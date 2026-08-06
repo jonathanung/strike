@@ -243,7 +243,8 @@ func TestBuiltinShortPurposesCoversCoreTools(t *testing.T) {
 	core := []string{
 		"read", "write", "edit", "glob", "grep", "bash", "webfetch",
 		"todowrite", "todoread", "memory_write", "memory_read",
-		"issue_write", "issue_read", "notebook_edit", "sleep", "skill",
+		"issue_write", "issue_read", "plan_write", "plan_read",
+		"notebook_edit", "sleep", "skill",
 		"toolsearch", "question", "apply_patch", "enter_plan_mode",
 		"exit_plan_mode", "phase_done", "task",
 		"task_status", "task_read", "task_message", "task_interrupt",

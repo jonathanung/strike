@@ -681,11 +681,12 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 			SchedulerAcquire: func(ctx context.Context, label string, pools ...string) (*scheduler.Lease, error) {
 				return e.acquireScheduler(ctx, corr, label, pools...)
 			},
-			Files:      e.files,
-			SessionID:  e.opts.SessionID,
-			MemberName: e.ownershipMemberName(),
-			Checkpoint: e.checkpoints.Snapshot,
-			TurnDiff:   e.turnDiff,
+			Files:         e.files,
+			SessionID:     e.opts.SessionID,
+			RootSessionID: e.rootSessionID(),
+			MemberName:    e.ownershipMemberName(),
+			Checkpoint:    e.checkpoints.Snapshot,
+			TurnDiff:      e.turnDiff,
 			// Record successful mutations only (post-write), not pre-mutation
 			// snapshots — failed tools must not appear in handoff files_changed.
 			FileSync: func(absPath string, content string, deleted bool) {

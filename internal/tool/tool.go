@@ -2,7 +2,7 @@
 // (read/glob/grep/edit/write/apply_patch/bash/task/task_status/task_read/
 // task_message/task_interrupt/agent_roster/agent_ownership/agent_message/agent_broadcast/
 // team_task/webfetch/todowrite/todoread/
-// memory_write/memory_read/issue_write/issue_read/notebook_edit/sleep/skill/question/enter_plan_mode/
+// memory_write/memory_read/issue_write/issue_read/plan_write/plan_read/notebook_edit/sleep/skill/question/enter_plan_mode/
 // exit_plan_mode/phase_done/toolsearch).
 // Used by internal/engine (dispatch), internal/permission (AskRequest, for the
 // Context.Ask signature), and cmd/strike (registry construction); internal/tui
@@ -460,6 +460,12 @@ type Context struct {
 	Ownership *PathOwnership
 	// SessionID identifies the calling agent for ownership claims.
 	SessionID string
+	// RootSessionID is the lineage root session id (empty ParentSessionID
+	// ancestor). Plan tools use it as the plan owner identity; mutations
+	// require SessionID == RootSessionID so children cannot mutate without
+	// later delegated authority. Empty falls back to SessionID when the
+	// caller is itself a root.
+	RootSessionID string
 	// MemberName is an optional stable teammate alias for ownership messages.
 	MemberName string
 	// OnOverlap is invoked when ClaimWrite/lease detects an active conflict

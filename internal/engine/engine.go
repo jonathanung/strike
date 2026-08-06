@@ -6,6 +6,7 @@ package engine
 import (
 	"context"
 	"crypto/rand"
+	"strings"
 	"sync"
 	"time"
 
@@ -190,6 +191,12 @@ type Options struct {
 	Depth int
 	// ParentSessionID is the spawning session's ID; empty on root engines.
 	ParentSessionID string
+	// RootSessionID is the top-level session id for this lineage. Empty on
+	// construction is filled in New (self when ParentSessionID is empty;
+	// otherwise ParentSessionID as a depth-1 fallback). spawnChild always
+	// passes the resolved root so nested children keep a stable owner id for
+	// plan tools and similar root-owned artifacts.
+	RootSessionID string
 	// Team is the implicit session-scoped agent team (lead + children).
 	// Root engines create one in New when nil. Child engines receive the
 	// lead's shared pointer from spawnChild so nested descendants enroll on
@@ -420,6 +427,14 @@ func New(opts Options) *Engine {
 	if opts.SessionID == "" {
 		opts.SessionID = rand.Text()
 	}
+	if opts.RootSessionID == "" {
+		if opts.ParentSessionID == "" {
+			opts.RootSessionID = opts.SessionID
+		} else {
+			// Depth-1 fallback when spawn forgot to set RootSessionID.
+			opts.RootSessionID = opts.ParentSessionID
+		}
+	}
 	if len(opts.Agents) == 0 {
 		opts.Agents = []Agent{{Name: "build", Description: "general coding agent"}}
 	}
@@ -539,6 +554,24 @@ func (e *Engine) baseCorr() protocol.Correlation {
 		ParentSessionID: e.opts.ParentSessionID,
 		Depth:           e.opts.Depth,
 	}
+}
+
+// rootSessionID returns the lineage root session id for root-owned artifacts
+// (plans). Prefer Options.RootSessionID, then team lead, then self when this
+// engine is a root.
+func (e *Engine) rootSessionID() string {
+	if id := strings.TrimSpace(e.opts.RootSessionID); id != "" {
+		return id
+	}
+	if e.team != nil {
+		if id := strings.TrimSpace(e.team.LeadID()); id != "" {
+			return id
+		}
+	}
+	if strings.TrimSpace(e.opts.ParentSessionID) == "" {
+		return e.opts.SessionID
+	}
+	return strings.TrimSpace(e.opts.ParentSessionID)
 }
 
 // sessionCorr is session-only correlation for selection events and
