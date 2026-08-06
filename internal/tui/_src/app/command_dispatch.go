@@ -160,6 +160,8 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 		return m.focusRightWindow(telemetryWindowID)
 	case "/telemetry":
 		return m.handleTelemetryCommand(fields[1:])
+	case "/pets":
+		return m.handlePetsCommand(fields[1:])
 	case "/fast":
 		return m.handleFastCommand(fields[1:])
 	case "/think":
@@ -1354,7 +1356,22 @@ func (m Model) handleTelemetryCommand(args []string) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// handleFastCommand toggles or sets the session priority-tier preference.
+// handlePetsCommand focuses the pets right pane. Optional name selects a
+// catalog pet (cat, dog, panda, fish) before focusing.
+func (m Model) handlePetsCommand(args []string) (tea.Model, tea.Cmd) {
+	if len(args) > 0 {
+		name := strings.TrimSpace(args[0])
+		var ok bool
+		m.windows, ok = selectPetsWindowPet(m.windows, name)
+		if !ok {
+			m.resetComposer()
+			m.setNotice("unknown pet "+sanitizeDisplayData(name)+" — try "+petCatalogNames(), true)
+			return m, nil
+		}
+	}
+	return m.focusRightWindow(petsWindowID)
+}
+
 // Bare /fast flips the current value; on/off/true/false/1/0 set it explicitly.
 func (m Model) handleFastCommand(args []string) (tea.Model, tea.Cmd) {
 	enabled := !m.fastEnabled

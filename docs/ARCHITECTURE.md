@@ -120,9 +120,10 @@ setup summary and `activity` for subagent status, recent parent tools, or an
 empty-state line), an `agents` multi-root tree, a `visualizer` for the selected node's
 status/tokens/cost/tokens-per-turn sparkline, a `files` explorer (lazy tree via
 `host.Files.ListDir`), `memory` and `issues` browsers, a `markdown` reader
-opened via `/md-read`, and an `editor` PTY window for `/vim`/`/nano`. Windows are
-organized into stack **groups** (session: context+activity; agents:
-agents+visualizer; project: memory+issues; singles: files/markdown/editor).
+opened via `/md-read`, an `editor` PTY window for `/vim`/`/nano`, and a `pets`
+ASCII companion pane (`/pets`). Windows are organized into stack **groups**
+(session: context+activity; agents: agents+visualizer; project: memory+issues;
+singles: files/markdown/editor/pets).
 When the right pane is large enough, multi-member groups render as a paired
 split (vertical in a side column, horizontal when the body split is a bottom
 bar); otherwise only the focused member is shown. Focus cycle walks members
@@ -296,7 +297,7 @@ Two different mechanisms, depending on whether it needs Go code:
   `/<name>` on the next launch automatically, through
    `host.Services.Skills`. Reserved names (`provider`, `model`, `effort`,
    `autonomy`, `auth`, `settings`, `agent`, `agents`, `activity`, `files`,
-   `visualizer`, `system`, `telemetry`, `fast`, `vim`, `nano`, `md-read`,
+   `visualizer`, `system`, `telemetry`, `pets`, `fast`, `vim`, `nano`, `md-read`,
    `theme`, `layout`, `split`, `compact`, `fork`, `undo`, `rewind`, `session`,
    `export`, `copy`, `help`, `keys`, `legend`, `memory`, `issues`, `goal`, `loop`, `context`,
    `effective-prompt`, `cost`, `upgrade`, `init`, `ftue`, `mcp`, `exit`, `quit`, and

@@ -41,6 +41,7 @@ func TestPaletteContainsOnlySupportedActionsWithStableMetadata(t *testing.T) {
 		{ID: "command:visualizer", Label: "/visualizer", Description: "focus the visualizer right pane", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/visualizer"}},
 		{ID: "command:system", Label: "/system", Description: "focus the system right pane (requires telemetry on)", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/system"}},
 		{ID: "command:telemetry", Label: "/telemetry", Description: "show or hide local system metrics (CPU/RAM/disk)", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/telemetry"}},
+		{ID: "command:pets", Label: "/pets", Description: "focus the pets right pane (ASCII companions)", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/pets"}},
 		{ID: "command:fast", Label: "/fast", Description: "toggle OpenAI priority tier (faster, ~2× cost)", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/fast"}},
 		{ID: "command:think", Label: "/think", Description: "show or hide model chain-of-thought", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/think"}},
 		{ID: "command:vim", Label: "/vim", Description: "open a file in the editor (embedded/modal/takeover; see vimMode)", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/vim"}},
