@@ -293,7 +293,7 @@ export default function App() {
     </main>
     <aside className={`inspector ${inspectorOpen ? "open" : "collapsed"}`} aria-label="Inspector"><PanelResize label="Resize inspector panel" value={inspectorWidth} min={240} max={520} onChange={setInspectorWidth} /><div className="inspector-tabs" role="tablist">{(["context", "files", "memory", "issues", "plans", "workflows"] as InspectorTab[]).map((tab) => <button role="tab" aria-selected={inspector === tab} key={tab} onClick={() => void inspectProject(tab)}>{tab}</button>)}</div><div className="inspector-body"><InspectorBody tab={inspector} boot={boot} status={state.status} data={projectData} loading={projectLoading} expandedDiffs={expandedDiffs} toggleDiff={toggleDiff} isLive={isLive} selectedID={selectedID} /></div></aside>
     {settingsOpen && <SettingsDialog boot={boot} status={state.status} providers={providers} onClose={() => setSettingsOpen(false)} />}
-    {state.permission && <BlockingDialog title="Permission required"><p><strong>{String(state.permission.tool || state.permission.name || "Tool request")}</strong></p><pre>{JSON.stringify(state.permission, null, 2)}</pre><div className="dialog-actions"><button onClick={() => void op("permission.reply", { requestId: state.permission?.requestId, decision: "reject" }, selectedID)}>Reject</button><button onClick={() => void op("permission.reply", { requestId: state.permission?.requestId, decision: "always" }, selectedID)}>Allow session</button><button autoFocus onClick={() => void op("permission.reply", { requestId: state.permission?.requestId, decision: "once" }, selectedID)}>Allow once</button></div></BlockingDialog>}{state.question && <QuestionDialog question={state.question} rootID={selectedID} />}
+    {state.permission && <PermissionDialog permission={state.permission} rootID={selectedID} />}{state.question && <QuestionDialog question={state.question} rootID={selectedID} />}
   </div>;
 }
 
@@ -353,4 +353,35 @@ function IssuesPanel({ boot, data }: { boot?: Bootstrap; data: unknown }) {
 function SettingsDialog({ boot, status, providers, onClose }: { boot?: Bootstrap; status: Status; providers: string[]; onClose: () => void }) { const ref = useRef<HTMLDialogElement>(null); const [provider, setProvider] = useState(String(status.provider || providers[0] || "")); const [key, setKey] = useState(""); useEffect(() => { ref.current?.showModal(); }, []); const save = async () => { if (boot?.capabilities.settings) await request("/v1/settings", { method: "PATCH", body: JSON.stringify({ provider: String(status.provider || ""), model: String(status.model || ""), agent: String(status.agent || ""), effort: String(status.effort || ""), mode: String(status.permissionMode || "") }) }); onClose(); }; return <dialog ref={ref} aria-labelledby="settings-title" onClose={onClose}><div className="dialog-rule" /><h2 id="settings-title">Workspace settings</h2>{boot?.capabilities.auth ? <fieldset><legend>Provider authentication</legend><label>Provider<select value={provider} onChange={(event) => setProvider(event.target.value)}>{providers.map((name) => <option key={name}>{name}</option>)}</select></label><label>API key<input value={key} onChange={(event) => setKey(event.target.value)} placeholder="Stored locally by strike" /></label><button disabled={!provider || !key} onClick={() => void request("/v1/auth/key", { method: "POST", body: JSON.stringify({ provider, key }) }).then(() => setKey(""))}>Save key</button></fieldset> : <CapabilityUnavailable name="Provider authentication" />}{boot?.capabilities.settings ? <p className="muted">Current defaults can be saved from the live runtime controls.</p> : <CapabilityUnavailable name="Saved defaults" />}<div className="dialog-actions"><button onClick={onClose}>Close</button><button onClick={() => void save()}>Save defaults</button></div></dialog>; }
 function CapabilityUnavailable({ name }: { name: string }) { return <section className="unavailable" role="status"><strong>{name} unavailable</strong><p>The configured host did not provide this capability. No action was attempted.</p></section>; }
 function CapabilityError({ error }: { error: string }) { return <section className="unavailable" role="status"><strong>Unable to load</strong><p>{error}</p></section>; }
+
+function permissionLabel(permission: Record<string, unknown>): string {
+  return String(permission.tool || permission.permission || permission.name || "Tool request");
+}
+
+function permissionDetail(permission: Record<string, unknown>): string {
+  if (typeof permission.reason === "string" && permission.reason.trim()) return permission.reason.trim();
+  if (typeof permission.path === "string" && permission.path.trim()) return permission.path.trim();
+  if (Array.isArray(permission.patterns) && permission.patterns.length) {
+    return permission.patterns.map(String).filter(Boolean).join(", ");
+  }
+  return "";
+}
+
+function PermissionDialog({ permission, rootID }: { permission: Record<string, unknown>; rootID: string }) {
+  const detail = permissionDetail(permission);
+  return <BlockingDialog title="Permission required">
+    <p><strong>{permissionLabel(permission)}</strong></p>
+    {detail && <p className="muted">{detail}</p>}
+    <details className="technical-details">
+      <summary>Technical details</summary>
+      <pre>{JSON.stringify(permission, null, 2)}</pre>
+    </details>
+    <div className="dialog-actions">
+      <button onClick={() => void op("permission.reply", { requestId: permission.requestId, decision: "reject" }, rootID)}>Reject</button>
+      <button onClick={() => void op("permission.reply", { requestId: permission.requestId, decision: "always" }, rootID)}>Allow session</button>
+      <button autoFocus onClick={() => void op("permission.reply", { requestId: permission.requestId, decision: "once" }, rootID)}>Allow once</button>
+    </div>
+  </BlockingDialog>;
+}
+
 function QuestionDialog({ question, rootID }: { question: Record<string, unknown>; rootID: string }) { const [answers, setAnswers] = useState<string[]>([]); const prompts = Array.isArray(question.questions) ? question.questions as Array<Record<string, unknown>> : [{ question: question.question }]; const update = (index: number, value: string) => setAnswers((old) => { const next = [...old]; next[index] = value; return next; }); return <BlockingDialog title={String(question.title || "Agent question")}>{prompts.map((prompt, index) => { const options = Array.isArray(prompt.options) ? prompt.options as Array<Record<string, unknown>> : []; return <fieldset key={index}><legend>{String(prompt.question || "A response is required to continue.")}</legend>{options.length ? options.map((option) => <label key={String(option.label)}><input type="radio" name={`question-${index}`} value={String(option.label)} checked={answers[index] === String(option.label)} onChange={(event) => update(index, event.target.value)} />{String(option.label)}<span>{String(option.description || "")}</span></label>) : <textarea aria-label={`Answer ${index + 1}`} value={answers[index] || ""} onChange={(event) => update(index, event.target.value)} />}</fieldset>; })}<div className="dialog-actions"><button autoFocus onClick={() => void op("question.reply", { requestId: question.requestId, answers }, rootID)}>Continue</button></div></BlockingDialog>; }
