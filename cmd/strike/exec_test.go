@@ -344,6 +344,42 @@ func TestRunHeadlessFrontendJSONResult(t *testing.T) {
 	}
 }
 
+func TestRunHeadlessFrontendJSONIncompleteNotOK(t *testing.T) {
+	// Channel closes without TurnCompleted: machine consumers must not see ok=true.
+	ops := make(chan protocol.Op, 2)
+	events := make(chan protocol.Event, 4)
+	var stdout bytes.Buffer
+	done := make(chan error, 1)
+	go func() {
+		done <- runHeadlessFrontend(ops, events, "hi", &stdout, io.Discard, headlessOpts{Format: execFormatJSON})
+	}()
+	select {
+	case <-ops:
+	case <-time.After(time.Second):
+		t.Fatal("timed out")
+	}
+	events <- protocol.TextDelta{Text: "partial"}
+	close(events)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("err = %v, want nil (incomplete is not a turn error)", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out")
+	}
+	var res execJSONResult
+	if err := json.Unmarshal(stdout.Bytes(), &res); err != nil {
+		t.Fatalf("decode: %v\n%s", err, stdout.String())
+	}
+	if res.OK {
+		t.Fatalf("incomplete turn reported ok=true: %+v", res)
+	}
+	if res.Error != "turn incomplete" || res.Text != "partial" {
+		t.Fatalf("result = %+v", res)
+	}
+}
+
 func TestRunHeadlessFrontendJSONError(t *testing.T) {
 	ops := make(chan protocol.Op, 2)
 	events := make(chan protocol.Event, 4)

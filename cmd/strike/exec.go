@@ -258,7 +258,8 @@ func runHeadlessFrontend(
 		select {
 		case ev, ok := <-events:
 			if !ok {
-				if err := state.flushJSON(stdout, turnErr, ""); err != nil {
+				// Channel closed without TurnCompleted — not a successful turn.
+				if err := state.flushJSON(stdout, turnErr, state.done); err != nil {
 					return err
 				}
 				if turnErr != nil {
@@ -270,7 +271,7 @@ func runHeadlessFrontend(
 				return err
 			}
 			if state.done {
-				if err := state.flushJSON(stdout, turnErr, state.stopReason); err != nil {
+				if err := state.flushJSON(stdout, turnErr, true); err != nil {
 					return err
 				}
 				if turnErr != nil {
@@ -295,7 +296,8 @@ func runHeadlessFrontend(
 					}
 				case protocol.TurnCompleted:
 					state.stopReason = e.StopReason
-					_ = state.flushJSON(stdout, turnErr, e.StopReason)
+					state.done = true
+					_ = state.flushJSON(stdout, turnErr, true)
 					return context.Canceled
 				case protocol.EngineError:
 					turnErr = errors.New(e.Message)
@@ -306,7 +308,8 @@ func runHeadlessFrontend(
 					state.addUsage(e)
 				}
 			}
-			_ = state.flushJSON(stdout, turnErr, state.stopReason)
+			// Interrupted before TurnCompleted: result must not claim ok.
+			_ = state.flushJSON(stdout, turnErr, false)
 			if turnErr != nil {
 				return turnErr
 			}
@@ -408,17 +411,18 @@ func (s *headlessState) addUsage(e protocol.UsageReported) {
 	}
 }
 
-func (s *headlessState) flushJSON(stdout io.Writer, turnErr error, stopReason string) error {
+// flushJSON writes the single --output-format=json result object once.
+// completed is true only when TurnCompleted was observed; incomplete turns
+// (interrupt, early channel close) must not report ok=true.
+func (s *headlessState) flushJSON(stdout io.Writer, turnErr error, completed bool) error {
 	if s.format != execFormatJSON || s.jsonFlushed {
 		return nil
 	}
 	s.jsonFlushed = true
-	if stopReason != "" {
-		s.stopReason = stopReason
-	}
+	ok := completed && turnErr == nil && s.stopReason != "error" && s.errMsg == ""
 	res := execJSONResult{
 		Type:       "result",
-		OK:         turnErr == nil && s.stopReason != "error" && s.errMsg == "",
+		OK:         ok,
 		Text:       s.text.String(),
 		StopReason: s.stopReason,
 		SessionID:  s.sessionID,
@@ -431,6 +435,8 @@ func (s *headlessState) flushJSON(stdout io.Writer, turnErr error, stopReason st
 		res.Error = turnErr.Error()
 	} else if s.stopReason == "error" {
 		res.Error = "turn ended with error"
+	} else if !completed {
+		res.Error = "turn incomplete"
 	}
 	if s.hasUsage {
 		u := s.usage
