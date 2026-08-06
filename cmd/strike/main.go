@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/jonathanung/strike-cli/internal/permission"
+	"github.com/jonathanung/strike-cli/internal/sandbox"
 	"github.com/jonathanung/strike-cli/internal/update"
 	"github.com/jonathanung/strike-cli/internal/version"
 )
@@ -20,6 +21,8 @@ type cliOptions struct {
 	provider                   string
 	model                      string
 	effort                     string
+	sandbox                    string // --sandbox: off|read-only|workspace-write
+	iKnow                      bool   // --i-know: allow yolo with sandbox off
 	dangerouslySkipPermissions bool
 	providerSet                bool
 	continueSession            bool
@@ -68,6 +71,21 @@ var optionSpecs = []optionSpec{
 		register: func(fs *flag.FlagSet, opts *cliOptions) {
 			fs.BoolVar(&opts.dangerouslySkipPermissions, "auto", false, "")
 			fs.BoolVar(&opts.dangerouslySkipPermissions, "dangerously-skip-permissions", false, "")
+		},
+	},
+	{
+		names:       []string{"sandbox"},
+		valueName:   "mode",
+		description: "OS process sandbox for bash (off|read-only|workspace-write); overrides config",
+		register: func(fs *flag.FlagSet, opts *cliOptions) {
+			fs.StringVar(&opts.sandbox, "sandbox", "", "")
+		},
+	},
+	{
+		names:       []string{"i-know"},
+		description: "allow permissionMode yolo when sandbox is off (explicit override)",
+		register: func(fs *flag.FlagSet, opts *cliOptions) {
+			fs.BoolVar(&opts.iKnow, "i-know", false, "")
 		},
 	},
 	{
@@ -219,7 +237,38 @@ func parseCLIOptions(args []string) (cliOptions, error) {
 	if opts.continueSession && opts.sessionID != "" {
 		return cliOptions{}, fmt.Errorf("cannot combine --continue and --session")
 	}
+	opts.sandbox = strings.TrimSpace(opts.sandbox)
+	if opts.sandbox != "" {
+		// Validate early so --help-adjacent typos fail before assemble.
+		if _, err := parseSandboxFlag(opts.sandbox); err != nil {
+			return cliOptions{}, err
+		}
+	}
 	return opts, nil
+}
+
+// parseSandboxFlag validates a --sandbox value and returns the canonical token.
+func parseSandboxFlag(value string) (string, error) {
+	mode, ok := sandbox.ParseMode(value)
+	if !ok || strings.TrimSpace(value) == "" {
+		return "", fmt.Errorf("unknown sandbox %q (want %s)", value, sandbox.ModeNames())
+	}
+	return mode.String(), nil
+}
+
+// resolveSandboxMode picks CLI --sandbox over config, defaulting to workspace-write.
+func resolveSandboxMode(cfgValue, cliValue string) (string, error) {
+	if strings.TrimSpace(cliValue) != "" {
+		return parseSandboxFlag(cliValue)
+	}
+	if strings.TrimSpace(cfgValue) == "" {
+		return sandbox.DefaultMode.String(), nil
+	}
+	mode, ok := sandbox.ParseMode(cfgValue)
+	if !ok {
+		return "", fmt.Errorf("unknown sandbox %q (want %s)", cfgValue, sandbox.ModeNames())
+	}
+	return mode.String(), nil
 }
 
 func prevalidateCLIOptions(args []string, fs *flag.FlagSet) error {

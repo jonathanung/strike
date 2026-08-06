@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/host"
+	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 )
 
@@ -28,6 +29,7 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 		"/effort":           {"set how much reasoning the model spends", "[level]", commandSourceBuiltin},
 		"/autonomy":         {"set exit-gate policy (supervised/agent/checks)", "[mode]", commandSourceBuiltin},
 		"/mode":             {"set permission posture (default/plan/accept-edits/yolo)", "[mode]", commandSourceBuiltin},
+		"/sandbox":          {"show OS sandbox policy; /sandbox explain for generated profile", "", commandSourceBuiltin},
 		"/auth":             {"manage provider authentication", "[provider]", commandSourceBuiltin},
 		"/agent":            {"select an agent", "[name]", commandSourceBuiltin},
 		"/agents":           {"focus the agents right pane", "", commandSourceBuiltin},
@@ -64,6 +66,7 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 		"/cost":             {"session token and cost totals", "", commandSourceBuiltin},
 		"/upgrade":          {"install the latest release and restart", "", commandSourceBuiltin},
 		"/init":             {"create or update project AGENTS.md", "", commandSourceBuiltin},
+		"/ftue":             {"setup wizard: provider, model, optional init, feature tour, scheduler presets, first prompt", "", commandSourceBuiltin},
 		"/mcp":              {"MCP servers: status, retry, disable", "[retry [name]|disable <name>]", commandSourceBuiltin},
 		"/exit":             {"quit strike", "", commandSourceBuiltin},
 		"/quit":             {"quit strike", "", commandSourceBuiltin},
@@ -187,5 +190,45 @@ func assertPayloadRemainsOnDescriptionRow(t *testing.T, value, prefix, payload s
 	}
 	if matchingRows != 1 {
 		t.Errorf("payload appeared on %d rows, want exactly one sanitized description row: %q", matchingRows, value)
+	}
+}
+
+func TestSandboxStatusNotice(t *testing.T) {
+	m := Model{
+		sandboxMode:      "workspace-write",
+		sandboxBackend:   "bwrap",
+		sandboxAvailable: true,
+		permMode:         protocol.PermissionModeDefault,
+		th:               theme.Default(),
+	}
+	got := m.sandboxStatusNotice()
+	for _, want := range []string{"sandbox: workspace-write", "bwrap", "permissionMode: default", "what is possible", "explain"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("notice = %q, want substring %q", got, want)
+		}
+	}
+	m.sandboxMode = "off"
+	m.sandboxAvailable = false
+	m.sandboxBackend = ""
+	got = m.sandboxStatusNotice()
+	if !strings.Contains(got, "OS isolation disabled") {
+		t.Errorf("off notice = %q", got)
+	}
+	m.sandboxExplain = "sandbox mode: workspace-write\nnetwork: false\nprofile:\nbwrap …\n"
+	got = m.sandboxExplainNotice()
+	for _, want := range []string{"sandbox mode: workspace-write", "network: false", "agent/phase"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("explain = %q, want substring %q", got, want)
+		}
+	}
+}
+
+func TestSandboxOptionsNotClobberedByPartialOptions(t *testing.T) {
+	m := New(nil, nil, host.Services{},
+		Options{SandboxMode: "read-only", SandboxBackend: "bwrap", SandboxAvailable: true},
+		Options{WorkDir: t.TempDir()},
+	)
+	if m.sandboxMode != "read-only" || m.sandboxBackend != "bwrap" || !m.sandboxAvailable {
+		t.Fatalf("sandbox wiring clobbered: mode=%q backend=%q avail=%v", m.sandboxMode, m.sandboxBackend, m.sandboxAvailable)
 	}
 }

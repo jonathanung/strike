@@ -90,6 +90,7 @@ var reservedSkillNames = map[string]struct{}{
 	"cost":             {},
 	"upgrade":          {},
 	"init":             {},
+	"ftue":             {},
 	"mcp":              {},
 	"exit":             {},
 	"quit":             {},

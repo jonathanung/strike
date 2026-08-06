@@ -169,7 +169,8 @@ func (notebookEditTool) Execute(ctx context.Context, args json.RawMessage, tc *C
 	}
 	out = append(out, '\n')
 	tc.SnapshotPath(path)
-	if err := os.WriteFile(path, out, 0o644); err != nil {
+	// Re-validate + O_NOFOLLOW at exec time (TOCTOU: symlink planted after resolve).
+	if err := workspaceWriteFile(tc.WorkDir, a.NotebookPath, out); err != nil {
 		return Result{}, err
 	}
 	return Result{

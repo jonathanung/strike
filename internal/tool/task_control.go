@@ -70,16 +70,27 @@ func (taskStatusTool) Execute(ctx context.Context, args json.RawMessage, tc *Con
 	if err != nil {
 		return Result{}, err
 	}
-	out, _ := json.Marshal(map[string]any{
+	payload := map[string]any{
 		"session_id":       res.SessionID,
 		"state":            res.State,
 		"elapsed":          res.Elapsed,
 		"current_tool":     res.CurrentTool,
 		"latest_activity":  res.LatestActivity,
 		"terminal_summary": nullIfEmpty(res.TerminalSummary),
-	})
+	}
+	if len(res.QueuePools) > 0 {
+		payload["queue_pools"] = res.QueuePools
+	}
+	if res.QueueLabel != "" {
+		payload["queue_label"] = res.QueueLabel
+	}
+	out, _ := json.Marshal(payload)
+	title := "task_status " + shortID(id) + " " + res.State
+	if res.QueueLabel != "" {
+		title += " queued:" + res.QueueLabel
+	}
 	return Result{
-		Title:  "task_status " + shortID(id) + " " + res.State,
+		Title:  title,
 		Output: string(out),
 	}, nil
 }

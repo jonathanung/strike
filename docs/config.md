@@ -9,6 +9,28 @@ issues and before writing config. A file symlink at `~/.strike/config` (for
 example stow/dotfiles) is preserved on save — the referent is updated, not
 replaced by a plain file.
 
+## First-time onboarding state
+
+Global (not per-project) acknowledgement lives at
+`~/.strike/onboarding.json`:
+
+```json
+{
+  "version": 1,
+  "acknowledged": true
+}
+```
+
+Interactive TUI launches auto-open `/ftue` while `acknowledged` is false or
+the file is missing on a clean install. Finish or dismiss (esc) sets
+`acknowledged: true` atomically. An interrupted session that never finishes
+or dismisses leaves the file unacknowledged so the wizard can reopen next
+launch. Established installs (existing session logs or real provider
+credentials) migrate to acknowledged without showing the modal. Precreated
+empty `~/.strike` directories alone do not suppress first launch.
+`strike exec`, `auth`, `serve`, `version`, and `upgrade` neither display nor
+write this file. Manual `/ftue` remains available after acknowledgement.
+
 ```json
 {
   "provider": "anthropic",
@@ -23,6 +45,7 @@ replaced by a plain file.
   "mdReadMode": "embedded",
   "notify": "unfocused-only",
   "permissionMode": "default",
+  "sandbox": "workspace-write",
   "permissionAutoApproveSeconds": 0,
   "permissionAutoApproveExclude": ["bash"],
   "compactionStrategy": "trim",
@@ -38,6 +61,21 @@ replaced by a plain file.
     "worktree": "off",
     "worktreeCleanup": "keep"
   },
+  "scheduler": {
+    "presets": ["cargo", "npm"],
+    "limits": {
+      "process": 8,
+      "build": 2,
+      "test": 4,
+      "model": 3,
+      "container": 1
+    },
+    "commands": [
+      { "pattern": "go test *", "class": "test" },
+      { "pattern": "go *", "class": "build" },
+      { "pattern": "make *", "class": "build" }
+    ]
+  },
   "permissions": [
     { "permission": "bash", "pattern": "go *", "action": "allow" },
     { "permission": "write", "pattern": "**/*.env", "action": "deny" }
@@ -48,11 +86,56 @@ replaced by a plain file.
 Rules concatenate across layers; the last matching rule wins, so project
 config overrides global, and session "always" grants override both.
 
+**Two-dial model (Codex mental model):**
+
+| Dial | Config / CLI | Controls |
+|---|---|---|
+| **sandbox** | `sandbox`, `--sandbox` | What OS isolation makes *possible* for bash (`off` \| `read-only` \| `workspace-write`) |
+| **permissionMode** | `permissionMode`, `/mode`, Shift+Tab | *When* the agent is asked before a tool runs |
+
+They are independent. Turning off permission prompts (`yolo`) does not disable
+the OS sandbox; setting `sandbox: off` does not skip permission asks.
+
+**OS sandbox dial:** `sandbox` is `off` | `read-only` | `workspace-write`
+(default **`workspace-write`**). Applies to the bash tool (and composer `!`
+shell) via Linux `bwrap` / macOS `sandbox-exec`. When the backend is missing
+or blocked, bash degrades to unsandboxed with a one-shot startup warning
+(unless `sandbox` is `off`). Override per invocation with `--sandbox <mode>`.
+Inspect the effective policy with `/sandbox`; `/sandbox explain` prints the
+generated OS profile (bwrap flags or seatbelt SBPL) compiled from permission
+rules.
+
+**Permission → sandbox profile:** hard `write`/`edit` deny rules are compiled
+into OS filesystem denials inside the bash sandbox (globs become seatbelt
+regexes and, when paths exist, bwrap `--ro-bind` remounts). A deny on
+`write`/`edit` `*` (including plan mode) suppresses the writable workspace
+bind. Network inside the sandbox stays off unless `webfetch` or `mcp` is
+effectively **allow** on `*` (patterned allows do not open full bash network).
+Ask/yolo posture does not widen the OS profile. Composer `!` uses the
+config-layer compile; agent bash uses live layers (agent/phase/session).
+
+**Yolo + sandbox off:** `permissionMode: yolo` (or a resumed session in yolo)
+combined with `sandbox: off` **refuses to start** unless you pass `--i-know`.
+Mid-session `/mode yolo` is also rejected while sandbox is off without that
+startup override. This is the only supported way to run with neither OS
+isolation nor permission prompts.
+
+**Not a security boundary alone:** permission rules and modes (including
+`yolo` / `--auto` / `--dangerously-skip-permissions`) only control whether the
+agent is *asked* before a tool runs. Prefer keeping `sandbox` at
+`workspace-write` (or `read-only`) so OS isolation still applies. The bash
+tool also applies a separate best-effort static path guard on a small set of
+destructive command forms; that guard is incomplete and must not be treated as
+isolation. Linux glob denials expand existing paths at compile time (new files
+matching a deny glob are covered on the next compile / seatbelt regex on
+macOS).
+
 **Permission mode dial:** `permissionMode` sets the default tool-permission
 posture for **new** sessions: `default` | `plan` | `soft-approve` |
 `accept-edits` | `yolo` (see [usage.md](usage.md)). Session changes via
 Shift+Tab or `/mode` persist in the session JSONL, not back into this file.
-Distinct from `/autonomy` (workflow exit gates).
+Distinct from `/autonomy` (workflow exit gates) and from `sandbox` (OS
+isolation).
 
 **Lean code:** `leanCode` is `off` | `lite` (default) | `full`. Injects
 agent-scoped efficiency guidance into the system prompt (strict ladder for
@@ -101,6 +184,115 @@ paths, prompts, or secrets.
 | `off` | never notify |
 
 Unknown values are ignored at load time.
+
+## Scheduler (in-process resource limits)
+
+`scheduler` bounds concurrent agent work **inside one Strike OS process**.
+Separate `strike` programs do **not** coordinate leases or share capacity —
+each process applies its own effective limits independently.
+
+| Field | Meaning |
+|---|---|
+| `presets` | Ordered list of shipped build-system preset IDs (see below) |
+| `limits` | Map of pool name → positive integer capacity |
+| `commands` | Ordered list of `{ "pattern", "class" }` classification rules |
+
+**Pools:** `process`, `build`, `test`, `model`, `container`. Omitted keys keep
+the lower config layer's value; when no layer sets a pool, that pool is
+**unlimited** (same as today's default). An explicit `0` or negative capacity
+**fails config load** with the file path — use omission for unlimited, not
+zero.
+
+**Layering:** project `limits` override global **per pool**. `presets` and
+`commands` concatenate (global then project; duplicate preset IDs keep the
+first). Malformed patterns, unknown classes, or unknown/duplicate preset IDs
+in one file fail load before the engine starts and name the source file and
+index.
+
+**Presets:** versioned bundles for common resource-heavy tools. At compile
+time each selected ID expands into ordinary suggested `limits` and `commands`
+(no second runtime matcher). Expansion order follows the shipped catalog
+order among the selected IDs (not the order written in config). Then:
+
+1. User/project `limits` overlay preset-suggested capacities per pool.
+2. User/project `commands` append after expanded preset rules (last-match-wins,
+   so a later user rule can reclassify a preset pattern).
+
+Shipped preset IDs: `cmake`, `ninja`, `gradle`, `bazel`, `maven`, `cargo`,
+`npm` (covers npm/yarn/pnpm/bun). Each has a stable ID, display name,
+rationale, default class, and inspectable generated rules (see
+`scheduler.Catalog` / host `SchedulerPresets`). Expanded rule provenance is
+`preset:<id>@v<version>` in `Effective.Report()`. The `/ftue` setup wizard can
+checkbox-select these presets and write the global `presets` list atomically
+(custom `limits`/`commands` are preserved; skip leaves config unchanged).
+
+**Command classification:** each rule's `pattern` is a full-string glob over
+the submitted shell command (`*` = any run of runes, `?` = one rune, `\`
+escapes the next byte). Matching is case-sensitive. `class` is `general` |
+`build` | `test`. Evaluation is **last-match-wins**: every matching rule is
+considered in order; the last match's class wins. When nothing matches, the
+class is `general`. Multiple matches are therefore resolved by rule order
+(project rules append after global, so a later project rule can reclassify).
+
+Admission wiring uses the compiled policy:
+
+- **Model streams** (ordinary turns, child turns, concurrent roots, harness
+  calls, and compaction summarize) acquire the `model` pool for the duration of
+  each `Provider.Stream` attempt. The lease is released when the stream is
+  fully drained, before retry backoff, and reacquired fairly on the next
+  attempt. Omitted/`unlimited` model capacity preserves pre-scheduler behavior.
+- **Bash** acquires `process` after permission approval and before process
+  start (command timeout begins after admission). `build` / `test` classes
+  acquire those pools in addition via the scheduler's multi-pool path.
+  Omitted limits stay unlimited (no wait — same as pre-scheduler behavior).
+
+**Queue lifecycle (protocol / session JSONL):** when a caller **blocks** on
+capacity, the engine emits `scheduler.queued` with correlation, a stable
+`requestId`, the constrained `pools`, and a short `label` (`model`, `bash`,
+`bash:build`, …). Grant then emits `scheduler.admitted` (with `waitMs`); cancel
+or scheduler close emits `scheduler.canceled` (`reason` `canceled`|`closed`).
+Immediate grants (unlimited pools or free capacity) emit **no** queue events,
+so default sessions stay quiet. After `canceled` for a `requestId`, `admitted`
+never follows. Exact queue positions are **not** on the wire — FIFO is internal
+and may change; UIs show the pool and label only. Replay reconstructs
+queued→admitted or queued→canceled so waiting roots/children are not mistaken
+for idle. Task status, team roster, and the activity/agents panes project these
+events without importing scheduler internals.
+
+Inspect the compiled policy via `Config.SchedulerEffective()` /
+`Effective.Report()`.
+
+Example — cargo preset plus global caps with a project test override:
+
+```json
+// ~/.strike/config
+{
+  "scheduler": {
+    "presets": ["cargo"],
+    "limits": { "process": 8, "build": 2 },
+    "commands": [
+      { "pattern": "go *", "class": "build" }
+    ]
+  }
+}
+
+// ./.strike/config
+{
+  "scheduler": {
+    "limits": { "build": 4, "test": 2 },
+    "commands": [
+      { "pattern": "go test *", "class": "test" },
+      { "pattern": "cargo test *", "class": "general" }
+    ]
+  }
+}
+```
+
+Effective: `process=8`, `build=4` (project overlays preset/global), `test=2`
+(from project; cargo preset also suggests test capacity when not overridden),
+other pools unlimited. `cargo build` → `build` (preset); `cargo test --lib` →
+`general` (project rule wins over preset); `go test ./...` → `test`;
+`go build .` → `build`.
 
 ## Session worktrees
 

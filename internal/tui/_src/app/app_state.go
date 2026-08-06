@@ -295,10 +295,11 @@ func (m Model) agentsStateSnapshot() agentsStateMsg {
 		}
 		kids = m.filterHiddenChildren(kids)
 		snaps = append(snaps, agentsRootSnap{
-			ID:       id,
-			Title:    m.rootTitleLabel(id),
-			State:    m.rootAgentState(id),
-			Children: kids,
+			ID:         id,
+			Title:      m.rootTitleLabel(id),
+			State:      m.rootAgentState(id),
+			Children:   kids,
+			QueueLabel: m.rootQueueLabel(id),
 		})
 	}
 	viewing := m.viewingID
@@ -369,7 +370,7 @@ func (m Model) agentBusyForReveal(id string) bool {
 		return st == theme.AgentStateWorking || st == theme.AgentStateAttention
 	}
 	if ch, ok := m.lookupChildActivity(id); ok {
-		return ch.status == "running"
+		return ch.status == "running" || len(ch.queuePools) > 0
 	}
 	return false
 }

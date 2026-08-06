@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 )
 
 type writeTool struct{}
@@ -65,11 +64,14 @@ func (writeTool) Execute(ctx context.Context, args json.RawMessage, tc *Context)
 	if err := tc.Ask(ctx, AskRequest{Permission: "write", Patterns: []string{rel}, Always: []string{"*"}, Metadata: meta}); err != nil {
 		return Result{}, err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	tc.SnapshotPath(path)
+	// Re-validate + O_NOFOLLOW at exec time (TOCTOU: symlink planted after resolve).
+	if err := workspaceWriteFile(tc.WorkDir, a.FilePath, []byte(a.Content)); err != nil {
 		return Result{}, err
 	}
-	tc.SnapshotPath(path)
-	if err := os.WriteFile(path, []byte(a.Content), 0o644); err != nil {
+	// Refresh path after secure write (may differ if a prior symlink was resolved).
+	path, _, err = resolveInWorkspace(tc.WorkDir, a.FilePath)
+	if err != nil {
 		return Result{}, err
 	}
 	if info, statErr := os.Stat(path); statErr == nil {

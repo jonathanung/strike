@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/jonathanung/strike-cli/internal/sandbox"
 )
 
 func TestExtractSessionPR(t *testing.T) {
@@ -186,6 +188,87 @@ func TestBashRecordsSessionPRFromGH(t *testing.T) {
 	}
 	if !strings.Contains(res.Output, "pull/99") {
 		t.Fatalf("output = %q", res.Output)
+	}
+}
+
+func TestBashWorkspaceWriteInsideSandbox(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+	root := t.TempDir()
+	tc := allowAll(root)
+	marker := filepath.Join(root, "sandboxed.txt")
+	res, err := NewBash().Execute(context.Background(), mustJSON(t, map[string]any{
+		"command": "printf x > sandboxed.txt && cat sandboxed.txt",
+	}), tc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Output, "x") {
+		t.Fatalf("output = %q", res.Output)
+	}
+	body, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "x" {
+		t.Fatalf("file = %q", body)
+	}
+}
+
+func TestBashSandboxModeOff(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+	root := t.TempDir()
+	tc := allowAll(root)
+	tc.SandboxMode = "off"
+	res, err := NewBash().Execute(context.Background(), mustJSON(t, map[string]any{
+		"command": "echo off-mode-ok",
+	}), tc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Output, "off-mode-ok") {
+		t.Fatalf("output = %q", res.Output)
+	}
+}
+
+func TestBashSandboxMode(t *testing.T) {
+	if got := bashSandboxMode(nil); got != sandbox.DefaultMode {
+		t.Fatalf("nil tc = %v", got)
+	}
+	if got := bashSandboxMode(&Context{}); got != sandbox.ModeWorkspaceWrite {
+		t.Fatalf("empty = %v", got)
+	}
+	if got := bashSandboxMode(&Context{SandboxMode: "off"}); got != sandbox.ModeOff {
+		t.Fatalf("off = %v", got)
+	}
+	if got := bashSandboxMode(&Context{SandboxMode: "read-only"}); got != sandbox.ModeReadOnly {
+		t.Fatalf("read-only = %v", got)
+	}
+}
+
+func TestBashSandboxPolicyCompiled(t *testing.T) {
+	wd := t.TempDir()
+	p := bashSandboxPolicy(&Context{
+		WorkDir:     wd,
+		SandboxMode: "workspace-write",
+		Sandbox: sandbox.Policy{
+			Mode:             sandbox.ModeWorkspaceWrite,
+			WorkDir:          wd,
+			NoWorkspaceWrite: true,
+			DenyWriteGlobs:   []string{"**/*.env"},
+			Network:          true,
+		},
+	})
+	if !p.NoWorkspaceWrite || !p.Network || len(p.DenyWriteGlobs) != 1 {
+		t.Fatalf("compiled policy = %+v", p)
+	}
+	// Fallback when only SandboxMode is set.
+	p2 := bashSandboxPolicy(&Context{WorkDir: wd, SandboxMode: "read-only"})
+	if p2.Mode != sandbox.ModeReadOnly || p2.WorkDir != wd {
+		t.Fatalf("fallback = %+v", p2)
 	}
 }
 

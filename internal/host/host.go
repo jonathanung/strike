@@ -179,6 +179,20 @@ type Settings interface {
 	SaveKeybinds(overrides map[string][]string) error
 }
 
+// Onboarding is global first-time setup state (installation-scoped, not
+// per-project). Interactive TUI may auto-open /ftue while unacknowledged;
+// exec/auth/serve/version/upgrade must not call this interface.
+type Onboarding interface {
+	// ShouldAutoOpen reports whether an interactive TUI launch should open
+	// the setup wizard once. Established installs (sessions or real
+	// credentials) migrate to acknowledged without returning true. Safe to
+	// call repeatedly; may persist migration on first call.
+	ShouldAutoOpen() bool
+	// Acknowledge marks onboarding complete (finish or dismiss). Idempotent
+	// and safe under concurrent in-process callers.
+	Acknowledge() error
+}
+
 // History is project-scoped prompt history. Enqueue is async; the channel
 // yields the persistence result exactly once.
 type History interface {
@@ -553,34 +567,92 @@ type ShellResult struct {
 
 // Shell runs local bash commands for frontend bang-escape (!cmd). Nil means
 // the capability is absent; frontends must degrade gracefully. Implementations
-// must apply the same workspace destructive-path sandbox as the bash tool.
-// Permission prompts are omitted — the user typed the command — but sandbox
-// blocks still apply even under yolo / skip-permissions.
+// must apply the same workspace destructive-path guard as the bash tool.
+// Permission prompts are omitted — the user typed the command — but the
+// destructive-path guard still runs (best-effort; not a security boundary).
 type Shell interface {
 	// Run executes command with bash in the session work directory. Empty
 	// command returns an error. Respects ctx cancellation/timeout.
 	Run(ctx context.Context, command string) (ShellResult, error)
 }
 
+// SchedulerPresetRule is one inspectable command classification rule from a
+// shipped scheduler preset (pattern glob → class).
+type SchedulerPresetRule struct {
+	Pattern string
+	Class   string // general | build | test
+}
+
+// SchedulerPreset is FTUE/settings metadata for one shipped build-system
+// preset. IDs are stable config keys; Rules/Limits are the values expansion
+// would inject (ordinary scheduler fields — not a second runtime path).
+type SchedulerPreset struct {
+	ID           string
+	Version      int
+	Name         string
+	Rationale    string
+	DefaultClass string // general | build | test
+	Limits       map[string]int
+	Rules        []SchedulerPresetRule
+}
+
+// SchedulerCommandRule is one user-authored (or otherwise stored) command
+// classification rule from the global scheduler config layer.
+type SchedulerCommandRule struct {
+	Pattern string
+	Class   string // general | build | test
+	Source  string // optional provenance stamp; empty for plain user rules
+}
+
+// SchedulerGlobalState is the global config layer's scheduler section for
+// FTUE/settings. Custom Limits/Commands are distinct from preset expansion.
+type SchedulerGlobalState struct {
+	Presets  []string // enabled shipped preset IDs
+	Limits   map[string]int
+	Commands []SchedulerCommandRule
+}
+
+// SchedulerPresets is the shipped build-system preset catalog plus global
+// apply for onboarding and future settings UIs. Nil means the capability is
+// absent.
+type SchedulerPresets interface {
+	// List returns every shipped preset in stable display order.
+	List() []SchedulerPreset
+	// Get returns one preset by stable ID.
+	Get(id string) (SchedulerPreset, bool)
+	// Global returns the current global-layer scheduler snapshot. Missing
+	// config yields zero values and a nil error.
+	Global() (SchedulerGlobalState, error)
+	// ApplyGlobalPresets validates ids and atomically replaces the global
+	// presets list. Custom limits and commands are preserved unchanged.
+	// Unknown or duplicate ids error without writing. An empty slice clears
+	// global presets only.
+	ApplyGlobalPresets(ids []string) error
+}
+
 // Services bundles everything a frontend receives from its host. Any field
 // may be nil/empty when a capability is absent (tests, future frontends);
 // frontends must degrade gracefully.
 type Services struct {
-	Auth      Auth
-	Catalog   Catalog
-	Settings  Settings
-	History   History
-	Files     Files
-	Shell     Shell // composer ! bang; nil when unsupported
-	Memory    Memory
-	Issues    Issues
-	Goals     Goals     // loop harness; nil when unsupported
-	Sessions  Sessions  // durable session list/replay; nil when unsupported
-	Roots     Roots     // concurrent parent sessions; nil when single-root only
-	Providers Providers // custom/self-hosted provider CRUD; nil when unsupported
-	Init      ProjectInit
-	MCP       MCP       // external MCP server status; nil when unsupported
-	Telemetry Telemetry // local CPU/RAM/disk; nil when unsupported
-	Agents    []string  // selectable agent names, default first
-	Skills    []Skill
+	Auth       Auth
+	Catalog    Catalog
+	Settings   Settings
+	Onboarding Onboarding // global FTUE state; nil when unsupported
+	History    History
+	Files      Files
+	Shell      Shell // composer ! bang; nil when unsupported
+	Memory     Memory
+	Issues     Issues
+	Goals      Goals     // loop harness; nil when unsupported
+	Sessions   Sessions  // durable session list/replay; nil when unsupported
+	Roots      Roots     // concurrent parent sessions; nil when single-root only
+	Providers  Providers // custom/self-hosted provider CRUD; nil when unsupported
+	Init       ProjectInit
+	MCP        MCP       // external MCP server status; nil when unsupported
+	Telemetry  Telemetry // local CPU/RAM/disk; nil when unsupported
+	// SchedulerPresets is the shipped build-system preset catalog and global
+	// apply surface (FTUE #705).
+	SchedulerPresets SchedulerPresets
+	Agents           []string // selectable agent names, default first
+	Skills           []Skill
 }

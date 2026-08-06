@@ -107,6 +107,20 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 			ops <- protocol.SetPermissionMode{Mode: mode}
 			return nil
 		}
+	case "/sandbox":
+		m.resetComposer()
+		m.clearNotice()
+		if len(fields) > 1 {
+			switch strings.ToLower(fields[1]) {
+			case "explain":
+				m.setNotice(m.sandboxExplainNotice(), false)
+			default:
+				m.setNotice("usage: /sandbox [explain]", true)
+			}
+			return m, nil
+		}
+		m.setNotice(m.sandboxStatusNotice(), false)
+		return m, nil
 	case "/auth":
 		m.resetComposer()
 		return m.handleAuth(fields[1:])
@@ -270,6 +284,8 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "/init":
 		return m.handleInitCommand()
+	case "/ftue":
+		return m.handleFTUECommand()
 	case "/mcp":
 		return m.handleMCPCommand(fields[1:])
 	case "/exit", "/quit":
@@ -459,6 +475,17 @@ func formatSessionRewound(ev protocol.SessionRewound) string {
 	return msg
 }
 
+// handleFTUECommand opens the setup wizard. Opening never writes settings;
+// Finish focuses the composer; esc/finish acknowledge global onboarding state
+// (idempotent after the first time) so auto-open does not repeat.
+func (m Model) handleFTUECommand() (tea.Model, tea.Cmd) {
+	m.resetComposer()
+	m.clearNotice()
+	m.modal = newFTUEModal(m.services, m.providerName, m.modelName, m.th)
+	m.reflow()
+	return m, nil
+}
+
 func (m Model) handleInitCommand() (tea.Model, tea.Cmd) {
 	m.resetComposer()
 	m.clearNotice()
@@ -487,7 +514,11 @@ func (m Model) handleInitCommand() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) applyInitResult(msg initResultMsg) (tea.Model, tea.Cmd) {
-	m.modal = nil
+	// Clear only an init confirm still on top. When /ftue parked the wizard and
+	// afterModalClosed already promoted it, do not wipe that modal.
+	if _, ok := m.modal.(*initConfirmModal); ok {
+		m.modal = nil
+	}
 	promote := m.afterModalClosed()
 	if msg.canceled {
 		m.setNotice("init canceled", false)
@@ -1405,4 +1436,45 @@ func permissionModeChoices() string {
 		names = append(names, string(mode))
 	}
 	return strings.Join(names, "|")
+}
+
+// sandboxStatusNotice formats the effective OS sandbox policy for /sandbox.
+// Two-dial model: sandbox = what is possible; permissionMode = when asked.
+func (m Model) sandboxStatusNotice() string {
+	mode := strings.TrimSpace(m.sandboxMode)
+	if mode == "" {
+		mode = "workspace-write"
+	}
+	ic := m.themeIcons()
+	dot := " " + ic.Dot + " "
+	var b strings.Builder
+	fmt.Fprintf(&b, "sandbox: %s", mode)
+	switch {
+	case mode == "off":
+		b.WriteString(" (OS isolation disabled)")
+	case m.sandboxAvailable && m.sandboxBackend != "":
+		fmt.Fprintf(&b, "%sbackend %s", dot, m.sandboxBackend)
+	case m.sandboxAvailable:
+		b.WriteString(dot + "backend available")
+	default:
+		b.WriteString(dot + "backend unavailable (bash unsandboxed)")
+	}
+	fmt.Fprintf(&b, "%spermissionMode: %s", dot, m.permMode.Normalize())
+	b.WriteString(" " + ic.DetailSeparator + " sandbox=what is possible, permissionMode=when asked")
+	b.WriteString(dot + "/sandbox explain for generated profile")
+	return b.String()
+}
+
+// sandboxExplainNotice returns the generated OS profile for /sandbox explain.
+func (m Model) sandboxExplainNotice() string {
+	text := strings.TrimSpace(m.sandboxExplain)
+	if text == "" {
+		mode := strings.TrimSpace(m.sandboxMode)
+		if mode == "" {
+			mode = "workspace-write"
+		}
+		return "sandbox explain unavailable (no compiled profile)\nmode: " + mode
+	}
+	note := "\n(note: config/base layers; active agent/phase/session layers apply at bash exec)"
+	return text + note
 }

@@ -17,6 +17,9 @@ func configureProcessCmd(cmd *exec.Cmd) {
 	// Own process group so cancel can kill shell + children together.
 	// Default CommandContext only kills the direct child; grandchildren that
 	// still hold stdout/stderr keep Wait blocked forever (pipe EOF never comes).
+	// OS sandbox wrapping (internal/sandbox via ProcessSpec.Sandbox) happens in
+	// RunProcess before CommandContext; bwrap --die-with-parent keeps the tree
+	// aligned with this process-group kill path.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
 		if cmd.Process == nil {

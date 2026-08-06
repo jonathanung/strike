@@ -12,6 +12,7 @@ import (
 
 	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike-cli/internal/scheduler"
 )
 
 var globalMu sync.Mutex
@@ -228,6 +229,61 @@ func SetGlobalPresentation(vimMode, nanoMode, mdReadMode string) error {
 		cfg.MdReadMode = normalizeMdReadMode(mdReadMode)
 	}
 	return writeGlobal(cfg, unlock)
+}
+
+// SetGlobalSchedulerPresets validates and persists the global scheduler
+// presets list into ~/.strike/config. Custom scheduler limits and command
+// rules are preserved. Unknown or duplicate ids are rejected without writing.
+// An empty slice clears global presets only. IDs are stored in catalog order
+// among the selection for stable re-writes.
+func SetGlobalSchedulerPresets(ids []string) error {
+	normalized, err := normalizeSchedulerPresetIDs(ids)
+	if err != nil {
+		return err
+	}
+
+	globalMu.Lock()
+	defer globalMu.Unlock()
+
+	cfg, unlock, err := readGlobalForWrite()
+	if err != nil {
+		return err
+	}
+	cfg.Scheduler.Presets = normalized
+	return writeGlobal(cfg, unlock)
+}
+
+// normalizeSchedulerPresetIDs trims, validates, and reorders ids into shipped
+// catalog order. Empty input yields nil (clears presets).
+func normalizeSchedulerPresetIDs(ids []string) ([]string, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	trimmed := make([]string, len(ids))
+	for i, id := range ids {
+		trimmed[i] = strings.TrimSpace(id)
+	}
+	src := "scheduler.presets"
+	if path := GlobalPath(); path != "" {
+		src = path + ": scheduler.presets"
+	}
+	if err := scheduler.ValidatePresetIDs(trimmed, src); err != nil {
+		return nil, err
+	}
+	seen := make(map[string]struct{}, len(trimmed))
+	for _, id := range trimmed {
+		seen[id] = struct{}{}
+	}
+	out := make([]string, 0, len(seen))
+	for _, p := range scheduler.Catalog() {
+		if _, ok := seen[p.ID]; ok {
+			out = append(out, p.ID)
+		}
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return out, nil
 }
 
 // ReadGlobalDefaults returns the global config file contents used as user

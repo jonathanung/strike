@@ -112,8 +112,10 @@ type Options struct {
 	// WorkDir is display identity for the context pane and resolves relative
 	// paths for /vim. Empty falls back to os.Getwd at launch time.
 	WorkDir string
-	// FirstRun is true when the host detected a fresh strike home (no global
-	// config and no real provider credentials). The TUI shows onboarding.
+	// FirstRun forces first-run onboarding UI (welcome card + auto /ftue).
+	// When false, New also enables first-run when services.Onboarding reports
+	// ShouldAutoOpen (global unacknowledged state). Tests may set this without
+	// wiring Onboarding.
 	FirstRun bool
 	// StartupAlert is a one-shot dismissible modal body shown after Init
 	// (e.g. session worktree soft-fail outside a git repository). Empty skips.
@@ -134,6 +136,17 @@ type Options struct {
 	// NotifyMode selects desktop notifications: on, off, or unfocused-only
 	// (default). Wired from config.notify.
 	NotifyMode NotifyMode
+	// SandboxMode is the resolved OS sandbox dial (off|read-only|workspace-write).
+	// Empty means workspace-write. Displayed by /sandbox; not mid-session mutable.
+	SandboxMode string
+	// SandboxBackend is the platform launcher name ("bwrap", "sandbox-exec") or
+	// empty when unavailable. Displayed by /sandbox.
+	SandboxBackend string
+	// SandboxAvailable reports whether the OS sandbox backend can run.
+	SandboxAvailable bool
+	// SandboxExplain is the multi-line generated profile text for /sandbox explain.
+	// Compiled from config permission layers at process start.
+	SandboxExplain string
 	// Replay is a prior session event log for --continue / --session. Seeded
 	// via cellsFromEvents + silent selection/child state — never fed through
 	// applyEvent (avoids stuck turns, zombie permission modals, orphan children).
@@ -146,8 +159,13 @@ type Options struct {
 	Telemetry bool
 }
 
-// firstRunSetupMsg opens the provider picker once on a fresh install.
+// firstRunSetupMsg opens the /ftue setup wizard once when onboarding is due.
 type firstRunSetupMsg struct{}
+
+// onboardingAckMsg is the result of persisting global onboarding acknowledgement.
+type onboardingAckMsg struct {
+	err error
+}
 
 // contextLimitsMsg delivers catalog context-window, output-limit, and optional
 // pricing lookups for a provider/model pair. Applied only when that pair is
@@ -246,6 +264,14 @@ type Model struct {
 	autonomy protocol.Autonomy
 	// permMode is the session tool-permission posture dial; default default.
 	permMode protocol.PermissionMode
+	// sandboxMode is the process OS sandbox dial (config/CLI); default workspace-write.
+	sandboxMode string
+	// sandboxBackend is bwrap|sandbox-exec|"" for /sandbox status.
+	sandboxBackend string
+	// sandboxAvailable is whether the OS backend can apply isolation.
+	sandboxAvailable bool
+	// sandboxExplain is /sandbox explain body (config-compiled profile).
+	sandboxExplain string
 	// fastEnabled is the session priority-tier preference from /fast.
 	fastEnabled bool
 	// showThinking shows reasoning/CoT cells in the transcript (/think).
@@ -257,6 +283,11 @@ type Model struct {
 	noticeErr    bool
 	noticeCause  noticeCause
 	turnRunning  bool
+	// queue* projects scheduler.queued/admitted/canceled for the active root
+	// so chrome/activity identify the constrained pool (not idle).
+	queueRequestID string
+	queuePools     []string
+	queueLabel     string
 	// inputQueue holds prompts typed while turnRunning. Drained FIFO on
 	// TurnCompleted; survives Interrupt until the user pops/clears it.
 	inputQueue []queuedInput
@@ -307,7 +338,7 @@ type Model struct {
 	// last open). Empty falls back to viewingID / sessionID.
 	vizFocusID string
 
-	// firstRun drives the empty-transcript onboarding card and auto provider modal.
+	// firstRun drives the empty-transcript onboarding card and auto /ftue modal.
 	firstRun, firstRunModalOpened bool
 	// testForceMultiPane disables the pre-first-prompt home layout so unit
 	// tests can exercise the multi-pane session surface without seeding a
@@ -392,8 +423,12 @@ type childActivity struct {
 	status    string // running | completed | failed | canceled
 	// rosterState is a short display chip from team.roster (working, needs you, …).
 	rosterState string
-	startedAt   time.Time
-	endedAt     time.Time
+	// queue* projects scheduler.queued/admitted/canceled (constrained pool, not idle).
+	queueRequestID string
+	queuePools     []string
+	queueLabel     string
+	startedAt      time.Time
+	endedAt        time.Time
 }
 
 // New builds the frontend model. services supplies every host capability; any
@@ -441,6 +476,7 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 		detectedDark:        true, // until BackgroundColorMsg; matches lipgloss default
 		autonomy:            protocol.AutonomySupervised,
 		permMode:            protocol.PermissionModeDefault,
+		sandboxMode:         "workspace-write",
 	}
 	m.applyAppearance()
 	var replay []protocol.Event
@@ -470,6 +506,14 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 		if option.NotifyMode != "" {
 			m.notifyMode = option.NotifyMode
 		}
+		if option.SandboxMode != "" {
+			// Apply backend/availability with mode so a later partial Options
+			// (e.g. WorkDir-only) cannot clear a prior sandbox wiring.
+			m.sandboxMode = option.SandboxMode
+			m.sandboxBackend = option.SandboxBackend
+			m.sandboxAvailable = option.SandboxAvailable
+			m.sandboxExplain = option.SandboxExplain
+		}
 		if option.PermissionAutoApproveSeconds != 0 {
 			m.permissionAutoApproveSeconds = option.PermissionAutoApproveSeconds
 		}
@@ -495,6 +539,11 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 	}
 	if m.notifyMode == "" {
 		m.notifyMode = NotifyUnfocusedOnly
+	}
+	// Host onboarding state drives auto-open when Options.FirstRun was not set.
+	// Only interactive TUI calls ShouldAutoOpen (may migrate established installs).
+	if !m.firstRun && services.Onboarding != nil && services.Onboarding.ShouldAutoOpen() {
+		m.firstRun = true
 	}
 	if services.History != nil {
 		m.entries = services.History.Entries()
@@ -876,7 +925,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case firstRunSetupMsg:
 		if m.firstRun && !m.firstRunModalOpened && m.modal == nil && len(m.cells) == 0 {
 			m.firstRunModalOpened = true
-			m.modal = newProviderModal(m.services, m.providerName, m.ops, m.th)
+			m.modal = newFTUEModal(m.services, m.providerName, m.modelName, m.th)
 			m.reflow()
 		}
 		return m, nil
@@ -890,13 +939,40 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case alertDismissedMsg:
-		// Startup alert may have deferred first-run provider setup.
+		// Startup alert may have deferred first-run /ftue setup.
 		if m.firstRun && !m.firstRunModalOpened && m.modal == nil && len(m.cells) == 0 {
 			m.firstRunModalOpened = true
-			m.modal = newProviderModal(m.services, m.providerName, m.ops, m.th)
+			m.modal = newFTUEModal(m.services, m.providerName, m.modelName, m.th)
 			m.reflow()
 		}
 		return m, nil
+
+	case onboardingAckMsg:
+		m.firstRun = false
+		if msg.err != nil {
+			m.setNotice("could not save onboarding state: "+msg.err.Error(), true)
+		}
+		return m, nil
+
+	case ftueSpawnChildMsg:
+		cmd := m.applyFTUESpawnChild(msg)
+		m.reflow()
+		return m, cmd
+
+	case ftueFinishedMsg:
+		cmd := m.applyFTUEFinished()
+		m.reflow()
+		return m, cmd
+
+	case tourClosedMsg:
+		cmd := m.applyTourClosed(msg)
+		m.reflow()
+		return m, cmd
+
+	case schedulerPresetsAppliedMsg:
+		cmd := m.applySchedulerPresetsApplied(msg)
+		m.reflow()
+		return m, cmd
 
 	case initResultMsg:
 		return m.applyInitResult(msg)

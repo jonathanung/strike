@@ -907,3 +907,303 @@ func TestCountOpenRootsSetWorktreeDestroy(t *testing.T) {
 		t.Fatalf("after destroy CountOpenRoots = %d, want 1", n)
 	}
 }
+
+func TestListCacheHit(t *testing.T) {
+	dir := t.TempDir()
+	m := NewManager(dir)
+
+	// First call populates cache.
+	all1, err := m.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all1) != 0 {
+		t.Fatalf("expected empty list, got %d", len(all1))
+	}
+
+	// Create a session via Manager (not directly on disk).
+	info, err := m.Create(CreateOptions{Title: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close(info.ID)
+
+	// Second call should see the new session (cache was invalidated by Create).
+	all2, err := m.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all2) != 1 {
+		t.Fatalf("expected 1 session after Create, got %d", len(all2))
+	}
+
+	// Third call within TTL should hit cache — no disk I/O.
+	// We verify by checking the result is the same slice (same length).
+	all3, err := m.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all3) != 1 {
+		t.Fatalf("cached List returned %d, want 1", len(all3))
+	}
+	if all3[0].ID != info.ID {
+		t.Fatalf("cached List id = %q, want %q", all3[0].ID, info.ID)
+	}
+}
+
+func TestListCacheInvalidateOnRename(t *testing.T) {
+	dir := t.TempDir()
+	m := NewManager(dir)
+
+	info, err := m.Create(CreateOptions{Title: "original"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close(info.ID)
+
+	// Populate cache.
+	all, _ := m.List()
+	if len(all) != 1 || all[0].Title != "original" {
+		t.Fatalf("before rename: %+v", all)
+	}
+
+	// Rename invalidates cache.
+	renamed, err := m.Rename(info.ID, "changed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if renamed.Title != "changed" {
+		t.Fatalf("Rename title = %q", renamed.Title)
+	}
+
+	// Fresh List should see new title.
+	all2, _ := m.List()
+	if len(all2) != 1 || all2[0].Title != "changed" {
+		t.Fatalf("after rename: %+v", all2)
+	}
+}
+
+func TestListCacheInvalidateOnClose(t *testing.T) {
+	dir := t.TempDir()
+	m := NewManager(dir)
+
+	info, err := m.Create(CreateOptions{Title: "to-close"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	all, _ := m.List()
+	if len(all) != 1 || !all[0].Open {
+		t.Fatal("expected open session before close")
+	}
+
+	// Close invalidates cache.
+	if err := m.Close(info.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	all2, _ := m.List()
+	if len(all2) != 1 {
+		t.Fatalf("expected 1 session after close, got %d", len(all2))
+	}
+	if all2[0].Open {
+		t.Fatal("expected closed session after close")
+	}
+}
+
+func TestListCacheInvalidateOnDelete(t *testing.T) {
+	dir := t.TempDir()
+	m := NewManager(dir)
+
+	info, err := m.Create(CreateOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Close(info.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	all, _ := m.List()
+	if len(all) != 1 {
+		t.Fatalf("expected 1 session before delete, got %d", len(all))
+	}
+
+	// Delete invalidates cache.
+	if err := m.Delete(info.ID, false); err != nil {
+		t.Fatal(err)
+	}
+
+	all2, err := m.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all2) != 0 {
+		t.Fatalf("expected 0 sessions after delete, got %d", len(all2))
+	}
+}
+
+func TestListCacheInvalidateOnDestroy(t *testing.T) {
+	dir := t.TempDir()
+	m := NewManager(dir)
+
+	info, err := m.Create(CreateOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	all, _ := m.List()
+	if len(all) != 1 {
+		t.Fatalf("expected 1 session before destroy, got %d", len(all))
+	}
+
+	// Destroy invalidates cache.
+	if err := m.Destroy(info.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	all2, err := m.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all2) != 0 {
+		t.Fatalf("expected 0 sessions after destroy, got %d", len(all2))
+	}
+}
+
+func TestListCacheNoCacheWhenEmpty(t *testing.T) {
+	dir := t.TempDir()
+	m := NewManager(dir)
+
+	// First List with empty dir — should NOT cache.
+	if _, err := m.List(); err != nil {
+		t.Fatal(err)
+	}
+	if m.listCache != nil {
+		t.Fatal("expected nil cache after empty List")
+	}
+
+	// Write a session directly to disk (bypassing Manager).
+	st, err := Open(dir, "sid-001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+	WriteMeta(dir, "sid-001", Meta{CreatedAt: "2020-01-01T00:00:00Z"})
+
+	// Second List should see the new session (cache was not populated).
+	all, err := m.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 1 {
+		t.Fatalf("expected 1 session after disk write, got %d", len(all))
+	}
+	if all[0].ID != "sid-001" {
+		t.Fatalf("expected sid-001, got %q", all[0].ID)
+	}
+}
+
+func TestListCacheExpiry(t *testing.T) {
+	dir := t.TempDir()
+	m := NewManager(dir)
+
+	info, err := m.Create(CreateOptions{Title: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close(info.ID)
+
+	// Populate cache.
+	all, _ := m.List()
+	if len(all) != 1 {
+		t.Fatal("expected 1 session")
+	}
+
+	// Artificially age the cache.
+	m.mu.Lock()
+	m.listCachedAt = time.Now().Add(-10 * time.Second)
+	m.mu.Unlock()
+
+	// List should still return correctly (cache expired but no changes).
+	all2, err := m.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all2) != 1 {
+		t.Fatalf("expected 1 session after expiry, got %d", len(all2))
+	}
+}
+
+func TestListCacheForkInvalidates(t *testing.T) {
+	dir := t.TempDir()
+	m := NewManager(dir)
+
+	root, err := m.Create(CreateOptions{Title: "source"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close(root.ID)
+
+	// Fork creates a new session, which should invalidate the cache.
+	forked, err := m.Fork(root.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close(forked.ID)
+
+	all, err := m.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("expected 2 sessions after fork, got %d", len(all))
+	}
+}
+
+func TestListCacheConcurrentAccess(t *testing.T) {
+	dir := t.TempDir()
+	m := NewManager(dir)
+
+	info, err := m.Create(CreateOptions{Title: "base"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close(info.ID)
+
+	// Populate cache.
+	m.List()
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 20)
+
+	// Concurrent reads.
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			all, err := m.List()
+			if err != nil {
+				errs <- err
+				return
+			}
+			if len(all) != 1 {
+				errs <- fmt.Errorf("expected 1, got %d", len(all))
+			}
+		}()
+	}
+
+	// Concurrent writes that invalidate.
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			m.Rename(info.ID, fmt.Sprintf("renamed-%d", n))
+		}(i)
+	}
+
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}

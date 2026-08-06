@@ -18,6 +18,7 @@ const (
 	activityChild
 	activityAttention
 	activityTeamMsg
+	activityQueue
 )
 
 // activityEntry is one projected activity-pane row. Higher Seq is newer.
@@ -40,13 +41,13 @@ type activityEntry struct {
 // rows, recent team messages, and an attention row while a permission/question
 // is pending. Replay and live paths share this projection.
 func projectActivityEntries(cells []cell, children []childActivity, messages []teamMessage, awaitingPermission bool) []activityEntry {
-	return projectActivityEntriesNamed(cells, children, messages, awaitingPermission, nil)
+	return projectActivityEntriesNamed(cells, children, messages, awaitingPermission, nil, "", nil)
 }
 
 // projectActivityEntriesNamed is projectActivityEntries with optional teammate
-// name resolution for message rows (lead UI).
-func projectActivityEntriesNamed(cells []cell, children []childActivity, messages []teamMessage, awaitingPermission bool, resolveName func(id string) string) []activityEntry {
-	entries := make([]activityEntry, 0, len(cells)+len(children)+len(messages)+1)
+// name resolution for message rows (lead UI) and optional root queue state.
+func projectActivityEntriesNamed(cells []cell, children []childActivity, messages []teamMessage, awaitingPermission bool, resolveName func(id string) string, rootQueueLabel string, rootQueuePools []string) []activityEntry {
+	entries := make([]activityEntry, 0, len(cells)+len(children)+len(messages)+2)
 	var seq int64
 
 	// Tools in transcript order; later cells/calls get higher seq.
@@ -94,6 +95,9 @@ func projectActivityEntriesNamed(cells []cell, children []childActivity, message
 		if ch.rosterState != "" {
 			status = ch.rosterState
 		}
+		if q := childQueueDetail(ch); q != "" {
+			status = q
+		}
 		entries = append(entries, activityEntry{
 			ID:           id,
 			Kind:         activityChild,
@@ -101,6 +105,18 @@ func projectActivityEntriesNamed(cells []cell, children []childActivity, message
 			Label:        label,
 			Status:       status,
 			NavSessionID: strings.TrimSpace(ch.sessionID),
+		})
+	}
+
+	// Root queue wait (model/bash admission) — identify constrained pool.
+	if rootQ := queueActivityStatus(rootQueueLabel, rootQueuePools); rootQ != "" {
+		seq++
+		entries = append(entries, activityEntry{
+			ID:     "queue:root",
+			Kind:   activityQueue,
+			Seq:    seq,
+			Label:  rootQueueLabelOrPools(rootQueueLabel, rootQueuePools),
+			Status: rootQ,
 		})
 	}
 
@@ -347,7 +363,26 @@ func (m Model) activityEntries() []activityEntry {
 		// Ephemeral / id-less children only in the flat feed.
 		kids = m.children
 	}
-	return projectActivityEntriesNamed(m.cells, kids, m.teamMessages, m.awaitingPermission, m.teamMemberLabel)
+	rootLabel := strings.TrimSpace(m.queueLabel)
+	return projectActivityEntriesNamed(m.cells, kids, m.teamMessages, m.awaitingPermission, m.teamMemberLabel, rootLabel, m.queuePools)
+}
+
+// queueActivityStatus is the status chip for a root queue row.
+func queueActivityStatus(label string, pools []string) string {
+	if strings.TrimSpace(label) == "" && len(pools) == 0 {
+		return ""
+	}
+	return queueDetailLabel(rootQueueLabelOrPools(label, pools))
+}
+
+func rootQueueLabelOrPools(label string, pools []string) string {
+	if s := strings.TrimSpace(label); s != "" {
+		return s
+	}
+	if len(pools) == 0 {
+		return "scheduler"
+	}
+	return strings.Join(pools, ",")
 }
 
 // activityEmptyMessage is the idle body when the activity feed has nothing yet.
@@ -460,20 +495,24 @@ func activityListItem(th theme.Theme, e activityEntry) ui.ListItem {
 	case activityChild:
 		glyph := ic.Ellipsis
 		suffixStyle := st.Muted
-		switch e.Status {
-		case "running", "working", "starting":
+		status := strings.ToLower(strings.TrimSpace(e.Status))
+		switch {
+		case strings.HasPrefix(status, "queued"):
 			suffixStyle = st.AccentAlt
 			glyph = ic.Ellipsis
-		case "needs you", "needs_attention":
+		case status == "running" || status == "working" || status == "starting":
+			suffixStyle = st.AccentAlt
+			glyph = ic.Ellipsis
+		case status == "needs you" || status == "needs_attention":
 			suffixStyle = st.Warning
 			glyph = ic.Bolt
-		case "completed", "done":
+		case status == "completed" || status == "done":
 			suffixStyle = st.Success
 			glyph = ic.OK
-		case "failed", "error":
+		case status == "failed" || status == "error":
 			suffixStyle = st.Error
 			glyph = ic.Err
-		case "canceled", "cancelled":
+		case status == "canceled" || status == "cancelled":
 			suffixStyle = st.Muted
 			glyph = ic.Info
 		}
@@ -481,6 +520,12 @@ func activityListItem(th theme.Theme, e activityEntry) ui.ListItem {
 			Label:  sanitizeDisplayData(e.Label),
 			Detail: e.Status,
 			Suffix: suffixStyle.Render(space + glyph),
+		}
+	case activityQueue:
+		return ui.ListItem{
+			Label:  sanitizeDisplayData(e.Label),
+			Detail: e.Status,
+			Suffix: st.AccentAlt.Render(space + ic.Ellipsis),
 		}
 	case activityTeamMsg:
 		return ui.ListItem{

@@ -8,6 +8,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/jonathanung/strike-cli/internal/sandbox"
+	"github.com/jonathanung/strike-cli/internal/scheduler"
 )
 
 const (
@@ -67,14 +70,23 @@ func (bashTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 	if fields := strings.Fields(a.Command); len(fields) > 1 {
 		always = []string{fields[0] + " *"}
 	}
-	// Hard workspace boundary for destructive ops — runs before Ask so yolo /
-	// --dangerously-skip-permissions cannot remove paths outside WorkDir.
+	// Best-effort workspace path guard for known destructive ops — runs before
+	// Ask. Incomplete static parse only; not a security boundary.
 	if err := checkBashWorkspaceBoundary(a.Command, tc.WorkDir); err != nil {
 		return Result{}, err
 	}
 	if err := tc.Ask(ctx, AskRequest{Permission: "bash", Patterns: []string{a.Command}, Always: always}); err != nil {
 		return Result{}, err
 	}
+
+	// Admit after permission approval and before process start so a canceled
+	// waiter never emits process-started or starts an OS process. Command
+	// timeout begins only after admission (RunProcess applies Timeout).
+	lease, err := acquireBashLease(ctx, tc, a.Command)
+	if err != nil {
+		return Result{}, err
+	}
+	defer lease.Release() // start failure, exit, timeout, cancel, panic-safe
 
 	timeout := bashDefaultTimeout
 	if a.TimeoutMs > 0 {
@@ -93,13 +105,17 @@ func (bashTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 	}
 
 	// Fresh process each call: Dir is always the session workdir so shell cd
-	// cannot stick across tool invocations.
+	// cannot stick across tool invocations. OS sandbox (bwrap / seatbelt)
+	// confines the shell when the platform backend is available and mode is
+	// not off (config/CLI dial + permission-compiled denials/network).
+	// Sandbox wrap stays inside RunProcess; the pool lease wraps the whole run.
 	proc, err := RunProcess(ctx, ProcessSpec{
 		Argv:      []string{"bash", "-c", a.Command},
 		Dir:       tc.WorkDir,
 		Timeout:   timeout,
 		MaxOutput: bashMaxOutput,
 		Combine:   true,
+		Sandbox:   bashSandboxPolicy(tc),
 	}, obs)
 	if err != nil {
 		return Result{}, err
@@ -144,6 +160,92 @@ func (bashTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 	}
 	meta, _ := json.Marshal(metaFields)
 	return Result{Title: a.Command, Output: output, Metadata: meta}, nil
+}
+
+// acquireBashLease acquires process (+ build/test when classified) pools.
+// When Scheduler is nil, returns a no-op lease (unlimited / current behavior).
+// Multi-pool grants use Scheduler.Acquire's deadlock-free atomic path (FIFO).
+// Prefer SchedulerAcquire when set so the engine can emit queue lifecycle events.
+func acquireBashLease(ctx context.Context, tc *Context, command string) (*scheduler.Lease, error) {
+	if tc == nil || (tc.Scheduler == nil && tc.SchedulerAcquire == nil) {
+		return nil, nil // Lease.Release is nil-safe
+	}
+	pools := bashPoolsForCommand(tc, command)
+	label := bashQueueLabel(pools)
+	if tc.SchedulerAcquire != nil {
+		lease, err := tc.SchedulerAcquire(ctx, label, pools...)
+		if err != nil {
+			return nil, fmt.Errorf("scheduler: %w", err)
+		}
+		return lease, nil
+	}
+	lease, err := tc.Scheduler.Acquire(ctx, pools...)
+	if err != nil {
+		return nil, fmt.Errorf("scheduler: %w", err)
+	}
+	return lease, nil
+}
+
+// bashQueueLabel is a short UI/protocol tag for bash admission (no argv leak).
+func bashQueueLabel(pools []string) string {
+	extra := make([]string, 0, len(pools))
+	for _, p := range pools {
+		if p == scheduler.PoolProcess {
+			continue
+		}
+		extra = append(extra, p)
+	}
+	if len(extra) == 0 {
+		return "bash"
+	}
+	return "bash:" + strings.Join(extra, ",")
+}
+
+// bashPoolsForCommand returns admission pool names for a bash command.
+func bashPoolsForCommand(tc *Context, command string) []string {
+	if tc != nil && tc.SchedulerPolicy != nil {
+		return tc.SchedulerPolicy.PoolsForCommand(command)
+	}
+	return scheduler.PoolsForClass(scheduler.ClassGeneral)
+}
+
+// bashSandboxMode resolves the OS sandbox dial from tool context.
+// Empty/unset defaults to workspace-write (product default).
+func bashSandboxMode(tc *Context) sandbox.Mode {
+	if tc == nil {
+		return sandbox.DefaultMode
+	}
+	return sandbox.ResolveMode(tc.SandboxMode)
+}
+
+// bashSandboxPolicy returns the OS policy for a bash invocation.
+// When tc.Sandbox carries a compiled policy (WorkDir and/or denial/network
+// fields, or a non-off Mode), that policy is used (WorkDir filled from tc
+// when empty). Otherwise Mode/WorkDir are derived from SandboxMode + WorkDir.
+func bashSandboxPolicy(tc *Context) sandbox.Policy {
+	if tc == nil {
+		return sandbox.Policy{Mode: sandbox.DefaultMode}
+	}
+	p := tc.Sandbox
+	if compiledSandboxPolicy(p) {
+		if strings.TrimSpace(p.WorkDir) == "" {
+			p.WorkDir = tc.WorkDir
+		}
+		return p
+	}
+	return sandbox.Policy{
+		Mode:    bashSandboxMode(tc),
+		WorkDir: tc.WorkDir,
+	}
+}
+
+func compiledSandboxPolicy(p sandbox.Policy) bool {
+	return p.Mode != sandbox.ModeOff ||
+		strings.TrimSpace(p.WorkDir) != "" ||
+		p.NoWorkspaceWrite ||
+		p.Network ||
+		len(p.DenyWritePaths) > 0 ||
+		len(p.DenyWriteGlobs) > 0
 }
 
 // githubPRURLRe matches common GitHub pull request URLs in gh CLI output.

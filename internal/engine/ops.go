@@ -10,6 +10,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
+	"github.com/jonathanung/strike-cli/internal/sandbox"
 )
 
 func (e *Engine) handleOp(ctx context.Context, op protocol.Op) {
@@ -335,6 +336,13 @@ func (e *Engine) applyPermissionMode(mode protocol.PermissionMode, alignPlan boo
 		e.emit(protocol.EngineError{
 			Correlation: e.sessionCorr(),
 			Message:     fmt.Sprintf("unknown permission mode %q (want %s)", mode, permissionModeNames()),
+		})
+		return
+	}
+	if err := sandbox.CheckYoloSandbox(string(parsed), e.opts.SandboxMode, e.opts.AllowYoloWithoutSandbox); err != nil {
+		e.emit(protocol.EngineError{
+			Correlation: e.sessionCorr(),
+			Message:     err.Error(),
 		})
 		return
 	}

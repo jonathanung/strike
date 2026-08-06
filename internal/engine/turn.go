@@ -16,6 +16,8 @@ import (
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
 	"github.com/jonathanung/strike-cli/internal/question"
+	"github.com/jonathanung/strike-cli/internal/sandbox"
+	"github.com/jonathanung/strike-cli/internal/scheduler"
 	"github.com/jonathanung/strike-cli/internal/tool"
 )
 
@@ -381,7 +383,7 @@ func (e *Engine) consumeStream(ctx context.Context, reqCorr protocol.Correlation
 	system := joinPromptLayerTexts(layers)
 	tools, _ := e.effectiveToolSchemas()
 	e.recordStreamEffective(layers, system, tools)
-	stream, err := e.prov.Stream(ctx, provider.Request{
+	stream, err := e.admitModelStream(ctx, reqCorr, provider.Request{
 		Model:     e.model,
 		System:    system,
 		Messages:  e.messages,
@@ -394,7 +396,6 @@ func (e *Engine) consumeStream(ctx context.Context, reqCorr protocol.Correlation
 	if err != nil {
 		return streamOutcome{}, err
 	}
-	stream = provider.NormalizeStream(stream)
 
 	var textBuf strings.Builder
 	var calls []provider.ToolCall
@@ -655,7 +656,14 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 		}
 		callID := call.ID
 		tc := &tool.Context{
-			WorkDir:    e.opts.WorkDir,
+			WorkDir:         e.opts.WorkDir,
+			SandboxMode:     e.opts.SandboxMode,
+			Sandbox:         e.bashSandboxPolicy(),
+			Scheduler:       e.opts.Scheduler,
+			SchedulerPolicy: e.opts.SchedulerPolicy,
+			SchedulerAcquire: func(ctx context.Context, label string, pools ...string) (*scheduler.Lease, error) {
+				return e.acquireScheduler(ctx, corr, label, pools...)
+			},
 			Files:      e.files,
 			Checkpoint: e.checkpoints.Snapshot,
 			Ask: func(ctx context.Context, req tool.AskRequest) error {
@@ -962,4 +970,14 @@ func (e *Engine) toolNames() string {
 		names = append(names, s.Name)
 	}
 	return strings.Join(names, ", ")
+}
+
+// bashSandboxPolicy compiles the live permission layers into an OS sandbox
+// Policy for bash (write denials, network from webfetch/mcp, plan hard-denies).
+func (e *Engine) bashSandboxPolicy() sandbox.Policy {
+	mode := sandbox.ResolveMode(e.opts.SandboxMode)
+	if e.perms == nil {
+		return sandbox.Policy{Mode: mode, WorkDir: e.opts.WorkDir}
+	}
+	return e.perms.CompileSandbox(mode, e.opts.WorkDir)
 }

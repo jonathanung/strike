@@ -18,6 +18,8 @@ import (
 
 	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike-cli/internal/sandbox"
+	"github.com/jonathanung/strike-cli/internal/scheduler"
 )
 
 type Config struct {
@@ -64,9 +66,14 @@ type Config struct {
 	// PermissionMode is the default tool-permission posture dial for new
 	// sessions (default|plan|soft-approve|accept-edits|yolo). Empty means
 	// default. Session changes via Shift+Tab or /mode persist in the JSONL
-	// log, not here.
+	// log, not here. Distinct from Sandbox (what OS isolation allows).
 	PermissionMode protocol.PermissionMode `json:"permissionMode,omitempty"`
-	Permissions    permission.Ruleset      `json:"permissions,omitempty"`
+	// Sandbox is the OS process sandbox dial for bash: off|read-only|
+	// workspace-write. Empty means workspace-write (default). This controls
+	// what the OS isolation layer makes possible; permissionMode controls
+	// when the agent is asked. See docs/config.md (two-dial model).
+	Sandbox     string             `json:"sandbox,omitempty"`
+	Permissions permission.Ruleset `json:"permissions,omitempty"`
 	// Hooks mixes declarative rules (action) and shell commands (command).
 	// Global then project layers concatenate. Invalid entries are dropped.
 	Hooks []Hook `json:"hooks,omitempty"`
@@ -140,6 +147,33 @@ type Config struct {
 	// Harnesses configures named external function harnesses. Project
 	// definitions replace global definitions with the same name.
 	Harnesses map[string]HarnessConfig `json:"harnesses,omitempty"`
+	// Scheduler holds in-process resource pool limits, optional shipped
+	// build-system presets, and command classification rules. Project limits
+	// override global per pool (omitted keys preserve lower layers /
+	// unlimited). Preset IDs and command rules concatenate (global then
+	// project; presets expand before user rules). Last match wins. See
+	// docs/config.md.
+	Scheduler SchedulerConfig `json:"scheduler,omitempty"`
+}
+
+// SchedulerConfig is the JSON "scheduler" object.
+//
+// Limits, presets, and command rules are process-local only — separate Strike
+// OS processes do not coordinate. Compile via SchedulerEffective /
+// scheduler.CompileWithPresets (presets expand into ordinary limits/rules).
+type SchedulerConfig struct {
+	// Presets lists shipped build-system preset IDs (cmake, ninja, gradle,
+	// bazel, maven, cargo, npm). Expanded at compile time into suggested
+	// limits and command rules before user Limits/Commands apply.
+	Presets []string `json:"presets,omitempty"`
+	// Limits maps pool name (process|build|test|model|container) → positive
+	// capacity. Omitted pools stay unlimited. Explicit 0 or negative fails load.
+	// User limits overlay preset-suggested capacities per pool.
+	Limits scheduler.Limits `json:"limits,omitempty"`
+	// Commands are ordered classification rules (pattern glob → class).
+	// Appended after expanded preset rules; last match wins. Empty list with
+	// no presets means every command is general.
+	Commands []scheduler.CommandRule `json:"commands,omitempty"`
 }
 
 // HarnessConfig is one named external subprocess harness command. Embedded Go
@@ -532,6 +566,13 @@ func read(path string) (Config, error) {
 		}
 		c.PermissionMode = mode
 	}
+	if strings.TrimSpace(c.Sandbox) != "" {
+		mode, ok := sandbox.ParseMode(c.Sandbox)
+		if !ok {
+			return Config{}, fmt.Errorf("%s: unknown sandbox %q (want %s)", path, c.Sandbox, sandbox.ModeNames())
+		}
+		c.Sandbox = mode.String()
+	}
 	c.CompactionStrategy = NormalizeCompactionStrategy(c.CompactionStrategy)
 	c.CompactionModel = strings.TrimSpace(c.CompactionModel)
 	c.CompactionThreshold = ClampCompactionThreshold(c.CompactionThreshold)
@@ -559,7 +600,49 @@ func read(path string) (Config, error) {
 			return Config{}, fmt.Errorf("%s: harness %q command is empty", path, name)
 		}
 	}
+	// Scheduler: validate limits/rules and stamp command provenance with path.
+	if err := normalizeSchedulerLayer(&c.Scheduler, path); err != nil {
+		return Config{}, err
+	}
 	return c, nil
+}
+
+// normalizeSchedulerLayer validates scheduler presets, limits, and command
+// rules for one config file and stamps each rule's Source with path for
+// startup reports.
+func normalizeSchedulerLayer(sc *SchedulerConfig, path string) error {
+	if sc == nil {
+		return nil
+	}
+	if err := scheduler.ValidatePresetIDs(sc.Presets, path); err != nil {
+		return err
+	}
+	// Normalize preset id whitespace; drop empties already rejected above.
+	if len(sc.Presets) > 0 {
+		out := make([]string, 0, len(sc.Presets))
+		for _, id := range sc.Presets {
+			out = append(out, strings.TrimSpace(id))
+		}
+		sc.Presets = out
+	}
+	if err := scheduler.ValidateLimits(sc.Limits, path); err != nil {
+		return err
+	}
+	if len(sc.Commands) == 0 {
+		return nil
+	}
+	out := make([]scheduler.CommandRule, 0, len(sc.Commands))
+	for i, r := range sc.Commands {
+		r.Source = path
+		if err := scheduler.ValidateCommandRule(r, i, path); err != nil {
+			return err
+		}
+		// Normalize class whitespace for stable effective output.
+		r.Class = scheduler.Class(strings.TrimSpace(string(r.Class)))
+		out = append(out, r)
+	}
+	sc.Commands = out
+	return nil
 }
 
 // ClampPermissionAutoApproveSeconds maps config values: ≤0 → 0 (off), >60 → 60.
@@ -811,6 +894,9 @@ func merge(base, layer Config) Config {
 	if layer.PermissionMode != "" {
 		base.PermissionMode = layer.PermissionMode
 	}
+	if layer.Sandbox != "" {
+		base.Sandbox = layer.Sandbox
+	}
 	if layer.CompactionStrategy != "" {
 		base.CompactionStrategy = layer.CompactionStrategy
 	}
@@ -853,6 +939,7 @@ func merge(base, layer Config) Config {
 	base.Keybinds = MergeKeybinds(base.Keybinds, layer.Keybinds)
 	base.MCP = mergeMCP(base.MCP, layer.MCP)
 	base.Harnesses = mergeHarnesses(base.Harnesses, layer.Harnesses)
+	base.Scheduler = mergeScheduler(base.Scheduler, layer.Scheduler)
 	if layer.disableDefaultProvidersSet {
 		base.DisableDefaultProviders = layer.DisableDefaultProviders
 		base.disableDefaultProvidersSet = true
@@ -861,6 +948,27 @@ func merge(base, layer Config) Config {
 		base.DisableDefaultPer = mergeDisableDefaultPer(base.DisableDefaultPer, layer.DisableDefaultPer)
 	}
 	return base
+}
+
+// mergeScheduler merges preset IDs (deduped), overlays limits per pool, and
+// appends command rules (later layers win under last-match-wins classification).
+func mergeScheduler(base, layer SchedulerConfig) SchedulerConfig {
+	return SchedulerConfig{
+		Presets: scheduler.MergePresetIDs(base.Presets, layer.Presets),
+		Limits:  scheduler.MergeLimits(base.Limits, layer.Limits),
+		Commands: append(
+			scheduler.CloneCommandRules(base.Commands),
+			scheduler.CloneCommandRules(layer.Commands)...,
+		),
+	}
+}
+
+// SchedulerEffective compiles the loaded scheduler policy for admission wiring.
+// Shipped presets expand into ordinary limits and command rules first; user
+// limits overlay suggested capacities and user commands append after preset
+// rules. Safe when Scheduler is empty (unlimited defaults, no command rules).
+func (c Config) SchedulerEffective() (*scheduler.Effective, error) {
+	return scheduler.CompileWithPresets(c.Scheduler.Presets, c.Scheduler.Limits, c.Scheduler.Commands, "")
 }
 
 func mergeHarnesses(base, layer map[string]HarnessConfig) map[string]HarnessConfig {

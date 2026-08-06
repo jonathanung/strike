@@ -209,7 +209,7 @@ func (e *Engine) applyCompaction(ctx context.Context, reason string, corr protoc
 	summary := ""
 
 	if requested == protocol.CompactionStrategySummarize {
-		s, err := e.summarizeHistory(ctx, dropped)
+		s, err := e.summarizeHistory(ctx, corr, dropped)
 		if err != nil || strings.TrimSpace(s) == "" {
 			msg := "summarize compaction failed, fell back to trim"
 			if err != nil {
@@ -261,7 +261,7 @@ func (e *Engine) handleCompact(ctx context.Context, op protocol.Compact) {
 // summarizeHistory runs a tools-free model call over dropped turns and returns
 // the assistant text. Does not emit TextDelta (not part of the user transcript).
 // Never executes tools; completed mutating tools are not replayed.
-func (e *Engine) summarizeHistory(ctx context.Context, dropped []provider.Message) (string, error) {
+func (e *Engine) summarizeHistory(ctx context.Context, corr protocol.Correlation, dropped []provider.Message) (string, error) {
 	if e.prov == nil {
 		return "", errors.New("no provider")
 	}
@@ -281,7 +281,7 @@ func (e *Engine) summarizeHistory(ctx context.Context, dropped []provider.Messag
 	if m := strings.TrimSpace(e.opts.CompactionModel); m != "" {
 		model = m
 	}
-	stream, err := e.prov.Stream(ctx, provider.Request{
+	stream, err := e.admitModelStream(ctx, corr, provider.Request{
 		Model:  model,
 		System: summarizeSystemPrompt,
 		Messages: []provider.Message{{
@@ -294,7 +294,6 @@ func (e *Engine) summarizeHistory(ctx context.Context, dropped []provider.Messag
 	if err != nil {
 		return "", err
 	}
-	stream = provider.NormalizeStream(stream)
 	var text strings.Builder
 	var streamErr error
 	terminated := false

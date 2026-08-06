@@ -44,11 +44,16 @@ type childHandle struct {
 	prompt    string
 	name      string // optional stable teammate alias
 
-	mu             sync.Mutex
-	currentTool    string
-	awaitingPerm   bool
-	awaitingQ      bool
-	turnRunning    bool
+	mu           sync.Mutex
+	currentTool  string
+	awaitingPerm bool
+	awaitingQ    bool
+	turnRunning  bool
+	// queue* tracks in-flight scheduler admission so task_status/roster can
+	// identify the constrained pool instead of looking idle/working-generic.
+	queueRequestID string
+	queuePools     []string
+	queueLabel     string
 	activity       []string
 	events         []tool.TaskTranscriptEntry // absolute index preserved in entry.Index
 	nextEventIndex int
@@ -168,48 +173,52 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 		parentLayers = append(parentLayers, append(permission.Ruleset(nil), e.agent.Permissions...))
 	}
 	child := New(Options{
-		SessionID:           childID,
-		ParentSessionID:     e.opts.SessionID,
-		Depth:               childDepth,
-		MaxChildDepth:       maxDepth,
-		TaskOneShot:         true,
-		Team:                e.team, // share lead roster; nested enrolls on same team
-		Select:              e.opts.Select,
-		Registry:            childReg,
-		WorkDir:             e.opts.WorkDir,
-		ProjectRoot:         e.opts.ProjectRoot,
-		Instructions:        e.opts.Instructions,
-		Memory:              e.opts.Memory,
-		SystemPrompt:        e.opts.SystemPrompt,
-		LeanCode:            e.opts.LeanCode,
-		HarnessRegistry:     e.opts.HarnessRegistry,
-		Agents:              e.opts.Agents,
-		InitialAgent:        agentName,
-		InitialProvider:     e.provName,
-		InitialModel:        e.model,
-		InitialEffort:       childEffort,
-		InitialTitled:       title != "",
-		MaxTokens:           e.opts.MaxTokens,
-		MaxStreamAttempts:   e.opts.MaxStreamAttempts,
-		StreamRetryBackoff:  e.opts.StreamRetryBackoff,
-		ContextWindow:       e.contextWindow(),
-		LookupContextWindow: e.opts.LookupContextWindow,
-		ListModels:          e.opts.ListModels,
-		LockModel:           modelPin.lock,
-		LockEffort:          effortPin.lock,
-		CompactionThreshold: e.opts.CompactionThreshold,
-		CompactionBuffer:    e.opts.CompactionBuffer,
-		KeepUserTurns:       e.opts.KeepUserTurns,
-		PruneProtectTokens:  e.opts.PruneProtectTokens,
-		PruneMinimumTokens:  e.opts.PruneMinimumTokens,
-		PruneKeepUserTurns:  e.opts.PruneKeepUserTurns,
-		PruneProtectTools:   e.opts.PruneProtectTools,
-		CompactionStrategy:  e.opts.CompactionStrategy,
-		CompactionModel:     e.opts.CompactionModel,
-		Rules:               permission.DeriveChildRules(parentLayers, childDepth >= maxDepth, childAgent.Permissions),
-		Hooks:               e.opts.Hooks,
-		HookRules:           e.opts.HookRules,
-		PersistProjectRule:  e.opts.PersistProjectRule,
+		SessionID:               childID,
+		ParentSessionID:         e.opts.SessionID,
+		Depth:                   childDepth,
+		MaxChildDepth:           maxDepth,
+		TaskOneShot:             true,
+		Team:                    e.team, // share lead roster; nested enrolls on same team
+		Select:                  e.opts.Select,
+		Registry:                childReg,
+		WorkDir:                 e.opts.WorkDir,
+		ProjectRoot:             e.opts.ProjectRoot,
+		Instructions:            e.opts.Instructions,
+		Memory:                  e.opts.Memory,
+		SystemPrompt:            e.opts.SystemPrompt,
+		LeanCode:                e.opts.LeanCode,
+		HarnessRegistry:         e.opts.HarnessRegistry,
+		Scheduler:               e.opts.Scheduler,       // share process-local pools
+		SchedulerPolicy:         e.opts.SchedulerPolicy, // bash classification rules
+		Agents:                  e.opts.Agents,
+		InitialAgent:            agentName,
+		InitialProvider:         e.provName,
+		InitialModel:            e.model,
+		InitialEffort:           childEffort,
+		InitialTitled:           title != "",
+		SandboxMode:             e.opts.SandboxMode,
+		AllowYoloWithoutSandbox: e.opts.AllowYoloWithoutSandbox,
+		MaxTokens:               e.opts.MaxTokens,
+		MaxStreamAttempts:       e.opts.MaxStreamAttempts,
+		StreamRetryBackoff:      e.opts.StreamRetryBackoff,
+		ContextWindow:           e.contextWindow(),
+		LookupContextWindow:     e.opts.LookupContextWindow,
+		ListModels:              e.opts.ListModels,
+		LockModel:               modelPin.lock,
+		LockEffort:              effortPin.lock,
+		CompactionThreshold:     e.opts.CompactionThreshold,
+		CompactionBuffer:        e.opts.CompactionBuffer,
+		KeepUserTurns:           e.opts.KeepUserTurns,
+		PruneProtectTokens:      e.opts.PruneProtectTokens,
+		PruneMinimumTokens:      e.opts.PruneMinimumTokens,
+		PruneKeepUserTurns:      e.opts.PruneKeepUserTurns,
+		PruneProtectTools:       e.opts.PruneProtectTools,
+		CompactionStrategy:      e.opts.CompactionStrategy,
+		CompactionModel:         e.opts.CompactionModel,
+		Rules:                   permission.DeriveChildRules(parentLayers, childDepth >= maxDepth, childAgent.Permissions),
+		Hooks:                   e.opts.Hooks,
+		HookRules:               e.opts.HookRules,
+		PersistProjectRule:      e.opts.PersistProjectRule,
 	})
 	child.taskHarness = childHarness
 	child.taskHarnessName = childHarnessName
@@ -325,6 +334,10 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 				e.emit(ev)
 			case protocol.TeamRoster:
 				// Nested engines share the lead team; bubble roster snapshots.
+				e.emit(ev)
+			case protocol.SchedulerQueued, protocol.SchedulerAdmitted, protocol.SchedulerCanceled:
+				// Surface queue lifecycle so parent TUI/task_status can show
+				// which pool a child is waiting on (not idle).
 				e.emit(ev)
 			case protocol.TurnCompleted:
 				// One-shot task: record stop reason. Do not cancel here —
@@ -562,6 +575,25 @@ func (h *childHandle) noteEvent(ev protocol.Event) {
 		if msg := strings.TrimSpace(ev.Message); msg != "" {
 			h.pushActivityLocked("error: " + truncateRunes(msg, 80))
 		}
+	case protocol.SchedulerQueued:
+		h.queueRequestID = ev.RequestID
+		h.queuePools = append([]string(nil), ev.Pools...)
+		h.queueLabel = ev.Label
+		h.pushActivityLocked(queueActivityLine("queued", ev.Label, ev.Pools))
+	case protocol.SchedulerAdmitted:
+		if h.queueRequestID == "" || h.queueRequestID == ev.RequestID {
+			h.queueRequestID = ""
+			h.queuePools = nil
+			h.queueLabel = ""
+		}
+		h.pushActivityLocked(queueActivityLine("admitted", ev.Label, ev.Pools))
+	case protocol.SchedulerCanceled:
+		if h.queueRequestID == "" || h.queueRequestID == ev.RequestID {
+			h.queueRequestID = ""
+			h.queuePools = nil
+			h.queueLabel = ""
+		}
+		h.pushActivityLocked(queueActivityLine("queue canceled", ev.Label, ev.Pools))
 	}
 
 	if entry, ok := summarizeChildEvent(h.nextEventIndex, ev); ok {
@@ -590,6 +622,12 @@ func summarizeChildEvent(index int, ev protocol.Event) (tool.TaskTranscriptEntry
 		return tool.TaskTranscriptEntry{Index: index, Kind: "child.started", Summary: "agent=" + ev.Agent}, true
 	case protocol.ChildCompleted:
 		return tool.TaskTranscriptEntry{Index: index, Kind: "child.completed", Summary: string(ev.Status) + ": " + truncateRunes(ev.Summary, 200)}, true
+	case protocol.SchedulerQueued:
+		return tool.TaskTranscriptEntry{Index: index, Kind: "scheduler.queued", Summary: queueActivityLine("queued", ev.Label, ev.Pools)}, true
+	case protocol.SchedulerAdmitted:
+		return tool.TaskTranscriptEntry{Index: index, Kind: "scheduler.admitted", Summary: queueActivityLine("admitted", ev.Label, ev.Pools)}, true
+	case protocol.SchedulerCanceled:
+		return tool.TaskTranscriptEntry{Index: index, Kind: "scheduler.canceled", Summary: queueActivityLine("canceled", ev.Label, ev.Pools)}, true
 	case protocol.UserMessage:
 		return tool.TaskTranscriptEntry{Index: index, Kind: "user", Summary: truncateRunes(ev.Text, 240)}, true
 	case protocol.TurnStarted:
@@ -676,6 +714,9 @@ func (h *childHandle) statusSnapshot(includeRecent bool) tool.TaskStatusResult {
 	switch {
 	case h.awaitingPerm || h.awaitingQ:
 		state = "needs_attention"
+	case len(h.queuePools) > 0:
+		// Waiting on a pool is still live work — never report idle/starting.
+		state = "working"
 	case h.turnRunning || h.currentTool != "":
 		state = "working"
 	case h.nextEventIndex > 1:
@@ -686,11 +727,25 @@ func (h *childHandle) statusSnapshot(includeRecent bool) tool.TaskStatusResult {
 		State:       state,
 		Elapsed:     formatElapsed(time.Since(h.startedAt)),
 		CurrentTool: h.currentTool,
+		QueuePools:  append([]string(nil), h.queuePools...),
+		QueueLabel:  h.queueLabel,
 	}
 	if includeRecent && len(h.activity) > 0 {
 		out.LatestActivity = append([]string(nil), h.activity...)
 	}
 	return out
+}
+
+// queueActivityLine formats a short activity pulse for scheduler lifecycle.
+func queueActivityLine(phase, label string, pools []string) string {
+	tag := strings.TrimSpace(label)
+	if tag == "" && len(pools) > 0 {
+		tag = strings.Join(pools, ",")
+	}
+	if tag == "" {
+		return phase
+	}
+	return phase + " " + tag
 }
 
 func (r *childRecord) statusSnapshot(includeRecent bool) tool.TaskStatusResult {

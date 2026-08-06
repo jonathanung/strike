@@ -9,6 +9,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
 	"github.com/jonathanung/strike-cli/internal/provider/echo"
+	"github.com/jonathanung/strike-cli/internal/sandbox"
 	"github.com/jonathanung/strike-cli/internal/session"
 	"github.com/jonathanung/strike-cli/internal/tool"
 )
@@ -58,7 +59,9 @@ func TestMultiRootHubSpawnAndActivate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	hub := newMultiRootHub(first, makeSlot, files, local.NewShell(dir))
+	hub := newMultiRootHub(first, makeSlot, files, local.NewShell(dir, sandbox.Policy{
+		Mode: sandbox.ModeWorkspaceWrite, WorkDir: dir,
+	}))
 	defer func() { _ = hub.Close() }()
 
 	if got := hub.ActiveID(); got != first.id {

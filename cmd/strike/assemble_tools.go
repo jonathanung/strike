@@ -29,6 +29,8 @@ import (
 	"github.com/jonathanung/strike-cli/internal/provider/echo"
 	"github.com/jonathanung/strike-cli/internal/provider/google"
 	"github.com/jonathanung/strike-cli/internal/provider/openaicompat"
+	"github.com/jonathanung/strike-cli/internal/sandbox"
+	"github.com/jonathanung/strike-cli/internal/scheduler"
 	"github.com/jonathanung/strike-cli/internal/session"
 	"github.com/jonathanung/strike-cli/internal/tool"
 )
@@ -41,21 +43,26 @@ type assembled struct {
 	store     session.Bound
 	sessionID string
 	// replay is prior transcript events for --continue (UI only; not re-appended).
-	replay       []protocol.Event
-	workDir      string // tool CWD (session worktree when bound, else launch cwd)
-	cfg          config.Config
-	services     host.Services
-	firstRun     bool
-	historyClose func() error
-	memoryClose  func() error
-	issuesClose  func() error
-	goalsClose   func() error
+	replay  []protocol.Event
+	workDir string // tool CWD (session worktree when bound, else launch cwd)
+	cfg     config.Config
+	// sandboxMode is the resolved OS sandbox dial (canonical token).
+	sandboxMode string
+	// sandboxExplain is the multi-line /sandbox explain text (config layers).
+	sandboxExplain string
+	services       host.Services
+	historyClose   func() error
+	memoryClose    func() error
+	issuesClose    func() error
+	goalsClose     func() error
 	// worktreeClose removes a strike-managed worktree when cleanup=delete.
 	worktreeClose func() error
 	// worktreeNotice is a user-visible soft-fail message (e.g. non-git cwd).
 	worktreeNotice string
 	// mcpClose stops MCP server sessions (stdio/HTTP; process-scoped).
 	mcpClose func() error
+	// schedulerClose shuts down the shared in-process admission controller.
+	schedulerClose func()
 	// spawnRoot creates additional concurrent root engines (interactive multi-root).
 	// resumeID empty = new session; non-empty opens that durable root.
 	spawnRoot rootSpawner
@@ -113,6 +120,19 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		_ = memoryStore.Close()
 		_ = historyStore.Close()
 		return nil, fmt.Errorf("loading config: %w", err)
+	}
+	sandboxMode, err := resolveSandboxMode(cfg.Sandbox, opts.sandbox)
+	if err != nil {
+		_ = goalStore.Close()
+		_ = issueStore.Close()
+		_ = memoryStore.Close()
+		_ = historyStore.Close()
+		return nil, err
+	}
+	// Loud once when OS sandbox backend is missing/blocked (bash degrades).
+	// Skip when the dial is off — operator chose no isolation.
+	if sandbox.ResolveMode(sandboxMode) != sandbox.ModeOff {
+		sandbox.WarnUnavailable()
 	}
 	if opts.providerSet && opts.provider != "" {
 		cfg.Provider = config.CanonicalProviderID(opts.provider)
@@ -392,6 +412,26 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		return n
 	}
 
+	// Process-local scheduler shared by every root and child engine so model
+	// and bash (process/build/test) pools cap aggregate concurrency inside
+	// this OS process. Omitted limits stay unlimited (no wait).
+	schedEff, err := cfg.SchedulerEffective()
+	if err != nil {
+		_ = goalStore.Close()
+		_ = issueStore.Close()
+		_ = memoryStore.Close()
+		_ = historyStore.Close()
+		return nil, fmt.Errorf("scheduler policy: %w", err)
+	}
+	sched, err := scheduler.New(schedEff.SchedulerConfig())
+	if err != nil {
+		_ = goalStore.Close()
+		_ = issueStore.Close()
+		_ = memoryStore.Close()
+		_ = historyStore.Close()
+		return nil, fmt.Errorf("scheduler: %w", err)
+	}
+
 	// openRoot builds one live root engine. resumeID empty creates a fresh
 	// session; non-empty opens that durable root (subagents rejected).
 	// applyCLI pins: only the process's first root applies --provider/--model/--effort.
@@ -477,48 +517,65 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			return nil, nil, err
 		}
 
+		// Refuse yolo + sandbox off without --i-know (startup gate).
+		if err := sandbox.CheckYoloSandbox(string(initialPermMode.Normalize()), sandboxMode, opts.iKnow); err != nil {
+			if !resuming {
+				_ = sessions.Destroy(sessionID)
+			} else {
+				_ = bound.Close()
+			}
+			if wtClose != nil {
+				_ = wtClose()
+			}
+			return nil, nil, err
+		}
+
 		sid := sessionID
 		eng := engine.New(engine.Options{
-			SessionID:             sid,
-			Select:                selectProvider,
-			Registry:              registry,
-			WorkDir:               toolDir,
-			ProjectRoot:           projectIdentity.Root,
-			Instructions:          instructions,
-			Memory:                memoryStore,
-			SystemPrompt:          cfg.SystemPrompt,
-			LeanCode:              cfg.LeanCode,
-			HarnessRegistry:       harnessRegistry,
-			MaxChildDepth:         cfg.MaxChildDepth,
-			InitialProvider:       initialProvider,
-			InitialModel:          initialModel,
-			InitialEffort:         initialEffort,
-			InitialAutonomy:       initialAutonomy,
-			InitialPermissionMode: initialPermMode,
-			Agents:                agents,
-			InitialAgent:          initialAgent,
-			InitialMessages:       initialMessages,
-			InitialPriority:       initialPriority,
-			InitialTitled:         initialTitled,
-			InitialPhaseWorkflow:  initialPhaseWF,
-			InitialPhaseIndex:     initialPhaseIndex,
-			InitialAlwaysGrants:   initialAlways,
-			QuietStartup:          quietStartup,
-			Workflows:             workflows,
-			Rules:                 permissionLayers(cfg.Permissions, opts.dangerouslySkipPermissions),
-			Hooks:                 hookDefs,
-			HookRules:             cfg.HookRules(),
-			CompactionStrategy:    cfg.CompactionStrategy,
-			CompactionModel:       cfg.CompactionModel,
-			CompactionThreshold:   cfg.CompactionThreshold,
-			CompactionBuffer:      cfg.CompactionBuffer,
-			KeepUserTurns:         cfg.KeepUserTurns,
-			PruneProtectTokens:    cfg.PruneProtectTokens,
-			PruneMinimumTokens:    cfg.PruneMinimumTokens,
-			PruneKeepUserTurns:    cfg.PruneKeepUserTurns,
-			PruneProtectTools:     cfg.PruneProtectTools,
-			LookupContextWindow:   lookupContextWindow,
-			ListModels:            listModels,
+			SessionID:               sid,
+			Select:                  selectProvider,
+			Registry:                registry,
+			WorkDir:                 toolDir,
+			ProjectRoot:             projectIdentity.Root,
+			Instructions:            instructions,
+			Memory:                  memoryStore,
+			SystemPrompt:            cfg.SystemPrompt,
+			LeanCode:                cfg.LeanCode,
+			HarnessRegistry:         harnessRegistry,
+			Scheduler:               sched,
+			SchedulerPolicy:         schedEff,
+			MaxChildDepth:           cfg.MaxChildDepth,
+			InitialProvider:         initialProvider,
+			InitialModel:            initialModel,
+			InitialEffort:           initialEffort,
+			InitialAutonomy:         initialAutonomy,
+			InitialPermissionMode:   initialPermMode,
+			SandboxMode:             sandboxMode,
+			AllowYoloWithoutSandbox: opts.iKnow,
+			Agents:                  agents,
+			InitialAgent:            initialAgent,
+			InitialMessages:         initialMessages,
+			InitialPriority:         initialPriority,
+			InitialTitled:           initialTitled,
+			InitialPhaseWorkflow:    initialPhaseWF,
+			InitialPhaseIndex:       initialPhaseIndex,
+			InitialAlwaysGrants:     initialAlways,
+			QuietStartup:            quietStartup,
+			Workflows:               workflows,
+			Rules:                   permissionLayers(cfg.Permissions, opts.dangerouslySkipPermissions),
+			Hooks:                   hookDefs,
+			HookRules:               cfg.HookRules(),
+			CompactionStrategy:      cfg.CompactionStrategy,
+			CompactionModel:         cfg.CompactionModel,
+			CompactionThreshold:     cfg.CompactionThreshold,
+			CompactionBuffer:        cfg.CompactionBuffer,
+			KeepUserTurns:           cfg.KeepUserTurns,
+			PruneProtectTokens:      cfg.PruneProtectTokens,
+			PruneMinimumTokens:      cfg.PruneMinimumTokens,
+			PruneKeepUserTurns:      cfg.PruneKeepUserTurns,
+			PruneProtectTools:       cfg.PruneProtectTools,
+			LookupContextWindow:     lookupContextWindow,
+			ListModels:              listModels,
 			PersistProjectRule: func(rule permission.Rule) error {
 				return config.AppendProjectPermission(launchDir, rule)
 			},
@@ -574,6 +631,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	if opts.continueSession {
 		info, err := sessions.LatestRoot(projectIdentity.Key)
 		if err != nil {
+			sched.Close()
 			_ = goalStore.Close()
 			_ = issueStore.Close()
 			_ = memoryStore.Close()
@@ -584,6 +642,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	}
 	first, replay, err := openRoot(resumeID, true)
 	if err != nil {
+		sched.Close()
 		_ = goalStore.Close()
 		_ = issueStore.Close()
 		_ = memoryStore.Close()
@@ -621,7 +680,15 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	// the TUI never sees auth/config/models/history/memory/issues directly.
 	services := local.New(authStore, historyStore, memoryStore, issueStore, agentNames, skills, customStore, workDir)
 	services.Files = local.NewFiles(workDir)
-	services.Shell = local.NewShell(workDir)
+	// Compile base sandbox profile from defaults + config (+ optional dangerous
+	// allow-all). Engine recompiles per bash call with live agent/phase layers.
+	sandboxPolicy := permission.CompileSandbox(
+		sandbox.ResolveMode(sandboxMode),
+		workDir,
+		permissionLayers(cfg.Permissions, opts.dangerouslySkipPermissions)...,
+	)
+	sandboxExplain := sandbox.Explain(sandboxPolicy)
+	services.Shell = local.NewShell(workDir, sandboxPolicy)
 	services.Goals = local.NewGoals(goalStore, workDir)
 	services.Sessions = local.NewSessions(sessions, projectIdentity.Key)
 	services.Init = local.NewProjectInit(workDir)
@@ -634,15 +701,16 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	})
 
 	return &assembled{
-		eng:       first.eng,
-		sessions:  sessions,
-		store:     first.bound,
-		sessionID: first.id,
-		replay:    replay,
-		workDir:   workDir,
-		cfg:       cfg,
-		services:  services,
-		firstRun:  isFreshStrikeHome(authStore),
+		eng:            first.eng,
+		sessions:       sessions,
+		store:          first.bound,
+		sessionID:      first.id,
+		replay:         replay,
+		workDir:        workDir,
+		cfg:            cfg,
+		sandboxMode:    sandboxMode,
+		sandboxExplain: sandboxExplain,
+		services:       services,
 		historyClose: func() error {
 			return historyStore.Close()
 		},
@@ -660,8 +728,9 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		mcpClose: func() error {
 			return mcpMgr.Close()
 		},
-		spawnRoot: spawn,
-		firstSlot: first,
+		schedulerClose: sched.Close,
+		spawnRoot:      spawn,
+		firstSlot:      first,
 	}, nil
 }
 

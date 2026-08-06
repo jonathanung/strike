@@ -11,10 +11,10 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/jonathanung/strike-cli/internal/auth"
 	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/project"
 	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike-cli/internal/sandbox"
 	"github.com/jonathanung/strike-cli/internal/session"
 	"github.com/jonathanung/strike-cli/internal/tui"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
@@ -255,6 +255,9 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 					runErr = fmt.Errorf("closing mcp servers: %w", err)
 				}
 			}
+			if a.schedulerClose != nil {
+				a.schedulerClose()
+			}
 			if a.goalsClose != nil {
 				if err := a.goalsClose(); err != nil && runErr == nil {
 					runErr = fmt.Errorf("closing project goals: %w", err)
@@ -310,12 +313,15 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 			ThemeID:                      themeID,
 			SessionID:                    a.sessionID,
 			WorkDir:                      a.workDir,
-			FirstRun:                     a.firstRun,
 			StartupAlert:                 a.worktreeNotice,
 			VimMode:                      vimMode,
 			NanoMode:                     nanoMode,
 			MdReadMode:                   mdReadMode,
 			NotifyMode:                   notifyMode,
+			SandboxMode:                  a.sandboxMode,
+			SandboxBackend:               sandbox.BackendName(),
+			SandboxAvailable:             sandbox.Available(),
+			SandboxExplain:               a.sandboxExplain,
 			PermissionAutoApproveSeconds: a.cfg.PermissionAutoApproveSeconds,
 			PermissionAutoApproveExclude: a.cfg.PermissionAutoApproveExclude,
 			Replay:                       a.replay,
@@ -368,6 +374,9 @@ func runExec(opts cliOptions, prompt string, stdout, stderr io.Writer) (runErr e
 				runErr = fmt.Errorf("closing mcp servers: %w", err)
 			}
 		}
+		if a.schedulerClose != nil {
+			a.schedulerClose()
+		}
 		if a.worktreeClose != nil {
 			if err := a.worktreeClose(); err != nil && runErr == nil {
 				runErr = fmt.Errorf("removing session worktree: %w", err)
@@ -404,21 +413,4 @@ func runExec(opts cliOptions, prompt string, stdout, stderr io.Writer) (runErr e
 	return runSession(context.Background(), a.eng.Run, a.eng.Events(), a.store, func(events <-chan protocol.Event) error {
 		return runHeadlessFrontend(a.eng.Ops(), events, prompt, stdout, stderr)
 	})
-}
-
-// isFreshStrikeHome reports a first-run install: no global config file and no
-// real credentials for anthropic/openai/xai/kimi/deepseek. echo does not
-// count as configured.
-func isFreshStrikeHome(store *auth.Store) bool {
-	if path := config.GlobalPath(); path != "" {
-		if _, err := os.Stat(path); err == nil {
-			return false
-		}
-	}
-	for _, provider := range []string{"anthropic", "openai", "xai", "kimi", "deepseek"} {
-		if auth.Describe(provider, store) != "none" {
-			return false
-		}
-	}
-	return true
 }

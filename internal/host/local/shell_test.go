@@ -10,14 +10,19 @@ import (
 	"time"
 
 	"github.com/jonathanung/strike-cli/internal/host"
+	"github.com/jonathanung/strike-cli/internal/sandbox"
 )
+
+func testShellPolicy(workDir string) sandbox.Policy {
+	return sandbox.Policy{Mode: sandbox.ModeWorkspaceWrite, WorkDir: workDir}
+}
 
 func TestShellRunPwd(t *testing.T) {
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash not available")
 	}
 	root := t.TempDir()
-	sh := NewShell(root)
+	sh := NewShell(root, testShellPolicy(root))
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	res, err := sh.Run(ctx, "pwd")
@@ -45,14 +50,15 @@ func TestShellRunPwd(t *testing.T) {
 }
 
 func TestShellRunEmpty(t *testing.T) {
-	sh := NewShell(t.TempDir())
+	root := t.TempDir()
+	sh := NewShell(root, testShellPolicy(root))
 	_, err := sh.Run(context.Background(), "   ")
 	if err == nil {
 		t.Fatal("empty command: want error")
 	}
 }
 
-func TestShellSandboxBlocksOutsideRm(t *testing.T) {
+func TestShellGuardBlocksOutsideRm(t *testing.T) {
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash not available")
 	}
@@ -62,13 +68,13 @@ func TestShellSandboxBlocksOutsideRm(t *testing.T) {
 	if err := os.WriteFile(marker, []byte("safe"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	sh := NewShell(root)
+	sh := NewShell(root, testShellPolicy(root))
 	res, err := sh.Run(context.Background(), "rm -rf "+outside)
 	if err == nil {
 		t.Fatalf("outside rm: want error, got %#v", res)
 	}
 	if _, statErr := os.Stat(marker); statErr != nil {
-		t.Fatalf("outside marker removed despite sandbox: %v", statErr)
+		t.Fatalf("outside marker removed despite path guard: %v", statErr)
 	}
 	if !strings.Contains(err.Error(), "escapes workspace") && !strings.Contains(res.Output, "escapes workspace") {
 		t.Fatalf("err/output should mention workspace escape: err=%v out=%q", err, res.Output)
@@ -84,7 +90,7 @@ func TestSetShellWorkDir(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(b, "marker"), []byte("b"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	sh := NewShell(a)
+	sh := NewShell(a, testShellPolicy(a))
 	SetShellWorkDir(sh, b)
 	res, err := sh.Run(context.Background(), "cat marker")
 	if err != nil {

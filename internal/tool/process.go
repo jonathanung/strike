@@ -10,6 +10,8 @@ import (
 	"os/exec"
 	"sync"
 	"time"
+
+	"github.com/jonathanung/strike-cli/internal/sandbox"
 )
 
 // Process stream labels (match protocol.ProcessStream*).
@@ -49,6 +51,10 @@ type ProcessSpec struct {
 	// ProcessObserver.Output still labels chunks stdout/stderr when separate;
 	// when Combine is true every chunk is labeled stdout.
 	Combine bool
+	// Sandbox, when Mode is non-off, prefixes Argv with the OS sandbox launcher
+	// (bwrap / sandbox-exec). Observer.Started still receives the original Argv.
+	// Zero value leaves the process unsandboxed (hooks, probes).
+	Sandbox sandbox.Policy
 }
 
 // ProcessResult is the terminal outcome of RunProcess.
@@ -93,7 +99,13 @@ func RunProcess(ctx context.Context, spec ProcessSpec, obs ProcessObserver) (Pro
 		defer cancel()
 	}
 
-	cmd := exec.CommandContext(runCtx, spec.Argv[0], spec.Argv[1:]...)
+	// Apply OS sandbox at the exec seam (process_unix SysProcAttr still owns
+	// process-group kill). Started observers see the pre-wrap argv.
+	execArgv := sandbox.Wrap(spec.Argv, spec.Sandbox)
+	if len(execArgv) == 0 || execArgv[0] == "" {
+		return ProcessResult{}, fmt.Errorf("empty argv")
+	}
+	cmd := exec.CommandContext(runCtx, execArgv[0], execArgv[1:]...)
 	configureProcessCmd(cmd)
 	cmd.Dir = spec.Dir
 	if spec.Env != nil {

@@ -262,6 +262,134 @@ type fakeSettings struct {
 	themeErr      error
 }
 
+// fakeOnboarding tracks global FTUE acknowledgement for tests.
+type fakeOnboarding struct {
+	autoOpen bool
+	acks     int
+	err      error
+}
+
+func (f *fakeOnboarding) ShouldAutoOpen() bool {
+	if f == nil {
+		return false
+	}
+	return f.autoOpen
+}
+
+func (f *fakeOnboarding) Acknowledge() error {
+	if f == nil {
+		return nil
+	}
+	f.acks++
+	f.autoOpen = false
+	return f.err
+}
+
+// fakeSchedulerPresets is an in-memory host.SchedulerPresets for FTUE tests.
+type fakeSchedulerPresets struct {
+	catalog   []host.SchedulerPreset
+	global    host.SchedulerGlobalState
+	applied   [][]string
+	applyErr  error
+	globalErr error
+}
+
+func newFakeSchedulerPresets() *fakeSchedulerPresets {
+	return &fakeSchedulerPresets{
+		catalog: []host.SchedulerPreset{
+			{
+				ID: "cmake", Version: 1, Name: "CMake",
+				Rationale: "CMake builds", DefaultClass: "build",
+				Limits: map[string]int{"build": 2, "test": 2},
+				Rules: []host.SchedulerPresetRule{
+					{Pattern: "cmake *", Class: "build"},
+					{Pattern: "ctest *", Class: "test"},
+				},
+			},
+			{
+				ID: "cargo", Version: 1, Name: "Cargo",
+				Rationale: "Rust cargo", DefaultClass: "build",
+				Limits: map[string]int{"build": 2, "test": 2},
+				Rules: []host.SchedulerPresetRule{
+					{Pattern: "cargo *", Class: "build"},
+					{Pattern: "cargo test *", Class: "test"},
+				},
+			},
+			{
+				ID: "npm", Version: 1, Name: "npm / yarn / pnpm / bun",
+				Rationale: "JS package managers", DefaultClass: "build",
+				Limits: map[string]int{"build": 2, "test": 2},
+				Rules: []host.SchedulerPresetRule{
+					{Pattern: "npm *", Class: "build"},
+					{Pattern: "npm test*", Class: "test"},
+				},
+			},
+		},
+	}
+}
+
+func (f *fakeSchedulerPresets) List() []host.SchedulerPreset {
+	if f == nil {
+		return nil
+	}
+	out := make([]host.SchedulerPreset, len(f.catalog))
+	copy(out, f.catalog)
+	return out
+}
+
+func (f *fakeSchedulerPresets) Get(id string) (host.SchedulerPreset, bool) {
+	if f == nil {
+		return host.SchedulerPreset{}, false
+	}
+	for _, p := range f.catalog {
+		if p.ID == id {
+			return p, true
+		}
+	}
+	return host.SchedulerPreset{}, false
+}
+
+func (f *fakeSchedulerPresets) Global() (host.SchedulerGlobalState, error) {
+	if f == nil {
+		return host.SchedulerGlobalState{}, nil
+	}
+	if f.globalErr != nil {
+		return host.SchedulerGlobalState{}, f.globalErr
+	}
+	st := host.SchedulerGlobalState{
+		Presets: append([]string(nil), f.global.Presets...),
+	}
+	if len(f.global.Limits) > 0 {
+		st.Limits = make(map[string]int, len(f.global.Limits))
+		for k, v := range f.global.Limits {
+			st.Limits[k] = v
+		}
+	}
+	if len(f.global.Commands) > 0 {
+		st.Commands = append([]host.SchedulerCommandRule(nil), f.global.Commands...)
+	}
+	return st, nil
+}
+
+func (f *fakeSchedulerPresets) ApplyGlobalPresets(ids []string) error {
+	if f == nil {
+		return nil
+	}
+	if f.applyErr != nil {
+		return f.applyErr
+	}
+	// Reject unknown ids like the real host.
+	for _, id := range ids {
+		if _, ok := f.Get(id); !ok {
+			return errors.New("unknown preset " + id)
+		}
+	}
+	cp := append([]string(nil), ids...)
+	f.applied = append(f.applied, cp)
+	f.global.Presets = cp
+	return nil
+}
+
 func (s *fakeSettings) Defaults() host.UserDefaults {
 	return s.defaults
 }
@@ -1077,11 +1205,12 @@ func (f *fakeTelemetry) Sample(context.Context, string) (host.TelemetrySample, e
 // testServices bundles the default fakes with the given agents and skills.
 func testServices(agents []string, skills []host.Skill) host.Services {
 	return host.Services{
-		Auth:      newFakeAuth(),
-		Catalog:   &fakeCatalog{ids: map[string][]string{"echo": {"echo-1"}, "openai": {"gpt-test"}}},
-		Settings:  &fakeSettings{},
-		Memory:    newFakeMemory(),
-		Providers: &fakeProviders{},
+		Auth:             newFakeAuth(),
+		Catalog:          &fakeCatalog{ids: map[string][]string{"echo": {"echo-1"}, "openai": {"gpt-test"}}},
+		Settings:         &fakeSettings{},
+		Memory:           newFakeMemory(),
+		Providers:        &fakeProviders{},
+		SchedulerPresets: newFakeSchedulerPresets(),
 		Telemetry: &fakeTelemetry{sample: host.TelemetrySample{
 			CPUHostOK: true, CPUHostPct: 10,
 			MemOK: true, MemUsedBytes: 1024 * 1024 * 1024, MemTotalBytes: 8 * 1024 * 1024 * 1024,

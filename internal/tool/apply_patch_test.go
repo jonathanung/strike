@@ -329,7 +329,7 @@ func TestRestorePath(t *testing.T) {
 		if err := os.WriteFile(path, []byte("temp\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if err := restorePath(path, pathOriginal{exists: false}); err != nil {
+		if err := restorePath(dir, path, pathOriginal{exists: false}); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
@@ -343,7 +343,7 @@ func TestRestorePath(t *testing.T) {
 		if err := os.WriteFile(path, []byte("mutated\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if err := restorePath(path, pathOriginal{exists: true, data: orig}); err != nil {
+		if err := restorePath(dir, path, pathOriginal{exists: true, data: orig}); err != nil {
 			t.Fatal(err)
 		}
 		data, err := os.ReadFile(path)
@@ -358,7 +358,7 @@ func TestRestorePath(t *testing.T) {
 	t.Run("recreate deleted file", func(t *testing.T) {
 		path := filepath.Join(dir, "deleted.txt")
 		orig := []byte("bring-back\n")
-		if err := restorePath(path, pathOriginal{exists: true, data: orig}); err != nil {
+		if err := restorePath(dir, path, pathOriginal{exists: true, data: orig}); err != nil {
 			t.Fatal(err)
 		}
 		data, err := os.ReadFile(path)
@@ -410,7 +410,7 @@ func TestRollbackPatchOps(t *testing.T) {
 		{Type: "delete", AbsPath: deleted},
 		{Type: "move", AbsPath: src, AbsMove: dst},
 	}
-	if err := rollbackPatchOps(applied, originals); err != nil {
+	if err := rollbackPatchOps(dir, applied, originals); err != nil {
 		t.Fatal(err)
 	}
 
@@ -482,7 +482,7 @@ func TestCommitPatchOpsRollbackOnFailure(t *testing.T) {
 		target:   {exists: false},
 	}
 
-	err := commitPatchOps(ops, originals)
+	err := commitPatchOps(dir, ops, originals)
 	if err == nil {
 		t.Fatal("expected commit failure")
 	}
@@ -559,7 +559,7 @@ func TestCommitPatchOpsRollbackRestoresDelete(t *testing.T) {
 		victim: {exists: true, data: victimOrig},
 		target: {exists: false},
 	}
-	err := commitPatchOps(ops, originals)
+	err := commitPatchOps(dir, ops, originals)
 	if err == nil {
 		t.Fatal("expected failure")
 	}

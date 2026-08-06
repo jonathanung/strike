@@ -98,7 +98,10 @@ strike launches without any provider configured. Pick one inside the TUI:
 /upgrade                       # install latest GitHub Release and restart
 /init                          # create or update project AGENTS.md (confirm
                                # before replacing an existing file)
- /mcp                           # MCP status; retry/disable servers
+ /ftue                          # setup wizard: provider, model, optional
+                               # /init, feature tour, scheduler presets,
+                               # first prompt (manual)
+/mcp                           # MCP status; retry/disable servers
 /exit                          # quit strike (same as ctrl+c)
 /quit                          # alias of /exit
 # Keybind mirrors (same actions as chords; see keybinds.md and /keys):
@@ -145,6 +148,7 @@ strike launches without any provider configured. Pick one inside the TUI:
 | `/context` | context doctor modal: system-prompt layer sizes, history msg count, **request token attribution** (system / tools / messages / tool_results; local ~4 chars/token estimate, labeled `estimated`), oversized warnings (previews redacted) |
 | `/cost` | session input/output/cache totals from usage events; est. USD when catalog rates known; unknown stays explicit |
 | `/init` | light local scan → write `AGENTS.md`; confirms before overwrite |
+| `/ftue` | setup wizard composing provider connect, model pick, optional `/init`, a skippable feature tour (panes, agents, permissions, autonomy, keys, commands), optional scheduler build-system presets (checkbox catalog with rule/limit preview; apply writes global `scheduler.presets` atomically and preserves custom limits/rules), and first-prompt guidance; opening does not change settings; tour copy uses live keybinds and omits unavailable surfaces; Finish focuses the composer; esc dismisses. Finish/dismiss acknowledge global onboarding so auto-open does not repeat; manual `/ftue` stays available. Child pickers/tour/presets return to the same wizard step |
 | `/mcp` | MCP status (`up`/`down`/`error`/`disabled`); `/mcp retry [name]`, `/mcp disable <name>` (see [config.md](config.md#mcp-servers-stdio--http)) |
 
 ### Agent teams
@@ -189,7 +193,8 @@ Full coordination semantics: [agents-skills.md](agents-skills.md#agent-teams).
 ### Permission mode dial
 
 `/mode` (or **Shift+Tab**) cycles the session **tool-permission posture**. This
-is distinct from `/autonomy` (exit gates). The header always shows `mode …`;
+is distinct from `/autonomy` (exit gates) and from the **sandbox** dial (OS
+isolation — what bash is allowed to touch). The header always shows `mode …`;
 yolo also paints a danger banner. Mode changes are accepted **mid-turn**: the
 new posture applies to subsequent tool permission checks in the same turn
 (in-flight permission asks are rejected so the model retries under the new
@@ -208,6 +213,15 @@ Persists per session in the JSONL log. Optional default for **new** sessions:
 picker (and global ctrl+d) to save the current posture as that default.
 Resume restores the session log, not the config default.
 
+### OS sandbox dial
+
+`sandbox` in [config.md](config.md) (or `--sandbox`) sets OS process isolation
+for bash: `off` | `read-only` | `workspace-write` (default). This is **what is
+possible**; `permissionMode` is **when you get asked**. `/sandbox` prints the
+effective policy and backend; `/sandbox explain` shows the generated profile
+(including write-deny globs and network posture compiled from permissions).
+`yolo` with `sandbox: off` requires `--i-know`.
+
 Built-in skills also appear as slash commands: `/commit`, `/push`, `/pr`,
 `/ship`, `/review`, `/learn`, `/deslop`, `/verify` (plus custom skills under
 discovery roots). See [agents-skills.md](agents-skills.md) and
@@ -219,7 +233,7 @@ Prefix a line with `!` to run a local bash command in the session work
 directory without starting a model turn (for example `!pwd`, `!git status`).
 Output appears in the transcript as a bash tool cell. Empty `!` is ignored
 with a notice. Destructive commands that target paths outside the workspace
-are blocked by the same sandbox as the bash tool.
+are checked by the same best-effort path guard as the bash tool.
 
 ### Composer: `@file` / `@folder` mentions
 
@@ -369,9 +383,12 @@ the cards and the header still owns the compact brand. The dashboard always
 shows keybindings. It shows get-started provider rows only when no provider is
 selected or the selected provider needs authentication, with provider rows
 bounded to fit (and a `/init` CTA when `AGENTS.md` is missing); first-run
-onboarding also mentions `/init`. Agents and skills appear only when valid
-configured entries exist; recent prompts only when prompt history exists. It
-repacks to fit the terminal on resize and collapses to a single column when
-narrow.
+onboarding also mentions `/init`. On a clean install the interactive TUI
+auto-opens `/ftue` once until you finish or dismiss it (state in
+`~/.strike/onboarding.json`). Re-run the full guided setup anytime with
+`/ftue` (provider → model → optional project init → feature tour → optional scheduler presets → first prompt). Agents and
+skills appear only when valid configured entries exist; recent prompts only
+when prompt history exists. It repacks to fit the terminal on resize and
+collapses to a single column when narrow.
 
 Full keyboard reference: [keybinds.md](keybinds.md).

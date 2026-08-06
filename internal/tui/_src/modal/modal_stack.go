@@ -176,6 +176,18 @@ func (m *Model) promoteModalQueue() tea.Cmd {
 	if len(m.modalQueue) == 0 {
 		m.modalQueue = nil
 	}
+	// Refresh parked setup wizard with live provider/model before showing it.
+	if f, ok := mod.(*ftueModal); ok {
+		f.syncFrom(m.providerName, m.modelName)
+	}
+	// Refresh parked tour with live surface facts (windows, keybinds, modes).
+	if t, ok := mod.(*tourModal); ok {
+		t.ctx = m.buildTourContext()
+		// Keep section list stable for an in-progress visit; only rebuild when empty.
+		if len(t.sections) == 0 {
+			t.sections = buildTourSections(t.ctx)
+		}
+	}
 	m.modal = mod
 	return m.armVisibleBlocking(mod)
 }

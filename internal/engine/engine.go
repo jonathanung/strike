@@ -15,6 +15,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
 	"github.com/jonathanung/strike-cli/internal/question"
+	"github.com/jonathanung/strike-cli/internal/scheduler"
 	"github.com/jonathanung/strike-cli/internal/tool"
 )
 
@@ -74,6 +75,13 @@ type Options struct {
 	// InitialPermissionMode is the tool-permission posture at startup. Empty
 	// becomes PermissionModeDefault so the dial is always explicit.
 	InitialPermissionMode protocol.PermissionMode
+	// SandboxMode is the OS process sandbox dial for bash
+	// (off|read-only|workspace-write). Empty means workspace-write.
+	// Distinct from InitialPermissionMode (when the agent is asked).
+	SandboxMode string
+	// AllowYoloWithoutSandbox permits permissionMode yolo when SandboxMode is
+	// off. Set only from CLI --i-know after an explicit operator override.
+	AllowYoloWithoutSandbox bool
 	// Agents are the selectable personas; the first is the default unless
 	// InitialAgent names another.
 	Agents       []Agent
@@ -219,6 +227,15 @@ type Options struct {
 	// HarnessRegistry maps task-subagent Agent.Harness names to complete agent-run
 	// functions. nil means every child uses the built-in loop.
 	HarnessRegistry *harness.Registry
+	// Scheduler is the process-local admission controller shared across
+	// concurrent roots and children. Model streams acquire the model pool;
+	// agent bash acquires process (+ build/test when classified). nil disables
+	// admission (unlimited; preserves pre-scheduler behavior).
+	Scheduler *scheduler.Scheduler
+	// SchedulerPolicy is the compiled classification policy for bash commands.
+	// nil treats all commands as general (process only). Used only when
+	// Scheduler is non-nil.
+	SchedulerPolicy *scheduler.Effective
 }
 
 // beginAck reports whether ToolCallBegin was actually written to Events.
