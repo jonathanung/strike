@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"os"
@@ -156,7 +157,7 @@ func TestRunHeadlessFrontendStreamsTextAndCompletes(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- runHeadlessFrontend(ops, events, "hello", &stdout, io.Discard)
+		done <- runHeadlessFrontend(context.Background(), ops, events, "hello", &stdout, io.Discard)
 	}()
 
 	select {
@@ -193,7 +194,7 @@ func TestRunHeadlessFrontendRejectsPermissionAsks(t *testing.T) {
 	events := make(chan protocol.Event, 8)
 	done := make(chan error, 1)
 	go func() {
-		done <- runHeadlessFrontend(ops, events, "run true", io.Discard, io.Discard)
+		done <- runHeadlessFrontend(context.Background(), ops, events, "run true", io.Discard, io.Discard)
 	}()
 
 	select {
@@ -237,7 +238,7 @@ func TestRunHeadlessFrontendRejectsQuestions(t *testing.T) {
 	var stderr bytes.Buffer
 	done := make(chan error, 1)
 	go func() {
-		done <- runHeadlessFrontend(ops, events, "ask me", io.Discard, &stderr)
+		done <- runHeadlessFrontend(context.Background(), ops, events, "ask me", io.Discard, &stderr)
 	}()
 
 	select {
@@ -280,7 +281,7 @@ func TestRunHeadlessFrontendEngineError(t *testing.T) {
 	events := make(chan protocol.Event, 4)
 	done := make(chan error, 1)
 	go func() {
-		done <- runHeadlessFrontend(ops, events, "hi", io.Discard, io.Discard)
+		done <- runHeadlessFrontend(context.Background(), ops, events, "hi", io.Discard, io.Discard)
 	}()
 	select {
 	case <-ops:

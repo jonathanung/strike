@@ -123,13 +123,18 @@ func resolveExecPrompt(positionals []string, stdin io.Reader) (string, error) {
 
 // runHeadlessFrontend submits one user prompt, streams TextDelta to stdout,
 // auto-rejects interactive asks, and returns when the turn completes.
+// parent is combined with os.Interrupt; cancel either to interrupt the turn.
 func runHeadlessFrontend(
+	parent context.Context,
 	ops chan<- protocol.Op,
 	events <-chan protocol.Event,
 	prompt string,
 	stdout, stderr io.Writer,
 ) error {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, stop := signal.NotifyContext(parent, os.Interrupt)
 	defer stop()
 
 	interrupted := make(chan struct{})

@@ -177,32 +177,22 @@ func strikeTaskHandler(opts cliOptions, stderr io.Writer) mcp.ToolHandler {
 			callOpts.effort = e
 		}
 
-		type outcome struct {
-			text string
-			err  error
-		}
-		ch := make(chan outcome, 1)
-		go func() {
-			var buf bytes.Buffer
-			err := runExec(callOpts, prompt, &buf, stderr)
-			ch <- outcome{text: buf.String(), err: err}
-		}()
-		select {
-		case <-callCtx.Done():
-			return "", false, callCtx.Err()
-		case out := <-ch:
-			if out.err != nil {
-				msg := out.err.Error()
-				if strings.TrimSpace(out.text) != "" {
-					msg = strings.TrimRight(out.text, "\n") + "\n" + msg
-				}
-				return msg, true, nil
+		var buf bytes.Buffer
+		err := runExecContext(callCtx, callOpts, prompt, &buf, stderr)
+		if err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return "", false, err
 			}
-			text := strings.TrimRight(out.text, "\n")
-			if text == "" {
-				text = "(no assistant text)"
+			msg := err.Error()
+			if strings.TrimSpace(buf.String()) != "" {
+				msg = strings.TrimRight(buf.String(), "\n") + "\n" + msg
 			}
-			return text, false, nil
+			return msg, true, nil
 		}
+		text := strings.TrimRight(buf.String(), "\n")
+		if text == "" {
+			text = "(no assistant text)"
+		}
+		return text, false, nil
 	}
 }
