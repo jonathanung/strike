@@ -188,6 +188,12 @@ write this file. Manual `/ftue` remains available after acknowledgement.
     "traceRetentionMaxFiles": 0,
     "traceRetentionMaxAgeDays": 0,
     "traceRetentionMaxBytes": 0,
+    "delegationPolicy": {
+      "mode": "enforce",
+      "tinyPromptRunes": 280,
+      "maxPathsLocal": 1,
+      "maxLiveChildren": 0
+    },
     "agentBudget": {
       "maxWallClockS": 0,
       "maxTokens": 0,
@@ -671,6 +677,38 @@ Lead and children can query the map with `agent_ownership` (`list`), and claim
 path prefixes with `lease` / `release` (exclusive or shared). Finished children
 are deactivated so they no longer cause overlap. Structured handoff
 `files_changed` (when available) can be merged via the same tracker.
+
+### Delegation-worthiness policy (`session.delegationPolicy`)
+
+Before every `task` / `delegate` create, the engine runs a deterministic
+worthiness gate (#876) so tiny or tightly coupled work stays local and fan-out
+respects concurrency/budget ceilings. Capability routing (#778) runs only after
+the policy chooses to delegate.
+
+| Field | Meaning |
+|---|---|
+| `mode` | `off` (always spawn), `advise` (record preferred action but spawn), `enforce` (soft-local returns status `local`; hard ceilings deny). When the block is omitted, the CLI defaults to `enforce`. Zero-value engine Options (tests/embedders) stay `off`. |
+| `tinyPromptRunes` | Bare prompts at or below this rune count prefer local (default 280) |
+| `maxPathsLocal` | Bare tasks with ≤N `context_bundle` paths prefer local (default 1; negative disables) |
+| `maxLiveChildren` | Hard-deny when live children reach this count (0 = unlimited) |
+
+**Soft prefer local** (overridable with `force_delegate=true` on the tool call):
+
+- Bare tiny prompt (no agent/specialty/criteria/deps/verify) with few scoped paths
+- Requested paths overlap active ownership claims of other live agents
+
+**Soft prefer delegate**: intentional signals (agent pin, specialty/capabilities,
+criteria, deps, verify gates) or multi-path independent work.
+
+**Hard deny** (never overridable): depth ceiling (`maxChildDepth`), optional
+`maxLiveChildren`, delegation object ceiling, and session budget exhausted when
+a `SessionBudgetExhausted` hook is wired (session cost envelope #577).
+
+Decisions expose a structured `policyReason` on tool metadata and
+`child.started`. Engine counters (`delegate` / `local` / `deny` / `override`)
+support comparing elapsed time and cost with policy on vs off.
+
+Orchestrator guidance has a single pre-spawn decision table matching this gate.
 
 ### Per-agent budgets (`session.agentBudget`)
 
