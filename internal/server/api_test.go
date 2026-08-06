@@ -54,6 +54,7 @@ func (testSettings) SaveConfigDials(string, string, string, string, string) erro
 	return nil
 }
 func (testSettings) SaveAutoApproveDials(string, *[]string, string) error { return nil }
+func (testSettings) SaveCompactionDials(host.CompactionDials) error       { return nil }
 func (testSettings) SaveKeybinds(map[string][]string) error               { return nil }
 
 func TestAttachOnlyBootstrapDeclaresProtocolOpsUnavailable(t *testing.T) {

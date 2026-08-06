@@ -31,7 +31,10 @@ func TestWrapDecodeRoundTrip(t *testing.T) {
 			}},
 		}},
 		QuestionResolved{Correlation: corr, RequestID: "q1"},
-		TurnCompleted{Correlation: corr, StopReason: "end_turn"},
+		TurnCompleted{Correlation: corr, StopReason: "end_turn", Files: []TurnFileChange{
+			{Path: "a.go", Kind: "create"},
+			{Path: "b.go", Kind: "update"},
+		}},
 		ModelSelected{Correlation: corr, Provider: "echo", Model: "echo"},
 		AgentSelected{Correlation: corr, Name: "build"},
 		PhaseChanged{Correlation: corr, Workflow: "plan-implement", Phase: "plan", Index: 0, Gate: "user"},

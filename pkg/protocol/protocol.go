@@ -810,9 +810,20 @@ type QuestionResolved struct {
 	RequestID string `json:"requestId"`
 }
 
+// TurnFileChange is one harness-touched path in a completed turn (create /
+// update / delete). Populated on TurnCompleted for timeline/UI; empty when the
+// turn made no file tool mutations.
+type TurnFileChange struct {
+	Path string `json:"path"`
+	Kind string `json:"kind"` // create | update | delete
+}
+
 type TurnCompleted struct {
 	Correlation
 	StopReason string `json:"stopReason,omitempty"`
+	// Files lists harness edit/write/apply_patch/notebook_edit paths touched
+	// this turn with change kind. Omitempty keeps legacy readers happy.
+	Files []TurnFileChange `json:"files,omitempty"`
 }
 
 // HarnessProgress is emitted by a custom harness to report intermediate state

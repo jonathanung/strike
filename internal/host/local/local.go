@@ -622,6 +622,15 @@ func (settingsAdapter) Defaults() host.UserDefaults {
 		VimMode:                      cfg.VimMode,
 		NanoMode:                     cfg.NanoMode,
 		MdReadMode:                   cfg.MdReadMode,
+		CompactionStrategy:           cfg.CompactionStrategy,
+		CompactionModel:              cfg.CompactionModel,
+		CompactionThreshold:          cfg.CompactionThreshold,
+		CompactionBuffer:             cfg.CompactionBuffer,
+		KeepUserTurns:                cfg.KeepUserTurns,
+		PruneProtectTokens:           cfg.PruneProtectTokens,
+		PruneMinimumTokens:           cfg.PruneMinimumTokens,
+		PruneKeepUserTurns:           cfg.PruneKeepUserTurns,
+		PruneProtectTools:            append([]string(nil), cfg.PruneProtectTools...),
 	}
 }
 
@@ -647,6 +656,20 @@ func (settingsAdapter) SaveConfigDials(sandboxMode, notify, leanCode, deferTools
 
 func (settingsAdapter) SaveAutoApproveDials(seconds string, exclude *[]string, maxChildDepth string) error {
 	return config.SetGlobalAutoApproveDials(seconds, exclude, maxChildDepth)
+}
+
+func (settingsAdapter) SaveCompactionDials(d host.CompactionDials) error {
+	return config.SetGlobalCompactionDials(config.CompactionDials{
+		Strategy:           d.Strategy,
+		Model:              d.Model,
+		Threshold:          d.Threshold,
+		Buffer:             d.Buffer,
+		KeepUserTurns:      d.KeepUserTurns,
+		PruneProtectTokens: d.PruneProtectTokens,
+		PruneMinimumTokens: d.PruneMinimumTokens,
+		PruneKeepUserTurns: d.PruneKeepUserTurns,
+		PruneProtectTools:  d.PruneProtectTools,
+	})
 }
 
 func (settingsAdapter) SaveKeybinds(overrides map[string][]string) error {
