@@ -384,6 +384,23 @@ mutates state; invalid definitions are listed but cannot be activated. Stop
 clears phase context and phase permissions without interrupting unrelated
 session history.
 
+### Visual builder (TUI)
+
+`/workflow new [name]` and `/workflow edit <name>` open a keyboard-driven
+linear editor (command palette: **workflow new** / **workflow edit …**):
+
+- Create, reorder, and remove phases; edit agent pins, context, exit gates,
+  check commands, and permission rules through typed controls.
+- Live preview of canonical JSON, validation errors, and phase permission
+  grants (same review surface as start-preview / CLI inspect).
+- Save requires an explicit **global** or **project** scope (`g` cycles).
+  Invalid documents cannot be saved. Unsaved edits prompt on cancel
+  (discard / save / stay). Overwrite of an existing file requires confirm.
+- **Saving never starts the workflow** — activation remains `/workflow start`.
+
+Built-in definitions can be edited as drafts and saved as a project/global
+override by name (same precedence as disk loaders).
+
 Example custom file:
 
 ```json

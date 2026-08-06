@@ -396,6 +396,52 @@ func TestChildCompletedHandoffRoundTrip(t *testing.T) {
 	}
 }
 
+func TestVerificationEventsAndTurnCompletedRoundTrip(t *testing.T) {
+	corr := Correlation{SessionID: "s1", TurnID: "t1"}
+	rep := VerificationReport{
+		Passed:   false,
+		Claimed:  true,
+		Verified: false,
+		Checks: []VerificationCheck{{
+			Name:     "unit",
+			Kind:     "cmd",
+			Value:    "false",
+			Passed:   false,
+			ExitCode: 1,
+			Error:    "exit 1",
+		}},
+		Env:     VerificationEnv{WorkDir: "/ws", SessionID: "s1", ModelID: "m"},
+		Summary: "verification failed: unit: exit 1",
+	}
+	cases := []Event{
+		VerificationStarted{Correlation: corr, Scope: VerificationScopeTurn, GateCount: 1},
+		VerificationCompleted{Correlation: corr, Scope: VerificationScopeTurn, Report: rep},
+		TurnCompleted{Correlation: corr, StopReason: "end_turn", Verification: &rep},
+	}
+	for _, want := range cases {
+		env, err := Wrap(want)
+		if err != nil {
+			t.Fatalf("Wrap %T: %v", want, err)
+		}
+		gotEv, err := env.Decode()
+		if err != nil {
+			t.Fatalf("Decode %T: %v", want, err)
+		}
+		wantJSON, _ := json.Marshal(want)
+		gotJSON, _ := json.Marshal(gotEv)
+		if string(wantJSON) != string(gotJSON) {
+			t.Errorf("%T: got %s, want %s", want, gotJSON, wantJSON)
+		}
+	}
+	// Type strings.
+	if env, _ := Wrap(VerificationStarted{}); env.Type != "verification.started" {
+		t.Fatalf("started type = %q", env.Type)
+	}
+	if env, _ := Wrap(VerificationCompleted{}); env.Type != "verification.completed" {
+		t.Fatalf("completed type = %q", env.Type)
+	}
+}
+
 func TestDecodeLiteralLegacyEnvelopeHasEmptyCorrelation(t *testing.T) {
 	literal := `{"type":"permission.asked","time":"2020-01-01T00:00:00Z","data":{"requestId":"perm_7","permission":"bash","patterns":["echo hi"]}}`
 	var env Envelope
@@ -526,6 +572,8 @@ func TestEventTypeCoverage(t *testing.T) {
 		"question.asked":         QuestionAsked{},
 		"question.resolved":      QuestionResolved{},
 		"turn.completed":         TurnCompleted{},
+		"verification.started":   VerificationStarted{},
+		"verification.completed": VerificationCompleted{},
 		"harness.progress":       HarnessProgress{Name: "test", Payload: json.RawMessage(`{}`)},
 		"model.selected":         ModelSelected{},
 		"agent.selected":         AgentSelected{},

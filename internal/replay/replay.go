@@ -1,10 +1,17 @@
 // Package replay provides deterministic session replay against the offline
-// echo provider for eval and regression harnesses (epic E3).
+// echo provider for eval and regression harnesses (epic E3), plus run
+// recording, branch-from-event, and structured compare (#791).
 //
 // A golden JSONL session is a recorded protocol event log. Replay extracts
 // user inputs, re-runs them through the engine with echo, and diffs the
 // normalized tool-call sequence (name + canonical args). Call IDs,
 // timestamps, and tool outputs are ignored so runs stay comparable.
+//
+// Recording (recording.go) derives a versioned, secret-redacted artifact with
+// settings digests, tool results, provider attempts, handoff/gate fields, and
+// nondeterministic markers. Schema concepts are shared with multi-agent run
+// snapshots (#782). CompareRecordings produces structured deltas; BranchFromEvent
+// forks a session JSONL prefix without replaying live side effects.
 //
 // Prompt regression (E3.2) builds on the same harness: CollectMetrics reports
 // tool-call count, turn count, and token/system-prompt deltas per scenario.
