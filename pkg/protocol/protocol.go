@@ -32,6 +32,7 @@ package protocol
 import (
 	"encoding/json"
 	"strings"
+	"time"
 )
 
 // Effort is the reasoning dial as the user sees it: how much internal
@@ -407,6 +408,13 @@ type Compact struct {
 // carries raw API keys — previews are redacted by the engine.
 type InspectEffectivePrompt struct{}
 
+// InspectDiagnosticBundle requests a versioned prompt/config diagnostic
+// bundle (layer map + effective dials + digests). Prefer the last Stream
+// composition when one exists; otherwise the current composition. Never
+// carries raw API keys — previews and paths are redacted by the engine.
+// See pkg/diag for the export document schema.
+type InspectDiagnosticBundle struct{}
+
 // Rewind removes the last completed user↔assistant turn from model-facing
 // history. When RestoreFiles is true, also restores per-file checkpoints
 // captured before mutating tools in that turn (never git reset --hard).
@@ -416,22 +424,23 @@ type Rewind struct {
 	RestoreFiles bool `json:"restoreFiles,omitempty"`
 }
 
-func (UserInput) isOp()              {}
-func (PermissionReply) isOp()        {}
-func (QuestionReply) isOp()          {}
-func (Interrupt) isOp()              {}
-func (SelectModel) isOp()            {}
-func (SelectAgent) isOp()            {}
-func (SetEffort) isOp()              {}
-func (SetAutonomy) isOp()            {}
-func (SetPermissionMode) isOp()      {}
-func (SetFast) isOp()                {}
-func (StartWorkflow) isOp()          {}
-func (StopWorkflow) isOp()           {}
-func (FilesChanged) isOp()           {}
-func (Compact) isOp()                {}
-func (InspectEffectivePrompt) isOp() {}
-func (Rewind) isOp()                 {}
+func (UserInput) isOp()               {}
+func (PermissionReply) isOp()         {}
+func (QuestionReply) isOp()           {}
+func (Interrupt) isOp()               {}
+func (SelectModel) isOp()             {}
+func (SelectAgent) isOp()             {}
+func (SetEffort) isOp()               {}
+func (SetAutonomy) isOp()             {}
+func (SetPermissionMode) isOp()       {}
+func (SetFast) isOp()                 {}
+func (StartWorkflow) isOp()           {}
+func (StopWorkflow) isOp()            {}
+func (FilesChanged) isOp()            {}
+func (Compact) isOp()                 {}
+func (InspectEffectivePrompt) isOp()  {}
+func (InspectDiagnosticBundle) isOp() {}
+func (Rewind) isOp()                  {}
 
 // Event is an engine -> client notification.
 type Event interface{ isEvent() }
@@ -1272,6 +1281,85 @@ type EffectivePrompt struct {
 	Attribution RequestTokenAttribution `json:"attribution"`
 }
 
+// DiagnosticSession is session lineage on a DiagnosticBundle (solo + child).
+type DiagnosticSession struct {
+	SessionID       string `json:"sessionId,omitempty"`
+	ParentSessionID string `json:"parentSessionId,omitempty"`
+	RootSessionID   string `json:"rootSessionId,omitempty"`
+	Depth           int    `json:"depth"`
+	IsChild         bool   `json:"isChild,omitempty"`
+}
+
+// DiagnosticPrompt is the ordered layer map section of a DiagnosticBundle.
+type DiagnosticPrompt struct {
+	Precedence     []string                `json:"precedence"`
+	Layers         []PromptLayerInfo       `json:"layers"`
+	LayerCount     int                     `json:"layerCount"`
+	SystemChars    int                     `json:"systemChars"`
+	MessageCount   int                     `json:"messageCount"`
+	FromLastStream bool                    `json:"fromLastStream,omitempty"`
+	Attribution    RequestTokenAttribution `json:"attribution"`
+}
+
+// DiagnosticCompaction holds effective compaction/prune dials on a bundle.
+type DiagnosticCompaction struct {
+	Strategy           string   `json:"strategy,omitempty"`
+	Model              string   `json:"model,omitempty"`
+	Threshold          float64  `json:"threshold,omitempty"`
+	Buffer             int      `json:"buffer,omitempty"`
+	KeepUserTurns      int      `json:"keepUserTurns,omitempty"`
+	PruneProtectTokens int      `json:"pruneProtectTokens,omitempty"`
+	PruneMinimumTokens int      `json:"pruneMinimumTokens,omitempty"`
+	PruneKeepUserTurns int      `json:"pruneKeepUserTurns,omitempty"`
+	PruneProtectTools  []string `json:"pruneProtectTools,omitempty"`
+}
+
+// DiagnosticScheduler holds scheduler pool limits on a bundle.
+type DiagnosticScheduler struct {
+	Limits map[string]int `json:"limits,omitempty"`
+}
+
+// DiagnosticConfig is the effective dial snapshot + digests (no secrets).
+type DiagnosticConfig struct {
+	Provider       string `json:"provider,omitempty"`
+	Model          string `json:"model,omitempty"`
+	Agent          string `json:"agent,omitempty"`
+	Effort         string `json:"effort,omitempty"`
+	Autonomy       string `json:"autonomy,omitempty"`
+	PermissionMode string `json:"permissionMode,omitempty"`
+	Sandbox        string `json:"sandbox,omitempty"`
+	LeanCode       string `json:"leanCode,omitempty"`
+	Fast           bool   `json:"fast,omitempty"`
+	MaxTokens      int    `json:"maxTokens,omitempty"`
+	MaxChildDepth  int    `json:"maxChildDepth,omitempty"`
+	ContextWindow  int    `json:"contextWindow,omitempty"`
+	WorkDir        string `json:"workDir,omitempty"`
+	ProjectRoot    string `json:"projectRoot,omitempty"`
+
+	Compaction DiagnosticCompaction `json:"compaction"`
+	Scheduler  DiagnosticScheduler  `json:"scheduler"`
+	// Digests maps stable names → hex SHA-256 of canonical non-secret JSON.
+	Digests map[string]string `json:"digests,omitempty"`
+}
+
+// DiagnosticBundle is the inspectable prompt/config diagnostic document for
+// the last Stream (or current composition). Field layout matches pkg/diag.Bundle
+// JSON so frontends can export the event payload directly. Never carries raw
+// API keys — engine redacts previews and paths before emit.
+type DiagnosticBundle struct {
+	Correlation
+	SchemaVersion   string            `json:"schemaVersion"`
+	ProtocolVersion string            `json:"protocolVersion,omitempty"`
+	StrikeVersion   string            `json:"strikeVersion,omitempty"`
+	ExportedAt      time.Time         `json:"exportedAt"`
+	Redacted        bool              `json:"redacted"`
+	Note            string            `json:"note,omitempty"`
+	Session         DiagnosticSession `json:"session"`
+	Prompt          DiagnosticPrompt  `json:"prompt"`
+	Config          DiagnosticConfig  `json:"config"`
+	Warnings        []string          `json:"warnings,omitempty"`
+}
+
 func (UserMessage) isEvent()            {}
 func (SessionTitled) isEvent()          {}
 func (TurnStarted) isEvent()            {}
@@ -1319,3 +1407,4 @@ func (SessionMeta) isEvent()            {}
 func (SessionRewound) isEvent()         {}
 func (HookMatched) isEvent()            {}
 func (EffectivePrompt) isEvent()        {}
+func (DiagnosticBundle) isEvent()       {}
