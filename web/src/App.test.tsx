@@ -69,8 +69,9 @@ describe("App", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Workflows unavailable");
     fireEvent.click(screen.getByRole("tab", { name: "timeline" }));
     expect(screen.getByRole("heading", { name: "Run timeline" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Load" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Export JSON" })).toBeInTheDocument();
+    // Auto-load hits the timeline snapshot endpoint for the selected session.
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/v1/sessions/live/timeline"), expect.anything()));
   });
 
   it("uses historical SSE in attach-only mode", async () => {

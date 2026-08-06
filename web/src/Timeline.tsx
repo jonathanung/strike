@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { downloadTimeline, fetchTimeline, type TimelineEntry, type TimelineTrace } from "./timeline";
 
 function formatDuration(ms?: number | null): string {
@@ -62,6 +62,14 @@ export function TimelinePanel({
       setLoading(false);
     }
   }, [available, sessionID]);
+
+  // Drop stale spans and reload when the selected session changes.
+  useEffect(() => {
+    setTrace(undefined);
+    setError("");
+    if (!available || !sessionID) return;
+    void load();
+  }, [available, sessionID, load]);
 
   const onExport = async (format: "json" | "jsonl") => {
     if (!sessionID) return;

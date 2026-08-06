@@ -51,7 +51,7 @@ describe("TimelinePanel", () => {
     vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
 
     render(<TimelinePanel available sessionID="live" />);
-    fireEvent.click(screen.getByRole("button", { name: "Load" }));
+    // Auto-loads on mount for the selected session.
     expect(await screen.findByLabelText("Timeline entries")).toBeInTheDocument();
     expect(screen.getByText("turn")).toBeInTheDocument();
     expect(screen.getByText("tool:bash")).toBeInTheDocument();
@@ -73,7 +73,44 @@ describe("TimelinePanel", () => {
       vi.fn(() => Promise.resolve(new Response(JSON.stringify({ error: "session not found" }), { status: 404, headers: { "Content-Type": "application/json" } }))),
     );
     render(<TimelinePanel available sessionID="missing" />);
-    fireEvent.click(screen.getByRole("button", { name: "Load" }));
     expect(await screen.findByRole("status")).toHaveTextContent("session not found");
+  });
+
+  it("clears and reloads when the session id changes", async () => {
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("sess-a")) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              schemaVersion: "1.0.0",
+              sessionId: "sess-a",
+              redacted: true,
+              summary: { turns: 1, tools: 0, providers: 0, children: 0, failed: 0, canceled: 0 },
+              entries: [{ id: "a1", kind: "turn", state: "completed", turnId: "ta" }],
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+        );
+      }
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            schemaVersion: "1.0.0",
+            sessionId: "sess-b",
+            redacted: true,
+            summary: { turns: 0, tools: 1, providers: 0, children: 0, failed: 0, canceled: 0 },
+            entries: [{ id: "b1", kind: "tool", state: "completed", name: "read", callId: "cb" }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { rerender } = render(<TimelinePanel available sessionID="sess-a" />);
+    expect(await screen.findByText("turn")).toBeInTheDocument();
+    rerender(<TimelinePanel available sessionID="sess-b" />);
+    expect(await screen.findByText("tool:read")).toBeInTheDocument();
+    expect(screen.queryByText("turn")).not.toBeInTheDocument();
   });
 });
