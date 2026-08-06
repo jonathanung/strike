@@ -23,6 +23,10 @@ func NewToolSearch(reg *Registry) Tool {
 
 func (t *toolSearchTool) Name() string { return "toolsearch" }
 
+func (t *toolSearchTool) Contract() Contract {
+	return staticContract(SideEffectNone, IdempotencySafeRetry)
+}
+
 func (t *toolSearchTool) Description() string {
 	base := `Search available tools by name or description substring.
 

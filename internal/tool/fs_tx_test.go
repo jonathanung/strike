@@ -26,7 +26,7 @@ func TestEditBaseHashPrecondition(t *testing.T) {
 		"newString": "ALPHA",
 		"baseHash":  strings.Repeat("0", 64),
 	}), tc)
-	if err == nil || CodeOf(err) != CodePreconditionFailed {
+	if err == nil || CodeOf(err) != string(CodePreconditionFailed) {
 		t.Fatalf("want precondition_failed, got %v (code=%q)", err, CodeOf(err))
 	}
 	// Matching hash succeeds.
@@ -56,7 +56,7 @@ func TestEditBaseHashInvalidArgs(t *testing.T) {
 		"newString": "y",
 		"baseHash":  "not-a-hash",
 	}), tc)
-	if err == nil || CodeOf(err) != CodeInvalidArgs {
+	if err == nil || CodeOf(err) != string(CodeInvalidArgs) {
 		t.Fatalf("want invalid_args, got %v", err)
 	}
 }
@@ -74,7 +74,7 @@ func TestApplyPatchBaseHashes(t *testing.T) {
 		"patch":      patch,
 		"baseHashes": map[string]string{"p.txt": strings.Repeat("a", 64)},
 	}), tc)
-	if err == nil || CodeOf(err) != CodePreconditionFailed {
+	if err == nil || CodeOf(err) != string(CodePreconditionFailed) {
 		t.Fatalf("want precondition_failed, got %v", err)
 	}
 	// Unchanged on disk.
@@ -113,7 +113,7 @@ func TestEditDetectsConcurrentModificationRace(t *testing.T) {
 		"oldString": "hello",
 		"newString": "hi",
 	}), tc)
-	if err == nil || CodeOf(err) != CodePreconditionFailed {
+	if err == nil || CodeOf(err) != string(CodePreconditionFailed) {
 		t.Fatalf("want concurrent precondition_failed, got %v (code=%q)", err, CodeOf(err))
 	}
 	got, _ := os.ReadFile(path)
@@ -190,7 +190,7 @@ func TestCheckBaseHashHelpers(t *testing.T) {
 	if err := CheckContentUnchanged(path, data, "z"); err != nil {
 		t.Fatal(err)
 	}
-	if err := CheckContentUnchanged(path, []byte("other"), "z"); err == nil || CodeOf(err) != CodePreconditionFailed {
+	if err := CheckContentUnchanged(path, []byte("other"), "z"); err == nil || CodeOf(err) != string(CodePreconditionFailed) {
 		t.Fatalf("want mismatch, got %v", err)
 	}
 }

@@ -48,8 +48,10 @@ type reqAccum struct {
 }
 
 type toolEnd struct {
-	output  string
-	isError bool
+	output    string
+	isError   bool
+	errorCode string
+	retryable bool
 }
 
 // pendingAsk remembers PermissionAsked fields until PermissionResolved.
@@ -84,11 +86,20 @@ func Restore(events []protocol.Event) Restored {
 			for _, c := range cur.calls {
 				end, ok := cur.results[c.ID]
 				if !ok {
-					end = toolEnd{output: unstartedToolOutput, isError: true}
+					end = toolEnd{
+						output:    unstartedToolOutput,
+						isError:   true,
+						errorCode: protocol.ErrorCodeCanceled,
+					}
+				}
+				tr := &provider.ToolResult{CallID: c.ID, Output: end.output, IsError: end.isError}
+				if end.isError && end.errorCode != "" {
+					tr.ErrorCode = end.errorCode
+					tr.Retryable = end.retryable
 				}
 				msgs = append(msgs, provider.Message{
 					Role:       provider.RoleTool,
-					ToolResult: &provider.ToolResult{CallID: c.ID, Output: end.output, IsError: end.isError},
+					ToolResult: tr,
 				})
 			}
 		}
@@ -131,7 +142,11 @@ func Restore(events []protocol.Event) Restored {
 			})
 		case protocol.ToolCallEnd:
 			ensure(e.ProviderRequestID)
-			cur.results[e.CallID] = toolEnd{output: e.Output, isError: e.IsError}
+			cur.results[e.CallID] = toolEnd{
+				output:    e.Output,
+				isError:   e.IsError,
+				errorCode: e.ErrorCode,
+			}
 		case protocol.TurnCompleted, protocol.EngineError:
 			flush()
 		case protocol.CompactionCompleted:

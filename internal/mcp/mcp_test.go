@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -429,4 +430,87 @@ func TestHelperProcessBinaryExists(t *testing.T) {
 func fileExists(p string) bool {
 	st, err := os.Stat(p)
 	return err == nil && !st.IsDir()
+}
+
+func TestBridgeContractAndErrorMapping(t *testing.T) {
+	cmd, args, env := helperCommand(t, "")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	client, err := Start(ctx, ServerConfig{Name: "demo", Command: cmd, Args: args, Env: env})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+
+	tools, err := client.ListTools(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var boom toolInfo
+	for _, ti := range tools {
+		if ti.Name == "boom" {
+			boom = ti
+			break
+		}
+	}
+	if boom.Name == "" {
+		t.Fatal("missing boom tool in fake MCP")
+	}
+	bridge := newBridge(client, boom)
+	c := tool.LookupContract(bridge)
+	if c.SideEffect != tool.SideEffectExternal || c.Idempotency != tool.IdempotencyConditional {
+		t.Fatalf("mcp contract = %+v", c)
+	}
+	if err := c.Validate(); err != nil {
+		t.Fatal(err)
+	}
+
+	tc := &tool.Context{
+		WorkDir: t.TempDir(),
+		Ask:     func(context.Context, tool.AskRequest) error { return nil },
+	}
+	_, err = bridge.Execute(ctx, json.RawMessage(`{}`), tc)
+	var te *tool.CodedError
+	if !errors.As(err, &te) {
+		t.Fatalf("boom err = %v (%T), want *tool.CodedError", err, err)
+	}
+	// Free-text MCP isError → internal fallback (never panic).
+	if te.Code != tool.CodeInternal {
+		t.Fatalf("code = %q, want internal fallback", te.Code)
+	}
+}
+
+func TestMapMCPErrorFallbackNoPanic(t *testing.T) {
+	t.Parallel()
+	// Unknown errors map to internal without panicking.
+	err := mapMCPError(fmt.Errorf("totally novel failure mode"))
+	var te *tool.CodedError
+	if !errors.As(err, &te) || te.Code != tool.CodeInternal {
+		t.Fatalf("got %v", err)
+	}
+	if err := mapMCPError(nil); err != nil {
+		t.Fatalf("nil = %v", err)
+	}
+	// Timeout / cancel.
+	if e := mapMCPError(context.DeadlineExceeded); !errors.As(e, &te) || te.Code != tool.CodeTimeout {
+		t.Fatalf("deadline = %v", e)
+	}
+	if e := mapMCPError(context.Canceled); !errors.As(e, &te) || te.Code != tool.CodeCanceled {
+		t.Fatalf("canceled = %v", e)
+	}
+	// Dead connection heuristics → transient.
+	if e := mapMCPError(fmt.Errorf("mcp demo: not connected")); !errors.As(e, &te) || te.Code != tool.CodeTransient {
+		t.Fatalf("dead = %v", e)
+	}
+	// Tool payload heuristics.
+	if e := mapMCPToolError("Permission denied by server"); !errors.As(e, &te) || te.Code != tool.CodePermissionDenied {
+		t.Fatalf("perm = %v", e)
+	}
+	if e := mapMCPToolError("invalid argument: foo"); !errors.As(e, &te) || te.Code != tool.CodeInvalidArgs {
+		t.Fatalf("args = %v", e)
+	}
+	if e := mapMCPToolError(""); !errors.As(e, &te) || te.Code != tool.CodeInternal {
+		t.Fatalf("empty = %v", e)
+	}
 }

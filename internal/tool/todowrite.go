@@ -52,6 +52,10 @@ func NewTodoWrite(store *TodoStore) Tool {
 
 func (t *todoWriteTool) Name() string { return "todowrite" }
 
+func (t *todoWriteTool) Contract() Contract {
+	return staticContract(SideEffectNone, IdempotencyConditional)
+}
+
 func (t *todoWriteTool) Description() string {
 	return `Create and maintain a structured task list for the current coding session.
 

@@ -73,6 +73,32 @@ func TestRestoreToolCallPair(t *testing.T) {
 	}
 }
 
+func TestRestoreToolCallEndPreservesErrorCode(t *testing.T) {
+	corr := protocol.Correlation{SessionID: "s1", TurnID: "t1", ProviderRequestID: "r1"}
+	args := json.RawMessage(`{"command":"echo hi"}`)
+	events := []protocol.Event{
+		protocol.UserMessage{Correlation: corr, Text: "run it"},
+		protocol.ToolCallBegin{Correlation: corr, CallID: "c1", Name: "bash", Args: args},
+		protocol.ToolCallEnd{
+			Correlation: corr,
+			CallID:      "c1",
+			Title:       "bash",
+			Output:      protocol.ToolFeedbackPermissionDenied("a permission rule matched"),
+			IsError:     true,
+			ErrorCode:   protocol.ErrorCodePermissionDenied,
+		},
+		protocol.TurnCompleted{Correlation: corr, StopReason: "end_turn"},
+	}
+	got := engine.Restore(events)
+	if len(got.Messages) != 3 {
+		t.Fatalf("len = %d: %#v", len(got.Messages), got.Messages)
+	}
+	tr := got.Messages[2].ToolResult
+	if tr == nil || !tr.IsError || tr.ErrorCode != "permission_denied" || tr.Retryable {
+		t.Fatalf("restored tool result = %#v, want permission_denied", tr)
+	}
+}
+
 func TestRestoreSkipsChildLineage(t *testing.T) {
 	root := protocol.Correlation{SessionID: "root", TurnID: "t1", ProviderRequestID: "r1"}
 	child := protocol.Correlation{SessionID: "child", ParentSessionID: "root", Depth: 1, TurnID: "ct", ProviderRequestID: "cr"}

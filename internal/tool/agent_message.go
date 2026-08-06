@@ -19,6 +19,10 @@ func NewAgentBroadcast() Tool { return agentBroadcastTool{} }
 
 func (agentMessageTool) Name() string { return "agent_message" }
 
+func (agentMessageTool) Contract() Contract {
+	return staticContract(SideEffectExternal, IdempotencyUnsafe)
+}
+
 func (agentMessageTool) Description() string {
 	return `Send a message to one teammate on the implicit session team.
 
@@ -94,6 +98,10 @@ func (agentMessageTool) Execute(ctx context.Context, args json.RawMessage, tc *C
 }
 
 func (agentBroadcastTool) Name() string { return "agent_broadcast" }
+
+func (agentBroadcastTool) Contract() Contract {
+	return staticContract(SideEffectExternal, IdempotencyUnsafe)
+}
 
 func (agentBroadcastTool) Description() string {
 	return `Broadcast a message to every other teammate on the session team.

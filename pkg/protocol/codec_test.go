@@ -21,6 +21,7 @@ func TestWrapDecodeRoundTrip(t *testing.T) {
 		ToolCallEnd{Correlation: corr, CallID: "c1", Title: "echo", Output: "ok", IsError: false, Metadata: json.RawMessage(`{"exitCode":0}`)},
 		ToolCallEnd{Correlation: corr, CallID: "c2", Title: "sleep", Output: "partial\n(incomplete: tool call canceled because the turn was interrupted.)", IsError: true, ErrorCode: ErrorCodeCanceled, Metadata: json.RawMessage(`{"incomplete":true}`)},
 		ToolCallEnd{Correlation: corr, CallID: "c3", Title: "sleep", Output: "(command timed out after 1s)", IsError: true, ErrorCode: ErrorCodeTimeout},
+		ToolCallEnd{Correlation: corr, CallID: "c4", Title: "edit", Output: "Permission denied.", IsError: true, ErrorCode: ErrorCodePermissionDenied},
 		EngineError{Correlation: corr, Message: "input queue full; wait for the current turn to finish", Code: ErrorCodeQueueFull},
 		ProcessStarted{Correlation: corr, ProcessID: "p1", CallID: "c1", Argv: []string{"bash", "-c", "echo"}, Cwd: "/tmp"},
 		ProcessOutput{Correlation: corr, ProcessID: "p1", Stream: ProcessStreamStdout, Data: "ok\n"},

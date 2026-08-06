@@ -33,6 +33,10 @@ func NewGrep() Tool { return grepTool{} }
 
 func (grepTool) Name() string { return "grep" }
 
+func (grepTool) Contract() Contract {
+	return staticContract(SideEffectRead, IdempotencySafeRetry)
+}
+
 func (grepTool) Description() string {
 	return `Fast content search tool that works with any codebase size.
 

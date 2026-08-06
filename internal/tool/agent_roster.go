@@ -12,6 +12,10 @@ func NewAgentRoster() Tool { return agentRosterTool{} }
 
 func (agentRosterTool) Name() string { return "agent_roster" }
 
+func (agentRosterTool) Contract() Contract {
+	return staticContract(SideEffectNone, IdempotencySafeRetry)
+}
+
 func (agentRosterTool) Description() string {
 	return `List teammates on the implicit session team (lead + children).
 
