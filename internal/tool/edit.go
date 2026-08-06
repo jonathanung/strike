@@ -79,6 +79,11 @@ func (editTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 	if err := tc.Ask(ctx, AskRequest{Permission: "edit", Patterns: []string{rel}, Always: []string{"*"}, Metadata: meta}); err != nil {
 		return Result{}, err
 	}
+	// Claim after validation + permission so failed matches do not pollute ownership.
+	overlapWarn, err := tc.ClaimWrite(path, rel)
+	if err != nil {
+		return Result{}, err
+	}
 	var updated string
 	replaced := 1
 	if a.ReplaceAll {
@@ -100,9 +105,11 @@ func (editTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 		tc.Files.Record(path, info)
 	}
 	tc.NotifyFileSync(path, updated, false)
+	out := fmt.Sprintf("Edited %s (%d replacement(s))", rel, replaced)
+	out = AppendOverlapWarning(out, overlapWarn)
 	res := Result{
 		Title:    rel,
-		Output:   fmt.Sprintf("Edited %s (%d replacement(s))", rel, replaced),
+		Output:   out,
 		Metadata: meta,
 	}
 	return tc.AppendDiagnostics(ctx, res, path), nil

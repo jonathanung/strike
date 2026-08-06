@@ -161,10 +161,16 @@ type UserDefaults struct {
 	DeferTools string
 	// SessionWorktree is session.worktree: off|auto|always.
 	SessionWorktree string
-	Theme           string
-	VimMode         string
-	NanoMode        string
-	MdReadMode      string
+	// PermissionAutoApproveSeconds is the permission-modal countdown (0 = off).
+	PermissionAutoApproveSeconds int
+	// PermissionAutoApproveExclude lists permission names that never auto-allow.
+	PermissionAutoApproveExclude []string
+	// MaxChildDepth bounds nested task spawns (0 = engine default).
+	MaxChildDepth int
+	Theme         string
+	VimMode       string
+	NanoMode      string
+	MdReadMode    string
 }
 
 // Settings persists user-chosen defaults. Empty fields mean "leave as is".
@@ -191,6 +197,12 @@ type Settings interface {
 	// and sessionWorktree (off|auto|always). Empty leaves the stored value
 	// unchanged; unknown values are rejected.
 	SaveConfigDials(sandbox, notify, leanCode, deferTools, sessionWorktree string) error
+	// SaveAutoApproveDials persists permissionAutoApproveSeconds, optional
+	// exclude list, and maxChildDepth. Empty scalar strings leave the
+	// corresponding field unchanged. exclude nil leaves the list unchanged; a
+	// non-nil pointer (including to an empty slice) replaces it.
+	// seconds: off|0|1-60; maxChildDepth: default|0|1-8. Unknown values error.
+	SaveAutoApproveDials(seconds string, exclude *[]string, maxChildDepth string) error
 	// SaveKeybinds persists binding-id overrides to ~/.strike/keybinds.jsonc.
 	// Unknown ids are silently dropped; callers should pre-filter. A nil
 	// map deletes the file (reset to defaults).
@@ -474,6 +486,41 @@ type MCP interface {
 	Disable(name string) error
 }
 
+// LSPServerStatus is one configured language server for /lsp.
+type LSPServerStatus struct {
+	Name       string
+	Command    string
+	State      string // "up", "down", "error", "disabled"
+	Extensions []string
+	Error      string
+	OpenDocs   int
+}
+
+// Diagnostic is one language-server finding for the diagnostics right pane.
+// Line and Character are 1-based for display (LSP wire is 0-based).
+type Diagnostic struct {
+	Path      string
+	Line      int
+	Character int
+	Severity  string // error|warning|info|hint
+	Source    string
+	Code      string
+	Message   string
+}
+
+// LSP reports language server status, control, and collected diagnostics.
+// Nil means the capability is absent; frontends must degrade gracefully.
+type LSP interface {
+	// Statuses returns configured servers in stable order.
+	Statuses() []LSPServerStatus
+	// Retry reconnects name (or every non-up server when name is empty).
+	Retry(name string) error
+	// Disable stops name.
+	Disable(name string) error
+	// Diagnostics returns a stable-ordered snapshot of live-server findings.
+	Diagnostics() []Diagnostic
+}
+
 // TelemetrySample is one local host resource snapshot for the system pane.
 // OK flags distinguish measured zeros from unavailable values — frontends
 // must never render missing metrics as zero.
@@ -667,6 +714,7 @@ type Services struct {
 	Providers  Providers // custom/self-hosted provider CRUD; nil when unsupported
 	Init       ProjectInit
 	MCP        MCP       // external MCP server status; nil when unsupported
+	LSP        LSP       // language server status + diagnostics; nil when unsupported
 	Telemetry  Telemetry // local CPU/RAM/disk; nil when unsupported
 	// SchedulerPresets is the shipped build-system preset catalog and global
 	// apply surface (FTUE #705).

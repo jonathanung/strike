@@ -51,7 +51,7 @@ func TestDefaultsIncludesAgentRosterAllow(t *testing.T) {
 
 func TestDefaultsIncludesTeamMessagingAllow(t *testing.T) {
 	// In-team messaging defaults to allow so peers do not prompt every send.
-	for _, perm := range []string{"agent_message", "agent_broadcast", "agent_roster", "team_task"} {
+	for _, perm := range []string{"agent_message", "agent_broadcast", "agent_roster", "agent_ownership", "team_task"} {
 		if got := Evaluate(perm, "*", Defaults()); got != Allow {
 			t.Errorf("Defaults %s = %q, want allow", perm, got)
 		}
@@ -92,7 +92,7 @@ func TestDefaultsTeamMessagingNoPrompt(t *testing.T) {
 	// Default allow: Ask succeeds with zero PermissionAsked events.
 	var events []protocol.Event
 	svc := New(func(ev protocol.Event) { events = append(events, ev) }, Defaults())
-	for _, perm := range []string{"agent_message", "agent_broadcast", "agent_roster"} {
+	for _, perm := range []string{"agent_message", "agent_broadcast", "agent_roster", "agent_ownership"} {
 		if err := svc.Ask(context.Background(), tool.AskRequest{
 			Permission: perm,
 			Patterns:   []string{"*"},
@@ -110,6 +110,7 @@ func TestValidateRulesetAcceptsTeamMessaging(t *testing.T) {
 		{Permission: "agent_message", Pattern: "*", Action: Deny},
 		{Permission: "agent_broadcast", Pattern: "*", Action: Allow},
 		{Permission: "agent_roster", Pattern: "*", Action: Ask},
+		{Permission: "agent_ownership", Pattern: "*", Action: Allow},
 		{Permission: "team_task", Pattern: "*", Action: Allow},
 	}
 	if err := ValidateRuleset(rs); err != nil {
@@ -258,7 +259,7 @@ func TestDeriveChildRules(t *testing.T) {
 			t.Fatalf("task = %q, want deny at depth cap", got)
 		}
 		for _, perm := range []string{
-			"agent_message", "agent_broadcast", "agent_roster", "task_message",
+			"agent_message", "agent_broadcast", "agent_roster", "agent_ownership", "task_message",
 		} {
 			if got := Evaluate(perm, "*", derived...); got != Allow {
 				t.Errorf("%s = %q, want allow (not stripped by denyTask)", perm, got)

@@ -40,6 +40,15 @@ func TestWrapDecodeRoundTrip(t *testing.T) {
 		PermissionModeSelected{Correlation: corr, Mode: PermissionModeYolo},
 		FastSelected{Correlation: corr, Enabled: true},
 		FilesInvalidated{Correlation: corr, Paths: []string{"a.go", "b.go"}, Reason: "external_editor"},
+		PathOverlap{
+			Correlation: childCorr,
+			Path:        "internal/foo.go",
+			Policy:      "warn",
+			Holders: []PathOverlapHolder{
+				{SessionID: "session-1", Name: "lead", Source: "touch"},
+			},
+			Warning: "path overlap on internal/foo.go",
+		},
 		EngineError{Correlation: corr, Message: "boom"},
 		ChildStarted{Correlation: childCorr, Agent: "build", Prompt: "do the subtask"},
 		ChildCompleted{Correlation: childCorr, Status: ChildStatusCompleted, Summary: "done"},
