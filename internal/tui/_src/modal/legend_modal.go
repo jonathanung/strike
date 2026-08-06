@@ -90,6 +90,8 @@ func buildLegendEntries(th theme.Theme) []legendEntry {
 		{"Chrome", ic.MeterFill + ic.MeterEmpty, "context meter fill / empty", legendPaintAccent},
 		{"Chrome", ic.TreeExpanded, "expanded tree node", legendPaintDefault},
 		{"Chrome", ic.TreeCollapsed, "collapsed tree node", legendPaintDefault},
+		{"Chrome", ic.CheckboxOn, "multi-select checked", legendPaintSuccess},
+		{"Chrome", ic.CheckboxOff, "multi-select unchecked", legendPaintMuted},
 		{"Chrome", ic.LogoTopRule + " / " + ic.LogoBottomRule, "logo top / bottom rules", legendPaintMuted},
 	}
 	if spark := strings.TrimSpace(ic.Sparkline); spark != "" {

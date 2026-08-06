@@ -92,8 +92,9 @@ otherwise `Background` resolves to a solid `lipgloss.TerminalColor`.
 `FocusBar`,
 `BadgeLeft`, `BadgeRight`, `DetailSeparator`, `Ellipsis`, `LogoTopRule`,
 `LogoBottomRule`, `MeterFill`, `MeterEmpty`, `TreeExpanded`,
-`TreeCollapsed`, and `Sparkline` (low→high bar runes). Stock badge delimiters
-are empty (soft pills). Use `th.Icons`, never the literal glyph.
+`TreeCollapsed`, `CheckboxOn` (`[x]`), `CheckboxOff` (`[ ]`), and `Sparkline`
+(low→high bar runes). Stock badge delimiters are empty (soft pills). Use
+`th.Icons`, never the literal glyph.
 
 `theme.AgentState` is the live session/agent status vocabulary for dynamic
 coloring: `Ready` → `Success`, `Working` → `AccentAlt`, `Attention` →

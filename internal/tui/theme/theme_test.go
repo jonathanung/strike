@@ -515,10 +515,14 @@ func TestDefaultThemeCarriesDefaultIcons(t *testing.T) {
 		"OK": ic.OK, "Err": ic.Err, "Info": ic.Info, "Agent": ic.Agent,
 		"Bolt": ic.Bolt, "Dot": ic.Dot, "Cursor": ic.Cursor,
 		"FocusBar": ic.FocusBar, "FilterCursor": ic.FilterCursor, "ToolGuide": ic.ToolGuide,
+		"CheckboxOn": ic.CheckboxOn, "CheckboxOff": ic.CheckboxOff,
 	} {
 		if glyph == "" {
 			t.Errorf("DefaultIcons().%s is empty", name)
 		}
+	}
+	if ic.CheckboxOn != "[x]" || ic.CheckboxOff != "[ ]" {
+		t.Errorf("checkbox defaults = %q / %q, want [x] / [ ]", ic.CheckboxOn, ic.CheckboxOff)
 	}
 	if lipgloss.Width(ic.FocusBar) != 1 {
 		t.Errorf("DefaultIcons().FocusBar width = %d, want 1 cell", lipgloss.Width(ic.FocusBar))

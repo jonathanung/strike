@@ -14,6 +14,10 @@ materially affect the shipped product.
 
 ## [Unreleased]
 
+### Changed
+
+- **FTUE build presets** — scheduler preset rows use `[x]` / `[ ]` checkbox marks so selected (added to the scheduler) vs unselected tools are obvious ([#747](https://github.com/jonathanung/strike/issues/747)).
+
 ### Added
 
 - **FTUE scheduler presets** — optional `/ftue` step with checkbox selection over the shipped build-system catalog (CMake, Ninja, Gradle, Bazel, Maven, Cargo, npm/yarn/pnpm/bun). Preview shows limits and command rules; apply writes global `scheduler.presets` atomically and preserves custom limits/rules; skip leaves config unchanged; re-runs are idempotent ([#705](https://github.com/jonathanung/strike/issues/705)).
