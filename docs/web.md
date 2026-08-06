@@ -108,6 +108,8 @@ ssh -L 8787:127.0.0.1:8787 user@strike-host
 | `POST` | `/v1/mcp/disable` | **yes** | Disable server and unregister tools (`{name}`) |
 | `GET` | `/v1/permissions/explain` | **yes** | Last-match-wins explain (`permission`, optional `pattern`) |
 | `GET` | `/v1/permissions/presets` | **yes** | Shipped permission preset catalog |
+| `GET` | `/v1/sessions/{id}/timeline` | **yes** | Redacted structured run timeline (JSON snapshot) |
+| `GET` | `/v1/sessions/{id}/timeline/export` | **yes** | Download redacted timeline (`format=json\|jsonl`) |
 | `GET` | `/v1/workflows` | **yes** | Workflow catalog (host-safe summaries) |
 | `GET` | `/v1/workflows/{name}` | **yes** | One catalog entry |
 | `GET` | `/v1/workflows/{name}/document` | **yes** | Editable document for builder |
@@ -213,6 +215,16 @@ and saves to an explicit `global` or `project` scope. **Save never activates.**
 Start requires a grant-review dialog and `POST .../start` with
 `{"confirm":true}`. Invalid catalog entries cannot be activated (422). The web
 surface uses only host-safe JSON DTOs — no TUI types cross the boundary.
+
+### Run timeline (web)
+
+Bootstrap capability `timeline` is always true. The inspector **timeline** tab
+loads a collapsed, secret-redacted harness span list for the selected session
+(`GET /v1/sessions/{id}/timeline`) and can download JSON or JSONL exports
+(`…/timeline/export?format=json|jsonl`). The timeline is derived from durable
+session JSONL via `pkg/timeline` — it complements the transcript, it does not
+replace it. Field-level scrubbing uses `pkg/redact` (same path as TUI
+`/timeline export`).
 
 Events use the same envelopes as session JSONL (`type` + `time` + `data`).
 

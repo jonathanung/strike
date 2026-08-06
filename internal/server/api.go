@@ -64,6 +64,9 @@ type capabilities struct {
 	Telemetry      bool `json:"telemetry"`
 	Workflows      bool `json:"workflows"`
 	WorkflowDrafts bool `json:"workflowDrafts"`
+	// Timeline is the redacted run-timeline snapshot/export surface
+	// (GET /v1/sessions/{id}/timeline[+ /export]). Always on when SessionDir is set.
+	Timeline bool `json:"timeline"`
 	// Permissions is true when host.Services.Permissions is set (explain + presets).
 	Permissions bool `json:"permissions"`
 	Sandbox     bool `json:"sandbox"`
@@ -88,6 +91,8 @@ var browserProtocolOps = []string{
 }
 
 func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
+	// Timeline is host-safe and derived from SessionDir JSONL (always available).
+	c := capabilities{Live: s.hasLive(), Roots: s.opts.LiveHub != nil, Timeline: true}
 	c := capabilities{Live: s.hasLive(), Roots: s.opts.LiveHub != nil, Sandbox: s.hasSandbox()}
 	var skills []map[string]any
 	if h := s.opts.Services; h != nil {
