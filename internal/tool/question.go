@@ -20,6 +20,10 @@ func NewQuestion() Tool { return questionTool{} }
 
 func (questionTool) Name() string { return "question" }
 
+func (questionTool) Contract() Contract {
+	return staticContract(SideEffectNone, IdempotencyUnsafe)
+}
+
 func (questionTool) Description() string {
 	return `Ask the user one or more clarifying questions during execution.
 

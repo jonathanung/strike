@@ -15,11 +15,15 @@ func NewSleep() Tool { return sleepTool{} }
 
 func (sleepTool) Name() string { return "sleep" }
 
+func (sleepTool) Contract() Contract {
+	return staticContract(SideEffectNone, IdempotencySafeRetry)
+}
+
 func (sleepTool) Description() string {
 	return `Pauses execution for a given number of seconds.
 
 Use this instead of bash sleep when you need to wait (e.g. for a service to become ready). Maximum 300 seconds.
-Do not use sleep to poll for task/subagent completion — child results arrive as [child.completed] automatically.`
+Do not use sleep to poll for task/subagent completion — prefer the wait tool (task.done/task.blocked/…) or [child.completed].`
 }
 
 func (sleepTool) Schema() json.RawMessage {

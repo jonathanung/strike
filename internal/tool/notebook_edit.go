@@ -18,6 +18,10 @@ func NewNotebookEdit() Tool { return notebookEditTool{} }
 
 func (notebookEditTool) Name() string { return "notebook_edit" }
 
+func (notebookEditTool) Contract() Contract {
+	return staticContract(SideEffectWorkspaceMutative, IdempotencyConditional)
+}
+
 func (notebookEditTool) Description() string {
 	return `Edits cells in a Jupyter notebook (.ipynb) file.
 
@@ -55,10 +59,10 @@ type notebookEditArgs struct {
 func (notebookEditTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) (Result, error) {
 	var a notebookEditArgs
 	if err := json.Unmarshal(args, &a); err != nil {
-		return Result{}, fmt.Errorf("invalid arguments: %w", err)
+		return Result{}, ErrInvalidArgs(fmt.Sprintf("invalid arguments: %v", err))
 	}
 	if strings.TrimSpace(a.NotebookPath) == "" {
-		return Result{}, fmt.Errorf("notebook_path is required")
+		return Result{}, ErrInvalidArgs("notebook_path is required")
 	}
 	mode := strings.ToLower(strings.TrimSpace(a.EditMode))
 	if mode == "" {

@@ -14,6 +14,10 @@ func NewTeamTask() Tool { return teamTaskTool{} }
 
 func (teamTaskTool) Name() string { return "team_task" }
 
+func (teamTaskTool) Contract() Contract {
+	return staticContract(SideEffectExternal, IdempotencyConditional)
+}
+
 func (teamTaskTool) Description() string {
 	return `Shared team task board for claim/assign coordination (lead session scope).
 

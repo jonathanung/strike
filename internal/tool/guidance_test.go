@@ -149,6 +149,7 @@ func TestBuildGuidanceTaskStatusPreferred(t *testing.T) {
 		{Name: "task"},
 		{Name: "task_status"},
 		{Name: "task_read"},
+		{Name: "wait"},
 		{Name: "sleep"},
 	})
 	if !strings.Contains(text, "task_status") || !strings.Contains(text, "task_read") {
@@ -156,6 +157,20 @@ func TestBuildGuidanceTaskStatusPreferred(t *testing.T) {
 	}
 	if !strings.Contains(text, "busy-poll") && !strings.Contains(text, "Do not busy-poll") {
 		t.Fatalf("task guidance should discourage busy-poll:\n%s", text)
+	}
+	if !strings.Contains(text, "`wait`") {
+		t.Fatalf("task+wait guidance should mention wait:\n%s", text)
+	}
+}
+
+func TestBuildGuidanceWaitPreferred(t *testing.T) {
+	text := BuildGuidance([]GuidanceEntry{
+		{Name: "wait"},
+		{Name: "task"},
+		{Name: "task_status"},
+	})
+	if !strings.Contains(text, "Prefer `wait`") && !strings.Contains(text, "prefer `wait`") {
+		t.Fatalf("expected wait preference guidance:\n%s", text)
 	}
 }
 
@@ -247,7 +262,7 @@ func TestBuiltinShortPurposesCoversCoreTools(t *testing.T) {
 		"notebook_edit", "sleep", "skill",
 		"toolsearch", "question", "apply_patch", "enter_plan_mode",
 		"exit_plan_mode", "phase_done", "task",
-		"task_status", "task_read", "task_message", "task_interrupt", "delegate",
+		"task_status", "task_read", "task_message", "task_interrupt", "delegate", "wait",
 		"agent_roster", "agent_ownership", "agent_message", "agent_broadcast", "team_task",
 	}
 	m := BuiltinShortPurposes()

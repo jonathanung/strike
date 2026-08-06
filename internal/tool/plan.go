@@ -171,6 +171,10 @@ func NewPlanWrite(store PlanStore) Tool {
 
 func (t *planWriteTool) Name() string { return "plan_write" }
 
+func (t *planWriteTool) Contract() Contract {
+	return staticContract(SideEffectExternal, IdempotencyConditional)
+}
+
 func (t *planWriteTool) Description() string {
 	return `Create or revise a root-session-owned structured plan (durable project artifact).
 
@@ -427,6 +431,10 @@ func NewPlanRead(store PlanStore) Tool {
 }
 
 func (t *planReadTool) Name() string { return "plan_read" }
+
+func (t *planReadTool) Contract() Contract {
+	return staticContract(SideEffectRead, IdempotencySafeRetry)
+}
 
 func (t *planReadTool) Description() string {
 	return `Read root-session-owned structured plans for this project.

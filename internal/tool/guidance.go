@@ -31,6 +31,7 @@ var shortPurposes = map[string]string{
 	"task_message":    "send guidance to a running child task",
 	"task_interrupt":  "cancel a running child task",
 	"delegate":        "first-class delegation lifecycle (create/get/list/transition)",
+	"wait":            "wait for owned child task events (done/blocked) with timeout",
 	"agent_roster":    "list lead and teammate agents on the session team",
 	"agent_ownership": "query path ownership/overlaps; lease path prefixes",
 	"agent_message":   "send a peer message to one teammate",
@@ -255,12 +256,16 @@ func recommendedGuidance(entries []GuidanceEntry) string {
 		"Use `webfetch` for ordinary page fetches.")
 	add(has("question"),
 		"Use `question` when a decision genuinely belongs to the user.")
-	add(has("task") && has("task_status", "task_read"),
+	add(has("task") && has("task_status", "task_read") && has("wait"),
+		"Use `task` for bounded non-blocking delegation (optional `agent`/`model`/`name`/`criteria`/`deps`/`subscribe`). Do not busy-poll `task_status` — prefer `wait` (task.done/task.blocked/…) with timeout, `[child.completed]` structured handoff JSON (summary, files_changed, verification, findings, blockers, recommended_next_action), and the peer inbox. One-off `task_status`/`task_read` only when needed (`task_status` also returns `handoff` + lifecycle fields when tracked). `task_message` steers owned children; `task_interrupt` cancels. Bound fan-out (MaxChildDepth).")
+	add(has("task") && has("task_status", "task_read") && !has("wait"),
 		"Use `task` for bounded non-blocking delegation (optional `agent`/`model`/`name`/`criteria`/`deps`/`subscribe`). Do not busy-poll `task_status` — prefer `[child.completed]` structured handoff JSON (summary, files_changed, verification, findings, blockers, recommended_next_action) and the peer inbox. One-off `task_status`/`task_read` only when needed (`task_status` also returns `handoff` + lifecycle fields when tracked). `task_message` steers owned children; `task_interrupt` cancels. Bound fan-out (MaxChildDepth).")
 	add(has("task") && !has("task_status", "task_read"),
 		"Use `task` for bounded non-blocking delegation (self-contained prompt). A later `[child.completed]` delivers a structured handoff JSON — never sleep-poll for task completion.")
 	add(has("delegate"),
 		"Use `delegate` for first-class lifecycle control (create/get/list/transition) with acceptance criteria, deps, subscriptions, and CAS `expected_version`. States: queued→working→blocked→review→done (+failed/canceled). Plain `task` remains a thin compatible spawn path.")
+	add(has("wait"),
+		"Prefer `wait` over sleep-polling `task_status` when you must synchronize on owned child completion or blockers (`task.done`/`task.failed`/`task.canceled`/`task.blocked` with timeout). Structured outcomes: matched|timeout|canceled.")
 	add(has("agent_roster"),
 		"Use `agent_roster` to list the lead and teammates (session ids, personas, states) on the implicit session team — prefer over status polling when you only need who is live.")
 	add(has("agent_ownership"),
@@ -270,7 +275,9 @@ func recommendedGuidance(entries []GuidanceEntry) string {
 	add(has("team_task"),
 		"Use `team_task` for a shared claim/assign board across teammates (create/list/update/claim/complete; CAS via expected_version). Prefer `todowrite`/`todoread` for solo lead planning only — not for multi-agent claim coordination.")
 
-	add(has("sleep") && has("bash") && has("task"),
+	add(has("sleep") && has("bash") && has("task") && has("wait"),
+		"Prefer `sleep` over bash sleep for external readiness (services, rate limits). Never sleep-poll for `task`/subagent completion — use `wait` or `[child.completed]`.")
+	add(has("sleep") && has("bash") && has("task") && !has("wait"),
 		"Prefer `sleep` over bash sleep for external readiness (services, rate limits). Never sleep-poll for `task`/subagent completion.")
 	add(has("sleep") && has("bash") && !has("task"),
 		"Prefer `sleep` over bash sleep when waiting for external readiness.")
