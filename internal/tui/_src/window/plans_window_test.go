@@ -330,6 +330,44 @@ func TestPlansWindowWidthSafeAtCommonSizes(t *testing.T) {
 	}
 }
 
+func TestSectionDelegateLabel(t *testing.T) {
+	if got := sectionDelegateLabel(host.PlanSection{}); got != "" {
+		t.Fatalf("empty = %q", got)
+	}
+	got := sectionDelegateLabel(host.PlanSection{
+		DelegateStatus:    "in_flight",
+		DelegateChildName: "refiner",
+	})
+	if got != "delegating → refiner" {
+		t.Fatalf("in_flight = %q", got)
+	}
+	if got := sectionDelegateLabel(host.PlanSection{DelegateStatus: "conflict"}); got != "delegate conflict" {
+		t.Fatalf("conflict = %q", got)
+	}
+}
+
+func TestPlansWindowShowsDelegateProgress(t *testing.T) {
+	store := newFakePlans(host.Plan{
+		ID: "p1", OwnerRoot: "root-a", Title: "Ship", Status: "draft", Version: 2,
+		Sections: []host.PlanSection{
+			{ID: "s1", Title: "Research", Body: "look", DelegateStatus: "in_flight", DelegateChildName: "ra"},
+			{ID: "s2", Title: "Build", Body: "code", DelegateStatus: "applied"},
+		},
+	})
+	w := newPlansWindow().bind(store, "root-a").resize(48, 16).(plansWindow)
+	w.mode = planModeDetail
+	view := ansi.Strip(w.view(theme.Default().Resolve()))
+	if !strings.Contains(view, "delegating") {
+		t.Fatalf("detail missing delegate progress:\n%s", view)
+	}
+	w.mode = planModeSection
+	w.sectionIdx = 0
+	view = ansi.Strip(w.view(theme.Default().Resolve()))
+	if !strings.Contains(view, "delegating → ra") {
+		t.Fatalf("section missing delegate badge:\n%s", view)
+	}
+}
+
 func TestPlansWindowRefreshAfterToolWrite(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	m.sessionID = "root-a"

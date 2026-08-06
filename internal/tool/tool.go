@@ -3,7 +3,7 @@
 // task_message/task_interrupt/delegate/agent_roster/agent_ownership/agent_message/agent_broadcast/
 // task_message/task_interrupt/wait/agent_roster/agent_ownership/agent_message/agent_broadcast/
 // team_task/webfetch/todowrite/todoread/
-// memory_write/memory_read/issue_write/issue_read/plan_write/plan_read/notebook_edit/sleep/skill/question/enter_plan_mode/
+// memory_write/memory_read/issue_write/issue_read/plan_write/plan_read/plan_delegate/notebook_edit/sleep/skill/question/enter_plan_mode/
 // exit_plan_mode/phase_done/toolsearch/definition/references/symbols).
 // Used by internal/engine (dispatch), internal/permission (AskRequest, for the
 // Context.Ask signature), and cmd/strike (registry construction); internal/tui
@@ -108,6 +108,11 @@ type TaskRequest struct {
 	// session defaults (engine Options.DefaultChildBudget / config session.agentBudget).
 	// Hard exceed interrupts the child and notifies the owner (#774).
 	Budget AgentBudgetLimits
+	// PlanID/SectionID correlate this child to a plan section refinement
+	// (plan_delegate). Empty for ordinary task spawns. On terminal status the
+	// engine applies structured handoff fields to that section only.
+	PlanID    string
+	SectionID string
 }
 
 // AgentBudgetLimits are optional per-child resource bounds.

@@ -52,6 +52,9 @@ type childHandle struct {
 	parent *Engine
 	// budgetWatchCancel stops the per-child budget ticker.
 	budgetWatchCancel context.CancelFunc
+	// planID/sectionID correlate this child to a plan section (plan_delegate).
+	planID    string
+	sectionID string
 
 	mu           sync.Mutex
 	currentTool  string
@@ -386,6 +389,8 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 		gates:     append([]tool.VerifyGate(nil), req.Verify...),
 		parent:    e,
 		budget:    newChildBudget(budgetLimits, req.Prompt, startedAt),
+		planID:    strings.TrimSpace(req.PlanID),
+		sectionID: strings.TrimSpace(req.SectionID),
 	}
 
 	e.childMu.Lock()
@@ -738,6 +743,8 @@ func (e *Engine) finishChild(h *childHandle, completed protocol.ChildCompleted) 
 	}
 	e.childMu.Unlock()
 	e.emitTeamRoster()
+	// Apply structured section refinement when this child was plan_delegate'd.
+	e.applyPlanSectionDelegate(h, completed)
 }
 
 // dissolveTeamIfLead clears the implicit team when this engine is the lead.
