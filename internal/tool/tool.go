@@ -384,6 +384,8 @@ type SessionPR struct {
 // SwitchAgent, when non-nil, queues an agent switch applied when the turn ends.
 // EnterPlanPhase starts the built-in plan→implement workflow at plan.
 // AdvancePhase runs the active phase exit gate and loads the next phase.
+// HandoffPlan is the unified plan approval + handoff used by exit_plan_mode
+// (canonical plan id/version or bounded legacy text; records approval source).
 // ReportOutput, when non-nil, streams partial stdout/stderr to the UI while
 // Execute is still running (e.g. live bash output).
 // Process, when set, receives subprocess lifecycle from RunProcess (engine
@@ -444,6 +446,11 @@ type Context struct {
 	StopWorkflow func() error
 	// AdvancePhase clears the current phase exit gate and advances (or ends).
 	AdvancePhase func(ctx context.Context) error
+	// HandoffPlan is the unified plan-mode approval + handoff path used by
+	// exit_plan_mode. It validates the canonical (or legacy) plan, runs the
+	// autonomy gate once, records approval source + plan identity, advances
+	// the plan→implement workflow, and routes to build/orchestrator.
+	HandoffPlan func(ctx context.Context, req PlanHandoffRequest) (PlanHandoffResult, error)
 	// ReportOutput streams retained output chunks (already size-capped by the
 	// tool) for live UI. Nil disables streaming; tools must still return the
 	// full Result.Output at the end.

@@ -729,6 +729,7 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 			StartWorkflow:  e.startWorkflow,
 			StopWorkflow:   func() error { e.stopWorkflow(); return nil },
 			AdvancePhase:   e.advancePhase,
+			HandoffPlan:    e.handoffPlan,
 			ReportOutput: func(data string) {
 				if data == "" {
 					return

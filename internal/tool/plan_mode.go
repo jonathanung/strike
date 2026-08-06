@@ -12,7 +12,37 @@ import (
 const (
 	postPlanComplexSteps = 4 // do-now steps >= this → orchestrator
 	postPlanComplexAreas = 3 // distinct code areas >= this → orchestrator
+	// MaxLegacyPlanText bounds the pre-feature text-plan recovery path.
+	MaxLegacyPlanText = 32 * 1024
 )
+
+// PlanHandoffRequest is the unified plan-mode exit payload.
+type PlanHandoffRequest struct {
+	// PlanID of the structured plan to approve and hand off (preferred).
+	PlanID string
+	// ExpectedVersion is the CAS token from plan_read/plan_write (required with PlanID).
+	ExpectedVersion int
+	// LegacyText is a bounded text plan for pre-feature session recovery when
+	// PlanID is empty. Ignored when PlanID is set.
+	LegacyText string
+	// Agent is an explicit implementer ("build" | "orchestrator"); empty uses heuristic.
+	Agent string
+	Steps int
+	Areas int
+	// MultiAgent selects orchestrator when Agent is omitted.
+	MultiAgent bool
+}
+
+// PlanHandoffResult is returned after a successful unified handoff.
+type PlanHandoffResult struct {
+	Agent          string // implementer actually applied
+	PlanID         string
+	PlanVersion    int
+	ApprovalSource string
+	Title          string
+	ViaPhase       bool
+	Legacy         bool
+}
 
 type enterPlanModeTool struct{}
 
@@ -23,7 +53,7 @@ func (enterPlanModeTool) Name() string { return "enter_plan_mode" }
 func (enterPlanModeTool) Description() string {
 	return `Switch the session into plan mode (the "plan" agent) and start the plan→implement workflow.
 
-Plan mode hard-denies write/edit tools via the plan phase permission profile. Analyze and propose a plan; call exit_plan_mode (or phase_done) when ready to implement after user approval.`
+Plan mode hard-denies write/edit tools via the plan phase permission profile. Analyze and propose a plan via plan_write; call exit_plan_mode with the plan id/version when ready to implement after user approval.`
 }
 
 func (enterPlanModeTool) Schema() json.RawMessage {
@@ -55,7 +85,7 @@ func (enterPlanModeTool) Execute(ctx context.Context, args json.RawMessage, tc *
 	}
 	return Result{
 		Title:  "plan mode",
-		Output: "Switched to plan mode. Write/edit tools are denied by the plan phase profile — analyze and plan; call exit_plan_mode when ready to implement.",
+		Output: "Switched to plan mode. Write/edit tools are denied by the plan phase profile — create/refine the structured plan with plan_write; call exit_plan_mode with plan_id and expected_version when ready to implement.",
 	}, nil
 }
 
@@ -66,15 +96,29 @@ func NewExitPlanMode() Tool { return exitPlanModeTool{} }
 func (exitPlanModeTool) Name() string { return "exit_plan_mode" }
 
 func (exitPlanModeTool) Description() string {
-	return `Leave plan mode and advance the plan→implement workflow after the user approves.
+	return `Leave plan mode via the unified approval and handoff path.
 
-Runs the plan phase user exit gate, then loads the implement phase and switches to build (simple) or orchestrator (complex). Pass agent explicitly, or omit and supply steps/areas/multi_agent for the built-in complexity heuristic. If no workflow phase is active, falls back to confirmation and SwitchAgent only.`
+Requires a canonical structured plan (plan_id + expected_version) unless autonomy is skip-all or a bounded legacy_text plan is supplied for pre-feature session recovery. Runs the session autonomy gate once, records whether approval came from the user or skip-all/agent/checks policy, marks the plan approved, advances plan→implement, and switches to build (simple) or orchestrator (complex).
+
+Rejection or revision leaves plan mode and plan lifecycle unchanged. Manual agent/permission dials and phase_done cannot bypass this path.`
 }
 
 func (exitPlanModeTool) Schema() json.RawMessage {
 	return json.RawMessage(`{
 		"type": "object",
 		"properties": {
+			"plan_id": {
+				"type": "string",
+				"description": "Structured plan id from plan_write/plan_read (required for new sessions unless autonomy is skip-all or legacy_text is set)."
+			},
+			"expected_version": {
+				"type": "integer",
+				"description": "CAS version from the last plan_read/plan_write. Stale versions fail handoff without mutating the plan."
+			},
+			"legacy_text": {
+				"type": "string",
+				"description": "Bounded text plan for pre-feature session recovery when no structured plan_id exists (max 32KiB). Ignored when plan_id is set."
+			},
 			"agent": {
 				"type": "string",
 				"description": "Post-plan implementer: \"build\" (solo simple) or \"orchestrator\" (multi-area / multi-agent). Overrides the complexity heuristic."
@@ -96,12 +140,15 @@ func (exitPlanModeTool) Schema() json.RawMessage {
 	}`)
 }
 
-// exitPlanArgs are optional exit_plan_mode inputs for implementer routing.
+// exitPlanArgs are exit_plan_mode inputs for handoff + implementer routing.
 type exitPlanArgs struct {
-	Agent      string `json:"agent"`
-	Steps      int    `json:"steps"`
-	Areas      int    `json:"areas"`
-	MultiAgent bool   `json:"multi_agent"`
+	PlanID          string `json:"plan_id"`
+	ExpectedVersion int    `json:"expected_version"`
+	LegacyText      string `json:"legacy_text"`
+	Agent           string `json:"agent"`
+	Steps           int    `json:"steps"`
+	Areas           int    `json:"areas"`
+	MultiAgent      bool   `json:"multi_agent"`
 }
 
 // PickPostPlanAgent chooses build (simple solo) or orchestrator (complex).
@@ -136,98 +183,40 @@ func (exitPlanModeTool) Execute(ctx context.Context, args json.RawMessage, tc *C
 	}
 	target := PickPostPlanAgent(parsed.Agent, parsed.Steps, parsed.Areas, parsed.MultiAgent)
 
-	if tc.AdvancePhase != nil {
-		err := tc.AdvancePhase(ctx)
-		switch {
-		case err == nil:
-			applied, err := switchPostPlanAgent(tc, target)
-			if err != nil {
-				return Result{}, err
-			}
-			return postPlanResult(applied, true), nil
-		case strings.Contains(err.Error(), "no active workflow phase"):
-			// Fall through to agent-only exit path.
-		default:
-			// User decline and other gate failures propagate so the engine
-			// can interrupt the turn (decline) or surface the error.
-			return Result{}, err
-		}
+	if tc.HandoffPlan == nil {
+		return Result{}, fmt.Errorf("exit_plan_mode: plan handoff is not configured")
 	}
-
-	if tc.SwitchAgent == nil {
-		return Result{}, fmt.Errorf("exit_plan_mode: SwitchAgent is not configured")
-	}
-
-	if tc.AskUser != nil {
-		resp, err := tc.AskUser(ctx, QuestionRequest{
-			Questions: []QuestionItem{{
-				ID:       "exit_plan",
-				Header:   "Exit plan",
-				Question: fmt.Sprintf("Exit plan mode and switch to %s to implement?", target),
-				Options: []QuestionOption{
-					{Label: "Yes", Description: fmt.Sprintf("Leave plan mode and switch to the %s agent", target)},
-					{Label: "No", Description: "Stay in plan mode"},
-				},
-			}},
-		})
-		if err != nil {
-			return Result{}, err
-		}
-		answer := ""
-		if len(resp.Answers) > 0 {
-			answer = strings.TrimSpace(resp.Answers[0])
-		}
-		if !isYesAnswer(answer) {
-			return Result{}, &UserRejectedError{
-				Message: "User declined exiting plan mode. Remaining in plan mode.",
-			}
-		}
-	}
-
-	applied, err := switchPostPlanAgent(tc, target)
+	res, err := tc.HandoffPlan(ctx, PlanHandoffRequest{
+		PlanID:          strings.TrimSpace(parsed.PlanID),
+		ExpectedVersion: parsed.ExpectedVersion,
+		LegacyText:      parsed.LegacyText,
+		Agent:           target,
+		Steps:           parsed.Steps,
+		Areas:           parsed.Areas,
+		MultiAgent:      parsed.MultiAgent,
+	})
 	if err != nil {
 		return Result{}, err
 	}
-	return postPlanResult(applied, false), nil
+	return postPlanHandoffResult(res), nil
 }
 
-// switchPostPlanAgent queues the implementer. Falls back to build if the
-// preferred target is unknown (e.g. orchestrator not in the agent catalog).
-// Returns the agent actually queued.
-func switchPostPlanAgent(tc *Context, target string) (string, error) {
-	if tc.SwitchAgent == nil {
-		if target == "build" {
-			return "build", nil
-		}
-		return "", fmt.Errorf("exit_plan_mode: SwitchAgent is not configured (cannot switch to %s)", target)
-	}
-	if err := tc.SwitchAgent(target); err != nil {
-		if target != "build" {
-			if err2 := tc.SwitchAgent("build"); err2 == nil {
-				return "build", nil
-			}
-		}
-		return "", err
-	}
-	return target, nil
-}
-
-func postPlanResult(target string, viaPhase bool) Result {
-	title := target + " mode"
-	var output string
-	if viaPhase {
-		output = fmt.Sprintf("Exited plan mode. Advanced to implement phase as %s — you may implement the plan.", target)
+func postPlanHandoffResult(res PlanHandoffResult) Result {
+	title := res.Agent + " mode"
+	var b strings.Builder
+	fmt.Fprintf(&b, "Exited plan mode via unified handoff.")
+	if res.ViaPhase {
+		fmt.Fprintf(&b, " Advanced to implement phase as %s.", res.Agent)
 	} else {
-		output = fmt.Sprintf("Exited plan mode. Switched to %s agent — you may implement the plan.", target)
+		fmt.Fprintf(&b, " Switched to %s agent.", res.Agent)
 	}
-	return Result{Title: title, Output: output}
-}
-
-func isYesAnswer(s string) bool {
-	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "yes", "y":
-		return true
-	default:
-		return false
+	if res.PlanID != "" {
+		fmt.Fprintf(&b, " Approved plan %s v%d (source=%s).", shortPlanID(res.PlanID), res.PlanVersion, res.ApprovalSource)
+	} else if res.Legacy {
+		fmt.Fprintf(&b, " Legacy text plan handed off (source=%s).", res.ApprovalSource)
+	} else {
+		fmt.Fprintf(&b, " Approval source=%s.", res.ApprovalSource)
 	}
+	fmt.Fprintf(&b, " Implement the exact approved plan; use plan_read when plan_id is set.")
+	return Result{Title: title, Output: b.String()}
 }

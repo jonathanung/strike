@@ -134,7 +134,9 @@ done:
 }
 
 func TestExitPlanModeAdvancesToImplement(t *testing.T) {
-	exitArgs, _ := json.Marshal(map[string]any{})
+	exitArgs, _ := json.Marshal(map[string]any{
+		"legacy_text": "1. implement the feature",
+	})
 	call := provider.ToolCall{ID: "ex1", Name: "exit_plan_mode", Args: exitArgs}
 	prov := newScriptedProvider(
 		toolCallStep(call),
@@ -194,7 +196,8 @@ func TestExitPlanModeAdvancesToImplement(t *testing.T) {
 
 func TestExitPlanModeRoutesToOrchestrator(t *testing.T) {
 	exitArgs, _ := json.Marshal(map[string]any{
-		"agent": "orchestrator",
+		"agent":       "orchestrator",
+		"legacy_text": "multi-area plan",
 	})
 	call := provider.ToolCall{ID: "ex-orch", Name: "exit_plan_mode", Args: exitArgs}
 	prov := newScriptedProvider(
@@ -263,7 +266,9 @@ func TestExitPlanModeRoutesToOrchestrator(t *testing.T) {
 // TestPlanRejectInterruptsTurn: declining the plan exit gate settles the tool
 // as an error and ends the turn with stopReason interrupted.
 func TestPlanRejectInterruptsTurn(t *testing.T) {
-	exitArgs, _ := json.Marshal(map[string]any{})
+	exitArgs, _ := json.Marshal(map[string]any{
+		"legacy_text": "do not implement yet",
+	})
 	call := provider.ToolCall{ID: "ex-no", Name: "exit_plan_mode", Args: exitArgs}
 	// Single stream only — a follow-up stream would mean the turn continued.
 	prov := newScriptedProvider(toolCallStep(call))
@@ -340,7 +345,10 @@ func TestPlanRejectInterruptsTurn(t *testing.T) {
 	}
 }
 
-func TestSelectOrchestratorFromPlanJumpsImplement(t *testing.T) {
+// TestSelectOrchestratorFromPlanAbandonsWithoutHandoff: manual agent selection
+// cannot enter implement without unified plan handoff — it clears the plan
+// workflow instead.
+func TestSelectOrchestratorFromPlanAbandonsWithoutHandoff(t *testing.T) {
 	prov := newScriptedProvider(completedStep("ok"))
 	eng := engine.New(engine.Options{
 		SessionID:       "phase-select-orch",
@@ -366,17 +374,22 @@ func TestSelectOrchestratorFromPlanJumpsImplement(t *testing.T) {
 
 	eng.Ops() <- protocol.SelectAgent{Name: "orchestrator"}
 
-	var phase protocol.PhaseChanged
+	var cleared bool
 	var agent string
 	deadline := time.After(5 * time.Second)
-	for phase.Phase != "implement" || agent != "orchestrator" {
+	for !cleared || agent != "orchestrator" {
 		select {
 		case <-deadline:
-			t.Fatalf("timeout phase=%#v agent=%q", phase, agent)
+			t.Fatalf("timeout cleared=%v agent=%q", cleared, agent)
 		case ev := <-eng.Events():
 			switch e := ev.(type) {
 			case protocol.PhaseChanged:
-				phase = e
+				if e.Phase == "" {
+					cleared = true
+				}
+				if e.Phase == "implement" {
+					t.Fatal("manual agent select must not enter implement without handoff")
+				}
 			case protocol.AgentSelected:
 				agent = e.Name
 			}
@@ -774,14 +787,17 @@ func TestPhaseAgentTransitionKeepsSessionModel(t *testing.T) {
 		},
 	}
 	enterArgs, _ := json.Marshal(map[string]any{})
-	doneArgs, _ := json.Marshal(map[string]any{})
+	exitArgs, _ := json.Marshal(map[string]any{
+		"legacy_text": "sticky model handoff plan",
+	})
 	enterCall := provider.ToolCall{ID: "en-sticky", Name: "enter_plan_mode", Args: enterArgs}
-	// phase_done (not exit_plan_mode): advances without forcing build/orchestrator.
-	doneCall := provider.ToolCall{ID: "pd-sticky", Name: "phase_done", Args: doneArgs}
+	// exit_plan_mode is required to leave plan convenience; routes implementer
+	// while phase agent pin must not thrash the session model.
+	exitCall := provider.ToolCall{ID: "ex-sticky", Name: "exit_plan_mode", Args: exitArgs}
 
 	sessionProv := newScriptedProvider(
 		toolCallStep(enterCall),
-		toolCallStep(doneCall),
+		toolCallStep(exitCall),
 		completedStep("implementing"),
 	)
 	planProv := newScriptedProvider(completedStep("plan-pin-should-not-run"))
@@ -802,7 +818,7 @@ func TestPhaseAgentTransitionKeepsSessionModel(t *testing.T) {
 		Select:          multiProviderSelect(providers, defaults),
 		InitialProvider: "session",
 		InitialModel:    sessionModel,
-		Registry:        tool.NewRegistry(tool.NewEnterPlanMode(), tool.NewPhaseDone()),
+		Registry:        tool.NewRegistry(tool.NewEnterPlanMode(), tool.NewExitPlanMode()),
 		Agents: []engine.Agent{
 			{Name: "build"},
 			{Name: "plan"},
@@ -826,14 +842,14 @@ func TestPhaseAgentTransitionKeepsSessionModel(t *testing.T) {
 
 	eng.Ops() <- protocol.UserInput{Text: "plan then implement"}
 
-	var sawPlan, sawImplement, sawPlanner, sawCoder, turnDone bool
+	var sawPlan, sawImplement, sawPlanner, sawBuild, turnDone bool
 	var modelAfterPhase []protocol.ModelSelected
 	deadline := time.After(15 * time.Second)
-	for !sawImplement || !sawCoder || !turnDone {
+	for !sawImplement || !sawBuild || !turnDone {
 		select {
 		case <-deadline:
-			t.Fatalf("timeout plan=%v implement=%v planner=%v coder=%v turn=%v models=%v",
-				sawPlan, sawImplement, sawPlanner, sawCoder, turnDone, modelAfterPhase)
+			t.Fatalf("timeout plan=%v implement=%v planner=%v build=%v turn=%v models=%v",
+				sawPlan, sawImplement, sawPlanner, sawBuild, turnDone, modelAfterPhase)
 		case ev := <-eng.Events():
 			switch e := ev.(type) {
 			case protocol.QuestionAsked:
@@ -849,8 +865,11 @@ func TestPhaseAgentTransitionKeepsSessionModel(t *testing.T) {
 				switch e.Name {
 				case "planner":
 					sawPlanner = true
-				case "coder":
-					sawCoder = true
+				case "build":
+					// exit_plan_mode routes to build (simple legacy plan).
+					if sawPlan {
+						sawBuild = true
+					}
 				}
 			case protocol.ModelSelected:
 				// Ignore startup; collect any model changes after phase work starts.

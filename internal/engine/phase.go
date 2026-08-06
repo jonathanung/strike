@@ -153,8 +153,13 @@ func (e *Engine) emitPhaseChanged(phaseName string, index int, status string) {
 }
 
 // advancePhase clears the current phase exit gate and loads the next phase
-// (or ends the workflow). Used by phase_done and exit_plan_mode.
+// (or ends the workflow). Used by phase_done. Leaving the plan convenience
+// plan phase requires exit_plan_mode (unified handoff) — phase_done cannot
+// bypass plan approval.
 func (e *Engine) advancePhase(ctx context.Context) error {
+	if err := e.requirePlanHandoffForPhaseAdvance(); err != nil {
+		return err
+	}
 	if e.phaseRecovery != "" {
 		return fmt.Errorf("workflow %q is in resume recovery (%s): stop or restart before advancing",
 			e.workflow.Name, e.phaseRecovery)
@@ -165,6 +170,20 @@ func (e *Engine) advancePhase(ctx context.Context) error {
 	phase := e.workflow.Phases[e.phaseIndex]
 	if err := e.runExitGate(ctx, phase); err != nil {
 		return err
+	}
+	return e.advancePhaseAfterGate()
+}
+
+// advancePhaseAfterGate loads the next phase (or ends the workflow) after the
+// exit gate has already been cleared. Used by the unified plan handoff so the
+// autonomy ask runs once.
+func (e *Engine) advancePhaseAfterGate() error {
+	if e.phaseRecovery != "" {
+		return fmt.Errorf("workflow %q is in resume recovery (%s): stop or restart before advancing",
+			e.workflow.Name, e.phaseRecovery)
+	}
+	if e.phaseIndex < 0 || e.workflow.Name == "" {
+		return fmt.Errorf("no active workflow phase")
 	}
 	next := e.phaseIndex + 1
 	if next >= len(e.workflow.Phases) {
@@ -448,8 +467,9 @@ func (e *Engine) isPlanConvenienceWorkflow() bool {
 }
 
 // syncPlanConvenienceWithAgent is the plan-mode adapter: selecting plan enters
-// the plan workflow; build/orchestrator leave the plan phase for implement
-// without re-pinning phase.Agent (so orchestrator is not clobbered to build).
+// the plan workflow. build/orchestrator cannot enter implement without the
+// unified plan handoff — manual agent selection abandons the plan workflow
+// (clears phase) rather than bypassing approval.
 func (e *Engine) syncPlanConvenienceWithAgent(agentName string) {
 	switch agentName {
 	case "plan":
@@ -459,13 +479,19 @@ func (e *Engine) syncPlanConvenienceWithAgent(agentName string) {
 		_ = e.enterPlanPhase()
 	case "build", "orchestrator":
 		if phase, ok := e.currentPhase(); ok && phase.Name == "plan" {
-			w := e.workflow
-			for i, p := range w.Phases {
-				if p.Name == "implement" || p.Agent == "build" || p.Agent == "orchestrator" {
-					_ = e.enterPhaseOpts(w, i, false)
-					return
+			// Already handed off: allow implement alignment without re-pinning.
+			if e.planHandoff.Active {
+				w := e.workflow
+				for i, p := range w.Phases {
+					if p.Name == "implement" || p.Agent == "build" || p.Agent == "orchestrator" {
+						_ = e.enterPhaseOpts(w, i, false)
+						return
+					}
 				}
 			}
+			// No handoff: abandon plan workflow. Do not enter implement.
+			e.clearPhase()
+			return
 		}
 		if e.phaseIndex >= 0 {
 			// Leaving a non-plan phase via agent switch ends the workflow.

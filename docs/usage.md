@@ -205,7 +205,7 @@ types are not. Distinct from `/mode` (tool permissions) and from `--auto`.
 | `supervised` (default) | you approve every phase exit |
 | `agent` | model clears gates via `phase_done` / `exit_plan_mode` |
 | `checks` | phase check commands must exit 0 (trust-gated `phase_check`) |
-| `skip-all` | bypass workflow/plan approval only — tool permissions unchanged |
+| `skip-all` | bypass workflow/plan approval only — tool permissions unchanged; plan handoff records `approvalSource=skip-all` |
 
 ### Permission mode dial
 

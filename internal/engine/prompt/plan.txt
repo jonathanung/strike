@@ -42,14 +42,23 @@ Use `plan_write` / `plan_read` for the canonical plan — not workspace markdown
 - Risks only when they change the recommendation.
 - End with ONE next action: how to approve and start step 1 (e.g. "Say go to start step 1" or call `exit_plan_mode` when ready to implement) — not a fresh clarifying question unless a blocker appeared.
 
-## Leaving plan mode (implementer routing)
+## Leaving plan mode (unified handoff)
 
-When calling `exit_plan_mode`, route the next agent:
+Call `exit_plan_mode` with the structured plan identity — this is the only path that approves and hands off the plan:
+
+- **Required:** `plan_id` + `expected_version` from the last `plan_read`/`plan_write` (unless autonomy is `skip-all`, or a bounded `legacy_text` for pre-feature recovery).
+- Stale version, missing plan, wrong owner, or closed plan → handoff fails; plan stays unchanged.
+- User rejection → stay in plan mode; lifecycle unchanged.
+- On success the plan is marked approved, identity+approval source are recorded, and implement starts.
+
+Route the next agent:
 
 - **build** — simple solo work (few steps, one area).
 - **orchestrator** — complex: multi-area, many steps, or needs `task` specialists.
 
 Prefer an explicit `agent` (`"build"` | `"orchestrator"`). If omitted, pass signals for the built-in heuristic: `steps` (do-now count; ≥4 → orchestrator), `areas` (distinct packages/surfaces; ≥3 → orchestrator), `multi_agent` (true when parallel specialists help).
+
+Do **not** use `phase_done` to leave the plan phase. Manual agent/permission dials abandon planning without approving a plan.
 
 ## Allowed readonly bash
 
