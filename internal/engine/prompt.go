@@ -222,6 +222,16 @@ func (e *Engine) systemLayers() []promptLayer {
 	})
 	layers = appendToolGuidanceLayer(e, layers)
 
+	// Delegated children get explicit structured completion-handoff guidance.
+	if e.opts.Depth > 0 {
+		layers = append(layers, promptLayer{
+			Kind:   protocol.PromptLayerTools,
+			Source: "builtin:completion-handoff",
+			Mode:   protocol.PromptLayerAppend,
+			Text:   childHandoffSystemPrompt,
+		})
+	}
+
 	switch {
 	case e.agent.Name == "build" && strings.TrimSpace(e.opts.SystemPrompt) != "":
 		// Config systemPrompt replaces the provider overlay for build only.

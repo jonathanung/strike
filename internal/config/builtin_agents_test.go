@@ -77,6 +77,8 @@ func TestBuiltinAgentsCatalog(t *testing.T) {
 		"mid-flight",
 		"task_status",
 		"chatty",
+		"files_changed",
+		"handoff",
 	} {
 		if !strings.Contains(o.Prompt, needle) {
 			t.Errorf("orchestrator prompt missing coordination needle %q: %q", needle, o.Prompt)
@@ -85,6 +87,9 @@ func TestBuiltinAgentsCatalog(t *testing.T) {
 	g := byName["general"]
 	if !strings.Contains(g.Prompt, "agent_message") || !strings.Contains(strings.ToLower(g.Prompt), "block") {
 		t.Errorf("general prompt should teach early blocker messaging: %q", g.Prompt)
+	}
+	if !strings.Contains(g.Prompt, "files_changed") || !strings.Contains(g.Prompt, "recommended_next_action") {
+		t.Errorf("general prompt should teach structured completion handoff: %q", g.Prompt)
 	}
 	// general is a multi-step implementer (root or task child): bash must be
 	// allow so it is not stuck on every shell prompt (#651).

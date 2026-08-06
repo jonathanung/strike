@@ -92,21 +92,25 @@ as before.
 |--------------|------|
 | `agent_message` / `agent_broadcast` | Mid-flight peer coordination (any teammate: child↔child, child↔lead) |
 | `team_task` | Shared claim/assign board (create/list/update/claim/complete; CAS) |
-| `[child.completed]` | Finished work product — terminal summary when a child ends |
+| `[child.completed]` | Finished work product — structured handoff JSON when a child ends |
 | `task_message` | Parent→owned-child steer only (not team chat) |
-| `task_status` / `task_read` | Rare one-off pulse / transcript slice — **not** busy-poll |
+| `task_status` / `task_read` | Rare one-off pulse / transcript slice — **not** busy-poll (`task_status` includes `handoff` when terminal) |
 | `agent_roster` | Who is on the team and live state |
 | `task_interrupt` | Cancel an owned child |
 | `todowrite` / `todoread` | Solo session todo list (full-replace) — **not** multi-agent claim |
 
 **Semantics:** prefer **messages** for mid-flight blockers/handoffs/questions;
-prefer **completion** for finished deliverables. Lead should not busy-poll
-`task_status` — use completion events + inbox. Children should message the lead
-early when blocked. Avoid chatty loops (no status ping-pong). Plain text bodies
-are enough; optional conventions (`blocker` / `handoff` / `question`) are fine
-without structured kinds. Messages inject at tool-round / idle turn boundaries
-(never mid-tool-call). Defaults **allow** team messaging; out-of-team targets
-fail closed; config/agent deny rules still hard-block.
+prefer **completion handoff JSON** for finished deliverables. Lead should not
+busy-poll `task_status` — use completion events + inbox. Children should message
+the lead early when blocked. Avoid chatty loops (no status ping-pong). Mid-flight
+message bodies stay plain text (optional conventions: `blocker` / `handoff` /
+`question`). **Completion** is structured: every terminal child emits a handoff
+with `summary`, `files_changed`, `verification`, `findings`, `blockers`, and
+`recommended_next_action` (empty arrays/strings allowed). The engine merges
+tool-tracked file mutations into `files_changed` and sets `incomplete` when the
+child did not supply parseable structured fields. Messages inject at tool-round /
+idle turn boundaries (never mid-tool-call). Defaults **allow** team messaging;
+out-of-team targets fail closed; config/agent deny rules still hard-block.
 
 #### Example: parallel explore + implement with peer handoff
 
