@@ -24,9 +24,9 @@ const childActivityCap = 12
 
 // leafTaskTools are stripped from registries that cannot nest further.
 // Team tools (agent_roster, agent_ownership, agent_message, agent_broadcast,
-// agent_thread, team_task, delegate) must NOT be listed here — depth-capped
-// leaves still coordinate. task_message is parent-control and is stripped with
-// task_*.
+// agent_thread, team_task, patch_collab, delegate) must NOT be listed here —
+// depth-capped leaves still coordinate. task_message is parent-control and is
+// stripped with task_*.
 // delegate create/spawn is parent-side; list/get/transition stay available so
 // leaves can self-report blocked/review (ownership-gated in engine).
 var leafTaskTools = []string{

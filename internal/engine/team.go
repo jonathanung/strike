@@ -41,6 +41,9 @@ const minSessionIDPrefixLen = 8
 // session id). Claim uses exclusive owner + optional CAS version. Board is
 // cleared on Dissolve with the rest of team lifecycle GC.
 //
+// The patch collaboration board (see team_patch.go) holds inspectable pending
+// patches for lead preview/reject/apply. Cleared on Dissolve with the task board.
+//
 // Delegation lifecycle objects (see delegation.go) track task spawns with
 // criteria, deps, subscriptions, and a validated state machine. Cleared on
 // Dissolve with the board.
@@ -57,6 +60,8 @@ type Team struct {
 	live        map[string]*mailboxTarget // session id → live engine mailbox
 	board       map[string]BoardTask      // task id → item
 	boardSeq    int                       // monotonic id allocator (t1, t2, …)
+	patches     map[string]TeamPatch      // patch id → item (p1, p2, …)
+	patchSeq    int                       // monotonic id allocator
 	delegations map[string]Delegation     // delegation id → item
 	delegSeq    int                       // monotonic id allocator (d1, d2, …)
 	ownership   *tool.PathOwnership
@@ -439,11 +444,11 @@ func (t *Team) SetPersona(sessionID, persona string) {
 	t.members[id] = m
 }
 
-// Dissolve clears the roster, shared task board, delegations, coordination
-// contracts, and path ownership (team ends with the lead session). After
-// Dissolve, Contains is false for everyone, Roster is empty, and
-// Board/Delegations/threads are empty. The Team value should not be reused;
-// callers may replace the pointer.
+// Dissolve clears the roster, shared task board, patch board, delegations,
+// coordination contracts, and path ownership (team ends with the lead session).
+// After Dissolve, Contains is false for everyone, Roster is empty, and
+// Board/Patches/Delegations/threads are empty. The Team value should not be
+// reused; callers may replace the pointer.
 func (t *Team) Dissolve() {
 	if t == nil {
 		return
@@ -453,6 +458,7 @@ func (t *Team) Dissolve() {
 	t.members = make(map[string]TeamMember)
 	t.live = make(map[string]*mailboxTarget)
 	t.clearBoardLocked()
+	t.clearPatchesLocked()
 	t.clearDelegationsLocked()
 	t.clearContractsLocked()
 	if t.ownership != nil {

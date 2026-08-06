@@ -502,6 +502,54 @@ type TeamTaskRequest struct {
 	ExpectedVersion int // 0 = skip CAS version check
 }
 
+// PatchCollabRequest is one patch_collab tool action.
+// Action is submit|list|preview|conflicts|reject|apply.
+type PatchCollabRequest struct {
+	Action          string
+	ID              string
+	IDs             []string // conflicts filter
+	Patch           string   // submit / inline preview
+	Title           string
+	Reason          string // reject
+	Status          string // list filter: pending|rejected|applied|all
+	ArtifactID      string
+	ArtifactVersion int
+	ExpectedVersion int    // 0 = skip CAS
+	WorkDir         string // active worktree (from tool Context)
+}
+
+// PatchCollabItem is one row on the team patch board.
+type PatchCollabItem struct {
+	ID              string   `json:"id"`
+	Title           string   `json:"title,omitempty"`
+	Status          string   `json:"status"` // pending|rejected|applied
+	Submitter       string   `json:"submitter,omitempty"`
+	Files           []string `json:"files,omitempty"`
+	ArtifactID      string   `json:"artifact_id,omitempty"`
+	ArtifactVersion int      `json:"artifact_version,omitempty"`
+	RejectReason    string   `json:"reject_reason,omitempty"`
+	AppliedSummary  string   `json:"applied_summary,omitempty"`
+	Version         int      `json:"version"`
+	CreatedAt       string   `json:"created_at,omitempty"` // RFC3339
+	UpdatedAt       string   `json:"updated_at,omitempty"`
+	// Patch is included on submit/preview/get-style responses (may be large).
+	Patch string `json:"patch,omitempty"`
+}
+
+// PatchCollabResult is the patch_collab tool payload.
+type PatchCollabResult struct {
+	LeadID    string              `json:"lead_id,omitempty"`
+	Action    string              `json:"action,omitempty"`
+	Patch     *PatchCollabItem    `json:"patch,omitempty"`
+	Patches   []PatchCollabItem   `json:"patches,omitempty"`
+	Preview   *PatchPreview       `json:"preview,omitempty"`
+	Conflicts *MultiPatchConflict `json:"conflicts,omitempty"`
+	Files     []string            `json:"files,omitempty"` // post-apply paths
+	Summary   string              `json:"summary,omitempty"`
+	Conflict  bool                `json:"conflict,omitempty"`
+	Detail    string              `json:"detail,omitempty"`
+}
+
 // DelegateRequest mutates or inspects first-class delegation lifecycle objects.
 // Action is create|get|list|transition.
 // Create mirrors task spawn fields (prompt/agent/…) plus criteria/deps/subscribe.
@@ -623,6 +671,7 @@ type SessionPR struct {
 // AgentRoster, when non-nil, lists the implicit session team (lead + peers).
 // AgentMessage/AgentBroadcast, when non-nil, send peer mail on the team.
 // TeamTask, when non-nil, mutates the shared lead-scoped team task board.
+// PatchCollab, when non-nil, submits/previews/applies/rejects inspectable patches.
 // Delegate, when non-nil, creates/lists/transitions first-class delegations.
 // AskUser, when non-nil, blocks until the user answers a question batch.
 // SwitchAgent, when non-nil, queues an agent switch applied when the turn ends.
@@ -684,6 +733,8 @@ type Context struct {
 	AgentThread func(ctx context.Context, req AgentThreadRequest) (AgentThreadResult, error)
 	// TeamTask creates/lists/updates/claims/completes shared team board items.
 	TeamTask func(ctx context.Context, req TeamTaskRequest) (TeamTaskResult, error)
+	// PatchCollab submits/previews/rejects/applies inspectable multi-agent patches.
+	PatchCollab func(ctx context.Context, req PatchCollabRequest) (PatchCollabResult, error)
 	// Delegate creates/lists/transitions first-class delegation lifecycle objects.
 	Delegate    func(ctx context.Context, req DelegateRequest) (DelegateResult, error)
 	AskUser     func(ctx context.Context, req QuestionRequest) (QuestionResponse, error)
