@@ -225,10 +225,10 @@ main {
   grid-template-rows: auto minmax(0, 1fr) auto;
   background: linear-gradient(90deg, transparent 49.9%, color-mix(in srgb, var(--ink) 3%, transparent) 50%, transparent 50.1%);
 }
+.runtime-stack { border-bottom: 1px solid var(--rule); }
 .runtime {
   display: flex;
   gap: 1px;
-  border-bottom: 1px solid var(--rule);
   background: var(--rule);
   overflow: auto;
 }
@@ -246,6 +246,27 @@ main {
   letter-spacing: .14em;
 }
 .runtime-field select { border: 0; padding: 0; background: transparent; font-size: 11px; }
+.runtime-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 18px;
+  padding: 6px 12px;
+  background: var(--surface);
+  border-top: 1px solid var(--rule);
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: .04em;
+}
+.runtime-status span::before {
+  content: "";
+  display: inline-block;
+  width: 4px;
+  height: 4px;
+  margin-right: 8px;
+  border-radius: 50%;
+  background: var(--acid);
+  vertical-align: middle;
+}
 .transcript {
   min-height: 0;
   overflow: auto;
