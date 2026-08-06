@@ -323,6 +323,10 @@ type Context struct {
 	// network). When non-zero extras are present or WorkDir is set on the
 	// policy, bash uses it directly; otherwise SandboxMode is resolved.
 	Sandbox sandbox.Policy
+	// NetworkAllow is the optional host/CIDR allowlist for webfetch (from
+	// config network.allow). Empty means unrestricted public hosts; SSRF
+	// private/loopback blocks still apply. Nil/empty Context is unrestricted.
+	NetworkAllow []string
 	// Scheduler, when non-nil, gates bash via named pools after permission
 	// approval and before process start. Shared across roots/children in one
 	// Strike process. nil preserves unlimited (no admission wait).

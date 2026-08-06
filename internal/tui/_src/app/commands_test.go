@@ -25,7 +25,7 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 	}{
 		"/provider":         {"select a provider and model", "[name [model]]", commandSourceBuiltin},
 		"/model":            {"select a model from authenticated providers", "[model|provider/model]", commandSourceBuiltin},
-		"/settings":         {"defaults (theme, editor, mode) and custom providers", "", commandSourceBuiltin},
+		"/settings":         {"defaults (theme, sandbox, notify, mode) and custom providers", "", commandSourceBuiltin},
 		"/effort":           {"set how much reasoning the model spends", "[level]", commandSourceBuiltin},
 		"/autonomy":         {"set exit-gate policy (supervised/agent/checks)", "[mode]", commandSourceBuiltin},
 		"/mode":             {"set permission posture (default/plan/accept-edits/yolo)", "[mode]", commandSourceBuiltin},
@@ -58,6 +58,7 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 		"/keys":             {"show keyboard shortcuts", "[reset]", commandSourceBuiltin},
 		"/legend":           {"explain UI icons, status glyphs, and chrome", "", commandSourceBuiltin},
 		"/memory":           {"list, get, set, delete, export, or import project memory", "[list|get|set|rm|export|import] ...", commandSourceBuiltin},
+		"/queue":            {"browse and edit prompts queued while a turn runs", "", commandSourceBuiltin},
 		"/issues":           {"list, add, get, close, export, or import project issues", "[list|add|get|close|export|import] ...", commandSourceBuiltin},
 		"/goal":             {"loop harness: set, run, status, pause, resume, abort, log, list", "[set|run|status|pause|resume|abort|log|list] ...", commandSourceBuiltin},
 		"/loop":             {"schedule a recurring LLM job (session-only)", "[interval job|list|stop [id]]", commandSourceBuiltin},

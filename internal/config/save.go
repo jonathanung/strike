@@ -12,6 +12,7 @@ import (
 
 	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike-cli/internal/sandbox"
 	"github.com/jonathanung/strike-cli/internal/scheduler"
 )
 
@@ -229,6 +230,82 @@ func SetGlobalPresentation(vimMode, nanoMode, mdReadMode string) error {
 		cfg.MdReadMode = normalizeMdReadMode(mdReadMode)
 	}
 	return writeGlobal(cfg, unlock)
+}
+
+// SetGlobalConfigDials persists non-empty peer-ported behavior dials into
+// ~/.strike/config. Empty fields are left unchanged. Values:
+//
+//	sandbox          — off|read-only|workspace-write (OS isolation; distinct from permissionMode)
+//	notify           — on|off|unfocused-only
+//	leanCode         — off|lite|full
+//	deferTools       — on|off
+//	sessionWorktree  — off|auto|always (session.worktree)
+func SetGlobalConfigDials(sandboxMode, notify, leanCode, deferTools, sessionWorktree string) error {
+	globalMu.Lock()
+	defer globalMu.Unlock()
+
+	cfg, unlock, err := readGlobalForWrite()
+	if err != nil {
+		return err
+	}
+	if sandboxMode != "" {
+		mode, ok := sandbox.ParseMode(sandboxMode)
+		if !ok {
+			unlock()
+			return fmt.Errorf("unknown sandbox %q (want %s)", sandboxMode, sandbox.ModeNames())
+		}
+		// Store canonical token even when input was empty-alias; callers pass
+		// non-empty only, so DefaultMode from "" is not used here.
+		cfg.Sandbox = mode.String()
+	}
+	if notify != "" {
+		n := NormalizeNotify(notify)
+		if n == "" {
+			unlock()
+			return fmt.Errorf("unknown notify %q (want on|off|unfocused-only)", notify)
+		}
+		cfg.Notify = n
+	}
+	if leanCode != "" {
+		lc := NormalizeLeanCode(leanCode)
+		if lc == "" {
+			unlock()
+			return fmt.Errorf("unknown leanCode %q (want off|lite|full)", leanCode)
+		}
+		cfg.LeanCode = lc
+	}
+	if deferTools != "" {
+		dt := NormalizeDeferTools(deferTools)
+		if dt == "" {
+			unlock()
+			return fmt.Errorf("unknown deferTools %q (want on|off)", deferTools)
+		}
+		cfg.DeferTools = dt
+	}
+	if sessionWorktree != "" {
+		wt, ok := parseSessionWorktree(sessionWorktree)
+		if !ok {
+			unlock()
+			return fmt.Errorf("unknown session.worktree %q (want off|auto|always)", sessionWorktree)
+		}
+		cfg.Session.Worktree = wt
+	}
+	return writeGlobal(cfg, unlock)
+}
+
+// parseSessionWorktree accepts only canonical off|auto|always (strict; no
+// silent fallback to off for unknown tokens).
+func parseSessionWorktree(s string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "off", "false", "0", "no", "never", "none":
+		return "off", true
+	case "auto":
+		return "auto", true
+	case "always", "on", "true", "1", "yes":
+		return "always", true
+	default:
+		return "", false
+	}
 }
 
 // SetGlobalSchedulerPresets validates and persists the global scheduler
