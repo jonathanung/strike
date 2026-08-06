@@ -58,6 +58,20 @@ func (e *Engine) diagnosticConfig() diag.Config {
 	if lean == "" {
 		lean = "lite"
 	}
+	// Resolve zero-means-default dials so the bundle matches runtime behavior
+	// (raw 0 would look like "disabled" for threshold/buffer).
+	threshold := e.opts.CompactionThreshold
+	if threshold <= 0 {
+		threshold = defaultCompactionThreshold
+	}
+	buffer := e.opts.CompactionBuffer
+	if buffer <= 0 {
+		buffer = defaultCompactionBuffer
+	}
+	keep := e.opts.KeepUserTurns
+	if keep < 1 {
+		keep = defaultKeepUserTurns
+	}
 	cfg := diag.Config{
 		Provider:       e.provName,
 		Model:          e.model,
@@ -76,9 +90,9 @@ func (e *Engine) diagnosticConfig() diag.Config {
 		Compaction: diag.Compaction{
 			Strategy:           resolveCompactionStrategy(e.opts.CompactionStrategy),
 			Model:              strings.TrimSpace(e.opts.CompactionModel),
-			Threshold:          e.opts.CompactionThreshold,
-			Buffer:             e.opts.CompactionBuffer,
-			KeepUserTurns:      e.opts.KeepUserTurns,
+			Threshold:          threshold,
+			Buffer:             buffer,
+			KeepUserTurns:      keep,
 			PruneProtectTokens: e.opts.PruneProtectTokens,
 			PruneMinimumTokens: e.opts.PruneMinimumTokens,
 			PruneKeepUserTurns: e.opts.PruneKeepUserTurns,
