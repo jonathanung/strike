@@ -376,6 +376,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		tool.NewArtifactRead(artifactStore),
 		tool.NewLedgerWrite(ledgerStore),
 		tool.NewLedgerRead(ledgerStore),
+		tool.NewContextBundle(),
 		tool.NewNotebookEdit(),
 		tool.NewSleep(),
 		tool.NewSkill(skillInfos),

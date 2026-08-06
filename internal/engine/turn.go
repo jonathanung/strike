@@ -821,9 +821,10 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 					SessionID:     entry.AuthorSession,
 				})
 			},
-			MemberName: e.ownershipMemberName(),
-			Checkpoint: e.checkpoints.Snapshot,
-			TurnDiff:   e.turnDiff,
+			MemberName:    e.ownershipMemberName(),
+			ContextBundle: engineContextBundlePtr(e),
+			Checkpoint:    e.checkpoints.Snapshot,
+			TurnDiff:      e.turnDiff,
 			// Record successful mutations only (post-write), not pre-mutation
 			// snapshots — failed tools must not appear in handoff files_changed.
 			FileSync: func(absPath string, content string, deleted bool) {
