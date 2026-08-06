@@ -13,6 +13,8 @@ import type {
 } from "./types";
 import { LAYER_KINDS } from "./types";
 import { MCPPanel } from "./MCP";
+import { PluginsPanel } from "./Plugins";
+import { PanesPanel } from "./Panes";
 import { TimelinePanel } from "./Timeline";
 import { DiagnosticsPanel } from "./Diagnostics";
 import { PlansPanel } from "./Plans";
@@ -27,12 +29,12 @@ import { GoalsPanel } from "./Goals";
 import { WorkflowsPanel } from "./Workflows";
 import "./styles.css";
 
-type InspectorTab = "context" | "files" | "memory" | "issues" | "plans" | "workflows" | "mcp" | "timeline" | "diagnostics" | "goals";
+type InspectorTab = "context" | "files" | "memory" | "issues" | "plans" | "workflows" | "mcp" | "plugins" | "panes" | "timeline" | "diagnostics" | "goals";
 type Completion = { label: string; detail: string; insert: string };
 type ChangedFile = { path: string; added: number; deleted: number; diff: string };
 type MemoryEntry = { Key?: string; key?: string; Value?: string; value?: string; Tags?: string[]; tags?: string[] };
 type IssueEntry = { ID?: number; id?: number; Title?: string; title?: string; Body?: string; body?: string; Status?: string; status?: string };
-const inspectorTabOrder: InspectorTab[] = ["context", "files", "memory", "issues", "plans", "workflows", "mcp", "timeline", "diagnostics", "goals"];
+const inspectorTabOrder: InspectorTab[] = ["context", "files", "memory", "issues", "plans", "workflows", "mcp", "plugins", "panes", "timeline", "diagnostics", "goals"];
 const availableInspectorTabs = (caps?: Capabilities): InspectorTab[] =>
   inspectorTabOrder.filter((tab) => {
     // Context doctor is event-driven (always available); not a host capability.
@@ -438,7 +440,7 @@ export default function App() {
       if (tab === "files") setProjectData(boot?.capabilities.files ? await request(`/v1/changed-files${selectedID ? `?root=${encodeURIComponent(selectedID)}` : ""}`).catch((error) => ({ error: error.message })) : undefined);
       if (tab === "memory") setProjectData(boot?.capabilities.memory ? await request("/v1/memory").catch((error) => ({ error: error.message })) : undefined);
       if (tab === "issues") setProjectData(boot?.capabilities.issues ? await request("/v1/issues").catch((error) => ({ error: error.message })) : undefined);
-      if (tab === "context" || tab === "plans" || tab === "workflows" || tab === "mcp" || tab === "timeline" || tab === "diagnostics" || tab === "goals") setProjectData(undefined);
+      if (tab === "context" || tab === "plans" || tab === "workflows" || tab === "mcp" || tab === "plugins" || tab === "panes" || tab === "timeline" || tab === "diagnostics" || tab === "goals") setProjectData(undefined);
     } finally { setProjectLoading(false); }
   };
   // Prefer files when present, else first available tab (context is always listed); hydrate without forcing open (#912).
@@ -988,6 +990,19 @@ function InspectorBody({ tab, boot, workspace, data, loading, expandedDiffs, tog
   }
   if (tab === "mcp") {
     return <MCPPanel available={Boolean(boot?.capabilities.mcp)} />;
+  }
+  if (tab === "plugins") {
+    return (
+      <PluginsPanel
+        available={Boolean(boot?.capabilities.plugins)}
+        live={isLive && !boot?.attachOnly}
+        panesAvailable={Boolean(boot?.capabilities.panes)}
+        rootID={selectedID}
+      />
+    );
+  }
+  if (tab === "panes") {
+    return <PanesPanel available={Boolean(boot?.capabilities.panes)} />;
   }
   if (tab === "timeline") {
     return <TimelinePanel available={Boolean(boot?.capabilities.timeline)} sessionID={selectedID} />;
