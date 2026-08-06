@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jonathanung/strike-cli/internal/secret"
 	"github.com/jonathanung/strike-cli/internal/tool"
 )
 
@@ -404,21 +405,7 @@ func validServerName(name string) bool {
 
 // redactErr returns a short error string without env values, headers, or tokens.
 func redactErr(err error) string {
-	if err == nil {
-		return ""
-	}
-	msg := err.Error()
-	if len(msg) > 200 {
-		msg = msg[:200] + "…"
-	}
-	upper := strings.ToUpper(msg)
-	lower := strings.ToLower(msg)
-	if strings.Contains(upper, "KEY=") || strings.Contains(upper, "TOKEN=") ||
-		strings.Contains(lower, "bearer ") || strings.Contains(lower, "authorization") ||
-		strings.Contains(lower, "api-key") || strings.Contains(lower, "api_key") {
-		return "start failed"
-	}
-	return msg
+	return secret.RedactError(err)
 }
 
 // FormatStatuses is a multi-line human summary for /mcp.

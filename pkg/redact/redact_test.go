@@ -1,6 +1,7 @@
 package redact_test
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -81,5 +82,41 @@ func TestBytes(t *testing.T) {
 	}
 	if redact.Bytes(nil) != nil {
 		t.Fatal("nil bytes should stay nil")
+	}
+}
+
+func TestScrubToolOutputHighEntropyAndHex(t *testing.T) {
+	tok := "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2"
+	got := redact.ScrubToolOutput("dump: " + tok)
+	if strings.Contains(got, tok) {
+		t.Fatalf("high-entropy leaked: %q", got)
+	}
+	sha := "a1b2c3d4e5f6789012345678abcdef0123456789"
+	in := "HEAD " + sha
+	if got := redact.ScrubToolOutput(in); got != in {
+		t.Fatalf("git SHA redacted: %q", got)
+	}
+}
+
+func TestError(t *testing.T) {
+	if got := redact.Error(nil); got != "" {
+		t.Fatalf("nil = %q", got)
+	}
+	if got := redact.Error(errBearer); got != "start failed" {
+		t.Fatalf("bearer = %q", got)
+	}
+}
+
+type simpleErr string
+
+func (e simpleErr) Error() string { return string(e) }
+
+var errBearer simpleErr = "Authorization: Bearer super-secret-token-xx"
+
+func TestJSONRedactsAPIKeyField(t *testing.T) {
+	in := json.RawMessage(`{"apiKey":"super-secret-value-here","ok":true}`)
+	got := string(redact.JSON(in))
+	if strings.Contains(got, "super-secret-value-here") {
+		t.Fatalf("apiKey leaked: %s", got)
 	}
 }
