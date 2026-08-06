@@ -469,9 +469,12 @@ func saveGlobalProviders(items []CustomProvider) error {
 	case err != nil:
 		return err
 	default:
-		if err := json.Unmarshal(data, &cfg); err != nil {
-			return fmt.Errorf("existing %s is not valid JSON (%v) — fix it before saving providers", path, err)
+		// JSONC load; rewrite below drops comments / $schema (pure JSON).
+		parsed, err := unmarshalConfigJSONC(data)
+		if err != nil {
+			return fmt.Errorf("existing %s is not valid JSON/JSONC (%v) — fix it before saving providers", path, err)
 		}
+		cfg = parsed
 	}
 	cfg.Providers = items
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

@@ -1,10 +1,13 @@
 // Package config loads strike configuration and user extensions. Layers:
 // defaults, then global (~/.strike/config), then project (./.strike/config)
-// — all JSON. Scalar fields override; permission rules concatenate so later
-// layers win under last-match-wins evaluation. The same two .strike roots
-// also hold agents/ and skills/ folders (see agents.go). Loaded by
+// — JSON or JSONC (// and /* */ comments). Optional "$schema" is ignored
+// (editor DX only). Scalar fields override; permission rules concatenate so
+// later layers win under last-match-wins evaluation. The same two .strike
+// roots also hold agents/ and skills/ folders (see agents.go). Loaded by
 // cmd/strike at startup and wrapped by internal/host/local (Settings, and
 // the agent/skill listings); internal/tui never imports it directly.
+// Programmatic saves (SetGlobal*, AppendProjectPermission) rewrite pure
+// JSON and drop comments / $schema — see docs/config.md.
 package config
 
 import (
@@ -165,7 +168,7 @@ type Config struct {
 
 // NetworkConfig is the JSON "network" object — shared allowlist shape for
 // application-layer web egress (webfetch). Bash OS networking stays
-// all-or-nothing via sandbox.Policy.Network; container net can reuse this
+// all-or-nothing via sandbox.Policy.NetworkEnabled; container net can reuse this
 // shape later.
 type NetworkConfig struct {
 	// Allow lists hostnames (example.com), single-label wildcards
@@ -259,6 +262,10 @@ type SessionConfig struct {
 	Worktree string `json:"worktree,omitempty"`
 	// WorktreeCleanup is keep (default) or delete on session close.
 	WorktreeCleanup string `json:"worktreeCleanup,omitempty"`
+	// OverlapPolicy is off|warn|block for multi-agent path conflicts
+	// (default warn). warn surfaces tool warnings + path.overlap events;
+	// block refuses conflicting writes; off tracks without signaling.
+	OverlapPolicy string `json:"overlapPolicy,omitempty"`
 }
 
 // Hook is one lifecycle hook entry. Exactly one of Action or Command should
@@ -322,6 +329,33 @@ func (c Config) HookRules() permission.HookRuleset {
 func Default() Config {
 	return Config{
 		Provider: "anthropic",
+		// Default language servers (E2.3). Missing binaries degrade to
+		// per-server error status; clear with "lsp": {"servers": {}}.
+		LSP: LSPConfig{Servers: DefaultLSPServers()},
+	}
+}
+
+// DefaultLSPServers is the shipped language-server map: Go, TypeScript,
+// Python, and Rust. First server claiming an extension wins at runtime.
+func DefaultLSPServers() map[string]LSPServer {
+	return map[string]LSPServer{
+		"go": {
+			Command:    "gopls",
+			Extensions: []string{".go"},
+		},
+		"typescript": {
+			Command:    "typescript-language-server",
+			Args:       []string{"--stdio"},
+			Extensions: []string{".ts", ".tsx", ".js", ".jsx"},
+		},
+		"python": {
+			Command:    "pylsp",
+			Extensions: []string{".py"},
+		},
+		"rust": {
+			Command:    "rust-analyzer",
+			Extensions: []string{".rs"},
+		},
 	}
 }
 
@@ -380,7 +414,7 @@ func GlobalRoot() string {
 	return resolveExisting(filepath.Join(home, ".strike"))
 }
 
-// GlobalPath is the global config file, ~/.strike/config (JSON).
+// GlobalPath is the global config file, ~/.strike/config (JSON or JSONC).
 func GlobalPath() string {
 	root := GlobalRoot()
 	if root == "" {
@@ -547,13 +581,18 @@ func read(path string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	stripped, err := stripJSONC(data)
+	if err != nil {
+		return Config{}, fmt.Errorf("%s: %w", path, err)
+	}
 	var c Config
-	if err := json.Unmarshal(data, &c); err != nil {
+	if err := json.Unmarshal(stripped, &c); err != nil {
 		return Config{}, err
 	}
 	c.Provider = CanonicalProviderID(c.Provider)
 	// disable-default-* top-level keys (same names as providers.jsonc).
-	if all, per, err := parseDisableDefaultFlags(data); err != nil {
+	// "$schema" and other unknown keys are ignored by encoding/json.
+	if all, per, err := parseDisableDefaultFlags(stripped); err != nil {
 		return Config{}, fmt.Errorf("%s: %w", path, err)
 	} else {
 		if all != nil {
@@ -607,6 +646,7 @@ func read(path string) (Config, error) {
 	}
 	c.PermissionAutoApproveSeconds = ClampPermissionAutoApproveSeconds(c.PermissionAutoApproveSeconds)
 	c.PermissionAutoApproveExclude = normalizePermissionAutoApproveExclude(c.PermissionAutoApproveExclude)
+	c.MaxChildDepth = ClampMaxChildDepth(c.MaxChildDepth)
 	if c.PermissionMode != "" {
 		mode, ok := protocol.ParsePermissionMode(string(c.PermissionMode))
 		if !ok {
@@ -700,6 +740,10 @@ func normalizeSchedulerLayer(sc *SchedulerConfig, path string) error {
 	return nil
 }
 
+// MaxChildDepthCeiling is the hard upper bound for nested task spawns
+// (matches engine absoluteMaxChildDepth).
+const MaxChildDepthCeiling = 8
+
 // ClampPermissionAutoApproveSeconds maps config values: ≤0 → 0 (off), >60 → 60.
 func ClampPermissionAutoApproveSeconds(n int) int {
 	if n <= 0 {
@@ -707,6 +751,18 @@ func ClampPermissionAutoApproveSeconds(n int) int {
 	}
 	if n > 60 {
 		return 60
+	}
+	return n
+}
+
+// ClampMaxChildDepth maps config values: <0 → 0 (engine default),
+// >MaxChildDepthCeiling → MaxChildDepthCeiling.
+func ClampMaxChildDepth(n int) int {
+	if n < 0 {
+		return 0
+	}
+	if n > MaxChildDepthCeiling {
+		return MaxChildDepthCeiling
 	}
 	return n
 }
@@ -994,6 +1050,9 @@ func merge(base, layer Config) Config {
 	}
 	if layer.Session.WorktreeCleanup != "" {
 		base.Session.WorktreeCleanup = layer.Session.WorktreeCleanup
+	}
+	if layer.Session.OverlapPolicy != "" {
+		base.Session.OverlapPolicy = layer.Session.OverlapPolicy
 	}
 	base.Permissions = append(base.Permissions, layer.Permissions...)
 	base.Hooks = append(base.Hooks, layer.Hooks...)

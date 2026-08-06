@@ -30,6 +30,7 @@ const (
 	AutonomySupervised = pub.AutonomySupervised
 	AutonomyAgent      = pub.AutonomyAgent
 	AutonomyChecks     = pub.AutonomyChecks
+	AutonomySkipAll    = pub.AutonomySkipAll
 )
 
 // Permission posture dial.
@@ -121,6 +122,8 @@ type (
 	PermissionModeSelected = pub.PermissionModeSelected
 	FastSelected           = pub.FastSelected
 	FilesInvalidated       = pub.FilesInvalidated
+	PathOverlap            = pub.PathOverlap
+	PathOverlapHolder      = pub.PathOverlapHolder
 	EngineError            = pub.EngineError
 	ChildStarted           = pub.ChildStarted
 	ChildCompleted         = pub.ChildCompleted

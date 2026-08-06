@@ -54,20 +54,21 @@ TUI rendered from (see `pkg/protocol/codec.go`).
 | `pkg/protocol` | **Public** Op/Event wire schema between engine and frontends; JSONL envelopes (`codec.go` / `op_codec.go`) are the session persistence + transport format (includes `scheduler.queued` / `admitted` / `canceled`). Semver via `Version` | stdlib only |
 | `pkg/sdk` | **Public** thin Go client over `pkg/protocol`: in-process channel client, JSONL encode/decode, `RunTurn`, session JSONL replay. Does not embed the engine (engine stays `internal/`). Consumer docs: [sdk.md](sdk.md) | `pkg/protocol`, stdlib only |
 | `internal/protocol` | Compatibility re-export of `pkg/protocol` (type aliases + thin forwards). Prefer `pkg/protocol` for new code | `pkg/protocol` only |
-| `internal/engine` | Headless agent runtime: built-in turn loop, task-subagent function harnesses, tool dispatch, permission/question integration, deferred agent switch; implicit session-scoped agent **team** (lead + children roster + shared task board in `team.go` / `team_board.go`); model-stream and bash admission via shared `scheduler`; scrubs tool I/O via `secret` | `protocol`, `provider`, `harness`, `tool`, `permission`, `question`, `memory`, `config`, `sandbox`, `scheduler`, `secret` |
+| `internal/engine` | Headless agent runtime: built-in turn loop, task-subagent function harnesses, tool dispatch, permission/question integration, deferred agent switch; implicit session-scoped agent **team** (lead + children roster + shared task board + path ownership/overlap in `team.go` / `team_board.go` / `ownership.go`); model-stream and bash admission via shared `scheduler`; scrubs tool I/O via `secret` | `protocol`, `provider`, `harness`, `tool`, `permission`, `question`, `memory`, `config`, `sandbox`, `scheduler`, `secret` |
 | `internal/harness` | Function-harness contract and named function registry; model calls return completed responses | `provider`, stdlib |
 | `internal/harness/external` | Private JSONL subprocess adapter from configured commands to `harness.Func` | `harness`, `provider`, stdlib, os/exec |
 | `internal/provider` | LLM provider abstraction: `Provider` interface, normalized `StreamEvent`s | stdlib |
 | `internal/provider/base` | Shared HTTP/JSON/SSE/auth client concrete adapters embed | `provider`, stdlib, net/http |
 | `internal/provider/{anthropic,openaicompat,chatgpt,google,echo}` | Concrete adapters (openaicompat covers OpenAI platform API, xAI, Kimi, DeepSeek; chatgpt is the ChatGPT-subscription backend; google is Google AI Studio generateContent; echo is the offline dev provider) | `provider`, `provider/base` (all but echo), stdlib |
-| `internal/sandbox` | OS-primitive process sandbox: `Wrap(argv, Policy)` via Linux `bwrap` / macOS `sandbox-exec`; Policy carries mode, write denials, network on/off, and optional `NetworkAllow` host/CIDR list (webfetch; shared shape for future container net); `Explain`/`ProfileText` for `/sandbox explain`; graceful degrade + startup warning when unavailable | stdlib only |
+| `internal/sandbox` | OS-primitive process sandbox: `Wrap(argv, Policy)` via Linux `bwrap` / macOS `sandbox-exec`; Policy carries mode, write denials, `NoNetwork` (host net on by default), and optional `NetworkAllow` host/CIDR list (webfetch; shared shape for future container net); `Explain`/`ProfileText` for `/sandbox explain`; graceful degrade + startup warning when unavailable | stdlib only |
 | `internal/scheduler` | Fair cancellable named-pool admission (process/build/test/model/container): context-aware acquire, atomic multi-pool leases, observer snapshots; layered limits + ordered command classification (`Compile` / `CompileWithPresets` → `Effective`); versioned build-system presets (`Catalog`, expand into ordinary limits/rules) | stdlib only |
-| `internal/tool` | Tool contract (`Tool`, `Context`, `Result`) + built-ins: read/glob/grep/edit/write/apply_patch/bash/task/task_status/task_read/task_message/task_interrupt/agent_roster/agent_message/agent_broadcast/team_task/webfetch/todowrite/todoread/memory_write/memory_read/issue_write/issue_read/notebook_edit/sleep/skill/question/enter_plan_mode/exit_plan_mode/phase_done/toolsearch; bash acquires scheduler pools after Ask; file tools call `FileSync` + `CollectDiagnostics` after mutations | `provider` (for `ToolSchema`), `memory`, `issue`, `sandbox`, `scheduler`, stdlib |
+| `internal/tool` | Tool contract (`Tool`, `Context`, `Result`) + built-ins: read/glob/grep/edit/write/apply_patch/bash/task/task_status/task_read/task_message/task_interrupt/agent_roster/agent_ownership/agent_message/agent_broadcast/team_task/webfetch/todowrite/todoread/memory_write/memory_read/issue_write/issue_read/notebook_edit/sleep/skill/question/enter_plan_mode/exit_plan_mode/phase_done/toolsearch; `PathOwnership` multi-agent path claims; bash acquires scheduler pools after Ask; file tools call `FileSync` + `CollectDiagnostics` after mutations | `provider` (for `ToolSchema`), `memory`, `issue`, `sandbox`, `scheduler`, stdlib |
 | `internal/mcp` | MCP client (stdio + streamable HTTP) + session manager; bridges tools onto `tool.Registry` as `mcp_<server>_<tool>`; retry/disable; tools-only stdio **server** (`Server`) for `strike mcp-serve` | `tool`, stdlib, net/http |
 | `internal/lsp` | LSP client (JSON-RPC 2.0 over stdio, Content-Length framing) + manager; extension→server registry; didOpen/didChange/didClose from file tools; collect `publishDiagnostics`; inject formatted diagnostics into file-tool Results (`CollectForPaths`); crash isolation | stdlib, os/exec |
 | `internal/memory` | Project-scoped durable key/value memory (JSON under `~/.strike/memory/`) | stdlib |
 | `internal/issue` | Project-scoped durable issues (JSON under `~/.strike/issues/`) | stdlib |
 | `internal/goal` | Loop harness: goals, JSONL iterations/events, guards, critic, hooks | stdlib |
+| `internal/plan` | Project-scoped root-session-owned structured plans (sections, lifecycle, CAS versions; JSON under `~/.strike/plans/`) | stdlib |
 | `internal/question` | User-question ask service: suspends a tool call until `QuestionReply` (1–4 prompts per batch; TUI walks them, one reply with all answers) | `protocol`, stdlib |
 | `internal/permission` | Ordered allow/ask/deny rulesets, last-match-wins; the ask service that suspends a tool call for user input; `CompileSandbox` maps write/edit denials + webfetch/mcp network posture into `sandbox.Policy` | `protocol`, `tool` (for `AskRequest`), `sandbox`, stdlib |
 | `internal/session` | JSONL event-log persistence (append/replay) + concurrent Manager (multi-session open, durable list, event mux). Sidecar `*.meta.json` stores `projectKey` (workspace folder) first for `/session` scoping. `Append` redacts via `secret.RedactEvent` | `protocol`, `secret`, stdlib |
@@ -79,7 +80,7 @@ TUI rendered from (see `pkg/protocol/codec.go`).
 | `internal/history` | Project-scoped prompt history | stdlib |
 | `internal/project` | Stable filesystem identity + optional per-session git worktrees under `.strike/worktrees/` | stdlib, os/exec |
 | `internal/host` | **Frozen contract**: the services a frontend needs from its host process (includes `SchedulerPresets` catalog + global apply) | stdlib only — enforced by the boundary test |
-| `internal/host/local` | Real `host.Services` implementation; wraps auth/config/models/history/memory/issue/files/mcp/scheduler presets for the frontend | `auth`, `config`, `history`, `host`, `issue`, `mcp`, `memory`, `models`, `sandbox`, `scheduler`, `tool` (composer `!` shell) |
+| `internal/host/local` | Real `host.Services` implementation; wraps auth/config/models/history/memory/issue/plan/goal/files/mcp/scheduler presets for the frontend | `auth`, `config`, `history`, `host`, `issue`, `plan`, `goal`, `mcp`, `memory`, `models`, `sandbox`, `scheduler`, `tool` (composer `!` shell) |
 | `internal/tui` | Bubble Tea frontend: app model, layout, cells, modals, composer. Sources under `_src/<group>/`, flattened by `go generate` | `protocol`, `host`, `secret`, `tui/...` only — enforced by the boundary test |
 | `internal/tui/theme` | Resolved design tokens: adaptive color roles, surfaces, chrome mode (soft\|solid\|bordered), terminal background, glyphs, border/spacing tokens, and precomputed styles | lipgloss, stdlib |
 | `internal/tui/common` | Pure formatting helpers (ThemedSpace, DotJoin, compact durations) | `tui/theme`, stdlib |
@@ -121,10 +122,12 @@ state. The registry holds right-pane windows: named session panes (`context` for
 setup summary and `activity` for subagent status, recent parent tools, or an
 empty-state line), an `agents` multi-root tree, a `visualizer` for the selected node's
 status/tokens/cost/tokens-per-turn sparkline, a `files` explorer (lazy tree via
-`host.Files.ListDir`), `memory` and `issues` browsers, a `markdown` reader
+`host.Files.ListDir`), a `diagnostics` browser (live language-server findings
+via `host.LSP`), `memory` and `issues` browsers, a `markdown` reader
 opened via `/md-read`, and an `editor` PTY window for `/vim`/`/nano`. Windows are
 organized into stack **groups** (session: context+activity; agents:
-agents+visualizer; project: memory+issues; singles: files/markdown/editor).
+agents+visualizer; files: files+diagnostics; project: memory+issues; singles:
+markdown/editor).
 When the right pane is large enough, multi-member groups render as a paired
 split (vertical in a side column, horizontal when the body split is a bottom
 bar); otherwise only the focused member is shown. Focus cycle walks members
@@ -376,7 +379,7 @@ Same package `internal/tui`; split for reviewability only (no subpackages).
    `internal/host/host.go`. This package is a stdlib-only contract — no
    importing `auth`, `config`, `models`, or `history` here, even for a type
    reference (the boundary test fails the build otherwise). Look at
-   `Auth`/`Catalog`/`Settings`/`History`/`Memory`/`Issues`/`Goals`/`Files` for the shape: small,
+    `Auth`/`Catalog`/`Settings`/`History`/`Memory`/`Issues`/`Plans`/`Goals`/`Files` for the shape: small,
   frontend-facing, `context`-aware when it may block.
 2. Implement it in `internal/host/local/` (e.g. `local.go`, `files.go`),
   wrapping the real backend package. This package is the seam that is allowed
