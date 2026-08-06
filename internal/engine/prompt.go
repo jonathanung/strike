@@ -482,7 +482,7 @@ func (e *Engine) environmentPrompt() string {
 		modelLine = fmt.Sprintf("You are powered by the model named %s. The exact model ID is %s", e.model, id)
 	}
 	tempLine := ""
-	if td := strings.TrimSpace(e.sessionTemp.dir); td != "" {
+	if td := strings.TrimSpace(e.ensureSessionTemp()); td != "" {
 		tempLine = fmt.Sprintf("\n  Session temporary directory: %s", td)
 	}
 	return strings.TrimSpace(fmt.Sprintf(`%s

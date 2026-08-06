@@ -31,9 +31,13 @@ func TestEngineSessionTempAllocatedAndCleaned(t *testing.T) {
 		Registry: tool.NewRegistry(),
 		Agents:   []engine.Agent{{Name: "build"}},
 	})
+	// Lazy: nothing on disk until first SessionTempDir/prompt/tool use.
+	if _, err := os.Stat(filepath.Join(os.TempDir(), "strike", sid)); !os.IsNotExist(err) {
+		t.Fatalf("temp dir created before first use: %v", err)
+	}
 	temp := eng.SessionTempDir()
 	if temp == "" {
-		t.Fatal("SessionTempDir empty after New")
+		t.Fatal("SessionTempDir empty after ensure")
 	}
 	if !strings.Contains(filepath.ToSlash(temp), "/strike/") {
 		t.Fatalf("SessionTempDir = %q, want under …/strike/…", temp)

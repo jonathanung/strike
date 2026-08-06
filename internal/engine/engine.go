@@ -22,12 +22,14 @@ import (
 )
 
 // sessionTemp holds the absolute private scratch dir for this engine session
-// (os.TempDir()/strike/<session-id>/). Empty when allocation failed or was
-// skipped. Cleaned up when Run returns.
+// (os.TempDir()/strike/<session-id>/). Lazily allocated on first use. Cleaned
+// up when Run returns.
 type sessionTempState struct {
 	dir string
 	// owned is true when this engine created/ensured the dir and should remove it.
 	owned bool
+	// failed is true after a permanent allocation failure (do not retry).
+	failed bool
 }
 
 // defaultMaxStreamAttempts is how many times one logical model request may
@@ -521,7 +523,8 @@ type Engine struct {
 	fitWarnedLevel  string
 
 	// sessionTemp is the private OS temp scratch dir for path tools.
-	sessionTemp sessionTempState
+	sessionTempMu sync.Mutex
+	sessionTemp   sessionTempState
 }
 
 func New(opts Options) *Engine {
@@ -608,28 +611,52 @@ func New(opts Options) *Engine {
 		e.perms.SetProjectPersister(opts.PersistProjectRule)
 	}
 	e.questions = question.New(e.emit)
-	// Allocate session-scoped scratch under os.TempDir() for path tools.
-	// Failure is non-fatal: tools simply keep the workspace-only boundary.
-	if dir, err := tool.EnsureSessionTemp(opts.SessionID); err == nil && dir != "" {
-		e.sessionTemp = sessionTempState{dir: dir, owned: true}
-	}
 	return e
 }
 
-// SessionTempDir returns the absolute session scratch directory when allocated.
+// SessionTempDir returns the absolute session scratch directory, allocating it
+// on first use. Empty when allocation fails or session id is unset. Failure is
+// non-fatal: path tools keep the workspace-only boundary.
 func (e *Engine) SessionTempDir() string {
 	if e == nil {
 		return ""
 	}
-	return e.sessionTemp.dir
+	return e.ensureSessionTemp()
+}
+
+// ensureSessionTemp lazily creates os.TempDir()/strike/<session-id>/ once.
+// Safe for concurrent first-use from tool dispatch and prompt composition.
+func (e *Engine) ensureSessionTemp() string {
+	if e == nil {
+		return ""
+	}
+	e.sessionTempMu.Lock()
+	defer e.sessionTempMu.Unlock()
+	if e.sessionTemp.dir != "" || e.sessionTemp.failed {
+		return e.sessionTemp.dir
+	}
+	dir, err := tool.EnsureSessionTemp(e.opts.SessionID)
+	if err != nil || dir == "" {
+		e.sessionTemp.failed = true
+		return ""
+	}
+	e.sessionTemp = sessionTempState{dir: dir, owned: true}
+	return dir
 }
 
 func (e *Engine) cleanupSessionTemp() {
-	if e == nil || !e.sessionTemp.owned {
+	if e == nil {
 		return
 	}
-	_ = tool.CleanupSessionTemp(e.opts.SessionID)
+	e.sessionTempMu.Lock()
+	owned := e.sessionTemp.owned
+	sid := e.opts.SessionID
 	e.sessionTemp = sessionTempState{}
+	e.sessionTempMu.Unlock()
+	if !owned {
+		return
+	}
+	_ = tool.CleanupSessionTemp(sid)
 }
 
 // ExplainPermission returns last-match-wins detail for a sample tool call

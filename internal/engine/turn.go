@@ -783,7 +783,7 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 		callID := call.ID
 		tc := &tool.Context{
 			WorkDir:         e.opts.WorkDir,
-			SessionTempDir:  e.sessionTemp.dir,
+			SessionTempDir:  e.ensureSessionTemp(),
 			SandboxMode:     e.opts.SandboxMode,
 			Sandbox:         e.bashSandboxPolicy(),
 			NetworkAllow:    e.opts.NetworkAllow,
