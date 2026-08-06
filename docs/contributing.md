@@ -84,6 +84,10 @@ session I/O (tier C):
 go test -race ./... -count=1
 ```
 
+Harness failure-injection (fsync fail, process kill, stream drop, permission
+flip, session truncate) lives under `internal/fault` and `TestChaos*` cases —
+see [`docs/chaos.md`](chaos.md). Focused run: `make chaos`.
+
 ### Coverage
 
 `make cover` runs `go test ./... -count=1 -coverprofile=coverage.out` and

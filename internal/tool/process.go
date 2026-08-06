@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jonathanung/strike-cli/internal/fault"
 	"github.com/jonathanung/strike-cli/internal/sandbox"
 )
 
@@ -142,6 +143,18 @@ func RunProcess(ctx context.Context, spec ProcessSpec, obs ProcessObserver) (Pro
 		obs.Started(id, append([]string(nil), spec.Argv...))
 	}
 
+	// Chaos: kill the tree immediately after start (mid-run crash). Safe
+	// outcome is canceled status with Wait reaped — never hang (docs/chaos.md).
+	injectedKill := false
+	if ferr := fault.Check(fault.ProcessAfterStart); ferr != nil {
+		injectedKill = true
+		if cmd.Cancel != nil {
+			_ = cmd.Cancel()
+		} else if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+	}
+
 	waitErr := cmd.Wait()
 	res := ProcessResult{ID: id, Status: ProcessStatusExited}
 	if spec.Combine {
@@ -155,6 +168,14 @@ func RunProcess(ctx context.Context, spec ProcessSpec, obs ProcessObserver) (Pro
 		res.Output = out + errOut
 		res.BytesSeen = outSeen + errSeen
 		res.Truncated = outTrunc || errTrunc
+	}
+	if injectedKill {
+		res.ExitCode = -1
+		res.Status = ProcessStatusCanceled
+		if obs.Exited != nil {
+			obs.Exited(id, res.ExitCode, res.Status)
+		}
+		return res, nil
 	}
 
 	if waitErr != nil {
