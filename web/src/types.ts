@@ -34,7 +34,7 @@ export type Bootstrap = {
   skills: { name: string; description: string }[];
   protocolOps: string[];
 };
-export type Session = { id: string; title?: string; mtime?: number; parentId?: string; open?: boolean };
+export type Session = { id: string; title?: string; mtime?: number; parentId?: string; forkedFrom?: string; open?: boolean };
 export type TranscriptItem = {
   id: string; kind: "user" | "assistant" | "reasoning" | "tool" | "system" | "error";
   title?: string; text: string; requestId?: string; data?: Record<string, unknown>;
@@ -85,6 +85,7 @@ export const LAYER_KINDS = [
 export type ActiveRoot = {
   id: string; title?: string; agent?: string; busy: boolean;
   activeAt?: number; createdAt?: number; hasRecentEvent?: boolean;
+  permissionPending?: boolean; questionPending?: boolean;
 };
 export type RootsResponse = { roots: ActiveRoot[]; activeId?: string };
 export type RootCreateResult = { id: string; sessionId: string };

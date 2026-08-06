@@ -749,3 +749,42 @@ func TestLiveHubResolveLiveBackwardCompat(t *testing.T) {
 		t.Fatalf("SessionID = %q", st.SessionID)
 	}
 }
+func TestLivePermissionQuestionPendingOnStatus(t *testing.T) {
+	ops := make(chan protocol.Op, 4)
+	live := NewLive("s1", "/tmp", nil, ops)
+	if live.Status().PermissionPending || live.Status().QuestionPending {
+		t.Fatal("expected no pending at start")
+	}
+	live.Publish(protocol.PermissionAsked{RequestID: "p1", Permission: "bash"})
+	if !live.Status().PermissionPending {
+		t.Fatal("permission pending after asked")
+	}
+	live.Publish(protocol.PermissionResolved{RequestID: "p1", Decision: protocol.DecisionOnce})
+	if live.Status().PermissionPending {
+		t.Fatal("permission cleared after resolved")
+	}
+	live.Publish(protocol.QuestionAsked{RequestID: "q1"})
+	if !live.Status().QuestionPending {
+		t.Fatal("question pending after asked")
+	}
+	live.Publish(protocol.QuestionResolved{RequestID: "q1"})
+	if live.Status().QuestionPending {
+		t.Fatal("question cleared after resolved")
+	}
+}
+
+func TestLiveHubListExposesAttentionFlags(t *testing.T) {
+	ops := make(chan protocol.Op, 4)
+	live := NewLive("r1", "/tmp", nil, ops)
+	hub := NewLiveHub(nil, nil)
+	hub.Add("r1", live)
+	live.Publish(protocol.PermissionAsked{RequestID: "p1", Permission: "bash"})
+	live.Publish(protocol.TurnStarted{})
+	list := hub.List()
+	if len(list) != 1 {
+		t.Fatalf("list = %d", len(list))
+	}
+	if !list[0].PermissionPending || !list[0].Busy {
+		t.Fatalf("summary = %+v, want permissionPending+busy", list[0])
+	}
+}
