@@ -64,6 +64,8 @@ type capabilities struct {
 	Telemetry      bool `json:"telemetry"`
 	Workflows      bool `json:"workflows"`
 	WorkflowDrafts bool `json:"workflowDrafts"`
+	// Permissions is true when host.Services.Permissions is set (explain + presets).
+	Permissions bool `json:"permissions"`
 }
 
 type bootstrapResponse struct {
@@ -93,6 +95,8 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 		c.Sessions = h.Sessions != nil
 		// Workflow authoring is exposed via /v1/workflows* and /v1/workflow-drafts*.
 		c.Workflows, c.WorkflowDrafts = h.Workflows != nil, h.WorkflowDrafts != nil
+		// Permission explain/presets via /v1/permissions/* (#926).
+		c.Permissions = h.Permissions != nil
 		// MCP status/control is exposed via /v1/mcp*.
 		c.MCP = h.MCP != nil
 		// Capabilities describe browser surfaces, not merely host interfaces.
@@ -480,6 +484,33 @@ func (s *Server) handleIssues(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"issues": items})
+}
+
+// handlePermissionExplain returns last-match-wins detail for a sample tool call.
+// Query: permission (required), pattern (optional; empty means "*").
+// Host-safe DTO only — no TUI types cross this boundary.
+func (s *Server) handlePermissionExplain(w http.ResponseWriter, r *http.Request) {
+	if s.opts.Services == nil || s.opts.Services.Permissions == nil {
+		capabilityUnavailable(w, "permissions")
+		return
+	}
+	perm := strings.TrimSpace(r.URL.Query().Get("permission"))
+	if perm == "" {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "permission is required"})
+		return
+	}
+	pattern := strings.TrimSpace(r.URL.Query().Get("pattern"))
+	ex := s.opts.Services.Permissions.Explain(perm, pattern)
+	writeJSON(w, http.StatusOK, ex)
+}
+
+// handlePermissionPresets lists shipped named permission rulesets.
+func (s *Server) handlePermissionPresets(w http.ResponseWriter, r *http.Request) {
+	if s.opts.Services == nil || s.opts.Services.Permissions == nil {
+		capabilityUnavailable(w, "permissions")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"presets": s.opts.Services.Permissions.Presets()})
 }
 
 func capabilityUnavailable(w http.ResponseWriter, name string) {

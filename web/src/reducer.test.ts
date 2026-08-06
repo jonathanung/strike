@@ -112,6 +112,35 @@ describe("reduceEvent", () => {
     expect(state.status.sessionId).toBe("other");
   });
 
+  it("tracks child start, handoff quality, budget, and escalation fields", () => {
+    let state = reduceEvent(initialState(), {
+      type: "child.started", time: "1",
+      data: { sessionId: "c1", agent: "explore", name: "scout", prompt: "find the bug" },
+    });
+    expect(state.children.c1).toMatchObject({ agent: "explore", name: "scout", status: "running", prompt: "find the bug" });
+    state = reduceEvent(state, {
+      type: "child.escalated", time: "2",
+      data: { sessionId: "c1", kind: "tokens", reason: "token budget exhausted", action: "finalizing" },
+    });
+    expect(state.children.c1).toMatchObject({ status: "finalizing", escalateKind: "tokens", budgetKind: "tokens" });
+    state = reduceEvent(state, {
+      type: "child.completed", time: "3",
+      data: { sessionId: "c1", status: "completed", summary: "top-level summary", budgetKind: "tokens", finalization: "succeeded", handoff: { summary: "handoff body", quality: "partial" } },
+    });
+    expect(state.children.c1).toMatchObject({ status: "completed", summary: "top-level summary", quality: "partial", finalization: "succeeded" });
+  });
+
+  it("seeds children from the sessions children API without clobbering events", () => {
+    let state = reduceEvent(initialState(), {
+      type: "child.started", time: "1", data: { sessionId: "c1", agent: "explore", prompt: "keep me" },
+    });
+    state = reduceEvent(state, {
+      type: "children.seed", time: "seed",
+      data: { sessions: [{ ID: "c1", Title: "should-not-overwrite", Open: false }, { id: "c2", title: "from-api", open: true }] },
+    });
+    expect(state.children.c1).toMatchObject({ agent: "explore", status: "running", prompt: "keep me" });
+    expect(state.children.c2).toMatchObject({ agent: "from-api", status: "running" });
+  });
 });
 
 describe("reduceClient workspace isolation", () => {
