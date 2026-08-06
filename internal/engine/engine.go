@@ -240,6 +240,11 @@ type Options struct {
 	// nil treats all commands as general (process only). Used only when
 	// Scheduler is non-nil.
 	SchedulerPolicy *scheduler.Effective
+	// FileSync, when set, is invoked after successful file tool mutations
+	// (write/edit/apply_patch/notebook_edit) so the host can drive LSP
+	// document sync. absPath is absolute; deleted marks removals.
+	// Nil disables. Must not panic the tool path (callers recover).
+	FileSync func(absPath string, content string, deleted bool)
 }
 
 // beginAck reports whether ToolCallBegin was actually written to Events.

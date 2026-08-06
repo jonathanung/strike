@@ -379,6 +379,11 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 					out = err
 				}
 			}
+			if a.lspClose != nil {
+				if err := a.lspClose(); err != nil && out == nil {
+					out = err
+				}
+			}
 			if a.schedulerClose != nil {
 				a.schedulerClose()
 			}

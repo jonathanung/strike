@@ -178,7 +178,7 @@ func strikeTaskHandler(opts cliOptions, stderr io.Writer) mcp.ToolHandler {
 		}
 
 		var buf bytes.Buffer
-		err := runExecContext(callCtx, callOpts, prompt, &buf, stderr)
+		err := runExecContext(callCtx, callOpts, prompt, execFormatText, &buf, stderr)
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return "", false, err

@@ -255,6 +255,11 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 					runErr = fmt.Errorf("closing mcp servers: %w", err)
 				}
 			}
+			if a.lspClose != nil {
+				if err := a.lspClose(); err != nil && runErr == nil {
+					runErr = fmt.Errorf("closing language servers: %w", err)
+				}
+			}
 			if a.schedulerClose != nil {
 				a.schedulerClose()
 			}
@@ -359,14 +364,15 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 }
 
 // runExec is the headless one-shot composition root: same engine and session
-// log as the TUI, but streams assistant text to stdout and exits after one turn.
-func runExec(opts cliOptions, prompt string, stdout, stderr io.Writer) error {
-	return runExecContext(context.Background(), opts, prompt, stdout, stderr)
+// log as the TUI, but streams assistant text (or JSON envelopes) to stdout and
+// exits after one turn.
+func runExec(opts cliOptions, prompt string, format execOutputFormat, stdout, stderr io.Writer) error {
+	return runExecContext(context.Background(), opts, prompt, format, stdout, stderr)
 }
 
 // runExecContext is runExec with a cancelable parent context (MCP host disconnect,
 // server shutdown). Cancel interrupts the in-flight turn.
-func runExecContext(ctx context.Context, opts cliOptions, prompt string, stdout, stderr io.Writer) (runErr error) {
+func runExecContext(ctx context.Context, opts cliOptions, prompt string, format execOutputFormat, stdout, stderr io.Writer) (runErr error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -381,6 +387,11 @@ func runExecContext(ctx context.Context, opts cliOptions, prompt string, stdout,
 		if a.mcpClose != nil {
 			if err := a.mcpClose(); err != nil && runErr == nil {
 				runErr = fmt.Errorf("closing mcp servers: %w", err)
+			}
+		}
+		if a.lspClose != nil {
+			if err := a.lspClose(); err != nil && runErr == nil {
+				runErr = fmt.Errorf("closing language servers: %w", err)
 			}
 		}
 		if a.schedulerClose != nil {
@@ -419,7 +430,8 @@ func runExecContext(ctx context.Context, opts cliOptions, prompt string, stdout,
 	writeDangerousPermissionsWarning(stderr, opts.dangerouslySkipPermissions)
 
 	storeOwned = true
+	hopts := headlessOpts{Format: format, SessionID: a.sessionID}
 	return runSession(ctx, a.eng.Run, a.eng.Events(), a.store, func(events <-chan protocol.Event) error {
-		return runHeadlessFrontend(ctx, a.eng.Ops(), events, prompt, stdout, stderr)
+		return runHeadlessFrontend(ctx, a.eng.Ops(), events, prompt, stdout, stderr, hopts)
 	})
 }

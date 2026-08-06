@@ -1429,3 +1429,52 @@ func TestLoadMCPHTTPFields(t *testing.T) {
 		t.Fatalf("headers = %#v", s.Headers)
 	}
 }
+
+func TestLoadLSPMergeReplace(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	work := t.TempDir()
+
+	global := filepath.Join(home, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(global), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(global, []byte(`{
+		"lsp": {"servers": {
+			"global_only": {"command": "gopls", "extensions": [".go"]},
+			"shared": {"command": "old-ls", "extensions": [".ts"]}
+		}}
+	}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	project := filepath.Join(work, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(project), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(project, []byte(`{
+		"lsp": {"servers": {
+			"shared": {"command": "typescript-language-server", "args": ["--stdio"], "extensions": [".ts", ".tsx"], "env": {"FOO": "1"}},
+			"py": {"command": "pylsp", "extensions": ["py"]}
+		}}
+	}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := cfg.LSP.Servers["global_only"]; ok {
+		t.Fatal("project lsp.servers should replace global map entirely")
+	}
+	s := cfg.LSP.Servers["shared"]
+	if s.Command != "typescript-language-server" || len(s.Args) != 1 || s.Args[0] != "--stdio" {
+		t.Fatalf("shared = %#v", s)
+	}
+	if s.Env["FOO"] != "1" || len(s.Extensions) != 2 {
+		t.Fatalf("shared fields = %#v", s)
+	}
+	if cfg.LSP.Servers["py"].Command != "pylsp" {
+		t.Fatalf("py = %#v", cfg.LSP.Servers["py"])
+	}
+}

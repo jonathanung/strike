@@ -173,6 +173,55 @@ func TestWriteAndEdit(t *testing.T) {
 	}
 }
 
+func TestFileSyncCallback(t *testing.T) {
+	dir := t.TempDir()
+	tc := allowAll(dir)
+	type syncEv struct {
+		path    string
+		content string
+		deleted bool
+	}
+	var got []syncEv
+	tc.FileSync = func(absPath, content string, deleted bool) {
+		got = append(got, syncEv{path: absPath, content: content, deleted: deleted})
+	}
+
+	_, err := NewWrite().Execute(context.Background(), mustJSON(t, map[string]any{
+		"filePath": "a.go",
+		"content":  "package a\n",
+	}), tc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].deleted || got[0].content != "package a\n" {
+		t.Fatalf("write sync = %#v", got)
+	}
+	if got[0].path != filepath.Join(dir, "a.go") {
+		t.Fatalf("path = %q", got[0].path)
+	}
+
+	_, err = NewEdit().Execute(context.Background(), mustJSON(t, map[string]any{
+		"filePath":  "a.go",
+		"oldString": "package a\n",
+		"newString": "package b\n",
+	}), tc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[1].content != "package b\n" {
+		t.Fatalf("edit sync = %#v", got)
+	}
+
+	// Panic in callback must not fail the tool.
+	tc.FileSync = func(string, string, bool) { panic("boom") }
+	if _, err := NewWrite().Execute(context.Background(), mustJSON(t, map[string]any{
+		"filePath": "c.go",
+		"content":  "x",
+	}), tc); err != nil {
+		t.Fatalf("panic should be recovered: %v", err)
+	}
+}
+
 func TestGlobAndGrep(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "a.go"), []byte("package a\nfunc Foo() {}\n"), 0o644); err != nil {
