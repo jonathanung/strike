@@ -21,6 +21,10 @@ type visualizerTool struct {
 	IsError bool
 }
 
+// visualizerMaxFilesShown caps how many file paths render in the detail list.
+// Remaining count is summarized as "+N more" so layout stays width-safe.
+const visualizerMaxFilesShown = 5
+
 // visualizerStateMsg is a snapshot of the selected session/agent node for the
 // right-pane visualizer. Model owns live stats; the window only renders.
 type visualizerStateMsg struct {
@@ -42,6 +46,11 @@ type visualizerStateMsg struct {
 	// Activity samples for the sparkline; empty means no known activity.
 	Activity []float64
 	Tools    []visualizerTool
+	// Live multi-agent detail (roster / observability). Empty means unknown.
+	Objective    string
+	LastAction   string
+	BlockReason  string
+	FilesTouched []string
 }
 
 // visualizerWindow shows status glyphs, token/cost (when known), an activity
@@ -115,6 +124,13 @@ func (w visualizerWindow) view(th theme.Theme) string {
 	statusVal := statusStyle.Render(glyph + themedSpace(th.Spacing.XS) + sanitizeDisplayData(statusLabel))
 	lines = append(lines, contextKVLine(th, w.width, "status", statusVal))
 
+	// Detail block: objective / last action / block reason / files.
+	// Children always show objective + last action (muted placeholder when
+	// unknown) so selection is never an empty status-only card. Roots only
+	// surface non-empty detail so the token stack stays primary.
+	lines = append(lines, visualizerDetailLines(th, w.width, s, dash)...)
+
+	// Root-oriented usage stack. Children keep unknown tokens as dashes.
 	// Tokens: never print measured zero for unknown sides.
 	inStr := formatTokenCount(s.Input, dash)
 	outStr := formatTokenCount(s.Output, dash)
@@ -182,6 +198,132 @@ func (w visualizerWindow) view(th theme.Theme) string {
 	}
 
 	return visualizerFit(lines, w.height)
+}
+
+// visualizerDetailLines renders objective / last action / block / files rows.
+// Never fabricates content: empty fields use the muted unknown marker or omit.
+func visualizerDetailLines(th theme.Theme, width int, s visualizerStateMsg, dash string) []string {
+	th = th.Resolve()
+	st := th.S()
+	isChild := strings.EqualFold(strings.TrimSpace(s.Kind), "child")
+	var lines []string
+
+	objective := strings.TrimSpace(s.Objective)
+	if isChild || objective != "" {
+		val := st.Muted.Render(dash)
+		if objective != "" {
+			val = st.Text.Render(sanitizeDisplayData(objective))
+		}
+		lines = append(lines, contextKVLine(th, width, "objective", val))
+	}
+
+	action := visualizerLastActionHint(s)
+	if isChild || action != "" {
+		val := st.Muted.Render(dash)
+		if action != "" {
+			val = st.Text.Render(sanitizeDisplayData(action))
+		}
+		lines = append(lines, contextKVLine(th, width, "action", val))
+	}
+
+	if block := visualizerBlockLine(th, width, s, dash); block != "" {
+		lines = append(lines, block)
+	}
+
+	lines = append(lines, visualizerFilesLines(th, width, s.FilesTouched, dash)...)
+	return lines
+}
+
+// visualizerLastActionHint prefers roster lastAction; falls back to an
+// in-flight tool name, then the most recent tool — never invents labels.
+func visualizerLastActionHint(s visualizerStateMsg) string {
+	if a := strings.TrimSpace(s.LastAction); a != "" {
+		return a
+	}
+	for _, tool := range s.Tools {
+		name := strings.TrimSpace(tool.Name)
+		if name == "" {
+			continue
+		}
+		if !tool.Done {
+			return name
+		}
+	}
+	if len(s.Tools) > 0 {
+		return strings.TrimSpace(s.Tools[0].Name)
+	}
+	return ""
+}
+
+// visualizerBlockLine surfaces blockReason for blocked / needs-attention nodes.
+// Empty reason with an attention/blocked status still shows a muted placeholder.
+func visualizerBlockLine(th theme.Theme, width int, s visualizerStateMsg, dash string) string {
+	th = th.Resolve()
+	st := th.S()
+	reason := strings.TrimSpace(s.BlockReason)
+	needs := reason != "" || visualizerNeedsBlockRow(s)
+	if !needs {
+		return ""
+	}
+	val := st.Muted.Render(dash)
+	if reason != "" {
+		val = st.Warning.Render(sanitizeDisplayData(reason))
+	}
+	return contextKVLine(th, width, "blocked", val)
+}
+
+func visualizerNeedsBlockRow(s visualizerStateMsg) bool {
+	if s.State == theme.AgentStateAttention || s.State == theme.AgentStateError {
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(s.StatusLabel)) {
+	case string(protocol.ChildStatusBlocked), "needs you", "needs_attention", "attention":
+		return true
+	default:
+		return false
+	}
+}
+
+// visualizerFilesLines renders a bounded, width-safe files-touched section.
+// Omits entirely when unknown (no fabricated paths).
+func visualizerFilesLines(th theme.Theme, width int, files []string, dash string) []string {
+	th = th.Resolve()
+	st := th.S()
+	clean := make([]string, 0, len(files))
+	for _, f := range files {
+		f = strings.TrimSpace(f)
+		if f == "" {
+			continue
+		}
+		clean = append(clean, sanitizeDisplayData(f))
+	}
+	if len(clean) == 0 {
+		return nil
+	}
+	total := len(clean)
+	show := clean
+	extra := 0
+	if total > visualizerMaxFilesShown {
+		show = clean[:visualizerMaxFilesShown]
+		extra = total - visualizerMaxFilesShown
+	}
+	header := "files"
+	if total > 1 || extra > 0 {
+		header = "files (" + strconv.Itoa(total) + ")"
+	}
+	lines := []string{wrapWindowText(st.Muted.Render(header), width)}
+	for _, f := range show {
+		// Indent with theme spacing; truncate long paths.
+		prefix := themedSpace(th.Spacing.SM)
+		budget := max(0, width-ansi.StringWidth(prefix))
+		path := welcomeTruncate(f, budget, th.Icons.Ellipsis)
+		lines = append(lines, wrapWindowText(st.Text.Render(prefix+path), width))
+	}
+	if extra > 0 {
+		more := dash + " +" + strconv.Itoa(extra) + " more"
+		lines = append(lines, wrapWindowText(st.Muted.Render(more), width))
+	}
+	return lines
 }
 
 func visualizerFit(lines []string, height int) string {
