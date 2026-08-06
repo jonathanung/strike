@@ -15,7 +15,7 @@ import (
 //
 // This is the shared policy shape for application-layer egress (webfetch
 // today; container net later). Bash OS networking remains all-or-nothing via
-// Policy.Network — host filters are not applied inside bwrap/seatbelt.
+// Policy.NetworkEnabled — host filters are not applied inside bwrap/seatbelt.
 
 // NormalizeNetworkAllow trims, lowercases hostnames, validates, dedupes, and
 // sorts allowlist entries. Empty strings are dropped. Bare "*" is rejected

@@ -31,6 +31,7 @@ var shortPurposes = map[string]string{
 	"task_message":    "send guidance to a running child task",
 	"task_interrupt":  "cancel a running child task",
 	"agent_roster":    "list lead and teammate agents on the session team",
+	"agent_ownership": "query path ownership/overlaps; lease path prefixes",
 	"agent_message":   "send a peer message to one teammate",
 	"agent_broadcast": "broadcast a peer message to all other teammates",
 	"team_task":       "shared team task board (create/list/claim/complete)",
@@ -257,6 +258,8 @@ func recommendedGuidance(entries []GuidanceEntry) string {
 		"Use `task` for bounded non-blocking delegation (self-contained prompt). A later `[child.completed]` delivers a structured handoff JSON — never sleep-poll for task completion.")
 	add(has("agent_roster"),
 		"Use `agent_roster` to list the lead and teammates (session ids, personas, states) on the implicit session team — prefer over status polling when you only need who is live.")
+	add(has("agent_ownership"),
+		"Use `agent_ownership` to inspect path ownership/overlaps before parallel writes, or to lease a package prefix. Write tools auto-register touches; `session.overlapPolicy` defaults to warn (block refuses conflicts). Prefer disjoint paths or isolated worktrees for parallel writers.")
 	add(has("agent_message") || has("agent_broadcast"),
 		"Prefer `agent_message` / `agent_broadcast` for mid-flight coordination (blockers, handoffs, child→lead early). Prefer `[child.completed]` structured handoff JSON for finished work products. Avoid chatty loops. `task_message` remains parent→owned-child steer only — not a parent-only team control plane.")
 	add(has("team_task"),

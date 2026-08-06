@@ -25,13 +25,13 @@ func probePlatform() availInfo {
 	if abs, err := filepath.Abs(path); err == nil {
 		path = abs
 	}
-	// Probe the same flag shape Wrap emits (minus workdir bind) so locked-down
-	// environments (no user namespaces) degrade at startup, not mid-command.
+	// Probe the default Wrap shape (host networking shared — product default).
+	// Avoid --unshare-net here: some environments allow shared-net bwrap but
+	// fail loopback setup inside a new netns; default policy does not unshare.
 	cmd := exec.Command(path,
 		"--ro-bind", "/", "/",
 		"--dev", "/dev",
 		"--proc", "/proc",
-		"--unshare-net",
 		"--die-with-parent",
 		"--", "true",
 	)
@@ -88,7 +88,7 @@ func wrapPlatform(argv []string, policy Policy) []string {
 		"--dev", "/dev",
 		"--proc", "/proc",
 	)
-	if !policy.Network {
+	if policy.NoNetwork {
 		out = append(out, "--unshare-net")
 	}
 	out = append(out, "--die-with-parent", "--")
@@ -124,7 +124,7 @@ func profileText(policy Policy) string {
 	}
 	b.WriteString("  --dev /dev \\\n")
 	b.WriteString("  --proc /proc \\\n")
-	if !policy.Network {
+	if policy.NoNetwork {
 		b.WriteString("  --unshare-net \\\n")
 	} else {
 		b.WriteString("  # network shared with host\n")
