@@ -204,7 +204,9 @@ func (e *Engine) runCheckGate(ctx context.Context, phase config.Phase) error {
 	}
 	switch res.Status {
 	case tool.ProcessStatusTimeout:
-		return fmt.Errorf("phase %q check timed out after %s", phase.Name, phaseCheckTimeout)
+		// Parent ctx may deadline sooner than phaseCheckTimeout; do not claim
+		// a fixed duration that may not match the deadline that fired.
+		return fmt.Errorf("phase %q check timed out", phase.Name)
 	case tool.ProcessStatusCanceled:
 		return fmt.Errorf("phase %q check canceled", phase.Name)
 	case tool.ProcessStatusError:
