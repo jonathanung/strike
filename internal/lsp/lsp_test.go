@@ -175,6 +175,104 @@ func runFakeLSP(mode string) {
 			if mode == "crash-on-shutdown" {
 				os.Exit(2)
 			}
+		case "textDocument/definition":
+			if mode == "nav" || mode == "" || mode == "no-diagnostics" {
+				var p textDocumentPositionParams
+				_ = json.Unmarshal(msg.Params, &p)
+				// Point at a synthetic location derived from the request URI.
+				write(map[string]any{
+					"jsonrpc": "2.0",
+					"id":      *msg.ID,
+					"result": Location{
+						URI: p.TextDocument.URI,
+						Range: Range{
+							Start: Position{Line: p.Position.Line, Character: 0},
+							End:   Position{Line: p.Position.Line, Character: 3},
+						},
+					},
+				})
+			} else {
+				write(map[string]any{
+					"jsonrpc": "2.0",
+					"id":      *msg.ID,
+					"result":  nil,
+				})
+			}
+		case "textDocument/references":
+			var p referenceParams
+			_ = json.Unmarshal(msg.Params, &p)
+			write(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      *msg.ID,
+				"result": []Location{
+					{
+						URI: p.TextDocument.URI,
+						Range: Range{
+							Start: Position{Line: p.Position.Line, Character: 0},
+							End:   Position{Line: p.Position.Line, Character: 3},
+						},
+					},
+					{
+						URI: p.TextDocument.URI,
+						Range: Range{
+							Start: Position{Line: p.Position.Line + 1, Character: 4},
+							End:   Position{Line: p.Position.Line + 1, Character: 7},
+						},
+					},
+				},
+			})
+		case "textDocument/documentSymbol":
+			var p documentSymbolParams
+			_ = json.Unmarshal(msg.Params, &p)
+			write(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      *msg.ID,
+				"result": []documentSymbol{
+					{
+						Name:           "Foo",
+						Kind:           SymbolKindFunction,
+						Range:          Range{Start: Position{Line: 0, Character: 0}, End: Position{Line: 2, Character: 1}},
+						SelectionRange: Range{Start: Position{Line: 0, Character: 5}, End: Position{Line: 0, Character: 8}},
+						Children: []documentSymbol{
+							{
+								Name:           "helper",
+								Kind:           SymbolKindMethod,
+								Range:          Range{Start: Position{Line: 1, Character: 1}, End: Position{Line: 1, Character: 10}},
+								SelectionRange: Range{Start: Position{Line: 1, Character: 1}, End: Position{Line: 1, Character: 7}},
+							},
+						},
+					},
+				},
+			})
+		case "workspace/symbol":
+			var p workspaceSymbolParams
+			_ = json.Unmarshal(msg.Params, &p)
+			uri := "file:///tmp/ws.go"
+			if len(openURIs) > 0 {
+				for u := range openURIs {
+					uri = u
+					break
+				}
+			}
+			name := "Bar"
+			if p.Query != "" {
+				name = p.Query
+			}
+			write(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      *msg.ID,
+				"result": []symbolInformation{
+					{
+						Name: name,
+						Kind: SymbolKindStruct,
+						Location: Location{
+							URI:   uri,
+							Range: Range{Start: Position{Line: 3, Character: 0}, End: Position{Line: 3, Character: 3}},
+						},
+						ContainerName: "pkg",
+					},
+				},
+			})
 		default:
 			write(map[string]any{
 				"jsonrpc": "2.0",
