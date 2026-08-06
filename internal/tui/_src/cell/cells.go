@@ -143,6 +143,13 @@ func isExploreTool(name string) bool {
 	}
 }
 
+// hideToolOutputBody reports tools whose successful result body should stay
+// off the transcript (header/title only). File contents still reach the model
+// via the tool result; y-to-copy can still pull output from copyText.
+func hideToolOutputBody(name string) bool {
+	return name == "read"
+}
+
 // collapsible reports whether this finished tool has body content that can
 // grow beyond the collapsed preview.
 func (c *toolCell) collapsible() bool {
@@ -152,6 +159,10 @@ func (c *toolCell) collapsible() bool {
 	if meta, ok := parseEditMetadata(c.metadata); ok {
 		// Expand when the unified hunk exceeds the collapsed MaxLines window.
 		return ui.DiffExceeds(meta.OldString, meta.NewString, diffPreviewMaxLinesCell) || c.expanded
+	}
+	// Successful reads are header-only in the chat (issue #746).
+	if hideToolOutputBody(c.name) && !c.isError {
+		return false
 	}
 	if c.output == "" {
 		return false
@@ -274,7 +285,8 @@ func (c *toolCell) renderLinked(width int, th theme.Theme, linkBase string) stri
 			if diff != "" {
 				out += "\n" + indent(diff, prefix)
 			}
-		} else if c.output != "" {
+		} else if c.output != "" && !(hideToolOutputBody(c.name) && !c.isError) {
+			// Successful read: header/title only — do not dump file contents.
 			text := c.output
 			if !c.expanded {
 				text = previewLines(c.output, toolPreviewLines, ic.Ellipsis, space)
@@ -284,8 +296,9 @@ func (c *toolCell) renderLinked(width int, th theme.Theme, linkBase string) stri
 			body := renderCellText(st.Muted, text, bodyWidth)
 			out += "\n" + indent(body, prefix)
 		}
-	} else if c.output != "" {
+	} else if c.output != "" && !(hideToolOutputBody(c.name) && !c.isError) {
 		// Live bash (and other streaming tools): bounded tail while running.
+		// Successful read stays header-only even if output streams early.
 		prefix := themedSpace(th.Spacing.SM) + st.BorderMuted.Render(ic.ToolGuide) + space
 		bodyWidth := max(1, width-lipgloss.Width(prefix))
 		body := renderCellText(st.Muted, tailLines(c.output, toolLiveTailLines), bodyWidth)

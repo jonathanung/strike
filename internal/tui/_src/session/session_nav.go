@@ -468,7 +468,7 @@ func loadSessionTranscriptOpts(sessions host.Sessions, id string, live bool) (ce
 	if title == "" {
 		for _, ev := range events {
 			if u, ok := ev.(protocol.UserMessage); ok {
-				if topic := sanitizeTitleTopic(u.Text); topic != "" {
+				if topic := sanitizeTitleTopic(userMessageDisplayText(u.Text, u.Images)); topic != "" {
 					title = topic
 					break
 				}
@@ -579,7 +579,7 @@ func seedFromReplay(m *Model, events []protocol.Event) {
 		switch e := ev.(type) {
 		case protocol.UserMessage:
 			if m.titleTopic == "" {
-				if topic := sanitizeTitleTopic(e.Text); topic != "" {
+				if topic := sanitizeTitleTopic(userMessageDisplayText(e.Text, e.Images)); topic != "" {
 					m.titleTopic = topic
 				}
 			}

@@ -7,7 +7,7 @@
 │   Reading the store, then running tests.                                     │ │ skills  1                           │
 │                                                                              │ ╰─────────────────────────────────────╯
 │ ⚙ read · internal/auth/store.go ✓                                            │
-│   │ package auth                                                             │ ╭─ activity ──────────────────────────╮
+│                                                                              │ ╭─ activity ──────────────────────────╮
 │                                                                              │ │   internal/auth/store.go — done  ✓  │
 │                                                                              │ │                                     │
 │                                                                              │ │                                     │

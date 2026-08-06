@@ -367,9 +367,10 @@ func applyEventToPane(p *rootPane, ev protocol.Event) {
 		if isChildCompletedNotice(e.Text) {
 			break
 		}
-		p.cells = append(p.cells, &userCell{text: e.Text})
+		display := userMessageDisplayText(e.Text, e.Images)
+		p.cells = append(p.cells, &userCell{text: display})
 		if p.titleTopic == "" {
-			if topic := sanitizeTitleTopic(e.Text); topic != "" {
+			if topic := sanitizeTitleTopic(display); topic != "" {
 				p.titleTopic = topic
 			}
 		}
