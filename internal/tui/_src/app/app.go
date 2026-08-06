@@ -511,6 +511,8 @@ type childPathOverlap struct {
 	policy  string
 	blocked bool
 	warning string
+	// holders are other claimants (display names or short ids); bounded.
+	holders []string
 }
 
 // childVerificationSummary is claim-vs-verified state for a child session.

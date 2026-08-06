@@ -740,3 +740,194 @@ func TestVisualizerBudgetWidthSafe(t *testing.T) {
 		}
 	}
 }
+
+func TestVisualizerVerificationClaimedVsVerified(t *testing.T) {
+	w := newVisualizerWindow().resize(48, 20).(visualizerWindow)
+
+	// Verified success.
+	updated, _ := w.update(visualizerStateMsg{
+		SessionID: "c1",
+		Label:     "done",
+		Kind:      "child",
+		State:     theme.AgentStateReady,
+		Verification: &visualizerVerification{
+			Claimed: true, Verified: true, Passed: true,
+			Summary: "2/2 gates passed",
+		},
+	})
+	plain := ansi.Strip(updated.view(theme.Default()))
+	if !strings.Contains(plain, "verify") || !strings.Contains(plain, "verified") {
+		t.Fatalf("verified badge missing:\n%s", plain)
+	}
+	if strings.Contains(plain, "claimed") && !strings.Contains(plain, "verified") {
+		t.Fatalf("claimed should not replace verified:\n%s", plain)
+	}
+
+	// Claimed not verified.
+	updated, _ = w.update(visualizerStateMsg{
+		SessionID: "c2",
+		Label:     "claim",
+		Kind:      "child",
+		State:     theme.AgentStateReady,
+		Verification: &visualizerVerification{
+			Claimed: true, Verified: false, Passed: false,
+			Summary: "unit failed",
+		},
+	})
+	plain = ansi.Strip(updated.view(theme.Default()))
+	if !strings.Contains(plain, "claimed") {
+		t.Fatalf("claimed badge missing:\n%s", plain)
+	}
+	if strings.Contains(plain, "verified") {
+		t.Fatalf("should not show verified when claimed-only:\n%s", plain)
+	}
+
+	// Failed / unverified (no claim).
+	updated, _ = w.update(visualizerStateMsg{
+		SessionID: "c3",
+		Label:     "fail",
+		Kind:      "child",
+		State:     theme.AgentStateError,
+		Verification: &visualizerVerification{
+			Claimed: false, Verified: false, Passed: false,
+			Summary: "gates failed",
+		},
+	})
+	plain = ansi.Strip(updated.view(theme.Default()))
+	if !strings.Contains(plain, "unverified") {
+		t.Fatalf("unverified badge missing:\n%s", plain)
+	}
+}
+
+func TestVisualizerNoReportOmitsVerifiedBadge(t *testing.T) {
+	w := newVisualizerWindow().resize(36, 16).(visualizerWindow)
+	updated, _ := w.update(visualizerStateMsg{
+		SessionID:   "c",
+		Label:       "x",
+		Kind:        "child",
+		State:       theme.AgentStateReady,
+		StatusLabel: "completed",
+		// Verification nil — gates never ran.
+	})
+	plain := ansi.Strip(updated.view(theme.Default()))
+	if strings.Contains(plain, "verify") || strings.Contains(plain, "verified") || strings.Contains(plain, "claimed") {
+		t.Fatalf("no-report must not show verification chrome:\n%s", plain)
+	}
+}
+
+func TestVisualizerPathOverlapConflict(t *testing.T) {
+	w := newVisualizerWindow().resize(48, 24).(visualizerWindow)
+	updated, _ := w.update(visualizerStateMsg{
+		SessionID: "c",
+		Label:     "writer",
+		Kind:      "child",
+		State:     theme.AgentStateWorking,
+		PathOverlaps: []visualizerPathOverlap{
+			{
+				Path:    "internal/auth/store.go",
+				Policy:  "block",
+				Blocked: true,
+				Holders: []string{"explorer", "reviewer"},
+			},
+			{
+				Path:    "pkg/protocol/protocol.go",
+				Policy:  "warn",
+				Blocked: false,
+				Holders: []string{"other"},
+			},
+		},
+	})
+	plain := ansi.Strip(updated.view(theme.Default()))
+	for _, want := range []string{
+		"conflicts", "blocked", "internal/auth/store.go",
+		"holders", "explorer", "reviewer",
+		"warn", "pkg/protocol/protocol.go",
+	} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("missing %q:\n%s", want, plain)
+		}
+	}
+}
+
+func TestVisualizerPathOverlapAbsent(t *testing.T) {
+	w := newVisualizerWindow().resize(32, 16).(visualizerWindow)
+	updated, _ := w.update(visualizerStateMsg{
+		SessionID: "c",
+		Label:     "x",
+		Kind:      "child",
+		State:     theme.AgentStateWorking,
+	})
+	plain := ansi.Strip(updated.view(theme.Default()))
+	if strings.Contains(plain, "conflict") || strings.Contains(plain, "holders") {
+		t.Fatalf("no overlaps should omit conflict section:\n%s", plain)
+	}
+}
+
+func TestVisualizerVerificationAndConflictWidthSafe(t *testing.T) {
+	msg := visualizerStateMsg{
+		SessionID: "c",
+		Label:     "long-child-name",
+		Kind:      "child",
+		State:     theme.AgentStateAttention,
+		Verification: &visualizerVerification{
+			Claimed: true, Verified: false, Passed: false,
+			Summary: "a very long verification summary that must not blow narrow panes",
+		},
+		PathOverlaps: []visualizerPathOverlap{
+			{
+				Path:    "internal/tui/_src/window/visualizer_window.go",
+				Policy:  "block",
+				Blocked: true,
+				Holders: []string{"agent-one", "agent-two", "agent-three", "agent-four"},
+				Warning: "path claimed by multiple agents concurrently under block policy",
+			},
+		},
+	}
+	for _, width := range []int{8, 16, 24, 40, 80} {
+		updated, _ := newVisualizerWindow().resize(width, 24).update(msg)
+		view := updated.view(theme.Default())
+		for i, line := range strings.Split(view, "\n") {
+			if got := lipgloss.Width(line); got > width {
+				t.Errorf("width %d line %d width %d: %q", width, i, got, ansi.Strip(line))
+			}
+		}
+	}
+}
+
+func TestPathOverlapHoldersPlumbedToSnapshot(t *testing.T) {
+	// Holders from wire PathOverlap reach the visualizer snapshot.
+	m, _ := newAppTestModel(nil, nil)
+	m.sessionID = "root"
+	m.children = []childActivity{{sessionID: "child-1", parentID: "root", status: "running", agent: "build"}}
+	m.onPathOverlap(protocol.PathOverlap{
+		Correlation: protocol.Correlation{SessionID: "child-1", ParentSessionID: "root", Depth: 1},
+		Path:        "shared.go",
+		Policy:      "warn",
+		Holders: []protocol.PathOverlapHolder{
+			{SessionID: "other-1", Name: "explorer"},
+			{SessionID: "other-2", Name: "reviewer"},
+		},
+	})
+	if len(m.children) == 0 || len(m.children[0].pathOverlaps) == 0 {
+		t.Fatalf("path overlap not stored: children=%#v", m.children)
+	}
+	po := m.children[0].pathOverlaps[0]
+	if len(po.holders) != 2 || po.holders[0] != "explorer" {
+		t.Fatalf("holders not plumbed: %#v", po.holders)
+	}
+	m.vizFocusID = "child-1"
+	snap := m.visualizerStateSnapshot()
+	if len(snap.PathOverlaps) != 1 || len(snap.PathOverlaps[0].Holders) != 2 {
+		t.Fatalf("snapshot overlaps = %#v", snap.PathOverlaps)
+	}
+	if snap.PathOverlaps[0].Holders[0] != "explorer" {
+		t.Fatalf("snapshot holders = %#v", snap.PathOverlaps[0].Holders)
+	}
+	// Render path.
+	w := newVisualizerWindow().resize(48, 20).(visualizerWindow)
+	updated, _ := w.update(snap)
+	plain := ansi.Strip(updated.view(theme.Default()))
+	if !strings.Contains(plain, "shared.go") || !strings.Contains(plain, "explorer") {
+		t.Fatalf("visualizer missing overlap/holders:\n%s", plain)
+	}
+}
