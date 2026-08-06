@@ -193,13 +193,13 @@ func buildSeatbeltProfile(policy Policy, workDir string) string {
 `)
 	if policy.Network {
 		b.WriteString(`
-; Network (compiled from webfetch/mcp allow)
+; Network (host networking; off only when webfetch+mcp deny *)
 (allow network-outbound)
 (allow network-inbound)
 (allow system-socket)
 `)
 	}
-	// Network is denied by default when Network is false (no allow network-*).
+	// When Network is false, deny-default omits network-* (no outbound/inbound).
 	if mode == ModeWorkspaceWrite && !policy.NoWorkspaceWrite && workDir != "" {
 		// Seatbelt subpath match; escape " and \ in the path literal.
 		escaped := seatbeltEscape(workDir)

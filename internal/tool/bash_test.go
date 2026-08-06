@@ -265,10 +265,13 @@ func TestBashSandboxPolicyCompiled(t *testing.T) {
 	if !p.NoWorkspaceWrite || !p.Network || len(p.DenyWriteGlobs) != 1 {
 		t.Fatalf("compiled policy = %+v", p)
 	}
-	// Fallback when only SandboxMode is set.
+	// Fallback when only SandboxMode is set — network on (product default).
 	p2 := bashSandboxPolicy(&Context{WorkDir: wd, SandboxMode: "read-only"})
-	if p2.Mode != sandbox.ModeReadOnly || p2.WorkDir != wd {
+	if p2.Mode != sandbox.ModeReadOnly || p2.WorkDir != wd || !p2.Network {
 		t.Fatalf("fallback = %+v", p2)
+	}
+	if pNil := bashSandboxPolicy(nil); !pNil.Network || pNil.Mode != sandbox.DefaultMode {
+		t.Fatalf("nil context = %+v", pNil)
 	}
 }
 
