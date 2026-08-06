@@ -50,6 +50,15 @@ type AskRequest struct {
 	Metadata json.RawMessage
 }
 
+// VerifyGate is one independent completion condition declared at task spawn.
+// Kind is cmd|schema|path (see internal/verify). The implementer model cannot
+// self-certify past configured gates.
+type VerifyGate struct {
+	Kind        string `json:"kind"`
+	Value       string `json:"value"`
+	Description string `json:"description,omitempty"`
+}
+
 // TaskRequest is a child/subagent spawn request.
 type TaskRequest struct {
 	Prompt string
@@ -65,6 +74,10 @@ type TaskRequest struct {
 	// (off|low|medium|high|xhigh|max). Empty inherits the parent's dial
 	// (subject to agent effort pins). When set, it wins over agent pins.
 	Effort string
+	// Verify declares independent completion gates. When non-empty, implementer
+	// completion alone does not yield final completed status — the harness runs
+	// these gates and only promotes to completed on pass (else blocked).
+	Verify []VerifyGate
 }
 
 // TaskResult is the outcome of spawning a child session.
@@ -99,8 +112,42 @@ type CompletionHandoff struct {
 	Incomplete            bool     `json:"incomplete,omitempty"`
 }
 
+// VerificationReport is the harness gate report on task_status (snake_case).
+// Distinct from CompletionHandoff.Verification (model self-report string).
+type VerificationReport struct {
+	Passed     bool                `json:"passed"`
+	Claimed    bool                `json:"claimed"`
+	Verified   bool                `json:"verified"`
+	Checks     []VerificationCheck `json:"checks"`
+	Env        VerificationEnv     `json:"env"`
+	Summary    string              `json:"summary,omitempty"`
+	DurationMs int64               `json:"duration_ms,omitempty"`
+}
+
+// VerificationCheck is one gate outcome (snake_case for tools).
+type VerificationCheck struct {
+	Name       string `json:"name,omitempty"`
+	Kind       string `json:"kind"`
+	Value      string `json:"value,omitempty"`
+	Passed     bool   `json:"passed"`
+	ExitCode   int    `json:"exit_code,omitempty"`
+	Output     string `json:"output,omitempty"`
+	Error      string `json:"error,omitempty"`
+	DurationMs int64  `json:"duration_ms,omitempty"`
+}
+
+// VerificationEnv is audit metadata for a verification run.
+type VerificationEnv struct {
+	WorkDir    string `json:"work_dir,omitempty"`
+	SessionID  string `json:"session_id,omitempty"`
+	WorktreeID string `json:"worktree_id,omitempty"`
+	ModelID    string `json:"model_id,omitempty"`
+	StartedAt  string `json:"started_at,omitempty"`
+	FinishedAt string `json:"finished_at,omitempty"`
+}
+
 // TaskStatusResult is a model-facing snapshot of a child session.
-// State is one of starting|working|needs_attention|completed|failed|canceled|unknown.
+// State is one of starting|working|needs_attention|completed|failed|canceled|blocked|unknown.
 // QueuePools/QueueLabel are set while the child is waiting on scheduler admission
 // so callers can distinguish queue wait from idle without exact queue positions.
 type TaskStatusResult struct {
@@ -114,6 +161,10 @@ type TaskStatusResult struct {
 	// HasHandoff distinguishes "not terminal yet" from an empty handoff object.
 	Handoff    CompletionHandoff
 	HasHandoff bool
+	// Verification is the harness gate report when gates ran at completion.
+	// HasVerification distinguishes "no gates" from an empty report object.
+	Verification    VerificationReport
+	HasVerification bool
 	// QueuePools lists constrained pool names while waiting for admission.
 	QueuePools []string `json:"queue_pools,omitempty"`
 	// QueueLabel is a short human tag for the waiting work (e.g. "model").

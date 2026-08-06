@@ -740,6 +740,8 @@ func agentsStatusParts(th theme.Theme, status string) (label, glyph string, styl
 		return "failed", ic.Err, st.Error
 	case string(protocol.ChildStatusCanceled):
 		return "canceled", ic.Info, st.Muted
+	case string(protocol.ChildStatusBlocked):
+		return "blocked", ic.Info, st.Warning
 	default:
 		if status == "" {
 			status = "unknown"

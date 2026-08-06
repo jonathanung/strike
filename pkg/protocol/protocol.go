@@ -440,6 +440,10 @@ const (
 	ChildStatusCompleted ChildStatus = "completed"
 	ChildStatusFailed    ChildStatus = "failed"
 	ChildStatusCanceled  ChildStatus = "canceled"
+	// ChildStatusBlocked means the implementer claimed done but independent
+	// verification gates failed (or the task is otherwise blocked pending fix).
+	// Distinct from failed (runtime/error) so leads can re-open work.
+	ChildStatusBlocked ChildStatus = "blocked"
 )
 
 // TeamMemberState is the roster lifecycle state of one agent on an implicit
@@ -452,6 +456,7 @@ const (
 	TeamMemberCompleted TeamMemberState = "completed"
 	TeamMemberFailed    TeamMemberState = "failed"
 	TeamMemberCanceled  TeamMemberState = "canceled"
+	TeamMemberBlocked   TeamMemberState = "blocked"
 )
 
 // TeamMemberStateFromChild maps a terminal child outcome onto a roster state.
@@ -462,6 +467,8 @@ func TeamMemberStateFromChild(s ChildStatus) TeamMemberState {
 		return TeamMemberCompleted
 	case ChildStatusCanceled:
 		return TeamMemberCanceled
+	case ChildStatusBlocked:
+		return TeamMemberBlocked
 	case ChildStatusFailed:
 		return TeamMemberFailed
 	default:
@@ -534,6 +541,43 @@ type CompletionHandoff struct {
 	Incomplete bool `json:"incomplete,omitempty"`
 }
 
+// VerificationCheck is one independent gate outcome inside a VerificationReport.
+type VerificationCheck struct {
+	Name       string `json:"name,omitempty"`
+	Kind       string `json:"kind"`
+	Value      string `json:"value,omitempty"`
+	Passed     bool   `json:"passed"`
+	ExitCode   int    `json:"exitCode,omitempty"`
+	Output     string `json:"output,omitempty"`
+	Error      string `json:"error,omitempty"`
+	DurationMs int64  `json:"durationMs,omitempty"`
+}
+
+// VerificationEnv is audit metadata for a verification run (cwd, session, models).
+type VerificationEnv struct {
+	WorkDir    string `json:"workDir,omitempty"`
+	SessionID  string `json:"sessionId,omitempty"`
+	WorktreeID string `json:"worktreeId,omitempty"`
+	ModelID    string `json:"modelId,omitempty"`
+	StartedAt  string `json:"startedAt,omitempty"`  // RFC3339
+	FinishedAt string `json:"finishedAt,omitempty"` // RFC3339
+}
+
+// VerificationReport is the harness-owned outcome of independent completion
+// gates. Distinct from CompletionHandoff.Verification (model self-report text):
+// implementer-done is Claimed; harness-verified is Verified/Passed.
+// Present on ChildCompleted when gates were configured at spawn (or when a
+// solo/harness path attaches verification — shared schema with #806).
+type VerificationReport struct {
+	Passed     bool                `json:"passed"`
+	Claimed    bool                `json:"claimed"`
+	Verified   bool                `json:"verified"`
+	Checks     []VerificationCheck `json:"checks"`
+	Env        VerificationEnv     `json:"env"`
+	Summary    string              `json:"summary,omitempty"`
+	DurationMs int64               `json:"durationMs,omitempty"`
+}
+
 // ChildCompleted marks the end of a foreground child/subagent session.
 // Emitted by the parent engine with the child's correlation.
 type ChildCompleted struct {
@@ -544,6 +588,10 @@ type ChildCompleted struct {
 	Name string `json:"name,omitempty"`
 	// Handoff is the structured completion payload (always set by the engine).
 	Handoff CompletionHandoff `json:"handoff"`
+	// Verification is set when independent completion gates ran. When gates
+	// were configured, Status is completed only if Verification.Passed;
+	// otherwise Status is blocked (gate failure) with this report attached.
+	Verification *VerificationReport `json:"verification,omitempty"`
 }
 
 // AgentMessage records a peer/team mailbox delivery for UI and debugging.
