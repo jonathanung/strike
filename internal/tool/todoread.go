@@ -19,6 +19,10 @@ func NewTodoRead(store *TodoStore) Tool {
 
 func (t *todoReadTool) Name() string { return "todoread" }
 
+func (t *todoReadTool) Contract() Contract {
+	return staticContract(SideEffectNone, IdempotencySafeRetry)
+}
+
 func (t *todoReadTool) Description() string {
 	return `Read the current session todo list without modifying it.
 

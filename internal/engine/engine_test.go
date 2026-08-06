@@ -357,6 +357,10 @@ func TestHardDenyFeedsBackToModel(t *testing.T) {
 			if msg.ToolResult.Output != want || !msg.ToolResult.IsError {
 				t.Errorf("history tool result = %#v, want output %q IsError=true", msg.ToolResult, want)
 			}
+			if msg.ToolResult.ErrorCode != "permission_denied" || msg.ToolResult.Retryable {
+				t.Errorf("ToolResult codes = code=%q retryable=%v, want permission_denied false",
+					msg.ToolResult.ErrorCode, msg.ToolResult.Retryable)
+			}
 		}
 	}
 	if !found {
@@ -379,6 +383,72 @@ func TestHardDenyFeedsBackToModel(t *testing.T) {
 				if end.CallID != call.ID || !end.IsError || end.Output != want {
 					t.Errorf("ToolCallEnd = %#v, want call %q IsError output %q", end, call.ID, want)
 				}
+				if end.ErrorCode != "permission_denied" {
+					t.Errorf("ToolCallEnd.ErrorCode = %q, want permission_denied", end.ErrorCode)
+				}
+				return
+			case protocol.EngineError:
+				t.Fatalf("engine error: %s", ev.Message)
+			}
+		}
+	}
+}
+
+// TestInvalidArgsErrorCodeDistinctFromPermissionDenied ensures bad tool JSON
+// settles as invalid_args (not permission_denied) on timeline + model history.
+func TestInvalidArgsErrorCodeDistinctFromPermissionDenied(t *testing.T) {
+	call := provider.ToolCall{ID: "bad-1", Name: "edit", Args: json.RawMessage(`{`)}
+	prov := newScriptedProvider(
+		streamStep{events: []provider.StreamEvent{{Type: provider.EventToolCall, ToolCall: &call}, {Type: provider.EventDone, StopReason: "tool_use"}}},
+		streamStep{events: []provider.StreamEvent{{Type: provider.EventTextDelta, Text: "ok"}, {Type: provider.EventDone, StopReason: "end_turn"}}},
+	)
+	eng := engine.New(engine.Options{
+		Select:          func(string) (provider.Provider, string, error) { return prov, "scripted", nil },
+		InitialProvider: "scripted",
+		Registry:        tool.NewRegistry(tool.NewEdit()),
+		WorkDir:         t.TempDir(),
+		Rules:           []permission.Ruleset{permission.Defaults()},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "edit something"}
+
+	_ = receiveRequest(t, prov.requests)
+	second := receiveRequest(t, prov.requests)
+
+	found := false
+	for _, msg := range second.Messages {
+		if msg.Role == provider.RoleTool && msg.ToolResult != nil && msg.ToolResult.CallID == call.ID {
+			found = true
+			if !msg.ToolResult.IsError || msg.ToolResult.ErrorCode != "invalid_args" {
+				t.Errorf("history = %#v, want invalid_args", msg.ToolResult)
+			}
+			if msg.ToolResult.ErrorCode == "permission_denied" {
+				t.Fatal("invalid_args must not collapse to permission_denied")
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("missing tool result: %#v", second.Messages)
+	}
+
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case <-deadline:
+			t.Fatal("timed out")
+		case ev := <-eng.Events():
+			switch ev := ev.(type) {
+			case protocol.ToolCallEnd:
+				if ev.CallID != call.ID {
+					continue
+				}
+				if !ev.IsError || ev.ErrorCode != "invalid_args" {
+					t.Fatalf("ToolCallEnd = %#v, want invalid_args", ev)
+				}
+			case protocol.TurnCompleted:
 				return
 			case protocol.EngineError:
 				t.Fatalf("engine error: %s", ev.Message)

@@ -58,11 +58,12 @@ service/theme token).
 | `internal/harness` | Function harness contract, registry, external process adapter |
 | `internal/provider` | LLM adapters (+ `base`, `echo`, anthropic, openai, xai, google, chatgpt) |
 | `internal/sandbox` | OS process sandbox (`Wrap` via bwrap / sandbox-exec) for bash |
-| `internal/tool` | read/glob/grep/edit/write/apply_patch/bash/task/task_status/task_read/task_message/task_interrupt/agent_roster/agent_message/agent_broadcast/team_task/webfetch/todowrite/todoread/memory_write/memory_read/issue_write/issue_read/plan_write/plan_read/notebook_edit/sleep/skill/question/enter_plan_mode/exit_plan_mode/toolsearch |
+| `internal/tool` | read/glob/grep/edit/write/apply_patch/bash/task/task_status/task_read/task_message/task_interrupt/wait/agent_roster/agent_message/agent_broadcast/team_task/webfetch/todowrite/todoread/memory_write/memory_read/issue_write/issue_read/plan_write/plan_read/notebook_edit/sleep/skill/question/enter_plan_mode/exit_plan_mode/toolsearch |
 | `internal/mcp` | MCP client (stdio + streamable HTTP); bridges external tools onto the registry |
 | `internal/lsp` | LSP client (JSON-RPC over stdio); extension registry; diagnostics collection |
 | `internal/question` | user-question ask service (suspend tool until QuestionReply) |
 | `internal/permission` | last-match-wins allow/ask/deny + ask service |
+| `internal/secret` | secret-ref env indirection + protocol event redaction on top of pkg/redact (see docs/secrets.md) |
 | `internal/auth` | credentials, OAuth/PKCE/device, env precedence |
 | `internal/config` | global/project JSON + agents/skills markdown |
 | `internal/session` | JSONL event log append/replay + concurrent Manager |
@@ -98,8 +99,8 @@ service/theme token).
 - `internal/tui` may import only `internal/protocol`, `internal/host`, and
   `internal/tui/...` among `internal/*` packages — enforced by
   `internal/tui/boundary_test.go` (`TestArchitectureBoundaries`). Prefer
-  `pkg/protocol` for the public wire schema (also allowed; not under
-  `internal/`). Charm paths: v1 `github.com/charmbracelet/…` or v2
+  `pkg/protocol` / `pkg/redact` for public wire/scrub helpers (also allowed;
+  not under `internal/`). Charm paths: v1 `github.com/charmbracelet/…` or v2
   `charm.land/…`; never `github.com/charmbracelet/…/v2`
   (`TestCharmImportPaths`).
 

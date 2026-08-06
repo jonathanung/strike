@@ -565,6 +565,7 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 	m.windows = configureDiagnosticsWindow(m.windows, m.workDir, m.services.LSP)
 	m.windows = configureMemoryWindow(m.windows, m.services.Memory)
 	m.windows = configureIssuesWindow(m.windows, m.services.Issues)
+	m.windows = configurePlansWindow(m.windows, m.services.Plans, m.sessionID)
 	m.windows = configureTelemetryWindow(m.windows, m.workDir, m.services.Telemetry)
 	// Telemetry is on by default (newTelemetryWindow). Options.Telemetry only
 	// forces on when callers pass it; Init() arms the sampler via windows.init().

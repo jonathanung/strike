@@ -30,6 +30,10 @@ func NewIssueWrite(store IssueStore) Tool {
 
 func (t *issueWriteTool) Name() string { return "issue_write" }
 
+func (t *issueWriteTool) Contract() Contract {
+	return staticContract(SideEffectExternal, IdempotencyConditional)
+}
+
 func (t *issueWriteTool) Description() string {
 	return `Create or update a project-local tracked issue that persists across sessions.
 
@@ -146,6 +150,10 @@ func NewIssueRead(store IssueStore) Tool {
 }
 
 func (t *issueReadTool) Name() string { return "issue_read" }
+
+func (t *issueReadTool) Contract() Contract {
+	return staticContract(SideEffectRead, IdempotencySafeRetry)
+}
 
 func (t *issueReadTool) Description() string {
 	return `Read project-local tracked issues that persist across sessions.

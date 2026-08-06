@@ -293,6 +293,7 @@ func TestLeafRegistryKeepsTeamMessagingTools(t *testing.T) {
 		tool.NewAgentBroadcast(),
 		tool.NewTeamTask(),
 		tool.NewTask(), // stripped at leaf
+		tool.NewWait(), // stripped at leaf (parent-control)
 	)
 	leaf := reg.CloneWithout(leafTaskTools...)
 	for _, name := range []string{"agent_roster", "agent_ownership", "agent_message", "agent_broadcast", "team_task"} {
@@ -302,6 +303,9 @@ func TestLeafRegistryKeepsTeamMessagingTools(t *testing.T) {
 	}
 	if _, ok := leaf.Get("task"); ok {
 		t.Error("leaf registry still has task")
+	}
+	if _, ok := leaf.Get("wait"); ok {
+		t.Error("leaf registry still has wait")
 	}
 }
 
