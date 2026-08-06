@@ -157,7 +157,7 @@ header {
 }
 .icon-button { border: 0; background: transparent; font-size: 18px; padding: 8px; }
 
-.navigation, .inspector { position: relative; min-height: 0; background: var(--surface); transition: width .16s ease, opacity .16s ease; }
+.navigation, .inspector { min-height: 0; background: var(--surface); transition: width .16s ease, opacity .16s ease; }
 .navigation {
   border-right: 1px solid var(--rule);
   min-width: 0;
@@ -179,7 +179,7 @@ header {
   width: 100%;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 6px;
   text-align: left;
   border: 0;
   border-left: 2px solid transparent;
@@ -193,6 +193,32 @@ header {
   color: var(--acid);
 }
 .session small { font-size: 8px; color: var(--acid); }
+.session-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.session-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-meta {
+  font-size: 9px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-flags {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  flex-shrink: 0;
+}
 .children { font-size: 11px; padding: 0 9px; }
 .children div {
   display: grid;
@@ -396,6 +422,7 @@ main {
 .panel-resize:focus-within .panel-resize-handle {
   background: color-mix(in srgb, var(--acid) 55%, transparent);
 }
+
 .inspector-tabs { display: flex; overflow: auto; border-bottom: 1px solid var(--rule); }
 .inspector-tabs button {
   flex: 1;
@@ -497,8 +524,7 @@ dialog input { padding: 12px; color: var(--ink); }
     transition: transform .2s ease;
     box-shadow: -20px 0 50px var(--shadow);
   }
-  .inspector.open { transform: translateX(0); opacity: 1; pointer-events: auto; }
-  .inspector.collapsed { transform: translateX(100%); opacity: 0; pointer-events: none; }
+  .inspector.open { transform: translateX(0); }
 }
 
 @media (max-width: 720px) {
@@ -552,6 +578,8 @@ dialog input { padding: 12px; color: var(--ink); }
   padding: 0 8px;
 }
 .session-actions > button { padding: 6px 8px; font-size: 9px; text-transform: uppercase; width: 100%; }
+.session-actions button:disabled { opacity: 0.4; }
+.session-actions button:disabled { opacity: 0.4; }
 .session-overflow { position: relative; width: 100%; }
 .session-overflow > summary {
   list-style: none;
@@ -587,7 +615,8 @@ dialog input { padding: 12px; color: var(--ink); }
 }
 .session-overflow-menu button:hover,
 .session-overflow-menu button:focus-visible { background: var(--surface); color: var(--acid); }
-.workspace-settings-meta code { color: var(--ink); font-size: 11px; }
+
+
 
 .nav-tab {
   border: 0;

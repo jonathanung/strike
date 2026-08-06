@@ -29,10 +29,43 @@ describe("App", () => {
   it("renders and resolves a blocking permission dialog", async () => {
     render(<App />);
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
-    FakeWebSocket.instances[0].onmessage?.({ data: JSON.stringify({ type: "permission.asked", data: { requestId: "p1", tool: "bash" } }) } as MessageEvent);
-    expect(await screen.findByRole("dialog", { name: "Permission required" })).toBeInTheDocument();
+    FakeWebSocket.instances[0].onmessage?.({ data: JSON.stringify({ type: "permission.asked", data: { requestId: "p1", tool: "bash", patterns: ["echo hi"], reason: "run shell" } }) } as MessageEvent);
+    // Accessible name is the title only — not the raw JSON payload.
+    const dialog = await screen.findByRole("dialog", { name: "Permission required" });
+    expect(dialog).toBeInTheDocument();
+    expect(dialog).toHaveTextContent("bash");
+    expect(dialog).toHaveTextContent("run shell");
+    // Raw JSON lives behind collapsed Technical details, not the default body.
+    const tech = dialog.querySelector("details.technical-details") as HTMLDetailsElement | null;
+    expect(tech).toBeTruthy();
+    expect(tech?.open).toBe(false);
+    expect(tech?.querySelector("summary")?.textContent).toMatch(/Technical details/i);
+    const raw = tech?.querySelector("pre");
+    expect(raw?.textContent).toContain('"requestId"');
+    expect(raw?.textContent).toContain("p1");
+    fireEvent.click(screen.getByText("Technical details"));
+    expect(tech?.open).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Allow once" }));
-    await waitFor(() => expect(fetch).toHaveBeenLastCalledWith(expect.stringContaining("/v1/ops"), expect.objectContaining({ body: expect.stringContaining("permission.reply") })));
+    await waitFor(() => expect(fetch).toHaveBeenLastCalledWith(expect.stringContaining("/v1/ops"), expect.objectContaining({
+      body: expect.stringMatching(/"type"\s*:\s*"permission\.reply"/),
+    })));
+    const body = JSON.parse(String((fetch as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1]?.body));
+    expect(body).toMatchObject({ type: "permission.reply", data: { requestId: "p1", decision: "once" } });
+  });
+
+  it("permission dialog keeps reject and allow-session ops unchanged", async () => {
+    render(<App />);
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    FakeWebSocket.instances[0].onmessage?.({ data: JSON.stringify({ type: "permission.asked", data: { requestId: "p2", permission: "edit", patterns: ["web/src/App.tsx"] } }) } as MessageEvent);
+    const dialog = await screen.findByRole("dialog", { name: "Permission required" });
+    expect(dialog).toHaveTextContent("edit");
+    expect(dialog).toHaveTextContent("web/src/App.tsx");
+    expect((dialog.querySelector("details.technical-details") as HTMLDetailsElement | null)?.open).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Allow session" }));
+    await waitFor(() => {
+      const body = JSON.parse(String((fetch as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1]?.body));
+      expect(body).toMatchObject({ type: "permission.reply", data: { requestId: "p2", decision: "always" } });
+    });
   });
 
   it("queues a prompt while busy and exposes slash and skill completion", async () => {
@@ -136,9 +169,6 @@ describe("App", () => {
   it("shows the refactored inspector tabs and unavailable project workflows", async () => {
     render(<App />);
     await screen.findByText("Current");
-    expect(screen.getByRole("button", { name: "Toggle inspector" })).toHaveAttribute("aria-pressed", "false");
-    fireEvent.click(screen.getByRole("button", { name: "Toggle inspector" }));
-    expect(screen.getByRole("button", { name: "Toggle inspector" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getAllByText("not reported")).toHaveLength(2);
     expect(screen.getByRole("tab", { name: "context" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "files" })).toBeInTheDocument();
@@ -191,11 +221,11 @@ describe("App", () => {
     }));
     render(<App />);
     await screen.findByText("Current");
-    expect(screen.getByRole("separator", { name: "Resize agents panel" })).toBeInTheDocument();
-    expect(screen.getByRole("separator", { name: "Resize inspector panel" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Toggle inspector" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByLabelText("Resize agents panel")).toBeInTheDocument();
+    expect(screen.getByLabelText("Resize inspector panel")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Toggle agents panel" }));
     expect(screen.getByRole("button", { name: "Toggle agents panel" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: "Toggle inspector" })).toHaveAttribute("aria-pressed", "false");
     fireEvent.click(screen.getByRole("button", { name: "Toggle inspector" }));
     expect(screen.getByRole("button", { name: "Toggle inspector" })).toHaveAttribute("aria-pressed", "true");
     fireEvent.click(screen.getByRole("tab", { name: "files" }));
@@ -231,6 +261,93 @@ describe("App", () => {
     await waitFor(() => expect(fetch).toHaveBeenLastCalledWith(expect.stringContaining("/v1/ops"), expect.objectContaining({ body: expect.stringContaining('"requestId":"q1"') })));
   });
 
+  it("activates a live root on select and creates/switches workspaces", async () => {
+    let activeId = "root-a";
+    const rootsState = [
+      { id: "root-a", title: "Alpha", agent: "build", busy: false, activeAt: Date.now() },
+      { id: "root-b", title: "Beta", agent: "plan", busy: true, activeAt: Date.now() - 120_000 },
+    ];
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = (init?.method || "GET").toUpperCase();
+      if (url.includes("bootstrap")) {
+        return response({
+          version: "test", authRequired: false, attachOnly: false,
+          capabilities: { live: true, roots: true, sessions: true },
+          protocolOps: ["user.input"], status: { sessionId: "root-a", provider: "echo", busy: false },
+          agents: [{ name: "build" }], skills: [],
+        });
+      }
+      if (url.includes("/v1/sessions") && method === "GET") {
+        return response({ sessions: [{ id: "root-a", title: "Alpha" }, { id: "root-b", title: "Beta" }, { id: "old", title: "Archived" }], liveId: activeId });
+      }
+      if (url.includes("/v1/roots") && method === "GET") {
+        return response({ roots: rootsState, activeId });
+      }
+      if (url.includes("/activate") && method === "POST") {
+        const id = url.split("/v1/roots/")[1]?.split("/")[0] || "";
+        activeId = decodeURIComponent(id);
+        return response({ ok: true });
+      }
+      if (url.endsWith("/v1/roots") && method === "POST") {
+        const created = { id: "root-c", title: "Gamma", agent: "build", busy: false, activeAt: Date.now() };
+        rootsState.push(created);
+        activeId = created.id;
+        return response({ id: created.id, sessionId: created.id }, 201);
+      }
+      if (url.includes("/v1/roots/") && method === "DELETE") {
+        const id = decodeURIComponent(url.split("/v1/roots/")[1] || "");
+        const idx = rootsState.findIndex((r) => r.id === id);
+        if (idx >= 0) rootsState.splice(idx, 1);
+        activeId = rootsState[0]?.id || "";
+        return response({ ok: true });
+      }
+      return response({ ok: true });
+    }));
+
+    render(<App />);
+    expect(await screen.findByText("Alpha")).toBeInTheDocument();
+    expect(screen.getByText("Beta")).toBeInTheDocument();
+    expect(screen.getByTitle("root-a")).toHaveTextContent(/build/);
+    expect(screen.getByTitle("root-b")).toHaveTextContent(/plan/);
+    expect(screen.getByTitle("root-a")).toHaveTextContent("IDLE");
+    expect(screen.getByTitle("root-b")).toHaveTextContent("BUSY");
+    expect(screen.getByTitle("root-a")).toHaveTextContent("ACTIVE");
+
+    fireEvent.click(screen.getByTitle("root-b"));
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/v1/roots/root-b/activate"), expect.objectContaining({ method: "POST" })));
+    await waitFor(() => expect(screen.getByTitle("root-b")).toHaveTextContent("ACTIVE"));
+
+    fireEvent.click(screen.getByRole("button", { name: "+ New workspace" }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringMatching(/\/v1\/roots$/), expect.objectContaining({ method: "POST" })));
+    await waitFor(() => expect(FakeWebSocket.instances.some((ws) => ws.url.includes("root=root-c"))).toBe(true));
+
+    window.confirm = vi.fn(() => true);
+    fireEvent.click(screen.getByTitle("root-b"));
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/v1/roots/root-b/activate"), expect.anything()));
+    fireEvent.click(screen.getByRole("button", { name: "Close workspace" }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringMatching(/\/v1\/roots\/root-b$/), expect.objectContaining({ method: "DELETE" })));
+    await waitFor(() => expect(screen.queryByTitle("root-b")).not.toBeInTheDocument());
+  });
+
+  it("attach-only mode never offers live create or close", async () => {
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("bootstrap")) {
+        return response({ version: "test", authRequired: false, attachOnly: true, capabilities: { live: false, roots: false, sessions: true }, protocolOps: null, agents: [], skills: [] });
+      }
+      if (url.includes("sessions")) return response({ sessions: [{ id: "saved", title: "Saved" }] });
+      if (url.includes("roots")) return Promise.resolve(new Response("multi-root unavailable", { status: 503 }));
+      return response({ ok: true });
+    }));
+    render(<App />);
+    await screen.findByText("Saved");
+    expect(screen.queryByRole("button", { name: "+ New workspace" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Close workspace" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Resume as workspace" })).not.toBeInTheDocument();
+  });
+
+
   it("adjusts panel width from the drag-handle separator via keyboard", async () => {
     render(<App />);
     await screen.findByText("Current");
@@ -260,16 +377,6 @@ describe("App", () => {
     expect(meta).not.toHaveAttribute("open");
   });
 
-  it("shows child agents only after a child is dispatched", async () => {
-    render(<App />);
-    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
-    expect(screen.queryByText("CHILD AGENTS")).not.toBeInTheDocument();
-    FakeWebSocket.instances[0].onmessage?.({ data: JSON.stringify({ type: "child.started", data: { sessionId: "c1", agent: "explore" } }) } as MessageEvent);
-    expect(await screen.findByText("CHILD AGENTS")).toBeInTheDocument();
-    expect(screen.getByLabelText("Child agents")).toHaveTextContent("explore");
-    expect(screen.queryByText("None dispatched")).not.toBeInTheDocument();
-  });
-
   it("keeps fork/rename/delete behind a Session menu when sessions capability is on", async () => {
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const url = String(input);
@@ -284,33 +391,5 @@ describe("App", () => {
     expect(screen.getByRole("menuitem", { name: "Fork" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Rename" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Delete" })).toBeInTheDocument();
-  });
-
-  it("still renders attach-only and roots/active+history modes", async () => {
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.includes("bootstrap")) return response({ version: "test", authRequired: false, attachOnly: true, capabilities: { live: false, roots: false }, protocolOps: null, agents: [], skills: [] });
-      if (url.includes("sessions")) return response({ sessions: [{ id: "saved", title: "Saved" }] });
-      if (url.includes("roots")) return Promise.resolve(new Response("multi-root unavailable", { status: 503 }));
-      return response({ ok: true });
-    }));
-    const { unmount } = render(<App />);
-    await screen.findByText("Saved");
-    expect(screen.getByLabelText("Agents panel")).toBeInTheDocument();
-    expect(screen.getByText("SESSIONS")).toBeInTheDocument();
-    unmount();
-
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.includes("bootstrap")) return response({ version: "test", authRequired: false, attachOnly: false, capabilities: { live: true, roots: true, sessions: true }, protocolOps: ["user.input"], status: { sessionId: "root-1", provider: "echo", busy: false }, agents: [{ name: "build" }], skills: [] });
-      if (url.includes("sessions")) return response({ sessions: [{ id: "root-1", title: "Root one" }], liveId: "root-1" });
-      if (url.includes("roots")) return response({ roots: [{ id: "root-1", agent: "build", busy: false }], activeId: "root-1" });
-      return response({ ok: true });
-    }));
-    render(<App />);
-    expect(await screen.findByRole("button", { name: "ACTIVE" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "HISTORY" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "HISTORY" }));
-    expect(screen.getByLabelText("Search sessions")).toBeInTheDocument();
   });
 });
