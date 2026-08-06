@@ -154,12 +154,48 @@ func (m *Manager) watch(name string, client *Client) {
 		time.Sleep(200 * time.Millisecond)
 	}
 	m.mu.Lock()
-	if m.clients[name] == client {
+	stillCurrent := m.clients[name] == client
+	if stillCurrent {
 		if !m.disabled[name] {
 			m.errs[name] = "server exited"
 		}
 	}
 	m.mu.Unlock()
+	// Crash isolation: drop cached diagnostics from a dead server so callers
+	// never see stale errors after the process exits.
+	if stillCurrent {
+		m.clearClientDiagnostics(client)
+	}
+}
+
+// clearClientDiagnostics removes manager-level cache entries for docs the
+// client had open (and any URI still held on the client store).
+func (m *Manager) clearClientDiagnostics(client *Client) {
+	if m == nil || client == nil {
+		return
+	}
+	paths := make(map[string]struct{})
+	client.docMu.Lock()
+	for uri := range client.openDocs {
+		if p := URIToPath(uri); p != "" {
+			paths[p] = struct{}{}
+		}
+	}
+	client.docMu.Unlock()
+	client.diagMu.Lock()
+	for uri := range client.diagnostics {
+		if p := URIToPath(uri); p != "" {
+			paths[p] = struct{}{}
+		}
+		delete(client.diagnostics, uri)
+	}
+	client.diagMu.Unlock()
+
+	m.diagMu.Lock()
+	for p := range paths {
+		delete(m.diagnostics, p)
+	}
+	m.diagMu.Unlock()
 }
 
 // NotifyFile drives didOpen/didChange/didClose from a file tool mutation.
@@ -190,16 +226,22 @@ func (m *Manager) NotifyFile(ctx context.Context, absPath, content string, delet
 
 // Diagnostics returns the latest diagnostics for an absolute path.
 // Empty when no server, server dead, or no publishDiagnostics yet.
+// Never returns stale diagnostics from a dead language server.
 func (m *Manager) Diagnostics(absPath string) []Diagnostic {
 	if m == nil || absPath == "" {
 		return nil
 	}
-	// Prefer live client store; fall back to manager cache.
-	if c := m.clientForPath(absPath); c != nil && !c.Closed() {
-		if diags := c.Diagnostics(absPath); diags != nil {
-			return diags
-		}
+	// Live client only — do not serve manager cache when the server is down
+	// (crash isolation: dead LS → no diagnostics).
+	c := m.clientForPath(absPath)
+	if c == nil || c.Closed() {
+		return nil
 	}
+	if diags := c.Diagnostics(absPath); len(diags) > 0 {
+		return diags
+	}
+	// Manager cache is updated by the same client callback; use it when the
+	// client store was cleared but the notification already landed here.
 	m.diagMu.Lock()
 	defer m.diagMu.Unlock()
 	src := m.diagnostics[absPath]
@@ -211,21 +253,38 @@ func (m *Manager) Diagnostics(absPath string) []Diagnostic {
 	return out
 }
 
-// AllDiagnostics returns a copy of all cached diagnostics keyed by absolute path.
+// AllDiagnostics returns a copy of diagnostics from live servers only,
+// keyed by absolute path.
 func (m *Manager) AllDiagnostics() map[string][]Diagnostic {
 	if m == nil {
 		return nil
 	}
-	m.diagMu.Lock()
-	defer m.diagMu.Unlock()
-	if len(m.diagnostics) == 0 {
-		return nil
+	m.mu.Lock()
+	live := make([]*Client, 0, len(m.clients))
+	for name, c := range m.clients {
+		if m.disabled[name] || c == nil || c.Closed() {
+			continue
+		}
+		if _, bad := m.errs[name]; bad && c.Closed() {
+			continue
+		}
+		live = append(live, c)
 	}
-	out := make(map[string][]Diagnostic, len(m.diagnostics))
-	for p, diags := range m.diagnostics {
-		cp := make([]Diagnostic, len(diags))
-		copy(cp, diags)
-		out[p] = cp
+	m.mu.Unlock()
+
+	out := make(map[string][]Diagnostic)
+	for _, c := range live {
+		for path, diags := range c.AllDiagnostics() {
+			if len(diags) == 0 {
+				continue
+			}
+			cp := make([]Diagnostic, len(diags))
+			copy(cp, diags)
+			out[path] = cp
+		}
+	}
+	if len(out) == 0 {
+		return nil
 	}
 	return out
 }

@@ -437,6 +437,54 @@ func TestManagerCrashDoesNotKillSession(t *testing.T) {
 	}
 }
 
+func TestManagerCrashClearsStaleDiagnostics(t *testing.T) {
+	// Start a healthy server, collect a diagnostic, then kill it and ensure
+	// Diagnostics returns empty (not stale cache).
+	cmd, args, env := helperCommand(t, "")
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	dir := t.TempDir()
+	m := NewManager(dir)
+	defer m.Close()
+
+	m.StartAll(ctx, []ServerConfig{{
+		Name: "go", Command: cmd, Args: args, Env: env,
+		RootDir: dir, Extensions: []string{".go"},
+	}})
+	path := filepath.Join(dir, "bad.go")
+	m.NotifyFile(ctx, path, "ERR", false)
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(m.Diagnostics(path)) > 0 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if len(m.Diagnostics(path)) == 0 {
+		t.Fatal("expected diagnostic before crash")
+	}
+
+	// Force-close the live client to simulate crash.
+	m.mu.Lock()
+	c := m.clients["go"]
+	m.mu.Unlock()
+	if c == nil {
+		t.Fatal("no client")
+	}
+	_ = c.Close()
+
+	deadline = time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(m.Diagnostics(path)) == 0 {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("stale diagnostics after crash: %#v", m.Diagnostics(path))
+}
+
 func TestManagerStartFailureIsolated(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
