@@ -285,6 +285,31 @@ type StatusSnapshot struct {
 	Busy           bool   `json:"busy"`
 	ContextUsed    int    `json:"contextUsed,omitempty"`
 	ContextLimit   int    `json:"contextLimit,omitempty"`
+	// Sandbox is the active OS process sandbox dial for this live session
+	// (off|read-only|workspace-write). Distinct from permissionMode.
+	Sandbox string `json:"sandbox,omitempty"`
+	// SandboxBackend is bwrap|sandbox-exec when the OS launcher is available.
+	SandboxBackend string `json:"sandboxBackend,omitempty"`
+	// SandboxAvailable reports whether the OS sandbox backend can apply isolation.
+	SandboxAvailable bool `json:"sandboxAvailable,omitempty"`
+	// NetworkAllow is the config network.allow summary (empty = unrestricted public).
+	NetworkAllow []string `json:"networkAllow,omitempty"`
+}
+
+// SandboxSnapshot is host-safe OS sandbox chrome for GET /v1/sandbox.
+// Mode is the active live dial; DefaultMode is the persisted config default
+// (may differ). Explain is the multi-line /sandbox explain profile text.
+type SandboxSnapshot struct {
+	Mode             string   `json:"mode"`
+	Backend          string   `json:"backend,omitempty"`
+	Available        bool     `json:"available"`
+	NetworkAllow     []string `json:"networkAllow,omitempty"`
+	Explain          string   `json:"explain,omitempty"`
+	DefaultMode      string   `json:"defaultMode,omitempty"`
+	PermissionMode   string   `json:"permissionMode,omitempty"`
+	Note             string   `json:"note,omitempty"`
+	Modes            []string `json:"modes,omitempty"`
+	CanChangeDefault bool     `json:"canChangeDefault"`
 }
 
 // Live bridges a running engine to HTTP/WebSocket clients.
@@ -295,11 +320,13 @@ type Live struct {
 
 	ops chan<- protocol.Op
 
-	mu      sync.RWMutex
-	status  StatusSnapshot
-	subs    map[chan protocol.Event]struct{}
-	closed  bool
-	closeCh chan struct{}
+	mu     sync.RWMutex
+	status StatusSnapshot
+	// sandboxExplain is the compiled profile text for GET /v1/sandbox.
+	sandboxExplain string
+	subs           map[chan protocol.Event]struct{}
+	closed         bool
+	closeCh        chan struct{}
 }
 
 // NewLive creates a live session bridge. ops must be the engine Ops channel.
@@ -319,6 +346,39 @@ func NewLive(sessionID, cwd string, agents []AgentInfo, ops chan<- protocol.Op) 
 	return l
 }
 
+// SetSandbox seeds OS sandbox chrome on the live status snapshot and stores
+// explain text for GET /v1/sandbox. Safe to call once after NewLive.
+func (l *Live) SetSandbox(mode, backend string, available bool, networkAllow []string, explain string) {
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	mode = strings.TrimSpace(mode)
+	if mode == "" {
+		mode = "workspace-write"
+	}
+	l.status.Sandbox = mode
+	l.status.SandboxBackend = strings.TrimSpace(backend)
+	l.status.SandboxAvailable = available
+	if len(networkAllow) > 0 {
+		l.status.NetworkAllow = append([]string(nil), networkAllow...)
+	} else {
+		l.status.NetworkAllow = nil
+	}
+	l.sandboxExplain = explain
+}
+
+// SandboxExplain returns the compiled /sandbox explain body for this live root.
+func (l *Live) SandboxExplain() string {
+	if l == nil {
+		return ""
+	}
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.sandboxExplain
+}
+
 // SessionID returns the live session id.
 func (l *Live) SessionID() string { return l.sessionID }
 
@@ -333,7 +393,11 @@ func (l *Live) Agents() []AgentInfo {
 func (l *Live) Status() StatusSnapshot {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
-	return l.status
+	out := l.status
+	if len(l.status.NetworkAllow) > 0 {
+		out.NetworkAllow = append([]string(nil), l.status.NetworkAllow...)
+	}
+	return out
 }
 
 // Submit sends an op to the engine. Returns err if the live session is closed

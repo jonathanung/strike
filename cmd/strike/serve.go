@@ -18,6 +18,7 @@ import (
 
 	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike-cli/internal/sandbox"
 	"github.com/jonathanung/strike-cli/internal/server"
 	"github.com/jonathanung/strike-cli/internal/session"
 )
@@ -208,6 +209,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 
 	var liveHub *server.LiveHub
 	var services *host.Services
+	var sandboxSnap *server.SandboxSnapshot
 	var cleanup func() error
 	sessionDir := opts.sessionDir
 
@@ -227,6 +229,20 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		agents := make([]server.AgentInfo, 0, len(a.services.Agents))
 		for _, name := range a.services.Agents {
 			agents = append(agents, server.AgentInfo{Name: name})
+		}
+		// Process-level sandbox chrome (same dial for every root from this serve).
+		sandboxSnap = &server.SandboxSnapshot{
+			Mode:         a.sandboxMode,
+			Backend:      sandbox.BackendName(),
+			Available:    sandbox.Available(),
+			NetworkAllow: sandbox.CloneNetworkAllow(a.cfg.Network.Allow),
+			Explain:      a.sandboxExplain,
+		}
+		seedLiveSandbox := func(live *server.Live) {
+			if live == nil || sandboxSnap == nil {
+				return
+			}
+			live.SetSandbox(sandboxSnap.Mode, sandboxSnap.Backend, sandboxSnap.Available, sandboxSnap.NetworkAllow, sandboxSnap.Explain)
 		}
 
 		// serveRoot tracks one live root engine for cleanup.
@@ -284,6 +300,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 					return "", err
 				}
 				live := server.NewLive(slot.id, slot.workDir, agents, slot.eng.Ops())
+				seedLiveSandbox(live)
 				sr := startServeRoot(ctx, slot, live)
 				mu.Lock()
 				roots[slot.id] = sr
@@ -323,6 +340,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 					return "", false, err
 				}
 				live := server.NewLive(slot.id, slot.workDir, agents, slot.eng.Ops())
+				seedLiveSandbox(live)
 				sr := startServeRoot(ctx, slot, live)
 				mu.Lock()
 				roots[slot.id] = sr
@@ -338,6 +356,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		// Add initial root from the first assembly slot.
 		initialSlot := a.firstSlot
 		initialLive := server.NewLive(initialSlot.id, initialSlot.workDir, agents, initialSlot.eng.Ops())
+		seedLiveSandbox(initialLive)
 		liveHub.Add(initialSlot.id, initialLive)
 		if info, err := a.sessions.Get(initialSlot.id); err == nil && info.Title != "" {
 			liveHub.SetTitle(initialSlot.id, info.Title)
@@ -446,6 +465,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		Expose:     opts.expose || !server.IsLocalhostBind(opts.addr),
 		AllowCIDRs: allowCIDRs,
 		Services:   services,
+		Sandbox:    sandboxSnap,
 	})
 	if err != nil {
 		return err

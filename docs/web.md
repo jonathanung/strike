@@ -88,7 +88,9 @@ ssh -L 8787:127.0.0.1:8787 user@strike-host
 | `GET` | `/v1/ws` | mode | WebSocket: ops in, event envelopes out |
 | `POST` | `/v1/ops` | **yes** | Submit one op envelope (JSON) |
 | `GET` | `/v1/live/events` | **yes** | SSE of live engine events (+ JSONL backlog) |
-| `GET` | `/v1/status` | **yes** | Live status (model, agent, mode, cwd, busy, …) |
+| `GET` | `/v1/status` | **yes** | Live status (model, agent, mode, sandbox, cwd, busy, …) |
+| `GET` | `/v1/sandbox` | **yes** | Active OS sandbox dial, backend, network.allow summary, explain profile |
+| `PATCH` | `/v1/sandbox` | **yes** | Persist sandbox default (`mode`, optional `iKnow`); new sessions only |
 | `GET` | `/v1/agents` | **yes** | Selectable agent names |
 | `GET` | `/v1/sessions` | **yes** | Durable session list (roots only) + `liveId` |
 | `GET` | `/v1/sessions/{id}/events` | **yes** | SSE tail of a session JSONL log |
@@ -147,6 +149,19 @@ JSON objects with a `type` and optional `data`:
 | `select.model` | `{ "provider", "model?" }` |
 | `set.permission_mode` | `{ "mode": "default\|plan\|accept-edits\|yolo" }` |
 | `set.autonomy` | `{ "mode": "supervised\|agent\|checks\|skip-all" }` |
+
+### OS sandbox (web parity)
+
+Bootstrap capability `sandbox` is true for live `strike serve` (not attach-only).
+Status includes `sandbox`, `sandboxBackend`, `sandboxAvailable`, and `networkAllow`.
+
+| Method | Path | Body | Notes |
+|---|---|---|---|
+| `GET` | `/v1/sandbox` | — | Active mode + compiled explain text (no browser shell-out) |
+| `PATCH` | `/v1/sandbox` | `{ "mode", "iKnow?" }` | Saves **default** via `host.Settings.SaveConfigDials` (TUI `/settings` parity). Active session dial is fixed at start. |
+| `PATCH` | `/v1/settings` | `…, "sandbox", "iKnow?"` | Same default write path when `sandbox` is non-empty |
+
+Safety gate: `mode=off` while live or default `permissionMode` is `yolo` requires `iKnow: true` (CLI `--i-know` equivalent). Invalid modes return 400. Missing capability returns 501.
 | `set.effort` | `{ "level": "..." }` |
 | `set.fast` | `{ "enabled": true\|false }` |
 | `compact` | `{ "strategy": "summarize" }` |

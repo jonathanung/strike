@@ -3,6 +3,12 @@ export type Status = {
   sessionId?: string; provider?: string; model?: string; agent?: string; effort?: string;
   autonomy?: string; permissionMode?: string; phase?: string; workflow?: string; cwd?: string;
   busy?: boolean; contextUsed?: number; contextLimit?: number;
+  sandbox?: string; sandboxBackend?: string; sandboxAvailable?: boolean; networkAllow?: string[];
+};
+export type SandboxInfo = {
+  mode: string; backend?: string; available: boolean; networkAllow?: string[];
+  explain?: string; defaultMode?: string; permissionMode?: string; note?: string;
+  modes?: string[]; canChangeDefault?: boolean;
 };
 export type Capabilities = Record<string, boolean>;
 export type Bootstrap = {
