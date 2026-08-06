@@ -610,6 +610,9 @@ type ToolCallEnd struct {
 	Title   string `json:"title"`
 	Output  string `json:"output"`
 	IsError bool   `json:"isError,omitempty"`
+	// ErrorCode is a stable machine code when IsError (canceled, timeout, …).
+	// Empty on success. See ErrorCode* constants.
+	ErrorCode string `json:"errorCode,omitempty"`
 	// Metadata is tool-specific data for rich UI rendering, independent of
 	// the model-facing Output.
 	Metadata json.RawMessage `json:"metadata,omitempty"`
@@ -808,6 +811,9 @@ type PathOverlap struct {
 type EngineError struct {
 	Correlation
 	Message string `json:"message"`
+	// Code is an optional stable machine code (e.g. queue_full). Empty when
+	// the error is free-text only.
+	Code string `json:"code,omitempty"`
 }
 
 // Usage source labels on UsageReported.

@@ -96,6 +96,11 @@ type Options struct {
 	// 3; set to 1 to disable retries. Retries mint a new attempt identity and
 	// never re-run tools already completed for a prior successful stream.
 	MaxStreamAttempts int
+	// TurnTimeout bounds each turn independently of the Run parent context.
+	// Zero means no per-turn deadline (cancel only via Interrupt / parent ctx).
+	// On expiry the turn ends with stopReason "timeout" and tool results use
+	// error code timeout when applicable.
+	TurnTimeout time.Duration
 	// StreamRetryBackoff returns the wait before starting nextAttempt
 	// (1-based, >=2). nil uses a small exponential default. Tests may return
 	// 0 for instant retries.

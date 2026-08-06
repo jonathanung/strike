@@ -303,6 +303,14 @@ queued→admitted or queued→canceled so waiting roots/children are not mistake
 for idle. Task status, team roster, and the activity/agents panes project these
 events without importing scheduler internals.
 
+**Interaction with turn cancel and `task_interrupt`:** parent `interrupt`
+cancels the active parent turn (and any in-flight model/bash acquire on that
+turn's ctx) but does **not** cancel non-blocking children. `task_interrupt`
+targets one child session's turn ctx only. A canceled waiter never holds a
+lease; an admitted bash/model call releases its lease on exit (including
+timeout and cancel). See [ARCHITECTURE.md](ARCHITECTURE.md#cancellation-deadlines-and-backpressure)
+for process-group kill, partial output, and engine queue backpressure.
+
 Inspect the compiled policy via `Config.SchedulerEffective()` /
 `Effective.Report()`.
 
