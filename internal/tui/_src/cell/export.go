@@ -40,7 +40,7 @@ type exportFinishedMsg struct {
 }
 
 // redactSecrets replaces common credential shapes with placeholders via
-// pkg/redact (shared with timeline export and engine inspect).
+// pkg/redact (shared with timeline export, session scrub, and #796).
 func redactSecrets(s string) string {
 	return redact.String(s)
 }

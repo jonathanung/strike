@@ -26,31 +26,66 @@ type PhaseGrantApproval struct {
 	Grants      permission.Ruleset
 }
 
-// enterWorkflow starts workflow at phase index 0 (or re-enters if already active).
-func (e *Engine) enterWorkflow(name string) error {
+// startWorkflow activates a loaded workflow at phase 0. Validates the target
+// before mutating state. Exactly one workflow is active per root session:
+// starting replaces any prior active (or recovery) workflow after validation.
+func (e *Engine) startWorkflow(name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("workflow name is required")
+	}
 	w, ok := e.findWorkflow(name)
 	if !ok {
 		return fmt.Errorf("unknown workflow %q", name)
 	}
+	if err := config.ValidateWorkflow(w); err != nil {
+		return fmt.Errorf("workflow %q invalid: %w", name, err)
+	}
+	if len(w.Phases) == 0 {
+		return fmt.Errorf("workflow %q has no phases", name)
+	}
+	// Validate phase 0 before clearing the current workflow.
+	if err := e.validatePhaseTarget(w, 0); err != nil {
+		return err
+	}
+	// Drop any prior active/recovery state so only one workflow is live.
+	if e.phaseIndex >= 0 || e.workflow.Name != "" || e.phaseRecovery != "" {
+		e.clearPhase()
+	}
 	return e.enterPhase(w, 0)
 }
 
-// enterPlanPhase starts the built-in plan-implement workflow at the plan phase.
+// stopWorkflow clears the active workflow phase and phase permissions.
+// Alias for clearPhase; used by the StopWorkflow op and recovery cleanup.
+func (e *Engine) stopWorkflow() {
+	e.clearPhase()
+}
+
+// enterWorkflow starts workflow at phase index 0 (or re-enters if already active).
+// Prefer startWorkflow for generic activation; kept for call-site compatibility.
+func (e *Engine) enterWorkflow(name string) error {
+	return e.startWorkflow(name)
+}
+
+// enterPlanPhase is the plan convenience adapter: starts the default plan
+// workflow (DefaultWorkflow or plan-implement) at phase 0.
 func (e *Engine) enterPlanPhase() error {
 	name := "plan-implement"
 	if e.opts.DefaultWorkflow != "" {
 		name = e.opts.DefaultWorkflow
 	}
-	return e.enterWorkflow(name)
+	return e.startWorkflow(name)
 }
 
-// clearPhase drops the active workflow phase and its permission profile.
+// clearPhase drops the active workflow phase, recovery state, and phase
+// permission profile.
 func (e *Engine) clearPhase() {
-	if e.phaseIndex < 0 && e.workflow.Name == "" {
+	if e.phaseIndex < 0 && e.workflow.Name == "" && e.phaseRecovery == "" {
 		return
 	}
 	e.workflow = config.Workflow{}
 	e.phaseIndex = -1
+	e.phaseRecovery = ""
 	e.phaseGrantApproval = PhaseGrantApproval{}
 	e.perms.SetPhaseRules(nil)
 	e.emitSelected(protocol.PhaseChanged{
@@ -59,6 +94,7 @@ func (e *Engine) clearPhase() {
 }
 
 // enterPhase applies phase index of w: permissions, optional agent pin, event.
+// Validates the target before mutating context, permissions, agent, or events.
 // Permission widenings relative to config/agent layers require approval first;
 // rejection leaves the current phase, permissions, and context unchanged.
 func (e *Engine) enterPhase(w config.Workflow, index int) error {
@@ -69,8 +105,8 @@ func (e *Engine) enterPhase(w config.Workflow, index int) error {
 // keeps the current persona (used when the user/tool already chose build or
 // orchestrator while leaving plan).
 func (e *Engine) enterPhaseOpts(ctx context.Context, w config.Workflow, index int, pinAgent bool) error {
-	if index < 0 || index >= len(w.Phases) {
-		return fmt.Errorf("workflow %q: phase index %d out of range", w.Name, index)
+	if err := e.validatePhaseTarget(w, index); err != nil {
+		return err
 	}
 	phase := w.Phases[index]
 	// Children inherit the parent ceiling (opts.Rules includes parent phase).
@@ -87,8 +123,10 @@ func (e *Engine) enterPhaseOpts(ctx context.Context, w config.Workflow, index in
 		}
 	}
 
+	// Mutate only after validation and widening approval succeed.
 	e.workflow = w
 	e.phaseIndex = index
+	e.phaseRecovery = ""
 	if len(delta) > 0 {
 		e.phaseGrantApproval = PhaseGrantApproval{
 			Workflow:    w.Name,
@@ -102,13 +140,7 @@ func (e *Engine) enterPhaseOpts(ctx context.Context, w config.Workflow, index in
 	}
 	e.perms.SetPhaseRules(phasePerms)
 
-	e.emitSelected(protocol.PhaseChanged{
-		Correlation: e.sessionCorr(),
-		Workflow:    w.Name,
-		Phase:       phase.Name,
-		Index:       index,
-		Gate:        e.effectiveGateLabel(),
-	})
+	e.emitPhaseChanged(phase.Name, index, "")
 
 	if !pinAgent {
 		return nil
@@ -127,9 +159,45 @@ func (e *Engine) enterPhaseOpts(ctx context.Context, w config.Workflow, index in
 	return nil
 }
 
+// validatePhaseTarget checks workflow/index before any state mutation.
+func (e *Engine) validatePhaseTarget(w config.Workflow, index int) error {
+	if strings.TrimSpace(w.Name) == "" {
+		return fmt.Errorf("workflow has empty name")
+	}
+	if index < 0 || index >= len(w.Phases) {
+		return fmt.Errorf("workflow %q: phase index %d out of range", w.Name, index)
+	}
+	phase := w.Phases[index]
+	if err := config.ValidatePhaseName(phase.Name); err != nil {
+		return fmt.Errorf("workflow %q phase %d: %w", w.Name, index, err)
+	}
+	return nil
+}
+
+// emitPhaseChanged emits the current (or recovery) phase identity.
+func (e *Engine) emitPhaseChanged(phaseName string, index int, status string) {
+	ev := protocol.PhaseChanged{
+		Correlation: e.sessionCorr(),
+		Workflow:    e.workflow.Name,
+		Phase:       phaseName,
+		Index:       index,
+		Source:      string(e.workflow.Source),
+		Fingerprint: e.workflow.Fingerprint,
+		Status:      status,
+	}
+	if status == "" && phaseName != "" {
+		ev.Gate = e.effectiveGateLabel()
+	}
+	e.emitSelected(ev)
+}
+
 // advancePhase clears the current phase exit gate and loads the next phase
 // (or ends the workflow). Used by phase_done and exit_plan_mode.
 func (e *Engine) advancePhase(ctx context.Context) error {
+	if e.phaseRecovery != "" {
+		return fmt.Errorf("workflow %q is in resume recovery (%s): stop or restart before advancing",
+			e.workflow.Name, e.phaseRecovery)
+	}
 	if e.phaseIndex < 0 || e.workflow.Name == "" {
 		return fmt.Errorf("no active workflow phase")
 	}
@@ -141,6 +209,10 @@ func (e *Engine) advancePhase(ctx context.Context) error {
 	if next >= len(e.workflow.Phases) {
 		e.clearPhase()
 		return nil
+	}
+	// Validate next before mutating away from the current phase.
+	if err := e.validatePhaseTarget(e.workflow, next); err != nil {
+		return err
 	}
 	return e.enterPhaseOpts(ctx, e.workflow, next, true)
 }
@@ -250,6 +322,65 @@ func formatPhaseGrantDelta(delta permission.Ruleset) string {
 		fmt.Fprintf(&b, "  • %s %s → %s", r.Permission, pat, r.Action)
 	}
 	return b.String()
+}
+
+// restoreWorkflowPhase re-enters a recorded phase after session resume.
+// When fingerprint is non-empty it must match the loaded definition; otherwise
+// a fail-closed recovery state is surfaced (no phase permissions applied).
+// Legacy resumes with empty fingerprint bind to the current loaded definition.
+func (e *Engine) restoreWorkflowPhase(name string, index int, phaseName, fingerprint string) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return
+	}
+	w, ok := e.findWorkflow(name)
+	if !ok {
+		e.enterPhaseRecovery(name, phaseName, index, fingerprint, "", protocol.PhaseStatusMissing)
+		return
+	}
+	fp := strings.TrimSpace(fingerprint)
+	if fp != "" && w.Fingerprint != "" && !strings.EqualFold(fp, w.Fingerprint) {
+		e.enterPhaseRecovery(name, phaseName, index, fingerprint, string(w.Source), protocol.PhaseStatusMismatch)
+		return
+	}
+	if index < 0 || index >= len(w.Phases) {
+		e.enterPhaseRecovery(name, phaseName, index, fingerprint, string(w.Source), protocol.PhaseStatusMismatch)
+		return
+	}
+	if pn := strings.TrimSpace(phaseName); pn != "" && w.Phases[index].Name != pn {
+		e.enterPhaseRecovery(name, phaseName, index, fingerprint, string(w.Source), protocol.PhaseStatusMismatch)
+		return
+	}
+	// Healthy restore: apply the fingerprinted (or legacy name-matched) def.
+	_ = e.enterPhase(w, index)
+}
+
+// enterPhaseRecovery records fail-closed resume state without applying
+// phase permissions or agent pins. Always emits (even during QuietStartup)
+// so displayed recovery cannot desync from enforced empty phase rules.
+func (e *Engine) enterPhaseRecovery(name, phaseName string, index int, fingerprint, source, status string) {
+	e.perms.SetPhaseRules(nil)
+	e.phaseGrantApproval = PhaseGrantApproval{}
+	e.workflow = config.Workflow{
+		Name:        name,
+		Source:      config.WorkflowSource(source),
+		Fingerprint: fingerprint,
+	}
+	e.phaseIndex = index
+	if e.phaseIndex < 0 {
+		e.phaseIndex = 0
+	}
+	e.phaseRecovery = status
+	ev := protocol.PhaseChanged{
+		Correlation: e.sessionCorr(),
+		Workflow:    e.workflow.Name,
+		Phase:       phaseName,
+		Index:       e.phaseIndex,
+		Source:      string(e.workflow.Source),
+		Fingerprint: e.workflow.Fingerprint,
+		Status:      status,
+	}
+	e.emit(ev)
 }
 
 // effectiveGateLabel is the PhaseChanged.Gate value for the session autonomy
@@ -397,22 +528,76 @@ func (e *Engine) findWorkflow(name string) (config.Workflow, bool) {
 	if name == "plan-implement" || name == "" {
 		return config.BuiltinPlanImplement(), true
 	}
+	if name == "review-fix" {
+		return config.BuiltinReviewFix(), true
+	}
 	return config.Workflow{}, false
 }
 
-// currentPhase returns the active phase, or false when none.
+// currentPhase returns the active enforced phase, or false when none / recovery.
 func (e *Engine) currentPhase() (config.Phase, bool) {
+	if e.phaseRecovery != "" {
+		return config.Phase{}, false
+	}
 	if e.phaseIndex < 0 || e.phaseIndex >= len(e.workflow.Phases) {
 		return config.Phase{}, false
 	}
 	return e.workflow.Phases[e.phaseIndex], true
 }
 
-// syncPhaseWithAgent enters or leaves the plan workflow when the user
-// switches agents via tab / SelectAgent (outside tool-driven phase_done).
-// build and orchestrator both leave plan for the implement phase (post-plan
-// routing may pick either after exit_plan_mode).
+// activeWorkflowHealthy reports whether a fully enforced workflow phase is live.
+func (e *Engine) activeWorkflowHealthy() bool {
+	_, ok := e.currentPhase()
+	return ok
+}
+
+// syncPhaseWithAgent keeps displayed and enforced phase state aligned when the
+// user switches agents via tab / SelectAgent (outside tool-driven phase_done).
+//
+// Plan convenience adapters handle the default plan-implement workflow only.
+// Generic workflows: if the new agent differs from the phase pin, stop the
+// workflow so phase permissions cannot linger under a different persona.
 func (e *Engine) syncPhaseWithAgent(agentName string) {
+	if e.phaseRecovery != "" {
+		// Recovery is display-only until stop/restart; agent switches do not
+		// invent enforcement from a stale record.
+		return
+	}
+	if e.isPlanConvenienceWorkflow() {
+		e.syncPlanConvenienceWithAgent(agentName)
+		return
+	}
+	phase, ok := e.currentPhase()
+	if !ok {
+		// No active generic workflow: plan agent still enters plan convenience.
+		if agentName == "plan" {
+			_ = e.enterPlanPhase()
+		}
+		return
+	}
+	pin := strings.TrimSpace(phase.Agent)
+	if pin != "" && pin != agentName {
+		e.stopWorkflow()
+	}
+}
+
+// isPlanConvenienceWorkflow reports whether the active workflow is the default
+// plan→implement sequence (built-in or DefaultWorkflow override).
+func (e *Engine) isPlanConvenienceWorkflow() bool {
+	if e.workflow.Name == "" {
+		return false
+	}
+	def := "plan-implement"
+	if e.opts.DefaultWorkflow != "" {
+		def = e.opts.DefaultWorkflow
+	}
+	return e.workflow.Name == def || e.workflow.Name == "plan-implement"
+}
+
+// syncPlanConvenienceWithAgent is the plan-mode adapter: selecting plan enters
+// the plan workflow; build/orchestrator leave the plan phase for implement
+// without re-pinning phase.Agent (so orchestrator is not clobbered to build).
+func (e *Engine) syncPlanConvenienceWithAgent(agentName string) {
 	switch agentName {
 	case "plan":
 		if phase, ok := e.currentPhase(); ok && phase.Name == "plan" {
@@ -421,8 +606,6 @@ func (e *Engine) syncPhaseWithAgent(agentName string) {
 		_ = e.enterPlanPhase()
 	case "build", "orchestrator":
 		if phase, ok := e.currentPhase(); ok && phase.Name == "plan" {
-			// User/tool forced implementer: jump to implement phase without
-			// re-pinning phase.Agent (would clobber orchestrator → build).
 			w := e.workflow
 			for i, p := range w.Phases {
 				if p.Name == "implement" || p.Agent == "build" || p.Agent == "orchestrator" {
@@ -434,6 +617,14 @@ func (e *Engine) syncPhaseWithAgent(agentName string) {
 		if e.phaseIndex >= 0 {
 			// Leaving a non-plan phase via agent switch ends the workflow.
 			if phase, ok := e.currentPhase(); ok && phase.Agent != "" && phase.Agent != agentName {
+				e.clearPhase()
+			}
+		}
+	default:
+		// Other agents leave plan convenience when the pin no longer matches.
+		if phase, ok := e.currentPhase(); ok {
+			pin := strings.TrimSpace(phase.Agent)
+			if pin != "" && pin != agentName {
 				e.clearPhase()
 			}
 		}
@@ -449,8 +640,9 @@ func (e *Engine) phaseContextPrompt() string {
 	if s := strings.TrimSpace(phase.Context); s != "" {
 		return s
 	}
-	// Built-in plan phase uses the embedded plan overlay when Context is empty.
-	if phase.Name == "plan" || phase.Agent == "plan" {
+	// Plan convenience: built-in plan phase uses the embedded plan overlay
+	// when Context is empty.
+	if e.isPlanConvenienceWorkflow() && (phase.Name == "plan" || phase.Agent == "plan") {
 		return PlanSystemPrompt
 	}
 	return ""

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jonathanung/strike-cli/internal/sandbox"
 )
@@ -311,5 +312,65 @@ func TestBashDoesNotRecordPROnFailure(t *testing.T) {
 	}
 	if called {
 		t.Fatal("RecordSessionPR must not run on non-zero exit")
+	}
+}
+
+func TestBashTimeoutSetsErrorCode(t *testing.T) {
+	tc := &Context{
+		WorkDir: t.TempDir(),
+		Ask:     func(context.Context, AskRequest) error { return nil },
+	}
+	args, _ := json.Marshal(map[string]any{
+		"command":   "sleep 5",
+		"timeoutMs": 50,
+	})
+	res, err := NewBash().Execute(context.Background(), args, tc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.ErrorCode != ErrorCodeTimeout {
+		t.Fatalf("ErrorCode = %q, want %q", res.ErrorCode, ErrorCodeTimeout)
+	}
+	if !strings.Contains(res.Output, "timed out") {
+		t.Fatalf("output = %q", res.Output)
+	}
+	if !strings.Contains(string(res.Metadata), `"incomplete":true`) {
+		t.Fatalf("metadata = %s", res.Metadata)
+	}
+}
+
+func TestBashCancelPreservesPartialOutput(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	tc := &Context{
+		WorkDir: t.TempDir(),
+		Ask:     func(context.Context, AskRequest) error { return nil },
+	}
+	// Print then sleep so cancel captures stdout.
+	args, _ := json.Marshal(map[string]any{
+		"command": "printf 'hello-partial\\n'; sleep 30",
+	})
+	done := make(chan Result, 1)
+	errc := make(chan error, 1)
+	go func() {
+		res, err := NewBash().Execute(ctx, args, tc)
+		done <- res
+		errc <- err
+	}()
+	// Wait until some output is likely, then cancel.
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+	select {
+	case res := <-done:
+		if err := <-errc; err != nil {
+			t.Fatalf("err = %v", err)
+		}
+		if res.ErrorCode != ErrorCodeCanceled {
+			t.Fatalf("ErrorCode = %q, want %q", res.ErrorCode, ErrorCodeCanceled)
+		}
+		if !strings.Contains(res.Output, "hello-partial") {
+			t.Fatalf("output missing partial: %q", res.Output)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("bash did not return after cancel")
 	}
 }

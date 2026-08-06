@@ -322,6 +322,29 @@ Built-in `review-fix`:
 1. **review** — `reviewer` agent, hard-deny `write`/`edit`, user exit gate
 2. **fix** — `build` agent, check gate (`make test`)
 
+### Lifecycle, identity, and resume
+
+Any **validated loaded** workflow can be started (`workflow.start` op / engine
+`startWorkflow`). Exactly **one** workflow is active per root session; starting
+another replaces the prior after the target is validated. Transitions validate
+the target phase **before** mutating context, permissions, agent, or protocol
+state. Completion and explicit stop (`workflow.stop`) clear phase context and
+phase permissions.
+
+`PhaseChanged` events carry workflow **source**, canonical **fingerprint**,
+phase name/index, and the effective **gate** (from `/autonomy`). On session
+resume the engine rebinds by name + fingerprint:
+
+| Outcome | Behavior |
+|---|---|
+| Fingerprint matches (or legacy empty fingerprint) | Restore phase permissions and agent pin |
+| Definition missing | Fail-closed `status: missing` — no phase perms until stop/restart |
+| Fingerprint or phase identity changed | Fail-closed `status: mismatch` — same |
+
+Plan convenience adapters (`enter_plan_mode` / `exit_plan_mode`, plan-agent
+tab sync) still drive the default plan workflow; core lifecycle APIs are
+workflow-name generic.
+
 Tools `enter_plan_mode` / `exit_plan_mode` start and advance the default plan
 workflow. After plan completes, `exit_plan_mode` switches to **build** (simple)
 or **orchestrator** (complex): pass `agent`, or omit and supply `steps` /

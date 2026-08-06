@@ -166,16 +166,14 @@ func TestAgentsMDExistsEmptyFile(t *testing.T) {
 }
 
 func TestScrubSecretSpans(t *testing.T) {
-	in := "token sk-ant-api03-SUPERSECRETKEY and ghp_ABCDEFG password=hunter2"
+	// ghp_ needs ≥20 body chars; password assignment needs ≥6 value chars.
+	in := "token sk-ant-api03-SUPERSECRETKEYVALUE and ghp_ABCDEFGHIJKLMNOPQRSTUV password=hunter2"
 	out := scrubSecretSpans(in)
-	if strings.Contains(out, "SUPERSECRETKEY") || strings.Contains(out, "ABCDEFG") || strings.Contains(out, "hunter2") {
+	if strings.Contains(out, "SUPERSECRETKEYVALUE") || strings.Contains(out, "ABCDEFGHIJKLMNOPQRSTUV") || strings.Contains(out, "hunter2") {
 		t.Fatalf("secret leaked: %q", out)
 	}
-	if !strings.Contains(out, "sk-ant-") || !strings.Contains(out, "ghp_") {
-		t.Fatalf("expected redacted prefixes kept: %q", out)
-	}
-	if !strings.Contains(out, "…") {
-		t.Fatalf("expected ellipsis redaction: %q", out)
+	if !strings.Contains(out, "[REDACTED") {
+		t.Fatalf("expected redaction placeholder: %q", out)
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"regexp"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -275,6 +276,56 @@ func TestReplaySliceAndLastBounded(t *testing.T) {
 	}
 	if _, _, err := ReplayLast(path, 0); err == nil {
 		t.Fatal("expected n<=0 error")
+	}
+}
+
+func TestAppendRedactsSecrets(t *testing.T) {
+	dir := t.TempDir()
+	st, err := Open(dir, "secret-session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := "sk-abcdefghijklmnopqrstuvwxyz0123456789"
+	tok := "ghp_abcdefghijklmnopqrstuvwxyz0123456789"
+	events := []protocol.Event{
+		protocol.UserMessage{Text: "my key is " + key},
+		protocol.ToolCallEnd{CallID: "c1", Title: "bash", Output: "token=" + tok},
+		protocol.ToolCallOutput{CallID: "c1", Data: "Authorization: Bearer abcdefghijklmnop"},
+	}
+	for _, ev := range events {
+		if err := st.Append(ev); err != nil {
+			t.Fatal(err)
+		}
+	}
+	path := st.Path()
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// Raw JSONL must not contain the fake credentials.
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(raw)
+	for _, banned := range []string{key, tok, "abcdefghijklmnop"} {
+		if strings.Contains(body, banned) {
+			t.Fatalf("session JSONL leaked %q:\n%s", banned, body)
+		}
+	}
+	got, err := Replay(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("replayed %d", len(got))
+	}
+	um := got[0].(protocol.UserMessage)
+	if strings.Contains(um.Text, key) {
+		t.Fatalf("replayed user message leaked: %q", um.Text)
+	}
+	end := got[1].(protocol.ToolCallEnd)
+	if strings.Contains(end.Output, tok) {
+		t.Fatalf("replayed tool end leaked: %q", end.Output)
 	}
 }
 

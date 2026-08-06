@@ -73,6 +73,29 @@ func (e *Engine) handleOp(ctx context.Context, op protocol.Op) {
 			return
 		}
 		e.setFast(op.Enabled)
+	case protocol.StartWorkflow:
+		if e.turnActive() {
+			e.emit(protocol.EngineError{
+				Correlation: e.sessionCorr(),
+				Message:     "cannot start a workflow while a turn is running",
+			})
+			return
+		}
+		if err := e.startWorkflow(op.Name); err != nil {
+			e.emit(protocol.EngineError{
+				Correlation: e.sessionCorr(),
+				Message:     err.Error(),
+			})
+		}
+	case protocol.StopWorkflow:
+		if e.turnActive() {
+			e.emit(protocol.EngineError{
+				Correlation: e.sessionCorr(),
+				Message:     "cannot stop a workflow while a turn is running",
+			})
+			return
+		}
+		e.stopWorkflow()
 	case protocol.PermissionReply:
 		e.routePermissionReply(op)
 	case protocol.QuestionReply:
@@ -309,13 +332,7 @@ func (e *Engine) setAutonomy(mode protocol.Autonomy) {
 		Mode:        parsed,
 	})
 	if phase, ok := e.currentPhase(); ok {
-		e.emitSelected(protocol.PhaseChanged{
-			Correlation: e.sessionCorr(),
-			Workflow:    e.workflow.Name,
-			Phase:       phase.Name,
-			Index:       e.phaseIndex,
-			Gate:        e.effectiveGateLabel(),
-		})
+		e.emitPhaseChanged(phase.Name, e.phaseIndex, "")
 	}
 }
 
