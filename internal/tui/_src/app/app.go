@@ -424,6 +424,9 @@ type Model struct {
 	// children tracks active/recent subagent sessions for the activity pane.
 	// Lifecycle never appends transcript cells.
 	children []childActivity
+	// pathOverlaps is a bounded root-side cache of PathOverlap warnings for the
+	// active lead session (#922). Child claims live on childActivity instead.
+	pathOverlaps []childPathOverlap
 	// teamMessages is a bounded ring of recent peer mailbox deliveries for the
 	// lead activity pane (agent.message). Oldest drop under broadcast storms.
 	teamMessages []teamMessage

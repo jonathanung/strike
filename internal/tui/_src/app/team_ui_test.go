@@ -315,7 +315,7 @@ func TestOnPathOverlapBounded(t *testing.T) {
 	}
 	// Dedup same path+policy updates warning.
 	m.onPathOverlap(protocol.PathOverlap{
-		Correlation: protocol.Correlation{SessionID: "c1"},
+		Correlation: protocol.Correlation{SessionID: "c1", ParentSessionID: "lead", Depth: 1},
 		Path:        last.path,
 		Policy:      "warn",
 		Warning:     "updated",
@@ -331,6 +331,29 @@ func TestOnPathOverlapBounded(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("dedup did not refresh warning")
+	}
+}
+
+func TestOnPathOverlapRootDoesNotCreateChild(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m.sessionID = "lead"
+	m.children = nil
+	m.onPathOverlap(protocol.PathOverlap{
+		Correlation: protocol.Correlation{SessionID: "lead"},
+		Path:        "root.go",
+		Policy:      "warn",
+		Warning:     "lead claim",
+	})
+	if len(m.children) != 0 {
+		t.Fatalf("root PathOverlap created fake child: %#v", m.children)
+	}
+	if len(m.pathOverlaps) != 1 || m.pathOverlaps[0].path != "root.go" {
+		t.Fatalf("root pathOverlaps = %#v", m.pathOverlaps)
+	}
+	m.vizFocusID = "lead"
+	snap := m.visualizerStateSnapshot()
+	if len(snap.PathOverlaps) != 1 || snap.PathOverlaps[0].Path != "root.go" {
+		t.Fatalf("root snapshot overlaps = %#v", snap.PathOverlaps)
 	}
 }
 
