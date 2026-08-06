@@ -165,7 +165,7 @@ type Config struct {
 
 // NetworkConfig is the JSON "network" object — shared allowlist shape for
 // application-layer web egress (webfetch). Bash OS networking stays
-// all-or-nothing via sandbox.Policy.Network; container net can reuse this
+// all-or-nothing via sandbox.Policy.NetworkEnabled; container net can reuse this
 // shape later.
 type NetworkConfig struct {
 	// Allow lists hostnames (example.com), single-label wildcards

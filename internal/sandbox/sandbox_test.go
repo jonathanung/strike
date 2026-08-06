@@ -161,7 +161,8 @@ func TestWrapLinuxArgvShape(t *testing.T) {
 		t.Fatalf("result = %+v", res)
 	}
 	argv := res.Argv
-	// bwrap --ro-bind / / --bind WD WD [--bind shared...] --dev /dev --proc /proc --unshare-net --die-with-parent -- bash -c echo hi
+	// bwrap --ro-bind / / --bind WD WD [--bind shared...] --dev /dev --proc /proc --die-with-parent -- bash -c echo hi
+	// Default (NoNetwork zero) shares host networking — no --unshare-net.
 	// Launcher may be absolute (preferred) or bare "bwrap". Shared temp/cache
 	// binds are host-dependent so assert structure, not a fixed argv length.
 	if len(argv) < 14 {
@@ -186,7 +187,11 @@ func TestWrapLinuxArgvShape(t *testing.T) {
 	if !strings.Contains(joined, "\x00--dev\x00/dev\x00--proc\x00/proc\x00") {
 		t.Fatalf("missing dev/proc: %#v", argv)
 	}
-	if !strings.Contains(joined, "\x00--unshare-net\x00--die-with-parent\x00--\x00bash\x00-c\x00echo hi") {
+	// Product default: bare Policy keeps host networking (issue #750).
+	if strings.Contains(joined, "\x00--unshare-net\x00") {
+		t.Fatalf("default Policy must omit --unshare-net: %#v", argv)
+	}
+	if !strings.Contains(joined, "\x00--die-with-parent\x00--\x00bash\x00-c\x00echo hi") {
 		t.Fatalf("missing trailer: %#v", argv)
 	}
 
@@ -200,10 +205,10 @@ func TestWrapLinuxArgvShape(t *testing.T) {
 		t.Fatalf("ro argv = %#v", ro)
 	}
 
-	// Network on: no --unshare-net.
-	netArgv := Wrap([]string{"true"}, Policy{Mode: ModeReadOnly, WorkDir: wd, Network: true})
-	if strings.Contains(strings.Join(netArgv, "\x00"), "\x00--unshare-net\x00") {
-		t.Fatalf("network policy must omit --unshare-net: %#v", netArgv)
+	// Explicit NoNetwork: --unshare-net present.
+	netOff := Wrap([]string{"true"}, Policy{Mode: ModeReadOnly, WorkDir: wd, NoNetwork: true})
+	if !strings.Contains("\x00"+strings.Join(netOff, "\x00")+"\x00", "\x00--unshare-net\x00") {
+		t.Fatalf("NoNetwork policy must include --unshare-net: %#v", netOff)
 	}
 
 	// Deny path remounted read-only after workspace bind.
@@ -318,7 +323,7 @@ func TestExplainAndProfileText(t *testing.T) {
 	text := Explain(Policy{
 		Mode:           ModeWorkspaceWrite,
 		WorkDir:        wd,
-		Network:        false,
+		NoNetwork:      true,
 		NetworkAllow:   []string{"api.github.com", "10.0.0.0/8"},
 		DenyWriteGlobs: []string{"**/*.env"},
 	})
@@ -333,15 +338,18 @@ func TestExplainAndProfileText(t *testing.T) {
 			t.Errorf("Explain missing %q:\n%s", want, text)
 		}
 	}
-	unrestricted := Explain(Policy{Mode: ModeReadOnly, WorkDir: wd, Network: true})
+	unrestricted := Explain(Policy{Mode: ModeReadOnly, WorkDir: wd})
 	if !strings.Contains(unrestricted, "network allowlist: (none — unrestricted public)") {
 		t.Errorf("Explain unrestricted allowlist:\n%s", unrestricted)
+	}
+	if !strings.Contains(unrestricted, "network: true") {
+		t.Errorf("Explain default network on:\n%s", unrestricted)
 	}
 	off := Explain(Policy{Mode: ModeOff})
 	if !strings.Contains(off, "disabled") {
 		t.Fatalf("off explain = %q", off)
 	}
-	prof := ProfileText(Policy{Mode: ModeReadOnly, WorkDir: wd, Network: true})
+	prof := ProfileText(Policy{Mode: ModeReadOnly, WorkDir: wd})
 	if prof == "" {
 		t.Fatal("empty ProfileText")
 	}
@@ -478,5 +486,81 @@ func TestLinuxIntegrationAllowsSharedTemp(t *testing.T) {
 	}
 	if _, err := os.Stat(marker); err != nil {
 		t.Fatalf("marker missing after shared write: %v", err)
+	}
+}
+
+// TestLinuxIntegrationDefaultNetworkHTTPS is the #750 regression: default
+// workspace-write policy (and bare Policy{Mode,WorkDir}) must reach the public
+// internet. NoNetwork must air-gap. Skips when bwrap or outbound HTTPS is
+// unavailable in the environment.
+func TestLinuxIntegrationDefaultNetworkHTTPS(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("linux bwrap integration")
+	}
+	ResetWarnForTest()
+	resetAvailabilityForTest()
+	if !Available() {
+		t.Skipf("bwrap unavailable or blocked in this environment")
+	}
+	if _, err := exec.LookPath("curl"); err != nil {
+		t.Skip("curl not available")
+	}
+	// Host baseline: skip when this environment has no outbound HTTPS.
+	base := exec.Command("curl", "-sI", "--max-time", "5", "https://example.com")
+	if out, err := base.CombinedOutput(); err != nil {
+		t.Skipf("host HTTPS unavailable (skip integration): err=%v out=%s", err, out)
+	}
+
+	wd := t.TempDir()
+	curlCmd := "curl -sI --max-time 5 https://example.com | head -n 1"
+
+	run := func(name string, p Policy) (string, error) {
+		t.Helper()
+		argv := Wrap([]string{"bash", "-c", curlCmd}, p)
+		joined := "\x00" + strings.Join(argv, "\x00") + "\x00"
+		hasUnshare := strings.Contains(joined, "\x00--unshare-net\x00")
+		if p.NoNetwork && !hasUnshare {
+			t.Fatalf("%s: expected --unshare-net in %#v", name, argv)
+		}
+		if !p.NoNetwork && hasUnshare {
+			t.Fatalf("%s: unexpected --unshare-net in %#v", name, argv)
+		}
+		cmd := exec.Command(argv[0], argv[1:]...)
+		cmd.Dir = wd
+		out, err := cmd.CombinedOutput()
+		return string(out), err
+	}
+
+	// Bare policy (zero NoNetwork) — the footgun PR #751 left open.
+	out, err := run("bare", Policy{Mode: ModeWorkspaceWrite, WorkDir: wd})
+	if err != nil {
+		t.Fatalf("default network bare Policy HTTPS failed: err=%v out=%s", err, out)
+	}
+	if !strings.Contains(out, "HTTP") {
+		t.Fatalf("default network bare Policy expected HTTP response, got %q", out)
+	}
+
+	// Explicit air-gap must fail DNS/connect (gh reports "token invalid" for
+	// the same failure mode — see issue #750 screenshot).
+	outOff, errOff := run("NoNetwork", Policy{Mode: ModeWorkspaceWrite, WorkDir: wd, NoNetwork: true})
+	if errOff == nil && strings.Contains(outOff, "HTTP/2 200") {
+		t.Fatalf("NoNetwork must not reach HTTPS; out=%s", outOff)
+	}
+	// Prefer a clear network failure signal when curl runs.
+	if errOff == nil && strings.TrimSpace(outOff) != "" &&
+		!strings.Contains(strings.ToLower(outOff), "fail") &&
+		!strings.Contains(strings.ToLower(outOff), "resolv") &&
+		!strings.Contains(strings.ToLower(outOff), "network") &&
+		!strings.Contains(outOff, "Could not") {
+		t.Logf("NoNetwork out (non-HTTP failure shape ok): %q", outOff)
+	}
+}
+
+func TestNetworkEnabledZeroValue(t *testing.T) {
+	if !(Policy{}).NetworkEnabled() {
+		t.Fatal("zero Policy must enable network")
+	}
+	if (Policy{NoNetwork: true}).NetworkEnabled() {
+		t.Fatal("NoNetwork must disable network")
 	}
 }

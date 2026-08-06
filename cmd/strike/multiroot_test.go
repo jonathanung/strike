@@ -60,7 +60,7 @@ func TestMultiRootHubSpawnAndActivate(t *testing.T) {
 		t.Fatal(err)
 	}
 	hub := newMultiRootHub(first, makeSlot, files, local.NewShell(dir, sandbox.Policy{
-		Mode: sandbox.ModeWorkspaceWrite, WorkDir: dir, Network: true,
+		Mode: sandbox.ModeWorkspaceWrite, WorkDir: dir,
 	}))
 	defer func() { _ = hub.Close() }()
 
