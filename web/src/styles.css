@@ -443,8 +443,40 @@ dialog h2 {
 }
 dialog label { display: grid; gap: 7px; color: var(--muted); font-size: 10px; }
 dialog input { padding: 12px; color: var(--ink); }
-.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 22px; }
+.dialog-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-top: 22px; }
 .dialog-actions button { padding: 9px 14px; }
+.permission-tool { margin: 0 0 10px; font-size: 15px; }
+.permission-patterns { margin: 0 0 14px; padding-left: 1.2em; display: grid; gap: 6px; }
+.permission-patterns code {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--code-bg);
+  color: var(--tool);
+  font-size: 12px;
+  word-break: break-all;
+}
+.permission-explain { display: grid; gap: 10px; margin: 12px 0 4px; }
+.permission-explain button {
+  justify-self: start;
+  padding: 7px 12px;
+  font-size: 12px;
+  color: var(--muted);
+  border: 1px solid var(--rule);
+  background: var(--surface-muted);
+}
+.permission-explain-body {
+  margin: 0;
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--code-bg);
+  color: var(--ink);
+  font-size: 12px;
+  white-space: pre-wrap;
+  max-height: 180px;
+  overflow: auto;
+}
+.permission-explain-error { margin: 0; color: var(--signal); font-size: 12px; }
 .mobile-only { display: none; }
 
 @keyframes pulse { 50% { opacity: .4; } }

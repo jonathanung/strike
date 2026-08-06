@@ -29,10 +29,54 @@ describe("App", () => {
   it("renders and resolves a blocking permission dialog", async () => {
     render(<App />);
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
-    FakeWebSocket.instances[0].onmessage?.({ data: JSON.stringify({ type: "permission.asked", data: { requestId: "p1", tool: "bash" } }) } as MessageEvent);
-    expect(await screen.findByRole("dialog", { name: "Permission required" })).toBeInTheDocument();
+    FakeWebSocket.instances[0].onmessage?.({ data: JSON.stringify({ type: "permission.asked", data: { requestId: "p1", permission: "bash", patterns: ["echo hi"] } }) } as MessageEvent);
+    const dialog = await screen.findByRole("dialog", { name: "Permission required" });
+    expect(dialog).toHaveTextContent("bash");
+    expect(dialog).toHaveTextContent("echo hi");
+    expect(screen.queryByText(/"requestId"/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reject" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Allow for project" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Allow session" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Allow once" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Why is this asked/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Allow once" }));
-    await waitFor(() => expect(fetch).toHaveBeenLastCalledWith(expect.stringContaining("/v1/ops"), expect.objectContaining({ body: expect.stringContaining("permission.reply") })));
+    await waitFor(() => expect(fetch).toHaveBeenLastCalledWith(expect.stringContaining("/v1/ops"), expect.objectContaining({ body: expect.stringContaining('"decision":"once"') })));
+  });
+
+  it("submits all four permission wire decisions", async () => {
+    render(<App />);
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    const ask = (id: string) => FakeWebSocket.instances[0].onmessage?.({ data: JSON.stringify({ type: "permission.asked", data: { requestId: id, permission: "write", patterns: ["README.md"] } }) } as MessageEvent);
+    const resolve = async (label: string, decision: string, id: string) => {
+      ask(id);
+      fireEvent.click(await screen.findByRole("button", { name: label }));
+      await waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/v1/ops"), expect.objectContaining({
+        body: expect.stringMatching(new RegExp(`"requestId":"${id}".*"decision":"${decision}"|"decision":"${decision}".*"requestId":"${id}"`)),
+      })));
+      FakeWebSocket.instances[0].onmessage?.({ data: JSON.stringify({ type: "permission.resolved", data: { requestId: id, decision } }) } as MessageEvent);
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: "Permission required" })).not.toBeInTheDocument());
+    };
+    await resolve("Reject", "reject", "d-reject");
+    await resolve("Allow session", "always", "d-always");
+    await resolve("Allow for project", "project", "d-project");
+    await resolve("Allow once", "once", "d-once");
+  });
+
+  it("loads permission explain when the host capability is present", async () => {
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("bootstrap")) return response({ version: "test", authRequired: false, attachOnly: false, capabilities: { live: true, permissions: true, roots: false }, protocolOps: ["permission.reply"], status: { sessionId: "live", busy: false }, agents: [], skills: [] });
+      if (url.includes("sessions")) return response({ sessions: [{ id: "live", title: "Current" }], liveId: "live" });
+      if (url.includes("/v1/permissions/explain")) return response({ Permission: "bash", Pattern: "rm -rf /", Action: "ask", Layer: "defaults", Summary: "bash * → ask (defaults)" });
+      return response({ ok: true });
+    }));
+    render(<App />);
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    FakeWebSocket.instances[0].onmessage?.({ data: JSON.stringify({ type: "permission.asked", data: { requestId: "p-ex", permission: "bash", patterns: ["rm -rf /"] } }) } as MessageEvent);
+    fireEvent.click(await screen.findByRole("button", { name: "Why is this asked?" }));
+    expect(await screen.findByLabelText("Permission explanation")).toHaveTextContent("bash * → ask (defaults)");
+    expect(screen.getByLabelText("Permission explanation")).toHaveTextContent("Effective: ask (defaults)");
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/v1/permissions/explain?permission=bash&pattern=rm"), expect.anything()));
   });
 
   it("queues a prompt while busy and exposes slash and skill completion", async () => {

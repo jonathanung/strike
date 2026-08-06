@@ -170,8 +170,88 @@ export default function App() {
     </main>
     <aside className={`inspector ${inspectorOpen ? "open" : "collapsed"}`} aria-label="Inspector"><PanelResize label="Resize inspector panel" value={inspectorWidth} min={240} max={520} onChange={setInspectorWidth} /><div className="inspector-tabs" role="tablist">{(["context", "files", "memory", "issues", "workflows"] as InspectorTab[]).map((tab) => <button role="tab" aria-selected={inspector === tab} key={tab} onClick={() => void inspectProject(tab)}>{tab}</button>)}</div><div className="inspector-body"><InspectorBody tab={inspector} boot={boot} status={state.status} data={projectData} loading={projectLoading} expandedDiffs={expandedDiffs} toggleDiff={toggleDiff} isLive={isLive} selectedID={selectedID} /></div></aside>
     {settingsOpen && <SettingsDialog boot={boot} status={state.status} providers={providers} onClose={() => setSettingsOpen(false)} />}
-    {state.permission && <BlockingDialog title="Permission required"><p><strong>{String(state.permission.tool || state.permission.name || "Tool request")}</strong></p><pre>{JSON.stringify(state.permission, null, 2)}</pre><div className="dialog-actions"><button onClick={() => void op("permission.reply", { requestId: state.permission?.requestId, decision: "reject" }, selectedID)}>Reject</button><button onClick={() => void op("permission.reply", { requestId: state.permission?.requestId, decision: "always" }, selectedID)}>Allow session</button><button autoFocus onClick={() => void op("permission.reply", { requestId: state.permission?.requestId, decision: "once" }, selectedID)}>Allow once</button></div></BlockingDialog>}{state.question && <QuestionDialog question={state.question} rootID={selectedID} />}
+    {state.permission && <PermissionDialog permission={state.permission} rootID={selectedID} canExplain={Boolean(boot?.capabilities.permissions)} />}
+    {state.question && <QuestionDialog question={state.question} rootID={selectedID} />}
   </div>;
+}
+
+type PermissionExplain = {
+  Permission?: string; permission?: string;
+  Pattern?: string; pattern?: string;
+  Action?: string; action?: string;
+  Layer?: string; layer?: string;
+  Summary?: string; summary?: string;
+};
+
+function permissionName(data: Record<string, unknown>): string {
+  return String(data.permission || data.tool || data.name || "tool");
+}
+
+function permissionPatterns(data: Record<string, unknown>): string[] {
+  const raw = data.patterns;
+  if (Array.isArray(raw)) return raw.map((p) => String(p)).filter(Boolean);
+  if (typeof raw === "string" && raw.trim()) return [raw];
+  return [];
+}
+
+function PermissionDialog({ permission, rootID, canExplain }: { permission: Record<string, unknown>; rootID: string; canExplain: boolean }) {
+  const name = permissionName(permission);
+  const patterns = permissionPatterns(permission);
+  const sample = patterns[0] || "*";
+  const [explain, setExplain] = useState<PermissionExplain | null>(null);
+  const [explainError, setExplainError] = useState("");
+  const [explainLoading, setExplainLoading] = useState(false);
+  const reply = (decision: "once" | "always" | "project" | "reject") =>
+    void op("permission.reply", { requestId: permission.requestId, decision }, rootID);
+  const loadExplain = async () => {
+    if (!canExplain || explainLoading) return;
+    setExplainLoading(true);
+    setExplainError("");
+    try {
+      const qs = new URLSearchParams({ permission: name, pattern: sample });
+      setExplain(await request<PermissionExplain>(`/v1/permissions/explain?${qs}`));
+    } catch (error) {
+      setExplainError((error as Error).message);
+      setExplain(null);
+    } finally {
+      setExplainLoading(false);
+    }
+  };
+  const summary = explain?.Summary || explain?.summary || "";
+  const action = explain?.Action || explain?.action || "";
+  const layer = explain?.Layer || explain?.layer || "";
+  return (
+    <BlockingDialog title="Permission required">
+      <p className="permission-tool"><strong>{name}</strong></p>
+      {patterns.length > 0 ? (
+        <ul className="permission-patterns" aria-label="Permission patterns">
+          {patterns.map((pattern) => <li key={pattern}><code>{pattern}</code></li>)}
+        </ul>
+      ) : (
+        <p className="muted">No pattern detail provided for this request.</p>
+      )}
+      {canExplain && (
+        <div className="permission-explain">
+          <button type="button" onClick={() => void loadExplain()} disabled={explainLoading}>
+            {explainLoading ? "Explaining…" : "Why is this asked?"}
+          </button>
+          {explainError && <p className="permission-explain-error" role="status">{explainError}</p>}
+          {summary && (
+            <pre className="permission-explain-body" aria-label="Permission explanation">
+              {summary}
+              {(action || layer) && `\n\nEffective: ${action || "unknown"}${layer ? ` (${layer})` : ""}`}
+            </pre>
+          )}
+        </div>
+      )}
+      <div className="dialog-actions">
+        <button type="button" onClick={() => reply("reject")}>Reject</button>
+        <button type="button" onClick={() => reply("project")}>Allow for project</button>
+        <button type="button" onClick={() => reply("always")}>Allow session</button>
+        <button type="button" autoFocus onClick={() => reply("once")}>Allow once</button>
+      </div>
+    </BlockingDialog>
+  );
 }
 
 function PanelResize({ label, value, min, max, onChange }: { label: string; value: number; min: number; max: number; onChange: (value: number) => void }) {

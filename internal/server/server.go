@@ -171,6 +171,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/file", s.handleFile)
 	s.mux.HandleFunc("GET /v1/memory", s.handleMemory)
 	s.mux.HandleFunc("GET /v1/issues", s.handleIssues)
+	s.mux.HandleFunc("GET /v1/permissions/explain", s.handlePermissionExplain)
+	s.mux.HandleFunc("GET /v1/permissions/presets", s.handlePermissionPresets)
 	s.mux.HandleFunc("GET /v1/workflows", s.handleWorkflows)
 	s.mux.HandleFunc("GET /v1/workflows/{name}", s.handleWorkflowGet)
 	s.mux.HandleFunc("GET /v1/workflows/{name}/document", s.handleWorkflowDocument)
