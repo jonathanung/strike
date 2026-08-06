@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
+	"os"
 	"strings"
 	"time"
 
@@ -60,13 +60,11 @@ func (e *Engine) patchCollab(ctx context.Context, req tool.PatchCollabRequest) (
 
 	case "preview":
 		patchText := req.Patch
-		var item *TeamPatch
 		if id := strings.TrimSpace(req.ID); id != "" {
 			p, ok := e.team.GetPatch(id)
 			if !ok {
 				return tool.PatchCollabResult{}, fmt.Errorf("patch %q not found", id)
 			}
-			item = &p
 			if strings.TrimSpace(patchText) == "" {
 				patchText = p.Patch
 			}
@@ -77,7 +75,7 @@ func (e *Engine) patchCollab(ctx context.Context, req tool.PatchCollabRequest) (
 		if prev.Valid {
 			out.Files = append([]string(nil), prev.Files...)
 		}
-		// Conflicts vs other pending (exclude self when id set).
+		// Full multi-patch report for lead inspection (includes others' base errors).
 		conf := e.pendingConflicts(workDir, req.ID, patchText)
 		out.Conflicts = &conf
 		if conf.HasConflict || !prev.Valid {
@@ -88,7 +86,6 @@ func (e *Engine) patchCollab(ctx context.Context, req tool.PatchCollabRequest) (
 				out.Detail = "conflicts with base and/or other pending patches"
 			}
 		}
-		_ = item
 		return out, nil
 
 	case "conflicts":
@@ -144,22 +141,25 @@ func (e *Engine) applyTeamPatch(ctx context.Context, out tool.PatchCollabResult,
 		return out, nil
 	}
 
-	// Conflict vs other pending path sets + base validity.
-	conf := e.pendingConflicts(workDir, p.ID, p.Patch)
-	if conf.HasConflict {
-		out.Conflict = true
-		out.Conflicts = &conf
-		out.Detail = "refusing apply: conflicts with base and/or other pending patches"
-		out.Patch = teamPatchToTool(p, false)
-		return out, nil
-	}
-
+	// Self must plan cleanly against current base.
 	prev := tool.PreviewPatch(workDir, p.Patch)
 	if !prev.Valid {
 		out.Conflict = true
 		out.Detail = prev.Error
 		out.Preview = &prev
 		out.Patch = teamPatchToTool(p, false)
+		return out, nil
+	}
+
+	// Path overlap with other pending only (do not block on unrelated stale
+	// pending patches that fail base validation on their own paths).
+	if overlap := e.pendingPathOverlap(p.ID, prev.Files); len(overlap) > 0 {
+		conf := tool.MultiPatchConflict{PathOverlap: overlap, HasConflict: true, Invalid: map[string]string{}}
+		out.Conflict = true
+		out.Conflicts = &conf
+		out.Detail = "refusing apply: path overlap with other pending patches"
+		out.Patch = teamPatchToTool(p, false)
+		out.Preview = &prev
 		return out, nil
 	}
 
@@ -179,34 +179,14 @@ func (e *Engine) applyTeamPatch(ctx context.Context, out tool.PatchCollabResult,
 		}
 	}
 
-	// Snapshot for turn diff / checkpoints when available via a synthetic tool context path.
 	// Apply through shared apply_patch stack (rollback on mid-commit failure).
 	summary, files, err := tool.ApplyOnePatch(workDir, p.Patch)
 	if err != nil {
 		return tool.PatchCollabResult{}, err
 	}
 
-	// Record mutations for handoff files_changed + ownership graph.
-	for _, rel := range files {
-		abs, _ := resolveTeamOwnershipPath(workDir, rel)
-		e.noteMutatedPath(abs)
-		if e.opts.FileSync != nil {
-			// Best-effort: content unknown here; empty content still signals change.
-			e.opts.FileSync(abs, "", false)
-		}
-		if e.turnDiff != nil {
-			e.turnDiff.Note(rel, true, false)
-		}
-		if e.checkpoints != nil {
-			// Post-apply snapshot is less useful; skip pre-mutation (already applied).
-		}
-	}
-	// Merge into team ownership as files_changed (handoff accuracy post-apply).
-	name := e.ownershipMemberName()
-	if name == "" {
-		name = actor
-	}
-	e.RecordChildFilesChanged(actor, name, files)
+	// Record mutations for handoff files_changed + ownership + LSP/turn-diff.
+	e.recordAppliedPatch(workDir, actor, prev, files)
 
 	item, err := e.team.MarkPatchApplied(req.ID, actor, summary, files, req.ExpectedVersion)
 	if err != nil {
@@ -223,6 +203,99 @@ func (e *Engine) applyTeamPatch(ctx context.Context, out tool.PatchCollabResult,
 		out.Detail = strings.Join(overlapWarns, "; ")
 	}
 	return out, nil
+}
+
+// pendingPathOverlap returns path → other pending patch ids that share a path
+// with files (selfID excluded).
+func (e *Engine) pendingPathOverlap(selfID string, files []string) map[string][]string {
+	sets := map[string][]string{strings.TrimSpace(selfID): files}
+	for _, other := range e.team.PatchesByStatus(PatchStatusPending) {
+		if other.ID == selfID {
+			continue
+		}
+		sets[other.ID] = other.Files
+	}
+	return tool.PathSetOverlap(sets)
+}
+
+// recordAppliedPatch notes handoff paths, ownership, turn-diff kinds, and LSP sync.
+func (e *Engine) recordAppliedPatch(workDir, actor string, prev tool.PatchPreview, files []string) {
+	if e == nil {
+		return
+	}
+	// Prefer op-typed recording when preview ops are available.
+	if len(prev.Ops) > 0 {
+		for _, op := range prev.Ops {
+			switch op.Type {
+			case "delete":
+				abs, _ := resolveTeamOwnershipPath(workDir, op.Path)
+				e.noteMutatedPath(abs)
+				if e.opts.FileSync != nil {
+					e.opts.FileSync(abs, "", true)
+				}
+				if e.turnDiff != nil {
+					e.turnDiff.Note(op.Path, true, true)
+				}
+			case "move":
+				absFrom, _ := resolveTeamOwnershipPath(workDir, op.Path)
+				absTo, _ := resolveTeamOwnershipPath(workDir, op.MoveTo)
+				e.noteMutatedPath(absFrom)
+				e.noteMutatedPath(absTo)
+				if e.opts.FileSync != nil {
+					e.opts.FileSync(absFrom, "", true)
+					if data, err := os.ReadFile(absTo); err == nil {
+						e.opts.FileSync(absTo, string(data), false)
+					}
+				}
+				if e.turnDiff != nil {
+					e.turnDiff.Note(op.Path, true, true)
+					if op.MoveTo != "" {
+						e.turnDiff.Note(op.MoveTo, false, false)
+					}
+				}
+			case "add":
+				abs, _ := resolveTeamOwnershipPath(workDir, op.Path)
+				e.noteMutatedPath(abs)
+				if e.opts.FileSync != nil {
+					if data, err := os.ReadFile(abs); err == nil {
+						e.opts.FileSync(abs, string(data), false)
+					}
+				}
+				if e.turnDiff != nil {
+					e.turnDiff.Note(op.Path, false, false)
+				}
+			default: // update
+				abs, _ := resolveTeamOwnershipPath(workDir, op.Path)
+				e.noteMutatedPath(abs)
+				if e.opts.FileSync != nil {
+					if data, err := os.ReadFile(abs); err == nil {
+						e.opts.FileSync(abs, string(data), false)
+					}
+				}
+				if e.turnDiff != nil {
+					e.turnDiff.Note(op.Path, true, false)
+				}
+			}
+		}
+	} else {
+		for _, rel := range files {
+			abs, _ := resolveTeamOwnershipPath(workDir, rel)
+			e.noteMutatedPath(abs)
+			if e.opts.FileSync != nil {
+				if data, err := os.ReadFile(abs); err == nil {
+					e.opts.FileSync(abs, string(data), false)
+				}
+			}
+			if e.turnDiff != nil {
+				e.turnDiff.Note(rel, true, false)
+			}
+		}
+	}
+	name := e.ownershipMemberName()
+	if name == "" {
+		name = actor
+	}
+	e.RecordChildFilesChanged(actor, name, files)
 }
 
 func claimPatchWrite(e *Engine, abs, display string) (warning string, err error) {
@@ -350,19 +423,4 @@ func teamPatchesToTool(items []TeamPatch, includeBody bool) []tool.PatchCollabIt
 		out = append(out, *teamPatchToTool(item, includeBody))
 	}
 	return out
-}
-
-// absInWorkDir joins workDir and rel when rel is not absolute.
-func absInWorkDir(workDir, rel string) string {
-	rel = strings.TrimSpace(rel)
-	if rel == "" {
-		return ""
-	}
-	if filepath.IsAbs(rel) {
-		return filepath.Clean(rel)
-	}
-	if workDir == "" {
-		return filepath.Clean(rel)
-	}
-	return filepath.Clean(filepath.Join(workDir, rel))
 }

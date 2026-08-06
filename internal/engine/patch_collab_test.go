@@ -289,3 +289,59 @@ func TestPatchCollabNoTeam(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+// Stale pending on an unrelated path must not block apply of a clean patch.
+func TestPatchCollabApplyIgnoresUnrelatedStalePending(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.WriteFile(filepath.Join(dir, "a.txt"), []byte("a\n"), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "b.txt"), []byte("b\n"), 0o644)
+	e := &Engine{opts: Options{SessionID: "lead", WorkDir: dir}}
+	e.team = NewTeam("lead", "")
+	if !e.team.Enroll(TeamMember{SessionID: "c1", ParentSessionID: "lead", Depth: 1}) {
+		t.Fatal("enroll")
+	}
+	if !e.team.Enroll(TeamMember{SessionID: "c2", ParentSessionID: "lead", Depth: 1}) {
+		t.Fatal("enroll")
+	}
+
+	// p_stale targets b.txt with wrong old lines (invalid against base).
+	stale := strings.Join([]string{
+		"*** Begin Patch",
+		"*** Update File: b.txt",
+		"@@",
+		"-nope",
+		"+B",
+		"*** End Patch",
+	}, "\n")
+	// Force onto board with precomputed files (bypass submit validation).
+	if _, err := e.team.SubmitPatch("stale", stale, "c2", []string{"b.txt"}, "", 0); err != nil {
+		t.Fatal(err)
+	}
+
+	good := strings.Join([]string{
+		"*** Begin Patch",
+		"*** Update File: a.txt",
+		"@@",
+		"-a",
+		"+A",
+		"*** End Patch",
+	}, "\n")
+	e.opts.SessionID = "c1"
+	s1, err := e.patchCollab(context.Background(), tool.PatchCollabRequest{
+		Action: "submit", Patch: good, WorkDir: dir,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.opts.SessionID = "lead"
+	app, err := e.patchCollab(context.Background(), tool.PatchCollabRequest{
+		Action: "apply", ID: s1.Patch.ID, WorkDir: dir,
+	})
+	if err != nil || app.Conflict {
+		t.Fatalf("apply should succeed despite unrelated stale pending: %#v err=%v", app, err)
+	}
+	data, _ := os.ReadFile(filepath.Join(dir, "a.txt"))
+	if string(data) != "A\n" {
+		t.Fatalf("a.txt = %q", data)
+	}
+}
