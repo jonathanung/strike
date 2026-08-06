@@ -568,5 +568,12 @@ func (l *Live) applyStatus(ev protocol.Event) {
 		if e.Used.Known {
 			l.status.ContextUsed = e.Used.N
 		}
+	case protocol.ContextFitWarning:
+		if e.ContextLimit > 0 {
+			l.status.ContextLimit = e.ContextLimit
+		}
+		if e.EstimatedTokens > 0 && l.status.ContextUsed == 0 {
+			l.status.ContextUsed = e.EstimatedTokens
+		}
 	}
 }

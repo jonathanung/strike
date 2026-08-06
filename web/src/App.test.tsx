@@ -230,11 +230,12 @@ describe("App", () => {
     expect(screen.queryByRole("list", { name: "Queued prompts" })).not.toBeInTheDocument();
   });
 
-  it("omits context and capability-gated inspector tabs, surfaces live status only when present", async () => {
+  it("always shows context doctor tab; omits capability-gated tabs when absent", async () => {
     render(<App />);
     await screen.findByText("Current");
-    expect(screen.queryByText("not reported")).not.toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: "context" })).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "context" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Context doctor" })).toBeInTheDocument();
+    expect(screen.queryByText(/catches up with the TUI/i)).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "files" })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "memory" })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "issues" })).not.toBeInTheDocument();
@@ -244,11 +245,11 @@ describe("App", () => {
     expect(screen.queryByRole("tab", { name: "activity" })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "project" })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "capabilities" })).not.toBeInTheDocument();
-    expect(screen.getByText("No inspector panels available for this host.")).toBeInTheDocument();
+    expect(screen.queryByText("No inspector panels available for this host.")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Session status")).not.toBeInTheDocument();
   });
 
-  it("lists only capability-backed inspector tabs and defaults to files", async () => {
+  it("lists context plus capability-backed inspector tabs and defaults to files", async () => {
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("bootstrap")) return response({ version: "test", authRequired: false, attachOnly: false, capabilities: { live: true, files: true, memory: false, issues: true, workflows: true, roots: false }, protocolOps: ["user.input"], status: { sessionId: "live", provider: "echo", busy: false }, agents: [{ name: "build" }], skills: [] });
@@ -261,12 +262,12 @@ describe("App", () => {
     render(<App />);
     await screen.findByText("Current");
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    expect(screen.getByRole("tab", { name: "context" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "files" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("tab", { name: "issues" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "workflows" })).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "memory" })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "plans" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: "context" })).not.toBeInTheDocument();
     expect(await screen.findByText("No changed files reported.")).toBeInTheDocument();
     expect(screen.queryByLabelText("Session status")).not.toBeInTheDocument();
     FakeWebSocket.instances[0].onmessage?.({ data: JSON.stringify({ type: "phase.changed", data: { phase: "act", workflow: "plan-implement" } }) } as MessageEvent);
@@ -280,6 +281,81 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("tab", { name: "workflows" }));
     expect(await screen.findByText("No workflows loaded.")).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "mcp" })).not.toBeInTheDocument();
+  });
+
+  it("renders context doctor breakdown, fit warning, and pin/exclude ops", async () => {
+    render(<App />);
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    fireEvent.click(screen.getByRole("tab", { name: "context" }));
+    const ws = FakeWebSocket.instances[0];
+    ws.onmessage?.({
+      data: JSON.stringify({
+        type: "context.fit_warning",
+        time: "1",
+        data: {
+          level: "warn",
+          message: "projected prompt ~90k tok is ≥50% of the 200k context window",
+          estimatedTokens: 90_000,
+          contextLimit: 200_000,
+          source: "estimated",
+        },
+      }),
+    } as MessageEvent);
+    expect(await screen.findByRole("alert", { name: "Context fit warning" })).toHaveTextContent("projected prompt");
+    expect(screen.getByText("90,000 / 200,000")).toBeInTheDocument();
+
+    ws.onmessage?.({
+      data: JSON.stringify({
+        type: "prompt.effective",
+        time: "2",
+        data: {
+          fromLastStream: true,
+          systemChars: 400,
+          messageCount: 2,
+          layers: [
+            { kind: "shared", source: "builtin:shared", mode: "append", chars: 100, estTokens: 25 },
+            { kind: "persona", source: "agent:build", mode: "replace", chars: 300, estTokens: 75 },
+          ],
+          attribution: {
+            system: { n: 100, known: true },
+            tools: { n: 40, known: true },
+            messages: { n: 200, known: true },
+            toolResults: { n: 0, known: true },
+            total: { n: 340, known: true },
+            source: "estimated",
+          },
+          pinnedKinds: [],
+          excludedKinds: [],
+        },
+      }),
+    } as MessageEvent);
+
+    expect(await screen.findByRole("heading", { name: "Tokens by source" })).toBeInTheDocument();
+    expect(screen.getAllByRole("table").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText("shared").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("persona").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("~340")).toBeInTheDocument();
+
+    const pinButtons = screen.getAllByRole("button", { name: "Pin" });
+    fireEvent.click(pinButtons[0]);
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining("/v1/ops"),
+      expect.objectContaining({
+        method: "POST",
+        body: expect.stringContaining("context.controls"),
+      }),
+    ));
+    const lastCall = (fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls.at(-1);
+    const body = String((lastCall?.[1] as { body?: string } | undefined)?.body || "");
+    expect(body).toContain("setPin");
+    expect(body).toContain("shared");
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => {
+      const bodies = (fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls
+        .map((c) => String((c[1] as { body?: string } | undefined)?.body || ""));
+      expect(bodies.some((b) => b.includes("inspect.prompt"))).toBe(true);
+    });
   });
 
 

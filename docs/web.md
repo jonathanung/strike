@@ -170,10 +170,25 @@ Safety gate: `mode=off` while live or default `permissionMode` is `yolo` require
 | `set.effort` | `{ "level": "..." }` |
 | `set.fast` | `{ "enabled": true\|false }` |
 | `compact` | `{ "strategy": "summarize" }` |
-| `inspect.prompt` | _(empty)_ |
+| `inspect.prompt` | _(empty)_ — request effective-prompt / context doctor snapshot |
+| `context.controls` | `{ "pinKinds?", "setPin?", "excludeKinds?", "setExclude?" }` |
 | `rewind` | `{ "restoreFiles"?: true }` |
 | `workflow.start` | `{ "name": "plan-implement" }` (prefer REST start after grant review) |
 | `workflow.stop` | _(empty)_ |
+
+### Context doctor (inspector **context** tab)
+
+Always available (event-driven; not a host capability). Live events drive the surface:
+
+| Event | UI effect |
+|---|---|
+| `usage.reported` | Updates used tokens when `used.known` |
+| `prompt.effective` | Layer table, token-by-source attribution, pin/exclude/shed sets |
+| `context.controls` | Confirms pin/exclude after a control op |
+| `context.fit_warning` | Fit warning banner + context limit |
+
+Pin/exclude send `context.controls` with full replacement sets (`setPin` /
+`setExclude`). Refresh (and `/context` / `/prompt`) re-issues `inspect.prompt`.
 
 ### Cockpit slash commands & export
 
@@ -186,7 +201,7 @@ still pass through as `user.input`.
 |---|---|
 | `/help` | List web commands + skills |
 | `/export` | Download the loaded transcript as markdown (also **Export** / header ↓) |
-| `/compact` `/prompt` `/rewind` `/rewind-files` `/interrupt` | Mapped protocol ops |
+| `/compact` `/prompt` `/context` `/rewind` `/rewind-files` `/interrupt` | Mapped protocol ops (`/context` → `inspect.prompt`) |
 | `/queue` | Focus the local prompt queue browser |
 | `/rename` `/fork` | Session REST when `capabilities.sessions` |
 | `/cost` `/copy` `/fast` | Client notices / clipboard / `set.fast` |

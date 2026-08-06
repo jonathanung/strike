@@ -7,6 +7,7 @@ export const WEB_SLASH_COMMANDS: SlashCompletion[] = [
   { label: "/export", detail: "Download conversation as markdown", insert: "/export" },
   { label: "/compact", detail: "Compact model history", insert: "/compact" },
   { label: "/prompt", detail: "Inspect effective prompt", insert: "/prompt" },
+  { label: "/context", detail: "Refresh context doctor", insert: "/context" },
   { label: "/rewind", detail: "Undo last turn — chat only or chat and files", insert: "/rewind" },
   { label: "/rewind-files", detail: "Undo last turn with file restore preview", insert: "/rewind-files" },
   { label: "/interrupt", detail: "Stop the running turn", insert: "/interrupt" },
@@ -71,6 +72,7 @@ export function resolveSlash(text: string, skillNames: string[] = []): SlashResu
     case "compact":
       return { kind: "op", type: "compact", data: { strategy: "summarize" } };
     case "prompt":
+    case "context":
       return { kind: "op", type: "inspect.prompt" };
     case "rewind":
       return { kind: "op", type: "rewind", data: {} };

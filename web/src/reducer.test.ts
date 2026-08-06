@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { emptySlice, initialClientState, initialState, reduceClient, reduceEvent, selectedSlice , applyUsageReported, tokenCount } from "./reducer";
+import { emptySlice, initialClientState, initialState, reduceClient, reduceEvent, selectedSlice, applyUsageReported, tokenCount, setAdd, setRemove } from "./reducer";
 
 describe("reduceEvent", () => {
   it("merges streamed text and deduplicates replayed envelopes", () => {
@@ -287,6 +287,123 @@ describe("usage.reported accumulation", () => {
     expect(state.status.outputTokens).toBe(2);
   });
 
+  it("stores prompt.effective layers, attribution, and control sets", () => {
+    const state = reduceEvent(initialState(), {
+      type: "prompt.effective",
+      time: "2",
+      data: {
+        fromLastStream: true,
+        systemChars: 400,
+        messageCount: 3,
+        layers: [
+          { kind: "shared", source: "builtin:shared", mode: "append", chars: 100, estTokens: 25, pinned: true },
+          { kind: "persona", source: "agent:build", mode: "replace", chars: 300, estTokens: 75 },
+        ],
+        attribution: {
+          system: { n: 100, known: true },
+          tools: { n: 50, known: true },
+          messages: { n: 200, known: true },
+          toolResults: { n: 10, known: true },
+          total: { n: 360, known: true },
+          source: "estimated",
+        },
+        pinnedKinds: ["shared"],
+        excludedKinds: ["project_memory"],
+        shedKinds: ["lean_code"],
+      },
+    });
+    expect(state.promptScope).toBe("last");
+    expect(state.systemChars).toBe(400);
+    expect(state.messageCount).toBe(3);
+    expect(state.layers).toHaveLength(2);
+    expect(state.layers[0].kind).toBe("shared");
+    expect(state.layers[0].pinned).toBe(true);
+    expect(state.attribution?.total?.n).toBe(360);
+    expect(state.attribution?.source).toBe("estimated");
+    expect(state.pinnedKinds).toEqual(["shared"]);
+    expect(state.excludedKinds).toEqual(["project_memory"]);
+    expect(state.shedKinds).toEqual(["lean_code"]);
+    expect(state.status.contextUsed).toBe(360);
+  });
+
+  it("applies context.controls to pin/exclude sets and layer pin flags", () => {
+    let state = reduceEvent(initialState(), {
+      type: "prompt.effective",
+      time: "1",
+      data: {
+        layers: [{ kind: "persona", source: "agent:build", mode: "replace", chars: 10 }],
+        pinnedKinds: [],
+        excludedKinds: [],
+      },
+    });
+    state = reduceEvent(state, {
+      type: "context.controls",
+      time: "2",
+      data: { pinnedKinds: ["persona"], excludedKinds: ["project_memory"] },
+    });
+    expect(state.pinnedKinds).toEqual(["persona"]);
+    expect(state.excludedKinds).toEqual(["project_memory"]);
+    expect(state.layers[0].pinned).toBe(true);
+  });
+
+  it("surfaces context.fit_warning and updates limit", () => {
+    const state = reduceEvent(initialState(), {
+      type: "context.fit_warning",
+      time: "3",
+      data: {
+        level: "critical",
+        message: "projected prompt ~180k tok is ≥80% of the 200k context window",
+        estimatedTokens: 180_000,
+        contextLimit: 200_000,
+        source: "estimated",
+      },
+    });
+    expect(state.fitWarning?.level).toBe("critical");
+    expect(state.fitWarning?.message).toContain("180k");
+    expect(state.status.contextLimit).toBe(200_000);
+    expect(state.status.contextUsed).toBe(180_000);
+  });
+
+  it("clears fit warning when a new turn starts", () => {
+    let state = reduceEvent(initialState(), {
+      type: "context.fit_warning",
+      time: "1",
+      data: { level: "warn", message: "hot", contextLimit: 100 },
+    });
+    expect(state.fitWarning).toBeDefined();
+    state = reduceEvent(state, { type: "turn.started", time: "2", data: { turnId: "t2" } });
+    expect(state.fitWarning).toBeUndefined();
+    expect(state.status.busy).toBe(true);
+    expect(state.status.contextLimit).toBe(100);
+  });
+
+  it("clears context doctor state on workspace.reset", () => {
+    let state = reduceEvent(initialState(), {
+      type: "context.fit_warning",
+      time: "1",
+      data: { level: "warn", message: "hot", contextLimit: 100 },
+    });
+    state = reduceEvent(state, {
+      type: "prompt.effective",
+      time: "2",
+      data: { layers: [{ kind: "shared", chars: 1 }], pinnedKinds: ["shared"] },
+    });
+    state = reduceEvent(state, { type: "workspace.reset", data: { sessionId: "next" } });
+    expect(state.fitWarning).toBeUndefined();
+    expect(state.layers).toEqual([]);
+    expect(state.pinnedKinds).toEqual([]);
+    expect(state.status.sessionId).toBe("next");
+  });
+
+});
+
+describe("set helpers", () => {
+  it("adds and removes without duplicates", () => {
+    expect(setAdd(["a"], "a")).toEqual(["a"]);
+    expect(setAdd(["a"], "b")).toEqual(["a", "b"]);
+    expect(setRemove(["a", "b"], "a")).toEqual(["b"]);
+    expect(setRemove(["a"], "z")).toEqual(["a"]);
+  });
 });
 
 describe("tokenCount / applyUsageReported", () => {

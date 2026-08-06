@@ -1,8 +1,12 @@
-import type { ChildAgent, ClientState, Envelope, Status, TranscriptItem, WorkspaceComposer, WorkspaceSlice, WorkspaceState } from "./types";
+import type {
+  ChildAgent, ClientState, Envelope, FitWarning, PromptLayer, RequestAttribution,
+  Status, TokenCount, TranscriptItem, WorkspaceComposer, WorkspaceSlice, WorkspaceState,
+} from "./types";
 import { isRootLineage, parseUndoPreview, type UndoPreview } from "./undoPreview";
 
 export const initialState = (): WorkspaceState => ({
   items: [], seen: new Set(), status: {}, children: {}, changedFiles: [], undoStack: [],
+  layers: [], pinnedKinds: [], excludedKinds: [], shedKinds: [],
 });
 
 const fingerprint = (env: Envelope) => JSON.stringify([env.type, env.time, env.data]);
@@ -74,6 +78,66 @@ function popUndo(stack: UndoPreview[]): UndoPreview[] {
   return stack.slice(0, -1);
 }
 
+function asTokenCount(raw: unknown): TokenCount | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const o = raw as Record<string, unknown>;
+  const known = Boolean(o.known);
+  const n = typeof o.n === "number" ? o.n : 0;
+  return { n, known };
+}
+
+function asStringList(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((v) => String(v)).filter(Boolean);
+}
+
+function asLayers(raw: unknown): PromptLayer[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((item) => {
+    const o = (item && typeof item === "object" ? item : {}) as Record<string, unknown>;
+    return {
+      kind: String(o.kind || ""),
+      source: o.source !== undefined ? String(o.source) : undefined,
+      mode: o.mode !== undefined ? String(o.mode) : undefined,
+      chars: typeof o.chars === "number" ? o.chars : undefined,
+      estTokens: typeof o.estTokens === "number" ? o.estTokens : undefined,
+      pinned: Boolean(o.pinned),
+      preview: o.preview !== undefined ? String(o.preview) : undefined,
+    };
+  }).filter((layer) => layer.kind);
+}
+
+function asAttribution(raw: unknown): RequestAttribution | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const o = raw as Record<string, unknown>;
+  const attr: RequestAttribution = {
+    system: asTokenCount(o.system),
+    tools: asTokenCount(o.tools),
+    messages: asTokenCount(o.messages),
+    toolResults: asTokenCount(o.toolResults),
+    total: asTokenCount(o.total),
+    source: o.source !== undefined ? String(o.source) : undefined,
+  };
+  const has =
+    attr.source ||
+    attr.system?.known || attr.tools?.known || attr.messages?.known ||
+    attr.toolResults?.known || attr.total?.known;
+  return has ? attr : undefined;
+}
+
+function knownN(tc: unknown): number | undefined {
+  const t = asTokenCount(tc);
+  return t?.known ? t.n : undefined;
+}
+
+/** Toggle helpers for pin/exclude sets (immutable). */
+export function setAdd(list: string[], value: string): string[] {
+  return list.includes(value) ? list : [...list, value];
+}
+export function setRemove(list: string[], value: string): string[] {
+  return list.filter((v) => v !== value);
+}
+
 
 const optionalText = (data: Record<string, unknown> | undefined, key: string) => {
   const value = String(data?.[key] ?? "").trim();
@@ -124,6 +188,15 @@ export function reduceEvent(state: WorkspaceState, env: Envelope): WorkspaceStat
   const children = { ...state.children };
   let changedFiles = state.changedFiles;
   let undoStack = state.undoStack;
+  let attribution = state.attribution;
+  let layers = state.layers;
+  let pinnedKinds = state.pinnedKinds;
+  let excludedKinds = state.excludedKinds;
+  let shedKinds = state.shedKinds;
+  let fitWarning = state.fitWarning;
+  let promptScope = state.promptScope;
+  let systemChars = state.systemChars;
+  let messageCount = state.messageCount;
   const id = correlation(d);
   switch (env.type) {
     case "status": status = { ...status, ...(d as Status) }; break;
@@ -146,7 +219,11 @@ export function reduceEvent(state: WorkspaceState, env: Envelope): WorkspaceStat
     case "permission.resolved": if (!d.requestId || d.requestId === permission?.requestId) permission = undefined; break;
     case "question.asked": question = d; break;
     case "question.resolved": if (!d.requestId || d.requestId === question?.requestId) question = undefined; break;
-    case "turn.started": status = { ...status, busy: true }; break;
+    case "turn.started":
+      // Drop stale fit banners; engine re-emits if the new turn is still tight.
+      status = { ...status, busy: true };
+      fitWarning = undefined;
+      break;
     case "turn.completed":
       status = { ...status, busy: false };
       // Stack undo preview for /rewind path list + uncovered warn (TUI #801 / WEB.12).
@@ -221,8 +298,54 @@ export function reduceEvent(state: WorkspaceState, env: Envelope): WorkspaceStat
     }
     case "engine.error": items = append(items, { id: `error:${items.length}`, kind: "error", text: text(d, "message") }); break;
     case "provider.retrying": items = append(items, { id: `retry:${items.length}`, kind: "system", title: "Retrying provider", text: text(d, "error") }); break;
+    case "prompt.effective": {
+      layers = asLayers(d.layers);
+      attribution = asAttribution(d.attribution) ?? attribution;
+      pinnedKinds = asStringList(d.pinnedKinds);
+      excludedKinds = asStringList(d.excludedKinds);
+      shedKinds = asStringList(d.shedKinds);
+      promptScope = d.fromLastStream ? "last" : "current";
+      if (typeof d.systemChars === "number") systemChars = d.systemChars;
+      if (typeof d.messageCount === "number") messageCount = d.messageCount;
+      const total = knownN((d.attribution as Record<string, unknown> | undefined)?.total);
+      if (total !== undefined) status = { ...status, contextUsed: status.contextUsed ?? total };
+      break;
+    }
+    case "context.controls": {
+      // Event confirms pin/exclude sets after SetContextControls.
+      pinnedKinds = asStringList(d.pinnedKinds);
+      excludedKinds = asStringList(d.excludedKinds);
+      layers = layers.map((layer) => ({
+        ...layer,
+        pinned: pinnedKinds.includes(layer.kind),
+      }));
+      break;
+    }
+    case "context.fit_warning": {
+      const level = text(d, "level") || "warn";
+      const message = text(d, "message") || `context fit ${level}`;
+      const fw: FitWarning = {
+        level,
+        message,
+        estimatedTokens: typeof d.estimatedTokens === "number" ? d.estimatedTokens : undefined,
+        contextLimit: typeof d.contextLimit === "number" ? d.contextLimit : undefined,
+        source: d.source !== undefined ? String(d.source) : undefined,
+      };
+      fitWarning = fw;
+      if (typeof d.contextLimit === "number" && d.contextLimit > 0) {
+        status = { ...status, contextLimit: d.contextLimit };
+      }
+      if (typeof d.estimatedTokens === "number" && d.estimatedTokens > 0) {
+        status = { ...status, contextUsed: status.contextUsed ?? d.estimatedTokens };
+      }
+      break;
+    }
   }
-  return { ...state, seen, items, status, permission, question, children, changedFiles, undoStack };
+  return {
+    ...state, seen, items, status, permission, question, children, changedFiles, undoStack,
+    attribution, layers, pinnedKinds, excludedKinds, shedKinds, fitWarning,
+    promptScope, systemChars, messageCount,
+  };
 }
 
 export const emptyComposer = (): WorkspaceComposer => ({
@@ -250,6 +373,15 @@ function asWorkspaceState(slice: WorkspaceSlice): WorkspaceState {
     children: slice.children,
     changedFiles: slice.changedFiles,
     undoStack: slice.undoStack,
+    attribution: slice.attribution,
+    layers: slice.layers,
+    pinnedKinds: slice.pinnedKinds,
+    excludedKinds: slice.excludedKinds,
+    shedKinds: slice.shedKinds,
+    fitWarning: slice.fitWarning,
+    promptScope: slice.promptScope,
+    systemChars: slice.systemChars,
+    messageCount: slice.messageCount,
   };
 }
 

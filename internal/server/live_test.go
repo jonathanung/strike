@@ -20,6 +20,36 @@ import (
 	"github.com/jonathanung/strike-cli/internal/session"
 )
 
+func TestLiveStatusTracksUsageAndFitWarning(t *testing.T) {
+	ops := make(chan protocol.Op, 1)
+	live := NewLive("sess-ctx", "/tmp/work", nil, ops)
+	defer live.Close()
+
+	live.Publish(protocol.UsageReported{Used: protocol.KnownTokens(1500), Source: protocol.UsageSourceActual})
+	st := live.Status()
+	if st.ContextUsed != 1500 {
+		t.Fatalf("ContextUsed = %d, want 1500", st.ContextUsed)
+	}
+	if st.ContextLimit != 0 {
+		t.Fatalf("ContextLimit = %d, want 0 until fit warning", st.ContextLimit)
+	}
+
+	live.Publish(protocol.ContextFitWarning{
+		EstimatedTokens: 180_000,
+		ContextLimit:    200_000,
+		Level:           protocol.ContextFitWarn,
+		Message:         "hot",
+	})
+	st = live.Status()
+	if st.ContextLimit != 200_000 {
+		t.Fatalf("ContextLimit = %d, want 200000", st.ContextLimit)
+	}
+	// Known usage is not overwritten by the estimate.
+	if st.ContextUsed != 1500 {
+		t.Fatalf("ContextUsed = %d, want 1500 (keep measured)", st.ContextUsed)
+	}
+}
+
 func TestLiveOpsPOSTAndStatus(t *testing.T) {
 	ops := make(chan protocol.Op, 4)
 	live := NewLive("sess-live", "/tmp/work", []AgentInfo{{Name: "build"}}, ops)

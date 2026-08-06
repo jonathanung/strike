@@ -1,4 +1,17 @@
 export type Envelope = { type: string; time?: string; data?: Record<string, unknown> };
+export type TokenCount = { n?: number; known?: boolean };
+export type RequestAttribution = {
+  system?: TokenCount; tools?: TokenCount; messages?: TokenCount;
+  toolResults?: TokenCount; total?: TokenCount; source?: string;
+};
+export type PromptLayer = {
+  kind: string; source?: string; mode?: string; chars?: number;
+  estTokens?: number; pinned?: boolean; preview?: string;
+};
+export type FitWarning = {
+  level: string; message: string; estimatedTokens?: number;
+  contextLimit?: number; source?: string;
+};
 export type Status = {
   sessionId?: string; provider?: string; model?: string; agent?: string; effort?: string;
   autonomy?: string; permissionMode?: string; phase?: string; workflow?: string; cwd?: string;
@@ -52,7 +65,23 @@ export type WorkspaceState = {
   changedFiles: string[];
   /** Stack of last-turn harness previews; top is current /rewind target (TUI undoStack). */
   undoStack: import("./undoPreview").UndoPreview[];
+  /** Token-by-source attribution from prompt.effective. */
+  attribution?: RequestAttribution;
+  layers: PromptLayer[];
+  pinnedKinds: string[];
+  excludedKinds: string[];
+  shedKinds: string[];
+  fitWarning?: FitWarning;
+  promptScope?: "last" | "current";
+  systemChars?: number;
+  messageCount?: number;
 };
+
+/** Known system-prompt layer kinds (protocol PromptLayer*). */
+export const LAYER_KINDS = [
+  "shared", "tools", "provider", "config_system", "persona", "phase",
+  "plan", "lean_code", "environment", "instruction", "project_memory", "decision_ledger",
+] as const;
 export type ActiveRoot = {
   id: string; title?: string; agent?: string; busy: boolean;
   activeAt?: number; createdAt?: number; hasRecentEvent?: boolean;
