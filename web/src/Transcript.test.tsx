@@ -1,8 +1,10 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { cleanup, render, screen, within } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
 import { Transcript } from "./Transcript";
 
 describe("Transcript", () => {
+  afterEach(() => cleanup());
+
   it("renders markdown, fenced code, and file references structurally", () => {
     render(<Transcript item={{ id: "a", kind: "assistant", text: "# Result\n**Done** in src/main.go:12\n```go\nfmt.Println(\"ok\")\n```" }} />);
     expect(screen.getByRole("heading", { name: "Result" })).toBeInTheDocument();
@@ -18,5 +20,17 @@ describe("Transcript", () => {
     expect(screen.getByText("diff")).toBeInTheDocument();
     expect([...container.querySelectorAll(".add")].some((node) => node.textContent === "+new\n")).toBe(true);
     expect([...container.querySelectorAll(".del")].some((node) => node.textContent === "-old\n")).toBe(true);
+  });
+
+  it("renders tool cards collapsed by default with a scannable summary", () => {
+    const { container } = render(<Transcript item={{ id: "t", kind: "tool", title: "read", text: '{"path":"a.go"}' }} />);
+    const card = container.querySelector("details.tool-card") as HTMLDetailsElement | null;
+    expect(card).toBeTruthy();
+    expect(card?.open).toBe(false);
+    const scope = within(container);
+    expect(scope.getByText("read", { selector: "summary span" })).toBeInTheDocument();
+    expect(scope.getByText("structured data")).toBeInTheDocument();
+    // Pretty-printed body stays in the DOM for expand, but the card starts closed.
+    expect(card?.querySelector("pre")?.textContent).toContain('"path"');
   });
 });

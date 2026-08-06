@@ -100,6 +100,7 @@ ssh -L 8787:127.0.0.1:8787 user@strike-host
 | `POST` | `/v1/roots` | **yes** | Create empty live workspace; becomes active |
 | `POST` | `/v1/roots/{id}/activate` | **yes** | Set hub active root (must already be live) |
 | `POST` | `/v1/roots/{id}/resume` | **yes** | Resume durable root as live workspace |
+| `DELETE` | `/v1/roots/{id}` | **yes** | Close/stop a live workspace (hub remove) |
 | `GET` | `/v1/workflows` | **yes** | Workflow catalog (host-safe summaries) |
 | `GET` | `/v1/workflows/{name}` | **yes** | One catalog entry |
 | `GET` | `/v1/workflows/{name}/document` | **yes** | Editable document for builder |
