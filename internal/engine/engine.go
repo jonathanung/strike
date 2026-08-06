@@ -49,10 +49,13 @@ type SelectFunc func(name string) (provider.Provider, string, error)
 type Agent struct {
 	Name        string
 	Description string
-	Provider    string
-	Model       string
-	Effort      protocol.Effort
-	Prompt      string
+	// Capabilities are optional specialty tags for capability-aware routing
+	// (#778). The agent name is always an implicit capability.
+	Capabilities []string
+	Provider     string
+	Model        string
+	Effort       protocol.Effort
+	Prompt       string
 	// Harness selects the function used when this agent runs as a task subagent.
 	// Empty and "default" use the built-in child model/tool loop.
 	// An unknown name falls back to default with a startup error.

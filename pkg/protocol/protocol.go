@@ -580,6 +580,9 @@ type ChildStarted struct {
 	Prompt string `json:"prompt,omitempty"`
 	// Name is an optional stable teammate alias assigned at spawn.
 	Name string `json:"name,omitempty"`
+	// RouteReason is the structured capability-routing decision when routing
+	// ran at spawn (#778). Empty when route=off / legacy pin-or-inherit.
+	RouteReason string `json:"routeReason,omitempty"`
 }
 
 // ArtifactRef points at a shared typed artifact (id + optional CAS version/type).
