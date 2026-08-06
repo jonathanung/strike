@@ -39,7 +39,7 @@ type DoctorPlugin struct {
 	Digest        string          `json:"digest,omitempty"`
 	LockDigest    string          `json:"lockDigest,omitempty"`
 	Source        *SourceIdentity `json:"source,omitempty"`
-	TrustState    string          `json:"trustState"` // none | n/a-passive-only | pending-#728
+	TrustState    string          `json:"trustState"` // none | trusted | stale | n/a-passive-only
 	Contributions DoctorContribs  `json:"contributions"`
 	Findings      []Diagnostic    `json:"findings,omitempty"`
 }
@@ -201,22 +201,39 @@ func doctorOne(ip InstalledPlugin, strikeVer string) DoctorPlugin {
 		}
 	}
 
-	// Executable contributions: summarize without secrets; trust pending #728.
+	// Executable contributions: summarize without secrets; report trust state.
 	mcp, harnesses, hooks, panes := summarizeExecutables(m.Contributions)
 	dp.Contributions.MCP = mcp
 	dp.Contributions.Harnesses = harnesses
 	dp.Contributions.Hooks = hooks
 	dp.Contributions.Panes = panes
-	if len(mcp)+len(harnesses)+hooks > 0 {
-		dp.TrustState = "pending-#728"
-		dp.Findings = append(dp.Findings, Diagnostic{
-			Severity: SeverityInfo,
-			Code:     "trust",
-			Message:  "executable contributions present; activation requires trust record (#728)",
-			PluginID: ip.ID,
-			Version:  m.Version,
-			Source:   ip.Scope,
-		})
+	if HasExecutableContributions(*m) {
+		caps := InferCapabilities(*m)
+		match := MatchTrust(ip.Trust, dp.Digest, ip.Source, caps)
+		dp.TrustState = match.State
+		if match.OK {
+			dp.Findings = append(dp.Findings, Diagnostic{
+				Severity: SeverityInfo,
+				Code:     "trust",
+				Message:  "executable contributions trusted for current digest and source",
+				PluginID: ip.ID,
+				Version:  m.Version,
+				Source:   ip.Scope,
+			})
+		} else {
+			msg := match.Reason
+			if msg == "" {
+				msg = "executable contributions present; run: strike plugin trust " + ip.ID
+			}
+			dp.Findings = append(dp.Findings, Diagnostic{
+				Severity: SeverityInfo,
+				Code:     "trust",
+				Message:  msg,
+				PluginID: ip.ID,
+				Version:  m.Version,
+				Source:   ip.Scope,
+			})
+		}
 	}
 
 	if m.Source != nil {
