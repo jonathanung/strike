@@ -176,6 +176,14 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/changed-files", s.handleChangedFiles)
 	s.mux.HandleFunc("GET /v1/file", s.handleFile)
 	s.mux.HandleFunc("GET /v1/memory", s.handleMemory)
+	s.mux.HandleFunc("GET /v1/memory/export", s.handleMemoryExport)
+	s.mux.HandleFunc("POST /v1/memory/import", s.handleMemoryImport)
+	s.mux.HandleFunc("PUT /v1/memory/{key}", s.handleMemoryPut)
+	s.mux.HandleFunc("DELETE /v1/memory/{key}", s.handleMemoryDelete)
+	s.mux.HandleFunc("POST /v1/issues", s.handleIssueCreate)
+	s.mux.HandleFunc("GET /v1/issues/export", s.handleIssuesExport)
+	s.mux.HandleFunc("POST /v1/issues/import", s.handleIssuesImport)
+	s.mux.HandleFunc("POST /v1/issues/{id}/close", s.handleIssueClose)
 	s.mux.HandleFunc("GET /v1/issues", s.handleIssues)
 	s.mux.HandleFunc("GET /v1/permissions/explain", s.handlePermissionExplain)
 	s.mux.HandleFunc("GET /v1/permissions/presets", s.handlePermissionPresets)
@@ -398,7 +406,7 @@ func (s *Server) applyCORS(w http.ResponseWriter, r *http.Request) {
 	if originAllowed(origin, s.opts.Expose) {
 		w.Header().Set("Access-Control-Allow-Origin", origin)
 		w.Header().Set("Vary", "Origin")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
 	}
 }

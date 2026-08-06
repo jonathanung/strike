@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"os/exec"
 	"sort"
 	"strconv"
@@ -1150,4 +1151,255 @@ func (s *Server) handleRootClose(w http.ResponseWriter, r *http.Request) {
 	}
 	s.opts.LiveHub.Remove(id)
 	writeJSON(w, http.StatusOK, opOKResponse{OK: true})
+}
+
+type hostImportBody struct {
+	Path    string          `json:"path"`
+	Replace bool            `json:"replace"`
+	Data    json.RawMessage `json:"data"`
+}
+
+func (s *Server) requireMutable(w http.ResponseWriter) bool {
+	if s.hasLive() {
+		return true
+	}
+	writeJSON(w, http.StatusForbidden, opErrorResponse{Error: "read-only attach mode does not allow mutations"})
+	return false
+}
+
+func (s *Server) memoryService(w http.ResponseWriter) host.Memory {
+	if s.opts.Services == nil || s.opts.Services.Memory == nil {
+		capabilityUnavailable(w, "memory")
+		return nil
+	}
+	return s.opts.Services.Memory
+}
+
+func (s *Server) issuesService(w http.ResponseWriter) host.Issues {
+	if s.opts.Services == nil || s.opts.Services.Issues == nil {
+		capabilityUnavailable(w, "issues")
+		return nil
+	}
+	return s.opts.Services.Issues
+}
+
+func (s *Server) writeHostExport(w http.ResponseWriter, filename string, export func(path string) error) {
+	dir, err := os.MkdirTemp("", "strike-export-*")
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, opErrorResponse{Error: err.Error()})
+		return
+	}
+	defer os.RemoveAll(dir)
+	path := filepath.Join(dir, filename)
+	if err := export(path); err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, opErrorResponse{Error: err.Error()})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
+}
+
+func (s *Server) runHostImport(w http.ResponseWriter, r *http.Request, importFn func(path string, replace bool) (int, error)) (int, error) {
+	var body hostImportBody
+	if err := decodeBody(w, r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return 0, err
+	}
+	path := strings.TrimSpace(body.Path)
+	if path == "" && len(body.Data) == 0 {
+		err := fmt.Errorf("path or data is required")
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return 0, err
+	}
+	if len(body.Data) > 0 {
+		if !json.Valid(body.Data) {
+			err := fmt.Errorf("data must be valid JSON")
+			writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+			return 0, err
+		}
+		dir, err := os.MkdirTemp("", "strike-import-*")
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, opErrorResponse{Error: err.Error()})
+			return 0, err
+		}
+		defer os.RemoveAll(dir)
+		path = filepath.Join(dir, "import.json")
+		if err := os.WriteFile(path, body.Data, 0o600); err != nil {
+			writeJSON(w, http.StatusInternalServerError, opErrorResponse{Error: err.Error()})
+			return 0, err
+		}
+	}
+	n, err := importFn(path, body.Replace)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return 0, err
+	}
+	return n, nil
+}
+
+func (s *Server) handleMemoryPut(w http.ResponseWriter, r *http.Request) {
+	mem := s.memoryService(w)
+	if mem == nil {
+		return
+	}
+	if !s.requireMutable(w) {
+		return
+	}
+	key := strings.TrimSpace(r.PathValue("key"))
+	if key == "" {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "key is required"})
+		return
+	}
+	var body struct {
+		Value string   `json:"value"`
+		Tags  []string `json:"tags"`
+	}
+	if err := decodeBody(w, r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	if err := mem.Put(key, body.Value, body.Tags); err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	entry, ok, err := mem.Get(key)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, opErrorResponse{Error: err.Error()})
+		return
+	}
+	if !ok {
+		writeJSON(w, http.StatusInternalServerError, opErrorResponse{Error: "memory entry missing after put"})
+		return
+	}
+	writeJSON(w, http.StatusOK, entry)
+}
+
+func (s *Server) handleMemoryDelete(w http.ResponseWriter, r *http.Request) {
+	mem := s.memoryService(w)
+	if mem == nil {
+		return
+	}
+	if !s.requireMutable(w) {
+		return
+	}
+	key := strings.TrimSpace(r.PathValue("key"))
+	if key == "" {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "key is required"})
+		return
+	}
+	if err := mem.Delete(key); err != nil {
+		status := http.StatusBadRequest
+		if strings.Contains(strings.ToLower(err.Error()), "not found") {
+			status = http.StatusNotFound
+		}
+		writeJSON(w, status, opErrorResponse{Error: err.Error()})
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleMemoryExport(w http.ResponseWriter, r *http.Request) {
+	mem := s.memoryService(w)
+	if mem == nil {
+		return
+	}
+	s.writeHostExport(w, "strike-memory.json", mem.Export)
+}
+
+func (s *Server) handleMemoryImport(w http.ResponseWriter, r *http.Request) {
+	mem := s.memoryService(w)
+	if mem == nil {
+		return
+	}
+	if !s.requireMutable(w) {
+		return
+	}
+	n, err := s.runHostImport(w, r, mem.Import)
+	if err != nil {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"imported": n})
+}
+
+func (s *Server) handleIssueCreate(w http.ResponseWriter, r *http.Request) {
+	issues := s.issuesService(w)
+	if issues == nil {
+		return
+	}
+	if !s.requireMutable(w) {
+		return
+	}
+	var body struct {
+		Title string `json:"title"`
+		Body  string `json:"body"`
+	}
+	if err := decodeBody(w, r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	if strings.TrimSpace(body.Title) == "" {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "title is required"})
+		return
+	}
+	item, err := issues.Create(body.Title, body.Body)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusCreated, item)
+}
+
+func (s *Server) handleIssueClose(w http.ResponseWriter, r *http.Request) {
+	issues := s.issuesService(w)
+	if issues == nil {
+		return
+	}
+	if !s.requireMutable(w) {
+		return
+	}
+	id, err := strconv.Atoi(r.PathValue("id"))
+	if err != nil || id < 1 {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "id must be a positive integer"})
+		return
+	}
+	item, err := issues.Close(id)
+	if err != nil {
+		status := http.StatusBadRequest
+		if strings.Contains(strings.ToLower(err.Error()), "not found") {
+			status = http.StatusNotFound
+		}
+		writeJSON(w, status, opErrorResponse{Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
+}
+
+func (s *Server) handleIssuesExport(w http.ResponseWriter, r *http.Request) {
+	issues := s.issuesService(w)
+	if issues == nil {
+		return
+	}
+	s.writeHostExport(w, "strike-issues.json", issues.Export)
+}
+
+func (s *Server) handleIssuesImport(w http.ResponseWriter, r *http.Request) {
+	issues := s.issuesService(w)
+	if issues == nil {
+		return
+	}
+	if !s.requireMutable(w) {
+		return
+	}
+	n, err := s.runHostImport(w, r, issues.Import)
+	if err != nil {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"imported": n})
 }

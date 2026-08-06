@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/jonathanung/strike-cli/internal/host"
@@ -612,3 +613,387 @@ func TestSettingsGETReturnsDefaults(t *testing.T) {
 		t.Fatalf("unexpected payload %#v", got)
 	}
 }
+
+type testMemory struct {
+	mu      sync.Mutex
+	entries map[string]host.MemoryEntry
+	exports []string
+	imports []struct {
+		path    string
+		replace bool
+	}
+}
+
+type testIssues struct {
+	mu      sync.Mutex
+	nextID  int
+	items   map[int]host.Issue
+	exports []string
+}
+
+func newTestMemory(entries ...host.MemoryEntry) *testMemory {
+	m := &testMemory{entries: make(map[string]host.MemoryEntry)}
+	for _, e := range entries {
+		m.entries[e.Key] = e
+	}
+	return m
+}
+
+func newTestIssues(items ...host.Issue) *testIssues {
+	iss := &testIssues{nextID: 1, items: make(map[int]host.Issue)}
+	for _, item := range items {
+		if item.ID >= iss.nextID {
+			iss.nextID = item.ID + 1
+		}
+		iss.items[item.ID] = item
+	}
+	return iss
+}
+
+func (m *testMemory) List(tag string) ([]host.MemoryEntry, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]host.MemoryEntry, 0, len(m.entries))
+	for _, e := range m.entries {
+		if tag != "" {
+			found := false
+			for _, t := range e.Tags {
+				if t == tag {
+					found = true
+					break
+				}
+			}
+			if !found {
+				continue
+			}
+		}
+		out = append(out, e)
+	}
+	return out, nil
+}
+
+func (m *testMemory) Get(key string) (host.MemoryEntry, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	e, ok := m.entries[key]
+	return e, ok, nil
+}
+
+func (m *testMemory) Put(key, value string, tags []string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.entries[key] = host.MemoryEntry{Key: key, Value: value, Tags: append([]string(nil), tags...)}
+	return nil
+}
+
+func (m *testMemory) Delete(key string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.entries[key]; !ok {
+		return errNotFound("memory: key not found")
+	}
+	delete(m.entries, key)
+	return nil
+}
+
+func (m *testMemory) Export(path string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.exports = append(m.exports, path)
+	entries := make([]map[string]any, 0, len(m.entries))
+	for _, e := range m.entries {
+		entries = append(entries, map[string]any{"key": e.Key, "value": e.Value, "tags": e.Tags})
+	}
+	data, err := json.MarshalIndent(map[string]any{
+		"format":  "strike.memory",
+		"version": 1,
+		"entries": entries,
+	}, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(data, '\n'), 0o600)
+}
+
+func (m *testMemory) Import(path string, replace bool) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.imports = append(m.imports, struct {
+		path    string
+		replace bool
+	}{path, replace})
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0, err
+	}
+	var doc struct {
+		Entries []struct {
+			Key   string   `json:"key"`
+			Value string   `json:"value"`
+			Tags  []string `json:"tags"`
+		} `json:"entries"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return 0, err
+	}
+	if replace {
+		m.entries = make(map[string]host.MemoryEntry)
+	}
+	for _, e := range doc.Entries {
+		m.entries[e.Key] = host.MemoryEntry{Key: e.Key, Value: e.Value, Tags: append([]string(nil), e.Tags...)}
+	}
+	return len(doc.Entries), nil
+}
+
+func (i *testIssues) List(status string) ([]host.Issue, error) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	out := make([]host.Issue, 0, len(i.items))
+	for _, item := range i.items {
+		if status != "" && item.Status != status {
+			continue
+		}
+		out = append(out, item)
+	}
+	return out, nil
+}
+
+func (i *testIssues) Get(id int) (host.Issue, bool, error) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	item, ok := i.items[id]
+	return item, ok, nil
+}
+
+func (i *testIssues) Create(title, body string) (host.Issue, error) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	item := host.Issue{ID: i.nextID, Title: title, Body: body, Status: "open"}
+	i.nextID++
+	i.items[item.ID] = item
+	return item, nil
+}
+
+func (i *testIssues) Update(id int, title, body, status *string) (host.Issue, error) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	item, ok := i.items[id]
+	if !ok {
+		return host.Issue{}, errNotFound("issue: not found")
+	}
+	if title != nil {
+		item.Title = *title
+	}
+	if body != nil {
+		item.Body = *body
+	}
+	if status != nil {
+		item.Status = *status
+	}
+	i.items[id] = item
+	return item, nil
+}
+
+func (i *testIssues) Close(id int) (host.Issue, error) {
+	closed := "closed"
+	return i.Update(id, nil, nil, &closed)
+}
+
+func (i *testIssues) Export(path string) error {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	i.exports = append(i.exports, path)
+	issues := make([]map[string]any, 0, len(i.items))
+	for _, item := range i.items {
+		issues = append(issues, map[string]any{
+			"id": item.ID, "title": item.Title, "body": item.Body, "status": item.Status,
+		})
+	}
+	data, err := json.MarshalIndent(map[string]any{
+		"format":  "strike.issues",
+		"version": 1,
+		"next_id": i.nextID,
+		"issues":  issues,
+	}, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(data, '\n'), 0o600)
+}
+
+func (i *testIssues) Import(path string, replace bool) (int, error) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0, err
+	}
+	var doc struct {
+		NextID int `json:"next_id"`
+		Issues []struct {
+			ID     int    `json:"id"`
+			Title  string `json:"title"`
+			Body   string `json:"body"`
+			Status string `json:"status"`
+		} `json:"issues"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return 0, err
+	}
+	if replace {
+		i.items = make(map[int]host.Issue)
+	}
+	for _, item := range doc.Issues {
+		i.items[item.ID] = host.Issue{ID: item.ID, Title: item.Title, Body: item.Body, Status: item.Status}
+		if item.ID >= i.nextID {
+			i.nextID = item.ID + 1
+		}
+	}
+	if doc.NextID > i.nextID {
+		i.nextID = doc.NextID
+	}
+	return len(doc.Issues), nil
+}
+
+func TestMemoryMutatingRoutes(t *testing.T) {
+	mem := newTestMemory(host.MemoryEntry{Key: "prefs", Value: "use tests", Tags: []string{"project"}})
+	live := NewLive("live", t.TempDir(), nil, make(chan protocol.Op))
+	srv, err := New(Options{SessionDir: t.TempDir(), Live: live, Services: &host.Services{Memory: mem}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	list := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/v1/memory", nil))
+	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), "prefs") {
+		t.Fatalf("list = %d %s", list.Code, list.Body.String())
+	}
+
+	put := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(put, httptest.NewRequest(http.MethodPut, "/v1/memory/prefs", strings.NewReader(`{"value":"prefer table tests","tags":["project","style"]}`)))
+	if put.Code != http.StatusOK || !strings.Contains(put.Body.String(), "prefer table tests") {
+		t.Fatalf("put = %d %s", put.Code, put.Body.String())
+	}
+
+	exp := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(exp, httptest.NewRequest(http.MethodGet, "/v1/memory/export", nil))
+	if exp.Code != http.StatusOK {
+		t.Fatalf("export = %d %s", exp.Code, exp.Body.String())
+	}
+	if ct := exp.Header().Get("Content-Type"); !strings.Contains(ct, "application/json") {
+		t.Fatalf("export content-type = %q", ct)
+	}
+	if cd := exp.Header().Get("Content-Disposition"); !strings.Contains(cd, "strike-memory.json") {
+		t.Fatalf("export disposition = %q", cd)
+	}
+	if !strings.Contains(exp.Body.String(), `"format": "strike.memory"`) && !strings.Contains(exp.Body.String(), `"format":"strike.memory"`) {
+		t.Fatalf("export missing portable format: %s", exp.Body.String())
+	}
+
+	imp := httptest.NewRecorder()
+	payload := `{"replace":true,"data":{"format":"strike.memory","version":1,"entries":[{"key":"imported","value":"yes","tags":["t"]}]}}`
+	srv.Handler().ServeHTTP(imp, httptest.NewRequest(http.MethodPost, "/v1/memory/import", strings.NewReader(payload)))
+	if imp.Code != http.StatusOK || !strings.Contains(imp.Body.String(), `"imported":1`) {
+		t.Fatalf("import = %d %s", imp.Code, imp.Body.String())
+	}
+	got, ok, err := mem.Get("imported")
+	if err != nil || !ok || got.Value != "yes" {
+		t.Fatalf("imported entry = %#v ok=%v err=%v", got, ok, err)
+	}
+
+	del := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(del, httptest.NewRequest(http.MethodDelete, "/v1/memory/imported", nil))
+	if del.Code != http.StatusNoContent {
+		t.Fatalf("delete = %d %s", del.Code, del.Body.String())
+	}
+	if _, ok, _ := mem.Get("imported"); ok {
+		t.Fatal("expected imported key deleted")
+	}
+}
+
+func TestMemoryIssuesMutationsBlockedInAttachOnly(t *testing.T) {
+	mem := newTestMemory()
+	issues := newTestIssues()
+	srv, err := New(Options{SessionDir: t.TempDir(), Services: &host.Services{Memory: mem, Issues: issues}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// No Live → attach-only. Reads still work; writes are forbidden.
+	list := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/v1/memory", nil))
+	if list.Code != http.StatusOK {
+		t.Fatalf("attach-only list = %d %s", list.Code, list.Body.String())
+	}
+	exp := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(exp, httptest.NewRequest(http.MethodGet, "/v1/memory/export", nil))
+	if exp.Code != http.StatusOK {
+		t.Fatalf("attach-only export = %d %s", exp.Code, exp.Body.String())
+	}
+	for _, tc := range []struct {
+		method, path, body string
+	}{
+		{http.MethodPut, "/v1/memory/k", `{"value":"v"}`},
+		{http.MethodDelete, "/v1/memory/k", ""},
+		{http.MethodPost, "/v1/memory/import", `{"path":"x.json"}`},
+		{http.MethodPost, "/v1/issues", `{"title":"t"}`},
+		{http.MethodPost, "/v1/issues/1/close", `{}`},
+		{http.MethodPost, "/v1/issues/import", `{"path":"x.json"}`},
+	} {
+		res := httptest.NewRecorder()
+		var body *strings.Reader
+		if tc.body != "" {
+			body = strings.NewReader(tc.body)
+		} else {
+			body = strings.NewReader("")
+		}
+		req := httptest.NewRequest(tc.method, tc.path, body)
+		srv.Handler().ServeHTTP(res, req)
+		if res.Code != http.StatusForbidden || !strings.Contains(res.Body.String(), "read-only attach") {
+			t.Errorf("%s %s = %d %s, want 403 attach-only", tc.method, tc.path, res.Code, res.Body.String())
+		}
+	}
+}
+
+func TestIssuesMutatingRoutes(t *testing.T) {
+	issues := newTestIssues(host.Issue{ID: 7, Title: "Fix panel", Body: "Resize it", Status: "open"})
+	live := NewLive("live", t.TempDir(), nil, make(chan protocol.Op))
+	srv, err := New(Options{SessionDir: t.TempDir(), Live: live, Services: &host.Services{Issues: issues}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	create := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/v1/issues", strings.NewReader(`{"title":"Ship web","body":"parity"}`)))
+	if create.Code != http.StatusCreated || !strings.Contains(create.Body.String(), "Ship web") {
+		t.Fatalf("create = %d %s", create.Code, create.Body.String())
+	}
+
+	closeRes := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(closeRes, httptest.NewRequest(http.MethodPost, "/v1/issues/7/close", strings.NewReader(`{}`)))
+	if closeRes.Code != http.StatusOK || !strings.Contains(closeRes.Body.String(), `"Status":"closed"`) && !strings.Contains(closeRes.Body.String(), `"status":"closed"`) {
+		// host.Issue has no json tags — exported field names are capitalized.
+		if closeRes.Code != http.StatusOK || !strings.Contains(closeRes.Body.String(), "closed") {
+			t.Fatalf("close = %d %s", closeRes.Code, closeRes.Body.String())
+		}
+	}
+
+	exp := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(exp, httptest.NewRequest(http.MethodGet, "/v1/issues/export", nil))
+	if exp.Code != http.StatusOK || !strings.Contains(exp.Body.String(), "strike.issues") {
+		t.Fatalf("export = %d %s", exp.Code, exp.Body.String())
+	}
+	if cd := exp.Header().Get("Content-Disposition"); !strings.Contains(cd, "strike-issues.json") {
+		t.Fatalf("export disposition = %q", cd)
+	}
+
+	imp := httptest.NewRecorder()
+	payload := `{"replace":false,"data":{"format":"strike.issues","version":1,"next_id":20,"issues":[{"id":19,"title":"From import","body":"","status":"open"}]}}`
+	srv.Handler().ServeHTTP(imp, httptest.NewRequest(http.MethodPost, "/v1/issues/import", strings.NewReader(payload)))
+	if imp.Code != http.StatusOK || !strings.Contains(imp.Body.String(), `"imported":1`) {
+		t.Fatalf("import = %d %s", imp.Code, imp.Body.String())
+	}
+}
+
+type errNotFound string
+
+func (e errNotFound) Error() string { return string(e) }
