@@ -50,7 +50,9 @@ func (m Model) focusRightWindow(id string) (tea.Model, tea.Cmd) {
 		m.setNotice("pane "+id+" missing", true)
 		return m, nil
 	}
+	var paneCmd tea.Cmd
+	m.windows, paneCmd = notifyPluginPaneFocus(m.windows)
 	cmd := m.setPaneFocus(focusRight)
 	m.reflow()
-	return m, tea.Batch(cmd, rightPanePollCmd(m.windows))
+	return m, tea.Batch(cmd, paneCmd, rightPanePollCmd(m.windows))
 }

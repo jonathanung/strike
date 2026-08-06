@@ -178,7 +178,7 @@ func CompileExecutables(opts Options, userMCP, userHarnesses map[string]struct{}
 			continue
 		}
 		source := entry.Source
-		caps := InferCapabilities(p.Manifest)
+		caps := InferCapabilitiesAt(p.Manifest, p.Root)
 		match := MatchTrust(entry.Trust, digest, source, caps)
 
 		base := Diagnostic{
@@ -188,7 +188,7 @@ func CompileExecutables(opts Options, userMCP, userHarnesses map[string]struct{}
 			Path:     p.Root,
 		}
 
-		if HasExecutableContributions(p.Manifest) && !match.OK {
+		if HasExecutableContributionsAt(p.Manifest, p.Root) && !match.OK {
 			d := base
 			d.Severity = SeverityInfo
 			d.Code = "executable_untrusted"

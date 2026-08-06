@@ -125,29 +125,37 @@ func (m Model) handleKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.completion = nil
 		m.windows = m.windows.cycleGroupBy(1)
 		m.windows = refreshProjectDataWindows(m.windows)
+		var paneCmd tea.Cmd
+		m.windows, paneCmd = notifyPluginPaneFocus(m.windows)
 		m.reflow()
-		return m, rightPanePollCmd(m.windows)
+		return m, tea.Batch(paneCmd, rightPanePollCmd(m.windows))
 	}
 	if key.Matches(msg, m.keyMap.CycleGroupPrev) {
 		m.completion = nil
 		m.windows = m.windows.cycleGroupBy(-1)
 		m.windows = refreshProjectDataWindows(m.windows)
+		var paneCmd tea.Cmd
+		m.windows, paneCmd = notifyPluginPaneFocus(m.windows)
 		m.reflow()
-		return m, rightPanePollCmd(m.windows)
+		return m, tea.Batch(paneCmd, rightPanePollCmd(m.windows))
 	}
 	if key.Matches(msg, m.keyMap.CycleWindowNext) {
 		m.completion = nil
 		m.windows = m.windows.cycleBy(1)
 		m.windows = refreshProjectDataWindows(m.windows)
+		var paneCmd tea.Cmd
+		m.windows, paneCmd = notifyPluginPaneFocus(m.windows)
 		m.reflow()
-		return m, rightPanePollCmd(m.windows)
+		return m, tea.Batch(paneCmd, rightPanePollCmd(m.windows))
 	}
 	if key.Matches(msg, m.keyMap.CycleWindowPrev) {
 		m.completion = nil
 		m.windows = m.windows.cycleBy(-1)
 		m.windows = refreshProjectDataWindows(m.windows)
+		var paneCmd tea.Cmd
+		m.windows, paneCmd = notifyPluginPaneFocus(m.windows)
 		m.reflow()
-		return m, rightPanePollCmd(m.windows)
+		return m, tea.Batch(paneCmd, rightPanePollCmd(m.windows))
 	}
 	if key.Matches(msg, m.keyMap.Palette) {
 		m.completion = nil

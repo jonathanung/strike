@@ -451,7 +451,7 @@ func (m *pluginModal) beginUntrustConfirm() (modal, tea.Cmd) {
 	m.detailScroll = 0
 	m.confirmBody = []string{
 		"Revoke executable trust for " + p.ID + "?",
-		"MCP/harness/shell-hook activation stops on next launch.",
+		"MCP/harness/shell-hook/process-pane activation stops on next launch.",
 		"Passive contributions are unaffected.",
 	}
 	return m, nil

@@ -62,10 +62,28 @@ func InferCapabilities(m Manifest) []string {
 			set[CapHooksDeclarative] = struct{}{}
 		}
 	}
+	if len(m.Contributions.Panes) > 0 {
+		set[CapPanes] = struct{}{}
+	}
+	return sortedKeys(set)
+}
+
+// InferCapabilitiesAt is InferCapabilities plus process-pane tags that require
+// reading definition files under pluginRoot.
+func InferCapabilitiesAt(m Manifest, pluginRoot string) []string {
+	set := map[string]struct{}{}
+	for _, c := range InferCapabilities(m) {
+		set[c] = struct{}{}
+	}
+	if pluginRoot != "" && HasProcessPanes(m, pluginRoot) {
+		set[CapPanes] = struct{}{}
+		set[CapPanesProcess] = struct{}{}
+	}
 	return sortedKeys(set)
 }
 
 // HasExecutableContributions reports MCP, harness, or shell-hook entries.
+// Process panes need the plugin root — use HasExecutableContributionsAt.
 func HasExecutableContributions(m Manifest) bool {
 	if len(m.Contributions.MCP) > 0 || len(m.Contributions.Harnesses) > 0 {
 		return true
@@ -80,6 +98,14 @@ func HasExecutableContributions(m Manifest) bool {
 		}
 	}
 	return false
+}
+
+// HasExecutableContributionsAt includes process panes under pluginRoot.
+func HasExecutableContributionsAt(m Manifest, pluginRoot string) bool {
+	if HasExecutableContributions(m) {
+		return true
+	}
+	return pluginRoot != "" && HasProcessPanes(m, pluginRoot)
 }
 
 // TrustMatch explains whether a trust record still authorizes execution.
@@ -167,7 +193,7 @@ func Trust(opts TrustOptions) (TrustResult, error) {
 		}
 		return TrustResult{}, fmt.Errorf("plugin %q: %s", id, msg)
 	}
-	if !HasExecutableContributions(*ip.Manifest) {
+	if !HasExecutableContributionsAt(*ip.Manifest, ip.Root) {
 		return TrustResult{}, fmt.Errorf("plugin %q has no executable contributions to trust", id)
 	}
 
@@ -182,7 +208,7 @@ func Trust(opts TrustOptions) (TrustResult, error) {
 		cp := *ip.Source
 		source = &cp
 	}
-	caps := InferCapabilities(*ip.Manifest)
+	caps := InferCapabilitiesAt(*ip.Manifest, ip.Root)
 
 	var result TrustResult
 	err = WithLockfileLock(roots.LockPath, func(lf Lockfile) (Lockfile, bool, error) {

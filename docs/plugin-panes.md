@@ -14,7 +14,8 @@ sizing, failure isolation, versioning, and web mapping **before** TUI host
 | Status | Meaning |
 |---|---|
 | **Contract (this doc)** | Normative. Pane hosts and loaders must conform. |
-| **Not implemented yet** | TUI window adapter, process supervisor, web renderer — later issues. |
+| **TUI host** | Implemented (#731): window adapter, process supervisor, focus/layout, isolation. |
+| **Not implemented yet** | Web renderer (#732). |
 | **Out of scope forever (v1 model)** | Exposing the private Go `window` interface; in-process Go/`plugin.Open` panes; unrestricted terminal escape / raw PTY output from plugins; Node plugin hosts. |
 
 Related: [plugins.md](plugins.md), [theme.md](theme.md), [harnesses.md](harnesses.md),
@@ -880,7 +881,7 @@ touching the private Go `window` interface.
 | Pane ABI | #522 (this doc) | Definition, process protocol, permissions, isolation |
 | Passive/exec loaders | #726 #728 | Register descriptors; trust for `panes.process` |
 | Plugin manager | #730 | Enable/disable, provenance, recovery actions |
-| TUI host | #731 | Adapter window, supervisor, focus/layout, isolation tests |
+| TUI host | #731 (done) | Adapter window, supervisor, focus/layout, isolation tests |
 | Web parity | #732 | Same trees over host APIs; no TUI types |
 
 ---
