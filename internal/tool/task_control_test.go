@@ -57,8 +57,47 @@ func TestTaskStatusSuccess(t *testing.T) {
 	if !strings.Contains(res.Output, `"state":"working"`) || !strings.Contains(res.Output, `"current_tool":"grep"`) {
 		t.Fatalf("output = %s", res.Output)
 	}
+	if strings.Contains(res.Output, `"handoff"`) {
+		t.Fatalf("live status should omit handoff: %s", res.Output)
+	}
 	if !strings.Contains(res.Title, "working") {
 		t.Fatalf("title = %q", res.Title)
+	}
+}
+
+func TestTaskStatusTerminalHandoff(t *testing.T) {
+	tc := allowAll(t.TempDir())
+	tc.TaskStatus = func(_ context.Context, req TaskStatusRequest) (TaskStatusResult, error) {
+		return TaskStatusResult{
+			SessionID:       req.SessionID,
+			State:           "completed",
+			Elapsed:         "12s",
+			TerminalSummary: "done",
+			HasHandoff:      true,
+			Handoff: CompletionHandoff{
+				Summary:               "done",
+				FilesChanged:          []string{"a.go"},
+				Verification:          "make test",
+				Findings:              []string{},
+				Blockers:              []string{},
+				RecommendedNextAction: "ship",
+			},
+		}, nil
+	}
+	res, err := NewTaskStatus().Execute(context.Background(), mustJSON(t, map[string]any{
+		"session_id": "child-1",
+	}), tc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Output, `"handoff"`) {
+		t.Fatalf("want handoff object: %s", res.Output)
+	}
+	if !strings.Contains(res.Output, `"files_changed"`) || !strings.Contains(res.Output, "a.go") {
+		t.Fatalf("want files_changed: %s", res.Output)
+	}
+	if !strings.Contains(res.Output, `"recommended_next_action":"ship"`) {
+		t.Fatalf("want next action: %s", res.Output)
 	}
 }
 

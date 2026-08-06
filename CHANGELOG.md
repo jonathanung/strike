@@ -14,6 +14,10 @@ materially affect the shipped product.
 
 ## [Unreleased]
 
+### Added
+
+- **Structured completion handoffs** — delegated `task` children always emit a machine-parseable handoff on `[child.completed]` and terminal `task_status` (`summary`, `files_changed`, `verification`, `findings`, `blockers`, `recommended_next_action`). Engine merges tool-tracked file mutations into `files_changed` and flags `incomplete` when the child did not supply structured JSON. Protocol wire version `1.1.0` ([#771](https://github.com/jonathanung/strike/issues/771)).
+
 ### Changed
 
 - **FTUE build presets** — scheduler preset rows use `[x]` / `[ ]` checkbox marks so selected (added to the scheduler) vs unselected tools are obvious ([#747](https://github.com/jonathanung/strike/issues/747)).

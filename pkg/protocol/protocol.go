@@ -508,6 +508,32 @@ type ChildStarted struct {
 	Name string `json:"name,omitempty"`
 }
 
+// CompletionHandoff is the structured work product for a delegated child at
+// terminal status. Always present on ChildCompleted (empty slices/strings are
+// honest). Success fills the full schema; failure/cancel may leave
+// verification/findings empty. filesChanged may be engine-tracked and/or
+// model-supplied (merged, de-duplicated).
+//
+// Wire JSON uses camelCase. Model-facing notices and task_status also expose a
+// snake_case view of the same fields.
+type CompletionHandoff struct {
+	// Summary is a short human/agent-readable outcome.
+	Summary string `json:"summary"`
+	// FilesChanged lists workspace-relative paths created, edited, or deleted.
+	FilesChanged []string `json:"filesChanged"`
+	// Verification describes what was run/checked and the results.
+	Verification string `json:"verification,omitempty"`
+	// Findings are notable discoveries, risks, or TODOs.
+	Findings []string `json:"findings,omitempty"`
+	// Blockers are unresolved blockers (empty when none).
+	Blockers []string `json:"blockers,omitempty"`
+	// RecommendedNextAction is a concrete next step for the lead or peers.
+	RecommendedNextAction string `json:"recommendedNextAction,omitempty"`
+	// Incomplete is true when the engine could not parse a model-supplied
+	// structured handoff and filled defaults + tracked files only.
+	Incomplete bool `json:"incomplete,omitempty"`
+}
+
 // ChildCompleted marks the end of a foreground child/subagent session.
 // Emitted by the parent engine with the child's correlation.
 type ChildCompleted struct {
@@ -516,6 +542,8 @@ type ChildCompleted struct {
 	Summary string      `json:"summary,omitempty"`
 	// Name is the stable teammate alias when one was assigned at spawn.
 	Name string `json:"name,omitempty"`
+	// Handoff is the structured completion payload (always set by the engine).
+	Handoff CompletionHandoff `json:"handoff"`
 }
 
 // AgentMessage records a peer/team mailbox delivery for UI and debugging.

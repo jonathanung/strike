@@ -70,6 +70,7 @@ type childRecord struct {
 	name      string
 	status    protocol.ChildStatus
 	summary   string
+	handoff   protocol.CompletionHandoff
 	activity  []string
 	events    []tool.TaskTranscriptEntry
 }
@@ -381,38 +382,54 @@ func (e *Engine) spawnChild(ctx context.Context, req tool.TaskRequest) (tool.Tas
 		}
 
 		// If parent engine life ended without a child turn terminal, treat as cancel.
-		summary := lastAssistantText(child.messages)
+		assistantText := lastAssistantText(child.messages)
 		var status protocol.ChildStatus
+		var errText string
 		switch {
 		case (childCtx.Err() != nil && !gotStop) || (gotStop && stopReason == "interrupted"):
 			status = protocol.ChildStatusCanceled
-			if summary == "" {
-				summary = "task canceled"
-			}
 		case !gotStop || stopReason == "error":
 			status = protocol.ChildStatusFailed
 			failMu.Lock()
-			errText := failMsg
+			errText = failMsg
 			failMu.Unlock()
-			switch {
-			case errText != "" && summary != "":
-				summary = summary + "\n\nError: " + errText
-			case errText != "":
-				summary = errText
-			case summary == "":
-				summary = "task failed"
-			}
 		default:
 			status = protocol.ChildStatusCompleted
-			if summary == "" {
-				summary = "task completed"
+		}
+		// Structured handoff: parse model JSON from assistant text first (before
+		// appending engine error suffixes), then merge engine file tracking.
+		handoff := buildCompletionHandoff(status, assistantText, child.mutatedPathsSnapshot())
+		if errText != "" {
+			if strings.TrimSpace(handoff.Summary) == "" || handoff.Summary == defaultHandoffSummary(status) {
+				handoff.Summary = errText
+			} else if !strings.Contains(handoff.Summary, errText) {
+				handoff.Summary = handoff.Summary + "\n\nError: " + errText
 			}
+			if len(handoff.Blockers) == 0 {
+				handoff.Blockers = []string{errText}
+			} else {
+				// Keep model blockers; ensure error is visible.
+				found := false
+				for _, b := range handoff.Blockers {
+					if strings.Contains(b, errText) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					handoff.Blockers = append(handoff.Blockers, errText)
+				}
+			}
+		}
+		if strings.TrimSpace(handoff.Summary) == "" {
+			handoff.Summary = defaultHandoffSummary(status)
 		}
 		completed := protocol.ChildCompleted{
 			Correlation: childCorr,
 			Status:      status,
-			Summary:     summary,
+			Summary:     handoff.Summary,
 			Name:        memberName,
+			Handoff:     handoff,
 		}
 		e.emit(completed)
 		e.persistChildEvent(childID, completed)
@@ -475,6 +492,7 @@ func (e *Engine) finishChild(h *childHandle, completed protocol.ChildCompleted) 
 		name:      h.name,
 		status:    completed.Status,
 		summary:   completed.Summary,
+		handoff:   completed.Handoff,
 		activity:  append([]string(nil), h.activity...),
 		events:    append([]tool.TaskTranscriptEntry(nil), h.events...),
 	}
@@ -765,11 +783,37 @@ func (r *childRecord) statusSnapshot(includeRecent bool) tool.TaskStatusResult {
 		State:           state,
 		Elapsed:         formatElapsed(elapsed),
 		TerminalSummary: r.summary,
+		Handoff:         toolHandoff(r.handoff),
+		HasHandoff:      true,
 	}
 	if includeRecent && len(r.activity) > 0 {
 		out.LatestActivity = append([]string(nil), r.activity...)
 	}
 	return out
+}
+
+func toolHandoff(h protocol.CompletionHandoff) tool.CompletionHandoff {
+	files := h.FilesChanged
+	if files == nil {
+		files = []string{}
+	}
+	findings := h.Findings
+	if findings == nil {
+		findings = []string{}
+	}
+	blockers := h.Blockers
+	if blockers == nil {
+		blockers = []string{}
+	}
+	return tool.CompletionHandoff{
+		Summary:               h.Summary,
+		FilesChanged:          files,
+		Verification:          h.Verification,
+		Findings:              findings,
+		Blockers:              blockers,
+		RecommendedNextAction: h.RecommendedNextAction,
+		Incomplete:            h.Incomplete,
+	}
 }
 
 func (e *Engine) childRead(ctx context.Context, req tool.TaskReadRequest) (tool.TaskReadResult, error) {
@@ -1130,11 +1174,32 @@ func formatChildCompletedNotice(c protocol.ChildCompleted) string {
 	default:
 		fmt.Fprintf(&b, "[child.completed status=%s]", status)
 	}
-	if summary := strings.TrimSpace(c.Summary); summary != "" {
-		b.WriteByte('\n')
-		b.WriteString(summary)
+	// Prefer structured handoff JSON for the lead; fall back to free-form summary.
+	handoff := c.Handoff
+	if strings.TrimSpace(handoff.Summary) == "" && strings.TrimSpace(c.Summary) != "" {
+		handoff.Summary = c.Summary
 	}
-	b.WriteString("\nDo not sleep-poll for subagents; this is the terminal result.")
+	if handoff.FilesChanged == nil {
+		handoff.FilesChanged = []string{}
+	}
+	if handoff.Findings == nil {
+		handoff.Findings = []string{}
+	}
+	if handoff.Blockers == nil {
+		handoff.Blockers = []string{}
+	}
+	// Zero-value handoff (legacy/tests): still emit a minimal object from Summary.
+	if strings.TrimSpace(handoff.Summary) == "" && strings.TrimSpace(c.Summary) == "" {
+		handoff.Summary = defaultHandoffSummary(c.Status)
+		handoff.Incomplete = true
+	}
+	b.WriteByte('\n')
+	b.WriteString("handoff: ")
+	b.WriteString(marshalHandoffModelJSON(handoff))
+	if handoff.Incomplete {
+		b.WriteString("\n(note: handoff.incomplete=true — child did not supply structured fields; engine filled defaults + tracked files)")
+	}
+	b.WriteString("\nDo not sleep-poll for subagents; this is the terminal result. Prefer the handoff JSON over free-form prose.")
 	return b.String()
 }
 

@@ -30,9 +30,13 @@ func (taskStatusTool) Description() string {
 - Input session_id from a prior task result (or child.completed notice), or the
   child's stable name alias when one was set at spawn.
 - Returns state (starting|working|needs_attention|completed|failed|canceled|unknown),
-  elapsed time, current tool, optional recent activity, and terminal_summary when done.
-- One-off pulse only — do not busy-poll. Prefer [child.completed] for finished work and
-  the peer inbox (agent_message) for mid-flight updates. agent_roster lists who is live.
+  elapsed time, current tool, optional recent activity, terminal_summary when done,
+  and a structured handoff object on terminal states (summary, files_changed,
+  verification, findings, blockers, recommended_next_action; incomplete may be true
+  when the child did not supply structured fields).
+- One-off pulse only — do not busy-poll. Prefer [child.completed] handoff JSON for
+  finished work and the peer inbox (agent_message) for mid-flight updates.
+  agent_roster lists who is live.
 - Cannot access sessions you do not own (parent→child ownership). For peer chat use
   agent_message / agent_broadcast.`
 }
@@ -77,6 +81,9 @@ func (taskStatusTool) Execute(ctx context.Context, args json.RawMessage, tc *Con
 		"current_tool":     res.CurrentTool,
 		"latest_activity":  res.LatestActivity,
 		"terminal_summary": nullIfEmpty(res.TerminalSummary),
+	}
+	if res.HasHandoff {
+		payload["handoff"] = res.Handoff
 	}
 	if len(res.QueuePools) > 0 {
 		payload["queue_pools"] = res.QueuePools
