@@ -131,6 +131,72 @@ func TestExpandFileMentionsDedupesPaths(t *testing.T) {
 	}
 }
 
+func TestStripFileMentionAttachments(t *testing.T) {
+	ff := &fakeFiles{files: map[string][]byte{
+		"pkg/main.go": []byte("package main\nfunc main() {}\n"),
+		"a.go":        []byte("A"),
+	}}
+	expanded, _ := expandFileMentions("look at @pkg/main.go please", ff)
+	got := stripFileMentionAttachments(expanded)
+	if got != "look at @pkg/main.go please" {
+		t.Fatalf("strip = %q, want prompt only", got)
+	}
+	if strings.Contains(got, "package main") || strings.Contains(got, "--- file:") {
+		t.Fatalf("strip leaked attachment body: %q", got)
+	}
+
+	// Round-trip through userMessageDisplayText (session replay path).
+	display := userMessageDisplayText(expanded, nil)
+	if display != "look at @pkg/main.go please" {
+		t.Fatalf("display = %q", display)
+	}
+
+	// Multiple attachments.
+	multi, _ := expandFileMentions("see @a.go and @pkg/main.go", ff)
+	if got := stripFileMentionAttachments(multi); got != "see @a.go and @pkg/main.go" {
+		t.Fatalf("multi strip = %q", got)
+	}
+
+	// Plain text unchanged.
+	if got := stripFileMentionAttachments("no fences here"); got != "no fences here" {
+		t.Fatalf("plain = %q", got)
+	}
+
+	// Folder fence.
+	folderExpanded := "list @pkg/\n\n--- folder: pkg/ ---\ndir listing\n--- end folder: pkg/ ---"
+	if got := stripFileMentionAttachments(folderExpanded); got != "list @pkg/" {
+		t.Fatalf("folder strip = %q", got)
+	}
+
+	// Body that documents the fence must not truncate at the inner close mark.
+	nested := "see @doc.md\n\n--- file: doc.md ---\nexample:\n--- end file: doc.md ---\nstill body\n--- end file: doc.md ---"
+	if got := stripFileMentionAttachments(nested); got != "see @doc.md" {
+		t.Fatalf("nested close strip = %q", got)
+	}
+}
+
+func TestUserMessageCellStripsFileAttachments(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	body := "review @note.go\n\n--- file: note.go ---\nsecret body\n--- end file: note.go ---"
+	m.applyEvent(protocol.UserMessage{Text: body})
+	if len(m.cells) != 1 {
+		t.Fatalf("cells = %d", len(m.cells))
+	}
+	uc, ok := m.cells[0].(*userCell)
+	if !ok {
+		t.Fatalf("cell %T", m.cells[0])
+	}
+	if uc.text != "review @note.go" {
+		t.Fatalf("user cell = %q, want @mention without body", uc.text)
+	}
+	if strings.Contains(uc.text, "secret") {
+		t.Fatalf("file body leaked into transcript: %q", uc.text)
+	}
+	if m.titleTopic != "" && strings.Contains(m.titleTopic, "secret") {
+		t.Fatalf("title leaked body: %q", m.titleTopic)
+	}
+}
+
 func TestAtFileCompletionActivation(t *testing.T) {
 	paths := []string{"internal/tui/app.go", "pkg/main.go"}
 	tests := []struct {

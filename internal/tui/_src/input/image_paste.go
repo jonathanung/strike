@@ -116,8 +116,10 @@ func displayPromptWithImages(text string, images []imageChip) string {
 }
 
 // userMessageDisplayText is transcript-facing: text plus [image N] labels,
-// never raw binary/base64.
+// never raw binary/base64. Strips @file mention attachment fences so session
+// replay and live UserMessage echoes keep @path tokens without file bodies.
 func userMessageDisplayText(text string, images []protocol.ImageAttachment) string {
+	text = stripFileMentionAttachments(text)
 	if len(images) == 0 {
 		return text
 	}

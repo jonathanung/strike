@@ -40,10 +40,12 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		if isChildCompletedNotice(ev.Text) {
 			break
 		}
-		m.cells = append(m.cells, &userCell{text: userMessageDisplayText(ev.Text, ev.Images)})
+		display := userMessageDisplayText(ev.Text, ev.Images)
+		m.cells = append(m.cells, &userCell{text: display})
 		// Fallback for logs without session.titled (pre-auto-title sessions).
+		// Use display text so @file attachment bodies do not pollute the title.
 		if m.titleTopic == "" {
-			if topic := sanitizeTitleTopic(ev.Text); topic != "" {
+			if topic := sanitizeTitleTopic(display); topic != "" {
 				m.titleTopic = topic
 				cmd = m.broadcastContextState()
 			}

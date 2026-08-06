@@ -72,6 +72,47 @@ func TestToolCellHeadClampedToWidth(t *testing.T) {
 	}
 }
 
+func TestReadToolCellHidesFileBody(t *testing.T) {
+	th := theme.Default()
+	cell := &toolCell{
+		name:   "read",
+		title:  "internal/auth/store.go",
+		output: "package auth\n\nfunc Load() {}\n",
+		done:   true,
+	}
+	plain := ansi.Strip(cell.render(80, th))
+	if !strings.Contains(plain, "read") {
+		t.Fatalf("missing read label:\n%s", plain)
+	}
+	if !strings.Contains(plain, "internal/auth/store.go") {
+		t.Fatalf("missing path title:\n%s", plain)
+	}
+	if strings.Contains(plain, "package auth") || strings.Contains(plain, "func Load") {
+		t.Fatalf("read tool dumped file body into chat:\n%s", plain)
+	}
+	if cell.collapsible() {
+		t.Fatal("successful read should not be collapsible")
+	}
+	// Errors still surface the message body.
+	errCell := &toolCell{
+		name:    "read",
+		title:   "missing.go",
+		output:  "file not found: missing.go",
+		done:    true,
+		isError: true,
+	}
+	errPlain := ansi.Strip(errCell.render(80, th))
+	if !strings.Contains(errPlain, "file not found") {
+		t.Fatalf("read error should show body:\n%s", errPlain)
+	}
+	// bash still previews output.
+	bash := &toolCell{name: "bash", title: "echo", output: "hello from bash", done: true}
+	bashPlain := ansi.Strip(bash.render(80, th))
+	if !strings.Contains(bashPlain, "hello from bash") {
+		t.Fatalf("bash should still preview output:\n%s", bashPlain)
+	}
+}
+
 func TestToolCellUsesToolGuideIconRatherThanBorderVertical(t *testing.T) {
 	th := theme.Default()
 	th.Icons.ToolGuide = ">"
