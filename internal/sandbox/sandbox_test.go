@@ -249,39 +249,56 @@ func TestSharedWritablePathsAndIsShared(t *testing.T) {
 	if IsSharedWritablePath("/etc/passwd") {
 		t.Fatal("/etc/passwd must not be shared writable")
 	}
-	home := t.TempDir()
+	// Fixture home must not sit under /tmp (which is itself shared-writable).
+	realHome, err := os.UserHomeDir()
+	if err != nil || realHome == "" || IsSharedWritablePath(realHome) {
+		t.Skip("need a non-shared-writable real home for over-broad root tests")
+	}
+	home, err := os.MkdirTemp(realHome, ".strike-sandbox-home-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(home) })
 	t.Setenv("HOME", home)
+	// Create workspace before rewriting TMPDIR (t.TempDir follows TMPDIR).
+	wd := t.TempDir()
+	// Over-broad env roots must not open the whole home tree.
+	t.Setenv("TMPDIR", home)
+	t.Setenv("XDG_CACHE_HOME", home)
+	if IsSharedWritablePath(filepath.Join(home, "Documents", "secret")) {
+		t.Fatal("TMPDIR/XDG_CACHE_HOME=$HOME must not make home contents shared-writable")
+	}
+	tmpUnderHome := filepath.Join(home, "tmpdir")
+	if err := os.MkdirAll(tmpUnderHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(home, ".cache"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, ".cache"))
+	t.Setenv("TMPDIR", tmpUnderHome)
 	cacheFile := filepath.Join(home, ".cache", "go-build", "x")
 	if !IsSharedWritablePath(cacheFile) {
 		t.Fatalf("cache path %q should be shared writable", cacheFile)
 	}
-	// Existing dirs only in SharedWritablePaths.
-	if err := os.MkdirAll(filepath.Join(home, ".cache"), 0o755); err != nil {
-		t.Fatal(err)
+	if !isSafeSharedRoot("/tmp", home) || isSafeSharedRoot(home, home) || isSafeSharedRoot("/", home) {
+		t.Fatal("isSafeSharedRoot basic cases")
 	}
-	wd := t.TempDir()
+	if parent := filepath.Dir(home); parent != "/" && isSafeSharedRoot(parent, home) {
+		t.Fatalf("ancestor %q of home should be rejected", parent)
+	}
 	paths := SharedWritablePaths(wd, true)
 	foundCache := false
+	wantCache := filepath.Join(home, ".cache")
+	if real, err := filepath.EvalSymlinks(wantCache); err == nil {
+		wantCache = real
+	}
 	for _, p := range paths {
-		if p == filepath.Join(home, ".cache") || strings.HasSuffix(p, string(filepath.Separator)+".cache") {
+		if p == wantCache {
 			foundCache = true
 		}
 		if p == wd {
 			t.Fatalf("SharedWritablePaths must not include workdir %q: %v", wd, paths)
-		}
-	}
-	// After EvalSymlinks the cache path may differ; accept any path under home/.cache.
-	if !foundCache {
-		want := filepath.Join(home, ".cache")
-		if real, err := filepath.EvalSymlinks(want); err == nil {
-			want = real
-		}
-		for _, p := range paths {
-			if p == want {
-				foundCache = true
-				break
-			}
 		}
 	}
 	if !foundCache {
@@ -290,7 +307,7 @@ func TestSharedWritablePathsAndIsShared(t *testing.T) {
 	// Caches omitted when includeCaches=false.
 	temps := SharedWritablePaths(wd, false)
 	for _, p := range temps {
-		if strings.Contains(p, ".cache") {
+		if p == wantCache {
 			t.Fatalf("temp-only list has cache %q: %v", p, temps)
 		}
 	}

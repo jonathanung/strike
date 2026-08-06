@@ -78,58 +78,104 @@ func SharedWritablePaths(workDir string, includeCaches bool) []string {
 }
 
 func sharedWritableRootCandidates(includeCaches bool) []string {
+	home := userHomeDir()
 	var roots []string
-	// Temp / scratch — always candidates.
-	roots = append(roots, "/tmp", "/var/tmp")
+	add := func(raw string) {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			return
+		}
+		abs := cleanAbsPath(raw)
+		if !isSafeSharedRoot(abs, home) {
+			return
+		}
+		roots = append(roots, abs)
+	}
+
+	// Temp / scratch — always candidates (hard-coded roots are known-safe).
+	add("/tmp")
+	add("/var/tmp")
 	if runtime.GOOS == "darwin" {
-		roots = append(roots, "/private/tmp", "/private/var/tmp")
+		add("/private/tmp")
+		add("/private/var/tmp")
 	}
 	if td := strings.TrimSpace(os.Getenv("TMPDIR")); td != "" {
-		roots = append(roots, td)
+		add(td)
 	}
 	if runtime.GOOS == "linux" {
-		roots = append(roots, "/dev/shm")
+		add("/dev/shm")
 	}
 	if !includeCaches {
 		return roots
 	}
 
-	home := ""
-	if h, err := os.UserHomeDir(); err == nil {
-		home = h
-	}
-	if home == "" {
-		home = os.Getenv("HOME")
-	}
-
 	if xdg := strings.TrimSpace(os.Getenv("XDG_CACHE_HOME")); xdg != "" {
-		roots = append(roots, xdg)
+		add(xdg)
 	} else if home != "" {
-		roots = append(roots, filepath.Join(home, ".cache"))
+		add(filepath.Join(home, ".cache"))
 	}
 	if xdg := strings.TrimSpace(os.Getenv("XDG_RUNTIME_DIR")); xdg != "" {
-		roots = append(roots, xdg)
+		add(xdg)
 	}
 
 	if g := strings.TrimSpace(os.Getenv("GOCACHE")); g != "" && !strings.EqualFold(g, "off") {
-		roots = append(roots, g)
+		add(g)
 	}
 	if g := strings.TrimSpace(os.Getenv("GOMODCACHE")); g != "" {
-		roots = append(roots, g)
+		add(g)
 	} else if gp := firstPATHListEntry(os.Getenv("GOPATH")); gp != "" {
-		roots = append(roots, filepath.Join(gp, "pkg", "mod"))
+		add(filepath.Join(gp, "pkg", "mod"))
 	} else if home != "" {
-		roots = append(roots, filepath.Join(home, "go", "pkg", "mod"))
+		add(filepath.Join(home, "go", "pkg", "mod"))
 	}
 
 	if home != "" {
-		roots = append(roots,
-			filepath.Join(home, ".npm"),
-			filepath.Join(home, ".cargo"),
-			filepath.Join(home, ".rustup"),
-		)
+		add(filepath.Join(home, ".npm"))
+		add(filepath.Join(home, ".cargo"))
+		add(filepath.Join(home, ".rustup"))
 	}
 	return roots
+}
+
+func userHomeDir() string {
+	if h, err := os.UserHomeDir(); err == nil && h != "" {
+		return filepath.Clean(h)
+	}
+	if h := strings.TrimSpace(os.Getenv("HOME")); h != "" {
+		return filepath.Clean(h)
+	}
+	return ""
+}
+
+// isSafeSharedRoot rejects over-broad env roots (/, $HOME, ancestors of $HOME,
+// bare root children like /home) so a mis-set TMPDIR/XDG_CACHE_HOME cannot
+// open the whole home directory for writes.
+func isSafeSharedRoot(abs, home string) bool {
+	abs = filepath.Clean(strings.TrimSpace(abs))
+	if abs == "" || abs == "/" || abs == "." {
+		return false
+	}
+	// Known scratch roots that are direct children of /.
+	switch abs {
+	case "/tmp", "/var/tmp", "/dev/shm",
+		"/private/tmp", "/private/var/tmp":
+		return true
+	}
+	// Any other direct child of root is too broad (/home, /Users, /var, …).
+	if filepath.Dir(abs) == "/" || filepath.Dir(abs) == string(filepath.Separator) {
+		return false
+	}
+	if home != "" {
+		home = filepath.Clean(home)
+		if abs == home {
+			return false
+		}
+		// abs is a proper ancestor of home → would include the whole home tree.
+		if pathUnderRoot(abs, home) {
+			return false
+		}
+	}
+	return true
 }
 
 func firstPATHListEntry(v string) string {
