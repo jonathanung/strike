@@ -38,8 +38,8 @@ func TestCompileSandboxWriteDenyGlob(t *testing.T) {
 	if p.NoWorkspaceWrite {
 		t.Fatal("specific denies must not clear workspace-write")
 	}
-	if p.Network {
-		t.Fatal("default webfetch/mcp ask must keep network off")
+	if !p.Network {
+		t.Fatal("default webfetch/mcp ask must keep network on (gh/git/npm)")
 	}
 	if !containsStr(p.DenyWriteGlobs, "**/*.env") || !containsStr(p.DenyWriteGlobs, "secrets/**") {
 		t.Fatalf("globs = %v", p.DenyWriteGlobs)
@@ -69,25 +69,95 @@ func TestCompileSandboxWriteStarDeny(t *testing.T) {
 	}
 }
 
-func TestCompileSandboxNetworkFromWebfetchAllow(t *testing.T) {
+func TestCompileSandboxNetworkDefaultOn(t *testing.T) {
 	wd := t.TempDir()
-	p := CompileSandbox(sandbox.ModeReadOnly, wd, Defaults(), Ruleset{
+	// Defaults alone (webfetch/mcp Ask) — coding agents need host network.
+	p := CompileSandbox(sandbox.ModeWorkspaceWrite, wd, Defaults())
+	if !p.Network {
+		t.Fatal("default permissions must enable bash network")
+	}
+	// Explicit allow still on.
+	pAllow := CompileSandbox(sandbox.ModeReadOnly, wd, Defaults(), Ruleset{
 		{Permission: "webfetch", Pattern: "*", Action: Allow},
 	})
-	if !p.Network {
-		t.Fatal("webfetch allow * should enable network")
+	if !pAllow.Network {
+		t.Fatal("webfetch allow * should keep network on")
 	}
-	p2 := CompileSandbox(sandbox.ModeReadOnly, wd, Defaults(), Ruleset{
+	pMCP := CompileSandbox(sandbox.ModeReadOnly, wd, Defaults(), Ruleset{
 		{Permission: "mcp", Pattern: "*", Action: Allow},
 	})
-	if !p2.Network {
-		t.Fatal("mcp allow * should enable network")
+	if !pMCP.Network {
+		t.Fatal("mcp allow * should keep network on")
 	}
-	p3 := CompileSandbox(sandbox.ModeReadOnly, wd, Defaults(), Ruleset{
+	// Patterned allow does not change * posture (still Ask → on).
+	pPat := CompileSandbox(sandbox.ModeReadOnly, wd, Defaults(), Ruleset{
 		{Permission: "webfetch", Pattern: "https://example.com/*", Action: Allow},
 	})
-	if p3.Network {
-		t.Fatal("patterned webfetch allow must not open full bash network")
+	if !pPat.Network {
+		t.Fatal("patterned webfetch allow must not disable default network")
+	}
+}
+
+func TestCompileSandboxNetworkOffOnlyOnDualDeny(t *testing.T) {
+	wd := t.TempDir()
+	// Single-family deny must not air-gap bash (webfetch tool deny ≠ no git).
+	pWF := CompileSandbox(sandbox.ModeWorkspaceWrite, wd, Defaults(), Ruleset{
+		{Permission: "webfetch", Pattern: "*", Action: Deny},
+	})
+	if !pWF.Network {
+		t.Fatal("webfetch deny alone must keep bash network on")
+	}
+	pMCP := CompileSandbox(sandbox.ModeWorkspaceWrite, wd, Defaults(), Ruleset{
+		{Permission: "mcp", Pattern: "*", Action: Deny},
+	})
+	if !pMCP.Network {
+		t.Fatal("mcp deny alone must keep bash network on")
+	}
+	// Both hard-deny on * → --unshare-net / no network-*.
+	pBoth := CompileSandbox(sandbox.ModeWorkspaceWrite, wd, Defaults(), Ruleset{
+		{Permission: "webfetch", Pattern: "*", Action: Deny},
+		{Permission: "mcp", Pattern: "*", Action: Deny},
+	})
+	if pBoth.Network {
+		t.Fatal("webfetch+mcp deny * should disable bash network")
+	}
+	// Patterned deny must not flip full-network posture after dual deny on *.
+	// (Evaluate("*") stays Deny; patterned rules do not match subject "*".)
+	pPat := CompileSandbox(sandbox.ModeWorkspaceWrite, wd, Defaults(), Ruleset{
+		{Permission: "webfetch", Pattern: "*", Action: Deny},
+		{Permission: "mcp", Pattern: "*", Action: Deny},
+		{Permission: "webfetch", Pattern: "https://example.com/*", Action: Allow},
+	})
+	if pPat.Network {
+		t.Fatal("patterned webfetch allow must not re-open full bash network after dual deny")
+	}
+}
+
+func TestCompileSandboxDefaultNetworkOmitsUnshareNet(t *testing.T) {
+	// When the Linux backend is available, default compile must not inject
+	// --unshare-net (regression for gh/git DNS failures under bwrap).
+	if sandbox.BackendName() != "bwrap" || !sandbox.Available() {
+		t.Skip("bwrap backend not available")
+	}
+	wd := t.TempDir()
+	p := CompileSandbox(sandbox.ModeWorkspaceWrite, wd, Defaults())
+	if !p.Network {
+		t.Fatal("expected Network true from Defaults")
+	}
+	argv := sandbox.Wrap([]string{"true"}, p)
+	joined := strings.Join(argv, "\x00")
+	if strings.Contains(joined, "\x00--unshare-net\x00") || strings.HasSuffix(joined, "\x00--unshare-net") || strings.HasPrefix(joined, "--unshare-net\x00") {
+		t.Fatalf("default policy must omit --unshare-net: %#v", argv)
+	}
+	// Dual deny still gets isolation.
+	off := CompileSandbox(sandbox.ModeWorkspaceWrite, wd, Defaults(), Ruleset{
+		{Permission: "webfetch", Pattern: "*", Action: Deny},
+		{Permission: "mcp", Pattern: "*", Action: Deny},
+	})
+	offArgv := sandbox.Wrap([]string{"true"}, off)
+	offJoined := "\x00" + strings.Join(offArgv, "\x00") + "\x00"
+	if !strings.Contains(offJoined, "\x00--unshare-net\x00") {
+		t.Fatalf("dual-deny policy must include --unshare-net: %#v", offArgv)
 	}
 }
 

@@ -17,6 +17,11 @@ materially affect the shipped product.
 ### Changed
 
 - **FTUE build presets** — scheduler preset rows use `[x]` / `[ ]` checkbox marks so selected (added to the scheduler) vs unselected tools are obvious ([#747](https://github.com/jonathanung/strike/issues/747)).
+- **Bash sandbox network default** — OS sandbox keeps host networking on under default permissions so `gh`, `git`, and package managers work; network isolation (`--unshare-net` / no seatbelt `network-*`) applies only when both `webfetch` and `mcp` are hard-deny on `*` ([#750](https://github.com/jonathanung/strike/issues/750)).
+
+### Fixed
+
+- Fixed bash under the default OS sandbox failing DNS/network (`gh auth status`, `git push`, etc.) because network was off unless `webfetch`/`mcp` were allow-on-`*` ([#750](https://github.com/jonathanung/strike/issues/750)).
 
 ### Added
 
@@ -26,7 +31,7 @@ materially affect the shipped product.
 - **`/ftue` setup wizard** — manually invokable onboarding that guides provider connection, model selection, optional `/init`, and the first prompt by reusing existing host services and modals. Opening does not change settings; Finish focuses the composer; esc cancels. Child pickers preserve wizard step ([#702](https://github.com/jonathanung/strike/issues/702)).
 - **Contextual TUI feature tour** — skippable `/ftue` step covering pane navigation, agents/subagents, permissions, autonomy, key help, and command discovery. Copy uses live keybinds, omits unavailable surfaces, stays readable at 80×24, and never mutates settings or arms timers; established users revisit via `/ftue` ([#704](https://github.com/jonathanung/strike/issues/704)).
 - Config/CLI **sandbox dial** (`sandbox`: `off` | `read-only` | `workspace-write`, default `workspace-write`; `--sandbox`, `/sandbox`) for OS isolation of bash, documented as a two-dial model with `permissionMode`. `yolo` with `sandbox: off` requires `--i-know` ([#552](https://github.com/jonathanung/strike/issues/552)).
-- **Permission → sandbox profile:** `write`/`edit` deny globs compile into OS filesystem denials; bash network follows `webfetch`/`mcp` allow-on-`*`; `/sandbox explain` shows the generated profile ([#553](https://github.com/jonathanung/strike/issues/553)).
+- **Permission → sandbox profile:** `write`/`edit` deny globs compile into OS filesystem denials; bash network posture follows `webfetch`/`mcp` (on unless both deny-on-`*`); `/sandbox explain` shows the generated profile ([#553](https://github.com/jonathanung/strike/issues/553), [#750](https://github.com/jonathanung/strike/issues/750)).
 
 ## [v0.1.2] - 2026-08-05
 

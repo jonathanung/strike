@@ -112,10 +112,12 @@ rules.
 into OS filesystem denials inside the bash sandbox (globs become seatbelt
 regexes and, when paths exist, bwrap `--ro-bind` remounts). A deny on
 `write`/`edit` `*` (including plan mode) suppresses the writable workspace
-bind. Network inside the sandbox stays off unless `webfetch` or `mcp` is
-effectively **allow** on `*` (patterned allows do not open full bash network).
-Ask/yolo posture does not widen the OS profile. Composer `!` uses the
-config-layer compile; agent bash uses live layers (agent/phase/session).
+bind. Network inside the sandbox stays **on** by default (so bash can run
+`gh`, `git`, package managers, etc.). It turns **off** only when both
+`webfetch` and `mcp` are hard-**deny** on `*` (patterned rules do not flip
+full-network posture). Ask/yolo posture does not widen the OS profile.
+Composer `!` uses the config-layer compile; agent bash uses live layers
+(agent/phase/session).
 
 **Network allowlist (`network.allow`):** optional host/CIDR whitelist for
 **application-layer** web egress (`webfetch`). Entries may be hostnames
@@ -134,7 +136,7 @@ This is the same policy **shape** as future container network filters. It is
 | Surface | What applies today |
 |---|---|
 | `webfetch` | `network.allow` host/CIDR allowlist + SSRF private blocks |
-| bash OS profile | `sandbox.Policy.Network` on/off from `webfetch`/`mcp` permission `*` (all-or-nothing; no per-host filter inside bwrap/seatbelt) |
+| bash OS profile | `sandbox.Policy.Network` on by default; off only when both `webfetch` and `mcp` are hard-deny on `*` (all-or-nothing; no per-host filter inside bwrap/seatbelt) |
 | permission rules | `webfetch` ask/allow/deny patterns (prompt posture), independent of the hard allowlist |
 | container net | deferred — reuse `network.allow` shape |
 
