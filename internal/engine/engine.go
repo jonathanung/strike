@@ -224,10 +224,15 @@ type Options struct {
 	InitialPriority bool
 	// InitialTitled skips auto SessionTitled when the session was already titled.
 	InitialTitled bool
-	// InitialPhaseWorkflow / InitialPhaseIndex restore an active workflow
-	// phase after agent selection at startup. Empty workflow skips restore.
-	InitialPhaseWorkflow string
-	InitialPhaseIndex    int
+	// InitialPhaseWorkflow / InitialPhaseIndex / InitialPhaseName /
+	// InitialPhaseFingerprint restore an active workflow phase after agent
+	// selection at startup. Empty workflow skips restore. When Fingerprint is
+	// set, resume fail-closes (recovery status) if the loaded definition is
+	// missing or changed; empty Fingerprint is legacy name-only bind.
+	InitialPhaseWorkflow    string
+	InitialPhaseIndex       int
+	InitialPhaseName        string
+	InitialPhaseFingerprint string
 	// InitialAlwaysGrants restores session DecisionAlways rules after the
 	// initial agent profile is applied (SetAgentRules clears grants).
 	InitialAlwaysGrants permission.Ruleset
@@ -367,8 +372,11 @@ type Engine struct {
 	pendingAgent   string
 
 	// workflow/phaseIndex track the active workflow phase (-1 = none).
-	workflow   config.Workflow
-	phaseIndex int
+	// phaseRecovery is non-empty (missing|mismatch) when resume could not bind
+	// the fingerprinted definition; permissions are not applied until stop/restart.
+	workflow      config.Workflow
+	phaseIndex    int
+	phaseRecovery string
 
 	// files tracks tool read snapshots so external edits (FilesChanged / /vim)
 	// force the model to re-read before edit/write.
@@ -594,12 +602,11 @@ func (e *Engine) Run(ctx context.Context) {
 		_ = e.enterPlanPhase()
 	}
 	// Resume: re-enter the recorded workflow phase after mode so a restored
-	// implement/custom phase is not clobbered by plan-mode enterPlanPhase,
-	// then re-seed session always-grants (SetAgentRules cleared them).
+	// implement/custom phase is not clobbered by plan-mode enterPlanPhase.
+	// Fingerprint bind fail-closes into recovery when the def is missing/changed.
+	// Then re-seed session always-grants (SetAgentRules cleared them).
 	if wf := e.opts.InitialPhaseWorkflow; wf != "" {
-		if w, ok := e.findWorkflow(wf); ok {
-			_ = e.enterPhase(w, e.opts.InitialPhaseIndex)
-		}
+		e.restoreWorkflowPhase(wf, e.opts.InitialPhaseIndex, e.opts.InitialPhaseName, e.opts.InitialPhaseFingerprint)
 	}
 	if len(e.opts.InitialAlwaysGrants) > 0 {
 		e.perms.SeedAlwaysGrants(e.opts.InitialAlwaysGrants)

@@ -435,8 +435,13 @@ type Context struct {
 	TeamTask    func(ctx context.Context, req TeamTaskRequest) (TeamTaskResult, error)
 	AskUser     func(ctx context.Context, req QuestionRequest) (QuestionResponse, error)
 	SwitchAgent func(name string) error
-	// EnterPlanPhase starts the default plan-implement workflow at the plan phase.
+	// EnterPlanPhase starts the default plan-implement workflow at the plan phase
+	// (plan convenience adapter over StartWorkflow).
 	EnterPlanPhase func() error
+	// StartWorkflow activates any loaded workflow at phase 0 (exactly one active).
+	StartWorkflow func(name string) error
+	// StopWorkflow clears the active workflow phase and phase permissions.
+	StopWorkflow func() error
 	// AdvancePhase clears the current phase exit gate and advances (or ends).
 	AdvancePhase func(ctx context.Context) error
 	// ReportOutput streams retained output chunks (already size-capped by the

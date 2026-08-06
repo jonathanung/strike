@@ -24,11 +24,15 @@ type Restored struct {
 	// PermissionMode is the last PermissionModeSelected posture; empty means
 	// unset (caller keeps default).
 	PermissionMode protocol.PermissionMode
-	// Phase* capture the last PhaseChanged with a non-empty Phase. Empty
-	// PhaseName means no workflow phase was active at end of log.
-	PhaseWorkflow string
-	PhaseName     string
-	PhaseIndex    int
+	// Phase* capture the last PhaseChanged with a non-empty Phase (or a
+	// non-empty recovery Status). Empty PhaseName and empty PhaseStatus means
+	// no workflow phase was active at end of log.
+	PhaseWorkflow    string
+	PhaseName        string
+	PhaseIndex       int
+	PhaseSource      string
+	PhaseFingerprint string
+	PhaseStatus      string // empty | missing | mismatch
 	// AlwaysGrants are session DecisionAlways rules still in force after the
 	// last agent switch (SetAgentRules clears grants).
 	AlwaysGrants permission.Ruleset
@@ -156,9 +160,15 @@ func Restore(events []protocol.Event) Restored {
 			r.PhaseWorkflow = e.Workflow
 			r.PhaseName = e.Phase
 			r.PhaseIndex = e.Index
-			if e.Phase == "" {
+			r.PhaseSource = e.Source
+			r.PhaseFingerprint = e.Fingerprint
+			r.PhaseStatus = e.Status
+			if e.Phase == "" && e.Status == "" {
 				r.PhaseWorkflow = ""
 				r.PhaseIndex = 0
+				r.PhaseSource = ""
+				r.PhaseFingerprint = ""
+				r.PhaseStatus = ""
 			}
 		case protocol.SessionTitled:
 			if e.Title != "" {

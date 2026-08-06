@@ -720,6 +720,8 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 			},
 			SwitchAgent:    e.queueSwitchAgent,
 			EnterPlanPhase: e.enterPlanPhase,
+			StartWorkflow:  e.startWorkflow,
+			StopWorkflow:   func() error { e.stopWorkflow(); return nil },
 			AdvancePhase:   e.advancePhase,
 			ReportOutput: func(data string) {
 				if data == "" {
