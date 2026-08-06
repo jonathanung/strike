@@ -274,6 +274,7 @@ or config `providers` — see [config.md](config.md).
 ./strike --telemetry             # ensure local system metrics pane (on by default)
 ./strike exec "fix the flaky test"   # one-shot headless turn → stdout
 ./strike exec -                  # read prompt from stdin
+./strike rpc --provider echo     # stdio JSON-RPC Op/Event bridge (NDJSON)
 ```
 
 System telemetry (local host CPU/RAM/disk only — not cloud analytics) is **on
@@ -287,6 +288,12 @@ question prompts cannot be answered interactively in exec; asks are rejected
 unless `--auto` or `--dangerously-skip-permissions` is set
 (configured/agent denies still apply). Full flag list:
 [install.md](install.md) or `strike --help`.
+
+`strike rpc` is a long-lived stdio bridge: newline-delimited JSON-RPC 2.0 on
+stdin/stdout (same Op/Event envelopes as `pkg/protocol` and the serve
+WebSocket). Ops go in (`user.input`, `permission.reply`, or method `op` with
+an OpEnvelope); events come out as `event` notifications. Diagnostics stay on
+stderr. See `strike rpc --help`.
 
 ## UI
 

@@ -3,10 +3,11 @@
 ## Package layout
 
 ```
-cmd/strike/            main.go: flags/usage/auth/exec/serve subcommands;
+cmd/strike/            main.go: flags/usage/auth/exec/rpc/serve subcommands;
                        wire.go: composition root (engine + host + tui wiring)
 pkg/protocol/          public Op/Event wire schema (semver Version)
 internal/protocol/     compatibility re-export of pkg/protocol
+internal/rpc/          stdio JSON-RPC 2.0 transport (strike rpc; ops in, events out)
 internal/engine/       turn loop & tool dispatch
 internal/auth/         credential store + OAuth (PKCE, device) flows
 internal/provider/     provider interface; base/ (embeddable client: HTTP,
