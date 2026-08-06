@@ -142,7 +142,8 @@ func scanScope(strikeRoot string, scope Scope, strikeVer string, diags *[]Diagno
 	}
 	var dirNames []string
 	for _, e := range entries {
-		if e.IsDir() {
+		// Skip hidden/staging/backup dirs used by lifecycle install.
+		if e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
 			dirNames = append(dirNames, e.Name())
 		}
 	}
