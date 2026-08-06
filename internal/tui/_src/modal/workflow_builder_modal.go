@@ -79,8 +79,9 @@ type workflowBuilderModal struct {
 	focus       int // meta | phases | fields | perms | json
 	metaCursor  int
 	phaseCursor int
-	fieldCursor int
 	permCursor  int
+	permPart    int // 0 permission name, 1 pattern, 2 action
+	fieldCursor int
 	showPreview bool
 
 	// text editing
@@ -94,6 +95,13 @@ type workflowBuilderModal struct {
 	status          string // transient validation/save feedback
 	statusErr       bool
 }
+
+const (
+	wfPermPartName = iota
+	wfPermPartPattern
+	wfPermPartAction
+	wfPermPartCount
+)
 
 func newWorkflowBuilderModal(
 	workflows host.Workflows,
@@ -214,11 +222,19 @@ func (m *workflowBuilderModal) update(msg tea.KeyPressMsg) (modal, tea.Cmd) {
 	case "down", "j", "ctrl+n":
 		return m.move(1)
 	case "left", "h":
+		if m.focus == wfBuilderFocusPerms {
+			m.permPart = clampCursor(m.permPart-1, wfPermPartCount)
+			return m, nil
+		}
 		if m.focus > 0 {
 			m.focus--
 		}
 		return m, nil
 	case "right", "l":
+		if m.focus == wfBuilderFocusPerms {
+			m.permPart = clampCursor(m.permPart+1, wfPermPartCount)
+			return m, nil
+		}
 		if m.focus < wfBuilderFocusJSON {
 			m.focus++
 		}
@@ -447,20 +463,29 @@ func (m *workflowBuilderModal) beginPermEdit() (modal, tea.Cmd) {
 	if m.permCursor < 0 || m.permCursor >= len(perms) {
 		m.permCursor = 0
 	}
-	// Cycle action on enter; e edits permission name via text.
-	// Use enter to cycle action, shift+enter not available — second enter path:
-	// first key 'e' already maps here; cycle action.
-	r := &m.doc.Phases[m.phaseCursor].Permissions[m.permCursor]
-	for i, a := range wfActionChoices {
-		if a == strings.ToLower(r.Action) {
-			r.Action = wfActionChoices[(i+1)%len(wfActionChoices)]
-			m.refreshStatus()
-			return m, nil
+	r := m.doc.Phases[m.phaseCursor].Permissions[m.permCursor]
+	switch m.permPart {
+	case wfPermPartName:
+		return m.startTextEdit("perm.permission", r.Permission, "permission name (e.g. write)")
+	case wfPermPartPattern:
+		pat := r.Pattern
+		if pat == "" {
+			pat = "*"
 		}
+		return m.startTextEdit("perm.pattern", pat, "glob pattern")
+	default: // action
+		rp := &m.doc.Phases[m.phaseCursor].Permissions[m.permCursor]
+		for i, a := range wfActionChoices {
+			if a == strings.ToLower(rp.Action) {
+				rp.Action = wfActionChoices[(i+1)%len(wfActionChoices)]
+				m.refreshStatus()
+				return m, nil
+			}
+		}
+		rp.Action = "allow"
+		m.refreshStatus()
+		return m, nil
 	}
-	r.Action = "allow"
-	m.refreshStatus()
-	return m, nil
 }
 
 func (m *workflowBuilderModal) cycleGate() (modal, tea.Cmd) {
@@ -887,7 +912,14 @@ func (m *workflowBuilderModal) renderPerms(th theme.Theme, st theme.Styles, inne
 	if m.focus == wfBuilderFocusPerms {
 		headerStyle = st.Accent
 	}
-	lines := []string{headerStyle.Render("Permissions (" + dotJoin(th, "r add", "enter cycle action", "d del") + ")")}
+	partHint := "name"
+	switch m.permPart {
+	case wfPermPartPattern:
+		partHint = "pattern"
+	case wfPermPartAction:
+		partHint = "action"
+	}
+	lines := []string{headerStyle.Render("Permissions (" + dotJoin(th, "r add", "←/→ field="+partHint, "enter edit", "d del") + ")")}
 	if m.phaseCursor < 0 || m.phaseCursor >= len(m.doc.Phases) {
 		return lines[0]
 	}
@@ -905,7 +937,19 @@ func (m *workflowBuilderModal) renderPerms(th theme.Theme, st theme.Styles, inne
 		if pat == "" {
 			pat = "*"
 		}
-		line := fmt.Sprintf("%s %s %s", r.Action, r.Permission, pat)
+		// Highlight the active sub-field when this row is selected.
+		act, perm, pattern := r.Action, r.Permission, pat
+		line := fmt.Sprintf("%s %s %s", act, perm, pattern)
+		if m.focus == wfBuilderFocusPerms && m.permCursor == i {
+			switch m.permPart {
+			case wfPermPartName:
+				line = fmt.Sprintf("%s [%s] %s", act, perm, pattern)
+			case wfPermPartPattern:
+				line = fmt.Sprintf("%s %s [%s]", act, perm, pattern)
+			default:
+				line = fmt.Sprintf("[%s] %s %s", act, perm, pattern)
+			}
+		}
 		tone := st.Text
 		switch strings.ToLower(r.Action) {
 		case "deny":

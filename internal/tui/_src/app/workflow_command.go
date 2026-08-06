@@ -249,7 +249,8 @@ func (m Model) workflowNew(name string) (tea.Model, tea.Cmd) {
 	}
 	scaffolded, err := m.services.Workflows.Scaffold(name)
 	if err != nil {
-		// Fall back to a minimal local draft so the builder still opens.
+		// Fall back to a minimal local draft so the builder still opens
+		// (e.g. offline fakes); user can fix name before save.
 		doc = host.WorkflowDocument{
 			SchemaVersion: 1,
 			Name:          name,
@@ -257,10 +258,6 @@ func (m Model) workflowNew(name string) (tea.Model, tea.Cmd) {
 			Phases: []host.WorkflowPhaseDocument{
 				{Name: "step-one", Agent: "build", Gate: "agent"},
 			},
-		}
-		if name == "" {
-			m.setNotice("workflow: "+err.Error(), true)
-			return m, nil
 		}
 	} else {
 		doc = scaffolded

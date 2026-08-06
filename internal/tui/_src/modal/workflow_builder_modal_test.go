@@ -92,13 +92,35 @@ func TestWorkflowBuilderEditFieldsAndPerms(t *testing.T) {
 	}
 	modal.focus = wfBuilderFocusPerms
 	modal.permCursor = 0
-	if _, _ = modal.beginPermEdit(); modal.doc.Phases[0].Permissions[0].Action != "allow" {
-		// default was deny; cycle → allow
-		if modal.doc.Phases[0].Permissions[0].Action != "allow" {
-			// deny -> allow is first cycle from deny? wfActionChoices = allow, ask, deny
-			// starting deny → next after matching deny is allow (index 2 -> 0)
-			t.Fatalf("action = %q", modal.doc.Phases[0].Permissions[0].Action)
-		}
+	// Edit permission name via text.
+	modal.permPart = wfPermPartName
+	updated, _ := modal.beginPermEdit()
+	ed := updated.(*workflowBuilderModal)
+	if !ed.editing || ed.editKind != "perm.permission" {
+		t.Fatalf("expected perm name edit, editing=%v kind=%q", ed.editing, ed.editKind)
+	}
+	ed.input.SetValue("write")
+	next, _ := ed.commitTextEdit()
+	ed = next.(*workflowBuilderModal)
+	if ed.doc.Phases[0].Permissions[0].Permission != "write" {
+		t.Fatalf("permission = %q", ed.doc.Phases[0].Permissions[0].Permission)
+	}
+	// Pattern text edit.
+	ed.permPart = wfPermPartPattern
+	next, _ = ed.beginPermEdit()
+	ed = next.(*workflowBuilderModal)
+	ed.input.SetValue("src/**")
+	next, _ = ed.commitTextEdit()
+	ed = next.(*workflowBuilderModal)
+	if ed.doc.Phases[0].Permissions[0].Pattern != "src/**" {
+		t.Fatalf("pattern = %q", ed.doc.Phases[0].Permissions[0].Pattern)
+	}
+	// Action cycles.
+	ed.permPart = wfPermPartAction
+	next, _ = ed.beginPermEdit()
+	ed = next.(*workflowBuilderModal)
+	if ed.doc.Phases[0].Permissions[0].Action != "allow" {
+		t.Fatalf("action = %q want allow (from deny)", ed.doc.Phases[0].Permissions[0].Action)
 	}
 }
 
