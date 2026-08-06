@@ -191,6 +191,15 @@ func buildSeatbeltProfile(policy Policy, workDir string) string {
 (allow file-write* (subpath "/var/tmp"))
 (allow file-write* (subpath "/private/var/tmp"))
 `)
+	// Additional shared writable roots (TMPDIR, caches, …) — skip paths already
+	// covered by the hard-coded temp rules above.
+	for _, p := range SharedWritablePaths(workDir, mode == ModeWorkspaceWrite && !policy.NoWorkspaceWrite) {
+		switch p {
+		case "/tmp", "/private/tmp", "/var/tmp", "/private/var/tmp":
+			continue
+		}
+		fmt.Fprintf(&b, "(allow file-write* (subpath \"%s\"))\n", seatbeltEscape(p))
+	}
 	if policy.Network {
 		b.WriteString(`
 ; Network (host networking; off only when webfetch+mcp deny *)
@@ -300,20 +309,4 @@ func seatbeltEscape(p string) string {
 	p = strings.ReplaceAll(p, `\`, `\\`)
 	p = strings.ReplaceAll(p, `"`, `\"`)
 	return p
-}
-
-func absWorkDir(workDir string) string {
-	workDir = strings.TrimSpace(workDir)
-	if workDir == "" {
-		return ""
-	}
-	clean := filepath.Clean(workDir)
-	abs, err := filepath.Abs(clean)
-	if err != nil {
-		return clean
-	}
-	if real, err := filepath.EvalSymlinks(abs); err == nil && real != "" {
-		return real
-	}
-	return abs
 }
