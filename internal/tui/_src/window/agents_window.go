@@ -669,17 +669,18 @@ func agentsOrchSuffix(th theme.Theme, ch childActivity) string {
 }
 
 func agentsChildBlocked(ch childActivity) bool {
+	// Explicit block reason always counts (needs-you with a block).
 	if strings.TrimSpace(ch.blockReason) != "" {
 		return true
 	}
+	// Wire blocked status only — bare "needs you" already has Detail coloring
+	// and is not necessarily a path/permission block.
 	status := strings.ToLower(strings.TrimSpace(ch.status))
 	roster := strings.ToLower(strings.TrimSpace(ch.rosterState))
-	switch status {
-	case string(protocol.ChildStatusBlocked), "needs you", "needs_attention":
+	if status == string(protocol.ChildStatusBlocked) || status == "blocked" {
 		return true
 	}
-	switch roster {
-	case "needs you", "needs_attention", "blocked":
+	if roster == "blocked" {
 		return true
 	}
 	return false
