@@ -16,17 +16,21 @@ materially affect the shipped product.
 
 ## [v0.2.2] - 2026-08-06
 
-Patch release: session scratch temp, harness tool broker, and partial child handoffs on soft budget stop. Protocol wire `1.12.0`.
+Patch release: session scratch temp, harness tool broker, partial child handoffs on soft budget stop, diagnostics tool, config JSON Schema, and plugin contract docs. Protocol wire `1.12.0`.
 
 ### Added
 
 - **Session temporary directory** — each engine session gets a private `os.TempDir()/strike/<session-id>/` scratch root. Path tools (`write` / `edit` / `apply_patch` / `notebook_edit`) may write absolute paths under that root (siblings, `..`, and symlink escapes stay denied). The path is exposed in the environment prompt; the directory is removed on `Run` shutdown with bounded stale cleanup for crashes. Relative paths still bind only to the workspace ([#877](https://github.com/jonathanung/strike/issues/877), [#884](https://github.com/jonathanung/strike/pull/884)).
 - **Harness tool execution** — custom function harnesses can run allowed tools mid-turn through the Strike runtime (`Input.Tools.Execute` embedded; additive `tool.execute` / `tool.result` on the external JSONL ABI) with the same permissions, hooks, sandbox, scheduler, redaction, and protocol events as the built-in loop. Final `harness.Result` remains the only committed assistant response. Go/TypeScript/Lean SDKs updated; provider-only Lean harnesses stay arity-compatible ([#878](https://github.com/jonathanung/strike/issues/878), [#885](https://github.com/jonathanung/strike/pull/885)).
 - **Partial child handoffs on budget exhaustion** — soft per-child budgets (`tool_calls`, `tokens`, `wall_clock`, `cost_usd`, `dangerous_tools`, hard `stall`/`loop`) attempt one tools-disabled finalization turn (~45s reserve) so children can return structured findings before stop. `ChildCompleted` records `budgetKind` and finalization outcome; handoff `quality` is `complete` | `partial` | `unavailable`. Engine-tracked files and artifact refs always merge into the handoff. Hard cancel skips finalization ([#879](https://github.com/jonathanung/strike/issues/879), [#886](https://github.com/jonathanung/strike/pull/886)).
+- **`diagnostics` tool** — read-only, deferred model-facing workspace diagnostics backed by the LSP manager (workspace / directory / file scopes, severity filter, bounded stable JSON). Soft structured status when servers are missing or down; allow-by-default including the read-only permission preset ([#880](https://github.com/jonathanung/strike/issues/880), [#898](https://github.com/jonathanung/strike/pull/898)).
+- **Main config JSON Schema** — versioned `schemas/strike-config.schema.json` for editor autocomplete/validation of high-traffic config keys. Point `$schema` at the raw GitHub URL; Strike ignores `$schema` at runtime (no fetch). `additionalProperties: true` so unknown/future keys stay valid ([#873](https://github.com/jonathanung/strike/issues/873), [#900](https://github.com/jonathanung/strike/pull/900)).
+- **Plugin bundle contract (docs)** — normative PLUGIN.1 contract in `docs/plugins.md` (manifest, contribution matrix, trust/digest, path confinement, secrets). Loaders and install UX are not shipped yet ([#725](https://github.com/jonathanung/strike/issues/725), [#899](https://github.com/jonathanung/strike/pull/899)).
 
 ### Fixed
 
 - Fixed live sessions losing their scratch temp dir when peer `EnsureSessionTemp` ran stale cleanup after >24h idle on disk by refreshing mtime (at most hourly) on ensure hits ([#877](https://github.com/jonathanung/strike/issues/877), [#884](https://github.com/jonathanung/strike/pull/884)).
+- Fixed macOS sandbox still blocking credential-backed CLIs (Keychain / SecurityServer / trustd) after the initial Keychain allowlist ([#887](https://github.com/jonathanung/strike/pull/887)).
 
 **Full changelog:** [v0.2.0...v0.2.2](https://github.com/jonathanung/strike/compare/v0.2.0...v0.2.2)
 
