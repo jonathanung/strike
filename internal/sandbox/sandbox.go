@@ -123,10 +123,10 @@ type Policy struct {
 	// Linux; omit network-* on seatbelt). Zero value keeps host networking —
 	// the product default so bare Policy{Mode, WorkDir} and coding workflows
 	// (gh, git, npm) work under workspace-write. CompileSandbox sets this only
-	// when both webfetch and mcp are hard-Deny on "*".
+	// when webfetch, websearch, and mcp are all hard-Deny on "*".
 	NoNetwork bool
 	// NetworkAllow is an optional host/CIDR allowlist for application-layer
-	// egress (webfetch). Empty means unrestricted public hosts (SSRF blocks
+	// egress (webfetch/websearch). Empty means unrestricted public hosts (SSRF blocks
 	// still apply). Populated from config network.allow — not enforced by
 	// OS bash networking (NetworkEnabled remains all-or-nothing).
 	NetworkAllow []string

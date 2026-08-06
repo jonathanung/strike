@@ -41,6 +41,7 @@ var shortPurposes = map[string]string{
 	"agent_thread":    "read task/delegation-bound peer message thread",
 	"team_task":       "shared team task board (create/list/claim/complete)",
 	"webfetch":        "fetch a URL",
+	"websearch":       "search the web with source citations",
 	"todowrite":       "write the multi-step todo list",
 	"todoread":        "read the current todo list",
 	"memory_write":    "store durable project memory",
@@ -168,7 +169,7 @@ func BuildGuidance(entries []GuidanceEntry) string {
 
 	var b strings.Builder
 	b.WriteString("# Available tools\n\n")
-	b.WriteString("Names, descriptions, and parameter schemas are in the provider Tools array for this turn (hard-denied tools omitted). This section is additive only: usage policy and when-to-use tips. Prefer purpose-built tools over improvising with bash. There is no websearch tool.\n")
+	b.WriteString("Names, descriptions, and parameter schemas are in the provider Tools array for this turn (hard-denied tools omitted). This section is additive only: usage policy and when-to-use tips. Prefer purpose-built tools over improvising with bash.\n")
 
 	if len(mcp) > MaxMCPGuidanceListed {
 		b.WriteString("\n")
@@ -266,6 +267,10 @@ func recommendedGuidance(entries []GuidanceEntry) string {
 		"Prefer `webfetch` over curl/wget in bash for ordinary page fetches.")
 	add(has("webfetch") && !has("bash"),
 		"Use `webfetch` for ordinary page fetches.")
+	add(has("websearch") && has("webfetch"),
+		"Use `websearch` to discover sources (titles/URLs/snippets); use `webfetch` to retrieve a selected result. Cite source URLs in answers.")
+	add(has("websearch") && !has("webfetch"),
+		"Use `websearch` to discover public web sources; cite result URLs in answers.")
 	add(has("question"),
 		"Use `question` when a decision genuinely belongs to the user.")
 	add(has("task"),
