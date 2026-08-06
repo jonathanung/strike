@@ -1,7 +1,10 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -259,4 +262,164 @@ func looksLikeSecretLiteral(v string) bool {
 		return true
 	}
 	return false
+}
+
+// ReadHooksLayer loads hooks from a single config file path (missing → nil).
+func ReadHooksLayer(path string) ([]Hook, error) {
+	if path == "" {
+		return nil, nil
+	}
+	layer, err := read(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return append([]Hook(nil), layer.Hooks...), nil
+}
+
+// HookLayers returns user global and project hooks separately (for §4.1
+// interleaving with plugin hooks). Managed/MDM hooks are not included.
+func HookLayers(workDir string) (global, project []Hook, err error) {
+	global, err = ReadHooksLayer(GlobalPath())
+	if err != nil {
+		return nil, nil, err
+	}
+	if workDir != "" {
+		project, err = ReadHooksLayer(filepath.Join(projectRoot(workDir), "config"))
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	return global, project, nil
+}
+
+// ApplyPluginExecutables merges trusted plugin MCP/harness/hook contributions
+// into cfg. User MCP/harness names win; plugin-plugin collisions are reported
+// in the returned diagnostics. Hook order is:
+//
+//	user global → plugin global → user project → plugin project → managed (cfg.Hooks tail if any)
+//
+// When rebuildHooks is true, cfg.Hooks is replaced using HookLayers + plugin
+// hooks. Managed hooks already present only in cfg (from Load) are preserved
+// by appending any cfg hooks not found in the user layers (best-effort).
+func ApplyPluginExecutables(workDir string, cfg Config, exec plugin.ExecutableSet, rebuildHooks bool) (Config, []plugin.Diagnostic) {
+	diags := append([]plugin.Diagnostic(nil), exec.Diagnostics...)
+
+	// MCP: add plugin servers when name not already set by user config.
+	if len(exec.MCP) > 0 {
+		if cfg.MCP.Servers == nil {
+			cfg.MCP.Servers = map[string]MCPServer{}
+		}
+		for _, m := range exec.MCP {
+			if _, exists := cfg.MCP.Servers[m.Name]; exists {
+				continue
+			}
+			srv := MCPServer{
+				Type:    m.Transport,
+				Command: m.Command,
+				Args:    append([]string(nil), m.Args...),
+				Env:     cloneStringMap(m.Env),
+				URL:     m.URL,
+				Headers: cloneStringMap(m.Headers),
+			}
+			cfg.MCP.Servers[m.Name] = srv
+		}
+	}
+
+	// Harnesses: add when name not already set.
+	if len(exec.Harnesses) > 0 {
+		if cfg.Harnesses == nil {
+			cfg.Harnesses = map[string]HarnessConfig{}
+		}
+		for _, h := range exec.Harnesses {
+			if _, exists := cfg.Harnesses[h.Name]; exists {
+				continue
+			}
+			cfg.Harnesses[h.Name] = HarnessConfig{
+				Command:       h.Command,
+				Args:          append([]string(nil), h.Args...),
+				Env:           cloneStringMap(h.Env),
+				Mode:          h.Mode,
+				MaxConcurrent: h.MaxConcurrent,
+				IdleTimeoutMs: h.IdleTimeoutMs,
+				MaxRestarts:   h.MaxRestarts,
+			}
+		}
+	}
+
+	if rebuildHooks {
+		userGlobal, userProject, err := HookLayers(workDir)
+		if err != nil {
+			diags = append(diags, plugin.Diagnostic{
+				Severity: plugin.SeverityWarning,
+				Code:     "hooks",
+				Message:  "could not split user hook layers: " + err.Error(),
+			})
+		} else {
+			// Preserve managed-only hooks: entries in cfg.Hooks not in user layers.
+			managedTail := hooksNotIn(cfg.Hooks, append(append([]Hook{}, userGlobal...), userProject...))
+			var merged []Hook
+			merged = append(merged, userGlobal...)
+			merged = append(merged, compiledHooksToConfig(exec.GlobalHooks)...)
+			merged = append(merged, userProject...)
+			merged = append(merged, compiledHooksToConfig(exec.ProjectHooks)...)
+			merged = append(merged, managedTail...)
+			cfg.Hooks = merged
+		}
+	}
+
+	return cfg, diags
+}
+
+func compiledHooksToConfig(in []plugin.CompiledHook) []Hook {
+	out := make([]Hook, 0, len(in))
+	for _, h := range in {
+		out = append(out, Hook{
+			Event:     h.Event,
+			Matcher:   h.Matcher,
+			Action:    h.Action,
+			Message:   h.Message,
+			Command:   h.Command,
+			TimeoutMs: h.TimeoutMs,
+		})
+	}
+	return out
+}
+
+func hooksNotIn(all, known []Hook) []Hook {
+	if len(all) == 0 {
+		return nil
+	}
+	type key struct {
+		event, matcher, action, command, message string
+		timeout                                  int
+	}
+	seen := map[key]int{}
+	for _, h := range known {
+		k := key{h.Event, h.Matcher, h.Action, h.Command, h.Message, h.TimeoutMs}
+		seen[k]++
+	}
+	var out []Hook
+	for _, h := range all {
+		k := key{h.Event, h.Matcher, h.Action, h.Command, h.Message, h.TimeoutMs}
+		if n := seen[k]; n > 0 {
+			seen[k] = n - 1
+			continue
+		}
+		out = append(out, h)
+	}
+	return out
+}
+
+func cloneStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }

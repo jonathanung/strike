@@ -12,7 +12,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/plugin"
 )
 
-const pluginUsage = `Manage local and Git plugin installs (lifecycle).
+const pluginUsage = `Manage local and Git plugin installs (lifecycle + trust).
 
 Usage:
   strike plugin list [--scope global|project]
@@ -20,6 +20,8 @@ Usage:
   strike plugin install <path-or-git-url> [options]
   strike plugin enable <id> [--scope global|project]
   strike plugin disable <id> [--scope global|project]
+  strike plugin trust <id> [--scope global|project]
+  strike plugin untrust <id> [--scope global|project]
   strike plugin remove <id> --yes [--scope global|project]
   strike plugin doctor [id]
   strike plugin help
@@ -39,8 +41,9 @@ Notes:
   - Install is atomic: failed validation leaves no partially enabled plugin.
   - Git installs always pin a full commit SHA in the lockfile.
   - disable keeps files; remove deletes files and lockfile entry (--yes required).
-  - doctor prints paths and provenance; never secrets or env values.
-  - Executable MCP/harness/hook activation is not performed here (see #728).
+  - trust grants executable MCP/harness/shell-hook activation for the current
+    content digest + source identity + capability set; untrust revokes it.
+  - doctor prints paths, provenance, and trust state; never secrets or env values.
   - Changes apply on next Strike launch (no hot reload).
 `
 
@@ -60,6 +63,10 @@ func runPluginCLI(args []string, stdout, stderr io.Writer) int {
 		return runPluginEnable(args[1:], stdout, stderr, true)
 	case "disable":
 		return runPluginEnable(args[1:], stdout, stderr, false)
+	case "trust":
+		return runPluginTrust(args[1:], stdout, stderr, true)
+	case "untrust":
+		return runPluginTrust(args[1:], stdout, stderr, false)
 	case "remove":
 		return runPluginRemove(args[1:], stdout, stderr)
 	case "doctor":
@@ -194,6 +201,15 @@ func runPluginInspect(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "contribs: agents=%d skills=%d workflows=%d themes=%d providers=%d mcp=%d harnesses=%d hooks=%d panes=%d\n",
 			len(c.Agents), len(c.Skills), len(c.Workflows), len(c.Themes), len(c.Providers),
 			len(c.MCP), len(c.Harnesses), len(c.Hooks), len(c.Panes))
+		if plugin.HasExecutableContributions(*p.Manifest) {
+			caps := plugin.InferCapabilities(*p.Manifest)
+			match := plugin.MatchTrust(p.Trust, p.Digest, p.Source, caps)
+			fmt.Fprintf(stdout, "trust:    %s", match.State)
+			if !match.OK && match.Reason != "" {
+				fmt.Fprintf(stdout, " (%s)", match.Reason)
+			}
+			fmt.Fprintln(stdout)
+		}
 	}
 	return 0
 }
@@ -331,6 +347,58 @@ func runPluginRemove(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	fmt.Fprintf(stdout, "Removed %s\n", pos[0])
+	return 0
+}
+
+func runPluginTrust(args []string, stdout, stderr io.Writer, grant bool) int {
+	cmdName := "trust"
+	if !grant {
+		cmdName = "untrust"
+	}
+	fs := flag.NewFlagSet("plugin "+cmdName, flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	scopeFlag := parsePluginScope(fs)
+	flagArgs, pos := splitPluginArgs(args, map[string]bool{"scope": true})
+	if err := fs.Parse(flagArgs); err != nil {
+		return 2
+	}
+	if len(pos) < 1 {
+		fmt.Fprintf(stderr, "usage: strike plugin %s <id> [--scope global|project]\n", cmdName)
+		return 2
+	}
+	scope, err := scopeFromFlag(*scopeFlag)
+	if err != nil {
+		fmt.Fprintf(stderr, "strike plugin %s: %v\n", cmdName, err)
+		return 2
+	}
+	opts := pluginDiscoverOpts()
+	topts := plugin.TrustOptions{
+		ID:      pos[0],
+		Scope:   scope,
+		WorkDir: opts.WorkDir,
+	}
+	if grant {
+		res, err := plugin.Trust(topts)
+		if err != nil {
+			fmt.Fprintln(stderr, "strike plugin trust:", err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "Trusted %s (%s)\n", res.ID, res.Scope)
+		fmt.Fprintf(stdout, "  digest:       %s\n", res.Digest)
+		if len(res.Capabilities) > 0 {
+			fmt.Fprintf(stdout, "  capabilities: %s\n", strings.Join(res.Capabilities, ", "))
+		}
+		if res.Source != nil {
+			fmt.Fprintf(stdout, "  source:       %s\n", res.Source.String())
+		}
+		fmt.Fprintln(stdout, "Executable MCP/harness/shell-hook contributions activate on next launch.")
+		return 0
+	}
+	if err := plugin.Untrust(topts); err != nil {
+		fmt.Fprintln(stderr, "strike plugin untrust:", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "Untrusted %s (executables inactive on next launch)\n", pos[0])
 	return 0
 }
 

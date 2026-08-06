@@ -31,6 +31,7 @@ type InstalledPlugin struct {
 	Enabled   bool
 	Digest    string
 	Source    *SourceIdentity
+	Trust     *TrustRecord
 	Manifest  *Manifest
 	LoadError string // non-empty when manifest/load failed
 }
@@ -85,6 +86,7 @@ func ListInstalled(opts ListOptions) ([]InstalledPlugin, []Diagnostic, error) {
 					ip.Enabled = EntryEnabled(e)
 					ip.Digest = e.Digest
 					ip.Source = e.Source
+					ip.Trust = e.Trust
 					ip.Version = e.Version
 				} else {
 					ip.Enabled = true
@@ -103,6 +105,7 @@ func ListInstalled(opts ListOptions) ([]InstalledPlugin, []Diagnostic, error) {
 			if e, ok := lock.Plugins[m.ID]; ok {
 				ip.Digest = e.Digest
 				ip.Source = e.Source
+				ip.Trust = e.Trust
 				if e.Version != "" {
 					ip.Version = e.Version
 				}

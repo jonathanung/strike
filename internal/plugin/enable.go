@@ -29,6 +29,9 @@ type LockfileEntry struct {
 	Digest      string          `json:"digest,omitempty"`
 	Source      *SourceIdentity `json:"source,omitempty"`
 	InstalledAt string          `json:"installedAt,omitempty"` // RFC3339
+	// Trust is the explicit executable grant (docs/plugins.md §5). Absent means
+	// passive-only load; MCP/harness/shell hooks stay inactive.
+	Trust *TrustRecord `json:"trust,omitempty"`
 }
 
 // ReadLockfile loads path; missing or empty file yields an empty lockfile.

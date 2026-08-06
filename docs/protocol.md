@@ -116,11 +116,13 @@ paths that can contribute observability or gates:
 | **Plugin panes** | Declarative view trees (`static`) or supervised JSONL subprocess (`process`); bounded primitives; no private Go `window` ABI | Normative: [plugin-panes.md](plugin-panes.md) ([#522](https://github.com/jonathanung/strike/issues/522)); TUI host [#731](https://github.com/jonathanung/strike/issues/731); web [#732](https://github.com/jonathanung/strike/issues/732) |
 
 **Trusted executable contributions (#728):** plugin MCP startup, harness
-commands, and shell hooks must not run until source + content-digest trust is
-recorded; trust invalidates on relevant content change (see
-[plugins.md](plugins.md#5-trust-model)). Passive contributions load when enabled
-([#726](https://github.com/jonathanung/strike/issues/726)); do not assume silent
-project-plugin **executable** startup until trusted activation lands.
+commands, and shell hooks run only when a lockfile trust record matches the
+current source identity + content digest + capability set (`strike plugin trust`;
+see [plugins.md](plugins.md#5-trust-model)). Trust invalidates on content or
+source change. Passive contributions load when enabled
+([#726](https://github.com/jonathanung/strike/issues/726)). Disablement stops
+new activation on the next launch and tears down managed MCP via process
+shutdown.
 
 **Contributing new spans or gates**
 

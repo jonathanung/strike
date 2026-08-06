@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/jonathanung/strike-cli/internal/plugin"
 )
 
 func TestPluginPassiveLoad_Surfaces(t *testing.T) {
@@ -364,6 +366,110 @@ func TestPluginPassiveLoad_ProviderWireOnly(t *testing.T) {
 	if !found {
 		t.Fatal("expected ok-proxy")
 	}
+}
+
+func TestApplyPluginExecutables_TrustedMCPAndHookOrder(t *testing.T) {
+	home := t.TempDir()
+	work := t.TempDir()
+	t.Setenv("HOME", home)
+	ResetPluginCache()
+
+	if err := os.MkdirAll(filepath.Join(home, ".strike"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".strike", "config"), []byte(`{
+  "hooks": [{ "event": "pre_tool_use", "matcher": "*", "action": "log", "message": "user-global" }]
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(work, ".strike"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(work, ".strike", "config"), []byte(`{
+  "hooks": [{ "event": "pre_tool_use", "matcher": "*", "action": "log", "message": "user-project" }]
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	gPlug := filepath.Join(home, ".strike", "plugins", "acme.exec")
+	writeTree(t, gPlug, map[string]string{
+		"plugin.json": `{
+  "schemaVersion": 1,
+  "id": "acme.exec",
+  "version": "1.0.0",
+  "name": "Exec",
+  "strike": { "min": "0.1.0" },
+  "contributions": {
+    "mcp": [{ "name": "plugMcp", "transport": "stdio", "command": "bin/m.sh" }],
+    "hooks": [
+      { "event": "pre_tool_use", "matcher": "bash", "command": "bin/h.sh" },
+      { "event": "pre_tool_use", "matcher": "write", "action": "log", "message": "plugin-global" }
+    ]
+  }
+}`,
+		"bin/m.sh": "#!/bin/sh\n",
+		"bin/h.sh": "#!/bin/sh\n",
+	})
+	_ = os.Chmod(filepath.Join(gPlug, "bin", "m.sh"), 0o755)
+	_ = os.Chmod(filepath.Join(gPlug, "bin", "h.sh"), 0o755)
+
+	if _, err := plugin.Trust(plugin.TrustOptions{
+		ID:            "acme.exec",
+		GlobalRoot:    filepath.Join(home, ".strike"),
+		StrikeVersion: "0.2.0",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Load does not apply executables — assemble does. Apply here.
+	exec := plugin.CompileExecutables(plugin.Options{
+		WorkDir:       work,
+		GlobalRoot:    filepath.Join(home, ".strike"),
+		ProjectRoot:   filepath.Join(work, ".strike"),
+		StrikeVersion: "0.2.0",
+	}, nil, nil)
+	cfg, _ = ApplyPluginExecutables(work, cfg, exec, true)
+
+	if _, ok := cfg.MCP.Servers["plugMcp"]; !ok {
+		t.Fatalf("expected plugMcp in cfg.MCP: %+v", cfg.MCP.Servers)
+	}
+	// Hook order: user-global, plugin shell+rule, user-project
+	var msgs []string
+	for _, h := range cfg.Hooks {
+		if h.Message != "" {
+			msgs = append(msgs, h.Message)
+		} else if h.Command != "" {
+			msgs = append(msgs, "shell")
+		}
+	}
+	// Expect user-global before plugin-global before user-project; shell from plugin global.
+	joined := strings.Join(msgs, ",")
+	if !strings.Contains(joined, "user-global") || !strings.Contains(joined, "user-project") {
+		t.Fatalf("hooks missing user layers: %v", msgs)
+	}
+	ug := indexOf(msgs, "user-global")
+	pg := indexOf(msgs, "plugin-global")
+	up := indexOf(msgs, "user-project")
+	sh := indexOf(msgs, "shell")
+	if ug < 0 || pg < 0 || up < 0 || sh < 0 {
+		t.Fatalf("hook messages incomplete: %v", msgs)
+	}
+	if !(ug < sh && sh < up && ug < pg && pg < up) {
+		t.Fatalf("hook order wrong: %v (ug=%d sh=%d pg=%d up=%d)", msgs, ug, sh, pg, up)
+	}
+}
+
+func indexOf(ss []string, want string) int {
+	for i, s := range ss {
+		if s == want {
+			return i
+		}
+	}
+	return -1
 }
 
 func writeTree(t *testing.T, root string, files map[string]string) {

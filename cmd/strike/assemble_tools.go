@@ -25,6 +25,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/models"
 	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/plan"
+	"github.com/jonathanung/strike-cli/internal/plugin"
 	"github.com/jonathanung/strike-cli/internal/project"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
@@ -161,6 +162,27 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		_ = memoryStore.Close()
 		_ = historyStore.Close()
 		return nil, fmt.Errorf("loading config: %w", err)
+	}
+	// Trusted plugin MCP / harness / hook activation (#728). Untrusted
+	// executable contributions never start; user config names win collisions.
+	{
+		userMCP := make(map[string]struct{}, len(cfg.MCP.Servers))
+		for name := range cfg.MCP.Servers {
+			userMCP[name] = struct{}{}
+		}
+		userHarness := make(map[string]struct{}, len(cfg.Harnesses))
+		for name := range cfg.Harnesses {
+			userHarness[name] = struct{}{}
+		}
+		execSet := plugin.CompileExecutables(plugin.Options{WorkDir: workDir}, userMCP, userHarness)
+		var pdiags []plugin.Diagnostic
+		cfg, pdiags = config.ApplyPluginExecutables(workDir, cfg, execSet, true)
+		for _, d := range pdiags {
+			if d.Code == "shadowed" {
+				continue
+			}
+			fmt.Fprintf(os.Stderr, "plugin: %s\n", d.String())
+		}
 	}
 	sandboxMode, err := resolveSandboxMode(cfg.Sandbox, opts.sandbox, cfg.Managed.Sandbox)
 	if err != nil {

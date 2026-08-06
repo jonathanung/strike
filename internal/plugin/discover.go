@@ -356,12 +356,13 @@ func loadOne(root string, scope Scope, strikeVer string) (*Plugin, []Diagnostic)
 		return nil, diags
 	}
 
-	// Note executable contributions are present but inactive (info once).
-	if len(m.Contributions.MCP)+len(m.Contributions.Harnesses)+len(m.Contributions.Hooks) > 0 {
+	// Note executable contributions when present. CompileExecutables refines
+	// this with trust match (trusted vs untrusted); Discover stays passive-only.
+	if HasExecutableContributions(m) {
 		d := base
 		d.Severity = SeverityInfo
 		d.Code = "executable_inactive"
-		d.Message = "executable contributions present but not activated (requires trust; see #728)"
+		d.Message = "executable contributions present; activation requires matching trust record"
 		diags = append(diags, d)
 	}
 

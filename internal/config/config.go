@@ -675,7 +675,7 @@ func Load(workDir string) (Config, error) {
 		}
 		// Surface discovery diagnostics once (agents/skills also Discover).
 		for _, d := range DiscoverPlugins(workDir).Diagnostics {
-			if d.Severity == plugin.SeverityInfo && (d.Code == "shadowed" || d.Code == "executable_inactive") {
+			if d.Severity == plugin.SeverityInfo && (d.Code == "shadowed" || d.Code == "executable_inactive" || d.Code == "executable_untrusted") {
 				continue
 			}
 			fmt.Fprintf(os.Stderr, "plugin: %s\n", d.String())
