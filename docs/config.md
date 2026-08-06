@@ -1275,6 +1275,67 @@ project **concatenate**). Each entry is either a **declarative rule**
 Invalid rows are dropped at load. Peer event-name mapping (CC/OpenCode/Crush):
 [peer-ecosystem.md](peer-ecosystem.md#hooks-alignment).
 
+### Shell hook stdin payload
+
+Shell hooks (`command`) receive one JSON object on stdin (not env vars):
+
+| Field | When | Notes |
+|---|---|---|
+| `event` | always | `pre_tool_use` or `post_tool_use` |
+| `session_id` | always | session id |
+| `cwd` | always | engine workdir |
+| `tool_name` | tool events | e.g. `edit`, `write` |
+| `tool_call_id` | tool events | call id |
+| `tool_input` | tool events | raw tool args object (`filePath` for `edit`/`write`) |
+| `tool_output` | `post_tool_use` | tool result text |
+| `is_error` | `post_tool_use` | `true` when the tool failed |
+
+Exit **0** allows; non-zero **blocks** (pre: deny tool; post: mark the completed call blocked and replace feedback). Timeouts and start failures **fail-open**. Prefer always-exit-0 recipes for non-blocking side effects (formatters, notify).
+
+### Post-edit formatters (recipe)
+
+Strike has **no** first-class `formatters` map (OpenCode-style plugin host is out of scope). Run formatters with `post_tool_use` shell hooks after successful `edit` / `write`. Requires `jq` on `PATH` for the snippets below.
+
+**Non-blocking Go format** (recommended default — formatter failure does not fail the tool):
+
+```json
+{
+  "hooks": [
+    {
+      "event": "post_tool_use",
+      "matcher": "{edit,write}",
+      "timeoutMs": 15000,
+      "command": "payload=$(cat); echo \"$payload\" | jq -e '.is_error == true' >/dev/null 2>&1 && exit 0; f=$(echo \"$payload\" | jq -r '.tool_input.filePath // empty'); [ -n \"$f\" ] || exit 0; case \"$f\" in *.go) gofmt -w \"$f\" 2>/dev/null || true ;; esac; exit 0"
+    }
+  ]
+}
+```
+
+**Multi-language sketch** (still non-blocking; adjust tools to taste):
+
+```json
+{
+  "hooks": [
+    {
+      "event": "post_tool_use",
+      "matcher": "{edit,write}",
+      "timeoutMs": 30000,
+      "command": "payload=$(cat); echo \"$payload\" | jq -e '.is_error == true' >/dev/null 2>&1 && exit 0; f=$(echo \"$payload\" | jq -r '.tool_input.filePath // empty'); [ -n \"$f\" ] || exit 0; case \"$f\" in *.go) gofmt -w \"$f\" 2>/dev/null || true ;; *.ts|*.tsx|*.js|*.jsx|*.json|*.css|*.md) command -v prettier >/dev/null && prettier --write \"$f\" 2>/dev/null || true ;; *.py) command -v ruff >/dev/null && ruff format \"$f\" 2>/dev/null || true ;; esac; exit 0"
+    }
+  ]
+}
+```
+
+**Blocking format** (rare): omit the trailing `|| true` / `exit 0` so a non-zero formatter exit marks the tool result blocked. Prefer non-blocking unless you intentionally gate the agent on format success.
+
+Notes:
+
+- Matcher is doublestar on **tool name** (`{edit,write}` is fine); it does not filter by file extension — do that in the shell `case`.
+- `apply_patch` and other mutators are not covered by this matcher; add separate rows if you format those paths.
+- Project hooks concatenate after global hooks; put team formatters in `./.strike/config` (or your project config path).
+- Editor/`$EDITOR` format-on-save remains a valid alternative outside the agent loop.
+- Peer inventory: [peer-ecosystem.md](peer-ecosystem.md#settings-inventory) (Formatters → hooks recipe).
+
 ## History compaction
 
 `/compact` and automatic threshold/overflow compaction shrink model-facing
