@@ -57,6 +57,9 @@ type Options struct {
 	AllowCIDRs []*net.IPNet
 	// Services exposes optional frontend host capabilities.
 	Services *host.Services
+	// Sandbox enables the sandbox capability and seeds live roots that do not
+	// call Live.SetSandbox themselves. Nil keeps capabilities.sandbox false.
+	Sandbox *SandboxSnapshot
 }
 
 // Server is an HTTP server for session attach and optional live cockpit.
@@ -162,6 +165,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/models", s.handleModels)
 	s.mux.HandleFunc("GET /v1/history", s.handleHistory)
 	s.mux.HandleFunc("PATCH /v1/settings", s.handleSettings)
+	s.mux.HandleFunc("GET /v1/sandbox", s.handleSandboxGet)
+	s.mux.HandleFunc("PATCH /v1/sandbox", s.handleSandboxPatch)
 	s.mux.HandleFunc("GET /v1/sessions/{id}/children", s.handleSessionChildren)
 	s.mux.HandleFunc("POST /v1/sessions/{id}/fork", s.handleSessionFork)
 	s.mux.HandleFunc("PATCH /v1/sessions/{id}", s.handleSessionRename)
@@ -171,6 +176,19 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/file", s.handleFile)
 	s.mux.HandleFunc("GET /v1/memory", s.handleMemory)
 	s.mux.HandleFunc("GET /v1/issues", s.handleIssues)
+	s.mux.HandleFunc("GET /v1/permissions/explain", s.handlePermissionExplain)
+	s.mux.HandleFunc("GET /v1/permissions/presets", s.handlePermissionPresets)
+	s.mux.HandleFunc("GET /v1/plans", s.handlePlansList)
+	s.mux.HandleFunc("POST /v1/plans", s.handlePlanCreate)
+	s.mux.HandleFunc("GET /v1/plans/{id}", s.handlePlanGet)
+	s.mux.HandleFunc("PATCH /v1/plans/{id}", s.handlePlanUpdateTitle)
+	s.mux.HandleFunc("POST /v1/plans/{id}/sections", s.handlePlanAddSection)
+	s.mux.HandleFunc("PATCH /v1/plans/{id}/sections/{sectionID}", s.handlePlanUpdateSection)
+	s.mux.HandleFunc("POST /v1/plans/{id}/status", s.handlePlanSetStatus)
+	s.mux.HandleFunc("POST /v1/plans/{id}/reopen", s.handlePlanReopen)
+	s.mux.HandleFunc("GET /v1/mcp", s.handleMCPList)
+	s.mux.HandleFunc("POST /v1/mcp/retry", s.handleMCPRetry)
+	s.mux.HandleFunc("POST /v1/mcp/disable", s.handleMCPDisable)
 	s.mux.HandleFunc("GET /v1/lsp", s.handleLSP)
 	s.mux.HandleFunc("POST /v1/lsp/retry", s.handleLSPRetry)
 	s.mux.HandleFunc("POST /v1/lsp/{name}/disable", s.handleLSPDisable)
@@ -188,11 +206,14 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/workflow-drafts/review", s.handleWorkflowDraftReview)
 	s.mux.HandleFunc("POST /v1/workflow-drafts/save", s.handleWorkflowDraftSave)
 	s.mux.HandleFunc("GET /v1/sessions/{id}/events", s.handleSessionEvents)
+	s.mux.HandleFunc("GET /v1/sessions/{id}/timeline", s.handleSessionTimeline)
+	s.mux.HandleFunc("GET /v1/sessions/{id}/timeline/export", s.handleSessionTimelineExport)
 	s.mux.HandleFunc("GET /v1/sessions", s.handleSessions)
 	s.mux.HandleFunc("GET /v1/roots", s.handleRoots)
 	s.mux.HandleFunc("POST /v1/roots", s.handleRootCreate)
 	s.mux.HandleFunc("POST /v1/roots/{id}/activate", s.handleRootActivate)
 	s.mux.HandleFunc("POST /v1/roots/{id}/resume", s.handleRootResume)
+	s.mux.HandleFunc("DELETE /v1/roots/{id}", s.handleRootClose)
 	s.mux.HandleFunc("GET /v1/status", s.handleStatus)
 	s.mux.HandleFunc("GET /v1/agents", s.handleAgents)
 	s.mux.HandleFunc("POST /v1/ops", s.handleOps)

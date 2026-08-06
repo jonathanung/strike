@@ -40,17 +40,30 @@ func (h testHistory) Enqueue(string) <-chan error {
 	return ch
 }
 
-type testSettings struct{ saved chan [5]string }
+type testSettings struct {
+	saved     chan [5]string
+	defaults  host.UserDefaults
+	savedDial chan string
+	dialErr   error
+}
 
-func (testSettings) Defaults() host.UserDefaults { return host.UserDefaults{} }
+func (s testSettings) Defaults() host.UserDefaults { return s.defaults }
 
 func (s testSettings) SaveDefaults(provider, model, agent, effort, mode string) error {
-	s.saved <- [5]string{provider, model, agent, effort, mode}
+	if s.saved != nil {
+		s.saved <- [5]string{provider, model, agent, effort, mode}
+	}
 	return nil
 }
 func (testSettings) SaveTheme(string) error                        { return nil }
 func (testSettings) SavePresentation(string, string, string) error { return nil }
-func (testSettings) SaveConfigDials(string, string, string, string, string, string) error {
+func (s testSettings) SaveConfigDials(sandboxMode, notify, leanCode, deferTools, sessionWorktree, autoupdate string) error {
+	if s.dialErr != nil {
+		return s.dialErr
+	}
+	if s.savedDial != nil && sandboxMode != "" {
+		s.savedDial <- sandboxMode
+	}
 	return nil
 }
 func (testSettings) SaveAutoApproveDials(string, *[]string, string) error { return nil }
@@ -126,12 +139,115 @@ func TestServiceAPIsUnavailableWithoutConfiguredHost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{"/v1/providers", "/v1/models?provider=echo", "/v1/history", "/v1/files", "/v1/memory", "/v1/issues", "/v1/lsp", "/v1/diagnostics"} {
+	for _, path := range []string{
+		"/v1/providers", "/v1/models?provider=echo", "/v1/history", "/v1/files",
+		"/v1/memory", "/v1/issues", "/v1/plans",
+		"/v1/permissions/explain?permission=bash", "/v1/permissions/presets",
+	} {
 		res := httptest.NewRecorder()
 		srv.Handler().ServeHTTP(res, httptest.NewRequest(http.MethodGet, path, nil))
 		if res.Code != http.StatusNotImplemented || !strings.Contains(res.Body.String(), "capability unavailable") {
 			t.Errorf("GET %s = %d %q, want tested unavailable state", path, res.Code, res.Body.String())
 		}
+	}
+}
+
+type testPermissions struct {
+	lastPerm, lastPat string
+	presets           []host.PermissionPresetInfo
+}
+
+func (p *testPermissions) Explain(permission, pattern string) host.PermissionExplanation {
+	p.lastPerm, p.lastPat = permission, pattern
+	if pattern == "" {
+		pattern = "*"
+	}
+	return host.PermissionExplanation{
+		Permission: permission,
+		Pattern:    pattern,
+		Action:     "ask",
+		Layer:      "defaults",
+		Matched: host.PermissionMatch{
+			Layer:      "defaults",
+			Permission: permission,
+			Pattern:    "*",
+			Action:     "ask",
+		},
+		Summary: "bash * → ask (defaults)",
+	}
+}
+
+func (p *testPermissions) Presets() []host.PermissionPresetInfo {
+	if p.presets != nil {
+		return p.presets
+	}
+	return []host.PermissionPresetInfo{
+		{ID: "read-only", Name: "Read only", Description: "deny writes"},
+	}
+}
+
+func TestPermissionServiceAPIs(t *testing.T) {
+	perms := &testPermissions{
+		presets: []host.PermissionPresetInfo{
+			{ID: "dev", Name: "Dev", Description: "local development"},
+		},
+	}
+	services := &host.Services{Permissions: perms}
+	srv, err := New(Options{SessionDir: t.TempDir(), Services: services})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Bootstrap capability flag.
+	boot := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(boot, httptest.NewRequest(http.MethodGet, "/v1/bootstrap", nil))
+	if boot.Code != http.StatusOK || !strings.Contains(boot.Body.String(), `"permissions":true`) {
+		t.Fatalf("bootstrap permissions cap = %d %s", boot.Code, boot.Body.String())
+	}
+
+	// Explain requires permission query.
+	missing := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(missing, httptest.NewRequest(http.MethodGet, "/v1/permissions/explain", nil))
+	if missing.Code != http.StatusBadRequest {
+		t.Fatalf("explain missing perm = %d %s", missing.Code, missing.Body.String())
+	}
+
+	// Explain happy path.
+	ex := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(ex, httptest.NewRequest(http.MethodGet, "/v1/permissions/explain?permission=bash&pattern=git+status", nil))
+	if ex.Code != http.StatusOK {
+		t.Fatalf("explain = %d %s", ex.Code, ex.Body.String())
+	}
+	body := ex.Body.String()
+	for _, want := range []string{`"Permission":"bash"`, `"Pattern":"git status"`, `"Action":"ask"`, `"Summary":"bash * → ask (defaults)"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("explain missing %q: %s", want, body)
+		}
+	}
+	if perms.lastPerm != "bash" || perms.lastPat != "git status" {
+		t.Fatalf("explain args = %q %q", perms.lastPerm, perms.lastPat)
+	}
+
+	// Presets list.
+	presets := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(presets, httptest.NewRequest(http.MethodGet, "/v1/permissions/presets", nil))
+	if presets.Code != http.StatusOK || !strings.Contains(presets.Body.String(), `"ID":"dev"`) {
+		t.Fatalf("presets = %d %s", presets.Code, presets.Body.String())
+	}
+}
+
+func TestAttachOnlyBootstrapPermissionsFalse(t *testing.T) {
+	srv, err := New(Options{SessionDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/v1/bootstrap", nil))
+	if res.Code != http.StatusOK {
+		t.Fatalf("status = %d", res.Code)
+	}
+	if !strings.Contains(res.Body.String(), `"permissions":false`) {
+		t.Errorf("attach-only should declare permissions false: %s", res.Body.String())
 	}
 }
 
@@ -322,5 +438,156 @@ func TestSettingsRejectsUnknownAndOversizePayloads(t *testing.T) {
 				t.Fatalf("status = %d, want 400", res.Code)
 			}
 		})
+	}
+}
+
+func TestSandboxCapabilityDenyAndExplain(t *testing.T) {
+	// Deny path: no sandbox capability.
+	srv, err := New(Options{SessionDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/v1/sandbox", nil))
+	if res.Code != http.StatusNotImplemented || !strings.Contains(res.Body.String(), "sandbox capability unavailable") {
+		t.Fatalf("deny GET = %d %s", res.Code, res.Body.String())
+	}
+	res = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(res, httptest.NewRequest(http.MethodPatch, "/v1/sandbox", strings.NewReader(`{"mode":"read-only"}`)))
+	if res.Code != http.StatusNotImplemented {
+		t.Fatalf("deny PATCH = %d %s", res.Code, res.Body.String())
+	}
+
+	// Bootstrap advertises sandbox when Options.Sandbox is set.
+	ops := make(chan protocol.Op, 1)
+	live := NewLive("s1", t.TempDir(), nil, ops)
+	live.SetSandbox("read-only", "bwrap", true, []string{"github.com"}, "sandbox mode: read-only\nprofile:\ntest\n")
+	dials := make(chan string, 1)
+	settings := testSettings{
+		defaults:  host.UserDefaults{Sandbox: "workspace-write", PermissionMode: "default"},
+		savedDial: dials,
+	}
+	srv, err = New(Options{
+		SessionDir: t.TempDir(),
+		Live:       live,
+		Services:   &host.Services{Settings: settings},
+		Sandbox: &SandboxSnapshot{
+			Mode:         "read-only",
+			Backend:      "bwrap",
+			Available:    true,
+			NetworkAllow: []string{"github.com"},
+			Explain:      "sandbox mode: read-only\nprofile:\ntest\n",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	boot := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(boot, httptest.NewRequest(http.MethodGet, "/v1/bootstrap", nil))
+	if boot.Code != http.StatusOK || !strings.Contains(boot.Body.String(), `"sandbox":true`) {
+		t.Fatalf("bootstrap sandbox cap = %d %s", boot.Code, boot.Body.String())
+	}
+	if !strings.Contains(boot.Body.String(), `"sandbox":"read-only"`) {
+		t.Fatalf("bootstrap status missing sandbox: %s", boot.Body.String())
+	}
+
+	get := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(get, httptest.NewRequest(http.MethodGet, "/v1/sandbox", nil))
+	if get.Code != http.StatusOK {
+		t.Fatalf("GET sandbox = %d %s", get.Code, get.Body.String())
+	}
+	body := get.Body.String()
+	for _, want := range []string{
+		`"mode":"read-only"`,
+		`"backend":"bwrap"`,
+		`"available":true`,
+		`"github.com"`,
+		`sandbox mode: read-only`,
+		`"defaultMode":"workspace-write"`,
+		`"canChangeDefault":true`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("GET sandbox missing %s: %s", want, body)
+		}
+	}
+
+	// Status carries sandbox chrome.
+	st := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(st, httptest.NewRequest(http.MethodGet, "/v1/status", nil))
+	if st.Code != http.StatusOK || !strings.Contains(st.Body.String(), `"sandbox":"read-only"`) {
+		t.Fatalf("status = %d %s", st.Code, st.Body.String())
+	}
+
+	// PATCH default mode.
+	patch := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(patch, httptest.NewRequest(http.MethodPatch, "/v1/sandbox", strings.NewReader(`{"mode":"workspace-write"}`)))
+	if patch.Code != http.StatusOK {
+		t.Fatalf("PATCH sandbox = %d %s", patch.Code, patch.Body.String())
+	}
+	if got := <-dials; got != "workspace-write" {
+		t.Fatalf("saved dial = %q", got)
+	}
+}
+
+func TestSandboxPatchYoloOffRequiresIKnow(t *testing.T) {
+	dials := make(chan string, 1)
+	settings := testSettings{
+		defaults:  host.UserDefaults{PermissionMode: "yolo", Sandbox: "workspace-write"},
+		savedDial: dials,
+	}
+	srv, err := New(Options{
+		SessionDir: t.TempDir(),
+		Services:   &host.Services{Settings: settings},
+		Sandbox:    &SandboxSnapshot{Mode: "workspace-write", Available: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Deny without iKnow.
+	res := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(res, httptest.NewRequest(http.MethodPatch, "/v1/sandbox", strings.NewReader(`{"mode":"off"}`)))
+	if res.Code != http.StatusBadRequest || !strings.Contains(res.Body.String(), "iKnow") {
+		t.Fatalf("yolo+off without iKnow = %d %s", res.Code, res.Body.String())
+	}
+	select {
+	case got := <-dials:
+		t.Fatalf("unexpected save without iKnow: %q", got)
+	default:
+	}
+
+	// Allow with iKnow.
+	res = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(res, httptest.NewRequest(http.MethodPatch, "/v1/sandbox", strings.NewReader(`{"mode":"off","iKnow":true}`)))
+	if res.Code != http.StatusOK {
+		t.Fatalf("yolo+off with iKnow = %d %s", res.Code, res.Body.String())
+	}
+	if got := <-dials; got != "off" {
+		t.Fatalf("saved = %q", got)
+	}
+
+	// Settings PATCH also gates sandbox.
+	res = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(res, httptest.NewRequest(http.MethodPatch, "/v1/settings", strings.NewReader(`{"sandbox":"off"}`)))
+	if res.Code != http.StatusBadRequest || !strings.Contains(res.Body.String(), "iKnow") {
+		t.Fatalf("settings yolo+off = %d %s", res.Code, res.Body.String())
+	}
+
+	// Unknown mode rejected.
+	res = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(res, httptest.NewRequest(http.MethodPatch, "/v1/sandbox", strings.NewReader(`{"mode":"nope"}`)))
+	if res.Code != http.StatusBadRequest || !strings.Contains(res.Body.String(), "unknown sandbox") {
+		t.Fatalf("unknown mode = %d %s", res.Code, res.Body.String())
+	}
+
+	// PATCH without settings capability.
+	srv2, err := New(Options{SessionDir: t.TempDir(), Sandbox: &SandboxSnapshot{Mode: "off"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res = httptest.NewRecorder()
+	srv2.Handler().ServeHTTP(res, httptest.NewRequest(http.MethodPatch, "/v1/sandbox", strings.NewReader(`{"mode":"read-only"}`)))
+	if res.Code != http.StatusNotImplemented || !strings.Contains(res.Body.String(), "settings capability unavailable") {
+		t.Fatalf("patch without settings = %d %s", res.Code, res.Body.String())
 	}
 }

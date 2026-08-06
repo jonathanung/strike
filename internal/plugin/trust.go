@@ -295,7 +295,11 @@ func sourceIdentityEqual(a, b *SourceIdentity) bool {
 			strings.TrimSpace(a.Subdir) == strings.TrimSpace(b.Subdir)
 		// Ref is resolve-time only; commit is the pin.
 	case SourceCatalog:
-		return false
+		return strings.TrimSpace(a.Registry) == strings.TrimSpace(b.Registry) &&
+			strings.TrimSpace(a.Package) == strings.TrimSpace(b.Package) &&
+			strings.TrimSpace(a.Version) == strings.TrimSpace(b.Version) &&
+			strings.TrimSpace(a.URL) == strings.TrimSpace(b.URL) &&
+			digestsEqual(a.Digest, b.Digest)
 	default:
 		return false
 	}

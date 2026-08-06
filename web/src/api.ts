@@ -1,4 +1,4 @@
-import type { Bootstrap, Envelope, RootsResponse, RootCreateResult, RootResumeResult, Session } from "./types";
+import type { Bootstrap, Envelope, RootsResponse, RootCreateResult, RootResumeResult, SandboxInfo, Session } from "./types";
 
 // Token may arrive via ?token= before the server handoff redirect strips it and
 // sets an HttpOnly cookie. After handoff, same-origin cookies authenticate
@@ -16,6 +16,14 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
 }
 export const bootstrap = () => request<Bootstrap>("/v1/bootstrap");
 export const sessions = () => request<{ sessions: Session[]; liveId?: string }>("/v1/sessions");
+export const getSandbox = (rootID?: string) => {
+  const qs = rootID ? `?root=${encodeURIComponent(rootID)}` : "";
+  return request<SandboxInfo>(`/v1/sandbox${qs}`);
+};
+export const patchSandbox = (mode: string, iKnow = false, rootID?: string) => {
+  const qs = rootID ? `?root=${encodeURIComponent(rootID)}` : "";
+  return request<SandboxInfo>(`/v1/sandbox${qs}`, { method: "PATCH", body: JSON.stringify({ mode, iKnow }) });
+};
 export const sendOp = (type: string, data?: unknown, rootID?: string) => {
   const qs = rootID ? `?root=${encodeURIComponent(rootID)}` : "";
   return request<{ ok: boolean }>(`/v1/ops${qs}`, { method: "POST", body: JSON.stringify({ type, ...(data === undefined ? {} : { data }) }) });
@@ -26,6 +34,7 @@ export const roots = () => request<RootsResponse>("/v1/roots");
 export const createRoot = () => request<RootCreateResult>("/v1/roots", { method: "POST" });
 export const activateRoot = (id: string) => request<{ ok: boolean }>(`/v1/roots/${encodeURIComponent(id)}/activate`, { method: "POST" });
 export const resumeRoot = (sessionID: string) => request<RootResumeResult>(`/v1/roots/${encodeURIComponent(sessionID)}/resume`, { method: "POST" });
+export const closeRoot = (id: string) => request<{ ok: boolean }>(`/v1/roots/${encodeURIComponent(id)}`, { method: "DELETE" });
 
 export function liveConnection(rootID: string, onEvent: (event: Envelope) => void, onState: (state: string) => void) {
   let socket: WebSocket | undefined;
@@ -42,7 +51,15 @@ export function liveConnection(rootID: string, onEvent: (event: Envelope) => voi
     socket.onclose = () => { if (!closed) { onState("reconnecting"); setTimeout(connect, Math.min(500 * 2 ** retry++, 8000)); } };
   };
   connect();
-  return { send: (type: string, data?: unknown) => socket?.readyState === WebSocket.OPEN && socket.send(JSON.stringify({ type, ...(data === undefined ? {} : { data }) })), close: () => { closed = true; socket?.close(); } };
+  return { send: (type: string, data?: unknown) => socket?.readyState === WebSocket.OPEN && socket.send(JSON.stringify({ type, ...(data === undefined ? {} : { data }) })), close: () => {
+      closed = true;
+      if (socket) {
+        socket.onmessage = null;
+        socket.onerror = null;
+        socket.onclose = null;
+        socket.close();
+      }
+    } };
 }
 
 export function historicalConnection(id: string, onEvent: (event: Envelope) => void, onError: (message: string) => void = () => {}) {
@@ -52,3 +69,6 @@ export function historicalConnection(id: string, onEvent: (event: Envelope) => v
   source.onerror = () => onError("history reconnecting");
   return () => source.close();
 }
+
+export const sessionChildren = (id: string) =>
+  request<{ sessions: Array<Record<string, unknown>> }>(`/v1/sessions/${encodeURIComponent(id)}/children`);
