@@ -92,6 +92,23 @@ func TestWrapDecodeRoundTrip(t *testing.T) {
 			Summary:     "handoff",
 			TeamID:      "session-1",
 			MessageID:   "msg-1",
+			TaskID:      "d1",
+			Urgency:     AgentUrgencyHigh,
+			Kind:        AgentMessageKindRequest,
+			RequireAck:  true,
+			EscalateTo:  "session-1",
+			AckStatus:   "pending",
+		},
+		AgentContractTimeout{
+			Correlation: childCorr,
+			MessageID:   "msg-1",
+			From:        "session-1",
+			To:          "child-1",
+			TaskID:      "d1",
+			TeamID:      "session-1",
+			Urgency:     AgentUrgencyHigh,
+			EscalateTo:  "session-1",
+			Detail:      "ack timed out",
 		},
 		TeamRoster{
 			Correlation: Correlation{SessionID: "session-1"},
@@ -133,6 +150,26 @@ func TestWrapDecodeRoundTrip(t *testing.T) {
 				ToolResults: KnownTokens(5),
 				Total:       KnownTokens(80),
 				Source:      UsageSourceEstimated,
+			},
+		},
+		DiagnosticBundle{
+			Correlation:     corr,
+			SchemaVersion:   "1.0.0",
+			ProtocolVersion: Version,
+			ExportedAt:      time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC),
+			Redacted:        true,
+			Session: DiagnosticSession{
+				SessionID: "session-1", RootSessionID: "session-1", Depth: 0,
+			},
+			Prompt: DiagnosticPrompt{
+				Precedence:  []string{PromptLayerShared},
+				Layers:      []PromptLayerInfo{{Kind: PromptLayerShared, Source: "builtin:shared", Mode: PromptLayerAppend, Chars: 12}},
+				LayerCount:  1,
+				SystemChars: 12,
+			},
+			Config: DiagnosticConfig{
+				Provider: "echo", Model: "echo", Agent: "build",
+				Digests: map[string]string{"effective": "abc"},
 			},
 		},
 	}
@@ -379,62 +416,89 @@ func TestChildCompletedHandoffRoundTrip(t *testing.T) {
 	}
 }
 
-func TestArtifactUpdatedAndHandoffRefsRoundTrip(t *testing.T) {
-	want := ArtifactUpdated{
-		Correlation: Correlation{SessionID: "s1"},
-		ID:          "ab12cd34",
-		Type:        "findings",
-		Version:     2,
-		Scope:       "project",
-		Title:       "Review",
-		Op:          "update",
-		SessionID:   "s1",
+func TestChildEscalatedRoundTrip(t *testing.T) {
+	rem := 3
+	want := ChildEscalated{
+		Correlation:    Correlation{SessionID: "c9", ParentSessionID: "p1", Depth: 1},
+		Name:           "worker",
+		Kind:           "tool_calls",
+		Reason:         "tool-call budget exhausted (3/3)",
+		Action:         "interrupted",
+		TerminalStatus: ChildStatusFailed,
+		Budget: &AgentBudgetView{
+			MaxToolCalls:       3,
+			ToolCalls:          3,
+			ToolCallsRemaining: &rem,
+			Escalated:          true,
+			EscalateKind:       "tool_calls",
+		},
 	}
 	env, err := Wrap(want)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if env.Type != "artifact.updated" {
-		t.Fatalf("type = %q", env.Type)
+	if env.Type != "child.escalated" {
+		t.Fatalf("type=%q", env.Type)
 	}
 	gotEv, err := env.Decode()
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, ok := gotEv.(ArtifactUpdated)
+	got, ok := gotEv.(ChildEscalated)
 	if !ok {
 		t.Fatalf("type %T", gotEv)
 	}
-	if got.ID != want.ID || got.Version != 2 || got.Op != "update" {
-		t.Fatalf("got = %#v", got)
+	if got.Kind != "tool_calls" || got.Action != "interrupted" || got.Name != "worker" {
+		t.Fatalf("got %#v", got)
 	}
+	if got.Budget == nil || got.Budget.MaxToolCalls != 3 || !got.Budget.Escalated {
+		t.Fatalf("budget %#v", got.Budget)
+	}
+}
 
-	// CompletionHandoff.artifactRefs on the wire.
-	cc := ChildCompleted{
-		Correlation: Correlation{SessionID: "c1"},
-		Status:      ChildStatusCompleted,
-		Handoff: CompletionHandoff{
-			Summary: "done",
-			ArtifactRefs: []ArtifactRef{
-				{ID: "ab12cd34", Version: 2, Type: "findings"},
-			},
-		},
+func TestVerificationEventsAndTurnCompletedRoundTrip(t *testing.T) {
+	corr := Correlation{SessionID: "s1", TurnID: "t1"}
+	rep := VerificationReport{
+		Passed:   false,
+		Claimed:  true,
+		Verified: false,
+		Checks: []VerificationCheck{{
+			Name:     "unit",
+			Kind:     "cmd",
+			Value:    "false",
+			Passed:   false,
+			ExitCode: 1,
+			Error:    "exit 1",
+		}},
+		Env:     VerificationEnv{WorkDir: "/ws", SessionID: "s1", ModelID: "m"},
+		Summary: "verification failed: unit: exit 1",
 	}
-	env2, err := Wrap(cc)
-	if err != nil {
-		t.Fatal(err)
+	cases := []Event{
+		VerificationStarted{Correlation: corr, Scope: VerificationScopeTurn, GateCount: 1},
+		VerificationCompleted{Correlation: corr, Scope: VerificationScopeTurn, Report: rep},
+		TurnCompleted{Correlation: corr, StopReason: "end_turn", Verification: &rep},
 	}
-	got2, err := env2.Decode()
-	if err != nil {
-		t.Fatal(err)
+	for _, want := range cases {
+		env, err := Wrap(want)
+		if err != nil {
+			t.Fatalf("Wrap %T: %v", want, err)
+		}
+		gotEv, err := env.Decode()
+		if err != nil {
+			t.Fatalf("Decode %T: %v", want, err)
+		}
+		wantJSON, _ := json.Marshal(want)
+		gotJSON, _ := json.Marshal(gotEv)
+		if string(wantJSON) != string(gotJSON) {
+			t.Errorf("%T: got %s, want %s", want, gotJSON, wantJSON)
+		}
 	}
-	cc2 := got2.(ChildCompleted)
-	if len(cc2.Handoff.ArtifactRefs) != 1 || cc2.Handoff.ArtifactRefs[0].ID != "ab12cd34" {
-		t.Fatalf("refs = %#v", cc2.Handoff.ArtifactRefs)
+	// Type strings.
+	if env, _ := Wrap(VerificationStarted{}); env.Type != "verification.started" {
+		t.Fatalf("started type = %q", env.Type)
 	}
-	raw, _ := json.Marshal(cc2.Handoff)
-	if !strings.Contains(string(raw), `"artifactRefs"`) {
-		t.Fatalf("wire missing artifactRefs: %s", raw)
+	if env, _ := Wrap(VerificationCompleted{}); env.Type != "verification.completed" {
+		t.Fatalf("completed type = %q", env.Type)
 	}
 }
 
@@ -550,55 +614,118 @@ func TestTokenCountKnownVsUnknown(t *testing.T) {
 	}
 }
 
+func TestArtifactUpdatedAndHandoffRefsRoundTrip(t *testing.T) {
+	want := ArtifactUpdated{
+		Correlation: Correlation{SessionID: "s1"},
+		ID:          "ab12cd34",
+		Type:        "findings",
+		Version:     2,
+		Scope:       "project",
+		Title:       "Review",
+		Op:          "update",
+		SessionID:   "s1",
+	}
+	env, err := Wrap(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env.Type != "artifact.updated" {
+		t.Fatalf("type = %q", env.Type)
+	}
+	gotEv, err := env.Decode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := gotEv.(ArtifactUpdated)
+	if !ok {
+		t.Fatalf("type %T", gotEv)
+	}
+	if got.ID != want.ID || got.Version != 2 || got.Op != "update" {
+		t.Fatalf("got = %#v", got)
+	}
+
+	// CompletionHandoff.artifactRefs on the wire.
+	cc := ChildCompleted{
+		Correlation: Correlation{SessionID: "c1"},
+		Status:      ChildStatusCompleted,
+		Handoff: CompletionHandoff{
+			Summary: "done",
+			ArtifactRefs: []ArtifactRef{
+				{ID: "ab12cd34", Version: 2, Type: "findings"},
+			},
+		},
+	}
+	env2, err := Wrap(cc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got2, err := env2.Decode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cc2 := got2.(ChildCompleted)
+	if len(cc2.Handoff.ArtifactRefs) != 1 || cc2.Handoff.ArtifactRefs[0].ID != "ab12cd34" {
+		t.Fatalf("refs = %#v", cc2.Handoff.ArtifactRefs)
+	}
+	raw, _ := json.Marshal(cc2.Handoff)
+	if !strings.Contains(string(raw), `"artifactRefs"`) {
+		t.Fatalf("wire missing artifactRefs: %s", raw)
+	}
+}
+
 func TestEventTypeCoverage(t *testing.T) {
 	// Ensure every known event maps to a stable type string used by sessions.
 	want := map[string]Event{
-		"user.message":         UserMessage{},
-		"turn.started":         TurnStarted{},
-		"text.delta":           TextDelta{},
-		"reasoning.delta":      ReasoningDelta{},
-		"tool.begin":           ToolCallBegin{},
-		"tool.end":             ToolCallEnd{},
-		"tool.output":          ToolCallOutput{},
-		"process.started":      ProcessStarted{},
-		"process.output":       ProcessOutput{},
-		"process.exited":       ProcessExited{},
-		"permission.asked":     PermissionAsked{},
-		"permission.resolved":  PermissionResolved{},
-		"question.asked":       QuestionAsked{},
-		"question.resolved":    QuestionResolved{},
-		"turn.completed":       TurnCompleted{},
-		"harness.progress":     HarnessProgress{Name: "test", Payload: json.RawMessage(`{}`)},
-		"model.selected":       ModelSelected{},
-		"agent.selected":       AgentSelected{},
-		"phase.changed":        PhaseChanged{},
-		"plan.handoff":         PlanHandoff{},
-		"artifact.updated":     ArtifactUpdated{ID: "a1", Type: "findings", Version: 1, Op: "create"},
-		"phase.grant_approved": PhaseGrantApproved{},
-		"effort.selected":      EffortSelected{},
-		"autonomy.selected":    AutonomySelected{},
-		"permission.mode":      PermissionModeSelected{},
-		"fast.selected":        FastSelected{},
-		"files.invalidated":    FilesInvalidated{},
-		"engine.error":         EngineError{},
-		"child.started":        ChildStarted{},
-		"child.completed":      ChildCompleted{},
-		"delegation.changed":   DelegationChanged{},
-		"wait.started":         WaitStarted{},
-		"wait.resolved":        WaitResolved{},
-		"agent.message":        AgentMessage{},
-		"team.roster":          TeamRoster{},
-		"usage.reported":       UsageReported{},
-		"provider.retrying":    ProviderRetrying{},
-		"scheduler.queued":     SchedulerQueued{},
-		"scheduler.admitted":   SchedulerAdmitted{},
-		"scheduler.canceled":   SchedulerCanceled{},
-		"compaction.started":   CompactionStarted{},
-		"compaction.completed": CompactionCompleted{},
-		"session.meta":         SessionMeta{},
-		"session.rewound":      SessionRewound{},
-		"hook.matched":         HookMatched{},
-		"prompt.effective":     EffectivePrompt{},
+		"user.message":           UserMessage{},
+		"turn.started":           TurnStarted{},
+		"text.delta":             TextDelta{},
+		"reasoning.delta":        ReasoningDelta{},
+		"tool.begin":             ToolCallBegin{},
+		"tool.end":               ToolCallEnd{},
+		"tool.output":            ToolCallOutput{},
+		"process.started":        ProcessStarted{},
+		"process.output":         ProcessOutput{},
+		"process.exited":         ProcessExited{},
+		"permission.asked":       PermissionAsked{},
+		"permission.resolved":    PermissionResolved{},
+		"question.asked":         QuestionAsked{},
+		"question.resolved":      QuestionResolved{},
+		"turn.completed":         TurnCompleted{},
+		"verification.started":   VerificationStarted{},
+		"verification.completed": VerificationCompleted{},
+		"harness.progress":       HarnessProgress{Name: "test", Payload: json.RawMessage(`{}`)},
+		"model.selected":         ModelSelected{},
+		"agent.selected":         AgentSelected{},
+		"phase.changed":          PhaseChanged{},
+		"plan.handoff":           PlanHandoff{},
+		"phase.grant_approved":   PhaseGrantApproved{},
+		"effort.selected":        EffortSelected{},
+		"autonomy.selected":      AutonomySelected{},
+		"permission.mode":        PermissionModeSelected{},
+		"fast.selected":          FastSelected{},
+		"files.invalidated":      FilesInvalidated{},
+		"engine.error":           EngineError{},
+		"child.started":          ChildStarted{},
+		"child.completed":        ChildCompleted{},
+		"child.escalated":        ChildEscalated{},
+		"delegation.changed":     DelegationChanged{},
+		"wait.started":           WaitStarted{},
+		"wait.resolved":          WaitResolved{},
+		"agent.message":          AgentMessage{},
+		"agent.contract.timeout": AgentContractTimeout{},
+		"team.roster":            TeamRoster{},
+		"usage.reported":         UsageReported{},
+		"provider.retrying":      ProviderRetrying{},
+		"scheduler.queued":       SchedulerQueued{},
+		"scheduler.admitted":     SchedulerAdmitted{},
+		"scheduler.canceled":     SchedulerCanceled{},
+		"compaction.started":     CompactionStarted{},
+		"compaction.completed":   CompactionCompleted{},
+		"session.meta":           SessionMeta{},
+		"session.rewound":        SessionRewound{},
+		"hook.matched":           HookMatched{},
+		"prompt.effective":       EffectivePrompt{},
+		"diagnostic.bundle":      DiagnosticBundle{},
 	}
 	for typ, ev := range want {
 		env, err := Wrap(ev)

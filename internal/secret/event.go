@@ -57,6 +57,27 @@ func RedactEvent(ev protocol.Event) protocol.Event {
 	case protocol.ChildCompleted:
 		e.Summary = redact.String(e.Summary)
 		e.Handoff = redactHandoff(e.Handoff)
+		if e.Verification != nil {
+			rep := redactVerification(*e.Verification)
+			e.Verification = &rep
+		}
+		return e
+	case protocol.TurnCompleted:
+		if e.Verification != nil {
+			rep := redactVerification(*e.Verification)
+			e.Verification = &rep
+		}
+		return e
+	case protocol.VerificationCompleted:
+		e.Report = redactVerification(e.Report)
+		return e
+	case protocol.ChildEscalated:
+		e.Reason = redact.String(e.Reason)
+		if e.Budget != nil && e.Budget.EscalateReason != "" {
+			cp := *e.Budget
+			cp.EscalateReason = redact.String(cp.EscalateReason)
+			e.Budget = &cp
+		}
 		return e
 	case protocol.ArtifactUpdated:
 		e.Title = redact.String(e.Title)
@@ -77,6 +98,29 @@ func RedactEvent(ev protocol.Event) protocol.Event {
 			}
 			e.Layers = layers
 		}
+		return e
+	case protocol.DiagnosticBundle:
+		e.StrikeVersion = redact.String(e.StrikeVersion)
+		e.Note = redact.String(e.Note)
+		e.Session.SessionID = redact.String(e.Session.SessionID)
+		e.Session.ParentSessionID = redact.String(e.Session.ParentSessionID)
+		e.Session.RootSessionID = redact.String(e.Session.RootSessionID)
+		if len(e.Prompt.Layers) > 0 {
+			layers := make([]protocol.PromptLayerInfo, len(e.Prompt.Layers))
+			copy(layers, e.Prompt.Layers)
+			for i := range layers {
+				layers[i].Source = redact.String(layers[i].Source)
+				layers[i].Preview = redact.String(layers[i].Preview)
+			}
+			e.Prompt.Layers = layers
+		}
+		e.Config.Provider = redact.String(e.Config.Provider)
+		e.Config.Model = redact.String(e.Config.Model)
+		e.Config.Agent = redact.String(e.Config.Agent)
+		e.Config.WorkDir = redact.String(e.Config.WorkDir)
+		e.Config.ProjectRoot = redact.String(e.Config.ProjectRoot)
+		e.Config.Compaction.Model = redact.String(e.Config.Compaction.Model)
+		e.Warnings = redactStrings(e.Warnings)
 		return e
 	case protocol.HarnessProgress:
 		e.Payload = redact.JSON(e.Payload)
@@ -103,6 +147,23 @@ func redactHandoff(h protocol.CompletionHandoff) protocol.CompletionHandoff {
 		h.ArtifactRefs = refs
 	}
 	return h
+}
+
+func redactVerification(r protocol.VerificationReport) protocol.VerificationReport {
+	r.Summary = redact.String(r.Summary)
+	if len(r.Checks) == 0 {
+		return r
+	}
+	checks := make([]protocol.VerificationCheck, len(r.Checks))
+	copy(checks, r.Checks)
+	for i := range checks {
+		checks[i].Output = redact.ScrubToolOutput(checks[i].Output)
+		checks[i].Error = redact.String(checks[i].Error)
+		checks[i].Name = redact.String(checks[i].Name)
+		checks[i].Value = redact.String(checks[i].Value)
+	}
+	r.Checks = checks
+	return r
 }
 
 func redactStrings(in []string) []string {

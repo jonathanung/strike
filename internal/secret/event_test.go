@@ -91,6 +91,7 @@ func TestRedactEventPreservesNonSensitive(t *testing.T) {
 	}
 }
 
+
 func TestRedactEventArtifactUpdated(t *testing.T) {
 	key := "sk-abcdefghijklmnopqrstuvwxyz0123456789"
 	ev := secret.RedactEvent(protocol.ArtifactUpdated{
@@ -109,5 +110,37 @@ func TestRedactEventArtifactUpdated(t *testing.T) {
 	}
 	if got.ID != "ab12" || got.Type != "findings" || got.Version != 2 || got.Op != "update" {
 		t.Fatalf("structural fields changed: %+v", got)
+	}
+}
+
+func TestRedactEventDiagnosticBundle(t *testing.T) {
+	tok := "sk-ant-api03-SECRETEVENTBUNDLE99"
+	ev := secret.RedactEvent(protocol.DiagnosticBundle{
+		SchemaVersion: "1.0.0",
+		Redacted:      true,
+		Prompt: protocol.DiagnosticPrompt{
+			Layers: []protocol.PromptLayerInfo{
+				{Kind: protocol.PromptLayerShared, Source: "builtin:shared", Mode: protocol.PromptLayerAppend, Chars: 10, Preview: "key=" + tok},
+			},
+			LayerCount: 1,
+		},
+		Config: protocol.DiagnosticConfig{
+			Provider: "anthropic",
+			Model:    "m",
+			WorkDir:  "/tmp/ws",
+		},
+	})
+	b, ok := ev.(protocol.DiagnosticBundle)
+	if !ok {
+		t.Fatalf("type %T", ev)
+	}
+	if len(b.Prompt.Layers) != 1 {
+		t.Fatalf("layers = %+v", b.Prompt.Layers)
+	}
+	if strings.Contains(b.Prompt.Layers[0].Preview, tok) {
+		t.Fatalf("preview leaked: %q", b.Prompt.Layers[0].Preview)
+	}
+	if b.Config.Provider != "anthropic" || b.SchemaVersion != "1.0.0" {
+		t.Fatalf("structural fields changed: %+v", b)
 	}
 }

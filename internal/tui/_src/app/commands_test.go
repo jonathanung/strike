@@ -55,6 +55,8 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 		"/rename":           {"rename the current session", "[title]", commandSourceBuiltin},
 		"/export":           {"export the conversation to markdown", "[path] [--open]", commandSourceBuiltin},
 		"/timeline":         {"structured run timeline (collapsed view or JSON export)", "[export [path]]", commandSourceBuiltin},
+		"/diag":             {"export prompt/config diagnostic bundle (JSON)", "[export [path]]", commandSourceBuiltin},
+		"/diagnostic":       {"alias of /diag", "[export [path]]", commandSourceBuiltin},
 		"/copy":             {"copy the last assistant response to the clipboard", "", commandSourceBuiltin},
 		"/help":             {"show available commands", "", commandSourceBuiltin},
 		"/keys":             {"show keyboard shortcuts", "[reset]", commandSourceBuiltin},
@@ -65,7 +67,7 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 		"/plan":             {"browse and edit root-owned structured plans", "[list|create|get|approve|close|reopen] ...", commandSourceBuiltin},
 		"/goal":             {"loop harness: set, run, status, pause, resume, abort, log, list", "[set|run|status|pause|resume|abort|log|list] ...", commandSourceBuiltin},
 		"/loop":             {"schedule a recurring LLM job (session-only)", "[interval job|list|stop [id]]", commandSourceBuiltin},
-		"/workflow":         {"list, inspect, start, or stop loaded workflows", "[list|inspect|start|stop] ...", commandSourceBuiltin},
+		"/workflow":         {"list, inspect, start, stop, or edit workflows", "[list|inspect|start|stop|new|edit] ...", commandSourceBuiltin},
 		"/context":          {"context doctor: system-prompt layer breakdown", "", commandSourceBuiltin},
 		"/effective-prompt": {"context doctor: system-prompt layer breakdown", "", commandSourceBuiltin},
 		"/cost":             {"session token and cost totals", "", commandSourceBuiltin},
@@ -134,7 +136,7 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 }
 
 func TestValidSkillNameRejectsReservedBuiltinsIncludingMDRead(t *testing.T) {
-	for _, name := range []string{"provider", "model", "effort", "autonomy", "mode", "auth", "agent", "agents", "activity", "files", "visualizer", "system", "telemetry", "pets", "fast", "vim", "nano", "md-read", "theme", "layout", "split", "compact", "fork", "undo", "rewind", "session", "rename", "export", "timeline", "copy", "help", "keys", "legend", "memory", "issues", "plan", "goal", "loop", "workflow", "context", "effective-prompt", "cost", "upgrade", "init", "mcp", "lsp", "diagnostics", "exit", "quit", "focus-left", "focus-right", "window-next", "window-prev", "group-next", "group-prev", "scroll-up", "scroll-down", "jump-bottom", "palette", "interrupt", "save-defaults", "leave-editor", "edit-prompt", "agent-next", "mode-next", "tool-prev", "tool-next", "tool-expand", "tool-copy", "tool-review", "tool-apply", "subagent", "parent", "subagent-next", "subagent-prev", "root-new", "root-open", "root-interrupt", "root-hide", "root-filter"} {
+	for _, name := range []string{"provider", "model", "effort", "autonomy", "mode", "auth", "agent", "agents", "activity", "files", "visualizer", "system", "telemetry", "pets", "fast", "vim", "nano", "md-read", "theme", "layout", "split", "compact", "fork", "undo", "rewind", "session", "rename", "export", "timeline", "diag", "diagnostic", "copy", "help", "keys", "legend", "memory", "issues", "plan", "goal", "loop", "workflow", "context", "effective-prompt", "cost", "upgrade", "init", "mcp", "lsp", "diagnostics", "exit", "quit", "focus-left", "focus-right", "window-next", "window-prev", "group-next", "group-prev", "scroll-up", "scroll-down", "jump-bottom", "palette", "interrupt", "save-defaults", "leave-editor", "edit-prompt", "agent-next", "mode-next", "tool-prev", "tool-next", "tool-expand", "tool-copy", "tool-review", "tool-apply", "subagent", "parent", "subagent-next", "subagent-prev", "root-new", "root-open", "root-interrupt", "root-hide", "root-filter"} {
 		if validSkillName(name) {
 			t.Errorf("validSkillName(%q) = true, want false for reserved builtin", name)
 		}

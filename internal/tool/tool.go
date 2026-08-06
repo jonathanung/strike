@@ -105,11 +105,57 @@ type TaskRequest struct {
 	// completion alone does not yield final completed status — the harness runs
 	// these gates and only promotes to completed on pass (else blocked).
 	Verify []VerifyGate
+	// Budget is an optional per-child limit set at spawn. Zero fields inherit
+	// session defaults (engine Options.DefaultChildBudget / config session.agentBudget).
+	// Hard exceed interrupts the child and notifies the owner (#774).
+	Budget AgentBudgetLimits
 	// PlanID/SectionID correlate this child to a plan section refinement
 	// (plan_delegate). Empty for ordinary task spawns. On terminal status the
 	// engine applies structured handoff fields to that section only.
 	PlanID    string
 	SectionID string
+}
+
+// AgentBudgetLimits are optional per-child resource bounds.
+// Zero means unlimited / inherit (soft stall/loop signals still apply).
+// Session maxSessionCostUSD (#577), when present, remains the outer envelope;
+// per-agent MaxCostUSD nests inside it and is only enforced once cost pricing
+// is wired.
+type AgentBudgetLimits struct {
+	MaxWallClockS     int     `json:"max_wall_clock_s,omitempty"`
+	MaxTokens         int     `json:"max_tokens,omitempty"`
+	MaxCostUSD        float64 `json:"max_cost_usd,omitempty"`
+	MaxToolCalls      int     `json:"max_tool_calls,omitempty"`
+	MaxDangerousTools int     `json:"max_dangerous_tools,omitempty"`
+	// StallAfterS hard-escalates after this many seconds without progress.
+	// Zero keeps soft stale signaling only (default 300s observability).
+	StallAfterS int `json:"stall_after_s,omitempty"`
+	// LoopDetectN hard-escalates when the same tool name repeats N times.
+	// Zero keeps soft loop signaling only (default 6).
+	LoopDetectN int `json:"loop_detect_n,omitempty"`
+}
+
+// AgentBudgetSnapshot is the live budget + signal view for task_status / roster.
+type AgentBudgetSnapshot struct {
+	Limits              AgentBudgetLimits `json:"limits,omitempty"`
+	ElapsedS            int               `json:"elapsed_s"`
+	TokensUsed          int               `json:"tokens_used"`
+	CostUSDUsed         float64           `json:"cost_usd_used,omitempty"`
+	ToolCalls           int               `json:"tool_calls"`
+	DangerousTools      int               `json:"dangerous_tools"`
+	WallClockRemainingS *int              `json:"wall_clock_remaining_s,omitempty"`
+	TokensRemaining     *int              `json:"tokens_remaining,omitempty"`
+	ToolCallsRemaining  *int              `json:"tool_calls_remaining,omitempty"`
+	DangerousRemaining  *int              `json:"dangerous_remaining,omitempty"`
+	CostUSDRemaining    *float64          `json:"cost_usd_remaining,omitempty"`
+	// Stall is true when no progress for the stall threshold (soft or hard).
+	// Folds stale-child detection (#517) into the same signal.
+	Stall bool `json:"stall,omitempty"`
+	// Loop is true when the recent tool pattern looks stuck.
+	Loop           bool   `json:"loop,omitempty"`
+	Escalated      bool   `json:"escalated,omitempty"`
+	EscalateKind   string `json:"escalate_kind,omitempty"`
+	EscalateReason string `json:"escalate_reason,omitempty"`
 }
 
 // TaskResult is the outcome of spawning a child session.
@@ -215,6 +261,12 @@ type TaskStatusResult struct {
 	Deps         []string `json:"deps,omitempty"`
 	Version      int      `json:"version,omitempty"`
 	BlockReason  string   `json:"block_reason,omitempty"`
+	// Observability (#774): objective, last action, files, budget remaining.
+	Objective    string              `json:"objective,omitempty"`
+	LastAction   string              `json:"last_action,omitempty"`
+	FilesTouched []string            `json:"files_touched,omitempty"`
+	Budget       AgentBudgetSnapshot `json:"budget,omitempty"`
+	HasBudget    bool                `json:"-"` // omit empty budget object when unset
 }
 
 // TaskReadRequest loads a bounded transcript slice from a child session.
@@ -318,6 +370,13 @@ type AgentRosterMember struct {
 	IsSelf          bool     `json:"is_self"`
 	QueuePools      []string `json:"queue_pools,omitempty"`
 	QueueLabel      string   `json:"queue_label,omitempty"`
+	// Live observability (#774).
+	Objective    string              `json:"objective,omitempty"`
+	LastAction   string              `json:"last_action,omitempty"`
+	BlockReason  string              `json:"block_reason,omitempty"`
+	FilesTouched []string            `json:"files_touched,omitempty"`
+	Budget       AgentBudgetSnapshot `json:"budget,omitempty"`
+	HasBudget    bool                `json:"-"`
 }
 
 // AgentRosterResult is the full team snapshot for agent_roster.
@@ -328,26 +387,73 @@ type AgentRosterResult struct {
 
 // AgentMessageRequest sends one peer message to a teammate.
 // To is a session id (or stable name when aliases are set).
+// Optional coordination-contract fields bind threads, urgency, and ack TTL.
 type AgentMessageRequest struct {
-	To      string
-	Body    string
-	Summary string // optional short UI label
+	To                string
+	Body              string
+	Summary           string  // optional short UI label
+	TaskID            string  // team_task or delegation id (thread key)
+	Urgency           string  // normal|high|blocker
+	Kind              string  // message|request|ack
+	RequireAck        bool    // request explicit ack (implied by kind=request)
+	AckTimeoutSeconds float64 // TTL when require_ack (default 60, max 300)
+	InReplyTo         string  // required for kind=ack
+	EscalateTo        string  // ack-timeout target (default lead)
 }
 
 // AgentMessageResult acknowledges peer delivery (mailbox status vocabulary).
 // Status is queued|accepted|rejected.
 type AgentMessageResult struct {
-	To        string `json:"to"`
-	Status    string `json:"status"`
-	Detail    string `json:"detail,omitempty"`
-	MessageID string `json:"message_id,omitempty"`
-	Dropped   bool   `json:"dropped,omitempty"`
+	To                string  `json:"to"`
+	Status            string  `json:"status"`
+	Detail            string  `json:"detail,omitempty"`
+	MessageID         string  `json:"message_id,omitempty"`
+	Dropped           bool    `json:"dropped,omitempty"`
+	TaskID            string  `json:"task_id,omitempty"`
+	Urgency           string  `json:"urgency,omitempty"`
+	Kind              string  `json:"kind,omitempty"`
+	RequireAck        bool    `json:"require_ack,omitempty"`
+	AckStatus         string  `json:"ack_status,omitempty"` // pending|acked|timed_out
+	AckTimeoutSeconds float64 `json:"ack_timeout_seconds,omitempty"`
+	InReplyTo         string  `json:"in_reply_to,omitempty"`
+	EscalateTo        string  `json:"escalate_to,omitempty"`
 }
 
 // AgentBroadcastRequest sends one body to every other teammate.
 type AgentBroadcastRequest struct {
 	Body    string
 	Summary string
+	TaskID  string // optional thread binding on each copy
+	Urgency string // normal|high|blocker
+}
+
+// AgentThreadRequest reads a task/delegation-bound message thread.
+type AgentThreadRequest struct {
+	TaskID string
+	Limit  int // default 20, max 64
+}
+
+// AgentThreadMessage is one entry in an agent_thread listing.
+type AgentThreadMessage struct {
+	MessageID  string `json:"message_id"`
+	From       string `json:"from"`
+	To         string `json:"to"`
+	Body       string `json:"body"`
+	Summary    string `json:"summary,omitempty"`
+	TaskID     string `json:"task_id,omitempty"`
+	Urgency    string `json:"urgency,omitempty"`
+	Kind       string `json:"kind,omitempty"`
+	RequireAck bool   `json:"require_ack,omitempty"`
+	InReplyTo  string `json:"in_reply_to,omitempty"`
+	EscalateTo string `json:"escalate_to,omitempty"`
+	AckStatus  string `json:"ack_status,omitempty"`
+	CreatedAt  string `json:"created_at,omitempty"` // RFC3339
+}
+
+// AgentThreadResult is the agent_thread tool payload.
+type AgentThreadResult struct {
+	TaskID   string               `json:"task_id"`
+	Messages []AgentThreadMessage `json:"messages"`
 }
 
 // AgentBroadcastDelivery is one recipient outcome from agent_broadcast.
@@ -555,6 +661,8 @@ type Context struct {
 	AgentMessage func(ctx context.Context, req AgentMessageRequest) (AgentMessageResult, error)
 	// AgentBroadcast sends a peer mailbox message to all other teammates.
 	AgentBroadcast func(ctx context.Context, req AgentBroadcastRequest) (AgentBroadcastResult, error)
+	// AgentThread lists messages bound to a task_id / delegation id on the team.
+	AgentThread func(ctx context.Context, req AgentThreadRequest) (AgentThreadResult, error)
 	// TeamTask creates/lists/updates/claims/completes shared team board items.
 	TeamTask func(ctx context.Context, req TeamTaskRequest) (TeamTaskResult, error)
 	// Delegate creates/lists/transitions first-class delegation lifecycle objects.

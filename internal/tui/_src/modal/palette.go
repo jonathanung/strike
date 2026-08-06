@@ -59,7 +59,7 @@ func newPaletteModal(specs []commandSpec, agents []string, availability paletteA
 	return &paletteModal{entries: buildPaletteEntries(specs, agents, availability)}
 }
 
-// workflowPaletteEntries builds list/start/stop palette rows for /workflow.
+// workflowPaletteEntries builds list/start/stop/edit palette rows for /workflow.
 func workflowPaletteEntries(availability paletteAvailability) []paletteEntry {
 	var out []paletteEntry
 	out = append(out, paletteEntry{
@@ -67,6 +67,12 @@ func workflowPaletteEntries(availability paletteAvailability) []paletteEntry {
 		Label:       "/workflow list",
 		Description: "list loaded workflows by source",
 		Action:      paletteAction{Kind: paletteActionBuiltin, Value: "/workflow list"},
+	})
+	out = append(out, paletteEntry{
+		ID:          "workflow:new",
+		Label:       "/workflow new",
+		Description: "open visual builder to create a workflow (save does not start)",
+		Action:      paletteAction{Kind: paletteActionBuiltin, Value: "/workflow new"},
 	})
 	if availability.ActiveWorkflow != "" {
 		stop := paletteEntry{
@@ -114,6 +120,12 @@ func workflowPaletteEntries(availability paletteAvailability) []paletteEntry {
 			Label:       "/workflow inspect " + display,
 			Description: "inspect " + src + " workflow phases and grants",
 			Action:      paletteAction{Kind: paletteActionBuiltin, Value: "/workflow inspect " + name},
+		})
+		out = append(out, paletteEntry{
+			ID:          "workflow:edit:" + name,
+			Label:       "/workflow edit " + display,
+			Description: "edit " + src + " workflow in visual builder (save does not start)",
+			Action:      paletteAction{Kind: paletteActionBuiltin, Value: "/workflow edit " + name},
 		})
 	}
 	return out
@@ -238,7 +250,7 @@ func paletteBuiltinDisabled(id commandID, availability paletteAvailability) stri
 		commandScrollUp, commandScrollDown, commandJumpBottom,
 		commandPalette, commandInterrupt, commandLeaveEditor:
 		return ""
-	case commandVim, commandNano, commandMDRead, commandThink, commandTelemetry, commandExport, commandTimeline, commandCopy, commandContext, commandEffectivePrompt, commandCost, commandMCP, commandLSP, commandDiagnostics, commandRename,
+	case commandVim, commandNano, commandMDRead, commandThink, commandTelemetry, commandExport, commandTimeline, commandDiag, commandDiagnostic, commandCopy, commandContext, commandEffectivePrompt, commandCost, commandMCP, commandLSP, commandDiagnostics, commandRename,
 		commandAgents, commandActivity, commandFiles, commandVisualizer, commandSystem,
 		commandToolPrev, commandToolNext, commandToolExpand, commandToolCopy, commandToolReview, commandToolApply,
 		commandSubagent, commandParent, commandSubagentNext, commandSubagentPrev,

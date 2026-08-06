@@ -65,7 +65,7 @@ func softCoalesceEvent(ev protocol.Event) bool {
 	case protocol.TextDelta, protocol.ReasoningDelta,
 		// Team UI: roster snapshots and peer mail can flood under broadcast;
 		// coalesce paints so the activity/agents panes stay responsive (#614).
-		protocol.TeamRoster, protocol.AgentMessage:
+		protocol.TeamRoster, protocol.AgentMessage, protocol.AgentContractTimeout:
 		return true
 	default:
 		return false

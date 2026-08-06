@@ -26,6 +26,8 @@ const modulePath = "github.com/jonathanung/strike-cli"
 //   - pkg/redact imports the standard library only.
 //   - pkg/timeline may import only the standard library, pkg/protocol, and
 //     pkg/redact.
+//   - pkg/diag may import only the standard library, pkg/protocol, and
+//     pkg/redact.
 //   - pkg/sdk may import only the standard library and pkg/protocol.
 //   - no backend package (internal/* except internal/tui/**) imports
 //     internal/tui/**.
@@ -173,6 +175,18 @@ func boundaryViolation(pkgDir, imp string) string {
 			return ""
 		}
 		return "pkg/timeline may only import stdlib, pkg/protocol, and pkg/redact"
+
+	case pkgDir == "pkg/diag" || strings.HasPrefix(pkgDir, "pkg/diag/"):
+		if !strings.Contains(imp, ".") {
+			return "" // stdlib
+		}
+		if imp == modulePath+"/pkg/protocol" || strings.HasPrefix(imp, modulePath+"/pkg/protocol/") {
+			return ""
+		}
+		if imp == modulePath+"/pkg/redact" || strings.HasPrefix(imp, modulePath+"/pkg/redact/") {
+			return ""
+		}
+		return "pkg/diag may only import stdlib, pkg/protocol, and pkg/redact"
 
 	case pkgDir == "pkg/sdk" || strings.HasPrefix(pkgDir, "pkg/sdk/"):
 		if !strings.Contains(imp, ".") {

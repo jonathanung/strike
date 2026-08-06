@@ -63,6 +63,13 @@ type Options struct {
 	Select    SelectFunc
 	Registry  *tool.Registry
 	WorkDir   string
+	// Verify declares independent completion gates for solo/root turns (and
+	// custom harness paths that use the built-in turn loop). When non-empty, a
+	// successful claim (stopReason end_turn) runs gates via internal/verify,
+	// emits verification.started/completed, and attaches the report on
+	// TurnCompleted. Distinct from task/delegate child gates (#780). Model
+	// self-report cannot pass a configured gate (#806).
+	Verify []tool.VerifyGate
 	// InitialProvider/InitialModel are tried once at startup; failure is
 	// silent (the user selects interactively later).
 	InitialProvider string
@@ -206,6 +213,11 @@ type Options struct {
 	// (session.overlapPolicy). Empty defaults to warn. Applied to Team
 	// ownership when the root team is created or inherited.
 	OverlapPolicy string
+	// DefaultChildBudget is the session default for per-child limits (#774).
+	// Spawn-time task budget fields overlay non-zero values. Zero fields mean
+	// unlimited (soft stall/loop signals still apply). Nested under any future
+	// session maxSessionCostUSD (#577) outer envelope.
+	DefaultChildBudget tool.AgentBudgetLimits
 	// PersistSessionMeta, when set, writes durable session metadata (sidecar).
 	// The engine emits protocol.SessionMeta after a successful persist.
 	PersistSessionMeta func(meta protocol.SessionMeta) error

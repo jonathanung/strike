@@ -46,6 +46,8 @@ const (
 	commandRename          commandID = "rename"
 	commandExport          commandID = "export"
 	commandTimeline        commandID = "timeline"
+	commandDiag            commandID = "diag"
+	commandDiagnostic      commandID = "diagnostic"
 	commandCopy            commandID = "copy"
 	commandMemory          commandID = "memory"
 	commandQueue           commandID = "queue"
@@ -148,6 +150,8 @@ var builtinCommandSpecs = []commandSpec{
 	{ID: commandRename, Name: "/rename", Description: "rename the current session", ArgsHint: "[title]", Source: commandSourceBuiltin},
 	{ID: commandExport, Name: "/export", Description: "export the conversation to markdown", ArgsHint: "[path] [--open]", Source: commandSourceBuiltin},
 	{ID: commandTimeline, Name: "/timeline", Description: "structured run timeline (collapsed view or JSON export)", ArgsHint: "[export [path]]", Source: commandSourceBuiltin},
+	{ID: commandDiag, Name: "/diag", Description: "export prompt/config diagnostic bundle (JSON)", ArgsHint: "[export [path]]", Source: commandSourceBuiltin},
+	{ID: commandDiagnostic, Name: "/diagnostic", Description: "alias of /diag", ArgsHint: "[export [path]]", Source: commandSourceBuiltin},
 	{ID: commandCopy, Name: "/copy", Description: "copy the last assistant response to the clipboard", Source: commandSourceBuiltin},
 	{ID: commandHelp, Name: "/help", Description: "show available commands", Source: commandSourceBuiltin},
 	{ID: commandKeys, Name: "/keys", Description: "show keyboard shortcuts", ArgsHint: "[reset]", Source: commandSourceBuiltin},
@@ -158,7 +162,7 @@ var builtinCommandSpecs = []commandSpec{
 	{ID: commandPlan, Name: "/plan", Description: "browse and edit root-owned structured plans", ArgsHint: "[list|create|get|approve|close|reopen] ...", Source: commandSourceBuiltin},
 	{ID: commandGoal, Name: "/goal", Description: "loop harness: set, run, status, pause, resume, abort, log, list", ArgsHint: "[set|run|status|pause|resume|abort|log|list] ...", Source: commandSourceBuiltin},
 	{ID: commandLoop, Name: "/loop", Description: "schedule a recurring LLM job (session-only)", ArgsHint: "[interval job|list|stop [id]]", Source: commandSourceBuiltin},
-	{ID: commandWorkflow, Name: "/workflow", Description: "list, inspect, start, or stop loaded workflows", ArgsHint: "[list|inspect|start|stop] ...", Source: commandSourceBuiltin},
+	{ID: commandWorkflow, Name: "/workflow", Description: "list, inspect, start, stop, or edit workflows", ArgsHint: "[list|inspect|start|stop|new|edit] ...", Source: commandSourceBuiltin},
 	{ID: commandContext, Name: "/context", Description: "context doctor: system-prompt layer breakdown", Source: commandSourceBuiltin},
 	{ID: commandEffectivePrompt, Name: "/effective-prompt", Description: "context doctor: system-prompt layer breakdown", Source: commandSourceBuiltin},
 	{ID: commandCost, Name: "/cost", Description: "session token and cost totals", Source: commandSourceBuiltin},
@@ -258,6 +262,8 @@ var reservedCommandNames = map[string]struct{}{
 	"rename":           {},
 	"export":           {},
 	"timeline":         {},
+	"diag":             {},
+	"diagnostic":       {},
 	"copy":             {},
 	"help":             {},
 	"keys":             {},

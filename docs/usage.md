@@ -70,6 +70,8 @@ strike launches without any provider configured. Pick one inside the TUI:
                                # the file to $EDITOR / $VISUAL
 /timeline                      # collapsed structured run timeline
 /timeline export [path]        # versioned redacted JSON/JSONL trace export
+/diag [export [path]]          # prompt/config diagnostic bundle (JSON)
+/diagnostic …                  # alias of /diag
 /copy                          # copy last assistant response to clipboard
                                # (OSC52; also alt+y)
 /vim [path|@path[:line]]       # open file in editor (embedded/modal/takeover)
@@ -152,6 +154,7 @@ strike launches without any provider configured. Pick one inside the TUI:
 | `/rewind` | fork a **new** session from a completed turn (idle only); original session stays listable; bare opens turn picker; `/rewind n` keeps turns 1..n. Workspace file revert is not part of rewind (use `/undo files` on the live session) |
 | `/export` | dump the visible transcript to markdown (user/assistant/tool summaries); redacts credentials via `pkg/redact` (see [secrets.md](secrets.md)); default path under `.strike/exports/` or tmp; `--open` launches `$EDITOR` |
 | `/timeline` | collapsed structured run timeline (turns/tools/provider attempts/children with durations); `/timeline export [path]` writes versioned redacted JSON (or `.jsonl`). Complements session JSONL and agent roster/budget fields — not a second full transcript |
+| `/diag` | export a **versioned prompt/config diagnostic bundle** (JSON): ordered system-prompt layers with source ids/sizes (same map as `/context`), instruction precedence, effective dials (model, effort, leanCode, permission mode, sandbox, compaction, scheduler limits), and config digests — never full secret-bearing files. Default path under `.strike/exports/` or tmp. `/diagnostic` is an alias. Works for solo and child sessions (lineage on the bundle). See [secrets.md](secrets.md) |
 | `/copy` | copy plain text of the last assistant response (not tool output) to the system clipboard via OSC52; same as `alt+y`; notice on success/failure |
 | `/compact` | ask the engine to compact model history |
 | `/memory` | bare = list browser (focuses memory pane); `list [tag]`, `get <key>`, `set <key> <value>`, `rm <key>`, `export [path]`, `import <path> [--replace]` (portable JSON; relative paths stay under project root) |
@@ -161,7 +164,7 @@ strike launches without any provider configured. Pick one inside the TUI:
 | `/telemetry [on\|off\|status]` | local system metrics pane (CPU/RAM/disk); **on by default** (~1 Hz sampler). Disable with `/telemetry off` |
 | `/loop` | schedule a recurring prompt (`15m`, `2h`, …); session-only; `/loop list`, `/loop stop [id]` — see [loop.md](loop.md). Distinct from [`/goal`](goal.md) |
 | `/workflow` | list/inspect/start/stop loaded workflows; start previews phase permission grants; palette expands actions |
-| `/context` | context doctor modal: system-prompt layer sizes, history msg count, **request token attribution** (system / tools / messages / tool_results; local ~4 chars/token estimate, labeled `estimated`), oversized warnings (previews redacted) |
+| `/context` | context doctor modal: system-prompt layer sizes, history msg count, **request token attribution** (system / tools / messages / tool_results; local ~4 chars/token estimate, labeled `estimated`), oversized warnings (previews redacted). Layer order (instruction precedence): shared → tools → config_system\|persona\|provider → phase → plan → lean_code → environment → instruction (AGENTS.md) → project_memory. Skills are user-turn content, not system layers. For a file export of the same map plus config digests, use `/diag` |
 | `/cost` | session input/output/cache totals from usage events; est. USD when catalog rates known; unknown stays explicit |
 | `/init` | light local scan → write `AGENTS.md`; confirms before overwrite |
 | `/ftue` | setup wizard composing provider connect, model pick, optional `/init`, a skippable feature tour (panes, agents, permissions, autonomy, keys, commands), optional scheduler build-system presets (checkbox catalog with rule/limit preview; apply writes global `scheduler.presets` atomically and preserves custom limits/rules), and first-prompt guidance; opening does not change settings; tour copy uses live keybinds and omits unavailable surfaces; Finish focuses the composer; esc dismisses. Finish/dismiss acknowledge global onboarding so auto-open does not repeat; manual `/ftue` stays available. Child pickers/tour/presets return to the same wizard step |
@@ -178,23 +181,27 @@ team-create step. Concurrent roots are independent teams.
 | Capability | How |
 |---|---|
 | Spawn teammates | `task` with optional `name` (stable alias) and `agent` persona |
-| List roster | `agent_roster` |
+| List roster | `agent_roster` (includes objective, last action, files, budget remaining) |
 | Peer message | `agent_message` (`to` = `session_id` or `name`) |
+| Contracts | `agent_message` with `task_id` / `urgency` / `kind=request`+`require_ack`; read via `agent_thread`; ack with `kind=ack` |
 | Fan-out | `agent_broadcast` (all other teammates; use sparingly) |
 | Parent steer only | `task_message` (owned child; not peer chat) |
+| Per-child budgets | `task`/`delegate` `budget` or config `session.agentBudget`; hard exceed → `child.escalated` + interrupt |
+| Live pulse | `task_status` (objective, last_action, files_touched, budget, stall/loop) |
 | Finish signal | `[child.completed]` on the lead (structured handoff JSON) |
 
 Messages land at tool-round / idle boundaries (safe injection). Defaults allow
 in-team messaging; out-of-team targets fail closed; permission deny rules still
-apply. Parent-only flows that never call `agent_*` tools are unchanged.
+apply. Parent-only flows that never call `agent_*` tools are unchanged. Prefer
+contracts (task-bound threads, ack TTL, urgency) over chatty status ping-pong.
 
 **Example — parallel explore + implement with one peer handoff:**
 
 1. Lead: `task(name=explorer, agent=explore, …)` and
    `task(name=implementer, agent=general, …)` in the same turn.
-2. Explorer: `agent_message(to="implementer", body="change X in path Y; tests in Z")`.
-3. Implementer acts on the peer handoff; lead synthesizes from `[child.completed]`
-   structured handoff (`files_changed`, verification, blockers, next action) + inbox.
+2. Explorer: `agent_message(to="implementer", body="change X in path Y; tests in Z", task_id=…, kind="request")`.
+3. Implementer acks (`kind=ack`, `in_reply_to`) and acts; lead synthesizes from
+   `[child.completed]` structured handoff + inbox / `agent_thread`.
 
 Full coordination semantics: [agents-skills.md](agents-skills.md#agent-teams).
 

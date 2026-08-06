@@ -528,6 +528,22 @@ func applyEventToPane(p *rootPane, ev protocol.Event) {
 		applyTeamRosterToPane(p, e)
 	case protocol.AgentMessage:
 		applyAgentMessageToPane(p, e)
+	case protocol.AgentContractTimeout:
+		applyAgentMessageToPane(p, protocol.AgentMessage{
+			Correlation: e.Correlation,
+			From:        e.From,
+			To:          e.To,
+			Body:        e.Detail,
+			Summary:     "ack timeout",
+			TeamID:      e.TeamID,
+			MessageID:   "timeout-" + e.MessageID,
+			TaskID:      e.TaskID,
+			Urgency:     e.Urgency,
+			Kind:        protocol.AgentMessageKindTimeout,
+			InReplyTo:   e.MessageID,
+			EscalateTo:  e.EscalateTo,
+			AckStatus:   "timed_out",
+		})
 	case protocol.SchedulerQueued:
 		if applySchedulerQueuedToChildren(&p.children, e) {
 			break

@@ -46,6 +46,10 @@ func (taskTool) Description() string {
   When set, successful completion enters lifecycle review (not final done) for verification.
 - Optional deps[] (delegation or session ids) keep the task queued until upstream deps are done.
 - Optional subscribe[] notifies the owner on lifecycle states (blocked|review|done|…).
+- Optional budget bounds the child (wall clock, tokens, tool calls, dangerous tools, stall/loop).
+  Exceeding a hard limit interrupts the child, emits child.escalated, and notifies the owner.
+  Session defaults come from config session.agentBudget; spawn fields overlay non-zero values.
+  Session maxSessionCostUSD (when configured) remains the outer cost envelope.
 - Creates a delegation lifecycle object (id dN) even for plain spawns; see also delegate tool.
 - Nested task depth is bounded by MaxChildDepth (default 1: children cannot nest). Bound fan-out.
 - Parent→owned-child control: task_status / task_read / task_message / task_interrupt
@@ -95,6 +99,20 @@ func (taskTool) Schema() json.RawMessage {
 					},
 					"required": ["kind", "value"]
 				}
+			},
+			"budget": {
+				"type": "object",
+				"description": "Optional per-child resource limits (overlay session.agentBudget defaults). Zero/omit = unlimited for that dimension. Hard exceed → child.escalated + interrupt",
+				"properties": {
+					"max_wall_clock_s": {"type": "integer", "description": "Max wall-clock seconds before fail"},
+					"max_tokens": {"type": "integer", "description": "Max accumulated stream tokens before fail"},
+					"max_cost_usd": {"type": "number", "description": "Max USD cost before fail (enforced when cost pricing is available; nests under session maxSessionCostUSD)"},
+					"max_tool_calls": {"type": "integer", "description": "Max tool invocations before fail"},
+					"max_dangerous_tools": {"type": "integer", "description": "Max bash/write/edit/apply_patch/notebook_edit calls before fail"},
+					"stall_after_s": {"type": "integer", "description": "Hard-escalate (block) after this many seconds without progress; soft stale signal always uses 300s default"},
+					"loop_detect_n": {"type": "integer", "description": "Hard-escalate (block) when the same tool name repeats N times; soft loop signal defaults to 6"}
+				},
+				"additionalProperties": false
 			}
 		},
 		"required": ["prompt"]
@@ -102,16 +120,17 @@ func (taskTool) Schema() json.RawMessage {
 }
 
 type taskArgs struct {
-	Prompt    string       `json:"prompt"`
-	Name      string       `json:"name"`
-	Agent     string       `json:"agent"`
-	Model     string       `json:"model"`
-	Effort    string       `json:"effort"`
-	Criteria  []string     `json:"criteria"`
-	Deps      []string     `json:"deps"`
-	Subscribe []string     `json:"subscribe"`
-	Assignee  string       `json:"assignee"`
-	Verify    []VerifyGate `json:"verify"`
+	Prompt    string            `json:"prompt"`
+	Name      string            `json:"name"`
+	Agent     string            `json:"agent"`
+	Model     string            `json:"model"`
+	Effort    string            `json:"effort"`
+	Criteria  []string          `json:"criteria"`
+	Deps      []string          `json:"deps"`
+	Subscribe []string          `json:"subscribe"`
+	Assignee  string            `json:"assignee"`
+	Verify    []VerifyGate      `json:"verify"`
+	Budget    AgentBudgetLimits `json:"budget"`
 }
 
 func (taskTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) (Result, error) {
@@ -143,6 +162,7 @@ func (taskTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 		Subscribe: a.Subscribe,
 		Assignee:  a.Assignee,
 		Verify:    gates,
+		Budget:    a.Budget,
 	})
 	if err != nil {
 		return Result{}, err

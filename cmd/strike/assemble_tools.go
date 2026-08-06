@@ -340,6 +340,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		tool.NewAgentOwnership(),
 		tool.NewAgentMessage(),
 		tool.NewAgentBroadcast(),
+		tool.NewAgentThread(),
 		tool.NewTeamTask(),
 		tool.NewWebFetch(),
 		tool.NewTodoWrite(todoStore),
@@ -620,9 +621,18 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 				// Background context: document sync must not be canceled with the tool call.
 				lspMgr.NotifyFile(context.Background(), absPath, content, deleted)
 			},
-			CollectDiagnostics:         makeLSPCollectDiagnostics(lspMgr, toolDir, cfg.LSP),
-			MaxChildDepth:              cfg.MaxChildDepth,
-			OverlapPolicy:              cfg.Session.OverlapPolicy,
+			CollectDiagnostics: makeLSPCollectDiagnostics(lspMgr, toolDir, cfg.LSP),
+			MaxChildDepth:      cfg.MaxChildDepth,
+			OverlapPolicy:      cfg.Session.OverlapPolicy,
+			DefaultChildBudget: tool.AgentBudgetLimits{
+				MaxWallClockS:     cfg.Session.AgentBudget.MaxWallClockS,
+				MaxTokens:         cfg.Session.AgentBudget.MaxTokens,
+				MaxCostUSD:        cfg.Session.AgentBudget.MaxCostUSD,
+				MaxToolCalls:      cfg.Session.AgentBudget.MaxToolCalls,
+				MaxDangerousTools: cfg.Session.AgentBudget.MaxDangerousTools,
+				StallAfterS:       cfg.Session.AgentBudget.StallAfterS,
+				LoopDetectN:       cfg.Session.AgentBudget.LoopDetectN,
+			},
 			InitialProvider:            initialProvider,
 			InitialModel:               initialModel,
 			InitialEffort:              initialEffort,
@@ -803,7 +813,10 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	services.MCP = local.NewMCP(mcpMgr)
 	services.LSP = local.NewLSP(lspMgr)
 	services.Telemetry = local.NewTelemetry()
-	services.Workflows = local.NewWorkflows(workflows)
+	services.Workflows = local.NewWorkflowsWithOpts(workflows, nil, local.WorkflowsOpts{
+		WorkDir: workDir,
+		Agents:  agentNames,
+	})
 	services.WorkflowDrafts = local.NewWorkflowDrafts(workDir)
 
 	spawn := rootSpawner(func(id string) (*rootSlot, error) {
