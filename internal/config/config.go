@@ -85,9 +85,12 @@ type Config struct {
 	// what the OS isolation layer makes possible; permissionMode controls
 	// when the agent is asked. See docs/config.md (two-dial model).
 	Sandbox string `json:"sandbox,omitempty"`
-	// Network holds application-layer egress allowlists (webfetch host/CIDR).
+	// Network holds application-layer egress allowlists (webfetch/websearch host/CIDR).
 	// Distinct from Sandbox Network on/off (bash OS profile). See docs/config.md.
-	Network     NetworkConfig      `json:"network,omitempty"`
+	Network NetworkConfig `json:"network,omitempty"`
+	// WebSearch configures the websearch tool backend (provider + API key env).
+	// Empty means auto-detect (brave when BRAVE_API_KEY is set). See docs/config.md.
+	WebSearch   WebSearchConfig    `json:"webSearch,omitempty"`
 	Permissions permission.Ruleset `json:"permissions,omitempty"`
 	// PermissionPreset selects a shipped named ruleset (read-only|dev|
 	// yolo-with-sandbox) inserted after defaults and before permissions[].
@@ -205,16 +208,31 @@ type ToolRetryConfig struct {
 }
 
 // NetworkConfig is the JSON "network" object — shared allowlist shape for
-// application-layer web egress (webfetch). Bash OS networking stays
-// all-or-nothing via sandbox.Policy.NetworkEnabled; container net can reuse this
-// shape later.
+// application-layer web egress (webfetch, websearch API hosts). Bash OS
+// networking stays all-or-nothing via sandbox.Policy.NetworkEnabled; container
+// net can reuse this shape later.
 type NetworkConfig struct {
 	// Allow lists hostnames (example.com), single-label wildcards
-	// (*.example.com), IP literals, and CIDRs permitted for webfetch.
+	// (*.example.com), IP literals, and CIDRs permitted for webfetch/websearch.
 	// Empty/omitted means unrestricted public hosts (SSRF private blocks
 	// still apply). When a layer sets allow (including []), it replaces the
 	// previous layer's list (project can tighten or clear global).
 	Allow []string `json:"allow,omitempty"`
+}
+
+// WebSearchConfig is the JSON "webSearch" object — backend for the websearch
+// tool. Provider-neutral: add providers without changing the tool contract.
+// Empty provider auto-selects brave when its API key env is set; otherwise
+// websearch returns structured setup guidance (no silent scrape fallback).
+type WebSearchConfig struct {
+	// Provider is the search backend id. Currently "brave". Empty = auto.
+	Provider string `json:"provider,omitempty"`
+	// APIKeyEnv is the environment variable holding the API key.
+	// Empty defaults per provider (brave → BRAVE_API_KEY).
+	APIKeyEnv string `json:"apiKeyEnv,omitempty"`
+	// BaseURL overrides the provider API base (tests / enterprise proxies).
+	// Empty uses the provider default (brave → https://api.search.brave.com).
+	BaseURL string `json:"baseURL,omitempty"`
 }
 
 // SchedulerConfig is the JSON "scheduler" object.
@@ -851,6 +869,10 @@ func read(path string) (Config, error) {
 		}
 		c.Network.Allow = norm
 	}
+	c.WebSearch = NormalizeWebSearch(c.WebSearch)
+	if err := ValidateWebSearch(c.WebSearch); err != nil {
+		return Config{}, fmt.Errorf("%s: %w", path, err)
+	}
 	c.CompactionStrategy = NormalizeCompactionStrategy(c.CompactionStrategy)
 	c.CompactionModel = strings.TrimSpace(c.CompactionModel)
 	c.CompactionThreshold = ClampCompactionThreshold(c.CompactionThreshold)
@@ -1245,6 +1267,24 @@ func DeferToolsEnabled(s string) bool {
 	return NormalizeDeferTools(s) == DeferToolsOn
 }
 
+// NormalizeWebSearch trims webSearch fields.
+func NormalizeWebSearch(c WebSearchConfig) WebSearchConfig {
+	c.Provider = strings.ToLower(strings.TrimSpace(c.Provider))
+	c.APIKeyEnv = strings.TrimSpace(c.APIKeyEnv)
+	c.BaseURL = strings.TrimSpace(c.BaseURL)
+	return c
+}
+
+// ValidateWebSearch rejects unknown providers. Empty provider is valid (auto).
+func ValidateWebSearch(c WebSearchConfig) error {
+	switch c.Provider {
+	case "", "brave":
+		return nil
+	default:
+		return fmt.Errorf("unknown webSearch.provider %q (want brave or empty for auto)", c.Provider)
+	}
+}
+
 func merge(base, layer Config) Config {
 	if layer.Provider != "" {
 		base.Provider = CanonicalProviderID(layer.Provider)
@@ -1306,6 +1346,11 @@ func merge(base, layer Config) Config {
 		out := make([]string, len(layer.Network.Allow))
 		copy(out, layer.Network.Allow)
 		base.Network.Allow = out
+	}
+	// webSearch: any non-empty field on the layer replaces the whole object
+	// (project can override provider/key/baseURL as a unit).
+	if layer.WebSearch.Provider != "" || layer.WebSearch.APIKeyEnv != "" || layer.WebSearch.BaseURL != "" {
+		base.WebSearch = layer.WebSearch
 	}
 	if layer.CompactionStrategy != "" {
 		base.CompactionStrategy = layer.CompactionStrategy

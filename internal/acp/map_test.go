@@ -56,6 +56,7 @@ func TestToolKind(t *testing.T) {
 		"bash":         "execute",
 		"grep":         "search",
 		"webfetch":     "fetch",
+		"websearch":    "search",
 		"todowrite":    "think",
 		"agent_roster": "other",
 	}

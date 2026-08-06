@@ -35,7 +35,7 @@ session worktrees.
 - **off:** argv unchanged (no launcher).
 - Permission hard-denies for `write`/`edit` compile into deny-write paths/globs
   (`permission.CompileSandbox`). Network inside the bash sandbox stays **on**
-  unless both webfetch and mcp are hard-deny on `*`.
+  unless webfetch, websearch, and mcp are all hard-deny on `*`.
 - When `bwrap` / `sandbox-exec` is missing or blocked, bash **degrades** to
   unsandboxed with a one-shot startup warning (unless mode is `off`).
 - Capability blocks that surface as OS errors (`Read-only file system`,

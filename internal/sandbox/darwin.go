@@ -212,7 +212,7 @@ func buildSeatbeltProfile(policy Policy, workDir string) string {
 	}
 	if policy.NetworkEnabled() {
 		b.WriteString(`
-; Network (host networking; off only when webfetch+mcp deny *)
+; Network (host networking; off only when webfetch+websearch+mcp deny *)
 (allow network-outbound)
 (allow network-inbound)
 (allow system-socket)
