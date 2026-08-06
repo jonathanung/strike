@@ -252,13 +252,13 @@ func recommendedGuidance(entries []GuidanceEntry) string {
 	add(has("question"),
 		"Use `question` when a decision genuinely belongs to the user.")
 	add(has("task") && has("task_status", "task_read"),
-		"Use `task` for bounded non-blocking delegation (optional `agent`/`model`/`name`). Do not busy-poll `task_status` — prefer `[child.completed]` and the peer inbox. One-off `task_status`/`task_read` only when needed. `task_message` steers owned children; `task_interrupt` cancels. Bound fan-out (MaxChildDepth).")
+		"Use `task` for bounded non-blocking delegation (optional `agent`/`model`/`name`). Do not busy-poll `task_status` — prefer `[child.completed]` structured handoff JSON (summary, files_changed, verification, findings, blockers, recommended_next_action) and the peer inbox. One-off `task_status`/`task_read` only when needed (`task_status` also returns `handoff` when terminal). `task_message` steers owned children; `task_interrupt` cancels. Bound fan-out (MaxChildDepth).")
 	add(has("task") && !has("task_status", "task_read"),
-		"Use `task` for bounded non-blocking delegation (self-contained prompt). A later `[child.completed]` delivers the finished summary — never sleep-poll for task completion.")
+		"Use `task` for bounded non-blocking delegation (self-contained prompt). A later `[child.completed]` delivers a structured handoff JSON — never sleep-poll for task completion.")
 	add(has("agent_roster"),
 		"Use `agent_roster` to list the lead and teammates (session ids, personas, states) on the implicit session team — prefer over status polling when you only need who is live.")
 	add(has("agent_message") || has("agent_broadcast"),
-		"Prefer `agent_message` / `agent_broadcast` for mid-flight coordination (blockers, handoffs, child→lead early). Prefer `[child.completed]` for finished work products. Avoid chatty loops. `task_message` remains parent→owned-child steer only — not a parent-only team control plane.")
+		"Prefer `agent_message` / `agent_broadcast` for mid-flight coordination (blockers, handoffs, child→lead early). Prefer `[child.completed]` structured handoff JSON for finished work products. Avoid chatty loops. `task_message` remains parent→owned-child steer only — not a parent-only team control plane.")
 	add(has("team_task"),
 		"Use `team_task` for a shared claim/assign board across teammates (create/list/update/claim/complete; CAS via expected_version). Prefer `todowrite`/`todoread` for solo lead planning only — not for multi-agent claim coordination.")
 

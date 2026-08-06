@@ -168,7 +168,7 @@ team-create step. Concurrent roots are independent teams.
 | Peer message | `agent_message` (`to` = `session_id` or `name`) |
 | Fan-out | `agent_broadcast` (all other teammates; use sparingly) |
 | Parent steer only | `task_message` (owned child; not peer chat) |
-| Finish signal | `[child.completed]` on the lead |
+| Finish signal | `[child.completed]` on the lead (structured handoff JSON) |
 
 Messages land at tool-round / idle boundaries (safe injection). Defaults allow
 in-team messaging; out-of-team targets fail closed; permission deny rules still
@@ -179,7 +179,8 @@ apply. Parent-only flows that never call `agent_*` tools are unchanged.
 1. Lead: `task(name=explorer, agent=explore, …)` and
    `task(name=implementer, agent=general, …)` in the same turn.
 2. Explorer: `agent_message(to="implementer", body="change X in path Y; tests in Z")`.
-3. Implementer acts on the handoff; lead synthesizes from completion + inbox.
+3. Implementer acts on the peer handoff; lead synthesizes from `[child.completed]`
+   structured handoff (`files_changed`, verification, blockers, next action) + inbox.
 
 Full coordination semantics: [agents-skills.md](agents-skills.md#agent-teams).
 

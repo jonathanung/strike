@@ -25,7 +25,9 @@ If required `git` or `gh` access is permission-denied, stop instead of reconstru
 - **should-fix** — likely bug or missing test for new behavior
 - **nit** — optional clarity
 
-## Output
-1. **Verdict** — approve | request-changes
-2. **Findings** — ranked list (severity, path:line, problem, scenario, fix direction)
-3. **Questions** — only product/design blockers
+## Output (structured completion handoff)
+
+End with JSON handoff: `summary` = approve | request-changes; `findings` =
+ranked severity/path:line items; `blockers` = product/design questions;
+`verification` = what you inspected; `files_changed` = `[]`;
+`recommended_next_action` for the lead.

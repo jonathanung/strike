@@ -434,6 +434,9 @@ func TestTaskStatusTerminalAfterComplete(t *testing.T) {
 	if !strings.Contains(out, "child terminal summary text") && !strings.Contains(out, "task completed") {
 		t.Fatalf("summary missing: %s", out)
 	}
+	if !strings.Contains(out, `"handoff"`) || !strings.Contains(out, `"files_changed"`) {
+		t.Fatalf("want structured handoff on terminal status: %s", out)
+	}
 }
 
 func TestTaskMessageRejectedWhenCompleted(t *testing.T) {

@@ -13,6 +13,12 @@ func TestFormatChildCompletedNoticeIncludesName(t *testing.T) {
 		Status:      protocol.ChildStatusCompleted,
 		Summary:     "done",
 		Name:        "explorer",
+		Handoff: protocol.CompletionHandoff{
+			Summary:      "done",
+			FilesChanged: []string{},
+			Findings:     []string{},
+			Blockers:     []string{},
+		},
 	})
 	if !strings.Contains(got, "name=explorer") {
 		t.Fatalf("notice missing name: %q", got)
@@ -22,5 +28,8 @@ func TestFormatChildCompletedNoticeIncludesName(t *testing.T) {
 	}
 	if !strings.Contains(got, "done") {
 		t.Fatalf("notice missing summary: %q", got)
+	}
+	if !strings.Contains(got, "handoff: ") {
+		t.Fatalf("notice missing handoff JSON: %q", got)
 	}
 }
