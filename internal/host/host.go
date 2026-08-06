@@ -474,6 +474,41 @@ type MCP interface {
 	Disable(name string) error
 }
 
+// LSPServerStatus is one configured language server for /lsp.
+type LSPServerStatus struct {
+	Name       string
+	Command    string
+	State      string // "up", "down", "error", "disabled"
+	Extensions []string
+	Error      string
+	OpenDocs   int
+}
+
+// Diagnostic is one language-server finding for the diagnostics right pane.
+// Line and Character are 1-based for display (LSP wire is 0-based).
+type Diagnostic struct {
+	Path      string
+	Line      int
+	Character int
+	Severity  string // error|warning|info|hint
+	Source    string
+	Code      string
+	Message   string
+}
+
+// LSP reports language server status, control, and collected diagnostics.
+// Nil means the capability is absent; frontends must degrade gracefully.
+type LSP interface {
+	// Statuses returns configured servers in stable order.
+	Statuses() []LSPServerStatus
+	// Retry reconnects name (or every non-up server when name is empty).
+	Retry(name string) error
+	// Disable stops name.
+	Disable(name string) error
+	// Diagnostics returns a stable-ordered snapshot of live-server findings.
+	Diagnostics() []Diagnostic
+}
+
 // TelemetrySample is one local host resource snapshot for the system pane.
 // OK flags distinguish measured zeros from unavailable values — frontends
 // must never render missing metrics as zero.
@@ -667,6 +702,7 @@ type Services struct {
 	Providers  Providers // custom/self-hosted provider CRUD; nil when unsupported
 	Init       ProjectInit
 	MCP        MCP       // external MCP server status; nil when unsupported
+	LSP        LSP       // language server status + diagnostics; nil when unsupported
 	Telemetry  Telemetry // local CPU/RAM/disk; nil when unsupported
 	// SchedulerPresets is the shipped build-system preset catalog and global
 	// apply surface (FTUE #705).

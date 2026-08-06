@@ -1799,3 +1799,40 @@ func TestLoadLSPDiagnosticsOverlay(t *testing.T) {
 		t.Fatalf("servers should remain from global: %#v", cfg.LSP.Servers)
 	}
 }
+
+func TestDefaultLSPServers(t *testing.T) {
+	cfg := Default()
+	want := []string{"go", "typescript", "python", "rust"}
+	for _, name := range want {
+		s, ok := cfg.LSP.Servers[name]
+		if !ok {
+			t.Fatalf("missing default server %q in %#v", name, cfg.LSP.Servers)
+		}
+		if strings.TrimSpace(s.Command) == "" || len(s.Extensions) == 0 {
+			t.Fatalf("%s = %#v", name, s)
+		}
+	}
+	if cfg.LSP.Servers["go"].Command != "gopls" {
+		t.Fatalf("go command = %q", cfg.LSP.Servers["go"].Command)
+	}
+	if len(cfg.LSP.Servers["typescript"].Args) != 1 || cfg.LSP.Servers["typescript"].Args[0] != "--stdio" {
+		t.Fatalf("typescript args = %#v", cfg.LSP.Servers["typescript"].Args)
+	}
+	// Empty servers map in a layer clears defaults (replace semantics).
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	global := filepath.Join(home, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(global), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(global, []byte(`{"lsp":{"servers":{}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.LSP.Servers) != 0 {
+		t.Fatalf("empty servers should clear defaults: %#v", loaded.LSP.Servers)
+	}
+}

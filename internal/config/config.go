@@ -329,6 +329,33 @@ func (c Config) HookRules() permission.HookRuleset {
 func Default() Config {
 	return Config{
 		Provider: "anthropic",
+		// Default language servers (E2.3). Missing binaries degrade to
+		// per-server error status; clear with "lsp": {"servers": {}}.
+		LSP: LSPConfig{Servers: DefaultLSPServers()},
+	}
+}
+
+// DefaultLSPServers is the shipped language-server map: Go, TypeScript,
+// Python, and Rust. First server claiming an extension wins at runtime.
+func DefaultLSPServers() map[string]LSPServer {
+	return map[string]LSPServer{
+		"go": {
+			Command:    "gopls",
+			Extensions: []string{".go"},
+		},
+		"typescript": {
+			Command:    "typescript-language-server",
+			Args:       []string{"--stdio"},
+			Extensions: []string{".ts", ".tsx", ".js", ".jsx"},
+		},
+		"python": {
+			Command:    "pylsp",
+			Extensions: []string{".py"},
+		},
+		"rust": {
+			Command:    "rust-analyzer",
+			Extensions: []string{".rs"},
+		},
 	}
 }
 
