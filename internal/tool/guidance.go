@@ -58,6 +58,10 @@ var shortPurposes = map[string]string{
 	"exit_plan_mode":  "leave plan mode for build or orchestrator",
 	"phase_done":      "advance the active workflow phase gate",
 	"toolsearch":      "search registered tool names/descriptions",
+	"definition":      "go to definition via language server",
+	"references":      "find references via language server",
+	"symbols":         "list document or workspace symbols via language server",
+	"diagnostics":     "query language-server diagnostics for workspace/path",
 }
 
 // BuiltinShortPurposes returns a copy of the built-in name→purpose map.

@@ -520,11 +520,12 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	// StartAll runs after the first root opens; NotifyFile no-ops until then and
 	// when a server is dead (crash isolation).
 	lspMgr := lsp.NewManager(launchDir)
-	// Optional LSP navigation tools (definition/references/symbols). Not core —
+	// Optional LSP tools (definition/references/symbols/diagnostics). Not core —
 	// omitted from provider Tools when deferTools is on until toolsearch/direct call.
 	registry.Register(tool.NewDefinition(lspMgr))
 	registry.Register(tool.NewReferences(lspMgr))
 	registry.Register(tool.NewSymbols(lspMgr))
+	registry.Register(tool.NewDiagnostics(lspMgr))
 
 	// openRoot builds one live root engine. resumeID empty creates a fresh
 	// session; non-empty opens that durable root (subagents rejected).
