@@ -10,11 +10,13 @@ import (
 	"github.com/jonathanung/strike-cli/internal/protocol"
 )
 
-const workflowUsage = `usage: /workflow [list|inspect <name>|start <name>|stop]
+const workflowUsage = `usage: /workflow [list|inspect|start|stop|new|edit] ...
 /workflow list                 # catalog (source, phases, valid)
 /workflow inspect <name>       # phases, gates, fingerprint, grants
 /workflow start <name>         # preview phase grants, then activate
-/workflow stop                 # clear active phase (session history kept)`
+/workflow stop                 # clear active phase (session history kept)
+/workflow new [name]           # visual builder (create; save does not start)
+/workflow edit <name>          # visual builder (edit copy; save does not start)`
 
 func (m Model) handleWorkflowCommand(args []string) (tea.Model, tea.Cmd) {
 	m.resetComposer()
@@ -42,6 +44,18 @@ func (m Model) handleWorkflowCommand(args []string) (tea.Model, tea.Cmd) {
 		return m.workflowStart(strings.Join(args[1:], " "))
 	case "stop", "clear", "end":
 		return m.workflowStop()
+	case "new", "create", "add":
+		name := ""
+		if len(args) >= 2 {
+			name = strings.Join(args[1:], " ")
+		}
+		return m.workflowNew(name)
+	case "edit", "builder", "build":
+		if len(args) < 2 {
+			m.setNotice("workflow: edit requires a name - "+workflowUsage, true)
+			return m, nil
+		}
+		return m.workflowEdit(strings.Join(args[1:], " "))
 	default:
 		// Bare name: treat as inspect when it matches a catalog entry,
 		// otherwise show usage (avoids accidental activation).
@@ -223,6 +237,140 @@ func (m Model) handleWorkflowStartResult(msg workflowStartResultMsg) (tea.Model,
 	}
 	if msg.started {
 		m.setNotice(fmt.Sprintf("workflow: starting %s...", sanitizeDisplayData(msg.name)), false)
+	}
+	return m, nil
+}
+
+func (m Model) workflowNew(name string) (tea.Model, tea.Cmd) {
+	name = strings.TrimSpace(name)
+	var doc host.WorkflowDocument
+	if name == "" {
+		name = "my-workflow"
+	}
+	scaffolded, err := m.services.Workflows.Scaffold(name)
+	if err != nil {
+		// Fall back to a minimal local draft so the builder still opens.
+		doc = host.WorkflowDocument{
+			SchemaVersion: 1,
+			Name:          name,
+			Description:   "TODO: describe this workflow",
+			Phases: []host.WorkflowPhaseDocument{
+				{Name: "step-one", Agent: "build", Gate: "agent"},
+			},
+		}
+		if name == "" {
+			m.setNotice("workflow: "+err.Error(), true)
+			return m, nil
+		}
+	} else {
+		doc = scaffolded
+	}
+	m.clearNotice()
+	m.modal = newWorkflowBuilderModal(
+		m.services.Workflows,
+		m.services.Agents,
+		doc,
+		host.WorkflowScopeProject,
+		true,
+		m.th,
+	)
+	return m, nil
+}
+
+func (m Model) workflowEdit(name string) (tea.Model, tea.Cmd) {
+	name = strings.TrimSpace(name)
+	doc, ok := m.services.Workflows.Document(name)
+	if !ok {
+		// Try summary-only fallback via Get + reconstruct.
+		sum, sok := m.services.Workflows.Get(name)
+		if !sok {
+			m.setNotice(fmt.Sprintf("workflow: unknown %q - /workflow list", name), true)
+			return m, nil
+		}
+		doc = workflowSummaryToDocument(sum)
+	}
+	scope := host.WorkflowScopeProject
+	if sum, ok := m.services.Workflows.Get(name); ok {
+		switch sum.Source {
+		case host.WorkflowSourceGlobal:
+			scope = host.WorkflowScopeGlobal
+		case host.WorkflowSourceProject:
+			scope = host.WorkflowScopeProject
+		default:
+			// builtin/plugin → save as project override by default
+			scope = host.WorkflowScopeProject
+		}
+	}
+	m.clearNotice()
+	m.modal = newWorkflowBuilderModal(
+		m.services.Workflows,
+		m.services.Agents,
+		doc,
+		scope,
+		false,
+		m.th,
+	)
+	return m, nil
+}
+
+func workflowSummaryToDocument(s host.WorkflowSummary) host.WorkflowDocument {
+	doc := host.WorkflowDocument{
+		SchemaVersion: 1,
+		Name:          s.Name,
+		Description:   s.Description,
+	}
+	doc.Phases = make([]host.WorkflowPhaseDocument, 0, len(s.Phases))
+	for _, p := range s.Phases {
+		gate := p.Gate
+		if gate == "" {
+			gate = "agent"
+		}
+		pd := host.WorkflowPhaseDocument{
+			Name:        p.Name,
+			Description: p.Description,
+			Agent:       p.Agent,
+			Gate:        gate,
+			GateCommand: p.GateCommand,
+		}
+		if len(p.Permissions) > 0 {
+			pd.Permissions = append([]host.WorkflowPermission(nil), p.Permissions...)
+		}
+		doc.Phases = append(doc.Phases, pd)
+	}
+	return doc
+}
+
+func (m Model) handleWorkflowBuilderSaved(msg workflowBuilderSavedMsg) (tea.Model, tea.Cmd) {
+	if ed, ok := m.modal.(*workflowBuilderModal); ok {
+		next, cmd := ed.onSaved(msg)
+		if next == nil {
+			m.modal = nil
+			if msg.err == nil {
+				m.setNotice(fmt.Sprintf("workflow: saved %s (not started)", sanitizeDisplayData(msg.name)), false)
+			}
+			promote := m.afterModalClosed()
+			m.refreshAwaitingPermission()
+			m.reflow()
+			return m, tea.Batch(cmd, promote)
+		}
+		m.modal = next
+		return m, cmd
+	}
+	if msg.err != nil {
+		m.setNotice("workflow save: "+msg.err.Error(), true)
+		return m, nil
+	}
+	m.setNotice(fmt.Sprintf("workflow: saved %s (not started)", sanitizeDisplayData(msg.name)), false)
+	return m, nil
+}
+
+func (m Model) handleWorkflowBuilderResult(msg workflowBuilderResultMsg) (tea.Model, tea.Cmd) {
+	if msg.canceled {
+		m.setNotice("workflow: builder canceled", false)
+		return m, nil
+	}
+	if msg.saved {
+		m.setNotice(fmt.Sprintf("workflow: saved %s (not started)", sanitizeDisplayData(msg.name)), false)
 	}
 	return m, nil
 }

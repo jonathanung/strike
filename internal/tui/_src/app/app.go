@@ -1005,6 +1005,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case workflowStartResultMsg:
 		return m.handleWorkflowStartResult(msg)
+	case workflowBuilderSavedMsg:
+		return m.handleWorkflowBuilderSaved(msg)
+	case workflowBuilderResultMsg:
+		return m.handleWorkflowBuilderResult(msg)
 
 	case bangResultMsg:
 		return m.applyBangResult(msg)
