@@ -60,14 +60,14 @@ describe("PluginsPanel", () => {
         if (url.endsWith("/v1/panes") && method === "GET") return response(panes);
         if (url.includes("/v1/plugins/disable")) return response({ ok: true });
         if (url.includes("/v1/plugins/enable")) return response({ ok: true });
-        if (url.includes("/v1/plugins/trust-preview")) {
+        if (url.includes("/trust-preview") && method === "GET") {
           return response({
             id: "acme.pack",
             digest: "sha256:abc",
             reviewLines: ["Grant executable trust for acme.pack?", "mcp: bin/lint"],
           });
         }
-        if (url.includes("/v1/plugins/trust") && method === "POST") return response({ ok: true });
+        if (url.endsWith("/v1/plugins/trust") && method === "POST") return response({ ok: true });
         if (url.includes("/v1/plugins/remove")) return response({ ok: true });
         if (url.includes("/v1/panes/acme.status/mount")) {
           return response({
