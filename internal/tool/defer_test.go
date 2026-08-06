@@ -12,7 +12,8 @@ import (
 func TestIsCoreTool(t *testing.T) {
 	for _, name := range []string{
 		"read", "glob", "grep", "edit", "write", "apply_patch", "bash",
-		"task", "task_status", "wait", "agent_roster", "agent_ownership", "agent_message", "agent_broadcast", "team_task", "toolsearch", "question", "enter_plan_mode",
+		"task", "task_status", "wait", "agent_roster", "agent_ownership", "agent_message", "agent_broadcast", "team_task",
+		"plan_write", "plan_read", "toolsearch", "question", "enter_plan_mode",
 	} {
 		if !IsCoreTool(name) {
 			t.Errorf("IsCoreTool(%q) = false, want true", name)

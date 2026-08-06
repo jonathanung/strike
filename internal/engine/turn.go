@@ -71,6 +71,8 @@ func protocolImagesToProvider(images []protocol.ImageAttachment) []provider.Imag
 
 // enqueueUserInput buffers input for FIFO start after the active turn ends.
 // Empty/whitespace-only text with no images is ignored. Queue survives Interrupt.
+// When full (maxPendingUserInputs), rejects with EngineError code queue_full
+// rather than blocking the Ops sender (explicit backpressure).
 func (e *Engine) enqueueUserInput(op protocol.UserInput) {
 	if strings.TrimSpace(op.Text) == "" && len(op.Images) == 0 {
 		return
@@ -79,6 +81,7 @@ func (e *Engine) enqueueUserInput(op protocol.UserInput) {
 		e.emit(protocol.EngineError{
 			Correlation: e.sessionCorr(),
 			Message:     "input queue full; wait for the current turn to finish",
+			Code:        protocol.ErrorCodeQueueFull,
 		})
 		return
 	}
@@ -124,7 +127,13 @@ func (e *Engine) startNextPendingUserInput(ctx context.Context) bool {
 func (e *Engine) startTurn(ctx context.Context, text string, images []protocol.ImageAttachment) {
 	// Mint turn ID only after input acceptance (provider present, no active turn).
 	turnID := rand.Text()
-	turnCtx, cancel := context.WithCancel(ctx)
+	var turnCtx context.Context
+	var cancel context.CancelFunc
+	if e.opts.TurnTimeout > 0 {
+		turnCtx, cancel = context.WithTimeout(ctx, e.opts.TurnTimeout)
+	} else {
+		turnCtx, cancel = context.WithCancel(ctx)
+	}
 	done := make(chan struct{})
 	finishing := make(chan struct{})
 	e.turnCancel = cancel
@@ -501,13 +510,14 @@ func (e *Engine) appendUnstartedToolResults(calls []provider.ToolCall) {
 // ToolCallEnd for the frontend plus a RoleTool message for the model.
 // EmitEnd is false for unstarted calls (history-only synthetic results).
 type toolFeedback struct {
-	Corr     protocol.Correlation
-	CallID   string
-	Output   string
-	IsError  bool
-	Title    string
-	Metadata json.RawMessage
-	EmitEnd  bool
+	Corr      protocol.Correlation
+	CallID    string
+	Output    string
+	IsError   bool
+	ErrorCode string
+	Title     string
+	Metadata  json.RawMessage
+	EmitEnd   bool
 }
 
 // settleToolFeedback is the formal tool-result feedback path: one place that
@@ -522,6 +532,7 @@ func (e *Engine) settleToolFeedback(fb toolFeedback) provider.Message {
 			Title:       fb.Title,
 			Output:      fb.Output,
 			IsError:     fb.IsError,
+			ErrorCode:   fb.ErrorCode,
 			Metadata:    fb.Metadata,
 		})
 	}
@@ -612,7 +623,7 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 	}
 	// Begin was emitted. Pre-Execute cancel/shutdown check (no Execute).
 	if ctx.Err() != nil {
-		return e.canceledToolResult(call.ID, corr)
+		return e.canceledOrTimeoutToolResult(ctx, call.ID, corr, tool.Result{})
 	}
 
 	// Declarative rules first (cheap, no process). Block skips shell + Execute.
@@ -628,8 +639,8 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 
 	pre, err := e.runToolHooks(ctx, tool.HookEventPreToolUse, call, corr, "", false)
 	if err != nil {
-		if ctx.Err() != nil || errors.Is(err, context.Canceled) {
-			return e.canceledToolResult(call.ID, corr)
+		if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return e.canceledOrTimeoutToolResult(ctx, call.ID, corr, tool.Result{})
 		}
 		return e.settleToolFeedback(toolFeedback{
 			Corr:    corr,
@@ -670,11 +681,12 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 			SchedulerAcquire: func(ctx context.Context, label string, pools ...string) (*scheduler.Lease, error) {
 				return e.acquireScheduler(ctx, corr, label, pools...)
 			},
-			Files:      e.files,
-			SessionID:  e.opts.SessionID,
-			MemberName: e.ownershipMemberName(),
-			Checkpoint: e.checkpoints.Snapshot,
-			TurnDiff:   e.turnDiff,
+			Files:         e.files,
+			SessionID:     e.opts.SessionID,
+			RootSessionID: e.rootSessionID(),
+			MemberName:    e.ownershipMemberName(),
+			Checkpoint:    e.checkpoints.Snapshot,
+			TurnDiff:      e.turnDiff,
 			// Record successful mutations only (post-write), not pre-mutation
 			// snapshots — failed tools must not appear in handoff files_changed.
 			FileSync: func(absPath string, content string, deleted bool) {
@@ -709,6 +721,8 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 			},
 			SwitchAgent:    e.queueSwitchAgent,
 			EnterPlanPhase: e.enterPlanPhase,
+			StartWorkflow:  e.startWorkflow,
+			StopWorkflow:   func() error { e.stopWorkflow(); return nil },
 			AdvancePhase:   e.advancePhase,
 			ReportOutput: func(data string) {
 				if data == "" {
@@ -778,12 +792,28 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 		res, err = t.Execute(ctx, call.Args, tc)
 	}
 
-	// Normalize cancellation after Execute (including permission-wait cancel).
-	if ctx.Err() != nil || errors.Is(err, context.Canceled) {
-		return e.canceledToolResult(call.ID, corr)
+	// Normalize cancellation/deadline after Execute (including permission-wait
+	// cancel). Preserve partial output from the tool when present.
+	// Tool-reported timeout/canceled without a dead ctx settles below so
+	// post-tool hooks still observe the completed call.
+	if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return e.canceledOrTimeoutToolResult(ctx, call.ID, corr, res)
 	}
 
 	output, isError := modelFacingToolOutput(res, err)
+	errCode := res.ErrorCode
+	if errCode == tool.ErrorCodeCanceled || errCode == protocol.ErrorCodeCanceled {
+		// Tool finished with cancel code while ctx is still live (unusual);
+		// mark incomplete for the model without treating it as a turn interrupt.
+		output = protocol.ToolFeedbackCanceledPartial(output)
+		isError = true
+		errCode = protocol.ErrorCodeCanceled
+	} else if errCode == tool.ErrorCodeTimeout || errCode == protocol.ErrorCodeTimeout {
+		isError = true
+		errCode = protocol.ErrorCodeTimeout
+	} else if errCode != "" {
+		isError = true
+	}
 	if pre.Inject != "" {
 		if output == "" {
 			output = pre.Inject
@@ -794,8 +824,8 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 
 	post, postErr := e.runToolHooks(ctx, tool.HookEventPostToolUse, call, corr, output, isError)
 	if postErr != nil {
-		if ctx.Err() != nil || errors.Is(postErr, context.Canceled) {
-			return e.canceledToolResult(call.ID, corr)
+		if ctx.Err() != nil || errors.Is(postErr, context.Canceled) || errors.Is(postErr, context.DeadlineExceeded) {
+			return e.canceledOrTimeoutToolResult(ctx, call.ID, corr, res)
 		}
 		// Post-hook infrastructure errors do not discard a successful tool result.
 	} else if !post.Allow {
@@ -817,13 +847,14 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 	e.fireHookRules(corr, permission.HookEventPostToolUse, call.Name, call.ID)
 
 	msg := e.settleToolFeedback(toolFeedback{
-		Corr:     corr,
-		CallID:   call.ID,
-		Output:   output,
-		IsError:  isError,
-		Title:    res.Title,
-		Metadata: res.Metadata,
-		EmitEnd:  true,
+		Corr:      corr,
+		CallID:    call.ID,
+		Output:    output,
+		IsError:   isError,
+		ErrorCode: errCode,
+		Title:     res.Title,
+		Metadata:  res.Metadata,
+		EmitEnd:   true,
 	})
 	// User reject/dismiss/decline: settle the tool with clear feedback, then
 	// cancel the turn so the agent does not continue as if approved.
@@ -885,17 +916,59 @@ func (e *Engine) recordSessionPR(corr protocol.Correlation) func(tool.SessionPR)
 	}
 }
 
-func (e *Engine) canceledToolResult(callID string, corr protocol.Correlation) provider.Message {
+// canceledOrTimeoutToolResult settles a started tool that ended via cancel or
+// deadline. Partial Output from the tool is preserved and marked incomplete;
+// empty output uses the standard canceled/timeout feedback text.
+func (e *Engine) canceledOrTimeoutToolResult(ctx context.Context, callID string, corr protocol.Correlation, res tool.Result) provider.Message {
+	code := res.ErrorCode
+	switch {
+	case code == tool.ErrorCodeTimeout || code == protocol.ErrorCodeTimeout:
+		code = protocol.ErrorCodeTimeout
+	case code == tool.ErrorCodeCanceled || code == protocol.ErrorCodeCanceled:
+		code = protocol.ErrorCodeCanceled
+	case ctx != nil && errors.Is(ctx.Err(), context.DeadlineExceeded):
+		code = protocol.ErrorCodeTimeout
+	default:
+		code = protocol.ErrorCodeCanceled
+	}
+
+	var output string
+	switch code {
+	case protocol.ErrorCodeTimeout:
+		if strings.TrimSpace(res.Output) != "" && strings.TrimSpace(res.Output) != "(no output)" {
+			output = res.Output
+			if !strings.Contains(output, "timed out") {
+				output = strings.TrimRight(output, "\n") + "\n" + protocol.ToolFeedbackTimeout("")
+			}
+		} else {
+			output = protocol.ToolFeedbackTimeout("")
+		}
+	default:
+		output = protocol.ToolFeedbackCanceledPartial(res.Output)
+	}
+
 	return e.settleToolFeedback(toolFeedback{
-		Corr:    corr,
-		CallID:  callID,
-		Output:  canceledToolOutput,
-		IsError: true,
-		EmitEnd: true,
+		Corr:      corr,
+		CallID:    callID,
+		Output:    output,
+		IsError:   true,
+		ErrorCode: code,
+		Title:     res.Title,
+		Metadata:  res.Metadata,
+		EmitEnd:   true,
 	})
 }
 
 func (e *Engine) failTurn(err error, corr protocol.Correlation, finishing chan struct{}) {
+	if errors.Is(err, context.DeadlineExceeded) {
+		e.emit(protocol.EngineError{
+			Correlation: corr,
+			Message:     "turn deadline exceeded",
+			Code:        protocol.ErrorCodeTimeout,
+		})
+		e.completeTurn(finishing, corr, "timeout")
+		return
+	}
 	if errors.Is(err, context.Canceled) {
 		e.completeTurn(finishing, corr, "interrupted")
 		return

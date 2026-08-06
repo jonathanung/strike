@@ -6,6 +6,7 @@ package engine
 import (
 	"context"
 	"crypto/rand"
+	"strings"
 	"sync"
 	"time"
 
@@ -96,6 +97,11 @@ type Options struct {
 	// 3; set to 1 to disable retries. Retries mint a new attempt identity and
 	// never re-run tools already completed for a prior successful stream.
 	MaxStreamAttempts int
+	// TurnTimeout bounds each turn independently of the Run parent context.
+	// Zero means no per-turn deadline (cancel only via Interrupt / parent ctx).
+	// On expiry the turn ends with stopReason "timeout" and tool results use
+	// error code timeout when applicable.
+	TurnTimeout time.Duration
 	// StreamRetryBackoff returns the wait before starting nextAttempt
 	// (1-based, >=2). nil uses a small exponential default. Tests may return
 	// 0 for instant retries.
@@ -185,6 +191,12 @@ type Options struct {
 	Depth int
 	// ParentSessionID is the spawning session's ID; empty on root engines.
 	ParentSessionID string
+	// RootSessionID is the top-level session id for this lineage. Empty on
+	// construction is filled in New (self when ParentSessionID is empty;
+	// otherwise ParentSessionID as a depth-1 fallback). spawnChild always
+	// passes the resolved root so nested children keep a stable owner id for
+	// plan tools and similar root-owned artifacts.
+	RootSessionID string
 	// Team is the implicit session-scoped agent team (lead + children).
 	// Root engines create one in New when nil. Child engines receive the
 	// lead's shared pointer from spawnChild so nested descendants enroll on
@@ -219,10 +231,15 @@ type Options struct {
 	InitialPriority bool
 	// InitialTitled skips auto SessionTitled when the session was already titled.
 	InitialTitled bool
-	// InitialPhaseWorkflow / InitialPhaseIndex restore an active workflow
-	// phase after agent selection at startup. Empty workflow skips restore.
-	InitialPhaseWorkflow string
-	InitialPhaseIndex    int
+	// InitialPhaseWorkflow / InitialPhaseIndex / InitialPhaseName /
+	// InitialPhaseFingerprint restore an active workflow phase after agent
+	// selection at startup. Empty workflow skips restore. When Fingerprint is
+	// set, resume fail-closes (recovery status) if the loaded definition is
+	// missing or changed; empty Fingerprint is legacy name-only bind.
+	InitialPhaseWorkflow    string
+	InitialPhaseIndex       int
+	InitialPhaseName        string
+	InitialPhaseFingerprint string
 	// InitialAlwaysGrants restores session DecisionAlways rules after the
 	// initial agent profile is applied (SetAgentRules clears grants).
 	InitialAlwaysGrants permission.Ruleset
@@ -367,8 +384,11 @@ type Engine struct {
 	pendingAgent   string
 
 	// workflow/phaseIndex track the active workflow phase (-1 = none).
-	workflow   config.Workflow
-	phaseIndex int
+	// phaseRecovery is non-empty (missing|mismatch) when resume could not bind
+	// the fingerprinted definition; permissions are not applied until stop/restart.
+	workflow      config.Workflow
+	phaseIndex    int
+	phaseRecovery string
 
 	// files tracks tool read snapshots so external edits (FilesChanged / /vim)
 	// force the model to re-read before edit/write.
@@ -411,6 +431,14 @@ type Engine struct {
 func New(opts Options) *Engine {
 	if opts.SessionID == "" {
 		opts.SessionID = rand.Text()
+	}
+	if opts.RootSessionID == "" {
+		if opts.ParentSessionID == "" {
+			opts.RootSessionID = opts.SessionID
+		} else {
+			// Depth-1 fallback when spawn forgot to set RootSessionID.
+			opts.RootSessionID = opts.ParentSessionID
+		}
 	}
 	if len(opts.Agents) == 0 {
 		opts.Agents = []Agent{{Name: "build", Description: "general coding agent"}}
@@ -533,6 +561,24 @@ func (e *Engine) baseCorr() protocol.Correlation {
 	}
 }
 
+// rootSessionID returns the lineage root session id for root-owned artifacts
+// (plans). Prefer Options.RootSessionID, then team lead, then self when this
+// engine is a root.
+func (e *Engine) rootSessionID() string {
+	if id := strings.TrimSpace(e.opts.RootSessionID); id != "" {
+		return id
+	}
+	if e.team != nil {
+		if id := strings.TrimSpace(e.team.LeadID()); id != "" {
+			return id
+		}
+	}
+	if strings.TrimSpace(e.opts.ParentSessionID) == "" {
+		return e.opts.SessionID
+	}
+	return strings.TrimSpace(e.opts.ParentSessionID)
+}
+
 // sessionCorr is session-only correlation for selection events and
 // rejected ops that never enter a turn.
 func (e *Engine) sessionCorr() protocol.Correlation {
@@ -594,12 +640,11 @@ func (e *Engine) Run(ctx context.Context) {
 		_ = e.enterPlanPhase()
 	}
 	// Resume: re-enter the recorded workflow phase after mode so a restored
-	// implement/custom phase is not clobbered by plan-mode enterPlanPhase,
-	// then re-seed session always-grants (SetAgentRules cleared them).
+	// implement/custom phase is not clobbered by plan-mode enterPlanPhase.
+	// Fingerprint bind fail-closes into recovery when the def is missing/changed.
+	// Then re-seed session always-grants (SetAgentRules cleared them).
 	if wf := e.opts.InitialPhaseWorkflow; wf != "" {
-		if w, ok := e.findWorkflow(wf); ok {
-			_ = e.enterPhase(w, e.opts.InitialPhaseIndex)
-		}
+		e.restoreWorkflowPhase(wf, e.opts.InitialPhaseIndex, e.opts.InitialPhaseName, e.opts.InitialPhaseFingerprint)
 	}
 	if len(e.opts.InitialAlwaysGrants) > 0 {
 		e.perms.SeedAlwaysGrants(e.opts.InitialAlwaysGrants)

@@ -61,6 +61,26 @@ func TestDefaultsIncludesTeamMessagingAllow(t *testing.T) {
 	}
 }
 
+func TestDefaultsIncludesPlanToolsAllow(t *testing.T) {
+	// Independent of write/edit so plan mode can revise structured plans.
+	for _, perm := range []string{"plan_write", "plan_read"} {
+		if got := Evaluate(perm, "*", Defaults()); got != Allow {
+			t.Errorf("Defaults %s = %q, want allow", perm, got)
+		}
+	}
+	// Plan phase hard-denies write/edit without touching plan_*.
+	phase := Ruleset{
+		{Permission: "write", Pattern: "*", Action: Deny},
+		{Permission: "edit", Pattern: "*", Action: Deny},
+	}
+	if got := Evaluate("plan_write", "*", Defaults(), phase); got != Allow {
+		t.Errorf("plan_write under write/edit deny = %q, want allow", got)
+	}
+	if got := Evaluate("write", "x.go", Defaults(), phase); got != Deny {
+		t.Errorf("write under phase deny = %q, want deny", got)
+	}
+}
+
 func TestDenyRuleAgentMessageBlocks(t *testing.T) {
 	// Config/agent deny must hard-block agent_message without prompting.
 	base := Defaults()

@@ -162,5 +162,8 @@ func TestUserInputQueueFullEmitsError(t *testing.T) {
 	if ev == nil {
 		t.Fatal("expected queue full EngineError")
 	}
+	if errEv, ok := ev.(protocol.EngineError); !ok || errEv.Code != protocol.ErrorCodeQueueFull {
+		t.Fatalf("EngineError = %#v, want code %q", ev, protocol.ErrorCodeQueueFull)
+	}
 	close(release)
 }
