@@ -68,6 +68,7 @@ func TestPaletteContainsOnlySupportedActionsWithStableMetadata(t *testing.T) {
 		{ID: "command:plan", Label: "/plan", Description: "browse and edit root-owned structured plans", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/plan"}},
 		{ID: "command:goal", Label: "/goal", Description: "loop harness: set, run, status, pause, resume, abort, log, list", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/goal"}},
 		{ID: "command:loop", Label: "/loop", Description: "schedule a recurring LLM job (session-only)", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/loop"}},
+		{ID: "workflow:list", Label: "/workflow list", Description: "list loaded workflows by source", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/workflow list"}},
 		{ID: "command:context", Label: "/context", Description: "context doctor: system-prompt layer breakdown", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/context"}},
 		{ID: "command:effective-prompt", Label: "/effective-prompt", Description: "context doctor: system-prompt layer breakdown", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/effective-prompt"}},
 		{ID: "command:cost", Label: "/cost", Description: "session token and cost totals", Action: paletteAction{Kind: paletteActionBuiltin, Value: "/cost"}},
@@ -469,5 +470,48 @@ func runPaletteCmd(t *testing.T, cmd tea.Cmd) tea.Msg {
 	case <-time.After(paletteCmdTimeout):
 		t.Fatalf("tea command did not complete within %s", paletteCmdTimeout)
 		return nil
+	}
+}
+
+func TestWorkflowPaletteEntriesExpandCatalog(t *testing.T) {
+	av := paletteAvailability{
+		HasProvider:    true,
+		ActiveWorkflow: "plan-implement",
+		WorkflowCatalog: []host.WorkflowSummary{
+			{
+				Name: "plan-implement", Source: host.WorkflowSourceBuiltin, Valid: true,
+				Description: "plan then implement",
+				Phases:      []host.WorkflowPhaseSummary{{Name: "plan"}},
+			},
+			{
+				Name: "broken", Source: host.WorkflowSourceGlobal, Valid: false,
+				ValidationError: "no phases",
+			},
+		},
+	}
+	entries := workflowPaletteEntries(av)
+	var ids []string
+	for _, e := range entries {
+		ids = append(ids, e.ID)
+		switch e.ID {
+		case "workflow:start:broken":
+			if e.DisabledReason == "" || !strings.Contains(e.DisabledReason, "invalid") {
+				t.Fatalf("broken start disabled = %q", e.DisabledReason)
+			}
+		case "workflow:stop":
+			if e.Action.Value != "/workflow stop" {
+				t.Fatalf("stop action = %#v", e.Action)
+			}
+		case "workflow:start:plan-implement":
+			if e.Action.Value != "/workflow start plan-implement" {
+				t.Fatalf("start action = %#v", e.Action)
+			}
+		}
+	}
+	joined := strings.Join(ids, ",")
+	for _, want := range []string{"workflow:list", "workflow:stop", "workflow:start:plan-implement", "workflow:inspect:plan-implement", "workflow:start:broken"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("missing %s in %s", want, joined)
+		}
 	}
 }

@@ -60,6 +60,8 @@ func eventType(ev Event) string {
 		return "agent.selected"
 	case PhaseChanged:
 		return "phase.changed"
+	case PhaseGrantApproved:
+		return "phase.grant_approved"
 	case EffortSelected:
 		return "effort.selected"
 	case AutonomySelected:
@@ -179,6 +181,8 @@ func (e Envelope) Decode() (Event, error) {
 		ev = &AgentSelected{}
 	case "phase.changed":
 		ev = &PhaseChanged{}
+	case "phase.grant_approved":
+		ev = &PhaseGrantApproved{}
 	case "effort.selected":
 		ev = &EffortSelected{}
 	case "autonomy.selected":
@@ -277,6 +281,8 @@ func deref(ev Event) Event {
 	case *AgentSelected:
 		return *v
 	case *PhaseChanged:
+		return *v
+	case *PhaseGrantApproved:
 		return *v
 	case *EffortSelected:
 		return *v

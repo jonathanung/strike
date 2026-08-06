@@ -463,7 +463,7 @@ func TestNormalPermissionLayersStillAskAndDeny(t *testing.T) {
 }
 
 func TestWarningTextAndPreflightFailuresDoNotWarn(t *testing.T) {
-	const wantWarning = "WARNING: --dangerously-skip-permissions is enabled; configured permission asks are skipped for this invocation. Active agent permission denies still apply."
+	const wantWarning = "WARNING: --dangerously-skip-permissions is enabled; configured permission asks are skipped for this invocation. Active agent permission denies still apply. Workflow phase permission widening is auto-accepted; hard sandbox and path protections are unchanged."
 	if dangerousPermissionsWarning != wantWarning {
 		t.Errorf("warning = %q, want %q", dangerousPermissionsWarning, wantWarning)
 	}

@@ -889,9 +889,29 @@ type PhaseChanged struct {
 	Phase       string `json:"phase,omitempty"`
 	Index       int    `json:"index,omitempty"`
 	Gate        string `json:"gate,omitempty"`        // agent | check | user | skip (effective; from autonomy)
-	Source      string `json:"source,omitempty"`      // builtin | global | project
+	Source      string `json:"source,omitempty"`      // builtin | global | project | plugin
 	Fingerprint string `json:"fingerprint,omitempty"` // canonical SHA-256 of formatted def
 	Status      string `json:"status,omitempty"`      // empty | missing | mismatch
+}
+
+// PhaseGrantRule is one effective permission widening approved for a phase.
+type PhaseGrantRule struct {
+	Permission string `json:"permission"`
+	Pattern    string `json:"pattern"`
+	Action     string `json:"action"` // allow | ask
+}
+
+// PhaseGrantApproved records acceptance of workflow phase permission
+// widenings (user review or --auto / --dangerously-skip-permissions).
+// Resume skips re-prompt when Fingerprint and Grants still match.
+type PhaseGrantApproved struct {
+	Correlation
+	Workflow    string           `json:"workflow"`
+	Phase       string           `json:"phase"`
+	Index       int              `json:"index"`
+	Fingerprint string           `json:"fingerprint"`
+	Grants      []PhaseGrantRule `json:"grants"`
+	Auto        bool             `json:"auto,omitempty"`
 }
 
 // EffortSelected confirms the active reasoning level, at startup and after
@@ -1203,6 +1223,7 @@ func (HarnessProgress) isEvent()        {}
 func (ModelSelected) isEvent()          {}
 func (AgentSelected) isEvent()          {}
 func (PhaseChanged) isEvent()           {}
+func (PhaseGrantApproved) isEvent()     {}
 func (EffortSelected) isEvent()         {}
 func (AutonomySelected) isEvent()       {}
 func (PermissionModeSelected) isEvent() {}

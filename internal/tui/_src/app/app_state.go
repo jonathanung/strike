@@ -593,10 +593,15 @@ func (m Model) hasContextMeter() bool {
 }
 
 func (m Model) currentPaletteAvailability() paletteAvailability {
-	return paletteAvailability{
-		HasProvider: m.providerName != "",
-		TurnRunning: m.turnRunning,
+	av := paletteAvailability{
+		HasProvider:    m.providerName != "",
+		TurnRunning:    m.turnRunning,
+		ActiveWorkflow: m.phaseWorkflow,
 	}
+	if m.services.Workflows != nil {
+		av.WorkflowCatalog = m.services.Workflows.List()
+	}
+	return av
 }
 
 func (m *Model) refreshOpenPalette() {

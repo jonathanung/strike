@@ -599,6 +599,22 @@ per file). A dead language server degrades to no injection.
 - `/lsp disable <name>` — stop a server for the session
 - `/diagnostics` — focus the right-pane diagnostics browser (findings from live servers; Enter opens the file)
 
+### Navigation tools (optional)
+
+Three read-only tools call the language server for code navigation. They are
+**not** core tools: when `deferTools` is `on`, their schemas stay out of the
+hot provider Tools array until `toolsearch` discovers them (or the model calls
+them by name).
+
+| Tool | LSP method | Args |
+|---|---|---|
+| `definition` | `textDocument/definition` | `filePath`, `line` (1-based), optional `character` (0-based) |
+| `references` | `textDocument/references` | same position args; includes declaration |
+| `symbols` | `textDocument/documentSymbol` or `workspace/symbol` | `filePath` and/or `query` |
+
+A missing or dead language server returns a soft message in the tool result
+(never takes down the session). Default permission is Allow (read-only).
+
 ## MCP servers (stdio + HTTP)
 
 Connect external [Model Context Protocol](https://modelcontextprotocol.io)

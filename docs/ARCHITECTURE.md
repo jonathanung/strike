@@ -64,9 +64,9 @@ TUI rendered from (see `pkg/protocol/codec.go`).
 | `internal/provider/{anthropic,openaicompat,chatgpt,google,echo}` | Concrete adapters (openaicompat covers OpenAI platform API, xAI, Kimi, DeepSeek; chatgpt is the ChatGPT-subscription backend; google is Google AI Studio generateContent; echo is the offline dev provider) | `provider`, `provider/base` (all but echo), stdlib |
 | `internal/sandbox` | OS-primitive process sandbox: `Wrap(argv, Policy)` via Linux `bwrap` / macOS `sandbox-exec`; Policy carries mode, write denials, `NoNetwork` (host net on by default), and optional `NetworkAllow` host/CIDR list (webfetch; shared shape for future container net); `Explain`/`ProfileText` for `/sandbox explain`; graceful degrade + startup warning when unavailable | stdlib only |
 | `internal/scheduler` | Fair cancellable named-pool admission (process/build/test/model/container): context-aware acquire, atomic multi-pool leases, observer snapshots; layered limits + ordered command classification (`Compile` / `CompileWithPresets` → `Effective`); versioned build-system presets (`Catalog`, expand into ordinary limits/rules) | stdlib only |
-| `internal/tool` | Tool contract (`Tool`, `Context`, `Result`, `CodedError`) + built-ins: read/glob/grep/edit/write/apply_patch/bash/task/task_status/task_read/task_message/task_interrupt/wait/agent_roster/agent_ownership/agent_message/agent_broadcast/team_task/webfetch/todowrite/todoread/memory_write/memory_read/issue_write/issue_read/plan_write/plan_read/plan_delegate/notebook_edit/sleep/skill/question/enter_plan_mode/exit_plan_mode/phase_done/toolsearch; FS tx safety (`FileState` freshness + optional `baseHash`, atomic temp+rename writes, `TurnDiff` create/update/delete); `PathOwnership` multi-agent path claims; bash acquires scheduler pools after Ask; file tools call `FileSync` + `CollectDiagnostics` after mutations; plan tools use `RootSessionID` for ownership; `plan_delegate` correlates sections to task children with content CAS apply | `provider` (for `ToolSchema`), `memory`, `issue`, `plan`, `sandbox`, `scheduler`, stdlib |
+| `internal/tool` | Tool contract (`Tool`, `Context`, `Result`, `CodedError`) + built-ins: read/glob/grep/edit/write/apply_patch/bash/task/task_status/task_read/task_message/task_interrupt/wait/agent_roster/agent_ownership/agent_message/agent_broadcast/team_task/webfetch/todowrite/todoread/memory_write/memory_read/issue_write/issue_read/plan_write/plan_read/plan_delegate/notebook_edit/sleep/skill/question/enter_plan_mode/exit_plan_mode/phase_done/toolsearch/definition/references/symbols; FS tx safety (`FileState` freshness + optional `baseHash`, atomic temp+rename writes, `TurnDiff` create/update/delete); `PathOwnership` multi-agent path claims; bash acquires scheduler pools after Ask; file tools call `FileSync` + `CollectDiagnostics` after mutations; plan tools use `RootSessionID` for ownership; `plan_delegate` correlates sections to task children with content CAS apply; LSP nav tools use `LSPNavigator` | `provider` (for `ToolSchema`), `memory`, `issue`, `plan`, `lsp`, `sandbox`, `scheduler`, stdlib |
 | `internal/mcp` | MCP client (stdio + streamable HTTP) + session manager; bridges tools onto `tool.Registry` as `mcp_<server>_<tool>`; retry/disable; tools-only stdio **server** (`Server`) for `strike mcp-serve` | `tool`, stdlib, net/http |
-| `internal/lsp` | LSP client (JSON-RPC 2.0 over stdio, Content-Length framing) + manager; extension→server registry; didOpen/didChange/didClose from file tools; collect `publishDiagnostics`; inject formatted diagnostics into file-tool Results (`CollectForPaths`); crash isolation | stdlib, os/exec |
+| `internal/lsp` | LSP client (JSON-RPC 2.0 over stdio, Content-Length framing) + manager; extension→server registry; didOpen/didChange/didClose from file tools; collect `publishDiagnostics`; inject formatted diagnostics into file-tool Results (`CollectForPaths`); navigation requests (definition/references/document+workspace symbols) for deferred tools; crash isolation | stdlib, os/exec |
 | `internal/memory` | Project-scoped durable key/value memory (JSON under `~/.strike/memory/`) | stdlib |
 | `internal/issue` | Project-scoped durable issues (JSON under `~/.strike/issues/`) | stdlib |
 | `internal/goal` | Loop harness: goals, JSONL iterations/events, guards, critic, hooks | stdlib |
@@ -325,6 +325,10 @@ branch in `internal/tui/view.go` for the pattern.
 1. Implement `tool.Tool` (`Name`, `Description`, `Schema`, `Execute`) in a new
    file under `internal/tool/` — `internal/tool/glob.go` is a minimal
    example; `edit.go`/`write.go`/`bash.go` show the permission-ask pattern.
+   Prefer also implementing `Contract() tool.Contract` (side-effect class +
+   idempotency; see `internal/tool/contract.go`). Registry helpers
+   `Contract`/`Contracts` document these fields; tools without `Contract`
+   default to `external` + `conditional`.
 2. Register it in the `tool.NewRegistry(...)` call in `cmd/strike/assemble_tools.go`.
   3. If it mutates state or has side effects, call
      `tc.Ask(ctx, tool.AskRequest{Permission: "yourperm", Patterns: []string{...}})`
@@ -332,6 +336,10 @@ branch in `internal/tui/view.go` for the pattern.
      `permission.Defaults()` in `internal/permission/permission.go` (Allow for
      read-only, Ask for anything mutating — see the existing defaults; reuse
      `edit`/`write`/`bash` when the new tool is the same class of action).
+     Prefer structured failures via `tool.ErrInvalidArgs` /
+     `tool.ErrPrecondition` / … so the engine can settle stable
+     `protocol.ToolResultError` codes on `ToolCallEnd` and
+     `provider.ToolResult.ErrorCode`.
   4. No `internal/tui` change is needed for a generic tool: tool calls render
     from `protocol.ToolCallBegin`/`ToolCallEnd` via `toolCell` in
     `internal/tui/cells.go` (name, title, output preview, ok/err glyph).
@@ -355,10 +363,11 @@ Two different mechanisms, depending on whether it needs Go code:
   `/<name>` on the next launch automatically, through
    `host.Services.Skills`. Reserved names (`provider`, `model`, `effort`,
    `autonomy`, `auth`, `settings`, `agent`, `agents`, `activity`, `files`,
-   `visualizer`, `system`, `telemetry`, `pets`, `fast`, `vim`, `nano`, `md-read`,
+   `visualizer`, `system`, `telemetry`, `fast`, `vim`, `nano`, `md-read`,
    `theme`, `layout`, `split`, `compact`, `fork`, `undo`, `rewind`, `session`,
-   `export`, `timeline`, `copy`, `help`, `keys`, `legend`, `memory`, `issues`, `goal`, `loop`, `context`,
-   `effective-prompt`, `cost`, `upgrade`, `init`, `ftue`, `mcp`, `exit`, `quit`, and
+   `export`, `copy`, `help`, `keys`, `legend`, `memory`, `issues`, `goal`, `loop`,
+   `workflow`, `context`,
+   `effective-prompt`, `cost`, `upgrade`, `init`, `mcp`, `exit`, `quit`, and
    keybind-backed action mirrors such as `focus-left`, `palette`,
    `interrupt`, `agent-next`, `tool-copy`, `subagent`, `root-new`, …) are
    rejected by `config.ValidateSkillName` before they ever reach the frontend.
@@ -433,7 +442,7 @@ Same package `internal/tui`; split for reviewability only (no subpackages).
    `internal/host/host.go`. This package is a stdlib-only contract — no
    importing `auth`, `config`, `models`, or `history` here, even for a type
    reference (the boundary test fails the build otherwise). Look at
-    `Auth`/`Catalog`/`Settings`/`History`/`Memory`/`Issues`/`Plans`/`Goals`/`Files` for the shape: small,
+    `Auth`/`Catalog`/`Settings`/`History`/`Memory`/`Issues`/`Plans`/`Goals`/`Workflows`/`Files` for the shape: small,
   frontend-facing, `context`-aware when it may block.
 2. Implement it in `internal/host/local/` (e.g. `local.go`, `files.go`),
   wrapping the real backend package. This package is the seam that is allowed

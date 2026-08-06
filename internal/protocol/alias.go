@@ -129,6 +129,8 @@ type (
 	ModelSelected          = pub.ModelSelected
 	AgentSelected          = pub.AgentSelected
 	PhaseChanged           = pub.PhaseChanged
+	PhaseGrantApproved     = pub.PhaseGrantApproved
+	PhaseGrantRule         = pub.PhaseGrantRule
 	EffortSelected         = pub.EffortSelected
 	AutonomySelected       = pub.AutonomySelected
 	PermissionModeSelected = pub.PermissionModeSelected
@@ -245,7 +247,13 @@ func ToolFeedbackUnstarted() string            { return pub.ToolFeedbackUnstarte
 func ToolFeedbackError(msg string) string      { return pub.ToolFeedbackError(msg) }
 
 const (
-	ErrorCodeCanceled  = pub.ErrorCodeCanceled
-	ErrorCodeTimeout   = pub.ErrorCodeTimeout
-	ErrorCodeQueueFull = pub.ErrorCodeQueueFull
+	ErrorCodePermissionDenied   = pub.ErrorCodePermissionDenied
+	ErrorCodeInvalidArgs        = pub.ErrorCodeInvalidArgs
+	ErrorCodePreconditionFailed = pub.ErrorCodePreconditionFailed
+	ErrorCodeCanceled           = pub.ErrorCodeCanceled
+	ErrorCodeTimeout            = pub.ErrorCodeTimeout
+	ErrorCodeTransient          = pub.ErrorCodeTransient
+	ErrorCodeInternal           = pub.ErrorCodeInternal
+	ErrorCodeBlocked            = pub.ErrorCodeBlocked
+	ErrorCodeQueueFull          = pub.ErrorCodeQueueFull
 )
