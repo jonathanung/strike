@@ -511,6 +511,8 @@ type childPathOverlap struct {
 	policy  string
 	blocked bool
 	warning string
+	// holders are other claimants (display names or short ids); bounded.
+	holders []string
 }
 
 // childVerificationSummary is claim-vs-verified state for a child session.
@@ -960,6 +962,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case pluginOpDoneMsg, pluginTrustPreviewMsg, pluginUpdatePreviewMsg, pluginCatalogMsg, pluginOutdatedMsg:
+		if pm, ok := m.modal.(*pluginModal); ok {
+			cmd := pm.applyMsg(msg)
+			m.reflow()
+			return m, cmd
+		}
+		return m, nil
+
 	case effortChoicesLoadedMsg:
 		if msg.modal != nil {
 			m.modal = msg.modal
@@ -980,6 +990,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case themeSelectedMsg:
 		m.applyThemeEntry(msg.entry)
 		m.setNotice("theme: "+msg.entry.ID, false)
+		return m, nil
+
+	case themePreviewMsg:
+		// Live preview while /theme picker is open — session only, never SaveTheme.
+		m.applyThemeEntry(msg.entry)
+		return m, nil
+
+	case themeRevertMsg:
+		// Esc/q from picker restores the theme active when the modal opened.
+		m.applyThemeEntry(msg.entry)
 		return m, nil
 
 	case themeSavedMsg:

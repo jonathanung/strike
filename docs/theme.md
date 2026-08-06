@@ -154,8 +154,24 @@ JSON icons.
 
 ## Loading themes
 
-Bundled JSON under `internal/tui/theme/themes/`, then `~/.strike/themes`, then
-`./.strike/themes`. Pick with `/theme` or `config.theme`.
+Merge order (later wins on the same theme id — [plugins.md](plugins.md) §4.1):
+
+1. Bundled JSON under `internal/tui/theme/themes/` (`builtin`)
+2. `~/.strike/themes` (`user`)
+3. Global plugin contributions under `~/.strike/plugins/*/…` (`plugin:<id>`)
+4. `./.strike/themes` (`project`)
+5. Project plugin contributions under `./.strike/plugins/*/…` (`plugin:<id>`)
+
+Invalid theme JSON, malformed plugins, disabled lockfile entries, and install
+staging dirs are **skipped** — they must not break startup or silently shadow a
+winner. Collisions surface in `/theme` as `over <previous-provenance>`.
+
+Pick with `/theme` or `config.theme`. In the picker: cursor movement **previews**
+without writing config; **enter** applies the session theme; **ctrl+d** saves
+the default; **esc** always reverts to the theme that was active when the
+picker opened. Install/update theme *plugins* through the generic plugin
+lifecycle (`/plugin` or `strike plugin`) — same catalog integrity and lockfile
+path as other contributions; there is no separate theme marketplace.
 
 ## Web cockpit parity
 

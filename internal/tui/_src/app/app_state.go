@@ -234,6 +234,9 @@ func visualizerPathOverlapsFrom(list []childPathOverlap) []visualizerPathOverlap
 			Blocked: po.blocked,
 			Warning: po.warning,
 		}
+		if len(po.holders) > 0 {
+			out[i].Holders = append([]string(nil), po.holders...)
+		}
 	}
 	return out
 }

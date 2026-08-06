@@ -25,12 +25,20 @@ type visualizerTool struct {
 // Remaining count is summarized as "+N more" so layout stays width-safe.
 const visualizerMaxFilesShown = 5
 
+// visualizerMaxOverlapsShown caps path-overlap rows in the detail list.
+const visualizerMaxOverlapsShown = 4
+
+// visualizerMaxOverlapHolders caps holder names shown per overlap row.
+const visualizerMaxOverlapHolders = 3
+
 // visualizerPathOverlap is one path-overlap warning on a selected node.
 type visualizerPathOverlap struct {
 	Path    string
 	Policy  string
 	Blocked bool
 	Warning string
+	// Holders are other claimants (names or short ids); empty when unknown.
+	Holders []string
 }
 
 // visualizerVerification is claim-vs-verified state when a report was observed.
@@ -155,6 +163,15 @@ func (w visualizerWindow) view(th theme.Theme) string {
 	// surface non-empty detail so the token stack stays primary.
 	lines = append(lines, visualizerDetailLines(th, w.width, s, dash)...)
 
+	// Per-agent budget meters + escalation chrome (#924). Omitted when no
+	// limits and no escalation — never draw full meters from zero limits.
+	lines = append(lines, visualizerBudgetLines(th, w.width, s, dash)...)
+
+	// Verification + path-conflict signals (#925). Omit when no report / no
+	// overlaps — never invent a verified badge.
+	lines = append(lines, visualizerVerificationLines(th, w.width, s, dash)...)
+	lines = append(lines, visualizerConflictLines(th, w.width, s, dash)...)
+
 	// Root-oriented usage stack. Children keep unknown tokens as dashes.
 	// Tokens: never print measured zero for unknown sides.
 	inStr := formatTokenCount(s.Input, dash)
@@ -223,6 +240,487 @@ func (w visualizerWindow) view(th theme.Theme) string {
 	}
 
 	return visualizerFit(lines, w.height)
+}
+
+// visualizerBudgetLines renders per-agent remaining/used affordances and
+// escalation chrome. Only dimensions with limits appear; unlimited stays omitted
+// (never 0% from a zero max). Session catalog cost is separate (cost row).
+func visualizerBudgetLines(th theme.Theme, width int, s visualizerStateMsg, dash string) []string {
+	th = th.Resolve()
+	st := th.S()
+	b := s.Budget
+	hasLimits := visualizerBudgetHasLimits(b)
+	hasEsc := visualizerHasEscalation(s)
+	if !hasLimits && !hasEsc {
+		return nil
+	}
+
+	var lines []string
+	if esc := visualizerEscalationLine(th, width, s, dash); esc != "" {
+		lines = append(lines, esc)
+	}
+	if !hasLimits {
+		return lines
+	}
+
+	// Section header once we know at least one meter will render.
+	meters := visualizerBudgetMeterRows(th, width, b)
+	if len(meters) == 0 {
+		return lines
+	}
+	lines = append(lines, wrapWindowText(st.Muted.Render("budget"), width))
+	lines = append(lines, meters...)
+	return lines
+}
+
+// visualizerBudgetHasLimits is true when any hard dimension is configured.
+// Zero limits mean unlimited on the wire — do not treat as 0% used.
+func visualizerBudgetHasLimits(b *protocol.AgentBudgetView) bool {
+	if b == nil {
+		return false
+	}
+	return b.MaxWallClockS > 0 ||
+		b.MaxTokens > 0 ||
+		b.MaxCostUSD > 0 ||
+		b.MaxToolCalls > 0 ||
+		b.MaxDangerousTools > 0
+}
+
+// visualizerHasEscalation is true when ChildEscalated fields or budget flags set.
+func visualizerHasEscalation(s visualizerStateMsg) bool {
+	if strings.TrimSpace(s.EscalateKind) != "" || strings.TrimSpace(s.EscalateReason) != "" {
+		return true
+	}
+	if strings.TrimSpace(s.EscalateAction) != "" {
+		return true
+	}
+	if s.Budget == nil {
+		return false
+	}
+	return s.Budget.Escalated || s.Budget.Stall || s.Budget.Loop ||
+		strings.TrimSpace(s.Budget.EscalateKind) != "" ||
+		strings.TrimSpace(s.Budget.EscalateReason) != ""
+}
+
+// visualizerEscalationLine surfaces stall / loop / escalated with kind+reason.
+func visualizerEscalationLine(th theme.Theme, width int, s visualizerStateMsg, dash string) string {
+	th = th.Resolve()
+	st := th.S()
+	if !visualizerHasEscalation(s) {
+		return ""
+	}
+
+	kind := strings.TrimSpace(s.EscalateKind)
+	reason := strings.TrimSpace(s.EscalateReason)
+	action := strings.TrimSpace(s.EscalateAction)
+	if b := s.Budget; b != nil {
+		if kind == "" {
+			kind = strings.TrimSpace(b.EscalateKind)
+		}
+		if reason == "" {
+			reason = strings.TrimSpace(b.EscalateReason)
+		}
+		// Prefer explicit stall/loop flags when kind empty.
+		if kind == "" {
+			switch {
+			case b.Stall:
+				kind = "stall"
+			case b.Loop:
+				kind = "loop"
+			case b.Escalated:
+				kind = "budget"
+			}
+		}
+	}
+
+	// Prefer human reason as the value (badge already marks escalated/stall).
+	// Fall back to kind + action when reason is empty.
+	var body string
+	switch {
+	case reason != "":
+		body = sanitizeDisplayData(reason)
+	case kind != "" && action != "":
+		body = dotJoin(th, sanitizeDisplayData(kind), sanitizeDisplayData(action))
+	case kind != "":
+		body = sanitizeDisplayData(kind)
+	case action != "":
+		body = sanitizeDisplayData(action)
+	default:
+		body = dash
+	}
+
+	// Error tone when hard-interrupted; warning for soft finalizing / stall / loop.
+	style := st.Warning
+	tone := ui.ToneWarning
+	if strings.EqualFold(action, protocol.EscalateActionInterrupted) {
+		style = st.Error
+		tone = ui.ToneError
+	}
+	// Badge carries kind when known (tool_calls / stall / loop); else "escalated".
+	label := "escalated"
+	if kind != "" {
+		label = kind
+	}
+	val := style.Render(body)
+	badge := ui.Badge(th, tone, label)
+	return contextKVLine(th, width, "escalation", badge+themedSpace(th.Spacing.XS)+val)
+}
+
+// visualizerBudgetMeterRows builds one row per limited dimension.
+func visualizerBudgetMeterRows(th theme.Theme, width int, b *protocol.AgentBudgetView) []string {
+	if b == nil {
+		return nil
+	}
+	th = th.Resolve()
+	st := th.S()
+	barWidth := min(10, max(4, width/4))
+	if width < 18 {
+		barWidth = 0
+	}
+
+	type dim struct {
+		key   string
+		pair  string
+		ratio float64
+		hot   bool // at/over limit
+	}
+	var dims []dim
+
+	if b.MaxToolCalls > 0 {
+		used, rem := budgetUsedRemaining(b.ToolCalls, b.MaxToolCalls, b.ToolCallsRemaining)
+		dims = append(dims, dim{
+			key:   "tools",
+			pair:  budgetPairInt(used, b.MaxToolCalls, rem),
+			ratio: budgetRatio(used, b.MaxToolCalls),
+			hot:   used >= b.MaxToolCalls || (rem != nil && *rem <= 0),
+		})
+	}
+	if b.MaxDangerousTools > 0 {
+		used, rem := budgetUsedRemaining(b.DangerousTools, b.MaxDangerousTools, b.DangerousRemaining)
+		dims = append(dims, dim{
+			key:   "danger",
+			pair:  budgetPairInt(used, b.MaxDangerousTools, rem),
+			ratio: budgetRatio(used, b.MaxDangerousTools),
+			hot:   used >= b.MaxDangerousTools || (rem != nil && *rem <= 0),
+		})
+	}
+	if b.MaxTokens > 0 {
+		used, rem := budgetUsedRemaining(b.TokensUsed, b.MaxTokens, b.TokensRemaining)
+		dims = append(dims, dim{
+			key:   "tok",
+			pair:  budgetPairTokens(used, b.MaxTokens, rem),
+			ratio: budgetRatio(used, b.MaxTokens),
+			hot:   used >= b.MaxTokens || (rem != nil && *rem <= 0),
+		})
+	}
+	if b.MaxCostUSD > 0 {
+		used := b.CostUSDUsed
+		var rem *float64
+		if b.CostUSDRemaining != nil {
+			r := *b.CostUSDRemaining
+			rem = &r
+			// Prefer remaining-derived used when wire used is zero but remaining set.
+			if used <= 0 && r >= 0 && r <= b.MaxCostUSD {
+				used = b.MaxCostUSD - r
+			}
+		}
+		pair := formatSessionCostUSD(used) + "/" + formatSessionCostUSD(b.MaxCostUSD)
+		if rem != nil {
+			pair = formatSessionCostUSD(used) + "/" + formatSessionCostUSD(b.MaxCostUSD) +
+				" (" + formatSessionCostUSD(*rem) + " left)"
+		}
+		ratio := 0.0
+		if b.MaxCostUSD > 0 {
+			ratio = used / b.MaxCostUSD
+			if ratio > 1 {
+				ratio = 1
+			}
+			if ratio < 0 {
+				ratio = 0
+			}
+		}
+		dims = append(dims, dim{
+			key:   "cost",
+			pair:  pair,
+			ratio: ratio,
+			hot:   used >= b.MaxCostUSD || (rem != nil && *rem <= 0),
+		})
+	}
+	if b.MaxWallClockS > 0 {
+		used, rem := budgetUsedRemaining(b.ElapsedS, b.MaxWallClockS, b.WallClockRemainingS)
+		dims = append(dims, dim{
+			key:   "wall",
+			pair:  budgetPairDuration(used, b.MaxWallClockS, rem),
+			ratio: budgetRatio(used, b.MaxWallClockS),
+			hot:   used >= b.MaxWallClockS || (rem != nil && *rem <= 0),
+		})
+	}
+
+	lines := make([]string, 0, len(dims))
+	for _, d := range dims {
+		pairStyle := st.Text
+		if d.hot || b.Escalated {
+			pairStyle = st.Warning
+			if b.Escalated && d.hot {
+				pairStyle = st.Error
+			}
+		}
+		val := pairStyle.Render(d.pair)
+		if barWidth > 0 {
+			val = ui.Meter(th, barWidth, d.ratio) + themedSpace(th.Spacing.XS) + val
+		}
+		lines = append(lines, contextKVLine(th, width, d.key, val))
+	}
+	return lines
+}
+
+// budgetUsedRemaining prefers explicit remaining when present.
+func budgetUsedRemaining(used, max int, remaining *int) (int, *int) {
+	if remaining != nil {
+		r := *remaining
+		// Derive used from remaining when it is consistent with the max.
+		if max > 0 && r >= 0 && r <= max {
+			derived := max - r
+			if used <= 0 || derived >= used {
+				used = derived
+			}
+		}
+		return used, remaining
+	}
+	return used, nil
+}
+
+func budgetRatio(used, max int) float64 {
+	if max <= 0 {
+		return -1 // hollow / unknown
+	}
+	r := float64(used) / float64(max)
+	if r < 0 {
+		return 0
+	}
+	if r > 1 {
+		return 1
+	}
+	return r
+}
+
+func budgetPairInt(used, max int, remaining *int) string {
+	pair := strconv.Itoa(used) + "/" + strconv.Itoa(max)
+	if remaining != nil {
+		pair += " (" + strconv.Itoa(*remaining) + " left)"
+	}
+	return pair
+}
+
+func budgetPairTokens(used, max int, remaining *int) string {
+	pair := ui.FormatTokens(used) + "/" + ui.FormatTokens(max)
+	if remaining != nil {
+		pair += " (" + ui.FormatTokens(*remaining) + " left)"
+	}
+	return pair
+}
+
+func budgetPairDuration(usedS, maxS int, remaining *int) string {
+	pair := formatBudgetSeconds(usedS) + "/" + formatBudgetSeconds(maxS)
+	if remaining != nil {
+		pair += " (" + formatBudgetSeconds(*remaining) + " left)"
+	}
+	return pair
+}
+
+func formatBudgetSeconds(sec int) string {
+	if sec < 0 {
+		sec = 0
+	}
+	if sec < 60 {
+		return strconv.Itoa(sec) + "s"
+	}
+	if sec < 3600 {
+		return strconv.Itoa(sec/60) + "m" + strconv.Itoa(sec%60) + "s"
+	}
+	h := sec / 3600
+	m := (sec % 3600) / 60
+	return strconv.Itoa(h) + "h" + strconv.Itoa(m) + "m"
+}
+
+// visualizerVerificationLines renders claim-vs-verified chrome when a report
+// exists. Nil Verification ⇒ no badge (unknown stays unknown).
+func visualizerVerificationLines(th theme.Theme, width int, s visualizerStateMsg, dash string) []string {
+	th = th.Resolve()
+	st := th.S()
+	v := s.Verification
+	if v == nil {
+		return nil
+	}
+	label, tone, ok := visualizerVerificationLabel(v)
+	if !ok {
+		return nil
+	}
+	badge := ui.Badge(th, tone, label)
+	summary := strings.TrimSpace(v.Summary)
+	val := badge
+	if summary != "" && !strings.EqualFold(summary, label) {
+		// Distinct claimed vs verified: badge carries vocabulary; summary elaborates.
+		sumStyle := st.Text
+		switch tone {
+		case ui.ToneWarning:
+			sumStyle = st.Warning
+		case ui.ToneError:
+			sumStyle = st.Error
+		case ui.ToneSuccess:
+			sumStyle = st.Success
+		}
+		val = badge + themedSpace(th.Spacing.XS) + sumStyle.Render(sanitizeDisplayData(summary))
+	}
+	return []string{contextKVLine(th, width, "verify", val)}
+}
+
+// visualizerVerificationLabel mirrors header chip vocabulary (#809):
+// verified / claimed / unverified. ok false when nothing should render.
+func visualizerVerificationLabel(v *visualizerVerification) (label string, tone ui.Tone, ok bool) {
+	if v == nil {
+		return "", ui.ToneMuted, false
+	}
+	// Same precedence as verificationBadgeLabel (harness_trust.go).
+	switch {
+	case v.Verified && v.Passed:
+		return "verified", ui.ToneSuccess, true
+	case v.Claimed && !v.Verified:
+		return "claimed", ui.ToneWarning, true
+	case !v.Passed:
+		return "unverified", ui.ToneError, true
+	case v.Passed:
+		return "verified", ui.ToneSuccess, true
+	default:
+		// Report observed but no decisive flags — still surface as unverified
+		// so a present pointer never looks like silent success.
+		return "unverified", ui.ToneError, true
+	}
+}
+
+// visualizerConflictLines renders latest path overlaps with policy + holders.
+// Conflicting state uses warn/error tokens; omitted when no overlaps.
+func visualizerConflictLines(th theme.Theme, width int, s visualizerStateMsg, dash string) []string {
+	th = th.Resolve()
+	st := th.S()
+	list := s.PathOverlaps
+	if len(list) == 0 {
+		return nil
+	}
+	total := len(list)
+	show := list
+	extra := 0
+	if total > visualizerMaxOverlapsShown {
+		show = list[:visualizerMaxOverlapsShown]
+		extra = total - visualizerMaxOverlapsShown
+	}
+
+	// Header badge: blocked (error) when any overlap blocked, else warn.
+	anyBlocked := false
+	for _, po := range list {
+		if po.Blocked || strings.EqualFold(strings.TrimSpace(po.Policy), "block") {
+			anyBlocked = true
+			break
+		}
+	}
+	headerTone := ui.ToneWarning
+	headerLabel := "conflict"
+	if anyBlocked {
+		headerTone = ui.ToneError
+		headerLabel = "blocked"
+	}
+	header := "conflicts"
+	if total > 1 {
+		header = "conflicts (" + strconv.Itoa(total) + ")"
+	}
+	lines := []string{
+		wrapWindowText(
+			st.Muted.Render(header)+themedSpace(th.Spacing.XS)+ui.Badge(th, headerTone, headerLabel),
+			width,
+		),
+	}
+	for _, po := range show {
+		lines = append(lines, visualizerConflictRow(th, width, po, dash)...)
+	}
+	if extra > 0 {
+		more := dash + " +" + strconv.Itoa(extra) + " more"
+		lines = append(lines, wrapWindowText(st.Muted.Render(more), width))
+	}
+	return lines
+}
+
+func visualizerConflictRow(th theme.Theme, width int, po visualizerPathOverlap, dash string) []string {
+	th = th.Resolve()
+	st := th.S()
+	pathStyle := st.Warning
+	policyTone := ui.ToneWarning
+	policyLabel := strings.TrimSpace(po.Policy)
+	if policyLabel == "" {
+		if po.Blocked {
+			policyLabel = "block"
+		} else {
+			policyLabel = "warn"
+		}
+	}
+	if po.Blocked || strings.EqualFold(policyLabel, "block") {
+		pathStyle = st.Error
+		policyTone = ui.ToneError
+	}
+	path := strings.TrimSpace(po.Path)
+	if path == "" {
+		path = dash
+	} else {
+		path = sanitizeDisplayData(path)
+	}
+	prefix := themedSpace(th.Spacing.SM)
+	badge := ui.Badge(th, policyTone, policyLabel)
+	// path + policy badge on one row; truncate path to fit.
+	suffix := themedSpace(th.Spacing.XS) + badge
+	budget := max(0, width-ansi.StringWidth(prefix)-ansi.StringWidth(suffix))
+	pathShown := welcomeTruncate(path, budget, th.Icons.Ellipsis)
+	row := st.Text.Render(prefix) + pathStyle.Render(pathShown) + suffix
+	lines := []string{wrapWindowText(row, width)}
+
+	// Holders (or count) on a muted sub-row when present.
+	if holders := visualizerHolderSummary(po.Holders); holders != "" {
+		hPrefix := themedSpace(th.Spacing.MD)
+		hBudget := max(0, width-ansi.StringWidth(hPrefix))
+		hText := welcomeTruncate("holders "+holders, hBudget, th.Icons.Ellipsis)
+		lines = append(lines, wrapWindowText(st.Muted.Render(hPrefix+hText), width))
+	} else if w := strings.TrimSpace(po.Warning); w != "" {
+		// Fall back to warning text when holders unknown.
+		hPrefix := themedSpace(th.Spacing.MD)
+		hBudget := max(0, width-ansi.StringWidth(hPrefix))
+		hText := welcomeTruncate(sanitizeDisplayData(w), hBudget, th.Icons.Ellipsis)
+		lines = append(lines, wrapWindowText(st.Muted.Render(hPrefix+hText), width))
+	}
+	return lines
+}
+
+// visualizerHolderSummary formats holder names (bounded) or a count.
+func visualizerHolderSummary(holders []string) string {
+	clean := make([]string, 0, len(holders))
+	for _, h := range holders {
+		h = strings.TrimSpace(h)
+		if h == "" {
+			continue
+		}
+		clean = append(clean, sanitizeDisplayData(h))
+	}
+	if len(clean) == 0 {
+		return ""
+	}
+	show := clean
+	extra := 0
+	if len(clean) > visualizerMaxOverlapHolders {
+		show = clean[:visualizerMaxOverlapHolders]
+		extra = len(clean) - visualizerMaxOverlapHolders
+	}
+	out := strings.Join(show, ", ")
+	if extra > 0 {
+		out += " +" + strconv.Itoa(extra)
+	}
+	return out
 }
 
 // visualizerDetailLines renders objective / last action / block / files rows.

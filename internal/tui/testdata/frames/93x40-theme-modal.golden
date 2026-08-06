@@ -21,8 +21,8 @@
           │   Nord — nord · builtin                                              │
           │   Tokyo Night — tokyo-night · builtin                                │
           │                                                                      │
-          │ up/down/j/k move · type to filter · enter select · ctrl+d set        │
-          │ default · esc close                                                  │
+          │ ↑/↓ preview · type filter · enter apply · ctrl+d default · esc       │
+          │ revert                                                               │
           ╰──────────────────────────────────────────────────────────────────────╯
 
 

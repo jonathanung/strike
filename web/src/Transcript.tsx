@@ -50,6 +50,7 @@ function Tool({ item }: { item: TranscriptItem }) {
   return <details className="tool-card"><summary><span>{item.title || "tool"}</span><small>{parsed ? "structured data" : diff ? "diff" : "output"}</small></summary>{diff ? <pre className="diff">{raw.split("\n").map((line, i) => <span className={line.startsWith("+") ? "add" : line.startsWith("-") ? "del" : ""} key={i}>{line}{"\n"}</span>)}</pre> : <pre>{parsed ? JSON.stringify(parsed, null, 2) : raw}</pre>}</details>;
 }
 
-export function Transcript({ item }: { item: TranscriptItem }) {
+export function Transcript({ item, showThinking = true }: { item: TranscriptItem; showThinking?: boolean }) {
+  if (item.kind === "reasoning" && !showThinking) return null;
   return <article className={`message ${item.kind}`}><div className="message-label">{item.title || item.kind}</div>{item.kind === "tool" ? <Tool item={item} /> : <Markdown text={item.text} />}</article>;
 }

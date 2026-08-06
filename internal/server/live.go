@@ -275,6 +275,10 @@ type AgentInfo struct {
 }
 
 // StatusSnapshot is the live cockpit chrome state.
+//
+// Token/cost session totals are accumulated client-side from usage.reported
+// events (including WS/SSE replay). ContextUsed is last-request occupancy from
+// UsageReported.Used when known — not a session sum.
 type StatusSnapshot struct {
 	SessionID      string `json:"sessionId"`
 	Provider       string `json:"provider,omitempty"`

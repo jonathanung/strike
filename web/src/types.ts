@@ -3,6 +3,10 @@ export type Status = {
   sessionId?: string; provider?: string; model?: string; agent?: string; effort?: string;
   autonomy?: string; permissionMode?: string; phase?: string; workflow?: string; cwd?: string;
   busy?: boolean; contextUsed?: number; contextLimit?: number;
+  /** Session totals accumulated from usage.reported (Known parts only). */
+  inputTokens?: number; outputTokens?: number;
+  cacheReadTokens?: number; cacheCreationTokens?: number;
+  usageReports?: number; usageSource?: string;
   sandbox?: string; sandboxBackend?: string; sandboxAvailable?: boolean; networkAllow?: string[];
 };
 export type SandboxInfo = {

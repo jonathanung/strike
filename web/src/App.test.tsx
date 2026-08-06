@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import App from "./App";
+import App, { formatCostLabel, formatContextLabel } from "./App";
 
 class FakeEventSource { static instances: FakeEventSource[] = []; onmessage?: (event: MessageEvent) => void; onerror?: () => void; close = vi.fn(); constructor(public url: string) { FakeEventSource.instances.push(this); } }
 class FakeWebSocket { static OPEN = 1; static instances: FakeWebSocket[] = []; readyState = 1; onopen?: () => void; onmessage?: (event: MessageEvent) => void; onerror?: () => void; onclose?: () => void; send = vi.fn(); close = vi.fn(); constructor(public url: string) { FakeWebSocket.instances.push(this); queueMicrotask(() => this.onopen?.()); } }
@@ -16,6 +16,58 @@ describe("App", () => {
     vi.stubGlobal("URL", { ...URL, createObjectURL: vi.fn(() => "blob:diag"), revokeObjectURL: vi.fn() });
   });
   afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+
+
+  it("exposes skip-all in the autonomy control and wires set.autonomy", async () => {
+    render(<App />);
+    await screen.findByText("Current");
+    fireEvent.click(screen.getByRole("button", { name: /Runtime/ }));
+    const autonomy = screen.getByLabelText("Autonomy") as HTMLSelectElement;
+    expect([...autonomy.options].map((o) => o.value)).toEqual(["", "supervised", "agent", "checks", "skip-all"]);
+    fireEvent.change(autonomy, { target: { value: "skip-all" } });
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining("/v1/ops"),
+      expect.objectContaining({ body: expect.stringContaining('"type":"set.autonomy"') }),
+    ));
+  });
+
+  it("shows cost empty state then token totals after usage.reported", async () => {
+    render(<App />);
+    await screen.findByText("Current");
+    await waitFor(() => expect(FakeWebSocket.instances.length).toBeGreaterThan(0));
+    expect(screen.queryByText(/in 1,200/)).not.toBeInTheDocument();
+    FakeWebSocket.instances[0].onmessage?.({
+      data: JSON.stringify({
+        type: "usage.reported",
+        time: "1",
+        data: {
+          input: { n: 1200, known: true },
+          output: { n: 450, known: true },
+          used: { n: 1650, known: true },
+          source: "actual",
+        },
+      }),
+    } as MessageEvent);
+    expect(await screen.findByText(/in 1,200 · out 450/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Session status")).toHaveTextContent(/1,650/);
+  });
+
+  it("toggles thinking visibility and persists the preference", async () => {
+    sessionStorage.clear();
+    render(<App />);
+    await waitFor(() => expect(FakeWebSocket.instances.length).toBeGreaterThan(0));
+    fireEvent.click(screen.getByRole("button", { name: /Runtime/ }));
+    FakeWebSocket.instances[0].onmessage?.({
+      data: JSON.stringify({ type: "reasoning.delta", time: "1", data: { turnId: "t", text: "secret chain of thought" } }),
+    } as MessageEvent);
+    expect(await screen.findByText("secret chain of thought")).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Show thinking"));
+    expect(screen.queryByText("secret chain of thought")).not.toBeInTheDocument();
+    expect(sessionStorage.getItem("strike.web.showThinking")).toBe("0");
+    fireEvent.click(screen.getByLabelText("Show thinking"));
+    expect(screen.getByText("secret chain of thought")).toBeInTheDocument();
+    expect(sessionStorage.getItem("strike.web.showThinking")).toBe("1");
+  });
 
   it("uses only the live transport for the live session and sends prompts", async () => {
     render(<App />);
@@ -228,6 +280,43 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("tab", { name: "workflows" }));
     expect(await screen.findByText("No workflows loaded.")).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "mcp" })).not.toBeInTheDocument();
+  });
+
+
+  it("loads and saves settings dials when capability is present", async () => {
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("bootstrap")) {
+        return response({
+          version: "test", authRequired: false, attachOnly: false,
+          capabilities: { live: true, settings: true, auth: false, roots: false },
+          protocolOps: ["user.input"], status: { sessionId: "live", provider: "echo", busy: false },
+          agents: [{ name: "build" }], skills: [],
+        });
+      }
+      if (url.includes("sessions")) return response({ sessions: [{ id: "live", title: "Current" }], liveId: "live" });
+      if (url.includes("/v1/settings") && (!init || !init.method || init.method === "GET")) {
+        return response({
+          provider: "echo", model: "dev", sandbox: "workspace-write",
+          permissionAutoApproveSeconds: 10, maxChildDepth: 1, compactionStrategy: "trim",
+        });
+      }
+      if (url.includes("/v1/settings") && init?.method === "PATCH") {
+        return response({ sandbox: "read-only" });
+      }
+      return response({ ok: true });
+    }));
+    render(<App />);
+    await screen.findByText("Current");
+    fireEvent.click(screen.getByRole("button", { name: "Open settings" }));
+    expect(await screen.findByLabelText("Sandbox")).toHaveValue("workspace-write");
+    expect(screen.getByLabelText("Countdown seconds")).toHaveValue("10");
+    fireEvent.change(screen.getByLabelText("Sandbox"), { target: { value: "read-only" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining("/v1/settings"),
+      expect.objectContaining({ method: "PATCH", body: expect.stringContaining('"sandbox":"read-only"') }),
+    ));
   });
 
   it("uses historical SSE in attach-only mode", async () => {
@@ -853,4 +942,21 @@ describe("App", () => {
   });
 
 
+});
+
+describe("formatCostLabel / formatContextLabel", () => {
+  it("returns graceful empty states", () => {
+    expect(formatCostLabel({})).toBe("not reported");
+    expect(formatContextLabel({})).toBe("not reported");
+  });
+
+  it("formats tokens and optional catalog cost", () => {
+    expect(formatCostLabel({ inputTokens: 1000, outputTokens: 500 })).toBe("in 1,000 · out 500");
+    expect(formatCostLabel(
+      { inputTokens: 1_000_000, outputTokens: 1_000_000 },
+      { inputPerM: 1, outputPerM: 2, hasCost: true },
+    )).toBe("$3 · in 1,000,000 · out 1,000,000");
+    expect(formatContextLabel({ contextUsed: 100, contextLimit: 200 })).toBe("100 / 200");
+    expect(formatContextLabel({ contextUsed: 50 })).toBe("50 used");
+  });
 });

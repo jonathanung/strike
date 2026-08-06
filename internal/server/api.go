@@ -66,6 +66,7 @@ type capabilities struct {
 	Telemetry      bool `json:"telemetry"`
 	Workflows      bool `json:"workflows"`
 	WorkflowDrafts bool `json:"workflowDrafts"`
+	Goals          bool `json:"goals"`
 	// Timeline is the redacted run-timeline snapshot/export surface
 	// (GET /v1/sessions/{id}/timeline[+ /export]). Always on when SessionDir is set.
 	Timeline bool `json:"timeline"`
@@ -104,6 +105,7 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 		c.Sessions = h.Sessions != nil
 		// Workflow authoring is exposed via /v1/workflows* and /v1/workflow-drafts*.
 		c.Workflows, c.WorkflowDrafts = h.Workflows != nil, h.WorkflowDrafts != nil
+		c.Goals = h.Goals != nil
 		// LSP status + diagnostics are exposed via /v1/lsp and /v1/diagnostics.
 		c.LSP = h.LSP != nil
 		// Permission explain/presets via /v1/permissions/* (#926).
@@ -243,40 +245,181 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"entries": s.opts.Services.History.Entries()})
 }
 
+// settingsResponse is the GET /v1/settings payload (host.UserDefaults wire form).
+// Field names match ~/.strike/config JSON keys where applicable.
+type settingsResponse struct {
+	Provider                     string   `json:"provider,omitempty"`
+	Model                        string   `json:"model,omitempty"`
+	Agent                        string   `json:"agent,omitempty"`
+	Effort                       string   `json:"effort,omitempty"`
+	Mode                         string   `json:"mode,omitempty"`
+	Sandbox                      string   `json:"sandbox,omitempty"`
+	Notify                       string   `json:"notify,omitempty"`
+	Autoupdate                   string   `json:"autoupdate,omitempty"`
+	LeanCode                     string   `json:"leanCode,omitempty"`
+	DeferTools                   string   `json:"deferTools,omitempty"`
+	SessionWorktree              string   `json:"sessionWorktree,omitempty"`
+	PermissionAutoApproveSeconds int      `json:"permissionAutoApproveSeconds"`
+	PermissionAutoApproveExclude []string `json:"permissionAutoApproveExclude,omitempty"`
+	MaxChildDepth                int      `json:"maxChildDepth"`
+	Theme                        string   `json:"theme,omitempty"`
+	VimMode                      string   `json:"vimMode,omitempty"`
+	NanoMode                     string   `json:"nanoMode,omitempty"`
+	MdReadMode                   string   `json:"mdReadMode,omitempty"`
+	CompactionStrategy           string   `json:"compactionStrategy,omitempty"`
+	CompactionModel              string   `json:"compactionModel,omitempty"`
+	CompactionThreshold          float64  `json:"compactionThreshold,omitempty"`
+	CompactionBuffer             int      `json:"compactionBuffer,omitempty"`
+	KeepUserTurns                int      `json:"keepUserTurns,omitempty"`
+	PruneProtectTokens           int      `json:"pruneProtectTokens,omitempty"`
+	PruneMinimumTokens           int      `json:"pruneMinimumTokens,omitempty"`
+	PruneKeepUserTurns           int      `json:"pruneKeepUserTurns,omitempty"`
+	PruneProtectTools            []string `json:"pruneProtectTools,omitempty"`
+}
+
+// settingsPatchBody is the PATCH /v1/settings payload. Empty scalars leave the
+// stored value unchanged (same contract as host.Settings). Compaction and
+// auto-approve dials use the string vocabulary of host.CompactionDials /
+// SaveAutoApproveDials so validation matches the TUI.
+type settingsPatchBody struct {
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
+	Agent    string `json:"agent"`
+	Effort   string `json:"effort"`
+	Mode     string `json:"mode"`
+
+	Theme           string `json:"theme"`
+	Sandbox         string `json:"sandbox"`
+	// IKnow acknowledges yolo+sandbox-off (same gate as PATCH /v1/sandbox).
+	IKnow           bool   `json:"iKnow"`
+	Notify          string `json:"notify"`
+	LeanCode        string `json:"leanCode"`
+	DeferTools      string `json:"deferTools"`
+	SessionWorktree string `json:"sessionWorktree"`
+	Autoupdate      string `json:"autoupdate"`
+
+	// permissionAutoApproveSeconds: off|0|1-60 (string dial, not int).
+	PermissionAutoApproveSeconds string `json:"permissionAutoApproveSeconds"`
+	// nil = leave exclude list unchanged; non-nil (incl. empty) replaces it.
+	PermissionAutoApproveExclude *[]string `json:"permissionAutoApproveExclude"`
+	// maxChildDepth: default|0|1-8.
+	MaxChildDepth string `json:"maxChildDepth"`
+
+	CompactionStrategy  string `json:"compactionStrategy"`
+	CompactionModel     string `json:"compactionModel"`
+	CompactionThreshold string `json:"compactionThreshold"`
+	CompactionBuffer    string `json:"compactionBuffer"`
+	KeepUserTurns       string `json:"keepUserTurns"`
+	PruneProtectTokens  string `json:"pruneProtectTokens"`
+	PruneMinimumTokens  string `json:"pruneMinimumTokens"`
+	PruneKeepUserTurns  string `json:"pruneKeepUserTurns"`
+	PruneProtectTools   string `json:"pruneProtectTools"`
+}
+
+func settingsFromDefaults(d host.UserDefaults) settingsResponse {
+	return settingsResponse{
+		Provider:                     d.Provider,
+		Model:                        d.Model,
+		Agent:                        d.Agent,
+		Effort:                       d.Effort,
+		Mode:                         d.PermissionMode,
+		Sandbox:                      d.Sandbox,
+		Notify:                       d.Notify,
+		Autoupdate:                   d.Autoupdate,
+		LeanCode:                     d.LeanCode,
+		DeferTools:                   d.DeferTools,
+		SessionWorktree:              d.SessionWorktree,
+		PermissionAutoApproveSeconds: d.PermissionAutoApproveSeconds,
+		PermissionAutoApproveExclude: append([]string(nil), d.PermissionAutoApproveExclude...),
+		MaxChildDepth:                d.MaxChildDepth,
+		Theme:                        d.Theme,
+		VimMode:                      d.VimMode,
+		NanoMode:                     d.NanoMode,
+		MdReadMode:                   d.MdReadMode,
+		CompactionStrategy:           d.CompactionStrategy,
+		CompactionModel:              d.CompactionModel,
+		CompactionThreshold:          d.CompactionThreshold,
+		CompactionBuffer:             d.CompactionBuffer,
+		KeepUserTurns:                d.KeepUserTurns,
+		PruneProtectTokens:           d.PruneProtectTokens,
+		PruneMinimumTokens:           d.PruneMinimumTokens,
+		PruneKeepUserTurns:           d.PruneKeepUserTurns,
+		PruneProtectTools:            append([]string(nil), d.PruneProtectTools...),
+	}
+}
+
 func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 	if s.opts.Services == nil || s.opts.Services.Settings == nil {
 		capabilityUnavailable(w, "settings")
 		return
 	}
-	var body struct {
-		Provider string `json:"provider"`
-		Model    string `json:"model"`
-		Agent    string `json:"agent"`
-		Effort   string `json:"effort"`
-		Mode     string `json:"mode"`
-		// Sandbox is the OS sandbox dial default (off|read-only|workspace-write).
-		// Empty leaves the stored default unchanged. Prefer PATCH /v1/sandbox when
-		// also sending iKnow for the yolo+off safety gate.
-		Sandbox string `json:"sandbox"`
-		// IKnow is the --i-know equivalent when sandbox is set to off while
-		// permission mode default (or live) is yolo.
-		IKnow bool `json:"iKnow"`
+	settings := s.opts.Services.Settings
+	if r.Method == http.MethodGet {
+		writeJSON(w, http.StatusOK, settingsFromDefaults(settings.Defaults()))
+		return
 	}
+	var body settingsPatchBody
 	if err := decodeBody(w, r, &body); err != nil {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
 		return
 	}
-	if err := s.opts.Services.Settings.SaveDefaults(body.Provider, body.Model, body.Agent, body.Effort, body.Mode); err != nil {
-		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
-		return
-	}
-	if strings.TrimSpace(body.Sandbox) != "" {
+	// Sandbox dial uses the same yolo+off iKnow gate as PATCH /v1/sandbox.
+	if body.Sandbox != "" {
 		if err := s.saveSandboxDefault(body.Sandbox, body.IKnow, r); err != nil {
 			writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
 			return
 		}
+		body.Sandbox = "" // already persisted; avoid double-write in applySettingsPatch
 	}
-	writeJSON(w, http.StatusOK, opOKResponse{OK: true})
+	if err := applySettingsPatch(settings, body); err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, settingsFromDefaults(settings.Defaults()))
+}
+
+// applySettingsPatch writes non-empty dial groups through host.Settings.
+// Validation errors match TUI /settings (unknown tokens rejected without a
+// successful write for that dial group). Groups are applied in order; a later
+// failure may leave earlier groups persisted (same as sequential TUI saves).
+func applySettingsPatch(settings host.Settings, body settingsPatchBody) error {
+	if body.Provider != "" || body.Model != "" || body.Agent != "" || body.Effort != "" || body.Mode != "" {
+		if err := settings.SaveDefaults(body.Provider, body.Model, body.Agent, body.Effort, body.Mode); err != nil {
+			return err
+		}
+	}
+	if body.Theme != "" {
+		if err := settings.SaveTheme(body.Theme); err != nil {
+			return err
+		}
+	}
+	if body.Sandbox != "" || body.Notify != "" || body.LeanCode != "" || body.DeferTools != "" || body.SessionWorktree != "" || body.Autoupdate != "" {
+		if err := settings.SaveConfigDials(body.Sandbox, body.Notify, body.LeanCode, body.DeferTools, body.SessionWorktree, body.Autoupdate); err != nil {
+			return err
+		}
+	}
+	if body.PermissionAutoApproveSeconds != "" || body.PermissionAutoApproveExclude != nil || body.MaxChildDepth != "" {
+		if err := settings.SaveAutoApproveDials(body.PermissionAutoApproveSeconds, body.PermissionAutoApproveExclude, body.MaxChildDepth); err != nil {
+			return err
+		}
+	}
+	compaction := host.CompactionDials{
+		Strategy:           body.CompactionStrategy,
+		Model:              body.CompactionModel,
+		Threshold:          body.CompactionThreshold,
+		Buffer:             body.CompactionBuffer,
+		KeepUserTurns:      body.KeepUserTurns,
+		PruneProtectTokens: body.PruneProtectTokens,
+		PruneMinimumTokens: body.PruneMinimumTokens,
+		PruneKeepUserTurns: body.PruneKeepUserTurns,
+		PruneProtectTools:  body.PruneProtectTools,
+	}
+	if compaction != (host.CompactionDials{}) {
+		if err := settings.SaveCompactionDials(compaction); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Server) hasSandbox() bool {
