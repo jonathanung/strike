@@ -1,4 +1,4 @@
-.PHONY: build run run-echo serve serve-expose web-build web-test web-check test vet cover cover-check clean setup restore tui-gen
+.PHONY: build run run-echo serve serve-expose web-build web-test web-check test vet cover cover-check clean setup restore tui-gen prompt-reg
 
 # Overall statement-coverage floor for `make cover-check` (local / optional CI).
 # Soft baseline ~77%; keep below measured total so the gate does not flake.
@@ -59,6 +59,14 @@ web-check:
 
 test: tui-gen
 	go test ./...
+
+# E3.2 prompt regression report (also runs under `make test` via go test).
+# Non-blocking metric deltas by default. After prompt.go / prompt_tools.go /
+# prompt/*.txt / agent definition changes:
+#   UPDATE_METRICS=1 make prompt-reg   # refresh testdata/metrics.json
+#   PROMPT_REGRESSION_STRICT=1 make prompt-reg  # fail on deltas (future gate)
+prompt-reg:
+	go test ./internal/replay/ -run TestPromptRegressionReport -v -count=1
 
 vet: tui-gen
 	go vet ./...
