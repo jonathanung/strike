@@ -20,20 +20,38 @@ type LaunchInsideOpts struct {
 	WorkDirHost string
 	// ForceRebuild forces image rebuild.
 	ForceRebuild bool
-	// Replace replaces a drifted running container.
+	// Replace replaces a drifted running container (rebuild choice).
 	Replace bool
+	// AttachStale joins a drifted container without rebuilding (attach choice).
+	AttachStale bool
 	// Version for build hash / preflight.
 	Version string
 	// SkipPreflight for tests that inject a ready Manager.
 	SkipPreflight bool
+	// OnResult is called with the launch outcome before exec (attached vs started).
+	// Optional; used for user-facing "attached to…" / "started…" messages.
+	OnResult func(LaunchResult)
+}
+
+// LaunchInsideResult is returned when callers need the mode without relying on OnResult.
+type LaunchInsideResult struct {
+	LaunchResult
 }
 
 // LaunchInside builds/starts the repo container and exec's strike with a TTY.
 // It replaces the current process semantics by running docker exec -it and
 // returning the exit code via error (*ExitError) or nil.
+// On config drift without Replace/AttachStale it returns *StaleContainerError.
 func (m *Manager) LaunchInside(ctx context.Context, opts LaunchInsideOpts) error {
+	_, err := m.LaunchInsideWithResult(ctx, opts)
+	return err
+}
+
+// LaunchInsideWithResult is LaunchInside plus the attach/start mode.
+func (m *Manager) LaunchInsideWithResult(ctx context.Context, opts LaunchInsideOpts) (LaunchInsideResult, error) {
+	var zero LaunchInsideResult
 	if m == nil {
-		return fmt.Errorf("container: nil manager")
+		return zero, fmt.Errorf("container: nil manager")
 	}
 	cfg := m.Cfg
 	if opts.WorkDirHost != "" {
@@ -47,25 +65,30 @@ func (m *Manager) LaunchInside(ctx context.Context, opts LaunchInsideOpts) error
 			CheckDrift:        true,
 			Version:           opts.Version,
 		}); err != nil {
-			return err
+			return zero, err
 		}
 	}
 
-	// Ensure image + running container (headless).
-	id, err := m.Launch(ctx, LaunchOpts{
+	// Ensure image + running container (headless). One container per repo;
+	// compatible live containers are joined rather than duplicated (E12.6).
+	res, err := m.LaunchWithResult(ctx, LaunchOpts{
 		ForceRebuild: opts.ForceRebuild,
 		Replace:      opts.Replace,
+		AttachStale:  opts.AttachStale,
 		Headless:     true,
 	})
 	if err != nil {
-		return err
+		return zero, err
+	}
+	if opts.OnResult != nil {
+		opts.OnResult(res)
 	}
 
 	bin := opts.StrikeBinary
 	if bin == "" {
 		bin, err = os.Executable()
 		if err != nil {
-			return fmt.Errorf("container: resolve strike binary: %w", err)
+			return zero, fmt.Errorf("container: resolve strike binary: %w", err)
 		}
 	}
 	bin, err = filepath.EvalSymlinks(bin)
@@ -77,16 +100,16 @@ func (m *Manager) LaunchInside(ctx context.Context, opts LaunchInsideOpts) error
 	}
 
 	// Copy strike binary into the container at /usr/local/bin/strike (ephemeral).
-	if err := m.RT.CopyTo(ctx, id, bin, "/usr/local/bin/strike"); err != nil {
+	if err := m.RT.CopyTo(ctx, res.ID, bin, "/usr/local/bin/strike"); err != nil {
 		// fallback: try /tmp/strike
-		if err2 := m.RT.CopyTo(ctx, id, bin, "/tmp/strike"); err2 != nil {
-			return fmt.Errorf("container: copy strike binary: %w", err)
+		if err2 := m.RT.CopyTo(ctx, res.ID, bin, "/tmp/strike"); err2 != nil {
+			return zero, fmt.Errorf("container: copy strike binary: %w", err)
 		}
-		return m.execStrikeTTY(ctx, id, "/tmp/strike", opts.Args)
+		return LaunchInsideResult{LaunchResult: res}, m.execStrikeTTY(ctx, res.ID, "/tmp/strike", opts.Args)
 	}
 	// ensure executable
-	_, _, _, _ = m.RT.Exec(ctx, id, []string{"chmod", "+x", "/usr/local/bin/strike"}, ExecOpts{})
-	return m.execStrikeTTY(ctx, id, "/usr/local/bin/strike", opts.Args)
+	_, _, _, _ = m.RT.Exec(ctx, res.ID, []string{"chmod", "+x", "/usr/local/bin/strike"}, ExecOpts{})
+	return LaunchInsideResult{LaunchResult: res}, m.execStrikeTTY(ctx, res.ID, "/usr/local/bin/strike", opts.Args)
 }
 
 func (m *Manager) execStrikeTTY(ctx context.Context, id, strikePath string, args []string) error {

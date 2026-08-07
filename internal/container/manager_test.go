@@ -284,11 +284,20 @@ func TestManagerLaunchLifecycleFakeCLI(t *testing.T) {
 		t.Fatal("should not need build after launch")
 	}
 
-	// second launch reuses running
-	id2, err := m.Launch(ctx, LaunchOpts{Headless: true})
-	if err != nil || id2 != id {
-		t.Fatalf("reuse: %q %v", id2, err)
+	// second launch reuses running (E12.6 attach mode)
+	res2, err := m.LaunchWithResult(ctx, LaunchOpts{Headless: true})
+	if err != nil || res2.ID != id || res2.Mode != LaunchModeAttached {
+		t.Fatalf("reuse: %+v %v", res2, err)
 	}
+	id2 := res2.ID
+	_ = id2
+	// find by deterministic ContainerName after clearing cache
+	_ = m.Cache.ClearRuntime()
+	res3, err := m.LaunchWithResult(ctx, LaunchOpts{Headless: true})
+	if err != nil || res3.Mode != LaunchModeAttached || res3.ID != id {
+		t.Fatalf("by name: %+v %v", res3, err)
+	}
+	_ = m.Cache.SetContainerID(id)
 
 	out, _, code, err := m.Exec(ctx, []string{"true"}, ExecOpts{})
 	if err != nil || code != 0 {
@@ -355,6 +364,33 @@ func TestManagerConfigDrift(t *testing.T) {
 	_, err = m.Launch(context.Background(), LaunchOpts{Headless: true})
 	if !errors.Is(err, ErrConfigDrift) {
 		t.Fatalf("want drift, got %v", err)
+	}
+	var stale *StaleContainerError
+	if !errors.As(err, &stale) {
+		t.Fatalf("want StaleContainerError, got %T %v", err, err)
+	}
+	if stale.Reason == "" || len(stale.QuestionOptions()) != 3 {
+		t.Fatalf("%+v", stale)
+	}
+
+	// attach-stale joins without rebuild
+	res, err := m.LaunchWithResult(context.Background(), LaunchOpts{Headless: true, AttachStale: true})
+	if err != nil || res.Mode != LaunchModeAttached || res.ID != "cid" {
+		t.Fatalf("attach stale: %+v %v", res, err)
+	}
+}
+
+func TestStaleContainerErrorOptions(t *testing.T) {
+	e := &StaleContainerError{Reason: "hash", Name: "strike-x", ContainerID: "abc"}
+	if !errors.Is(e, ErrConfigDrift) {
+		t.Fatal("unwrap")
+	}
+	opts := e.QuestionOptions()
+	if len(opts) != 3 || opts[0] != "attach" || opts[1] != "rebuild" || opts[2] != "cancel" {
+		t.Fatalf("%v", opts)
+	}
+	if !strings.Contains(e.Error(), "attach anyway") {
+		t.Fatalf("%s", e.Error())
 	}
 }
 

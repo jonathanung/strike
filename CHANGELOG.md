@@ -41,6 +41,13 @@ materially affect the shipped product.
 
 ### Added
 
+- **Attach to live container** — one container per repo (`ContainerName`);
+  launch joins a compatible running container instead of creating a second.
+  Stale config/image raises a prompt (attach / rebuild / cancel) or flags
+  `--container-attach-stale` / `--container-rebuild` / `--container-cancel`.
+  `strike container ls` / `status`; stderr reports attached vs started
+  ([#588](https://github.com/jonathanung/strike/issues/588)).
+
 - **/devcontainer skill** — built-in `/devcontainer` scaffolds project container
   config: `strike container detect` scans go.mod / package.json / Python
   manifests / Cargo.toml / flake.nix / Makefile; skill always asks via

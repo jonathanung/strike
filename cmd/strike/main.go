@@ -30,6 +30,9 @@ type cliOptions struct {
 	sessionID                  string // --session: resume a specific root session
 	worktree                   bool   // --worktree: force a git worktree for this session
 	launchInsideContainer      bool   // --launch-inside-container: re-exec strike in managed container
+	containerRebuild           bool   // --container-rebuild: replace stale live container
+	containerAttachStale       bool   // --container-attach-stale: join drifted container
+	containerCancelStale       bool   // --container-cancel: refuse stale container non-interactively
 	telemetry                  bool   // --telemetry: show local system metrics pane
 	upgrade                    bool
 	version                    bool
@@ -117,6 +120,27 @@ var optionSpecs = []optionSpec{
 		description: "build/start the project container and re-exec strike inside it (E12.4)",
 		register: func(fs *flag.FlagSet, opts *cliOptions) {
 			fs.BoolVar(&opts.launchInsideContainer, "launch-inside-container", false, "")
+		},
+	},
+	{
+		names:       []string{"container-rebuild"},
+		description: "with --launch-inside-container: rebuild when the live container is stale (E12.6)",
+		register: func(fs *flag.FlagSet, opts *cliOptions) {
+			fs.BoolVar(&opts.containerRebuild, "container-rebuild", false, "")
+		},
+	},
+	{
+		names:       []string{"container-attach-stale"},
+		description: "with --launch-inside-container: attach to a stale live container (E12.6)",
+		register: func(fs *flag.FlagSet, opts *cliOptions) {
+			fs.BoolVar(&opts.containerAttachStale, "container-attach-stale", false, "")
+		},
+	},
+	{
+		names:       []string{"container-cancel"},
+		description: "with --launch-inside-container: cancel when the live container is stale (E12.6)",
+		register: func(fs *flag.FlagSet, opts *cliOptions) {
+			fs.BoolVar(&opts.containerCancelStale, "container-cancel", false, "")
 		},
 	},
 	{

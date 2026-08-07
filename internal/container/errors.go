@@ -1,6 +1,9 @@
 package container
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 // Sentinel errors returned by Runtime operations.
 var (
@@ -22,4 +25,41 @@ var (
 	// ErrConfigDrift is returned when a running container's labels do not match
 	// the current config/image hash (refuse silent attach into stale env).
 	ErrConfigDrift = errors.New("running container does not match current config")
+
+	// ErrLaunchCancelled is returned when the user cancels a stale-container prompt.
+	ErrLaunchCancelled = errors.New("container launch cancelled")
 )
+
+// StaleContainerError is returned when a live container exists for the repo but
+// its config/image labels do not match the current recipe (E12.6).
+// Callers should offer: attach anyway / rebuild / cancel (CLI prompt or question tool).
+type StaleContainerError struct {
+	// Reason is a human-readable compatibility failure (hash/image mismatch).
+	Reason string
+	// ContainerID is the running container id.
+	ContainerID string
+	// Name is the deterministic container name (strike-<repo>-<hash>).
+	Name string
+	// WantHash is the current config hash (may be empty if compute failed).
+	WantHash string
+	// HaveHash is the label on the running container (may be empty).
+	HaveHash string
+}
+
+func (e *StaleContainerError) Error() string {
+	if e == nil {
+		return ErrConfigDrift.Error()
+	}
+	base := fmt.Sprintf("%s: %s", ErrConfigDrift.Error(), e.Reason)
+	if e.Name != "" {
+		base += fmt.Sprintf(" (container %s)", e.Name)
+	}
+	return base + " — choose attach anyway, rebuild, or cancel"
+}
+
+func (e *StaleContainerError) Unwrap() error { return ErrConfigDrift }
+
+// QuestionOptions returns the three stable choices for a question-tool / CLI prompt.
+func (e *StaleContainerError) QuestionOptions() []string {
+	return []string{"attach", "rebuild", "cancel"}
+}
