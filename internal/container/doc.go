@@ -13,8 +13,10 @@
 //   - Injectable ExecFunc keeps unit tests offline (same pattern as Zone's
 //     network.ExecFunc and internal/eval/swebench.CLIRuntime).
 //
-// Zone's internal/docker used the Moby SDK; the port (#583) rewrites call sites
-// onto this CLI Runtime rather than copying the SDK client.
+// Zone's internal/docker used the Moby SDK; E12.1 (#583) ports lifecycle onto
+// this CLI Runtime (Manager: build/launch/attach/exec/stop/restart/destroy/clean)
+// with harness abstraction stripped. Config JSON layering is E12.2; Dockerfile
+// eject is E12.3.
 //
 // Boundary: internal/tui must not import this package. Container status reaches
 // the UI via host.Services and protocol events (see epic #547).

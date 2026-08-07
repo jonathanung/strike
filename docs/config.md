@@ -267,6 +267,19 @@ rule uses **either** facts or pattern — not both — so deny cannot double-fir
 Incomplete parses (expansions, `eval`, opaque scripts) never drive deny via
 facts; legacy pattern matching alone applies.
 
+**Dry-run preset:** `/permission explain --preset <id> <tool> [pattern]`
+evaluates under an alternate shipped preset without mutating the session
+(`ExplainPreset`). Useful for “what would `read-only` do on this call?”
+
+**Diff:** `/permission diff <presetA> <presetB>` lists added/removed/changed
+rules with layer labels (`permission.DiffPresets`). HTTP:
+`GET /v1/permissions/diff?left=&right=`, and explain accepts optional
+`preset=` for dry-run.
+
+**Managed ceiling:** explain output notes when the managed/MDM deny layer
+blocks a widen (stricter than the stack without managed). Sandbox dial and
+`network.allow` appear on the same explain surface when the host provides them.
+
 **Scoped approvals:** runtime grants may be bounded by scope and optional
 wall-clock TTL (`session`, `path-prefix`, `tool`, `command-class`). A scoped
 grant that would override a parent **Deny** is rejected (does not silently

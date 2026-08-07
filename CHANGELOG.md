@@ -16,18 +16,28 @@ materially affect the shipped product.
 
 ### Added
 
+- **Permission explain dry-run + diff** — `/permission explain --preset <id>`
+  evaluates under an alternate shipped preset without applying it;
+  `/permission diff <a> <b>` lists added/removed/changed rules with layer
+  labels; managed-ceiling and sandbox/`network.allow` notes on the explain
+  surface; HTTP `preset=` + `/v1/permissions/diff`
+  ([#895](https://github.com/jonathanung/strike/issues/895)).
+
 - **Tool-chain correlation** — content-free multi-step permission correlation
   within a turn: sensitive read → network/bash, write executable → bash
   execute, and identical denial retry storms. Matches **ask** or **deny** with
   explainable chain summaries (tool names/classes only); `chainId` on
   `permission.decided` and timeline entries. State clears on turn end/interrupt
   and caps pending nodes ([#891](https://github.com/jonathanung/strike/issues/891)).
-- **Container runtime foundation (E12.0)** — `internal/container` shells out to
-  `docker`/`podman` via an injectable `ExecFunc` (no Moby SDK). Low-level
-  `Runtime` (pull/create/start/stop/rm/exec/cp), deterministic
-  `strike-<repo>-<hash>` names, and `com.strike.*` labels. Decision and boundary
-  documented in `docs/container.md`
-  ([#582](https://github.com/jonathanung/strike/issues/582)).
+- **Container runtime foundation (E12.0–E12.1)** — `internal/container` shells
+  out to `docker`/`podman` via an injectable `ExecFunc` (no Moby SDK). Low-level
+  `Runtime` plus per-repo `Manager` lifecycle (build/launch/attach/exec/stop/
+  restart/destroy/clean), build cache under `.strike/container/`, resource/port/
+  env/SSH forwarding, deterministic `strike-<repo>-<hash>` names, and
+  `com.strike.*` labels. Zone harness abstraction stripped. Docs:
+  `docs/container.md`
+  ([#582](https://github.com/jonathanung/strike/issues/582),
+  [#583](https://github.com/jonathanung/strike/issues/583)).
 - **Plugin theme contributions** — theme packages load through the plugin
   catalog/lifecycle (same lockfile and integrity path). `/theme` shows plugin
   provenance and collision winners, live-previews on cursor move without
