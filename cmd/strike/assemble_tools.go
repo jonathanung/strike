@@ -908,6 +908,38 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			CloseChildSession: func(childID string) error {
 				return sessions.Close(childID)
 			},
+			LoadChildSession: func(childID string) (engine.ChildSessionSnapshot, error) {
+				childID = strings.TrimSpace(childID)
+				if childID == "" {
+					return engine.ChildSessionSnapshot{}, fmt.Errorf("child session id is empty")
+				}
+				meta, err := session.ReadMeta(sessionDir, childID)
+				if err != nil {
+					return engine.ChildSessionSnapshot{}, err
+				}
+				// Missing meta with no log → not found.
+				evs, err := sessions.Replay(childID)
+				if err != nil {
+					return engine.ChildSessionSnapshot{}, err
+				}
+				if len(evs) == 0 && strings.TrimSpace(meta.ParentSessionID) == "" {
+					// Distinguish empty/unknown: require parent lineage for resume.
+					if _, statErr := os.Stat(sessions.Path(childID)); statErr != nil {
+						return engine.ChildSessionSnapshot{}, fmt.Errorf("child session %q not found", childID)
+					}
+				}
+				return engine.ChildSessionSnapshot{
+					SessionID:       childID,
+					ParentSessionID: meta.ParentSessionID,
+					LeadSessionID:   meta.LeadSessionID,
+					Title:           meta.Title,
+					Events:          evs,
+				}, nil
+			},
+			ReopenChildSession: func(childID string) error {
+				_, err := sessions.Open(childID)
+				return err
+			},
 		})
 		return &rootSlot{
 			id:       sid,

@@ -191,6 +191,17 @@ type AgentBudgetSnapshot struct {
 	EscalateReason string `json:"escalate_reason,omitempty"`
 }
 
+// TaskResumeRequest reopens a persisted owned child as an active delegated task (#1035).
+type TaskResumeRequest struct {
+	// ID is a delegation id, session id, or stable name alias.
+	ID string
+	// Prompt is an optional continuation user message after restore.
+	Prompt string
+	// Continue allows resuming a terminal completed/failed/canceled child.
+	// Without Continue, terminal children stay terminal.
+	Continue bool
+}
+
 // TaskResult is the outcome of spawning a child session.
 // Status is one of "started", "queued", "completed", "failed", or "canceled".
 // Non-blocking spawns return "started" with SessionID set; "queued" means the
@@ -761,9 +772,11 @@ type Context struct {
 	SchedulerAcquire func(ctx context.Context, label string, pools ...string) (*scheduler.Lease, error)
 	Ask              func(ctx context.Context, req AskRequest) error
 	SpawnTask        func(ctx context.Context, req TaskRequest) (TaskResult, error)
-	TaskStatus       func(ctx context.Context, req TaskStatusRequest) (TaskStatusResult, error)
-	TaskRead         func(ctx context.Context, req TaskReadRequest) (TaskReadResult, error)
-	TaskMessage      func(ctx context.Context, req TaskMessageRequest) (TaskMessageResult, error)
+	// ResumeTask reopens a persisted owned child as the same delegated task (#1035).
+	ResumeTask  func(ctx context.Context, req TaskResumeRequest) (TaskResult, error)
+	TaskStatus  func(ctx context.Context, req TaskStatusRequest) (TaskStatusResult, error)
+	TaskRead    func(ctx context.Context, req TaskReadRequest) (TaskReadResult, error)
+	TaskMessage func(ctx context.Context, req TaskMessageRequest) (TaskMessageResult, error)
 	// TaskInterrupt cancels an owned running child by session id.
 	TaskInterrupt func(ctx context.Context, req TaskInterruptRequest) (TaskInterruptResult, error)
 	// Wait blocks until an owned-child orchestration event matches, times out,

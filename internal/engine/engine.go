@@ -334,6 +334,13 @@ type Options struct {
 	AppendChildEvent func(childID string, ev protocol.Event) error
 	// CloseChildSession, when set, closes a child session log after completion.
 	CloseChildSession func(childID string) error
+	// LoadChildSession, when set, loads a persisted child log for resume (#1035).
+	// Returns events plus ownership meta (parent/lead). Missing sessions should
+	// return a not-found error the resume path surfaces safely.
+	LoadChildSession func(childID string) (ChildSessionSnapshot, error)
+	// ReopenChildSession, when set, reopens a closed child log for append on
+	// resume. No-op when the session is already open.
+	ReopenChildSession func(childID string) error
 	// InitialMessages seeds model-facing history (durable resume / --continue).
 	// Copied at New; not emitted as transcript events.
 	InitialMessages []provider.Message
