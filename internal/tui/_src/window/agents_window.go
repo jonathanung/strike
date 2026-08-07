@@ -175,8 +175,11 @@ func (w agentsWindow) update(msg tea.Msg) (window, tea.Cmd) {
 		w.cursor = clampAgentsCursor(w.cursor, len(rows))
 		return w, nil
 	case petsTickMsg:
-		if p, ok := w.focusPet(); ok && len(p.Frames) > 0 {
-			w.petFrame = (w.petFrame + 1) % len(p.Frames)
+		if p, ok := w.focusPet(); ok {
+			frames := p.framesFor(w.focusPetState())
+			if len(frames) > 0 {
+				w.petFrame = (w.petFrame + 1) % len(frames)
+			}
 		}
 		return w, nil
 	case tea.KeyPressMsg:
@@ -252,11 +255,16 @@ func (w agentsWindow) view(th theme.Theme) string {
 
 // renderFocusPet draws the focused agent's ASCII pet above the tree.
 // Returns the block and how many rows it consumes (including trailing blank).
+// Art and name use AgentState tokens so status is visible at a glance.
 func (w agentsWindow) renderFocusPet(th theme.Theme) (string, int) {
 	th = th.Resolve()
-	st := th.S()
 	p, ok := w.focusPet()
-	if !ok || len(p.Frames) == 0 {
+	if !ok {
+		return "", 0
+	}
+	state := w.focusPetState()
+	frames := p.framesFor(state)
+	if len(frames) == 0 {
 		return "", 0
 	}
 	// Need room for name + at least one art row.
@@ -264,9 +272,18 @@ func (w agentsWindow) renderFocusPet(th theme.Theme) (string, int) {
 		return "", 0
 	}
 	lines := make([]string, 0, 8)
-	name := st.Accent.Render(sanitizeDisplayData(p.Name))
-	lines = append(lines, petsCenterLine(th, name, w.width))
-	art := p.Frames[w.petFrame%len(p.Frames)]
+	stateStyle := th.AgentStateStyle(state)
+	nameLabel := sanitizeDisplayData(p.Name)
+	// Muted status word next to the pet name when not ready.
+	if state != theme.AgentStateReady {
+		sep := th.Icons.DetailSeparator
+		if strings.TrimSpace(sep) == "" {
+			sep = "·"
+		}
+		nameLabel = nameLabel + " " + sep + " " + state.Label()
+	}
+	lines = append(lines, petsCenterLine(th, stateStyle.Bold(true).Render(nameLabel), w.width))
+	art := frames[w.petFrame%len(frames)]
 	artRows := strings.Split(art, "\n")
 	// Budget: leave at least 2 rows for the tree when possible.
 	budget := w.height - 2
@@ -282,13 +299,39 @@ func (w agentsWindow) renderFocusPet(th theme.Theme) (string, int) {
 		artRows = artRows[:artBudget]
 	}
 	for _, row := range artRows {
-		lines = append(lines, petsCenterLine(th, st.Text.Render(row), w.width))
+		lines = append(lines, petsCenterLine(th, stateStyle.Render(row), w.width))
 	}
 	// Trailing blank separator when space remains for the tree.
 	if w.height > len(lines)+1 {
 		lines = append(lines, "")
 	}
 	return strings.Join(lines, "\n"), len(lines)
+}
+
+// focusPetState is the runtime state of the session whose pet is shown.
+func (w agentsWindow) focusPetState() theme.AgentState {
+	id := w.focusPetSessionID()
+	if id == "" {
+		return theme.AgentStateReady
+	}
+	for _, root := range w.roots {
+		if root.ID == id {
+			return root.State
+		}
+		for _, ch := range root.Children {
+			if ch.sessionID == id {
+				state := childAgentState(ch.status)
+				if ch.rosterState == "needs you" {
+					state = theme.AgentStateAttention
+				}
+				if len(ch.queuePools) > 0 {
+					state = theme.AgentStateWorking
+				}
+				return state
+			}
+		}
+	}
+	return theme.AgentStateReady
 }
 
 // focusPetSessionID is the session whose pet is shown (cursor → viewing → active).
