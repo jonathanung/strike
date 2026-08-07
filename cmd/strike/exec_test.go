@@ -109,18 +109,18 @@ func TestParseExecArgsPromptForms(t *testing.T) {
 			if tt.wantFormat == "" {
 				tt.wantFormat = execFormatText
 			}
-			opts, prompt, format, err := parseExecArgs(tt.args, strings.NewReader(tt.stdin))
+			parsed, err := parseExecArgs(tt.args, strings.NewReader(tt.stdin))
 			if err != nil {
 				t.Fatalf("parseExecArgs: %v", err)
 			}
-			if prompt != tt.want {
-				t.Errorf("prompt = %q, want %q", prompt, tt.want)
+			if parsed.prompt != tt.want {
+				t.Errorf("prompt = %q, want %q", parsed.prompt, tt.want)
 			}
-			if opts != tt.wantOpt {
-				t.Errorf("opts = %+v, want %+v", opts, tt.wantOpt)
+			if parsed.opts != tt.wantOpt {
+				t.Errorf("opts = %+v, want %+v", parsed.opts, tt.wantOpt)
 			}
-			if format != tt.wantFormat {
-				t.Errorf("format = %q, want %q", format, tt.wantFormat)
+			if parsed.format != tt.wantFormat {
+				t.Errorf("format = %q, want %q", parsed.format, tt.wantFormat)
 			}
 		})
 	}
@@ -147,7 +147,7 @@ func TestParseExecArgsErrors(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, _, _, err := parseExecArgs(tt.args, strings.NewReader(tt.stdin))
+			_, err := parseExecArgs(tt.args, strings.NewReader(tt.stdin))
 			if tt.help {
 				if !errors.Is(err, errExecHelp) {
 					t.Fatalf("err = %v, want errExecHelp", err)
