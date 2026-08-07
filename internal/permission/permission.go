@@ -359,6 +359,9 @@ type pending struct {
 	announced        bool
 	hasDeferred      bool
 	deferredDecision protocol.Decision
+
+	// chainHit is set when tool-chain correlation forced this ask/deny.
+	chainHit *ChainHit
 }
 
 // resolvedEmission is a PermissionResolved to publish outside the mutex.
@@ -413,6 +416,10 @@ type Service struct {
 	// grant is recorded in memory. Failures are ignored so the in-session
 	// grant still applies; the caller may log them.
 	persistProject func(Rule) error
+
+	// chain is content-free multi-step correlation within a turn (#891).
+	// Never nil after New.
+	chain *Correlator
 }
 
 // New creates a Service. emit publishes events toward the frontend; base
@@ -422,7 +429,32 @@ func New(emit func(protocol.Event), base ...Ruleset) *Service {
 	if emit == nil {
 		emit = func(protocol.Event) {}
 	}
-	return &Service{emit: emit, base: base, pending: map[string]*pending{}}
+	return &Service{emit: emit, base: base, pending: map[string]*pending{}, chain: NewCorrelator()}
+}
+
+// BeginTurn resets tool-chain correlation state for a new user turn.
+func (s *Service) BeginTurn() {
+	if s == nil {
+		return
+	}
+	s.chain.BeginTurn()
+}
+
+// EndTurn clears tool-chain correlation state (turn complete or interrupt).
+func (s *Service) EndTurn() {
+	if s == nil {
+		return
+	}
+	s.chain.EndTurn()
+}
+
+// Chain returns the tool-chain correlator (tests / diagnostics). Never nil
+// for a Service from New.
+func (s *Service) Chain() *Correlator {
+	if s == nil {
+		return nil
+	}
+	return s.chain
 }
 
 // SetBaseLayerNames sets optional stable names for base layers (explain/audit).
@@ -662,17 +694,42 @@ func (s *Service) ask(ctx context.Context, req tool.AskRequest, corr protocol.Co
 	s.pruneExpiredLocked(s.now())
 	action := s.evaluateLocked(req.Permission, req.Patterns)
 	ex := s.explainWorstLocked(req.Permission, req.Patterns)
+
+	// Tool-chain correlation runs after ruleset + mode so multi-step abuse can
+	// still Ask/Deny under yolo. Check before recording this step.
+	var chainHit *ChainHit
+	if hit := s.chain.Check(req.Permission, req.Patterns); hit != nil {
+		chainHit = hit
+		switch hit.Action {
+		case Deny:
+			action = Deny
+		case Ask:
+			// Force prompt even when rules/mode would allow (safety net).
+			if action == Allow {
+				action = Ask
+			}
+		}
+	}
+
 	switch action {
 	case Allow:
 		// Skip audit on synchronous allow — high-frequency tools (read/glob)
 		// would flood session JSONL. Deny, ask suspend, and user replies still
 		// emit permission.decided for the timeline audit trail.
+		s.chain.Record(req.Permission, req.Patterns, false)
 		s.mu.Unlock()
 		return nil
 	case Deny:
+		s.chain.Record(req.Permission, req.Patterns, true)
 		s.mu.Unlock()
-		s.emitDecided(corr, req, action, "", "", ex)
-		return &DeniedError{Reason: "a permission rule matched"}
+		reason := "a permission rule matched"
+		if chainHit != nil && chainHit.Action == Deny {
+			// Chain hard-deny (e.g. retry storm) owns the model-facing reason.
+			reason = chainHit.Summary
+			ex.Action = Deny
+		}
+		s.emitDecided(corr, req, action, "", "", ex, chainHit)
+		return &DeniedError{Reason: reason}
 	}
 	s.nextID++
 	// Session-scope IDs so concurrent parent/child engines never collide when
@@ -687,6 +744,7 @@ func (s *Service) ask(ctx context.Context, req tool.AskRequest, corr protocol.Co
 		always:      req.Always,
 		correlation: corr,
 		ch:          make(chan protocol.PermissionReply, 1),
+		chainHit:    chainHit,
 	}
 	s.pending[id] = p
 	s.mu.Unlock()
@@ -700,7 +758,7 @@ func (s *Service) ask(ctx context.Context, req tool.AskRequest, corr protocol.Co
 		Metadata:    req.Metadata,
 	})
 	// Audit: ask suspended (timeline KindPermission waiting).
-	s.emitDecided(corr, req, Ask, id, "", ex)
+	s.emitDecided(corr, req, Ask, id, "", ex, chainHit)
 
 	// Mark announced only after PermissionAsked returns. Any Reply that ran
 	// while unannounced left a deferred resolution for us to emit now.
@@ -733,8 +791,11 @@ func (s *Service) ask(ctx context.Context, req tool.AskRequest, corr protocol.Co
 		return ctx.Err()
 	case reply := <-p.ch:
 		if reply.Decision == protocol.DecisionReject {
+			// Reject is not a ruleset denial; do not feed retry-storm.
 			return &RejectedError{Message: reply.Message}
 		}
+		// Approved — record successful step for downstream chain rules.
+		s.chain.Record(req.Permission, req.Patterns, false)
 		return nil
 	}
 }
@@ -762,7 +823,8 @@ func actionFromDecision(d protocol.Decision) Action {
 }
 
 // emitDecided publishes a redaction-safe audit event for timeline consumers.
-func (s *Service) emitDecided(corr protocol.Correlation, req tool.AskRequest, action Action, requestID string, decision protocol.Decision, ex Explanation) {
+// chainHit may be nil; when set, ChainID/Rule/Summary are attached for forensics.
+func (s *Service) emitDecided(corr protocol.Correlation, req tool.AskRequest, action Action, requestID string, decision protocol.Decision, ex Explanation, chainHit *ChainHit) {
 	ev := protocol.PermissionDecided{
 		Correlation: corr,
 		RequestID:   requestID,
@@ -776,6 +838,17 @@ func (s *Service) emitDecided(corr protocol.Correlation, req tool.AskRequest, ac
 		ev.RulePermission = ex.Matched.Permission
 		ev.RulePattern = ex.Matched.Pattern
 		ev.RuleAction = string(ex.Matched.Action)
+	}
+	if chainHit != nil {
+		ev.ChainID = chainHit.ChainID
+		ev.ChainRule = chainHit.Rule
+		ev.ChainSummary = chainHit.Summary
+		// Prefer chain layer label when no ruleset match drove the outcome.
+		if ev.Layer == "" {
+			ev.Layer = "tool-chain"
+			ev.RulePermission = chainHit.Rule
+			ev.RuleAction = string(chainHit.Action)
+		}
 	}
 	s.emit(ev)
 }
@@ -883,7 +956,7 @@ func (s *Service) Reply(r protocol.PermissionReply) {
 			ex = primaryEx
 			ex.Permission = a.pend.permission
 		}
-		s.emitDecided(a.pend.correlation, req, actionFromDecision(a.dec), a.id, a.dec, ex)
+		s.emitDecided(a.pend.correlation, req, actionFromDecision(a.dec), a.id, a.dec, ex, a.pend.chainHit)
 	}
 	if persist != nil {
 		for _, rule := range projectRules {
