@@ -503,6 +503,9 @@ type Engine struct {
 	// (Run handleOp vs turn worker).
 	pendingSteerMu sync.Mutex
 	pendingSteer   *pendingSteer
+	// steerQueueFallback is set by the turn worker when a steer must become
+	// the next UserInput; Run drains it into pendingUserInputs.
+	steerQueueFallback *pendingUserInput
 
 	// mailbox holds unread peer/team messages for this session. Delivery is
 	// at tool-round / turn boundaries (injectPendingMailbox /

@@ -166,6 +166,9 @@ func (e *Engine) applyPendingSteer(turnID, mode string) {
 // fallbackSteerToQueue converts an unapplied steer into a next-turn UserInput
 // with a visible TurnSteered(queued_fallback) event. Used on cancel/interrupt
 // when a boundary was never reached.
+//
+// Enqueue is deferred onto Run via steerQueueFallback so pendingUserInputs is
+// only mutated on the Run goroutine (same as handleOp → enqueueUserInput).
 func (e *Engine) fallbackSteerToQueue(turnID string) {
 	ps := e.takePendingSteer()
 	if ps == nil {
@@ -179,7 +182,21 @@ func (e *Engine) fallbackSteerToQueue(turnID string) {
 		Mode:         protocol.SteerModeQueuedFallback,
 		TargetTurnID: ps.targetTurnID,
 	})
-	e.enqueueUserInput(protocol.UserInput{Text: ps.text, Images: ps.images})
+	e.pendingSteerMu.Lock()
+	e.steerQueueFallback = &pendingUserInput{
+		text:   ps.text,
+		images: append([]protocol.ImageAttachment(nil), ps.images...),
+	}
+	e.pendingSteerMu.Unlock()
+}
+
+// takeSteerQueueFallback moves a deferred steer→queue item onto the Run path.
+func (e *Engine) takeSteerQueueFallback() *pendingUserInput {
+	e.pendingSteerMu.Lock()
+	item := e.steerQueueFallback
+	e.steerQueueFallback = nil
+	e.pendingSteerMu.Unlock()
+	return item
 }
 
 // enqueueUserInput buffers input for FIFO start after the active turn ends.
@@ -208,6 +225,10 @@ func (e *Engine) enqueueUserInput(op protocol.UserInput) {
 // user-queued input, otherwise pending child-completion notices, otherwise
 // peer mailbox messages.
 func (e *Engine) drainIdleFollowups(ctx context.Context) {
+	// Promote deferred steer→queue items before draining the user-input FIFO.
+	if item := e.takeSteerQueueFallback(); item != nil {
+		e.enqueueUserInput(protocol.UserInput{Text: item.text, Images: item.images})
+	}
 	if e.startNextPendingUserInput(ctx) {
 		return
 	}
@@ -393,7 +414,7 @@ func (e *Engine) runTurn(ctx context.Context, text string, images []protocol.Ima
 		if err != nil {
 			// If canceled with a pending steer, fall back to next-turn queue
 			// rather than dropping the guidance (visible TurnSteered event).
-			if e.pendingSteer != nil && (ctx.Err() != nil || errors.Is(err, context.Canceled)) {
+			if e.hasPendingSteer() && (ctx.Err() != nil || errors.Is(err, context.Canceled)) {
 				e.fallbackSteerToQueue(turnID)
 			}
 			e.failTurn(ctx, err, reqCorr, finishing)
@@ -417,7 +438,7 @@ func (e *Engine) runTurn(ctx context.Context, text string, images []protocol.Ima
 			// this stream, continue the turn with cancel_restart semantics
 			// (steer as next user message) instead of ending — avoids losing
 			// guidance and does not duplicate any tool calls.
-			if e.pendingSteer != nil {
+			if e.hasPendingSteer() {
 				e.applyPendingSteer(turnID, protocol.SteerModeCancelRestart)
 				continue
 			}
