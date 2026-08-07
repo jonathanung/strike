@@ -99,7 +99,8 @@ type agentsHighlightMsg struct {
 // agentsWindow is a multi-root session tree: top-level = parent agents, nested
 // = that parent's subagents. Keys: j/k move, enter select, n spawn, x interrupt,
 // r rename, d hide from pane (keeps session), space/h/l toggle expand, f cycle
-// view filter, / text filter.
+// view filter, / text filter, p cycle pet for the focused agent.
+// A per-agent ASCII pet sits above the tree for identification.
 type agentsWindow struct {
 	activeID  string
 	viewingID string
@@ -112,9 +113,13 @@ type agentsWindow struct {
 	// textFilter is an optional name/id substring filter (/ to edit).
 	textFilter string
 	filterEdit bool
-	cursor     int
-	width      int
-	height     int
+	// pets maps session id → petCatalog index (per-agent companion).
+	pets map[string]int
+	// petFrame is the shared animation frame for the focused pet art.
+	petFrame int
+	cursor   int
+	width    int
+	height   int
 }
 
 func newAgentsWindow() agentsWindow {
@@ -155,6 +160,7 @@ func (w agentsWindow) update(msg tea.Msg) (window, tea.Cmd) {
 		w.activeID = msg.activeID
 		w.viewingID = msg.viewingID
 		w.roots = append([]agentsRootSnap(nil), msg.roots...)
+		w = w.ensurePetsAssigned()
 		w.nodes = w.buildNodes(theme.Default())
 		// Keep cursor on the same id when possible.
 		rows := ui.FlattenTree(w.nodes)
@@ -167,6 +173,11 @@ func (w agentsWindow) update(msg tea.Msg) (window, tea.Cmd) {
 			}
 		}
 		w.cursor = clampAgentsCursor(w.cursor, len(rows))
+		return w, nil
+	case petsTickMsg:
+		if p, ok := w.focusPet(); ok && len(p.Frames) > 0 {
+			w.petFrame = (w.petFrame + 1) % len(p.Frames)
+		}
 		return w, nil
 	case tea.KeyPressMsg:
 		return w.handleKey(msg)
@@ -196,13 +207,23 @@ func (w agentsWindow) view(th theme.Theme) string {
 	empty := agentsEmptyLabel(w.viewFilter, w.textFilter)
 	showFilter := w.filterEdit || w.textFilter != ""
 	bodyH := visible
-	var header string
+	var parts []string
+	// Pet companion sits above the agent tree (focused session's pet).
+	if petBlock, n := w.renderFocusPet(th); petBlock != "" {
+		parts = append(parts, petBlock)
+		if bodyH > n {
+			bodyH -= n
+		} else {
+			bodyH = 0
+		}
+	}
 	if showFilter {
 		cursor := ""
 		if w.filterEdit {
 			cursor = ic.FilterCursor
 		}
-		header = st.Muted.Render("filter: ") + st.Input.Render(sanitizeDisplayData(w.textFilter)+cursor)
+		header := st.Muted.Render("filter: ") + st.Input.Render(sanitizeDisplayData(w.textFilter)+cursor)
+		parts = append(parts, wrapWindowText(header, w.width))
 		if bodyH > 0 {
 			bodyH--
 		}
@@ -212,7 +233,7 @@ func (w agentsWindow) view(th theme.Theme) string {
 		body = lipgloss.NewStyle().Width(max(1, w.width)).Render(
 			st.Muted.Render(empty),
 		)
-	} else {
+	} else if bodyH > 0 {
 		body = ui.Tree(th, ui.TreeOpts{
 			Nodes:   w.nodes,
 			Cursor:  clampAgentsCursor(w.cursor, len(rows)),
@@ -221,13 +242,195 @@ func (w agentsWindow) view(th theme.Theme) string {
 			Empty:   empty,
 		})
 	}
-	if header == "" {
-		return body
+	// Always surface empty-state copy (even when the pet consumed the height
+	// budget). Tree body only when there is remaining vertical room.
+	if body != "" {
+		parts = append(parts, body)
 	}
-	if bodyH <= 0 || body == "" {
-		return lipgloss.NewStyle().Width(max(1, w.width)).Render(header)
+	return strings.Join(parts, "\n")
+}
+
+// renderFocusPet draws the focused agent's ASCII pet above the tree.
+// Returns the block and how many rows it consumes (including trailing blank).
+func (w agentsWindow) renderFocusPet(th theme.Theme) (string, int) {
+	th = th.Resolve()
+	st := th.S()
+	p, ok := w.focusPet()
+	if !ok || len(p.Frames) == 0 {
+		return "", 0
 	}
-	return header + "\n" + body
+	// Need room for name + at least one art row.
+	if w.height < 2 {
+		return "", 0
+	}
+	lines := make([]string, 0, 8)
+	name := st.Accent.Render(sanitizeDisplayData(p.Name))
+	lines = append(lines, petsCenterLine(th, name, w.width))
+	art := p.Frames[w.petFrame%len(p.Frames)]
+	artRows := strings.Split(art, "\n")
+	// Budget: leave at least 2 rows for the tree when possible.
+	budget := w.height - 2
+	if budget < 2 {
+		budget = w.height
+	}
+	// name already used 1
+	artBudget := budget - 1
+	if artBudget < 1 {
+		return strings.Join(lines, "\n"), len(lines)
+	}
+	if len(artRows) > artBudget {
+		artRows = artRows[:artBudget]
+	}
+	for _, row := range artRows {
+		lines = append(lines, petsCenterLine(th, st.Text.Render(row), w.width))
+	}
+	// Trailing blank separator when space remains for the tree.
+	if w.height > len(lines)+1 {
+		lines = append(lines, "")
+	}
+	return strings.Join(lines, "\n"), len(lines)
+}
+
+// focusPetSessionID is the session whose pet is shown (cursor → viewing → active).
+func (w agentsWindow) focusPetSessionID() string {
+	if len(w.nodes) == 0 {
+		w.nodes = w.buildNodes(theme.Default())
+	}
+	if id := w.selectedID(ui.FlattenTree(w.nodes)); id != "" {
+		return id
+	}
+	if id := strings.TrimSpace(w.viewingID); id != "" {
+		return id
+	}
+	return strings.TrimSpace(w.activeID)
+}
+
+// focusPet returns the catalog pet for the focused session.
+func (w agentsWindow) focusPet() (petSpec, bool) {
+	id := w.focusPetSessionID()
+	if id == "" || w.pets == nil {
+		return petSpec{}, false
+	}
+	idx, ok := w.pets[id]
+	if !ok {
+		return petSpec{}, false
+	}
+	return petAt(idx)
+}
+
+// ensurePetsAssigned gives every live root/child a pet. Prefers catalog entries
+// not already assigned; when the roster is exhausted, picks any random pet.
+func (w agentsWindow) ensurePetsAssigned() agentsWindow {
+	if len(petCatalog) == 0 {
+		return w
+	}
+	if w.pets == nil {
+		w.pets = map[string]int{}
+	}
+	ids := w.liveAgentIDs()
+	live := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		live[id] = true
+	}
+	// Drop assignments for sessions no longer in the tree.
+	for id := range w.pets {
+		if !live[id] {
+			delete(w.pets, id)
+		}
+	}
+	used := make(map[int]bool, len(w.pets))
+	for id, idx := range w.pets {
+		if live[id] {
+			used[idx] = true
+		}
+	}
+	for _, id := range ids {
+		if _, ok := w.pets[id]; ok {
+			continue
+		}
+		free := make([]int, 0, len(petCatalog))
+		for i := range petCatalog {
+			if !used[i] {
+				free = append(free, i)
+			}
+		}
+		var pick int
+		if len(free) == 0 {
+			pick = petRandN(len(petCatalog))
+		} else {
+			pick = free[petRandN(len(free))]
+		}
+		w.pets[id] = pick
+		used[pick] = true
+	}
+	return w
+}
+
+// liveAgentIDs lists root and child session ids currently in the agents tree.
+func (w agentsWindow) liveAgentIDs() []string {
+	out := make([]string, 0, len(w.roots)*2)
+	seen := map[string]bool{}
+	add := func(id string) {
+		id = strings.TrimSpace(id)
+		if id == "" || seen[id] {
+			return
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	for _, root := range w.roots {
+		add(root.ID)
+		for _, ch := range root.Children {
+			add(ch.sessionID)
+		}
+	}
+	return out
+}
+
+// cycleFocusPet advances the focused agent's pet through the catalog.
+func (w agentsWindow) cycleFocusPet(delta int) agentsWindow {
+	n := len(petCatalog)
+	if n == 0 {
+		return w
+	}
+	id := w.focusPetSessionID()
+	if id == "" {
+		return w
+	}
+	if w.pets == nil {
+		w.pets = map[string]int{}
+	}
+	cur, ok := w.pets[id]
+	if !ok {
+		cur = 0
+	}
+	w.pets[id] = (cur + delta%n + n) % n
+	w.petFrame = 0
+	return w
+}
+
+// setFocusPetByName assigns a catalog pet to the focused (or given) session.
+func (w agentsWindow) setFocusPetByName(name, sessionID string) (agentsWindow, bool) {
+	idx, ok := petByID(name)
+	if !ok {
+		return w, false
+	}
+	id := strings.TrimSpace(sessionID)
+	if id == "" {
+		id = w.focusPetSessionID()
+	}
+	if id == "" {
+		id = strings.TrimSpace(w.activeID)
+	}
+	if id == "" {
+		return w, false
+	}
+	if w.pets == nil {
+		w.pets = map[string]int{}
+	}
+	w.pets[id] = idx
+	w.petFrame = 0
+	return w, true
 }
 
 func agentsEmptyLabel(filter agentsViewFilter, text string) string {
@@ -265,8 +468,8 @@ func agentsPaneFooter(th theme.Theme, width int) string {
 // agentsPaneKeyHints is the ordered agents-pane footer binding list.
 func agentsPaneKeyHints() []ui.KeyHint {
 	ak := defaultAgentsKeyMap()
-	hints := make([]ui.KeyHint, 0, 7)
-	for _, b := range []key.Binding{ak.Spawn, ak.Open, ak.Interrupt, ak.Rename, ak.Hide, ak.Move, ak.Filter} {
+	hints := make([]ui.KeyHint, 0, 8)
+	for _, b := range []key.Binding{ak.Spawn, ak.Open, ak.Interrupt, ak.Rename, ak.Hide, ak.Move, ak.Filter, ak.Pet} {
 		h := b.Help()
 		if h.Key == "" {
 			continue
@@ -302,6 +505,11 @@ func (w agentsWindow) handleKey(msg tea.KeyPressMsg) (agentsWindow, tea.Cmd) {
 		rows = ui.FlattenTree(w.nodes)
 		w.cursor = clampAgentsCursor(w.cursor, len(rows))
 		return w, w.highlightCmd()
+	case "p":
+		// Cycle companion pet for the focused agent.
+		return w.cycleFocusPet(1), nil
+	case "P":
+		return w.cycleFocusPet(-1), nil
 	case "/":
 		w.filterEdit = true
 		return w, nil

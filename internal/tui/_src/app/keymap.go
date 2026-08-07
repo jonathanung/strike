@@ -167,6 +167,7 @@ type agentsKeyMap struct {
 	Rename    key.Binding
 	Hide      key.Binding
 	Filter    key.Binding
+	Pet       key.Binding
 }
 
 func defaultAgentsKeyMap() agentsKeyMap {
@@ -179,6 +180,7 @@ func defaultAgentsKeyMap() agentsKeyMap {
 		// Hide removes the row from the agents pane only; session JSONL stays.
 		Hide:   key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "hide from pane")),
 		Filter: key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "cycle filter")),
+		Pet:    key.NewBinding(key.WithKeys("p", "P"), key.WithHelp("p", "cycle pet")),
 	}
 }
 
@@ -467,6 +469,7 @@ func keybindCatalog(keys keyMap) []keybindEntry {
 		from("agents.rename", "Agents", ak.Rename),
 		from("agents.hide", "Agents", ak.Hide),
 		from("agents.filter", "Agents", ak.Filter),
+		from("agents.pet", "Agents", ak.Pet),
 		keybindEntry{ID: "lists.move", Category: "Lists", Keys: "up/down/ctrl+p/ctrl+n", Action: "move selection", Slash: slashForKeybindID("lists.move")},
 		keybindEntry{ID: "lists.move-jk", Category: "Lists", Keys: "j/k", Action: "move (pickers without filter)", Slash: slashForKeybindID("lists.move-jk")},
 		keybindEntry{ID: "lists.select", Category: "Lists", Keys: "enter", Action: "confirm selection", Slash: slashForKeybindID("lists.select")},
