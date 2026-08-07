@@ -811,7 +811,8 @@ func (s *Server) handleIssues(w http.ResponseWriter, r *http.Request) {
 }
 
 // handlePermissionExplain returns last-match-wins detail for a sample tool call.
-// Query: permission (required), pattern (optional; empty means "*").
+// Query: permission (required), pattern (optional; empty means "*"),
+// preset (optional; dry-run alternate shipped preset without mutating session).
 // Host-safe DTO only — no TUI types cross this boundary.
 func (s *Server) handlePermissionExplain(w http.ResponseWriter, r *http.Request) {
 	if s.opts.Services == nil || s.opts.Services.Permissions == nil {
@@ -824,8 +825,35 @@ func (s *Server) handlePermissionExplain(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	pattern := strings.TrimSpace(r.URL.Query().Get("pattern"))
-	ex := s.opts.Services.Permissions.Explain(perm, pattern)
+	preset := strings.TrimSpace(r.URL.Query().Get("preset"))
+	var ex host.PermissionExplanation
+	if preset != "" {
+		ex = s.opts.Services.Permissions.ExplainPreset(perm, pattern, preset)
+	} else {
+		ex = s.opts.Services.Permissions.Explain(perm, pattern)
+	}
 	writeJSON(w, http.StatusOK, ex)
+}
+
+// handlePermissionDiff compares two shipped permission presets.
+// Query: left and right preset ids (required).
+func (s *Server) handlePermissionDiff(w http.ResponseWriter, r *http.Request) {
+	if s.opts.Services == nil || s.opts.Services.Permissions == nil {
+		capabilityUnavailable(w, "permissions")
+		return
+	}
+	left := strings.TrimSpace(r.URL.Query().Get("left"))
+	right := strings.TrimSpace(r.URL.Query().Get("right"))
+	if left == "" || right == "" {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "left and right preset ids are required"})
+		return
+	}
+	d, err := s.opts.Services.Permissions.DiffPresets(left, right)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, d)
 }
 
 // handlePermissionPresets lists shipped named permission rulesets.

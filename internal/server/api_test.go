@@ -179,6 +179,14 @@ func (p *testPermissions) Explain(permission, pattern string) host.PermissionExp
 	}
 }
 
+func (p *testPermissions) ExplainPreset(permission, pattern, presetID string) host.PermissionExplanation {
+	return p.Explain(permission, pattern)
+}
+
+func (p *testPermissions) DiffPresets(leftID, rightID string) (host.PermissionDiff, error) {
+	return host.PermissionDiff{}, nil
+}
+
 func (p *testPermissions) Presets() []host.PermissionPresetInfo {
 	if p.presets != nil {
 		return p.presets
