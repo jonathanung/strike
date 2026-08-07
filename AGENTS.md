@@ -68,6 +68,7 @@ service/theme token).
 | `internal/secret` | secret-ref env indirection + protocol event redaction on top of pkg/redact (see docs/secrets.md) |
 | `internal/auth` | credentials, OAuth/PKCE/device, env precedence |
 | `internal/config` | global/project JSON + agents/skills markdown |
+| `internal/audit` | Durable retention-bounded security audit sink (`~/.strike/audit/`) |
 | `internal/session` | JSONL event log append/replay + concurrent Manager |
 | `internal/history` | project-scoped prompt history |
 | `internal/memory` | project-scoped durable key/value memory |

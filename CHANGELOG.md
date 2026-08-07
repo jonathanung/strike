@@ -16,6 +16,11 @@ materially affect the shipped product.
 
 ### Added
 
+- **Durable security audit sink** — append-only redacted JSONL under
+  `~/.strike/audit/` for permission/sandbox/admission (and related) decisions,
+  retention prune, and `strike audit export` machine-readable bundles
+  ([#893](https://github.com/jonathanung/strike/issues/893)).
+
 - **Schema-first security/harness telemetry families** — versioned registry at
   `schemas/telemetry/v1/registry.json` with Go export structs, redaction
   annotations, golden fixtures, and `make telemetry-check` drift gate in
