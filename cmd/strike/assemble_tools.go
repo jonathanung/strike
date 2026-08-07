@@ -908,6 +908,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 				Env:     s.Env,
 				URL:     s.URL,
 				Headers: s.Headers,
+				OAuth:   configMCPOAuth(s.OAuth),
 			}
 		}
 		mcpCtx, mcpCancel := context.WithTimeout(context.Background(), 45*time.Second)
@@ -1266,5 +1267,22 @@ func toolRetryBackoffFromConfig(tr config.ToolRetryConfig) func(int) time.Durati
 	max := time.Duration(tr.MaxDelayMs) * time.Millisecond
 	return func(nextAttempt int) time.Duration {
 		return tool.ToolRetryDelay(nextAttempt, base, max)
+	}
+}
+
+func configMCPOAuth(o *config.MCPOAuth) *mcp.OAuthConfig {
+	if o == nil {
+		return nil
+	}
+	return &mcp.OAuthConfig{
+		ClientID:     o.ClientID,
+		ClientSecret: o.ClientSecret,
+		Scopes:       o.Scopes,
+		AuthorizeURL: o.AuthorizeURL,
+		TokenURL:     o.TokenURL,
+		RevokeURL:    o.RevokeURL,
+		DiscoveryURL: o.DiscoveryURL,
+		TokenFile:    o.TokenFile,
+		RedirectURL:  o.RedirectURL,
 	}
 }

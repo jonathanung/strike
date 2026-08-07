@@ -1263,6 +1263,47 @@ Equivalent wrapped form:
 }
 ```
 
+### Prompts, resources, OAuth, catalog refresh
+
+After `initialize`, Strike negotiates server capabilities before exposing tools,
+prompts, or resources:
+
+| Capability | Strike tools (when advertised) |
+|---|---|
+| `tools` | `mcp_<server>_<tool>` bridges (existing) |
+| `prompts` | `mcp_<server>_list_prompts`, `mcp_<server>_get_prompt` |
+| `resources` | `mcp_<server>_list_resources`, `mcp_<server>_read_resource` |
+
+Servers lacking a capability degrade cleanly (no tools registered for that
+surface). External content is permission-gated (`mcp`), size-bounded, secret-
+redacted, and tagged with provenance metadata (`mcpServer` / `mcpKind`).
+
+`notifications/tools|prompts|resources/list_changed` refreshes the in-process
+catalog without restarting Strike (malformed notifications are ignored).
+
+HTTP servers may set `oauth` for discovery + token refresh:
+
+```jsonc
+{
+  "servers": {
+    "remote": {
+      "type": "http",
+      "url": "https://mcp.example.com/mcp",
+      "oauth": {
+        "clientId": "strike",
+        "discoveryUrl": "https://auth.example.com/.well-known/oauth-authorization-server",
+        "tokenFile": "~/.strike/mcp-tokens/remote.json",
+        "scopes": "mcp"
+      }
+    }
+  }
+}
+```
+
+Token files are mode `0600`. Access/refresh tokens are never logged. On HTTP
+401, Strike refreshes once and retries. Hosts can drive login via
+`mcp.OAuthLoginURL` + authorization-code exchange / `Revoke`.
+
 ### Legacy: `mcp` in config
 
 ```json

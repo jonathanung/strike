@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -22,6 +23,8 @@ type Status struct {
 	ToolCount int
 	Error     string // non-secret error summary when down/error/quarantined
 	Tools     []string
+	// Caps is a short capability summary (tools,prompts,resources).
+	Caps string
 	// Admission is the last admission action (allow|warn|block|quarantine).
 	Admission string
 	// AdmissionReason is a short operator-visible reason (redact-safe).
@@ -151,18 +154,27 @@ func (m *Manager) startOne(ctx context.Context, cfg ServerConfig, reg *tool.Regi
 		return
 	}
 
-	names := make([]string, 0, len(tools))
-	for _, t := range tools {
-		bridge := newBridge(client, t)
-		reg.Register(bridge)
-		names = append(names, bridge.Name())
+	names := make([]string, 0, len(tools)+4)
+	if client.Caps().Tools {
+		for _, t := range tools {
+			bridge := newBridge(client, t)
+			reg.Register(bridge)
+			names = append(names, bridge.Name())
+		}
 	}
+	// Typed prompt/resource surface tools when capabilities allow.
+	names = append(names, registerSurfaceTools(reg, client, client.Caps())...)
 
 	m.mu.Lock()
 	m.clients[cfg.Name] = client
 	m.tools[cfg.Name] = names
 	delete(m.errs, cfg.Name)
 	m.mu.Unlock()
+
+	// Dynamic catalog refresh without restarting Strike.
+	client.OnNotification(func(method string, _ json.RawMessage) {
+		m.handleCatalogNotification(cfg.Name, method)
+	})
 
 	// Watch for unexpected exit: mark down (tools error cleanly via client.Closed).
 	go m.watch(cfg.Name, client)
@@ -204,6 +216,75 @@ func (m *Manager) watch(name string, client session) {
 		if !m.disabled[name] {
 			m.errs[name] = "server exited"
 		}
+	}
+	m.mu.Unlock()
+}
+
+// handleCatalogNotification refreshes tools/prompts/resources on list_changed.
+func (m *Manager) handleCatalogNotification(name, method string) {
+	if m == nil {
+		return
+	}
+	switch method {
+	case notifyToolsListChanged, notifyPromptsListChanged, notifyResourcesListChanged:
+		// coalesce: refresh full surface for this server
+		m.refreshServerCatalog(name)
+	default:
+		// ignore unknown notifications (malformed or future)
+	}
+}
+
+// refreshServerCatalog re-lists capabilities and rebinds registry tools in place.
+func (m *Manager) refreshServerCatalog(name string) {
+	m.mu.Lock()
+	client := m.clients[name]
+	reg := m.reg
+	disabled := m.disabled[name] || m.quarantined[name]
+	m.mu.Unlock()
+	if client == nil || reg == nil || disabled || client.Closed() {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultInitTimeout)
+	defer cancel()
+
+	caps := client.Caps()
+	var tools []toolInfo
+	var err error
+	if caps.Tools {
+		tools, err = client.ListTools(ctx)
+		if err != nil {
+			m.mu.Lock()
+			m.errs[name] = redactErr(err)
+			m.mu.Unlock()
+			return
+		}
+	}
+
+	// Unregister previous names then rebind.
+	m.mu.Lock()
+	oldNames := append([]string(nil), m.tools[name]...)
+	m.mu.Unlock()
+	if reg != nil {
+		for _, n := range oldNames {
+			reg.Unregister(n)
+		}
+	}
+
+	names := make([]string, 0, len(tools)+4)
+	if caps.Tools {
+		for _, t := range tools {
+			bridge := newBridge(client, t)
+			reg.Register(bridge)
+			names = append(names, bridge.Name())
+		}
+	}
+	names = append(names, registerSurfaceTools(reg, client, caps)...)
+
+	m.mu.Lock()
+	// Only apply if same client still live.
+	if m.clients[name] == client {
+		m.tools[name] = names
+		delete(m.errs, name)
 	}
 	m.mu.Unlock()
 }
@@ -354,6 +435,9 @@ func (m *Manager) Statuses() []Status {
 			AdmissionReason: m.admitReason[name],
 		}
 		st.ToolCount = len(st.Tools)
+		if c := m.clients[name]; c != nil {
+			st.Caps = formatCaps(c.Caps())
+		}
 		if m.disabled[name] {
 			st.State = "disabled"
 			st.Error = "disabled"
@@ -445,6 +529,7 @@ func ConfigsFromMap(servers map[string]ServerConfigFields, workDir string) []Ser
 			WorkDir:   workDir,
 			URL:       strings.TrimSpace(f.URL),
 			Headers:   copyEnv(f.Headers),
+			OAuth:     cloneOAuth(f.OAuth),
 		}
 		switch transport {
 		case TransportHTTP:
@@ -469,6 +554,15 @@ type ServerConfigFields struct {
 	Env     map[string]string `json:"env,omitempty"`
 	URL     string            `json:"url,omitempty"`
 	Headers map[string]string `json:"headers,omitempty"`
+	OAuth   *OAuthConfig      `json:"oauth,omitempty"`
+}
+
+func cloneOAuth(in *OAuthConfig) *OAuthConfig {
+	if in == nil {
+		return nil
+	}
+	cp := *in
+	return &cp
 }
 
 func copyEnv(in map[string]string) map[string]string {
@@ -546,4 +640,21 @@ func FormatStatuses(statuses []Status) string {
 	}
 	b.WriteString("\n(/mcp retry [name]  |  /mcp disable <name>)")
 	return b.String()
+}
+
+func formatCaps(c ServerCaps) string {
+	var parts []string
+	if c.Tools {
+		parts = append(parts, "tools")
+	}
+	if c.Prompts {
+		parts = append(parts, "prompts")
+	}
+	if c.Resources {
+		parts = append(parts, "resources")
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, ",")
 }
