@@ -13,17 +13,21 @@ export (run spans) — it does **not** store conversational payloads by default.
 
 ## Event families
 
-| Family | Source (v1) |
+Every family below has a production emitter and an Observe→Record path (#1032).
+
+| Family | Production source |
 |---|---|
 | `permission` | `permission.decided` |
+| `toolchain_match` | `permission.decided` with `chainRule` set (tool-chain correlation #891) |
 | `sandbox` | `tool.end` with `errorCode=sandbox_denied` |
-| `admission` | `scheduler.queued` / `admitted` / `canceled` |
-| `egress` | direct `Record` (tooling hooks) |
-| `secret_ref_use` | direct `Record` (class/hash only) |
-| `content_guard` | direct `Record` |
-| `toolchain_match` | direct `Record` |
+| `egress` | `tool.end` with `errorCode=network_denied` |
+| `content_guard` | `tool.end` with `errorCode=content_guard_denied`, or `permission.decided` for permission `content_guard` |
+| `admission` | `scheduler.queued` / `admitted` / `canceled`, and `admission.decided` |
+| `hook` | `hook.matched` (shell_* and declarative), and `tool.end` with `errorCode=blocked` |
+| `secret_ref_use` | `Sink.RecordSecretRefUse` at bash secret inject (class + name hash only — never values) |
 
 Payloads are redacted via `pkg/telemetry` / `pkg/redact` before append.
+Raw credentials, sensitive tool bodies, and secret values never enter the log.
 
 ## Storage and privacy
 

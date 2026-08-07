@@ -754,6 +754,9 @@ type Context struct {
 	// (secret://env/NAME). Resolved only into the bash process environment;
 	// values never appear in tool args, results, or events (#1030).
 	BashSecrets map[string]string
+	// OnSecretRefUse, when set, is called after a secret ref is resolved for
+	// process injection (class/hash only — never the value) for audit (#1032).
+	OnSecretRefUse func(refClass, refHash, action string)
 	// ContentGuard is the write-time content scanner dial (config contentGuard).
 	// Zero value enables default posture: credential shapes deny, high-confidence
 	// dangerous sinks ask. Mode off disables. See checkContentGuard (#890).

@@ -397,6 +397,7 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 		SandboxAllowDegrade:        e.opts.SandboxAllowDegrade,
 		NetworkAllow:               e.opts.NetworkAllow,
 		BashSecrets:                e.opts.BashSecrets,
+		Audit:                      e.opts.Audit,
 		ContentGuard:               e.opts.ContentGuard,
 		WebSearch:                  e.opts.WebSearch,
 		AllowYoloWithoutSandbox:    e.opts.AllowYoloWithoutSandbox,

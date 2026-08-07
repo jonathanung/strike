@@ -22,6 +22,12 @@ import (
 	"github.com/jonathanung/strike-cli/internal/tool"
 )
 
+// AuditRecorder is the narrow surface engine needs for durable security audit
+// beyond protocol Observe (secret_ref_use at inject). Implemented by *audit.Sink.
+type AuditRecorder interface {
+	RecordSecretRefUse(sessionID, turnID, toolCallID, refClass, refHash, action, toolName string) error
+}
+
 // sessionTemp holds the absolute private scratch dir for this engine session
 // (os.TempDir()/strike/<session-id>/). Lazily allocated on first use. Cleaned
 // up when Run returns.
@@ -123,6 +129,9 @@ type Options struct {
 	NetworkAllow []string
 	// BashSecrets maps env names → secret refs for bash process injection.
 	BashSecrets map[string]string
+	// Audit, when non-nil, receives durable security audit records beyond
+	// protocol Observe (e.g. secret_ref_use at inject time) (#1032).
+	Audit AuditRecorder
 	// ContentGuard is config contentGuard (+ managed ForcedDeny) for write-time
 	// content scanning on edit/write/apply_patch. Zero enables default posture.
 	ContentGuard tool.ContentGuardSettings
