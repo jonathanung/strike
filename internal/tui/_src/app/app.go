@@ -1258,9 +1258,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, diagnosticsRefreshCmd()
 
 	case petsTickMsg:
-		// Animate only while the pets pane is active so idle sessions stay
-		// event-driven (same pattern as filesRefreshMsg).
-		if !petsWindowActive(m.windows) {
+		// Animate agent pets only while the agents pane is active so idle
+		// sessions stay event-driven (same pattern as filesRefreshMsg).
+		if !agentsWindowActive(m.windows) {
 			return m, nil
 		}
 		var cmd tea.Cmd

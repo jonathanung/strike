@@ -197,10 +197,11 @@ empty-state line), an `agents` multi-root tree, a `visualizer` for the selected 
 status/tokens/cost/tokens-per-turn sparkline, a `files` explorer (lazy tree via
 `host.Files.ListDir`), a `diagnostics` browser (live language-server findings
 via `host.LSP`), `memory` and `issues` browsers, a `markdown` reader
-opened via `/md-read`, an `editor` PTY window for `/vim`/`/nano`, and a `pets`
-ASCII companion pane (`/pets`). Windows are organized into stack **groups**
+opened via `/md-read`, and an `editor` PTY window for `/vim`/`/nano`. The
+`agents` pane shows a per-agent ASCII companion pet above the tree (`/pets`,
+`p` to cycle). Windows are organized into stack **groups**
 (session: context+activity; agents: agents+visualizer; files: files+diagnostics;
-project: memory+issues; singles: markdown/editor/pets).
+project: memory+issues; singles: markdown/editor).
 When the right pane is large enough, multi-member groups render as a paired
 split (vertical in a side column, horizontal when the body split is a bottom
 bar); otherwise only the focused member is shown. Focus cycle walks members
