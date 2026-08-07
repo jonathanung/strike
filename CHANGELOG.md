@@ -16,6 +16,11 @@ materially affect the shipped product.
 
 ### Added
 
+- **Hardened path I/O helpers** — `internal/safefile` centralizes FIFO/special
+  file rejection, symlink-leaf refuse on write, timed reads, path identity for
+  grant/overlap matching, and atomic replace; adopted by read/write/edit/
+  apply_patch ([#896](https://github.com/jonathanung/strike/issues/896)).
+
 - **Plugin theme contributions** — theme packages load through the plugin
   catalog/lifecycle (same lockfile and integrity path). `/theme` shows plugin
   provenance and collision winners, live-previews on cursor move without
