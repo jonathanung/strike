@@ -315,32 +315,33 @@ OS profile. Composer `!` uses the config-layer compile; agent bash uses live
 layers (agent/phase/session).
 
 **Network allowlist (`network.allow`):** optional host/CIDR whitelist for
-**application-layer** web egress (`webfetch` target hosts and `websearch` API
-hosts). Entries may be hostnames (`api.github.com`), a single leading wildcard
-label (`*.example.com`), IP literals, or CIDRs (`10.0.0.0/8`). Empty or omitted
-means unrestricted **public** hosts (existing SSRF blocks for
-private/loopback/link-local/CGNAT still apply and cannot be opened by the
-allowlist). When non-empty, the request host must match an entry:
-hostname/wildcard on the name, or IP/CIDR on the literal host or (when the list
-includes IP/CIDR entries) a resolved address. Redirects and dial-time
-resolution are re-checked. Global and project layers: when a layer sets
-`network.allow` (including `[]`), it **replaces** the previous list so a
+**application-layer** egress. Entries may be hostnames (`api.github.com`), a
+single leading wildcard label (`*.example.com`), IP literals, or CIDRs
+(`10.0.0.0/8`). Empty or omitted means unrestricted **public** hosts (existing
+SSRF blocks for private/loopback/link-local/CGNAT still apply on webfetch and
+cannot be opened by the allowlist). When non-empty, destinations must match an
+entry: hostname/wildcard on the name, or IP/CIDR on the literal host or (when
+the list includes IP/CIDR entries) a resolved address. Webfetch redirects and
+dial-time resolution are re-checked. Global and project layers: when a layer
+sets `network.allow` (including `[]`), it **replaces** the previous list so a
 project can tighten or clear a global whitelist.
 
-This is the same policy **shape** as future container network filters. It is
-**not** a third independent system:
+This is the same policy **shape** for webfetch, bash preflight, and future
+container filters. It is **not** a third independent system:
 
 | Surface | What applies today |
 |---|---|
 | `webfetch` | `network.allow` host/CIDR allowlist + SSRF private blocks |
 | `websearch` | `network.allow` on the search API host + SSRF private blocks; result domain filters are separate tool args |
-| bash OS profile | host networking on by default (`Policy.NoNetwork` zero value / `NetworkEnabled()`); off only when `webfetch`, `websearch`, and `mcp` are all hard-deny on `*` (all-or-nothing; no per-host filter inside bwrap/seatbelt) |
-| permission rules | `webfetch` / `websearch` ask/allow/deny patterns (prompt posture), independent of the hard allowlist |
-| container net | deferred — reuse `network.allow` shape |
+| bash preflight (v1) | Same allowlist via argv parse for `curl`/`wget`/`ssh`/`scp`/`sftp`/`nc` (and common wrappers). Outside list → `network_denied`. Unparseable destinations on those clients fail closed when the list is non-empty. **Not** a full shell/network proxy. |
+| bash OS profile | host networking on by default (`Policy.NoNetwork` zero value / `NetworkEnabled()`); off only when `webfetch`, `websearch`, and `mcp` are all hard-deny on `*` (all-or-nothing; **no** per-host filter inside bwrap/seatbelt; no Windows host filter) |
+| permission rules | `webfetch` / `websearch` / `bash` ask/allow/deny patterns (prompt posture), independent of the hard allowlist |
+| container net | deferred (#547) — reuse `network.allow` shape |
 
-`/sandbox explain` prints the effective allowlist next to bash `network: on/off`.
-Prefer `webfetch` over `curl`/`wget` in bash when you need allowlist enforcement;
-bash egress is not host-filtered at the OS layer.
+`/sandbox explain` prints the effective allowlist, an `egress enforcement:`
+line (`preflight` when allow is set; `OS host filter: none` documents the
+platform gap), and bash `network: on/off`. Prefer `webfetch` for ordinary page
+fetches; use bash preflight when agents still shell out to curl/ssh.
 
 **Web search (`webSearch`):** configures the `websearch` tool backend. Search
 discovers titles/URLs/snippets; use `webfetch` to retrieve a selected page.

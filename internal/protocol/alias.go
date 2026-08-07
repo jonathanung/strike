@@ -339,5 +339,6 @@ const (
 	ErrorCodeInternal           = pub.ErrorCodeInternal
 	ErrorCodeBlocked            = pub.ErrorCodeBlocked
 	ErrorCodeSandboxDenied      = pub.ErrorCodeSandboxDenied
+	ErrorCodeNetworkDenied      = pub.ErrorCodeNetworkDenied
 	ErrorCodeQueueFull          = pub.ErrorCodeQueueFull
 )

@@ -16,6 +16,13 @@ materially affect the shipped product.
 
 ### Added
 
+- **Bash egress allowlist preflight** — when `network.allow` is set, bash
+  preflight denies `curl`/`wget`/`ssh`/`scp`/`sftp`/`nc` destinations outside
+  the shared host/CIDR/`*.suffix` list (same `CheckNetworkAllow` as webfetch).
+  Structured `network_denied` on the tool result/timeline. `/sandbox explain`
+  shows `egress enforcement: preflight` and documents that OS backends still
+  have no per-host filter ([#892](https://github.com/jonathanung/strike/issues/892)).
+
 - **Plugin theme contributions** — theme packages load through the plugin
   catalog/lifecycle (same lockfile and integrity path). `/theme` shows plugin
   provenance and collision winners, live-previews on cursor move without

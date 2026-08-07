@@ -332,6 +332,8 @@ func TestExplainAndProfileText(t *testing.T) {
 		"sandbox mode: workspace-write",
 		"network: false",
 		"network allowlist: api.github.com, 10.0.0.0/8",
+		"egress enforcement: preflight",
+		"OS network: off",
 		"deny-write globs: **/*.env",
 		"profile:",
 	} {
@@ -342,6 +344,12 @@ func TestExplainAndProfileText(t *testing.T) {
 	unrestricted := Explain(Policy{Mode: ModeReadOnly, WorkDir: wd})
 	if !strings.Contains(unrestricted, "network allowlist: (none — unrestricted public)") {
 		t.Errorf("Explain unrestricted allowlist:\n%s", unrestricted)
+	}
+	if !strings.Contains(unrestricted, "egress enforcement: none") {
+		t.Errorf("Explain egress none:\n%s", unrestricted)
+	}
+	if !strings.Contains(unrestricted, "OS host filter: none") {
+		t.Errorf("Explain OS host filter gap:\n%s", unrestricted)
 	}
 	if !strings.Contains(unrestricted, "network: true") {
 		t.Errorf("Explain default network on:\n%s", unrestricted)

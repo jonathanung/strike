@@ -25,6 +25,8 @@ const (
 	CodeBlocked ErrorCode = "blocked"
 	// CodeSandboxDenied is an OS sandbox capability block (bwrap/seatbelt).
 	CodeSandboxDenied ErrorCode = "sandbox_denied"
+	// CodeNetworkDenied is an application-layer network.allow egress block.
+	CodeNetworkDenied ErrorCode = "network_denied"
 )
 
 // ValidErrorCode reports whether c is a known stable error code.
@@ -32,7 +34,7 @@ func ValidErrorCode(c ErrorCode) bool {
 	switch c {
 	case CodePermissionDenied, CodeInvalidArgs, CodePreconditionFailed,
 		CodeCanceled, CodeTimeout, CodeTransient, CodeInternal, CodeBlocked,
-		CodeSandboxDenied:
+		CodeSandboxDenied, CodeNetworkDenied:
 		return true
 	}
 	return false
@@ -134,6 +136,11 @@ func ErrBlocked(msg string) *CodedError {
 // ErrSandboxDenied returns a non-retryable sandbox_denied error (OS isolation).
 func ErrSandboxDenied(msg string) *CodedError {
 	return &CodedError{Code: CodeSandboxDenied, Message: strings.TrimSpace(msg), Retryable: false}
+}
+
+// ErrNetworkDenied returns a non-retryable network_denied error (egress allowlist).
+func ErrNetworkDenied(msg string) *CodedError {
+	return &CodedError{Code: CodeNetworkDenied, Message: strings.TrimSpace(msg), Retryable: false}
 }
 
 // Classify maps an arbitrary error onto a structured *CodedError.
