@@ -213,6 +213,7 @@ func runACP(opts cliOptions, stdin io.Reader, stdout, stderr io.Writer) (runErr 
 			AgentTitle:    "Strike",
 			AgentVersion:  ver,
 			SubmitTimeout: 5 * time.Second,
+			Lifecycle:     newRPCLifecycle(a.sessions, a.services.Sessions, sessionID, ""),
 		})
 		return srv.Run(ctx, bridged)
 	})
