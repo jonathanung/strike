@@ -3,10 +3,13 @@ package swebench
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/jonathanung/strike-cli/internal/scheduler"
 )
 
 // Config configures a subset run.
@@ -56,6 +59,11 @@ type Runner struct {
 	Agent AgentDriver
 	Grade Grader
 	Cost  CostEstimator
+	// Sched, when non-nil, acquires scheduler.PoolContainer for the full
+	// instance lifecycle (materialize → agent → grade → cleanup). Waiting
+	// instances do not create containers before admission (E12.10 / #592).
+	// Release always runs even if cleanup fails so capacity is not leaked.
+	Sched *scheduler.Scheduler
 	// Now for timestamps (tests).
 	Now func() time.Time
 	// Materialize overrides workspace extraction (tests).
@@ -219,6 +227,19 @@ func (r *Runner) runOne(
 		row.WallClockMs = row.FinishedAt.Sub(start).Milliseconds()
 		row.GradeDetail = "dry-run"
 		return row, emptyPred
+	}
+
+	// Admit into the in-process container pool before any docker create/pull.
+	if r.Sched != nil {
+		lease, err := r.Sched.Acquire(ctx, scheduler.PoolContainer)
+		if err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return finish(StatusSkipped, "container pool canceled: "+err.Error())
+			}
+			return finish(StatusError, "container pool: "+err.Error())
+		}
+		// Always release — cleanup failure must not permanently consume capacity.
+		defer lease.Release()
 	}
 
 	instDir := InstanceRunDir(workRoot, runID, in.InstanceID)

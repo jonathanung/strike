@@ -11,9 +11,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/eval/swebench"
 	"github.com/jonathanung/strike-cli/internal/eval/sweep"
 	"github.com/jonathanung/strike-cli/internal/eval/tbench"
+	"github.com/jonathanung/strike-cli/internal/scheduler"
 	"github.com/jonathanung/strike-cli/internal/version"
 )
 
@@ -230,10 +232,19 @@ func runEvalSWEBench(args []string, stdout, stderr io.Writer) int {
 		cfg.Grader = swebench.GraderDocker
 	}
 
+	// E12.10: shared internal/container CLI + in-process container pool lease.
+	rt := swebench.NewContainerRuntime("")
 	runner := &swebench.Runner{
-		RT:    &swebench.CLIRuntime{},
+		RT:    rt,
 		Agent: &swebench.StrikeExec{},
 		Cost:  &swebench.CatalogCost{},
+	}
+	if sched, serr := evalContainerScheduler(); serr != nil {
+		fmt.Fprintln(stderr, "strike eval swebench:", serr)
+		return 2
+	} else if sched != nil {
+		runner.Sched = sched
+		defer sched.Close()
 	}
 	// Attach grader explicitly so "none" works without docker available.
 	if g, err := swebench.NewGrader(cfg.Grader, runner.RT, cfg.WorkRoot, cfg.RunID); err != nil {
@@ -761,4 +772,24 @@ func (m *multiFlag) Set(v string) error {
 	}
 	*m = append(*m, v)
 	return nil
+}
+
+// evalContainerScheduler builds a process-local scheduler with the configured
+// container pool capacity (defaults → global → project). Separate strike OS
+// processes remain independent (#446 / E12.10).
+func evalContainerScheduler() (*scheduler.Scheduler, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		cwd = ""
+	}
+	cfg, err := config.Load(cwd)
+	if err != nil {
+		// No config: unlimited default pools (same as interactive strike).
+		return scheduler.NewDefault(), nil
+	}
+	eff, err := scheduler.CompileWithPresets(cfg.Scheduler.Presets, cfg.Scheduler.Limits, cfg.Scheduler.Commands, "eval")
+	if err != nil {
+		return nil, err
+	}
+	return scheduler.New(eff.SchedulerConfig())
 }

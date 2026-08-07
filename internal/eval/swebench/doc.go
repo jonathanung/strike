@@ -8,9 +8,9 @@
 // Internal regression signal only — do not publish pass rates in the README
 // (SWE-ABS found ~1 in 5 leaderboard "passes" were semantically wrong).
 //
-// Container lifecycle uses the Docker CLI today. Epic #592 wires the same
-// runner onto internal/container + the scheduler container pool when that
-// runtime lands; keep Docker behind the Runtime interface.
+// Container lifecycle uses internal/container.CLI via ContainerRuntime (#592)
+// with optional scheduler.PoolContainer admission on Runner.Sched. CLIRuntime
+// remains for tests and direct docker injection.
 //
 // Official SWE-bench grading (log parsers + repo test specs) is optional via
 // --grader=harness when the swebench Python package is installed. The default
