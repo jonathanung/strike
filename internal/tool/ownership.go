@@ -632,6 +632,10 @@ func cleanAbs(p string) string {
 		// Keep cleaned relative form when caller did not abs it.
 		return filepath.Clean(p)
 	}
+	// Normalize identity (symlink parents, . segments) for grant/overlap match.
+	if id, err := pathIdentity(p); err == nil && id != "" {
+		return id
+	}
 	return filepath.Clean(p)
 }
 
@@ -641,7 +645,7 @@ func resolveOwnershipPath(workDir, p string) (abs, display string) {
 		return "", ""
 	}
 	if filepath.IsAbs(p) {
-		abs = filepath.Clean(p)
+		abs = cleanAbs(p)
 		display = abs
 		if workDir != "" {
 			if rel, err := filepath.Rel(workDir, abs); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {

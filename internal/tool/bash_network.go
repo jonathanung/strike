@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/jonathanung/strike-cli/internal/actionfacts"
 	"github.com/jonathanung/strike-cli/internal/sandbox"
 )
 
@@ -25,6 +26,19 @@ func checkBashNetworkAllow(command string, allow []string) error {
 	command = strings.TrimSpace(command)
 	if command == "" {
 		return nil
+	}
+	// Prefer hosts projected by actionfacts (#888) when present, then the
+	// dedicated argv preflight (fail-closed on known clients).
+	facts := actionfacts.Analyze(actionfacts.Input{Tool: "bash", Command: command})
+	for _, n := range facts.Network {
+		host := strings.TrimSpace(n.Host)
+		if host == "" || isAllDigits(host) {
+			// Skip empty / port-only tokens some projections emit for -p N.
+			continue
+		}
+		if err := sandbox.CheckNetworkAllow(host, allow); err != nil {
+			return errNetworkDenied(fmt.Sprintf("host %q is not on the network allowlist (bash preflight)", host))
+		}
 	}
 	return checkBashNetworkCommand(command, allow, 0)
 }

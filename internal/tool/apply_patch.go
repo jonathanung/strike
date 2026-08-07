@@ -588,12 +588,15 @@ func planPatchOps(workDir, tempDir string, hunks []patchHunk) ([]plannedOp, map[
 		if _, ok := originals[abs]; ok {
 			return nil
 		}
-		data, err := os.ReadFile(abs)
-		if err != nil {
+		if _, err := os.Lstat(abs); err != nil {
 			if os.IsNotExist(err) {
 				originals[abs] = pathOriginal{exists: false}
 				return nil
 			}
+			return err
+		}
+		data, err := safeReadFile(context.Background(), abs)
+		if err != nil {
 			return err
 		}
 		originals[abs] = pathOriginal{exists: true, data: data}

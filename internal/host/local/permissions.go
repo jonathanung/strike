@@ -13,7 +13,7 @@ import (
 type Permissions struct {
 	mu      sync.Mutex
 	layers  []permission.LabeledLayer
-	live    func(permission, pattern string) permission.Explanation
+	live    func(permission, pattern string) permission.DetailedExplanation
 	sandbox func() permission.SandboxExplainBits
 }
 
@@ -33,7 +33,7 @@ func NewPermissions(layers []permission.Ruleset, names []string) *Permissions {
 
 // SetLive installs a callback for live service explain (agent/phase/session).
 // nil clears (falls back to base layers only).
-func (p *Permissions) SetLive(fn func(permission, pattern string) permission.Explanation) {
+func (p *Permissions) SetLive(fn func(permission, pattern string) permission.DetailedExplanation) {
 	if p == nil {
 		return
 	}
@@ -75,7 +75,7 @@ func (p *Permissions) ExplainPreset(perm, pattern, presetID string) host.Permiss
 
 func (p *Permissions) explain(perm, pattern, presetID string, dryRun bool) host.PermissionExplanation {
 	if p == nil {
-		return toHost(permission.Explain(perm, pattern), "", nil, nil)
+		return toHost(permission.ExplainDetailed(perm, pattern, nil), "", nil, nil)
 	}
 	p.mu.Lock()
 	live := p.live
@@ -126,7 +126,7 @@ func (p *Permissions) explain(perm, pattern, presetID string, dryRun bool) host.
 		}
 		return toHost(ex, "", &ceil, sb)
 	}
-	ex := permission.ExplainLabeled(perm, pattern, layers)
+	ex := permission.ExplainDetailed(perm, pattern, layers)
 	ceil := permission.InspectCeiling(layers, perm, patternOrStar(pattern))
 	return toHost(ex, "", &ceil, sb)
 }
@@ -161,8 +161,8 @@ func patternOrStar(p string) string {
 	return p
 }
 
-func toHost(ex permission.Explanation, dryPreset string, ceiling *permission.CeilingInfo, sandbox *permission.SandboxExplainBits) host.PermissionExplanation {
-	summary := permission.FormatExplanationFull(ex, ceiling, sandbox)
+func toHost(ex permission.DetailedExplanation, dryPreset string, ceiling *permission.CeilingInfo, sandbox *permission.SandboxExplainBits) host.PermissionExplanation {
+	summary := permission.FormatDetailedExplanationFull(ex, ceiling, sandbox)
 	if dryPreset != "" {
 		label := dryPreset
 		if label == "" {
@@ -171,10 +171,12 @@ func toHost(ex permission.Explanation, dryPreset string, ceiling *permission.Cei
 		summary = "dry-run preset=" + label + "\n" + summary
 	}
 	h := host.PermissionExplanation{
-		Permission: ex.Permission,
-		Pattern:    ex.Pattern,
-		Action:     string(ex.Action),
-		Summary:    summary,
+		Permission:  ex.Permission,
+		Pattern:     ex.Pattern,
+		Action:      string(ex.Action),
+		Summary:     summary,
+		EvalPath:    ex.EvalPath,
+		FactSummary: ex.FactSummary,
 	}
 	if ex.Matched != nil {
 		h.Layer = ex.Matched.Layer

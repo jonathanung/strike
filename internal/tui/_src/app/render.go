@@ -90,8 +90,8 @@ func (m Model) renderFrame() string {
 		hGeometry = computePaneGeometry(m.width, gutter, m.focus)
 		leftWidth = hGeometry.leftCandidateWidth(m.width)
 	}
-	l := computeLayout(leftWidth, m.height, m.composer.Height(), m.completionPopupHeightFor(leftWidth), m.showDangerBanner(), m.noticeRowsFor(leftWidth))
-	bodyHeight := l.transcript + l.notice + l.popup + l.composer
+	l := computeLayout(leftWidth, m.height, m.composer.Height(), m.completionPopupHeightFor(leftWidth), m.showDangerBanner(), m.noticeRowsFor(leftWidth), m.tipRowsFor())
+	bodyHeight := l.transcript + l.notice + l.tip + l.popup + l.composer
 	rightWidth, rightHeight := 0, bodyHeight
 	showLeft, showRight := true, false
 	vGutter := 0
@@ -103,7 +103,7 @@ func (m Model) renderFrame() string {
 		if geo.mode == paneSplit {
 			splitVertical = true
 			l = l.withBodyHeight(geo.leftHeight)
-			bodyHeight = l.transcript + l.notice + l.popup + l.composer
+			bodyHeight = l.transcript + l.notice + l.tip + l.popup + l.composer
 			rightWidth, rightHeight = geo.rightWidth, geo.rightHeight
 			vGutter = geo.gutter
 			showLeft, showRight = true, true
@@ -164,6 +164,13 @@ func (m Model) renderFrame() string {
 		if m.modal == nil && l.popup > 0 {
 			if popup := m.completion.view(leftWidth, l.popup, m.th); popup != "" {
 				left = append(left, popup)
+			}
+		}
+		if l.tip > 0 {
+			if tip := m.tipView(leftWidth); tip != "" {
+				left = append(left, tip)
+			} else {
+				left = append(left, themedSpace(leftWidth))
 			}
 		}
 		if l.composer > 0 {

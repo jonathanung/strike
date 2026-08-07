@@ -3,32 +3,24 @@ package tool
 import "strings"
 
 // Core tools always appear in the provider Tools array when registered, even
-// with defer loading enabled. Everything else (optional built-ins, MCP) is
-// omitted until toolsearch discovers it (or the model calls it by name).
+// with defer loading enabled. Everything else (orchestration, compatibility
+// shims, optional built-ins, MCP) is omitted until toolsearch discovers it,
+// the model calls it by name, or deterministic workflow activation promotes it.
+//
+// Minimal always-visible surface for ordinary repository coding:
+// file inspect/edit, bash, progressive task, question, and toolsearch.
 var coreToolNames = map[string]struct{}{
 	"read": {}, "glob": {}, "grep": {},
 	"edit": {}, "write": {}, "apply_patch": {},
 	"move": {}, "delete": {},
-	"bash": {},
-	"task": {}, "task_status": {}, "task_read": {}, "task_message": {}, "task_interrupt": {},
-	"delegate":        {},
-	"wait":            {},
-	"agent_roster":    {},
-	"agent_ownership": {},
-	"agent_message":   {},
-	"agent_broadcast": {},
-	"agent_thread":    {},
-	"team_task":       {},
-	"plan_write":      {},
-	"plan_read":       {},
-	"plan_delegate":   {},
-	"toolsearch":      {},
-	"question":        {},
-	"enter_plan_mode": {}, "exit_plan_mode": {}, "phase_done": {},
+	"bash":       {},
+	"task":       {},
+	"toolsearch": {},
+	"question":   {},
 }
 
 // IsCoreTool reports whether name is always sent in provider Tools under
-// defer loading (coding + task + discovery + plan/question workflow).
+// defer loading (coding + task + discovery + question).
 func IsCoreTool(name string) bool {
 	name = strings.TrimSpace(name)
 	if name == "" {

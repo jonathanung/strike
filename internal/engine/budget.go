@@ -100,6 +100,10 @@ type childBudget struct {
 
 	softStall bool
 	softLoop  bool
+	// softStallSignaled is true after the rising-edge soft-stall notify
+	// (ChildEscalated action=signaled). Cleared on progress so a later stall
+	// can signal again.
+	softStallSignaled bool
 
 	escalated bool
 	kind      string // wall_clock|tokens|cost_usd|tool_calls|dangerous_tools|stall|loop
@@ -129,8 +133,9 @@ func (b *childBudget) noteProgress(now time.Time, action string) {
 	if a := strings.TrimSpace(action); a != "" {
 		b.lastAction = a
 	}
-	// Progress clears soft stall; loop is recomputed on tool notes.
+	// Progress clears soft stall and allows a future rising-edge signal.
 	b.softStall = false
+	b.softStallSignaled = false
 }
 
 func (b *childBudget) noteTool(name string, now time.Time) {
@@ -272,6 +277,37 @@ func (b *childBudget) evaluate(now time.Time, startedAt time.Time) (trip bool, k
 	return false, "", "", ""
 }
 
+func (b *childBudget) stallThresholdS() int {
+	if b != nil && b.limits.StallAfterS > 0 {
+		return b.limits.StallAfterS
+	}
+	return defaultSoftStallAfterS
+}
+
+func (b *childBudget) idleDuration(now time.Time, startedAt time.Time) time.Duration {
+	if b == nil {
+		return 0
+	}
+	if !b.lastProgressAt.IsZero() {
+		d := now.Sub(b.lastProgressAt)
+		if d < 0 {
+			return 0
+		}
+		return d
+	}
+	d := now.Sub(startedAt)
+	if d < 0 {
+		return 0
+	}
+	return d
+}
+
+func (b *childBudget) softStallReason(now time.Time, startedAt time.Time) string {
+	idle := b.idleDuration(now, startedAt)
+	th := b.stallThresholdS()
+	return fmt.Sprintf("stale/stall: no progress for %s (soft threshold %ds)", idle.Round(time.Second), th)
+}
+
 func (b *childBudget) snapshot(now time.Time, startedAt time.Time) tool.AgentBudgetSnapshot {
 	if b == nil {
 		return tool.AgentBudgetSnapshot{}
@@ -281,18 +317,28 @@ func (b *childBudget) snapshot(now time.Time, startedAt time.Time) tool.AgentBud
 		elapsed = 0
 	}
 	elapsedS := int(elapsed.Seconds())
+	idle := b.idleDuration(now, startedAt)
+	idleS := int(idle.Seconds())
+	if idleS < 0 {
+		idleS = 0
+	}
 	snap := tool.AgentBudgetSnapshot{
-		Limits:         b.limits,
-		ElapsedS:       elapsedS,
-		TokensUsed:     b.tokensUsed,
-		CostUSDUsed:    b.costUSD,
-		ToolCalls:      b.toolCalls,
-		DangerousTools: b.dangerousTools,
-		Stall:          b.softStall,
-		Loop:           b.softLoop,
-		Escalated:      b.escalated,
-		EscalateKind:   b.kind,
-		EscalateReason: b.reason,
+		Limits:               b.limits,
+		ElapsedS:             elapsedS,
+		TokensUsed:           b.tokensUsed,
+		CostUSDUsed:          b.costUSD,
+		ToolCalls:            b.toolCalls,
+		DangerousTools:       b.dangerousTools,
+		Stall:                b.softStall,
+		IdleS:                idleS,
+		StallAfterSEffective: b.stallThresholdS(),
+		Loop:                 b.softLoop,
+		Escalated:            b.escalated,
+		EscalateKind:         b.kind,
+		EscalateReason:       b.reason,
+	}
+	if !b.lastProgressAt.IsZero() {
+		snap.LastProgressAt = b.lastProgressAt.UTC().Format(time.RFC3339)
 	}
 	if b.limits.MaxWallClockS > 0 {
 		rem := b.limits.MaxWallClockS - elapsedS
@@ -381,6 +427,17 @@ func (e *Engine) pollChildBudget(h *childHandle, now time.Time) {
 		return
 	}
 	trip, kind, reason, terminal := h.budget.evaluate(now, h.startedAt)
+	// Soft stall rising edge: parent-visible signal without kill (#517).
+	if !trip && h.budget.softStall && !h.budget.softStallSignaled {
+		h.budget.softStallSignaled = true
+		id := h.id
+		name := h.name
+		softReason := h.budget.softStallReason(now, h.startedAt)
+		snap := h.budget.snapshot(now, h.startedAt)
+		h.mu.Unlock()
+		e.signalSoftStall(id, name, softReason, snap)
+		return
+	}
 	if !trip || !h.budget.markEscalatedLocked(kind, reason, terminal) {
 		h.mu.Unlock()
 		return
@@ -390,6 +447,59 @@ func (e *Engine) pollChildBudget(h *childHandle, now time.Time) {
 	snap := h.budget.snapshot(now, h.startedAt)
 	h.mu.Unlock()
 	e.escalateChildBudget(id, name, kind, reason, terminal, snap, h)
+}
+
+// signalSoftStall emits child.escalated action=signaled + lead mailbox and
+// wakes waiters on task.stale / task.blocked. Does not interrupt the child.
+func (e *Engine) signalSoftStall(id, name, reason string, snap tool.AgentBudgetSnapshot) {
+	if e == nil || id == "" {
+		return
+	}
+	depth := e.opts.Depth + 1
+	view := budgetSnapshotToProtocol(snap)
+	ev := protocol.ChildEscalated{
+		Correlation: protocol.Correlation{
+			SessionID:       id,
+			ParentSessionID: e.opts.SessionID,
+			Depth:           depth,
+		},
+		Name:   name,
+		Kind:   "stall",
+		Reason: reason,
+		Action: protocol.EscalateActionSignaled,
+		Budget: view,
+	}
+	e.emit(ev)
+	e.persistChildEvent(id, ev)
+
+	body := fmt.Sprintf(
+		"[child.stale] session=%s kind=stall action=signaled\n%s",
+		id, reason,
+	)
+	if name != "" {
+		body = fmt.Sprintf(
+			"[child.stale] session=%s name=%s kind=stall action=signaled\n%s",
+			id, name, reason,
+		)
+	}
+	if e.team != nil {
+		to := e.team.LeadID()
+		if d, ok := e.team.GetDelegation(id); ok && d.OwnerSessionID != "" {
+			to = d.OwnerSessionID
+		}
+		_ = e.team.Deliver(e.opts.SessionID, to, body)
+	}
+
+	e.notifyWaiters(waitSignal{
+		Kind:      tool.WaitEventTaskStale,
+		SessionID: id,
+		Name:      name,
+		Status:    "needs_attention",
+		Summary:   reason,
+	})
+	// Also wake waiters subscribed only to task.blocked (needs_attention).
+	e.notifyWaitersBlocked(id, name)
+	e.emitTeamRoster()
 }
 
 // escalateChildBudget emits child.escalated, notifies the lead, marks
@@ -667,28 +777,31 @@ func (e *Engine) childFilesTouched(sessionID string) []string {
 
 func budgetSnapshotToProtocol(s tool.AgentBudgetSnapshot) *protocol.AgentBudgetView {
 	v := &protocol.AgentBudgetView{
-		MaxWallClockS:       s.Limits.MaxWallClockS,
-		MaxTokens:           s.Limits.MaxTokens,
-		MaxCostUSD:          s.Limits.MaxCostUSD,
-		MaxToolCalls:        s.Limits.MaxToolCalls,
-		MaxDangerousTools:   s.Limits.MaxDangerousTools,
-		StallAfterS:         s.Limits.StallAfterS,
-		LoopDetectN:         s.Limits.LoopDetectN,
-		ElapsedS:            s.ElapsedS,
-		TokensUsed:          s.TokensUsed,
-		CostUSDUsed:         s.CostUSDUsed,
-		ToolCalls:           s.ToolCalls,
-		DangerousTools:      s.DangerousTools,
-		WallClockRemainingS: s.WallClockRemainingS,
-		TokensRemaining:     s.TokensRemaining,
-		ToolCallsRemaining:  s.ToolCallsRemaining,
-		DangerousRemaining:  s.DangerousRemaining,
-		CostUSDRemaining:    s.CostUSDRemaining,
-		Stall:               s.Stall,
-		Loop:                s.Loop,
-		Escalated:           s.Escalated,
-		EscalateKind:        s.EscalateKind,
-		EscalateReason:      s.EscalateReason,
+		MaxWallClockS:        s.Limits.MaxWallClockS,
+		MaxTokens:            s.Limits.MaxTokens,
+		MaxCostUSD:           s.Limits.MaxCostUSD,
+		MaxToolCalls:         s.Limits.MaxToolCalls,
+		MaxDangerousTools:    s.Limits.MaxDangerousTools,
+		StallAfterS:          s.Limits.StallAfterS,
+		LoopDetectN:          s.Limits.LoopDetectN,
+		ElapsedS:             s.ElapsedS,
+		TokensUsed:           s.TokensUsed,
+		CostUSDUsed:          s.CostUSDUsed,
+		ToolCalls:            s.ToolCalls,
+		DangerousTools:       s.DangerousTools,
+		WallClockRemainingS:  s.WallClockRemainingS,
+		TokensRemaining:      s.TokensRemaining,
+		ToolCallsRemaining:   s.ToolCallsRemaining,
+		DangerousRemaining:   s.DangerousRemaining,
+		CostUSDRemaining:     s.CostUSDRemaining,
+		Stall:                s.Stall,
+		IdleS:                s.IdleS,
+		LastProgressAt:       s.LastProgressAt,
+		StallAfterSEffective: s.StallAfterSEffective,
+		Loop:                 s.Loop,
+		Escalated:            s.Escalated,
+		EscalateKind:         s.EscalateKind,
+		EscalateReason:       s.EscalateReason,
 	}
 	return v
 }

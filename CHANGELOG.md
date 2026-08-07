@@ -14,6 +14,17 @@ materially affect the shipped product.
 
 ## [Unreleased]
 
+### Changed
+
+- **Progressive tool disclosure default** — `deferTools` now defaults to `on`
+  with a smaller always-visible core (`read`/`glob`/`grep`/`edit`/`write`/
+  `apply_patch`/`move`/`delete`/`bash`/`task`/`toolsearch`/`question`).
+  Compatibility delegation, team coordination, and plan tools stay registered
+  but deferred until `toolsearch`, direct call, or workflow activation.
+  Set `deferTools: "off"` to restore the full permitted `tools[]` surface
+  ([#988](https://github.com/jonathanung/strike/issues/988),
+  [#993](https://github.com/jonathanung/strike/issues/993)).
+
 ### Added
 
 - **Bash egress allowlist preflight** — when `network.allow` is set, bash
@@ -22,6 +33,21 @@ materially affect the shipped product.
   Structured `network_denied` on the tool result/timeline. `/sandbox explain`
   shows `egress enforcement: preflight` and documents that OS backends still
   have no per-host filter ([#892](https://github.com/jonathanung/strike/issues/892)).
+- **Admission scan for MCP, skills, and plugins** — register/load-time
+  scanners apply a severity→action matrix (`allow` / `warn` / `block` /
+  `quarantine`) before MCP tools bind or skills enter the catalog. Config
+  `admission.preset` (`permissive` \| `default` \| `strict`), home-anchored
+  `allowPaths` only (bare relative markers rejected — spoof-via-subdirectory
+  regression tested), and explicit fail-closed on `strict`. Emits
+  `admission.decided` (protocol `1.14.0`) for timeline/audit. Shared
+  `internal/security.Finding` types for future write-time content guards.
+  Docs: [docs/admission.md](docs/admission.md)
+  ([#889](https://github.com/jonathanung/strike/issues/889)).
+- **Hardened path I/O helpers** — `internal/safefile` centralizes FIFO/special
+  file rejection, symlink-leaf refuse on write, timed reads, path identity for
+  grant/overlap matching, and atomic replace; adopted by read/write/edit/
+  apply_patch ([#896](https://github.com/jonathanung/strike/issues/896)).
+
 - **Permission explain dry-run + diff** — `/permission explain --preset <id>`
   evaluates under an alternate shipped preset without applying it;
   `/permission diff <a> <b>` lists added/removed/changed rules with layer
@@ -29,6 +55,12 @@ materially affect the shipped product.
   surface; HTTP `preset=` + `/v1/permissions/diff`
   ([#895](https://github.com/jonathanung/strike/issues/895)).
 
+- **Container config (E12.2)** — layered `container` block in main config plus
+  optional `container.jsonc`/`container.json` (defaults → global → project →
+  managed). Fields cover base image, packages, shell, resources, workspace,
+  auth forwarding, network mode/allow shape, execution dial, and engine binary.
+  Maps to `internal/container` via `ToRuntime`
+  ([#584](https://github.com/jonathanung/strike/issues/584)).
 - **Tool-chain correlation** — content-free multi-step permission correlation
   within a turn: sensitive read → network/bash, write executable → bash
   execute, and identical denial retry storms. Matches **ask** or **deny** with

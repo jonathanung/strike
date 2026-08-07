@@ -24,21 +24,27 @@ func TestPermissionsExplainBaseLayers(t *testing.T) {
 	if !strings.Contains(ex.Summary, "allow") {
 		t.Fatalf("summary missing allow: %s", ex.Summary)
 	}
+	if ex.EvalPath == "" {
+		t.Fatalf("expected eval path in explain, summary=%s", ex.Summary)
+	}
 }
 
 func TestPermissionsExplainLive(t *testing.T) {
 	p := local.NewPermissions(nil, nil)
-	p.SetLive(func(perm, pat string) permission.Explanation {
-		return permission.Explanation{
-			Permission: perm,
-			Pattern:    pat,
-			Action:     permission.Deny,
-			Matched: &permission.Match{
-				Layer:      permission.LayerAgent,
+	p.SetLive(func(perm, pat string) permission.DetailedExplanation {
+		return permission.DetailedExplanation{
+			Explanation: permission.Explanation{
 				Permission: perm,
-				Pattern:    "*",
+				Pattern:    pat,
 				Action:     permission.Deny,
+				Matched: &permission.Match{
+					Layer:      permission.LayerAgent,
+					Permission: perm,
+					Pattern:    "*",
+					Action:     permission.Deny,
+				},
 			},
+			EvalPath: permission.EvalPathPattern,
 		}
 	})
 	ex := p.Explain("bash", "rm -rf /")
