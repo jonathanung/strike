@@ -39,6 +39,10 @@ type Client struct {
 	closed  atomic.Bool
 	exitMu  sync.Mutex
 	exitErr error
+
+	caps     ServerCaps
+	notifyMu sync.Mutex
+	onNotify func(method string, params json.RawMessage)
 }
 
 // startStdio launches the server subprocess and completes the MCP initialize handshake.
@@ -137,10 +141,16 @@ func (c *Client) initialize(ctx context.Context) error {
 	var result initializeResult
 	if err := c.call(ctx, "initialize", initializeParams{
 		ProtocolVersion: ProtocolVersion,
-		Capabilities:    map[string]any{},
+		Capabilities:    clientCapabilities(),
 		ClientInfo:      implementationInfo{Name: "strike", Version: "1"},
 	}, &result); err != nil {
 		return fmt.Errorf("mcp %s: initialize: %w", c.cfg.Name, err)
+	}
+	c.caps = ParseServerCaps(result.Capabilities)
+	// Servers that omit tools capability still historically expose tools/list;
+	// treat missing caps as tools-only for backward compatibility.
+	if !c.caps.Tools && !c.caps.Prompts && !c.caps.Resources {
+		c.caps.Tools = true
 	}
 	if err := c.notify(ctx, "notifications/initialized", map[string]any{}); err != nil {
 		return fmt.Errorf("mcp %s: initialized notify: %w", c.cfg.Name, err)
@@ -148,10 +158,24 @@ func (c *Client) initialize(ctx context.Context) error {
 	return nil
 }
 
+// Caps returns negotiated server capabilities.
+func (c *Client) Caps() ServerCaps { return c.caps }
+
+// OnNotification sets the server→client notification handler.
+func (c *Client) OnNotification(fn func(method string, params json.RawMessage)) {
+	c.notifyMu.Lock()
+	c.onNotify = fn
+	c.notifyMu.Unlock()
+}
+
 // ListTools returns tools advertised by the server.
+// Degrades cleanly when the server lacks tools capability.
 func (c *Client) ListTools(ctx context.Context) ([]toolInfo, error) {
 	if c.Closed() {
 		return nil, c.deadErr()
+	}
+	if !c.caps.Tools {
+		return nil, nil
 	}
 	var result listToolsResult
 	if err := c.call(ctx, "tools/list", map[string]any{}, &result); err != nil {
@@ -165,12 +189,75 @@ func (c *Client) CallTool(ctx context.Context, name string, args json.RawMessage
 	if c.Closed() {
 		return callToolResult{}, c.deadErr()
 	}
+	if !c.caps.Tools {
+		return callToolResult{}, fmt.Errorf("mcp %s: server has no tools capability", c.cfg.Name)
+	}
 	if args == nil {
 		args = json.RawMessage(`{}`)
 	}
 	var result callToolResult
 	if err := c.call(ctx, "tools/call", callToolParams{Name: name, Arguments: args}, &result); err != nil {
 		return callToolResult{}, fmt.Errorf("mcp %s: tools/call %s: %w", c.cfg.Name, name, err)
+	}
+	return result, nil
+}
+
+// ListPrompts returns prompts when the server advertises prompts capability.
+func (c *Client) ListPrompts(ctx context.Context) ([]promptInfo, error) {
+	if c.Closed() {
+		return nil, c.deadErr()
+	}
+	if !c.caps.Prompts {
+		return nil, nil
+	}
+	var result listPromptsResult
+	if err := c.call(ctx, "prompts/list", map[string]any{}, &result); err != nil {
+		return nil, fmt.Errorf("mcp %s: prompts/list: %w", c.cfg.Name, err)
+	}
+	return result.Prompts, nil
+}
+
+// GetPrompt fetches one prompt template expansion.
+func (c *Client) GetPrompt(ctx context.Context, name string, args map[string]string) (getPromptResult, error) {
+	if c.Closed() {
+		return getPromptResult{}, c.deadErr()
+	}
+	if !c.caps.Prompts {
+		return getPromptResult{}, fmt.Errorf("mcp %s: server has no prompts capability", c.cfg.Name)
+	}
+	var result getPromptResult
+	if err := c.call(ctx, "prompts/get", getPromptParams{Name: name, Arguments: args}, &result); err != nil {
+		return getPromptResult{}, fmt.Errorf("mcp %s: prompts/get %s: %w", c.cfg.Name, name, err)
+	}
+	return result, nil
+}
+
+// ListResources returns resources when advertised.
+func (c *Client) ListResources(ctx context.Context) ([]resourceInfo, error) {
+	if c.Closed() {
+		return nil, c.deadErr()
+	}
+	if !c.caps.Resources {
+		return nil, nil
+	}
+	var result listResourcesResult
+	if err := c.call(ctx, "resources/list", map[string]any{}, &result); err != nil {
+		return nil, fmt.Errorf("mcp %s: resources/list: %w", c.cfg.Name, err)
+	}
+	return result.Resources, nil
+}
+
+// ReadResource reads one resource by URI.
+func (c *Client) ReadResource(ctx context.Context, uri string) (readResourceResult, error) {
+	if c.Closed() {
+		return readResourceResult{}, c.deadErr()
+	}
+	if !c.caps.Resources {
+		return readResourceResult{}, fmt.Errorf("mcp %s: server has no resources capability", c.cfg.Name)
+	}
+	var result readResourceResult
+	if err := c.call(ctx, "resources/read", readResourceParams{URI: uri}, &result); err != nil {
+		return readResourceResult{}, fmt.Errorf("mcp %s: resources/read: %w", c.cfg.Name, err)
 	}
 	return result, nil
 }
@@ -261,6 +348,11 @@ func (c *Client) readLoop() {
 		if err := json.Unmarshal(line, &resp); err != nil {
 			continue
 		}
+		// Server→client notification (method set, typically no result/id).
+		if resp.Method != "" && resp.ID == 0 && resp.Result == nil && resp.Error == nil {
+			c.dispatchNotify(resp.Method, resp.Params)
+			continue
+		}
 		if resp.ID == 0 && resp.Result == nil && resp.Error == nil {
 			continue
 		}
@@ -278,6 +370,15 @@ func (c *Client) readLoop() {
 		}
 	}
 	c.failPending(fmt.Errorf("mcp server %q stdout closed", c.cfg.Name))
+}
+
+func (c *Client) dispatchNotify(method string, params json.RawMessage) {
+	c.notifyMu.Lock()
+	fn := c.onNotify
+	c.notifyMu.Unlock()
+	if fn != nil {
+		fn(method, params)
+	}
 }
 
 func (c *Client) failPending(err error) {

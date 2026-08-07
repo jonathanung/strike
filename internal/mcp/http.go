@@ -31,6 +31,11 @@ type HTTPClient struct {
 	closed    atomic.Bool
 	exitMu    sync.Mutex
 	exitErr   error
+
+	caps     ServerCaps
+	oauth    *oauthSession
+	notifyMu sync.Mutex
+	onNotify func(method string, params json.RawMessage)
 }
 
 func startHTTP(ctx context.Context, cfg ServerConfig) (*HTTPClient, error) {
@@ -42,6 +47,13 @@ func startHTTP(ctx context.Context, cfg ServerConfig) (*HTTPClient, error) {
 		cfg:  cfg,
 		hc:   &http.Client{},
 		base: base,
+	}
+	if cfg.OAuth != nil {
+		oa, err := newOAuthSession(ctx, cfg)
+		if err != nil {
+			return nil, err
+		}
+		c.oauth = oa
 	}
 	initCtx, cancel := context.WithTimeout(ctx, defaultInitTimeout)
 	defer cancel()
@@ -56,10 +68,14 @@ func (c *HTTPClient) initialize(ctx context.Context) error {
 	var result initializeResult
 	if err := c.call(ctx, "initialize", initializeParams{
 		ProtocolVersion: ProtocolVersion,
-		Capabilities:    map[string]any{},
+		Capabilities:    clientCapabilities(),
 		ClientInfo:      implementationInfo{Name: "strike", Version: "1"},
 	}, &result); err != nil {
 		return fmt.Errorf("mcp %s: initialize: %w", c.cfg.Name, err)
+	}
+	c.caps = ParseServerCaps(result.Capabilities)
+	if !c.caps.Tools && !c.caps.Prompts && !c.caps.Resources {
+		c.caps.Tools = true
 	}
 	if err := c.notify(ctx, "notifications/initialized", map[string]any{}); err != nil {
 		return fmt.Errorf("mcp %s: initialized notify: %w", c.cfg.Name, err)
@@ -67,10 +83,33 @@ func (c *HTTPClient) initialize(ctx context.Context) error {
 	return nil
 }
 
+// Caps returns negotiated server capabilities.
+func (c *HTTPClient) Caps() ServerCaps { return c.caps }
+
+// OnNotification sets the notification handler (HTTP path is pull-based;
+// notifications may arrive on SSE responses when supported).
+func (c *HTTPClient) OnNotification(fn func(method string, params json.RawMessage)) {
+	c.notifyMu.Lock()
+	c.onNotify = fn
+	c.notifyMu.Unlock()
+}
+
+func (c *HTTPClient) dispatchNotify(method string, params json.RawMessage) {
+	c.notifyMu.Lock()
+	fn := c.onNotify
+	c.notifyMu.Unlock()
+	if fn != nil {
+		fn(method, params)
+	}
+}
+
 // ListTools returns tools advertised by the server.
 func (c *HTTPClient) ListTools(ctx context.Context) ([]toolInfo, error) {
 	if c.Closed() {
 		return nil, c.deadErr()
+	}
+	if !c.caps.Tools {
+		return nil, nil
 	}
 	var result listToolsResult
 	if err := c.call(ctx, "tools/list", map[string]any{}, &result); err != nil {
@@ -84,12 +123,75 @@ func (c *HTTPClient) CallTool(ctx context.Context, name string, args json.RawMes
 	if c.Closed() {
 		return callToolResult{}, c.deadErr()
 	}
+	if !c.caps.Tools {
+		return callToolResult{}, fmt.Errorf("mcp %s: server has no tools capability", c.cfg.Name)
+	}
 	if args == nil {
 		args = json.RawMessage(`{}`)
 	}
 	var result callToolResult
 	if err := c.call(ctx, "tools/call", callToolParams{Name: name, Arguments: args}, &result); err != nil {
 		return callToolResult{}, fmt.Errorf("mcp %s: tools/call %s: %w", c.cfg.Name, name, err)
+	}
+	return result, nil
+}
+
+// ListPrompts returns prompts when advertised.
+func (c *HTTPClient) ListPrompts(ctx context.Context) ([]promptInfo, error) {
+	if c.Closed() {
+		return nil, c.deadErr()
+	}
+	if !c.caps.Prompts {
+		return nil, nil
+	}
+	var result listPromptsResult
+	if err := c.call(ctx, "prompts/list", map[string]any{}, &result); err != nil {
+		return nil, fmt.Errorf("mcp %s: prompts/list: %w", c.cfg.Name, err)
+	}
+	return result.Prompts, nil
+}
+
+// GetPrompt fetches one prompt.
+func (c *HTTPClient) GetPrompt(ctx context.Context, name string, args map[string]string) (getPromptResult, error) {
+	if c.Closed() {
+		return getPromptResult{}, c.deadErr()
+	}
+	if !c.caps.Prompts {
+		return getPromptResult{}, fmt.Errorf("mcp %s: server has no prompts capability", c.cfg.Name)
+	}
+	var result getPromptResult
+	if err := c.call(ctx, "prompts/get", getPromptParams{Name: name, Arguments: args}, &result); err != nil {
+		return getPromptResult{}, fmt.Errorf("mcp %s: prompts/get %s: %w", c.cfg.Name, name, err)
+	}
+	return result, nil
+}
+
+// ListResources returns resources when advertised.
+func (c *HTTPClient) ListResources(ctx context.Context) ([]resourceInfo, error) {
+	if c.Closed() {
+		return nil, c.deadErr()
+	}
+	if !c.caps.Resources {
+		return nil, nil
+	}
+	var result listResourcesResult
+	if err := c.call(ctx, "resources/list", map[string]any{}, &result); err != nil {
+		return nil, fmt.Errorf("mcp %s: resources/list: %w", c.cfg.Name, err)
+	}
+	return result.Resources, nil
+}
+
+// ReadResource reads one resource by URI.
+func (c *HTTPClient) ReadResource(ctx context.Context, uri string) (readResourceResult, error) {
+	if c.Closed() {
+		return readResourceResult{}, c.deadErr()
+	}
+	if !c.caps.Resources {
+		return readResourceResult{}, fmt.Errorf("mcp %s: server has no resources capability", c.cfg.Name)
+	}
+	var result readResourceResult
+	if err := c.call(ctx, "resources/read", readResourceParams{URI: uri}, &result); err != nil {
+		return readResourceResult{}, fmt.Errorf("mcp %s: resources/read: %w", c.cfg.Name, err)
 	}
 	return result, nil
 }
@@ -235,6 +337,22 @@ func (c *HTTPClient) notify(ctx context.Context, method string, params any) erro
 }
 
 func (c *HTTPClient) doPOST(ctx context.Context, body []byte) (*http.Response, error) {
+	resp, err := c.doPOSTOnce(ctx, body)
+	if err != nil {
+		return nil, err
+	}
+	// One refresh+retry on 401 when OAuth is configured.
+	if resp.StatusCode == http.StatusUnauthorized && c.oauth != nil {
+		_ = resp.Body.Close()
+		if rerr := c.oauth.refreshTokens(ctx); rerr != nil {
+			return nil, fmt.Errorf("mcp %s: oauth refresh: %w", c.cfg.Name, rerr)
+		}
+		return c.doPOSTOnce(ctx, body)
+	}
+	return resp, nil
+}
+
+func (c *HTTPClient) doPOSTOnce(ctx context.Context, body []byte) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
