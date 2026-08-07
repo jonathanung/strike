@@ -10,9 +10,10 @@
 // corruption or an unsupported newer log schema version. See also export/
 // import packages, Fork lineage, and retention hooks in this package.
 // Trace/run sidecar retention (#810) coordinates with session.retention* via
-// ApplyTraceRetention / ApplyRetentionWithSidecars. Checkpoint stack
-// persistence across --continue is #573; human-readable markdown transcript
-// export is #221 (/export) — complementary, not replacements.
+// ApplyTraceRetention / ApplyRetentionWithSidecars. Durable checkpoint stacks
+// live under ~/.strike/checkpoints/<session-id>/ (#573) and are removed with
+// Destroy/retention. Human-readable markdown transcript export is #221
+// (/export) — complementary, not replacements.
 package session
 
 import (

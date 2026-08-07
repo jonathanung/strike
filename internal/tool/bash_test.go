@@ -98,11 +98,16 @@ func TestBashMarksCheckpointUncovered(t *testing.T) {
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash not available")
 	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
 	dir := t.TempDir()
 	store := NewCheckpointStore()
+	store.Configure(dir, t.TempDir())
 	store.BeginTurn("t")
 	tc := allowAll(dir)
 	tc.CheckpointUncovered = store.MarkUncovered
+	// No-op bash: shadow reconcile clears uncovered.
 	if _, err := NewBash().Execute(context.Background(), mustJSON(t, map[string]any{
 		"command": "true",
 	}), tc); err != nil {
@@ -110,8 +115,55 @@ func TestBashMarksCheckpointUncovered(t *testing.T) {
 	}
 	store.CommitTurn()
 	peek := store.Peek()
-	if len(peek.Uncovered) != 1 || peek.Uncovered[0] != "bash" {
-		t.Fatalf("after bash Peek.Uncovered = %#v", peek.Uncovered)
+	if len(peek.Uncovered) != 0 {
+		t.Fatalf("noop bash should be covered, Uncovered=%#v", peek.Uncovered)
+	}
+}
+
+func TestBashMutationRestoredViaCheckpoint(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mut.txt")
+	if err := os.WriteFile(path, []byte("orig\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store := NewCheckpointStore()
+	store.Configure(dir, t.TempDir())
+	store.BeginTurn("t")
+	tc := allowAll(dir)
+	tc.Checkpoint = store.Snapshot
+	tc.CheckpointUncovered = store.MarkUncovered
+	if _, err := NewBash().Execute(context.Background(), mustJSON(t, map[string]any{
+		"command": "printf 'changed\n' > mut.txt",
+	}), tc); err != nil {
+		t.Fatal(err)
+	}
+	store.CommitTurn()
+	peek := store.Peek()
+	if len(peek.Uncovered) != 0 {
+		t.Fatalf("Uncovered=%#v", peek.Uncovered)
+	}
+	if !peek.HadFiles {
+		t.Fatal("expected bash mutation in checkpoint")
+	}
+	res, err := store.Pop(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.RestoredN != 1 {
+		t.Fatalf("RestoredN=%d", res.RestoredN)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "orig\n" {
+		t.Fatalf("restored=%q", got)
 	}
 }
 

@@ -22,7 +22,7 @@ const (
 // Package is a versioned, secret-redacted portable snapshot of one session
 // (metadata + ordered event envelopes). Used for support bundles and
 // export/import round-trips. Distinct from markdown /export (#221) and from
-// checkpoint stack persistence (#573).
+// durable checkpoint stacks under ~/.strike/checkpoints/ (#573).
 type Package struct {
 	Format        string              `json:"format"`
 	Version       int                 `json:"version"`

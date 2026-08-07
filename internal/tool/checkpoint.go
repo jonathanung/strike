@@ -1,7 +1,8 @@
 package tool
 
 import (
-	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,6 +16,10 @@ import (
 // bounded.
 const DefaultCheckpointMaxBytes int64 = 2 << 20 // 2 MiB
 
+// DefaultCheckpointMaxTurns caps how many committed turn frames are retained
+// in memory and on disk (#573). Oldest frames are dropped first.
+const DefaultCheckpointMaxTurns = 50
+
 // fileOrig is the on-disk state of a path at first mutation touch in a turn.
 type fileOrig struct {
 	exists  bool
@@ -27,6 +32,9 @@ type turnCheckpoint struct {
 	turnID    string
 	files     map[string]fileOrig // absolute path → original
 	uncovered map[string]struct{} // reasons disk may have mutations outside snapshots (e.g. "bash")
+	// baseline is a shadow-git tree oid captured when the first uncovered
+	// tool (bash) runs. Used at CommitTurn to fill gaps for shell mutations.
+	baseline string
 }
 
 // CheckpointStore snapshots file contents before mutating tools write, keyed
@@ -34,19 +42,86 @@ type turnCheckpoint struct {
 // align with chat undo. A nil receiver is a no-op on every method.
 //
 // Restore is per-file only (write original bytes or remove created paths). It
-// never runs git reset --hard. Bash-driven mutations are not snapshotted
-// (#572); MarkUncovered records that gap so undo UX can warn instead of
-// claiming silent full success (#801).
+// never runs git reset --hard.
+//
+// Bash coverage (#572): MarkUncovered("bash") records a pending gap and
+// lazily captures a shadow-git baseline of WorkDir. CommitTurn reconciles
+// the worktree against that baseline and snapshots any paths not already
+// recorded by harness tools. When reconcile succeeds, the pending "bash"
+// reason is cleared so undo does not warn about covered shell mutations.
+//
+// Persistence (#573): when PersistDir is configured, committed frames spill
+// under ~/.strike/checkpoints/<session-id>/ so --continue can restore files.
 type CheckpointStore struct {
 	mu       sync.Mutex
 	maxBytes int64
+	maxTurns int
 	active   *turnCheckpoint
 	stack    []*turnCheckpoint // completed turns, oldest first
+
+	workDir    string
+	persistDir string // empty disables disk persistence
+	shadow     *shadowGit
+	// loaded is true after a successful Load from disk (even if empty).
+	loaded bool
 }
 
 // NewCheckpointStore returns an empty store with the default size limit.
 func NewCheckpointStore() *CheckpointStore {
-	return &CheckpointStore{maxBytes: DefaultCheckpointMaxBytes}
+	return &CheckpointStore{
+		maxBytes: DefaultCheckpointMaxBytes,
+		maxTurns: DefaultCheckpointMaxTurns,
+	}
+}
+
+// Configure binds the store to a workspace and optional durable directory.
+// persistDir empty keeps the stack process-local only. Safe to call once
+// after New; subsequent calls with the same paths are no-ops.
+func (s *CheckpointStore) Configure(workDir, persistDir string) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	workDir = strings.TrimSpace(workDir)
+	persistDir = strings.TrimSpace(persistDir)
+	if workDir != "" {
+		s.workDir = filepath.Clean(workDir)
+	}
+	if persistDir != "" {
+		s.persistDir = filepath.Clean(persistDir)
+	}
+	if s.workDir != "" && s.persistDir != "" {
+		s.shadow = newShadowGit(filepath.Join(s.persistDir, "shadow"), s.workDir)
+	} else if s.workDir != "" {
+		// Ephemeral shadow under the process temp dir when not persisting.
+		sum := sha256.Sum256([]byte(s.workDir))
+		tmp := filepath.Join(os.TempDir(), "strike", "shadow", hex.EncodeToString(sum[:12]))
+		s.shadow = newShadowGit(tmp, s.workDir)
+	}
+}
+
+// DefaultCheckpointDir returns ~/.strike/checkpoints/<sessionID>.
+// Empty sessionID yields empty string.
+func DefaultCheckpointDir(sessionID string) string {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return ""
+	}
+	// Reject path separators so session ids cannot escape the checkpoints root.
+	if strings.Contains(sessionID, "/") || strings.Contains(sessionID, "\\") ||
+		strings.Contains(sessionID, "..") {
+		return ""
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return filepath.Join(os.TempDir(), "strike", "checkpoints", sessionID)
+	}
+	root := filepath.Join(home, ".strike")
+	if resolved, err := filepath.EvalSymlinks(root); err == nil {
+		root = resolved
+	}
+	return filepath.Join(root, "checkpoints", sessionID)
 }
 
 // BeginTurn starts capturing mutations for turnID. Replaces any uncommitted
@@ -66,6 +141,7 @@ func (s *CheckpointStore) BeginTurn(turnID string) {
 
 // MarkUncovered records that the active turn may have disk mutations outside
 // per-file snapshots (e.g. bash). reason is a short stable token ("bash").
+// Lazily captures a shadow-git baseline so CommitTurn can cover shell writes.
 // No-op when there is no active turn. Duplicate reasons collapse.
 func (s *CheckpointStore) MarkUncovered(reason string) {
 	if s == nil {
@@ -84,6 +160,12 @@ func (s *CheckpointStore) MarkUncovered(reason string) {
 		s.active.uncovered = make(map[string]struct{})
 	}
 	s.active.uncovered[reason] = struct{}{}
+	// Capture baseline once per turn, before the mutating tool runs.
+	if s.active.baseline == "" && s.shadow != nil {
+		if tree, err := s.shadow.capture(); err == nil {
+			s.active.baseline = tree
+		}
+	}
 }
 
 // Snapshot records the pre-mutation state of absPath on first touch in the
@@ -100,6 +182,10 @@ func (s *CheckpointStore) Snapshot(absPath string) {
 	if s.active == nil {
 		return
 	}
+	s.snapshotLocked(absPath)
+}
+
+func (s *CheckpointStore) snapshotLocked(absPath string) {
 	if _, ok := s.active.files[absPath]; ok {
 		return
 	}
@@ -125,7 +211,7 @@ func (s *CheckpointStore) Snapshot(absPath string) {
 		s.active.files[absPath] = fileOrig{exists: true, skipped: true}
 		return
 	}
-	data, err := safeReadFile(context.Background(), absPath)
+	data, err := os.ReadFile(absPath)
 	if err != nil {
 		s.active.files[absPath] = fileOrig{exists: true, skipped: true}
 		return
@@ -134,7 +220,8 @@ func (s *CheckpointStore) Snapshot(absPath string) {
 }
 
 // CommitTurn pushes the active frame onto the stack (even when empty) and
-// clears active. No-op when there is no active turn.
+// clears active. Reconciles shadow-git coverage for bash before commit.
+// No-op when there is no active turn.
 func (s *CheckpointStore) CommitTurn() {
 	if s == nil {
 		return
@@ -144,8 +231,88 @@ func (s *CheckpointStore) CommitTurn() {
 	if s.active == nil {
 		return
 	}
+	s.reconcileShadowLocked()
 	s.stack = append(s.stack, s.active)
 	s.active = nil
+	s.trimLocked()
+	s.persistLocked()
+}
+
+// reconcileShadowLocked fills active.files from the shadow baseline for any
+// worktree paths changed since baseline that harness tools did not snapshot.
+// On success, clears uncovered reasons that shadow covers ("bash").
+// Caller must hold s.mu.
+func (s *CheckpointStore) reconcileShadowLocked() {
+	if s.active == nil {
+		return
+	}
+	baseline := s.active.baseline
+	if baseline == "" || s.shadow == nil {
+		// No baseline → leave uncovered markers as-is (bash ran without git).
+		return
+	}
+	// Capture post-mutation tree and diff against baseline.
+	// Temporarily release is not needed: capture only runs git against workDir.
+	toTree, err := s.shadow.capture()
+	if err != nil || toTree == "" {
+		return
+	}
+	changes, err := s.shadow.diffTrees(baseline, toTree)
+	if err != nil {
+		return
+	}
+	max := s.maxBytes
+	if max <= 0 {
+		max = DefaultCheckpointMaxBytes
+	}
+	reconcileOK := true
+	for _, ch := range changes {
+		if ch.Path == "" {
+			continue
+		}
+		if _, ok := s.active.files[ch.Path]; ok {
+			continue // harness tool already recorded first-touch original
+		}
+		// Status A = added after baseline → original does not exist.
+		if ch.Status == 'A' {
+			s.active.files[ch.Path] = fileOrig{exists: false}
+			continue
+		}
+		// M/D/T: recover bytes from baseline tree.
+		data, exists, err := s.shadow.readAtTree(baseline, ch.Path)
+		if err != nil {
+			reconcileOK = false
+			s.active.files[ch.Path] = fileOrig{skipped: true}
+			continue
+		}
+		if !exists {
+			// Diff said modified/deleted but baseline lacks path — treat as create.
+			s.active.files[ch.Path] = fileOrig{exists: false}
+			continue
+		}
+		if int64(len(data)) > max {
+			s.active.files[ch.Path] = fileOrig{exists: true, skipped: true}
+			continue
+		}
+		s.active.files[ch.Path] = fileOrig{exists: true, data: data}
+	}
+	if reconcileOK {
+		// Shadow covered the turn's unknown mutations.
+		delete(s.active.uncovered, "bash")
+	}
+}
+
+func (s *CheckpointStore) trimLocked() {
+	max := s.maxTurns
+	if max <= 0 {
+		max = DefaultCheckpointMaxTurns
+	}
+	if len(s.stack) <= max {
+		return
+	}
+	// Drop oldest.
+	drop := len(s.stack) - max
+	s.stack = append([]*turnCheckpoint(nil), s.stack[drop:]...)
 }
 
 // PopResult is the outcome of popping the last committed turn checkpoint.
@@ -199,6 +366,7 @@ func (s *CheckpointStore) Pop(restore bool) (PopResult, error) {
 				}
 			}
 		}
+		s.persistLocked()
 		return out, nil
 	}
 	var errs []error
@@ -221,6 +389,7 @@ func (s *CheckpointStore) Pop(restore bool) (PopResult, error) {
 		out.Restored = append(out.Restored, p)
 	}
 	out.RestoredN = len(out.Restored)
+	s.persistLocked()
 	if len(errs) == 0 {
 		return out, nil
 	}
@@ -261,6 +430,26 @@ func (s *CheckpointStore) Peek() PeekResult {
 func (s *CheckpointStore) PeekHasFiles() bool {
 	p := s.Peek()
 	return p.HadFiles
+}
+
+// Len returns how many committed frames are on the stack.
+func (s *CheckpointStore) Len() int {
+	if s == nil {
+		return 0
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.stack)
+}
+
+// Loaded reports whether Load successfully read a durable stack (possibly empty).
+func (s *CheckpointStore) Loaded() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.loaded
 }
 
 func uncoveredReasons(m map[string]struct{}) []string {
