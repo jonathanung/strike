@@ -385,7 +385,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	admissionVerdicts = append(admissionVerdicts, pluginVerdicts...)
 	skillInfos := make([]tool.SkillInfo, len(skills))
 	for i, s := range skills {
-		skillInfos[i] = tool.SkillInfo{Name: s.Name, Description: s.Description, Template: s.Template}
+		skillInfos[i] = tool.SkillInfo{Name: s.Name, Description: s.Description, Template: s.Template, Path: s.Path}
 	}
 
 	todoStore := tool.NewTodoStore()

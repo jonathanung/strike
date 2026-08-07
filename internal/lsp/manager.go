@@ -18,6 +18,10 @@ type Status struct {
 	Extensions []string
 	Error      string
 	OpenDocs   int
+	// Missing is true when the configured binary is not on PATH.
+	Missing bool
+	// InstallGuidance is short operator-facing install advice when Missing.
+	InstallGuidance string
 }
 
 // ServerConfig is one language server (stdio command) plus the extensions it owns.
@@ -468,6 +472,15 @@ func (m *Manager) Statuses() []Status {
 			Name:       name,
 			Command:    strings.TrimSpace(cfg.Command),
 			Extensions: append([]string(nil), cfg.Extensions...),
+		}
+		if st.Command != "" && !LookPath(st.Command) {
+			st.Missing = true
+			hints := knownInstallers[filepathBase(st.Command)]
+			if hints.Guidance != "" {
+				st.InstallGuidance = hints.Guidance
+			} else {
+				st.InstallGuidance = "Binary not found on PATH; install the language server explicitly."
+			}
 		}
 		if c := m.clients[name]; c != nil {
 			c.docMu.Lock()
