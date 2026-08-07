@@ -11,7 +11,8 @@ chaos monkey — faults are never armed outside tests.
 
 | Point | Kind | Where | Safe outcome |
 |---|---|---|---|
-| `session.sync` | wired | `session.Store` fsync on header/append | `Append`/`Sync` returns error; prior complete JSONL lines remain `Replay`-able |
+| `session.sync` | wired | `session.Store` fsync on header/append | `Append` latches + `Recover` rolls back to known-good size; prior complete JSONL lines remain `Replay`-able; runtime cancels on fatal |
+| `session.write` | wired | `session.Store` before Write | `Append` errors without latch (retryable); manager may recover/retry |
 | `process.after_start` | wired | `tool.RunProcess` after `Start` | Process tree killed; `ProcessStatusCanceled`; bash → `ErrorCodeCanceled`; no hang |
 | `provider.stream_drop` | logical | tests close stream without terminal event | `NormalizeStream` → `ErrIncompleteStream`; engine retries then `stopReason=error` + `EngineError` |
 | `permission.flip_mid_turn` | logical | tests `PermissionReply` reject / hard-deny rules | `ToolCallEnd` with `permission_denied`; defined turn stop |
