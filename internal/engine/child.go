@@ -36,6 +36,20 @@ var leafTaskTools = []string{
 	"task", "task_status", "task_read", "task_message", "task_interrupt", "wait",
 }
 
+// childInitialPermissionMode chooses InitialPermissionMode for a spawned or
+// resumed child. MDM lock pins the managed mode; otherwise a non-empty restored
+// mode (resume) wins; else the parent's live dial is inherited so yolo parents
+// do not spawn supervised children (#1093).
+func (e *Engine) childInitialPermissionMode(restored protocol.PermissionMode) protocol.PermissionMode {
+	if e.opts.LockPermissionMode {
+		return e.opts.InitialPermissionMode
+	}
+	if restored != "" {
+		return restored
+	}
+	return e.permMode
+}
+
 // childHandle tracks one non-blocking child engine while it runs.
 type childHandle struct {
 	id        string
@@ -365,12 +379,7 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 	if scope := bundlePathScopeRules(childBundle.AllowedPaths); len(scope) > 0 {
 		parentLayers = append(parentLayers, scope)
 	}
-	// Only pin InitialPermissionMode when MDM locked the dial; otherwise leave
-	// empty so children keep the historical default posture at startup.
-	var childPermMode protocol.PermissionMode
-	if e.opts.LockPermissionMode {
-		childPermMode = e.opts.InitialPermissionMode
-	}
+	childPermMode := e.childInitialPermissionMode("")
 
 	// Optional per-child filesystem isolation (#1036).
 	childWorkDir := e.opts.WorkDir

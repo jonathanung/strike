@@ -119,12 +119,7 @@ func (e *Engine) resumeChild(ctx context.Context, req tool.TaskResumeRequest) (t
 	if scope := bundlePathScopeRules(bundle.AllowedPaths); len(scope) > 0 {
 		parentLayers = append(parentLayers, scope)
 	}
-	var childPermMode protocol.PermissionMode
-	if e.opts.LockPermissionMode {
-		childPermMode = e.opts.InitialPermissionMode
-	} else if restored.PermissionMode != "" {
-		childPermMode = restored.PermissionMode
-	}
+	childPermMode := e.childInitialPermissionMode(restored.PermissionMode)
 
 	initialProvider := restored.Provider
 	if initialProvider == "" {
