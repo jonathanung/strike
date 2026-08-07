@@ -529,10 +529,10 @@ type AgentBudgetConfig struct {
 //   - Action (log|block|notify): declarative rule evaluated in-process
 //   - Command: shell hook (event JSON on stdin; exit allow/block; stdout inject)
 type Hook struct {
-	// Event is pre_tool_use, post_tool_use, turn_start, or turn_end.
-	// Shell hooks only run for pre_tool_use / post_tool_use.
+	// Event is a lifecycle vocabulary name (tool.LifecycleVocabularyVersion).
+	// Shell hooks run for all known events; only pre_tool_use may block.
 	Event string `json:"event"`
-	// Matcher is a doublestar glob over the tool name; empty matches all.
+	// Matcher is a doublestar glob over the subject (tool/phase/permission/…); empty matches all.
 	Matcher string `json:"matcher,omitempty"`
 	// Action is log, block, or notify (declarative). Mutually exclusive with Command.
 	Action string `json:"action,omitempty"`
@@ -932,8 +932,8 @@ func read(path string) (Config, error) {
 		for _, h := range c.Hooks {
 			switch {
 			case h.IsShell():
-				// Shell hooks only fire on tool events; keep any event string
-				// and let the engine matcher filter.
+				// Shell hooks fire on any known lifecycle event (or unknown kept
+				// for forward-compat; engine matcher filters at dispatch).
 				if strings.TrimSpace(h.Event) == "" {
 					continue
 				}

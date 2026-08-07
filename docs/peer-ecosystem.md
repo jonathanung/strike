@@ -66,10 +66,15 @@ Strike config uses a flat `hooks` array (global then project concatenate).
 
 | Strike | Claude Code-ish | OpenCode / Crush-ish | Notes |
 |---|---|---|---|
-| `pre_tool_use` | `PreToolUse` | `PreToolUse` / `pre_tool_use` | shell + declarative; **block** only here |
-| `post_tool_use` | `PostToolUse` | `PostToolUse` | shell + log/notify |
-| `turn_start` | Session/turn start variants | — | declarative only |
-| `turn_end` | Stop / turn end variants | — | declarative only |
+| `pre_tool_use` | `PreToolUse` | `PreToolUse` / `pre_tool_use` | shell + declarative; **block** only here (declarative) |
+| `post_tool_use` | `PostToolUse` | `PostToolUse` | shell + log/notify; shell non-zero marks feedback blocked (no side-effect undo) |
+| `turn_start` / `turn_end` | Session/turn start/stop | — | declarative + shell (observe) |
+| `session_start` / `session_resume` / `session_end` | SessionStart / Stop | — | observe-only |
+| `provider_attempt` / `provider_retry` | — | — | observe-only |
+| `permission_resolution` | — | — | observe-only; cannot widen hard deny |
+| `compaction` / `phase_transition` / `child_lifecycle` / `verification_gate` | — | — | observe-only |
+
+Vocabulary version: `1.0.0` — see [config.md](config.md#hooks).
 
 ### Strike schema
 
@@ -94,7 +99,7 @@ Strike config uses a flat `hooks` array (global then project concatenate).
 
 | Field | Meaning |
 |---|---|
-| `event` | `pre_tool_use` \| `post_tool_use` \| `turn_start` \| `turn_end` |
+| `event` | lifecycle v1 names (see config.md#hooks) |
 | `matcher` | doublestar over **tool name** (empty/`*` = all); not full regex |
 | `action` | declarative: `log` \| `block` \| `notify` (mutually exclusive with `command`) |
 | `command` | shell hook: event JSON on stdin; exit allow/block; stdout may inject |

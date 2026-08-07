@@ -47,8 +47,13 @@ func TestServerInitializeSessionPrompt(t *testing.T) {
 		t.Fatalf("protocolVersion = %v", res["protocolVersion"])
 	}
 	caps, _ := res["agentCapabilities"].(map[string]any)
-	if caps["loadSession"] != false {
-		t.Fatalf("loadSession = %v", caps["loadSession"])
+	// SessionID is set in test options → loadSession advertised.
+	if caps["loadSession"] != true {
+		t.Fatalf("loadSession = %v, want true when SessionID bound", caps["loadSession"])
+	}
+	sessCaps, _ := caps["sessionCapabilities"].(map[string]any)
+	if sessCaps == nil {
+		t.Fatal("missing sessionCapabilities")
 	}
 	info, _ := res["agentInfo"].(map[string]any)
 	if info["name"] != "strike" {

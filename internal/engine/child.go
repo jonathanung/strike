@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -542,6 +543,7 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 	e.emit(startedEv)
 	e.persistChildEvent(childID, startedEv)
 	h.noteEvent(startedEv)
+	e.fireChildLifecycle(childCorr, childID, agentName, "started", "prompt_chars="+strconv.Itoa(len(req.Prompt)))
 	e.emitTeamRoster()
 
 	// stopReason is delivered once when the child turn ends. Buffer 1 so the
@@ -751,6 +753,7 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 		e.emit(completed)
 		e.persistChildEvent(childID, completed)
 		h.noteEvent(completed)
+		e.fireChildLifecycle(childCorr, childID, agentName, string(status), "summary_chars="+strconv.Itoa(len(completed.Summary)))
 		e.finishChild(h, completed)
 		e.onChildDelegationTerminal(childID, status)
 		// Wake wait-tool subscribers before the model-facing notice path so

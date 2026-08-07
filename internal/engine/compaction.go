@@ -261,6 +261,7 @@ func (e *Engine) applyCompaction(ctx context.Context, reason string, corr protoc
 		Summary:     summary,
 		Residue:     residue,
 	})
+	e.fireCompaction(corr, reason, applied, removed, keptTail+1)
 	return true
 }
 
