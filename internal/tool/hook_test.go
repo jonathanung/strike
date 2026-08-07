@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jonathanung/strike-cli/internal/sandbox"
 )
 
 func TestRunHooksAllowInject(t *testing.T) {
@@ -110,7 +112,8 @@ func TestRunHooksMatcher(t *testing.T) {
 	}
 }
 
-func TestRunHooksTimeoutFailOpen(t *testing.T) {
+func TestRunHooksTimeoutFailClosedDefault(t *testing.T) {
+	// pre_tool_use defaults to fail-closed on timeout (#1031).
 	dir := t.TempDir()
 	start := time.Now()
 	out, err := RunHooks(context.Background(), []HookDef{{
@@ -121,11 +124,97 @@ func TestRunHooksTimeoutFailOpen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !out.Allow {
-		t.Fatal("timeout should fail-open")
+	if out.Allow {
+		t.Fatal("timeout should fail-closed on pre_tool_use")
+	}
+	if len(out.Decisions) == 0 || out.Decisions[0].Decision != "fail_closed" {
+		t.Fatalf("decisions = %#v", out.Decisions)
 	}
 	if elapsed := time.Since(start); elapsed > 2*time.Second {
 		t.Fatalf("took %v", elapsed)
+	}
+}
+
+func TestRunHooksTimeoutFailOpenExplicit(t *testing.T) {
+	dir := t.TempDir()
+	failOpen := false // FailClosed=false → fail-open
+	out, err := RunHooks(context.Background(), []HookDef{{
+		Event:      HookEventPreToolUse,
+		Command:    `sleep 5`,
+		TimeoutMs:  50,
+		FailClosed: &failOpen,
+	}}, HookEventPreToolUse, HookPayload{Event: HookEventPreToolUse, ToolName: "bash"}, dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !out.Allow {
+		t.Fatal("explicit fail-open should allow on timeout")
+	}
+	if len(out.Decisions) == 0 || out.Decisions[0].Decision != "fail_open" {
+		t.Fatalf("decisions = %#v", out.Decisions)
+	}
+}
+
+func TestRunHooksLaunchErrorFailClosed(t *testing.T) {
+	// Nonexistent binary via bash -c still exits; force launch error with empty
+	// argv path by using a command that fails at start — use invalid sandbox
+	// that cannot degrade when fail-closed.
+	dir := t.TempDir()
+	// sleep with tiny timeout is covered above; here: process error via false
+	// is exit non-zero (block), not launch. Launch: use Sandbox that fails closed.
+	if sandbox.Available() {
+		t.Skip("need unavailable sandbox to force launch sandbox_denied")
+	}
+	// Backend unavailable + fail-closed DefaultHookSandbox → sandbox_denied launch.
+	out, err := RunHooks(context.Background(), []HookDef{{
+		Event:   HookEventPreToolUse,
+		Command: `printf should-not-run`,
+	}}, HookEventPreToolUse, HookPayload{Event: HookEventPreToolUse, ToolName: "bash"}, dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Allow {
+		t.Fatal("missing sandbox backend should fail-closed for policy hooks")
+	}
+}
+
+func TestRunHooksPayloadRedacted(t *testing.T) {
+	dir := t.TempDir()
+	secret := "sk-ant-api03-supersecrettokenvalue000000000000000000000000"
+	out, err := RunHooks(context.Background(), []HookDef{{
+		Event:   HookEventPreToolUse,
+		Command: `cat`,
+	}}, HookEventPreToolUse, HookPayload{
+		Event:     HookEventPreToolUse,
+		ToolName:  "bash",
+		ToolInput: json.RawMessage(`{"command":"echo ` + secret + `"}`),
+	}, dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.Inject, secret) {
+		t.Fatalf("raw secret leaked into hook stdin/inject: %q", out.Inject)
+	}
+	if !strings.Contains(out.Inject, "REDACTED") && !strings.Contains(out.Inject, "sk-ant") {
+		// redact may replace with placeholder; ensure original token gone is enough
+	}
+}
+
+func TestRunHooksFailedBlockCannotAllow(t *testing.T) {
+	// A failed blocking hook must not silently allow a protected operation.
+	dir := t.TempDir()
+	fc := true
+	out, err := RunHooks(context.Background(), []HookDef{{
+		Event:      HookEventPreToolUse,
+		Command:    `sleep 5`,
+		TimeoutMs:  30,
+		FailClosed: &fc,
+	}}, HookEventPreToolUse, HookPayload{Event: HookEventPreToolUse, ToolName: "write"}, dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Allow {
+		t.Fatal("failed blocking hook silently allowed protected op")
 	}
 }
 

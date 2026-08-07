@@ -553,6 +553,11 @@ type Hook struct {
 	Command string `json:"command,omitempty"`
 	// TimeoutMs bounds shell execution (default 30000, max 120000).
 	TimeoutMs int `json:"timeoutMs,omitempty"`
+	// FailClosed controls timeout/launch/process-error policy for shell hooks.
+	// nil → fail-closed on pre/post_tool_use (safe default for policy hooks);
+	// fail-open on observe-only lifecycle events. true forces fail-closed;
+	// false forces fail-open (availability-oriented side effects) (#1031).
+	FailClosed *bool `json:"failClosed,omitempty"`
 }
 
 // IsShell reports a shell-command hook (has command, no action).
