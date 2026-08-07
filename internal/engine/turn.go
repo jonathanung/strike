@@ -1212,15 +1212,21 @@ func (e *Engine) recordSessionPR(corr protocol.Correlation) func(tool.SessionPR)
 // canceledOrTimeoutToolResult settles a started tool that ended via cancel or
 // deadline. Partial Output from the tool is preserved and marked incomplete;
 // empty output uses the standard canceled/timeout feedback text.
+//
+// DeadlineExceeded on ctx wins over a tool-stamped canceled code: tools often
+// observe ctx.Done() and report canceled generically, but the turn wall-clock
+// must surface as timeout so operators can distinguish interrupt from expiry.
 func (e *Engine) canceledOrTimeoutToolResult(ctx context.Context, callID string, corr protocol.Correlation, res tool.Result) provider.Message {
 	code := res.ErrorCode
 	switch {
+	case ctx != nil && errors.Is(ctx.Err(), context.DeadlineExceeded):
+		code = protocol.ErrorCodeTimeout
 	case code == tool.ErrorCodeTimeout || code == protocol.ErrorCodeTimeout:
 		code = protocol.ErrorCodeTimeout
 	case code == tool.ErrorCodeCanceled || code == protocol.ErrorCodeCanceled:
 		code = protocol.ErrorCodeCanceled
-	case ctx != nil && errors.Is(ctx.Err(), context.DeadlineExceeded):
-		code = protocol.ErrorCodeTimeout
+	case errors.Is(ctx.Err(), context.Canceled):
+		code = protocol.ErrorCodeCanceled
 	default:
 		code = protocol.ErrorCodeCanceled
 	}

@@ -1892,8 +1892,11 @@ type DiagnosticConfig struct {
 	MaxTokens      int    `json:"maxTokens,omitempty"`
 	MaxChildDepth  int    `json:"maxChildDepth,omitempty"`
 	ContextWindow  int    `json:"contextWindow,omitempty"`
-	WorkDir        string `json:"workDir,omitempty"`
-	ProjectRoot    string `json:"projectRoot,omitempty"`
+	// TurnTimeoutS is the effective root-turn wall-clock deadline in seconds
+	// (negative = disabled).
+	TurnTimeoutS int    `json:"turnTimeoutS,omitempty"`
+	WorkDir      string `json:"workDir,omitempty"`
+	ProjectRoot  string `json:"projectRoot,omitempty"`
 
 	Compaction DiagnosticCompaction `json:"compaction"`
 	Scheduler  DiagnosticScheduler  `json:"scheduler"`

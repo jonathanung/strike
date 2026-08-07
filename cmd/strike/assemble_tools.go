@@ -728,6 +728,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			},
 			CollectDiagnostics:   makeLSPCollectDiagnostics(lspMgr, toolDir, cfg.LSP),
 			MaxChildDepth:        cfg.MaxChildDepth,
+			TurnTimeout:          resolveRootTurnTimeout(cfg, opts),
 			MaxToolRetryAttempts: cfg.ToolRetry.MaxAttempts,
 			ToolLoopThreshold:    cfg.ToolRetry.LoopThreshold,
 			ToolRetryBackoff:     toolRetryBackoffFromConfig(cfg.ToolRetry),
@@ -1267,4 +1268,19 @@ func toolRetryBackoffFromConfig(tr config.ToolRetryConfig) func(int) time.Durati
 	return func(nextAttempt int) time.Duration {
 		return tool.ToolRetryDelay(nextAttempt, base, max)
 	}
+}
+
+// resolveRootTurnTimeout picks CLI --turn-timeout over session.turnTimeoutS,
+// then applies the product default (30m) when unset. Negative config/CLI
+// disables the deadline. Fresh per turn — resume does not carry an expired
+// wall clock from a prior process.
+func resolveRootTurnTimeout(cfg config.Config, opts cliOptions) time.Duration {
+	secs := cfg.Session.TurnTimeoutS
+	if opts.turnTimeoutSet {
+		parsed, err := parseTurnTimeoutFlag(opts.turnTimeout)
+		if err == nil {
+			secs = parsed
+		}
+	}
+	return config.ResolveTurnTimeout(secs)
 }

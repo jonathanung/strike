@@ -557,6 +557,10 @@
         "delegationPolicy": {
           "$ref": "#/$defs/delegationPolicy"
         },
+        "turnTimeoutS": {
+          "type": "integer",
+          "description": "Root-turn wall-clock deadline in seconds. 0/omitted = default 1800 (30m). Negative disables. Fresh per turn; resume does not inherit an expired deadline."
+        },
         "auditRetentionMaxEvents": {
           "type": "integer",
           "minimum": 0,

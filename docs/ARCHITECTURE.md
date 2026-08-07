@@ -162,7 +162,7 @@ Interrupt op / Run parent ctx / turn deadline
 | Per-tool (bash) | `timeoutMs` (default 120s, max 600s); starts **after** scheduler admission | `process.exited` status `timeout`; `tool.end` `errorCode=timeout`, `IsError` |
 | Per-tool mem/CPU | optional `ProcessSpec.Limits` (`RLIMIT_AS` / `RLIMIT_CPU` via prlimit) | **Linux only**; no-op elsewhere — see [isolation.md](isolation.md) |
 | Per-tool OS sandbox deny | bwrap/seatbelt blocks classified after exit | `tool.end` `errorCode=sandbox_denied` + reason; timeline `errorCode` |
-| Per-turn | `engine.Options.TurnTimeout` (zero = off) | `EngineError` code `timeout` + `turn.completed` `stopReason=timeout` |
+| Per-turn (root) | `engine.Options.TurnTimeout` from `session.turnTimeoutS` / `--turn-timeout` (product default 30m; negative/off disables; engine zero = off) | `EngineError` code `timeout` + `turn.completed` `stopReason=timeout`. Fresh bound each turn — resume keeps the configured posture, not a leftover deadline. |
 | Provider HTTP | request ctx only (no separate client timeout on streaming adapters) | surfaces as stream/turn cancel |
 
 ### Backpressure (bounded queues)

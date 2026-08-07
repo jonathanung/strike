@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -2029,5 +2030,55 @@ func TestHarnessInvalidModeRejected(t *testing.T) {
 	}
 	if _, err := Load(t.TempDir()); err == nil || !strings.Contains(err.Error(), "mode") {
 		t.Fatalf("err = %v, want mode error", err)
+	}
+}
+
+func TestResolveTurnTimeout(t *testing.T) {
+	if got := ResolveTurnTimeout(0); got != time.Duration(DefaultTurnTimeoutS)*time.Second {
+		t.Fatalf("default = %v", got)
+	}
+	if got := ResolveTurnTimeout(-1); got != 0 {
+		t.Fatalf("disable = %v", got)
+	}
+	if got := ResolveTurnTimeout(90); got != 90*time.Second {
+		t.Fatalf("explicit = %v", got)
+	}
+	if got := EffectiveTurnTimeoutS(0); got != DefaultTurnTimeoutS {
+		t.Fatalf("effective default = %d", got)
+	}
+	if got := EffectiveTurnTimeoutS(-5); got != -1 {
+		t.Fatalf("effective off = %d", got)
+	}
+}
+
+func TestLoadSessionTurnTimeoutMerge(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	work := t.TempDir()
+
+	global := filepath.Join(home, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(global), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(global, []byte(`{
+		"session": {"turnTimeoutS": 3600}
+	}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	project := filepath.Join(work, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(project), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(project, []byte(`{
+		"session": {"turnTimeoutS": -1}
+	}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Session.TurnTimeoutS != -1 {
+		t.Fatalf("turnTimeoutS = %d, want -1 (project disable)", cfg.Session.TurnTimeoutS)
 	}
 }
