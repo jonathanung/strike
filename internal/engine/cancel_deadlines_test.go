@@ -294,3 +294,215 @@ func TestProviderStreamCancelEndsInterrupted(t *testing.T) {
 	}
 	close(unblock)
 }
+
+func TestTurnTimeoutDuringToolPropagatesTimeoutCode(t *testing.T) {
+	// Tool blocks until ctx deadline; turn timeout must settle tool as timeout
+	// (not canceled) and complete the turn with stopReason timeout.
+	call := toolCall("slow1", "partial")
+	pt := &partialCancelTool{started: make(chan struct{})}
+	prov := newScriptedProvider(toolCallStep(call), completedStep("after-timeout"))
+	eng := engine.New(engine.Options{
+		Select:          func(string) (provider.Provider, string, error) { return prov, "test-model", nil },
+		InitialProvider: "scripted",
+		Registry:        tool.NewRegistry(pt),
+		WorkDir:         t.TempDir(),
+		Rules:           []permission.Ruleset{permission.Defaults()},
+		TurnTimeout:     50 * time.Millisecond,
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+	eng.Ops() <- protocol.UserInput{Text: "slow tool under turn deadline"}
+	_ = receiveRequest(t, prov.requests)
+
+	select {
+	case <-pt.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("tool never started")
+	}
+
+	var (
+		completed protocol.TurnCompleted
+		sawErr    bool
+		end       protocol.ToolCallEnd
+	)
+	guard := time.After(3 * time.Second)
+	for completed.StopReason == "" {
+		select {
+		case ev, ok := <-eng.Events():
+			if !ok {
+				t.Fatal("events closed")
+			}
+			switch e := ev.(type) {
+			case protocol.EngineError:
+				if e.Code == protocol.ErrorCodeTimeout {
+					sawErr = true
+				}
+			case protocol.ToolCallEnd:
+				if e.CallID == "slow1" {
+					end = e
+				}
+			case protocol.TurnCompleted:
+				completed = e
+			}
+		case <-guard:
+			t.Fatal("timeout waiting for turn completed")
+		}
+	}
+	if completed.StopReason != "timeout" {
+		t.Fatalf("stopReason = %q, want timeout", completed.StopReason)
+	}
+	if !sawErr {
+		t.Fatal("expected EngineError timeout")
+	}
+	if end.CallID == "" {
+		t.Fatal("missing ToolCallEnd")
+	}
+	if end.ErrorCode != protocol.ErrorCodeTimeout {
+		t.Fatalf("tool ErrorCode = %q, want timeout (not canceled)", end.ErrorCode)
+	}
+	if !strings.Contains(end.Output, "partial-bytes-before-cancel") {
+		t.Fatalf("partial output lost: %q", end.Output)
+	}
+}
+
+func TestTurnTimeoutResumeAppliesConfiguredPostureNotExpiredDeadline(t *testing.T) {
+	// After a timed-out turn, a resumed engine with the same TurnTimeout must
+	// still apply a fresh bound on the next turn (not "already expired").
+	// First engine: short timeout fires.
+	prov1 := newScriptedProvider(streamStep{stream: func(ctx context.Context) <-chan provider.StreamEvent {
+		ch := make(chan provider.StreamEvent)
+		go func() {
+			defer close(ch)
+			ch <- provider.StreamEvent{Type: provider.EventTextDelta, Text: "hang"}
+			<-ctx.Done()
+		}()
+		return ch
+	}})
+	eng1 := engine.New(engine.Options{
+		Select:          func(string) (provider.Provider, string, error) { return prov1, "m", nil },
+		InitialProvider: "scripted",
+		Registry:        tool.NewRegistry(),
+		WorkDir:         t.TempDir(),
+		Rules:           []permission.Ruleset{permission.Defaults()},
+		TurnTimeout:     40 * time.Millisecond,
+	})
+	ctx1, cancel1 := context.WithCancel(context.Background())
+	defer cancel1()
+	go eng1.Run(ctx1)
+	eng1.Ops() <- protocol.UserInput{Text: "first"}
+	_ = receiveRequest(t, prov1.requests)
+	completed, events := collectThroughTurnCompleted(t, eng1.Events())
+	if completed.StopReason != "timeout" {
+		t.Fatalf("first stopReason = %q", completed.StopReason)
+	}
+	// Capture events for Restore (include user message from live path).
+	_ = events
+
+	// Second engine: same configured timeout, seeded history, QuietStartup.
+	// A fast-completing stream must finish normally — proving the deadline is
+	// fresh, not inherited as already-expired from the prior process.
+	prov2 := newScriptedProvider(completedStep("ok after resume"))
+	restored := engine.Restore([]protocol.Event{
+		protocol.UserMessage{Correlation: protocol.Correlation{SessionID: "s"}, Text: "first"},
+		protocol.TextDelta{Correlation: protocol.Correlation{SessionID: "s"}, Text: "hang"},
+		protocol.TurnCompleted{Correlation: protocol.Correlation{SessionID: "s"}, StopReason: "timeout"},
+		protocol.EngineError{Correlation: protocol.Correlation{SessionID: "s"}, Code: protocol.ErrorCodeTimeout, Message: "turn deadline exceeded"},
+	})
+	eng2 := engine.New(engine.Options{
+		Select:          func(string) (provider.Provider, string, error) { return prov2, "m", nil },
+		InitialProvider: "scripted",
+		Registry:        tool.NewRegistry(),
+		WorkDir:         t.TempDir(),
+		Rules:           []permission.Ruleset{permission.Defaults()},
+		TurnTimeout:     5 * time.Second, // configured posture (generous)
+		InitialMessages: restored.Messages,
+		QuietStartup:    true,
+	})
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	defer cancel2()
+	go eng2.Run(ctx2)
+	// Allow quiet startup to settle.
+	time.Sleep(20 * time.Millisecond)
+	eng2.Ops() <- protocol.UserInput{Text: "second after resume"}
+	_ = receiveRequest(t, prov2.requests)
+	completed2, _ := collectThroughTurnCompleted(t, eng2.Events())
+	if completed2.StopReason != "end_turn" {
+		t.Fatalf("resume turn stopReason = %q, want end_turn (fresh deadline, not expired)", completed2.StopReason)
+	}
+}
+
+func TestTurnTimeoutDistinguishedFromInterrupt(t *testing.T) {
+	// Interrupt → interrupted; deadline → timeout. Same slow stream shape.
+	newSlow := func() (*scriptedProvider, *engine.Engine) {
+		prov := newScriptedProvider(streamStep{stream: func(ctx context.Context) <-chan provider.StreamEvent {
+			ch := make(chan provider.StreamEvent)
+			go func() {
+				defer close(ch)
+				ch <- provider.StreamEvent{Type: provider.EventTextDelta, Text: "x"}
+				<-ctx.Done()
+			}()
+			return ch
+		}})
+		eng := engine.New(engine.Options{
+			Select:          func(string) (provider.Provider, string, error) { return prov, "m", nil },
+			InitialProvider: "scripted",
+			Registry:        tool.NewRegistry(),
+			WorkDir:         t.TempDir(),
+			Rules:           []permission.Ruleset{permission.Defaults()},
+			// Long timeout so interrupt wins on the interrupt path.
+			TurnTimeout: 30 * time.Second,
+		})
+		return prov, eng
+	}
+
+	// Interrupt path.
+	provI, engI := newSlow()
+	ctxI, cancelI := context.WithCancel(context.Background())
+	defer cancelI()
+	go engI.Run(ctxI)
+	engI.Ops() <- protocol.UserInput{Text: "interrupt me"}
+	_ = receiveRequest(t, provI.requests)
+	engI.Ops() <- protocol.Interrupt{}
+	cI, _ := collectThroughTurnCompleted(t, engI.Events())
+	if cI.StopReason != "interrupted" {
+		t.Fatalf("interrupt stopReason = %q", cI.StopReason)
+	}
+
+	// Timeout path (short deadline).
+	provT := newScriptedProvider(streamStep{stream: func(ctx context.Context) <-chan provider.StreamEvent {
+		ch := make(chan provider.StreamEvent)
+		go func() {
+			defer close(ch)
+			ch <- provider.StreamEvent{Type: provider.EventTextDelta, Text: "x"}
+			<-ctx.Done()
+		}()
+		return ch
+	}})
+	engT := engine.New(engine.Options{
+		Select:          func(string) (provider.Provider, string, error) { return provT, "m", nil },
+		InitialProvider: "scripted",
+		Registry:        tool.NewRegistry(),
+		WorkDir:         t.TempDir(),
+		Rules:           []permission.Ruleset{permission.Defaults()},
+		TurnTimeout:     40 * time.Millisecond,
+	})
+	ctxT, cancelT := context.WithCancel(context.Background())
+	defer cancelT()
+	go engT.Run(ctxT)
+	engT.Ops() <- protocol.UserInput{Text: "timeout me"}
+	_ = receiveRequest(t, provT.requests)
+	cT, events := collectThroughTurnCompleted(t, engT.Events())
+	if cT.StopReason != "timeout" {
+		t.Fatalf("timeout stopReason = %q", cT.StopReason)
+	}
+	var sawTimeoutErr bool
+	for _, ev := range events {
+		if e, ok := ev.(protocol.EngineError); ok && e.Code == protocol.ErrorCodeTimeout {
+			sawTimeoutErr = true
+		}
+	}
+	if !sawTimeoutErr {
+		t.Fatal("timeout path missing EngineError timeout")
+	}
+}

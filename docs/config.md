@@ -816,6 +816,32 @@ Each `bash` invocation is a fresh process whose cwd is that session workdir
 does not affect later bash calls or other tools; chain with `&&` or
 `(cd subdir && …)` when a single command needs a subdirectory.
 
+### Root-turn deadline (`session.turnTimeoutS`)
+
+Each root user turn gets an independent wall-clock deadline so a stuck provider
+stream or long-running tool cannot retain the active turn indefinitely.
+
+| `session.turnTimeoutS` | Behavior |
+|---|---|
+| omitted / `0` | **default 1800** (30 minutes) — bounds unattended runs without breaking ordinary builds |
+| positive integer | that many seconds per root turn |
+| negative (e.g. `-1`) | disabled — cancel only via Interrupt / parent context |
+
+CLI: `strike --turn-timeout 30m` (or `1h`, `1800s`, plain seconds). Use
+`--turn-timeout off` (or `0` / `none`) to disable for that invocation. CLI
+overrides config.
+
+**Interaction:** expiry cancels the turn context (provider stream drain, in-flight
+tools, bash process groups, scheduler waiters) the same way as other turn
+deadlines — see [ARCHITECTURE.md](ARCHITECTURE.md#cancellation-deadlines-and-backpressure).
+Terminal events use `stopReason=timeout` and `EngineError` code `timeout`,
+distinct from user `interrupted` and provider `error`. Partial tool output stays
+structurally valid in history. **Resume / `--continue`:** each new turn applies
+the configured posture again; an expired deadline from a prior process is not
+restored. Child agents use `session.agentBudget` wall-clock limits, not this dial.
+Inspect the effective value via the diagnostic bundle (`config.turnTimeoutS`;
+negative means off).
+
 ### Parallel children and path overlap
 
 Within one session team, `task` children share the lead's tool CWD. Write tools

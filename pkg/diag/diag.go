@@ -106,6 +106,10 @@ type Config struct {
 	MaxTokens      int    `json:"maxTokens,omitempty"`
 	MaxChildDepth  int    `json:"maxChildDepth,omitempty"`
 	ContextWindow  int    `json:"contextWindow,omitempty"`
+	// TurnTimeoutS is the effective root-turn wall-clock deadline in seconds.
+	// Negative means disabled; positive is the active bound. Zero is omitted
+	// (callers should resolve defaults before Build).
+	TurnTimeoutS int `json:"turnTimeoutS,omitempty"`
 	// WorkDir and ProjectRoot are paths only (not file contents).
 	WorkDir     string `json:"workDir,omitempty"`
 	ProjectRoot string `json:"projectRoot,omitempty"`
@@ -469,6 +473,7 @@ func configToProtocol(c Config) protocol.DiagnosticConfig {
 		MaxTokens:      c.MaxTokens,
 		MaxChildDepth:  c.MaxChildDepth,
 		ContextWindow:  c.ContextWindow,
+		TurnTimeoutS:   c.TurnTimeoutS,
 		WorkDir:        c.WorkDir,
 		ProjectRoot:    c.ProjectRoot,
 		Compaction: protocol.DiagnosticCompaction{
@@ -515,6 +520,7 @@ func configFromProtocol(c protocol.DiagnosticConfig) Config {
 		MaxTokens:      c.MaxTokens,
 		MaxChildDepth:  c.MaxChildDepth,
 		ContextWindow:  c.ContextWindow,
+		TurnTimeoutS:   c.TurnTimeoutS,
 		WorkDir:        c.WorkDir,
 		ProjectRoot:    c.ProjectRoot,
 		Compaction: Compaction{

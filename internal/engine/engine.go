@@ -140,7 +140,10 @@ type Options struct {
 	// TurnTimeout bounds each turn independently of the Run parent context.
 	// Zero means no per-turn deadline (cancel only via Interrupt / parent ctx).
 	// On expiry the turn ends with stopReason "timeout" and tool results use
-	// error code timeout when applicable.
+	// error code timeout when applicable. The CLI composition root applies a
+	// product default (session.turnTimeoutS / --turn-timeout; 30m) for root
+	// engines; embedders and tests keep zero-off unless set. Each startTurn
+	// mints a fresh deadline — resume does not inherit an expired wall clock.
 	TurnTimeout time.Duration
 	// StreamRetryBackoff returns the wait before starting nextAttempt
 	// (1-based, >=2). nil uses a small exponential default. Tests may return

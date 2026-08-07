@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/plugin"
@@ -457,6 +458,42 @@ type SessionConfig struct {
 	// DelegationPolicy is the pre-spawn worthiness gate (#876): whether to
 	// fan out vs run locally. See docs/config.md.
 	DelegationPolicy DelegationPolicyConfig `json:"delegationPolicy,omitempty"`
+	// TurnTimeoutS is the root-turn wall-clock deadline in seconds (#1037).
+	// Zero / omitted means the product default (DefaultTurnTimeoutS = 1800).
+	// Negative disables the deadline (cancel only via Interrupt / parent ctx).
+	// Applied per turn at start — resume does not inherit an expired deadline.
+	// Child engines do not inherit this dial (they use session.agentBudget).
+	TurnTimeoutS int `json:"turnTimeoutS,omitempty"`
+}
+
+// DefaultTurnTimeoutS is the product default root-turn wall-clock deadline
+// (30 minutes). Long enough for ordinary builds and multi-tool turns; short
+// enough to bound unattended stuck provider streams.
+const DefaultTurnTimeoutS = 1800
+
+// ResolveTurnTimeout maps config/CLI seconds onto an engine duration.
+// seconds < 0 → disabled (0). seconds == 0 → DefaultTurnTimeoutS.
+// seconds > 0 → that many seconds.
+func ResolveTurnTimeout(seconds int) time.Duration {
+	if seconds < 0 {
+		return 0
+	}
+	if seconds == 0 {
+		seconds = DefaultTurnTimeoutS
+	}
+	return time.Duration(seconds) * time.Second
+}
+
+// EffectiveTurnTimeoutS returns the resolved seconds for inspect/docs
+// (negative stays negative for "off"; zero becomes DefaultTurnTimeoutS).
+func EffectiveTurnTimeoutS(seconds int) int {
+	if seconds < 0 {
+		return -1
+	}
+	if seconds == 0 {
+		return DefaultTurnTimeoutS
+	}
+	return seconds
 }
 
 // DelegationPolicyConfig is JSON for session.delegationPolicy (camelCase).
@@ -1544,6 +1581,11 @@ func merge(base, layer Config) Config {
 	}
 	base.Session.AgentBudget = mergeAgentBudgetConfig(base.Session.AgentBudget, layer.Session.AgentBudget)
 	base.Session.DelegationPolicy = mergeDelegationPolicyConfig(base.Session.DelegationPolicy, layer.Session.DelegationPolicy)
+	// TurnTimeoutS: non-zero layer wins (including negative = disable). Zero
+	// layer leaves base unchanged so project can disable after global default.
+	if layer.Session.TurnTimeoutS != 0 {
+		base.Session.TurnTimeoutS = layer.Session.TurnTimeoutS
+	}
 	base.Permissions = append(base.Permissions, layer.Permissions...)
 	base.Hooks = append(base.Hooks, layer.Hooks...)
 	base.Providers = mergeProviders(base.Providers, layer.Providers)

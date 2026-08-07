@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/tool"
@@ -43,6 +44,7 @@ Options:
   --continue                         resume the most recent root session (model history + selections)
   --session <id>                     resume a specific session by id (model history + selections)
   --worktree                         run this session in an isolated git worktree under .strike/worktrees/
+  --turn-timeout <duration>          root-turn wall-clock deadline (e.g. 30m, 1h, 1800s); off/0 disables; overrides session.turnTimeoutS
   --launch-inside-container          build/start the project container and re-exec strike inside it (E12.4)
   --container-rebuild                with --launch-inside-container: rebuild when the live container is stale (E12.6)
   --container-attach-stale           with --launch-inside-container: attach to a stale live container (E12.6)
@@ -114,6 +116,16 @@ func TestParseCLIOptionsValueFormsAndProviderExplicitness(t *testing.T) {
 			name: "worktree flag",
 			args: []string{"--worktree"},
 			want: cliOptions{worktree: true},
+		},
+		{
+			name: "turn-timeout duration",
+			args: []string{"--turn-timeout", "45m"},
+			want: cliOptions{turnTimeout: "45m", turnTimeoutSet: true},
+		},
+		{
+			name: "turn-timeout off",
+			args: []string{"--turn-timeout=off"},
+			want: cliOptions{turnTimeout: "off", turnTimeoutSet: true},
 		},
 		{
 			name: "telemetry flag",
@@ -605,5 +617,71 @@ func TestUpgradeCLIOptionsDoesNotReexec(t *testing.T) {
 	}
 	if opts.Stdout != &stdout {
 		t.Fatal("CLI upgrade must forward stdout for progress messages")
+	}
+}
+
+func TestParseTurnTimeoutFlag(t *testing.T) {
+	tests := []struct {
+		in      string
+		want    int
+		wantErr bool
+	}{
+		{"off", -1, false},
+		{"none", -1, false},
+		{"0", -1, false},
+		{"", -1, false},
+		{"30m", 1800, false},
+		{"1h", 3600, false},
+		{"90s", 90, false},
+		{"120", 120, false},
+		{"bogus", 0, true},
+	}
+	for _, tt := range tests {
+		got, err := parseTurnTimeoutFlag(tt.in)
+		if tt.wantErr {
+			if err == nil {
+				t.Fatalf("parseTurnTimeoutFlag(%q) err=nil, want error", tt.in)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("parseTurnTimeoutFlag(%q): %v", tt.in, err)
+		}
+		if got != tt.want {
+			t.Fatalf("parseTurnTimeoutFlag(%q) = %d, want %d", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestResolveRootTurnTimeout(t *testing.T) {
+	// Default when unset.
+	d := resolveRootTurnTimeout(config.Config{}, cliOptions{})
+	if d != 30*time.Minute {
+		t.Fatalf("default = %v, want 30m", d)
+	}
+	// Config seconds.
+	d = resolveRootTurnTimeout(config.Config{Session: config.SessionConfig{TurnTimeoutS: 60}}, cliOptions{})
+	if d != time.Minute {
+		t.Fatalf("config 60s = %v", d)
+	}
+	// Config disable.
+	d = resolveRootTurnTimeout(config.Config{Session: config.SessionConfig{TurnTimeoutS: -1}}, cliOptions{})
+	if d != 0 {
+		t.Fatalf("config off = %v, want 0", d)
+	}
+	// CLI overrides config.
+	d = resolveRootTurnTimeout(
+		config.Config{Session: config.SessionConfig{TurnTimeoutS: 60}},
+		cliOptions{turnTimeout: "off", turnTimeoutSet: true},
+	)
+	if d != 0 {
+		t.Fatalf("cli off override = %v", d)
+	}
+	d = resolveRootTurnTimeout(
+		config.Config{Session: config.SessionConfig{TurnTimeoutS: -1}},
+		cliOptions{turnTimeout: "10s", turnTimeoutSet: true},
+	)
+	if d != 10*time.Second {
+		t.Fatalf("cli 10s override = %v", d)
 	}
 }
