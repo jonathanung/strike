@@ -27,16 +27,19 @@ import (
 //  3. System guidance is additive only — usage policy / when-to-use tips, not
 //     a second name/purpose catalog (#437).
 //
-// Optional defer_loading (#438): when registry.SetDeferLoading is on
-// (config deferTools), non-core tools are also omitted from SchemasForProvider
-// until toolsearch (or a direct call / history re-promote) discovers them.
-// Core coding tools remain always bound on the first stream.
+// Optional defer_loading (#438/#988): when registry.SetDeferLoading is on
+// (config deferTools, default on), non-core tools are also omitted from
+// SchemasForProvider until toolsearch, direct call, history re-promote, or
+// deterministic workflow activation (#991) discovers them. Core coding tools
+// remain always bound on the first stream.
 func (e *Engine) effectiveToolSchemas() (schemas []provider.ToolSchema, omitted int) {
 	if e == nil || e.opts.Registry == nil {
 		return nil, 0
 	}
 	// Re-promote tools already used in history (resume / --continue).
 	e.discoverToolsFromHistory()
+	// Deterministic workflow-state activation (#991): plan/child/team families.
+	e.lastToolActivation = e.applyWorkflowToolActivation()
 	all := e.opts.Registry.SchemasForProvider()
 	if len(all) == 0 {
 		return nil, 0
@@ -114,6 +117,9 @@ func (e *Engine) toolGuidanceLayer() (text, source string) {
 		} else {
 			source = source + "+defer"
 		}
+	}
+	if suf := activationSourceSuffix(e.lastToolActivation); suf != "" {
+		source += suf
 	}
 	return text, source
 }

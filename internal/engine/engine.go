@@ -440,6 +440,9 @@ type Engine struct {
 	// finish so task_status/task_read can return completed state without a
 	// new spawn. Only sessions this engine started are present.
 	childHistory map[string]*childRecord
+	// lastToolActivation is the family token list from the most recent
+	// applyWorkflowToolActivation call (diagnostics / guidance source).
+	lastToolActivation []string
 	// team is the implicit lead+children roster. Shared with descendant
 	// engines; only the lead dissolves it on Run exit.
 	team *Team
