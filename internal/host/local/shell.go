@@ -70,10 +70,11 @@ func (s *shellService) Run(ctx context.Context, command string) (host.ShellResul
 	}
 	pol := s.sandboxPolicy()
 	tc := &tool.Context{
-		WorkDir:     workDir,
-		SandboxMode: pol.Mode.String(),
-		Sandbox:     pol,
-		Ask:         func(context.Context, tool.AskRequest) error { return nil },
+		WorkDir:      workDir,
+		SandboxMode:  pol.Mode.String(),
+		Sandbox:      pol,
+		NetworkAllow: sandbox.CloneNetworkAllow(pol.NetworkAllow),
+		Ask:          func(context.Context, tool.AskRequest) error { return nil },
 	}
 	res, err := tool.NewBash().Execute(ctx, args, tc)
 	out := host.ShellResult{Command: command, Output: res.Output}

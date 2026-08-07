@@ -83,7 +83,12 @@ func (bashTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 	// on known clients outside the list, interpreters, shell networking, and
 	// unknown binaries while OS host networking remains on (#1030).
 	policy := bashSandboxPolicy(tc)
-	if err := checkBashNetworkAllowOpts(a.Command, networkAllowFrom(tc), policy.NetworkEnabled()); err != nil {
+	allow := networkAllowFrom(tc)
+	if len(allow) == 0 {
+		// Composer ! shell and other callers may only set Sandbox.NetworkAllow.
+		allow = sandbox.CloneNetworkAllow(policy.NetworkAllow)
+	}
+	if err := checkBashNetworkAllowOpts(a.Command, allow, policy.NetworkEnabled()); err != nil {
 		return Result{}, err
 	}
 	if err := tc.Ask(ctx, AskRequest{Permission: "bash", Patterns: []string{a.Command}, Always: always}); err != nil {
