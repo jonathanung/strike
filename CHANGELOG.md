@@ -16,6 +16,13 @@ materially affect the shipped product.
 
 ### Changed
 
+- **Workflow tool activation** — deferred plan/child/team tool families and
+  advanced `task` promote from deterministic engine state (plan mode, children,
+  multi-child) without `toolsearch` or a classifier; hard denies still win
+  ([#991](https://github.com/jonathanung/strike/issues/991),
+  [#993](https://github.com/jonathanung/strike/issues/993)).
+
+
 - **Progressive `task` schemas** — `task` starts with a compact basic schema
   (prompt-only create + status/wait/cancel). Advanced fields load after
   `toolsearch`, advanced args, or workflow activation; one tool name and one
