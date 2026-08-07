@@ -48,6 +48,19 @@ materially affect the shipped product.
 
 ### Added
 
+- **/devcontainer skill** — built-in `/devcontainer` scaffolds project container
+  config: `strike container detect` scans go.mod / package.json / Python
+  manifests / Cargo.toml / flake.nix / Makefile; skill always asks via
+  `question` (base image, deps, network, resources), writes
+  `.strike/container.json`, shows Dockerfile diff, then `strike container eject`
+  only after confirm. Config: `needsNode`/`needsPython`/`needsGo`/`needsRust`
+  ([#587](https://github.com/jonathanung/strike/issues/587)).
+
+- **Queue right pane** — `/queue` focuses a session-group pane listing buffered
+  prompts, scheduled `/loop` jobs, and scheduler pool waits; reorder/edit/
+  promote/delete/run-next from the pane (`m` opens the overlay browser)
+  ([#1007](https://github.com/jonathanung/strike/issues/1007)).
+
 - **Write-time content guards** — `write` / `edit` / `apply_patch` /
   `notebook_edit` scan proposed content before disk. Default: credential
   shapes (PEM, AWS `AKIA…`, provider keys, GitHub/Slack tokens, …) **deny**
@@ -58,6 +71,7 @@ materially affect the shipped product.
   `pkg/redact.Findings` with egress redaction (write guard ≠ redact-on-read).
   Optional skill `/write-guards`
   ([#890](https://github.com/jonathanung/strike/issues/890)).
+
 - **Durable security audit sink** — append-only redacted JSONL under
   `~/.strike/audit/` for permission/sandbox/admission (and related) decisions,
   retention prune, and `strike audit export` machine-readable bundles

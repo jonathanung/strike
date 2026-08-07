@@ -437,6 +437,10 @@ type Model struct {
 	activityAnchorID    string
 	activityStickNewest bool
 	activityDetail      bool
+	// queuePaneCursor / queuePaneAnchorID navigate the queue right pane
+	// (buffered prompts, scheduled loops, scheduler waits).
+	queuePaneCursor   int
+	queuePaneAnchorID string
 
 	// roots holds frozen UI state for concurrent parent sessions (multi-root).
 	// The active root's fields live on Model; others sit here until activated.
@@ -1254,9 +1258,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, diagnosticsRefreshCmd()
 
 	case petsTickMsg:
-		// Animate only while the pets pane is active so idle sessions stay
-		// event-driven (same pattern as filesRefreshMsg).
-		if !petsWindowActive(m.windows) {
+		// Animate agent pets only while the agents pane is active so idle
+		// sessions stay event-driven (same pattern as filesRefreshMsg).
+		if !agentsWindowActive(m.windows) {
 			return m, nil
 		}
 		var cmd tea.Cmd

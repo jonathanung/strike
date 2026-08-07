@@ -43,8 +43,8 @@ func TestLeftFocusKeymapRoutingMatrix(t *testing.T) {
 	const (
 		kindSend kind = iota
 		kindNewline
-		kindCycleNext // ctrl+o cycles even on left focus (#414)
-		kindCyclePrev // ctrl+p cycles prev (#414); not palette
+		kindCycleNext // ctrl+p cycles even on left focus (#414, #1009)
+		kindCyclePrev // ctrl+o cycles prev (#414, #1009); not palette
 		kindScrollUp
 		kindScrollDown
 		kindJumpBottom
@@ -65,8 +65,8 @@ func TestLeftFocusKeymapRoutingMatrix(t *testing.T) {
 		// Bare LF (Ubuntu ctrl+j) and enhanced alt+j both newline (#414).
 		{"newline bare LF ctrl+j", tea.KeyPressMsg{Code: 'j', Mod: tea.ModCtrl}, kindNewline},
 		{"newline enhanced ctrl+j", keyMsgAltJ(), kindNewline},
-		{"cycle next ctrl+o", tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl}, kindCycleNext},
-		{"cycle prev ctrl+p", tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl}, kindCyclePrev},
+		{"cycle next ctrl+p", tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl}, kindCycleNext},
+		{"cycle prev ctrl+o", tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl}, kindCyclePrev},
 		{"scroll pgup", tea.KeyPressMsg{Code: tea.KeyPgUp}, kindScrollUp},
 		{"scroll ctrl+up", tea.KeyPressMsg{Code: tea.KeyUp, Mod: tea.ModCtrl}, kindScrollUp},
 		{"scroll pgdown", tea.KeyPressMsg{Code: tea.KeyPgDown}, kindScrollDown},
@@ -152,7 +152,7 @@ func TestLeftFocusKeymapRoutingMatrix(t *testing.T) {
 					t.Errorf("cycle prev changed composer to %q", m.composer.Value())
 				}
 				if _, ok := m.modal.(*paletteModal); ok {
-					t.Error("ctrl+p opened palette")
+					t.Error("ctrl+o opened palette")
 				}
 				assertNoAppOp(t, ops)
 			case kindScrollUp:
@@ -355,10 +355,10 @@ func TestUbuntuBareLFCtrlJNewlinesNotCycle(t *testing.T) {
 		t.Fatalf("bare LF window = %d/%s, want 0/a", m.windows.index, m.windows.active().id())
 	}
 
-	// ctrl+o still cycles from left.
-	m = updateApp(t, m, tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
+	// ctrl+p still cycles next from left (#1009).
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
 	if m.windows.index != 1 || m.windows.active().id() != "b" {
-		t.Fatalf("ctrl+o window = %d/%s, want 1/b", m.windows.index, m.windows.active().id())
+		t.Fatalf("ctrl+p window = %d/%s, want 1/b", m.windows.index, m.windows.active().id())
 	}
 
 	// Enter still sends.
@@ -389,7 +389,7 @@ func TestUbuntuBareLFCtrlJNewlinesNotCycle(t *testing.T) {
 	assertNoAppOp(t, ops)
 }
 
-// TestCtrlOPCyclesWindows pins ctrl+o / ctrl+p cycle from either focus (#414).
+// TestCtrlOPCyclesWindows pins ctrl+p / ctrl+o cycle from either focus (#414, #1009).
 func TestCtrlOPCyclesWindows(t *testing.T) {
 	m, ops := newAppTestModel(nil, nil)
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
@@ -398,27 +398,27 @@ func TestCtrlOPCyclesWindows(t *testing.T) {
 		statefulTestWindow{windowID: "b", windowTitle: "B"},
 	}}
 	m.composer.SetValue("keep")
-	m = updateApp(t, m, tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
 	if got := m.composer.Value(); got != "keep" {
-		t.Fatalf("ctrl+o composer = %q, want keep", got)
+		t.Fatalf("ctrl+p composer = %q, want keep", got)
 	}
 	if m.windows.index != 1 || m.windows.active().id() != "b" {
-		t.Fatalf("ctrl+o window = %d/%s, want 1/b", m.windows.index, m.windows.active().id())
+		t.Fatalf("ctrl+p window = %d/%s, want 1/b", m.windows.index, m.windows.active().id())
 	}
-	m = updateApp(t, m, tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
 	if m.windows.index != 0 || m.windows.active().id() != "a" {
-		t.Fatalf("ctrl+p window = %d/%s, want 0/a", m.windows.index, m.windows.active().id())
+		t.Fatalf("ctrl+o window = %d/%s, want 0/a", m.windows.index, m.windows.active().id())
 	}
 	m = updateApp(t, m, tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl})
 	if m.focus != focusRight {
 		t.Fatalf("focus = %v, want right", m.focus)
 	}
-	m = updateApp(t, m, tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
 	if m.windows.index != 1 || m.windows.active().id() != "b" {
-		t.Errorf("right ctrl+o window = %d/%s, want 1/b", m.windows.index, m.windows.active().id())
+		t.Errorf("right ctrl+p window = %d/%s, want 1/b", m.windows.index, m.windows.active().id())
 	}
 	if got := m.composer.Value(); got != "keep" {
-		t.Errorf("right ctrl+o changed composer to %q", got)
+		t.Errorf("right ctrl+p changed composer to %q", got)
 	}
 	assertNoAppOp(t, ops)
 }
@@ -541,11 +541,11 @@ func TestCtrlSemicolonToggleOrientationViaKeyMsg(t *testing.T) {
 	if !key.Matches(tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl}, m.keyMap.FocusRight) {
 		t.Error("vertical: ctrl+l should still focus right/secondary")
 	}
-	if !key.Matches(tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl}, m.keyMap.CycleWindowNext) {
-		t.Error("vertical: ctrl+o should still cycle next")
+	if !key.Matches(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl}, m.keyMap.CycleWindowNext) {
+		t.Error("vertical: ctrl+p should still cycle next")
 	}
-	if !key.Matches(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl}, m.keyMap.CycleWindowPrev) {
-		t.Error("vertical: ctrl+p should still cycle prev")
+	if !key.Matches(tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl}, m.keyMap.CycleWindowPrev) {
+		t.Error("vertical: ctrl+o should still cycle prev")
 	}
 	if !key.Matches(tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl | tea.ModShift}, m.keyMap.CycleGroupNext) {
 		t.Error("vertical: ctrl+shift+o should still cycle group next")

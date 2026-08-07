@@ -86,32 +86,32 @@ func TestComposerReadlineDoesNotStealPaletteOrRightPaneCycle(t *testing.T) {
 		statefulTestWindow{windowID: "b", windowTitle: "B"},
 	}}
 
-	// ctrl+o cycles windows on left focus even with composer text (#414).
+	// ctrl+p cycles windows next on left focus even with composer text (#414, #1009).
 	m.composer.SetValue("draft")
 	m.composer.SetCursorColumn(2)
-	m = updateApp(t, m, tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
 	if m.windows.active().id() != "b" {
-		t.Fatalf("left-focus ctrl+o window = %s, want b", m.windows.active().id())
+		t.Fatalf("left-focus ctrl+p window = %s, want b", m.windows.active().id())
 	}
 	if m.composer.Value() != "draft" {
 		t.Fatalf("cycle stole composer edit: %q", m.composer.Value())
 	}
 	if m.modal != nil {
-		t.Fatalf("ctrl+o opened modal %T", m.modal)
+		t.Fatalf("ctrl+p opened modal %T", m.modal)
 	}
 
-	// Right-focus ctrl+o still cycles windows; ctrl+k opens palette (#414).
+	// Right-focus ctrl+p still cycles windows; ctrl+k opens palette (#414, #1009).
 	m = updateApp(t, m, tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl})
 	if m.focus != focusRight {
 		t.Fatalf("focus = %v, want right", m.focus)
 	}
 	before := m.windows.index
-	m = updateApp(t, m, tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
 	if m.windows.index == before {
-		t.Fatalf("right-focus ctrl+o did not cycle windows")
+		t.Fatalf("right-focus ctrl+p did not cycle windows")
 	}
 	if m.composer.Value() != "draft" {
-		t.Fatalf("right-focus ctrl+o edited composer: %q", m.composer.Value())
+		t.Fatalf("right-focus ctrl+p edited composer: %q", m.composer.Value())
 	}
 	m = updateApp(t, m, tea.KeyPressMsg{Code: 'k', Mod: tea.ModCtrl})
 	if _, ok := m.modal.(*paletteModal); !ok {

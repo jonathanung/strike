@@ -14,11 +14,12 @@ func TestPaneSlashCommandsFocusNamedWindows(t *testing.T) {
 	}{
 		{"/agents", agentsWindowID},
 		{"/activity", "activity"},
+		{"/queue", queueWindowID},
 		{"/files", filesWindowID},
 		{"/diagnostics", diagnosticsWindowID},
 		{"/visualizer", visualizerWindowID},
 		{"/system", telemetryWindowID},
-		{"/pets", petsWindowID},
+		{"/pets", agentsWindowID},
 	}
 	for _, tt := range tests {
 		t.Run(tt.command, func(t *testing.T) {

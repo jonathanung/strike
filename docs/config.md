@@ -660,6 +660,12 @@ global config; project file after project config).
 | `network.allow` | Reserved container egress allowlist (same shape as top-level `network.allow`) |
 | `dockerfile` | Optional hand-written Dockerfile path |
 | `engine` | Override CLI binary (`docker` / `podman` / absolute path) |
+| `needsNode` / `nodeVersion` | Install Node via NodeSource (`nodeVersion` major, default 22) |
+| `needsPython` / `pythonVersion` | Install Python apt packages (default version `3`) |
+| `needsGo` / `goVersion` | Install `golang-go` (+ build deps); `goVersion` is informational |
+| `needsRust` | Install Rust via rustup |
+
+Scaffold with `/devcontainer` or `strike container detect` (E12.5).
 
 Runtime mapping: `Config.Container.ToRuntime(version)` → `container.Config` for
 `Manager`. See [container.md](container.md) and [isolation.md](isolation.md).
@@ -1022,8 +1028,8 @@ Remap app-level chords without recompiling. Ids match the in-app cheatsheet
   "nav.jump-bottom": "ctrl+b",
   "global.palette": "ctrl+k",
   "composer.newline": ["ctrl+j", "alt+enter"],
-  "nav.window-next": "ctrl+o",
-  "nav.window-prev": "ctrl+p",
+  "nav.window-next": "ctrl+p",
+  "nav.window-prev": "ctrl+o",
   "nav.group-next": "ctrl+shift+o",
   "nav.group-prev": "ctrl+shift+p",
   "nav.tool-expand": "alt+enter"

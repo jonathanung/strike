@@ -195,8 +195,19 @@ func TestInputQueueOpenModalAndMutations(t *testing.T) {
 		{modelText: "c", displayPrompt: "c"},
 	}
 
+	// /queue focuses the right pane; open overlay browser with "m".
 	next, _ := m.handleCommand("/queue")
 	m = next.(Model)
+	if m.windows.active().id() != queueWindowID {
+		t.Fatalf("active = %q, want queue pane", m.windows.active().id())
+	}
+	if m.focus != focusRight {
+		t.Fatalf("focus = %v, want right", m.focus)
+	}
+	handled, _ := m.handleQueuePaneKeys(tea.KeyPressMsg{Text: "m"})
+	if !handled {
+		t.Fatal("m should open modal from queue pane")
+	}
 	qm, ok := m.modal.(*queueModal)
 	if !ok {
 		t.Fatalf("modal = %T, want *queueModal", m.modal)
@@ -252,10 +263,13 @@ func TestInputQueueRunNextInterruptsThenDrains(t *testing.T) {
 	}
 	next, _ := m.handleCommand("/queue")
 	m = next.(Model)
-
-	m = updateQueue(t, m, tea.KeyPressMsg{Text: "x"})
-	if m.modal != nil {
-		t.Fatalf("modal still open after x: %T", m.modal)
+	// Run-next from the focused queue pane (no modal required).
+	handled, cmd := m.handleQueuePaneKeys(tea.KeyPressMsg{Text: "x"})
+	if !handled {
+		t.Fatal("x not handled on queue pane")
+	}
+	if cmd != nil {
+		runAppCmd(t, cmd)
 	}
 	if got := receiveAppOp(t, ops); got != (protocol.Interrupt{}) {
 		t.Fatalf("op = %#v, want Interrupt", got)
@@ -280,7 +294,13 @@ func TestInputQueueRunNextDrainsWhenIdle(t *testing.T) {
 	}
 	next, _ := m.handleCommand("/queue")
 	m = next.(Model)
-	m = updateQueue(t, m, tea.KeyPressMsg{Text: "x"})
+	handled, cmd := m.handleQueuePaneKeys(tea.KeyPressMsg{Text: "x"})
+	if !handled {
+		t.Fatal("x not handled on queue pane")
+	}
+	if cmd != nil {
+		runAppCmd(t, cmd)
+	}
 	assertUserInputText(t, receiveAppOp(t, ops), "go")
 	if len(m.inputQueue) != 0 {
 		t.Fatalf("queue = %#v", m.inputQueue)

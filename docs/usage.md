@@ -31,8 +31,8 @@ strike launches without any provider configured. Pick one inside the TUI:
 /system                        # focus the system right pane (needs telemetry on)
 /telemetry                     # toggle local system metrics pane (CPU/RAM/disk)
 /telemetry on|off|status       # show/hide or report; on by default (also --telemetry)
-/pets                          # focus the pets right pane (ASCII companions)
-/pets <name>                   # pick a pet (cat, dog, panda, fish, owl, …) and focus
+/pets                          # focus agents pane (ASCII pet above the tree)
+/pets <name>                   # assign pet to focused agent (cat, dog, owl, …)
 /session                       # browse past root sessions for this workspace
                                # (auto-titles); ctrl+a shows all workspaces
 /session <id>                  # resume a specific session by id (any workspace)
@@ -89,9 +89,9 @@ strike launches without any provider configured. Pick one inside the TUI:
                                # export/import portable JSON (default path
                                # strike-memory.json). import merges by key;
                                # add --replace to wipe first
-/queue                         # browse/edit prompts queued while a turn runs
-                               # (reorder, promote, delete, edit text, or
-                               # interrupt to run the next item now)
+/queue                         # focus queue right pane (queued prompts,
+                               # scheduled /loop jobs, scheduler pool waits;
+                               # reorder/edit/delete/run-next; m = overlay)
  /issues [list|add|get|close|export|import] …
                                # project-scoped issue tracker; export/import
                                # portable JSON (default strike-issues.json).
@@ -128,7 +128,7 @@ strike launches without any provider configured. Pick one inside the TUI:
 /quit                          # alias of /exit
 # Keybind mirrors (same actions as chords; see keybinds.md and /keys):
 /focus-left /focus-right       # focus panes (ctrl+h / ctrl+l)
-/window-next /window-prev      # cycle right-pane windows (ctrl+o / ctrl+p)
+/window-next /window-prev      # cycle right-pane windows (ctrl+p / ctrl+o)
 /group-next /group-prev        # cycle right-pane stack groups (ctrl+shift+o / ctrl+shift+p)
 /scroll-up /scroll-down        # transcript scroll
 /jump-bottom                   # jump to latest output (ctrl+t)
@@ -170,9 +170,9 @@ strike launches without any provider configured. Pick one inside the TUI:
 | `/copy` | copy plain text of the last assistant response (not tool output) to the system clipboard via OSC52; same as `alt+y`; notice on success/failure |
 | `/compact` | ask the engine to compact model history |
 | `/memory` | bare = list browser (focuses memory pane); `list [tag]`, `get <key>`, `set <key> <value>`, `rm <key>`, `export [path]`, `import <path> [--replace]` (portable JSON; relative paths stay under project root) |
-| `/queue` | browse prompts buffered while a turn runs: reorder (`shift+↑/↓` or `K`/`J`), promote (`p`), in-place edit (`enter`), load into composer (`e`), delete (`d`), clear (`c`), or interrupt and run the FIFO head next (`x`). Empty-composer `bksp` still pops the last item; idle `esc` clears the whole queue |
+| `/queue` | focus the **queue** right pane: buffered prompts (while a turn runs), session `/loop` jobs, and scheduler pool waits. Pane keys: reorder (`shift+↑/↓` or `K`/`J`), promote (`p`), edit (`enter`), load into composer (`e`), delete prompt or stop loop (`d`), clear prompts (`c`), run next (`x`), overlay browser (`m`). Empty-composer `bksp` still pops the last item; idle `esc` clears the whole prompt queue |
 | `/issues` | bare = list browser (focuses issues pane); `list [open\|closed]`, `add <title>`, `get <id>`, `close <id>`, `export [path]`, `import <path> [--replace]` (same portable rules as memory) |
-| `/agents` `/activity` `/files` `/diagnostics` `/visualizer` `/system` `/pets` | jump focus to the named right pane (`/agent` remains persona select; `/system` needs telemetry on; `/pets [name]` picks from the companion catalog) |
+| `/agents` `/activity` `/queue` `/files` `/diagnostics` `/visualizer` `/system` `/pets` | jump focus to the named right pane (`/agent` remains persona select; `/system` needs telemetry on; `/pets [name]` focuses agents and sets the focused agent's companion) |
 | `/telemetry [on\|off\|status]` | local system metrics pane (CPU/RAM/disk); **on by default** (~1 Hz sampler). Disable with `/telemetry off` |
 | `/loop` | schedule a recurring prompt (`15m`, `2h`, …); session-only; `/loop list`, `/loop stop [id]` — see [loop.md](loop.md). Distinct from [`/goal`](goal.md) |
 | `/workflow` | list/inspect/start/stop loaded workflows; start previews phase permission grants; palette expands actions |
@@ -428,6 +428,7 @@ composer. The right slot hosts one active window from the registry:
 |---|---|
 | `context` | setup summary (provider, model, agent, …) |
 | `activity` | tools / subagent status / empty-state |
+| `queue` | buffered prompts, scheduled `/loop` jobs, scheduler pool waits |
 | `agents` | multi-root session/agent tree (concurrent roots + children) |
 | `visualizer` | selected-node status, tokens/cost, tokens/turn sparkline |
 | `files` | workspace file tree (`host.Files`) |
@@ -437,12 +438,12 @@ composer. The right slot hosts one active window from the registry:
 | `editor` | embedded nvim/vim/nano PTY for `/vim` or `/nano` (modal via `vimMode`/`nanoMode`) |
 
 Related right-pane windows stack as **groups** when the pane is tall/wide
-enough: session (`context`+`activity`[+`system` telemetry]), agents
+enough: session (`context`+`activity`+`queue`[+`system` telemetry]), agents
 (`agents`+`visualizer`), and project (`memory`+`issues`). Sparse panes
-(context, system) size to their content; activity (and other flex members)
-absorb the remainder so empty bordered voids stay small. `files`, `markdown`,
-and `editor` stay full-height singles. Compact or narrow terminals collapse
-each group to one pane.
+(context, system, empty queue) size to their content; activity (and other flex
+members) absorb the remainder so empty bordered voids stay small. `files`,
+`markdown`, and `editor` stay full-height singles. Compact or narrow terminals
+collapse each group to one pane.
 
 ### Concurrent root sessions
 
@@ -472,8 +473,8 @@ per-root git worktrees. Full chord table:
 [keybinds.md](keybinds.md).
 
 Pane keys (orientation-independent): `ctrl+h` / `ctrl+l` focus the left
-(primary transcript) or right (secondary pane column); `ctrl+o` / `ctrl+p`
-cycle focus within the active stack group then to the next group;
+(primary transcript) or right (secondary pane column); `ctrl+p` / `ctrl+o`
+cycle focus next / previous within the active stack group then to the next group;
 `ctrl+shift+o` / `ctrl+shift+p` jump to the next/previous stack group (first
 pane). `ctrl+;` (or `/layout` / `/split`) toggles a vertical top/bottom split
 without swapping those chords. `ctrl+k` opens the command palette (when

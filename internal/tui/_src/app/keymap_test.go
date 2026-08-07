@@ -28,9 +28,9 @@ func TestDefaultKeyMapBindingsMatchTheirRequiredKeysAndHaveHelp(t *testing.T) {
 
 		{"focus right", keys.FocusRight, tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl}},
 
-		{"window next ctrl+o", keys.CycleWindowNext, tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl}},
+		{"window next ctrl+p", keys.CycleWindowNext, tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl}},
 
-		{"window prev ctrl+p", keys.CycleWindowPrev, tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl}},
+		{"window prev ctrl+o", keys.CycleWindowPrev, tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl}},
 
 		{"group next ctrl+shift+o", keys.CycleGroupNext, tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl | tea.ModShift}},
 
@@ -77,15 +77,15 @@ func TestDefaultKeyMapBindingsMatchTheirRequiredKeysAndHaveHelp(t *testing.T) {
 
 	}
 
-	if keys.CycleWindowNext.Help().Key != "ctrl+o" {
+	if keys.CycleWindowNext.Help().Key != "ctrl+p" {
 
-		t.Errorf("CycleWindowNext help key = %q, want ctrl+o", keys.CycleWindowNext.Help().Key)
+		t.Errorf("CycleWindowNext help key = %q, want ctrl+p", keys.CycleWindowNext.Help().Key)
 
 	}
 
-	if keys.CycleWindowPrev.Help().Key != "ctrl+p" {
+	if keys.CycleWindowPrev.Help().Key != "ctrl+o" {
 
-		t.Errorf("CycleWindowPrev help key = %q, want ctrl+p", keys.CycleWindowPrev.Help().Key)
+		t.Errorf("CycleWindowPrev help key = %q, want ctrl+o", keys.CycleWindowPrev.Help().Key)
 
 	}
 
@@ -101,12 +101,18 @@ func TestDefaultKeyMapBindingsMatchTheirRequiredKeysAndHaveHelp(t *testing.T) {
 
 	}
 
-	// ctrl+o must not match group cycle; ctrl+shift+o must not match window cycle (#671).
+	// ctrl+o/p must not match group cycle; ctrl+shift+o/p must not match window cycle (#671).
 	if key.Matches(tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl}, keys.CycleGroupNext, keys.CycleGroupPrev) {
 		t.Error("ctrl+o must not match CycleGroup*")
 	}
+	if key.Matches(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl}, keys.CycleGroupNext, keys.CycleGroupPrev) {
+		t.Error("ctrl+p must not match CycleGroup*")
+	}
 	if key.Matches(tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl | tea.ModShift}, keys.CycleWindowNext, keys.CycleWindowPrev) {
 		t.Error("ctrl+shift+o must not match CycleWindow*")
+	}
+	if key.Matches(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl | tea.ModShift}, keys.CycleWindowNext, keys.CycleWindowPrev) {
+		t.Error("ctrl+shift+p must not match CycleWindow*")
 	}
 
 	if keys.Palette.Help().Key != "ctrl+k" {
@@ -131,7 +137,13 @@ func TestDefaultKeyMapBindingsMatchTheirRequiredKeysAndHaveHelp(t *testing.T) {
 
 	if key.Matches(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl}, keys.Palette) {
 
-		t.Error("ctrl+p must not match Palette (window-prev) (#414)")
+		t.Error("ctrl+p must not match Palette (window-next) (#414, #1009)")
+
+	}
+
+	if key.Matches(tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl}, keys.Palette) {
+
+		t.Error("ctrl+o must not match Palette (window-prev) (#414, #1009)")
 
 	}
 
@@ -295,7 +307,7 @@ func TestKeybindCatalogCoversAppBindingsAndIsSearchable(t *testing.T) {
 
 		"composer.kill-line-start", "composer.kill-line-end", "composer.yank",
 
-		"agents.move", "agents.open", "agents.spawn", "agents.interrupt", "agents.rename", "agents.hide", "agents.filter",
+		"agents.move", "agents.open", "agents.spawn", "agents.interrupt", "agents.rename", "agents.hide", "agents.filter", "agents.pet",
 	} {
 
 		if !seen[id] {
@@ -327,6 +339,8 @@ func TestKeybindCatalogCoversAppBindingsAndIsSearchable(t *testing.T) {
 		{"agents.move", ak.Move},
 
 		{"agents.filter", ak.Filter},
+
+		{"agents.pet", ak.Pet},
 	} {
 
 		help := tt.b.Help()
@@ -508,7 +522,7 @@ func TestOrderKeybindEntriesPromotesFocusContext(t *testing.T) {
 
 	}
 
-	agentIDs := []string{"agents.move", "agents.open", "agents.spawn", "agents.interrupt", "agents.rename", "agents.hide", "agents.filter"}
+	agentIDs := []string{"agents.move", "agents.open", "agents.spawn", "agents.interrupt", "agents.rename", "agents.hide", "agents.filter", "agents.pet"}
 
 	for i, id := range agentIDs {
 

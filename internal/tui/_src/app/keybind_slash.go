@@ -56,6 +56,7 @@ var keybindSlashPrimary = map[string]string{
 	"agents.hide":      "/root-hide",
 	"agents.filter":    "/root-filter",
 	"agents.rename":    "/rename",
+	"agents.pet":       "/pets",
 }
 
 // keybindSlashAliases lists extra slash names that perform the same action as
