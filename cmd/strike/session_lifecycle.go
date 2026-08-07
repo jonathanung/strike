@@ -404,13 +404,21 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 // runExec is the headless one-shot composition root: same engine and session
 // log as the TUI, but streams assistant text (or JSON envelopes) to stdout and
 // exits after one turn.
-func runExec(opts cliOptions, prompt string, format execOutputFormat, stdout, stderr io.Writer) error {
-	return runExecContext(context.Background(), opts, prompt, format, stdout, stderr)
+func runExec(opts cliOptions, prompt string, format execOutputFormat, stdout, stderr io.Writer, extra ...headlessExtra) error {
+	var ex headlessExtra
+	if len(extra) > 0 {
+		ex = extra[0]
+	}
+	return runExecContext(context.Background(), opts, prompt, format, stdout, stderr, ex)
 }
 
 // runExecContext is runExec with a cancelable parent context (MCP host disconnect,
 // server shutdown). Cancel interrupts the in-flight turn.
-func runExecContext(ctx context.Context, opts cliOptions, prompt string, format execOutputFormat, stdout, stderr io.Writer) (runErr error) {
+func runExecContext(ctx context.Context, opts cliOptions, prompt string, format execOutputFormat, stdout, stderr io.Writer, extra ...headlessExtra) (runErr error) {
+	var ex headlessExtra
+	if len(extra) > 0 {
+		ex = extra[0]
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -488,7 +496,12 @@ func runExecContext(ctx context.Context, opts cliOptions, prompt string, format 
 	writeDangerousPermissionsWarning(stderr, opts.dangerouslySkipPermissions)
 
 	storeOwned = true
-	hopts := headlessOpts{Format: format, SessionID: a.sessionID}
+	hopts := headlessOpts{
+		Format:          format,
+		SessionID:       a.sessionID,
+		ApprovalControl: ex.ApprovalControl,
+		ApprovalTimeout: ex.ApprovalTimeout,
+	}
 	return runSession(ctx, a.eng.Run, a.eng.Events(), bindAudit(a.store, a.cfg), func(events <-chan protocol.Event) error {
 		return runHeadlessFrontend(ctx, a.eng.Ops(), events, prompt, stdout, stderr, hopts)
 	})

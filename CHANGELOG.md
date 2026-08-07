@@ -14,6 +14,15 @@ materially affect the shipped product.
 
 ## [Unreleased]
 
+### Added
+
+- **`strike exec` approval callbacks** — `--approval-control` unix socket/FIFO
+  NDJSON channel for per-request permission and question replies (once/reject;
+  durable always/project requires explicit `durable:true`). Timeout, disconnect,
+  and malformed replies fail closed; request payloads are secret-redacted.
+  Legacy auto-reject without the flag is unchanged
+  ([#1040](https://github.com/jonathanung/strike/issues/1040)).
+
 ### Changed
 
 - **Progressive disclosure validation** — offline fixture pack compares full vs
