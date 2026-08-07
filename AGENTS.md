@@ -65,10 +65,12 @@ service/theme token).
 | `internal/mcp` | MCP client (stdio + streamable HTTP); bridges external tools onto the registry |
 | `internal/lsp` | LSP client (JSON-RPC over stdio); extension registry; diagnostics collection |
 | `internal/question` | user-question ask service (suspend tool until QuestionReply) |
-| `internal/permission` | last-match-wins allow/ask/deny + ask service |
+| `internal/actionfacts` | semantic bash/tool fact projection for permissions (#888) |
+| `internal/permission` | last-match-wins allow/ask/deny + ask service (+ action facts) |
 | `internal/secret` | secret-ref env indirection + protocol event redaction on top of pkg/redact (see docs/secrets.md) |
 | `internal/auth` | credentials, OAuth/PKCE/device, env precedence |
 | `internal/config` | global/project JSON + agents/skills markdown |
+| `internal/audit` | Durable retention-bounded security audit sink (`~/.strike/audit/`) |
 | `internal/session` | JSONL event log append/replay + concurrent Manager |
 | `internal/history` | project-scoped prompt history |
 | `internal/memory` | project-scoped durable key/value memory |

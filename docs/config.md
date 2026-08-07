@@ -144,7 +144,7 @@ write this file. Manual `/ftue` remains available after acknowledgement.
   "effort": "high",
   "defaultAgent": "build",
   "leanCode": "lite",
-  "deferTools": "off",
+  "deferTools": "on",
   "theme": "strike",
   "vimMode": "pane",
   "nanoMode": "pane",
@@ -155,6 +155,20 @@ write this file. Manual `/ftue` remains available after acknowledgement.
   "sandbox": "workspace-write",
   "network": {
     "allow": ["api.github.com", "*.npmjs.org", "10.0.0.0/8"]
+  },
+  "container": {
+    "execution": "local",
+    "baseImage": "ubuntu:24.04",
+    "packages": [],
+    "shell": "/bin/bash",
+    "resources": { "memory": "", "cpus": "", "pidsLimit": 512, "gpus": "" },
+    "workspace": { "mountPath": "/workspace", "ports": [], "persistHome": true },
+    "auth": {
+      "forwardEnv": ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "STRIKE_*"],
+      "forwardSSHAgent": false
+    },
+    "network": { "mode": "default", "allow": [] },
+    "engine": ""
   },
   "permissionAutoApproveSeconds": 0,
   "permissionAutoApproveExclude": ["bash"],
@@ -275,7 +289,17 @@ scanners, and fail-open/closed behavior: [admission.md](admission.md).
 
 **Explain:** `/permission explain <tool> [pattern]` (or the
 `permission.Explain` / `Service.Explain` API) returns the effective action,
-matched rule, layer name, and match trail for a sample tool call.
+matched rule, layer name, and match trail for a sample tool call. For bash
+(and selected tools), explain also reports whether the decisive match used
+**action facts** or the raw **pattern** path (`eval=facts` / `eval=pattern`)
+plus a short fact summary (#888). See [isolation.md](isolation.md#action-facts-semantic-permission-projection-888).
+
+**Action facts + last-match-wins:** when a bash command parses completely,
+rules may match semantic keys (e.g. inner `rm *` inside `bash -c '…'`, path
+`**/.env`, `host:example.com`) in addition to the raw command string. Each
+rule uses **either** facts or pattern — not both — so deny cannot double-fire.
+Incomplete parses (expansions, `eval`, opaque scripts) never drive deny via
+facts; legacy pattern matching alone applies.
 
 **Dry-run preset:** `/permission explain --preset <id> <tool> [pattern]`
 evaluates under an alternate shipped preset without mutating the session
@@ -348,32 +372,34 @@ OS profile. Composer `!` uses the config-layer compile; agent bash uses live
 layers (agent/phase/session).
 
 **Network allowlist (`network.allow`):** optional host/CIDR whitelist for
-**application-layer** web egress (`webfetch` target hosts and `websearch` API
-hosts). Entries may be hostnames (`api.github.com`), a single leading wildcard
-label (`*.example.com`), IP literals, or CIDRs (`10.0.0.0/8`). Empty or omitted
-means unrestricted **public** hosts (existing SSRF blocks for
-private/loopback/link-local/CGNAT still apply and cannot be opened by the
-allowlist). When non-empty, the request host must match an entry:
-hostname/wildcard on the name, or IP/CIDR on the literal host or (when the list
-includes IP/CIDR entries) a resolved address. Redirects and dial-time
-resolution are re-checked. Global and project layers: when a layer sets
-`network.allow` (including `[]`), it **replaces** the previous list so a
+**application-layer** egress. Entries may be hostnames (`api.github.com`), a
+single leading wildcard label (`*.example.com`), IP literals, or CIDRs
+(`10.0.0.0/8`). Empty or omitted means unrestricted **public** hosts (existing
+SSRF blocks for private/loopback/link-local/CGNAT still apply on webfetch and
+cannot be opened by the allowlist). When non-empty, destinations must match an
+entry: hostname/wildcard on the name, or IP/CIDR on the literal host or (when
+the list includes IP/CIDR entries) a resolved address. Webfetch redirects and
+dial-time resolution are re-checked. Global and project layers: when a layer
+sets `network.allow` (including `[]`), it **replaces** the previous list so a
 project can tighten or clear a global whitelist.
 
-This is the same policy **shape** as future container network filters. It is
-**not** a third independent system:
+This is the same policy **shape** for webfetch, bash preflight, and future
+container filters. It is **not** a third independent system:
 
 | Surface | What applies today |
 |---|---|
 | `webfetch` | `network.allow` host/CIDR allowlist + SSRF private blocks |
 | `websearch` | `network.allow` on the search API host + SSRF private blocks; result domain filters are separate tool args |
-| bash OS profile | host networking on by default (`Policy.NoNetwork` zero value / `NetworkEnabled()`); off only when `webfetch`, `websearch`, and `mcp` are all hard-deny on `*` (all-or-nothing; no per-host filter inside bwrap/seatbelt) |
-| permission rules | `webfetch` / `websearch` ask/allow/deny patterns (prompt posture), independent of the hard allowlist |
-| container net | deferred — reuse `network.allow` shape |
+| bash preflight (v1) | Same allowlist via argv parse + actionfacts network projection for `curl`/`wget`/`ssh`/`scp`/`sftp`/`nc` (and common wrappers). Outside list → `network_denied`. Unparseable destinations on those clients fail closed when the list is non-empty. **Not** a full shell/network proxy. |
+| bash OS profile | host networking on by default (`Policy.NoNetwork` zero value / `NetworkEnabled()`); off only when `webfetch`, `websearch`, and `mcp` are all hard-deny on `*` (all-or-nothing; **no** per-host filter inside bwrap/seatbelt; no Windows host filter) |
+| permission rules | `webfetch` / `websearch` / `bash` ask/allow/deny patterns (prompt posture), independent of the hard allowlist |
+| container net | `container.network.mode` (`default`\|`none`); `container.network.allow` reserved (same host/CIDR shape as `network.allow`) |
 
-`/sandbox explain` prints the effective allowlist next to bash `network: on/off`.
-Prefer `webfetch` over `curl`/`wget` in bash when you need allowlist enforcement;
-bash egress is not host-filtered at the OS layer.
+
+`/sandbox explain` prints the effective allowlist, an `egress enforcement:`
+line (`preflight` when allow is set; `OS host filter: none` documents the
+platform gap), and bash `network: on/off`. Prefer `webfetch` for ordinary page
+fetches; use bash preflight when agents still shell out to curl/ssh.
 
 **Web search (`webSearch`):** configures the `websearch` tool backend. Search
 discovers titles/URLs/snippets; use `webfetch` to retrieve a selected page.
@@ -425,6 +451,23 @@ Shift+Tab or `/mode` persist in the session JSONL, not back into this file.
 Distinct from `/autonomy` (workflow exit gates) and from `sandbox` (OS
 isolation).
 
+**User system prompt:** `systemPrompt` is optional user text that **replaces**
+(not appends) a composition slot. Whitespace-only values are ignored (they do
+not blank the overlay).
+
+| `systemPromptMode` | Behavior |
+|---|---|
+| `overlay` (default) | Replace the provider overlay only; shared baseline stays |
+| `defaults` | Replace **shared + provider** with `systemPrompt`; tools, environment, instructions, memory, and ledger still append |
+
+**Precedence** for the overlay/defaults slot: custom agent persona body
+(`agents/*.md`) **wins over** config `systemPrompt`, which **wins over** the
+built-in provider overlay. When a persona wins, shared baseline still applies
+even if `systemPromptMode` is `defaults` (defaults mode only applies when the
+config prompt is the active slot content). Visible in `/context` and `/diag`
+as kind `config` with source `config:systemPrompt+mode:overlay|defaults`.
+Details: [agents-skills.md](agents-skills.md#system-prompt-layers).
+
 **Lean code:** `leanCode` is `off` | `lite` (default) | `full`. Injects
 agent-scoped efficiency guidance into the system prompt (strict ladder for
 build/general/debugger; softer scaling-aware lean for plan/orchestrator;
@@ -432,19 +475,25 @@ none for explore/reviewer/tester/validator/commit). Inspired by
 [ponytail](https://github.com/DietrichGebert/ponytail) (clean-room wording).
 Details: [agents-skills.md](agents-skills.md#lean-code-ponytail-lite).
 
-**Deferred tool schemas:** `deferTools` is `on` | `off` (default off). When
-`on`, non-core tools are omitted from the provider `tools[]` array until
-`toolsearch` discovers them (or the model calls them by name). Core coding
-tools stay always available: `read`/`glob`/`grep`/`edit`/`write`/
-`apply_patch`/`bash`, the `task*` family, `toolsearch`, `question`, and plan
-workflow tools. Deferred surface includes optional built-ins (`webfetch`,
-`websearch`, todo/memory/issue, `sleep`, `skill`, `notebook_edit`, …) and all
-`mcp_*` tools. Discovery lives on the process registry: matches from `toolsearch`
-load full schemas on the **next** model request (including the next
-iteration of the same turn’s tool loop). Tools already present as assistant
-tool calls in history are re-promoted on each stream (so `--continue` keeps
-schemas for tools used earlier). Set `"deferTools": "on"` in global or
-project config to enable.
+**Deferred tool schemas:** `deferTools` is `on` (default) | `off`. When
+`on` (or unset), non-core tools are omitted from the provider `tools[]` array
+until `toolsearch` discovers them, the model calls them by name, or
+deterministic workflow activation promotes them. Core coding tools stay always
+available: `read`/`glob`/`grep`/`edit`/`write`/`apply_patch`/`move`/`delete`/
+`bash`, progressive `task`, `toolsearch`, and `question`. Deferred surface
+includes compatibility delegation shims (`delegate`, `task_status`,
+`task_read`, `task_message`, `task_interrupt`, `wait`), team coordination
+(`agent_roster`, `agent_message`, `agent_broadcast`, `agent_thread`,
+`agent_ownership`, `team_task`, `patch_collab`), plan tools (`plan_write`,
+`plan_read`, `plan_delegate`, `enter_plan_mode`, `exit_plan_mode`,
+`phase_done`), optional built-ins (`webfetch`, `websearch`, todo/memory/issue,
+`sleep`, `skill`, `notebook_edit`, …), and all `mcp_*` tools. Discovery lives
+on the process registry: matches from `toolsearch` load full schemas on the
+**next** model request (including the next iteration of the same turn’s tool
+loop). Tools already present as assistant tool calls in history are
+re-promoted on each stream (so `--continue` keeps schemas for tools used
+earlier). Set `"deferTools": "off"` in global or project config to expose the
+full permitted registry.
 
 **Permission soft-approve / auto-approve:** session mode `soft-approve`
 (`permissionMode`, `/mode`, Shift+Tab) arms a **visible** 15s countdown on
@@ -527,6 +576,37 @@ remains unsupported (same as manual upgrade).
 
 Probe state is cached under `~/.strike/cache/update-check.json`. Editable under
 `/settings` → Defaults.
+
+## Container (native containerization, E12)
+
+Layered JSON for `internal/container` (epic
+[#547](https://github.com/jonathanung/strike/issues/547)). Merge order matches
+the rest of config: **defaults → global → project → managed**.
+
+| Source | Path |
+|---|---|
+| Inline | `"container": { … }` in `~/.strike/config` or `./.strike/config` |
+| Dedicated file | `container.jsonc` / `container.json` under the same `.strike` roots (like `mcp.jsonc`) |
+
+Dedicated files overlay the inline block at the same layer (global file after
+global config; project file after project config).
+
+| Field | Meaning |
+|---|---|
+| `execution` | `local` (default) or `container` — where the agent runs (CLI flag in E12.4) |
+| `baseImage` | Dockerfile `FROM` (default `ubuntu:24.04`) |
+| `packages` | Extra apt packages at build |
+| `shell` | Login shell (default `/bin/bash`) |
+| `resources` | `memory`, `cpus`, `pidsLimit`, `gpus` → create flags |
+| `workspace` | `mountPath`, `hostPath`, `ports` (`host:container`), `persistHome`, `extraBinds` |
+| `auth` | `forwardEnv` globs, `envFile`, `requiredEnv`, `forwardSSHAgent` (credentials never baked into images) |
+| `network.mode` | `default` (bridge) or `none` |
+| `network.allow` | Reserved container egress allowlist (same shape as top-level `network.allow`) |
+| `dockerfile` | Optional hand-written Dockerfile path |
+| `engine` | Override CLI binary (`docker` / `podman` / absolute path) |
+
+Runtime mapping: `Config.Container.ToRuntime(version)` → `container.Config` for
+`Manager`. See [container.md](container.md) and [isolation.md](isolation.md).
 
 ## Scheduler (in-process resource limits)
 
@@ -807,8 +887,15 @@ notice is delivered. Soft stall (default 300s idle) and loop (default 6
 identical tools) flags always appear on `task_status` / `agent_roster` without
 killing when no hard threshold is set.
 
-**Stale children (#517):** folded into stall — same `stall` signal and optional
-`stallAfterS` hard threshold; not a second detector.
+**Stale children (#517):** folded into stall — not a second detector.
+
+| Mode | Trigger | Parent-visible | Kills child? |
+|---|---|---|---|
+| **Soft stall** | Default **300s** without progress (or `stallAfterS` when set, for the soft flag) | `budget.stall=true`, `idle_s`, `last_progress_at`, `stall_after_s` on `task_status` / `agent_roster`; live state `needs_attention` + `block_reason`; rising-edge `child.escalated` with `action=signaled` + lead mailbox; `wait` on `task.stale` or `task.blocked` | **No** |
+| **Hard stall** | `stallAfterS` / spawn `stall_after_s` configured and idle ≥ threshold | Same pulse fields + `child.escalated` `interrupted`/`finalizing`, terminal `blocked`, mailbox | **Yes** (after optional finalization) |
+
+Progress clears soft stall flags and allows a later rising-edge signal. Prefer
+`wait` / `task` action=wait over busy-polling status.
 
 **Session cost envelope (#577 / #542):** when `maxSessionCostUSD` is configured
 it remains the **outer** cost cap for the whole session. Per-agent

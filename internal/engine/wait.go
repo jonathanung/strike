@@ -221,10 +221,39 @@ func (e *Engine) snapshotWaitMatch(filterID string, kinds map[string]struct{}) (
 			return waitSignal{}, false
 		}
 		h.mu.Lock()
+		// Refresh soft stall so snapshot waits see current idle state.
+		if h.budget != nil {
+			_, _, _, _ = h.budget.evaluate(time.Now(), h.startedAt)
+		}
 		blocked := h.awaitingPerm || h.awaitingQ
+		stale := h.budget != nil && h.budget.softStall && !h.budget.escalated
+		var staleReason string
+		if stale {
+			staleReason = h.budget.softStallReason(time.Now(), h.startedAt)
+		}
 		name := h.name
 		id := h.id
 		h.mu.Unlock()
+		if stale {
+			if _, ok := kinds[tool.WaitEventTaskStale]; ok {
+				return waitSignal{
+					Kind:      tool.WaitEventTaskStale,
+					SessionID: id,
+					Name:      name,
+					Status:    "needs_attention",
+					Summary:   staleReason,
+				}, true
+			}
+			if _, ok := kinds[tool.WaitEventTaskBlocked]; ok {
+				return waitSignal{
+					Kind:      tool.WaitEventTaskBlocked,
+					SessionID: id,
+					Name:      name,
+					Status:    "needs_attention",
+					Summary:   staleReason,
+				}, true
+			}
+		}
 		if blocked {
 			if _, ok := kinds[tool.WaitEventTaskBlocked]; ok {
 				return waitSignal{

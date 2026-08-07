@@ -211,9 +211,16 @@ type Options struct {
 	// to WorkDir). nil disables. Shared with child spawns so specialists see
 	// the same active slice. Refreshed every turn after ledger_write.
 	Ledger LedgerSource
-	// SystemPrompt, when set, replaces the provider overlay for the build
-	// agent only (shared baseline still applies). From config systemPrompt.
+	// SystemPrompt, when set (non-whitespace), supplies the user system-prompt
+	// layer. Precedence for the overlay/defaults slot: custom agent persona
+	// body wins over config SystemPrompt, which wins over the built-in
+	// provider overlay. From config systemPrompt.
 	SystemPrompt string
+	// SystemPromptMode is overlay (default) or defaults. overlay replaces only
+	// the provider/persona slot (shared baseline stays). defaults replaces
+	// shared + provider/persona with SystemPrompt while keeping tools,
+	// environment, instructions, memory, and ledger. From config systemPromptMode.
+	SystemPromptMode string
 	// LeanCode controls agent-scoped lean-code guidance: off|lite|full.
 	// Empty defaults to lite. From config leanCode.
 	LeanCode string
@@ -797,12 +804,13 @@ func (e *Engine) cleanupSessionTemp() {
 }
 
 // ExplainPermission returns last-match-wins detail for a sample tool call
-// against the live permission service (agent/phase/session grants included).
-func (e *Engine) ExplainPermission(permissionName, pattern string) permission.Explanation {
+// against the live permission service (agent/phase/session grants included),
+// including action-fact diagnostics when applicable (#888).
+func (e *Engine) ExplainPermission(permissionName, pattern string) permission.DetailedExplanation {
 	if e == nil || e.perms == nil {
-		return permission.Explain(permissionName, pattern)
+		return permission.ExplainDetailed(permissionName, pattern, nil)
 	}
-	return e.perms.Explain(permissionName, pattern)
+	return e.perms.ExplainDetailed(permissionName, pattern)
 }
 
 // PermissionService exposes the live ask service for host adapters (explain,

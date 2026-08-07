@@ -34,13 +34,21 @@ type Config struct {
 	Model        string          `json:"model,omitempty"`
 	Effort       protocol.Effort `json:"effort,omitempty"`
 	SystemPrompt string          `json:"systemPrompt,omitempty"`
+	// SystemPromptMode controls how systemPrompt composes with builtins:
+	// "overlay" (default) replaces the provider/persona overlay slot only;
+	// "defaults" replaces shared + provider/persona with the user text while
+	// keeping tools, environment, instructions, memory, and ledger layers.
+	// Empty means overlay. Unknown values are ignored at load time.
+	SystemPromptMode string `json:"systemPromptMode,omitempty"`
 	// LeanCode is agent-scoped lean-code guidance intensity: off|lite|full.
 	// Empty means lite (default). Unknown values are ignored at load time.
 	LeanCode string `json:"leanCode,omitempty"`
 	// DeferTools controls toolsearch-backed schema deferral: on|off.
-	// When on, non-core tools (optional built-ins + MCP) are omitted from the
-	// provider tools[] until toolsearch discovers them (or they are called).
-	// Empty means off (default). Unknown values are ignored at load time.
+	// When on (default), non-core tools (orchestration, optional built-ins,
+	// MCP) are omitted from the provider tools[] until toolsearch discovers
+	// them, they are called by name, or workflow activation promotes them.
+	// Empty means on (default). Set "off" for the full permitted registry.
+	// Unknown values are ignored at load time.
 	DeferTools   string `json:"deferTools,omitempty"`
 	DefaultAgent string `json:"defaultAgent,omitempty"`
 	// Theme is the preferred TUI color theme id (bundled or JSON under
@@ -170,6 +178,10 @@ type Config struct {
 	// Prefer mcp.jsonc (see Load). When a layer sets servers (including {}),
 	// it replaces the previous layer's server map.
 	MCP MCPConfig `json:"mcp,omitempty"`
+	// Container configures native containerization (E12). Also loadable from
+	// dedicated container.jsonc/json (global/project), same pattern as mcp.jsonc.
+	// Merge: defaults → global → project → managed. See docs/config.md.
+	Container ContainerConfig `json:"container,omitempty"`
 	// LSP configures external language servers (JSON-RPC over stdio). When a
 	// layer sets servers (including {}), it replaces the previous layer's map.
 	// Registry is keyed by file extension via each server's extensions list.
@@ -404,6 +416,12 @@ type SessionConfig struct {
 	TraceRetentionMaxFiles   int   `json:"traceRetentionMaxFiles,omitempty"`
 	TraceRetentionMaxAgeDays int   `json:"traceRetentionMaxAgeDays,omitempty"`
 	TraceRetentionMaxBytes   int64 `json:"traceRetentionMaxBytes,omitempty"`
+	// AuditRetentionMaxEvents caps security audit sink rows under
+	// ~/.strike/audit/ (0 = package default 10000 when both audit axes unset).
+	AuditRetentionMaxEvents int `json:"auditRetentionMaxEvents,omitempty"`
+	// AuditRetentionMaxAgeDays deletes audit rows older than N days
+	// (0 = package default 90 when both audit axes unset).
+	AuditRetentionMaxAgeDays int `json:"auditRetentionMaxAgeDays,omitempty"`
 	// AgentBudget is the default per-child resource limit for task spawns
 	// (#774). Spawn-time task.budget fields overlay non-zero values. Zero
 	// means unlimited for that dimension (soft stall/loop signals still
@@ -507,6 +525,8 @@ func Default() Config {
 		// Default language servers (E2.3). Missing binaries degrade to
 		// per-server error status; clear with "lsp": {"servers": {}}.
 		LSP: LSPConfig{Servers: DefaultLSPServers()},
+		// Container defaults (E12.2); layered JSON / container.jsonc overlay.
+		Container: DefaultContainer(),
 	}
 }
 
@@ -654,6 +674,12 @@ func Load(workDir string) (Config, error) {
 	} else {
 		cfg.MCP = mergeMCP(cfg.MCP, mc)
 	}
+	// Global container.jsonc/json (optional).
+	if cc, ok, err := loadContainerFileLayer(GlobalRoot()); err != nil {
+		return cfg, err
+	} else if ok {
+		cfg.Container = mergeContainer(cfg.Container, cc)
+	}
 	// Global providers.jsonc/json (optional; loads even when config is absent).
 	if pf, err := loadProvidersFileLayer(GlobalRoot()); err != nil {
 		return cfg, err
@@ -690,6 +716,11 @@ func Load(workDir string) (Config, error) {
 			return cfg, err
 		} else {
 			cfg.MCP = mergeMCP(cfg.MCP, mc)
+		}
+		if cc, ok, err := loadContainerFileLayer(projectRoot(workDir)); err != nil {
+			return cfg, err
+		} else if ok {
+			cfg.Container = mergeContainer(cfg.Container, cc)
 		}
 		if pf, err := loadProvidersFileLayer(projectRoot(workDir)); err != nil {
 			return cfg, err
@@ -728,6 +759,11 @@ func Load(workDir string) (Config, error) {
 		cfg.Managed = info
 	}
 	cfg.Provider = CanonicalProviderID(cfg.Provider)
+	norm, err := NormalizeContainer(cfg.Container)
+	if err != nil {
+		return cfg, err
+	}
+	cfg.Container = norm
 	return cfg, nil
 }
 
@@ -906,6 +942,7 @@ func read(path string) (Config, error) {
 	c.Notify = NormalizeNotify(c.Notify)
 	c.Autoupdate = NormalizeAutoupdate(c.Autoupdate)
 	c.LeanCode = NormalizeLeanCode(c.LeanCode)
+	c.SystemPromptMode = NormalizeSystemPromptMode(c.SystemPromptMode)
 	c.DeferTools = NormalizeDeferTools(c.DeferTools)
 	// Keybinds: unknown ids / invalid chords fail the layer (and thus Load).
 	if err := ValidateKeybinds(c.Keybinds); err != nil {
@@ -1242,6 +1279,25 @@ func EffectiveAutoupdate(s string) string {
 	return AutoupdateNotify
 }
 
+// SystemPromptMode values for Config.SystemPromptMode / engine composition.
+const (
+	SystemPromptModeOverlay  = "overlay"
+	SystemPromptModeDefaults = "defaults"
+)
+
+// NormalizeSystemPromptMode maps config aliases to overlay|defaults.
+// Empty and unknown values default to overlay (preserve historical behavior).
+func NormalizeSystemPromptMode(s string) string {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case SystemPromptModeDefaults, "default", "replace-defaults", "replace_defaults":
+		return SystemPromptModeDefaults
+	case SystemPromptModeOverlay, "provider", "persona", "":
+		return SystemPromptModeOverlay
+	default:
+		return SystemPromptModeOverlay
+	}
+}
+
 // LeanCode intensity values for Config.LeanCode / engine lean-code overlays.
 const (
 	LeanCodeOff  = "off"
@@ -1250,7 +1306,7 @@ const (
 )
 
 // NormalizeLeanCode maps config aliases to off|lite|full.
-// Empty and unknown values become "" (engine default = lite).
+// Empty and unknown values default to lite.
 func NormalizeLeanCode(s string) string {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "off", "false", "0", "no", "never", "none":
@@ -1271,7 +1327,7 @@ const (
 )
 
 // NormalizeDeferTools maps config aliases to on|off.
-// Empty and unknown values become "" (default off).
+// Empty and unknown values become "" (runtime default = on via DeferToolsEnabled).
 func NormalizeDeferTools(s string) string {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "on", "true", "1", "yes", "enable", "enabled":
@@ -1284,8 +1340,9 @@ func NormalizeDeferTools(s string) string {
 }
 
 // DeferToolsEnabled reports whether deferred tool schemas are active.
+// Empty/unset defaults to on; only an explicit off disables deferral.
 func DeferToolsEnabled(s string) bool {
-	return NormalizeDeferTools(s) == DeferToolsOn
+	return NormalizeDeferTools(s) != DeferToolsOff
 }
 
 // NormalizeWebSearch trims webSearch fields.
@@ -1318,6 +1375,9 @@ func merge(base, layer Config) Config {
 	}
 	if layer.SystemPrompt != "" {
 		base.SystemPrompt = layer.SystemPrompt
+	}
+	if layer.SystemPromptMode != "" {
+		base.SystemPromptMode = layer.SystemPromptMode
 	}
 	if layer.LeanCode != "" {
 		base.LeanCode = layer.LeanCode
@@ -1443,6 +1503,12 @@ func merge(base, layer Config) Config {
 	if layer.Session.TraceRetentionMaxBytes != 0 {
 		base.Session.TraceRetentionMaxBytes = layer.Session.TraceRetentionMaxBytes
 	}
+	if layer.Session.AuditRetentionMaxEvents != 0 {
+		base.Session.AuditRetentionMaxEvents = layer.Session.AuditRetentionMaxEvents
+	}
+	if layer.Session.AuditRetentionMaxAgeDays != 0 {
+		base.Session.AuditRetentionMaxAgeDays = layer.Session.AuditRetentionMaxAgeDays
+	}
 	base.Session.AgentBudget = mergeAgentBudgetConfig(base.Session.AgentBudget, layer.Session.AgentBudget)
 	base.Session.DelegationPolicy = mergeDelegationPolicyConfig(base.Session.DelegationPolicy, layer.Session.DelegationPolicy)
 	base.Permissions = append(base.Permissions, layer.Permissions...)
@@ -1450,6 +1516,7 @@ func merge(base, layer Config) Config {
 	base.Providers = mergeProviders(base.Providers, layer.Providers)
 	base.Keybinds = MergeKeybinds(base.Keybinds, layer.Keybinds)
 	base.MCP = mergeMCP(base.MCP, layer.MCP)
+	base.Container = mergeContainer(base.Container, layer.Container)
 	base.LSP = mergeLSP(base.LSP, layer.LSP)
 	base.Harnesses = mergeHarnesses(base.Harnesses, layer.Harnesses)
 	base.Scheduler = mergeScheduler(base.Scheduler, layer.Scheduler)

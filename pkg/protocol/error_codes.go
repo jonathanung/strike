@@ -22,6 +22,10 @@ const (
 	// ErrorCodeSandboxDenied is an OS sandbox capability block (bwrap/seatbelt
 	// path/syscall denial). Distinct from permission_denied (ruleset/ask).
 	ErrorCodeSandboxDenied = "sandbox_denied"
+	// ErrorCodeNetworkDenied is an application-layer egress allowlist block
+	// (network.allow preflight on webfetch/bash clients). Distinct from
+	// sandbox_denied (OS profile) and permission_denied (ruleset/ask).
+	ErrorCodeNetworkDenied = "network_denied"
 	// ErrorCodeQueueFull is backpressure rejection when a bounded queue is full
 	// (e.g. mid-turn user-input buffer). Callers should retry after the turn.
 	ErrorCodeQueueFull = "queue_full"

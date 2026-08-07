@@ -126,9 +126,10 @@ type Policy struct {
 	// when webfetch, websearch, and mcp are all hard-Deny on "*".
 	NoNetwork bool
 	// NetworkAllow is an optional host/CIDR allowlist for application-layer
-	// egress (webfetch/websearch). Empty means unrestricted public hosts (SSRF blocks
-	// still apply). Populated from config network.allow — not enforced by
-	// OS bash networking (NetworkEnabled remains all-or-nothing).
+	// egress (webfetch/websearch and bash preflight for curl/wget/ssh/scp/…).
+	// Empty means unrestricted public hosts (SSRF blocks still apply). Populated
+	// from config network.allow — not enforced as a per-host OS filter
+	// (NetworkEnabled remains all-or-nothing inside bwrap/seatbelt).
 	NetworkAllow []string
 }
 
@@ -156,6 +157,8 @@ func Explain(p Policy) string {
 	} else {
 		b.WriteString("network allowlist: (none — unrestricted public)\n")
 	}
+	// Egress enforcement level: preflight vs OS (no fake per-host OS filter).
+	fmt.Fprintf(&b, "egress enforcement: %s\n", describeEgressEnforcement(p))
 	if p.Mode == ModeOff {
 		b.WriteString("OS isolation: disabled\n")
 		return b.String()
@@ -179,6 +182,24 @@ func Explain(p Policy) string {
 	b.WriteString("profile:\n")
 	b.WriteString(ProfileText(p))
 	return b.String()
+}
+
+// describeEgressEnforcement summarizes how network.allow is enforced for this
+// policy snapshot. v1 is application preflight only; OS backends do not filter
+// by host/CIDR (NoNetwork is all-or-nothing). Documented platform gap.
+func describeEgressEnforcement(p Policy) string {
+	var parts []string
+	if len(p.NetworkAllow) > 0 {
+		parts = append(parts, "preflight (curl/wget/ssh/scp/sftp/nc + webfetch/websearch; shared network.allow)")
+	} else {
+		parts = append(parts, "none (network.allow empty — unrestricted public hosts)")
+	}
+	if p.NoNetwork {
+		parts = append(parts, "OS network: off (all-or-nothing)")
+	} else {
+		parts = append(parts, "OS host filter: none (no per-host bwrap/seatbelt allowlist)")
+	}
+	return strings.Join(parts, "; ")
 }
 
 // ProfileText returns the generated launcher profile text for p.

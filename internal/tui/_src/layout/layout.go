@@ -14,6 +14,7 @@ type layout struct {
 	header     int  // header strip
 	transcript int  // transcript region outer height (flex)
 	notice     int  // reserved notice row
+	tip        int  // strike tip strip above composer (droppable; #664)
 	popup      int  // completion popup (0 when closed)
 	composer   int  // composer region outer height (includes its border when not compact)
 	hints      int  // keybinding footer
@@ -119,23 +120,31 @@ func (g paneGeometry) leftCandidateWidth(width int) int {
 
 // computeLayout budgets the screen. composerRows is the textarea's row count,
 // popupHeight the completion popup's reserved height, danger whether the
-// permissions-bypassed banner is shown, and noticeRows the desired height of a
-// live notice (wrapped content). Omit noticeRows or pass 0 for the default blank
-// reservation (1 row, droppable under shortfall). A positive noticeRows reserves
-// that many rows (multi-line help, etc.) and keeps at least one row under
-// pressure until last resort.
+// permissions-bypassed banner is shown, and optional trailing ints:
+//
+//	noticeRows — desired height of a live notice (wrapped content). Omit or
+//	pass 0 for the default blank reservation (1 row, droppable under shortfall).
+//	A positive value reserves that many rows and keeps at least one under
+//	pressure until last resort.
+//	tipRows — optional second value: strike tip strip above the composer (#664).
+//	Droppable chrome; never steals the last composer row.
 func computeLayout(width, height, composerRows, popupHeight int, danger bool, noticeRows ...int) layout {
 	height = max(0, height)
 	noticeH := 1
 	activeNotice := false
+	tipH := 0
 	if len(noticeRows) > 0 && noticeRows[0] > 0 {
 		noticeH = noticeRows[0]
 		activeNotice = true
+	}
+	if len(noticeRows) > 1 && noticeRows[1] > 0 {
+		tipH = noticeRows[1]
 	}
 	l := layout{
 		compact: width < compactWidth || height < compactHeight,
 		header:  1,
 		notice:  noticeH,
+		tip:     tipH,
 		hints:   1,
 		popup:   max(0, popupHeight),
 	}
@@ -147,7 +156,7 @@ func computeLayout(width, height, composerRows, popupHeight int, danger bool, no
 		composerBorder = 2 // rounded top+bottom border rows around the composer
 	}
 	l.composer = max(0, composerRows) + composerBorder
-	used := l.header + l.notice + l.hints + l.danger + l.popup + l.composer
+	used := l.header + l.notice + l.tip + l.hints + l.danger + l.popup + l.composer
 	l.transcript = max(0, height-used)
 	shortfall := max(0, used-height)
 	reduce := func(region *int, floor int) {
@@ -159,9 +168,10 @@ func computeLayout(width, height, composerRows, popupHeight int, danger bool, no
 		shortfall -= delta
 	}
 
-	// The transcript has already absorbed all available remainder. Preserve the
-	// active notice and danger banner as long as possible when space is scarce.
-	// Multi-line notices may shrink toward one row before other chrome yields.
+	// The transcript has already absorbed all available remainder. Tip is the
+	// first droppable chrome. Preserve active notice and danger as long as
+	// possible. Multi-line notices may shrink toward one row before other chrome.
+	reduce(&l.tip, 0)
 	reduce(&l.popup, 0)
 	reduce(&l.composer, 1)
 	reduce(&l.hints, 0)
@@ -177,12 +187,12 @@ func computeLayout(width, height, composerRows, popupHeight int, danger bool, no
 	return l
 }
 
-// withBodyHeight returns a copy of l whose transcript/notice/popup/composer
+// withBodyHeight returns a copy of l whose transcript/notice/tip/popup/composer
 // sum to bodyHeight by shrinking transcript first (used when the left stack
 // shares vertical space with the right pane).
 func (l layout) withBodyHeight(bodyHeight int) layout {
 	bodyHeight = max(0, bodyHeight)
-	cur := l.transcript + l.notice + l.popup + l.composer
+	cur := l.transcript + l.notice + l.tip + l.popup + l.composer
 	if cur <= bodyHeight {
 		l.transcript += bodyHeight - cur
 		return l
@@ -197,6 +207,7 @@ func (l layout) withBodyHeight(bodyHeight int) layout {
 		shortfall -= delta
 	}
 	reduce(&l.transcript, 0)
+	reduce(&l.tip, 0)
 	reduce(&l.popup, 0)
 	reduce(&l.composer, 1)
 	reduce(&l.notice, 0)

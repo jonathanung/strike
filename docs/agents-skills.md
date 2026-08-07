@@ -162,17 +162,22 @@ tracking. Use `team_task` when two or more teammates must see the same board and
 claim items (exclusive owner + optional `expected_version` CAS). The board is
 keyed by the lead session id and cleared when the lead session ends.
 
+### System prompt layers
+
 Each model request composes the system prompt in layers (like opencode):
 
-1. **Shared baseline** — identity, ADHD-shaped response contract, doing-tasks
-2. **Tools** — effective registry guidance (name + short purpose, recommended use). Reflects agent/permission/depth/MCP; hard-denied tools omitted. Own `/context` provenance layer (`tools` / `registry:effective`). On every stream (including turn 1) the same effective set is bound as provider tool schemas so the model has tools without discovery lag. With config `deferTools: on`, non-core/MCP schemas stay out of `tools[]` until `toolsearch` discovers them (core coding tools remain always-on; see [config.md](config.md)).
-3. **Provider overlay** — anthropic / openai (incl. chatgpt) / xai / default, chosen from the active provider and model id
-4. **Agent persona** — empty for built-in build/plan (provider overlay used); custom `agents/*.md` body replaces the provider overlay; config `systemPrompt` replaces it for build only
-5. **Plan overlay** — always added while the plan agent is active
-6. **Lean code** — agent-scoped efficiency guidance (see below); off via config `leanCode`
-7. **Environment** — workdir, workspace root, git, platform, date, model id
-8. **Instructions** — `AGENTS.md` / `CLAUDE.md` from `~/.strike` and the project (walked up to the git root). Create or refresh the project file with `/init` (confirms before replacing an existing `AGENTS.md`; light local scan only — no secrets).
-9. **Project memory** — entries tagged `instruction`, `preference`, or `project-convention` (capped; untrusted). Untagged notes and issues stay on-demand via tools.
+1. **Shared baseline** — identity, ADHD-shaped response contract, doing-tasks. Skipped when config `systemPrompt` is active with `systemPromptMode: defaults` (persona still keeps shared).
+2. **Tools** — effective registry guidance (name + short purpose, recommended use). Reflects agent/permission/depth/MCP; hard-denied tools omitted. Own `/context` provenance layer (`tools` / `registry:effective`). On every stream (including turn 1) the same effective set is bound as provider tool schemas so the model has tools without discovery lag. With config `deferTools` on (the default), non-core/MCP schemas stay out of `tools[]` until `toolsearch` discovers them, they are called by name, or workflow activation promotes them (core coding tools remain always-on; set `deferTools: off` for the full surface — see [config.md](config.md)). **Never dropped** by user system-prompt modes.
+3. **Overlay / defaults slot (exactly one)** — precedence: custom agent persona body (`agents/*.md`) **>** config `systemPrompt` **>** built-in provider overlay (anthropic / openai incl. chatgpt / xai / default). Config `systemPromptMode`: `overlay` (default) replaces only this slot; `defaults` also omits shared when config wins. Whitespace-only `systemPrompt` is ignored.
+4. **Plan / phase overlay** — phase context when a workflow phase is active; else plan overlay while the plan agent is active
+5. **Lean code** — agent-scoped efficiency guidance (see below); off via config `leanCode`
+6. **Environment** — workdir, workspace root, git, platform, date, model id (**never dropped** by defaults mode)
+7. **Instructions** — `AGENTS.md` / `CLAUDE.md` from `~/.strike` and the project (walked up to the git root). Create or refresh the project file with `/init` (confirms before replacing an existing `AGENTS.md`; light local scan only — no secrets).
+8. **Project memory** — entries tagged `instruction`, `preference`, or `project-convention` (capped; untrusted). Untagged notes and issues stay on-demand via tools.
+9. **Decision ledger** — active decisions/assumptions/constraints (capped; untrusted)
+
+`/context` and `/diag` show each layer with kind/source/mode; config prompts
+appear as `config` / `config:systemPrompt+mode:overlay|defaults`.
 
 ### Lean code (ponytail-lite)
 

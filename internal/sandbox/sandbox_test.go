@@ -332,6 +332,8 @@ func TestExplainAndProfileText(t *testing.T) {
 		"sandbox mode: workspace-write",
 		"network: false",
 		"network allowlist: api.github.com, 10.0.0.0/8",
+		"egress enforcement: preflight",
+		"OS network: off",
 		"deny-write globs: **/*.env",
 		"profile:",
 	} {
@@ -342,6 +344,12 @@ func TestExplainAndProfileText(t *testing.T) {
 	unrestricted := Explain(Policy{Mode: ModeReadOnly, WorkDir: wd})
 	if !strings.Contains(unrestricted, "network allowlist: (none — unrestricted public)") {
 		t.Errorf("Explain unrestricted allowlist:\n%s", unrestricted)
+	}
+	if !strings.Contains(unrestricted, "egress enforcement: none") {
+		t.Errorf("Explain egress none:\n%s", unrestricted)
+	}
+	if !strings.Contains(unrestricted, "OS host filter: none") {
+		t.Errorf("Explain OS host filter gap:\n%s", unrestricted)
 	}
 	if !strings.Contains(unrestricted, "network: true") {
 		t.Errorf("Explain default network on:\n%s", unrestricted)
@@ -436,12 +444,15 @@ func TestDarwinSandboxHTTPSHelper(t *testing.T) {
 	if os.Getenv("STRIKE_SANDBOX_HTTPS_HELPER") == "" {
 		t.Skip("helper process")
 	}
+	// Prove TLS + host networking work under seatbelt. Any HTTP response
+	// (including 403/429 from api.github.com rate limits on CI runners) means
+	// certificate trust and dial succeeded; only transport errors fail the check.
 	resp, err := http.Get("https://api.github.com/zen")
 	if err != nil {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode < 100 || resp.StatusCode > 599 {
 		t.Fatalf("status = %s", resp.Status)
 	}
 }

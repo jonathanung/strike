@@ -85,15 +85,16 @@ var LeanStrategicSystemPrompt = normPrompt(leanStrategicPrompt)
 // Prompt composition layer model (system string only; conversation history is
 // separate and inspected as message counts):
 //
-//  1. shared            append   builtin baseline
+//  1. shared            append   builtin baseline (skipped in systemPromptMode=defaults
+//                                when a user systemPrompt is active)
 //  2. tools             append   effective registry guidance (name + purpose;
-//                                agent/permission/depth/MCP aware)
-//  3. overlay slot      replace  exactly one of: provider | config systemPrompt
-//                                (build only) | agent persona
+//                                agent/permission/depth/MCP aware) — never dropped
+//  3. overlay/defaults  replace  exactly one of: agent persona | config systemPrompt
+//                                | provider (persona > config > provider)
 //  4. phase slot        replace  phase context, else plan overlay when agent
 //                                is plan; neither when inactive
 //  5. lean code         append   agent-scoped lean guidance when leanCode≠off
-//  6. environment       append   cwd / model / date
+//  6. environment       append   cwd / model / date — never dropped by defaults mode
 //  7. instructions      append   each AGENTS.md/CLAUDE.md block
 //  8. project memory    append   tagged entries (instruction|preference|
 //                                project-convention), capped; untrusted
@@ -104,6 +105,23 @@ var LeanStrategicSystemPrompt = normPrompt(leanStrategicPrompt)
 // Untagged memory, other tags, and issues stay tool/turn-local (memory_read /
 // issue_read). Full ledger history stays on ledger_read. @file attachments
 // remain turn-local. Tool results live in provider message history.
+
+// SystemPromptMode values (mirror config; engine accepts the same strings).
+const (
+	SystemPromptModeOverlay  = "overlay"
+	SystemPromptModeDefaults = "defaults"
+)
+
+// ResolveSystemPromptMode maps config/engine mode to overlay|defaults.
+// Empty and unknown values default to overlay.
+func ResolveSystemPromptMode(s string) string {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case SystemPromptModeDefaults, "default", "replace-defaults", "replace_defaults":
+		return SystemPromptModeDefaults
+	default:
+		return SystemPromptModeOverlay
+	}
+}
 
 // ProviderSystemPrompt returns the provider-specific overlay for a strike
 // provider name and/or model id (opencode-style selection).
@@ -225,12 +243,25 @@ type promptLayer struct {
 // filters. Callers that need the model-facing set should use systemLayers.
 func (e *Engine) composeSystemLayers() []promptLayer {
 	layers := make([]promptLayer, 0, 8)
-	layers = append(layers, promptLayer{
-		Kind:   protocol.PromptLayerShared,
-		Source: "builtin:shared",
-		Mode:   protocol.PromptLayerAppend,
-		Text:   SharedSystemPrompt,
-	})
+
+	userPrompt := strings.TrimSpace(e.opts.SystemPrompt)
+	mode := ResolveSystemPromptMode(e.opts.SystemPromptMode)
+	persona := strings.TrimSpace(e.agent.Prompt)
+	// Persona wins over config systemPrompt; config wins over provider.
+	usePersona := persona != ""
+	useConfig := !usePersona && userPrompt != ""
+	// defaults mode only drops shared when the user config prompt is the active
+	// overlay/defaults content (persona still keeps shared baseline).
+	skipShared := useConfig && mode == SystemPromptModeDefaults
+
+	if !skipShared {
+		layers = append(layers, promptLayer{
+			Kind:   protocol.PromptLayerShared,
+			Source: "builtin:shared",
+			Mode:   protocol.PromptLayerAppend,
+			Text:   SharedSystemPrompt,
+		})
+	}
 	layers = appendToolGuidanceLayer(e, layers)
 
 	// Delegated children get explicit structured completion-handoff guidance.
@@ -260,15 +291,7 @@ func (e *Engine) composeSystemLayers() []promptLayer {
 	}
 
 	switch {
-	case e.agent.Name == "build" && strings.TrimSpace(e.opts.SystemPrompt) != "":
-		// Config systemPrompt replaces the provider overlay for build only.
-		layers = append(layers, promptLayer{
-			Kind:   protocol.PromptLayerConfig,
-			Source: "config:systemPrompt",
-			Mode:   protocol.PromptLayerReplace,
-			Text:   e.opts.SystemPrompt,
-		})
-	case strings.TrimSpace(e.agent.Prompt) != "":
+	case usePersona:
 		// Custom agent (or user-defined build/plan.md) supplies the persona layer.
 		name := strings.TrimSpace(e.agent.Name)
 		if name == "" {
@@ -279,6 +302,20 @@ func (e *Engine) composeSystemLayers() []promptLayer {
 			Source: "agent:" + name,
 			Mode:   protocol.PromptLayerReplace,
 			Text:   e.agent.Prompt,
+		})
+	case useConfig:
+		// Config systemPrompt replaces provider (overlay) or shared+provider (defaults).
+		src := "config:systemPrompt"
+		if mode == SystemPromptModeDefaults {
+			src = "config:systemPrompt+mode:defaults"
+		} else {
+			src = "config:systemPrompt+mode:overlay"
+		}
+		layers = append(layers, promptLayer{
+			Kind:   protocol.PromptLayerConfig,
+			Source: src,
+			Mode:   protocol.PromptLayerReplace,
+			Text:   userPrompt,
 		})
 	default:
 		kind := providerPromptKind(e.provName, e.model)

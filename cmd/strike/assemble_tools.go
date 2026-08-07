@@ -707,19 +707,20 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 
 		sid := sessionID
 		eng := engine.New(engine.Options{
-			SessionID:       sid,
-			Select:          selectProvider,
-			Registry:        registry,
-			WorkDir:         toolDir,
-			ProjectRoot:     projectIdentity.Root,
-			Instructions:    instructions,
-			Memory:          memoryStore,
-			Ledger:          ledgerStore,
-			SystemPrompt:    cfg.SystemPrompt,
-			LeanCode:        cfg.LeanCode,
-			HarnessRegistry: harnessRegistry,
-			Scheduler:       sched,
-			SchedulerPolicy: schedEff,
+			SessionID:        sid,
+			Select:           selectProvider,
+			Registry:         registry,
+			WorkDir:          toolDir,
+			ProjectRoot:      projectIdentity.Root,
+			Instructions:     instructions,
+			Memory:           memoryStore,
+			Ledger:           ledgerStore,
+			SystemPrompt:     cfg.SystemPrompt,
+			SystemPromptMode: cfg.SystemPromptMode,
+			LeanCode:         cfg.LeanCode,
+			HarnessRegistry:  harnessRegistry,
+			Scheduler:        sched,
+			SchedulerPolicy:  schedEff,
 			FileSync: func(absPath, content string, deleted bool) {
 				// Background context: document sync must not be canceled with the tool call.
 				lspMgr.NotifyFile(context.Background(), absPath, content, deleted)
@@ -976,7 +977,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	)
 	if first != nil && first.eng != nil {
 		eng := first.eng
-		permHost.SetLive(func(perm, pat string) permission.Explanation {
+		permHost.SetLive(func(perm, pat string) permission.DetailedExplanation {
 			return eng.ExplainPermission(perm, pat)
 		})
 	}

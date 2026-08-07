@@ -110,7 +110,7 @@ func (webFetchTool) Execute(ctx context.Context, args json.RawMessage, tc *Conte
 	}
 	allow := networkAllowFrom(tc)
 	if err := sandbox.CheckNetworkAllow(host, allow); err != nil {
-		return Result{}, err
+		return Result{}, ErrNetworkDenied(err.Error())
 	}
 
 	finalURL := u.String()
@@ -147,7 +147,7 @@ func (webFetchTool) Execute(ctx context.Context, args json.RawMessage, tc *Conte
 				return err
 			}
 			if err := sandbox.CheckNetworkAllow(rh, allow); err != nil {
-				return err
+				return ErrNetworkDenied(err.Error())
 			}
 			return nil
 		},
@@ -277,7 +277,7 @@ func newWebfetchSafeTransport(allow []string) *http.Transport {
 			return nil, err
 		}
 		if err := sandbox.CheckNetworkDialAllow(host, ipAddr, allow); err != nil {
-			return nil, err
+			return nil, ErrNetworkDenied(err.Error())
 		}
 		// Dial the filtered IP; http.Transport keeps TLS ServerName / Host as the
 		// original request hostname, so certificate verification still works.

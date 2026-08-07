@@ -562,8 +562,8 @@ func (m *settingsModal) pickOptionsFor(field settingsField) []settingsPickOption
 		}
 	case settingsFieldDeferTools:
 		return []settingsPickOption{
-			{value: "off", label: "off", detail: "default — full tools[] schemas"},
-			{value: "on", label: "on", detail: "defer non-core tools until toolsearch"},
+			{value: "on", label: "on", detail: "default — defer non-core tools until toolsearch"},
+			{value: "off", label: "off", detail: "full permitted tools[] schemas"},
 		}
 	case settingsFieldWorktree:
 		return []settingsPickOption{
@@ -950,7 +950,7 @@ func (m *settingsModal) fieldDisplay(field settingsField) (value, detail string)
 		return raw, "new sessions"
 	case settingsFieldDeferTools:
 		if raw == "" {
-			return "off", "new sessions"
+			return "on", "new sessions"
 		}
 		return raw, "new sessions"
 	case settingsFieldWorktree:
