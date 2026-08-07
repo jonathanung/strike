@@ -217,10 +217,11 @@ func TestC3WelcomeTwoColumnGutterUsesResolvedSmallSpacing(t *testing.T) {
 func TestC3WelcomeCapacityAndFocusTokens(t *testing.T) {
 	for _, danger := range []bool{false, true} {
 		m, _ := newAppTestModelWithHistory([]string{"build", "plan", "ship", "test"}, []host.Skill{fakeSkill("review", "", ""), fakeSkill("audit", "", "")}, newFakeHistory("one", "two", "three"))
+		m.firstRun = true // full view renders welcome dashboard
 		m.dangerouslySkipPermissions = danger
 		m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 		plain := ansi.Strip(viewString(m))
-		for _, want := range []string{"get started", "keys", "agents & skills", "recent prompts"} {
+		for _, want := range []string{"first run", "keys", "agents & skills", "recent prompts"} {
 			if !strings.Contains(plain, want) {
 				t.Errorf("danger=%v dropped eligible %q:\n%s", danger, want, plain)
 			}
@@ -234,6 +235,7 @@ func TestC3WelcomeCapacityAndFocusTokens(t *testing.T) {
 	th.SurfaceMuted = fixedColor("#040506")
 	th.OverlayScrim = fixedColor("#070809")
 	m, _ := newAppTestModelWithOptions(Options{Theme: &th})
+	m.firstRun = true // full view renders welcome dashboard
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
 	if !strings.Contains(viewString(m), rgbBGSGR("#010203")) || !strings.Contains(viewString(m), rgbBGSGR("#040506")) {
 		t.Fatal("focused and dim dashboard surfaces are not tokenized")
@@ -282,6 +284,7 @@ func TestC3WelcomeProviderAndPromptLimits(t *testing.T) {
 
 	const dangerousPrompt = "before\x1b[2J\u0085after"
 	hostModel, _ := newAppTestModelWithHistory(nil, nil, newFakeHistory(dangerousPrompt))
+	hostModel.firstRun = true // full view renders welcome dashboard
 	hostModel = updateApp(t, hostModel, tea.WindowSizeMsg{Width: 120, Height: 80})
 	raw := viewString(hostModel)
 	if strings.Contains(raw, "\x1b[2J") {
@@ -356,6 +359,7 @@ func TestC3DangerNoticeHintsAndWorkingRows(t *testing.T) {
 		}
 	}
 	m, _ := newAppTestModel(nil, nil)
+	m.firstRun = true // full view renders welcome dashboard
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.setNotice("separate notice", false)
 	m.applyEvent(protocol.TurnStarted{})
@@ -380,6 +384,7 @@ func TestC3CanonicalLayoutCanvas(t *testing.T) {
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
 			m, _ := newAppTestModelWithHistory([]string{"build", "plan", "ship", "test"}, []host.Skill{fakeSkill("review", "", ""), fakeSkill("audit", "", "")}, newFakeHistory("old prompt", "new prompt"))
+			m.firstRun = true // full view renders welcome dashboard
 			m.dangerouslySkipPermissions = tt.danger
 			m.focus = tt.focus
 			m.agents = []string{"very-long-agent-name-with-control-\x1b"}
@@ -394,7 +399,7 @@ func TestC3CanonicalLayoutCanvas(t *testing.T) {
 				t.Errorf("welcome missing logo/header brand:\n%s", plain)
 			}
 			assertNoWelcomeOuterPanel(t, viewString(m))
-			if tt.focus == focusRight && strings.Contains(plain, "get started") {
+			if tt.focus == focusRight && strings.Contains(plain, "first run") {
 				t.Errorf("right-only layout rendered dashboard:\n%s", plain)
 			}
 			if tt.danger && strings.Count(plain, "DANGER: permissions bypassed") != 1 {

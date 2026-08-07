@@ -80,6 +80,7 @@ func TestC2ViewGeometryAndActivePanes(t *testing.T) {
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
 			m, _ := newAppTestModel(nil, nil)
+			m.firstRun = true // full view renders welcome dashboard
 			m.focus = tt.focus
 			m = updateApp(t, m, tea.WindowSizeMsg{Width: tt.width, Height: tt.height})
 			view := viewString(m)
@@ -108,7 +109,7 @@ func TestC2ViewGeometryAndActivePanes(t *testing.T) {
 				panelRowIdx := -1
 				for i, row := range rows {
 					plain := ansi.Strip(row)
-					if strings.Contains(plain, "get started") && strings.Contains(plain, "context") {
+					if strings.Contains(plain, "first run") && strings.Contains(plain, "context") {
 						panelRowIdx = i
 						break
 					}
@@ -119,7 +120,7 @@ func TestC2ViewGeometryAndActivePanes(t *testing.T) {
 					hasLeft, hasRight := false, false
 					for _, row := range rows {
 						plain := ansi.Strip(row)
-						if strings.Contains(plain, "get started") {
+						if strings.Contains(plain, "first run") {
 							hasLeft = true
 						}
 						if strings.Contains(plain, "context") {

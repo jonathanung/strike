@@ -315,6 +315,24 @@ func (m Model) transcriptView(compact bool, width, height int) string {
 				Dim:     m.focus == focusRight || m.modal != nil,
 			}, body)
 		}
+		// Past-onboarding (spawned root or multi-pane): show a simple
+		// placeholder instead of the full welcome dashboard. The welcome
+		// cards are only relevant during first-run onboarding (#1092).
+		if !m.firstRun {
+			label := shortSessionID(m.sessionID)
+			body := m.th.Resolve().S().Muted.Render("new agent " + label)
+			if compact {
+				return body
+			}
+			return ui.Panel(m.th, ui.PanelOpts{
+				Title:   m.sessionPanelTitle(),
+				Footer:  m.transcriptFooter(),
+				Width:   width,
+				Height:  height,
+				Focused: m.focus == focusLeft && m.modal == nil,
+				Dim:     m.focus == focusRight || m.modal != nil,
+			}, body)
+		}
 		return m.welcomeView(width, height)
 	}
 	body := m.viewport.View()
