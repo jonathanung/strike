@@ -14,6 +14,27 @@ materially affect the shipped product.
 
 ## [Unreleased]
 
+### Added
+
+- **Active-turn steering** — new `steer` op redirects a running root turn at the
+  next safe request boundary (distinct from queued `user.input` and
+  `interrupt`). Durable `turn.steered` events record boundary /
+  cancel_restart / queued_fallback decisions. Wire schema 1.17.0
+  ([#1039](https://github.com/jonathanung/strike/issues/1039)).
+
+- **`strike exec` approval callbacks** — `--approval-control` unix socket/FIFO
+  NDJSON channel for per-request permission and question replies (once/reject;
+  durable always/project requires explicit `durable:true`). Timeout, disconnect,
+  and malformed replies fail closed; request payloads are secret-redacted.
+  Legacy auto-reject without the flag is unchanged
+  ([#1040](https://github.com/jonathanung/strike/issues/1040)).
+
+- **Public session lifecycle contract** — list/get/fork/fork_at/load/rewind_points
+  shared across RPC, HTTP, ACP, and `pkg/sdk` with capability discovery and
+  structured errors (`session_not_found`, `session_busy`, …). Wire schema
+  `protocol.Version` 1.16.0
+  ([#1038](https://github.com/jonathanung/strike/issues/1038)).
+
 ### Changed
 
 - **Progressive disclosure validation** — offline fixture pack compares full vs

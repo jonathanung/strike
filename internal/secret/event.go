@@ -19,6 +19,9 @@ func RedactEvent(ev protocol.Event) protocol.Event {
 	case protocol.UserMessage:
 		e.Text = redact.String(e.Text)
 		return e
+	case protocol.TurnSteered:
+		e.Text = redact.String(e.Text)
+		return e
 	case protocol.TextDelta:
 		e.Text = redact.String(e.Text)
 		return e

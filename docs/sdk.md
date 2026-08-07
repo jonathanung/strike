@@ -105,6 +105,27 @@ events, err := sdk.ReadSession(path)
 err = sdk.WriteSession(path, events) // fixtures / offline tooling
 ```
 
+## Session lifecycle (#1038)
+
+Public types live in `pkg/protocol` (`LifecycleCapabilities`, `SessionSummary`,
+method name constants, structured `LifecycleError` codes). The SDK exposes:
+
+```go
+store := sdk.NewSessionStore(sdk.DefaultSessionsDir())
+caps := store.Capabilities()
+list, _ := store.List(true) // roots only
+sum, _ := store.Get(id)
+points, _ := store.RewindPoints(id)
+forked, _ := store.ForkAt(id, points[len(points)-1].KeepEvents)
+```
+
+For a live `strike rpc` connection, use `sdk.LifecycleClient` with a JSON-RPC
+`Call` transport (method names `session.list`, `session.fork`, …). Engine-level
+last-turn undo remains `client.Rewind(ctx, restoreFiles)` → `protocol.Rewind`.
+
+Offline `SessionStore.Load` returns `unsupported` (no live binding). RPC/ACP
+`session.load` only activates the process-bound session id.
+
 ## Stability
 
 - Wire schema version: `protocol.Version` (see `pkg/protocol` package doc and

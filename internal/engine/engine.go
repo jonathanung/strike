@@ -114,10 +114,15 @@ type Options struct {
 	// (off|read-only|workspace-write). Empty means workspace-write.
 	// Distinct from InitialPermissionMode (when the agent is asked).
 	SandboxMode string
+	// SandboxAllowDegrade permits unsandboxed bash when the OS backend is
+	// unavailable. Default false is fail-closed (#1030).
+	SandboxAllowDegrade bool
 	// NetworkAllow is the config network.allow host/CIDR list for
 	// webfetch/websearch. Empty means unrestricted public hosts. Copied onto
 	// tool.Context and sandbox.Policy.NetworkAllow for /sandbox explain.
 	NetworkAllow []string
+	// BashSecrets maps env names → secret refs for bash process injection.
+	BashSecrets map[string]string
 	// ContentGuard is config contentGuard (+ managed ForcedDeny) for write-time
 	// content scanning on edit/write/apply_patch. Zero enables default posture.
 	ContentGuard tool.ContentGuardSettings
@@ -334,6 +339,13 @@ type Options struct {
 	AppendChildEvent func(childID string, ev protocol.Event) error
 	// CloseChildSession, when set, closes a child session log after completion.
 	CloseChildSession func(childID string) error
+	// LoadChildSession, when set, loads a persisted child log for resume (#1035).
+	// Returns events plus ownership meta (parent/lead). Missing sessions should
+	// return a not-found error the resume path surfaces safely.
+	LoadChildSession func(childID string) (ChildSessionSnapshot, error)
+	// ReopenChildSession, when set, reopens a closed child log for append on
+	// resume. No-op when the session is already open.
+	ReopenChildSession func(childID string) error
 	// InitialMessages seeds model-facing history (durable resume / --continue).
 	// Copied at New; not emitted as transcript events.
 	InitialMessages []provider.Message
@@ -493,6 +505,19 @@ type Engine struct {
 	// Drained FIFO one-at-a-time after each turn ends. Survives Interrupt so
 	// follow-up prompts typed mid-turn are not lost.
 	pendingUserInputs []pendingUserInput
+
+	// activeTurnID is the immutable id of the in-flight root turn (empty when
+	// idle). Used to validate protocol.Steer targeting.
+	activeTurnID string
+	// pendingSteer holds at most one active-turn redirect. Applied at the next
+	// safe Provider.Stream boundary (never mid-tool-call). Replaces prior
+	// pending steer text rather than queueing. Guarded by pendingSteerMu
+	// (Run handleOp vs turn worker).
+	pendingSteerMu sync.Mutex
+	pendingSteer   *pendingSteer
+	// steerQueueFallback is set by the turn worker when a steer must become
+	// the next UserInput; Run drains it into pendingUserInputs.
+	steerQueueFallback *pendingUserInput
 
 	// mailbox holds unread peer/team messages for this session. Delivery is
 	// at tool-round / turn boundaries (injectPendingMailbox /
@@ -1274,6 +1299,9 @@ func (e *Engine) clearTurn() {
 	e.turnDone = nil
 	e.turnCancel = nil
 	e.turnFinishing = nil
+	e.activeTurnID = ""
+	// Drop unapplied steer on turn clear only when already fallback-queued;
+	// otherwise leave pendingSteer for failTurn path to convert to queue.
 }
 
 // cancelAndJoinTurn cancels any active turn, waits for its worker to finish,

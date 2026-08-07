@@ -42,6 +42,14 @@ type pendingUserInput struct {
 	images []protocol.ImageAttachment
 }
 
+// pendingSteer is one active-turn redirect awaiting a safe request boundary.
+type pendingSteer struct {
+	text   string
+	images []protocol.ImageAttachment
+	// targetTurnID captured at accept time for durable TurnSteered events.
+	targetTurnID string
+}
+
 // protocolImagesToProvider decodes base64 session attachments into provider images.
 // Invalid entries are skipped so a corrupt log line does not block restore/send.
 func protocolImagesToProvider(images []protocol.ImageAttachment) []provider.Image {
@@ -72,6 +80,125 @@ func protocolImagesToProvider(images []protocol.ImageAttachment) []provider.Imag
 	return out
 }
 
+// handleSteer accepts an active-turn redirect. Distinct from UserInput (queue)
+// and Interrupt (cancel). Targets the live session/turn when ids are set.
+func (e *Engine) handleSteer(op protocol.Steer) {
+	if strings.TrimSpace(op.Text) == "" && len(op.Images) == 0 {
+		return
+	}
+	if !e.turnActive() {
+		e.emit(protocol.EngineError{
+			Correlation: e.sessionCorr(),
+			Message:     "no active turn to steer; use user.input to start a turn",
+			Code:        protocol.ErrorCodeInvalidArgs,
+		})
+		return
+	}
+	// Session targeting (multi-root frontends).
+	if sid := strings.TrimSpace(op.SessionID); sid != "" && e.opts.SessionID != "" && sid != e.opts.SessionID {
+		e.emit(protocol.EngineError{
+			Correlation: e.sessionCorr(),
+			Message:     fmt.Sprintf("steer session %q does not match live session %q", sid, e.opts.SessionID),
+			Code:        protocol.ErrorCodeInvalidArgs,
+		})
+		return
+	}
+	if tid := strings.TrimSpace(op.TurnID); tid != "" && e.activeTurnID != "" && tid != e.activeTurnID {
+		e.emit(protocol.EngineError{
+			Correlation: e.sessionCorr(),
+			Message:     fmt.Sprintf("steer turn %q does not match active turn %q", tid, e.activeTurnID),
+			Code:        protocol.ErrorCodeInvalidArgs,
+		})
+		return
+	}
+	// Replace prior pending steer (latest redirect wins).
+	e.pendingSteerMu.Lock()
+	e.pendingSteer = &pendingSteer{
+		text:         op.Text,
+		images:       append([]protocol.ImageAttachment(nil), op.Images...),
+		targetTurnID: e.activeTurnID,
+	}
+	e.pendingSteerMu.Unlock()
+}
+
+// takePendingSteer atomically clears and returns any pending steer.
+func (e *Engine) takePendingSteer() *pendingSteer {
+	e.pendingSteerMu.Lock()
+	ps := e.pendingSteer
+	e.pendingSteer = nil
+	e.pendingSteerMu.Unlock()
+	return ps
+}
+
+// hasPendingSteer reports whether a steer is waiting (racy peek for branch
+// decisions; takePendingSteer is the authoritative claim).
+func (e *Engine) hasPendingSteer() bool {
+	e.pendingSteerMu.Lock()
+	defer e.pendingSteerMu.Unlock()
+	return e.pendingSteer != nil
+}
+
+// applyPendingSteer injects pending steer as a user message at a safe history
+// boundary and emits a durable TurnSteered event. No-op when none pending.
+// Never called mid-tool-call.
+func (e *Engine) applyPendingSteer(turnID, mode string) {
+	ps := e.takePendingSteer()
+	if ps == nil {
+		return
+	}
+	corr := e.baseCorr()
+	corr.TurnID = turnID
+	// Durable user.message so resume sees the guidance in the transcript.
+	e.emit(protocol.UserMessage{Correlation: corr, Text: ps.text, Images: ps.images})
+	e.messages = append(e.messages, provider.Message{
+		Role:   provider.RoleUser,
+		Text:   ps.text,
+		Images: protocolImagesToProvider(ps.images),
+	})
+	e.emit(protocol.TurnSteered{
+		Correlation:  corr,
+		Text:         ps.text,
+		Mode:         mode,
+		TargetTurnID: ps.targetTurnID,
+	})
+}
+
+// fallbackSteerToQueue converts an unapplied steer into a next-turn UserInput
+// with a visible TurnSteered(queued_fallback) event. Used on cancel/interrupt
+// when a boundary was never reached.
+//
+// Enqueue is deferred onto Run via steerQueueFallback so pendingUserInputs is
+// only mutated on the Run goroutine (same as handleOp → enqueueUserInput).
+func (e *Engine) fallbackSteerToQueue(turnID string) {
+	ps := e.takePendingSteer()
+	if ps == nil {
+		return
+	}
+	corr := e.baseCorr()
+	corr.TurnID = turnID
+	e.emit(protocol.TurnSteered{
+		Correlation:  corr,
+		Text:         ps.text,
+		Mode:         protocol.SteerModeQueuedFallback,
+		TargetTurnID: ps.targetTurnID,
+	})
+	e.pendingSteerMu.Lock()
+	e.steerQueueFallback = &pendingUserInput{
+		text:   ps.text,
+		images: append([]protocol.ImageAttachment(nil), ps.images...),
+	}
+	e.pendingSteerMu.Unlock()
+}
+
+// takeSteerQueueFallback moves a deferred steer→queue item onto the Run path.
+func (e *Engine) takeSteerQueueFallback() *pendingUserInput {
+	e.pendingSteerMu.Lock()
+	item := e.steerQueueFallback
+	e.steerQueueFallback = nil
+	e.pendingSteerMu.Unlock()
+	return item
+}
+
 // enqueueUserInput buffers input for FIFO start after the active turn ends.
 // Empty/whitespace-only text with no images is ignored. Queue survives Interrupt.
 // When full (maxPendingUserInputs), rejects with EngineError code queue_full
@@ -98,6 +225,10 @@ func (e *Engine) enqueueUserInput(op protocol.UserInput) {
 // user-queued input, otherwise pending child-completion notices, otherwise
 // peer mailbox messages.
 func (e *Engine) drainIdleFollowups(ctx context.Context) {
+	// Promote deferred steer→queue items before draining the user-input FIFO.
+	if item := e.takeSteerQueueFallback(); item != nil {
+		e.enqueueUserInput(protocol.UserInput{Text: item.text, Images: item.images})
+	}
 	if e.startNextPendingUserInput(ctx) {
 		return
 	}
@@ -148,6 +279,7 @@ func (e *Engine) startTurn(ctx context.Context, text string, images []protocol.I
 	e.turnCancel = cancel
 	e.turnDone = done
 	e.turnFinishing = finishing
+	e.activeTurnID = turnID
 	go func() {
 		defer close(done)
 		defer cancel()
@@ -269,15 +401,22 @@ func (e *Engine) runTurn(ctx context.Context, text string, images []protocol.Ima
 	}
 
 	for {
-		// Deliver child.completed and peer mailbox messages into model history
-		// before each Stream (tool-round boundary). Never mid-tool-call.
+		// Deliver child.completed, peer mailbox, and active-turn steer into
+		// model history before each Stream (tool-round boundary). Never
+		// mid-tool-call — preserves assistant/tool-result pairing.
 		e.injectPendingChildNotices()
 		e.injectPendingMailbox()
+		e.applyPendingSteer(turnID, protocol.SteerModeBoundary)
 		e.maybePruneToolResults()
 		e.maybeThresholdCompact(ctx, turnID)
 		e.maybeEmitFitWarning(turnID)
 		outcome, reqCorr, err := e.streamModel(ctx, turnID)
 		if err != nil {
+			// If canceled with a pending steer, fall back to next-turn queue
+			// rather than dropping the guidance (visible TurnSteered event).
+			if e.hasPendingSteer() && (ctx.Err() != nil || errors.Is(err, context.Canceled)) {
+				e.fallbackSteerToQueue(turnID)
+			}
 			e.failTurn(ctx, err, reqCorr, finishing)
 			return
 		}
@@ -295,6 +434,14 @@ func (e *Engine) runTurn(ctx context.Context, text string, images []protocol.Ima
 			return
 		}
 		if len(outcome.calls) == 0 {
+			// Final assistant message with no tools. If a steer arrived during
+			// this stream, continue the turn with cancel_restart semantics
+			// (steer as next user message) instead of ending — avoids losing
+			// guidance and does not duplicate any tool calls.
+			if e.hasPendingSteer() {
+				e.applyPendingSteer(turnID, protocol.SteerModeCancelRestart)
+				continue
+			}
 			e.completeTurn(ctx, finishing, reqCorr, outcome.stopReason)
 			return
 		}
@@ -862,6 +1009,7 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 			SandboxMode:     e.opts.SandboxMode,
 			Sandbox:         e.bashSandboxPolicy(),
 			NetworkAllow:    e.opts.NetworkAllow,
+			BashSecrets:     e.opts.BashSecrets,
 			ContentGuard:    e.opts.ContentGuard,
 			WebSearch:       e.opts.WebSearch,
 			Scheduler:       e.opts.Scheduler,
@@ -990,6 +1138,7 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 		}
 		if e.opts.Depth < e.opts.MaxChildDepth {
 			tc.SpawnTask = e.spawnChild
+			tc.ResumeTask = e.resumeChild
 			tc.TaskStatus = e.childStatus
 			tc.TaskRead = e.childRead
 			tc.TaskMessage = e.childMessage
@@ -1586,5 +1735,6 @@ func (e *Engine) bashSandboxPolicy() sandbox.Policy {
 		p = e.perms.CompileSandbox(mode, e.opts.WorkDir)
 	}
 	p.NetworkAllow = sandbox.CloneNetworkAllow(e.opts.NetworkAllow)
+	p.AllowDegrade = e.opts.SandboxAllowDegrade
 	return p
 }

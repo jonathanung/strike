@@ -392,8 +392,9 @@ func scenarioCancelErrorCode(t *testing.T) string {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	tc := &tool.Context{
-		WorkDir: t.TempDir(),
-		Ask:     func(context.Context, tool.AskRequest) error { return nil },
+		WorkDir:     t.TempDir(),
+		SandboxMode: "off", // CI may lack OS sandbox backend (#1030 fail-closed)
+		Ask:         func(context.Context, tool.AskRequest) error { return nil },
 	}
 	// Print then sleep so cancel is observed after the process starts
 	// (matches internal/tool TestBashCancelPreservesPartialOutput).

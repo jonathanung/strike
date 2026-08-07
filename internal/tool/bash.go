@@ -79,10 +79,16 @@ func (bashTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 	if err := checkBashWorkspaceBoundary(a.Command, tc.WorkDir); err != nil {
 		return Result{}, err
 	}
-	// Application-layer egress preflight: when network.allow is set, deny known
-	// clients (curl/wget/ssh/scp/…) whose destinations fall outside the shared
-	// allowlist (same CheckNetworkAllow as webfetch). Not OS-level filtering.
-	if err := checkBashNetworkAllow(a.Command, networkAllowFrom(tc)); err != nil {
+	// Application-layer egress preflight: when network.allow is set, fail-closed
+	// on known clients outside the list, interpreters, shell networking, and
+	// unknown binaries while OS host networking remains on (#1030).
+	policy := bashSandboxPolicy(tc)
+	allow := networkAllowFrom(tc)
+	if len(allow) == 0 {
+		// Composer ! shell and other callers may only set Sandbox.NetworkAllow.
+		allow = sandbox.CloneNetworkAllow(policy.NetworkAllow)
+	}
+	if err := checkBashNetworkAllowOpts(a.Command, allow, policy.NetworkEnabled()); err != nil {
 		return Result{}, err
 	}
 	if err := tc.Ask(ctx, AskRequest{Permission: "bash", Patterns: []string{a.Command}, Always: always}); err != nil {
@@ -119,18 +125,27 @@ func (bashTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 		}
 	}
 
+	// Minimal documented environment + explicit secret refs (never full host
+	// env — avoids leaking credentials into bash children) (#1030).
+	env, err := bashEnv(tc)
+	if err != nil {
+		return Result{}, ErrInvalidArgs(err.Error())
+	}
+
 	// Fresh process each call: Dir is always the session workdir so shell cd
 	// cannot stick across tool invocations. OS sandbox (bwrap / seatbelt)
 	// confines the shell when the platform backend is available and mode is
 	// not off (config/CLI dial + permission-compiled denials/network).
 	// Sandbox wrap stays inside RunProcess; the pool lease wraps the whole run.
+	// Degrade is fail-closed unless policy.AllowDegrade (sandboxAllowDegrade).
 	proc, err := RunProcess(ctx, ProcessSpec{
 		Argv:      []string{"bash", "-c", a.Command},
 		Dir:       tc.WorkDir,
+		Env:       env,
 		Timeout:   timeout,
 		MaxOutput: bashMaxOutput,
 		Combine:   true,
-		Sandbox:   bashSandboxPolicy(tc),
+		Sandbox:   policy,
 	}, obs)
 	if err != nil {
 		return Result{}, err

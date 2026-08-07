@@ -72,6 +72,33 @@ type pendingAsk struct {
 // tool batches receive synthetic error results so the next model request stays
 // structurally valid and does not re-run completed side effects.
 func Restore(events []protocol.Event) Restored {
+	return restoreEvents(events, restoreRootEvent)
+}
+
+// RestoreSession reduces events belonging to sessionID (by Correlation.SessionID
+// when present). Used to resume a persisted child log where events carry
+// ParentSessionID/Depth and would be skipped by Restore. Empty sessionID
+// accepts all events (same as no filter). Incomplete tool batches still get
+// synthetic error results so completed side effects are not re-run.
+func RestoreSession(events []protocol.Event, sessionID string) Restored {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return restoreEvents(events, func(protocol.Event) bool { return true })
+	}
+	return restoreEvents(events, func(ev protocol.Event) bool {
+		corr, ok := restoreCorrelation(ev)
+		if !ok {
+			return true
+		}
+		// Events without SessionID are treated as belonging to the log.
+		if strings.TrimSpace(corr.SessionID) == "" {
+			return true
+		}
+		return corr.SessionID == sessionID
+	})
+}
+
+func restoreEvents(events []protocol.Event, keep func(protocol.Event) bool) Restored {
 	var r Restored
 	var msgs []provider.Message
 	var cur *reqAccum
@@ -124,7 +151,7 @@ func Restore(events []protocol.Event) Restored {
 	}
 
 	for _, ev := range events {
-		if !restoreRootEvent(ev) {
+		if keep != nil && !keep(ev) {
 			continue
 		}
 		switch e := ev.(type) {

@@ -28,6 +28,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/sandbox"
 	"github.com/jonathanung/strike-cli/internal/scheduler"
+	"github.com/jonathanung/strike-cli/internal/secret"
 )
 
 type Config struct {
@@ -94,9 +95,17 @@ type Config struct {
 	// what the OS isolation layer makes possible; permissionMode controls
 	// when the agent is asked. See docs/config.md (two-dial model).
 	Sandbox string `json:"sandbox,omitempty"`
+	// SandboxAllowDegrade, when true, permits bash to run unsandboxed if the
+	// OS backend is missing or wrap fails. Default false is fail-closed (#1030):
+	// non-off sandbox modes error with sandbox_denied instead of silent degrade.
+	SandboxAllowDegrade bool `json:"sandboxAllowDegrade,omitempty"`
 	// Network holds application-layer egress allowlists (webfetch/websearch host/CIDR).
 	// Distinct from Sandbox Network on/off (bash OS profile). See docs/config.md.
 	Network NetworkConfig `json:"network,omitempty"`
+	// BashSecrets maps env var names injected into bash tool processes to
+	// secret refs (secret://env/NAME). Values are resolved at exec only and
+	// never appear in events or logs. See docs/secrets.md / docs/config.md (#1030).
+	BashSecrets map[string]string `json:"bashSecrets,omitempty"`
 	// ContentGuard is the write-time content scanner for edit/write/apply_patch
 	// (and notebook_edit). Empty mode means default (credential deny, sink ask).
 	// See docs/config.md / docs/secrets.md (#890).
@@ -243,15 +252,17 @@ type AdmissionConfig struct {
 }
 
 // NetworkConfig is the JSON "network" object — shared allowlist shape for
-// application-layer web egress (webfetch, websearch API hosts). Bash OS
-// networking stays all-or-nothing via sandbox.Policy.NetworkEnabled; container
-// net can reuse this shape later.
+// application-layer web egress (webfetch, websearch API hosts) and bash
+// fail-closed preflight. Bash OS networking stays all-or-nothing via
+// sandbox.Policy.NetworkEnabled; container net can reuse this shape later.
 type NetworkConfig struct {
 	// Allow lists hostnames (example.com), single-label wildcards
-	// (*.example.com), IP literals, and CIDRs permitted for webfetch/websearch.
-	// Empty/omitted means unrestricted public hosts (SSRF private blocks
-	// still apply). When a layer sets allow (including []), it replaces the
-	// previous layer's list (project can tighten or clear global).
+	// (*.example.com), IP literals, and CIDRs permitted for webfetch/websearch
+	// and bash known-client preflight. Empty/omitted means unrestricted public
+	// hosts (SSRF private blocks still apply). When non-empty, bash also
+	// fail-closes interpreters, shell networking, and unknown binaries while
+	// OS host networking remains on (#1030). When a layer sets allow
+	// (including []), it replaces the previous layer's list.
 	Allow []string `json:"allow,omitempty"`
 }
 
@@ -989,6 +1000,13 @@ func read(path string) (Config, error) {
 		}
 		c.Network.Allow = norm
 	}
+	if len(c.BashSecrets) > 0 {
+		norm, err := normalizeBashSecrets(c.BashSecrets)
+		if err != nil {
+			return Config{}, fmt.Errorf("%s: %w", path, err)
+		}
+		c.BashSecrets = norm
+	}
 	c.WebSearch = NormalizeWebSearch(c.WebSearch)
 	if err := ValidateWebSearch(c.WebSearch); err != nil {
 		return Config{}, fmt.Errorf("%s: %w", path, err)
@@ -1426,6 +1444,43 @@ func ValidateWebSearch(c WebSearchConfig) error {
 	}
 }
 
+// normalizeBashSecrets validates secret refs and trims keys/values.
+func normalizeBashSecrets(in map[string]string) (map[string]string, error) {
+	if len(in) == 0 {
+		return nil, nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		k = strings.TrimSpace(k)
+		v = strings.TrimSpace(v)
+		if k == "" {
+			return nil, fmt.Errorf("bashSecrets: empty destination name")
+		}
+		if v == "" {
+			return nil, fmt.Errorf("bashSecrets.%s: empty value (want secret://env/NAME)", k)
+		}
+		if _, ok := secret.ParseRef(v); !ok {
+			return nil, fmt.Errorf("bashSecrets.%s: %q is not a secret ref (want secret://env/NAME)", k, v)
+		}
+		out[k] = v
+	}
+	return out, nil
+}
+
+func mergeBashSecrets(base, layer map[string]string) map[string]string {
+	if len(layer) == 0 {
+		return base
+	}
+	out := make(map[string]string, len(base)+len(layer))
+	for k, v := range base {
+		out[k] = v
+	}
+	for k, v := range layer {
+		out[k] = v
+	}
+	return out
+}
+
 func merge(base, layer Config) Config {
 	if layer.Provider != "" {
 		base.Provider = CanonicalProviderID(layer.Provider)
@@ -1485,12 +1540,20 @@ func merge(base, layer Config) Config {
 	if layer.Sandbox != "" {
 		base.Sandbox = layer.Sandbox
 	}
+	// sandboxAllowDegrade: true on any layer sticks (explicit opt-in to degrade).
+	if layer.SandboxAllowDegrade {
+		base.SandboxAllowDegrade = true
+	}
 	// network.allow: non-nil layer slice replaces (including explicit []).
 	// make+copy so len-0 stays non-nil (append to nil yields nil).
 	if layer.Network.Allow != nil {
 		out := make([]string, len(layer.Network.Allow))
 		copy(out, layer.Network.Allow)
 		base.Network.Allow = out
+	}
+	// bashSecrets: layer keys overlay base (project can add/replace entries).
+	if len(layer.BashSecrets) > 0 {
+		base.BashSecrets = mergeBashSecrets(base.BashSecrets, layer.BashSecrets)
 	}
 	base.ContentGuard = mergeContentGuard(base.ContentGuard, layer.ContentGuard)
 	// webSearch: any non-empty field on the layer replaces the whole object
