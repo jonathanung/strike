@@ -16,6 +16,13 @@ materially affect the shipped product.
 
 ### Added
 
+- **Schema-first security/harness telemetry families** — versioned registry at
+  `schemas/telemetry/v1/registry.json` with Go export structs, redaction
+  annotations, golden fixtures, and `make telemetry-check` drift gate in
+  `pkg/telemetry` (tool, permission, sandbox, usage, error, egress, admission).
+  Export/observability only; Op/Event wire unchanged
+  ([#894](https://github.com/jonathanung/strike/issues/894)).
+
 - **Plugin theme contributions** — theme packages load through the plugin
   catalog/lifecycle (same lockfile and integrity path). `/theme` shows plugin
   provenance and collision winners, live-previews on cursor move without

@@ -1,0 +1,7 @@
+{"schemaVersion":"1.0.0","family":"tool","time":"2026-08-06T12:00:00Z","payload":{"callId":"call_1","name":"bash","sessionId":"sess_1","turnId":"turn_1","state":"completed","argsPreview":"git status","errorCode":"","durationMs":12}}
+{"schemaVersion":"1.0.0","family":"permission","time":"2026-08-06T12:00:01Z","payload":{"permission":"bash","patterns":["git push --force"],"action":"deny","layer":"preset","rulePermission":"bash","rulePattern":"git push --force*","ruleAction":"deny","sessionId":"sess_1","turnId":"turn_1"}}
+{"schemaVersion":"1.0.0","family":"sandbox","time":"2026-08-06T12:00:02Z","payload":{"mode":"workspace-write","noNetwork":false,"noWorkspaceWrite":false,"reason":"ok","sessionId":"sess_1"}}
+{"schemaVersion":"1.0.0","family":"usage","time":"2026-08-06T12:00:03Z","payload":{"sessionId":"sess_1","turnId":"turn_1","inputTokens":100,"outputTokens":50,"source":"provider","model":"echo"}}
+{"schemaVersion":"1.0.0","family":"error","time":"2026-08-06T12:00:04Z","payload":{"code":"sandbox_denied","message":"write blocked by sandbox","retryable":false,"component":"sandbox","sessionId":"sess_1"}}
+{"schemaVersion":"1.0.0","family":"egress","time":"2026-08-06T12:00:05Z","payload":{"destination":"example.com","destinationClass":"host","tool":"webfetch","action":"allow","sessionId":"sess_1","turnId":"turn_1"}}
+{"schemaVersion":"1.0.0","family":"admission","time":"2026-08-06T12:00:06Z","payload":{"pool":"default","state":"admitted","waitMs":3,"sessionId":"sess_1","turnId":"turn_1","chainId":"chain_1"}}

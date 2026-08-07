@@ -52,6 +52,7 @@ service/theme token).
 | `pkg/protocol` | Public Ops/Events wire schema; JSONL envelopes (semver `Version`) |
 | `pkg/redact` | Shared credential-shaped string scrubbing (exports, inspect, traces) |
 | `pkg/timeline` | Structured run timeline builder + redacted JSON/JSONL export |
+| `pkg/telemetry` | Versioned security/harness telemetry families + redaction annotations (export schema) |
 | `pkg/diag` | Prompt/config diagnostic bundle builder + redacted JSON export |
 | `pkg/sdk` | Thin Go client over `pkg/protocol` (channel/JSONL client, RunTurn, session replay) |
 | `internal/protocol` | Compatibility re-export of `pkg/protocol` |
