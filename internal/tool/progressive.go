@@ -22,6 +22,7 @@ const (
 	ProgressiveTransition = "transition"
 	ProgressiveCancel     = "cancel"
 	ProgressiveWait       = "wait"
+	ProgressiveResume     = "resume"
 )
 
 // Compat tool names that forward into the progressive task API.
@@ -60,8 +61,12 @@ type progressiveArgs struct {
 	ContextBundle ContextBundle     `json:"context_bundle"`
 	// ForceDelegate overrides soft local-prefer policy (#876).
 	ForceDelegate bool `json:"force_delegate"`
+	// Isolation is shared|worktree for this spawn (#1036). Empty inherits session default.
+	Isolation string `json:"isolation"`
+	// Continue allows resume of a terminal child as an explicit continuation (#1035).
+	Continue bool `json:"continue"`
 
-	// Identity for get/status/read/message/transition/cancel/wait.
+	// Identity for get/status/read/message/transition/cancel/wait/resume.
 	// id accepts delegation id, session id, or name; session_id is an alias.
 	ID        string `json:"id"`
 	SessionID string `json:"session_id"`
@@ -108,15 +113,17 @@ func normalizeProgressiveAction(action, prompt string) (string, error) {
 	switch a {
 	case ProgressiveCreate, ProgressiveGet, ProgressiveList, ProgressiveStatus,
 		ProgressiveRead, ProgressiveMessage, ProgressiveTransition,
-		ProgressiveCancel, ProgressiveWait:
+		ProgressiveCancel, ProgressiveWait, ProgressiveResume:
 		return a, nil
 	// Aliases
 	case "interrupt", "cancel_task":
 		return ProgressiveCancel, nil
 	case "spawn":
 		return ProgressiveCreate, nil
+	case "reopen", "continue":
+		return ProgressiveResume, nil
 	default:
-		return "", fmt.Errorf("action must be create, get, list, status, read, message, transition, cancel, or wait")
+		return "", fmt.Errorf("action must be create, get, list, status, read, message, transition, cancel, wait, or resume")
 	}
 }
 
@@ -224,9 +231,47 @@ func executeProgressive(ctx context.Context, source, permission string, a progre
 		return progressiveCancel(ctx, source, permission, a, tc)
 	case ProgressiveWait:
 		return progressiveWait(ctx, source, permission, a, tc)
+	case ProgressiveResume:
+		return progressiveResume(ctx, source, permission, a, tc)
 	default:
-		return Result{}, fmt.Errorf("action must be create, get, list, status, read, message, transition, cancel, or wait")
+		return Result{}, fmt.Errorf("action must be create, get, list, status, read, message, transition, cancel, wait, or resume")
 	}
+}
+
+func progressiveResume(ctx context.Context, source, permission string, a progressiveArgs, tc *Context) (Result, error) {
+	id := a.resolveID()
+	if id == "" {
+		return Result{}, fmt.Errorf("resume: id is required")
+	}
+	perm := permission
+	if perm == "" {
+		perm = "task"
+	}
+	if err := tc.Ask(ctx, AskRequest{Permission: perm, Patterns: []string{"resume", id, "*"}, Always: []string{"*"}}); err != nil {
+		return Result{}, err
+	}
+	if tc.ResumeTask == nil {
+		return Result{}, fmt.Errorf("task resume is not available")
+	}
+	res, err := tc.ResumeTask(ctx, TaskResumeRequest{
+		ID:       id,
+		Prompt:   a.Prompt,
+		Continue: a.Continue,
+	})
+	if err != nil {
+		return Result{}, err
+	}
+	title := "task resume"
+	if n := strings.TrimSpace(res.Name); n != "" {
+		title = "task resume " + n
+	} else if res.SessionID != "" {
+		title = "task resume " + shortID(res.SessionID)
+	}
+	if res.Lifecycle != "" {
+		title += " " + res.Lifecycle
+	}
+	meta := taskMetadata(res)
+	return attachCompatMeta(Result{Title: title, Output: res.Output, Metadata: meta}, source), nil
 }
 
 func progressiveCreate(ctx context.Context, source, permission string, a progressiveArgs, tc *Context) (Result, error) {
@@ -271,6 +316,7 @@ func progressiveCreate(ctx context.Context, source, permission string, a progres
 		Budget:        a.Budget,
 		ContextBundle: bundle,
 		ForceDelegate: a.ForceDelegate,
+		Isolation:     a.Isolation,
 	})
 	if err != nil {
 		return Result{}, err

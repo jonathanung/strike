@@ -33,8 +33,10 @@ type sessionStore interface {
 // and an event tee, runs the frontend, then on frontend return signals
 // frontend-done and cancels the engine. The tee appends every engine event
 // before optional frontend delivery; after frontend-done it stops forwarding
-// but keeps draining and persisting until engine events close. Store.Close
-// runs only after the engine and tee have both finished.
+// but keeps draining until engine events close. On fatal persistence failure
+// the engine is canceled immediately and events that failed to persist are not
+// forwarded (so a TurnCompleted cannot appear completed without a durable
+// record). Store.Close runs only after the engine and tee have both finished.
 func runSession(
 	parent context.Context,
 	engineRun func(context.Context),
@@ -59,15 +61,34 @@ func runSession(
 		defer closeFrontend()
 
 		forwarding := true
+		persistOK := true
 		for ev := range engineEvents {
-			if err := store.Append(ev); err != nil && appendErr == nil {
-				appendErr = err
+			if persistOK {
+				if err := store.Append(ev); err != nil {
+					if appendErr == nil {
+						appendErr = err
+					}
+					// Fatal durability failure: stop side effects and do not
+					// forward unrecorded events (including terminal ones).
+					if session.IsFatalPersistence(err) || isHardAppendFailure(err) {
+						persistOK = false
+						cancel()
+						// Best-effort audit of the failure path only.
+						if obs, ok := store.(interface{ ObserveAudit(protocol.Event) }); ok {
+							obs.ObserveAudit(ev)
+						}
+						continue
+					}
+					// Non-fatal (e.g. transient write before latch): still do
+					// not forward an unpersisted event.
+					continue
+				}
 			}
 			// Best-effort security audit sink (never fails the session path).
 			if obs, ok := store.(interface{ ObserveAudit(protocol.Event) }); ok {
 				obs.ObserveAudit(ev)
 			}
-			if !forwarding {
+			if !forwarding || !persistOK {
 				continue
 			}
 			select {
@@ -110,6 +131,20 @@ func runSession(
 		out = errors.Join(out, fmt.Errorf("close: %w", closeErr))
 	}
 	return out
+}
+
+// isHardAppendFailure treats legacy plain append errors (pre-PersistenceError)
+// as fatal so fake test stores and older paths still cancel the runtime.
+func isHardAppendFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	if session.IsFatalPersistence(err) {
+		return true
+	}
+	// Any append error from the live store path is treated as hard once the
+	// manager has already attempted recover-and-retry inside Append.
+	return true
 }
 
 // worktreeNotGitNotice is shown when session.worktree / --worktree wants a
@@ -404,13 +439,21 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 // runExec is the headless one-shot composition root: same engine and session
 // log as the TUI, but streams assistant text (or JSON envelopes) to stdout and
 // exits after one turn.
-func runExec(opts cliOptions, prompt string, format execOutputFormat, stdout, stderr io.Writer) error {
-	return runExecContext(context.Background(), opts, prompt, format, stdout, stderr)
+func runExec(opts cliOptions, prompt string, format execOutputFormat, stdout, stderr io.Writer, extra ...headlessExtra) error {
+	var ex headlessExtra
+	if len(extra) > 0 {
+		ex = extra[0]
+	}
+	return runExecContext(context.Background(), opts, prompt, format, stdout, stderr, ex)
 }
 
 // runExecContext is runExec with a cancelable parent context (MCP host disconnect,
 // server shutdown). Cancel interrupts the in-flight turn.
-func runExecContext(ctx context.Context, opts cliOptions, prompt string, format execOutputFormat, stdout, stderr io.Writer) (runErr error) {
+func runExecContext(ctx context.Context, opts cliOptions, prompt string, format execOutputFormat, stdout, stderr io.Writer, extra ...headlessExtra) (runErr error) {
+	var ex headlessExtra
+	if len(extra) > 0 {
+		ex = extra[0]
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -488,7 +531,12 @@ func runExecContext(ctx context.Context, opts cliOptions, prompt string, format 
 	writeDangerousPermissionsWarning(stderr, opts.dangerouslySkipPermissions)
 
 	storeOwned = true
-	hopts := headlessOpts{Format: format, SessionID: a.sessionID}
+	hopts := headlessOpts{
+		Format:          format,
+		SessionID:       a.sessionID,
+		ApprovalControl: ex.ApprovalControl,
+		ApprovalTimeout: ex.ApprovalTimeout,
+	}
 	return runSession(ctx, a.eng.Run, a.eng.Events(), bindAudit(a.store, a.cfg), func(events <-chan protocol.Event) error {
 		return runHeadlessFrontend(ctx, a.eng.Ops(), events, prompt, stdout, stderr, hopts)
 	})

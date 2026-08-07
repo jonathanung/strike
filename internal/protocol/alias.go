@@ -128,6 +128,7 @@ type (
 	PermissionReply         = pub.PermissionReply
 	QuestionReply           = pub.QuestionReply
 	Interrupt               = pub.Interrupt
+	Steer                   = pub.Steer
 	SelectModel             = pub.SelectModel
 	SelectAgent             = pub.SelectAgent
 	SetEffort               = pub.SetEffort
@@ -163,6 +164,7 @@ type (
 	AdmissionDecided        = pub.AdmissionDecided
 	QuestionAsked           = pub.QuestionAsked
 	QuestionResolved        = pub.QuestionResolved
+	TurnSteered             = pub.TurnSteered
 	TurnCompleted           = pub.TurnCompleted
 	TurnFileChange          = pub.TurnFileChange
 	VerificationStarted     = pub.VerificationStarted
@@ -383,6 +385,10 @@ const (
 	LifecycleMethodLoad         = pub.LifecycleMethodLoad
 	LifecycleMethodRewindPoints = pub.LifecycleMethodRewindPoints
 	LifecycleMethodReplay       = pub.LifecycleMethodReplay
+
+	SteerModeBoundary       = pub.SteerModeBoundary
+	SteerModeCancelRestart  = pub.SteerModeCancelRestart
+	SteerModeQueuedFallback = pub.SteerModeQueuedFallback
 )
 
 // Session lifecycle contract types (#1038).

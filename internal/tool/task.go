@@ -38,6 +38,7 @@ tool metadata and child.started.
 
 Actions (optional action=; omit + prompt ⇒ create):
   create     — spawn (default). Nested depth bounded by MaxChildDepth.
+  resume     — reopen a persisted owned child as the same delegated task
   get        — lifecycle snapshot by id (delegation id, session id, or name)
   list       — all delegations on this session team
   status     — live/terminal pulse + handoff/budget/lifecycle fields
@@ -108,12 +109,13 @@ func (taskTool) Schema() json.RawMessage {
 		"properties": {
 			"action": {
 				"type": "string",
-				"enum": ["create", "get", "list", "status", "read", "message", "transition", "cancel", "wait"],
+				"enum": ["create", "resume", "get", "list", "status", "read", "message", "transition", "cancel", "wait"],
 				"description": "Operation; omit with prompt for create (progressive default)"
 			},
-			"prompt": {"type": "string", "description": "Subtask instructions (create; required when action omitted)"},
-			"id": {"type": "string", "description": "Delegation id, session id, or name (get/status/read/message/transition/cancel/wait)"},
+			"prompt": {"type": "string", "description": "Subtask instructions (create; required when action omitted). resume: optional continuation message"},
+			"id": {"type": "string", "description": "Delegation id, session id, or name (get/status/read/message/transition/cancel/wait/resume)"},
 			"session_id": {"type": "string", "description": "Alias for id (compat with task_* tools)"},
+			"continue": {"type": "boolean", "description": "resume: allow explicit continuation of a terminal completed/failed/canceled child"},
 			"name": {"type": "string", "description": "Optional stable teammate alias unique on this session team (e.g. explorer)"},
 			"agent": {"type": "string", "description": "Optional agent persona pin: explore, general, commit, reviewer, tester, debugger, build, plan, or user-defined. Wins over auto-route"},
 			"model": {"type": "string", "description": "Optional model id pin (bare id or provider/model). Wins over auto-route; omit to inherit"},
@@ -178,6 +180,11 @@ func (taskTool) Schema() json.RawMessage {
 			"force_delegate": {
 				"type": "boolean",
 				"description": "Override soft local-prefer policy and spawn anyway. Hard ceilings (depth, live children, budget) still apply"
+			},
+			"isolation": {
+				"type": "string",
+				"enum": ["shared", "worktree"],
+				"description": "Filesystem mode: shared (parent workdir, default) or worktree (isolated git worktree; returns inspectable patch on complete)"
 			},
 			"context_bundle": {
 				"type": "object",

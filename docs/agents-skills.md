@@ -444,3 +444,12 @@ Example custom file:
   ]
 }
 ```
+
+### Adjacent skill resources
+
+Disk skills may reference adjacent files under their **source root** (the
+directory containing `SKILL.md`, or the parent of a flat `name.md`). The
+`skill` tool accepts optional `resource` (relative path only). Paths are
+traversal-protected (`..` and absolute paths rejected). Catalog changes can be
+reloaded via `config.SkillCatalog.Reload` without restarting the process.
+

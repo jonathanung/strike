@@ -3,6 +3,8 @@ package tool
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -140,5 +142,38 @@ func TestSkillPermissionDenied(t *testing.T) {
 	_, err := sk.Execute(context.Background(), mustJSON(t, map[string]any{"name": "x"}), tc)
 	if err == nil {
 		t.Fatal("expected deny")
+	}
+}
+
+func TestSkillAdjacentResource(t *testing.T) {
+	dir := t.TempDir()
+	skillDir := filepath.Join(dir, "demo")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	skillPath := filepath.Join(skillDir, "SKILL.md")
+	if err := os.WriteFile(skillPath, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "extra.md"), []byte("adjacent-body"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sk := NewSkill([]SkillInfo{{
+		Name: "demo", Template: "main", Path: skillPath,
+	}})
+	res, err := sk.Execute(context.Background(), mustJSON(t, map[string]any{
+		"name": "demo", "resource": "extra.md",
+	}), &Context{Ask: func(context.Context, AskRequest) error { return nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Output, "adjacent-body") {
+		t.Fatalf("%q", res.Output)
+	}
+	_, err = sk.Execute(context.Background(), mustJSON(t, map[string]any{
+		"name": "demo", "resource": "../nope",
+	}), &Context{Ask: func(context.Context, AskRequest) error { return nil }})
+	if err == nil {
+		t.Fatal("want traversal error")
 	}
 }

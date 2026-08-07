@@ -23,8 +23,15 @@ audit sink (#893), and eval tooling. This is **not** the Op/Event wire schema
 | `egress` | Outbound network/tool egress decisions |
 | `admission` | Scheduler admission pool wait/admit/cancel |
 
-No external OpenTelemetry collector is required in v1. Optional OTel exporters
-may map these families later.
+No external OpenTelemetry collector is required in v1.
+
+### Optional OTLP export
+
+Set `STRIKE_OTLP_ENDPOINT` (e.g. `http://localhost:4318/v1/traces`) to POST
+redacted envelopes as a minimal OTLP/HTTP JSON `resourceSpans` payload.
+Optional `STRIKE_OTLP_HEADERS` is a comma-separated `k=v` list. Export is
+best-effort and never required for normal operation (`pkg/telemetry.OTLP`).
+
 
 ## Redaction annotations
 

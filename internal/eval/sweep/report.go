@@ -40,6 +40,11 @@ type PointMetrics struct {
 	FirstTurnSchemaTokens int `json:"firstTurnSchemaTokens,omitempty"`
 	ToolSearchCalls       int `json:"toolSearchCalls,omitempty"`
 	InvalidToolCalls      int `json:"invalidToolCalls,omitempty"`
+	// Optional repeated-trial metrics (#1043); zero when unset.
+	PassAtK     float64 `json:"passAtK,omitempty"`
+	PassHatK    float64 `json:"passHatK,omitempty"`
+	Flakiness   float64 `json:"flakiness,omitempty"`
+	ConfidenceN int     `json:"confidenceN,omitempty"`
 }
 
 // PointResult is one matrix point after a subset run.

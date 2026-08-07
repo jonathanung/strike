@@ -475,6 +475,39 @@ type SessionConfig struct {
 	// Applied per turn at start — resume does not inherit an expired deadline.
 	// Child engines do not inherit this dial (they use session.agentBudget).
 	TurnTimeoutS int `json:"turnTimeoutS,omitempty"`
+	// ChildIsolation is the default filesystem mode for task children (#1036):
+	// off|shared (default, same workdir as parent) or worktree (per-child git
+	// worktree under .strike/worktrees/). Spawn-time task.isolation overlays.
+	ChildIsolation string `json:"childIsolation,omitempty"`
+}
+
+// Child isolation mode values (config session.childIsolation / task.isolation).
+const (
+	ChildIsolationOff      = "off"
+	ChildIsolationShared   = "shared"
+	ChildIsolationWorktree = "worktree"
+)
+
+// NormalizeChildIsolation maps config/task strings to off|shared|worktree.
+// Empty and unknown values become off (shared workdir).
+func NormalizeChildIsolation(s string) string {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case ChildIsolationWorktree:
+		return ChildIsolationWorktree
+	case ChildIsolationShared, ChildIsolationOff:
+		return ChildIsolationShared
+	default:
+		return ChildIsolationOff
+	}
+}
+
+// WantChildWorktree reports whether a child spawn should get an isolated worktree.
+func WantChildWorktree(sessionDefault, spawnOverride string) bool {
+	mode := NormalizeChildIsolation(spawnOverride)
+	if strings.TrimSpace(spawnOverride) == "" {
+		mode = NormalizeChildIsolation(sessionDefault)
+	}
+	return mode == ChildIsolationWorktree
 }
 
 // DefaultTurnTimeoutS is the product default root-turn wall-clock deadline
@@ -1653,6 +1686,9 @@ func merge(base, layer Config) Config {
 	// layer leaves base unchanged so project can disable after global default.
 	if layer.Session.TurnTimeoutS != 0 {
 		base.Session.TurnTimeoutS = layer.Session.TurnTimeoutS
+	}
+	if layer.Session.ChildIsolation != "" {
+		base.Session.ChildIsolation = layer.Session.ChildIsolation
 	}
 	base.Permissions = append(base.Permissions, layer.Permissions...)
 	base.Hooks = append(base.Hooks, layer.Hooks...)

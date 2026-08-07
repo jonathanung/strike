@@ -862,9 +862,28 @@ restored. Child agents use `session.agentBudget` wall-clock limits, not this dia
 Inspect the effective value via the diagnostic bundle (`config.turnTimeoutS`;
 negative means off).
 
+### Child filesystem isolation (`session.childIsolation`)
+
+Parallel `task` children default to the parent's tool CWD (shared mode). Optional
+per-child git worktrees reduce uncoordinated edits:
+
+| `session.childIsolation` | Behavior |
+|---|---|
+| `off` / `shared` / omitted (default) | children inherit the parent workdir |
+| `worktree` | each child gets `<repo>/.strike/worktrees/<child-id>/` at HEAD |
+
+Spawn overlay: `task({…, isolation:"worktree"|"shared"})`. When isolation is
+`worktree`, the child does **not** silently mutate the parent workspace; on
+completion the engine exports a unified `handoff.patch` (plus `baseRevision` /
+`worktreePath`) and submits it to `patch_collab` for lead preview/apply with
+conflict detection. Cancellation/cleanup removes only the strike-managed child
+worktree (never the primary checkout or unrelated worktrees). Soft-fails to
+shared mode outside a git repository.
+
 ### Parallel children and path overlap
 
-Within one session team, `task` children share the lead's tool CWD. Write tools
+Within one session team, `task` children share the lead's tool CWD (unless
+`isolation=worktree`). Write tools
 (`edit`, `write`, `apply_patch`, `notebook_edit`) register path touches on a
 shared ownership map. When two **active** agents claim the same path:
 

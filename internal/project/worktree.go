@@ -276,3 +276,46 @@ func validateSessionSegment(id string) error {
 	}
 	return nil
 }
+
+// DiffUnified returns a unified diff of workDir against HEAD, including
+// untracked files. Used to export an inspectable child patch when filesystem
+// isolation is on. Empty string means no changes. The worktree index may be
+// briefly staged then reset — safe for strike-managed child worktrees only.
+func DiffUnified(ctx context.Context, workDir string) (string, error) {
+	workDir = strings.TrimSpace(workDir)
+	if workDir == "" {
+		return "", fmt.Errorf("worktree: workDir is empty")
+	}
+	gitCtx, cancel := context.WithTimeout(ctx, worktreeTimeout)
+	defer cancel()
+	// Stage everything (including untracked) so one diff covers the full delta.
+	if out, err := exec.CommandContext(gitCtx, "git", "-C", workDir, "add", "-A").CombinedOutput(); err != nil {
+		return "", fmt.Errorf("worktree: git add: %w\n%s", err, strings.TrimSpace(string(out)))
+	}
+	cmd := exec.CommandContext(gitCtx, "git", "-C", workDir, "diff", "--cached", "HEAD")
+	out, err := cmd.CombinedOutput()
+	// Best-effort unstage so the worktree is not left dirty-staged for inspect.
+	_ = exec.CommandContext(gitCtx, "git", "-C", workDir, "reset", "-q", "HEAD").Run()
+	if err != nil {
+		// No HEAD (empty repo): still return staged diff against empty tree.
+		cmd2 := exec.CommandContext(gitCtx, "git", "-C", workDir, "diff", "--cached")
+		out2, err2 := cmd2.CombinedOutput()
+		_ = exec.CommandContext(gitCtx, "git", "-C", workDir, "reset", "-q").Run()
+		if err2 != nil {
+			return "", fmt.Errorf("worktree: git diff: %w\n%s", err, strings.TrimSpace(string(out)))
+		}
+		return string(out2), nil
+	}
+	return string(out), nil
+}
+
+// HeadRev returns the short HEAD commit of cwd's repo, or empty when unavailable.
+func HeadRev(ctx context.Context, cwd string) string {
+	gitCtx, cancel := context.WithTimeout(ctx, gitTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(gitCtx, "git", "-C", cwd, "rev-parse", "--short", "HEAD").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}

@@ -24,6 +24,9 @@ type Point string
 const (
 	// SessionSync replaces os.File.Sync during session header/append durability.
 	SessionSync Point = "session.sync"
+	// SessionWrite injects a failure before session log Write (disk-full /
+	// short-write simulation). When armed, Append returns before any bytes.
+	SessionWrite Point = "session.write"
 	// ProcessAfterStart fires after a subprocess has started and before Wait,
 	// simulating a mid-run kill of the process tree.
 	ProcessAfterStart Point = "process.after_start"
@@ -154,6 +157,7 @@ func Reset() {
 func Catalog() []Point {
 	return []Point{
 		SessionSync,
+		SessionWrite,
 		ProcessAfterStart,
 		ProviderStreamDrop,
 		PermissionFlipMidTurn,

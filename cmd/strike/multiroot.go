@@ -312,8 +312,19 @@ func (h *multiRootHub) startSlotLocked(slot *rootSlot) {
 		defer h.wg.Done()
 		defer close(done)
 		forwarding := true
+		persistOK := true
 		for ev := range events {
-			_ = bound.Append(ev)
+			if persistOK {
+				if err := bound.Append(ev); err != nil {
+					// Stop side effects; do not forward unrecorded events.
+					persistOK = false
+					forwarding = false
+					if slotCancel != nil {
+						slotCancel()
+					}
+					continue
+				}
+			}
 			if !forwarding {
 				continue
 			}

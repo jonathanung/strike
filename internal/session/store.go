@@ -47,9 +47,62 @@ const headerType = "session.header"
 type Store struct {
 	mu sync.Mutex
 	f  *os.File
-	// appendDisabled is set after a short/partial write so callers cannot
-	// compound corruption; the process should reopen or recover.
+	// appendDisabled is set after a short/partial write or fsync failure so
+	// callers cannot compound corruption; Recover (or reopen) is required.
 	appendDisabled bool
+	// recoverTo is the known-good file size before a failed write/fsync.
+	// Recover truncates back to this boundary before reopening. -1 means
+	// "compute durable prefix via Replay" (e.g. after external damage).
+	recoverTo int64
+}
+
+// PersistenceError is returned when session durability fails and the runtime
+// must not continue side effects as if the log were healthy.
+type PersistenceError struct {
+	Op      string // append | recover | sync
+	Path    string
+	Message string
+	Err     error
+	// Fatal is true when recovery failed or the store is latched closed;
+	// active turns must cancel and must not treat the transcript as complete.
+	Fatal bool
+}
+
+func (e *PersistenceError) Error() string {
+	if e == nil {
+		return "session: persistence error"
+	}
+	msg := e.Message
+	if msg == "" && e.Err != nil {
+		msg = e.Err.Error()
+	}
+	if msg == "" {
+		msg = "persistence failure"
+	}
+	op := e.Op
+	if op == "" {
+		op = "append"
+	}
+	if e.Path != "" {
+		return fmt.Sprintf("session %s %q: %s", op, e.Path, msg)
+	}
+	return fmt.Sprintf("session %s: %s", op, msg)
+}
+
+func (e *PersistenceError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+// IsFatalPersistence reports whether err requires stopping runtime side effects.
+func IsFatalPersistence(err error) bool {
+	var pe *PersistenceError
+	if errors.As(err, &pe) {
+		return pe != nil && pe.Fatal
+	}
+	return false
 }
 
 // logHeader is the optional first line of a session JSONL log.
@@ -120,7 +173,7 @@ func Open(dir, id string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Store{f: f}
+	s := &Store{f: f, recoverTo: -1}
 	if needHeader {
 		if err := s.writeHeaderLocked(); err != nil {
 			_ = f.Close()
@@ -162,7 +215,7 @@ func (s *Store) fsyncLocked() error {
 func (s *Store) Path() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.f.Name()
+	return s.pathLocked()
 }
 
 func (s *Store) Append(ev protocol.Event) error {
@@ -181,27 +234,196 @@ func (s *Store) Append(ev protocol.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.appendDisabled {
-		return errors.New("session: cannot append after a partial write; reopen or recover the log")
+		return &PersistenceError{
+			Op:      "append",
+			Path:    s.pathLocked(),
+			Message: "cannot append after a partial write or fsync failure; recover the log",
+			Fatal:   true,
+		}
 	}
 	if s.f == nil {
-		return errors.New("session: store is closed")
+		return &PersistenceError{
+			Op:      "append",
+			Message: "store is closed",
+			Fatal:   true,
+		}
+	}
+	startSize, err := s.sizeLocked()
+	if err != nil {
+		return &PersistenceError{Op: "append", Path: s.pathLocked(), Err: err, Fatal: true}
+	}
+	if err := fault.Check(fault.SessionWrite); err != nil {
+		// Injected write failure before any bytes — retryable without latch.
+		return &PersistenceError{Op: "append", Path: s.pathLocked(), Err: err, Fatal: false}
 	}
 	n, err := s.f.Write(line)
 	if err != nil {
 		if n != 0 {
-			s.appendDisabled = true
+			s.latchLocked(startSize)
 		}
-		return fmt.Errorf("session append: %w", err)
+		return &PersistenceError{
+			Op:      "append",
+			Path:    s.pathLocked(),
+			Message: "write failed",
+			Err:     err,
+			Fatal:   n != 0,
+		}
 	}
 	if n != len(line) {
-		s.appendDisabled = true
-		return fmt.Errorf("session append: %w", io.ErrShortWrite)
+		s.latchLocked(startSize)
+		return &PersistenceError{
+			Op:      "append",
+			Path:    s.pathLocked(),
+			Message: "short write",
+			Err:     io.ErrShortWrite,
+			Fatal:   true,
+		}
 	}
 	// fsync so a crash cannot leave a torn last record on stable storage.
+	// On failure, roll back to startSize — the line is not confirmed durable.
 	if err := s.fsyncLocked(); err != nil {
-		return fmt.Errorf("session sync: %w", err)
+		s.latchLocked(startSize)
+		return &PersistenceError{
+			Op:      "sync",
+			Path:    s.pathLocked(),
+			Message: "fsync failed",
+			Err:     err,
+			Fatal:   true,
+		}
 	}
 	return nil
+}
+
+func (s *Store) pathLocked() string {
+	if s.f == nil {
+		return ""
+	}
+	return s.f.Name()
+}
+
+func (s *Store) sizeLocked() (int64, error) {
+	st, err := s.f.Stat()
+	if err != nil {
+		return 0, err
+	}
+	return st.Size(), nil
+}
+
+func (s *Store) latchLocked(recoverTo int64) {
+	s.appendDisabled = true
+	s.recoverTo = recoverTo
+}
+
+// NeedsRecover reports whether Append is latched after a durability failure.
+func (s *Store) NeedsRecover() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.appendDisabled
+}
+
+// Recover reopens the log after a partial write or fsync failure.
+// It truncates back to the known-good size (or the validated durable prefix),
+// verifies the prefix via Replay, and clears the append latch. It never
+// appends new records. Returns a fatal PersistenceError when recovery is
+// impossible (interior corruption, truncate/open failure).
+func (s *Store) Recover() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.recoverLocked()
+}
+
+func (s *Store) recoverLocked() error {
+	path := s.pathLocked()
+	if path == "" && s.f == nil {
+		return &PersistenceError{Op: "recover", Message: "store is closed", Fatal: true}
+	}
+	if s.f != nil {
+		path = s.f.Name()
+		_ = s.f.Close()
+		s.f = nil
+	}
+	target := s.recoverTo
+	if target < 0 {
+		end, err := durablePrefixEnd(path)
+		if err != nil {
+			s.appendDisabled = true
+			return &PersistenceError{Op: "recover", Path: path, Message: "unrecoverable log", Err: err, Fatal: true}
+		}
+		target = end
+	}
+	if err := os.Truncate(path, target); err != nil {
+		s.appendDisabled = true
+		return &PersistenceError{Op: "recover", Path: path, Message: "truncate failed", Err: err, Fatal: true}
+	}
+	// Validate durable prefix before accepting new appends.
+	if _, err := Replay(path); err != nil {
+		s.appendDisabled = true
+		return &PersistenceError{Op: "recover", Path: path, Message: "prefix validation failed", Err: err, Fatal: true}
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		s.appendDisabled = true
+		return &PersistenceError{Op: "recover", Path: path, Message: "reopen failed", Err: err, Fatal: true}
+	}
+	s.f = f
+	s.appendDisabled = false
+	s.recoverTo = -1
+	return nil
+}
+
+// durablePrefixEnd returns the byte size of the longest valid complete-line
+// prefix of path. Trailing partial lines are excluded. Interior corruption
+// returns an error (unrecoverable without external repair).
+func durablePrefixEnd(path string) (int64, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return 0, err
+	}
+	if len(raw) == 0 {
+		return 0, nil
+	}
+	// Walk complete newline-terminated lines; stop before a trailing partial.
+	var end int
+	for end < len(raw) {
+		nl := indexByte(raw[end:], '\n')
+		if nl < 0 {
+			// Trailing partial — durable prefix ends at end.
+			break
+		}
+		lineEnd := end + nl + 1
+		chunk := raw[:lineEnd]
+		// Validate by decoding what we have so far (endsWithNL=true).
+		if _, err := decodeLogLines(path, splitCompleteLines(chunk), true); err != nil {
+			return 0, err
+		}
+		end = lineEnd
+	}
+	return int64(end), nil
+}
+
+func indexByte(b []byte, c byte) int {
+	for i, v := range b {
+		if v == c {
+			return i
+		}
+	}
+	return -1
+}
+
+func splitCompleteLines(raw []byte) [][]byte {
+	var lines [][]byte
+	start := 0
+	for i := 0; i < len(raw); i++ {
+		if raw[i] != '\n' {
+			continue
+		}
+		line := bytesTrimSpace(raw[start:i])
+		if len(line) > 0 {
+			lines = append(lines, append([]byte(nil), line...))
+		}
+		start = i + 1
+	}
+	return lines
 }
 
 // Sync flushes the underlying JSONL file so concurrent readers see all
@@ -212,7 +434,12 @@ func (s *Store) Sync() error {
 	if s.f == nil {
 		return nil
 	}
-	return s.fsyncLocked()
+	if err := s.fsyncLocked(); err != nil {
+		// Do not latch on Sync-only failure of already-appended durable lines;
+		// Append already fsynced each record. Surface the error to the caller.
+		return &PersistenceError{Op: "sync", Path: s.pathLocked(), Err: err, Fatal: false}
+	}
+	return nil
 }
 
 func (s *Store) Close() error {
