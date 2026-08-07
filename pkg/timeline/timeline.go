@@ -26,7 +26,7 @@ import (
 )
 
 // SchemaVersion is the versioned export document schema (not the Op/Event wire).
-const SchemaVersion = "1.0.0"
+const SchemaVersion = "1.1.0"
 
 // Entry kinds on the timeline.
 const (
@@ -101,6 +101,8 @@ type Entry struct {
 	OutputRef string `json:"outputRef,omitempty"`
 	// Truncated is true when a payload was clipped (with or without spill).
 	Truncated bool `json:"truncated,omitempty"`
+	// ChainID links permission decisions that matched a tool-chain rule (#891).
+	ChainID string `json:"chainId,omitempty"`
 }
 
 // Summary rolls up a trace for quick inspection.
@@ -400,6 +402,9 @@ func (b *Builder) Observe(ev protocol.Event, t time.Time) {
 		if ent.ArgsPreview == "" && len(e.Patterns) > 0 {
 			ent.ArgsPreview = clip(redact.String(strings.Join(e.Patterns, ", ")), b.opts.ArgsPreviewMax)
 		}
+		if e.ChainID != "" {
+			ent.ChainID = e.ChainID
+		}
 		// Build redacted decision summary for export.
 		summary := e.Action
 		if e.Decision != "" {
@@ -410,6 +415,16 @@ func (b *Builder) Observe(ev protocol.Event, t time.Time) {
 		}
 		if e.RulePermission != "" {
 			summary += " rule=" + e.RulePermission + " " + e.RulePattern + "→" + e.RuleAction
+		}
+		if e.ChainID != "" {
+			summary += " chain=" + e.ChainID
+			if e.ChainRule != "" {
+				summary += ":" + e.ChainRule
+			}
+		}
+		if e.ChainSummary != "" {
+			// Summary is already content-free (tool names/classes only).
+			summary += " " + e.ChainSummary
 		}
 		ent.OutputPreview = clip(redact.String(summary), b.opts.OutputPreviewMax)
 		switch e.Action {

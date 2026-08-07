@@ -22,10 +22,16 @@ materially affect the shipped product.
   `admission.preset` (`permissive` \| `default` \| `strict`), home-anchored
   `allowPaths` only (bare relative markers rejected — spoof-via-subdirectory
   regression tested), and explicit fail-closed on `strict`. Emits
-  `admission.decided` (protocol `1.13.0`) for timeline/audit. Shared
+  `admission.decided` (protocol `1.14.0`) for timeline/audit. Shared
   `internal/security.Finding` types for future write-time content guards.
   Docs: [docs/admission.md](docs/admission.md)
   ([#889](https://github.com/jonathanung/strike/issues/889)).
+- **Tool-chain correlation** — content-free multi-step permission correlation
+  within a turn: sensitive read → network/bash, write executable → bash
+  execute, and identical denial retry storms. Matches **ask** or **deny** with
+  explainable chain summaries (tool names/classes only); `chainId` on
+  `permission.decided` and timeline entries. State clears on turn end/interrupt
+  and caps pending nodes ([#891](https://github.com/jonathanung/strike/issues/891)).
 - **Container runtime foundation (E12.0)** — `internal/container` shells out to
   `docker`/`podman` via an injectable `ExecFunc` (no Moby SDK). Low-level
   `Runtime` (pull/create/start/stop/rm/exec/cp), deterministic

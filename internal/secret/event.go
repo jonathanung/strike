@@ -56,6 +56,10 @@ func RedactEvent(ev protocol.Event) protocol.Event {
 		e.Layer = redact.String(e.Layer)
 		e.RulePermission = redact.String(e.RulePermission)
 		e.RuleAction = redact.String(e.RuleAction)
+		// ChainSummary is authored content-free (tool names/classes); still scrub.
+		e.ChainSummary = redact.String(e.ChainSummary)
+		e.ChainRule = redact.String(e.ChainRule)
+		e.ChainID = redact.String(e.ChainID)
 		return e
 	case protocol.AgentMessage:
 		e.Body = redact.String(e.Body)
