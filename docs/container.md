@@ -51,8 +51,19 @@ Layered JSON `container` block and optional `container.jsonc` (defaults →
 global → project → managed). See [config.md](config.md#container-native-containerization-e12).
 `config.ContainerConfig.ToRuntime` feeds `Manager`.
 
-Still later: Dockerfile eject (E12.3), `--launch-inside-container` UX (E12.4),
-attach prompts (E12.6).
+### Eject (E12.3)
+
+```sh
+strike container eject [--out Dockerfile.devcontainer] [--force] [--dockerfile path]
+strike container drift [--dockerfile path]
+```
+
+Materializes `Dockerfile.devcontainer` (commit by default) with a
+`# strike-config-hash:` header. Drift refuses overwrite unless `--force`.
+`--dockerfile` uses a hand-edited file as the body while still stamping the hash.
+`Manager` prefers the ejected file when present.
+
+Still later: `--launch-inside-container` UX (E12.4), attach prompts (E12.6).
 
 ## Binary selection
 

@@ -55,21 +55,21 @@ func (m *Manager) warnf(format string, args ...any) {
 }
 
 // dockerfileAndHash resolves Dockerfile body and cache hash.
+// Prefers cfg.Dockerfile, then ejected Dockerfile.devcontainer, else template.
 func (m *Manager) dockerfileAndHash() (body, hash string, err error) {
-	uid := HostUID()
-	body, err = ResolveDockerfileBody(m.Cfg, m.RepoDir, uid)
-	if err != nil {
-		return "", "", err
-	}
 	ver := m.Cfg.TemplateVersion
 	if ver == "" {
 		ver = "dev"
 	}
-	hash, err = ComputeConfigHash(m.Cfg, body, ver)
-	if err != nil {
-		return "", "", err
+	cfg := m.Cfg
+	if cfg.Dockerfile == "" {
+		// Prefer committed eject artifact when present.
+		cand := filepath.Join(m.RepoDir, DefaultEjectName)
+		if _, statErr := os.Stat(cand); statErr == nil {
+			cfg.Dockerfile = DefaultEjectName
+		}
 	}
-	return body, hash, nil
+	return RenderDockerfile(cfg, m.RepoDir, ver)
 }
 
 // NeedsBuild reports whether an image build is required.

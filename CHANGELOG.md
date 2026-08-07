@@ -66,6 +66,11 @@ materially affect the shipped product.
   surface; HTTP `preset=` + `/v1/permissions/diff`
   ([#895](https://github.com/jonathanung/strike/issues/895)).
 
+- **Container Dockerfile eject (E12.3)** — `strike container eject` writes
+  `Dockerfile.devcontainer` with a config-hash header; `strike container drift`
+  checks staleness; `--force` / `--dockerfile` supported. Template drops Zone
+  harness install and hardcodes strike-at-launch
+  ([#585](https://github.com/jonathanung/strike/issues/585)).
 - **Container config (E12.2)** — layered `container` block in main config plus
   optional `container.jsonc`/`container.json` (defaults → global → project →
   managed). Fields cover base image, packages, shell, resources, workspace,

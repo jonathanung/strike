@@ -18,10 +18,18 @@ type Config struct {
 	// Network is a coarse mode string: "default" | "none" (iptables filters later).
 	Network Network
 	// Dockerfile is an optional host path to a hand-written Dockerfile.
-	// When set, Build uses it instead of the embedded template.
+	// When set, Build/Eject uses it instead of the embedded template.
 	Dockerfile string
 	// TemplateVersion is included in the build cache hash (strike version).
 	TemplateVersion string
+
+	// Optional project dependency branches (set by /devcontainer skill or config).
+	NeedsNode     bool
+	NodeVersion   string
+	NeedsPython   bool
+	PythonVersion string
+	NpmPackages   []string
+	PipPackages   []string
 }
 
 // Resources holds optional create-time limits (CLI flags).
