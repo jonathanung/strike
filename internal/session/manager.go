@@ -260,6 +260,10 @@ func (m *Manager) delete(id string, force bool) error {
 			first = err
 		}
 	}
+	// Drop durable undo stack sidecar (#573).
+	if err := RemoveCheckpoints(id); err != nil && first == nil {
+		first = err
+	}
 	return first
 }
 

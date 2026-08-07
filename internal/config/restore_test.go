@@ -24,7 +24,7 @@ func TestRestoreCreatesGlobalLayout(t *testing.T) {
 		}
 	}
 	for _, name := range []string{
-		"agents", "skills", "sessions", "history", "memory", "issues",
+		"agents", "skills", "sessions", "checkpoints", "history", "memory", "issues",
 		"goals", "cache", "themes", "workflows", "bin",
 	} {
 		fi, err := os.Stat(filepath.Join(root, name))

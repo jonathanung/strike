@@ -711,6 +711,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			Select:           selectProvider,
 			Registry:         registry,
 			WorkDir:          toolDir,
+			CheckpointDir:    tool.DefaultCheckpointDir(sid),
 			ProjectRoot:      projectIdentity.Root,
 			Instructions:     instructions,
 			Memory:           memoryStore,

@@ -840,8 +840,8 @@ via `secret.RedactEvent` (see [secrets.md](secrets.md)).
 
 Portable **session packages** (`format: strike.session`) export/import the
 redacted event sequence + meta for support bundles — distinct from the
-human-readable markdown transcript (`/export`, #221) and from checkpoint stack
-persistence across `--continue` (#573). Live `/fork` / `/rewind` copy into a new
+human-readable markdown transcript (`/export`, #221) and from durable checkpoint stacks
+under `~/.strike/checkpoints/` (#573). Live `/fork` / `/rewind` copy into a new
 id with `meta.forkedFrom` lineage.
 
 | `session.retentionMaxSessions` | Cap closed sessions retained (0 = unlimited) |
