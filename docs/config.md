@@ -156,6 +156,20 @@ write this file. Manual `/ftue` remains available after acknowledgement.
   "network": {
     "allow": ["api.github.com", "*.npmjs.org", "10.0.0.0/8"]
   },
+  "container": {
+    "execution": "local",
+    "baseImage": "ubuntu:24.04",
+    "packages": [],
+    "shell": "/bin/bash",
+    "resources": { "memory": "", "cpus": "", "pidsLimit": 512, "gpus": "" },
+    "workspace": { "mountPath": "/workspace", "ports": [], "persistHome": true },
+    "auth": {
+      "forwardEnv": ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "STRIKE_*"],
+      "forwardSSHAgent": false
+    },
+    "network": { "mode": "default", "allow": [] },
+    "engine": ""
+  },
   "permissionAutoApproveSeconds": 0,
   "permissionAutoApproveExclude": ["bash"],
   "maxChildDepth": 0,
@@ -349,7 +363,7 @@ This is the same policy **shape** as future container network filters. It is
 | `websearch` | `network.allow` on the search API host + SSRF private blocks; result domain filters are separate tool args |
 | bash OS profile | host networking on by default (`Policy.NoNetwork` zero value / `NetworkEnabled()`); off only when `webfetch`, `websearch`, and `mcp` are all hard-deny on `*` (all-or-nothing; no per-host filter inside bwrap/seatbelt) |
 | permission rules | `webfetch` / `websearch` ask/allow/deny patterns (prompt posture), independent of the hard allowlist |
-| container net | deferred — reuse `network.allow` shape |
+| container net | `container.network.mode` (`default`\|`none`); `container.network.allow` reserved (same host/CIDR shape as `network.allow`) |
 
 `/sandbox explain` prints the effective allowlist next to bash `network: on/off`.
 Prefer `webfetch` over `curl`/`wget` in bash when you need allowlist enforcement;
@@ -507,6 +521,37 @@ remains unsupported (same as manual upgrade).
 
 Probe state is cached under `~/.strike/cache/update-check.json`. Editable under
 `/settings` → Defaults.
+
+## Container (native containerization, E12)
+
+Layered JSON for `internal/container` (epic
+[#547](https://github.com/jonathanung/strike/issues/547)). Merge order matches
+the rest of config: **defaults → global → project → managed**.
+
+| Source | Path |
+|---|---|
+| Inline | `"container": { … }` in `~/.strike/config` or `./.strike/config` |
+| Dedicated file | `container.jsonc` / `container.json` under the same `.strike` roots (like `mcp.jsonc`) |
+
+Dedicated files overlay the inline block at the same layer (global file after
+global config; project file after project config).
+
+| Field | Meaning |
+|---|---|
+| `execution` | `local` (default) or `container` — where the agent runs (CLI flag in E12.4) |
+| `baseImage` | Dockerfile `FROM` (default `ubuntu:24.04`) |
+| `packages` | Extra apt packages at build |
+| `shell` | Login shell (default `/bin/bash`) |
+| `resources` | `memory`, `cpus`, `pidsLimit`, `gpus` → create flags |
+| `workspace` | `mountPath`, `hostPath`, `ports` (`host:container`), `persistHome`, `extraBinds` |
+| `auth` | `forwardEnv` globs, `envFile`, `requiredEnv`, `forwardSSHAgent` (credentials never baked into images) |
+| `network.mode` | `default` (bridge) or `none` |
+| `network.allow` | Reserved container egress allowlist (same shape as top-level `network.allow`) |
+| `dockerfile` | Optional hand-written Dockerfile path |
+| `engine` | Override CLI binary (`docker` / `podman` / absolute path) |
+
+Runtime mapping: `Config.Container.ToRuntime(version)` → `container.Config` for
+`Manager`. See [container.md](container.md) and [isolation.md](isolation.md).
 
 ## Scheduler (in-process resource limits)
 

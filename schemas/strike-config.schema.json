@@ -182,6 +182,9 @@
     "mcp": {
       "$ref": "#/$defs/mcp"
     },
+    "container": {
+      "$ref": "#/$defs/container"
+    },
     "lsp": {
       "$ref": "#/$defs/lsp"
     },
@@ -463,6 +466,97 @@
             "$ref": "#/$defs/mcpServer"
           }
         }
+      }
+    },
+    "container": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Native containerization (E12). Also loadable from container.jsonc/json. Merge: defaults → global → project → managed. See docs/config.md and docs/container.md.",
+      "properties": {
+        "baseImage": { "type": "string" },
+        "packages": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "shell": { "type": "string" },
+        "resources": { "$ref": "#/$defs/containerResources" },
+        "workspace": { "$ref": "#/$defs/containerWorkspace" },
+        "auth": { "$ref": "#/$defs/containerAuth" },
+        "network": { "$ref": "#/$defs/containerNetwork" },
+        "dockerfile": {
+          "type": "string",
+          "description": "Optional path to a hand-written Dockerfile (relative to repo or absolute)."
+        },
+        "execution": {
+          "type": "string",
+          "description": "Where the agent runs: local (default) or container (E12.4).",
+          "enum": ["local", "container", "host", "docker", "podman"]
+        },
+        "engine": {
+          "type": "string",
+          "description": "Container CLI binary override (docker, podman, or absolute path)."
+        }
+      }
+    },
+    "containerResources": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "memory": { "type": "string" },
+        "cpus": { "type": "string" },
+        "pidsLimit": { "type": "integer", "minimum": 0 },
+        "gpus": { "type": "string" }
+      }
+    },
+    "containerWorkspace": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "mountPath": { "type": "string" },
+        "hostPath": { "type": "string" },
+        "ports": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "persistHome": { "type": "boolean" },
+        "extraBinds": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "containerAuth": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "forwardEnv": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "envFile": { "type": "string" },
+        "requiredEnv": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "forwardSSHAgent": { "type": "boolean" }
+      }
+    },
+    "containerNetwork": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Container network posture. allow reuses the network.allow host/CIDR shape for future egress filters.",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["default", "none", "bridge", "off"]
+        },
+        "allow": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "httpProxy": { "type": "string" },
+        "httpsProxy": { "type": "string" },
+        "noProxy": { "type": "string" }
       }
     },
     "mcpServer": {

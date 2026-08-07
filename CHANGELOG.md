@@ -23,6 +23,12 @@ materially affect the shipped product.
   surface; HTTP `preset=` + `/v1/permissions/diff`
   ([#895](https://github.com/jonathanung/strike/issues/895)).
 
+- **Container config (E12.2)** — layered `container` block in main config plus
+  optional `container.jsonc`/`container.json` (defaults → global → project →
+  managed). Fields cover base image, packages, shell, resources, workspace,
+  auth forwarding, network mode/allow shape, execution dial, and engine binary.
+  Maps to `internal/container` via `ToRuntime`
+  ([#584](https://github.com/jonathanung/strike/issues/584)).
 - **Tool-chain correlation** — content-free multi-step permission correlation
   within a turn: sensitive read → network/bash, write executable → bash
   execute, and identical denial retry storms. Matches **ask** or **deny** with
