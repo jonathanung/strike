@@ -16,6 +16,13 @@ materially affect the shipped product.
 
 ### Changed
 
+- **Progressive `task` schemas** — `task` starts with a compact basic schema
+  (prompt-only create + status/wait/cancel). Advanced fields load after
+  `toolsearch`, advanced args, or workflow activation; one tool name and one
+  executor throughout ([#989](https://github.com/jonathanung/strike/issues/989),
+  [#993](https://github.com/jonathanung/strike/issues/993)).
+
+
 - **Progressive tool disclosure default** — `deferTools` now defaults to `on`
   with a smaller always-visible core (`read`/`glob`/`grep`/`edit`/`write`/
   `apply_patch`/`move`/`delete`/`bash`/`task`/`toolsearch`/`question`).

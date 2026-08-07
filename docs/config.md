@@ -495,6 +495,15 @@ re-promoted on each stream (so `--continue` keeps schemas for tools used
 earlier). Set `"deferTools": "off"` in global or project config to expose the
 full permitted registry.
 
+**Progressive `task` schema:** the unified `task` tool starts with a compact
+basic schema (prompt-only create plus `status` / `wait` / `cancel`). The full
+advanced contract (routing, budget, verify, `context_bundle`, lifecycle
+`get`/`list`/`read`/`message`/`transition`, …) loads after `toolsearch`
+matches `task`, a call uses advanced fields/actions, or workflow activation
+promotes it. Providers always see a single tool named `task`; the executor
+accepts the full argument surface regardless of the schema level currently
+advertised. Session resume restores advanced when history used advanced args.
+
 **Permission soft-approve / auto-approve:** session mode `soft-approve`
 (`permissionMode`, `/mode`, Shift+Tab) arms a **visible** 15s countdown on
 permission asks and submits **allow once** at zero if the user does nothing.
