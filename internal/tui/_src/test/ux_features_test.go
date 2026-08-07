@@ -116,8 +116,8 @@ func TestToggleOrientationAndLayoutCommand(t *testing.T) {
 	if !key.Matches(tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl}, m.keyMap.FocusLeft) {
 		t.Error("vertical: ctrl+h should focus left/primary")
 	}
-	if !key.Matches(tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl}, m.keyMap.CycleWindowNext) {
-		t.Error("vertical: ctrl+o should cycle windows")
+	if !key.Matches(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl}, m.keyMap.CycleWindowNext) {
+		t.Error("vertical: ctrl+p should cycle windows")
 	}
 	if key.Matches(tea.KeyPressMsg{Code: 'j', Mod: tea.ModCtrl}, m.keyMap.FocusLeft, m.keyMap.CycleWindowNext) {
 		t.Error("vertical: ctrl+j must remain newline-only")
@@ -130,8 +130,8 @@ func TestToggleOrientationAndLayoutCommand(t *testing.T) {
 	if m.splitOrientation != orientHorizontal {
 		t.Fatalf("/layout orientation = %v, want horizontal", m.splitOrientation)
 	}
-	if !key.Matches(tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl}, m.keyMap.CycleWindowNext) {
-		t.Error("horizontal: ctrl+o should cycle windows")
+	if !key.Matches(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl}, m.keyMap.CycleWindowNext) {
+		t.Error("horizontal: ctrl+p should cycle windows")
 	}
 	if !strings.Contains(m.notice, "horizontal") {
 		t.Errorf("layout notice = %q, want horizontal", m.notice)
@@ -191,10 +191,10 @@ func TestVerticalFocusKeysStayOrientationIndependent(t *testing.T) {
 	if m.focus != focusLeft {
 		t.Errorf("vertical ctrl+h focus = %v, want left/primary", m.focus)
 	}
-	// ctrl+o cycles secondary panes.
-	m = updateApp(t, m, tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
+	// ctrl+p cycles secondary panes next (#1009).
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
 	if m.windows.active().id() != "b" {
-		t.Errorf("vertical ctrl+o window = %s, want b", m.windows.active().id())
+		t.Errorf("vertical ctrl+p window = %s, want b", m.windows.active().id())
 	}
 	// Mid-line ctrl+k kills; empty ctrl+k opens palette.
 	m.focus = focusLeft

@@ -428,7 +428,7 @@ malformed under §10 when lines overflow host clip budgets repeatedly.
 
 | `group` value | Behavior |
 |---|---|
-| omitted / `"plugin"` | Host places the pane in a shared **Plugin** stack group (or per-plugin subgroup). Exact grouping is host UX (#731) but must participate in existing cycle commands (`ctrl+o` / `ctrl+p`, group cycle). |
+| omitted / `"plugin"` | Host places the pane in a shared **Plugin** stack group (or per-plugin subgroup). Exact grouping is host UX (#731) but must participate in existing cycle commands (`ctrl+p` / `ctrl+o`, group cycle). |
 | other string | Hint only; host may sanitize to slug and cluster matching hints. |
 
 Plugin panes **must not** inject themselves into built-in groups (`session`,
@@ -440,7 +440,7 @@ Plugin panes **must not** inject themselves into built-in groups (`session`,
 When the pane is the active right-pane window and focus is on the right column:
 
 1. Host translates key/pointer events into `pane.input` messages (§11).
-2. Global / navigation keybinds (`ctrl+h/l`, `ctrl+o/p`, quit, command palette,
+2. Global / navigation keybinds (`ctrl+h/l`, `ctrl+p/o`, quit, command palette,
    …) are **not** delivered to the pane.
 3. Process panes do not read the TTY directly; stdin is the JSONL control
    channel only.

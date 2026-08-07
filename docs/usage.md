@@ -128,7 +128,7 @@ strike launches without any provider configured. Pick one inside the TUI:
 /quit                          # alias of /exit
 # Keybind mirrors (same actions as chords; see keybinds.md and /keys):
 /focus-left /focus-right       # focus panes (ctrl+h / ctrl+l)
-/window-next /window-prev      # cycle right-pane windows (ctrl+o / ctrl+p)
+/window-next /window-prev      # cycle right-pane windows (ctrl+p / ctrl+o)
 /group-next /group-prev        # cycle right-pane stack groups (ctrl+shift+o / ctrl+shift+p)
 /scroll-up /scroll-down        # transcript scroll
 /jump-bottom                   # jump to latest output (ctrl+t)
@@ -471,8 +471,8 @@ per-root git worktrees. Full chord table:
 [keybinds.md](keybinds.md).
 
 Pane keys (orientation-independent): `ctrl+h` / `ctrl+l` focus the left
-(primary transcript) or right (secondary pane column); `ctrl+o` / `ctrl+p`
-cycle focus within the active stack group then to the next group;
+(primary transcript) or right (secondary pane column); `ctrl+p` / `ctrl+o`
+cycle focus next / previous within the active stack group then to the next group;
 `ctrl+shift+o` / `ctrl+shift+p` jump to the next/previous stack group (first
 pane). `ctrl+;` (or `/layout` / `/split`) toggles a vertical top/bottom split
 without swapping those chords. `ctrl+k` opens the command palette (when

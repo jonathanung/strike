@@ -217,7 +217,7 @@ Composer input treats Enter as send and `ctrl+j` / Shift+Enter / Alt+Enter
 as newline (Shift+Enter CSI normalizes to Alt+Enter; enhanced ctrl+j to
 Alt+j via a stdin wrapper). Bare LF (`KeyCtrlJ`) is also newline. Pane focus is `ctrl+h`/`ctrl+l`
 (primary vs secondary, orientation-independent); secondary-pane cycle is
-`ctrl+o`/`ctrl+p`; stack-group cycle is `ctrl+shift+o`/`ctrl+shift+p`;
+`ctrl+p`/`ctrl+o` (next/prev); stack-group cycle is `ctrl+shift+o`/`ctrl+shift+p`;
 command palette is `ctrl+k` (when kill-to-end does not delete). Bare Escape
 from CSI-u is normalized to `0x1b`.
 

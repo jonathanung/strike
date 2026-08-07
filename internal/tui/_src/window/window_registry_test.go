@@ -796,9 +796,9 @@ func TestStackedRightPaneCollapsesWhenCompact(t *testing.T) {
 	if strings.Contains(plain, "╭") {
 		t.Errorf("compact view retained panel chrome:\n%s", plain)
 	}
-	// Cycle still walks full focus order one pane at a time.
+	// Cycle still walks full focus order one pane at a time (ctrl+p = next, #1009).
 	start := m.windows.active().id()
-	m = updateApp(t, m, tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
 	if m.windows.active().id() == start {
 		t.Error("compact cycle did not advance focus")
 	}
