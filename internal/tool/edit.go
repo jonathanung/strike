@@ -91,6 +91,18 @@ func (editTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 	if count > 1 && !a.ReplaceAll {
 		return Result{}, ErrPrecondition(fmt.Sprintf("oldString matches %d locations in %s; provide more surrounding context to make it unique, or set replaceAll", count, rel))
 	}
+	var updated string
+	replaced := 1
+	if a.ReplaceAll {
+		updated = strings.ReplaceAll(content, a.OldString, a.NewString)
+		replaced = count
+	} else {
+		updated = strings.Replace(content, a.OldString, a.NewString, 1)
+	}
+	// Evaluate resulting file content (not only the hunk) before permission/disk.
+	if err := checkContentGuard(ctx, tc, rel, updated); err != nil {
+		return Result{}, err
+	}
 	// Metadata carries the change for UI diff rendering, independent of the
 	// model-facing output.
 	meta, _ := json.Marshal(map[string]any{"oldString": a.OldString, "newString": a.NewString, "count": count})
@@ -101,14 +113,6 @@ func (editTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 	overlapWarn, err := tc.ClaimWrite(path, rel)
 	if err != nil {
 		return Result{}, err
-	}
-	var updated string
-	replaced := 1
-	if a.ReplaceAll {
-		updated = strings.ReplaceAll(content, a.OldString, a.NewString)
-		replaced = count
-	} else {
-		updated = strings.Replace(content, a.OldString, a.NewString, 1)
 	}
 	// Close the race between plan-time read and commit.
 	if err := CheckContentUnchanged(path, data, rel); err != nil {

@@ -739,6 +739,10 @@ type Context struct {
 	// (from config network.allow). Empty means unrestricted public hosts; SSRF
 	// private/loopback blocks still apply. Nil/empty Context is unrestricted.
 	NetworkAllow []string
+	// ContentGuard is the write-time content scanner dial (config contentGuard).
+	// Zero value enables default posture: credential shapes deny, high-confidence
+	// dangerous sinks ask. Mode off disables. See checkContentGuard (#890).
+	ContentGuard ContentGuardSettings
 	// WebSearch holds backend settings from config webSearch (provider, API
 	// key env, optional base URL). Empty means auto-detect from the
 	// environment; missing setup returns structured guidance from websearch.

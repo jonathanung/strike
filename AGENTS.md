@@ -50,7 +50,7 @@ service/theme token).
 | `internal/acp` | Agent Client Protocol adapter (`strike acp`: ACP session/prompt ↔ Op/Event for Zed/Devin) |
 | `internal/server` | Experimental read-only HTTP attach (`strike serve`: /health, SSE events, attach page) |
 | `pkg/protocol` | Public Ops/Events wire schema; JSONL envelopes (semver `Version`) |
-| `pkg/redact` | Shared credential-shaped string scrubbing (exports, inspect, traces) |
+| `pkg/redact` | Shared credential-shaped string scrubbing + Findings (exports, inspect, traces, write guards) |
 | `pkg/timeline` | Structured run timeline builder + redacted JSON/JSONL export |
 | `pkg/telemetry` | Versioned security/harness telemetry families + redaction annotations (export schema) |
 | `pkg/diag` | Prompt/config diagnostic bundle builder + redacted JSON export |
