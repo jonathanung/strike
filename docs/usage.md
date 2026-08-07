@@ -32,7 +32,7 @@ strike launches without any provider configured. Pick one inside the TUI:
 /telemetry                     # toggle local system metrics pane (CPU/RAM/disk)
 /telemetry on|off|status       # show/hide or report; on by default (also --telemetry)
 /pets                          # focus the pets right pane (ASCII companions)
-/pets cat|dog|panda|fish       # pick a pet and focus the pane
+/pets <name>                   # pick a pet (cat, dog, panda, fish, owl, …) and focus
 /session                       # browse past root sessions for this workspace
                                # (auto-titles); ctrl+a shows all workspaces
 /session <id>                  # resume a specific session by id (any workspace)
@@ -172,7 +172,7 @@ strike launches without any provider configured. Pick one inside the TUI:
 | `/memory` | bare = list browser (focuses memory pane); `list [tag]`, `get <key>`, `set <key> <value>`, `rm <key>`, `export [path]`, `import <path> [--replace]` (portable JSON; relative paths stay under project root) |
 | `/queue` | browse prompts buffered while a turn runs: reorder (`shift+↑/↓` or `K`/`J`), promote (`p`), in-place edit (`enter`), load into composer (`e`), delete (`d`), clear (`c`), or interrupt and run the FIFO head next (`x`). Empty-composer `bksp` still pops the last item; idle `esc` clears the whole queue |
 | `/issues` | bare = list browser (focuses issues pane); `list [open\|closed]`, `add <title>`, `get <id>`, `close <id>`, `export [path]`, `import <path> [--replace]` (same portable rules as memory) |
-| `/agents` `/activity` `/files` `/diagnostics` `/visualizer` `/system` `/pets` | jump focus to the named right pane (`/agent` remains persona select; `/system` needs telemetry on; `/pets [name]` picks cat/dog/panda/fish) |
+| `/agents` `/activity` `/files` `/diagnostics` `/visualizer` `/system` `/pets` | jump focus to the named right pane (`/agent` remains persona select; `/system` needs telemetry on; `/pets [name]` picks from the companion catalog) |
 | `/telemetry [on\|off\|status]` | local system metrics pane (CPU/RAM/disk); **on by default** (~1 Hz sampler). Disable with `/telemetry off` |
 | `/loop` | schedule a recurring prompt (`15m`, `2h`, …); session-only; `/loop list`, `/loop stop [id]` — see [loop.md](loop.md). Distinct from [`/goal`](goal.md) |
 | `/workflow` | list/inspect/start/stop loaded workflows; start previews phase permission grants; palette expands actions |

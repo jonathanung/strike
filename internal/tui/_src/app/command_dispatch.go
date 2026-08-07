@@ -1511,7 +1511,7 @@ func (m Model) handleTelemetryCommand(args []string) (tea.Model, tea.Cmd) {
 }
 
 // handlePetsCommand focuses the pets right pane. Optional name selects a
-// catalog pet (cat, dog, panda, fish) before focusing.
+// catalog pet (cat, dog, panda, fish, owl, …) before focusing.
 func (m Model) handlePetsCommand(args []string) (tea.Model, tea.Cmd) {
 	if len(args) > 0 {
 		name := strings.TrimSpace(args[0])

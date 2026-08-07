@@ -52,11 +52,12 @@ func TestPetsWindowCycleKeys(t *testing.T) {
 	if p, _ := w.pet(); p.ID != "cat" {
 		t.Fatalf("k = %q, want cat", p.ID)
 	}
-	// wrap backward from cat → fish (last)
+	// wrap backward from cat → last catalog entry
+	last := petCatalog[len(petCatalog)-1].ID
 	next, _ = w.update(tea.KeyPressMsg{Code: tea.KeyUp})
 	w = next.(petsWindow)
-	if p, _ := w.pet(); p.ID != "fish" {
-		t.Fatalf("up wrap = %q, want fish", p.ID)
+	if p, _ := w.pet(); p.ID != last {
+		t.Fatalf("up wrap = %q, want %s", p.ID, last)
 	}
 	// digit select
 	next, _ = w.update(tea.KeyPressMsg{Text: "3"})
@@ -200,9 +201,58 @@ func TestApplyPetsTick(t *testing.T) {
 
 func TestPetCatalogNames(t *testing.T) {
 	got := petCatalogNames()
-	for _, want := range []string{"cat", "dog", "panda", "fish"} {
+	for _, want := range []string{
+		"cat", "dog", "panda", "fish",
+		"owl", "rabbit", "fox", "bear", "bird",
+		"frog", "turtle", "mouse", "snail", "duck",
+	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("petCatalogNames missing %q: %q", want, got)
+		}
+	}
+}
+
+func TestPetCatalogHasFourteenDistinctAnimals(t *testing.T) {
+	const wantCount = 14
+	if got := len(petCatalog); got != wantCount {
+		t.Fatalf("len(petCatalog) = %d, want %d", got, wantCount)
+	}
+	seen := make(map[string]bool, len(petCatalog))
+	for _, p := range petCatalog {
+		if p.ID == "" {
+			t.Fatal("pet with empty ID")
+		}
+		if seen[p.ID] {
+			t.Fatalf("duplicate pet ID %q", p.ID)
+		}
+		seen[p.ID] = true
+		if len(p.Frames) == 0 {
+			t.Fatalf("pet %q has no frames", p.ID)
+		}
+		for i, fr := range p.Frames {
+			if strings.TrimSpace(fr) == "" {
+				t.Fatalf("pet %q frame %d empty", p.ID, i)
+			}
+			for _, line := range strings.Split(fr, "\n") {
+				if w := lipgloss.Width(line); w > 32 {
+					t.Errorf("pet %q frame %d line width %d > 32: %q", p.ID, i, w, line)
+				}
+			}
+		}
+	}
+}
+
+func TestSelectNewPets(t *testing.T) {
+	w := newPetsWindow()
+	for _, name := range []string{"owl", "RABBIT", "Duck", "snail"} {
+		var ok bool
+		w, ok = w.selectPet(name)
+		if !ok {
+			t.Fatalf("selectPet(%q) failed", name)
+		}
+		p, _ := w.pet()
+		if !strings.EqualFold(p.ID, name) {
+			t.Fatalf("after selectPet(%q) got %q", name, p.ID)
 		}
 	}
 }
