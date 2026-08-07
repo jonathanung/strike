@@ -309,6 +309,9 @@ func (m *Manager) Open(id string) (Info, error) {
 }
 
 // Append writes an event to an open session. SessionTitled updates durable title.
+// On append/fsync failure it attempts one Recover onto a verified durable
+// prefix and retries the event once. If recovery is impossible, it returns a
+// fatal PersistenceError so the runtime can cancel side effects.
 func (m *Manager) Append(id string, ev protocol.Event) error {
 	id = strings.TrimSpace(id)
 	m.mu.Lock()
@@ -321,7 +324,26 @@ func (m *Manager) Append(id string, ev protocol.Event) error {
 	m.mu.Unlock()
 
 	if err := store.Append(ev); err != nil {
-		return err
+		// Recover onto a verified durable prefix when latched (partial/fsync).
+		if store.NeedsRecover() {
+			if recErr := m.recoverStore(id, store); recErr != nil {
+				return recErr
+			}
+		}
+		// One retry after recover, or for non-latched transient write faults.
+		if err2 := store.Append(ev); err2 != nil {
+			if pe, ok := err2.(*PersistenceError); ok {
+				out := *pe
+				out.Fatal = true
+				return &out
+			}
+			return &PersistenceError{
+				Op:      "append",
+				Message: "append failed after recover",
+				Err:     err2,
+				Fatal:   true,
+			}
+		}
 	}
 
 	now := time.Now().UTC()
@@ -359,6 +381,26 @@ func (m *Manager) Append(id string, ev protocol.Event) error {
 		} else if e.info.PRState == "" && e.info.PRURL != "" {
 			e.info.PRState = PRStateOpen
 		}
+	}
+	return nil
+}
+
+// recoverStore runs Store.Recover under the manager lock so the open handle
+// stays consistent. store must be the currently bound store for id.
+func (m *Manager) recoverStore(id string, store *Store) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	e, ok := m.sessions[id]
+	if !ok || e.store != store {
+		return &PersistenceError{
+			Op:      "recover",
+			Message: fmt.Sprintf("session %q is not open for recover", id),
+			Fatal:   true,
+		}
+	}
+	if err := store.Recover(); err != nil {
+		// Keep the latched store; runtime must stop side effects.
+		return err
 	}
 	return nil
 }

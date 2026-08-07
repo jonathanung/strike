@@ -144,26 +144,16 @@ func TestRunSessionDrainsEventsAfterFrontendAbandonsForwardedStream(t *testing.T
 	}
 }
 
-func TestRunSessionAppendErrorContinuesDrainingBeforeClose(t *testing.T) {
+func TestRunSessionAppendErrorCancelsEngineAndStopsAppend(t *testing.T) {
 	firstAppendErr := errors.New("first append failure")
-	laterAppendErr := errors.New("later append failure")
 	engineEvents := make(chan protocol.Event)
 	engineReturned := make(chan struct{})
-	const eventCount = 3
+	engineSawCancel := make(chan struct{})
 
 	var closeBeforeJoin bool
 	store := &fakeSessionStore{}
-	appendCall := 0
 	store.append = func(protocol.Event) error {
-		appendCall++
-		switch appendCall {
-		case 1:
-			return firstAppendErr
-		case 2:
-			return laterAppendErr
-		default:
-			return nil
-		}
+		return firstAppendErr
 	}
 	store.close = func() error {
 		select {
@@ -171,23 +161,28 @@ func TestRunSessionAppendErrorContinuesDrainingBeforeClose(t *testing.T) {
 		default:
 			closeBeforeJoin = true
 		}
-		if store.appendCount() != eventCount {
-			closeBeforeJoin = true
-		}
 		return nil
 	}
 	engineRun := func(ctx context.Context) {
-		<-ctx.Done()
-		for i := 0; i < eventCount; i++ {
-			engineEvents <- protocol.TextDelta{Text: "event"}
-		}
+		// Emit events while running; first Append fails and cancels ctx.
+		engineEvents <- protocol.TextDelta{Text: "one"}
+		engineEvents <- protocol.TextDelta{Text: "two"}
+		engineEvents <- protocol.TurnCompleted{StopReason: "end_turn"}
 		close(engineEvents)
+		select {
+		case <-ctx.Done():
+			close(engineSawCancel)
+		case <-time.After(2 * time.Second):
+		}
 		close(engineReturned)
 	}
 
 	done := make(chan error, 1)
 	go func() {
-		done <- runSession(context.Background(), engineRun, engineEvents, store, func(<-chan protocol.Event) error {
+		done <- runSession(context.Background(), engineRun, engineEvents, store, func(ch <-chan protocol.Event) error {
+			// Block until channel closes so we don't cancel via frontend first.
+			for range ch {
+			}
 			return nil
 		})
 	}()
@@ -195,20 +190,52 @@ func TestRunSessionAppendErrorContinuesDrainingBeforeClose(t *testing.T) {
 	if !errors.Is(err, firstAppendErr) {
 		t.Errorf("runSession() error = %v, want first append error", err)
 	}
-	if errors.Is(err, laterAppendErr) {
-		t.Errorf("runSession() error = %v, want only the first append error preserved", err)
-	}
 	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "append") {
 		t.Errorf("runSession() error = %v, want append context", err)
 	}
-	if got := store.appendCount(); got != eventCount {
-		t.Errorf("Append call count = %d, want %d despite errors", got, eventCount)
+	// Fail-safe: stop appending after the first failure (remaining events drain).
+	if got := store.appendCount(); got != 1 {
+		t.Errorf("Append call count = %d, want 1 (stop after fatal persistence)", got)
+	}
+	select {
+	case <-engineSawCancel:
+	case <-time.After(2 * time.Second):
+		t.Error("engine was not canceled after append failure")
 	}
 	if closeBeforeJoin {
 		t.Error("store.Close occurred before engine return and tee drain completion")
 	}
 	if got := store.closeCount(); got != 1 {
 		t.Errorf("Close call count = %d, want 1", got)
+	}
+}
+
+func TestRunSessionDoesNotForwardUnpersistedTerminal(t *testing.T) {
+	appendErr := errors.New("disk full")
+	engineEvents := make(chan protocol.Event, 2)
+	store := &fakeSessionStore{}
+	store.append = func(protocol.Event) error { return appendErr }
+
+	engineRun := func(ctx context.Context) {
+		engineEvents <- protocol.TurnCompleted{StopReason: "end_turn"}
+		close(engineEvents)
+	}
+
+	var forwarded []protocol.Event
+	done := make(chan error, 1)
+	go func() {
+		done <- runSession(context.Background(), engineRun, engineEvents, store, func(ch <-chan protocol.Event) error {
+			for ev := range ch {
+				forwarded = append(forwarded, ev)
+			}
+			return nil
+		})
+	}()
+	if err := waitResult(t, done, "runSession unpersisted terminal"); !errors.Is(err, appendErr) {
+		t.Fatalf("err = %v, want appendErr", err)
+	}
+	if len(forwarded) != 0 {
+		t.Fatalf("forwarded = %#v, want none (terminal must not appear completed)", forwarded)
 	}
 }
 
