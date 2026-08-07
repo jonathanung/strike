@@ -886,8 +886,12 @@ func (e *Engine) finishChild(h *childHandle, completed protocol.ChildCompleted) 
 	if h == nil {
 		return
 	}
-	if h.budgetWatchCancel != nil {
-		h.budgetWatchCancel()
+	h.mu.Lock()
+	cancelWatch := h.budgetWatchCancel
+	h.budgetWatchCancel = nil
+	h.mu.Unlock()
+	if cancelWatch != nil {
+		cancelWatch()
 	}
 	now := time.Now()
 	h.mu.Lock()
