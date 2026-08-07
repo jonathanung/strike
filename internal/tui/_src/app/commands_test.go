@@ -64,7 +64,7 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 		"/keys":             {"show keyboard shortcuts", "[reset]", commandSourceBuiltin},
 		"/legend":           {"explain UI icons, status glyphs, and chrome", "", commandSourceBuiltin},
 		"/memory":           {"list, get, set, delete, export, or import project memory", "[list|get|set|rm|export|import] ...", commandSourceBuiltin},
-		"/queue":            {"browse and edit prompts queued while a turn runs", "", commandSourceBuiltin},
+		"/queue":            {"focus the queue right pane (queued prompts, scheduled loops, pool waits)", "", commandSourceBuiltin},
 		"/issues":           {"list, add, get, close, export, or import project issues", "[list|add|get|close|export|import] ...", commandSourceBuiltin},
 		"/plan":             {"browse and edit root-owned structured plans", "[list|create|get|approve|close|reopen] ...", commandSourceBuiltin},
 		"/goal":             {"loop harness: set, run, status, pause, resume, abort, log, list", "[set|run|status|pause|resume|abort|log|list] ...", commandSourceBuiltin},

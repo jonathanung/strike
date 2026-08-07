@@ -34,6 +34,11 @@ materially affect the shipped product.
 
 ### Added
 
+- **Queue right pane** — `/queue` focuses a session-group pane listing buffered
+  prompts, scheduled `/loop` jobs, and scheduler pool waits; reorder/edit/
+  promote/delete/run-next from the pane (`m` opens the overlay browser)
+  ([#1007](https://github.com/jonathanung/strike/issues/1007)).
+
 - **Durable security audit sink** — append-only redacted JSONL under
   `~/.strike/audit/` for permission/sandbox/admission (and related) decisions,
   retention prune, and `strike audit export` machine-readable bundles

@@ -257,11 +257,9 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 	case "/memory":
 		return m.handleMemoryCommand(fields[1:])
 	case "/queue":
-		m.resetComposer()
-		m.clearNotice()
-		m.openInputQueueModal()
-		m.reflow()
-		return m, nil
+		// Focus the queue right pane (prompts + loops + scheduler waits).
+		// Overlay browser remains available via pane key "m".
+		return m.focusRightWindow(queueWindowID)
 	case "/issues":
 		return m.handleIssuesCommand(fields[1:])
 	case "/plan":
