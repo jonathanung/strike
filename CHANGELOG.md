@@ -14,6 +14,26 @@ materially affect the shipped product.
 
 ## [Unreleased]
 
+## [v0.3.1] - 2026-08-07
+
+Patch release: child permission-mode inheritance and spawned-root welcome
+screen corrections.
+
+### Fixed
+
+- Child agents now inherit the parent session's live permission mode when they
+  spawn or resume, while managed locks and persisted child modes remain
+  authoritative
+  ([#1093](https://github.com/jonathanung/strike/issues/1093),
+  [#1095](https://github.com/jonathanung/strike/pull/1095)).
+- Spawned and newly created root sessions now show a minimal new-agent
+  placeholder instead of the full welcome dashboard, including safe handling
+  before a session id is available
+  ([#1092](https://github.com/jonathanung/strike/issues/1092),
+  [#1094](https://github.com/jonathanung/strike/pull/1094)).
+
+**Full changelog:** [v0.3.0...v0.3.1](https://github.com/jonathanung/strike/compare/v0.3.0...v0.3.1)
+
 ## [v0.3.0] - 2026-08-07
 
 Minor release: plugins, containerization (E12), progressive tools, security
@@ -710,7 +730,8 @@ Initial public release.
 
 **Full changelog:** [commits through v0.0.1](https://github.com/jonathanung/strike/commits/v0.0.1)
 
-[Unreleased]: https://github.com/jonathanung/strike/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/jonathanung/strike/compare/v0.3.1...HEAD
+[v0.3.1]: https://github.com/jonathanung/strike/compare/v0.3.0...v0.3.1
 [v0.3.0]: https://github.com/jonathanung/strike/compare/v0.2.2...v0.3.0
 [v0.2.2]: https://github.com/jonathanung/strike/compare/v0.2.0...v0.2.2
 [v0.2.0]: https://github.com/jonathanung/strike/compare/v0.1.2...v0.2.0
