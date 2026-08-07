@@ -134,6 +134,20 @@ func (applyPatchTool) Execute(ctx context.Context, args json.RawMessage, tc *Con
 		addPat(op.RelMove)
 	}
 
+	// Content guard on resulting file bodies (add/update/move), not just hunks.
+	for _, op := range planned {
+		switch op.Type {
+		case "add", "update", "move":
+			guardRel := op.RelPath
+			if op.Type == "move" && op.RelMove != "" {
+				guardRel = op.RelMove
+			}
+			if err := checkContentGuard(ctx, tc, guardRel, op.Content); err != nil {
+				return Result{}, err
+			}
+		}
+	}
+
 	meta, _ := json.Marshal(plannedOpsMeta(planned))
 	if err := tc.Ask(ctx, AskRequest{
 		Permission: "edit",

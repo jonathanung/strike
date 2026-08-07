@@ -74,6 +74,33 @@ func TestContainsSecret(t *testing.T) {
 	}
 }
 
+func TestFindings(t *testing.T) {
+	got := redact.Findings("key AKIAIOSFODNN7EXAMPLE and more")
+	if len(got) == 0 {
+		t.Fatal("want aws finding")
+	}
+	found := false
+	for _, f := range got {
+		if f.RuleID == redact.RuleAWSAccessKeyID && f.Kind == redact.KindCredential {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("findings = %+v, want aws_access_key_id", got)
+	}
+	pem := "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA0Z3VS5JJcds3xfn/ygWyF6PZGFw...\n-----END RSA PRIVATE KEY-----"
+	pf := redact.Findings(pem)
+	if len(pf) == 0 || pf[0].RuleID != redact.RulePEMPrivateKey {
+		t.Fatalf("pem findings = %+v", pf)
+	}
+	if redact.Findings("ordinary prose about keys") != nil {
+		t.Fatal("prose should yield no findings")
+	}
+	if redact.Findings("") != nil {
+		t.Fatal("empty should be nil")
+	}
+}
+
 func TestBytes(t *testing.T) {
 	in := []byte("Bearer abcdefghijklmnop")
 	got := redact.Bytes(in)

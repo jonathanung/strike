@@ -113,6 +113,9 @@ type Options struct {
 	// webfetch/websearch. Empty means unrestricted public hosts. Copied onto
 	// tool.Context and sandbox.Policy.NetworkAllow for /sandbox explain.
 	NetworkAllow []string
+	// ContentGuard is config contentGuard (+ managed ForcedDeny) for write-time
+	// content scanning on edit/write/apply_patch. Zero enables default posture.
+	ContentGuard tool.ContentGuardSettings
 	// WebSearch is config webSearch (provider, API key env, optional base URL)
 	// for the websearch tool. Empty means auto-detect from the environment.
 	WebSearch tool.WebSearchSettings
