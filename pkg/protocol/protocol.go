@@ -643,6 +643,14 @@ type ChildStarted struct {
 	// Included so reproducible-run snapshots (#782) can capture prompt+bundle
 	// without re-deriving from tool args. Omitted when the spawn had no bundle.
 	ContextBundle *ContextBundle `json:"contextBundle,omitempty"`
+	// Isolation is "shared" (default) or "worktree" when the child runs in a
+	// distinct filesystem workspace (#1036).
+	Isolation string `json:"isolation,omitempty"`
+	// WorktreePath is the absolute child workspace when isolation=worktree.
+	// Tool paths remain attributable to the logical ProjectRoot.
+	WorktreePath string `json:"worktreePath,omitempty"`
+	// BaseRevision is the short git HEAD the child worktree was created from.
+	BaseRevision string `json:"baseRevision,omitempty"`
 }
 
 // ArtifactRef points at a shared typed artifact (id + optional CAS version/type).
@@ -776,6 +784,19 @@ type CompletionHandoff struct {
 	// ArtifactRefs points at shared typed artifacts (findings/patch/test_report/…).
 	// Prefer refs over inlining large bodies; peers fetch via artifact_read.
 	ArtifactRefs []ArtifactRef `json:"artifactRefs,omitempty"`
+	// Isolation is "shared" (default parent workdir) or "worktree" when the
+	// child ran in an isolated git worktree (#1036).
+	Isolation string `json:"isolation,omitempty"`
+	// Patch is a unified diff of the child's isolated worktree against the base
+	// revision. Empty in shared mode or when there were no filesystem changes.
+	// Leads apply via patch_collab after conflict preview — children do not
+	// silently mutate the parent workspace when isolation=worktree.
+	Patch string `json:"patch,omitempty"`
+	// BaseRevision is the short git HEAD the child worktree was created from.
+	BaseRevision string `json:"baseRevision,omitempty"`
+	// WorktreePath is the absolute child workspace when isolation=worktree
+	// (for attribution; logical project paths remain ProjectRoot-relative).
+	WorktreePath string `json:"worktreePath,omitempty"`
 	// MissingContext lists sealed-context gaps when the child cannot proceed
 	// honestly. Non-empty missing_context promotes status to blocked (unless
 	// already failed/canceled) so the lead can resupply context.

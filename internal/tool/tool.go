@@ -140,6 +140,11 @@ type TaskRequest struct {
 	// Hard ceilings (depth, live-child count, delegation count, session budget)
 	// still apply.
 	ForceDelegate bool
+	// Isolation selects filesystem mode for this child: shared|worktree.
+	// Empty inherits session.childIsolation (default shared). worktree runs
+	// the child in a distinct git worktree and returns an inspectable patch
+	// instead of mutating the parent workspace (#1036).
+	Isolation string
 }
 
 // AgentBudgetLimits are optional per-child resource bounds.

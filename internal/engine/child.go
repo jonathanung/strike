@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/permission"
+	"github.com/jonathanung/strike-cli/internal/project"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
 	"github.com/jonathanung/strike-cli/internal/tool"
@@ -57,6 +59,12 @@ type childHandle struct {
 	// planID/sectionID correlate this child to a plan section (plan_delegate).
 	planID    string
 	sectionID string
+	// Isolation metadata for optional per-child worktree mode (#1036).
+	isolation      string // shared|worktree
+	worktreePath   string
+	worktreeBranch string
+	worktreeRepo   string
+	baseRevision   string
 
 	mu           sync.Mutex
 	currentTool  string
@@ -363,6 +371,34 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 	if e.opts.LockPermissionMode {
 		childPermMode = e.opts.InitialPermissionMode
 	}
+
+	// Optional per-child filesystem isolation (#1036).
+	childWorkDir := e.opts.WorkDir
+	isolationMode := "shared"
+	var (
+		wtPath, wtBranch, wtRepo, baseRev string
+	)
+	if config.WantChildWorktree(e.opts.ChildIsolation, req.Isolation) {
+		base := e.opts.WorkDir
+		if base == "" {
+			base = e.opts.ProjectRoot
+		}
+		wt, wtErr := project.Add(ctx, base, childID)
+		if wtErr != nil {
+			// Soft-fail outside git: stay shared and note in policy reason.
+			if !errorsIsNotGit(wtErr) {
+				e.failDelegationSpawn(delegID, "child worktree: "+wtErr.Error())
+				e.closeChildSession(childID)
+				return tool.TaskResult{}, fmt.Errorf("child worktree: %w", wtErr)
+			}
+		} else {
+			childWorkDir = wt.Path
+			isolationMode = "worktree"
+			wtPath, wtBranch, wtRepo = wt.Path, wt.Branch, wt.RepoRoot
+			baseRev = project.HeadRev(ctx, wt.Path)
+		}
+	}
+
 	child := New(Options{
 		SessionID:                  childID,
 		ParentSessionID:            e.opts.SessionID,
@@ -374,7 +410,7 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 		Team:                       e.team, // share lead roster; nested enrolls on same team
 		Select:                     e.opts.Select,
 		Registry:                   childReg,
-		WorkDir:                    e.opts.WorkDir,
+		WorkDir:                    childWorkDir,
 		ProjectRoot:                e.opts.ProjectRoot,
 		Instructions:               e.opts.Instructions,
 		Memory:                     e.opts.Memory,
@@ -470,22 +506,27 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 		}
 	}
 	h := &childHandle{
-		id:        childID,
-		ops:       child.Ops(),
-		cancel:    cancel,
-		done:      make(chan struct{}),
-		permReply: child.perms.Reply,
-		qReply:    child.questions.Reply,
-		eng:       child,
-		startedAt: startedAt,
-		agent:     agentName,
-		prompt:    req.Prompt,
-		name:      memberName,
-		gates:     append([]tool.VerifyGate(nil), req.Verify...),
-		parent:    e,
-		budget:    newChildBudget(budgetLimits, req.Prompt, startedAt),
-		planID:    strings.TrimSpace(req.PlanID),
-		sectionID: strings.TrimSpace(req.SectionID),
+		id:             childID,
+		ops:            child.Ops(),
+		cancel:         cancel,
+		done:           make(chan struct{}),
+		permReply:      child.perms.Reply,
+		qReply:         child.questions.Reply,
+		eng:            child,
+		startedAt:      startedAt,
+		agent:          agentName,
+		prompt:         req.Prompt,
+		name:           memberName,
+		gates:          append([]tool.VerifyGate(nil), req.Verify...),
+		parent:         e,
+		budget:         newChildBudget(budgetLimits, req.Prompt, startedAt),
+		planID:         strings.TrimSpace(req.PlanID),
+		sectionID:      strings.TrimSpace(req.SectionID),
+		isolation:      isolationMode,
+		worktreePath:   wtPath,
+		worktreeBranch: wtBranch,
+		worktreeRepo:   wtRepo,
+		baseRevision:   baseRev,
 	}
 
 	e.childMu.Lock()
@@ -511,6 +552,7 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 			delete(e.children, childID)
 			e.childMu.Unlock()
 			cancel()
+			e.cleanupChildWorktree(h)
 			e.closeChildSession(childID)
 			e.failDelegationSpawn(delegID, "failed to enroll child on team")
 			if memberName != "" {
@@ -541,6 +583,9 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 		RouteReason:   routeDec.Reason,
 		PolicyReason:  policyDec.Reason,
 		ContextBundle: protocolContextBundle(childBundle),
+		Isolation:     isolationMode,
+		WorktreePath:  wtPath,
+		BaseRevision:  baseRev,
 	}
 	e.emit(startedEv)
 	e.persistChildEvent(childID, startedEv)
@@ -752,6 +797,8 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 		if status == protocol.ChildStatusBlocked && verification != nil && verification.Summary != "" {
 			completed.Summary = verification.Summary
 		}
+		// Isolation patch must land on the emitted event (#1036).
+		e.attachChildIsolationHandoff(h, &completed)
 		e.emit(completed)
 		e.persistChildEvent(childID, completed)
 		h.noteEvent(completed)
@@ -832,6 +879,8 @@ func unmetDepsFor(t *Team, deps []string) []string {
 }
 
 // finishChild moves a live handle into childHistory with terminal state.
+// Callers must run attachChildIsolationHandoff before emit so the patch is on
+// the wire ChildCompleted event.
 func (e *Engine) finishChild(h *childHandle, completed protocol.ChildCompleted) {
 	if h == nil {
 		return
@@ -889,7 +938,90 @@ func (e *Engine) finishChild(h *childHandle, completed protocol.ChildCompleted) 
 	e.emitTeamRoster()
 	// Apply structured section refinement when this child was plan_delegate'd.
 	e.applyPlanSectionDelegate(h, completed)
+	// Remove strike-managed child worktree after handoff is captured. Never
+	// touches the primary checkout or unrelated worktrees.
+	e.cleanupChildWorktree(h)
 }
+
+// attachChildIsolationHandoff fills isolation/patch fields on the completion
+// handoff when the child ran in a worktree. Also auto-submits the patch to the
+// team patch board (pending) so leads can preview/apply with conflict checks.
+func (e *Engine) attachChildIsolationHandoff(h *childHandle, completed *protocol.ChildCompleted) {
+	if h == nil || completed == nil {
+		return
+	}
+	mode := strings.TrimSpace(h.isolation)
+	if mode == "" {
+		mode = "shared"
+	}
+	completed.Handoff.Isolation = mode
+	if mode != "worktree" || h.worktreePath == "" {
+		return
+	}
+	completed.Handoff.WorktreePath = h.worktreePath
+	completed.Handoff.BaseRevision = h.baseRevision
+	patch, err := project.DiffUnified(context.Background(), h.worktreePath)
+	if err != nil {
+		if completed.Handoff.Findings == nil {
+			completed.Handoff.Findings = []string{}
+		}
+		completed.Handoff.Findings = append(completed.Handoff.Findings, "isolation patch export failed: "+err.Error())
+		return
+	}
+	completed.Handoff.Patch = patch
+	if strings.TrimSpace(patch) == "" {
+		return
+	}
+	// Auto-submit for lead collaboration when a team is present.
+	if e.team == nil {
+		return
+	}
+	title := "child " + shortChildID(h.id)
+	if h.name != "" {
+		title = h.name
+	}
+	prev := tool.PreviewPatch(e.opts.WorkDir, patch)
+	files := prev.Files
+	if !prev.Valid {
+		// Still submit so the lead can inspect; conflict/base errors surface on preview/apply.
+		files = append([]string(nil), completed.Handoff.FilesChanged...)
+	}
+	actor := strings.TrimSpace(e.opts.SessionID)
+	if _, err := e.team.SubmitPatch(title, patch, actor, files, "", 0); err != nil {
+		completed.Handoff.Findings = append(completed.Handoff.Findings, "patch_collab submit: "+err.Error())
+	} else if completed.Handoff.RecommendedNextAction == "" {
+		completed.Handoff.RecommendedNextAction = "Review the child patch via patch_collab preview/apply (conflicts checked before apply)."
+	}
+}
+
+func (e *Engine) cleanupChildWorktree(h *childHandle) {
+	if h == nil || h.worktreePath == "" {
+		return
+	}
+	// Only remove strike-managed paths under .strike/worktrees/.
+	path := h.worktreePath
+	if !strings.Contains(path, string([]byte{filepathSep})+"worktrees"+string([]byte{filepathSep})) &&
+		!strings.Contains(path, "/worktrees/") && !strings.Contains(path, `\worktrees\`) {
+		return
+	}
+	_ = project.Remove(context.Background(), h.worktreeRepo, path, h.worktreeBranch)
+	h.worktreePath = ""
+}
+
+func errorsIsNotGit(err error) bool {
+	return errors.Is(err, project.ErrNotGitRepository)
+}
+
+func shortChildID(id string) string {
+	id = strings.TrimSpace(id)
+	if len(id) <= 8 {
+		return id
+	}
+	return id[:8]
+}
+
+// filepathSep avoids importing path/filepath solely for cleanup path checks.
+const filepathSep = '/'
 
 // dissolveTeamIfLead clears the implicit team when this engine is the lead.
 // Nested engines share the pointer and must not dissolve the lead's roster.

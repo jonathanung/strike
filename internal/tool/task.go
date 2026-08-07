@@ -181,6 +181,11 @@ func (taskTool) Schema() json.RawMessage {
 				"type": "boolean",
 				"description": "Override soft local-prefer policy and spawn anyway. Hard ceilings (depth, live children, budget) still apply"
 			},
+			"isolation": {
+				"type": "string",
+				"enum": ["shared", "worktree"],
+				"description": "Filesystem mode: shared (parent workdir, default) or worktree (isolated git worktree; returns inspectable patch on complete)"
+			},
 			"context_bundle": {
 				"type": "object",
 				"description": "Sealed context: goal, acceptance, allowed/required paths, artifacts, constraints, items, file_pins",
