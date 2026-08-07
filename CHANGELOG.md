@@ -20,6 +20,12 @@ materially affect the shipped product.
   file rejection, symlink-leaf refuse on write, timed reads, path identity for
   grant/overlap matching, and atomic replace; adopted by read/write/edit/
   apply_patch ([#896](https://github.com/jonathanung/strike/issues/896)).
+- **Permission explain dry-run + diff** — `/permission explain --preset <id>`
+  evaluates under an alternate shipped preset without applying it;
+  `/permission diff <a> <b>` lists added/removed/changed rules with layer
+  labels; managed-ceiling and sandbox/`network.allow` notes on the explain
+  surface; HTTP `preset=` + `/v1/permissions/diff`
+  ([#895](https://github.com/jonathanung/strike/issues/895)).
 
 - **Tool-chain correlation** — content-free multi-step permission correlation
   within a turn: sensitive read → network/bash, write executable → bash

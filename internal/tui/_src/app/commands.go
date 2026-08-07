@@ -128,7 +128,7 @@ var builtinCommandSpecs = []commandSpec{
 	{ID: commandAutonomy, Name: "/autonomy", Description: "set exit-gate policy (supervised/agent/checks/skip-all)", ArgsHint: "[mode]", Source: commandSourceBuiltin},
 	{ID: commandMode, Name: "/mode", Description: "set permission posture (default/plan/accept-edits/yolo)", ArgsHint: "[mode]", Source: commandSourceBuiltin},
 	{ID: commandSandbox, Name: "/sandbox", Description: "show OS sandbox policy; /sandbox explain for generated profile", Source: commandSourceBuiltin},
-	{ID: commandPermission, Name: "/permission", Description: "explain a tool permission or list presets", ArgsHint: "[explain <tool> [pattern]|presets]", Source: commandSourceBuiltin},
+	{ID: commandPermission, Name: "/permission", Description: "explain/diff tool permissions or list presets", ArgsHint: "[explain [--preset id] <tool> [pattern]|diff <a> <b>|presets]", Source: commandSourceBuiltin},
 	{ID: commandAuth, Name: "/auth", Description: "manage provider authentication", ArgsHint: "[provider]", Source: commandSourceBuiltin},
 	{ID: commandSettings, Name: "/settings", Description: "defaults (theme, sandbox, notify, autoupdate, mode) and custom providers", Source: commandSourceBuiltin},
 	{ID: commandConfig, Name: "/config", Description: "open .strike config files in the embedded editor (picker or slot)", ArgsHint: "[nano] [global|project] [config|mcp|providers|keybinds]", Source: commandSourceBuiltin},
