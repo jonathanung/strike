@@ -1203,6 +1203,11 @@ type PermissionDecided struct {
 	EvalPath string `json:"evalPath,omitempty"`
 	// FactSummary is a short redaction-friendly action-fact projection (#888).
 	FactSummary string `json:"factSummary,omitempty"`
+	// Tool-chain correlation (#891): set when a multi-step rule contributed.
+	// ChainSummary cites prior tool names/classes only — never secret bytes.
+	ChainID      string `json:"chainId,omitempty"`
+	ChainRule    string `json:"chainRule,omitempty"`
+	ChainSummary string `json:"chainSummary,omitempty"`
 }
 
 // QuestionOption is one selectable choice on a QuestionPrompt.
