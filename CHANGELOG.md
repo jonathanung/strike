@@ -16,6 +16,13 @@ materially affect the shipped product.
 
 ### Added
 
+- **Permission explain dry-run + diff** — `/permission explain --preset <id>`
+  evaluates under an alternate shipped preset without applying it;
+  `/permission diff <a> <b>` lists added/removed/changed rules with layer
+  labels; managed-ceiling and sandbox/`network.allow` notes on the explain
+  surface; HTTP `preset=` + `/v1/permissions/diff`
+  ([#895](https://github.com/jonathanung/strike/issues/895)).
+
 - **Tool-chain correlation** — content-free multi-step permission correlation
   within a turn: sensitive read → network/bash, write executable → bash
   execute, and identical denial retry storms. Matches **ask** or **deny** with
