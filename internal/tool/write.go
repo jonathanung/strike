@@ -63,6 +63,9 @@ func (writeTool) Execute(ctx context.Context, args json.RawMessage, tc *Context)
 	if err != nil {
 		return Result{}, err
 	}
+	if isSymlinkLeaf(tc.WorkDir, tempDir, a.FilePath) {
+		return Result{}, ErrPrecondition(fmt.Sprintf("%s is a symlink; refuse to write through symlinks", rel))
+	}
 	existed := FileExisted(path)
 	if existed {
 		if err := tc.Files.CheckFresh(path, rel); err != nil {
@@ -76,7 +79,7 @@ func (writeTool) Execute(ctx context.Context, args json.RawMessage, tc *Context)
 		return Result{}, PreconditionFailed(fmt.Sprintf("%s: baseHash precondition failed (file missing)", rel))
 	}
 
-	existing, readErr := os.ReadFile(path)
+	existing, readErr := safeReadFile(ctx, path)
 	meta, _ := json.Marshal(map[string]any{
 		"exists":  readErr == nil,
 		"oldSize": len(existing),
