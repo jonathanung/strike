@@ -68,11 +68,14 @@ Moby SDK. See [container.md](container.md).
 
 Shipped today:
 
-- `internal/container` — `Runtime` / `CLI`, naming (`strike-<repo>-<hash>`),
-  `com.strike.*` labels, offline-testable `ExecFunc`.
+- `internal/container` — `Runtime` / `CLI`, per-repo `Manager` lifecycle
+  (build/launch/attach/exec/stop/restart/destroy/clean), naming
+  (`strike-<repo>-<hash>`), `com.strike.*` labels, build cache under
+  `.strike/container/`, offline-testable `ExecFunc`.
 
-Still planned (E12.1+): config block, Dockerfile eject, `--launch-inside-container`,
-attach, isolation badge, eval pool wiring.
+Still planned: config JSON block (E12.2), Dockerfile eject (E12.3),
+`--launch-inside-container` (E12.4), attach UX (E12.6), isolation badge (E12.7),
+eval pool wiring (E12.10).
 
 Until launch UX ships:
 
