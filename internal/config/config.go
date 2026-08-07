@@ -38,9 +38,11 @@ type Config struct {
 	// Empty means lite (default). Unknown values are ignored at load time.
 	LeanCode string `json:"leanCode,omitempty"`
 	// DeferTools controls toolsearch-backed schema deferral: on|off.
-	// When on, non-core tools (optional built-ins + MCP) are omitted from the
-	// provider tools[] until toolsearch discovers them (or they are called).
-	// Empty means off (default). Unknown values are ignored at load time.
+	// When on (default), non-core tools (orchestration, optional built-ins,
+	// MCP) are omitted from the provider tools[] until toolsearch discovers
+	// them, they are called by name, or workflow activation promotes them.
+	// Empty means on (default). Set "off" for the full permitted registry.
+	// Unknown values are ignored at load time.
 	DeferTools   string `json:"deferTools,omitempty"`
 	DefaultAgent string `json:"defaultAgent,omitempty"`
 	// Theme is the preferred TUI color theme id (bundled or JSON under
@@ -1250,7 +1252,7 @@ const (
 )
 
 // NormalizeDeferTools maps config aliases to on|off.
-// Empty and unknown values become "" (default off).
+// Empty and unknown values become "" (runtime default = on via DeferToolsEnabled).
 func NormalizeDeferTools(s string) string {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "on", "true", "1", "yes", "enable", "enabled":
@@ -1263,8 +1265,9 @@ func NormalizeDeferTools(s string) string {
 }
 
 // DeferToolsEnabled reports whether deferred tool schemas are active.
+// Empty/unset defaults to on; only an explicit off disables deferral.
 func DeferToolsEnabled(s string) bool {
-	return NormalizeDeferTools(s) == DeferToolsOn
+	return NormalizeDeferTools(s) != DeferToolsOff
 }
 
 // NormalizeWebSearch trims webSearch fields.

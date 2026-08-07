@@ -159,7 +159,7 @@ type UserDefaults struct {
 	Autoupdate string
 	// LeanCode is lean-code guidance intensity: off|lite|full.
 	LeanCode string
-	// DeferTools is toolsearch-backed schema deferral: on|off.
+	// DeferTools is toolsearch-backed schema deferral: on|off (empty means on).
 	DeferTools string
 	// SessionWorktree is session.worktree: off|auto|always.
 	SessionWorktree string

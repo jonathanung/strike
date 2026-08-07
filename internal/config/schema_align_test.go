@@ -188,7 +188,7 @@ func TestStrikeConfigSchemaExampleRoundTrip(t *testing.T) {
   "model": "echo",
   "effort": "low",
   "leanCode": "lite",
-  "deferTools": "off",
+  "deferTools": "on",
   "permissionMode": "default",
   "sandbox": "workspace-write",
   "network": { "allow": ["api.github.com"] },
