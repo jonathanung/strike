@@ -16,6 +16,13 @@ materially affect the shipped product.
 
 ### Added
 
+- **`strike exec` approval callbacks** — `--approval-control` unix socket/FIFO
+  NDJSON channel for per-request permission and question replies (once/reject;
+  durable always/project requires explicit `durable:true`). Timeout, disconnect,
+  and malformed replies fail closed; request payloads are secret-redacted.
+  Legacy auto-reject without the flag is unchanged
+  ([#1040](https://github.com/jonathanung/strike/issues/1040)).
+
 - **Public session lifecycle contract** — list/get/fork/fork_at/load/rewind_points
   shared across RPC, HTTP, ACP, and `pkg/sdk` with capability discovery and
   structured errors (`session_not_found`, `session_busy`, …). Wire schema
