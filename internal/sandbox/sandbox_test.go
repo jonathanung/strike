@@ -334,6 +334,7 @@ func TestExplainAndProfileText(t *testing.T) {
 		"network allowlist: api.github.com, 10.0.0.0/8",
 		"egress enforcement: preflight",
 		"OS network: off",
+		"degrade policy: deny",
 		"deny-write globs: **/*.env",
 		"profile:",
 	} {
@@ -357,6 +358,10 @@ func TestExplainAndProfileText(t *testing.T) {
 	off := Explain(Policy{Mode: ModeOff})
 	if !strings.Contains(off, "disabled") {
 		t.Fatalf("off explain = %q", off)
+	}
+	degradeOK := Explain(Policy{Mode: ModeWorkspaceWrite, WorkDir: wd, AllowDegrade: true})
+	if !strings.Contains(degradeOK, "degrade policy: allow") {
+		t.Errorf("Explain allow degrade:\n%s", degradeOK)
 	}
 	prof := ProfileText(Policy{Mode: ModeReadOnly, WorkDir: wd})
 	if prof == "" {

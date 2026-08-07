@@ -823,6 +823,7 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 			SandboxMode:     e.opts.SandboxMode,
 			Sandbox:         e.bashSandboxPolicy(),
 			NetworkAllow:    e.opts.NetworkAllow,
+			BashSecrets:     e.opts.BashSecrets,
 			ContentGuard:    e.opts.ContentGuard,
 			WebSearch:       e.opts.WebSearch,
 			Scheduler:       e.opts.Scheduler,
@@ -1424,5 +1425,6 @@ func (e *Engine) bashSandboxPolicy() sandbox.Policy {
 		p = e.perms.CompileSandbox(mode, e.opts.WorkDir)
 	}
 	p.NetworkAllow = sandbox.CloneNetworkAllow(e.opts.NetworkAllow)
+	p.AllowDegrade = e.opts.SandboxAllowDegrade
 	return p
 }

@@ -760,7 +760,9 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			InitialAutonomy:       initialAutonomy,
 			InitialPermissionMode: initialPermMode,
 			SandboxMode:           sandboxMode,
+			SandboxAllowDegrade:   cfg.SandboxAllowDegrade,
 			NetworkAllow:          sandbox.CloneNetworkAllow(cfg.Network.Allow),
+			BashSecrets:           cloneBashSecrets(cfg.BashSecrets),
 			ContentGuard: tool.ContentGuardSettings{
 				Mode:       cfg.ContentGuard.Mode,
 				PathAllow:  append([]string(nil), cfg.ContentGuard.PathAllow...),
@@ -973,6 +975,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		basePermLayers...,
 	)
 	sandboxPolicy.NetworkAllow = sandbox.CloneNetworkAllow(cfg.Network.Allow)
+	sandboxPolicy.AllowDegrade = cfg.SandboxAllowDegrade
 	sandboxExplain := sandbox.Explain(sandboxPolicy)
 	services.Shell = local.NewShell(workDir, sandboxPolicy)
 	// Permission explain/presets for /permission. Live explain binds to the
@@ -1267,4 +1270,15 @@ func toolRetryBackoffFromConfig(tr config.ToolRetryConfig) func(int) time.Durati
 	return func(nextAttempt int) time.Duration {
 		return tool.ToolRetryDelay(nextAttempt, base, max)
 	}
+}
+
+func cloneBashSecrets(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }

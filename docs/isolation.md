@@ -60,8 +60,10 @@ public telemetry without redaction; OS egress filtering (see #892).
 - Permission hard-denies for `write`/`edit` compile into deny-write paths/globs
   (`permission.CompileSandbox`). Network inside the bash sandbox stays **on**
   unless webfetch, websearch, and mcp are all hard-deny on `*`.
-- When `bwrap` / `sandbox-exec` is missing or blocked, bash **degrades** to
-  unsandboxed with a one-shot startup warning (unless mode is `off`).
+- When `bwrap` / `sandbox-exec` is missing or blocked, bash **fails closed**
+  with `sandbox_denied` unless `sandboxAllowDegrade: true` (explicit opt-in to
+  unsandboxed fallback) or `sandbox: off`. A one-shot startup warning still
+  fires when degrade is permitted.
 - Capability blocks that surface as OS errors (`Read-only file system`,
   `Permission denied`, seatbelt deny lines, …) are classified as
   **`sandbox_denied`** on the bash tool result (stable code + human reason) and
@@ -81,15 +83,20 @@ for application-layer egress:
 | Surface | Enforcement |
 |---|---|
 | `webfetch` / `websearch` | Dial/redirect checks via `sandbox.CheckNetworkAllow` |
-| bash | **v1 preflight** on known clients (`curl`, `wget`, `ssh`, `scp`, `sftp`, `nc`/`ncat`/`netcat`), including common wrappers (`env`, `timeout`, `bash -c`, …). Destinations outside the list → tool error `network_denied` (timeline `errorCode`). Unparseable destinations on those clients fail closed when the list is non-empty. |
+| bash | **Fail-closed preflight** when allow is non-empty and OS host networking is on: known clients (`curl`/`wget`/`ssh`/`scp`/`sftp`/`nc` + wrappers) must match allow; interpreters, shell `/dev/tcp`/`/dev/udp`, package-manager network subcommands, and unknown binaries are denied (`network_denied`). When OS network is off (`NoNetwork`), preflight is skipped (stronger isolation). |
 | OS sandbox profile | **Not** per-host: host net on by default; off only when webfetch+websearch+mcp are hard-deny on `*`. No bwrap/seatbelt/Windows host allowlist in v1. |
 | Containers (#547) | Planned stronger plane; reuse the same allowlist shape |
 
 Empty/`[]` allowlist = unrestricted **public** hosts (SSRF private blocks on
-webfetch unchanged). `/sandbox explain` prints the allowlist and
-`egress enforcement:` line (preflight vs OS gap). Prefer `webfetch` when you
-need fetch semantics; bash preflight is best-effort argv parse, not a
-transparent userspace proxy.
+webfetch unchanged). `/sandbox explain` prints the allowlist, degrade policy,
+and `egress enforcement:` line. Prefer `webfetch` when you need fetch
+semantics; bash preflight is static argv classification, not a transparent
+userspace proxy.
+
+**Bash environment:** the bash tool receives a **minimal** env (PATH, HOME,
+locale, toolchain roots, … — see `tool.BashMinimalEnvKeys`) rather than the
+full Strike process environment. Inject credentials with config `bashSecrets`
+(`"VAR": "secret://env/HOST_VAR"`); resolved values never enter events/logs.
 
 ## Session worktrees
 

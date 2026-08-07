@@ -147,6 +147,17 @@
         "workspace-write"
       ]
     },
+    "sandboxAllowDegrade": {
+      "type": "boolean",
+      "description": "When true, permit bash to run unsandboxed if the OS backend is missing. Default false is fail-closed (sandbox_denied)."
+    },
+    "bashSecrets": {
+      "type": "object",
+      "description": "Map of env var names to secret refs (secret://env/NAME) injected into bash tool processes only.",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
     "network": {
       "$ref": "#/$defs/network"
     },

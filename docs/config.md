@@ -344,11 +344,12 @@ optional process mem/CPU caps — [isolation.md](isolation.md).
 **OS sandbox dial:** `sandbox` is `off` | `read-only` | `workspace-write`
 (default **`workspace-write`**). Applies to the bash tool (and composer `!`
 shell) via Linux `bwrap` / macOS `sandbox-exec`. When the backend is missing
-or blocked, bash degrades to unsandboxed with a one-shot startup warning
-(unless `sandbox` is `off`). Override per invocation with `--sandbox <mode>`.
-Inspect the effective policy with `/sandbox`; `/sandbox explain` prints the
-generated OS profile (bwrap flags or seatbelt SBPL) compiled from permission
-rules.
+or blocked, bash **fails closed** with `sandbox_denied` unless
+`sandboxAllowDegrade: true` (explicit unsandboxed fallback) or `sandbox` is
+`off`. Override per invocation with `--sandbox <mode>`. Inspect the effective
+policy with `/sandbox`; `/sandbox explain` prints degrade policy, egress
+enforcement, and the generated OS profile (bwrap flags or seatbelt SBPL)
+compiled from permission rules.
 
 **Shared writable roots (default usability):** under any non-`off` mode the
 sandbox keeps common scratch dirs writable (`/tmp`, `/var/tmp`, `$TMPDIR`,
@@ -391,16 +392,35 @@ container filters. It is **not** a third independent system:
 |---|---|
 | `webfetch` | `network.allow` host/CIDR allowlist + SSRF private blocks |
 | `websearch` | `network.allow` on the search API host + SSRF private blocks; result domain filters are separate tool args |
-| bash preflight (v1) | Same allowlist via argv parse + actionfacts network projection for `curl`/`wget`/`ssh`/`scp`/`sftp`/`nc` (and common wrappers). Outside list → `network_denied`. Unparseable destinations on those clients fail closed when the list is non-empty. **Not** a full shell/network proxy. |
+| bash preflight | Fail-closed when allow is non-empty and OS host net is on: known clients (`curl`/`wget`/`ssh`/…) must match allow; interpreters, `/dev/tcp`, package network subcommands, and unknown binaries → `network_denied`. Skipped when OS `NoNetwork`. **Not** a full shell/network proxy. |
 | bash OS profile | host networking on by default (`Policy.NoNetwork` zero value / `NetworkEnabled()`); off only when `webfetch`, `websearch`, and `mcp` are all hard-deny on `*` (all-or-nothing; **no** per-host filter inside bwrap/seatbelt; no Windows host filter) |
 | permission rules | `webfetch` / `websearch` / `bash` ask/allow/deny patterns (prompt posture), independent of the hard allowlist |
 | container net | `container.network.mode` (`default`\|`none`); `container.network.allow` reserved (same host/CIDR shape as `network.allow`) |
 
+**Sandbox degrade (`sandboxAllowDegrade`):** default `false`. When `true`, a
+missing OS backend may run bash unsandboxed (with a one-shot warning). When
+`false`, non-off sandbox modes return `sandbox_denied` instead of silent
+degrade (#1030).
 
-`/sandbox explain` prints the effective allowlist, an `egress enforcement:`
-line (`preflight` when allow is set; `OS host filter: none` documents the
-platform gap), and bash `network: on/off`. Prefer `webfetch` for ordinary page
-fetches; use bash preflight when agents still shell out to curl/ssh.
+**Bash secrets (`bashSecrets`):** map of env var name → secret ref injected
+into the bash tool process only:
+
+```jsonc
+{
+  "sandboxAllowDegrade": false,
+  "bashSecrets": {
+    "GITHUB_TOKEN": "secret://env/GITHUB_TOKEN"
+  }
+}
+```
+
+Bash does **not** inherit the full Strike environment (minimal documented
+keys only — PATH, HOME, locale, common toolchain roots). Secret values never
+appear in events or logs. See [secrets.md](secrets.md).
+
+`/sandbox explain` prints the effective allowlist, degrade policy, an
+`egress enforcement:` line, and bash `network: on/off`. Prefer `webfetch` for
+ordinary page fetches; use allowlisted curl when agents still shell out.
 
 **Web search (`webSearch`):** configures the `websearch` tool backend. Search
 discovers titles/URLs/snippets; use `webfetch` to retrieve a selected page.
