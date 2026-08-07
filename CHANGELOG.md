@@ -39,6 +39,17 @@ materially affect the shipped product.
   promote/delete/run-next from the pane (`m` opens the overlay browser)
   ([#1007](https://github.com/jonathanung/strike/issues/1007)).
 
+- **Write-time content guards** — `write` / `edit` / `apply_patch` /
+  `notebook_edit` scan proposed content before disk. Default: credential
+  shapes (PEM, AWS `AKIA…`, provider keys, GitHub/Slack tokens, …) **deny**
+  with stable error code `content_guard_denied`; high-confidence dangerous
+  sinks (language-limited `eval`/`exec`/`os.system`/…) **ask**. Config
+  `contentGuard.mode` (`off`|`default`|`ask`|`deny`) and `pathAllow` globs;
+  managed `mode: deny` is a ForcedDeny ceiling yolo cannot widen. Shares
+  `pkg/redact.Findings` with egress redaction (write guard ≠ redact-on-read).
+  Optional skill `/write-guards`
+  ([#890](https://github.com/jonathanung/strike/issues/890)).
+
 - **Durable security audit sink** — append-only redacted JSONL under
   `~/.strike/audit/` for permission/sandbox/admission (and related) decisions,
   retention prune, and `strike audit export` machine-readable bundles
@@ -77,7 +88,6 @@ materially affect the shipped product.
   labels; managed-ceiling and sandbox/`network.allow` notes on the explain
   surface; HTTP `preset=` + `/v1/permissions/diff`
   ([#895](https://github.com/jonathanung/strike/issues/895)).
-
 - **Container Dockerfile eject (E12.3)** — `strike container eject` writes
   `Dockerfile.devcontainer` with a config-hash header; `strike container drift`
   checks staleness; `--force` / `--dockerfile` supported. Template drops Zone
