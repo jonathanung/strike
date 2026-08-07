@@ -14,7 +14,59 @@ materially affect the shipped product.
 
 ## [Unreleased]
 
+## [v0.3.0] - 2026-08-07
+
+Minor release: plugins, containerization (E12), progressive tools, security
+hardening, cost budgets, session lifecycle, steer, hooks, MCP surface, and the
+wave 1030–1043 reliability/security pack. Protocol wire `1.17.0`.
+
 ### Added
+
+- **Session cost envelope** — `session.maxSessionCostUSD` / `session.maxTurnTokens`
+  plus CLI `--max-cost` cap catalog-priced usage. Emits `session.budget_warning` at
+  50/80/100%; hard stop uses `budget_exhausted` (not silent). TUI status-bar budget
+  chip and notices; per-child `MaxCostUSD` nests under the session envelope
+  ([#577](https://github.com/jonathanung/strike/issues/577),
+  [#1029](https://github.com/jonathanung/strike/pull/1029)).
+- **Root turn wall-clock deadline** — `session.turnTimeoutS` (default 1800s;
+  negative/off disables) and CLI `--turn-timeout`. Prefer `timeout` stop reason
+  over tool-stamped `canceled` when the turn deadline fires
+  ([#1037](https://github.com/jonathanung/strike/issues/1037),
+  [#1044](https://github.com/jonathanung/strike/pull/1044)).
+- **Lifecycle hooks vocabulary v1.0.0** — versioned shell/declarative hooks for
+  session start/resume/end, turn start/end, provider attempt/retry, permission
+  resolution, compaction, phase transition, child lifecycle, verification gates,
+  and pre/post tool use. Stable correlation ids, `schema_version`, redacted
+  bounded payloads; deterministic order declarative → shell
+  ([#1041](https://github.com/jonathanung/strike/issues/1041),
+  [#1047](https://github.com/jonathanung/strike/pull/1047)).
+- **MCP prompts, resources, OAuth, catalog refresh** — capability negotiation;
+  typed `list_prompts` / `get_prompt` / `list_resources` / `read_resource`; HTTP
+  OAuth (discover, authorize, refresh, revoke); `list_changed` rebinds catalogs
+  without restart; missing capabilities degrade cleanly
+  ([#1042](https://github.com/jonathanung/strike/issues/1042),
+  [#1061](https://github.com/jonathanung/strike/pull/1061)).
+- **Per-child worktree isolation** — `session.childIsolation` / `task.isolation`
+  `shared` (default) or `worktree`. Isolated git worktrees under
+  `.strike/worktrees/<child-id>/`; completion handoff includes `patch` +
+  `baseRevision` and optional `patch_collab` submit; soft-fail to shared outside
+  git repos ([#1036](https://github.com/jonathanung/strike/issues/1036),
+  [#1067](https://github.com/jonathanung/strike/pull/1067)).
+- **Resume persisted child sessions** — `task({action:"resume", id, …})` reopens
+  an owned child JSONL with ownership/lineage checks; terminal refuse unless
+  `continue=true`; incomplete tools settled on restore
+  ([#1035](https://github.com/jonathanung/strike/issues/1035),
+  [#1062](https://github.com/jonathanung/strike/pull/1062)).
+- **Bash shadow-git checkpoints** — bash mutations covered via per-session
+  shadow-git baseline so `/undo files` restores formatter/codegen/`sed -i`
+  changes; durable checkpoint stack under `~/.strike/checkpoints/<session-id>/`
+  ([#572](https://github.com/jonathanung/strike/issues/572),
+  [#1028](https://github.com/jonathanung/strike/pull/1028)).
+- **DX grab-bag** — optional OTLP/HTTP export (`STRIKE_OTLP_ENDPOINT`); skill
+  adjacent `resource` reads + live catalog `Reload`; LSP missing-binary install
+  hints (never auto-install); eval pass@k / pass^k / flakiness metrics
+  ([#1043](https://github.com/jonathanung/strike/issues/1043),
+  [#1065](https://github.com/jonathanung/strike/pull/1065)).
 
 - **Active-turn steering** — new `steer` op redirects a running root turn at the
   next safe request boundary (distinct from queued `user.input` and
@@ -237,6 +289,39 @@ materially affect the shipped product.
   confinement, strike/schema version checks, collision diagnostics, and
   `plugins.lock.json` disablement; executable MCP/harness/hook entries stay
   inactive until trusted activation ([#726](https://github.com/jonathanung/strike/issues/726)).
+
+### Fixed
+
+- **Provider Retry-After** — preserve delay-seconds and HTTP-date on normalized
+  status errors; stream retries prefer valid provider guidance with cancelable
+  waits; `ProviderRetrying` reports `DelayMs` + `FromProvider`
+  ([#1034](https://github.com/jonathanung/strike/issues/1034),
+  [#1064](https://github.com/jonathanung/strike/pull/1064)).
+- **Live session persistence recovery** — latch on partial write/fsync failure;
+  `Recover` truncates to known-good size, validates via Replay, retries once;
+  unrecoverable persistence cancels the runtime without forwarding unpersisted
+  terminal events ([#1033](https://github.com/jonathanung/strike/issues/1033),
+  [#1063](https://github.com/jonathanung/strike/pull/1063)).
+
+### Security
+
+- **Fail-closed bash isolation and egress** — expanded `network.allow` preflight
+  (interpreters, `/dev/tcp`, package network subcommands, unknown binaries);
+  sandbox degrade fail-closed by default (`sandboxAllowDegrade: true` to opt in);
+  minimal bash environment + `bashSecrets` secret-ref injection
+  ([#1030](https://github.com/jonathanung/strike/issues/1030),
+  [#1046](https://github.com/jonathanung/strike/pull/1046)).
+- **Executable hook fail-closed default** — pre/post_tool_use timeout/launch/
+  process errors fail closed (`failClosed: false` opts into fail-open); shell
+  hooks run under OS sandbox (read-only + no network) with resource caps;
+  `hook.matched` audit decisions
+  ([#1031](https://github.com/jonathanung/strike/issues/1031),
+  [#1066](https://github.com/jonathanung/strike/pull/1066)).
+- **Complete durable audit coverage** — `audit.Observe` maps network_denied,
+  content_guard_denied, blocked, hook.matched, chain-rule permissions,
+  admission.decided, and secret_ref_use (hash only)
+  ([#1032](https://github.com/jonathanung/strike/issues/1032),
+  [#1068](https://github.com/jonathanung/strike/pull/1068)).
 
 ## [v0.2.2] - 2026-08-06
 
@@ -625,7 +710,8 @@ Initial public release.
 
 **Full changelog:** [commits through v0.0.1](https://github.com/jonathanung/strike/commits/v0.0.1)
 
-[Unreleased]: https://github.com/jonathanung/strike/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/jonathanung/strike/compare/v0.3.0...HEAD
+[v0.3.0]: https://github.com/jonathanung/strike/compare/v0.2.2...v0.3.0
 [v0.2.2]: https://github.com/jonathanung/strike/compare/v0.2.0...v0.2.2
 [v0.2.0]: https://github.com/jonathanung/strike/compare/v0.1.2...v0.2.0
 [v0.1.2]: https://github.com/jonathanung/strike/compare/v0.1.1...v0.1.2
