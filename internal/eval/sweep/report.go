@@ -13,7 +13,7 @@ import (
 )
 
 // ReportSchemaVersion bumps when the summary document shape changes.
-const ReportSchemaVersion = "1.0.0"
+const ReportSchemaVersion = "1.1.0"
 
 // Benchmark names accepted by the sweep CLI / summary.
 const (
@@ -36,6 +36,10 @@ type PointMetrics struct {
 	TotalTokensOut int     `json:"totalTokensOut"`
 	TotalCostUSD   float64 `json:"totalCostUsd"`
 	TotalWallMs    int64   `json:"totalWallMs"`
+	// Optional progressive-disclosure fields (#992); zero when unset.
+	FirstTurnSchemaTokens int `json:"firstTurnSchemaTokens,omitempty"`
+	ToolSearchCalls       int `json:"toolSearchCalls,omitempty"`
+	InvalidToolCalls      int `json:"invalidToolCalls,omitempty"`
 }
 
 // PointResult is one matrix point after a subset run.

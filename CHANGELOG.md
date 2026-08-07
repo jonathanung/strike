@@ -16,6 +16,13 @@ materially affect the shipped product.
 
 ### Changed
 
+- **Progressive disclosure validation** — offline fixture pack compares full vs
+  progressive tool surfaces (schema tokens, completion, wall time) with documented
+  rollback thresholds; legacy `task` shims stay registered/deferred; docs prefer
+  `task` ([#992](https://github.com/jonathanung/strike/issues/992),
+  [#993](https://github.com/jonathanung/strike/issues/993)).
+
+
 - **Workflow tool activation** — deferred plan/child/team tool families and
   advanced `task` promote from deterministic engine state (plan mode, children,
   multi-child) without `toolsearch` or a classifier; hard denies still win

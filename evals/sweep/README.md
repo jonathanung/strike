@@ -73,3 +73,9 @@ Keep the sample fixture for schema reference.
 Before `strike exec`, the runner writes the point's JSON to
 `<workspace>/.strike/config` (project config layer). SWE-bench patch extraction
 excludes `.strike/` so the overlay never lands in `model_patch`.
+
+## Progressive disclosure offline pack
+
+For first-turn schema reduction and compatibility fixtures without Docker, see
+[`evals/progressive/README.md`](../progressive/README.md) and
+`go test ./internal/eval/progressive`.
