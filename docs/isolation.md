@@ -73,6 +73,24 @@ Inspect: `/sandbox`, `/sandbox explain`.
 **Non-goal:** reimplementing the landlock/bwrap stack. Residual work lives on
 [#799](https://github.com/jonathanung/strike/issues/799), not a reopen of #537.
 
+## Network egress allowlist (`network.allow`)
+
+Config `network.allow` (host, `*.suffix`, IP, CIDR) is the single policy source
+for application-layer egress:
+
+| Surface | Enforcement |
+|---|---|
+| `webfetch` / `websearch` | Dial/redirect checks via `sandbox.CheckNetworkAllow` |
+| bash | **v1 preflight** on known clients (`curl`, `wget`, `ssh`, `scp`, `sftp`, `nc`/`ncat`/`netcat`), including common wrappers (`env`, `timeout`, `bash -c`, …). Destinations outside the list → tool error `network_denied` (timeline `errorCode`). Unparseable destinations on those clients fail closed when the list is non-empty. |
+| OS sandbox profile | **Not** per-host: host net on by default; off only when webfetch+websearch+mcp are hard-deny on `*`. No bwrap/seatbelt/Windows host allowlist in v1. |
+| Containers (#547) | Planned stronger plane; reuse the same allowlist shape |
+
+Empty/`[]` allowlist = unrestricted **public** hosts (SSRF private blocks on
+webfetch unchanged). `/sandbox explain` prints the allowlist and
+`egress enforcement:` line (preflight vs OS gap). Prefer `webfetch` when you
+need fetch semantics; bash preflight is best-effort argv parse, not a
+transparent userspace proxy.
+
 ## Session worktrees
 
 Per-root-session git worktrees bind tool CWD to
@@ -104,10 +122,15 @@ eval pool wiring (E12.10).
 Until launch UX ships:
 
 - Prefer OS sandbox + worktrees for day-to-day coding.
-- `network.allow` is the shared **shape** for future container egress filters
-  (application-layer webfetch today; OS bash net remains all-or-nothing).
+- `network.allow` is the shared **shape** for application egress and future
+  container filters. Today: `webfetch`/`websearch` + bash **preflight** for
+  curl/wget/ssh/scp/sftp/nc (deny `network_denied` when outside the list).
+  OS bash networking remains all-or-nothing (`NoNetwork`); there is **no**
+  per-host bwrap/seatbelt/Windows filter — `/sandbox explain` labels this as
+  `egress enforcement: preflight` vs `OS host filter: none`.
 - Scheduler pool name `container` is reserved for admission once E12.10 wires
   eval onto this runtime.
+
 
 ## Resource limits (compose with scheduler)
 

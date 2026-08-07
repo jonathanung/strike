@@ -38,6 +38,7 @@ const (
 	ErrorCodeCanceled      = "canceled"
 	ErrorCodeTimeout       = "timeout"
 	ErrorCodeSandboxDenied = "sandbox_denied"
+	ErrorCodeNetworkDenied = "network_denied"
 )
 
 // UserRejectedError is returned when the user declines an interactive

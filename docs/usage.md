@@ -281,11 +281,14 @@ Resume restores the session log, not the config default.
 for bash: `off` | `read-only` | `workspace-write` (default). This is **what is
 possible**; `permissionMode` is **when you get asked**. `/sandbox` prints the
 effective policy and backend; `/sandbox explain` shows the generated profile
-(including write-deny globs and network posture compiled from permissions).
+(including write-deny globs, `network.allow`, and egress enforcement level).
 `yolo` with `sandbox: off` requires `--i-know`.
 
 OS capability blocks (read-only FS, seatbelt deny, …) surface on bash as
 `errorCode=sandbox_denied` with a human reason (timeline + model tool result).
+When `network.allow` is set, bash preflight also blocks known network clients
+(`curl`/`wget`/`ssh`/…) outside the list as `errorCode=network_denied` (shared
+allowlist with webfetch; not an OS per-host filter).
 See the isolation matrix: [isolation.md](isolation.md) (sandbox vs worktrees vs
 planned containers).
 

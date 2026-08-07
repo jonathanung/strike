@@ -27,6 +27,12 @@ materially affect the shipped product.
 
 ### Added
 
+- **Bash egress allowlist preflight** — when `network.allow` is set, bash
+  preflight denies `curl`/`wget`/`ssh`/`scp`/`sftp`/`nc` destinations outside
+  the shared host/CIDR/`*.suffix` list (same `CheckNetworkAllow` as webfetch).
+  Structured `network_denied` on the tool result/timeline. `/sandbox explain`
+  shows `egress enforcement: preflight` and documents that OS backends still
+  have no per-host filter ([#892](https://github.com/jonathanung/strike/issues/892)).
 - **Admission scan for MCP, skills, and plugins** — register/load-time
   scanners apply a severity→action matrix (`allow` / `warn` / `block` /
   `quarantine`) before MCP tools bind or skills enter the catalog. Config
@@ -41,6 +47,7 @@ materially affect the shipped product.
   file rejection, symlink-leaf refuse on write, timed reads, path identity for
   grant/overlap matching, and atomic replace; adopted by read/write/edit/
   apply_patch ([#896](https://github.com/jonathanung/strike/issues/896)).
+
 - **Permission explain dry-run + diff** — `/permission explain --preset <id>`
   evaluates under an alternate shipped preset without applying it;
   `/permission diff <a> <b>` lists added/removed/changed rules with layer
@@ -60,6 +67,7 @@ materially affect the shipped product.
   explainable chain summaries (tool names/classes only); `chainId` on
   `permission.decided` and timeline entries. State clears on turn end/interrupt
   and caps pending nodes ([#891](https://github.com/jonathanung/strike/issues/891)).
+
 - **Container runtime foundation (E12.0–E12.1)** — `internal/container` shells
   out to `docker`/`podman` via an injectable `ExecFunc` (no Moby SDK). Low-level
   `Runtime` plus per-repo `Manager` lifecycle (build/launch/attach/exec/stop/
@@ -69,6 +77,7 @@ materially affect the shipped product.
   `docs/container.md`
   ([#582](https://github.com/jonathanung/strike/issues/582),
   [#583](https://github.com/jonathanung/strike/issues/583)).
+
 - **Plugin theme contributions** — theme packages load through the plugin
   catalog/lifecycle (same lockfile and integrity path). `/theme` shows plugin
   provenance and collision winners, live-previews on cursor move without
