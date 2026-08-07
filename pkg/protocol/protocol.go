@@ -1597,12 +1597,14 @@ type UsageReported struct {
 // retried with a new attempt identity. Correlation identifies the failed
 // attempt; NextAttempt is the 1-based number of the upcoming Stream call.
 // Retries only happen at the model boundary — never after tool side effects
-// from the failed attempt have committed.
+// from the failed attempt have committed. FromProvider is true when DelayMs
+// came from a valid provider Retry-After header rather than local backoff.
 type ProviderRetrying struct {
 	Correlation
-	NextAttempt int    `json:"nextAttempt"`
-	DelayMs     int    `json:"delayMs,omitempty"`
-	Message     string `json:"message,omitempty"`
+	NextAttempt  int    `json:"nextAttempt"`
+	DelayMs      int    `json:"delayMs,omitempty"`
+	FromProvider bool   `json:"fromProvider,omitempty"`
+	Message      string `json:"message,omitempty"`
 }
 
 // ToolRetrying announces that a transient tool failure will be retried under

@@ -92,7 +92,7 @@ func (e *Engine) harnessEnvironment(ctx context.Context, corr protocol.Correlati
 			if attempt == maxAttempts || !provider.IsRetryable(err) {
 				return harness.ModelResponse{}, err
 			}
-			delay := e.streamRetryDelay(attempt + 1)
+			delay, _ := e.streamRetryDelayFor(err, attempt+1)
 			if delay > 0 {
 				timer := time.NewTimer(delay)
 				select {

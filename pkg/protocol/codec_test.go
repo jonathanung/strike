@@ -126,10 +126,11 @@ func TestWrapDecodeRoundTrip(t *testing.T) {
 			Source:      UsageSourceActual,
 		},
 		ProviderRetrying{
-			Correlation: Correlation{SessionID: "session-1", TurnID: "turn-1", ProviderRequestID: "provider-1", Attempt: 1},
-			NextAttempt: 2,
-			DelayMs:     200,
-			Message:     "rate limited",
+			Correlation:  Correlation{SessionID: "session-1", TurnID: "turn-1", ProviderRequestID: "provider-1", Attempt: 1},
+			NextAttempt:  2,
+			DelayMs:      200,
+			FromProvider: true,
+			Message:      "rate limited",
 		},
 		ToolRetrying{
 			Correlation: corr,

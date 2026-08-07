@@ -244,6 +244,185 @@ func TestRetryExhaustionFailsTurn(t *testing.T) {
 	}
 }
 
+// retryAfterStatus is a retryable provider error carrying Retry-After guidance.
+type retryAfterStatus struct {
+	msg   string
+	delay time.Duration
+}
+
+func (e retryAfterStatus) Error() string   { return e.msg }
+func (e retryAfterStatus) Retryable() bool { return true }
+func (e retryAfterStatus) RetryAfterDelay() (time.Duration, bool) {
+	if e.delay <= 0 {
+		return 0, false
+	}
+	return e.delay, true
+}
+
+func TestStreamHonorsProviderRetryAfter(t *testing.T) {
+	prov := &scriptedProvider{steps: []streamStep{
+		{err: retryAfterStatus{msg: "unexpected status 429: slow down", delay: 80 * time.Millisecond}},
+		{events: []provider.StreamEvent{
+			{Type: provider.EventTextDelta, Text: "ok"},
+			{Type: provider.EventDone, StopReason: "end_turn"},
+		}},
+	}}
+	// Local backoff would be 0 via override; provider guidance must win.
+	eng := engine.New(engine.Options{
+		SessionID:          "session-retry-after",
+		Select:             func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider:    "scripted",
+		Registry:           tool.NewRegistry(),
+		WorkDir:            t.TempDir(),
+		StreamRetryBackoff: func(int) time.Duration { return 0 },
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+	start := time.Now()
+	eng.Ops() <- protocol.UserInput{Text: "hi"}
+
+	var retry protocol.ProviderRetrying
+	var completed protocol.TurnCompleted
+	deadline := time.After(3 * time.Second)
+	for completed.StopReason == "" {
+		select {
+		case ev := <-eng.Events():
+			switch ev := ev.(type) {
+			case protocol.ProviderRetrying:
+				retry = ev
+			case protocol.TurnCompleted:
+				completed = ev
+			case protocol.EngineError:
+				t.Fatalf("unexpected EngineError: %s", ev.Message)
+			}
+		case <-deadline:
+			t.Fatal("timed out")
+		}
+	}
+	elapsed := time.Since(start)
+	if !retry.FromProvider {
+		t.Fatalf("FromProvider = false, want true; retry=%#v", retry)
+	}
+	if retry.DelayMs < 70 || retry.DelayMs > 90 {
+		t.Fatalf("DelayMs = %d, want ~80", retry.DelayMs)
+	}
+	if elapsed < 60*time.Millisecond {
+		t.Fatalf("elapsed %v, expected wait near Retry-After", elapsed)
+	}
+	if retry.Attempt != 1 || retry.NextAttempt != 2 {
+		t.Fatalf("retry attempts = %#v", retry)
+	}
+	if completed.StopReason != "end_turn" || completed.Attempt != 2 {
+		t.Fatalf("completed = %#v", completed)
+	}
+}
+
+func TestStreamInvalidRetryAfterFallsBackToLocal(t *testing.T) {
+	prov := &scriptedProvider{steps: []streamStep{
+		{err: retryAfterStatus{msg: "unexpected status 429: slow down", delay: 0}}, // ok=false
+		{events: []provider.StreamEvent{
+			{Type: provider.EventDone, StopReason: "end_turn"},
+		}},
+	}}
+	eng := engine.New(engine.Options{
+		SessionID:       "session-retry-fallback",
+		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider: "scripted",
+		Registry:        tool.NewRegistry(),
+		WorkDir:         t.TempDir(),
+		StreamRetryBackoff: func(int) time.Duration {
+			return 25 * time.Millisecond
+		},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+	eng.Ops() <- protocol.UserInput{Text: "hi"}
+
+	var retry protocol.ProviderRetrying
+	var completed protocol.TurnCompleted
+	deadline := time.After(2 * time.Second)
+	for completed.StopReason == "" {
+		select {
+		case ev := <-eng.Events():
+			switch ev := ev.(type) {
+			case protocol.ProviderRetrying:
+				retry = ev
+			case protocol.TurnCompleted:
+				completed = ev
+			case protocol.EngineError:
+				t.Fatalf("EngineError: %s", ev.Message)
+			}
+		case <-deadline:
+			t.Fatal("timed out")
+		}
+	}
+	if retry.FromProvider {
+		t.Fatalf("FromProvider true on invalid guidance: %#v", retry)
+	}
+	if retry.DelayMs != 25 {
+		t.Fatalf("DelayMs = %d, want local 25", retry.DelayMs)
+	}
+	if completed.StopReason != "end_turn" {
+		t.Fatalf("stop = %q", completed.StopReason)
+	}
+}
+
+func TestStreamRetryWaitCancelable(t *testing.T) {
+	prov := &scriptedProvider{steps: []streamStep{
+		{err: retryAfterStatus{msg: "unexpected status 429", delay: 30 * time.Second}},
+		{events: []provider.StreamEvent{{Type: provider.EventDone, StopReason: "end_turn"}}},
+	}}
+	eng := engine.New(engine.Options{
+		SessionID:          "session-retry-cancel",
+		Select:             func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider:    "scripted",
+		Registry:           tool.NewRegistry(),
+		WorkDir:            t.TempDir(),
+		StreamRetryBackoff: func(int) time.Duration { return 30 * time.Second },
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+	eng.Ops() <- protocol.UserInput{Text: "hi"}
+
+	// Wait until retry is announced, then interrupt.
+	deadline := time.After(2 * time.Second)
+	sawRetry := false
+	for !sawRetry {
+		select {
+		case ev := <-eng.Events():
+			if _, ok := ev.(protocol.ProviderRetrying); ok {
+				sawRetry = true
+			}
+		case <-deadline:
+			t.Fatal("no ProviderRetrying")
+		}
+	}
+	eng.Ops() <- protocol.Interrupt{}
+
+	var completed protocol.TurnCompleted
+	deadline = time.After(2 * time.Second)
+	for completed.StopReason == "" {
+		select {
+		case ev := <-eng.Events():
+			if c, ok := ev.(protocol.TurnCompleted); ok {
+				completed = c
+			}
+		case <-deadline:
+			t.Fatal("interrupt did not end turn during retry wait")
+		}
+	}
+	if completed.StopReason != "interrupted" {
+		t.Fatalf("stopReason = %q, want interrupted", completed.StopReason)
+	}
+	// Second stream attempt must not have run (cancel during wait).
+	if prov.callCount() != 1 {
+		t.Fatalf("Stream calls = %d, want 1 (canceled during backoff)", prov.callCount())
+	}
+}
+
 func TestToolLoopStreamFailureDoesNotRerunCompletedTools(t *testing.T) {
 	var bashRuns atomic.Int32
 	bash := &countingBash{runs: &bashRuns}

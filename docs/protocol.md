@@ -89,7 +89,7 @@ additive fields on all of them.
 | `context.controls` | `ContextControlsSelected` | Exclude/pin context kinds |
 | `scheduler.queued` / `admitted` / `canceled` | `Scheduler*` | Admission pool wait/admit/cancel |
 | `tool.loop_detected` / `tool.retrying` | `ToolLoopDetected` / `ToolRetrying` | Tool reliability signals |
-| `provider.retrying` | `ProviderRetrying` | Provider backoff |
+| `provider.retrying` | `ProviderRetrying` | Provider backoff (`delayMs`, `fromProvider` when Retry-After honored) |
 
 Derived views (not separate session event types):
 

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	mrand "math/rand"
 	"strings"
 	"time"
 	"unicode"
@@ -553,12 +554,13 @@ func (e *Engine) streamModelAttempts(ctx context.Context, turnID string) (stream
 		if attempt == maxAttempts || !provider.IsRetryable(err) {
 			return streamOutcome{}, reqCorr, err
 		}
-		delay := e.streamRetryDelay(attempt + 1)
+		delay, fromProvider := e.streamRetryDelayFor(err, attempt+1)
 		e.emit(protocol.ProviderRetrying{
-			Correlation: reqCorr,
-			NextAttempt: attempt + 1,
-			DelayMs:     int(delay / time.Millisecond),
-			Message:     err.Error(),
+			Correlation:  reqCorr,
+			NextAttempt:  attempt + 1,
+			DelayMs:      int(delay / time.Millisecond),
+			FromProvider: fromProvider,
+			Message:      err.Error(),
 		})
 		e.fireProviderRetry(reqCorr, attempt+1, err.Error())
 		if delay > 0 {
@@ -574,11 +576,20 @@ func (e *Engine) streamModelAttempts(ctx context.Context, turnID string) (stream
 	return streamOutcome{}, lastCorr, lastErr
 }
 
+// streamRetryDelayFor prefers valid provider Retry-After guidance; otherwise
+// uses StreamRetryBackoff or the default jittered exponential policy.
+func (e *Engine) streamRetryDelayFor(err error, nextAttempt int) (delay time.Duration, fromProvider bool) {
+	if d, ok := provider.RetryAfter(err); ok {
+		return d, true
+	}
+	return e.streamRetryDelay(nextAttempt), false
+}
+
 func (e *Engine) streamRetryDelay(nextAttempt int) time.Duration {
 	if e.opts.StreamRetryBackoff != nil {
 		return e.opts.StreamRetryBackoff(nextAttempt)
 	}
-	// 200ms, 400ms, 800ms… capped at 2s.
+	// 200ms, 400ms, 800ms… capped at 2s, full jitter in [0, d].
 	shift := nextAttempt - 2
 	if shift < 0 {
 		shift = 0
@@ -587,7 +598,10 @@ func (e *Engine) streamRetryDelay(nextAttempt int) time.Duration {
 	if d > 2*time.Second {
 		d = 2 * time.Second
 	}
-	return d
+	if d <= 0 {
+		return 0
+	}
+	return time.Duration(mrand.Int63n(int64(d) + 1))
 }
 
 // consumeStream runs one Provider.Stream attempt and applies the terminal
