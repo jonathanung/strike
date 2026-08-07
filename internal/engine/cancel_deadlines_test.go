@@ -307,7 +307,7 @@ func TestTurnTimeoutDuringToolPropagatesTimeoutCode(t *testing.T) {
 		Registry:        tool.NewRegistry(pt),
 		WorkDir:         t.TempDir(),
 		Rules:           []permission.Ruleset{permission.Defaults()},
-		TurnTimeout:     50 * time.Millisecond,
+		TurnTimeout:     500 * time.Millisecond,
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -315,10 +315,26 @@ func TestTurnTimeoutDuringToolPropagatesTimeoutCode(t *testing.T) {
 	eng.Ops() <- protocol.UserInput{Text: "slow tool under turn deadline"}
 	_ = receiveRequest(t, prov.requests)
 
-	select {
-	case <-pt.started:
-	case <-time.After(2 * time.Second):
-		t.Fatal("tool never started")
+	startGuard := time.NewTimer(3 * time.Second)
+	defer startGuard.Stop()
+waitForTool:
+	for {
+		select {
+		case <-pt.started:
+			break waitForTool
+		case ev, ok := <-eng.Events():
+			if !ok {
+				t.Fatal("events closed before tool started")
+			}
+			switch e := ev.(type) {
+			case protocol.EngineError:
+				t.Fatalf("engine error before tool started: code=%q message=%q", e.Code, e.Message)
+			case protocol.TurnCompleted:
+				t.Fatalf("turn completed before tool started: stopReason=%q", e.StopReason)
+			}
+		case <-startGuard.C:
+			t.Fatal("timeout waiting for tool to start")
+		}
 	}
 
 	var (
