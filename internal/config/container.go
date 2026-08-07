@@ -41,6 +41,15 @@ type ContainerConfig struct {
 	Execution string `json:"execution,omitempty"`
 	// Engine overrides the CLI binary ("docker", "podman", or absolute path).
 	Engine string `json:"engine,omitempty"`
+
+	// Language toolchain branches for the embedded Dockerfile template (/devcontainer).
+	NeedsNode     *bool  `json:"needsNode,omitempty"`
+	NodeVersion   string `json:"nodeVersion,omitempty"`
+	NeedsPython   *bool  `json:"needsPython,omitempty"`
+	PythonVersion string `json:"pythonVersion,omitempty"`
+	NeedsGo       *bool  `json:"needsGo,omitempty"`
+	GoVersion     string `json:"goVersion,omitempty"`
+	NeedsRust     *bool  `json:"needsRust,omitempty"`
 }
 
 // ContainerResources is JSON "container.resources".
@@ -126,6 +135,31 @@ func mergeContainer(base, layer ContainerConfig) ContainerConfig {
 	}
 	if layer.Engine != "" {
 		base.Engine = layer.Engine
+	}
+	if layer.NeedsNode != nil {
+		v := *layer.NeedsNode
+		base.NeedsNode = &v
+	}
+	if layer.NodeVersion != "" {
+		base.NodeVersion = layer.NodeVersion
+	}
+	if layer.NeedsPython != nil {
+		v := *layer.NeedsPython
+		base.NeedsPython = &v
+	}
+	if layer.PythonVersion != "" {
+		base.PythonVersion = layer.PythonVersion
+	}
+	if layer.NeedsGo != nil {
+		v := *layer.NeedsGo
+		base.NeedsGo = &v
+	}
+	if layer.GoVersion != "" {
+		base.GoVersion = layer.GoVersion
+	}
+	if layer.NeedsRust != nil {
+		v := *layer.NeedsRust
+		base.NeedsRust = &v
 	}
 	base.Resources = mergeContainerResources(base.Resources, layer.Resources)
 	base.Workspace = mergeContainerWorkspace(base.Workspace, layer.Workspace)
@@ -245,6 +279,21 @@ func (c ContainerConfig) ToRuntime(version string) container.Config {
 	}
 	out.Dockerfile = c.Dockerfile
 	out.TemplateVersion = version
+	if c.NeedsNode != nil {
+		out.NeedsNode = *c.NeedsNode
+	}
+	out.NodeVersion = c.NodeVersion
+	if c.NeedsPython != nil {
+		out.NeedsPython = *c.NeedsPython
+	}
+	out.PythonVersion = c.PythonVersion
+	if c.NeedsGo != nil {
+		out.NeedsGo = *c.NeedsGo
+	}
+	out.GoVersion = c.GoVersion
+	if c.NeedsRust != nil {
+		out.NeedsRust = *c.NeedsRust
+	}
 	return out
 }
 

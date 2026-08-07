@@ -652,6 +652,12 @@ global config; project file after project config).
 | `network.allow` | Reserved container egress allowlist (same shape as top-level `network.allow`) |
 | `dockerfile` | Optional hand-written Dockerfile path |
 | `engine` | Override CLI binary (`docker` / `podman` / absolute path) |
+| `needsNode` / `nodeVersion` | Install Node via NodeSource (`nodeVersion` major, default 22) |
+| `needsPython` / `pythonVersion` | Install Python apt packages (default version `3`) |
+| `needsGo` / `goVersion` | Install `golang-go` (+ build deps); `goVersion` is informational |
+| `needsRust` | Install Rust via rustup |
+
+Scaffold with `/devcontainer` or `strike container detect` (E12.5).
 
 Runtime mapping: `Config.Container.ToRuntime(version)` → `container.Config` for
 `Manager`. See [container.md](container.md) and [isolation.md](isolation.md).

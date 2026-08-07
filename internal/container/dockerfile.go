@@ -62,6 +62,21 @@ func MinimalDockerfile(cfg Config, hostUID int) string {
 		fmt.Fprintf(&b, "    python%s python3-pip \\\n", ver)
 		b.WriteString("    && rm -rf /var/lib/apt/lists/*\n")
 	}
+	if cfg.NeedsGo {
+		b.WriteString("\n# Go toolchain (distro packages; pin via base image or packages for exact versions)\n")
+		b.WriteString("RUN apt-get update && apt-get install -y --no-install-recommends \\\n")
+		b.WriteString("    golang-go gcc libc6-dev \\\n")
+		b.WriteString("    && rm -rf /var/lib/apt/lists/*\n")
+		if cfg.GoVersion != "" {
+			fmt.Fprintf(&b, "# go.mod suggested version: %s\n", cfg.GoVersion)
+		}
+	}
+	if cfg.NeedsRust {
+		b.WriteString("\n# Rust toolchain (rustup)\n")
+		b.WriteString("RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \\\n")
+		b.WriteString("    && echo 'source $HOME/.cargo/env' >> $HOME/.bashrc\n")
+		b.WriteString("ENV PATH=\"/home/strike/.cargo/bin:/root/.cargo/bin:${PATH}\"\n")
+	}
 	if len(cfg.NpmPackages) > 0 {
 		b.WriteString("\n# Global npm packages\n")
 		fmt.Fprintf(&b, "RUN npm install -g %s\n", strings.Join(cfg.NpmPackages, " "))

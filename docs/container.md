@@ -76,6 +76,24 @@ On success: build/start Manager container, copy host `strike` binary,
 `docker exec -it` with workspace mount and credential env. Nested launch is
 refused via `STRIKE_ISOLATION`.
 
+### `/devcontainer` skill (E12.5)
+
+Built-in skill that scaffolds project container config:
+
+```sh
+strike container detect          # human summary
+strike container detect --json   # markers + suggested config fragment
+```
+
+Detection reads `go.mod`, `package.json` (+ lockfiles), `requirements.txt` /
+`pyproject.toml` / `Pipfile` / `setup.py`, `Cargo.toml`, `flake.nix` /
+`shell.nix`, and `Makefile`. The skill **always** asks via the `question` tool
+(base image, deps, network posture, resources), writes `.strike/container.json`,
+shows the Dockerfile diff, and only then runs `strike container eject`.
+Config fields: `needsNode` / `nodeVersion`, `needsPython` / `pythonVersion`,
+`needsGo` / `goVersion`, `needsRust` (plus existing `packages`, `network`,
+`resources`).
+
 Still later: attach prompts (E12.6), isolation badge (E12.7).
 
 ## Binary selection

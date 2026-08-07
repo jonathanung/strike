@@ -28,6 +28,9 @@ type Config struct {
 	NodeVersion   string
 	NeedsPython   bool
 	PythonVersion string
+	NeedsGo       bool
+	GoVersion     string // informational; apt golang-go when set via packages/branch
+	NeedsRust     bool
 	NpmPackages   []string
 	PipPackages   []string
 }

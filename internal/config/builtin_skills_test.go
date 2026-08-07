@@ -13,7 +13,7 @@ func TestBuiltinSkillsShippingCommands(t *testing.T) {
 	for _, s := range skills {
 		byName[s.Name] = s
 	}
-	for _, name := range []string{"commit", "push", "pr", "ship", "review", "learn", "deslop", "verify", "write-guards"} {
+	for _, name := range []string{"commit", "push", "pr", "ship", "review", "learn", "deslop", "verify", "write-guards", "devcontainer"} {
 		s, ok := byName[name]
 		if !ok {
 			t.Fatalf("missing builtin skill %q among %+v", name, skills)
@@ -26,6 +26,13 @@ func TestBuiltinSkillsShippingCommands(t *testing.T) {
 		}
 		if got := s.Render("fix auth"); !strings.Contains(got, "fix auth") {
 			t.Errorf("%s render missing args: %q", name, got)
+		}
+	}
+	// /devcontainer must require question + confirm-before-Dockerfile.
+	dc := byName["devcontainer"]
+	for _, needle := range []string{"question", "strike container detect", "strike container eject", "Never"} {
+		if !strings.Contains(dc.Template, needle) {
+			t.Errorf("devcontainer skill missing %q", needle)
 		}
 	}
 }
@@ -44,7 +51,7 @@ func TestLoadSkillsMergesBuiltinsAndProjectOverride(t *testing.T) {
 	for _, s := range skills {
 		names[s.Name] = true
 	}
-	for _, want := range []string{"commit", "push", "pr", "ship", "review", "learn", "deslop", "verify", "write-guards"} {
+	for _, want := range []string{"commit", "push", "pr", "ship", "review", "learn", "deslop", "verify", "write-guards", "devcontainer"} {
 		if !names[want] {
 			t.Errorf("missing %s in %+v", want, skills)
 		}

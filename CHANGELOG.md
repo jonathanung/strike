@@ -41,6 +41,14 @@ materially affect the shipped product.
 
 ### Added
 
+- **/devcontainer skill** — built-in `/devcontainer` scaffolds project container
+  config: `strike container detect` scans go.mod / package.json / Python
+  manifests / Cargo.toml / flake.nix / Makefile; skill always asks via
+  `question` (base image, deps, network, resources), writes
+  `.strike/container.json`, shows Dockerfile diff, then `strike container eject`
+  only after confirm. Config: `needsNode`/`needsPython`/`needsGo`/`needsRust`
+  ([#587](https://github.com/jonathanung/strike/issues/587)).
+
 - **Write-time content guards** — `write` / `edit` / `apply_patch` /
   `notebook_edit` scan proposed content before disk. Default: credential
   shapes (PEM, AWS `AKIA…`, provider keys, GitHub/Slack tokens, …) **deny**

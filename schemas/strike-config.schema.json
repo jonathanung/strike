@@ -721,6 +721,34 @@
         "engine": {
           "type": "string",
           "description": "Container CLI binary override (docker, podman, or absolute path)."
+        },
+        "needsNode": {
+          "type": "boolean",
+          "description": "Install Node.js via NodeSource in the generated Dockerfile (E12.5)."
+        },
+        "nodeVersion": {
+          "type": "string",
+          "description": "Node major version for NodeSource setup (default 22)."
+        },
+        "needsPython": {
+          "type": "boolean",
+          "description": "Install Python via apt in the generated Dockerfile (E12.5)."
+        },
+        "pythonVersion": {
+          "type": "string",
+          "description": "Python version suffix for apt packages (default 3)."
+        },
+        "needsGo": {
+          "type": "boolean",
+          "description": "Install golang-go and build deps in the generated Dockerfile (E12.5)."
+        },
+        "goVersion": {
+          "type": "string",
+          "description": "Informational go.mod version recorded in the Dockerfile comment."
+        },
+        "needsRust": {
+          "type": "boolean",
+          "description": "Install Rust via rustup in the generated Dockerfile (E12.5)."
         }
       }
     },

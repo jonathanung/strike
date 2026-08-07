@@ -24,6 +24,22 @@ func TestMinimalDockerfile(t *testing.T) {
 	}
 }
 
+func TestMinimalDockerfileToolchains(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.NeedsNode = true
+	cfg.NodeVersion = "20"
+	cfg.NeedsPython = true
+	cfg.NeedsGo = true
+	cfg.GoVersion = "1.22"
+	cfg.NeedsRust = true
+	body := MinimalDockerfile(cfg, 1000)
+	for _, needle := range []string{"nodesource.com/setup_20.x", "python3", "golang-go", "rustup"} {
+		if !strings.Contains(body, needle) {
+			t.Fatalf("missing %q in:\n%s", needle, body)
+		}
+	}
+}
+
 func TestComputeConfigHashStable(t *testing.T) {
 	cfg := DefaultConfig()
 	body := MinimalDockerfile(cfg, 1000)
