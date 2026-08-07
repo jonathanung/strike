@@ -514,6 +514,37 @@ func TestBuildVerificationSpan(t *testing.T) {
 	}
 }
 
+func TestPermissionDecidedChainID(t *testing.T) {
+	base := time.Date(2026, 8, 6, 12, 0, 0, 0, time.UTC)
+	tr := timeline.Build([]timeline.TimedEvent{
+		{Time: base, Event: protocol.TurnStarted{Correlation: protocol.Correlation{SessionID: "s1", TurnID: "t1"}}},
+		{Time: base.Add(time.Millisecond), Event: protocol.PermissionDecided{
+			Correlation:  protocol.Correlation{SessionID: "s1", TurnID: "t1"},
+			Permission:   "webfetch",
+			Action:       "ask",
+			ChainID:      "chain_1",
+			ChainRule:    "sensitive_read_egress",
+			ChainSummary: "tool-chain chain_1: read(sensitive) then webfetch within 8 steps",
+		}},
+	}, timeline.Options{})
+	var found *timeline.Entry
+	for i := range tr.Entries {
+		if tr.Entries[i].Kind == timeline.KindPermission {
+			found = &tr.Entries[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("missing permission entry")
+	}
+	if found.ChainID != "chain_1" {
+		t.Fatalf("chainId = %q", found.ChainID)
+	}
+	if found.OutputPreview == "" {
+		t.Fatal("empty preview")
+	}
+}
+
 func int64Ptr(v int64) *int64 { return &v }
 
 func itoa(i int) string {

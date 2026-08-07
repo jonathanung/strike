@@ -14,7 +14,7 @@ session worktrees.
 | **Scheduler pools** | Concurrent bash/model/build/test inside one process | `scheduler.limits` / presets | `internal/scheduler` | Wait / `scheduler.canceled`; not a security boundary |
 | **Process resource caps** | Optional mem/CPU on a single subprocess | `ProcessSpec.Limits` (tool/harness) | Linux `prlimit` (`RLIMIT_AS`, `RLIMIT_CPU`) | Non-zero exit / signal; **no-op on non-Linux** (documented) |
 | **Wall time** | Per-bash and per-turn deadlines | bash `timeoutMs`, `TurnTimeout` | context cancel + process-group kill | `timeout` / `canceled` |
-| **Containers** (in progress) | Full host isolation for the agent runtime | epic [#547](https://github.com/jonathanung/strike/issues/547) | `internal/container` CLI shell-out to docker/podman ([#582](https://github.com/jonathanung/strike/issues/582)); Zone port | Foundation shipped; launch/attach/eject follow E12.1+ — reuse `network.allow` shape |
+| **Containers** (in progress) | Full host isolation for the agent runtime | epic [#547](https://github.com/jonathanung/strike/issues/547) | `internal/container` CLI + Manager ([#582](https://github.com/jonathanung/strike/issues/582)/[#583](https://github.com/jonathanung/strike/issues/583)) | Runtime shipped; config/eject/launch UX follow E12.2+ — reuse `network.allow` shape |
 
 ## Two-dial model (sandbox × permission)
 
@@ -102,9 +102,69 @@ caps on macOS should use wall time and/or external container isolation (#547).
 have forked, so mem/CPU caps are best-effort for sandboxed runs. Wall-time
 `Timeout` still kills the process group reliably.
 
+## Tool-chain correlation (#891)
+
+Permission rules are evaluated **per tool call**. Multi-step abuse can still
+pass each hop (e.g. `read` a secrets-class path → `webfetch`/`bash` egress;
+write a script → immediately execute it). Strike keeps a **content-free**
+rolling correlator on the permission service for the active turn:
+
+| State retained | Not retained |
+|---|---|
+| Tool/permission name, step class, path class | Tool output bodies |
+| Normalized path key for executable writes only | Secret file bytes |
+| Denial signatures (retry storms) | Cross-session history |
+
+### v1 rules
+
+| Rule id | Trigger | Default action |
+|---|---|---|
+| `sensitive_read_egress` | `read` of a sensitive-class path, then `webfetch` / `websearch` / `bash` within the lookback window | **ask** (even under `yolo`) |
+| `write_exec_bash` | `write`/`edit` of an executable/script path, then `bash` that executes/sources that path | **ask** |
+| `retry_storm` | ≥ N identical permission denials in-turn (same permission + pattern) | **deny** |
+
+Reasons and timeline fields cite **prior tool names and classes** (and a
+`chainId`), never secret bytes. `permission.decided` may carry `chainId`,
+`chainRule`, and `chainSummary`; the run timeline copies `chainId` onto the
+permission entry.
+
+State is cleared on **turn end** and **interrupt** (`BeginTurn` / `EndTurn`).
+Pending nodes are **capped** (default 64) so correlation cannot grow without
+bound.
+
+### Path classes (heuristic)
+
+- **sensitive** — `.env` / `.env.*`, common key material (`*.pem`, `id_ed25519`,
+  …), credential basenames, `secrets/` segments, kube/aws credential paths.
+- **executable** — script extensions (`.sh`, `.py`, …), paths under `bin/` or
+  `scripts/`.
+- **normal** — everything else.
+
+These heuristics are intentionally shallow. Semantic **action facts** (#888)
+can refine path/network classes later; correlation does not require an
+external audit DB.
+
+### Authoring / extension notes
+
+- Rules live in `internal/permission/chain.go` (`Correlator`). Keep new rules
+  **content-free**: classify inputs, do not buffer tool output for matching.
+- Prefer **ask** when a legitimate workflow might match; use **deny** for
+  clear retry/abuse loops.
+- Compose with (do not replace) OS sandbox, ruleset denies, and engine tool
+  loop detection.
+
+### Non-goals (v1)
+
+- Full UEBA or cross-session ML
+- Storing tool output bodies for correlation
+- External audit database
+- MCP/network tool classification without facts
+- Replacing per-call permission rules or the OS sandbox
+
 ## Related docs
 
 - [config.md](config.md) — sandbox dial, scheduler, worktrees, network.allow
 - [usage.md](usage.md) — `/sandbox`, `/permission`, worktree UX
 - [ARCHITECTURE.md](ARCHITECTURE.md) — cancel/deadline/backpressure, package map
 - [harnesses.md](harnesses.md) — external harnesses are not OS-sandboxed today
+- [protocol.md](protocol.md) — `permission.decided` chain fields (wire 1.13+)
