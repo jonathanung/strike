@@ -237,11 +237,26 @@ func TestCLICopy(t *testing.T) {
 	if err := c.CopyFrom(context.Background(), "cid", "/app", dst); err != nil {
 		t.Fatalf("copyfrom: %v", err)
 	}
-	if _, err := os.Stat(dst); err != nil {
-		t.Fatalf("dst mkdir: %v", err)
+	// parent of dst exists; dst itself is not pre-created as a directory
+	if fi, err := os.Stat(dst); err == nil && fi.IsDir() {
+		t.Fatalf("CopyFrom must not MkdirAll the destination path itself")
+	}
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("parent mkdir: %v", err)
 	}
 	if len(saw) < 3 || saw[0] != "cp" || saw[1] != "cid:/app" {
 		t.Fatalf("copyfrom args: %v", saw)
+	}
+	// file destination: parent only
+	fileDst := filepath.Join(dir, "nested", "file.txt")
+	if err := c.CopyFrom(context.Background(), "cid", "/f", fileDst); err != nil {
+		t.Fatalf("copyfrom file: %v", err)
+	}
+	if st, err := os.Stat(filepath.Join(dir, "nested")); err != nil || !st.IsDir() {
+		t.Fatalf("nested parent: %v", err)
+	}
+	if fi, err := os.Stat(fileDst); err == nil && fi.IsDir() {
+		t.Fatalf("file dst must not be a directory")
 	}
 	if err := c.CopyTo(context.Background(), "cid", "/host/f", "/c/f"); err != nil {
 		t.Fatalf("copyto: %v", err)

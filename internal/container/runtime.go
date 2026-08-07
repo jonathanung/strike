@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -317,10 +318,10 @@ func (c *CLI) InspectID(ctx context.Context, nameOrID string) (string, error) {
 
 // CopyFrom implements Runtime.
 func (c *CLI) CopyFrom(ctx context.Context, id, src, dst string) error {
-	if err := os.MkdirAll(dst, 0o755); err != nil {
-		if err2 := os.MkdirAll(parentDir(dst), 0o755); err2 != nil {
-			return fmt.Errorf("container: mkdir for copy: %w", err)
-		}
+	// Only ensure the parent exists. MkdirAll(dst) would create a directory
+	// named like the destination file when dst is a file path.
+	if err := os.MkdirAll(parentDir(dst), 0o755); err != nil {
+		return fmt.Errorf("container: mkdir for copy: %w", err)
 	}
 	spec := id + ":" + src
 	_, stderr, code, err := c.run(ctx, "cp", spec, dst)
@@ -384,11 +385,11 @@ func (c *CLI) Exec(ctx context.Context, id string, cmd []string, opts ExecOpts) 
 }
 
 func parentDir(path string) string {
-	i := strings.LastIndex(path, "/")
-	if i <= 0 {
+	dir := filepath.Dir(path)
+	if dir == "" {
 		return "."
 	}
-	return path[:i]
+	return dir
 }
 
 // Ensure CLI satisfies Runtime.

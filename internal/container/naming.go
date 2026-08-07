@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -71,14 +72,7 @@ func LabelArgs(labels map[string]string) []string {
 	for k := range labels {
 		keys = append(keys, k)
 	}
-	// small n — insertion sort keeps stdlib-only
-	for i := 1; i < len(keys); i++ {
-		j := i
-		for j > 0 && keys[j-1] > keys[j] {
-			keys[j-1], keys[j] = keys[j], keys[j-1]
-			j--
-		}
-	}
+	sort.Strings(keys)
 	args := make([]string, 0, len(keys))
 	for _, k := range keys {
 		args = append(args, k+"="+labels[k])
