@@ -10,6 +10,7 @@ import (
 
 	"github.com/jonathanung/strike-cli/internal/admission"
 	"github.com/jonathanung/strike-cli/internal/artifact"
+	"github.com/jonathanung/strike-cli/internal/audit"
 	"github.com/jonathanung/strike-cli/internal/auth"
 	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/engine"
@@ -765,11 +766,19 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		}
 
 		sid := sessionID
+		// Shared audit sink for protocol Observe + secret_ref_use inject (#1032).
+		var auditSink *audit.Sink
+		if s, err := openAuditSink(cfg); err != nil {
+			fmt.Fprintf(os.Stderr, "strike: audit sink unavailable: %v\n", err)
+		} else {
+			auditSink = s
+		}
 		eng := engine.New(engine.Options{
 			SessionID:        sid,
 			Select:           selectProvider,
 			Registry:         registry,
 			WorkDir:          toolDir,
+			Audit:            auditSink,
 			CheckpointDir:    tool.DefaultCheckpointDir(sid),
 			ProjectRoot:      projectIdentity.Root,
 			Instructions:     instructions,

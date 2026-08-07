@@ -176,3 +176,162 @@ func TestAgeRetention(t *testing.T) {
 		t.Fatalf("age prune count = %d, want 1; body=%s", bundle.Count, data)
 	}
 }
+
+func TestObserveAllFamilies(t *testing.T) {
+	dir := t.TempDir()
+	s, err := audit.Open(audit.Options{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	corr := protocol.Correlation{SessionID: "s1", TurnID: "t1"}
+
+	// permission + toolchain_match
+	if err := s.Observe(protocol.PermissionDecided{
+		Correlation:  corr,
+		Permission:   "bash",
+		Patterns:     []string{"rm -rf /"},
+		Action:       "deny",
+		ChainID:      "ch1",
+		ChainRule:    "write_exec_bash",
+		ChainSummary: "write then bash",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// content_guard via permission
+	if err := s.Observe(protocol.PermissionDecided{
+		Correlation: corr,
+		Permission:  "content_guard",
+		Action:      "deny",
+		Patterns:    []string{"secret.env"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// sandbox
+	if err := s.Observe(protocol.ToolCallEnd{
+		Correlation: corr,
+		CallID:      "c1",
+		Title:       "bash",
+		IsError:     true,
+		ErrorCode:   "sandbox_denied",
+		Output:      "Read-only file system",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// egress
+	if err := s.Observe(protocol.ToolCallEnd{
+		Correlation: corr,
+		CallID:      "c2",
+		Title:       "bash",
+		IsError:     true,
+		ErrorCode:   "network_denied",
+		Output:      `host "evil.com" is not on the network allowlist`,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// content_guard tool end
+	if err := s.Observe(protocol.ToolCallEnd{
+		Correlation: corr,
+		CallID:      "c3",
+		Title:       "write",
+		IsError:     true,
+		ErrorCode:   "content_guard_denied",
+		Output:      "credential shape denied",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// hook
+	if err := s.Observe(protocol.HookMatched{
+		Correlation: corr,
+		Event:       "pre_tool_use",
+		Action:      "shell_fail_closed",
+		Tool:        "bash",
+		Message:     "hook timed out",
+		CallID:      "c4",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// admission
+	if err := s.Observe(protocol.SchedulerQueued{
+		Correlation: corr,
+		Pools:       []string{"process"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// secret_ref_use (direct production emitter)
+	if err := s.RecordSecretRefUse("s1", "t1", "c5", "env", "abcd1234", "inject", "bash"); err != nil {
+		t.Fatal(err)
+	}
+
+	out := filepath.Join(t.TempDir(), "all.json")
+	if err := s.ExportBundle(out); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := string(data)
+	// Must not contain raw secrets
+	if strings.Contains(raw, "sk-") || strings.Contains(raw, "supersecret") {
+		t.Fatalf("secret leaked: %s", raw)
+	}
+	wantFamilies := map[string]bool{
+		"permission":      false,
+		"toolchain_match": false,
+		"content_guard":   false,
+		"sandbox":         false,
+		"egress":          false,
+		"hook":            false,
+		"admission":       false,
+		"secret_ref_use":  false,
+	}
+	var bundle struct {
+		Records []struct {
+			Family string `json:"family"`
+		} `json:"records"`
+	}
+	if err := json.Unmarshal(data, &bundle); err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range bundle.Records {
+		if _, ok := wantFamilies[r.Family]; ok {
+			wantFamilies[r.Family] = true
+		}
+	}
+	for fam, ok := range wantFamilies {
+		if !ok {
+			t.Errorf("missing family %q in export (%d records)", fam, len(bundle.Records))
+		}
+	}
+	// Documented Families list matches emitters
+	for _, f := range audit.Families {
+		if _, ok := wantFamilies[f]; !ok {
+			t.Errorf("Families lists %q but test map incomplete", f)
+		}
+	}
+}
+
+func TestObserveIgnoresTranscript(t *testing.T) {
+	dir := t.TempDir()
+	s, err := audit.Open(audit.Options{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	_ = s.Observe(protocol.UserMessage{Text: "hello agent with OPENAI_API_KEY=sk-abcdefghijklmnopqrstuv"})
+	_ = s.Observe(protocol.TextDelta{Text: "model reply"})
+	out := filepath.Join(t.TempDir(), "empty.json")
+	if err := s.ExportBundle(out); err != nil {
+		t.Fatal(err)
+	}
+	var bundle struct {
+		Count int `json:"count"`
+	}
+	data, _ := os.ReadFile(out)
+	_ = json.Unmarshal(data, &bundle)
+	if bundle.Count != 0 {
+		t.Fatalf("count = %d, want 0 for non-security events", bundle.Count)
+	}
+}

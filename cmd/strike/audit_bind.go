@@ -81,14 +81,23 @@ func openAuditSink(cfg config.Config) (*audit.Sink, error) {
 
 // bindAudit wraps store so runSession tees security events into the audit sink.
 // Failures opening the sink are non-fatal (session continues without audit).
+// When sink is non-nil it is reused (same instance as engine.Options.Audit).
 func bindAudit(store sessionStore, cfg config.Config) sessionStore {
+	return bindAuditSink(store, cfg, nil)
+}
+
+// bindAuditSink is bindAudit with an optional pre-opened sink (shared with engine).
+func bindAuditSink(store sessionStore, cfg config.Config, sink *audit.Sink) sessionStore {
 	if store == nil {
 		return store
 	}
-	sink, err := openAuditSink(cfg)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "strike: audit sink unavailable: %v\n", err)
-		return store
+	if sink == nil {
+		var err error
+		sink, err = openAuditSink(cfg)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "strike: audit sink unavailable: %v\n", err)
+			return store
+		}
 	}
 	path := ""
 	type pather interface{ Path() string }

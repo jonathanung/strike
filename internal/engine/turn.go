@@ -1004,12 +1004,18 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 		}
 		callID := call.ID
 		tc := &tool.Context{
-			WorkDir:         e.opts.WorkDir,
-			SessionTempDir:  e.ensureSessionTemp(),
-			SandboxMode:     e.opts.SandboxMode,
-			Sandbox:         e.bashSandboxPolicy(),
-			NetworkAllow:    e.opts.NetworkAllow,
-			BashSecrets:     e.opts.BashSecrets,
+			WorkDir:        e.opts.WorkDir,
+			SessionTempDir: e.ensureSessionTemp(),
+			SandboxMode:    e.opts.SandboxMode,
+			Sandbox:        e.bashSandboxPolicy(),
+			NetworkAllow:   e.opts.NetworkAllow,
+			BashSecrets:    e.opts.BashSecrets,
+			OnSecretRefUse: func(refClass, refHash, action string) {
+				if e.opts.Audit == nil {
+					return
+				}
+				_ = e.opts.Audit.RecordSecretRefUse(corr.SessionID, corr.TurnID, call.ID, refClass, refHash, action, "bash")
+			},
 			ContentGuard:    e.opts.ContentGuard,
 			WebSearch:       e.opts.WebSearch,
 			Scheduler:       e.opts.Scheduler,
