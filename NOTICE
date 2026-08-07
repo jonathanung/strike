@@ -2,3 +2,21 @@ strike-cli
 Copyright 2026 Jonathan Ung
 
 This product includes software developed by Jonathan Ung.
+
+-------------------------------------------------------------------------------
+Third-party provenance
+
+Zone (https://github.com/peasant-community/zone)
+  Copyright and contributions of the Zone authors.
+  License: MIT (see that repository's LICENSE; retained in git history).
+  Zone provided Dockerized agent workspace ideas and substantial reference
+  implementations (container lifecycle, naming/hashing, network helpers,
+  Dockerfile scaffolding patterns) that were ported or rewritten into strike's
+  native containerization (internal/container, epic
+  https://github.com/jonathanung/strike/issues/547).
+
+  Disposition: Zone is archived and no longer maintained as a separate binary.
+  Strike is Apache License 2.0. Attribution to Zone (MIT) is required for the
+  ported material; this NOTICE satisfies that obligation. Multi-harness plugin
+  surfaces from Zone were intentionally not ported.
+-------------------------------------------------------------------------------

@@ -48,6 +48,10 @@ materially affect the shipped product.
 
 ### Added
 
+- **Zone retired** — `peasant-community/zone` archived with README pointing at
+  strike; `NOTICE` records MIT→Apache-2.0 provenance for the container port
+  ([#591](https://github.com/jonathanung/strike/issues/591)).
+
 - **Attach to live container** — one container per repo (`ContainerName`);
   launch joins a compatible running container instead of creating a second.
   Stale config/image raises a prompt (attach / rebuild / cancel) or flags
