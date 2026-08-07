@@ -181,6 +181,9 @@ func (m Model) welcomeCards(statuses []host.ProviderStatus) []welcomeCard {
 	}
 	cards := make([]welcomeCard, 0, 4)
 	if m.providerName == "" || selectedUnauthed {
+		// Defense-in-depth: transcriptView gates firstRun to avoid welcome
+		// on spawned roots (#1092). This branch still guards direct
+		// welcomeView callers (tests, edge reflows).
 		if m.firstRun {
 			cards = append(cards, welcomeCard{title: "first run", tone: ui.ToneAccentAlt, primary: true, desired: 7, body: func(width, rows int) string {
 				return m.welcomeFirstRun(width, rows)

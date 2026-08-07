@@ -320,6 +320,9 @@ func (m Model) transcriptView(compact bool, width, height int) string {
 		// cards are only relevant during first-run onboarding (#1092).
 		if !m.firstRun {
 			label := shortSessionID(m.sessionID)
+			if label == "" {
+				label = "session"
+			}
 			body := m.th.Resolve().S().Muted.Render("new agent " + label)
 			if compact {
 				return body
