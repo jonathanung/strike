@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/jonathanung/strike-cli/pkg/protocol"
 )
 
 // PreflightError is a user-actionable launch failure.
@@ -38,7 +40,7 @@ const (
 // InsideContainer reports whether this process is already running in a strike
 // managed container. Prefer STRIKE_ISOLATION (set at launch) over /.dockerenv.
 func InsideContainer() bool {
-	if v := strings.TrimSpace(os.Getenv("STRIKE_ISOLATION")); v != "" {
+	if v := strings.TrimSpace(os.Getenv(protocol.IsolationEnvKey)); v != "" {
 		return strings.HasPrefix(strings.ToLower(v), "container")
 	}
 	return false

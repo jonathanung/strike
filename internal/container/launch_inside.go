@@ -117,9 +117,9 @@ func (m *Manager) execStrikeTTY(ctx context.Context, id, strikePath string, args
 	if err != nil {
 		return err
 	}
-	// docker exec -it -w workspace -e STRIKE_ISOLATION=container …
+	// docker exec -it -w workspace -e STRIKE_ISOLATION=… (real posture, not /.dockerenv)
 	work := m.Cfg.mountPath()
-	argv := []string{"exec", "-it", "-w", work, "-e", "STRIKE_ISOLATION=container"}
+	argv := []string{"exec", "-it", "-w", work, "-e", "STRIKE_ISOLATION=" + IsolationEnvValue(m.Cfg)}
 	// Forward common credential env that CollectForwardedEnv would inject at create;
 	// re-pass selected keys so late-set env still reaches the inner process.
 	for _, e := range os.Environ() {

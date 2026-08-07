@@ -118,7 +118,18 @@ strike container status        # running + config-hash compatibility
 Stale config raises `*StaleContainerError` (unwraps `ErrConfigDrift`) with
 question options attach/rebuild/cancel for CLI or the `question` tool.
 
-Still later: isolation badge (E12.7).
+### Isolation indicator (E12.7)
+
+Posture ladder (descriptive, not graded):
+
+`host+yolo` → `host+default` → `host+sandbox` → `container` → `container+no-network`
+
+- Injected as `STRIKE_ISOLATION` at process/container launch (never `/.dockerenv`).
+- Header badge (muted) next to the permission dial; `/container` full view;
+  `/legend` entries; context right-pane row.
+- `session.meta.isolation` for reproducibility (protocol 1.15+).
+
+Still later: broader test suite (E12.8).
 
 
 ## Binary selection

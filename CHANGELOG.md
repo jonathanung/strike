@@ -48,6 +48,13 @@ materially affect the shipped product.
 
 ### Added
 
+- **Isolation indicator** — header badge and `/container` show the E12.7 posture
+  ladder (`host+yolo` → `host+default` → `host+sandbox` → `container` →
+  `container+no-network`). `STRIKE_ISOLATION` is injected at launch (not
+  inferred from `/.dockerenv`); recorded on `session.meta` (`isolation`).
+  Protocol wire `1.15.0`. Legend + context pane include the label (descriptive,
+  not graded) ([#589](https://github.com/jonathanung/strike/issues/589)).
+
 - **Zone retired** — `peasant-community/zone` archived with README pointing at
   strike; `NOTICE` records MIT→Apache-2.0 provenance for the container port
   ([#591](https://github.com/jonathanung/strike/issues/591)).

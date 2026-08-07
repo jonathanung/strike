@@ -423,7 +423,7 @@ func (m *Manager) collectEnv() ([]string, error) {
 			}
 		}
 	}
-	envVars = append(envVars, "STRIKE_ISOLATION=container")
+	envVars = append(envVars, "STRIKE_ISOLATION="+IsolationEnvValue(m.Cfg))
 	return envVars, nil
 }
 

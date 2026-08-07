@@ -112,6 +112,10 @@ func (m Model) headerView(width int) string {
 	if m.permMode.Normalize() != protocol.PermissionModeDefault {
 		chips = append(chips, headerChip{85, ui.Badge(th, permissionModeBadgeTone(m.permMode), m.permMode.Short())})
 	}
+	// Isolation ladder badge (E12.7): state the posture; do not grade it.
+	if iso := m.isolationLabel(); iso != "" {
+		chips = append(chips, headerChip{84, ui.Badge(th, ui.ToneMuted, iso)})
+	}
 	if secs := m.effectivePermissionAutoApproveSeconds(); secs > 0 {
 		chips = append(chips, headerChip{80, ui.Badge(th, ui.ToneWarning, "auto-allow"+inlineGap+itoa(secs)+"s")})
 	}
@@ -708,6 +712,18 @@ func permissionModeBadgeTone(mode protocol.PermissionMode) ui.Tone {
 	default:
 		return ui.ToneMuted
 	}
+}
+
+// isolationLabel returns the E12.7 posture badge text (muted; not a grade).
+func (m Model) isolationLabel() string {
+	if m.isolation != "" {
+		return protocol.IsolationShort(m.isolation)
+	}
+	// Fallback: env (container launch) then recompute from host dials.
+	if p, ok := protocol.ParseIsolationEnv(os.Getenv(protocol.IsolationEnvKey)); ok {
+		return protocol.IsolationShort(p)
+	}
+	return protocol.IsolationShort(protocol.ComputeIsolation(false, false, m.permMode, m.sandboxMode))
 }
 
 // headerContextMeter is the compact usage chip for the status bar: a short

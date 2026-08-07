@@ -1697,6 +1697,10 @@ type SessionMeta struct {
 	PRURL    string `json:"prUrl,omitempty"`
 	PRNumber int    `json:"prNumber,omitempty"`
 	PRState  string `json:"prState,omitempty"`
+	// Isolation is the E12.7 posture ladder label (host+yolo|host+default|
+	// host+sandbox|container|container+no-network). Optional; set at session
+	// start for reproducibility (do not infer from /.dockerenv).
+	Isolation string `json:"isolation,omitempty"`
 }
 
 // SessionRewound records that the last completed user↔assistant turn was

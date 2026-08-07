@@ -341,6 +341,11 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 		// Alt screen, mouse cell motion, and focus reporting are declared on
 		// Model.View (Bubble Tea v2). Mouse cell motion keeps chrome from being
 		// natively selected; the TUI owns drag-highlight in transcript/prompt.
+		isolation := resolveIsolationPosture(opts, a)
+		// Inject real posture at launch (E12.7); do not infer from /.dockerenv.
+		_ = os.Setenv(protocol.IsolationEnvKey, isolation)
+		// Persist posture on the session for E3 reproducibility.
+		_ = a.store.Append(protocol.SessionMeta{Isolation: isolation})
 		program := tea.NewProgram(tui.New(hub.Ops(), hub.Events(), a.services, tui.Options{
 			DangerouslySkipPermissions:   opts.dangerouslySkipPermissions,
 			Theme:                        themePtr,
@@ -357,6 +362,7 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 			SandboxBackend:               sandbox.BackendName(),
 			SandboxAvailable:             sandbox.Available(),
 			SandboxExplain:               a.sandboxExplain,
+			Isolation:                    isolation,
 			PermissionAutoApproveSeconds: a.cfg.PermissionAutoApproveSeconds,
 			PermissionAutoApproveExclude: a.cfg.PermissionAutoApproveExclude,
 			Replay:                       a.replay,
@@ -524,4 +530,23 @@ func autoupdateCheckFn(rawMode string) func(context.Context) string {
 		}
 		return res.Message
 	}
+}
+
+// resolveIsolationPosture picks the E12.7 ladder label for this process.
+// Prefers an existing STRIKE_ISOLATION (container launch) over recomputing.
+func resolveIsolationPosture(opts cliOptions, a *assembled) string {
+	if p, ok := protocol.ParseIsolationEnv(os.Getenv(protocol.IsolationEnvKey)); ok {
+		return p
+	}
+	perm := protocol.PermissionModeDefault
+	if opts.dangerouslySkipPermissions {
+		perm = protocol.PermissionModeYolo
+	} else if a != nil && a.cfg.PermissionMode != "" {
+		perm = a.cfg.PermissionMode.Normalize()
+	}
+	sb := ""
+	if a != nil {
+		sb = a.sandboxMode
+	}
+	return protocol.ComputeIsolation(false, false, perm, sb)
 }

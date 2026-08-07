@@ -75,6 +75,15 @@ func (m Model) contextPaneBody(width, height int) string {
 			return st.Text.Render(s)
 		},
 	})
+	if iso := m.isolationLabel(); iso != "" {
+		rows = append(rows, row{
+			label: "isolation",
+			value: iso,
+			valueStyle: func(s string) string {
+				return st.Muted.Render(s)
+			},
+		})
+	}
 	if m.phaseName != "" || m.phaseWorkflow != "" {
 		phaseVal := sanitizeDisplayData(m.phaseName)
 		if m.phaseWorkflow != "" && m.phaseName != "" {
@@ -188,6 +197,9 @@ func (m Model) contextPaneContentRows() int {
 		n++
 	}
 	n++ // autonomy
+	if m.isolationLabel() != "" {
+		n++ // isolation
+	}
 	if m.phaseName != "" || m.phaseWorkflow != "" {
 		n++ // phase
 		if m.activePhaseGrantsLabel() != "" {

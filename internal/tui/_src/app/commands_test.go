@@ -31,6 +31,7 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 		"/autonomy":         {"set exit-gate policy (supervised/agent/checks/skip-all)", "[mode]", commandSourceBuiltin},
 		"/mode":             {"set permission posture (default/plan/accept-edits/yolo)", "[mode]", commandSourceBuiltin},
 		"/sandbox":          {"show OS sandbox policy; /sandbox explain for generated profile", "", commandSourceBuiltin},
+		"/container":        {"show isolation posture ladder (host/container) and container status", "", commandSourceBuiltin},
 		"/permission":       {"explain/diff tool permissions or list presets", "[explain [--preset id] <tool> [pattern]|diff <a> <b>|presets]", commandSourceBuiltin},
 		"/auth":             {"manage provider authentication", "[provider]", commandSourceBuiltin},
 		"/agent":            {"select an agent", "[name]", commandSourceBuiltin},
@@ -140,7 +141,7 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 }
 
 func TestValidSkillNameRejectsReservedBuiltinsIncludingMDRead(t *testing.T) {
-	for _, name := range []string{"provider", "model", "effort", "autonomy", "mode", "sandbox", "permission", "auth", "settings", "config", "agent", "agents", "activity", "files", "visualizer", "system", "telemetry", "pets", "fast", "vim", "nano", "md-read", "theme", "layout", "split", "compact", "fork", "undo", "rewind", "session", "rename", "export", "timeline", "diag", "diagnostic", "copy", "help", "keys", "legend", "memory", "issues", "plan", "goal", "loop", "workflow", "context", "effective-prompt", "cost", "upgrade", "init", "mcp", "plugin", "pane", "lsp", "diagnostics", "exit", "quit", "focus-left", "focus-right", "window-next", "window-prev", "group-next", "group-prev", "scroll-up", "scroll-down", "jump-bottom", "palette", "interrupt", "save-defaults", "leave-editor", "edit-prompt", "agent-next", "mode-next", "tool-prev", "tool-next", "tool-expand", "tool-copy", "tool-review", "tool-apply", "subagent", "parent", "subagent-next", "subagent-prev", "root-new", "root-open", "root-interrupt", "root-hide", "root-filter"} {
+	for _, name := range []string{"provider", "model", "effort", "autonomy", "mode", "sandbox", "container", "permission", "auth", "settings", "config", "agent", "agents", "activity", "files", "visualizer", "system", "telemetry", "pets", "fast", "vim", "nano", "md-read", "theme", "layout", "split", "compact", "fork", "undo", "rewind", "session", "rename", "export", "timeline", "diag", "diagnostic", "copy", "help", "keys", "legend", "memory", "issues", "plan", "goal", "loop", "workflow", "context", "effective-prompt", "cost", "upgrade", "init", "mcp", "plugin", "pane", "lsp", "diagnostics", "exit", "quit", "focus-left", "focus-right", "window-next", "window-prev", "group-next", "group-prev", "scroll-up", "scroll-down", "jump-bottom", "palette", "interrupt", "save-defaults", "leave-editor", "edit-prompt", "agent-next", "mode-next", "tool-prev", "tool-next", "tool-expand", "tool-copy", "tool-review", "tool-apply", "subagent", "parent", "subagent-next", "subagent-prev", "root-new", "root-open", "root-interrupt", "root-hide", "root-filter"} {
 		if validSkillName(name) {
 			t.Errorf("validSkillName(%q) = true, want false for reserved builtin", name)
 		}
@@ -203,6 +204,21 @@ func assertPayloadRemainsOnDescriptionRow(t *testing.T, value, prefix, payload s
 	}
 	if matchingRows != 1 {
 		t.Errorf("payload appeared on %d rows, want exactly one sanitized description row: %q", matchingRows, value)
+	}
+}
+
+func TestContainerPostureNotice(t *testing.T) {
+	m := Model{
+		isolation:   protocol.IsolationHostSandbox,
+		sandboxMode: "workspace-write",
+		permMode:    protocol.PermissionModeDefault,
+		th:          theme.Default(),
+	}
+	got := m.containerPostureNotice()
+	for _, want := range []string{"isolation: host+sandbox", "ladder:", "permissionMode=default", "sandbox=workspace-write", "STRIKE_ISOLATION"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing %q in:\n%s", want, got)
+		}
 	}
 }
 

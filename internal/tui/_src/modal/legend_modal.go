@@ -90,6 +90,12 @@ func buildLegendEntries(th theme.Theme) []legendEntry {
 		{"Chrome", ic.DetailSeparator, "label/detail separator", legendPaintMuted},
 		{"Chrome", ic.Ellipsis, "truncated marker", legendPaintMuted},
 		{"Chrome", ic.BadgeLeft + ic.Ellipsis + ic.BadgeRight, "status badge delimiters", legendPaintMuted},
+		// Isolation posture (E12.7) — descriptive labels, not grades
+		{"Isolation", "host+yolo", "agent on host; permission asks skipped", legendPaintMuted},
+		{"Isolation", "host+default", "agent on host; OS sandbox off", legendPaintMuted},
+		{"Isolation", "host+sandbox", "agent on host; OS process sandbox on", legendPaintMuted},
+		{"Isolation", "container", "agent inside managed container", legendPaintMuted},
+		{"Isolation", "container+no-network", "managed container; network mode none", legendPaintMuted},
 		// Meters / trees
 		{"Chrome", ic.MeterFill + ic.MeterEmpty, "context meter fill / empty", legendPaintAccent},
 		{"Chrome", ic.TreeExpanded, "expanded tree node", legendPaintDefault},
