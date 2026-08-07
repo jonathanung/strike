@@ -991,6 +991,7 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 		}
 		if e.opts.Depth < e.opts.MaxChildDepth {
 			tc.SpawnTask = e.spawnChild
+			tc.ResumeTask = e.resumeChild
 			tc.TaskStatus = e.childStatus
 			tc.TaskRead = e.childRead
 			tc.TaskMessage = e.childMessage
