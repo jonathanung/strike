@@ -18,6 +18,19 @@ type statusErr struct {
 func (e statusErr) Error() string   { return fmt.Sprintf("status %d", e.status) }
 func (e statusErr) Retryable() bool { return e.retryable }
 
+type retryAfterErr struct {
+	msg       string
+	d         time.Duration
+	ok        bool
+	retryable bool
+}
+
+func (e retryAfterErr) Error() string   { return e.msg }
+func (e retryAfterErr) Retryable() bool { return e.retryable }
+func (e retryAfterErr) RetryAfterDelay() (time.Duration, bool) {
+	return e.d, e.ok
+}
+
 type timeoutErr struct{}
 
 func (timeoutErr) Error() string   { return "i/o timeout" }
@@ -53,6 +66,30 @@ func TestIsRetryable(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := IsRetryable(tt.err); got != tt.want {
 				t.Fatalf("IsRetryable(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRetryAfter(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		err  error
+		want time.Duration
+		ok   bool
+	}{
+		{name: "nil", err: nil, ok: false},
+		{name: "plain", err: errors.New("boom"), ok: false},
+		{name: "carrier valid", err: retryAfterErr{msg: "429", d: 3 * time.Second, ok: true, retryable: true}, want: 3 * time.Second, ok: true},
+		{name: "carrier invalid", err: retryAfterErr{msg: "429", d: 0, ok: false, retryable: true}, ok: false},
+		{name: "wrapped carrier", err: fmt.Errorf("wrap: %w", retryAfterErr{msg: "429", d: 2 * time.Second, ok: true}), want: 2 * time.Second, ok: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := RetryAfter(tc.err)
+			if ok != tc.ok || got != tc.want {
+				t.Fatalf("RetryAfter = %v, %v; want %v, %v", got, ok, tc.want, tc.ok)
 			}
 		})
 	}
