@@ -80,7 +80,7 @@ additive fields on all of them.
 | `verification.completed` | `VerificationCompleted` | Gate outcome (`Report`: claimed vs verified, checks, env) |
 | `turn.completed` | `TurnCompleted` | Optional `verification` report when solo/harness gates ran |
 | `child.completed` | `ChildCompleted` | Optional `verification` when child spawn configured gates |
-| `permission.decided` | `PermissionDecided` | Permission audit (effective action + matched rule layer) |
+| `permission.decided` | `PermissionDecided` | Permission audit (effective action + matched rule layer); optional tool-chain fields `chainId` / `chainRule` / `chainSummary` (#891, wire 1.13+) |
 | `permission.asked` / `permission.resolved` | `PermissionAsked` / `PermissionResolved` | Interactive ask lifecycle |
 | `hook.matched` | `HookMatched` | Lifecycle hook fired (event/action/matcher/tool) |
 | `diagnostic.bundle` | `DiagnosticBundle` | Prompt/config diagnostic export payload |
