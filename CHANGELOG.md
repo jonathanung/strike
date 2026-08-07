@@ -48,6 +48,10 @@ materially affect the shipped product.
 
 ### Added
 
+- **Containerization test suite** — golden Dockerfiles, preflight failure table,
+  naming/hash/labels, `/devcontainer` skill contract, offline eject→launch→exec
+  round-trip (E12.8 / [#590](https://github.com/jonathanung/strike/issues/590)).
+
 - **Isolation indicator** — header badge and `/container` show the E12.7 posture
   ladder (`host+yolo` → `host+default` → `host+sandbox` → `container` →
   `container+no-network`). `STRIKE_ISOLATION` is injected at launch (not

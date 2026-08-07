@@ -1,4 +1,4 @@
-.PHONY: build run run-echo serve serve-expose web-build web-test web-check test vet cover cover-check clean setup restore tui-gen prompt-reg chaos harness-eval swebench-eval telemetry-check
+.PHONY: build run run-echo serve serve-expose web-build web-test web-check test vet cover cover-check clean setup restore tui-gen prompt-reg chaos harness-eval swebench-eval telemetry-check container-smoke
 
 # Overall statement-coverage floor for `make cover-check` (local / optional CI).
 # Soft baseline ~77%; keep below measured total so the gate does not flake.
@@ -116,6 +116,12 @@ cover-check: cover
 		printf "cover-check: total %s%% (floor %s%%)\n", pct, min; \
 		if (pct+0 < min+0) { print "cover-check: below COVER_MIN" > "/dev/stderr"; exit 1 } \
 	}'
+
+# Optional live docker smoke (E12.8): build default Dockerfile and run strike version inside.
+# Not part of default CI; requires docker/podman on PATH.
+container-smoke: build
+	@command -v docker >/dev/null || command -v podman >/dev/null || { echo "container-smoke: no docker/podman"; exit 1; }
+	@tmpdir=$$(mktemp -d); 	  ./strike container eject --out "$$tmpdir/Dockerfile" 2>/dev/null || true; 	  if [ ! -f "$$tmpdir/Dockerfile" ]; then echo "FROM ubuntu:24.04" > "$$tmpdir/Dockerfile"; fi; 	  engine=docker; command -v docker >/dev/null || engine=podman; 	  $$engine build -t strike-smoke:local -f "$$tmpdir/Dockerfile" "$$tmpdir"; 	  $$engine run --rm strike-smoke:local true; 	  rm -rf "$$tmpdir"; 	  echo "container-smoke: ok"
 
 clean:
 	rm -f strike $(COVER_PROFILE)
