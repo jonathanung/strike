@@ -144,7 +144,7 @@ write this file. Manual `/ftue` remains available after acknowledgement.
   "effort": "high",
   "defaultAgent": "build",
   "leanCode": "lite",
-  "deferTools": "off",
+  "deferTools": "on",
   "theme": "strike",
   "vimMode": "pane",
   "nanoMode": "pane",
@@ -432,19 +432,25 @@ none for explore/reviewer/tester/validator/commit). Inspired by
 [ponytail](https://github.com/DietrichGebert/ponytail) (clean-room wording).
 Details: [agents-skills.md](agents-skills.md#lean-code-ponytail-lite).
 
-**Deferred tool schemas:** `deferTools` is `on` | `off` (default off). When
-`on`, non-core tools are omitted from the provider `tools[]` array until
-`toolsearch` discovers them (or the model calls them by name). Core coding
-tools stay always available: `read`/`glob`/`grep`/`edit`/`write`/
-`apply_patch`/`bash`, the `task*` family, `toolsearch`, `question`, and plan
-workflow tools. Deferred surface includes optional built-ins (`webfetch`,
-`websearch`, todo/memory/issue, `sleep`, `skill`, `notebook_edit`, …) and all
-`mcp_*` tools. Discovery lives on the process registry: matches from `toolsearch`
-load full schemas on the **next** model request (including the next
-iteration of the same turn’s tool loop). Tools already present as assistant
-tool calls in history are re-promoted on each stream (so `--continue` keeps
-schemas for tools used earlier). Set `"deferTools": "on"` in global or
-project config to enable.
+**Deferred tool schemas:** `deferTools` is `on` (default) | `off`. When
+`on` (or unset), non-core tools are omitted from the provider `tools[]` array
+until `toolsearch` discovers them, the model calls them by name, or
+deterministic workflow activation promotes them. Core coding tools stay always
+available: `read`/`glob`/`grep`/`edit`/`write`/`apply_patch`/`move`/`delete`/
+`bash`, progressive `task`, `toolsearch`, and `question`. Deferred surface
+includes compatibility delegation shims (`delegate`, `task_status`,
+`task_read`, `task_message`, `task_interrupt`, `wait`), team coordination
+(`agent_roster`, `agent_message`, `agent_broadcast`, `agent_thread`,
+`agent_ownership`, `team_task`, `patch_collab`), plan tools (`plan_write`,
+`plan_read`, `plan_delegate`, `enter_plan_mode`, `exit_plan_mode`,
+`phase_done`), optional built-ins (`webfetch`, `websearch`, todo/memory/issue,
+`sleep`, `skill`, `notebook_edit`, …), and all `mcp_*` tools. Discovery lives
+on the process registry: matches from `toolsearch` load full schemas on the
+**next** model request (including the next iteration of the same turn’s tool
+loop). Tools already present as assistant tool calls in history are
+re-promoted on each stream (so `--continue` keeps schemas for tools used
+earlier). Set `"deferTools": "off"` in global or project config to expose the
+full permitted registry.
 
 **Permission soft-approve / auto-approve:** session mode `soft-approve`
 (`permissionMode`, `/mode`, Shift+Tab) arms a **visible** 15s countdown on

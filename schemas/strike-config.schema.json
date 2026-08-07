@@ -34,7 +34,7 @@
     },
     "deferTools": {
       "type": "string",
-      "description": "Defer non-core tool schemas until toolsearch. Empty means off.",
+      "description": "Defer non-core tool schemas until toolsearch. Empty means on.",
       "enum": ["on", "off"]
     },
     "defaultAgent": {

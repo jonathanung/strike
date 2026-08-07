@@ -14,6 +14,17 @@ materially affect the shipped product.
 
 ## [Unreleased]
 
+### Changed
+
+- **Progressive tool disclosure default** — `deferTools` now defaults to `on`
+  with a smaller always-visible core (`read`/`glob`/`grep`/`edit`/`write`/
+  `apply_patch`/`move`/`delete`/`bash`/`task`/`toolsearch`/`question`).
+  Compatibility delegation, team coordination, and plan tools stay registered
+  but deferred until `toolsearch`, direct call, or workflow activation.
+  Set `deferTools: "off"` to restore the full permitted `tools[]` surface
+  ([#988](https://github.com/jonathanung/strike/issues/988),
+  [#993](https://github.com/jonathanung/strike/issues/993)).
+
 ### Added
 
 - **Admission scan for MCP, skills, and plugins** — register/load-time
