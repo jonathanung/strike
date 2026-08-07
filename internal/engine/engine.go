@@ -114,10 +114,15 @@ type Options struct {
 	// (off|read-only|workspace-write). Empty means workspace-write.
 	// Distinct from InitialPermissionMode (when the agent is asked).
 	SandboxMode string
+	// SandboxAllowDegrade permits unsandboxed bash when the OS backend is
+	// unavailable. Default false is fail-closed (#1030).
+	SandboxAllowDegrade bool
 	// NetworkAllow is the config network.allow host/CIDR list for
 	// webfetch/websearch. Empty means unrestricted public hosts. Copied onto
 	// tool.Context and sandbox.Policy.NetworkAllow for /sandbox explain.
 	NetworkAllow []string
+	// BashSecrets maps env names → secret refs for bash process injection.
+	BashSecrets map[string]string
 	// ContentGuard is config contentGuard (+ managed ForcedDeny) for write-time
 	// content scanning on edit/write/apply_patch. Zero enables default posture.
 	ContentGuard tool.ContentGuardSettings

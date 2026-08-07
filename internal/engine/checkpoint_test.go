@@ -247,6 +247,7 @@ func TestRewindMultiFileRestoreOrderAndBashUncovered(t *testing.T) {
 		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
 		Registry:        tool.NewRegistry(tool.NewEdit(), tool.NewBash()),
 		WorkDir:         dir,
+		SandboxMode:     "off",
 		CheckpointDir:   t.TempDir(),
 		Rules: []permission.Ruleset{{
 			{Permission: "edit", Pattern: "*", Action: permission.Allow},
@@ -373,6 +374,7 @@ func TestRewindRestoresBashMutation(t *testing.T) {
 		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
 		Registry:        tool.NewRegistry(tool.NewBash()),
 		WorkDir:         dir,
+		SandboxMode:     "off",
 		CheckpointDir:   persist,
 		Rules: []permission.Ruleset{{
 			{Permission: "bash", Pattern: "*", Action: permission.Allow},

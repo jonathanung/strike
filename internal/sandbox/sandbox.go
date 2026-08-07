@@ -131,6 +131,10 @@ type Policy struct {
 	// from config network.allow — not enforced as a per-host OS filter
 	// (NetworkEnabled remains all-or-nothing inside bwrap/seatbelt).
 	NetworkAllow []string
+	// AllowDegrade, when true, permits non-off Mode to run unsandboxed if the
+	// OS backend is missing or wrap fails. Default false is fail-closed: bash
+	// must not silently lose isolation (#1030). Config: sandboxAllowDegrade.
+	AllowDegrade bool
 }
 
 // WorkspaceWritable reports whether the policy grants a writable workspace bind.
@@ -165,6 +169,11 @@ func Explain(p Policy) string {
 	}
 	fmt.Fprintf(&b, "workspace-write: %v\n", p.WorkspaceWritable())
 	fmt.Fprintf(&b, "network: %v\n", p.NetworkEnabled())
+	degrade := "deny (fail-closed)"
+	if p.AllowDegrade {
+		degrade = "allow (unsandboxed fallback permitted)"
+	}
+	fmt.Fprintf(&b, "degrade policy: %s\n", degrade)
 	if shared := SharedWritablePaths(p.WorkDir, p.WorkspaceWritable()); len(shared) > 0 {
 		fmt.Fprintf(&b, "shared-writable: %s\n", strings.Join(shared, ", "))
 	}
@@ -179,18 +188,30 @@ func Explain(p Policy) string {
 		backend = "(unavailable)"
 	}
 	fmt.Fprintf(&b, "backend: %s\n", backend)
+	if !Available() && p.Mode != ModeOff {
+		if p.AllowDegrade {
+			b.WriteString("backend status: unavailable (degrade allowed — bash runs unsandboxed)\n")
+		} else {
+			b.WriteString("backend status: unavailable (degrade denied — bash blocked)\n")
+		}
+	}
 	b.WriteString("profile:\n")
 	b.WriteString(ProfileText(p))
 	return b.String()
 }
 
 // describeEgressEnforcement summarizes how network.allow is enforced for this
-// policy snapshot. v1 is application preflight only; OS backends do not filter
-// by host/CIDR (NoNetwork is all-or-nothing). Documented platform gap.
+// policy snapshot. Application preflight is fail-closed on known clients,
+// interpreters, shell networking, and unknown binaries when allow is set and
+// OS network remains on. OS backends do not filter by host/CIDR.
 func describeEgressEnforcement(p Policy) string {
 	var parts []string
 	if len(p.NetworkAllow) > 0 {
-		parts = append(parts, "preflight (curl/wget/ssh/scp/sftp/nc + webfetch/websearch; shared network.allow)")
+		if p.NoNetwork {
+			parts = append(parts, "preflight skipped (OS network off — stronger isolation boundary)")
+		} else {
+			parts = append(parts, "preflight fail-closed (known clients + interpreters + shell-net + unknown binaries; webfetch/websearch; shared network.allow)")
+		}
 	} else {
 		parts = append(parts, "none (network.allow empty — unrestricted public hosts)")
 	}

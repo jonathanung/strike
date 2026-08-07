@@ -2,6 +2,7 @@ package tool
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -359,12 +360,14 @@ func TestRunProcessSandboxPolicyDegradesOrRuns(t *testing.T) {
 	// is missing/blocked (graceful degrade) and must still succeed when applied.
 	dir := t.TempDir()
 	var started []string
+	// AllowDegrade so CI hosts without bwrap/sandbox-exec still exercise the path.
 	res, err := RunProcess(context.Background(), ProcessSpec{
 		Argv: []string{"bash", "-c", "printf hi"},
 		Dir:  dir,
 		Sandbox: sandbox.Policy{
-			Mode:    sandbox.ModeWorkspaceWrite,
-			WorkDir: dir,
+			Mode:         sandbox.ModeWorkspaceWrite,
+			WorkDir:      dir,
+			AllowDegrade: true,
 		},
 	}, ProcessObserver{
 		Started: func(_ string, argv []string) {
@@ -390,6 +393,32 @@ func TestRunProcessSandboxPolicyDegradesOrRuns(t *testing.T) {
 	if !res.SandboxApplied && !res.SandboxDegraded {
 		// Backend may report Applied via wrap; if neither, Mode was treated as off.
 		t.Logf("sandbox neither applied nor degraded (backend=%q) — ok if probe flaky", res.SandboxBackend)
+	}
+}
+
+func TestRunProcessSandboxDegradeFailClosed(t *testing.T) {
+	// When Mode is non-off and AllowDegrade is false, a missing backend must
+	// not run the process unsandboxed (#1030).
+	if sandbox.Available() {
+		t.Skip("backend available — cannot force degrade path")
+	}
+	sandbox.ResetWarnForTest()
+	dir := t.TempDir()
+	_, err := RunProcess(context.Background(), ProcessSpec{
+		Argv: []string{"bash", "-c", "echo should-not-run"},
+		Dir:  dir,
+		Sandbox: sandbox.Policy{
+			Mode:    sandbox.ModeWorkspaceWrite,
+			WorkDir: dir,
+			// AllowDegrade false (default)
+		},
+	}, ProcessObserver{})
+	if err == nil {
+		t.Fatal("expected sandbox_denied when backend unavailable and degrade denied")
+	}
+	var ce *CodedError
+	if !errors.As(err, &ce) || ce.Code != CodeSandboxDenied {
+		t.Fatalf("err = %v (%T), want sandbox_denied", err, err)
 	}
 }
 

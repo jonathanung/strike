@@ -656,6 +656,7 @@ func TestGeneralRootAllowsBashWithoutAsk(t *testing.T) {
 		InitialProvider: "scripted",
 		Registry:        tool.NewRegistry(tool.NewBash()),
 		WorkDir:         t.TempDir(),
+		SandboxMode:     "off",
 		Rules:           []permission.Ruleset{permission.Defaults()},
 		Agents: []engine.Agent{
 			{Name: "build"},
@@ -746,6 +747,7 @@ func TestGeneralChildAllowsBashWithoutAsk(t *testing.T) {
 		InitialProvider: "scripted",
 		Registry:        tool.NewRegistry(tool.NewTask(), tool.NewBash()),
 		WorkDir:         dir,
+		SandboxMode:     "off",
 		// Defaults: bash=ask. general profile must upgrade without prompting.
 		Rules: []permission.Ruleset{permission.Defaults()},
 		Agents: []engine.Agent{
