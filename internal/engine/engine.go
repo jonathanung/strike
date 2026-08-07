@@ -506,6 +506,19 @@ type Engine struct {
 	// follow-up prompts typed mid-turn are not lost.
 	pendingUserInputs []pendingUserInput
 
+	// activeTurnID is the immutable id of the in-flight root turn (empty when
+	// idle). Used to validate protocol.Steer targeting.
+	activeTurnID string
+	// pendingSteer holds at most one active-turn redirect. Applied at the next
+	// safe Provider.Stream boundary (never mid-tool-call). Replaces prior
+	// pending steer text rather than queueing. Guarded by pendingSteerMu
+	// (Run handleOp vs turn worker).
+	pendingSteerMu sync.Mutex
+	pendingSteer   *pendingSteer
+	// steerQueueFallback is set by the turn worker when a steer must become
+	// the next UserInput; Run drains it into pendingUserInputs.
+	steerQueueFallback *pendingUserInput
+
 	// mailbox holds unread peer/team messages for this session. Delivery is
 	// at tool-round / turn boundaries (injectPendingMailbox /
 	// flushPendingMailbox), never mid-tool-call.
@@ -1286,6 +1299,9 @@ func (e *Engine) clearTurn() {
 	e.turnDone = nil
 	e.turnCancel = nil
 	e.turnFinishing = nil
+	e.activeTurnID = ""
+	// Drop unapplied steer on turn clear only when already fallback-queued;
+	// otherwise leave pendingSteer for failTurn path to convert to queue.
 }
 
 // cancelAndJoinTurn cancels any active turn, waits for its worker to finish,
