@@ -29,6 +29,7 @@ type cliOptions struct {
 	continueSession            bool
 	sessionID                  string // --session: resume a specific root session
 	worktree                   bool   // --worktree: force a git worktree for this session
+	launchInsideContainer      bool   // --launch-inside-container: re-exec strike in managed container
 	telemetry                  bool   // --telemetry: show local system metrics pane
 	upgrade                    bool
 	version                    bool
@@ -109,6 +110,13 @@ var optionSpecs = []optionSpec{
 		description: "run this session in an isolated git worktree under .strike/worktrees/",
 		register: func(fs *flag.FlagSet, opts *cliOptions) {
 			fs.BoolVar(&opts.worktree, "worktree", false, "")
+		},
+	},
+	{
+		names:       []string{"launch-inside-container"},
+		description: "build/start the project container and re-exec strike inside it (E12.4)",
+		register: func(fs *flag.FlagSet, opts *cliOptions) {
+			fs.BoolVar(&opts.launchInsideContainer, "launch-inside-container", false, "")
 		},
 	},
 	{

@@ -43,6 +43,7 @@ Options:
   --continue                         resume the most recent root session (model history + selections)
   --session <id>                     resume a specific session by id (model history + selections)
   --worktree                         run this session in an isolated git worktree under .strike/worktrees/
+  --launch-inside-container          build/start the project container and re-exec strike inside it (E12.4)
   --telemetry                        show local system metrics pane (CPU/RAM/disk); on by default
   --upgrade                          download and install the latest GitHub Release
   --version                          print version and exit
