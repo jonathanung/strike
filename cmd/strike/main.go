@@ -10,7 +10,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/sandbox"
@@ -27,13 +29,17 @@ type cliOptions struct {
 	dangerouslySkipPermissions bool
 	providerSet                bool
 	continueSession            bool
-	sessionID                  string // --session: resume a specific root session
-	worktree                   bool   // --worktree: force a git worktree for this session
-	launchInsideContainer      bool   // --launch-inside-container: re-exec strike in managed container
-	containerRebuild           bool   // --container-rebuild: replace stale live container
-	containerAttachStale       bool   // --container-attach-stale: join drifted container
-	containerCancelStale       bool   // --container-cancel: refuse stale container non-interactively
-	telemetry                  bool   // --telemetry: show local system metrics pane
+	sessionID                  string  // --session: resume a specific root session
+	worktree                   bool    // --worktree: force a git worktree for this session
+	turnTimeout                string  // --turn-timeout: root-turn wall-clock deadline (duration or off)
+	turnTimeoutSet             bool    // true when --turn-timeout was explicitly passed
+	launchInsideContainer      bool    // --launch-inside-container: re-exec strike in managed container
+	containerRebuild           bool    // --container-rebuild: replace stale live container
+	containerAttachStale       bool    // --container-attach-stale: join drifted container
+	containerCancelStale       bool    // --container-cancel: refuse stale container non-interactively
+	telemetry                  bool    // --telemetry: show local system metrics pane
+	maxCost                    float64 // --max-cost: session cost envelope USD (#577)
+	maxCostSet                 bool
 	upgrade                    bool
 	version                    bool
 }
@@ -116,6 +122,14 @@ var optionSpecs = []optionSpec{
 		},
 	},
 	{
+		names:       []string{"turn-timeout"},
+		valueName:   "duration",
+		description: "root-turn wall-clock deadline (e.g. 30m, 1h, 1800s); off/0 disables; overrides session.turnTimeoutS",
+		register: func(fs *flag.FlagSet, opts *cliOptions) {
+			fs.StringVar(&opts.turnTimeout, "turn-timeout", "", "")
+		},
+	},
+	{
 		names:       []string{"launch-inside-container"},
 		description: "build/start the project container and re-exec strike inside it (E12.4)",
 		register: func(fs *flag.FlagSet, opts *cliOptions) {
@@ -148,6 +162,14 @@ var optionSpecs = []optionSpec{
 		description: "show local system metrics pane (CPU/RAM/disk); on by default",
 		register: func(fs *flag.FlagSet, opts *cliOptions) {
 			fs.BoolVar(&opts.telemetry, "telemetry", false, "")
+		},
+	},
+	{
+		names:       []string{"max-cost"},
+		valueName:   "usd",
+		description: "session cost envelope in USD (hard stop; overrides config session.maxSessionCostUSD)",
+		register: func(fs *flag.FlagSet, opts *cliOptions) {
+			fs.Float64Var(&opts.maxCost, "max-cost", 0, "")
 		},
 	},
 	{
@@ -286,6 +308,12 @@ func parseCLIOptions(args []string) (cliOptions, error) {
 		if f.Name == "provider" && opts.provider != "" {
 			opts.providerSet = true
 		}
+		if f.Name == "turn-timeout" {
+			opts.turnTimeoutSet = true
+		}
+		if f.Name == "max-cost" {
+			opts.maxCostSet = true
+		}
 	})
 	if fs.NArg() != 0 {
 		return cliOptions{}, fmt.Errorf("unexpected argument %q", fs.Arg(0))
@@ -301,7 +329,46 @@ func parseCLIOptions(args []string) (cliOptions, error) {
 			return cliOptions{}, err
 		}
 	}
+	opts.turnTimeout = strings.TrimSpace(opts.turnTimeout)
+	if opts.turnTimeoutSet {
+		if _, err := parseTurnTimeoutFlag(opts.turnTimeout); err != nil {
+			return cliOptions{}, err
+		}
+	}
 	return opts, nil
+}
+
+// parseTurnTimeoutFlag maps a --turn-timeout value to config seconds.
+// "off"/"none"/"disable"/empty/"0" → -1 (disabled). Duration strings and plain
+// integer seconds are accepted. Returns seconds for ResolveTurnTimeout.
+func parseTurnTimeoutFlag(value string) (int, error) {
+	v := strings.ToLower(strings.TrimSpace(value))
+	switch v {
+	case "", "off", "none", "disable", "disabled", "0":
+		return -1, nil
+	}
+	// Plain integer seconds (no unit).
+	if n, err := strconv.Atoi(v); err == nil {
+		if n < 0 {
+			return -1, nil
+		}
+		if n == 0 {
+			return -1, nil
+		}
+		return n, nil
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		return 0, fmt.Errorf("invalid --turn-timeout %q (want duration like 30m/1h/1800s, or off)", value)
+	}
+	if d <= 0 {
+		return -1, nil
+	}
+	secs := int(d / time.Second)
+	if secs < 1 {
+		secs = 1
+	}
+	return secs, nil
 }
 
 // parseSandboxFlag validates a --sandbox value and returns the canonical token.

@@ -376,7 +376,7 @@
       "properties": {
         "event": {
           "type": "string",
-          "description": "pre_tool_use | post_tool_use | turn_start | turn_end. Shell hooks only for pre/post_tool_use.",
+          "description": "Lifecycle vocabulary v1: session_start|session_resume|session_end|turn_start|turn_end|provider_attempt|provider_retry|permission_resolution|compaction|phase_transition|child_lifecycle|verification_gate|pre_tool_use|post_tool_use. Shell hooks may observe all; block only on pre_tool_use.",
           "enum": [
             "pre_tool_use",
             "post_tool_use",
@@ -551,11 +551,25 @@
           "description": "Bound traces/runs by total bytes (0 = unlimited).",
           "minimum": 0
         },
+        "maxSessionCostUSD": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Outer session cost envelope in USD (#577). Zero = unlimited. Enforced when catalog pricing is available."
+        },
+        "maxTurnTokens": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Per-turn accumulated stream token ceiling (#577). Zero = unlimited."
+        },
         "agentBudget": {
           "$ref": "#/$defs/agentBudget"
         },
         "delegationPolicy": {
           "$ref": "#/$defs/delegationPolicy"
+        },
+        "turnTimeoutS": {
+          "type": "integer",
+          "description": "Root-turn wall-clock deadline in seconds. 0/omitted = default 1800 (30m). Negative disables. Fresh per turn; resume does not inherit an expired deadline."
         },
         "auditRetentionMaxEvents": {
           "type": "integer",

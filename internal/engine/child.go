@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -426,6 +427,10 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 		PersistProjectRule:         e.opts.PersistProjectRule,
 		DangerouslySkipPermissions: e.opts.DangerouslySkipPermissions,
 		DefaultChildBudget:         e.opts.DefaultChildBudget,
+		MaxSessionCostUSD:          e.opts.MaxSessionCostUSD,
+		MaxTurnTokens:              e.opts.MaxTurnTokens,
+		EstimateUsageCost:          e.opts.EstimateUsageCost,
+		SessionBudget:              e.sessionBudget,
 		DelegationPolicy:           e.opts.DelegationPolicy,
 		SessionBudgetExhausted:     e.opts.SessionBudgetExhausted,
 	})
@@ -538,6 +543,7 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 	e.emit(startedEv)
 	e.persistChildEvent(childID, startedEv)
 	h.noteEvent(startedEv)
+	e.fireChildLifecycle(childCorr, childID, agentName, "started", "prompt_chars="+strconv.Itoa(len(req.Prompt)))
 	e.emitTeamRoster()
 
 	// stopReason is delivered once when the child turn ends. Buffer 1 so the
@@ -585,6 +591,9 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 			case protocol.PathOverlap:
 				// Multi-agent path conflicts from child writers surface on the
 				// parent stream for lead/UI visibility.
+				e.emit(ev)
+			case protocol.SessionBudgetWarning:
+				// Session envelope warnings from children (#577) — root TUI.
 				e.emit(ev)
 			case protocol.SchedulerQueued, protocol.SchedulerAdmitted, protocol.SchedulerCanceled:
 				// Surface queue lifecycle so parent TUI/task_status can show
@@ -744,6 +753,7 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 		e.emit(completed)
 		e.persistChildEvent(childID, completed)
 		h.noteEvent(completed)
+		e.fireChildLifecycle(childCorr, childID, agentName, string(status), "summary_chars="+strconv.Itoa(len(completed.Summary)))
 		e.finishChild(h, completed)
 		e.onChildDelegationTerminal(childID, status)
 		// Wake wait-tool subscribers before the model-facing notice path so
@@ -943,7 +953,7 @@ func (h *childHandle) noteEvent(ev protocol.Event) {
 			h.budget.noteProgress(now, label)
 		}
 	case protocol.UsageReported:
-		// Accumulate stream usage toward token budget (#774).
+		// Accumulate stream usage toward token/cost budget (#774 / #577).
 		tokens := 0
 		if ev.Used.Known {
 			tokens = ev.Used.N
@@ -963,6 +973,25 @@ func (h *childHandle) noteEvent(ev protocol.Event) {
 		}
 		if h.budget != nil && tokens > 0 {
 			h.budget.noteUsage(tokens, now)
+		}
+		// Per-child MaxCostUSD once session pricing is available (#577).
+		if h.budget != nil && h.eng != nil && h.eng.opts.EstimateUsageCost != nil {
+			u := provider.Usage{}
+			if ev.Input.Known {
+				u.InputTokens = ev.Input.N
+			}
+			if ev.Output.Known {
+				u.OutputTokens = ev.Output.N
+			}
+			if ev.CacheRead.Known {
+				u.CacheReadTokens = ev.CacheRead.N
+			}
+			if ev.CacheCreation.Known {
+				u.CacheCreationTokens = ev.CacheCreation.N
+			}
+			if cost := h.eng.opts.EstimateUsageCost(h.eng.provName, h.eng.model, u); cost > 0 {
+				h.budget.noteCost(cost, now)
+			}
 		}
 	case protocol.PermissionAsked:
 		h.awaitingPerm = true

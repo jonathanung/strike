@@ -30,6 +30,9 @@ func (e *Engine) handleOp(ctx context.Context, op protocol.Op) {
 			})
 			return
 		}
+		if e.rejectUserInputIfBudgetExhausted() {
+			return
+		}
 		e.startTurn(ctx, op.Text, op.Images)
 	case protocol.SelectModel:
 		e.handleSelect(op)

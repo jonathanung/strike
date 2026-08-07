@@ -33,4 +33,6 @@ const (
 	// ErrorCodeQueueFull is backpressure rejection when a bounded queue is full
 	// (e.g. mid-turn user-input buffer). Callers should retry after the turn.
 	ErrorCodeQueueFull = "queue_full"
+	// ErrorCodeBudgetExhausted is a session cost/token envelope hard stop (#577).
+	ErrorCodeBudgetExhausted = "budget_exhausted"
 )

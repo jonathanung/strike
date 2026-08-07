@@ -816,6 +816,32 @@ Each `bash` invocation is a fresh process whose cwd is that session workdir
 does not affect later bash calls or other tools; chain with `&&` or
 `(cd subdir && …)` when a single command needs a subdirectory.
 
+### Root-turn deadline (`session.turnTimeoutS`)
+
+Each root user turn gets an independent wall-clock deadline so a stuck provider
+stream or long-running tool cannot retain the active turn indefinitely.
+
+| `session.turnTimeoutS` | Behavior |
+|---|---|
+| omitted / `0` | **default 1800** (30 minutes) — bounds unattended runs without breaking ordinary builds |
+| positive integer | that many seconds per root turn |
+| negative (e.g. `-1`) | disabled — cancel only via Interrupt / parent context |
+
+CLI: `strike --turn-timeout 30m` (or `1h`, `1800s`, plain seconds). Use
+`--turn-timeout off` (or `0` / `none`) to disable for that invocation. CLI
+overrides config.
+
+**Interaction:** expiry cancels the turn context (provider stream drain, in-flight
+tools, bash process groups, scheduler waiters) the same way as other turn
+deadlines — see [ARCHITECTURE.md](ARCHITECTURE.md#cancellation-deadlines-and-backpressure).
+Terminal events use `stopReason=timeout` and `EngineError` code `timeout`,
+distinct from user `interrupted` and provider `error`. Partial tool output stays
+structurally valid in history. **Resume / `--continue`:** each new turn applies
+the configured posture again; an expired deadline from a prior process is not
+restored. Child agents use `session.agentBudget` wall-clock limits, not this dial.
+Inspect the effective value via the diagnostic bundle (`config.turnTimeoutS`;
+negative means off).
+
 ### Parallel children and path overlap
 
 Within one session team, `task` children share the lead's tool CWD. Write tools
@@ -959,11 +985,20 @@ killing when no hard threshold is set.
 Progress clears soft stall flags and allows a later rising-edge signal. Prefer
 `wait` / `task` action=wait over busy-polling status.
 
-**Session cost envelope (#577 / #542):** when `maxSessionCostUSD` is configured
-it remains the **outer** cost cap for the whole session. Per-agent
+**Session cost envelope (#577 / #542):**
+
+| Field | Meaning |
+|---|---|
+| `session.maxSessionCostUSD` | Outer USD ceiling for the whole session (0 = unlimited). CLI `--max-cost` overrides. |
+| `session.maxTurnTokens` | Per-turn accumulated stream token ceiling (0 = unlimited). |
+
+When `maxSessionCostUSD` is set it is the **outer** cost cap. Per-agent
 `maxCostUsd` nests inside that envelope and never raises the session ceiling.
-Until session cost pricing ships, `maxCostUsd` is accepted and exposed but not
-enforced (usage stays 0).
+Cost is estimated from models.dev / catalog rates on each `usage.reported`.
+At 50% / 80% / 100% the engine emits `session.budget_warning`; at 100% it hard-
+stops with `EngineError` code `budget_exhausted` and `TurnCompleted`
+`stopReason=budget_exhausted` (not a silent halt). The TUI status bar shows a
+budget chip at those thresholds. Delegation fan-out is denied while exhausted.
 
 **Isolated worktree path (explicit apply):** for true filesystem isolation,
 prefer separate root sessions with `session.worktree=always` (or
@@ -1619,6 +1654,9 @@ Lifecycle hooks live in the same JSON config under `hooks` (global then
 project **concatenate**). Each entry is either a **declarative rule**
 (`action`) or a **shell command** (`command`) — not both.
 
+**Vocabulary version:** `1.0.0` (`tool.LifecycleVocabularyVersion`). Bump only
+when event names or payload contracts change in a breaking way.
+
 ```json
 {
   "hooks": [
@@ -1634,6 +1672,11 @@ project **concatenate**). Each entry is either a **declarative rule**
       "message": "writes blocked by policy"
     },
     {
+      "event": "session_start",
+      "action": "notify",
+      "message": "session began"
+    },
+    {
       "event": "post_tool_use",
       "matcher": "edit",
       "command": "echo ok",
@@ -1645,32 +1688,74 @@ project **concatenate**). Each entry is either a **declarative rule**
 
 | Field | Notes |
 |---|---|
-| `event` | `pre_tool_use`, `post_tool_use`, `turn_start`, `turn_end` |
-| `matcher` | doublestar on tool name; empty/`*` = all (turn events: empty/`*` only) |
-| `action` | `log`, `block`, or `notify` (block only on `pre_tool_use`) |
+| `event` | lifecycle name (see table below) |
+| `matcher` | doublestar on **subject** (tool name, phase, permission, child id, …); empty/`*` = all; subject-less events match empty/`*` only |
+| `action` | `log`, `block`, or `notify` (**block only on `pre_tool_use`**) |
 | `message` | optional block/notify text |
-| `command` | `bash -c` with event JSON on stdin (shell hooks: tool events) |
+| `command` | `bash -c` with event JSON on stdin |
 | `timeoutMs` | shell bound; default 30000, max 120000 |
+
+### Lifecycle events (v1.0.0)
+
+| Event | When | Shell may block? |
+|---|---|---|
+| `session_start` | fresh engine `Run` (no resume seed) | no |
+| `session_resume` | `QuietStartup` or seeded `InitialMessages` | no |
+| `session_end` | engine `Run` shutdown | no |
+| `turn_start` / `turn_end` | each user turn | no |
+| `provider_attempt` | each provider stream attempt | no |
+| `provider_retry` | transient provider retry scheduled | no |
+| `permission_resolution` | after each `PermissionDecided` | no |
+| `compaction` | after successful history compaction | no |
+| `phase_transition` | workflow phase enter/clear/recovery | no |
+| `child_lifecycle` | child agent started / completed | no |
+| `verification_gate` | independent completion gates start/result | no |
+| `pre_tool_use` | before tool Execute | **yes** (exit ≠ 0 or `action: block`) |
+| `post_tool_use` | after tool Execute | no (observe / inject only; non-zero is observe-only for shell on non-pre events — post shell non-zero still marks feedback blocked for **compat**) |
+
+### Dispatch order
+
+1. **Declarative rules** for the event (config order; first-match block on `pre_tool_use` wins last message).
+2. **Shell hooks** for the event (config order).
+
+Tool path specifically:
+
+`declarative pre_tool_use` → `shell pre_tool_use` → **Execute** → `shell post_tool_use` → `declarative post_tool_use`
+
+### Failure, timeout, cancellation
+
+| Condition | Policy |
+|---|---|
+| Shell exit 0 | allow; stdout may inject into tool feedback |
+| Shell exit ≠ 0 on `pre_tool_use` | **block** tool (no Execute) |
+| Shell exit ≠ 0 on other events | **fail-open** (observe-only); inject recorded when useful |
+| Timeout / start failure | **fail-open** |
+| Context cancel | return cancel; partial inject kept |
+| Hard permission **deny** | evaluated **before** hooks; hooks **cannot widen** a hard deny into allow |
+| Completed side effects | hooks after Execute cannot roll back tool work; post hooks are observational (+ optional feedback inject) |
 
 Invalid rows are dropped at load. Peer event-name mapping (CC/OpenCode/Crush):
 [peer-ecosystem.md](peer-ecosystem.md#hooks-alignment).
 
 ### Shell hook stdin payload
 
-Shell hooks (`command`) receive one JSON object on stdin (not env vars):
+Shell hooks (`command`) receive one JSON object on stdin (not env vars). Payloads
+are **secret-redacted** and **field-bounded** before marshal (`schema_version` =
+vocabulary version).
 
 | Field | When | Notes |
 |---|---|---|
-| `event` | always | `pre_tool_use` or `post_tool_use` |
+| `schema_version` | always | e.g. `1.0.0` |
+| `event` | always | lifecycle name |
 | `session_id` | always | session id |
+| `turn_id` / `provider_request_id` / `attempt` / `depth` / `parent_session_id` | when known | stable correlation for replay |
 | `cwd` | always | engine workdir |
-| `tool_name` | tool events | e.g. `edit`, `write` |
-| `tool_call_id` | tool events | call id |
-| `tool_input` | tool events | raw tool args object (`filePath` for `edit`/`write`) |
-| `tool_output` | `post_tool_use` | tool result text |
-| `is_error` | `post_tool_use` | `true` when the tool failed |
+| `subject` | when set | matcher target (tool, phase, permission, …) |
+| `tool_name` / `tool_call_id` / `tool_input` | tool events | args redacted+bounded |
+| `tool_output` / `is_error` | `post_tool_use` | output redacted+bounded |
+| `status` / `detail` | lifecycle events | short machine label + redacted detail |
 
-Exit **0** allows; non-zero **blocks** (pre: deny tool; post: mark the completed call blocked and replace feedback). Timeouts and start failures **fail-open**. Prefer always-exit-0 recipes for non-blocking side effects (formatters, notify).
+Exit **0** allows; non-zero **blocks only on `pre_tool_use`**. Timeouts and start failures **fail-open**. Prefer always-exit-0 recipes for non-blocking side effects (formatters, notify). **Compat:** `post_tool_use` shell non-zero still marks the completed call's feedback blocked (historical behavior) but cannot undo side effects.
 
 ### Post-edit formatters (recipe)
 

@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/plugin"
@@ -457,15 +458,57 @@ type SessionConfig struct {
 	// AuditRetentionMaxAgeDays deletes audit rows older than N days
 	// (0 = package default 90 when both audit axes unset).
 	AuditRetentionMaxAgeDays int `json:"auditRetentionMaxAgeDays,omitempty"`
+	// MaxSessionCostUSD is the outer session cost envelope in USD (#577).
+	// Zero means unlimited. Enforced in the engine turn loop when pricing is
+	// available; nests above per-agent maxCostUsd.
+	MaxSessionCostUSD float64 `json:"maxSessionCostUSD,omitempty"`
+	// MaxTurnTokens caps accumulated stream tokens within one engine turn
+	// (#577). Zero means unlimited.
+	MaxTurnTokens int `json:"maxTurnTokens,omitempty"`
 	// AgentBudget is the default per-child resource limit for task spawns
 	// (#774). Spawn-time task.budget fields overlay non-zero values. Zero
 	// means unlimited for that dimension (soft stall/loop signals still
-	// apply). Distinct from future session maxSessionCostUSD (#577), which
-	// remains the outer cost envelope when configured.
+	// apply). Nested under maxSessionCostUSD when that outer envelope is set.
 	AgentBudget AgentBudgetConfig `json:"agentBudget,omitempty"`
 	// DelegationPolicy is the pre-spawn worthiness gate (#876): whether to
 	// fan out vs run locally. See docs/config.md.
 	DelegationPolicy DelegationPolicyConfig `json:"delegationPolicy,omitempty"`
+	// TurnTimeoutS is the root-turn wall-clock deadline in seconds (#1037).
+	// Zero / omitted means the product default (DefaultTurnTimeoutS = 1800).
+	// Negative disables the deadline (cancel only via Interrupt / parent ctx).
+	// Applied per turn at start — resume does not inherit an expired deadline.
+	// Child engines do not inherit this dial (they use session.agentBudget).
+	TurnTimeoutS int `json:"turnTimeoutS,omitempty"`
+}
+
+// DefaultTurnTimeoutS is the product default root-turn wall-clock deadline
+// (30 minutes). Long enough for ordinary builds and multi-tool turns; short
+// enough to bound unattended stuck provider streams.
+const DefaultTurnTimeoutS = 1800
+
+// ResolveTurnTimeout maps config/CLI seconds onto an engine duration.
+// seconds < 0 → disabled (0). seconds == 0 → DefaultTurnTimeoutS.
+// seconds > 0 → that many seconds.
+func ResolveTurnTimeout(seconds int) time.Duration {
+	if seconds < 0 {
+		return 0
+	}
+	if seconds == 0 {
+		seconds = DefaultTurnTimeoutS
+	}
+	return time.Duration(seconds) * time.Second
+}
+
+// EffectiveTurnTimeoutS returns the resolved seconds for inspect/docs
+// (negative stays negative for "off"; zero becomes DefaultTurnTimeoutS).
+func EffectiveTurnTimeoutS(seconds int) int {
+	if seconds < 0 {
+		return -1
+	}
+	if seconds == 0 {
+		return DefaultTurnTimeoutS
+	}
+	return seconds
 }
 
 // DelegationPolicyConfig is JSON for session.delegationPolicy (camelCase).
@@ -501,10 +544,10 @@ type AgentBudgetConfig struct {
 //   - Action (log|block|notify): declarative rule evaluated in-process
 //   - Command: shell hook (event JSON on stdin; exit allow/block; stdout inject)
 type Hook struct {
-	// Event is pre_tool_use, post_tool_use, turn_start, or turn_end.
-	// Shell hooks only run for pre_tool_use / post_tool_use.
+	// Event is a lifecycle vocabulary name (tool.LifecycleVocabularyVersion).
+	// Shell hooks run for all known events; only pre_tool_use may block.
 	Event string `json:"event"`
-	// Matcher is a doublestar glob over the tool name; empty matches all.
+	// Matcher is a doublestar glob over the subject (tool/phase/permission/…); empty matches all.
 	Matcher string `json:"matcher,omitempty"`
 	// Action is log, block, or notify (declarative). Mutually exclusive with Command.
 	Action string `json:"action,omitempty"`
@@ -904,8 +947,8 @@ func read(path string) (Config, error) {
 		for _, h := range c.Hooks {
 			switch {
 			case h.IsShell():
-				// Shell hooks only fire on tool events; keep any event string
-				// and let the engine matcher filter.
+				// Shell hooks fire on any known lifecycle event (or unknown kept
+				// for forward-compat; engine matcher filters at dispatch).
 				if strings.TrimSpace(h.Event) == "" {
 					continue
 				}
@@ -1545,8 +1588,19 @@ func merge(base, layer Config) Config {
 	if layer.Session.AuditRetentionMaxAgeDays != 0 {
 		base.Session.AuditRetentionMaxAgeDays = layer.Session.AuditRetentionMaxAgeDays
 	}
+	if layer.Session.MaxSessionCostUSD != 0 {
+		base.Session.MaxSessionCostUSD = layer.Session.MaxSessionCostUSD
+	}
+	if layer.Session.MaxTurnTokens != 0 {
+		base.Session.MaxTurnTokens = layer.Session.MaxTurnTokens
+	}
 	base.Session.AgentBudget = mergeAgentBudgetConfig(base.Session.AgentBudget, layer.Session.AgentBudget)
 	base.Session.DelegationPolicy = mergeDelegationPolicyConfig(base.Session.DelegationPolicy, layer.Session.DelegationPolicy)
+	// TurnTimeoutS: non-zero layer wins (including negative = disable). Zero
+	// layer leaves base unchanged so project can disable after global default.
+	if layer.Session.TurnTimeoutS != 0 {
+		base.Session.TurnTimeoutS = layer.Session.TurnTimeoutS
+	}
 	base.Permissions = append(base.Permissions, layer.Permissions...)
 	base.Hooks = append(base.Hooks, layer.Hooks...)
 	base.Providers = mergeProviders(base.Providers, layer.Providers)
