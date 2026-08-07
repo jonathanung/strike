@@ -140,6 +140,8 @@ func eventType(ev Event) string {
 		return "diagnostic.bundle"
 	case ContextFitWarning:
 		return "context.fit_warning"
+	case SessionBudgetWarning:
+		return "session.budget_warning"
 	case ContextControlsSelected:
 		return "context.controls"
 	default:
@@ -301,6 +303,8 @@ func (e Envelope) Decode() (Event, error) {
 		ev = &DiagnosticBundle{}
 	case "context.fit_warning":
 		ev = &ContextFitWarning{}
+	case "session.budget_warning":
+		ev = &SessionBudgetWarning{}
 	case "context.controls":
 		ev = &ContextControlsSelected{}
 	default:
@@ -445,6 +449,8 @@ func deref(ev Event) Event {
 	case *DiagnosticBundle:
 		return *v
 	case *ContextFitWarning:
+		return *v
+	case *SessionBudgetWarning:
 		return *v
 	case *ContextControlsSelected:
 		return *v

@@ -2,6 +2,7 @@ package engine
 
 import (
 	"strings"
+	"time"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/version"
@@ -72,6 +73,15 @@ func (e *Engine) diagnosticConfig() diag.Config {
 	if keep < 1 {
 		keep = defaultKeepUserTurns
 	}
+	// Turn timeout: report effective seconds for inspect. Engine zero means
+	// disabled (-1 on the wire); positive duration → whole seconds.
+	turnTimeoutS := -1
+	if e.opts.TurnTimeout > 0 {
+		turnTimeoutS = int(e.opts.TurnTimeout / time.Second)
+		if turnTimeoutS < 1 {
+			turnTimeoutS = 1
+		}
+	}
 	cfg := diag.Config{
 		Provider:       e.provName,
 		Model:          e.model,
@@ -85,6 +95,7 @@ func (e *Engine) diagnosticConfig() diag.Config {
 		MaxTokens:      e.opts.MaxTokens,
 		MaxChildDepth:  e.opts.MaxChildDepth,
 		ContextWindow:  e.contextWindow(),
+		TurnTimeoutS:   turnTimeoutS,
 		WorkDir:        e.opts.WorkDir,
 		ProjectRoot:    e.opts.ProjectRoot,
 		Compaction: diag.Compaction{

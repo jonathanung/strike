@@ -836,6 +836,32 @@ Each `bash` invocation is a fresh process whose cwd is that session workdir
 does not affect later bash calls or other tools; chain with `&&` or
 `(cd subdir && …)` when a single command needs a subdirectory.
 
+### Root-turn deadline (`session.turnTimeoutS`)
+
+Each root user turn gets an independent wall-clock deadline so a stuck provider
+stream or long-running tool cannot retain the active turn indefinitely.
+
+| `session.turnTimeoutS` | Behavior |
+|---|---|
+| omitted / `0` | **default 1800** (30 minutes) — bounds unattended runs without breaking ordinary builds |
+| positive integer | that many seconds per root turn |
+| negative (e.g. `-1`) | disabled — cancel only via Interrupt / parent context |
+
+CLI: `strike --turn-timeout 30m` (or `1h`, `1800s`, plain seconds). Use
+`--turn-timeout off` (or `0` / `none`) to disable for that invocation. CLI
+overrides config.
+
+**Interaction:** expiry cancels the turn context (provider stream drain, in-flight
+tools, bash process groups, scheduler waiters) the same way as other turn
+deadlines — see [ARCHITECTURE.md](ARCHITECTURE.md#cancellation-deadlines-and-backpressure).
+Terminal events use `stopReason=timeout` and `EngineError` code `timeout`,
+distinct from user `interrupted` and provider `error`. Partial tool output stays
+structurally valid in history. **Resume / `--continue`:** each new turn applies
+the configured posture again; an expired deadline from a prior process is not
+restored. Child agents use `session.agentBudget` wall-clock limits, not this dial.
+Inspect the effective value via the diagnostic bundle (`config.turnTimeoutS`;
+negative means off).
+
 ### Parallel children and path overlap
 
 Within one session team, `task` children share the lead's tool CWD. Write tools
@@ -979,11 +1005,20 @@ killing when no hard threshold is set.
 Progress clears soft stall flags and allows a later rising-edge signal. Prefer
 `wait` / `task` action=wait over busy-polling status.
 
-**Session cost envelope (#577 / #542):** when `maxSessionCostUSD` is configured
-it remains the **outer** cost cap for the whole session. Per-agent
+**Session cost envelope (#577 / #542):**
+
+| Field | Meaning |
+|---|---|
+| `session.maxSessionCostUSD` | Outer USD ceiling for the whole session (0 = unlimited). CLI `--max-cost` overrides. |
+| `session.maxTurnTokens` | Per-turn accumulated stream token ceiling (0 = unlimited). |
+
+When `maxSessionCostUSD` is set it is the **outer** cost cap. Per-agent
 `maxCostUsd` nests inside that envelope and never raises the session ceiling.
-Until session cost pricing ships, `maxCostUsd` is accepted and exposed but not
-enforced (usage stays 0).
+Cost is estimated from models.dev / catalog rates on each `usage.reported`.
+At 50% / 80% / 100% the engine emits `session.budget_warning`; at 100% it hard-
+stops with `EngineError` code `budget_exhausted` and `TurnCompleted`
+`stopReason=budget_exhausted` (not a silent halt). The TUI status bar shows a
+budget chip at those thresholds. Delegation fan-out is denied while exhausted.
 
 **Isolated worktree path (explicit apply):** for true filesystem isolation,
 prefer separate root sessions with `session.worktree=always` (or

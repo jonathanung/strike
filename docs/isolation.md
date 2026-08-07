@@ -13,7 +13,7 @@ session worktrees.
 | **Session worktree** | Tool CWD / git branch per root session | `session.worktree`: `off` \| `auto` \| `always` | `git worktree` under `.strike/worktrees/` | Soft-fail to launch cwd when not a git repo |
 | **Scheduler pools** | Concurrent bash/model/build/test inside one process | `scheduler.limits` / presets | `internal/scheduler` | Wait / `scheduler.canceled`; not a security boundary |
 | **Process resource caps** | Optional mem/CPU on a single subprocess | `ProcessSpec.Limits` (tool/harness) | Linux `prlimit` (`RLIMIT_AS`, `RLIMIT_CPU`) | Non-zero exit / signal; **no-op on non-Linux** (documented) |
-| **Wall time** | Per-bash and per-turn deadlines | bash `timeoutMs`, `TurnTimeout` | context cancel + process-group kill | `timeout` / `canceled` |
+| **Wall time** | Per-bash and per-turn deadlines | bash `timeoutMs`, `session.turnTimeoutS` / `--turn-timeout` (default 30m) | context cancel + process-group kill | `timeout` / `canceled` |
 | **Containers** (in progress) | Full host isolation for the agent runtime | epic [#547](https://github.com/jonathanung/strike/issues/547) | `internal/container` CLI + Manager ([#582](https://github.com/jonathanung/strike/issues/582)/[#583](https://github.com/jonathanung/strike/issues/583)) | Runtime shipped; config/eject/launch UX follow E12.2+ — reuse `network.allow` shape |
 
 ## Action facts (semantic permission projection, #888)

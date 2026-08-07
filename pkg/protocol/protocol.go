@@ -1812,6 +1812,43 @@ type ContextFitWarning struct {
 	Source          string `json:"source,omitempty"` // actual | estimated
 }
 
+// Session budget warning levels on SessionBudgetWarning (#577).
+// Thresholds are 50% / 80% / 100% of the configured envelope.
+const (
+	SessionBudgetLevel50  = "50"
+	SessionBudgetLevel80  = "80"
+	SessionBudgetLevel100 = "100"
+)
+
+// SessionBudgetKind labels which envelope dimension tripped.
+const (
+	SessionBudgetKindCostUSD    = "cost_usd"
+	SessionBudgetKindTurnTokens = "turn_tokens"
+)
+
+// SessionBudgetWarning reports session cost / per-turn token envelope progress
+// at 50% / 80% / 100% thresholds (#577 / #542). Level 100 with Exhausted=true
+// is the hard stop signal frontends render (paired with EngineError code
+// budget_exhausted and TurnCompleted stopReason budget_exhausted).
+type SessionBudgetWarning struct {
+	Correlation
+	// Level is 50 | 80 | 100.
+	Level string `json:"level"`
+	// Kind is cost_usd | turn_tokens.
+	Kind string `json:"kind"`
+	// Exhausted is true at the hard stop (level 100).
+	Exhausted bool `json:"exhausted,omitempty"`
+	// Cost fields when Kind=cost_usd.
+	CostUSD    float64 `json:"costUsd,omitempty"`
+	MaxCostUSD float64 `json:"maxCostUsd,omitempty"`
+	// Token fields when Kind=turn_tokens.
+	TokensUsed int `json:"tokensUsed,omitempty"`
+	MaxTokens  int `json:"maxTokens,omitempty"`
+	// Ratio is used/max (may exceed 1.0 slightly after the crossing stream).
+	Ratio   float64 `json:"ratio,omitempty"`
+	Message string  `json:"message"`
+}
+
 // ContextControlsSelected confirms the session pin/exclude sets after
 // SetContextControls (and is echoed on EffectivePrompt for inspect).
 type ContextControlsSelected struct {
@@ -1892,8 +1929,11 @@ type DiagnosticConfig struct {
 	MaxTokens      int    `json:"maxTokens,omitempty"`
 	MaxChildDepth  int    `json:"maxChildDepth,omitempty"`
 	ContextWindow  int    `json:"contextWindow,omitempty"`
-	WorkDir        string `json:"workDir,omitempty"`
-	ProjectRoot    string `json:"projectRoot,omitempty"`
+	// TurnTimeoutS is the effective root-turn wall-clock deadline in seconds
+	// (negative = disabled).
+	TurnTimeoutS int    `json:"turnTimeoutS,omitempty"`
+	WorkDir      string `json:"workDir,omitempty"`
+	ProjectRoot  string `json:"projectRoot,omitempty"`
 
 	Compaction DiagnosticCompaction `json:"compaction"`
 	Scheduler  DiagnosticScheduler  `json:"scheduler"`
@@ -1978,5 +2018,6 @@ func (HookMatched) isEvent()             {}
 func (EffectivePrompt) isEvent()         {}
 func (DiagnosticBundle) isEvent()        {}
 func (ContextFitWarning) isEvent()       {}
+func (SessionBudgetWarning) isEvent()    {}
 func (ContextControlsSelected) isEvent() {}
 func (UnknownEvent) isEvent()            {}
