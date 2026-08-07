@@ -78,6 +78,9 @@ type capabilities struct {
 	Sandbox     bool `json:"sandbox"`
 	// Diag is true when a live engine can build a prompt/config diagnostic bundle.
 	Diag bool `json:"diag"`
+	// SessionLifecycle is true when list/fork/fork_at/rewind_points are exposed
+	// under /v1/session-lifecycle and /v1/sessions/{id}/* (#1038).
+	SessionLifecycle bool `json:"sessionLifecycle"`
 }
 
 type bootstrapResponse struct {
@@ -106,6 +109,7 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 		c.Auth, c.Catalog, c.Settings, c.History = h.Auth != nil, h.Catalog != nil, h.Settings != nil, h.History != nil
 		c.Files, c.Memory, c.Issues, c.Plans = h.Files != nil, h.Memory != nil, h.Issues != nil, h.Plans != nil
 		c.Sessions = h.Sessions != nil
+		c.SessionLifecycle = h.Sessions != nil
 		// Workflow authoring is exposed via /v1/workflows* and /v1/workflow-drafts*.
 		c.Workflows, c.WorkflowDrafts = h.Workflows != nil, h.WorkflowDrafts != nil
 		c.Goals = h.Goals != nil
@@ -664,10 +668,147 @@ func (s *Server) handleSessionFork(w http.ResponseWriter, r *http.Request) {
 	}
 	item, err := s.opts.Services.Sessions.Fork(r.PathValue("id"))
 	if err != nil {
+		writeJSON(w, http.StatusBadRequest, lifecycleHTTPError(err))
+		return
+	}
+	writeJSON(w, http.StatusCreated, toSessionSummary(item))
+}
+
+// handleSessionForkAt copies a prefix of the session log (rewind-as-fork).
+// Body: {"keepEvents":N} — negative or omitted means full log (same as fork).
+func (s *Server) handleSessionForkAt(w http.ResponseWriter, r *http.Request) {
+	if s.opts.Services == nil || s.opts.Services.Sessions == nil {
+		capabilityUnavailable(w, "sessions")
+		return
+	}
+	var body struct {
+		KeepEvents *int `json:"keepEvents"`
+	}
+	if err := decodeBody(w, r, &body); err != nil {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusCreated, item)
+	keep := -1
+	if body.KeepEvents != nil {
+		keep = *body.KeepEvents
+	}
+	item, err := s.opts.Services.Sessions.ForkAt(r.PathValue("id"), keep)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, lifecycleHTTPError(err))
+		return
+	}
+	writeJSON(w, http.StatusCreated, toSessionSummary(item))
+}
+
+// handleSessionRewindPoints lists fork-at-turn candidates for a session.
+func (s *Server) handleSessionRewindPoints(w http.ResponseWriter, r *http.Request) {
+	if s.opts.Services == nil || s.opts.Services.Sessions == nil {
+		capabilityUnavailable(w, "sessions")
+		return
+	}
+	id := r.PathValue("id")
+	raw, err := s.opts.Services.Sessions.ReplayJSONL(id)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, lifecycleHTTPError(err))
+		return
+	}
+	evs, err := decodeSessionJSONL(raw)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, lifecycleErrorBody{
+			Error: err.Error(),
+			Code:  protocol.ErrorCodeSessionCorrupt,
+		})
+		return
+	}
+	points := protocol.RewindPoints(evs)
+	if points == nil {
+		points = []protocol.RewindPoint{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"points": points})
+}
+
+// handleSessionLifecycleCapabilities advertises the public session lifecycle surface.
+func (s *Server) handleSessionLifecycleCapabilities(w http.ResponseWriter, r *http.Request) {
+	caps := protocol.LifecycleCapabilities{
+		EngineRewind: s.hasLive(),
+	}
+	if s.opts.Services != nil && s.opts.Services.Sessions != nil {
+		caps.List = true
+		caps.Get = true
+		caps.Fork = true
+		caps.ForkAt = true
+		caps.RewindPoints = true
+		caps.Replay = true
+		// HTTP attach does not rebind the live engine to another session id.
+		caps.Load = false
+	}
+	if s.opts.LiveHub != nil {
+		if live := s.opts.LiveHub.Active(); live != nil {
+			caps.ActiveSessionID = live.SessionID()
+		}
+	} else if s.opts.Live != nil {
+		caps.ActiveSessionID = s.opts.Live.SessionID()
+	}
+	writeJSON(w, http.StatusOK, caps)
+}
+
+func toSessionSummary(s host.Session) protocol.SessionSummary {
+	return protocol.SessionSummary{
+		ID:         s.ID,
+		ParentID:   s.ParentID,
+		Title:      s.Title,
+		ProjectKey: s.ProjectKey,
+		Open:       s.Open,
+		UpdatedAt:  s.UpdatedAt,
+	}
+}
+
+type lifecycleErrorBody struct {
+	Error string `json:"error"`
+	Code  string `json:"code,omitempty"`
+}
+
+func lifecycleHTTPError(err error) lifecycleErrorBody {
+	msg := err.Error()
+	code := ""
+	switch {
+	case strings.Contains(msg, "not found"):
+		code = protocol.ErrorCodeSessionNotFound
+	case strings.Contains(msg, "subagent") || strings.Contains(msg, "parent"):
+		code = protocol.ErrorCodeInvalidSession
+	case strings.Contains(msg, "corrupt"):
+		code = protocol.ErrorCodeSessionCorrupt
+	case strings.Contains(msg, "open") && strings.Contains(msg, "force"):
+		code = protocol.ErrorCodeSessionBusy
+	}
+	return lifecycleErrorBody{Error: msg, Code: code}
+}
+
+func decodeSessionJSONL(raw []byte) ([]protocol.Event, error) {
+	var out []protocol.Event
+	sc := bufio.NewScanner(bytes.NewReader(raw))
+	sc.Buffer(make([]byte, 0, 64*1024), 16<<20)
+	lineNo := 0
+	for sc.Scan() {
+		lineNo++
+		line := bytes.TrimSpace(sc.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+		var env protocol.Envelope
+		if err := json.Unmarshal(line, &env); err != nil {
+			return nil, fmt.Errorf("line %d: %w", lineNo, err)
+		}
+		if env.Type == "" || env.Type == "session.header" {
+			continue
+		}
+		ev, err := env.Decode()
+		if err != nil {
+			return nil, fmt.Errorf("line %d: %w", lineNo, err)
+		}
+		out = append(out, ev)
+	}
+	return out, sc.Err()
 }
 
 func (s *Server) handleSessionRename(w http.ResponseWriter, r *http.Request) {

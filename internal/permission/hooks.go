@@ -7,15 +7,27 @@ import (
 	"github.com/bmatcuk/doublestar/v4"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike-cli/internal/tool"
 )
 
-// Declarative hook lifecycle events. Tool events match tool.HookEvent* so
-// config can mix shell commands and rules under one hooks list.
+// Declarative hook lifecycle events. Names match tool.HookEvent* so config
+// can mix shell commands and rules under one hooks list. Vocabulary version:
+// tool.LifecycleVocabularyVersion.
 const (
-	HookEventPreToolUse  = "pre_tool_use"
-	HookEventPostToolUse = "post_tool_use"
-	HookEventTurnStart   = "turn_start"
-	HookEventTurnEnd     = "turn_end"
+	HookEventPreToolUse           = tool.HookEventPreToolUse
+	HookEventPostToolUse          = tool.HookEventPostToolUse
+	HookEventTurnStart            = tool.HookEventTurnStart
+	HookEventTurnEnd              = tool.HookEventTurnEnd
+	HookEventSessionStart         = tool.HookEventSessionStart
+	HookEventSessionResume        = tool.HookEventSessionResume
+	HookEventSessionEnd           = tool.HookEventSessionEnd
+	HookEventProviderAttempt      = tool.HookEventProviderAttempt
+	HookEventProviderRetry        = tool.HookEventProviderRetry
+	HookEventPermissionResolution = tool.HookEventPermissionResolution
+	HookEventCompaction           = tool.HookEventCompaction
+	HookEventPhaseTransition      = tool.HookEventPhaseTransition
+	HookEventChildLifecycle       = tool.HookEventChildLifecycle
+	HookEventVerificationGate     = tool.HookEventVerificationGate
 )
 
 // Declarative hook actions.
@@ -26,8 +38,9 @@ const (
 )
 
 // HookRule is one declarative matcher → action entry.
-// Event is a lifecycle name; Matcher is a doublestar glob over the tool name
-// for tool events (empty/"*" = any). Message is optional block/notify text.
+// Event is a lifecycle name; Matcher is a doublestar glob over the subject
+// (tool name for tool events; phase/permission/status for others; empty/"*" = any).
+// Message is optional block/notify text.
 type HookRule struct {
 	Event   string `json:"event"`
 	Matcher string `json:"matcher,omitempty"`
@@ -44,7 +57,7 @@ type HookHit struct {
 	Matcher string
 	Action  string
 	Message string
-	Tool    string
+	Tool    string // subject (tool name or other matcher target)
 }
 
 // HookDecision aggregates matching declarative rules for one event.
@@ -60,11 +73,12 @@ func (d HookDecision) BlockMessage() string {
 	return strings.TrimSpace(d.BlockHit.Message)
 }
 
-var knownHookEvents = map[string]struct{}{
-	HookEventPreToolUse:  {},
-	HookEventPostToolUse: {},
-	HookEventTurnStart:   {},
-	HookEventTurnEnd:     {},
+var knownHookEvents = map[string]struct{}{}
+
+func init() {
+	for _, ev := range tool.KnownLifecycleEvents {
+		knownHookEvents[ev] = struct{}{}
+	}
 }
 
 var knownHookActions = map[string]struct{}{
@@ -99,7 +113,7 @@ func ValidateHookRule(r HookRule) error {
 	if !ValidHookAction(r.Action) {
 		return fmt.Errorf("unknown action %q", r.Action)
 	}
-	if r.Action == HookActionBlock && r.Event != HookEventPreToolUse {
+	if r.Action == HookActionBlock && !tool.DeclarativeBlockAllowed(r.Event) {
 		return fmt.Errorf("action %q only allowed on event %q", HookActionBlock, HookEventPreToolUse)
 	}
 	return nil
@@ -116,7 +130,7 @@ func ValidateHookRuleset(rs HookRuleset) error {
 }
 
 // EvaluateHooks walks rules in order. Any matching block sets Block; later
-// block messages override. subject is the tool name for tool events.
+// block messages override. subject is the matcher target (tool name, phase, …).
 func EvaluateHooks(rules HookRuleset, event, subject string) HookDecision {
 	var d HookDecision
 	for _, rule := range rules {
@@ -139,7 +153,7 @@ func EvaluateHooks(rules HookRuleset, event, subject string) HookDecision {
 		case HookActionNotify:
 			d.Notify = append(d.Notify, hit)
 		case HookActionBlock:
-			if event == HookEventPreToolUse {
+			if tool.DeclarativeBlockAllowed(event) {
 				d.Block = true
 				d.BlockHit = hit
 			}
@@ -152,7 +166,7 @@ func hookMatch(pattern, subject string) bool {
 	if pattern == "" || pattern == "*" {
 		return true
 	}
-	// Turn events have no subject; only empty/"*" match them.
+	// Events with no subject; only empty/"*" match them.
 	if subject == "" {
 		return false
 	}
@@ -170,12 +184,12 @@ func (e *BlockedError) Error() string {
 }
 
 // DefaultBlockMessage builds a reason when a block rule has no message.
-func DefaultBlockMessage(event, matcher, tool string) string {
+func DefaultBlockMessage(event, matcher, toolName string) string {
 	if matcher == "" {
 		matcher = "*"
 	}
-	if tool != "" {
-		return fmt.Sprintf("hook %s matcher=%s tool=%s", event, matcher, tool)
+	if toolName != "" {
+		return fmt.Sprintf("hook %s matcher=%s tool=%s", event, matcher, toolName)
 	}
 	return fmt.Sprintf("hook %s matcher=%s", event, matcher)
 }

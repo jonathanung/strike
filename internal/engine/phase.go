@@ -189,6 +189,11 @@ func (e *Engine) emitPhaseChanged(phaseName string, index int, status string) {
 		ev.Gate = e.effectiveGateLabel()
 	}
 	e.emitSelected(ev)
+	st := status
+	if st == "" {
+		st = "enter"
+	}
+	e.firePhaseTransition(ev.Correlation, ev.Workflow, phaseName, index, st)
 }
 
 // advancePhase clears the current phase exit gate and loads the next phase

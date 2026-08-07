@@ -54,6 +54,9 @@ type Options struct {
 	Status StatusFunc
 	// SubmitTimeout bounds engine op queue wait (default 5s, matching Live.Submit).
 	SubmitTimeout time.Duration
+	// Lifecycle, when set, serves session.list/get/fork/load/… host methods.
+	// When nil, those methods return structured unsupported errors.
+	Lifecycle Lifecycle
 }
 
 // Server is a single-session JSON-RPC bridge over a byte stream.
@@ -220,6 +223,19 @@ func (s *Server) helloParams() map[string]any {
 			out["status"] = st
 		}
 	}
+	// Always advertise lifecycle capability bits so clients can discover
+	// unsupported operations without probing each method.
+	caps := protocol.LifecycleCapabilities{
+		ActiveSessionID: s.opts.SessionID,
+		EngineRewind:    true, // live session accepts protocol.Rewind when submit works
+	}
+	if s.opts.Lifecycle != nil {
+		caps = s.opts.Lifecycle.Capabilities()
+		if caps.ActiveSessionID == "" {
+			caps.ActiveSessionID = s.opts.SessionID
+		}
+	}
+	out["lifecycle"] = caps
 	return out
 }
 
@@ -300,6 +316,13 @@ func (s *Server) handleLine(ctx context.Context, line []byte) error {
 		return s.submitOp(ctx, req.ID, isNotification, op)
 
 	default:
+		// Host-level session lifecycle (list/fork/load/…) — not engine ops.
+		if isLifecycleMethod(req.Method) {
+			if isNotification {
+				return nil
+			}
+			return s.handleLifecycle(ctx, req.ID, req.Method, req.Params)
+		}
 		// Method name is an op type string (user.input, interrupt, …).
 		op, err := decodeOpMethod(req.Method, req.Params)
 		if err != nil {

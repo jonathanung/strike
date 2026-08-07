@@ -147,6 +147,17 @@
         "workspace-write"
       ]
     },
+    "sandboxAllowDegrade": {
+      "type": "boolean",
+      "description": "When true, permit bash to run unsandboxed if the OS backend is missing. Default false is fail-closed (sandbox_denied)."
+    },
+    "bashSecrets": {
+      "type": "object",
+      "description": "Map of env var names to secret refs (secret://env/NAME) injected into bash tool processes only.",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
     "network": {
       "$ref": "#/$defs/network"
     },
@@ -376,7 +387,7 @@
       "properties": {
         "event": {
           "type": "string",
-          "description": "pre_tool_use | post_tool_use | turn_start | turn_end. Shell hooks only for pre/post_tool_use.",
+          "description": "Lifecycle vocabulary v1: session_start|session_resume|session_end|turn_start|turn_end|provider_attempt|provider_retry|permission_resolution|compaction|phase_transition|child_lifecycle|verification_gate|pre_tool_use|post_tool_use. Shell hooks may observe all; block only on pre_tool_use.",
           "enum": [
             "pre_tool_use",
             "post_tool_use",

@@ -367,4 +367,39 @@ const (
 	ErrorCodeNetworkDenied      = pub.ErrorCodeNetworkDenied
 	ErrorCodeQueueFull          = pub.ErrorCodeQueueFull
 	ErrorCodeBudgetExhausted    = pub.ErrorCodeBudgetExhausted
+
+	// Session lifecycle (#1038).
+	ErrorCodeSessionNotFound = pub.ErrorCodeSessionNotFound
+	ErrorCodeSessionBusy     = pub.ErrorCodeSessionBusy
+	ErrorCodeSessionCorrupt  = pub.ErrorCodeSessionCorrupt
+	ErrorCodeUnsupported     = pub.ErrorCodeUnsupported
+	ErrorCodeInvalidSession  = pub.ErrorCodeInvalidSession
+
+	LifecycleMethodCapabilities = pub.LifecycleMethodCapabilities
+	LifecycleMethodList         = pub.LifecycleMethodList
+	LifecycleMethodGet          = pub.LifecycleMethodGet
+	LifecycleMethodFork         = pub.LifecycleMethodFork
+	LifecycleMethodForkAt       = pub.LifecycleMethodForkAt
+	LifecycleMethodLoad         = pub.LifecycleMethodLoad
+	LifecycleMethodRewindPoints = pub.LifecycleMethodRewindPoints
+	LifecycleMethodReplay       = pub.LifecycleMethodReplay
 )
+
+// Session lifecycle contract types (#1038).
+type (
+	LifecycleCapabilities     = pub.LifecycleCapabilities
+	SessionSummary            = pub.SessionSummary
+	LifecycleError            = pub.LifecycleError
+	SessionListParams         = pub.SessionListParams
+	SessionListResult         = pub.SessionListResult
+	SessionIDParams           = pub.SessionIDParams
+	SessionForkAtParams       = pub.SessionForkAtParams
+	SessionRewindPointsResult = pub.SessionRewindPointsResult
+	SessionReplayResult       = pub.SessionReplayResult
+	SessionLoadResult         = pub.SessionLoadResult
+)
+
+// NewLifecycleError builds a structured session lifecycle error.
+func NewLifecycleError(code, message, sessionID string) *LifecycleError {
+	return pub.NewLifecycleError(code, message, sessionID)
+}

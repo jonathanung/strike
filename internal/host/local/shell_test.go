@@ -14,7 +14,8 @@ import (
 )
 
 func testShellPolicy(workDir string) sandbox.Policy {
-	return sandbox.Policy{Mode: sandbox.ModeWorkspaceWrite, WorkDir: workDir}
+	// AllowDegrade so CI without bwrap/sandbox-exec still exercises shell Run.
+	return sandbox.Policy{Mode: sandbox.ModeWorkspaceWrite, WorkDir: workDir, AllowDegrade: true}
 }
 
 func TestShellRunPwd(t *testing.T) {

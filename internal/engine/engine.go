@@ -114,10 +114,15 @@ type Options struct {
 	// (off|read-only|workspace-write). Empty means workspace-write.
 	// Distinct from InitialPermissionMode (when the agent is asked).
 	SandboxMode string
+	// SandboxAllowDegrade permits unsandboxed bash when the OS backend is
+	// unavailable. Default false is fail-closed (#1030).
+	SandboxAllowDegrade bool
 	// NetworkAllow is the config network.allow host/CIDR list for
 	// webfetch/websearch. Empty means unrestricted public hosts. Copied onto
 	// tool.Context and sandbox.Policy.NetworkAllow for /sandbox explain.
 	NetworkAllow []string
+	// BashSecrets maps env names → secret refs for bash process injection.
+	BashSecrets map[string]string
 	// ContentGuard is config contentGuard (+ managed ForcedDeny) for write-time
 	// content scanning on edit/write/apply_patch. Zero enables default posture.
 	ContentGuard tool.ContentGuardSettings
@@ -802,7 +807,7 @@ func New(opts Options) *Engine {
 	if len(opts.InitialMessages) > 0 {
 		e.messages = append([]provider.Message(nil), opts.InitialMessages...)
 	}
-	e.perms = permission.New(e.emit, opts.Rules...)
+	e.perms = permission.New(e.emitPermission, opts.Rules...)
 	if len(opts.RuleLayerNames) > 0 {
 		e.perms.SetBaseLayerNames(opts.RuleLayerNames...)
 	}
@@ -995,6 +1000,7 @@ func (e *Engine) Run(ctx context.Context) {
 	// Dissolve the team after children shut down so terminal members stay
 	// listable for the lead's lifetime, then clear on lead exit.
 	defer e.closeEvents()
+	defer e.fireSessionEnd()
 	defer e.dissolveTeamIfLead()
 	defer e.detachMailbox()
 	defer e.shutdownChildren()
@@ -1054,6 +1060,8 @@ func (e *Engine) Run(ctx context.Context) {
 	if len(e.opts.InitialAlwaysGrants) > 0 {
 		e.perms.SeedAlwaysGrants(e.opts.InitialAlwaysGrants)
 	}
+	// Session lifecycle hooks observe start vs resume before quietStartup clears.
+	e.fireSessionLifecycle()
 	e.quietStartup = false
 	oneshotTurnSeen := false
 	for {

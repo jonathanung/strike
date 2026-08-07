@@ -72,11 +72,21 @@ env, err := secret.MergeEnv(nil /* os.Environ */, map[string]secret.Ref{
 // pass env to os/exec.Cmd.Env — do not log env
 ```
 
-**Bash without model-visible values:** put the secret in the strike process
-environment (shell profile, CI secret, `direnv`, etc.). Child `bash` tool
-invocations inherit that environment. Prefer refs + `MergeEnv` when a tool
-must set a *named* variable for a subprocess without embedding the value in
-tool args or results.
+**Bash without model-visible values:** the bash tool receives a **minimal**
+environment (not the full Strike process env — #1030). Put the secret in the
+strike process environment (shell profile, CI secret, `direnv`, etc.) and
+declare a config `bashSecrets` entry so it is injected by ref:
+
+```jsonc
+{
+  "bashSecrets": {
+    "GITHUB_TOKEN": "secret://env/GITHUB_TOKEN"
+  }
+}
+```
+
+Prefer refs + `MergeEnv` / `bashSecrets` when a tool must set a *named*
+variable for a subprocess without embedding the value in tool args or results.
 
 Config provider options still use `{env:NAME}` / `$NAME` expansion (see
 [config.md](config.md)); those expand at provider select time inside the

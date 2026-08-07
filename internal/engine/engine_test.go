@@ -161,6 +161,7 @@ func TestFullLoop(t *testing.T) {
 		InitialProvider: "echo",
 		Registry:        tool.NewRegistry(tool.NewBash()),
 		WorkDir:         t.TempDir(),
+		SandboxMode:     "off",
 		Rules:           []permission.Ruleset{permission.Defaults()},
 	})
 	ctx, cancel := context.WithCancel(context.Background())
@@ -272,6 +273,7 @@ func TestRejectionInterruptsTurn(t *testing.T) {
 		InitialProvider: "echo",
 		Registry:        tool.NewRegistry(tool.NewBash()),
 		WorkDir:         t.TempDir(),
+		SandboxMode:     "off",
 		Rules:           []permission.Ruleset{permission.Defaults()},
 	})
 	ctx, cancel := context.WithCancel(context.Background())
@@ -336,6 +338,7 @@ func TestHardDenyFeedsBackToModel(t *testing.T) {
 		InitialProvider: "scripted",
 		Registry:        tool.NewRegistry(tool.NewBash()),
 		WorkDir:         t.TempDir(),
+		SandboxMode:     "off",
 		Rules: []permission.Ruleset{{
 			{Permission: "bash", Pattern: "*", Action: permission.Deny},
 		}},
@@ -470,6 +473,7 @@ func TestRuntimeCorrelationAcrossTwoStreamToolLoop(t *testing.T) {
 		InitialProvider: "scripted",
 		Registry:        tool.NewRegistry(tool.NewBash()),
 		WorkDir:         t.TempDir(),
+		SandboxMode:     "off",
 		Rules:           []permission.Ruleset{permission.Defaults()},
 	})
 	ctx, cancel := context.WithCancel(context.Background())
@@ -809,6 +813,9 @@ func newTestEngine(t *testing.T, prov provider.Provider, tools ...tool.Tool) *en
 		Registry:        tool.NewRegistry(tools...),
 		WorkDir:         t.TempDir(),
 		Rules:           []permission.Ruleset{permission.Defaults()},
+		// CI hosts often lack bwrap/sandbox-exec; production fail-closed degrade
+		// must not brick unit tests that only exercise engine/tool wiring (#1030).
+		SandboxAllowDegrade: true,
 	})
 }
 
