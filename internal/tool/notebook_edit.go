@@ -124,14 +124,6 @@ func (notebookEditTool) Execute(ctx context.Context, args json.RawMessage, tc *C
 		"cell_id":       a.CellID,
 		"cell_type":     cellType,
 	})
-	if err := tc.Ask(ctx, AskRequest{
-		Permission: "edit",
-		Patterns:   []string{rel},
-		Always:     []string{"*"},
-		Metadata:   meta,
-	}); err != nil {
-		return Result{}, err
-	}
 
 	var outMsg string
 	switch mode {
@@ -176,6 +168,23 @@ func (notebookEditTool) Execute(ctx context.Context, args json.RawMessage, tc *C
 		return Result{}, err
 	}
 	out = append(out, '\n')
+	// Guard resulting notebook JSON (and new cell source) before permission/disk.
+	if mode != "delete" {
+		if err := checkContentGuard(ctx, tc, rel, a.NewSource); err != nil {
+			return Result{}, err
+		}
+		if err := checkContentGuard(ctx, tc, rel, string(out)); err != nil {
+			return Result{}, err
+		}
+	}
+	if err := tc.Ask(ctx, AskRequest{
+		Permission: "edit",
+		Patterns:   []string{rel},
+		Always:     []string{"*"},
+		Metadata:   meta,
+	}); err != nil {
+		return Result{}, err
+	}
 	// Claim after in-memory mutation validates so failed parses do not claim.
 	overlapWarn, err := tc.ClaimWrite(path, rel)
 	if err != nil {

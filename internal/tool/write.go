@@ -77,6 +77,11 @@ func (writeTool) Execute(ctx context.Context, args json.RawMessage, tc *Context)
 	}
 
 	existing, readErr := os.ReadFile(path)
+	// Content guard before permission ask so secret-shaped writes never prompt
+	// as ordinary write approvals (and never reach disk).
+	if err := checkContentGuard(ctx, tc, rel, a.Content); err != nil {
+		return Result{}, err
+	}
 	meta, _ := json.Marshal(map[string]any{
 		"exists":  readErr == nil,
 		"oldSize": len(existing),

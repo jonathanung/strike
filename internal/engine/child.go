@@ -393,6 +393,7 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 		InitialTitled:              title != "",
 		SandboxMode:                e.opts.SandboxMode,
 		NetworkAllow:               e.opts.NetworkAllow,
+		ContentGuard:               e.opts.ContentGuard,
 		WebSearch:                  e.opts.WebSearch,
 		AllowYoloWithoutSandbox:    e.opts.AllowYoloWithoutSandbox,
 		MaxTokens:                  e.opts.MaxTokens,

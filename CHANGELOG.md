@@ -16,6 +16,16 @@ materially affect the shipped product.
 
 ### Added
 
+- **Write-time content guards** — `write` / `edit` / `apply_patch` /
+  `notebook_edit` scan proposed content before disk. Default: credential
+  shapes (PEM, AWS `AKIA…`, provider keys, GitHub/Slack tokens, …) **deny**
+  with stable error code `content_guard_denied`; high-confidence dangerous
+  sinks (language-limited `eval`/`exec`/`os.system`/…) **ask**. Config
+  `contentGuard.mode` (`off`|`default`|`ask`|`deny`) and `pathAllow` globs;
+  managed `mode: deny` is a ForcedDeny ceiling yolo cannot widen. Shares
+  `pkg/redact.Findings` with egress redaction (write guard ≠ redact-on-read).
+  Optional skill `/write-guards`
+  ([#890](https://github.com/jonathanung/strike/issues/890)).
 - **Plugin theme contributions** — theme packages load through the plugin
   catalog/lifecycle (same lockfile and integrity path). `/theme` shows plugin
   provenance and collision winners, live-previews on cursor move without

@@ -248,6 +248,7 @@ func scenarioToolContracts(t *testing.T) string {
 	for _, code := range []tool.ErrorCode{
 		tool.CodePermissionDenied, tool.CodeInvalidArgs, tool.CodePreconditionFailed,
 		tool.CodeCanceled, tool.CodeTimeout, tool.CodeTransient, tool.CodeInternal, tool.CodeBlocked,
+		tool.CodeSandboxDenied, tool.CodeContentGuardDenied,
 	} {
 		if !tool.ValidErrorCode(code) {
 			t.Fatalf("ValidErrorCode(%q) = false", code)

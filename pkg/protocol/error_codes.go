@@ -22,6 +22,10 @@ const (
 	// ErrorCodeSandboxDenied is an OS sandbox capability block (bwrap/seatbelt
 	// path/syscall denial). Distinct from permission_denied (ruleset/ask).
 	ErrorCodeSandboxDenied = "sandbox_denied"
+	// ErrorCodeContentGuardDenied is a write-time content scanner block
+	// (credential-shaped material or high-risk sinks on mutators). Distinct
+	// from permission_denied and blocked (hooks/phase).
+	ErrorCodeContentGuardDenied = "content_guard_denied"
 	// ErrorCodeQueueFull is backpressure rejection when a bounded queue is full
 	// (e.g. mid-turn user-input buffer). Callers should retry after the turn.
 	ErrorCodeQueueFull = "queue_full"

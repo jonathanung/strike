@@ -88,6 +88,10 @@ type Config struct {
 	// Network holds application-layer egress allowlists (webfetch/websearch host/CIDR).
 	// Distinct from Sandbox Network on/off (bash OS profile). See docs/config.md.
 	Network NetworkConfig `json:"network,omitempty"`
+	// ContentGuard is the write-time content scanner for edit/write/apply_patch
+	// (and notebook_edit). Empty mode means default (credential deny, sink ask).
+	// See docs/config.md / docs/secrets.md (#890).
+	ContentGuard ContentGuardConfig `json:"contentGuard,omitempty"`
 	// WebSearch configures the websearch tool backend (provider + API key env).
 	// Empty means auto-detect (brave when BRAVE_API_KEY is set). See docs/config.md.
 	WebSearch   WebSearchConfig    `json:"webSearch,omitempty"`
@@ -218,6 +222,22 @@ type NetworkConfig struct {
 	// still apply). When a layer sets allow (including []), it replaces the
 	// previous layer's list (project can tighten or clear global).
 	Allow []string `json:"allow,omitempty"`
+}
+
+// ContentGuardConfig is the JSON "contentGuard" object — write-time scan of
+// proposed file content on edit/write/apply_patch/notebook_edit (#890).
+// Distinct from pkg/redact egress scrubbing (logs/timeline/display).
+type ContentGuardConfig struct {
+	// Mode is off|default|ask|deny. Empty means default:
+	//   default — credential shapes deny; high-confidence dangerous sinks ask
+	//   ask     — all findings ask (allow-once / path always-grant)
+	//   deny    — all findings hard-deny (content_guard_denied)
+	//   off     — disable scanner (managed ForcedDeny still applies when set)
+	Mode string `json:"mode,omitempty"`
+	// PathAllow lists doublestar globs over workspace-relative paths that skip
+	// the guard (e.g. "**/testdata/**"). When a layer sets pathAllow (including
+	// []), it replaces the previous layer's list.
+	PathAllow []string `json:"pathAllow,omitempty"`
 }
 
 // WebSearchConfig is the JSON "webSearch" object — backend for the websearch
@@ -1347,6 +1367,7 @@ func merge(base, layer Config) Config {
 		copy(out, layer.Network.Allow)
 		base.Network.Allow = out
 	}
+	base.ContentGuard = mergeContentGuard(base.ContentGuard, layer.ContentGuard)
 	// webSearch: any non-empty field on the layer replaces the whole object
 	// (project can override provider/key/baseURL as a unit).
 	if layer.WebSearch.Provider != "" || layer.WebSearch.APIKeyEnv != "" || layer.WebSearch.BaseURL != "" {
@@ -1440,6 +1461,42 @@ func merge(base, layer Config) Config {
 		base.DisableDefaultPer = mergeDisableDefaultPer(base.DisableDefaultPer, layer.DisableDefaultPer)
 	}
 	return base
+}
+
+// mergeContentGuard overlays content-guard knobs. Non-empty mode replaces;
+// non-nil pathAllow replaces (including explicit []).
+func mergeContentGuard(base, layer ContentGuardConfig) ContentGuardConfig {
+	if strings.TrimSpace(layer.Mode) != "" {
+		base.Mode = layer.Mode
+	}
+	if layer.PathAllow != nil {
+		out := make([]string, len(layer.PathAllow))
+		copy(out, layer.PathAllow)
+		base.PathAllow = out
+	}
+	return base
+}
+
+// NormalizeContentGuard returns a cleaned contentGuard config (mode canonical).
+func NormalizeContentGuard(c ContentGuardConfig) ContentGuardConfig {
+	c.Mode = strings.ToLower(strings.TrimSpace(c.Mode))
+	switch c.Mode {
+	case "", "off", "default", "ask", "deny":
+		// ok (empty stays empty = default at tool layer)
+	default:
+		c.Mode = "default"
+	}
+	if c.PathAllow != nil {
+		out := make([]string, 0, len(c.PathAllow))
+		for _, p := range c.PathAllow {
+			p = strings.TrimSpace(p)
+			if p != "" {
+				out = append(out, p)
+			}
+		}
+		c.PathAllow = out
+	}
+	return c
 }
 
 // mergeToolRetry overlays non-zero tool-retry knobs from layer onto base.

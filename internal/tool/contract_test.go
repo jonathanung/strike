@@ -28,7 +28,7 @@ func TestContractVocabulary(t *testing.T) {
 	for _, c := range []ErrorCode{
 		CodePermissionDenied, CodeInvalidArgs, CodePreconditionFailed,
 		CodeCanceled, CodeTimeout, CodeTransient, CodeInternal, CodeBlocked,
-		CodeSandboxDenied,
+		CodeSandboxDenied, CodeContentGuardDenied,
 	} {
 		if !ValidErrorCode(c) {
 			t.Errorf("ValidErrorCode(%q) = false", c)
