@@ -26,20 +26,27 @@ Eval runners already shell out (`internal/eval/swebench.CLIRuntime`). **E12.10
 /#592** should migrate them onto `internal/container` so one backend owns
 create/exec/rm and scheduler pool leases.
 
-## Package surface (foundation)
+## Package surface
 
 ```text
 internal/container
   ExecFunc / DefaultExecFunc   injectable CLI runner
   Runtime (interface)          Available, Pull, Create, Start, Stop,
                                Remove, InspectID, CopyFrom/To, Exec
-  CLI                          production Runtime (field ExecFn ExecFunc)
+  CLI                          production Runtime (+ BuildImage, networks,
+                               InspectContainer)
+  Manager                      per-repo lifecycle: Build, Launch, Attach,
+                               Exec, Stop, Restart, Destroy, Clean, Status,
+                               ListManaged
+  Config                       in-process config (JSON layering = E12.2)
+  Cache                        <repo>/.strike/container/ (image/container ids,
+                               config.hash)
   ContainerName / NetworkName  strike-<repo>-<sha256[:16]>
   Labels                       com.strike.* (was com.zone.*)
 ```
 
-Higher-level Manager (build cache, Dockerfile materialize, launch-inside,
-attach) is **not** in E12.0 — see E12.1–E12.6.
+Still later: layered JSON config (E12.2), Dockerfile eject (E12.3),
+`--launch-inside-container` UX (E12.4), attach prompts (E12.6).
 
 ## Binary selection
 
