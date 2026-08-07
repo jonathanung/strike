@@ -246,6 +246,12 @@ func (s stubPermissions) Explain(permission, pattern string) host.PermissionExpl
 	}
 }
 
+func (s stubPermissions) ExplainPreset(permission, pattern, presetID string) host.PermissionExplanation {
+	return s.Explain(permission, pattern)
+}
+func (s stubPermissions) DiffPresets(leftID, rightID string) (host.PermissionDiff, error) {
+	return host.PermissionDiff{}, nil
+}
 func (s stubPermissions) Presets() []host.PermissionPresetInfo { return nil }
 
 func TestPermissionDecidedDenyUsesHostExplain(t *testing.T) {

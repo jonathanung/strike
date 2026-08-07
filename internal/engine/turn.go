@@ -213,6 +213,10 @@ func (e *Engine) runTurn(ctx context.Context, text string, images []protocol.Ima
 		e.toolLoop.reset()
 	}
 	e.toolLoopStop = ""
+	// Reset content-free tool-chain correlation for this turn (#891).
+	if e.perms != nil {
+		e.perms.BeginTurn()
+	}
 	// Promote soft-budget finalization armed → active for this turn (#879).
 	e.noteBudgetFinalizationTurnStart()
 	e.emit(protocol.UserMessage{Correlation: turnCorr, Text: text, Images: images})
@@ -1294,6 +1298,10 @@ func (e *Engine) completeTurn(ctx context.Context, finishing chan struct{}, corr
 	e.checkpoints.CommitTurn()
 	peek := e.checkpoints.Peek()
 	e.fireHookRules(corr, permission.HookEventTurnEnd, "", "")
+	// Clear tool-chain state on every terminal path (end, interrupt, error).
+	if e.perms != nil {
+		e.perms.EndTurn()
+	}
 	var verification *protocol.VerificationReport
 	if stopReason == "end_turn" && len(e.opts.Verify) > 0 {
 		verification = e.runSoloVerification(ctx, corr)

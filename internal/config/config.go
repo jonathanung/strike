@@ -44,9 +44,11 @@ type Config struct {
 	// Empty means lite (default). Unknown values are ignored at load time.
 	LeanCode string `json:"leanCode,omitempty"`
 	// DeferTools controls toolsearch-backed schema deferral: on|off.
-	// When on, non-core tools (optional built-ins + MCP) are omitted from the
-	// provider tools[] until toolsearch discovers them (or they are called).
-	// Empty means off (default). Unknown values are ignored at load time.
+	// When on (default), non-core tools (orchestration, optional built-ins,
+	// MCP) are omitted from the provider tools[] until toolsearch discovers
+	// them, they are called by name, or workflow activation promotes them.
+	// Empty means on (default). Set "off" for the full permitted registry.
+	// Unknown values are ignored at load time.
 	DeferTools   string `json:"deferTools,omitempty"`
 	DefaultAgent string `json:"defaultAgent,omitempty"`
 	// Theme is the preferred TUI color theme id (bundled or JSON under
@@ -102,6 +104,10 @@ type Config struct {
 	// yolo-with-sandbox) inserted after defaults and before permissions[].
 	// Empty means no preset layer. See permission.Presets / docs/config.md.
 	PermissionPreset string `json:"permissionPreset,omitempty"`
+	// Admission configures register/load-time scans for MCP servers, skills,
+	// and plugins (allow|warn|block|quarantine). Distinct from permissionPreset
+	// and OS sandbox — see docs/config.md and docs/admission.md.
+	Admission AdmissionConfig `json:"admission,omitempty"`
 	// Hooks mixes declarative rules (action) and shell commands (command).
 	// Global then project layers concatenate. Invalid entries are dropped.
 	Hooks []Hook `json:"hooks,omitempty"`
@@ -172,6 +178,10 @@ type Config struct {
 	// Prefer mcp.jsonc (see Load). When a layer sets servers (including {}),
 	// it replaces the previous layer's server map.
 	MCP MCPConfig `json:"mcp,omitempty"`
+	// Container configures native containerization (E12). Also loadable from
+	// dedicated container.jsonc/json (global/project), same pattern as mcp.jsonc.
+	// Merge: defaults → global → project → managed. See docs/config.md.
+	Container ContainerConfig `json:"container,omitempty"`
 	// LSP configures external language servers (JSON-RPC over stdio). When a
 	// layer sets servers (including {}), it replaces the previous layer's map.
 	// Registry is keyed by file extension via each server's extensions list.
@@ -211,6 +221,20 @@ type ToolRetryConfig struct {
 	// LoopThreshold is how many identical consecutive failing tool+args stop
 	// the turn. Zero means engine default (3).
 	LoopThreshold int `json:"loopThreshold,omitempty"`
+}
+
+// AdmissionConfig is the JSON "admission" object — register/load-time scans
+// for MCP/skills/plugins. Re-exports admission.Config field shape so config
+// JSON stays in this package without an import cycle at parse time.
+type AdmissionConfig struct {
+	// Preset is permissive|default|strict. Empty means default.
+	Preset string `json:"preset,omitempty"`
+	// AllowPaths lists home-anchored path prefixes trusted as first-party.
+	// Must be absolute under $HOME or start with ~/. Bare relative markers
+	// (e.g. ".strike/skills") are rejected — they are spoofable via subdirs.
+	AllowPaths []string `json:"allowPaths,omitempty"`
+	// FailClosed overrides the preset default when non-nil (strict defaults true).
+	FailClosed *bool `json:"failClosed,omitempty"`
 }
 
 // NetworkConfig is the JSON "network" object — shared allowlist shape for
@@ -495,6 +519,8 @@ func Default() Config {
 		// Default language servers (E2.3). Missing binaries degrade to
 		// per-server error status; clear with "lsp": {"servers": {}}.
 		LSP: LSPConfig{Servers: DefaultLSPServers()},
+		// Container defaults (E12.2); layered JSON / container.jsonc overlay.
+		Container: DefaultContainer(),
 	}
 }
 
@@ -642,6 +668,12 @@ func Load(workDir string) (Config, error) {
 	} else {
 		cfg.MCP = mergeMCP(cfg.MCP, mc)
 	}
+	// Global container.jsonc/json (optional).
+	if cc, ok, err := loadContainerFileLayer(GlobalRoot()); err != nil {
+		return cfg, err
+	} else if ok {
+		cfg.Container = mergeContainer(cfg.Container, cc)
+	}
 	// Global providers.jsonc/json (optional; loads even when config is absent).
 	if pf, err := loadProvidersFileLayer(GlobalRoot()); err != nil {
 		return cfg, err
@@ -678,6 +710,11 @@ func Load(workDir string) (Config, error) {
 			return cfg, err
 		} else {
 			cfg.MCP = mergeMCP(cfg.MCP, mc)
+		}
+		if cc, ok, err := loadContainerFileLayer(projectRoot(workDir)); err != nil {
+			return cfg, err
+		} else if ok {
+			cfg.Container = mergeContainer(cfg.Container, cc)
 		}
 		if pf, err := loadProvidersFileLayer(projectRoot(workDir)); err != nil {
 			return cfg, err
@@ -716,6 +753,11 @@ func Load(workDir string) (Config, error) {
 		cfg.Managed = info
 	}
 	cfg.Provider = CanonicalProviderID(cfg.Provider)
+	norm, err := NormalizeContainer(cfg.Container)
+	if err != nil {
+		return cfg, err
+	}
+	cfg.Container = norm
 	return cfg, nil
 }
 
@@ -860,6 +902,9 @@ func read(path string) (Config, error) {
 		if !permission.ValidPresetID(c.PermissionPreset) {
 			return Config{}, fmt.Errorf("%s: unknown permissionPreset %q (want read-only|dev|yolo-with-sandbox)", path, c.PermissionPreset)
 		}
+	}
+	if err := normalizeAdmissionLayer(&c.Admission, path); err != nil {
+		return Config{}, err
 	}
 	if strings.TrimSpace(c.Sandbox) != "" {
 		mode, ok := sandbox.ParseMode(c.Sandbox)
@@ -1276,7 +1321,7 @@ const (
 )
 
 // NormalizeDeferTools maps config aliases to on|off.
-// Empty and unknown values become "" (default off).
+// Empty and unknown values become "" (runtime default = on via DeferToolsEnabled).
 func NormalizeDeferTools(s string) string {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "on", "true", "1", "yes", "enable", "enabled":
@@ -1289,8 +1334,9 @@ func NormalizeDeferTools(s string) string {
 }
 
 // DeferToolsEnabled reports whether deferred tool schemas are active.
+// Empty/unset defaults to on; only an explicit off disables deferral.
 func DeferToolsEnabled(s string) bool {
-	return NormalizeDeferTools(s) == DeferToolsOn
+	return NormalizeDeferTools(s) != DeferToolsOff
 }
 
 // NormalizeWebSearch trims webSearch fields.
@@ -1366,6 +1412,7 @@ func merge(base, layer Config) Config {
 	if layer.PermissionPreset != "" {
 		base.PermissionPreset = layer.PermissionPreset
 	}
+	base.Admission = mergeAdmission(base.Admission, layer.Admission)
 	if layer.Sandbox != "" {
 		base.Sandbox = layer.Sandbox
 	}
@@ -1457,6 +1504,7 @@ func merge(base, layer Config) Config {
 	base.Providers = mergeProviders(base.Providers, layer.Providers)
 	base.Keybinds = MergeKeybinds(base.Keybinds, layer.Keybinds)
 	base.MCP = mergeMCP(base.MCP, layer.MCP)
+	base.Container = mergeContainer(base.Container, layer.Container)
 	base.LSP = mergeLSP(base.LSP, layer.LSP)
 	base.Harnesses = mergeHarnesses(base.Harnesses, layer.Harnesses)
 	base.Scheduler = mergeScheduler(base.Scheduler, layer.Scheduler)
@@ -1469,6 +1517,102 @@ func merge(base, layer Config) Config {
 		base.DisableDefaultPer = mergeDisableDefaultPer(base.DisableDefaultPer, layer.DisableDefaultPer)
 	}
 	return base
+}
+
+// mergeAdmission overlays non-empty admission fields from layer onto base.
+// allowPaths: non-nil layer slice replaces (including explicit []).
+func mergeAdmission(base, layer AdmissionConfig) AdmissionConfig {
+	if layer.Preset != "" {
+		base.Preset = layer.Preset
+	}
+	if layer.FailClosed != nil {
+		v := *layer.FailClosed
+		base.FailClosed = &v
+	}
+	if layer.AllowPaths != nil {
+		out := make([]string, len(layer.AllowPaths))
+		copy(out, layer.AllowPaths)
+		base.AllowPaths = out
+	}
+	return base
+}
+
+func normalizeAdmissionLayer(ac *AdmissionConfig, path string) error {
+	if ac == nil {
+		return nil
+	}
+	if ac.Preset != "" {
+		ac.Preset = strings.ToLower(strings.TrimSpace(ac.Preset))
+		if !admissionValidPreset(ac.Preset) {
+			return fmt.Errorf("%s: unknown admission.preset %q (want permissive|default|strict)", path, ac.Preset)
+		}
+	}
+	if ac.AllowPaths != nil {
+		// Validate shape at load (home may be unavailable in some tests — use UserHomeDir).
+		home, _ := os.UserHomeDir()
+		norm, err := normalizeAdmissionAllowPaths(ac.AllowPaths, home)
+		if err != nil {
+			return fmt.Errorf("%s: %w", path, err)
+		}
+		ac.AllowPaths = norm
+	}
+	return nil
+}
+
+// admissionValidPreset mirrors admission.ValidPresetID without importing
+// internal/admission from config parse hot path helpers used in tests.
+func admissionValidPreset(id string) bool {
+	switch strings.ToLower(strings.TrimSpace(id)) {
+	case "", "permissive", "default", "strict":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeAdmissionAllowPaths(in []string, home string) ([]string, error) {
+	// Inline the same rules as admission.NormalizeAllowPaths so config Load
+	// fails closed on spoofable markers without a package cycle.
+	if len(in) == 0 {
+		if in != nil {
+			return []string{}, nil
+		}
+		return nil, nil
+	}
+	home = filepath.Clean(strings.TrimSpace(home))
+	var out []string
+	seen := map[string]struct{}{}
+	for i, raw := range in {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		if !strings.HasPrefix(raw, "~") && !filepath.IsAbs(raw) {
+			return nil, fmt.Errorf("admission.allowPaths[%d]: %q must be home-anchored (~/… or absolute under $HOME); bare relative markers are spoofable", i, raw)
+		}
+		if home == "" {
+			return nil, fmt.Errorf("admission.allowPaths[%d]: home directory unavailable for anchoring", i)
+		}
+		var path string
+		switch {
+		case raw == "~":
+			path = home
+		case strings.HasPrefix(raw, "~/"):
+			path = filepath.Join(home, raw[2:])
+		default:
+			path = raw
+		}
+		path = filepath.Clean(path)
+		if path != home && !strings.HasPrefix(path, home+string(filepath.Separator)) {
+			return nil, fmt.Errorf("admission.allowPaths[%d]: %q resolves outside home %q", i, raw, home)
+		}
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+		out = append(out, path)
+	}
+	return out, nil
 }
 
 // mergeToolRetry overlays non-zero tool-retry knobs from layer onto base.

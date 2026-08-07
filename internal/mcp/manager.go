@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jonathanung/strike-cli/internal/admission"
 	"github.com/jonathanung/strike-cli/internal/secret"
 	"github.com/jonathanung/strike-cli/internal/tool"
 )
@@ -17,10 +18,14 @@ type Status struct {
 	Name      string
 	Command   string // non-secret endpoint label (command or URL)
 	Transport string // stdio|http
-	State     string // "up", "down", "error", "disabled"
+	State     string // "up", "down", "error", "disabled", "quarantined"
 	ToolCount int
-	Error     string // non-secret error summary when down/error
+	Error     string // non-secret error summary when down/error/quarantined
 	Tools     []string
+	// Admission is the last admission action (allow|warn|block|quarantine).
+	Admission string
+	// AdmissionReason is a short operator-visible reason (redact-safe).
+	AdmissionReason string
 }
 
 // Manager owns configured MCP servers for a session.
@@ -31,22 +36,55 @@ type Manager struct {
 	errs     map[string]string
 	cfgs     map[string]ServerConfig
 	disabled map[string]bool
-	reg      *tool.Registry
+	// quarantined servers stay connected but tools are not bound.
+	quarantined map[string]bool
+	admitAction map[string]string
+	admitReason map[string]string
+	reg         *tool.Registry
+	policy      admission.Policy
+	// onVerdict is optional; called after each admission decision (tests / timeline).
+	onVerdict func(admission.Verdict)
 }
 
 // NewManager returns an empty manager.
 func NewManager() *Manager {
 	return &Manager{
-		clients:  make(map[string]session),
-		tools:    make(map[string][]string),
-		errs:     make(map[string]string),
-		cfgs:     make(map[string]ServerConfig),
-		disabled: make(map[string]bool),
+		clients:     make(map[string]session),
+		tools:       make(map[string][]string),
+		errs:        make(map[string]string),
+		cfgs:        make(map[string]ServerConfig),
+		disabled:    make(map[string]bool),
+		quarantined: make(map[string]bool),
+		admitAction: make(map[string]string),
+		admitReason: make(map[string]string),
 	}
 }
 
-// StartAll starts each server, lists tools, and registers bridge tools on reg.
-// Failures are recorded per-server and do not abort other servers.
+// SetAdmissionPolicy installs the register-time admission policy. Zero policy
+// allows all (no matrix → Decide treats missing as allow). Call before StartAll.
+func (m *Manager) SetAdmissionPolicy(pol admission.Policy) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	m.policy = pol
+	m.mu.Unlock()
+}
+
+// SetAdmissionHook registers a callback invoked after each admission verdict
+// (including allow). Used to emit timeline/session events.
+func (m *Manager) SetAdmissionHook(fn func(admission.Verdict)) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	m.onVerdict = fn
+	m.mu.Unlock()
+}
+
+// StartAll starts each server, lists tools, runs admission, and registers
+// bridge tools on reg when the verdict binds tools. Failures are recorded
+// per-server and do not abort other servers.
 func (m *Manager) StartAll(ctx context.Context, servers []ServerConfig, reg *tool.Registry) {
 	if m == nil || reg == nil {
 		return
@@ -63,6 +101,9 @@ func (m *Manager) startOne(ctx context.Context, cfg ServerConfig, reg *tool.Regi
 	m.mu.Lock()
 	m.cfgs[cfg.Name] = cfg
 	delete(m.disabled, cfg.Name)
+	delete(m.quarantined, cfg.Name)
+	delete(m.admitAction, cfg.Name)
+	delete(m.admitReason, cfg.Name)
 	m.mu.Unlock()
 
 	client, err := Start(ctx, cfg)
@@ -84,6 +125,32 @@ func (m *Manager) startOne(ctx context.Context, cfg ServerConfig, reg *tool.Regi
 		return
 	}
 
+	// Admission scan before tools bind into the registry.
+	verdict := m.admit(cfg, tools)
+	m.recordVerdict(cfg.Name, verdict)
+	if m.onVerdict != nil {
+		m.onVerdict(verdict)
+	}
+
+	switch verdict.Action {
+	case admission.ActionBlock:
+		_ = client.Close()
+		m.mu.Lock()
+		m.errs[cfg.Name] = "admission blocked: " + verdict.Reason
+		m.mu.Unlock()
+		return
+	case admission.ActionQuarantine:
+		// Keep session for diagnostics but do not bind tools.
+		m.mu.Lock()
+		m.clients[cfg.Name] = client
+		m.tools[cfg.Name] = nil
+		m.quarantined[cfg.Name] = true
+		m.errs[cfg.Name] = "admission quarantined: " + verdict.Reason
+		m.mu.Unlock()
+		go m.watch(cfg.Name, client)
+		return
+	}
+
 	names := make([]string, 0, len(tools))
 	for _, t := range tools {
 		bridge := newBridge(client, t)
@@ -99,6 +166,33 @@ func (m *Manager) startOne(ctx context.Context, cfg ServerConfig, reg *tool.Regi
 
 	// Watch for unexpected exit: mark down (tools error cleanly via client.Closed).
 	go m.watch(cfg.Name, client)
+}
+
+func (m *Manager) admit(cfg ServerConfig, tools []toolInfo) admission.Verdict {
+	m.mu.Lock()
+	pol := m.policy
+	m.mu.Unlock()
+	sub := admission.MCPSubject{
+		Name:      cfg.Name,
+		Transport: cfg.transport(),
+		Endpoint:  cfg.displayEndpoint(),
+		Tools:     make([]admission.MCPTool, 0, len(tools)),
+	}
+	for _, t := range tools {
+		sub.Tools = append(sub.Tools, admission.MCPTool{
+			Name:        t.Name,
+			Description: t.Description,
+			InputSchema: t.InputSchema,
+		})
+	}
+	return admission.AdmitMCP(pol, sub)
+}
+
+func (m *Manager) recordVerdict(name string, v admission.Verdict) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.admitAction[name] = string(v.Action)
+	m.admitReason[name] = v.Reason
 }
 
 func (m *Manager) watch(name string, client session) {
@@ -163,7 +257,7 @@ func (m *Manager) Retry(ctx context.Context, name string) error {
 }
 
 func (m *Manager) isUpLocked(name string) bool {
-	if m.disabled[name] {
+	if m.disabled[name] || m.quarantined[name] {
 		return false
 	}
 	if _, bad := m.errs[name]; bad {
@@ -223,6 +317,7 @@ func (m *Manager) detach(name string, reg *tool.Registry) {
 	toolNames := append([]string(nil), m.tools[name]...)
 	delete(m.clients, name)
 	delete(m.tools, name)
+	delete(m.quarantined, name)
 	m.mu.Unlock()
 
 	if reg != nil && len(toolNames) > 0 {
@@ -251,15 +346,26 @@ func (m *Manager) Statuses() []Status {
 	for _, name := range names {
 		cfg := m.cfgs[name]
 		st := Status{
-			Name:      name,
-			Command:   cfg.displayEndpoint(),
-			Transport: cfg.transport(),
-			Tools:     append([]string(nil), m.tools[name]...),
+			Name:            name,
+			Command:         cfg.displayEndpoint(),
+			Transport:       cfg.transport(),
+			Tools:           append([]string(nil), m.tools[name]...),
+			Admission:       m.admitAction[name],
+			AdmissionReason: m.admitReason[name],
 		}
 		st.ToolCount = len(st.Tools)
 		if m.disabled[name] {
 			st.State = "disabled"
 			st.Error = "disabled"
+			out = append(out, st)
+			continue
+		}
+		if m.quarantined[name] {
+			st.State = "quarantined"
+			st.Error = m.errs[name]
+			if st.Error == "" {
+				st.Error = "admission quarantined"
+			}
 			out = append(out, st)
 			continue
 		}
@@ -425,6 +531,9 @@ func FormatStatuses(statuses []Status) string {
 		fmt.Fprintf(&b, "%s  %s  %s  tools=%d", st.Name, st.State, transport, st.ToolCount)
 		if st.Command != "" {
 			fmt.Fprintf(&b, "  %s", st.Command)
+		}
+		if st.Admission != "" && st.Admission != "allow" {
+			fmt.Fprintf(&b, "  admission=%s", st.Admission)
 		}
 		if st.Error != "" && st.State != "disabled" {
 			fmt.Fprintf(&b, "  (%s)", st.Error)

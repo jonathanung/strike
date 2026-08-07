@@ -39,7 +39,7 @@
     },
     "deferTools": {
       "type": "string",
-      "description": "Defer non-core tool schemas until toolsearch. Empty means off.",
+      "description": "Defer non-core tool schemas until toolsearch. Empty means on.",
       "enum": ["on", "off"]
     },
     "defaultAgent": {
@@ -111,6 +111,9 @@
       "type": "string",
       "description": "Shipped named ruleset inserted after defaults and before permissions[].",
       "enum": ["read-only", "dev", "yolo-with-sandbox"]
+    },
+    "admission": {
+      "$ref": "#/$defs/admission"
     },
     "hooks": {
       "type": "array",
@@ -186,6 +189,9 @@
     },
     "mcp": {
       "$ref": "#/$defs/mcp"
+    },
+    "container": {
+      "$ref": "#/$defs/container"
     },
     "lsp": {
       "$ref": "#/$defs/lsp"
@@ -457,6 +463,27 @@
         }
       }
     },
+    "admission": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Register/load-time admission scans for MCP servers, skills, and plugins. Distinct from permissionPreset and OS sandbox. See docs/admission.md.",
+      "properties": {
+        "preset": {
+          "type": "string",
+          "description": "Severity→action matrix. Empty means default. strict fails closed on scanner errors.",
+          "enum": ["permissive", "default", "strict"]
+        },
+        "allowPaths": {
+          "type": "array",
+          "description": "Home-anchored path prefixes trusted as first-party (~/… or absolute under $HOME). Bare relative markers are rejected (spoofable).",
+          "items": { "type": "string" }
+        },
+        "failClosed": {
+          "type": "boolean",
+          "description": "When true, scanner errors become block. Defaults true for strict, false otherwise."
+        }
+      }
+    },
     "mcp": {
       "type": "object",
       "additionalProperties": true,
@@ -468,6 +495,97 @@
             "$ref": "#/$defs/mcpServer"
           }
         }
+      }
+    },
+    "container": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Native containerization (E12). Also loadable from container.jsonc/json. Merge: defaults → global → project → managed. See docs/config.md and docs/container.md.",
+      "properties": {
+        "baseImage": { "type": "string" },
+        "packages": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "shell": { "type": "string" },
+        "resources": { "$ref": "#/$defs/containerResources" },
+        "workspace": { "$ref": "#/$defs/containerWorkspace" },
+        "auth": { "$ref": "#/$defs/containerAuth" },
+        "network": { "$ref": "#/$defs/containerNetwork" },
+        "dockerfile": {
+          "type": "string",
+          "description": "Optional path to a hand-written Dockerfile (relative to repo or absolute)."
+        },
+        "execution": {
+          "type": "string",
+          "description": "Where the agent runs: local (default) or container (E12.4).",
+          "enum": ["local", "container", "host", "docker", "podman"]
+        },
+        "engine": {
+          "type": "string",
+          "description": "Container CLI binary override (docker, podman, or absolute path)."
+        }
+      }
+    },
+    "containerResources": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "memory": { "type": "string" },
+        "cpus": { "type": "string" },
+        "pidsLimit": { "type": "integer", "minimum": 0 },
+        "gpus": { "type": "string" }
+      }
+    },
+    "containerWorkspace": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "mountPath": { "type": "string" },
+        "hostPath": { "type": "string" },
+        "ports": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "persistHome": { "type": "boolean" },
+        "extraBinds": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "containerAuth": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "forwardEnv": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "envFile": { "type": "string" },
+        "requiredEnv": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "forwardSSHAgent": { "type": "boolean" }
+      }
+    },
+    "containerNetwork": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Container network posture. allow reuses the network.allow host/CIDR shape for future egress filters.",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["default", "none", "bridge", "off"]
+        },
+        "allow": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "httpProxy": { "type": "string" },
+        "httpsProxy": { "type": "string" },
+        "noProxy": { "type": "string" }
       }
     },
     "mcpServer": {

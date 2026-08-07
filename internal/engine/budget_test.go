@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -109,16 +110,51 @@ func TestChildBudgetSoftStallNoHardTrip(t *testing.T) {
 	start := time.Now()
 	b := newChildBudget(tool.AgentBudgetLimits{}, "x", start) // no hard stall
 	// Past default soft stall (300s).
-	trip, _, _, _ := b.evaluate(start.Add(301*time.Second), start)
+	at := start.Add(301 * time.Second)
+	trip, _, _, _ := b.evaluate(at, start)
 	if trip {
 		t.Fatal("soft stall must not hard-trip")
 	}
 	if !b.softStall {
 		t.Fatal("expected softStall true")
 	}
-	snap := b.snapshot(start.Add(301*time.Second), start)
+	snap := b.snapshot(at, start)
 	if !snap.Stall {
 		t.Fatal("snapshot.Stall want true")
+	}
+	if snap.IdleS < 300 {
+		t.Fatalf("IdleS=%d want >=300", snap.IdleS)
+	}
+	if snap.StallAfterSEffective != defaultSoftStallAfterS {
+		t.Fatalf("StallAfterSEffective=%d want %d", snap.StallAfterSEffective, defaultSoftStallAfterS)
+	}
+	if snap.LastProgressAt == "" {
+		t.Fatal("LastProgressAt should be set from spawn progress time")
+	}
+}
+
+func TestChildBudgetProgressClearsSoftStallSignal(t *testing.T) {
+	start := time.Now()
+	b := newChildBudget(tool.AgentBudgetLimits{}, "obj", start)
+	at := start.Add(301 * time.Second)
+	_, _, _, _ = b.evaluate(at, start)
+	if !b.softStall {
+		t.Fatal("want soft stall")
+	}
+	b.softStallSignaled = true
+	b.noteProgress(at.Add(time.Second), "tool read")
+	if b.softStall || b.softStallSignaled {
+		t.Fatalf("progress should clear softStall and softStallSignaled: stall=%v signaled=%v", b.softStall, b.softStallSignaled)
+	}
+}
+
+func TestChildBudgetSoftStallReason(t *testing.T) {
+	start := time.Now()
+	b := newChildBudget(tool.AgentBudgetLimits{}, "x", start)
+	at := start.Add(310 * time.Second)
+	got := b.softStallReason(at, start)
+	if !strings.Contains(got, "stale/stall") || !strings.Contains(got, "300") {
+		t.Fatalf("reason=%q", got)
 	}
 }
 

@@ -24,21 +24,27 @@ func TestPermissionsExplainBaseLayers(t *testing.T) {
 	if !strings.Contains(ex.Summary, "allow") {
 		t.Fatalf("summary missing allow: %s", ex.Summary)
 	}
+	if ex.EvalPath == "" {
+		t.Fatalf("expected eval path in explain, summary=%s", ex.Summary)
+	}
 }
 
 func TestPermissionsExplainLive(t *testing.T) {
 	p := local.NewPermissions(nil, nil)
-	p.SetLive(func(perm, pat string) permission.Explanation {
-		return permission.Explanation{
-			Permission: perm,
-			Pattern:    pat,
-			Action:     permission.Deny,
-			Matched: &permission.Match{
-				Layer:      permission.LayerAgent,
+	p.SetLive(func(perm, pat string) permission.DetailedExplanation {
+		return permission.DetailedExplanation{
+			Explanation: permission.Explanation{
 				Permission: perm,
-				Pattern:    "*",
+				Pattern:    pat,
 				Action:     permission.Deny,
+				Matched: &permission.Match{
+					Layer:      permission.LayerAgent,
+					Permission: perm,
+					Pattern:    "*",
+					Action:     permission.Deny,
+				},
 			},
+			EvalPath: permission.EvalPathPattern,
 		}
 	})
 	ex := p.Explain("bash", "rm -rf /")
@@ -62,5 +68,41 @@ func TestPermissionsPresets(t *testing.T) {
 	}
 	if !ids[permission.PresetIDReadOnly] || !ids[permission.PresetIDDev] {
 		t.Fatalf("missing shipped presets: %v", ids)
+	}
+}
+
+func TestPermissionsExplainPresetDryRun(t *testing.T) {
+	layers := []permission.Ruleset{
+		permission.Defaults(),
+	}
+	p := local.NewPermissions(layers, []string{permission.LayerDefaults})
+	ex := p.ExplainPreset("write", "main.go", permission.PresetIDReadOnly)
+	if ex.Action != "deny" {
+		t.Fatalf("action = %q, want deny", ex.Action)
+	}
+	if ex.DryRunPreset != permission.PresetIDReadOnly {
+		t.Fatalf("DryRunPreset = %q", ex.DryRunPreset)
+	}
+	if !strings.Contains(ex.Summary, "dry-run preset=") {
+		t.Fatalf("summary = %s", ex.Summary)
+	}
+	// Live explain without preset should not be deny from read-only.
+	base := p.Explain("write", "main.go")
+	if base.Action == "deny" && base.Layer == permission.LayerPreset {
+		t.Fatal("base layers mutated by dry-run")
+	}
+}
+
+func TestPermissionsDiffPresets(t *testing.T) {
+	p := local.NewPermissions(nil, nil)
+	d, err := p.DiffPresets(permission.PresetIDReadOnly, permission.PresetIDDev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Changes) == 0 {
+		t.Fatal("expected changes")
+	}
+	if !strings.Contains(d.Summary, "permission diff") {
+		t.Fatalf("summary = %s", d.Summary)
 	}
 }

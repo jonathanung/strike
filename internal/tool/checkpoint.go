@@ -1,6 +1,7 @@
 package tool
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -124,7 +125,7 @@ func (s *CheckpointStore) Snapshot(absPath string) {
 		s.active.files[absPath] = fileOrig{exists: true, skipped: true}
 		return
 	}
-	data, err := os.ReadFile(absPath)
+	data, err := safeReadFile(context.Background(), absPath)
 	if err != nil {
 		s.active.files[absPath] = fileOrig{exists: true, skipped: true}
 		return

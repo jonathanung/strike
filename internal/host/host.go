@@ -159,7 +159,7 @@ type UserDefaults struct {
 	Autoupdate string
 	// LeanCode is lean-code guidance intensity: off|lite|full.
 	LeanCode string
-	// DeferTools is toolsearch-backed schema deferral: on|off.
+	// DeferTools is toolsearch-backed schema deferral: on|off (empty means on).
 	DeferTools string
 	// SessionWorktree is session.worktree: off|auto|always.
 	SessionWorktree string
@@ -858,6 +858,18 @@ type PermissionExplanation struct {
 	Matched    PermissionMatch
 	Trail      []PermissionMatch
 	Summary    string // multi-line human text for notices
+	// EvalPath is pattern|facts|none when action facts were considered (#888).
+	EvalPath string
+	// FactSummary is a short action-fact projection for explain/audit (#888).
+	FactSummary string
+	// DryRunPreset is set when Explain used an alternate preset without applying it.
+	DryRunPreset string
+	// ManagedBlocks is true when the managed deny ceiling tightens the decision.
+	ManagedBlocks bool
+	// ManagedSummary is a one-line ceiling note when relevant.
+	ManagedSummary string
+	// SandboxSummary is sandbox dial + network.allow when provided by the host.
+	SandboxSummary string
 }
 
 // PermissionPresetInfo is one shipped permission preset (read-only, dev, …).
@@ -867,11 +879,42 @@ type PermissionPresetInfo struct {
 	Description string
 }
 
-// Permissions is the explain/preset surface for /permission. Nil when unsupported.
+// PermissionRuleRef is one rule in a permission diff.
+type PermissionRuleRef struct {
+	Layer      string
+	Permission string
+	Pattern    string
+	Action     string
+}
+
+// PermissionRuleDelta is one added/removed/changed rule between two stacks.
+type PermissionRuleDelta struct {
+	Kind   string // added | removed | changed
+	Layer  string
+	Before *PermissionRuleRef
+	After  *PermissionRuleRef
+}
+
+// PermissionDiff is the host-facing diff between two effective rulesets or presets.
+type PermissionDiff struct {
+	LeftLabel  string
+	RightLabel string
+	Changes    []PermissionRuleDelta
+	Summary    string // multi-line human text
+}
+
+// Permissions is the explain/preset/diff surface for /permission. Nil when unsupported.
 type Permissions interface {
 	// Explain returns last-match-wins detail for permission + pattern.
 	// Empty pattern means "*".
 	Explain(permission, pattern string) PermissionExplanation
+	// ExplainPreset dry-runs Explain under an alternate shipped preset without
+	// mutating session grants. Empty presetID means no preset layer.
+	// Unknown preset IDs should return an explanation with Summary error text
+	// and empty Action, or implementations may surface via Summary only.
+	ExplainPreset(permission, pattern, presetID string) PermissionExplanation
+	// DiffPresets compares two shipped presets (added/removed/changed + layer labels).
+	DiffPresets(leftID, rightID string) (PermissionDiff, error)
 	// Presets lists shipped named rulesets.
 	Presets() []PermissionPresetInfo
 }
