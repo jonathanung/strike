@@ -16,6 +16,12 @@ materially affect the shipped product.
 
 ### Added
 
+- **Tool-chain correlation** — content-free multi-step permission correlation
+  within a turn: sensitive read → network/bash, write executable → bash
+  execute, and identical denial retry storms. Matches **ask** or **deny** with
+  explainable chain summaries (tool names/classes only); `chainId` on
+  `permission.decided` and timeline entries. State clears on turn end/interrupt
+  and caps pending nodes ([#891](https://github.com/jonathanung/strike/issues/891)).
 - **Plugin theme contributions** — theme packages load through the plugin
   catalog/lifecycle (same lockfile and integrity path). `/theme` shows plugin
   provenance and collision winners, live-previews on cursor move without
