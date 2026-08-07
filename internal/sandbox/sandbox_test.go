@@ -444,12 +444,15 @@ func TestDarwinSandboxHTTPSHelper(t *testing.T) {
 	if os.Getenv("STRIKE_SANDBOX_HTTPS_HELPER") == "" {
 		t.Skip("helper process")
 	}
+	// Prove TLS + host networking work under seatbelt. Any HTTP response
+	// (including 403/429 from api.github.com rate limits on CI runners) means
+	// certificate trust and dial succeeded; only transport errors fail the check.
 	resp, err := http.Get("https://api.github.com/zen")
 	if err != nil {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode < 100 || resp.StatusCode > 599 {
 		t.Fatalf("status = %s", resp.Status)
 	}
 }
