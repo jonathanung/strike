@@ -107,6 +107,9 @@
       "description": "Shipped named ruleset inserted after defaults and before permissions[].",
       "enum": ["read-only", "dev", "yolo-with-sandbox"]
     },
+    "admission": {
+      "$ref": "#/$defs/admission"
+    },
     "hooks": {
       "type": "array",
       "description": "Lifecycle hooks: declarative action rules and/or shell commands.",
@@ -449,6 +452,27 @@
           "type": "integer",
           "description": "Hard-deny when live children reach this count (0 = unlimited).",
           "minimum": 0
+        }
+      }
+    },
+    "admission": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Register/load-time admission scans for MCP servers, skills, and plugins. Distinct from permissionPreset and OS sandbox. See docs/admission.md.",
+      "properties": {
+        "preset": {
+          "type": "string",
+          "description": "Severity→action matrix. Empty means default. strict fails closed on scanner errors.",
+          "enum": ["permissive", "default", "strict"]
+        },
+        "allowPaths": {
+          "type": "array",
+          "description": "Home-anchored path prefixes trusted as first-party (~/… or absolute under $HOME). Bare relative markers are rejected (spoofable).",
+          "items": { "type": "string" }
+        },
+        "failClosed": {
+          "type": "boolean",
+          "description": "When true, scanner errors become block. Defaults true for strict, false otherwise."
         }
       }
     },

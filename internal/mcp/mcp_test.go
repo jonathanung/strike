@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jonathanung/strike-cli/internal/admission"
 	"github.com/jonathanung/strike-cli/internal/tool"
 )
 
@@ -57,26 +58,36 @@ func runFakeMCP(mode string) {
 				"serverInfo":      map[string]string{"name": "fake", "version": "0.0.1"},
 			}, nil)
 		case "tools/list":
-			writeRPC(*req.ID, map[string]any{
-				"tools": []map[string]any{
-					{
-						"name":        "echo",
-						"description": "echoes the message",
-						"inputSchema": map[string]any{
-							"type": "object",
-							"properties": map[string]any{
-								"message": map[string]any{"type": "string"},
-							},
-							"required": []string{"message"},
+			tools := []map[string]any{
+				{
+					"name":        "echo",
+					"description": "echoes the message",
+					"inputSchema": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"message": map[string]any{"type": "string"},
 						},
-					},
-					{
-						"name":        "boom",
-						"description": "returns an error result",
-						"inputSchema": map[string]any{"type": "object", "properties": map[string]any{}},
+						"required": []string{"message"},
 					},
 				},
-			}, nil)
+				{
+					"name":        "boom",
+					"description": "returns an error result",
+					"inputSchema": map[string]any{"type": "object", "properties": map[string]any{}},
+				},
+			}
+			if mode == "shell-tools" {
+				tools = []map[string]any{
+					{
+						"name":        "run_shell",
+						"description": "execute shell commands on the host",
+						"inputSchema": map[string]any{"type": "object", "properties": map[string]any{
+							"command": map[string]any{"type": "string"},
+						}},
+					},
+				}
+			}
+			writeRPC(*req.ID, map[string]any{"tools": tools}, nil)
 		case "tools/call":
 			var p callToolParams
 			_ = json.Unmarshal(req.Params, &p)
@@ -269,6 +280,47 @@ func TestManagerRegistersAndStatus(t *testing.T) {
 	summary := FormatStatuses(st)
 	if !strings.Contains(summary, "fake") || !strings.Contains(summary, "up") {
 		t.Fatalf("summary = %q", summary)
+	}
+}
+
+func TestManagerAdmissionBlocksShellUnderStrict(t *testing.T) {
+	cmd, args, env := helperCommand(t, "shell-tools")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	pol, err := admission.Resolve(admission.Config{Preset: admission.PresetStrict}, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := tool.NewRegistry()
+	m := NewManager()
+	m.SetAdmissionPolicy(pol)
+	var got []admission.Verdict
+	m.SetAdmissionHook(func(v admission.Verdict) { got = append(got, v) })
+	defer m.Close()
+
+	m.StartAll(ctx, []ServerConfig{{
+		Name:    "evil",
+		Command: cmd,
+		Args:    args,
+		Env:     env,
+	}}, reg)
+
+	if len(got) != 1 || got[0].Action != admission.ActionBlock {
+		t.Fatalf("verdicts = %+v", got)
+	}
+	st := m.Statuses()
+	if len(st) != 1 || st[0].State != "error" {
+		t.Fatalf("status = %+v", st)
+	}
+	if !strings.Contains(st[0].Error, "admission blocked") {
+		t.Fatalf("error = %q", st[0].Error)
+	}
+	if st[0].Admission != "block" {
+		t.Fatalf("admission = %q", st[0].Admission)
+	}
+	if _, ok := reg.Get("mcp_evil_run_shell"); ok {
+		t.Fatal("shell tool must not bind under strict block")
 	}
 }
 
