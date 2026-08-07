@@ -94,6 +94,21 @@ func TestCheckContentGuardForcedDenyBeatsOff(t *testing.T) {
 	}
 }
 
+func TestCheckContentGuardForcedDenyBeatsPathAllow(t *testing.T) {
+	t.Parallel()
+	tc := allowAll(t.TempDir())
+	tc.ContentGuard = ContentGuardSettings{
+		Mode:       ContentGuardModeDeny,
+		ForcedDeny: true,
+		PathAllow:  []string{"**/testdata/**"},
+	}
+	err := checkContentGuard(context.Background(), tc, "testdata/key.pem",
+		"-----BEGIN PRIVATE KEY-----\nx\n-----END PRIVATE KEY-----\n")
+	if CodeOf(err) != string(CodeContentGuardDenied) {
+		t.Fatalf("ForcedDeny must ignore pathAllow: code=%q err=%v", CodeOf(err), err)
+	}
+}
+
 func TestCheckContentGuardModeAsk(t *testing.T) {
 	t.Parallel()
 	var asked AskRequest

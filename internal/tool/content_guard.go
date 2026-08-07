@@ -89,7 +89,9 @@ func checkContentGuard(ctx context.Context, tc *Context, rel, content string) er
 		return nil
 	}
 	rel = filepath.ToSlash(strings.TrimSpace(rel))
-	if contentGuardPathAllowed(rel, settings.PathAllow) {
+	// pathAllow is an operator escape for false positives. Managed ForcedDeny
+	// is a hard ceiling — project pathAllow must not widen it.
+	if !settings.ForcedDeny && contentGuardPathAllowed(rel, settings.PathAllow) {
 		return nil
 	}
 

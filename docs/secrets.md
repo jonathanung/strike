@@ -124,7 +124,7 @@ Config (`contentGuard` — see [config.md](config.md)):
 - **deny** mode hard-blocks all findings.
 - **off** disables the scanner unless managed locks deny.
 - Managed/MDM `contentGuard.mode: deny` sets a **ForcedDeny** ceiling: project
-  config, yolo, and session grants cannot widen it.
+  config (including `pathAllow`), yolo, and session grants cannot widen it.
 - `permissionMode: yolo` may upgrade remaining **ask** findings only; it never
   bypasses deny-severity hits or the managed ceiling.
 

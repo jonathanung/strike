@@ -394,10 +394,10 @@ see [secrets.md](secrets.md)). Shared credential patterns via
 
 `pathAllow` replaces per layer when set (including `[]`). Managed
 `contentGuard.mode: deny` installs a ForcedDeny ceiling that project `off`/`ask`,
-yolo, and session grants cannot widen. Yolo only upgrades remaining **ask**
-findings — never deny-severity hits. Resulting file content is evaluated (not
-only patch hunks). Optional skill `/write-guards` documents the rules for the
-model.
+`pathAllow`, yolo, and session grants cannot widen. Yolo only upgrades remaining
+**ask** findings — never deny-severity hits. Resulting file content is evaluated
+(not only patch hunks). Optional skill `/write-guards` documents the rules for
+the model.
 
 **Yolo + sandbox off:** `permissionMode: yolo` (or a resumed session in yolo)
 combined with `sandbox: off` **refuses to start** unless you pass `--i-know`.
