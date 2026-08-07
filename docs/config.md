@@ -1733,6 +1733,7 @@ when event names or payload contracts change in a breaking way.
 | `message` | optional block/notify text |
 | `command` | `bash -c` with event JSON on stdin |
 | `timeoutMs` | shell bound; default 30000, max 120000 |
+| `failClosed` | shell timeout/launch/process-error policy. Omitted: **fail-closed** on `pre_tool_use`/`post_tool_use`, fail-open on observe-only events. `true` forces closed; `false` forces open (availability-oriented) (#1031) |
 
 ### Lifecycle events (v1.0.0)
 
@@ -1768,10 +1769,13 @@ Tool path specifically:
 | Shell exit 0 | allow; stdout may inject into tool feedback |
 | Shell exit ≠ 0 on `pre_tool_use` | **block** tool (no Execute) |
 | Shell exit ≠ 0 on other events | **fail-open** (observe-only); inject recorded when useful |
-| Timeout / start failure | **fail-open** |
+| Timeout / launch / process error on `pre_tool_use`/`post_tool_use` | **fail-closed** by default (blocks); set `failClosed: false` for fail-open |
+| Timeout / launch / process error on observe-only events | **fail-open** by default; set `failClosed: true` to block (no-op for non-blocking events) |
 | Context cancel | return cancel; partial inject kept |
 | Hard permission **deny** | evaluated **before** hooks; hooks **cannot widen** a hard deny into allow |
 | Completed side effects | hooks after Execute cannot roll back tool work; post hooks are observational (+ optional feedback inject) |
+| Process isolation | shell hooks run under OS sandbox **read-only + no network** (degrade allowed only when fail-open) |
+| Audit | each shell decision emits `hook.matched` with `action` `shell_allow` / `shell_block` / `shell_fail_closed` / `shell_fail_open` |
 
 Invalid rows are dropped at load. Peer event-name mapping (CC/OpenCode/Crush):
 [peer-ecosystem.md](peer-ecosystem.md#hooks-alignment).

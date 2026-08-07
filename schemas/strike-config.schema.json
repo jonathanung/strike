@@ -421,6 +421,10 @@
           "description": "Shell execution bound (default 30000, max 120000).",
           "minimum": 0,
           "maximum": 120000
+        },
+        "failClosed": {
+          "type": "boolean",
+          "description": "Shell hook failure policy for timeout/launch/process errors. Default fail-closed on pre/post_tool_use; true forces closed, false forces open (availability)."
         }
       }
     },

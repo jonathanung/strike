@@ -1388,13 +1388,49 @@ func (e *Engine) runToolHooks(ctx context.Context, event string, call provider.T
 		ToolOutput:        toolOutput,
 		IsError:           isError,
 	}
-	return tool.RunHooks(ctx, e.opts.Hooks, event, payload, e.opts.WorkDir, func(ctx context.Context, command string) error {
+	out, err := tool.RunHooks(ctx, e.opts.Hooks, event, payload, e.opts.WorkDir, func(ctx context.Context, command string) error {
 		return e.perms.AskWithCorrelation(ctx, tool.AskRequest{
 			Permission: "hook",
 			Patterns:   []string{command},
 			Always:     []string{command},
 		}, corr)
 	})
+	e.emitShellHookDecisions(corr, event, call.Name, call.ID, out)
+	return out, err
+}
+
+// emitShellHookDecisions records shell hook allow/block/fail outcomes on the
+// session event stream (HookMatched) for audit/timeline consumers (#1031).
+func (e *Engine) emitShellHookDecisions(corr protocol.Correlation, event, toolName, callID string, out tool.HookOutcome) {
+	if e == nil || len(out.Decisions) == 0 {
+		return
+	}
+	for _, d := range out.Decisions {
+		action := d.Decision
+		if action == "" {
+			action = "allow"
+		}
+		// Prefix so declarative actions (log/block/notify) stay distinct.
+		if !strings.HasPrefix(action, "shell_") {
+			action = "shell_" + action
+		}
+		msg := strings.TrimSpace(d.Reason)
+		if d.Command != "" {
+			if msg != "" {
+				msg = d.Command + ": " + msg
+			} else {
+				msg = d.Command
+			}
+		}
+		e.emit(protocol.HookMatched{
+			Correlation: corr,
+			Event:       event,
+			Action:      action,
+			Tool:        toolName,
+			Message:     msg,
+			CallID:      callID,
+		})
+	}
 }
 
 // recordSessionPR returns a tool callback that persists PR linkage and emits

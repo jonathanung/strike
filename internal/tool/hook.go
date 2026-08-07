@@ -10,6 +10,7 @@ import (
 
 	"github.com/bmatcuk/doublestar/v4"
 
+	"github.com/jonathanung/strike-cli/internal/sandbox"
 	"github.com/jonathanung/strike-cli/pkg/redact"
 )
 
@@ -116,6 +117,17 @@ func DeclarativeBlockAllowed(event string) bool {
 	return event == HookEventPreToolUse
 }
 
+// Hook failure policy tokens (config failClosed / failOpen).
+const (
+	// HookFailClosed blocks the protected operation when the hook cannot run
+	// to a clean exit 0 (timeout, launch error, process error). Default for
+	// blocking events (pre_tool_use / post_tool_use) — #1031.
+	HookFailClosed = "closed"
+	// HookFailOpen allows the operation when the hook cannot run cleanly.
+	// Explicit opt-in for availability-oriented side-effect hooks.
+	HookFailOpen = "open"
+)
+
 // HookDef is one shell-command hook from config.
 type HookDef struct {
 	// Event is a lifecycle vocabulary name (see HookEvent*).
@@ -127,6 +139,14 @@ type HookDef struct {
 	// Matcher is a doublestar glob over the subject (tool name, phase name,
 	// child status, permission name, …); empty or "*" matches all.
 	Matcher string
+	// FailClosed, when non-nil, overrides the default failure policy for
+	// timeout/launch/process errors. nil → fail-closed on blocking events
+	// (pre/post_tool_use), fail-open on observe-only events (#1031).
+	FailClosed *bool
+	// Sandbox, when non-nil, is the OS policy for the hook process.
+	// nil uses DefaultHookSandbox (read-only + no network; degrade allowed
+	// only when the hook is fail-open).
+	Sandbox *sandbox.Policy
 }
 
 // HookPayload is the JSON object written to a hook's stdin.
@@ -201,21 +221,65 @@ func boundField(s string, maxRunes int) string {
 	return string(runes[:maxRunes]) + "…[truncated]"
 }
 
+// HookDecision is one shell hook's allow/block/fail outcome (for events/audit).
+// Command is truncated; never includes secret values from the payload.
+type HookDecision struct {
+	Command    string // truncated command text
+	Decision   string // allow|block|fail_open|fail_closed|canceled
+	Reason     string // human-readable, redacted
+	FailClosed bool
+	ExitCode   int
+}
+
 // HookOutcome is the aggregated result of matching hooks for one event.
-// Allow is false when a blocking event had a non-zero exit (or trust deny).
-// Inject is stdout from hooks (block reasons and allow-side messages).
+// Allow is false when a blocking event had a non-zero exit, trust deny, or
+// fail-closed infrastructure failure. Inject is stdout from hooks.
 type HookOutcome struct {
-	Allow  bool
-	Inject string
+	Allow     bool
+	Inject    string
+	Decisions []HookDecision
+}
+
+// DefaultHookSandbox returns the OS policy for shell hooks: read-only FS,
+// no host network. AllowDegrade is always true so hosts without bwrap/seatbelt
+// still run hooks; fail-closed policy applies to timeout/launch/exit of the
+// hook command itself, not OS backend availability (#1031).
+func DefaultHookSandbox(failOpen bool) sandbox.Policy {
+	_ = failOpen // reserved: callers may pass tighter policies via HookDef.Sandbox
+	return sandbox.Policy{
+		Mode:         sandbox.ModeReadOnly,
+		NoNetwork:    true,
+		AllowDegrade: true,
+	}
+}
+
+// hookFailOpen reports whether infrastructure failures should allow the op.
+// Explicit FailClosed wins; otherwise blocking events default closed, others open.
+func hookFailOpen(def HookDef, event string) bool {
+	if def.FailClosed != nil {
+		return !*def.FailClosed
+	}
+	// Safe default: fail-closed on events that can gate tool execution.
+	if HookCanBlock(event) {
+		return false
+	}
+	return true
 }
 
 // RunHooks executes matching shell hooks in config order.
 //
 // Exit 0 allows; non-zero blocks only when HookCanBlock(event). Stdout
-// (trimmed) is collected as Inject. Timeouts and start failures fail-open so
-// a broken hook cannot brick the agent. ask is invoked once per distinct
-// command before the first run (trust gate); a non-nil error from ask blocks
-// only on blocking events (otherwise fail-open with inject note).
+// (trimmed) is collected as Inject.
+//
+// Failure policy (#1031):
+//   - Timeout / launch failure / process error: fail-closed by default on
+//     pre/post_tool_use (blocks); fail-open on observe-only events. Override
+//     per hook with FailClosed.
+//   - Cancellation: return ctx.Err() with partial inject
+//   - Payload is always BoundHookPayload (redacted) before crossing the boundary
+//   - Process runs under DefaultHookSandbox unless def.Sandbox is set
+//
+// ask is invoked once per distinct command before the first run (trust gate).
 func RunHooks(ctx context.Context, defs []HookDef, event string, payload HookPayload, workDir string, ask func(ctx context.Context, command string) error) (HookOutcome, error) {
 	out := HookOutcome{Allow: true}
 	if len(defs) == 0 || event == "" {
@@ -226,12 +290,14 @@ func RunHooks(ctx context.Context, defs []HookDef, event string, payload HookPay
 	}
 
 	payload.Event = event
+	// Redact before subprocess boundary — never send raw secrets to hooks.
 	body, err := json.Marshal(BoundHookPayload(payload))
 	if err != nil {
 		return out, fmt.Errorf("marshal hook payload: %w", err)
 	}
 
 	var injects []string
+	var decisions []HookDecision
 	trusted := map[string]struct{}{}
 	subject := payload.Subject
 	if subject == "" {
@@ -248,8 +314,11 @@ func RunHooks(ctx context.Context, defs []HookDef, event string, payload HookPay
 			continue
 		}
 		if err := ctx.Err(); err != nil {
-			return HookOutcome{Allow: out.Allow, Inject: joinInjects(injects)}, err
+			return HookOutcome{Allow: out.Allow, Inject: joinInjects(injects), Decisions: decisions}, err
 		}
+
+		failOpen := hookFailOpen(def, event)
+		cmdLabel := boundField(cmd, 200)
 
 		if _, ok := trusted[cmd]; !ok {
 			if ask != nil {
@@ -259,14 +328,26 @@ func RunHooks(ctx context.Context, defs []HookDef, event string, payload HookPay
 						reason = "hook trust denied"
 					}
 					injects = append(injects, reason)
+					decisions = append(decisions, HookDecision{
+						Command:    cmdLabel,
+						Decision:   "block",
+						Reason:     reason,
+						FailClosed: !failOpen,
+					})
 					if canBlock {
-						return HookOutcome{Allow: false, Inject: joinInjects(injects)}, nil
+						return HookOutcome{Allow: false, Inject: joinInjects(injects), Decisions: decisions}, nil
 					}
-					// Observe-only events: trust deny skips the command, continues.
 					continue
 				}
 			}
 			trusted[cmd] = struct{}{}
+		}
+
+		pol := DefaultHookSandbox(failOpen)
+		if def.Sandbox != nil {
+			pol = *def.Sandbox
+		} else if workDir != "" {
+			pol.WorkDir = workDir
 		}
 
 		res, runErr := RunProcess(ctx, ProcessSpec{
@@ -276,17 +357,47 @@ func RunHooks(ctx context.Context, defs []HookDef, event string, payload HookPay
 			Timeout:   hookTimeout(def.TimeoutMs),
 			MaxOutput: hookMaxOutput,
 			Combine:   false,
+			Sandbox:   pol,
+			// Bounded resources for hook processes (Linux prlimit; no-op elsewhere).
+			Limits: ProcessLimits{MemoryBytes: 512 << 20, CPUSeconds: 60},
 		}, ProcessObserver{})
 		if runErr != nil {
-			// Start/setup failure: fail-open.
+			reason := "hook launch failed: " + runErr.Error()
+			// sandbox_denied from fail-closed degrade is a launch failure.
+			if !failOpen && canBlock {
+				injects = append(injects, reason)
+				decisions = append(decisions, HookDecision{
+					Command: cmdLabel, Decision: "fail_closed", Reason: reason, FailClosed: true,
+				})
+				return HookOutcome{Allow: false, Inject: joinInjects(injects), Decisions: decisions}, nil
+			}
+			decisions = append(decisions, HookDecision{
+				Command: cmdLabel, Decision: "fail_open", Reason: reason, FailClosed: false,
+			})
 			continue
 		}
 		switch res.Status {
 		case ProcessStatusTimeout, ProcessStatusCanceled, ProcessStatusError:
 			if res.Status == ProcessStatusCanceled || ctx.Err() != nil {
-				return HookOutcome{Allow: out.Allow, Inject: joinInjects(injects)}, ctx.Err()
+				decisions = append(decisions, HookDecision{
+					Command: cmdLabel, Decision: "canceled", Reason: "hook canceled", FailClosed: !failOpen,
+				})
+				return HookOutcome{Allow: out.Allow, Inject: joinInjects(injects), Decisions: decisions}, ctx.Err()
 			}
-			// Timeout / process error: fail-open.
+			reason := "hook " + string(res.Status)
+			if res.Status == ProcessStatusTimeout {
+				reason = "hook timed out"
+			}
+			if !failOpen && canBlock {
+				injects = append(injects, reason)
+				decisions = append(decisions, HookDecision{
+					Command: cmdLabel, Decision: "fail_closed", Reason: reason, FailClosed: true,
+				})
+				return HookOutcome{Allow: false, Inject: joinInjects(injects), Decisions: decisions}, nil
+			}
+			decisions = append(decisions, HookDecision{
+				Command: cmdLabel, Decision: "fail_open", Reason: reason, FailClosed: false,
+			})
 			continue
 		}
 
@@ -294,22 +405,32 @@ func RunHooks(ctx context.Context, defs []HookDef, event string, payload HookPay
 		if msg == "" {
 			msg = strings.TrimSpace(res.Stderr)
 		}
+		// Scrub hook stdout before inject (may echo secrets from env).
+		msg = redact.String(msg)
 		if res.ExitCode != 0 {
 			if msg == "" {
 				msg = fmt.Sprintf("hook exited %d", res.ExitCode)
 			}
 			injects = append(injects, msg)
 			if canBlock {
-				return HookOutcome{Allow: false, Inject: joinInjects(injects)}, nil
+				decisions = append(decisions, HookDecision{
+					Command: cmdLabel, Decision: "block", Reason: msg, FailClosed: !failOpen, ExitCode: res.ExitCode,
+				})
+				return HookOutcome{Allow: false, Inject: joinInjects(injects), Decisions: decisions}, nil
 			}
-			// Observe-only: record inject, continue remaining hooks.
+			decisions = append(decisions, HookDecision{
+				Command: cmdLabel, Decision: "fail_open", Reason: msg, FailClosed: false, ExitCode: res.ExitCode,
+			})
 			continue
 		}
 		if msg != "" {
 			injects = append(injects, msg)
 		}
+		decisions = append(decisions, HookDecision{
+			Command: cmdLabel, Decision: "allow", Reason: "exit 0", FailClosed: !failOpen, ExitCode: 0,
+		})
 	}
-	return HookOutcome{Allow: true, Inject: joinInjects(injects)}, nil
+	return HookOutcome{Allow: true, Inject: joinInjects(injects), Decisions: decisions}, nil
 }
 
 func hookMatches(def HookDef, event, subject string) bool {

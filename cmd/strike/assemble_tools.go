@@ -527,10 +527,11 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	hookDefs := make([]tool.HookDef, 0, len(shellHooks))
 	for _, h := range shellHooks {
 		hookDefs = append(hookDefs, tool.HookDef{
-			Event:     h.Event,
-			Command:   h.Command,
-			TimeoutMs: h.TimeoutMs,
-			Matcher:   h.Matcher,
+			Event:      h.Event,
+			Command:    h.Command,
+			TimeoutMs:  h.TimeoutMs,
+			Matcher:    h.Matcher,
+			FailClosed: h.FailClosed,
 		})
 	}
 	// Shared catalog (models.dev + providers.jsonc) for task model pins and
