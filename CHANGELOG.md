@@ -16,6 +16,16 @@ materially affect the shipped product.
 
 ### Added
 
+- **Admission scan for MCP, skills, and plugins** — register/load-time
+  scanners apply a severity→action matrix (`allow` / `warn` / `block` /
+  `quarantine`) before MCP tools bind or skills enter the catalog. Config
+  `admission.preset` (`permissive` \| `default` \| `strict`), home-anchored
+  `allowPaths` only (bare relative markers rejected — spoof-via-subdirectory
+  regression tested), and explicit fail-closed on `strict`. Emits
+  `admission.decided` (protocol `1.14.0`) for timeline/audit. Shared
+  `internal/security.Finding` types for future write-time content guards.
+  Docs: [docs/admission.md](docs/admission.md)
+  ([#889](https://github.com/jonathanung/strike/issues/889)).
 - **Hardened path I/O helpers** — `internal/safefile` centralizes FIFO/special
   file rejection, symlink-leaf refuse on write, timed reads, path identity for
   grant/overlap matching, and atomic replace; adopted by read/write/edit/

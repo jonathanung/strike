@@ -96,6 +96,10 @@ type Config struct {
 	// yolo-with-sandbox) inserted after defaults and before permissions[].
 	// Empty means no preset layer. See permission.Presets / docs/config.md.
 	PermissionPreset string `json:"permissionPreset,omitempty"`
+	// Admission configures register/load-time scans for MCP servers, skills,
+	// and plugins (allow|warn|block|quarantine). Distinct from permissionPreset
+	// and OS sandbox — see docs/config.md and docs/admission.md.
+	Admission AdmissionConfig `json:"admission,omitempty"`
 	// Hooks mixes declarative rules (action) and shell commands (command).
 	// Global then project layers concatenate. Invalid entries are dropped.
 	Hooks []Hook `json:"hooks,omitempty"`
@@ -205,6 +209,20 @@ type ToolRetryConfig struct {
 	// LoopThreshold is how many identical consecutive failing tool+args stop
 	// the turn. Zero means engine default (3).
 	LoopThreshold int `json:"loopThreshold,omitempty"`
+}
+
+// AdmissionConfig is the JSON "admission" object — register/load-time scans
+// for MCP/skills/plugins. Re-exports admission.Config field shape so config
+// JSON stays in this package without an import cycle at parse time.
+type AdmissionConfig struct {
+	// Preset is permissive|default|strict. Empty means default.
+	Preset string `json:"preset,omitempty"`
+	// AllowPaths lists home-anchored path prefixes trusted as first-party.
+	// Must be absolute under $HOME or start with ~/. Bare relative markers
+	// (e.g. ".strike/skills") are rejected — they are spoofable via subdirs.
+	AllowPaths []string `json:"allowPaths,omitempty"`
+	// FailClosed overrides the preset default when non-nil (strict defaults true).
+	FailClosed *bool `json:"failClosed,omitempty"`
 }
 
 // NetworkConfig is the JSON "network" object — shared allowlist shape for
@@ -855,6 +873,9 @@ func read(path string) (Config, error) {
 			return Config{}, fmt.Errorf("%s: unknown permissionPreset %q (want read-only|dev|yolo-with-sandbox)", path, c.PermissionPreset)
 		}
 	}
+	if err := normalizeAdmissionLayer(&c.Admission, path); err != nil {
+		return Config{}, err
+	}
 	if strings.TrimSpace(c.Sandbox) != "" {
 		mode, ok := sandbox.ParseMode(c.Sandbox)
 		if !ok {
@@ -1337,6 +1358,7 @@ func merge(base, layer Config) Config {
 	if layer.PermissionPreset != "" {
 		base.PermissionPreset = layer.PermissionPreset
 	}
+	base.Admission = mergeAdmission(base.Admission, layer.Admission)
 	if layer.Sandbox != "" {
 		base.Sandbox = layer.Sandbox
 	}
@@ -1440,6 +1462,102 @@ func merge(base, layer Config) Config {
 		base.DisableDefaultPer = mergeDisableDefaultPer(base.DisableDefaultPer, layer.DisableDefaultPer)
 	}
 	return base
+}
+
+// mergeAdmission overlays non-empty admission fields from layer onto base.
+// allowPaths: non-nil layer slice replaces (including explicit []).
+func mergeAdmission(base, layer AdmissionConfig) AdmissionConfig {
+	if layer.Preset != "" {
+		base.Preset = layer.Preset
+	}
+	if layer.FailClosed != nil {
+		v := *layer.FailClosed
+		base.FailClosed = &v
+	}
+	if layer.AllowPaths != nil {
+		out := make([]string, len(layer.AllowPaths))
+		copy(out, layer.AllowPaths)
+		base.AllowPaths = out
+	}
+	return base
+}
+
+func normalizeAdmissionLayer(ac *AdmissionConfig, path string) error {
+	if ac == nil {
+		return nil
+	}
+	if ac.Preset != "" {
+		ac.Preset = strings.ToLower(strings.TrimSpace(ac.Preset))
+		if !admissionValidPreset(ac.Preset) {
+			return fmt.Errorf("%s: unknown admission.preset %q (want permissive|default|strict)", path, ac.Preset)
+		}
+	}
+	if ac.AllowPaths != nil {
+		// Validate shape at load (home may be unavailable in some tests — use UserHomeDir).
+		home, _ := os.UserHomeDir()
+		norm, err := normalizeAdmissionAllowPaths(ac.AllowPaths, home)
+		if err != nil {
+			return fmt.Errorf("%s: %w", path, err)
+		}
+		ac.AllowPaths = norm
+	}
+	return nil
+}
+
+// admissionValidPreset mirrors admission.ValidPresetID without importing
+// internal/admission from config parse hot path helpers used in tests.
+func admissionValidPreset(id string) bool {
+	switch strings.ToLower(strings.TrimSpace(id)) {
+	case "", "permissive", "default", "strict":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeAdmissionAllowPaths(in []string, home string) ([]string, error) {
+	// Inline the same rules as admission.NormalizeAllowPaths so config Load
+	// fails closed on spoofable markers without a package cycle.
+	if len(in) == 0 {
+		if in != nil {
+			return []string{}, nil
+		}
+		return nil, nil
+	}
+	home = filepath.Clean(strings.TrimSpace(home))
+	var out []string
+	seen := map[string]struct{}{}
+	for i, raw := range in {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		if !strings.HasPrefix(raw, "~") && !filepath.IsAbs(raw) {
+			return nil, fmt.Errorf("admission.allowPaths[%d]: %q must be home-anchored (~/… or absolute under $HOME); bare relative markers are spoofable", i, raw)
+		}
+		if home == "" {
+			return nil, fmt.Errorf("admission.allowPaths[%d]: home directory unavailable for anchoring", i)
+		}
+		var path string
+		switch {
+		case raw == "~":
+			path = home
+		case strings.HasPrefix(raw, "~/"):
+			path = filepath.Join(home, raw[2:])
+		default:
+			path = raw
+		}
+		path = filepath.Clean(path)
+		if path != home && !strings.HasPrefix(path, home+string(filepath.Separator)) {
+			return nil, fmt.Errorf("admission.allowPaths[%d]: %q resolves outside home %q", i, raw, home)
+		}
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+		out = append(out, path)
+	}
+	return out, nil
 }
 
 // mergeToolRetry overlays non-zero tool-retry knobs from layer onto base.

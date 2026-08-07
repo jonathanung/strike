@@ -54,6 +54,11 @@ type Skill struct {
 	Name        string
 	Description string
 	Template    string
+	// Path is the absolute source path for disk skills (empty for builtins).
+	// Used by admission scans; not serialized to config JSON.
+	Path string `json:"-"`
+	// Builtin is true for shipping skills embedded in the binary.
+	Builtin bool `json:"-"`
 }
 
 var reservedSkillNames = map[string]struct{}{
@@ -489,7 +494,11 @@ func parseSkillFile(path string) (*Skill, error) {
 	if err := ValidateSkillName(name); err != nil {
 		return nil, fmt.Errorf("load skill %s: %w", path, err)
 	}
-	return &Skill{Name: name, Description: meta["description"], Template: body}, nil
+	abs := path
+	if a, err := filepath.Abs(path); err == nil {
+		abs = a
+	}
+	return &Skill{Name: name, Description: meta["description"], Template: body, Path: abs}, nil
 }
 
 // Render substitutes the skill's arguments into its template.

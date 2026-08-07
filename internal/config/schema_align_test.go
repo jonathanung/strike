@@ -146,6 +146,7 @@ func TestStrikeConfigSchemaAlign(t *testing.T) {
 		{"agentBudget", AgentBudgetConfig{}, ""},
 		{"toolRetry", ToolRetryConfig{}, ""},
 		{"hook", Hook{}, ""},
+		{"admission", AdmissionConfig{}, ""},
 		{"mcp", MCPConfig{}, ""},
 		{"mcpServer", MCPServer{}, ""},
 		{"lsp", LSPConfig{}, ""},
