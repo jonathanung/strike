@@ -14,6 +14,7 @@ func TestPaneSlashCommandsFocusNamedWindows(t *testing.T) {
 	}{
 		{"/agents", agentsWindowID},
 		{"/activity", "activity"},
+		{"/queue", queueWindowID},
 		{"/files", filesWindowID},
 		{"/diagnostics", diagnosticsWindowID},
 		{"/visualizer", visualizerWindowID},

@@ -200,6 +200,10 @@ func (m Model) handleKeyMsg(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if handled, cmd := m.handleActivityKeys(msg); handled {
 			return m, cmd
 		}
+		if handled, cmd := m.handleQueuePaneKeys(msg); handled {
+			m.reflow()
+			return m, cmd
+		}
 		var cmd tea.Cmd
 		m.windows, cmd = m.windows.update(msg)
 		return m, cmd

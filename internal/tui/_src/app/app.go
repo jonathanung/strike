@@ -437,6 +437,10 @@ type Model struct {
 	activityAnchorID    string
 	activityStickNewest bool
 	activityDetail      bool
+	// queuePaneCursor / queuePaneAnchorID navigate the queue right pane
+	// (buffered prompts, scheduled loops, scheduler waits).
+	queuePaneCursor   int
+	queuePaneAnchorID string
 
 	// roots holds frozen UI state for concurrent parent sessions (multi-root).
 	// The active root's fields live on Model; others sit here until activated.
