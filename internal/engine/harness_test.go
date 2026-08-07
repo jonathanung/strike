@@ -464,6 +464,7 @@ func TestTaskChildHarnessToolDenial(t *testing.T) {
 		HarnessRegistry: registry,
 		Registry:        tool.NewRegistry(tool.NewTask(), tool.NewBash()),
 		WorkDir:         t.TempDir(),
+		SandboxMode:     "off",
 		Rules:           []permission.Ruleset{permission.Defaults(), denyBash},
 	})
 	ctx, cancel := context.WithCancel(context.Background())

@@ -298,6 +298,7 @@ func TestRestoreThenResumedModelRequest(t *testing.T) {
 		Registry:        reg,
 		InitialProvider: "echo",
 		InitialModel:    "echo",
+		SandboxMode:     "off",
 		Agents:          []engine.Agent{{Name: "build"}},
 	})
 	go eng1.Run(ctx)
@@ -497,6 +498,7 @@ func TestRestoreInitialPhaseAndAlwaysGrantsOnRun(t *testing.T) {
 		InitialProvider: "scripted",
 		Registry:        tool.NewRegistry(tool.NewBash()),
 		WorkDir:         dir,
+		SandboxMode:     "off",
 		Agents: []engine.Agent{
 			{Name: "build"},
 			{Name: "plan"},

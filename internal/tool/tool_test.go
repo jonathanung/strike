@@ -275,7 +275,8 @@ func TestBashTool(t *testing.T) {
 	dir := t.TempDir()
 	var sawAlways []string
 	tc := &Context{
-		WorkDir: dir,
+		WorkDir:     dir,
+		SandboxMode: "off",
 		Ask: func(_ context.Context, req AskRequest) error {
 			sawAlways = req.Always
 			return nil
@@ -331,8 +332,9 @@ func TestBashToolStreamsReportOutput(t *testing.T) {
 		chunks []string
 	)
 	tc := &Context{
-		WorkDir: dir,
-		Ask:     func(context.Context, AskRequest) error { return nil },
+		WorkDir:     dir,
+		SandboxMode: "off",
+		Ask:         func(context.Context, AskRequest) error { return nil },
 		ReportOutput: func(data string) {
 			mu.Lock()
 			chunks = append(chunks, data)

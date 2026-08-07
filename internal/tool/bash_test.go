@@ -464,8 +464,9 @@ func TestBashSandboxDenialClassificationUnit(t *testing.T) {
 
 func TestBashTimeoutSetsErrorCode(t *testing.T) {
 	tc := &Context{
-		WorkDir: t.TempDir(),
-		Ask:     func(context.Context, AskRequest) error { return nil },
+		WorkDir:     t.TempDir(),
+		SandboxMode: "off",
+		Ask:         func(context.Context, AskRequest) error { return nil },
 	}
 	args, _ := json.Marshal(map[string]any{
 		"command":   "sleep 5",
@@ -489,8 +490,9 @@ func TestBashTimeoutSetsErrorCode(t *testing.T) {
 func TestBashCancelPreservesPartialOutput(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	tc := &Context{
-		WorkDir: t.TempDir(),
-		Ask:     func(context.Context, AskRequest) error { return nil },
+		WorkDir:     t.TempDir(),
+		SandboxMode: "off",
+		Ask:         func(context.Context, AskRequest) error { return nil },
 	}
 	// Print then sleep so cancel captures stdout.
 	args, _ := json.Marshal(map[string]any{
