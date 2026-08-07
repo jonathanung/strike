@@ -306,7 +306,7 @@ func TestFormatSessionRewoundWarnsUncovered(t *testing.T) {
 	}
 }
 
-func TestUndoModalWarnsCheckpointsGoneAfterResume(t *testing.T) {
+func TestUndoModalWarnsCheckpointsGone(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	m.undoStack = []undoPreview{{
 		files:           []protocol.TurnFileChange{{Path: "a.go", Kind: "update"}},
@@ -314,8 +314,8 @@ func TestUndoModalWarnsCheckpointsGoneAfterResume(t *testing.T) {
 	}}
 	next, _ := m.handleCommand("/undo")
 	view := next.(Model).modal.(*undoModal).view(100, next.(Model).th)
-	if !strings.Contains(view, "resume") && !strings.Contains(view, "#573") {
-		t.Fatalf("missing resume/continue checkpoint warning:\n%s", view)
+	if !strings.Contains(strings.ToLower(view), "unavailable") {
+		t.Fatalf("missing checkpoint unavailable warning:\n%s", view)
 	}
 }
 

@@ -852,8 +852,9 @@ type Context struct {
 	// PathOwnership (#772); do not fork a second file-state system.
 	Checkpoint func(absPath string)
 	// CheckpointUncovered, when non-nil, marks the active turn as having
-	// possible disk mutations outside per-file snapshots (e.g. bash). Reason
-	// is a short stable token. Nil disables. See CheckpointStore.MarkUncovered.
+	// possible disk mutations outside per-file snapshots (e.g. bash). Captures
+	// a shadow-git baseline; CommitTurn reconciles and clears "bash" when
+	// covered (#572). Reason is a short stable token. Nil disables.
 	CheckpointUncovered func(reason string)
 	// TurnDiff, when non-nil, records harness file change kinds for the
 	// active turn (timeline/UI). Nil disables. Tools call NoteTurnChange.

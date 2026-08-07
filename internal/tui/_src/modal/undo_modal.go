@@ -24,9 +24,8 @@ type undoPreview struct {
 	files     []protocol.TurnFileChange
 	skipped   int
 	uncovered []string
-	// checkpointsGone is set after session resume/seed: path metadata may still
-	// be known from the log, but in-memory checkpoint bytes do not survive
-	// process restart (#573). File restore will not revert disk.
+	// checkpointsGone is set when the host knows durable checkpoint bytes are
+	// unavailable (legacy / failed load). Normally false after #573 persistence.
 	checkpointsGone bool
 }
 
@@ -187,7 +186,7 @@ func formatUndoPreview(p undoPreview, width int) string {
 		lines = append(lines, "Warning: uncovered mutations ("+reasons+") — shell/other changes are NOT restored.")
 	}
 	if p.checkpointsGone {
-		lines = append(lines, "Warning: checkpoint bytes unavailable after resume/continue — file restore will not revert disk (#573).")
+		lines = append(lines, "Warning: checkpoint bytes unavailable — file restore will not revert disk.")
 	}
 	if len(lines) == 0 {
 		return ""

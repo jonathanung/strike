@@ -3,6 +3,7 @@ package tool
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -328,5 +329,202 @@ func TestContextSnapshotHelper(t *testing.T) {
 	peek := store.Peek()
 	if len(peek.Uncovered) != 1 || peek.Uncovered[0] != "bash" {
 		t.Fatalf("Peek.Uncovered = %#v", peek.Uncovered)
+	}
+}
+
+func TestCheckpointBashShadowCoversMutation(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	persist := t.TempDir()
+	path := filepath.Join(dir, "from-bash.txt")
+	if err := os.WriteFile(path, []byte("before\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := NewCheckpointStore()
+	s.Configure(dir, persist)
+	s.BeginTurn("t-bash")
+	// Simulate bash: mark uncovered (captures baseline) then mutate.
+	s.MarkUncovered("bash")
+	if err := os.WriteFile(path, []byte("after-bash\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s.CommitTurn()
+
+	peek := s.Peek()
+	if len(peek.Uncovered) != 0 {
+		t.Fatalf("expected bash covered, Uncovered=%#v", peek.Uncovered)
+	}
+	if !peek.HadFiles || len(peek.Restorable) != 1 {
+		t.Fatalf("Peek = %+v", peek)
+	}
+	res, err := s.Pop(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.RestoredN != 1 {
+		t.Fatalf("RestoredN = %d", res.RestoredN)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "before\n" {
+		t.Fatalf("after restore = %q", got)
+	}
+}
+
+func TestCheckpointBashShadowCoversCreateAndDelete(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	s := NewCheckpointStore()
+	s.Configure(dir, t.TempDir())
+	keep := filepath.Join(dir, "keep.txt")
+	gone := filepath.Join(dir, "gone.txt")
+	if err := os.WriteFile(keep, []byte("k0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(gone, []byte("g0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s.BeginTurn("t-ad")
+	s.MarkUncovered("bash")
+	// create
+	if err := os.WriteFile(filepath.Join(dir, "new.txt"), []byte("n1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// delete
+	if err := os.Remove(gone); err != nil {
+		t.Fatal(err)
+	}
+	// modify
+	if err := os.WriteFile(keep, []byte("k1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s.CommitTurn()
+	if u := s.Peek().Uncovered; len(u) != 0 {
+		t.Fatalf("Uncovered=%#v", u)
+	}
+	res, err := s.Pop(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.RestoredN < 2 {
+		t.Fatalf("RestoredN = %d, Restored=%v", res.RestoredN, res.Restored)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "new.txt")); !os.IsNotExist(err) {
+		t.Fatalf("created file should be removed: %v", err)
+	}
+	got, _ := os.ReadFile(keep)
+	if string(got) != "k0\n" {
+		t.Fatalf("keep = %q", got)
+	}
+	got, err = os.ReadFile(gone)
+	if err != nil || string(got) != "g0\n" {
+		t.Fatalf("gone restored = %q err=%v", got, err)
+	}
+}
+
+func TestCheckpointPersistRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	persist := t.TempDir()
+	path := filepath.Join(dir, "a.txt")
+	if err := os.WriteFile(path, []byte("v0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := NewCheckpointStore()
+	s.Configure(dir, persist)
+	s.BeginTurn("turn-1")
+	s.Snapshot(path)
+	if err := os.WriteFile(path, []byte("v1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s.MarkUncovered("bash") // may or may not clear depending on git
+	s.CommitTurn()
+	if s.Len() != 1 {
+		t.Fatalf("Len = %d", s.Len())
+	}
+
+	// New store loads durable stack.
+	s2 := NewCheckpointStore()
+	s2.Configure(dir, persist)
+	if err := s2.Load(); err != nil {
+		t.Fatal(err)
+	}
+	if !s2.Loaded() || s2.Len() != 1 {
+		t.Fatalf("loaded=%v len=%d", s2.Loaded(), s2.Len())
+	}
+	res, err := s2.Pop(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.TurnID != "turn-1" || res.RestoredN != 1 {
+		t.Fatalf("Pop = %+v", res)
+	}
+	got, _ := os.ReadFile(path)
+	if string(got) != "v0\n" {
+		t.Fatalf("restored = %q", got)
+	}
+	// Pop should rewrite stack empty on disk.
+	s3 := NewCheckpointStore()
+	s3.Configure(dir, persist)
+	if err := s3.Load(); err != nil {
+		t.Fatal(err)
+	}
+	if s3.Len() != 0 {
+		t.Fatalf("after pop persist len=%d", s3.Len())
+	}
+}
+
+func TestCheckpointMaxTurnsTrim(t *testing.T) {
+	dir := t.TempDir()
+	s := NewCheckpointStore()
+	s.maxTurns = 3
+	s.Configure(dir, t.TempDir())
+	for i := 0; i < 5; i++ {
+		s.BeginTurn(fmt.Sprintf("t%d", i))
+		s.CommitTurn()
+	}
+	if s.Len() != 3 {
+		t.Fatalf("Len = %d, want 3", s.Len())
+	}
+	// Oldest should be t2 (t0,t1 dropped).
+	peek := s.Peek()
+	if peek.TurnID != "t4" {
+		t.Fatalf("Peek.TurnID = %q", peek.TurnID)
+	}
+}
+
+func TestDefaultCheckpointDirRejectsTraversal(t *testing.T) {
+	if DefaultCheckpointDir("../x") != "" {
+		t.Fatal("expected empty for traversal")
+	}
+	if DefaultCheckpointDir("a/b") != "" {
+		t.Fatal("expected empty for slash")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	got := DefaultCheckpointDir("sess-1")
+	want := filepath.Join(home, ".strike", "checkpoints", "sess-1")
+	if got != want {
+		t.Fatalf("DefaultCheckpointDir = %q, want %q", got, want)
+	}
+}
+
+func TestRemoveCheckpointDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := DefaultCheckpointDir("to-remove")
+	if err := os.MkdirAll(filepath.Join(dir, "blobs"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := RemoveCheckpointDir("to-remove"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("dir still exists: %v", err)
 	}
 }

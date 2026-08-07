@@ -247,6 +247,7 @@ func TestRewindMultiFileRestoreOrderAndBashUncovered(t *testing.T) {
 		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
 		Registry:        tool.NewRegistry(tool.NewEdit(), tool.NewBash()),
 		WorkDir:         dir,
+		CheckpointDir:   t.TempDir(),
 		Rules: []permission.Ruleset{{
 			{Permission: "edit", Pattern: "*", Action: permission.Allow},
 			{Permission: "bash", Pattern: "*", Action: permission.Allow},
@@ -272,8 +273,9 @@ func TestRewindMultiFileRestoreOrderAndBashUncovered(t *testing.T) {
 			t.Fatal("timeout turn")
 		}
 	}
-	if len(completed.Uncovered) != 1 || completed.Uncovered[0] != "bash" {
-		t.Fatalf("TurnCompleted.Uncovered = %#v", completed.Uncovered)
+	// No-op bash is covered by shadow-git reconcile (#572).
+	if len(completed.Uncovered) != 0 {
+		t.Fatalf("TurnCompleted.Uncovered = %#v, want empty", completed.Uncovered)
 	}
 	if len(completed.Files) != 2 {
 		t.Fatalf("TurnCompleted.Files = %#v", completed.Files)
@@ -298,8 +300,8 @@ func TestRewindMultiFileRestoreOrderAndBashUncovered(t *testing.T) {
 	if rewound.FilesRestored != 2 {
 		t.Fatalf("SessionRewound = %+v", rewound)
 	}
-	if len(rewound.Uncovered) != 1 || rewound.Uncovered[0] != "bash" {
-		t.Fatalf("SessionRewound.Uncovered = %#v", rewound.Uncovered)
+	if len(rewound.Uncovered) != 0 {
+		t.Fatalf("SessionRewound.Uncovered = %#v, want empty", rewound.Uncovered)
 	}
 	// Restored paths are workspace-relative and sorted.
 	if len(rewound.Files) != 2 || rewound.Files[0] != "a.txt" || rewound.Files[1] != "z.txt" {
@@ -340,4 +342,149 @@ func initTempGitRepo(t *testing.T) string {
 	run("config", "user.email", "strike@test")
 	run("config", "user.name", "strike")
 	return dir
+}
+
+func TestRewindRestoresBashMutation(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "shell.txt")
+	if err := os.WriteFile(path, []byte("pre\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bashArgs, _ := json.Marshal(map[string]any{"command": "printf 'post\n' > shell.txt"})
+	prov := newScriptedProvider(
+		streamStep{events: []provider.StreamEvent{
+			{Type: provider.EventToolCall, ToolCall: &provider.ToolCall{ID: "b1", Name: "bash", Args: bashArgs}},
+			{Type: provider.EventDone, StopReason: "tool_use"},
+		}},
+		streamStep{events: []provider.StreamEvent{
+			{Type: provider.EventDone, StopReason: "end_turn"},
+		}},
+	)
+	persist := t.TempDir()
+	eng := engine.New(engine.Options{
+		SessionID:       "ckpt-bash",
+		InitialProvider: "scripted",
+		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		Registry:        tool.NewRegistry(tool.NewBash()),
+		WorkDir:         dir,
+		CheckpointDir:   persist,
+		Rules: []permission.Ruleset{{
+			{Permission: "bash", Pattern: "*", Action: permission.Allow},
+		}},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "bash mutate"}
+	completed := waitForEvent(t, eng, func(ev protocol.Event) bool {
+		_, ok := ev.(protocol.TurnCompleted)
+		return ok
+	}).(protocol.TurnCompleted)
+	if len(completed.Uncovered) != 0 {
+		t.Fatalf("Uncovered=%#v", completed.Uncovered)
+	}
+	got, _ := os.ReadFile(path)
+	if string(got) != "post\n" {
+		t.Fatalf("after bash = %q", got)
+	}
+
+	eng.Ops() <- protocol.Rewind{RestoreFiles: true}
+	rewound := waitForEvent(t, eng, func(ev protocol.Event) bool {
+		_, ok := ev.(protocol.SessionRewound)
+		return ok
+	}).(protocol.SessionRewound)
+	if rewound.FilesRestored != 1 {
+		t.Fatalf("SessionRewound=%+v", rewound)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "pre\n" {
+		t.Fatalf("after restore = %q", got)
+	}
+}
+
+func TestContinueLoadsCheckpointStack(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "note.txt")
+	if err := os.WriteFile(path, []byte("v0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeArgs, _ := json.Marshal(map[string]any{
+		"filePath": "note.txt",
+		"content":  "v1\n",
+	})
+	prov := newScriptedProvider(
+		streamStep{events: []provider.StreamEvent{
+			{Type: provider.EventToolCall, ToolCall: &provider.ToolCall{ID: "w1", Name: "write", Args: writeArgs}},
+			{Type: provider.EventDone, StopReason: "tool_use"},
+		}},
+		streamStep{events: []provider.StreamEvent{
+			{Type: provider.EventDone, StopReason: "end_turn"},
+		}},
+	)
+	persist := t.TempDir()
+	eng := engine.New(engine.Options{
+		SessionID:       "ckpt-continue",
+		InitialProvider: "scripted",
+		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		Registry:        tool.NewRegistry(tool.NewWrite()),
+		WorkDir:         dir,
+		CheckpointDir:   persist,
+		Rules: []permission.Ruleset{{
+			{Permission: "write", Pattern: "*", Action: permission.Allow},
+		}},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "write"}
+	waitForEvent(t, eng, func(ev protocol.Event) bool {
+		_, ok := ev.(protocol.TurnCompleted)
+		return ok
+	})
+	cancel()
+
+	// Simulate --continue: new engine, same CheckpointDir, seeded history.
+	prov2 := newScriptedProvider()
+	eng2 := engine.New(engine.Options{
+		SessionID:       "ckpt-continue",
+		InitialProvider: "scripted",
+		Select:          func(string) (provider.Provider, string, error) { return prov2, "model", nil },
+		Registry:        tool.NewRegistry(tool.NewWrite()),
+		WorkDir:         dir,
+		CheckpointDir:   persist,
+		InitialMessages: []provider.Message{
+			{Role: provider.RoleUser, Text: "write"},
+			{Role: provider.RoleAssistant, Text: "done"},
+		},
+	})
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	defer cancel2()
+	go eng2.Run(ctx2)
+
+	eng2.Ops() <- protocol.Rewind{RestoreFiles: true}
+	rewound := waitForEvent(t, eng2, func(ev protocol.Event) bool {
+		_, ok := ev.(protocol.SessionRewound)
+		return ok
+	}).(protocol.SessionRewound)
+	if rewound.FilesRestored != 1 {
+		t.Fatalf("SessionRewound after continue = %+v", rewound)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "v0\n" {
+		t.Fatalf("after continue restore = %q", got)
+	}
 }

@@ -176,6 +176,7 @@ func restoreDirs(kind RestoreKind) []restoreDirSpec {
 			{"agents", 0o755},
 			{"skills", 0o755},
 			{"sessions", 0o755},
+			{"checkpoints", 0o700}, // durable undo stack per session (#573)
 			{"history", 0o700},
 			{"memory", 0o700},
 			{"issues", 0o700},

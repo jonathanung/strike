@@ -89,8 +89,9 @@ func (bashTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 		return Result{}, err
 	}
 
-	// Bash may mutate the workspace without per-file snapshots (#572). Mark
-	// the turn uncovered so /undo can warn instead of silent full success (#801).
+	// Bash may mutate the workspace outside harness SnapshotPath calls.
+	// MarkUncovered captures a shadow-git baseline; CommitTurn reconciles
+	// changed paths into the checkpoint frame and clears "bash" when covered (#572).
 	tc.MarkUncovered("bash")
 
 	// Admit after permission approval and before process start so a canceled

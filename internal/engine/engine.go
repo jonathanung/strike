@@ -85,6 +85,11 @@ type Options struct {
 	Select    SelectFunc
 	Registry  *tool.Registry
 	WorkDir   string
+	// CheckpointDir is the durable per-session checkpoint stack directory
+	// (#573). Empty disables disk persistence (tests). cmd/strike sets
+	// tool.DefaultCheckpointDir(sessionID). Set to "-" for an explicit off.
+	// Shadow-git for bash coverage still works from WorkDir alone.
+	CheckpointDir string
 	// Verify declares independent completion gates for solo/root turns (and
 	// custom harness paths that use the built-in turn loop). When non-empty, a
 	// successful claim (stopReason end_turn) runs gates via internal/verify,
@@ -748,13 +753,26 @@ func New(opts Options) *Engine {
 		opts.SessionBudgetExhausted = sb.Exhausted
 	}
 
+	ckpt := tool.NewCheckpointStore()
+	persistDir := strings.TrimSpace(opts.CheckpointDir)
+	if persistDir == "-" {
+		persistDir = "" // explicit disable
+	}
+	// Shadow-git (bash coverage) needs WorkDir; durable stack needs CheckpointDir
+	// from the composition root (cmd/strike sets DefaultCheckpointDir).
+	if strings.TrimSpace(opts.WorkDir) != "" || persistDir != "" {
+		ckpt.Configure(opts.WorkDir, persistDir)
+		// Best-effort load so --continue can restore files (#573).
+		_ = ckpt.Load()
+	}
+
 	e := &Engine{
 		opts:                opts,
 		ops:                 make(chan protocol.Op, 16),
 		events:              make(chan protocol.Event, 256),
 		beginReqs:           make(chan beginReq),
 		files:               &tool.FileState{},
-		checkpoints:         tool.NewCheckpointStore(),
+		checkpoints:         ckpt,
 		turnDiff:            &tool.TurnDiff{},
 		toolLoop:            newToolLoopDetector(opts.ToolLoopThreshold, 0),
 		children:            make(map[string]*childHandle),
