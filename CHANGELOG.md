@@ -16,6 +16,12 @@ materially affect the shipped product.
 
 ### Added
 
+- **Active-turn steering** — new `steer` op redirects a running root turn at the
+  next safe request boundary (distinct from queued `user.input` and
+  `interrupt`). Durable `turn.steered` events record boundary /
+  cancel_restart / queued_fallback decisions. Wire schema 1.17.0
+  ([#1039](https://github.com/jonathanung/strike/issues/1039)).
+
 - **`strike exec` approval callbacks** — `--approval-control` unix socket/FIFO
   NDJSON channel for per-request permission and question replies (once/reject;
   durable always/project requires explicit `durable:true`). Timeout, disconnect,

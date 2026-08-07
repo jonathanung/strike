@@ -347,6 +347,25 @@ type QuestionReply struct {
 // Interrupt cancels the running turn, if any.
 type Interrupt struct{}
 
+// Steer redirects an active root turn with additional user guidance at the
+// next safe request boundary (before the next Provider.Stream). Distinct from
+// UserInput (which queues a later turn) and Interrupt (which cancels).
+//
+// When SessionID or TurnID is set, the engine rejects mismatches so multi-root
+// frontends cannot steer the wrong session/turn. Empty fields match the live
+// session and active turn.
+//
+// Providers always receive steer as a new user message in history at a
+// tool-round boundary (no mid-stream mutation). If the turn ends before a
+// boundary is reached, the engine falls back to cancel-and-restart or
+// next-turn queue with a durable TurnSteered event.
+type Steer struct {
+	Text      string            `json:"text"`
+	Images    []ImageAttachment `json:"images,omitempty"`
+	SessionID string            `json:"sessionId,omitempty"`
+	TurnID    string            `json:"turnId,omitempty"`
+}
+
 // SelectModel switches the active provider (and optionally model). An empty
 // Model selects the provider's default. Rejected while a turn is running.
 type SelectModel struct {
@@ -455,6 +474,7 @@ func (UserInput) isOp()               {}
 func (PermissionReply) isOp()         {}
 func (QuestionReply) isOp()           {}
 func (Interrupt) isOp()               {}
+func (Steer) isOp()                   {}
 func (SelectModel) isOp()             {}
 func (SelectAgent) isOp()             {}
 func (SetEffort) isOp()               {}
@@ -1292,6 +1312,33 @@ type TurnFileChange struct {
 	Kind string `json:"kind"` // create | update | delete
 }
 
+// Steer application modes on TurnSteered (durable / replayable).
+const (
+	// SteerModeBoundary applied the steer as a user message before the next
+	// Provider.Stream (safe history boundary; no tool-call duplication).
+	SteerModeBoundary = "boundary"
+	// SteerModeCancelRestart canceled the in-flight stream and re-entered the
+	// turn loop with the steer appended (used when no tool-round boundary is
+	// imminent and the provider cannot accept mid-stream input).
+	SteerModeCancelRestart = "cancel_restart"
+	// SteerModeQueuedFallback could not apply mid-turn; the text was queued
+	// as the next UserInput with visible status.
+	SteerModeQueuedFallback = "queued_fallback"
+)
+
+// TurnSteered records that active-turn steering was accepted and how it was
+// applied. Emitted into the session log so resume/replay can observe decisions.
+type TurnSteered struct {
+	Correlation
+	// Text is the steer guidance (may be redacted on export).
+	Text string `json:"text,omitempty"`
+	// Mode is boundary | cancel_restart | queued_fallback.
+	Mode string `json:"mode"`
+	// TargetTurnID is the turn that was steered (empty when queued_fallback
+	// after the turn already ended).
+	TargetTurnID string `json:"targetTurnId,omitempty"`
+}
+
 type TurnCompleted struct {
 	Correlation
 	StopReason string `json:"stopReason,omitempty"`
@@ -1997,6 +2044,7 @@ func (PermissionDecided) isEvent()       {}
 func (AdmissionDecided) isEvent()        {}
 func (QuestionAsked) isEvent()           {}
 func (QuestionResolved) isEvent()        {}
+func (TurnSteered) isEvent()             {}
 func (TurnCompleted) isEvent()           {}
 func (VerificationStarted) isEvent()     {}
 func (VerificationCompleted) isEvent()   {}
