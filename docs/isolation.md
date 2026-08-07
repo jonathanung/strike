@@ -14,7 +14,7 @@ session worktrees.
 | **Scheduler pools** | Concurrent bash/model/build/test inside one process | `scheduler.limits` / presets | `internal/scheduler` | Wait / `scheduler.canceled`; not a security boundary |
 | **Process resource caps** | Optional mem/CPU on a single subprocess | `ProcessSpec.Limits` (tool/harness) | Linux `prlimit` (`RLIMIT_AS`, `RLIMIT_CPU`) | Non-zero exit / signal; **no-op on non-Linux** (documented) |
 | **Wall time** | Per-bash and per-turn deadlines | bash `timeoutMs`, `TurnTimeout` | context cancel + process-group kill | `timeout` / `canceled` |
-| **Containers** (planned) | Full host isolation for the agent runtime | epic [#547](https://github.com/jonathanung/strike/issues/547) | Docker/devcontainer (Zone port) | Not shipped — reuse `network.allow` shape |
+| **Containers** (in progress) | Full host isolation for the agent runtime | epic [#547](https://github.com/jonathanung/strike/issues/547) | `internal/container` CLI shell-out to docker/podman ([#582](https://github.com/jonathanung/strike/issues/582)); Zone port | Foundation shipped; launch/attach/eject follow E12.1+ — reuse `network.allow` shape |
 
 ## Two-dial model (sandbox × permission)
 
@@ -60,14 +60,27 @@ not replace OS sandboxing of bash syscalls.
 
 ## Containers (#547)
 
-Full container / devcontainer isolation is a separate epic (absorb Zone runtime).
-Until shipped:
+Full container / devcontainer isolation is epic
+[#547](https://github.com/jonathanung/strike/issues/547) (absorb Zone into
+strike). **E12.0 decision ([#582](https://github.com/jonathanung/strike/issues/582)):**
+shell out to `docker`/`podman` via injectable `ExecFunc` — do **not** vendor the
+Moby SDK. See [container.md](container.md).
+
+Shipped today:
+
+- `internal/container` — `Runtime` / `CLI`, naming (`strike-<repo>-<hash>`),
+  `com.strike.*` labels, offline-testable `ExecFunc`.
+
+Still planned (E12.1+): config block, Dockerfile eject, `--launch-inside-container`,
+attach, isolation badge, eval pool wiring.
+
+Until launch UX ships:
 
 - Prefer OS sandbox + worktrees for day-to-day coding.
 - `network.allow` is the shared **shape** for future container egress filters
   (application-layer webfetch today; OS bash net remains all-or-nothing).
-- Scheduler pool name `container` is reserved for future admission, not a
-  running runtime.
+- Scheduler pool name `container` is reserved for admission once E12.10 wires
+  eval onto this runtime.
 
 ## Resource limits (compose with scheduler)
 
