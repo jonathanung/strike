@@ -199,9 +199,11 @@ team-create step. Concurrent roots are independent teams.
 | `task({prompt, criteria, deps, route, budget, verify, context_bundle, …})` | Advanced create — same runtime |
 | `task({action:"get"\|"list"\|"status"\|"read"\|"message"\|"transition"\|"cancel"\|"wait", …})` | Lifecycle + control ops |
 
-Legacy names (`delegate`, `task_status`, `task_read`, `task_message`,
-`task_interrupt`, `wait`) remain as compatibility shims over the same handlers
-(usage is telemetry-counted). `team_task` stays the shared claim board;
+Prefer the unified **`task`** tool for all new delegation. Legacy names
+(`delegate`, `task_status`, `task_read`, `task_message`, `task_interrupt`,
+`wait`) remain as compatibility shims over the same handlers (usage is
+telemetry-counted); they stay registered but are deferred under default
+`deferTools` until discovered or called. `team_task` stays the shared claim board;
 `plan_delegate` stays the plan-section wrapper.
 
 | Capability | How |

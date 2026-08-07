@@ -95,8 +95,8 @@ ceilings (depth, optional max live children, budget) never override. See
 spawn, optional advanced fields (criteria/deps/subscribe/route/budget/verify/
 context_bundle), and actions get|list|status|read|message|transition|cancel|wait.
 Status and terminal handoff semantics are identical regardless of entry path.
-Legacy `delegate` / `task_*` / `wait` tools are compatibility shims (telemetry-
-counted). At MaxChildDepth, `task` is stripped from leaves; leaves may still use
+Prefer progressive **`task`** for spawn and control. Legacy `delegate` / `task_*` / `wait` tools are compatibility shims (telemetry-
+counted); deferred by default until discovered or called. At MaxChildDepth, `task` is stripped from leaves; leaves may still use
 `delegate` get/list/transition for ownership-gated self-report.
 
 Parent-only workflows are unchanged: if you never call `agent_*` tools,

@@ -543,6 +543,14 @@ advanced `task`; two or more live children → team tools (`agent_broadcast`,
 `team_task`, `patch_collab`). Hard-denied tools stay omitted. Guidance source
 tags include `+activate:<families>`.
 
+**Rollback / permanent default:** progressive disclosure (`deferTools` on) is
+the shipped default. Offline comparison lives in
+`go test ./internal/eval/progressive` and `evals/progressive/README.md`. Roll
+back to `"deferTools": "off"` if progressive completion drops by more than 5
+absolute points or median wall time rises by more than +25% vs full exposure
+on that fixture pack (schema reduction below 30% on solo first-turn is a soft
+warning only).
+
 **Permission soft-approve / auto-approve:** session mode `soft-approve`
 (`permissionMode`, `/mode`, Shift+Tab) arms a **visible** 15s countdown on
 permission asks and submits **allow once** at zero if the user does nothing.
