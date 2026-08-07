@@ -79,15 +79,15 @@ func defaultKeyMap() keyMap {
 		// secondary (right/stack) pane column, even when the split is top/bottom (#414).
 		FocusLeft:  key.NewBinding(key.WithKeys("ctrl+h"), key.WithHelp("ctrl+h", "focus left")),
 		FocusRight: key.NewBinding(key.WithKeys("ctrl+l"), key.WithHelp("ctrl+l", "focus right")),
-		// Cycle secondary-stack panes. ctrl+o / ctrl+p — not orientation-swapped (#414).
-		CycleWindowNext: key.NewBinding(key.WithKeys("ctrl+o"), key.WithHelp("ctrl+o", "next window")),
-		CycleWindowPrev: key.NewBinding(key.WithKeys("ctrl+p"), key.WithHelp("ctrl+p", "prev window")),
+		// Cycle secondary-stack panes. ctrl+p / ctrl+o — not orientation-swapped (#414, #1009).
+		CycleWindowNext: key.NewBinding(key.WithKeys("ctrl+p"), key.WithHelp("ctrl+p", "next window")),
+		CycleWindowPrev: key.NewBinding(key.WithKeys("ctrl+o"), key.WithHelp("ctrl+o", "prev window")),
 		// Cycle stack groups (session → agents → …). ctrl+shift+o/p — free of
 		// window-cycle and palette chords (#671).
 		CycleGroupNext: key.NewBinding(key.WithKeys("ctrl+shift+o"), key.WithHelp("ctrl+shift+o", "next pane group")),
 		CycleGroupPrev: key.NewBinding(key.WithKeys("ctrl+shift+p"), key.WithHelp("ctrl+shift+p", "prev pane group")),
-		// Palette moved off ctrl+p (now window-prev). ctrl+k is free of pane-cycle;
-		// kill-to-end still claims mid-line first via readline routing.
+		// Palette is ctrl+k (not ctrl+p; window cycle owns o/p). kill-to-end still
+		// claims mid-line first via readline routing.
 		Palette:           key.NewBinding(key.WithKeys("ctrl+k"), key.WithHelp("ctrl+k", "palette")),
 		KeyHelp:           key.NewBinding(key.WithKeys("f1"), key.WithHelp("f1", "keybinds")),
 		Interrupt:         key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "interrupt")),
@@ -184,7 +184,7 @@ func defaultAgentsKeyMap() agentsKeyMap {
 	}
 }
 
-// applyOrientationKeys is a no-op: focus (ctrl+h/l), window cycle (ctrl+o/p),
+// applyOrientationKeys is a no-op: focus (ctrl+h/l), window cycle (ctrl+p/o),
 // and group cycle (ctrl+shift+o/p) are orientation-independent — left/right mean
 // primary transcript vs secondary pane column even when the split is stacked
 // top/bottom (#414, #671).
@@ -230,8 +230,8 @@ func applyKeybindOverrides(k *keyMap, overrides map[string][]string) {
 	}
 	set(&k.FocusLeft, "nav.focus-left", "")
 	set(&k.FocusRight, "nav.focus-right", "")
-	set(&k.CycleWindowNext, "nav.window-next", "ctrl+o")
-	set(&k.CycleWindowPrev, "nav.window-prev", "ctrl+p")
+	set(&k.CycleWindowNext, "nav.window-next", "ctrl+p")
+	set(&k.CycleWindowPrev, "nav.window-prev", "ctrl+o")
 	set(&k.CycleGroupNext, "nav.group-next", "ctrl+shift+o")
 	set(&k.CycleGroupPrev, "nav.group-prev", "ctrl+shift+p")
 	set(&k.ScrollUp, "nav.scroll-up", "")

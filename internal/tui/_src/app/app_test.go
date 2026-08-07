@@ -3292,7 +3292,7 @@ func TestFocusAndPaletteClearCompletionBeforeChangingInputOwner(t *testing.T) {
 
 		}},
 
-		{"cycle next", tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl}, func(t *testing.T, m Model) {
+		{"cycle next", tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl}, func(t *testing.T, m Model) {
 
 			if m.windows.index != 1 {
 
@@ -3334,7 +3334,7 @@ func TestFocusAndPaletteClearCompletionBeforeChangingInputOwner(t *testing.T) {
 				statefulTestWindow{windowID: "b", windowTitle: "B"},
 			}}
 
-			// ctrl+o cycles from left focus (#414).
+			// ctrl+p cycles next from left focus (#414, #1009).
 
 			m.completion = leadingSlashCompletion("/", 0, 1, m.commands)
 
@@ -3367,21 +3367,21 @@ func TestCycleGroupKeysJumpGroupsAndLeaveWindowCycleIntact(t *testing.T) {
 	if got := m.windows.active().id(); got != "agents" {
 		t.Fatalf("ctrl+shift+o = %q, want agents", got)
 	}
-	// ctrl+o still walks one pane (agents → visualizer).
-	m = updateApp(t, m, tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
+	// ctrl+p still walks one pane forward (agents → visualizer) (#1009).
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
 	if got := m.windows.active().id(); got != "visualizer" {
-		t.Fatalf("ctrl+o after group jump = %q, want visualizer", got)
+		t.Fatalf("ctrl+p after group jump = %q, want visualizer", got)
 	}
 	// ctrl+shift+p → previous group first member (session/context).
 	m = updateApp(t, m, tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl | tea.ModShift})
 	if got := m.windows.active().id(); got != "context" {
 		t.Fatalf("ctrl+shift+p = %q, want context", got)
 	}
-	// ctrl+p still walks one pane backward.
+	// ctrl+o still walks one pane backward (#1009).
 	m.windows, _ = m.windows.activate("agents")
-	m = updateApp(t, m, tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
+	m = updateApp(t, m, tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
 	if got := m.windows.active().id(); got != "telemetry" {
-		t.Fatalf("ctrl+p = %q, want telemetry", got)
+		t.Fatalf("ctrl+o = %q, want telemetry", got)
 	}
 }
 
@@ -3393,9 +3393,9 @@ func TestCycleWindowKeysClearOpenCompletionAndCycleOnce(t *testing.T) {
 		key tea.KeyPressMsg
 	}{
 
-		// ctrl+o cycles from either focus (#414).
+		// ctrl+p cycles next from either focus (#414, #1009).
 
-		{name: "ctrl+o", key: tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl}},
+		{name: "ctrl+p", key: tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl}},
 	} {
 
 		t.Run(tt.name, func(t *testing.T) {
@@ -3519,7 +3519,11 @@ func TestCompletionEscapeDismissesBeforeInterruptAndFocusChange(t *testing.T) {
 
 func TestModalOwnsGlobalKeysExceptQuit(t *testing.T) {
 
-	for _, msg := range []tea.KeyPressMsg{{Code: 'o', Mod: tea.ModCtrl}} {
+	// Global pane-cycle chords (ctrl+p next / ctrl+o prev) stay modal-owned (#1009).
+	for _, msg := range []tea.KeyPressMsg{
+		{Code: 'p', Mod: tea.ModCtrl},
+		{Code: 'o', Mod: tea.ModCtrl},
+	} {
 
 		t.Run(msg.String(), func(t *testing.T) {
 

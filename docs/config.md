@@ -1014,8 +1014,8 @@ Remap app-level chords without recompiling. Ids match the in-app cheatsheet
   "nav.jump-bottom": "ctrl+b",
   "global.palette": "ctrl+k",
   "composer.newline": ["ctrl+j", "alt+enter"],
-  "nav.window-next": "ctrl+o",
-  "nav.window-prev": "ctrl+p",
+  "nav.window-next": "ctrl+p",
+  "nav.window-prev": "ctrl+o",
   "nav.group-next": "ctrl+shift+o",
   "nav.group-prev": "ctrl+shift+p",
   "nav.tool-expand": "alt+enter"

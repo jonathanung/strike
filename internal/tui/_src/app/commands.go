@@ -163,7 +163,7 @@ var builtinCommandSpecs = []commandSpec{
 	{ID: commandKeys, Name: "/keys", Description: "show keyboard shortcuts", ArgsHint: "[reset]", Source: commandSourceBuiltin},
 	{ID: commandLegend, Name: "/legend", Description: "explain UI icons, status glyphs, and chrome", Source: commandSourceBuiltin},
 	{ID: commandMemory, Name: "/memory", Description: "list, get, set, delete, export, or import project memory", ArgsHint: "[list|get|set|rm|export|import] ...", Source: commandSourceBuiltin},
-	{ID: commandQueue, Name: "/queue", Description: "browse and edit prompts queued while a turn runs", Source: commandSourceBuiltin},
+	{ID: commandQueue, Name: "/queue", Description: "focus the queue right pane (queued prompts, scheduled loops, pool waits)", Source: commandSourceBuiltin},
 	{ID: commandIssues, Name: "/issues", Description: "list, add, get, close, export, or import project issues", ArgsHint: "[list|add|get|close|export|import] ...", Source: commandSourceBuiltin},
 	{ID: commandPlan, Name: "/plan", Description: "browse and edit root-owned structured plans", ArgsHint: "[list|create|get|approve|close|reopen] ...", Source: commandSourceBuiltin},
 	{ID: commandGoal, Name: "/goal", Description: "loop harness: set, run, status, pause, resume, abort, log, list", ArgsHint: "[set|run|status|pause|resume|abort|log|list] ...", Source: commandSourceBuiltin},
