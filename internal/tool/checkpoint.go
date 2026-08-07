@@ -143,6 +143,9 @@ func (s *CheckpointStore) BeginTurn(turnID string) {
 // per-file snapshots (e.g. bash). reason is a short stable token ("bash").
 // Lazily captures a shadow-git baseline so CommitTurn can cover shell writes.
 // No-op when there is no active turn. Duplicate reasons collapse.
+//
+// The store lock is not held during shadow-git capture so parallel harness
+// Snapshot calls in the same turn are not blocked on a full-tree git add.
 func (s *CheckpointStore) MarkUncovered(reason string) {
 	if s == nil {
 		return
@@ -152,19 +155,31 @@ func (s *CheckpointStore) MarkUncovered(reason string) {
 		return
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.active == nil {
+		s.mu.Unlock()
 		return
 	}
 	if s.active.uncovered == nil {
 		s.active.uncovered = make(map[string]struct{})
 	}
 	s.active.uncovered[reason] = struct{}{}
-	// Capture baseline once per turn, before the mutating tool runs.
-	if s.active.baseline == "" && s.shadow != nil {
-		if tree, err := s.shadow.capture(); err == nil {
-			s.active.baseline = tree
-		}
+	needBaseline := s.active.baseline == "" && s.shadow != nil
+	shadow := s.shadow
+	s.mu.Unlock()
+
+	if !needBaseline || shadow == nil {
+		return
+	}
+	tree, err := shadow.capture()
+	if err != nil || tree == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Only set if this turn is still active and baseline was not filled by a
+	// concurrent MarkUncovered.
+	if s.active != nil && s.active.baseline == "" {
+		s.active.baseline = tree
 	}
 }
 
@@ -226,78 +241,109 @@ func (s *CheckpointStore) CommitTurn() {
 	if s == nil {
 		return
 	}
+	s.reconcileShadow()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.active == nil {
 		return
 	}
-	s.reconcileShadowLocked()
 	s.stack = append(s.stack, s.active)
 	s.active = nil
 	s.trimLocked()
 	s.persistLocked()
 }
 
-// reconcileShadowLocked fills active.files from the shadow baseline for any
+// reconcileShadow fills active.files from the shadow baseline for any
 // worktree paths changed since baseline that harness tools did not snapshot.
 // On success, clears uncovered reasons that shadow covers ("bash").
-// Caller must hold s.mu.
-func (s *CheckpointStore) reconcileShadowLocked() {
+// Git work runs without holding the store mutex.
+func (s *CheckpointStore) reconcileShadow() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
 	if s.active == nil {
+		s.mu.Unlock()
 		return
 	}
 	baseline := s.active.baseline
-	if baseline == "" || s.shadow == nil {
+	shadow := s.shadow
+	s.mu.Unlock()
+	if baseline == "" || shadow == nil {
 		// No baseline → leave uncovered markers as-is (bash ran without git).
 		return
 	}
-	// Capture post-mutation tree and diff against baseline.
-	// Temporarily release is not needed: capture only runs git against workDir.
-	toTree, err := s.shadow.capture()
+	toTree, err := shadow.capture()
 	if err != nil || toTree == "" {
 		return
 	}
-	changes, err := s.shadow.diffTrees(baseline, toTree)
+	changes, err := shadow.diffTrees(baseline, toTree)
 	if err != nil {
 		return
 	}
+
+	// Read blob bytes outside the store lock.
+	type pendingFile struct {
+		path string
+		orig fileOrig
+		fail bool
+	}
+	pending := make([]pendingFile, 0, len(changes))
+	s.mu.Lock()
 	max := s.maxBytes
 	if max <= 0 {
 		max = DefaultCheckpointMaxBytes
 	}
+	// Snapshot which paths are already recorded so we skip them after unlock.
+	already := map[string]struct{}{}
+	if s.active != nil {
+		for p := range s.active.files {
+			already[p] = struct{}{}
+		}
+	}
+	s.mu.Unlock()
+
 	reconcileOK := true
 	for _, ch := range changes {
 		if ch.Path == "" {
 			continue
 		}
-		if _, ok := s.active.files[ch.Path]; ok {
-			continue // harness tool already recorded first-touch original
-		}
-		// Status A = added after baseline → original does not exist.
-		if ch.Status == 'A' {
-			s.active.files[ch.Path] = fileOrig{exists: false}
+		if _, ok := already[ch.Path]; ok {
 			continue
 		}
-		// M/D/T: recover bytes from baseline tree.
-		data, exists, err := s.shadow.readAtTree(baseline, ch.Path)
+		if ch.Status == 'A' {
+			pending = append(pending, pendingFile{path: ch.Path, orig: fileOrig{exists: false}})
+			continue
+		}
+		data, exists, err := shadow.readAtTree(baseline, ch.Path)
 		if err != nil {
 			reconcileOK = false
-			s.active.files[ch.Path] = fileOrig{skipped: true}
+			pending = append(pending, pendingFile{path: ch.Path, orig: fileOrig{skipped: true}, fail: true})
 			continue
 		}
 		if !exists {
-			// Diff said modified/deleted but baseline lacks path — treat as create.
-			s.active.files[ch.Path] = fileOrig{exists: false}
+			pending = append(pending, pendingFile{path: ch.Path, orig: fileOrig{exists: false}})
 			continue
 		}
 		if int64(len(data)) > max {
-			s.active.files[ch.Path] = fileOrig{exists: true, skipped: true}
+			pending = append(pending, pendingFile{path: ch.Path, orig: fileOrig{exists: true, skipped: true}})
 			continue
 		}
-		s.active.files[ch.Path] = fileOrig{exists: true, data: data}
+		pending = append(pending, pendingFile{path: ch.Path, orig: fileOrig{exists: true, data: data}})
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.active == nil {
+		return
+	}
+	for _, pf := range pending {
+		if _, ok := s.active.files[pf.path]; ok {
+			continue // harness won the race — keep first-touch original
+		}
+		s.active.files[pf.path] = pf.orig
 	}
 	if reconcileOK {
-		// Shadow covered the turn's unknown mutations.
 		delete(s.active.uncovered, "bash")
 	}
 }

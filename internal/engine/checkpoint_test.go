@@ -411,3 +411,80 @@ func TestRewindRestoresBashMutation(t *testing.T) {
 		t.Fatalf("after restore = %q", got)
 	}
 }
+
+func TestContinueLoadsCheckpointStack(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "note.txt")
+	if err := os.WriteFile(path, []byte("v0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeArgs, _ := json.Marshal(map[string]any{
+		"filePath": "note.txt",
+		"content":  "v1\n",
+	})
+	prov := newScriptedProvider(
+		streamStep{events: []provider.StreamEvent{
+			{Type: provider.EventToolCall, ToolCall: &provider.ToolCall{ID: "w1", Name: "write", Args: writeArgs}},
+			{Type: provider.EventDone, StopReason: "tool_use"},
+		}},
+		streamStep{events: []provider.StreamEvent{
+			{Type: provider.EventDone, StopReason: "end_turn"},
+		}},
+	)
+	persist := t.TempDir()
+	eng := engine.New(engine.Options{
+		SessionID:       "ckpt-continue",
+		InitialProvider: "scripted",
+		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		Registry:        tool.NewRegistry(tool.NewWrite()),
+		WorkDir:         dir,
+		CheckpointDir:   persist,
+		Rules: []permission.Ruleset{{
+			{Permission: "write", Pattern: "*", Action: permission.Allow},
+		}},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "write"}
+	waitForEvent(t, eng, func(ev protocol.Event) bool {
+		_, ok := ev.(protocol.TurnCompleted)
+		return ok
+	})
+	cancel()
+
+	// Simulate --continue: new engine, same CheckpointDir, seeded history.
+	prov2 := newScriptedProvider()
+	eng2 := engine.New(engine.Options{
+		SessionID:       "ckpt-continue",
+		InitialProvider: "scripted",
+		Select:          func(string) (provider.Provider, string, error) { return prov2, "model", nil },
+		Registry:        tool.NewRegistry(tool.NewWrite()),
+		WorkDir:         dir,
+		CheckpointDir:   persist,
+		InitialMessages: []provider.Message{
+			{Role: provider.RoleUser, Text: "write"},
+			{Role: provider.RoleAssistant, Text: "done"},
+		},
+	})
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	defer cancel2()
+	go eng2.Run(ctx2)
+
+	eng2.Ops() <- protocol.Rewind{RestoreFiles: true}
+	rewound := waitForEvent(t, eng2, func(ev protocol.Event) bool {
+		_, ok := ev.(protocol.SessionRewound)
+		return ok
+	}).(protocol.SessionRewound)
+	if rewound.FilesRestored != 1 {
+		t.Fatalf("SessionRewound after continue = %+v", rewound)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "v0\n" {
+		t.Fatalf("after continue restore = %q", got)
+	}
+}
