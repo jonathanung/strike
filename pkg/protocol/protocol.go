@@ -604,10 +604,16 @@ type AgentBudgetView struct {
 	DangerousRemaining  *int     `json:"dangerousRemaining,omitempty"`
 	CostUSDRemaining    *float64 `json:"costUsdRemaining,omitempty"`
 	Stall               bool     `json:"stall,omitempty"`
-	Loop                bool     `json:"loop,omitempty"`
-	Escalated           bool     `json:"escalated,omitempty"`
-	EscalateKind        string   `json:"escalateKind,omitempty"`
-	EscalateReason      string   `json:"escalateReason,omitempty"`
+	IdleS               int      `json:"idleS,omitempty"`
+	LastProgressAt      string   `json:"lastProgressAt,omitempty"`
+	// StallAfterSEffective is the threshold used for the stall boolean
+	// (configured hard stallAfterS, else soft default). Distinct from
+	// StallAfterS which is only the hard-limit config field.
+	StallAfterSEffective int    `json:"stallAfterSEffective,omitempty"`
+	Loop                 bool   `json:"loop,omitempty"`
+	Escalated            bool   `json:"escalated,omitempty"`
+	EscalateKind         string `json:"escalateKind,omitempty"`
+	EscalateReason       string `json:"escalateReason,omitempty"`
 }
 
 // TeamRoster is a full snapshot of the implicit session team roster.
@@ -892,10 +898,10 @@ type ChildCompleted struct {
 // — unused in hard path). Kind is wall_clock|tokens|cost_usd|tool_calls|
 // dangerous_tools|stall|loop. Correlation is the child session.
 //
-// Soft stall/loop flags also appear on task_status / team.roster without this
-// event; hard limits always emit ChildEscalated. Soft resource budgets attempt
-// finalization before stop; hard cancel / trust-boundary / session ceilings
-// skip finalization (Action=interrupted).
+// Soft stall rising edge emits ChildEscalated with Action=signaled (no kill);
+// hard limits always emit ChildEscalated with interrupted|finalizing. Soft
+// resource budgets attempt finalization before stop; hard cancel /
+// trust-boundary / session ceilings skip finalization (Action=interrupted).
 // Stale-child detection (#517) is the stall kind, not a separate mechanism.
 type ChildEscalated struct {
 	Correlation
@@ -1199,6 +1205,10 @@ type PermissionDecided struct {
 	RulePermission string `json:"rulePermission,omitempty"`
 	RulePattern    string `json:"rulePattern,omitempty"`
 	RuleAction     string `json:"ruleAction,omitempty"`
+	// EvalPath is pattern|facts when action facts influenced the match (#888).
+	EvalPath string `json:"evalPath,omitempty"`
+	// FactSummary is a short redaction-friendly action-fact projection (#888).
+	FactSummary string `json:"factSummary,omitempty"`
 	// Tool-chain correlation (#891): set when a multi-step rule contributed.
 	// ChainSummary cites prior tool names/classes only — never secret bytes.
 	ChainID      string `json:"chainId,omitempty"`

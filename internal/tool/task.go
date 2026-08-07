@@ -45,12 +45,14 @@ Actions (optional action=; omit + prompt ⇒ create):
   message    — parent→owned-child steer (not peer chat; use agent_message)
   transition — lifecycle move with optional expected_version CAS
   cancel     — interrupt owned child (idempotent)
-  wait       — block on task.done/failed/canceled/blocked with timeout
+  wait       — block on task.done/failed/canceled/blocked/stale with timeout
 
 States: queued → working → blocked → review → done (+ failed / canceled).
 When criteria or verify gates are set, implementer-done is not final completed
 until gates pass (else blocked/review). Do not busy-poll status — prefer wait
-or [child.completed]. Prefer agent_message for mid-flight blockers.
+or [child.completed]. Soft-stale children set budget.stall + needs_attention
+(idle_s / last_progress_at on status); wait on task.stale or task.blocked.
+Prefer agent_message for mid-flight blockers.
 
 Identity: id or session_id (delegation id, session id, or stable name alias).
 team_task remains the shared claim board; plan_delegate is the plan-section

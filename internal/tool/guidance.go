@@ -264,7 +264,7 @@ func recommendedGuidance(entries []GuidanceEntry) string {
 	add(has("move") || has("delete"),
 		"Prefer `move`/`delete` over bash `mv`/`rm` for ordinary renames and deletions (workspace-scoped, freshness, TurnDiff).")
 	add(has("webfetch") && has("bash"),
-		"Prefer `webfetch` over curl/wget in bash for ordinary page fetches.")
+		"Prefer `webfetch` over curl/wget in bash for ordinary page fetches (network.allow preflight also covers curl/wget/ssh when set).")
 	add(has("webfetch") && !has("bash"),
 		"Use `webfetch` for ordinary page fetches.")
 	add(has("websearch") && has("webfetch"),

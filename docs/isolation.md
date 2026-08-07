@@ -8,13 +8,37 @@ session worktrees.
 
 | Layer | What it isolates | Config / dial | Backend | Failure signal |
 |---|---|---|---|---|
-| **Permission ruleset** | *When* a tool may run (allow / ask / deny) | `permissionMode`, rules, presets | `internal/permission` | `permission_denied` on tool result + timeline |
+| **Permission ruleset** | *When* a tool may run (allow / ask / deny) | `permissionMode`, rules, presets | `internal/permission` + `internal/actionfacts` | `permission_denied` on tool result + timeline |
 | **OS process sandbox** | *What* bash can touch (FS + optional net) | `sandbox`: `off` \| `read-only` \| `workspace-write` | Linux `bwrap`, macOS `sandbox-exec` | `sandbox_denied` + human reason when applied; degrade warning if backend missing |
 | **Session worktree** | Tool CWD / git branch per root session | `session.worktree`: `off` \| `auto` \| `always` | `git worktree` under `.strike/worktrees/` | Soft-fail to launch cwd when not a git repo |
 | **Scheduler pools** | Concurrent bash/model/build/test inside one process | `scheduler.limits` / presets | `internal/scheduler` | Wait / `scheduler.canceled`; not a security boundary |
 | **Process resource caps** | Optional mem/CPU on a single subprocess | `ProcessSpec.Limits` (tool/harness) | Linux `prlimit` (`RLIMIT_AS`, `RLIMIT_CPU`) | Non-zero exit / signal; **no-op on non-Linux** (documented) |
 | **Wall time** | Per-bash and per-turn deadlines | bash `timeoutMs`, `TurnTimeout` | context cancel + process-group kill | `timeout` / `canceled` |
 | **Containers** (in progress) | Full host isolation for the agent runtime | epic [#547](https://github.com/jonathanung/strike/issues/547) | `internal/container` CLI + Manager ([#582](https://github.com/jonathanung/strike/issues/582)/[#583](https://github.com/jonathanung/strike/issues/583)) | Runtime shipped; config/eject/launch UX follow E12.2+ — reuse `network.allow` shape |
+
+## Action facts (semantic permission projection, #888)
+
+Permission rules still match **globs** over the tool pattern (bash command
+string, path, URL). For bash and selected tools, Strike also projects the
+input into bounded **action facts** (`internal/actionfacts`): commands, paths,
+and network hosts — without eval/exec.
+
+| Parse outcome | Permission effect |
+|---|---|
+| **Authoritative** + enforcement-eligible | Each rule may match fact keys (program, `prog *` class, paths, `host:name`) **or** the raw pattern — never both for the same rule (no dual-eval deny). |
+| Partial / unsupported / invalid / limit | Facts are diagnostic only; evaluation uses the **raw pattern** path. Deny never rests on non-authoritative facts. |
+
+Bypass-shaped input (`eval`, `$()`, backticks, `base64 \| bash`, opaque
+scripts) is classified non-authoritative so pattern-only policy applies (usually
+default **ask**), rather than inventing a false deny.
+
+`/permission explain` and `permission.decided` include `evalPath`
+(`pattern`\|`facts`) and a short `factSummary` (programs/hosts/counts — not full
+command text). Fact-backed rules compose with existing **last-match-wins**
+layers (defaults → preset → config → … → managed ceiling).
+
+**Non-goals (v1):** PowerShell/CMD parity; OPA/Rego; serializing raw facts into
+public telemetry without redaction; OS egress filtering (see #892).
 
 ## Two-dial model (sandbox × permission)
 
@@ -49,6 +73,24 @@ Inspect: `/sandbox`, `/sandbox explain`.
 **Non-goal:** reimplementing the landlock/bwrap stack. Residual work lives on
 [#799](https://github.com/jonathanung/strike/issues/799), not a reopen of #537.
 
+## Network egress allowlist (`network.allow`)
+
+Config `network.allow` (host, `*.suffix`, IP, CIDR) is the single policy source
+for application-layer egress:
+
+| Surface | Enforcement |
+|---|---|
+| `webfetch` / `websearch` | Dial/redirect checks via `sandbox.CheckNetworkAllow` |
+| bash | **v1 preflight** on known clients (`curl`, `wget`, `ssh`, `scp`, `sftp`, `nc`/`ncat`/`netcat`), including common wrappers (`env`, `timeout`, `bash -c`, …). Destinations outside the list → tool error `network_denied` (timeline `errorCode`). Unparseable destinations on those clients fail closed when the list is non-empty. |
+| OS sandbox profile | **Not** per-host: host net on by default; off only when webfetch+websearch+mcp are hard-deny on `*`. No bwrap/seatbelt/Windows host allowlist in v1. |
+| Containers (#547) | Planned stronger plane; reuse the same allowlist shape |
+
+Empty/`[]` allowlist = unrestricted **public** hosts (SSRF private blocks on
+webfetch unchanged). `/sandbox explain` prints the allowlist and
+`egress enforcement:` line (preflight vs OS gap). Prefer `webfetch` when you
+need fetch semantics; bash preflight is best-effort argv parse, not a
+transparent userspace proxy.
+
 ## Session worktrees
 
 Per-root-session git worktrees bind tool CWD to
@@ -80,10 +122,15 @@ eval pool wiring (E12.10).
 Until launch UX ships:
 
 - Prefer OS sandbox + worktrees for day-to-day coding.
-- `network.allow` is the shared **shape** for future container egress filters
-  (application-layer webfetch today; OS bash net remains all-or-nothing).
+- `network.allow` is the shared **shape** for application egress and future
+  container filters. Today: `webfetch`/`websearch` + bash **preflight** for
+  curl/wget/ssh/scp/sftp/nc (deny `network_denied` when outside the list).
+  OS bash networking remains all-or-nothing (`NoNetwork`); there is **no**
+  per-host bwrap/seatbelt/Windows filter — `/sandbox explain` labels this as
+  `egress enforcement: preflight` vs `OS host filter: none`.
 - Scheduler pool name `container` is reserved for admission once E12.10 wires
   eval onto this runtime.
+
 
 ## Resource limits (compose with scheduler)
 

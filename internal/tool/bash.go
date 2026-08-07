@@ -79,6 +79,12 @@ func (bashTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 	if err := checkBashWorkspaceBoundary(a.Command, tc.WorkDir); err != nil {
 		return Result{}, err
 	}
+	// Application-layer egress preflight: when network.allow is set, deny known
+	// clients (curl/wget/ssh/scp/…) whose destinations fall outside the shared
+	// allowlist (same CheckNetworkAllow as webfetch). Not OS-level filtering.
+	if err := checkBashNetworkAllow(a.Command, networkAllowFrom(tc)); err != nil {
+		return Result{}, err
+	}
 	if err := tc.Ask(ctx, AskRequest{Permission: "bash", Patterns: []string{a.Command}, Always: always}); err != nil {
 		return Result{}, err
 	}
@@ -267,12 +273,18 @@ func bashSandboxPolicy(tc *Context) sandbox.Policy {
 		if strings.TrimSpace(p.WorkDir) == "" {
 			p.WorkDir = tc.WorkDir
 		}
-		return p
+	} else {
+		p = sandbox.Policy{
+			Mode:    bashSandboxMode(tc),
+			WorkDir: tc.WorkDir,
+		}
 	}
-	return sandbox.Policy{
-		Mode:    bashSandboxMode(tc),
-		WorkDir: tc.WorkDir,
+	// Always surface config network.allow on the OS policy snapshot (explain +
+	// shared shape). Enforcement for bash is application preflight, not OS.
+	if len(p.NetworkAllow) == 0 {
+		p.NetworkAllow = sandbox.CloneNetworkAllow(tc.NetworkAllow)
 	}
+	return p
 }
 
 func compiledSandboxPolicy(p sandbox.Policy) bool {
