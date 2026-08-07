@@ -25,19 +25,152 @@ func TestPetCatalogHasFourteenDistinctAnimals(t *testing.T) {
 			t.Fatalf("duplicate pet ID %q", p.ID)
 		}
 		seen[p.ID] = true
-		if len(p.Frames) == 0 {
-			t.Fatalf("pet %q has no frames", p.ID)
-		}
-		for i, fr := range p.Frames {
-			if strings.TrimSpace(fr) == "" {
-				t.Fatalf("pet %q frame %d empty", p.ID, i)
+		for _, set := range []struct {
+			name   string
+			frames []string
+		}{
+			{"Ready", p.Ready},
+			{"Working", p.Working},
+			{"Attention", p.Attention},
+			{"Error", p.Error},
+		} {
+			if len(set.frames) == 0 {
+				t.Fatalf("pet %q %s has no frames", p.ID, set.name)
 			}
-			for _, line := range strings.Split(fr, "\n") {
-				if w := lipgloss.Width(line); w > 32 {
-					t.Errorf("pet %q frame %d line width %d > 32: %q", p.ID, i, w, line)
+			for i, fr := range set.frames {
+				if strings.TrimSpace(fr) == "" {
+					t.Fatalf("pet %q %s frame %d empty", p.ID, set.name, i)
+				}
+				for _, line := range strings.Split(fr, "\n") {
+					if w := lipgloss.Width(line); w > 32 {
+						t.Errorf("pet %q %s frame %d line width %d > 32: %q", p.ID, set.name, i, w, line)
+					}
 				}
 			}
 		}
+		// Status sets must differ from Ready so the animation is observable.
+		if sameFrameSets(p.Ready, p.Working) {
+			t.Errorf("pet %q Working frames identical to Ready", p.ID)
+		}
+		if sameFrameSets(p.Ready, p.Attention) {
+			t.Errorf("pet %q Attention frames identical to Ready", p.ID)
+		}
+		if sameFrameSets(p.Ready, p.Error) {
+			t.Errorf("pet %q Error frames identical to Ready", p.ID)
+		}
+	}
+}
+
+func sameFrameSets(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func TestPetFramesForByStatus(t *testing.T) {
+	p, ok := petAt(0) // cat
+	if !ok {
+		t.Fatal("no pets")
+	}
+	if got := p.framesFor(theme.AgentStateReady); !sameFrameSets(got, p.Ready) {
+		t.Fatal("Ready frames mismatch")
+	}
+	if got := p.framesFor(theme.AgentStateWorking); !sameFrameSets(got, p.Working) {
+		t.Fatal("Working frames mismatch")
+	}
+	if got := p.framesFor(theme.AgentStateAttention); !sameFrameSets(got, p.Attention) {
+		t.Fatal("Attention frames mismatch")
+	}
+	if got := p.framesFor(theme.AgentStateError); !sameFrameSets(got, p.Error) {
+		t.Fatal("Error frames mismatch")
+	}
+	dead := p.framesFor(theme.AgentStateDead)
+	if len(dead) != 1 || dead[0] != p.Ready[0] {
+		t.Fatalf("Dead should be static first Ready frame, got %#v", dead)
+	}
+}
+
+func TestAgentsPetAnimationChangesWithStatus(t *testing.T) {
+	prev := petRandN
+	petRandN = func(n int) int { return 0 } // cat
+	t.Cleanup(func() { petRandN = prev })
+
+	w := newAgentsWindow().resize(32, 14).(agentsWindow)
+	next, _ := w.update(agentsStateMsg{
+		activeID:  "r1",
+		viewingID: "r1",
+		roots: []agentsRootSnap{
+			{ID: "r1", Title: "Main", State: theme.AgentStateReady},
+		},
+	})
+	w = next.(agentsWindow)
+	readyView := ansi.Strip(w.view(theme.Default()))
+	if !strings.Contains(readyView, "cat") {
+		t.Fatalf("ready view missing cat: %q", readyView)
+	}
+	// Ready should not show status label suffix.
+	if strings.Contains(readyView, "working") || strings.Contains(readyView, "needs you") || strings.Contains(readyView, "error") {
+		t.Fatalf("ready view leaked status label: %q", readyView)
+	}
+
+	next, _ = w.update(agentsStateMsg{
+		activeID:  "r1",
+		viewingID: "r1",
+		roots: []agentsRootSnap{
+			{ID: "r1", Title: "Main", State: theme.AgentStateWorking},
+		},
+	})
+	w = next.(agentsWindow)
+	workView := ansi.Strip(w.view(theme.Default()))
+	if !strings.Contains(workView, "working") {
+		t.Fatalf("working view missing status label: %q", workView)
+	}
+	// Working cat art uses * eyes — distinct from ready o.o
+	if !strings.Contains(workView, "*") {
+		t.Fatalf("working cat art should use busy eyes: %q", workView)
+	}
+
+	next, _ = w.update(agentsStateMsg{
+		activeID:  "r1",
+		viewingID: "r1",
+		roots: []agentsRootSnap{
+			{ID: "r1", Title: "Main", State: theme.AgentStateAttention},
+		},
+	})
+	w = next.(agentsWindow)
+	attView := ansi.Strip(w.view(theme.Default()))
+	if !strings.Contains(attView, "needs you") {
+		t.Fatalf("attention view missing label: %q", attView)
+	}
+
+	next, _ = w.update(agentsStateMsg{
+		activeID:  "r1",
+		viewingID: "r1",
+		roots: []agentsRootSnap{
+			{ID: "r1", Title: "Main", State: theme.AgentStateError},
+		},
+	})
+	w = next.(agentsWindow)
+	errView := ansi.Strip(w.view(theme.Default()))
+	if !strings.Contains(errView, "error") {
+		t.Fatalf("error view missing label: %q", errView)
+	}
+	if !strings.Contains(errView, "x") {
+		t.Fatalf("error cat art should use x eyes: %q", errView)
+	}
+
+	// Tick advances within the status-specific frame set.
+	before := w.petFrame
+	next, _ = w.update(petsTickMsg{})
+	w = next.(agentsWindow)
+	if w.petFrame == before {
+		t.Fatal("tick did not advance petFrame in error state")
 	}
 }
 
@@ -321,7 +454,7 @@ func TestPetsTickAdvancesOnlyWhileAgentsActive(t *testing.T) {
 		if aw, ok := w.(agentsWindow); ok {
 			if aw.petFrame == before {
 				// Only advances when focus pet has multi-frame art.
-				if p, ok := aw.focusPet(); ok && len(p.Frames) > 1 {
+				if p, ok := aw.focusPet(); ok && len(p.framesFor(aw.focusPetState())) > 1 {
 					t.Fatal("frame did not advance while agents active")
 				}
 			}

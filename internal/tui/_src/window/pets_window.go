@@ -20,153 +20,411 @@ const petsAnimInterval = 500 * time.Millisecond
 // petsTickMsg advances agent-pet animation frames while the agents pane is active.
 type petsTickMsg struct{}
 
-// petSpec is one selectable ASCII pet with one or more animation frames.
+// petSpec is one selectable ASCII pet with status-specific animation frames.
 // Each frame is a multi-line pure-ASCII drawing (no emoji / wide glyphs).
+// Ready is required; Working/Attention/Error fall back to Ready when empty.
 type petSpec struct {
-	ID     string
-	Name   string
-	Frames []string
+	ID        string
+	Name      string
+	Ready     []string
+	Working   []string
+	Attention []string
+	Error     []string
 }
 
+// petCatalog is the built-in pet roster. Keep drawings narrow so they fit the
+// default 32-col right pane without horizontal overflow.
 var petCatalog = []petSpec{
 	{
 		ID:   "cat",
 		Name: "cat",
-		Frames: []string{
+		Ready: []string{
 			" /\\_/\\\n( o.o )\n > ^ <",
 			" /\\_/\\\n( -.- )\n > ^ <",
 			" /\\_/\\\n( o.o )\n > ^ <",
 			" /\\_/\\\n( ^.^ )\n > ^ <",
 		},
+		Working: []string{
+			" /\\_/\\\n( *.o )\n > ^ <",
+			" /\\_/\\\n( o.* )\n > ^ < ~",
+			" /\\_/\\\n( *.* )\n > ^ <",
+			" /\\_/\\\n( o.o )\n > ^ <  z",
+		},
+		Attention: []string{
+			" /\\_/\\\n( O.O )\n > ! <",
+			" /\\_/\\\n( O.O )\n > ! < !",
+			" /\\_/\\\n( O,O )\n > ! <",
+			" /\\_/\\\n( O.O )\n > ! <",
+		},
+		Error: []string{
+			" /\\_/\\\n( x.x )\n > _ <",
+			" /\\_/\\\n( x_x )\n > _ <",
+			" /\\_/\\\n( x.x )\n > _ <",
+			" /\\_/\\\n( >.< )\n > _ <",
+		},
 	},
 	{
 		ID:   "dog",
 		Name: "dog",
-		Frames: []string{
+		Ready: []string{
 			"  __\no'')}____//\n `_/      )\n (_(_/-(_/",
 			"  __\no'')}____//\n `_/      )\n (_(_/-(_/  *",
 			"  __\no'')}____//\n `_/      )\n (_(_/-(_/",
 			"  __\no'') }___//\n `_/      )\n (_(_/-(_/",
 		},
+		Working: []string{
+			"  __\no'')}____//\n `_/      )\n (_(_/-(_/ ~",
+			"  __\no'')}____//\n `_/      )\n (_(_/-(_/  *",
+			"  __\no'')}____//\n `_/      )\n (_(_/-(_/~~",
+			"  __\no'') }___//\n `_/      )\n (_(_/-(_/ .",
+		},
+		Attention: []string{
+			"  __\no'')}____//\n `_/  !   )\n (_(_/-(_/",
+			"  __\no'')}____//\n `_/ !!   )\n (_(_/-(_/",
+			"  __\no'')}____//\n `_/  !   )\n (_(_/-(_/ !",
+			"  __\no'') }___//\n `_/  !   )\n (_(_/-(_/",
+		},
+		Error: []string{
+			"  __\no'')}____//\n `_/  x   )\n (_(_/-(_/",
+			"  __\no'')}____//\n `_/ xxx  )\n (_(_/-(_/",
+			"  __\no'')}____//\n `_/  x   )\n (_(_/-(_/",
+			"  __\no'') }___//\n `_/  x   )\n (_(_/-(_/",
+		},
 	},
 	{
 		ID:   "panda",
 		Name: "panda",
-		Frames: []string{
+		Ready: []string{
 			" (\\_/)\n (o.o)\n /| |\\\n  ^ ^",
 			" (\\_/)\n (-.-)\n /| |\\\n  ^ ^",
 			" (\\_/)\n (o.o)\n /| |\\\n  ^ ^",
 			" (\\_/)\n (^.^)\n /| |\\\n  ^ ^",
 		},
+		Working: []string{
+			" (\\_/)\n (*.*)\n /| |\\\n  ^ ^",
+			"  (\\_/)\n  (-.-)\n  /| |\\\n   ^ ^ .",
+			" (\\_/)\n (*.*)\n /| |\\\n  ^ ^",
+			" (\\_/)\n (^.^)\n /| |\\\n  ^ ^ .",
+		},
+		Attention: []string{
+			" (\\_/)\n (O.O)\n /| |\\\n  ^ ^",
+			" (\\_/)\n (O.O)\n /| |\\\n  ^ ^",
+			" (\\_/)\n (O.O)\n /| |\\\n  ^ ^",
+			" (\\_/)!\n (^.^)\n /| |\\\n  ^ ^",
+		},
+		Error: []string{
+			" (\\_/)\n (x.x)\n /| |\\\n  ^ ^",
+			" (\\_/)\n (-.-)\n /| |\\\n  ^ ^ x",
+			" (\\_/)\n (x.x)\n /| |\\\n  ^ ^",
+			" (\\_/)\n (x.x)\n /| |\\\n  ^ ^",
+		},
 	},
 	{
 		ID:   "fish",
 		Name: "fish",
-		Frames: []string{
+		Ready: []string{
 			"><(((('>",
 			" ><(((('>",
 			"  ><(((('>",
 			" ><(((('>",
 		},
+		Working: []string{
+			"~><(((('>",
+			"  ~><(((('>",
+			"  ~><(((('>",
+			" ~><(((('>",
+		},
+		Attention: []string{
+			"><(((('>?",
+			" ><(((('>?",
+			"  ><(((('>?",
+			" ><(((('>?",
+		},
+		Error: []string{
+			"><(((('>X",
+			" ><(((('>X",
+			"  ><(((('>X",
+			" ><(((('>X",
+		},
 	},
 	{
 		ID:   "owl",
 		Name: "owl",
-		Frames: []string{
+		Ready: []string{
 			" ,___,\n( o,o )\n/)   (\\\n \" \" \"",
 			" ,___,\n( -,o )\n/)   (\\\n \" \" \"",
 			" ,___,\n( o,o )\n/)   (\\\n \" \" \"",
 			" ,___,\n( o,- )\n/)   (\\\n \" \" \"",
 		},
+		Working: []string{
+			" ,___,\n( *,* )\n/)   (\\\n \" \" \"",
+			"  ,___,\n ( -,* )\n /)   (\\\n  \" \" \"",
+			" ,___,\n( *,* )\n/)   (\\\n \" \" \"",
+			" ,___,\n( o,- )\n/)   (\\\n \" \" \" .",
+		},
+		Attention: []string{
+			" ,___,\n( O,O )\n/)   (\\\n \" \" \"",
+			" ,___,\n( -,O )\n/)   (\\\n \" \" \"",
+			" ,___,\n( O,O )\n/)   (\\\n \" \" \"",
+			" ,___,!\n( o,- )\n/)   (\\\n \" \" \"",
+		},
+		Error: []string{
+			" ,___,\n( x,x )\n/)   (\\\n \" \" \"",
+			" ,___,\n( -,x )\n/)   (\\\n \" \" \"",
+			" ,___,\n( x,x )\n/)   (\\\n \" \" \"",
+			" ,___,\n( o,- )\n/)   (\\\n \" \" \" x",
+		},
 	},
 	{
 		ID:   "rabbit",
 		Name: "rabbit",
-		Frames: []string{
+		Ready: []string{
 			" (\\_/)\n (o.o)\n (\"|\")",
 			" (\\_/)\n (-.-)\n (\"|\")",
 			" (\\_/)\n (o.o)\n (\"|\")",
 			" (\\_/)\n (^.^)\n (\"|\")",
 		},
+		Working: []string{
+			" (\\_/)\n (*.*)\n (\"|\")",
+			"  (\\_/)\n  (-.-)\n  (\"|\") .",
+			" (\\_/)\n (*.*)\n (\"|\")",
+			" (\\_/)\n (^.^)\n (\"|\") .",
+		},
+		Attention: []string{
+			" (\\_/)\n (O.O)\n (\"|\")",
+			" (\\_/)\n (O.O)\n (\"|\")",
+			" (\\_/)\n (O.O)\n (\"|\")",
+			" (\\_/)!\n (^.^)\n (\"|\")",
+		},
+		Error: []string{
+			" (\\_/)\n (x.x)\n (\"|\")",
+			" (\\_/)\n (-.-)\n (\"|\") x",
+			" (\\_/)\n (x.x)\n (\"|\")",
+			" (\\_/)\n (x.x)\n (\"|\")",
+		},
 	},
 	{
 		ID:   "fox",
 		Name: "fox",
-		Frames: []string{
+		Ready: []string{
 			"  /\\   /\\\n (  .V.  )\n  \\  ^  /\n   |||||",
 			"  /\\   /\\\n (  -V-  )\n  \\  ^  /\n   |||||",
 			"  /\\   /\\\n (  .V.  )\n  \\  ^  /\n   |||||",
 			"  /\\   /\\\n (  ^V^  )\n  \\  ^  /\n   |||||",
 		},
+		Working: []string{
+			"  /\\   /\\\n (  *V*  )\n  \\  ^  /\n   |||||",
+			"   /\\   /\\\n  (  -V-  )\n   \\  ^  /\n    ||||| .",
+			"  /\\   /\\\n (  *V*  )\n  \\  ^  /\n   |||||",
+			"  /\\   /\\\n (  ^V^  )\n  \\  ^  /\n   ||||| .",
+		},
+		Attention: []string{
+			"  /\\   /\\\n (  !V!  )\n  \\  ^  /\n   |||||",
+			"  /\\   /\\!\n (  -V-  )\n  \\  ^  /\n   |||||",
+			"  /\\   /\\\n (  !V!  )\n  \\  ^  /\n   |||||",
+			"  /\\   /\\!\n (  ^V^  )\n  \\  ^  /\n   |||||",
+		},
+		Error: []string{
+			"  /\\   /\\\n (  xVx  )\n  \\  ^  /\n   |||||",
+			"  /\\   /\\\n (  -V-  )\n  \\  ^  /\n   ||||| x",
+			"  /\\   /\\\n (  xVx  )\n  \\  ^  /\n   |||||",
+			"  /\\   /\\\n (  ^V^  )\n  \\  ^  /\n   ||||| x",
+		},
 	},
 	{
 		ID:   "bear",
 		Name: "bear",
-		Frames: []string{
+		Ready: []string{
 			"  (\"\"\")\n ( o o )\n  \\ ^ /\n  (' ')",
 			"  (\"\"\")\n ( - - )\n  \\ ^ /\n  (' ')",
 			"  (\"\"\")\n ( o o )\n  \\ ^ /\n  (' ')",
 			"  (\"\"\")\n ( ^ ^ )\n  \\ ^ /\n  (' ')",
 		},
+		Working: []string{
+			"  (\"\"\")\n ( * * )\n  \\ ^ /\n  (' ')",
+			"   (\"\"\")\n  ( - - )\n   \\ ^ /\n   (' ') .",
+			"  (\"\"\")\n ( * * )\n  \\ ^ /\n  (' ')",
+			"  (\"\"\")\n ( ^ ^ )\n  \\ ^ /\n  (' ') .",
+		},
+		Attention: []string{
+			"  (\"\"\")\n ( O O )\n  \\ ^ /\n  (' ')",
+			"  (\"\"\")!\n ( - - )\n  \\ ^ /\n  (' ')",
+			"  (\"\"\")\n ( O O )\n  \\ ^ /\n  (' ')",
+			"  (\"\"\")!\n ( ^ ^ )\n  \\ ^ /\n  (' ')",
+		},
+		Error: []string{
+			"  (\"\"\")\n ( x x )\n  \\ ^ /\n  (' ')",
+			"  (\"\"\")\n ( - - )\n  \\ ^ /\n  (' ') x",
+			"  (\"\"\")\n ( x x )\n  \\ ^ /\n  (' ')",
+			"  (\"\"\")\n ( ^ ^ )\n  \\ ^ /\n  (' ') x",
+		},
 	},
 	{
 		ID:   "bird",
 		Name: "bird",
-		Frames: []string{
+		Ready: []string{
 			"  .--.\n ( o> )\n /)  )\n  \"\"",
 			"  .--.\n ( -> )\n /)  )\n  \"\"",
 			"  .--.\n ( o> )\n /)  )\n  \"\"",
 			" .--. \n( o> )\n/)  ) \n \"\"  ",
 		},
+		Working: []string{
+			"  .--.\n ( *> )\n /)  )\n  \"\"",
+			"   .--.\n  ( -> )\n  /)  )\n   \"\" .",
+			"  .--.\n ( *> )\n /)  )\n  \"\"",
+			" .--. \n( *> )\n/)  ) \n \"\"  ",
+		},
+		Attention: []string{
+			"  .--.\n ( O> )\n /)  )\n  \"\"",
+			"  .--.!\n ( -> )\n /)  )\n  \"\"",
+			"  .--.\n ( O> )\n /)  )\n  \"\"",
+			" .--. \n( O> )\n/)  ) \n \"\"  ",
+		},
+		Error: []string{
+			"  .--.\n ( x> )\n /)  )\n  \"\"",
+			"  .--.\n ( -> )\n /)  )\n  \"\" x",
+			"  .--.\n ( x> )\n /)  )\n  \"\"",
+			" .--. \n( x> )\n/)  ) \n \"\"  ",
+		},
 	},
 	{
 		ID:   "frog",
 		Name: "frog",
-		Frames: []string{
+		Ready: []string{
 			"  (.)_(.)\n (  . .  )\n  (_____) ",
 			"  (-)_(-)\n (  . .  )\n  (_____) ",
 			"  (.)_(.)\n (  . .  )\n  (_____) ",
 			"  (^)_(^)\n (  . .  )\n  (_____) ",
 		},
+		Working: []string{
+			"  (.)_(.)\n (  . .  )\n  (_____)  .",
+			"   (-)_(-)\n  (  . .  )\n   (_____)  .",
+			"  (.)_(.)\n (  . .  )\n  (_____)  .",
+			"  (^)_(^)\n (  . .  )\n  (_____)  .",
+		},
+		Attention: []string{
+			"  (.)_(.)!\n (  . .  )\n  (_____) ",
+			"  (-)_(-)!\n (  . .  )\n  (_____) ",
+			"  (.)_(.)!\n (  . .  )\n  (_____) ",
+			"  (^)_(^)!\n (  . .  )\n  (_____) ",
+		},
+		Error: []string{
+			"  (.)_(.)\n (  . .  )\n  (_____)  x",
+			"  (-)_(-)\n (  . .  )\n  (_____)  x",
+			"  (.)_(.)\n (  . .  )\n  (_____)  x",
+			"  (^)_(^)\n (  . .  )\n  (_____)  x",
+		},
 	},
 	{
 		ID:   "turtle",
 		Name: "turtle",
-		Frames: []string{
+		Ready: []string{
 			"  ___\n /._.\\\n \\_^_/\n  | |",
 			"  ___\n /.-.\\\n \\_^_/\n  | |",
 			"  ___\n /._.\\\n \\_^_/\n  | |",
 			"  ___\n /.^_\\\n \\_^_/\n /   \\",
 		},
+		Working: []string{
+			"  ___\n /._.\\\n \\_^_/\n  | | .",
+			"   ___\n  /.-.\\\n  \\_^_/\n   | | .",
+			"  ___\n /._.\\\n \\_^_/\n  | | .",
+			"  ___\n /.^_\\\n \\_^_/\n /   \\ .",
+		},
+		Attention: []string{
+			"  ___!\n /._.\\\n \\_^_/\n  | |",
+			"  ___!\n /.-.\\\n \\_^_/\n  | |",
+			"  ___!\n /._.\\\n \\_^_/\n  | |",
+			"  ___!\n /.^_\\\n \\_^_/\n /   \\",
+		},
+		Error: []string{
+			"  ___\n /._.\\\n \\_^_/\n  | | x",
+			"  ___\n /.-.\\\n \\_^_/\n  | | x",
+			"  ___\n /._.\\\n \\_^_/\n  | | x",
+			"  ___\n /.^_\\\n \\_^_/\n /   \\ x",
+		},
 	},
 	{
 		ID:   "mouse",
 		Name: "mouse",
-		Frames: []string{
+		Ready: []string{
 			"(\\_/)\n(o.o)\n > < ~~",
 			"(\\_/)\n(-.-)\n > < ~~",
 			"(\\_/)\n(o.o)\n > <  ~",
 			"(\\_/)\n(^.^)\n > <~~~",
 		},
+		Working: []string{
+			"(\\_/)\n(*.*)\n > < ~~",
+			" (\\_/)\n (-.-)\n  > < ~~ .",
+			"(\\_/)\n(*.*)\n > <  ~",
+			"(\\_/)\n(^.^)\n > <~~~ .",
+		},
+		Attention: []string{
+			"(\\_/)\n(O.O)\n > < ~~",
+			"(\\_/)\n(O.O)\n > < ~~",
+			"(\\_/)\n(O.O)\n > <  ~",
+			"(\\_/)!\n(^.^)\n > <~~~",
+		},
+		Error: []string{
+			"(\\_/)\n(x.x)\n > < ~~",
+			"(\\_/)\n(-.-)\n > < ~~ x",
+			"(\\_/)\n(x.x)\n > <  ~",
+			"(\\_/)\n(x.x)\n > <~~~",
+		},
 	},
 	{
 		ID:   "snail",
 		Name: "snail",
-		Frames: []string{
+		Ready: []string{
 			"  .--.\n@/ o o\\\n \\_ v _/\n  '---'",
 			"  .--.\n@/ - -\\\n \\_ v _/\n  '---'",
 			" .--. \n@/ o o\\\n\\_ v _/\n '---'",
 			"  .--.\n@/ ^ ^\\\n \\_ v _/\n  '---'",
 		},
+		Working: []string{
+			"  .--.\n@/ * *\\\n \\_ v _/\n  '---'",
+			"   .--.\n @/ - -\\\n  \\_ v _/\n   '---' .",
+			" .--. \n@/ * *\\\n\\_ v _/\n '---'",
+			"  .--.\n@/ ^ ^\\\n \\_ v _/\n  '---' .",
+		},
+		Attention: []string{
+			"  .--.\n@/ O O\\\n \\_ v _/\n  '---'",
+			"  .--.!\n@/ - -\\\n \\_ v _/\n  '---'",
+			" .--. \n@/ O O\\\n\\_ v _/\n '---'",
+			"  .--.!\n@/ ^ ^\\\n \\_ v _/\n  '---'",
+		},
+		Error: []string{
+			"  .--.\n@/ x x\\\n \\_ v _/\n  '---'",
+			"  .--.\n@/ - -\\\n \\_ v _/\n  '---' x",
+			" .--. \n@/ x x\\\n\\_ v _/\n '---'",
+			"  .--.\n@/ ^ ^\\\n \\_ v _/\n  '---' x",
+		},
 	},
 	{
 		ID:   "duck",
 		Name: "duck",
-		Frames: []string{
+		Ready: []string{
 			"  __\n<(o )___\n (  ._> )\n  `--'  ",
 			"  __\n<(- )___\n (  ._> )\n  `--'  ",
 			"  __\n<(o )___\n (  ._> )\n  `--' .",
 			"  __\n<(^ )___\n (  ._> )\n  `--'  ",
+		},
+		Working: []string{
+			"  __\n<(* )___\n (  ._> )\n  `--'  ",
+			"   __\n <(- )___\n  (  ._> )\n   `--'   .",
+			"  __\n<(* )___\n (  ._> )\n  `--' .",
+			"  __\n<(^ )___\n (  ._> )\n  `--'   .",
+		},
+		Attention: []string{
+			"  __\n<(O )___\n (  ._> )\n  `--'  ",
+			"  __!\n<(- )___\n (  ._> )\n  `--'  ",
+			"  __\n<(O )___\n (  ._> )\n  `--' .",
+			"  __!\n<(^ )___\n (  ._> )\n  `--'  ",
+		},
+		Error: []string{
+			"  __\n<(x )___\n (  ._> )\n  `--'  ",
+			"  __\n<(- )___\n (  ._> )\n  `--'   x",
+			"  __\n<(x )___\n (  ._> )\n  `--' .",
+			"  __\n<(^ )___\n (  ._> )\n  `--'   x",
 		},
 	},
 }
@@ -202,6 +460,35 @@ func petAt(idx int) (petSpec, bool) {
 		return petCatalog[0], true
 	}
 	return petCatalog[idx], true
+}
+
+// framesFor returns the animation frames for a runtime agent state.
+// Dead uses a single muted Ready frame; unknown/empty falls back to Ready.
+func (p petSpec) framesFor(state theme.AgentState) []string {
+	switch state {
+	case theme.AgentStateWorking:
+		if len(p.Working) > 0 {
+			return p.Working
+		}
+	case theme.AgentStateAttention:
+		if len(p.Attention) > 0 {
+			return p.Attention
+		}
+	case theme.AgentStateError:
+		if len(p.Error) > 0 {
+			return p.Error
+		}
+	case theme.AgentStateDead:
+		if len(p.Ready) > 0 {
+			// Static final pose — no idle blink loop for dead sessions.
+			return p.Ready[:1]
+		}
+	}
+	if len(p.Ready) > 0 {
+		return p.Ready
+	}
+	// Legacy safety: treat any leftover single slice as ready.
+	return nil
 }
 
 // petCatalogNames returns the selectable pet ids for notices/help.
@@ -286,8 +573,6 @@ func selectAgentPet(r windowRegistry, name, sessionID string) (windowRegistry, b
 			id = aw.focusPetSessionID()
 		}
 		if id == "" {
-			// No agent yet — stash as pending default on empty key once roots arrive
-			// by assigning when ensure runs; still record against activeID if set.
 			id = strings.TrimSpace(aw.activeID)
 		}
 		if id == "" {
