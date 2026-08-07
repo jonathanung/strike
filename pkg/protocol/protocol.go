@@ -1201,6 +1201,26 @@ type PermissionDecided struct {
 	RuleAction     string `json:"ruleAction,omitempty"`
 }
 
+// AdmissionDecided is a non-blocking audit event when MCP/skill/plugin
+// admission finishes for one subject (allow|warn|block|quarantine).
+// Emitted at register/load time before tools bind. Reasons and evidence are
+// redacted by timeline export.
+type AdmissionDecided struct {
+	Correlation
+	// Surface is mcp|skill|plugin.
+	Surface string `json:"surface"`
+	// Target is the server name, skill name, or plugin id.
+	Target string `json:"target"`
+	// Action is allow|warn|block|quarantine.
+	Action string `json:"action"`
+	// Reason is a short operator-visible summary (may include rule ids).
+	Reason string `json:"reason,omitempty"`
+	// Preset is the admission preset id (permissive|default|strict).
+	Preset string `json:"preset,omitempty"`
+	// Findings lists rule ids that contributed (not full evidence).
+	Findings []string `json:"findings,omitempty"`
+}
+
 // QuestionOption is one selectable choice on a QuestionPrompt.
 type QuestionOption struct {
 	Label       string `json:"label"`
@@ -1894,6 +1914,7 @@ func (ProcessExited) isEvent()           {}
 func (PermissionAsked) isEvent()         {}
 func (PermissionResolved) isEvent()      {}
 func (PermissionDecided) isEvent()       {}
+func (AdmissionDecided) isEvent()        {}
 func (QuestionAsked) isEvent()           {}
 func (QuestionResolved) isEvent()        {}
 func (TurnCompleted) isEvent()           {}

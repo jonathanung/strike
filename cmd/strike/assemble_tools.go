@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jonathanung/strike-cli/internal/admission"
 	"github.com/jonathanung/strike-cli/internal/artifact"
 	"github.com/jonathanung/strike-cli/internal/auth"
 	"github.com/jonathanung/strike-cli/internal/config"
@@ -345,6 +346,23 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		}
 	}
 
+	// Admission policy (MCP/skills/plugins). Distinct from permissionPreset /
+	// OS sandbox. Fail closed on unknown preset at config load; resolve here
+	// for runtime scanners.
+	admitPol, err := config.ResolveAdmission(cfg)
+	if err != nil {
+		_ = ledgerStore.Close()
+		_ = artifactStore.Close()
+		_ = planStore.Close()
+		_ = goalStore.Close()
+		_ = issueStore.Close()
+		_ = memoryStore.Close()
+		_ = historyStore.Close()
+		return nil, fmt.Errorf("admission policy: %w", err)
+	}
+	// Collect admission verdicts to append onto the first session after open.
+	var admissionVerdicts []admission.Verdict
+
 	// Skills load before the tool registry so the skill tool can advertise
 	// available names in its description at construction time.
 	skills, err := config.LoadSkillsWithError(workDir)
@@ -358,6 +376,12 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		_ = historyStore.Close()
 		return nil, fmt.Errorf("loading skills: %w", err)
 	}
+	var skillVerdicts []admission.Verdict
+	skills, skillVerdicts = config.FilterSkills(admitPol, skills)
+	admissionVerdicts = append(admissionVerdicts, skillVerdicts...)
+	// Plugin path/capability admission (trust remains a separate gate).
+	pluginVerdicts := config.AdmitPlugins(admitPol, config.DiscoverPlugins(workDir))
+	admissionVerdicts = append(admissionVerdicts, pluginVerdicts...)
 	skillInfos := make([]tool.SkillInfo, len(skills))
 	for i, s := range skills {
 		skillInfos[i] = tool.SkillInfo{Name: s.Name, Description: s.Description, Template: s.Template}
@@ -858,7 +882,15 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	// External MCP servers (stdio/HTTP): process-scoped, shared by all root
 	// engines via the common registry. Stdio CWD is the launch tree (not a
 	// session worktree). Per-server failures are recorded and do not abort assemble.
+	// Admission runs after tools/list and before registry bind.
 	mcpMgr := mcp.NewManager()
+	mcpMgr.SetAdmissionPolicy(admitPol)
+	mcpMgr.SetAdmissionHook(func(v admission.Verdict) {
+		admissionVerdicts = append(admissionVerdicts, v)
+		if v.Action != admission.ActionAllow || len(v.Findings) > 0 {
+			fmt.Fprintf(os.Stderr, "%s\n", admission.FormatVerdict(v))
+		}
+	})
 	if len(cfg.MCP.Servers) > 0 {
 		fields := make(map[string]mcp.ServerConfigFields, len(cfg.MCP.Servers))
 		for name, s := range cfg.MCP.Servers {
@@ -874,6 +906,30 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		mcpCtx, mcpCancel := context.WithTimeout(context.Background(), 45*time.Second)
 		mcpMgr.StartAll(mcpCtx, mcp.ConfigsFromMap(fields, launchDir), registry)
 		mcpCancel()
+	}
+	// Persist admission audit events on the first root session (timeline).
+	if first != nil && first.id != "" && len(admissionVerdicts) > 0 {
+		sid := first.id
+		for _, v := range admissionVerdicts {
+			if v.Action == admission.ActionAllow && len(v.Findings) == 0 && v.ScanError == "" {
+				continue
+			}
+			var findings []string
+			for _, f := range v.Findings {
+				if f.Rule != "" {
+					findings = append(findings, f.Rule)
+				}
+			}
+			_ = first.bound.Append(protocol.AdmissionDecided{
+				Correlation: protocol.Correlation{SessionID: sid},
+				Surface:     v.Surface,
+				Target:      v.Target,
+				Action:      string(v.Action),
+				Reason:      v.Reason,
+				Preset:      admitPol.Preset,
+				Findings:    findings,
+			})
+		}
 	}
 
 	// External language servers (stdio JSON-RPC). RootDir/CWD is the launch

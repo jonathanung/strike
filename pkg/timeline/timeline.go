@@ -35,6 +35,7 @@ const (
 	KindProvider   = "provider"
 	KindChild      = "child"
 	KindPermission = "permission"
+	KindAdmission  = "admission"
 	KindVerify     = "verify"
 )
 
@@ -109,6 +110,7 @@ type Summary struct {
 	Providers   int   `json:"providers"`
 	Children    int   `json:"children"`
 	Permissions int   `json:"permissions,omitempty"`
+	Admissions  int   `json:"admissions,omitempty"`
 	Verifies    int   `json:"verifies,omitempty"`
 	Failed      int   `json:"failed"`
 	Canceled    int   `json:"canceled"`
@@ -415,7 +417,7 @@ func (b *Builder) Observe(ev protocol.Event, t time.Time) {
 			if ent.State == "" || ent.State == StateQueued {
 				ent.State = StateWaiting
 			}
-			// Keep waiting until PermissionResolved / decided allow|deny.
+			// Keep waiting until PermissionResolved / decided allow/deny.
 		case "deny":
 			ent.State = StateFailed
 			if ent.Error == "" {
@@ -433,6 +435,43 @@ func (b *Builder) Observe(ev protocol.Event, t time.Time) {
 				}
 			}
 		}
+	case protocol.AdmissionDecided:
+		b.noteSession(e.SessionID)
+		ent := b.ensureAdmission(e.Surface, e.Target, e.SessionID, e.TurnID, t)
+		ent.Name = e.Surface + ":" + e.Target
+		summary := e.Action
+		if e.Preset != "" {
+			summary += " preset=" + e.Preset
+		}
+		if e.Reason != "" {
+			summary += " " + e.Reason
+		}
+		if len(e.Findings) > 0 {
+			summary += " findings=" + strings.Join(e.Findings, ",")
+		}
+		ent.OutputPreview = clip(redact.String(summary), b.opts.OutputPreviewMax)
+		switch e.Action {
+		case "block":
+			ent.State = StateFailed
+			ent.Error = clip(redact.String(e.Reason), b.opts.ErrorPreviewMax)
+			if ent.Error == "" {
+				ent.Error = "blocked"
+			}
+			ent.ErrorCode = "admission_blocked"
+		case "quarantine":
+			ent.State = StateFailed
+			ent.Error = clip(redact.String(e.Reason), b.opts.ErrorPreviewMax)
+			if ent.Error == "" {
+				ent.Error = "quarantined"
+			}
+			ent.ErrorCode = "admission_quarantined"
+		case "warn":
+			ent.State = StateCompleted
+			ent.ErrorCode = "admission_warn"
+		default:
+			ent.State = StateCompleted
+		}
+		b.finish(ent, t)
 	case protocol.UsageReported:
 		b.noteSession(e.SessionID)
 		ent := b.ensureProvider(e.ProviderRequestID, e.SessionID, e.TurnID, e.Attempt, t)
@@ -719,6 +758,8 @@ func (b *Builder) dropEntryLocked(ent *Entry) {
 		if key != "" {
 			delete(b.permissions, key)
 		}
+	case KindAdmission:
+		// one-shot entries; no secondary index
 	case KindVerify:
 		key := ent.SessionID + "\x00" + ent.TurnID + "\x00" + ent.Name
 		delete(b.verifies, key)
@@ -1110,6 +1151,20 @@ func (b *Builder) ensurePermission(requestID, sessionID, turnID string, t time.T
 	return ent
 }
 
+func (b *Builder) ensureAdmission(surface, target, sessionID, turnID string, t time.Time) *Entry {
+	ent := &Entry{
+		ID:        b.nextID("admit"),
+		Kind:      KindAdmission,
+		State:     StateRunning,
+		SessionID: sessionID,
+		TurnID:    turnID,
+		Name:      surface + ":" + target,
+		StartedAt: formatTime(t),
+	}
+	b.track(ent)
+	return ent
+}
+
 func (b *Builder) ensureVerify(sessionID, turnID, scope string, t time.Time) *Entry {
 	key := sessionID + "\x00" + turnID + "\x00" + scope
 	if turnID == "" && scope == "" {
@@ -1189,6 +1244,8 @@ func summarize(entries []Entry) Summary {
 			s.Providers++
 		case KindPermission:
 			s.Permissions++
+		case KindAdmission:
+			s.Admissions++
 		case KindChild:
 			s.Children++
 		case KindVerify:

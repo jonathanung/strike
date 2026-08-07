@@ -253,6 +253,26 @@ Inspect with `/permission presets`.
 | `dev` | Allow common local-dev bash (`go *`, `git status/diff/log/show`, `make test*`); deny force-push and `.env` writes; other mutations stay ask |
 | `yolo-with-sandbox` | Rule-level allow-all (`* *` allow). Does **not** turn off OS sandbox — keep `sandbox` at `workspace-write` or `read-only`. Later deny rules still win. Distinct from `permissionMode: yolo` |
 
+**Admission (`admission`):** register/load-time scans for MCP servers, skills,
+and plugins **before** tools bind / skills enter the catalog. Distinct from
+`permissionPreset` (per-call rules) and `sandbox` (OS isolation). Full matrix,
+scanners, and fail-open/closed behavior: [admission.md](admission.md).
+
+```jsonc
+{
+  "admission": {
+    "preset": "default",              // permissive | default | strict
+    "allowPaths": ["~/trusted-skills"] // home-anchored only; bare ".strike/…" rejected
+  }
+}
+```
+
+| Preset | High-risk MCP tool shapes | Scanner errors |
+|---|---|---|
+| `permissive` | warn (critical → quarantine) | warn (fail-open) |
+| `default` | quarantine (critical → block) | warn (fail-open) |
+| `strict` | **block** before bind | **block** (fail-closed) |
+
 **Explain:** `/permission explain <tool> [pattern]` (or the
 `permission.Explain` / `Service.Explain` API) returns the effective action,
 matched rule, layer name, and match trail for a sample tool call.

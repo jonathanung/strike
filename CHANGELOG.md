@@ -16,6 +16,16 @@ materially affect the shipped product.
 
 ### Added
 
+- **Admission scan for MCP, skills, and plugins** — register/load-time
+  scanners apply a severity→action matrix (`allow` / `warn` / `block` /
+  `quarantine`) before MCP tools bind or skills enter the catalog. Config
+  `admission.preset` (`permissive` \| `default` \| `strict`), home-anchored
+  `allowPaths` only (bare relative markers rejected — spoof-via-subdirectory
+  regression tested), and explicit fail-closed on `strict`. Emits
+  `admission.decided` (protocol `1.13.0`) for timeline/audit. Shared
+  `internal/security.Finding` types for future write-time content guards.
+  Docs: [docs/admission.md](docs/admission.md)
+  ([#889](https://github.com/jonathanung/strike/issues/889)).
 - **Plugin theme contributions** — theme packages load through the plugin
   catalog/lifecycle (same lockfile and integrity path). `/theme` shows plugin
   provenance and collision winners, live-previews on cursor move without
