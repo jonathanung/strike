@@ -211,6 +211,7 @@ type (
 	EffectivePrompt         = pub.EffectivePrompt
 	DiagnosticBundle        = pub.DiagnosticBundle
 	ContextFitWarning       = pub.ContextFitWarning
+	SessionBudgetWarning    = pub.SessionBudgetWarning
 	ContextControlsSelected = pub.ContextControlsSelected
 	UnknownEvent            = pub.UnknownEvent
 )
@@ -275,8 +276,13 @@ const (
 	UsageSourceActual    = pub.UsageSourceActual
 	UsageSourceEstimated = pub.UsageSourceEstimated
 
-	ContextFitWarn     = pub.ContextFitWarn
-	ContextFitCritical = pub.ContextFitCritical
+	ContextFitWarn              = pub.ContextFitWarn
+	SessionBudgetLevel50        = pub.SessionBudgetLevel50
+	SessionBudgetLevel80        = pub.SessionBudgetLevel80
+	SessionBudgetLevel100       = pub.SessionBudgetLevel100
+	SessionBudgetKindCostUSD    = pub.SessionBudgetKindCostUSD
+	SessionBudgetKindTurnTokens = pub.SessionBudgetKindTurnTokens
+	ContextFitCritical          = pub.ContextFitCritical
 
 	SchedulerReasonCanceled = pub.SchedulerReasonCanceled
 	SchedulerReasonClosed   = pub.SchedulerReasonClosed
@@ -360,6 +366,7 @@ const (
 	ErrorCodeContentGuardDenied = pub.ErrorCodeContentGuardDenied
 	ErrorCodeNetworkDenied      = pub.ErrorCodeNetworkDenied
 	ErrorCodeQueueFull          = pub.ErrorCodeQueueFull
+	ErrorCodeBudgetExhausted    = pub.ErrorCodeBudgetExhausted
 
 	// Session lifecycle (#1038).
 	ErrorCodeSessionNotFound = pub.ErrorCodeSessionNotFound

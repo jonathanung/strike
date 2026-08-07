@@ -523,14 +523,19 @@ func (e *Engine) totalDelegationCount() int {
 	return len(e.team.Delegations())
 }
 
-// sessionBudgetExhausted reports whether an outer session cost envelope is spent.
-// Wired via Options.SessionBudgetExhausted when session ceilings (#577) land;
-// until then the hook is nil and fan-out is not blocked on cost.
+// sessionBudgetExhausted reports whether an outer session cost envelope is spent (#577).
+// Prefers the shared SessionBudget tracker; falls back to Options.SessionBudgetExhausted.
 func (e *Engine) sessionBudgetExhausted() bool {
-	if e == nil || e.opts.SessionBudgetExhausted == nil {
+	if e == nil {
 		return false
 	}
-	return e.opts.SessionBudgetExhausted()
+	if e.sessionBudget != nil && e.sessionBudget.Exhausted() {
+		return true
+	}
+	if e.opts.SessionBudgetExhausted != nil {
+		return e.opts.SessionBudgetExhausted()
+	}
+	return false
 }
 
 // PolicyMetricsSnapshot returns counters for delegation-worthiness decisions.
