@@ -150,6 +150,9 @@
     "network": {
       "$ref": "#/$defs/network"
     },
+    "contentGuard": {
+      "$ref": "#/$defs/contentGuard"
+    },
     "webSearch": {
       "$ref": "#/$defs/webSearch"
     },
@@ -294,6 +297,23 @@
           "items": {
             "type": "string"
           }
+        }
+      }
+    },
+    "contentGuard": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Write-time content scanner on edit/write/apply_patch/notebook_edit. Distinct from egress redaction (pkg/redact). Default: credential shapes deny; high-confidence dangerous sinks ask. Error code content_guard_denied.",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "description": "off | default | ask | deny. Empty means default.",
+          "enum": ["off", "default", "ask", "deny"]
+        },
+        "pathAllow": {
+          "type": "array",
+          "description": "Doublestar globs over workspace-relative paths that skip the guard (e.g. **/testdata/**).",
+          "items": { "type": "string" }
         }
       }
     },

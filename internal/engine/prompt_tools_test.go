@@ -770,3 +770,89 @@ func (s stubMCPTool) Schema() json.RawMessage {
 func (s stubMCPTool) Execute(context.Context, json.RawMessage, *tool.Context) (tool.Result, error) {
 	return tool.Result{}, nil
 }
+
+// TestTaskSchemaBasicThenPromoteOnHistory ensures progressive task starts
+// basic and history with advanced args restores advanced on resume (#989).
+func TestTaskSchemaBasicThenPromoteOnHistory(t *testing.T) {
+	reg := tool.NewRegistry(tool.NewRead(), tool.NewTask())
+	reg.Register(tool.NewToolSearch(reg))
+
+	// Fresh session: basic task schema.
+	req := captureStreamRequest(t, engine.Options{
+		WorkDir:  t.TempDir(),
+		Registry: reg,
+		Agents:   []engine.Agent{{Name: "build"}},
+		Rules:    []permission.Ruleset{permission.Defaults()},
+	}, "echo", "echo")
+	var basic json.RawMessage
+	for _, s := range req.Tools {
+		if s.Name == "task" {
+			basic = s.InputSchema
+		}
+	}
+	if len(basic) == 0 {
+		t.Fatal("task missing on first stream")
+	}
+	if strings.Contains(string(basic), `"transition"`) {
+		t.Fatal("fresh task should be basic schema")
+	}
+
+	// Resume with advanced task call in history.
+	reg2 := tool.NewRegistry(tool.NewRead(), tool.NewTask())
+	reg2.Register(tool.NewToolSearch(reg2))
+	req2 := captureStreamRequest(t, engine.Options{
+		WorkDir:  t.TempDir(),
+		Registry: reg2,
+		Agents:   []engine.Agent{{Name: "build"}},
+		Rules:    []permission.Ruleset{permission.Defaults()},
+		InitialMessages: []provider.Message{
+			{Role: provider.RoleUser, Text: "delegate carefully"},
+			{
+				Role: provider.RoleAssistant,
+				ToolCalls: []provider.ToolCall{
+					{ID: "c1", Name: "task", Args: json.RawMessage(`{"action":"transition","id":"d1","state":"done"}`)},
+				},
+			},
+			{
+				Role:       provider.RoleTool,
+				ToolResult: &provider.ToolResult{CallID: "c1", Output: "ok"},
+			},
+		},
+	}, "echo", "echo")
+	var adv json.RawMessage
+	for _, s := range req2.Tools {
+		if s.Name == "task" {
+			adv = s.InputSchema
+		}
+	}
+	if !strings.Contains(string(adv), `"transition"`) {
+		t.Fatalf("resume should restore advanced task schema: %s", adv)
+	}
+
+	// Resume with prompt-only history stays basic.
+	reg3 := tool.NewRegistry(tool.NewRead(), tool.NewTask())
+	req3 := captureStreamRequest(t, engine.Options{
+		WorkDir:  t.TempDir(),
+		Registry: reg3,
+		Agents:   []engine.Agent{{Name: "build"}},
+		Rules:    []permission.Ruleset{permission.Defaults()},
+		InitialMessages: []provider.Message{
+			{Role: provider.RoleUser, Text: "spawn"},
+			{
+				Role: provider.RoleAssistant,
+				ToolCalls: []provider.ToolCall{
+					{ID: "c1", Name: "task", Args: json.RawMessage(`{"prompt":"explore pkg"}`)},
+				},
+			},
+			{
+				Role:       provider.RoleTool,
+				ToolResult: &provider.ToolResult{CallID: "c1", Output: "started"},
+			},
+		},
+	}, "echo", "echo")
+	for _, s := range req3.Tools {
+		if s.Name == "task" && strings.Contains(string(s.InputSchema), `"transition"`) {
+			t.Fatal("prompt-only history should keep basic task schema")
+		}
+	}
+}

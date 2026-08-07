@@ -60,6 +60,48 @@ wrapper. Legacy tools (delegate, task_status, task_read, task_message,
 task_interrupt, wait) are compatibility shims over this API.`
 }
 
+func (taskTool) BasicDescription() string {
+	return `Progressive delegation API (basic schema): spawn a child with prompt-only create, and bounded status/wait/cancel control.
+
+Simple path:
+  task({prompt: "…"})
+  Returns after the child starts. Prefer wait or [child.completed] over busy-polling.
+
+Basic actions (optional action=; omit + prompt ⇒ create):
+  create  — spawn (default). Nested depth bounded by MaxChildDepth.
+  status  — live/terminal pulse by id
+  wait    — block on task.done/failed/canceled/blocked with timeout
+  cancel  — interrupt owned child (idempotent)
+
+Identity: id or session_id (delegation id, session id, or stable name alias).
+Use toolsearch query "task" (or advanced fields) to load the full schema:
+get/list/read/message/transition, routing, budget, verify, context_bundle, and more.
+Legacy tools (delegate, task_*, wait) remain compatibility shims over this API.`
+}
+
+func (taskTool) BasicSchema() json.RawMessage {
+	return json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"action": {
+				"type": "string",
+				"enum": ["create", "status", "wait", "cancel"],
+				"description": "Operation; omit with prompt for create (progressive default)"
+			},
+			"prompt": {"type": "string", "description": "Subtask instructions (create; required when action omitted)"},
+			"id": {"type": "string", "description": "Delegation id, session id, or name (status/wait/cancel)"},
+			"session_id": {"type": "string", "description": "Alias for id (compat with task_* tools)"},
+			"include_recent": {"type": "boolean", "description": "status: include latest_activity lines"},
+			"events": {
+				"type": "array",
+				"items": {"type": "string"},
+				"description": "wait: task.done, task.failed, task.canceled, task.blocked"
+			},
+			"timeout_seconds": {"type": "number", "description": "wait: max seconds (0 < t ≤ 300)"}
+		}
+	}`)
+}
+
 func (taskTool) Schema() json.RawMessage {
 	return json.RawMessage(`{
 		"type": "object",

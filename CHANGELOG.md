@@ -16,6 +16,13 @@ materially affect the shipped product.
 
 ### Changed
 
+- **Progressive `task` schemas** — `task` starts with a compact basic schema
+  (prompt-only create + status/wait/cancel). Advanced fields load after
+  `toolsearch`, advanced args, or workflow activation; one tool name and one
+  executor throughout ([#989](https://github.com/jonathanung/strike/issues/989),
+  [#993](https://github.com/jonathanung/strike/issues/993)).
+
+
 - **Progressive tool disclosure default** — `deferTools` now defaults to `on`
   with a smaller always-visible core (`read`/`glob`/`grep`/`edit`/`write`/
   `apply_patch`/`move`/`delete`/`bash`/`task`/`toolsearch`/`question`).
@@ -27,6 +34,16 @@ materially affect the shipped product.
 
 ### Added
 
+- **Write-time content guards** — `write` / `edit` / `apply_patch` /
+  `notebook_edit` scan proposed content before disk. Default: credential
+  shapes (PEM, AWS `AKIA…`, provider keys, GitHub/Slack tokens, …) **deny**
+  with stable error code `content_guard_denied`; high-confidence dangerous
+  sinks (language-limited `eval`/`exec`/`os.system`/…) **ask**. Config
+  `contentGuard.mode` (`off`|`default`|`ask`|`deny`) and `pathAllow` globs;
+  managed `mode: deny` is a ForcedDeny ceiling yolo cannot widen. Shares
+  `pkg/redact.Findings` with egress redaction (write guard ≠ redact-on-read).
+  Optional skill `/write-guards`
+  ([#890](https://github.com/jonathanung/strike/issues/890)).
 - **Durable security audit sink** — append-only redacted JSONL under
   `~/.strike/audit/` for permission/sandbox/admission (and related) decisions,
   retention prune, and `strike audit export` machine-readable bundles
@@ -65,7 +82,6 @@ materially affect the shipped product.
   labels; managed-ceiling and sandbox/`network.allow` notes on the explain
   surface; HTTP `preset=` + `/v1/permissions/diff`
   ([#895](https://github.com/jonathanung/strike/issues/895)).
-
 - **Launch inside container (E12.4)** — `--launch-inside-container` and
   `container.execution: container` preflight the engine/Dockerfile, start the
   managed container, copy the strike binary, and `docker exec -it` with

@@ -36,6 +36,11 @@ type ManagedInfo struct {
 	PermissionMode   bool `json:"-"`
 	Sandbox          bool `json:"-"`
 	PermissionPreset bool `json:"-"`
+	// ContentGuard is true when managed set contentGuard.mode (lock dial).
+	ContentGuard bool `json:"-"`
+	// ContentGuardForcedDeny is true when managed contentGuard.mode is deny
+	// (write guards cannot be widened by project/session/yolo).
+	ContentGuardForcedDeny bool `json:"-"`
 	// Permissions is true when managed contributed any permission rules.
 	Permissions bool `json:"-"`
 
@@ -183,6 +188,12 @@ func stampManagedLocks(info *ManagedInfo, layer Config) {
 	}
 	if strings.TrimSpace(layer.PermissionPreset) != "" {
 		info.PermissionPreset = true
+	}
+	if strings.TrimSpace(layer.ContentGuard.Mode) != "" {
+		info.ContentGuard = true
+		if strings.EqualFold(strings.TrimSpace(layer.ContentGuard.Mode), "deny") {
+			info.ContentGuardForcedDeny = true
+		}
 	}
 	if len(layer.Permissions) > 0 {
 		info.Permissions = true

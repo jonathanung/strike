@@ -102,6 +102,7 @@ enterprise keys:
 | `sandbox` | Wins over global/project. **CLI `--sandbox` is ignored** so operators cannot loosen OS isolation from the command line. |
 | `permissionMode` | Wins over global/project and **session resume**. Mid-session `/mode` / Shift+Tab is **rejected** while locked. |
 | `permissionPreset` | Wins over user/project preset selection. |
+| `contentGuard.mode` | Wins over global/project. When set to **`deny`**, write-time content guards force deny (cannot be widened by project `off`/`ask`, yolo, or session grants). |
 | `permissions[]` | Concatenated after user/project rules (last-match in the config layer). **Deny** rules are also installed as a late evaluation **ceiling** so session always-grants, scoped grants, `--auto` / `--dangerously-skip-permissions`, and workflow phase widens cannot re-allow a managed deny. |
 
 Other managed keys (theme, model, MCP, …) merge with normal last-wins
@@ -428,6 +429,35 @@ the open web as a silent fallback. Project layers replace the whole
 family as `webfetch`). Queries and snippets pass through the usual tool-args /
 tool-output redaction and session audit paths.
 
+**Write-time content guards (`contentGuard`):** scan proposed file content on
+`write` / `edit` / `apply_patch` / `notebook_edit` **before** disk commit.
+Distinct from egress redaction (`pkg/redact` on logs/timeline/tool results —
+see [secrets.md](secrets.md)). Shared credential patterns via
+`redact.Findings`; plus high-confidence dangerous sinks (language-limited v1).
+
+```jsonc
+{
+  "contentGuard": {
+    "mode": "default",                 // off | default | ask | deny
+    "pathAllow": ["**/testdata/**"]     // doublestar globs; skip guard
+  }
+}
+```
+
+| Mode | Behavior |
+|---|---|
+| `default` (empty) | Credential shapes **deny**; dangerous sinks **ask** |
+| `ask` | All findings raise permission `content_guard` (allow-once / path always-grant; audited) |
+| `deny` | All findings hard-deny with error code `content_guard_denied` |
+| `off` | Scanner disabled (unless managed forces deny) |
+
+`pathAllow` replaces per layer when set (including `[]`). Managed
+`contentGuard.mode: deny` installs a ForcedDeny ceiling that project `off`/`ask`,
+`pathAllow`, yolo, and session grants cannot widen. Yolo only upgrades remaining
+**ask** findings — never deny-severity hits. Resulting file content is evaluated
+(not only patch hunks). Optional skill `/write-guards` documents the rules for
+the model.
+
 **Yolo + sandbox off:** `permissionMode: yolo` (or a resumed session in yolo)
 combined with `sandbox: off` **refuses to start** unless you pass `--i-know`.
 Mid-session `/mode yolo` is also rejected while sandbox is off without that
@@ -494,6 +524,15 @@ loop). Tools already present as assistant tool calls in history are
 re-promoted on each stream (so `--continue` keeps schemas for tools used
 earlier). Set `"deferTools": "off"` in global or project config to expose the
 full permitted registry.
+
+**Progressive `task` schema:** the unified `task` tool starts with a compact
+basic schema (prompt-only create plus `status` / `wait` / `cancel`). The full
+advanced contract (routing, budget, verify, `context_bundle`, lifecycle
+`get`/`list`/`read`/`message`/`transition`, …) loads after `toolsearch`
+matches `task`, a call uses advanced fields/actions, or workflow activation
+promotes it. Providers always see a single tool named `task`; the executor
+accepts the full argument surface regardless of the schema level currently
+advertised. Session resume restores advanced when history used advanced args.
 
 **Permission soft-approve / auto-approve:** session mode `soft-approve`
 (`permissionMode`, `/mode`, Shift+Tab) arms a **visible** 15s countdown on

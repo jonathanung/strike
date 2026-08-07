@@ -58,6 +58,12 @@ func TestErrorHelpers(t *testing.T) {
 	if !ValidErrorCode(CodeSandboxDenied) || ErrSandboxDenied("x").Retryable {
 		t.Fatal("sandbox_denied")
 	}
+	if !ValidErrorCode(CodeContentGuardDenied) || ErrContentGuardDenied("x").Retryable {
+		t.Fatal("content_guard_denied")
+	}
+	if CodeOf(ErrContentGuardDenied("nope")) != string(CodeContentGuardDenied) {
+		t.Fatal("CodeOf content_guard_denied")
+	}
 	if !ValidErrorCode(CodeNetworkDenied) || ErrNetworkDenied("x").Retryable {
 		t.Fatal("network_denied")
 	}

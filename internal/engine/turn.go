@@ -811,10 +811,10 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 			Title:     call.Name,
 		})
 	} else {
-		// Promote deferred tools called by name so subsequent streams include
-		// their schemas (mirrors toolsearch discovery).
+		// Promote deferred tools called by name and elevate progressive
+		// schemas when args need the advanced surface (mirrors toolsearch).
 		if e.opts.Registry != nil {
-			e.opts.Registry.Discover(call.Name)
+			e.opts.Registry.NoteToolCall(call.Name, call.Args)
 		}
 		callID := call.ID
 		tc := &tool.Context{
@@ -823,6 +823,7 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 			SandboxMode:     e.opts.SandboxMode,
 			Sandbox:         e.bashSandboxPolicy(),
 			NetworkAllow:    e.opts.NetworkAllow,
+			ContentGuard:    e.opts.ContentGuard,
 			WebSearch:       e.opts.WebSearch,
 			Scheduler:       e.opts.Scheduler,
 			SchedulerPolicy: e.opts.SchedulerPolicy,

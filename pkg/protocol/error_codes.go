@@ -22,6 +22,10 @@ const (
 	// ErrorCodeSandboxDenied is an OS sandbox capability block (bwrap/seatbelt
 	// path/syscall denial). Distinct from permission_denied (ruleset/ask).
 	ErrorCodeSandboxDenied = "sandbox_denied"
+	// ErrorCodeContentGuardDenied is a write-time content scanner block
+	// (credential-shaped material or high-risk sinks on mutators). Distinct
+	// from permission_denied and blocked (hooks/phase).
+	ErrorCodeContentGuardDenied = "content_guard_denied"
 	// ErrorCodeNetworkDenied is an application-layer egress allowlist block
 	// (network.allow preflight on webfetch/bash clients). Distinct from
 	// sandbox_denied (OS profile) and permission_denied (ruleset/ask).
