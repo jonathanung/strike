@@ -28,6 +28,8 @@ const (
 	// CodeContentGuardDenied is a write-time content scanner block (secrets /
 	// high-risk sinks on edit/write/apply_patch). Distinct from permission_denied.
 	CodeContentGuardDenied ErrorCode = "content_guard_denied"
+	// CodeNetworkDenied is an application-layer network.allow egress block.
+	CodeNetworkDenied ErrorCode = "network_denied"
 )
 
 // ValidErrorCode reports whether c is a known stable error code.
@@ -35,7 +37,7 @@ func ValidErrorCode(c ErrorCode) bool {
 	switch c {
 	case CodePermissionDenied, CodeInvalidArgs, CodePreconditionFailed,
 		CodeCanceled, CodeTimeout, CodeTransient, CodeInternal, CodeBlocked,
-		CodeSandboxDenied, CodeContentGuardDenied:
+		CodeSandboxDenied, CodeContentGuardDenied, CodeNetworkDenied:
 		return true
 	}
 	return false
@@ -142,6 +144,11 @@ func ErrSandboxDenied(msg string) *CodedError {
 // ErrContentGuardDenied returns a non-retryable content_guard_denied error.
 func ErrContentGuardDenied(msg string) *CodedError {
 	return &CodedError{Code: CodeContentGuardDenied, Message: strings.TrimSpace(msg), Retryable: false}
+}
+
+// ErrNetworkDenied returns a non-retryable network_denied error (egress allowlist).
+func ErrNetworkDenied(msg string) *CodedError {
+	return &CodedError{Code: CodeNetworkDenied, Message: strings.TrimSpace(msg), Retryable: false}
 }
 
 // Classify maps an arbitrary error onto a structured *CodedError.

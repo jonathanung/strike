@@ -1411,8 +1411,9 @@ func (e *Engine) toolNames() string {
 
 // bashSandboxPolicy compiles the live permission layers into an OS sandbox
 // Policy for bash (write denials, network posture, plan hard-denies).
-// Attaches config network.allow for /sandbox explain (webfetch enforces it
-// separately; bash OS network stays all-or-nothing via NetworkEnabled).
+// Attaches config network.allow for /sandbox explain and bash preflight
+// (shared with webfetch). Bash OS network stays all-or-nothing via NetworkEnabled;
+// per-host filtering is application-layer preflight only.
 func (e *Engine) bashSandboxPolicy() sandbox.Policy {
 	mode := sandbox.ResolveMode(e.opts.SandboxMode)
 	var p sandbox.Policy

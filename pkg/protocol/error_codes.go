@@ -26,6 +26,10 @@ const (
 	// (credential-shaped material or high-risk sinks on mutators). Distinct
 	// from permission_denied and blocked (hooks/phase).
 	ErrorCodeContentGuardDenied = "content_guard_denied"
+	// ErrorCodeNetworkDenied is an application-layer egress allowlist block
+	// (network.allow preflight on webfetch/bash clients). Distinct from
+	// sandbox_denied (OS profile) and permission_denied (ruleset/ask).
+	ErrorCodeNetworkDenied = "network_denied"
 	// ErrorCodeQueueFull is backpressure rejection when a bounded queue is full
 	// (e.g. mid-turn user-input buffer). Callers should retry after the turn.
 	ErrorCodeQueueFull = "queue_full"

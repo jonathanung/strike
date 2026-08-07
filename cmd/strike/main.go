@@ -179,6 +179,9 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 	if len(args) > 0 && args[0] == "eval" {
 		return runEvalCLI(args[1:], stdout, stderr)
 	}
+	if len(args) > 0 && args[0] == "audit" {
+		return runAuditCLI(args[1:], stdout, stderr)
+	}
 	if len(args) > 0 && (args[0] == "version" || args[0] == "--version" || args[0] == "-version") {
 		fmt.Fprintln(stdout, version.String())
 		return 0

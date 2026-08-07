@@ -275,7 +275,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 			}
 			go func() {
 				defer close(done)
-				runSession(rctx, slot.eng.Run, slot.eng.Events(), slot.bound, func(events <-chan protocol.Event) error {
+				runSession(rctx, slot.eng.Run, slot.eng.Events(), bindAudit(slot.bound, a.cfg), func(events <-chan protocol.Event) error {
 					for {
 						select {
 						case <-rctx.Done():

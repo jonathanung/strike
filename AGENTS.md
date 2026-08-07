@@ -52,6 +52,7 @@ service/theme token).
 | `pkg/protocol` | Public Ops/Events wire schema; JSONL envelopes (semver `Version`) |
 | `pkg/redact` | Shared credential-shaped string scrubbing + Findings (exports, inspect, traces, write guards) |
 | `pkg/timeline` | Structured run timeline builder + redacted JSON/JSONL export |
+| `pkg/telemetry` | Versioned security/harness telemetry families + redaction annotations (export schema) |
 | `pkg/diag` | Prompt/config diagnostic bundle builder + redacted JSON export |
 | `pkg/sdk` | Thin Go client over `pkg/protocol` (channel/JSONL client, RunTurn, session replay) |
 | `internal/protocol` | Compatibility re-export of `pkg/protocol` |
@@ -69,6 +70,7 @@ service/theme token).
 | `internal/secret` | secret-ref env indirection + protocol event redaction on top of pkg/redact (see docs/secrets.md) |
 | `internal/auth` | credentials, OAuth/PKCE/device, env precedence |
 | `internal/config` | global/project JSON + agents/skills markdown |
+| `internal/audit` | Durable retention-bounded security audit sink (`~/.strike/audit/`) |
 | `internal/session` | JSONL event log append/replay + concurrent Manager |
 | `internal/history` | project-scoped prompt history |
 | `internal/memory` | project-scoped durable key/value memory |

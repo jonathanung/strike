@@ -13,9 +13,10 @@ import (
 // (callers still apply SSRF / private-IP blocks). When non-empty, a host must
 // match at least one entry.
 //
-// This is the shared policy shape for application-layer egress (webfetch
-// today; container net later). Bash OS networking remains all-or-nothing via
-// Policy.NetworkEnabled — host filters are not applied inside bwrap/seatbelt.
+// This is the shared policy shape for application-layer egress (webfetch,
+// websearch, and bash client preflight; container net later). Bash OS
+// networking remains all-or-nothing via Policy.NetworkEnabled — per-host
+// filters are not applied inside bwrap/seatbelt (documented platform gap).
 
 // NormalizeNetworkAllow trims, lowercases hostnames, validates, dedupes, and
 // sorts allowlist entries. Empty strings are dropped. Bare "*" is rejected

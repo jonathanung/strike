@@ -64,4 +64,7 @@ func TestErrorHelpers(t *testing.T) {
 	if CodeOf(ErrContentGuardDenied("nope")) != string(CodeContentGuardDenied) {
 		t.Fatal("CodeOf content_guard_denied")
 	}
+	if !ValidErrorCode(CodeNetworkDenied) || ErrNetworkDenied("x").Retryable {
+		t.Fatal("network_denied")
+	}
 }

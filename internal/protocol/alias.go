@@ -341,5 +341,6 @@ const (
 	ErrorCodeBlocked            = pub.ErrorCodeBlocked
 	ErrorCodeSandboxDenied      = pub.ErrorCodeSandboxDenied
 	ErrorCodeContentGuardDenied = pub.ErrorCodeContentGuardDenied
+	ErrorCodeNetworkDenied      = pub.ErrorCodeNetworkDenied
 	ErrorCodeQueueFull          = pub.ErrorCodeQueueFull
 )

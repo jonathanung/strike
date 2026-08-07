@@ -34,6 +34,12 @@ type Config struct {
 	Model        string          `json:"model,omitempty"`
 	Effort       protocol.Effort `json:"effort,omitempty"`
 	SystemPrompt string          `json:"systemPrompt,omitempty"`
+	// SystemPromptMode controls how systemPrompt composes with builtins:
+	// "overlay" (default) replaces the provider/persona overlay slot only;
+	// "defaults" replaces shared + provider/persona with the user text while
+	// keeping tools, environment, instructions, memory, and ledger layers.
+	// Empty means overlay. Unknown values are ignored at load time.
+	SystemPromptMode string `json:"systemPromptMode,omitempty"`
 	// LeanCode is agent-scoped lean-code guidance intensity: off|lite|full.
 	// Empty means lite (default). Unknown values are ignored at load time.
 	LeanCode string `json:"leanCode,omitempty"`
@@ -430,6 +436,12 @@ type SessionConfig struct {
 	TraceRetentionMaxFiles   int   `json:"traceRetentionMaxFiles,omitempty"`
 	TraceRetentionMaxAgeDays int   `json:"traceRetentionMaxAgeDays,omitempty"`
 	TraceRetentionMaxBytes   int64 `json:"traceRetentionMaxBytes,omitempty"`
+	// AuditRetentionMaxEvents caps security audit sink rows under
+	// ~/.strike/audit/ (0 = package default 10000 when both audit axes unset).
+	AuditRetentionMaxEvents int `json:"auditRetentionMaxEvents,omitempty"`
+	// AuditRetentionMaxAgeDays deletes audit rows older than N days
+	// (0 = package default 90 when both audit axes unset).
+	AuditRetentionMaxAgeDays int `json:"auditRetentionMaxAgeDays,omitempty"`
 	// AgentBudget is the default per-child resource limit for task spawns
 	// (#774). Spawn-time task.budget fields overlay non-zero values. Zero
 	// means unlimited for that dimension (soft stall/loop signals still
@@ -950,6 +962,7 @@ func read(path string) (Config, error) {
 	c.Notify = NormalizeNotify(c.Notify)
 	c.Autoupdate = NormalizeAutoupdate(c.Autoupdate)
 	c.LeanCode = NormalizeLeanCode(c.LeanCode)
+	c.SystemPromptMode = NormalizeSystemPromptMode(c.SystemPromptMode)
 	c.DeferTools = NormalizeDeferTools(c.DeferTools)
 	// Keybinds: unknown ids / invalid chords fail the layer (and thus Load).
 	if err := ValidateKeybinds(c.Keybinds); err != nil {
@@ -1286,6 +1299,25 @@ func EffectiveAutoupdate(s string) string {
 	return AutoupdateNotify
 }
 
+// SystemPromptMode values for Config.SystemPromptMode / engine composition.
+const (
+	SystemPromptModeOverlay  = "overlay"
+	SystemPromptModeDefaults = "defaults"
+)
+
+// NormalizeSystemPromptMode maps config aliases to overlay|defaults.
+// Empty and unknown values default to overlay (preserve historical behavior).
+func NormalizeSystemPromptMode(s string) string {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case SystemPromptModeDefaults, "default", "replace-defaults", "replace_defaults":
+		return SystemPromptModeDefaults
+	case SystemPromptModeOverlay, "provider", "persona", "":
+		return SystemPromptModeOverlay
+	default:
+		return SystemPromptModeOverlay
+	}
+}
+
 // LeanCode intensity values for Config.LeanCode / engine lean-code overlays.
 const (
 	LeanCodeOff  = "off"
@@ -1294,7 +1326,7 @@ const (
 )
 
 // NormalizeLeanCode maps config aliases to off|lite|full.
-// Empty and unknown values become "" (engine default = lite).
+// Empty and unknown values default to lite.
 func NormalizeLeanCode(s string) string {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "off", "false", "0", "no", "never", "none":
@@ -1363,6 +1395,9 @@ func merge(base, layer Config) Config {
 	}
 	if layer.SystemPrompt != "" {
 		base.SystemPrompt = layer.SystemPrompt
+	}
+	if layer.SystemPromptMode != "" {
+		base.SystemPromptMode = layer.SystemPromptMode
 	}
 	if layer.LeanCode != "" {
 		base.LeanCode = layer.LeanCode
@@ -1488,6 +1523,12 @@ func merge(base, layer Config) Config {
 	}
 	if layer.Session.TraceRetentionMaxBytes != 0 {
 		base.Session.TraceRetentionMaxBytes = layer.Session.TraceRetentionMaxBytes
+	}
+	if layer.Session.AuditRetentionMaxEvents != 0 {
+		base.Session.AuditRetentionMaxEvents = layer.Session.AuditRetentionMaxEvents
+	}
+	if layer.Session.AuditRetentionMaxAgeDays != 0 {
+		base.Session.AuditRetentionMaxAgeDays = layer.Session.AuditRetentionMaxAgeDays
 	}
 	base.Session.AgentBudget = mergeAgentBudgetConfig(base.Session.AgentBudget, layer.Session.AgentBudget)
 	base.Session.DelegationPolicy = mergeDelegationPolicyConfig(base.Session.DelegationPolicy, layer.Session.DelegationPolicy)

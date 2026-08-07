@@ -135,7 +135,7 @@ func (m Model) promptContentRect() (contentRect, bool) {
 	if !ok || !showLeft || l.composer <= 0 {
 		return contentRect{}, false
 	}
-	outerY := l.header + l.transcript + l.notice + l.popup
+	outerY := l.header + l.transcript + l.notice + l.popup + l.tip
 	x, topPad := m.panelContentOrigin(leftWidth, outerY, l.compact)
 	h := l.composer
 	w := leftWidth
@@ -164,8 +164,8 @@ func (m Model) leftStackGeom() (leftWidth int, l layout, showLeft bool, ok bool)
 		}
 		leftWidth = geo.leftCandidateWidth(m.width)
 	} else {
-		l0 := computeLayout(m.width, m.height, m.composer.Height(), m.completionPopupHeightFor(m.width), m.showDangerBanner(), m.noticeRowsFor(m.width))
-		bodyHeight := l0.transcript + l0.notice + l0.popup + l0.composer
+		l0 := computeLayout(m.width, m.height, m.composer.Height(), m.completionPopupHeightFor(m.width), m.showDangerBanner(), m.noticeRowsFor(m.width), m.tipRowsFor())
+		bodyHeight := l0.transcript + l0.notice + l0.tip + l0.popup + l0.composer
 		geo := computeVerticalPaneGeometry(m.width, bodyHeight, gutter, m.focus)
 		if geo.mode == paneSingle && m.focus == focusRight {
 			return 0, layout{}, false, true
@@ -176,9 +176,9 @@ func (m Model) leftStackGeom() (leftWidth int, l layout, showLeft bool, ok bool)
 	if !showLeft {
 		return leftWidth, layout{}, false, true
 	}
-	l = computeLayout(leftWidth, m.height, m.composer.Height(), m.completionPopupHeightFor(leftWidth), m.showDangerBanner(), m.noticeRowsFor(leftWidth))
+	l = computeLayout(leftWidth, m.height, m.composer.Height(), m.completionPopupHeightFor(leftWidth), m.showDangerBanner(), m.noticeRowsFor(leftWidth), m.tipRowsFor())
 	if m.splitOrientation == orientVertical {
-		bodyHeight := l.transcript + l.notice + l.popup + l.composer
+		bodyHeight := l.transcript + l.notice + l.tip + l.popup + l.composer
 		geo := computeVerticalPaneGeometry(m.width, bodyHeight, gutter, m.focus)
 		if geo.mode == paneSplit {
 			l = l.withBodyHeight(geo.leftHeight)

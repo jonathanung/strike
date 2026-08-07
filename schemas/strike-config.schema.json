@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/jonathanung/strike/main/schemas/strike-config.schema.json",
   "title": "Strike main config",
-  "description": "JSON Schema for ~/.strike/config and ./.strike/config (and managed-config). Strike loads JSON or JSONC and ignores top-level $schema at runtime (no network fetch). Programmatic saves rewrite pure JSON and drop comments/$schema — see docs/config.md.\n\nadditionalProperties policy: true at the root and on nested objects. Runtime encoding/json ignores unknown keys; the schema stays permissive so future keys and editor-only fields do not fail validation. Known high-traffic keys are documented for autocomplete; this is best-effort alignment with internal/config.Config, not perfect 1:1 codegen.",
+  "description": "JSON Schema for ~/.strike/config and ./.strike/config (and managed-config). Strike loads JSON or JSONC and ignores top-level $schema at runtime (no network fetch). Programmatic saves rewrite pure JSON and drop comments/$schema \u2014 see docs/config.md.\n\nadditionalProperties policy: true at the root and on nested objects. Runtime encoding/json ignores unknown keys; the schema stays permissive so future keys and editor-only fields do not fail validation. Known high-traffic keys are documented for autocomplete; this is best-effort alignment with internal/config.Config, not perfect 1:1 codegen.",
   "type": "object",
   "additionalProperties": true,
   "properties": {
@@ -21,21 +21,40 @@
     "effort": {
       "type": "string",
       "description": "Reasoning effort dial.",
-      "enum": ["off", "low", "medium", "high", "xhigh", "max"]
+      "enum": [
+        "off",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ]
     },
     "systemPrompt": {
       "type": "string",
-      "description": "Optional extra system prompt text."
+      "description": "User system prompt. Replaces the provider overlay (mode=overlay, default) or shared+provider defaults (mode=defaults). Whitespace-only is ignored. Custom agent persona bodies win over this when that agent is selected."
+    },
+    "systemPromptMode": {
+      "type": "string",
+      "description": "How systemPrompt composes with builtins: overlay (replace provider slot only; default) or defaults (replace shared+provider; tools/env/instructions stay).",
+      "enum": ["overlay", "defaults"]
     },
     "leanCode": {
       "type": "string",
       "description": "Lean-code guidance intensity. Empty means lite.",
-      "enum": ["off", "lite", "full"]
+      "enum": [
+        "off",
+        "lite",
+        "full"
+      ]
     },
     "deferTools": {
       "type": "string",
       "description": "Defer non-core tool schemas until toolsearch. Empty means on.",
-      "enum": ["on", "off"]
+      "enum": [
+        "on",
+        "off"
+      ]
     },
     "defaultAgent": {
       "type": "string",
@@ -48,48 +67,85 @@
     "vimMode": {
       "type": "string",
       "description": "How /vim presents the editor.",
-      "enum": ["pane", "embedded", "overlay", "modal", "takeover"]
+      "enum": [
+        "pane",
+        "embedded",
+        "overlay",
+        "modal",
+        "takeover"
+      ]
     },
     "nanoMode": {
       "type": "string",
       "description": "How /nano presents nano (same values as vimMode).",
-      "enum": ["pane", "embedded", "overlay", "modal", "takeover"]
+      "enum": [
+        "pane",
+        "embedded",
+        "overlay",
+        "modal",
+        "takeover"
+      ]
     },
     "mdReadMode": {
       "type": "string",
       "description": "How /md-read presents markdown.",
-      "enum": ["embedded", "pane", "modal", "overlay"]
+      "enum": [
+        "embedded",
+        "pane",
+        "modal",
+        "overlay"
+      ]
     },
     "notify": {
       "type": "string",
       "description": "Desktop notifications (OSC 9 + bell). Empty means unfocused-only.",
-      "enum": ["on", "off", "unfocused-only"]
+      "enum": [
+        "on",
+        "off",
+        "unfocused-only"
+      ]
     },
     "autoupdate": {
       "type": "string",
       "description": "Startup GitHub Releases check. Empty means notify. auto is opt-in binary replace when writable; never the default.",
-      "enum": ["off", "notify", "auto"]
+      "enum": [
+        "off",
+        "notify",
+        "auto"
+      ]
     },
     "permissionAutoApproveSeconds": {
       "type": "integer",
-      "description": "Auto-allow permission asks after N seconds (1–60). Zero disables.",
+      "description": "Auto-allow permission asks after N seconds (1\u201360). Zero disables.",
       "minimum": 0,
       "maximum": 60
     },
     "permissionAutoApproveExclude": {
       "type": "array",
       "description": "Permission names that never auto-approve (case-insensitive).",
-      "items": { "type": "string" }
+      "items": {
+        "type": "string"
+      }
     },
     "permissionMode": {
       "type": "string",
       "description": "Default tool-permission posture for new sessions.",
-      "enum": ["default", "plan", "soft-approve", "accept-edits", "yolo"]
+      "enum": [
+        "default",
+        "plan",
+        "soft-approve",
+        "accept-edits",
+        "yolo"
+      ]
     },
     "sandbox": {
       "type": "string",
       "description": "OS process sandbox dial for bash. Empty means workspace-write.",
-      "enum": ["off", "read-only", "workspace-write"]
+      "enum": [
+        "off",
+        "read-only",
+        "workspace-write"
+      ]
     },
     "network": {
       "$ref": "#/$defs/network"
@@ -103,12 +159,18 @@
     "permissions": {
       "type": "array",
       "description": "Ordered permission rules (last-match-wins within the config layer stack).",
-      "items": { "$ref": "#/$defs/permissionRule" }
+      "items": {
+        "$ref": "#/$defs/permissionRule"
+      }
     },
     "permissionPreset": {
       "type": "string",
       "description": "Shipped named ruleset inserted after defaults and before permissions[].",
-      "enum": ["read-only", "dev", "yolo-with-sandbox"]
+      "enum": [
+        "read-only",
+        "dev",
+        "yolo-with-sandbox"
+      ]
     },
     "admission": {
       "$ref": "#/$defs/admission"
@@ -116,12 +178,16 @@
     "hooks": {
       "type": "array",
       "description": "Lifecycle hooks: declarative action rules and/or shell commands.",
-      "items": { "$ref": "#/$defs/hook" }
+      "items": {
+        "$ref": "#/$defs/hook"
+      }
     },
     "providers": {
       "type": "array",
       "description": "Custom/self-hosted provider endpoints (API keys live in auth.json, not here). Prefer providers.jsonc for overlays.",
-      "items": { "$ref": "#/$defs/customProvider" }
+      "items": {
+        "$ref": "#/$defs/customProvider"
+      }
     },
     "disable-default-providers": {
       "type": "boolean",
@@ -130,7 +196,10 @@
     "compactionStrategy": {
       "type": "string",
       "description": "Context compaction strategy. Empty/unknown ignored; default trim.",
-      "enum": ["trim", "summarize"]
+      "enum": [
+        "trim",
+        "summarize"
+      ]
     },
     "compactionModel": {
       "type": "string",
@@ -138,7 +207,7 @@
     },
     "compactionThreshold": {
       "type": "number",
-      "description": "Occupancy fraction (0–1 exclusive of 0) that triggers compaction. Zero = engine default 0.70; >=1 disables."
+      "description": "Occupancy fraction (0\u20131 exclusive of 0) that triggers compaction. Zero = engine default 0.70; >=1 disables."
     },
     "compactionBuffer": {
       "type": "integer",
@@ -168,7 +237,9 @@
     "pruneProtectTools": {
       "type": "array",
       "description": "Extra tool names whose results stay available after prune (merged with built-in skill).",
-      "items": { "type": "string" }
+      "items": {
+        "type": "string"
+      }
     },
     "maxChildDepth": {
       "type": "integer",
@@ -223,7 +294,9 @@
         "allow": {
           "type": "array",
           "description": "Hostnames, *.wildcard single-label, IP literals, or CIDRs. Empty/omitted = unrestricted public hosts (SSRF private blocks still apply).",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         }
       }
     },
@@ -252,7 +325,9 @@
         "provider": {
           "type": "string",
           "description": "Search backend id. Currently brave. Empty = auto-detect from API key env.",
-          "enum": ["brave"]
+          "enum": [
+            "brave"
+          ]
         },
         "apiKeyEnv": {
           "type": "string",
@@ -267,7 +342,11 @@
     "permissionRule": {
       "type": "object",
       "additionalProperties": true,
-      "required": ["permission", "pattern", "action"],
+      "required": [
+        "permission",
+        "pattern",
+        "action"
+      ],
       "properties": {
         "permission": {
           "type": "string",
@@ -279,20 +358,31 @@
         },
         "action": {
           "type": "string",
-          "enum": ["allow", "ask", "deny"]
+          "enum": [
+            "allow",
+            "ask",
+            "deny"
+          ]
         }
       }
     },
     "hook": {
       "type": "object",
       "additionalProperties": true,
-      "required": ["event"],
+      "required": [
+        "event"
+      ],
       "description": "Exactly one of action (declarative) or command (shell) should be set.",
       "properties": {
         "event": {
           "type": "string",
           "description": "pre_tool_use | post_tool_use | turn_start | turn_end. Shell hooks only for pre/post_tool_use.",
-          "enum": ["pre_tool_use", "post_tool_use", "turn_start", "turn_end"]
+          "enum": [
+            "pre_tool_use",
+            "post_tool_use",
+            "turn_start",
+            "turn_end"
+          ]
         },
         "matcher": {
           "type": "string",
@@ -301,7 +391,11 @@
         "action": {
           "type": "string",
           "description": "Declarative rule action (mutually exclusive with command).",
-          "enum": ["log", "block", "notify"]
+          "enum": [
+            "log",
+            "block",
+            "notify"
+          ]
         },
         "message": {
           "type": "string",
@@ -322,7 +416,11 @@
     "customProvider": {
       "type": "object",
       "additionalProperties": true,
-      "required": ["name", "baseURL", "api"],
+      "required": [
+        "name",
+        "baseURL",
+        "api"
+      ],
       "properties": {
         "name": {
           "type": "string",
@@ -335,11 +433,17 @@
         "api": {
           "type": "string",
           "description": "Wire dialect.",
-          "enum": ["openai", "responses", "anthropic"]
+          "enum": [
+            "openai",
+            "responses",
+            "anthropic"
+          ]
         },
         "headers": {
           "type": "object",
-          "additionalProperties": { "type": "string" }
+          "additionalProperties": {
+            "type": "string"
+          }
         },
         "apiKeyEnv": {
           "type": "string",
@@ -347,17 +451,23 @@
         },
         "models": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         }
       }
     },
     "keybindChords": {
       "description": "One key sequence or a list of sequences.",
       "oneOf": [
-        { "type": "string" },
+        {
+          "type": "string"
+        },
         {
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         }
       ]
     },
@@ -369,17 +479,28 @@
         "worktree": {
           "type": "string",
           "description": "Session worktree isolation. Empty means off.",
-          "enum": ["off", "auto", "always"]
+          "enum": [
+            "off",
+            "auto",
+            "always"
+          ]
         },
         "worktreeCleanup": {
           "type": "string",
           "description": "On session close. Empty means keep.",
-          "enum": ["keep", "delete"]
+          "enum": [
+            "keep",
+            "delete"
+          ]
         },
         "overlapPolicy": {
           "type": "string",
           "description": "Multi-agent path conflict policy. Empty means warn.",
-          "enum": ["off", "warn", "block"]
+          "enum": [
+            "off",
+            "warn",
+            "block"
+          ]
         },
         "retentionMaxSessions": {
           "type": "integer",
@@ -435,6 +556,16 @@
         },
         "delegationPolicy": {
           "$ref": "#/$defs/delegationPolicy"
+        },
+        "auditRetentionMaxEvents": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Max security audit sink events under ~/.strike/audit/ (0 = default 10000 when both audit axes unset)."
+        },
+        "auditRetentionMaxAgeDays": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Delete audit events older than N days (0 = default 90 when both audit axes unset)."
         }
       }
     },
@@ -443,13 +574,34 @@
       "additionalProperties": true,
       "description": "Default per-child resource limits for task spawns. Zero = unlimited for that dimension.",
       "properties": {
-        "maxWallClockS": { "type": "integer", "minimum": 0 },
-        "maxTokens": { "type": "integer", "minimum": 0 },
-        "maxCostUsd": { "type": "number", "minimum": 0 },
-        "maxToolCalls": { "type": "integer", "minimum": 0 },
-        "maxDangerousTools": { "type": "integer", "minimum": 0 },
-        "stallAfterS": { "type": "integer", "minimum": 0 },
-        "loopDetectN": { "type": "integer", "minimum": 0 }
+        "maxWallClockS": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "maxTokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "maxCostUsd": {
+          "type": "number",
+          "minimum": 0
+        },
+        "maxToolCalls": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "maxDangerousTools": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "stallAfterS": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "loopDetectN": {
+          "type": "integer",
+          "minimum": 0
+        }
       }
     },
     "delegationPolicy": {
@@ -460,16 +612,20 @@
         "mode": {
           "type": "string",
           "description": "off = always spawn; advise = record preferred action but spawn; enforce = soft-local returns status local; hard ceilings deny.",
-          "enum": ["off", "advise", "enforce"]
+          "enum": [
+            "off",
+            "advise",
+            "enforce"
+          ]
         },
         "tinyPromptRunes": {
           "type": "integer",
-          "description": "Bare prompts at or below this rune count prefer local (0 → 280).",
+          "description": "Bare prompts at or below this rune count prefer local (0 \u2192 280).",
           "minimum": 0
         },
         "maxPathsLocal": {
           "type": "integer",
-          "description": "Bare tasks with ≤N context_bundle paths prefer local (0 → 1; negative disables)."
+          "description": "Bare tasks with \u2264N context_bundle paths prefer local (0 \u2192 1; negative disables)."
         },
         "maxLiveChildren": {
           "type": "integer",
@@ -485,13 +641,19 @@
       "properties": {
         "preset": {
           "type": "string",
-          "description": "Severity→action matrix. Empty means default. strict fails closed on scanner errors.",
-          "enum": ["permissive", "default", "strict"]
+          "description": "Severity\u2192action matrix. Empty means default. strict fails closed on scanner errors.",
+          "enum": [
+            "permissive",
+            "default",
+            "strict"
+          ]
         },
         "allowPaths": {
           "type": "array",
-          "description": "Home-anchored path prefixes trusted as first-party (~/… or absolute under $HOME). Bare relative markers are rejected (spoofable).",
-          "items": { "type": "string" }
+          "description": "Home-anchored path prefixes trusted as first-party (~/\u2026 or absolute under $HOME). Bare relative markers are rejected (spoofable).",
+          "items": {
+            "type": "string"
+          }
         },
         "failClosed": {
           "type": "boolean",
@@ -515,18 +677,32 @@
     "container": {
       "type": "object",
       "additionalProperties": true,
-      "description": "Native containerization (E12). Also loadable from container.jsonc/json. Merge: defaults → global → project → managed. See docs/config.md and docs/container.md.",
+      "description": "Native containerization (E12). Also loadable from container.jsonc/json. Merge: defaults \u2192 global \u2192 project \u2192 managed. See docs/config.md and docs/container.md.",
       "properties": {
-        "baseImage": { "type": "string" },
+        "baseImage": {
+          "type": "string"
+        },
         "packages": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         },
-        "shell": { "type": "string" },
-        "resources": { "$ref": "#/$defs/containerResources" },
-        "workspace": { "$ref": "#/$defs/containerWorkspace" },
-        "auth": { "$ref": "#/$defs/containerAuth" },
-        "network": { "$ref": "#/$defs/containerNetwork" },
+        "shell": {
+          "type": "string"
+        },
+        "resources": {
+          "$ref": "#/$defs/containerResources"
+        },
+        "workspace": {
+          "$ref": "#/$defs/containerWorkspace"
+        },
+        "auth": {
+          "$ref": "#/$defs/containerAuth"
+        },
+        "network": {
+          "$ref": "#/$defs/containerNetwork"
+        },
         "dockerfile": {
           "type": "string",
           "description": "Optional path to a hand-written Dockerfile (relative to repo or absolute)."
@@ -534,7 +710,13 @@
         "execution": {
           "type": "string",
           "description": "Where the agent runs: local (default) or container (E12.4).",
-          "enum": ["local", "container", "host", "docker", "podman"]
+          "enum": [
+            "local",
+            "container",
+            "host",
+            "docker",
+            "podman"
+          ]
         },
         "engine": {
           "type": "string",
@@ -546,26 +728,45 @@
       "type": "object",
       "additionalProperties": true,
       "properties": {
-        "memory": { "type": "string" },
-        "cpus": { "type": "string" },
-        "pidsLimit": { "type": "integer", "minimum": 0 },
-        "gpus": { "type": "string" }
+        "memory": {
+          "type": "string"
+        },
+        "cpus": {
+          "type": "string"
+        },
+        "pidsLimit": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "gpus": {
+          "type": "string"
+        }
       }
     },
     "containerWorkspace": {
       "type": "object",
       "additionalProperties": true,
       "properties": {
-        "mountPath": { "type": "string" },
-        "hostPath": { "type": "string" },
+        "mountPath": {
+          "type": "string"
+        },
+        "hostPath": {
+          "type": "string"
+        },
         "ports": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         },
-        "persistHome": { "type": "boolean" },
+        "persistHome": {
+          "type": "boolean"
+        },
         "extraBinds": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         }
       }
     },
@@ -575,14 +776,22 @@
       "properties": {
         "forwardEnv": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         },
-        "envFile": { "type": "string" },
+        "envFile": {
+          "type": "string"
+        },
         "requiredEnv": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         },
-        "forwardSSHAgent": { "type": "boolean" }
+        "forwardSSHAgent": {
+          "type": "boolean"
+        }
       }
     },
     "containerNetwork": {
@@ -592,15 +801,28 @@
       "properties": {
         "mode": {
           "type": "string",
-          "enum": ["default", "none", "bridge", "off"]
+          "enum": [
+            "default",
+            "none",
+            "bridge",
+            "off"
+          ]
         },
         "allow": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         },
-        "httpProxy": { "type": "string" },
-        "httpsProxy": { "type": "string" },
-        "noProxy": { "type": "string" }
+        "httpProxy": {
+          "type": "string"
+        },
+        "httpsProxy": {
+          "type": "string"
+        },
+        "noProxy": {
+          "type": "string"
+        }
       }
     },
     "mcpServer": {
@@ -610,21 +832,34 @@
       "properties": {
         "type": {
           "type": "string",
-          "enum": ["stdio", "http"]
+          "enum": [
+            "stdio",
+            "http"
+          ]
         },
-        "command": { "type": "string" },
+        "command": {
+          "type": "string"
+        },
         "args": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         },
         "env": {
           "type": "object",
-          "additionalProperties": { "type": "string" }
+          "additionalProperties": {
+            "type": "string"
+          }
         },
-        "url": { "type": "string" },
+        "url": {
+          "type": "string"
+        },
         "headers": {
           "type": "object",
-          "additionalProperties": { "type": "string" },
+          "additionalProperties": {
+            "type": "string"
+          },
           "description": "HTTP headers (e.g. Authorization); never logged."
         }
       }
@@ -643,7 +878,12 @@
         "diagnosticsSeverity": {
           "type": "string",
           "description": "Minimum severity injected into file-tool results. Default error.",
-          "enum": ["error", "warning", "info", "hint"]
+          "enum": [
+            "error",
+            "warning",
+            "info",
+            "hint"
+          ]
         },
         "diagnosticsMaxChars": {
           "type": "integer",
@@ -661,40 +901,60 @@
       "type": "object",
       "additionalProperties": true,
       "properties": {
-        "command": { "type": "string" },
+        "command": {
+          "type": "string"
+        },
         "args": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         },
         "env": {
           "type": "object",
-          "additionalProperties": { "type": "string" }
+          "additionalProperties": {
+            "type": "string"
+          }
         },
         "extensions": {
           "type": "array",
           "description": "File extensions this server handles (e.g. .go). Required at start.",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         }
       }
     },
     "harness": {
       "type": "object",
       "additionalProperties": true,
-      "required": ["command"],
+      "required": [
+        "command"
+      ],
       "properties": {
-        "command": { "type": "string" },
+        "command": {
+          "type": "string"
+        },
         "args": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         },
         "env": {
           "type": "object",
-          "additionalProperties": { "type": "string" }
+          "additionalProperties": {
+            "type": "string"
+          }
         },
         "mode": {
           "type": "string",
           "description": "Process lifecycle: oneshot (default) or persistent worker reuse.",
-          "enum": ["oneshot", "persistent", "worker"]
+          "enum": [
+            "oneshot",
+            "persistent",
+            "worker"
+          ]
         },
         "maxConcurrent": {
           "type": "integer",
@@ -721,22 +981,45 @@
           "description": "Shipped build-system preset IDs.",
           "items": {
             "type": "string",
-            "enum": ["cmake", "ninja", "gradle", "bazel", "maven", "cargo", "npm"]
+            "enum": [
+              "cmake",
+              "ninja",
+              "gradle",
+              "bazel",
+              "maven",
+              "cargo",
+              "npm"
+            ]
           }
         },
         "limits": {
           "type": "object",
-          "description": "Pool name → positive capacity. Omitted = unlimited. Explicit 0 fails load.",
+          "description": "Pool name \u2192 positive capacity. Omitted = unlimited. Explicit 0 fails load.",
           "additionalProperties": {
             "type": "integer",
             "minimum": 1
           },
           "properties": {
-            "process": { "type": "integer", "minimum": 1 },
-            "build": { "type": "integer", "minimum": 1 },
-            "test": { "type": "integer", "minimum": 1 },
-            "model": { "type": "integer", "minimum": 1 },
-            "container": { "type": "integer", "minimum": 1 }
+            "process": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "build": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "test": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "model": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "container": {
+              "type": "integer",
+              "minimum": 1
+            }
           }
         },
         "commands": {
@@ -744,7 +1027,10 @@
           "items": {
             "type": "object",
             "additionalProperties": true,
-            "required": ["pattern", "class"],
+            "required": [
+              "pattern",
+              "class"
+            ],
             "properties": {
               "pattern": {
                 "type": "string",
