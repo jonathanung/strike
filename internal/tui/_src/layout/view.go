@@ -128,6 +128,10 @@ func (m Model) headerView(width int) string {
 	if m.showThinking {
 		chips = append(chips, headerChip{10, ui.Badge(th, ui.ToneMuted, "think")})
 	}
+	// Session cost envelope chip at 50/80/100% (#577).
+	if chip, ok := sessionBudgetHeaderChip(th, m); ok {
+		chips = append(chips, chip)
+	}
 	// Claim vs verified chip when independent gates last ran (#809 / #806).
 	if chip, ok := verificationHeaderChip(th, m.lastVerification); ok {
 		chips = append(chips, chip)
@@ -784,4 +788,56 @@ func iconsFor(th theme.Theme) theme.Icons {
 		return theme.DefaultIcons()
 	}
 	return th.Icons
+}
+
+// sessionBudgetHeaderChip renders a status-bar badge when the session cost
+// envelope has crossed a warning threshold (#577).
+func sessionBudgetHeaderChip(th theme.Theme, m Model) (headerChip, bool) {
+	if !m.sessionBudgetKnown || m.sessionBudgetMaxUSD <= 0 {
+		return headerChip{}, false
+	}
+	level := m.sessionBudgetLevel
+	if level == "" {
+		ratio := m.sessionBudgetCostUSD / m.sessionBudgetMaxUSD
+		switch {
+		case ratio >= 1.0 || m.sessionBudgetExhausted:
+			level = protocol.SessionBudgetLevel100
+		case ratio >= 0.80:
+			level = protocol.SessionBudgetLevel80
+		case ratio >= 0.50:
+			level = protocol.SessionBudgetLevel50
+		default:
+			return headerChip{}, false
+		}
+	}
+	tone := ui.ToneMuted
+	label := "budget " + level + "%"
+	switch level {
+	case protocol.SessionBudgetLevel50:
+		tone = ui.ToneWarning
+	case protocol.SessionBudgetLevel80:
+		tone = ui.ToneWarning
+		label = "budget 80%"
+	case protocol.SessionBudgetLevel100:
+		tone = ui.ToneDanger
+		if m.sessionBudgetExhausted {
+			label = "budget max"
+		} else {
+			label = "budget 100%"
+		}
+	}
+	// Prefer compact cost pair when space allows via badge text.
+	pair := formatSessionCostUSD(m.sessionBudgetCostUSD) + "/" + formatSessionCostUSD(m.sessionBudgetMaxUSD)
+	if level != "" {
+		label = pair
+		switch level {
+		case protocol.SessionBudgetLevel50:
+			tone = ui.ToneWarning
+		case protocol.SessionBudgetLevel80:
+			tone = ui.ToneWarning
+		default:
+			tone = ui.ToneDanger
+		}
+	}
+	return headerChip{75, ui.Badge(th, tone, label)}, true
 }

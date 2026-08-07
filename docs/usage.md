@@ -348,6 +348,7 @@ or config `providers` — see [config.md](config.md).
 ./strike exec -                  # read prompt from stdin
 ./strike exec --json "…"         # single result object on stdout
 ./strike exec --output-format stream-json "…"  # protocol Event envelopes (JSONL)
+./strike exec --max-cost 1.50 "…"  # hard-stop when session cost exceeds $1.50
 ./strike rpc --provider echo     # stdio JSON-RPC Op/Event bridge (NDJSON)
 ./strike acp --provider echo     # Agent Client Protocol agent (Zed / Devin)
 ./strike mcp-serve --provider echo --auto   # MCP server (stdio) for hosts
@@ -359,7 +360,7 @@ by default** (~1 Hz sampler). Disable with `/telemetry off`; re-enable with
 
 `--continue` and `--session` cannot be combined. `strike exec` accepts the
 same `--provider` / `--model` / `--effort` /
-`--auto` / `--dangerously-skip-permissions` flags as the TUI, plus
+`--auto` / `--dangerously-skip-permissions` / `--max-cost` flags as the TUI, plus
 `--output-format text|json|stream-json` (default `text`) and `--json`
 (shorthand for `json`). Formats:
 

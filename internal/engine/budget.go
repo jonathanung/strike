@@ -90,7 +90,7 @@ type childBudget struct {
 	tokensUsed     int
 	toolCalls      int
 	dangerousTools int
-	costUSD        float64 // reserved; stays 0 until session cost pricing (#577)
+	costUSD        float64 // estimated USD when session pricing is wired (#577)
 
 	lastProgressAt time.Time
 	recentTools    []string // newest at end
@@ -165,6 +165,15 @@ func (b *childBudget) noteUsage(tokens int, now time.Time) {
 	// Sum per-stream Used (input+cache+output for that request). Matches
 	// vendor billing (full prompt tokens each turn), not unique context size.
 	b.tokensUsed += tokens
+	b.noteProgress(now, b.lastAction)
+}
+
+// noteCost accumulates estimated USD toward MaxCostUSD (#577 / #774).
+func (b *childBudget) noteCost(usd float64, now time.Time) {
+	if b == nil || usd <= 0 {
+		return
+	}
+	b.costUSD += usd
 	b.noteProgress(now, b.lastAction)
 }
 
@@ -245,7 +254,7 @@ func (b *childBudget) evaluate(now time.Time, startedAt time.Time) (trip bool, k
 			fmt.Sprintf("token budget exhausted (%d/%d)", b.tokensUsed, b.limits.MaxTokens),
 			protocol.ChildStatusFailed
 	}
-	// CostUSD reserved until session pricing (#577); enforce when both limit and usage > 0.
+	// CostUSD enforced when session pricing has accumulated usage (#577).
 	if b.limits.MaxCostUSD > 0 && b.costUSD >= b.limits.MaxCostUSD {
 		return true, "cost_usd",
 			fmt.Sprintf("cost budget exhausted (%.4f/%.4f USD)", b.costUSD, b.limits.MaxCostUSD),

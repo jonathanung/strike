@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/tui/ui"
 )
@@ -137,4 +139,38 @@ func usageSourceLabel(t usageTotals) string {
 	default:
 		return "unknown"
 	}
+}
+
+// applySessionBudgetWarning records envelope progress and surfaces a notice /
+// transcript line so the hard stop is never silent (#577).
+func (m *Model) applySessionBudgetWarning(ev protocol.SessionBudgetWarning) tea.Cmd {
+	if ev.Kind == protocol.SessionBudgetKindCostUSD || ev.Kind == "" {
+		if ev.MaxCostUSD > 0 {
+			m.sessionBudgetMaxUSD = ev.MaxCostUSD
+			m.sessionBudgetCostUSD = ev.CostUSD
+			m.sessionBudgetKnown = true
+		}
+	}
+	if ev.Level != "" {
+		m.sessionBudgetLevel = ev.Level
+	}
+	if ev.Exhausted || ev.Level == protocol.SessionBudgetLevel100 {
+		m.sessionBudgetExhausted = true
+	}
+	msg := ev.Message
+	if msg == "" {
+		switch ev.Kind {
+		case protocol.SessionBudgetKindTurnTokens:
+			msg = fmt.Sprintf("turn token budget %s%%: %d / %d", ev.Level, ev.TokensUsed, ev.MaxTokens)
+		default:
+			msg = fmt.Sprintf("session cost budget %s%%", ev.Level)
+		}
+	}
+	critical := ev.Exhausted || ev.Level == protocol.SessionBudgetLevel100 || ev.Level == protocol.SessionBudgetLevel80
+	if m.turnRunning {
+		m.cells = append(m.cells, &errorCell{text: msg})
+	} else {
+		m.setNotice(msg, critical)
+	}
+	return nil
 }
