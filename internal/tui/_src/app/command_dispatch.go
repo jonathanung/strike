@@ -1510,20 +1510,39 @@ func (m Model) handleTelemetryCommand(args []string) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// handlePetsCommand focuses the pets right pane. Optional name selects a
-// catalog pet (cat, dog, panda, fish, owl, …) before focusing.
+// handlePetsCommand focuses the agents pane (pets live above the agent tree).
+// Optional name assigns a catalog pet to the focused agent.
 func (m Model) handlePetsCommand(args []string) (tea.Model, tea.Cmd) {
 	if len(args) > 0 {
 		name := strings.TrimSpace(args[0])
+		// Prefer the agents-pane cursor target; fall back to viewing/active session.
+		sessionID := ""
+		for _, w := range m.windows.windows {
+			if aw, ok := w.(agentsWindow); ok {
+				sessionID = aw.focusPetSessionID()
+				break
+			}
+		}
+		if sessionID == "" {
+			sessionID = strings.TrimSpace(m.viewingID)
+		}
+		if sessionID == "" {
+			sessionID = strings.TrimSpace(m.sessionID)
+		}
 		var ok bool
-		m.windows, ok = selectPetsWindowPet(m.windows, name)
+		m.windows, ok = selectAgentPet(m.windows, name, sessionID)
 		if !ok {
 			m.resetComposer()
-			m.setNotice("unknown pet "+sanitizeDisplayData(name)+" — try "+petCatalogNames(), true)
+			// Distinguish unknown name vs no agent to assign yet.
+			if _, known := petByID(name); !known {
+				m.setNotice("unknown pet "+sanitizeDisplayData(name)+" — try "+petCatalogNames(), true)
+				return m, nil
+			}
+			m.setNotice("no agent to assign pet — spawn a root first", true)
 			return m, nil
 		}
 	}
-	return m.focusRightWindow(petsWindowID)
+	return m.focusRightWindow(agentsWindowID)
 }
 
 // Bare /fast flips the current value; on/off/true/false/1/0 set it explicitly.

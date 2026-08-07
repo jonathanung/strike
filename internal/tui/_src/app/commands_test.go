@@ -40,7 +40,7 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 		"/visualizer":       {"focus the visualizer right pane", "", commandSourceBuiltin},
 		"/system":           {"focus the system right pane (requires telemetry on)", "", commandSourceBuiltin},
 		"/telemetry":        {"show or hide local system metrics (CPU/RAM/disk)", "[on|off|status]", commandSourceBuiltin},
-		"/pets":             {"focus the pets right pane (ASCII companions)", "[name]", commandSourceBuiltin},
+		"/pets":             {"focus agents pane pet; optional name sets focused agent pet", "[name]", commandSourceBuiltin},
 		"/fast":             {"toggle OpenAI priority tier (faster, ~2× cost)", "[on|off]", commandSourceBuiltin},
 		"/think":            {"show or hide model chain-of-thought", "[on|off]", commandSourceBuiltin},
 		"/vim":              {"open a file in the editor (embedded/modal/takeover; see vimMode)", "[path|@path[:line]]", commandSourceBuiltin},

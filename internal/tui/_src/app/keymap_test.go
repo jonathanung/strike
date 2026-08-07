@@ -295,7 +295,7 @@ func TestKeybindCatalogCoversAppBindingsAndIsSearchable(t *testing.T) {
 
 		"composer.kill-line-start", "composer.kill-line-end", "composer.yank",
 
-		"agents.move", "agents.open", "agents.spawn", "agents.interrupt", "agents.rename", "agents.hide", "agents.filter",
+		"agents.move", "agents.open", "agents.spawn", "agents.interrupt", "agents.rename", "agents.hide", "agents.filter", "agents.pet",
 	} {
 
 		if !seen[id] {
@@ -327,6 +327,8 @@ func TestKeybindCatalogCoversAppBindingsAndIsSearchable(t *testing.T) {
 		{"agents.move", ak.Move},
 
 		{"agents.filter", ak.Filter},
+
+		{"agents.pet", ak.Pet},
 	} {
 
 		help := tt.b.Help()
@@ -508,7 +510,7 @@ func TestOrderKeybindEntriesPromotesFocusContext(t *testing.T) {
 
 	}
 
-	agentIDs := []string{"agents.move", "agents.open", "agents.spawn", "agents.interrupt", "agents.rename", "agents.hide", "agents.filter"}
+	agentIDs := []string{"agents.move", "agents.open", "agents.spawn", "agents.interrupt", "agents.rename", "agents.hide", "agents.filter", "agents.pet"}
 
 	for i, id := range agentIDs {
 

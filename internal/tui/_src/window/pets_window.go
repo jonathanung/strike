@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"math/rand/v2"
 	"strings"
 	"time"
 
@@ -10,12 +11,13 @@ import (
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 )
 
+// petsWindowID remains reserved so plugins cannot claim the former pane id.
 const petsWindowID = "pets"
 
-// petsAnimInterval is the frame period for idle pet animation (~2 fps).
+// petsAnimInterval is the frame period for pet animation (~2 fps).
 const petsAnimInterval = 500 * time.Millisecond
 
-// petsTickMsg advances the active pet animation frame.
+// petsTickMsg advances agent-pet animation frames while the agents pane is active.
 type petsTickMsg struct{}
 
 // petSpec is one selectable ASCII pet with one or more animation frames.
@@ -26,8 +28,6 @@ type petSpec struct {
 	Frames []string
 }
 
-// petCatalog is the built-in pet roster. Keep drawings narrow so they fit the
-// default 32-col right pane without horizontal overflow.
 var petCatalog = []petSpec{
 	{
 		ID:   "cat",
@@ -171,143 +171,46 @@ var petCatalog = []petSpec{
 	},
 }
 
-// petsWindow is a fun right-pane surface: pick an ASCII pet and watch it idle.
-type petsWindow struct {
-	selected int // index into petCatalog
-	frame    int
-	width    int
-	height   int
+// petRandN picks a random index in [0, n). Tests may override for determinism.
+var petRandN = func(n int) int {
+	if n <= 0 {
+		return 0
+	}
+	return rand.IntN(n)
 }
 
-func newPetsWindow() petsWindow {
-	return petsWindow{}
-}
-
-func (w petsWindow) id() string { return petsWindowID }
-
-func (w petsWindow) title() string { return "pets" }
-
-func (w petsWindow) init() tea.Cmd { return nil }
-
-func (w petsWindow) update(msg tea.Msg) (window, tea.Cmd) {
-	switch msg := msg.(type) {
-	case petsTickMsg:
-		if p, ok := w.pet(); ok && len(p.Frames) > 0 {
-			w.frame = (w.frame + 1) % len(p.Frames)
-		}
-		return w, nil
-	case tea.KeyPressMsg:
-		return w.handleKey(msg), nil
-	}
-	return w, nil
-}
-
-func (w petsWindow) resize(width, height int) window {
-	w.width, w.height = max(0, width), max(0, height)
-	return w
-}
-
-func (w petsWindow) view(th theme.Theme) string {
-	if w.width <= 0 {
-		return ""
-	}
-	th = th.Resolve()
-	st := th.S()
-	p, ok := w.pet()
-	if !ok {
-		return lipgloss.NewStyle().Width(max(1, w.width)).Render(
-			st.Muted.Render("no pets"),
-		)
-	}
-
-	lines := make([]string, 0, 16)
-	// Roster strip: highlight the selected pet name.
-	roster := make([]string, 0, len(petCatalog))
-	for i, spec := range petCatalog {
-		label := sanitizeDisplayData(spec.Name)
-		if i == w.selected {
-			roster = append(roster, st.Accent.Render(label))
-		} else {
-			roster = append(roster, st.Muted.Render(label))
-		}
-	}
-	sep := themedSpace(th.Spacing.SM)
-	if sep == "" {
-		sep = " "
-	}
-	lines = append(lines, wrapWindowText(strings.Join(roster, sep), w.width))
-	lines = append(lines, "")
-
-	art := p.Frames[w.frame%len(p.Frames)]
-	for _, row := range strings.Split(art, "\n") {
-		lines = append(lines, petsCenterLine(th, st.Text.Render(row), w.width))
-	}
-
-	// Muted hint when there is room.
-	hintBudget := w.height - len(lines)
-	if hintBudget > 1 {
-		lines = append(lines, "")
-		sep := th.Icons.DetailSeparator
-		if strings.TrimSpace(sep) == "" {
-			sep = "-"
-		}
-		hint := st.Muted.Render("j/k cycle " + sep + " /pets <name>")
-		lines = append(lines, wrapWindowText(hint, w.width))
-	}
-
-	if w.height > 0 && len(lines) > w.height {
-		lines = lines[:w.height]
-	}
-	return strings.Join(lines, "\n")
-}
-
-func (w petsWindow) handleKey(msg tea.KeyPressMsg) petsWindow {
-	n := len(petCatalog)
-	if n == 0 {
-		return w
-	}
-	switch msg.String() {
-	case "up", "k", "left", "h":
-		w.selected = (w.selected - 1 + n) % n
-		w.frame = 0
-	case "down", "j", "right", "l":
-		w.selected = (w.selected + 1) % n
-		w.frame = 0
-	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
-		idx := int(msg.String()[0] - '1')
-		if idx >= 0 && idx < n {
-			w.selected = idx
-			w.frame = 0
-		}
-	}
-	return w
-}
-
-func (w petsWindow) pet() (petSpec, bool) {
-	if len(petCatalog) == 0 {
-		return petSpec{}, false
-	}
-	if w.selected < 0 || w.selected >= len(petCatalog) {
-		return petCatalog[0], true
-	}
-	return petCatalog[w.selected], true
-}
-
-// selectPet sets the active pet by id or display name (case-insensitive).
-// ok is false when no catalog entry matches.
-func (w petsWindow) selectPet(name string) (petsWindow, bool) {
+// petByID returns the catalog index for id or name (case-insensitive).
+func petByID(name string) (int, bool) {
 	name = strings.ToLower(strings.TrimSpace(name))
 	if name == "" {
-		return w, false
+		return 0, false
 	}
 	for i, p := range petCatalog {
 		if strings.EqualFold(p.ID, name) || strings.EqualFold(p.Name, name) {
-			w.selected = i
-			w.frame = 0
-			return w, true
+			return i, true
 		}
 	}
-	return w, false
+	return 0, false
+}
+
+// petAt returns the catalog entry at idx, falling back to the first entry.
+func petAt(idx int) (petSpec, bool) {
+	if len(petCatalog) == 0 {
+		return petSpec{}, false
+	}
+	if idx < 0 || idx >= len(petCatalog) {
+		return petCatalog[0], true
+	}
+	return petCatalog[idx], true
+}
+
+// petCatalogNames returns the selectable pet ids for notices/help.
+func petCatalogNames() string {
+	names := make([]string, len(petCatalog))
+	for i, p := range petCatalog {
+		names[i] = p.ID
+	}
+	return strings.Join(names, ", ")
 }
 
 // petsCenterLine centers a (possibly styled) row within width using spaces.
@@ -326,23 +229,23 @@ func petsCenterLine(th theme.Theme, row string, width int) string {
 	return wrapWindowText(strings.Repeat(" ", pad)+row, width)
 }
 
-// petsWindowActive reports whether the pets pane is in the active right-pane
-// group (visible when the right column is shown).
-func petsWindowActive(r windowRegistry) bool {
+// agentsWindowActive reports whether the agents pane is in the active right-pane
+// group (pets animate while agents are visible).
+func agentsWindowActive(r windowRegistry) bool {
 	for _, wi := range r.activeGroup().members {
 		if wi < 0 || wi >= len(r.windows) {
 			continue
 		}
-		if r.windows[wi].id() == petsWindowID {
+		if r.windows[wi].id() == agentsWindowID {
 			return true
 		}
 	}
 	return false
 }
 
-// petsAnimCmd arms the next animation tick when the pets pane is active.
+// petsAnimCmd arms the next animation tick when the agents pane is active.
 func petsAnimCmd(r windowRegistry) tea.Cmd {
-	if !petsWindowActive(r) {
+	if !agentsWindowActive(r) {
 		return nil
 	}
 	return tea.Tick(petsAnimInterval, func(time.Time) tea.Msg {
@@ -350,15 +253,14 @@ func petsAnimCmd(r windowRegistry) tea.Cmd {
 	})
 }
 
-// applyPetsTick advances the pets window frame. Caller re-arms via petsAnimCmd
-// only while the pane stays active.
+// applyPetsTick advances the agents-window pet animation frame.
 func applyPetsTick(r windowRegistry, msg petsTickMsg) (windowRegistry, tea.Cmd) {
 	for i, w := range r.windows {
-		pw, ok := w.(petsWindow)
+		aw, ok := w.(agentsWindow)
 		if !ok {
 			continue
 		}
-		next, cmd := pw.update(msg)
+		next, cmd := aw.update(msg)
 		windows := append([]window(nil), r.windows...)
 		windows[i] = next
 		r.windows = windows
@@ -367,30 +269,39 @@ func applyPetsTick(r windowRegistry, msg petsTickMsg) (windowRegistry, tea.Cmd) 
 	return r, nil
 }
 
-// selectPetsWindowPet sets the catalog selection on the pets window slot.
-func selectPetsWindowPet(r windowRegistry, name string) (windowRegistry, bool) {
+// selectAgentPet sets the pet for the agents-pane focus session by catalog name.
+// When sessionID is empty, uses the window's current focus pet target.
+func selectAgentPet(r windowRegistry, name, sessionID string) (windowRegistry, bool) {
+	idx, found := petByID(name)
+	if !found {
+		return r, false
+	}
 	for i, w := range r.windows {
-		pw, ok := w.(petsWindow)
+		aw, ok := w.(agentsWindow)
 		if !ok {
 			continue
 		}
-		next, found := pw.selectPet(name)
-		if !found {
+		id := strings.TrimSpace(sessionID)
+		if id == "" {
+			id = aw.focusPetSessionID()
+		}
+		if id == "" {
+			// No agent yet — stash as pending default on empty key once roots arrive
+			// by assigning when ensure runs; still record against activeID if set.
+			id = strings.TrimSpace(aw.activeID)
+		}
+		if id == "" {
 			return r, false
 		}
+		if aw.pets == nil {
+			aw.pets = map[string]int{}
+		}
+		aw.pets[id] = idx
+		aw.petFrame = 0
 		windows := append([]window(nil), r.windows...)
-		windows[i] = next
+		windows[i] = aw
 		r.windows = windows
 		return r, true
 	}
 	return r, false
-}
-
-// petCatalogNames returns the selectable pet ids for notices/help.
-func petCatalogNames() string {
-	names := make([]string, len(petCatalog))
-	for i, p := range petCatalog {
-		names[i] = p.ID
-	}
-	return strings.Join(names, ", ")
 }

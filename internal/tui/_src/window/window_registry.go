@@ -32,7 +32,6 @@ func newWindowRegistry() windowRegistry {
 		newPlansWindow(),
 		newMarkdownWindow(),
 		newTerminalWindow(),
-		newPetsWindow(),
 	}
 	r := windowRegistry{windows: windows}
 	r.groups = defaultWindowGroups(windows)
@@ -93,7 +92,6 @@ func defaultWindowGroups(windows []window) []windowGroup {
 		{id: "project", members: required("memory", "issues", "plans")},
 		{id: "markdown", members: required("markdown")},
 		{id: "editor", members: required("editor")},
-		{id: "pets", members: required("pets")},
 	}
 	// Plugin panes (§9.3): shared "plugin" stack group; never inject into built-ins.
 	var pluginIDs []string
