@@ -1,0 +1,119 @@
+{
+  "schemaVersion": "1.0.0",
+  "description": "Strike security and harness telemetry families for timeline export and audit sink. Export/observability schema only — does not change pkg/protocol Op/Event wire.",
+  "extensionPolicy": "Additive optional fields are allowed within a family without bumping schemaVersion minor when omitempty-compatible. Renames/removals or meaning changes require a schemaVersion bump and fixture refresh. Unknown families must be ignored by consumers (forward-compat).",
+  "redactionPolicies": {
+    "none": "Persist/export as-is (ids, enums, counts, booleans, stable codes).",
+    "scrub": "Run through pkg/redact.String before persist/export (free text that may embed secrets).",
+    "hash": "Store a non-reversible fingerprint (e.g. sha256 hex) instead of the raw value.",
+    "class": "Store a coarse class/label only (e.g. secret kind), never the raw secret.",
+    "omit": "Never persist; drop at the boundary (full conversational payloads, raw secret material)."
+  },
+  "families": [
+    {
+      "id": "tool",
+      "description": "Tool call span: start/end, name, redacted arg/output previews, stable error codes.",
+      "fields": [
+        {"name": "callId", "type": "string", "redact": "none", "required": true, "description": "Tool call id"},
+        {"name": "name", "type": "string", "redact": "none", "required": true, "description": "Tool name"},
+        {"name": "sessionId", "type": "string", "redact": "none", "description": "Session correlation"},
+        {"name": "turnId", "type": "string", "redact": "none", "description": "Turn correlation"},
+        {"name": "state", "type": "string", "redact": "none", "description": "Lifecycle state"},
+        {"name": "argsPreview", "type": "string", "redact": "scrub", "description": "Size-limited args preview"},
+        {"name": "outputPreview", "type": "string", "redact": "scrub", "description": "Size-limited output preview"},
+        {"name": "error", "type": "string", "redact": "scrub", "description": "Error message preview"},
+        {"name": "errorCode", "type": "string", "redact": "none", "description": "Stable machine error code"},
+        {"name": "durationMs", "type": "int64", "redact": "none", "description": "Wall duration when known"}
+      ]
+    },
+    {
+      "id": "permission",
+      "description": "Permission evaluation audit: effective action, matched rule layer, redacted patterns.",
+      "fields": [
+        {"name": "requestId", "type": "string", "redact": "none", "description": "Ask request id when interactive"},
+        {"name": "permission", "type": "string", "redact": "none", "required": true, "description": "Permission name (tool family)"},
+        {"name": "patterns", "type": "string[]", "redact": "scrub", "description": "Ask patterns (paths/commands)"},
+        {"name": "action", "type": "string", "redact": "none", "required": true, "description": "allow|deny|ask"},
+        {"name": "decision", "type": "string", "redact": "none", "description": "User reply when resolving ask"},
+        {"name": "layer", "type": "string", "redact": "none", "description": "Winning layer name"},
+        {"name": "rulePermission", "type": "string", "redact": "none", "description": "Matched rule permission"},
+        {"name": "rulePattern", "type": "string", "redact": "scrub", "description": "Matched rule pattern"},
+        {"name": "ruleAction", "type": "string", "redact": "none", "description": "Matched rule action"},
+        {"name": "sessionId", "type": "string", "redact": "none", "description": "Session correlation"},
+        {"name": "turnId", "type": "string", "redact": "none", "description": "Turn correlation"},
+        {"name": "toolCallId", "type": "string", "redact": "none", "description": "Tool call correlation"}
+      ]
+    },
+    {
+      "id": "sandbox",
+      "description": "OS sandbox posture and capability blocks for a tool/process.",
+      "fields": [
+        {"name": "mode", "type": "string", "redact": "none", "required": true, "description": "off|read-only|workspace-write|…"},
+        {"name": "noNetwork", "type": "bool", "redact": "none", "description": "Host network isolated"},
+        {"name": "noWorkspaceWrite", "type": "bool", "redact": "none", "description": "Workspace write disabled"},
+        {"name": "deniedPath", "type": "string", "redact": "scrub", "description": "Path that triggered a sandbox deny"},
+        {"name": "reason", "type": "string", "redact": "scrub", "description": "Human-readable deny reason"},
+        {"name": "errorCode", "type": "string", "redact": "none", "description": "sandbox_denied or related"},
+        {"name": "sessionId", "type": "string", "redact": "none"},
+        {"name": "turnId", "type": "string", "redact": "none"},
+        {"name": "toolCallId", "type": "string", "redact": "none"}
+      ]
+    },
+    {
+      "id": "usage",
+      "description": "Token/cost usage sample for a turn or provider attempt.",
+      "fields": [
+        {"name": "sessionId", "type": "string", "redact": "none"},
+        {"name": "turnId", "type": "string", "redact": "none"},
+        {"name": "providerRequestId", "type": "string", "redact": "none"},
+        {"name": "inputTokens", "type": "int", "redact": "none"},
+        {"name": "outputTokens", "type": "int", "redact": "none"},
+        {"name": "cacheReadTokens", "type": "int", "redact": "none"},
+        {"name": "cacheCreationTokens", "type": "int", "redact": "none"},
+        {"name": "source", "type": "string", "redact": "none", "description": "usage source label"},
+        {"name": "model", "type": "string", "redact": "none"}
+      ]
+    },
+    {
+      "id": "error",
+      "description": "Harness/engine error surface with stable codes (not full stack dumps).",
+      "fields": [
+        {"name": "code", "type": "string", "redact": "none", "required": true, "description": "Stable error code"},
+        {"name": "message", "type": "string", "redact": "scrub", "required": true, "description": "Redacted message"},
+        {"name": "retryable", "type": "bool", "redact": "none"},
+        {"name": "sessionId", "type": "string", "redact": "none"},
+        {"name": "turnId", "type": "string", "redact": "none"},
+        {"name": "toolCallId", "type": "string", "redact": "none"},
+        {"name": "component", "type": "string", "redact": "none", "description": "engine|tool|provider|sandbox|…"}
+      ]
+    },
+    {
+      "id": "egress",
+      "description": "Outbound network/tool egress decision (webfetch, websearch, mcp, allowlist).",
+      "fields": [
+        {"name": "destination", "type": "string", "redact": "scrub", "description": "Host/URL class (scrubbed)"},
+        {"name": "destinationClass", "type": "string", "redact": "class", "description": "host|ip|url|unknown"},
+        {"name": "tool", "type": "string", "redact": "none", "required": true},
+        {"name": "action", "type": "string", "redact": "none", "required": true, "description": "allow|deny|ask"},
+        {"name": "reason", "type": "string", "redact": "scrub"},
+        {"name": "sessionId", "type": "string", "redact": "none"},
+        {"name": "turnId", "type": "string", "redact": "none"},
+        {"name": "toolCallId", "type": "string", "redact": "none"}
+      ]
+    },
+    {
+      "id": "admission",
+      "description": "Scheduler/admission pool wait, admit, or cancel for a unit of work.",
+      "fields": [
+        {"name": "pool", "type": "string", "redact": "none", "description": "Admission pool id"},
+        {"name": "state", "type": "string", "redact": "none", "required": true, "description": "queued|admitted|canceled"},
+        {"name": "reason", "type": "string", "redact": "scrub"},
+        {"name": "waitMs", "type": "int64", "redact": "none"},
+        {"name": "sessionId", "type": "string", "redact": "none"},
+        {"name": "turnId", "type": "string", "redact": "none"},
+        {"name": "toolCallId", "type": "string", "redact": "none"},
+        {"name": "chainId", "type": "string", "redact": "none", "description": "Optional tool-chain correlation"}
+      ]
+    }
+  ]
+}

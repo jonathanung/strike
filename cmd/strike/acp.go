@@ -181,7 +181,7 @@ func runACP(opts cliOptions, stdin io.Reader, stdout, stderr io.Writer) (runErr 
 		ver = "dev"
 	}
 
-	return runSession(ctx, a.eng.Run, a.eng.Events(), a.store, func(events <-chan protocol.Event) error {
+	return runSession(ctx, a.eng.Run, a.eng.Events(), bindAudit(a.store, a.cfg), func(events <-chan protocol.Event) error {
 		bridged := make(chan protocol.Event, 256)
 		go func() {
 			defer close(bridged)

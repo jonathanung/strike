@@ -175,7 +175,7 @@ func runRPC(opts cliOptions, stdin io.Reader, stdout, stderr io.Writer) (runErr 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	return runSession(ctx, a.eng.Run, a.eng.Events(), a.store, func(events <-chan protocol.Event) error {
+	return runSession(ctx, a.eng.Run, a.eng.Events(), bindAudit(a.store, a.cfg), func(events <-chan protocol.Event) error {
 		// Tee engine events into Live for status, then into the RPC writer.
 		bridged := make(chan protocol.Event, 256)
 		go func() {

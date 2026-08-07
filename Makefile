@@ -1,4 +1,4 @@
-.PHONY: build run run-echo serve serve-expose web-build web-test web-check test vet cover cover-check clean setup restore tui-gen prompt-reg chaos harness-eval swebench-eval
+.PHONY: build run run-echo serve serve-expose web-build web-test web-check test vet cover cover-check clean setup restore tui-gen prompt-reg chaos harness-eval swebench-eval telemetry-check
 
 # Overall statement-coverage floor for `make cover-check` (local / optional CI).
 # Soft baseline ~77%; keep below measured total so the gate does not flake.
@@ -84,6 +84,12 @@ prompt-reg:
 #   UPDATE_HARNESS_EVAL=1 make harness-eval      # refresh testdata sample
 harness-eval:
 	go test ./internal/replay/ -run 'TestHarnessEvalSuite|TestBuildEvalReport' -v -count=1
+
+# Security/harness telemetry schema drift gate (#894).
+# Fails when schemas/telemetry/v1/registry.json diverges from Go export
+# structs or the embedded pkg/telemetry/registry.json copy.
+telemetry-check:
+	go test ./pkg/telemetry/ -run 'TestRegistry|TestEmbedded|TestDisk|TestGolden|TestRedact' -count=1
 
 # E3.3 SWE-bench Verified subset runner (#561). Offline unit tests always;
 # full Docker+model runs are manual / nightly (large images, API cost).

@@ -95,6 +95,8 @@ Derived views (not separate session event types):
 
 - **Timeline export** — `pkg/timeline` folds protocol events into a versioned
   trace document (`schemaVersion` independent of wire `Version`).
+- **Telemetry families** — `pkg/telemetry` + `schemas/telemetry/v1` define
+  versioned security/harness export records (redaction annotations; not wire).
 - **Run recordings / snapshots** — `internal/replay` (eval / multi-agent).
 
 Golden forward-compat coverage lives in `pkg/protocol` tests

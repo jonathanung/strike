@@ -416,6 +416,12 @@ type SessionConfig struct {
 	TraceRetentionMaxFiles   int   `json:"traceRetentionMaxFiles,omitempty"`
 	TraceRetentionMaxAgeDays int   `json:"traceRetentionMaxAgeDays,omitempty"`
 	TraceRetentionMaxBytes   int64 `json:"traceRetentionMaxBytes,omitempty"`
+	// AuditRetentionMaxEvents caps security audit sink rows under
+	// ~/.strike/audit/ (0 = package default 10000 when both audit axes unset).
+	AuditRetentionMaxEvents int `json:"auditRetentionMaxEvents,omitempty"`
+	// AuditRetentionMaxAgeDays deletes audit rows older than N days
+	// (0 = package default 90 when both audit axes unset).
+	AuditRetentionMaxAgeDays int `json:"auditRetentionMaxAgeDays,omitempty"`
 	// AgentBudget is the default per-child resource limit for task spawns
 	// (#774). Spawn-time task.budget fields overlay non-zero values. Zero
 	// means unlimited for that dimension (soft stall/loop signals still
@@ -1496,6 +1502,12 @@ func merge(base, layer Config) Config {
 	}
 	if layer.Session.TraceRetentionMaxBytes != 0 {
 		base.Session.TraceRetentionMaxBytes = layer.Session.TraceRetentionMaxBytes
+	}
+	if layer.Session.AuditRetentionMaxEvents != 0 {
+		base.Session.AuditRetentionMaxEvents = layer.Session.AuditRetentionMaxEvents
+	}
+	if layer.Session.AuditRetentionMaxAgeDays != 0 {
+		base.Session.AuditRetentionMaxAgeDays = layer.Session.AuditRetentionMaxAgeDays
 	}
 	base.Session.AgentBudget = mergeAgentBudgetConfig(base.Session.AgentBudget, layer.Session.AgentBudget)
 	base.Session.DelegationPolicy = mergeDelegationPolicyConfig(base.Session.DelegationPolicy, layer.Session.DelegationPolicy)

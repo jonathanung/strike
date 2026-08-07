@@ -63,6 +63,10 @@ func runSession(
 			if err := store.Append(ev); err != nil && appendErr == nil {
 				appendErr = err
 			}
+			// Best-effort security audit sink (never fails the session path).
+			if obs, ok := store.(interface{ ObserveAudit(protocol.Event) }); ok {
+				obs.ObserveAudit(ev)
+			}
 			if !forwarding {
 				continue
 			}
@@ -475,7 +479,7 @@ func runExecContext(ctx context.Context, opts cliOptions, prompt string, format 
 
 	storeOwned = true
 	hopts := headlessOpts{Format: format, SessionID: a.sessionID}
-	return runSession(ctx, a.eng.Run, a.eng.Events(), a.store, func(events <-chan protocol.Event) error {
+	return runSession(ctx, a.eng.Run, a.eng.Events(), bindAudit(a.store, a.cfg), func(events <-chan protocol.Event) error {
 		return runHeadlessFrontend(ctx, a.eng.Ops(), events, prompt, stdout, stderr, hopts)
 	})
 }
