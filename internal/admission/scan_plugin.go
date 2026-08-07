@@ -17,6 +17,8 @@ type PluginSubject struct {
 	Trusted bool
 	// HasExecutable is true when MCP/harness/shell-hook contributions exist.
 	HasExecutable bool
+	// WorkDir is the project working directory (for first-party project roots).
+	WorkDir string
 }
 
 // ScanPlugin returns findings for one plugin bundle (path + capability surface).
@@ -31,10 +33,7 @@ func ScanPlugin(pol Policy, sub PluginSubject) []security.Finding {
 	if sub.Root != "" {
 		abs := filepath.Clean(sub.Root)
 		// Real plugin roots: ~/.strike/plugins and <cwd>/.strike/plugins
-		var roots []string
-		if pol.Home != "" {
-			roots = append(roots, filepath.Join(filepath.Clean(pol.Home), ".strike", "plugins"))
-		}
+		roots := FirstPartyPluginRoots(pol.Home, sub.WorkDir)
 		if PathSpoofsFirstParty(abs, roots, pol.AllowPaths) {
 			// Only flag when the path contains a nested .strike/plugins marker
 			// outside the real install roots (same helper as skills).

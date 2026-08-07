@@ -133,6 +133,26 @@ func TestAdmitSkillPathSpoof(t *testing.T) {
 	}
 }
 
+func TestAdmitSkillProjectFirstPartyNotSpoof(t *testing.T) {
+	home := t.TempDir()
+	work := t.TempDir()
+	pol, err := admission.Resolve(admission.Config{Preset: admission.PresetStrict}, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pol.Home = home
+	legit := filepath.Join(work, ".strike", "skills", "mine.md")
+	v := admission.AdmitSkill(pol, admission.SkillSubject{
+		Name:     "mine",
+		Path:     legit,
+		Template: "project skill",
+		WorkDir:  work,
+	})
+	if v.Action != admission.ActionAllow {
+		t.Fatalf("project first-party skill action=%s reason=%s", v.Action, v.Reason)
+	}
+}
+
 func TestAdmitSkillBuiltinAlwaysAllow(t *testing.T) {
 	home := t.TempDir()
 	pol, err := admission.Resolve(admission.Config{Preset: admission.PresetStrict}, home)

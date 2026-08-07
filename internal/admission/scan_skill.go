@@ -18,6 +18,8 @@ type SkillSubject struct {
 	Builtin bool
 	// Source labels the discovery root (strike|claude|opencode|plugin|builtin).
 	Source string
+	// WorkDir is the project working directory (for first-party project roots).
+	WorkDir string
 }
 
 var (
@@ -41,7 +43,8 @@ func ScanSkill(pol Policy, sub SkillSubject) []security.Finding {
 			}
 		}
 		abs = filepath.Clean(abs)
-		roots := FirstPartySkillRoots(pol.Home, "")
+		// Include project workDir so legitimate <cwd>/.strike/skills is not spoofed.
+		roots := FirstPartySkillRoots(pol.Home, sub.WorkDir)
 		// Also treat allow-list as trusted first-party.
 		if PathSpoofsFirstParty(abs, roots, pol.AllowPaths) {
 			out = append(out, security.Finding{

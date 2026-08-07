@@ -111,8 +111,32 @@ func FirstPartySkillRoots(home, workDir string) []string {
 		roots = append(roots, filepath.Join(filepath.Clean(home), ".strike", "skills"))
 	}
 	if workDir != "" {
-		// projectRoot is workDir/.strike when present layout uses .strike under cwd.
+		// Project layout: <workDir>/.strike/skills
 		roots = append(roots, filepath.Join(filepath.Clean(workDir), ".strike", "skills"))
+	}
+	return roots
+}
+
+// FirstPartyPluginRoots returns real plugin install directories.
+func FirstPartyPluginRoots(home, workDir string) []string {
+	var roots []string
+	if home != "" {
+		roots = append(roots, filepath.Join(filepath.Clean(home), ".strike", "plugins"))
+	}
+	if workDir != "" {
+		roots = append(roots, filepath.Join(filepath.Clean(workDir), ".strike", "plugins"))
+	}
+	return roots
+}
+
+// FirstPartyAgentRoots returns real first-party agent directories.
+func FirstPartyAgentRoots(home, workDir string) []string {
+	var roots []string
+	if home != "" {
+		roots = append(roots, filepath.Join(filepath.Clean(home), ".strike", "agents"))
+	}
+	if workDir != "" {
+		roots = append(roots, filepath.Join(filepath.Clean(workDir), ".strike", "agents"))
 	}
 	return roots
 }
@@ -120,6 +144,9 @@ func FirstPartySkillRoots(home, workDir string) []string {
 // PathSpoofsFirstParty reports whether path looks like a first-party location
 // via a nested marker (e.g. .../evil/.strike/skills/...) without actually
 // residing under a real first-party root or an explicit allow-list entry.
+//
+// realRoots must include every legitimate install root (global + project).
+// A path under those roots is never a spoof even though it contains the marker.
 func PathSpoofsFirstParty(path string, realRoots, allow []string) bool {
 	if path == "" {
 		return false

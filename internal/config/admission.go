@@ -22,10 +22,9 @@ func ResolveAdmission(cfg Config) (admission.Policy, error) {
 
 // FilterSkills runs admission on each skill and returns those that bind
 // (allow|warn). Blocked/quarantined skills are omitted. Verdicts are returned
-// for operator/timeline emission (including allow when findings empty only if
-// non-allow — actually all non-allow and warn are included; pure allow with
-// no findings are omitted to reduce noise).
-func FilterSkills(pol admission.Policy, skills []Skill) (admitted []Skill, verdicts []admission.Verdict) {
+// for operator/timeline emission; pure allow with no findings are omitted to
+// reduce noise. workDir is the project cwd used for first-party path roots.
+func FilterSkills(pol admission.Policy, skills []Skill, workDir string) (admitted []Skill, verdicts []admission.Verdict) {
 	admitted = make([]Skill, 0, len(skills))
 	for _, s := range skills {
 		v := admission.AdmitSkill(pol, admission.SkillSubject{
@@ -33,6 +32,7 @@ func FilterSkills(pol admission.Policy, skills []Skill) (admitted []Skill, verdi
 			Path:     s.Path,
 			Template: s.Template,
 			Builtin:  s.Builtin,
+			WorkDir:  workDir,
 		})
 		if v.Action != admission.ActionAllow || len(v.Findings) > 0 || v.ScanError != "" {
 			verdicts = append(verdicts, v)
@@ -52,9 +52,8 @@ func FilterSkills(pol admission.Policy, skills []Skill) (admitted []Skill, verdi
 // AdmitPlugins runs admission on discovered plugins and returns verdicts.
 // Path spoof and capability surfaces are scanned. Executable trust remains
 // enforced by plugin.CompileExecutables; admission does not replace it.
-// HasExecutable+Trusted are left false/true respectively so the untrusted
-// finding is not double-counted here (trust diagnostics already cover that).
-func AdmitPlugins(pol admission.Policy, res plugin.Result) []admission.Verdict {
+// workDir is the project cwd used for first-party plugin install roots.
+func AdmitPlugins(pol admission.Policy, res plugin.Result, workDir string) []admission.Verdict {
 	var out []admission.Verdict
 	for _, p := range res.Plugins {
 		caps := plugin.InferCapabilitiesAt(p.Manifest, p.Root)
@@ -65,6 +64,7 @@ func AdmitPlugins(pol admission.Policy, res plugin.Result) []admission.Verdict {
 			// Trust is a separate gate; do not emit untrusted_executable here.
 			Trusted:       true,
 			HasExecutable: false,
+			WorkDir:       workDir,
 		})
 		if v.Action != admission.ActionAllow || len(v.Findings) > 0 {
 			out = append(out, v)

@@ -81,7 +81,7 @@ func TestFilterSkillsQuarantinesSpoof(t *testing.T) {
 		{Name: "pwn", Template: "pwn", Path: evilPath},
 		{Name: "ship", Template: "builtin", Builtin: true},
 	}
-	out, verdicts := config.FilterSkills(pol, skills)
+	out, verdicts := config.FilterSkills(pol, skills, "")
 	names := map[string]bool{}
 	for _, s := range out {
 		names[s.Name] = true
@@ -100,5 +100,23 @@ func TestFilterSkillsQuarantinesSpoof(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("verdicts = %+v", verdicts)
+	}
+}
+
+func TestFilterSkillsAllowsProjectFirstPartyRoot(t *testing.T) {
+	home := t.TempDir()
+	work := t.TempDir()
+	pol, err := admission.Resolve(admission.Config{Preset: admission.PresetDefault}, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pol.Home = home
+	legit := filepath.Join(work, ".strike", "skills", "local.md")
+	skills := []config.Skill{
+		{Name: "local", Template: "hello from project", Path: legit},
+	}
+	out, verdicts := config.FilterSkills(pol, skills, work)
+	if len(out) != 1 || out[0].Name != "local" {
+		t.Fatalf("admitted = %v verdicts=%v", out, verdicts)
 	}
 }

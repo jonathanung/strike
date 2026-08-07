@@ -377,10 +377,10 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		return nil, fmt.Errorf("loading skills: %w", err)
 	}
 	var skillVerdicts []admission.Verdict
-	skills, skillVerdicts = config.FilterSkills(admitPol, skills)
+	skills, skillVerdicts = config.FilterSkills(admitPol, skills, workDir)
 	admissionVerdicts = append(admissionVerdicts, skillVerdicts...)
 	// Plugin path/capability admission (trust remains a separate gate).
-	pluginVerdicts := config.AdmitPlugins(admitPol, config.DiscoverPlugins(workDir))
+	pluginVerdicts := config.AdmitPlugins(admitPol, config.DiscoverPlugins(workDir), workDir)
 	admissionVerdicts = append(admissionVerdicts, pluginVerdicts...)
 	skillInfos := make([]tool.SkillInfo, len(skills))
 	for i, s := range skills {
