@@ -19,8 +19,14 @@ materially affect the shipped product.
 - **Active-turn steering** — new `steer` op redirects a running root turn at the
   next safe request boundary (distinct from queued `user.input` and
   `interrupt`). Durable `turn.steered` events record boundary /
-  cancel_restart / queued_fallback decisions. Wire schema 1.16.0
+  cancel_restart / queued_fallback decisions. Wire schema 1.17.0
   ([#1039](https://github.com/jonathanung/strike/issues/1039)).
+
+- **Public session lifecycle contract** — list/get/fork/fork_at/load/rewind_points
+  shared across RPC, HTTP, ACP, and `pkg/sdk` with capability discovery and
+  structured errors (`session_not_found`, `session_busy`, …). Wire schema
+  `protocol.Version` 1.16.0
+  ([#1038](https://github.com/jonathanung/strike/issues/1038)).
 
 ### Changed
 

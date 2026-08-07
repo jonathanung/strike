@@ -35,6 +35,7 @@ func TestBashGHPRRecordsSessionMeta(t *testing.T) {
 		InitialProvider: "echo",
 		Registry:        tool.NewRegistry(tool.NewBash()),
 		WorkDir:         dir,
+		SandboxMode:     "off", // CI may lack OS sandbox backend (#1030 fail-closed)
 		Rules: []permission.Ruleset{{
 			{Permission: "bash", Pattern: "*", Action: permission.Allow},
 		}},

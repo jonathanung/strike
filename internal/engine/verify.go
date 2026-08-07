@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"time"
 
@@ -107,6 +108,7 @@ func (e *Engine) runVerification(parent context.Context, corr protocol.Correlati
 			Scope:       scope,
 			GateCount:   len(vgates),
 		})
+		e.fireVerificationGate(parent, corr, scope, "started", "gates="+itoaSafe(len(vgates)))
 	}
 
 	// Bound total gate wall time; parent cancel (solo turn interrupt) aborts early.
@@ -126,8 +128,24 @@ func (e *Engine) runVerification(parent context.Context, corr protocol.Correlati
 			Scope:       scope,
 			Report:      rep,
 		})
+		st := "failed"
+		if rep.Passed {
+			st = "passed"
+		}
+		e.fireVerificationGate(ctx, corr, scope, st, "passed="+boolStr(rep.Passed))
 	}
 	return &rep
+}
+
+func itoaSafe(n int) string {
+	return strconv.Itoa(n)
+}
+
+func boolStr(b bool) string {
+	if b {
+		return "true"
+	}
+	return "false"
 }
 
 func verifyResultToProtocol(res verify.Result) protocol.VerificationReport {

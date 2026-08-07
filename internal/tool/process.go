@@ -127,6 +127,15 @@ func RunProcess(ctx context.Context, spec ProcessSpec, obs ProcessObserver) (Pro
 	// Apply OS sandbox at the exec seam (process_unix SysProcAttr still owns
 	// process-group kill). Started observers see the pre-wrap argv.
 	wrap := sandbox.WrapResult(spec.Argv, spec.Sandbox)
+	// Fail-closed: non-off sandbox that could not be applied must not run
+	// unsandboxed unless Policy.AllowDegrade is set (#1030).
+	if wrap.Degraded && spec.Sandbox.Mode != sandbox.ModeOff && !spec.Sandbox.AllowDegrade {
+		return ProcessResult{
+			ID:              id,
+			Status:          ProcessStatusError,
+			SandboxDegraded: true,
+		}, ErrSandboxDenied("OS sandbox required but unavailable (set sandboxAllowDegrade: true to permit unsandboxed fallback, or sandbox: off)")
+	}
 	execArgv := wrap.Argv
 	if len(execArgv) == 0 || execArgv[0] == "" {
 		return ProcessResult{}, fmt.Errorf("empty argv")

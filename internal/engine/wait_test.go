@@ -318,6 +318,7 @@ func TestWaitBlockedNeedsAttention(t *testing.T) {
 		InitialProvider: "scripted",
 		Registry:        waitRegistry(tool.NewBash()),
 		WorkDir:         t.TempDir(),
+		SandboxMode:     "off",
 		Rules:           []permission.Ruleset{permission.Defaults()},
 	})
 	ctx, cancel := context.WithCancel(context.Background())

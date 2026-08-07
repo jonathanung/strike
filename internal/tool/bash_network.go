@@ -10,22 +10,41 @@ import (
 	"github.com/jonathanung/strike-cli/internal/sandbox"
 )
 
-// checkBashNetworkAllow rejects known network clients whose destinations fall
-// outside allow when allow is non-empty. Empty allow means unrestricted
-// (same semantics as webfetch). Shares sandbox.CheckNetworkAllow with webfetch.
+// checkBashNetworkAllow rejects commands that could bypass a non-empty
+// network.allow list. Empty allow means unrestricted (same as webfetch).
 //
-// Best-effort static guard: walks statements, wrappers, and command
-// substitutions like the workspace boundary guard. When a network client is
-// detected but the destination cannot be statically bound (variables,
-// missing host), the call is denied so allowlist policy cannot be bypassed
-// by unparseable forms.
+// When allow is non-empty and OS networking remains enabled (osNetOn):
+//   - known clients (curl/wget/ssh/…) — destination must match allow (fail-closed
+//     on unparseable hosts)
+//   - interpreters (python/node/…) — denied (cannot statically bind destinations)
+//   - shell networking (/dev/tcp, /dev/udp) — denied
+//   - unknown/arbitrary executables — denied unless classified local-safe
+//
+// When osNetOn is false (Policy.NoNetwork), preflight is skipped: the OS
+// isolation boundary already blocks egress (#1030 stronger isolation).
+//
+// Shares sandbox.CheckNetworkAllow with webfetch.
 func checkBashNetworkAllow(command string, allow []string) error {
+	return checkBashNetworkAllowOpts(command, allow, true)
+}
+
+// checkBashNetworkAllowOpts is the testable core. osNetOn false skips checks
+// (caller already applied NoNetwork OS isolation).
+func checkBashNetworkAllowOpts(command string, allow []string, osNetOn bool) error {
 	if len(allow) == 0 {
+		return nil
+	}
+	if !osNetOn {
+		// Stronger isolation boundary: host networking is off in the OS profile.
 		return nil
 	}
 	command = strings.TrimSpace(command)
 	if command == "" {
 		return nil
+	}
+	// Shell redirections to /dev/tcp and /dev/udp bypass argv client detection.
+	if err := checkBashShellNetworking(command); err != nil {
+		return err
 	}
 	// Prefer hosts projected by actionfacts (#888) when present, then the
 	// dedicated argv preflight (fail-closed on known clients).
@@ -41,6 +60,102 @@ func checkBashNetworkAllow(command string, allow []string) error {
 		}
 	}
 	return checkBashNetworkCommand(command, allow, 0)
+}
+
+// checkBashShellNetworking denies bash /dev/tcp and /dev/udp forms that open
+// sockets without a known network client argv.
+func checkBashShellNetworking(command string) error {
+	lower := strings.ToLower(command)
+	if strings.Contains(lower, "/dev/tcp/") || strings.Contains(lower, "/dev/udp/") {
+		return errNetworkDenied("shell networking (/dev/tcp or /dev/udp) is not allowed when network.allow is set (use webfetch or a preflighted client with an allowlisted host)")
+	}
+	return nil
+}
+
+// bashLocalSafeCmds are commands treated as non-egress when network.allow is
+// set. Best-effort classification only — not a full capability database.
+// Network-capable toolchains (go get, npm, pip, curl, …) are intentionally
+// absent so a non-empty allowlist cannot be silently bypassed.
+var bashLocalSafeCmds = map[string]struct{}{
+	"true": {}, "false": {}, "echo": {}, "printf": {}, "pwd": {},
+	"ls": {}, "dir": {}, "cat": {}, "head": {}, "tail": {}, "wc": {},
+	"sort": {}, "uniq": {}, "cut": {}, "tr": {}, "tee": {}, "basename": {},
+	"dirname": {}, "realpath": {}, "readlink": {}, "stat": {}, "file": {},
+	"test": {}, "mkdir": {}, "rmdir": {}, "rm": {},
+	"cp": {}, "mv": {}, "ln": {}, "touch": {}, "chmod": {}, "chown": {},
+	"chgrp": {}, "sleep": {}, "date": {}, "whoami": {}, "id": {}, "uname": {},
+	"hostname": {}, "env": {}, "printenv": {}, "which": {}, "type": {},
+	"command": {}, "hash": {}, "cd": {}, "pushd": {}, "popd": {},
+	"export": {}, "unset": {}, "set": {}, "shift": {}, "read": {},
+	"local": {}, "return": {}, "exit": {}, "break": {}, "continue": {},
+	"source": {}, "alias": {}, "unalias": {}, "wait": {},
+	"jobs": {}, "fg": {}, "bg": {}, "kill": {}, "pkill": {}, "pgrep": {},
+	"ps": {}, "top": {}, "diff": {}, "cmp": {}, "comm": {}, "patch": {},
+	"sed": {}, "awk": {}, "grep": {}, "egrep": {}, "fgrep": {}, "rg": {},
+	"find": {}, "xargs": {}, "tar": {}, "gzip": {}, "gunzip": {}, "bzip2": {},
+	"xz": {}, "zip": {}, "unzip": {}, "sha256sum": {}, "sha1sum": {}, "md5sum": {},
+	"base64": {}, "od": {}, "hexdump": {}, "jq": {}, "yq": {},
+	// VCS inspection (no remote by default in common forms; push/fetch still
+	// go through unknown-binary path when nested under wrappers — git itself
+	// is local-safe for status/diff/log; network subcommands are checked below).
+	"git": {},
+	// Compilers/test runners that typically work offline once deps exist.
+	// Package download commands remain network-capable via other binaries.
+	"make": {}, "cmake": {}, "ninja": {}, "gcc": {}, "g++": {}, "clang": {},
+	"clang++": {}, "cc": {}, "c++": {}, "ld": {}, "ar": {}, "ranlib": {},
+	"strip": {}, "objdump": {}, "nm": {}, "as": {},
+	"go":    {}, // go test/build offline; go get denied via bashNetworkSubcommands
+	"rustc": {}, "cargo": {},
+	"javac": {}, "java": {}, "jar": {},
+	// Interpreters are NOT local-safe: handled in checkBashNetworkWords switch
+	// (fail-closed — may open sockets). Offline use requires OS NoNetwork or
+	// empty network.allow.
+	"tsc": {}, "eslint": {}, "prettier": {}, "black": {}, "ruff": {},
+	"pytest": {}, "mypy": {}, "golangci-lint": {},
+	"docker": {}, "podman": {},
+	"kubectl":   {},
+	"terraform": {}, "tofu": {},
+	"nix": {}, "nix-build": {}, "nix-shell": {},
+	"bazel": {}, "buck": {}, "buck2": {},
+	"mvn": {}, "gradle": {}, "sbt": {},
+	"npm": {}, "npx": {}, "yarn": {}, "pnpm": {},
+	"pip": {}, "pip3": {}, "pipenv": {}, "poetry": {}, "uv": {},
+	"composer": {}, "bundle": {}, "gem": {},
+	"gh": {}, "hub": {},
+}
+
+// bashNetworkSubcommands maps local-safe multi-tool binaries to subcommands
+// that perform egress. When present with a non-empty allowlist, deny.
+var bashNetworkSubcommands = map[string]map[string]struct{}{
+	"git": {
+		"fetch": {}, "pull": {}, "push": {}, "clone": {}, "ls-remote": {},
+		"submodule": {}, "remote": {}, "archive": {},
+	},
+	"go": {
+		"get": {}, "install": {}, "mod": {}, // mod download/tidy may hit network
+	},
+	"cargo": {
+		"fetch": {}, "publish": {}, "install": {}, "search": {}, "update": {},
+	},
+	"npm": {
+		"install": {}, "i": {}, "ci": {}, "update": {}, "publish": {},
+		"pack": {}, "exec": {}, "create": {}, "add": {}, "remove": {},
+		"view": {}, "search": {}, "ping": {}, "audit": {},
+	},
+	"npx":  {"*": {}}, // npx always may fetch
+	"yarn": {"install": {}, "add": {}, "upgrade": {}, "publish": {}, "dlx": {}},
+	"pnpm": {"install": {}, "add": {}, "update": {}, "publish": {}, "dlx": {}, "fetch": {}},
+	"pip":  {"install": {}, "download": {}, "wheel": {}, "search": {}},
+	"pip3": {"install": {}, "download": {}, "wheel": {}, "search": {}},
+	"uv":   {"pip": {}, "add": {}, "sync": {}, "tool": {}, "publish": {}},
+	"docker": {
+		"pull": {}, "push": {}, "login": {}, "search": {}, "build": {}, // build may pull
+	},
+	"podman": {"pull": {}, "push": {}, "login": {}, "search": {}, "build": {}},
+	"gh": {
+		"api": {}, "browse": {}, "pr": {}, "issue": {}, "release": {},
+		"repo": {}, "gist": {}, "run": {}, "workflow": {}, "search": {},
+	},
 }
 
 func checkBashNetworkCommand(command string, allow []string, depth int) error {
@@ -119,8 +234,87 @@ func checkBashNetworkWords(words []string, allow []string, depth int) error {
 		return checkSFTPNetwork(args, allow)
 	case "nc", "ncat", "netcat":
 		return checkNetcatNetwork(args, allow)
+	case "python", "python2", "python3", "pypy", "pypy3",
+		"node", "nodejs", "deno", "bun",
+		"ruby", "perl", "php", "lua", "raku":
+		return checkInterpreterNetwork(cmd, args)
+	}
+
+	// Package managers / VCS network subcommands.
+	if err := checkNetworkSubcommand(cmd, args); err != nil {
+		return err
+	}
+
+	// Fail-closed on arbitrary executables when allow is set: unknown binaries
+	// can open sockets while the OS sandbox still has host networking.
+	if _, ok := bashLocalSafeCmds[cmd]; ok {
+		return nil
+	}
+	// Absolute/relative path to a custom binary — not on the local-safe list.
+	return errNetworkDenied(fmt.Sprintf("command %q is not a preflighted network client or local-safe tool; when network.allow is set it cannot run with host networking (use webfetch/curl with an allowlisted host, set OS network off, or clear network.allow)", cmd))
+}
+
+// checkInterpreterNetwork denies interpreter forms that can open sockets
+// without a statically bound destination (one-liners and script invocation).
+func checkInterpreterNetwork(cmd string, args []string) error {
+	// One-liners are never statically bound.
+	if interpreterOneLiner(cmd, args) {
+		return errNetworkDenied(fmt.Sprintf("interpreter one-liner %q cannot be statically bound to network.allow (use webfetch or a preflighted client)", cmd))
+	}
+	// Script / module form can still import urllib/http — fail closed when
+	// allow is set and OS net is on. Offline runners should use NoNetwork or
+	// empty allowlist.
+	return errNetworkDenied(fmt.Sprintf("interpreter %q may perform network I/O; when network.allow is set it is blocked unless OS network is off (stronger isolation) or network.allow is cleared", cmd))
+}
+
+// checkNetworkSubcommand denies known egress subcommands of multi-tool binaries.
+func checkNetworkSubcommand(cmd string, args []string) error {
+	subs, ok := bashNetworkSubcommands[cmd]
+	if !ok {
+		return nil
+	}
+	if _, star := subs["*"]; star {
+		return errNetworkDenied(fmt.Sprintf("%q may fetch packages/network resources; blocked when network.allow is set (use an allowlisted curl/webfetch or clear network.allow)", cmd))
+	}
+	sub := firstNonFlagArg(args)
+	if sub == "" {
+		return nil
+	}
+	if _, hit := subs[sub]; hit {
+		// go mod download/tidy etc.
+		if cmd == "go" && sub == "mod" {
+			return errNetworkDenied(`"go mod" may contact module proxies; blocked when network.allow is set`)
+		}
+		return errNetworkDenied(fmt.Sprintf("%s %s may perform network I/O; blocked when network.allow is set (preflight cannot verify destinations)", cmd, sub))
 	}
 	return nil
+}
+
+func firstNonFlagArg(args []string) string {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if a == "--" {
+			if i+1 < len(args) {
+				return args[i+1]
+			}
+			return ""
+		}
+		if strings.HasPrefix(a, "-") && a != "-" {
+			// --flag=value or -flag value
+			if strings.Contains(a, "=") {
+				continue
+			}
+			// Common global flags that take a value (best-effort).
+			switch a {
+			case "-C", "-c", "--git-dir", "--work-tree", "--namespace",
+				"--config", "--prefix", "-p", "--package":
+				i++
+			}
+			continue
+		}
+		return a
+	}
+	return ""
 }
 
 func checkShellCNetwork(args []string, allow []string, depth int) error {

@@ -739,6 +739,10 @@ type Context struct {
 	// (from config network.allow). Empty means unrestricted public hosts; SSRF
 	// private/loopback blocks still apply. Nil/empty Context is unrestricted.
 	NetworkAllow []string
+	// BashSecrets maps destination env var names to secret refs
+	// (secret://env/NAME). Resolved only into the bash process environment;
+	// values never appear in tool args, results, or events (#1030).
+	BashSecrets map[string]string
 	// ContentGuard is the write-time content scanner dial (config contentGuard).
 	// Zero value enables default posture: credential shapes deny, high-confidence
 	// dangerous sinks ask. Mode off disables. See checkContentGuard (#890).

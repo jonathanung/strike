@@ -54,6 +54,12 @@ func newRecordingEngine(t *testing.T, opts engine.Options) (*engine.Engine, *rec
 	if opts.WorkDir == "" {
 		opts.WorkDir = t.TempDir()
 	}
+	// Permit sandbox degrade so CI without bwrap is not fail-closed by #1030.
+	// Prefer AllowDegrade over forcing SandboxMode off so yolo+sandbox checks
+	// still exercise the real dial.
+	if !opts.SandboxAllowDegrade && strings.TrimSpace(opts.SandboxMode) == "" {
+		opts.SandboxAllowDegrade = true
+	}
 	eng := engine.New(opts)
 	ctx, cancel := context.WithCancel(context.Background())
 	go eng.Run(ctx)

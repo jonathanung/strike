@@ -367,7 +367,7 @@ func (e *Engine) runTurn(ctx context.Context, text string, images []protocol.Ima
 	e.emit(protocol.UserMessage{Correlation: turnCorr, Text: text, Images: images})
 	e.maybeTitleSession(text)
 	e.emit(protocol.TurnStarted{Correlation: turnCorr})
-	e.fireHookRules(turnCorr, permission.HookEventTurnStart, "", "")
+	e.fireLifecycle(turnCorr, permission.HookEventTurnStart, "", "", "start", "")
 	e.messages = append(e.messages, provider.Message{
 		Role:   provider.RoleUser,
 		Text:   text,
@@ -560,6 +560,7 @@ func (e *Engine) streamModelAttempts(ctx context.Context, turnID string) (stream
 			DelayMs:     int(delay / time.Millisecond),
 			Message:     err.Error(),
 		})
+		e.fireProviderRetry(reqCorr, attempt+1, err.Error())
 		if delay > 0 {
 			timer := time.NewTimer(delay)
 			select {
@@ -593,6 +594,7 @@ func (e *Engine) streamRetryDelay(nextAttempt int) time.Duration {
 // contract. On success, history-ready text/tool/reasoning are returned and
 // usage is emitted; nothing is appended to e.messages here.
 func (e *Engine) consumeStream(ctx context.Context, reqCorr protocol.Correlation) (streamOutcome, error) {
+	e.fireProviderAttempt(reqCorr)
 	layers, shed := e.systemLayersWithMeta()
 	system := joinPromptLayerTexts(layers)
 	tools, _ := e.effectiveToolSchemas()
@@ -929,7 +931,16 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 		})
 	}
 
-	pre, err := e.runToolHooks(ctx, tool.HookEventPreToolUse, call, corr, "", false)
+	// Hard permission deny: skip shell pre-hooks so they cannot run side effects
+	// ahead of a deny (hooks must not widen or bypass hard denials). Execute
+	// still performs Ask for deny audit/feedback.
+	var pre tool.HookOutcome
+	var err error
+	if e.perms != nil && e.perms.Peek(tool.PermissionName(call.Name), "*") == permission.Deny {
+		pre = tool.HookOutcome{Allow: true}
+	} else {
+		pre, err = e.runToolHooks(ctx, tool.HookEventPreToolUse, call, corr, "", false)
+	}
 	if err != nil {
 		if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return e.canceledOrTimeoutToolResult(ctx, call.ID, corr, tool.Result{})
@@ -998,6 +1009,7 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 			SandboxMode:     e.opts.SandboxMode,
 			Sandbox:         e.bashSandboxPolicy(),
 			NetworkAllow:    e.opts.NetworkAllow,
+			BashSecrets:     e.opts.BashSecrets,
 			ContentGuard:    e.opts.ContentGuard,
 			WebSearch:       e.opts.WebSearch,
 			Scheduler:       e.opts.Scheduler,
@@ -1339,14 +1351,21 @@ func (e *Engine) runToolHooks(ctx context.Context, event string, call provider.T
 		return tool.HookOutcome{Allow: true}, nil
 	}
 	payload := tool.HookPayload{
-		Event:      event,
-		SessionID:  e.opts.SessionID,
-		CWD:        e.opts.WorkDir,
-		ToolName:   call.Name,
-		ToolCallID: call.ID,
-		ToolInput:  call.Args,
-		ToolOutput: toolOutput,
-		IsError:    isError,
+		SchemaVersion:     tool.LifecycleVocabularyVersion,
+		Event:             event,
+		SessionID:         corr.SessionID,
+		TurnID:            corr.TurnID,
+		ProviderRequestID: corr.ProviderRequestID,
+		ParentSessionID:   corr.ParentSessionID,
+		Depth:             corr.Depth,
+		Attempt:           corr.Attempt,
+		CWD:               e.opts.WorkDir,
+		Subject:           call.Name,
+		ToolName:          call.Name,
+		ToolCallID:        call.ID,
+		ToolInput:         call.Args,
+		ToolOutput:        toolOutput,
+		IsError:           isError,
 	}
 	return tool.RunHooks(ctx, e.opts.Hooks, event, payload, e.opts.WorkDir, func(ctx context.Context, command string) error {
 		return e.perms.AskWithCorrelation(ctx, tool.AskRequest{
@@ -1479,7 +1498,7 @@ func (e *Engine) completeTurn(ctx context.Context, finishing chan struct{}, corr
 	files := turnFileChanges(e.turnDiff.Snapshot())
 	e.checkpoints.CommitTurn()
 	peek := e.checkpoints.Peek()
-	e.fireHookRules(corr, permission.HookEventTurnEnd, "", "")
+	e.fireLifecycle(corr, permission.HookEventTurnEnd, "", "", "end", "")
 	// Clear tool-chain state on every terminal path (end, interrupt, error).
 	if e.perms != nil {
 		e.perms.EndTurn()
@@ -1715,5 +1734,6 @@ func (e *Engine) bashSandboxPolicy() sandbox.Policy {
 		p = e.perms.CompileSandbox(mode, e.opts.WorkDir)
 	}
 	p.NetworkAllow = sandbox.CloneNetworkAllow(e.opts.NetworkAllow)
+	p.AllowDegrade = e.opts.SandboxAllowDegrade
 	return p
 }

@@ -138,6 +138,25 @@ shutdown.
 4. Redact secrets on the persist path (`internal/secret.RedactEvent` /
    `pkg/redact`); unknown payloads are JSON-scrubbed.
 
+## Session lifecycle contract (1.16+)
+
+Host-level session list/inspect/fork/load is **not** an engine Op. Frontends
+share one public contract in `pkg/protocol` (`LifecycleCapabilities`,
+`SessionSummary`, `LifecycleError` codes) and expose it as:
+
+| Surface | Discovery | Operations |
+|---|---|---|
+| `strike rpc` | `initialize` / `rpc.ready` → `lifecycle` | `session.list`, `session.get`, `session.fork`, `session.fork_at`, `session.load`, `session.rewind_points`, `session.replay`, `session.capabilities` |
+| `strike serve` | `GET /v1/session-lifecycle`, bootstrap `sessionLifecycle` | `GET /v1/sessions`, `POST …/fork`, `POST …/fork_at`, `GET …/rewind_points` |
+| `strike acp` | `agentCapabilities.loadSession` + `sessionCapabilities` | `session/load`, `session/list`; extensions `_session/fork`, `_session/fork_at`, `_session/rewind_points` |
+| `pkg/sdk` | `SessionStore.Capabilities` / `LifecycleClient` | offline store + JSON-RPC caller helpers |
+| Engine op | bootstrap `protocolOps` includes `rewind` | `protocol.Rewind` (in-session last-turn undo) |
+
+Structured error codes on lifecycle failures: `session_not_found`,
+`session_busy`, `session_corrupt`, `unsupported`, `invalid_session`.
+`session.load` on single-process rpc/acp only succeeds for the live session id;
+switching requires restart with `--session`.
+
 ## Related docs
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — package map and dataflow

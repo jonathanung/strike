@@ -344,11 +344,12 @@ optional process mem/CPU caps — [isolation.md](isolation.md).
 **OS sandbox dial:** `sandbox` is `off` | `read-only` | `workspace-write`
 (default **`workspace-write`**). Applies to the bash tool (and composer `!`
 shell) via Linux `bwrap` / macOS `sandbox-exec`. When the backend is missing
-or blocked, bash degrades to unsandboxed with a one-shot startup warning
-(unless `sandbox` is `off`). Override per invocation with `--sandbox <mode>`.
-Inspect the effective policy with `/sandbox`; `/sandbox explain` prints the
-generated OS profile (bwrap flags or seatbelt SBPL) compiled from permission
-rules.
+or blocked, bash **fails closed** with `sandbox_denied` unless
+`sandboxAllowDegrade: true` (explicit unsandboxed fallback) or `sandbox` is
+`off`. Override per invocation with `--sandbox <mode>`. Inspect the effective
+policy with `/sandbox`; `/sandbox explain` prints degrade policy, egress
+enforcement, and the generated OS profile (bwrap flags or seatbelt SBPL)
+compiled from permission rules.
 
 **Shared writable roots (default usability):** under any non-`off` mode the
 sandbox keeps common scratch dirs writable (`/tmp`, `/var/tmp`, `$TMPDIR`,
@@ -391,16 +392,35 @@ container filters. It is **not** a third independent system:
 |---|---|
 | `webfetch` | `network.allow` host/CIDR allowlist + SSRF private blocks |
 | `websearch` | `network.allow` on the search API host + SSRF private blocks; result domain filters are separate tool args |
-| bash preflight (v1) | Same allowlist via argv parse + actionfacts network projection for `curl`/`wget`/`ssh`/`scp`/`sftp`/`nc` (and common wrappers). Outside list → `network_denied`. Unparseable destinations on those clients fail closed when the list is non-empty. **Not** a full shell/network proxy. |
+| bash preflight | Fail-closed when allow is non-empty and OS host net is on: known clients (`curl`/`wget`/`ssh`/…) must match allow; interpreters, `/dev/tcp`, package network subcommands, and unknown binaries → `network_denied`. Skipped when OS `NoNetwork`. **Not** a full shell/network proxy. |
 | bash OS profile | host networking on by default (`Policy.NoNetwork` zero value / `NetworkEnabled()`); off only when `webfetch`, `websearch`, and `mcp` are all hard-deny on `*` (all-or-nothing; **no** per-host filter inside bwrap/seatbelt; no Windows host filter) |
 | permission rules | `webfetch` / `websearch` / `bash` ask/allow/deny patterns (prompt posture), independent of the hard allowlist |
 | container net | `container.network.mode` (`default`\|`none`); `container.network.allow` reserved (same host/CIDR shape as `network.allow`) |
 
+**Sandbox degrade (`sandboxAllowDegrade`):** default `false`. When `true`, a
+missing OS backend may run bash unsandboxed (with a one-shot warning). When
+`false`, non-off sandbox modes return `sandbox_denied` instead of silent
+degrade (#1030).
 
-`/sandbox explain` prints the effective allowlist, an `egress enforcement:`
-line (`preflight` when allow is set; `OS host filter: none` documents the
-platform gap), and bash `network: on/off`. Prefer `webfetch` for ordinary page
-fetches; use bash preflight when agents still shell out to curl/ssh.
+**Bash secrets (`bashSecrets`):** map of env var name → secret ref injected
+into the bash tool process only:
+
+```jsonc
+{
+  "sandboxAllowDegrade": false,
+  "bashSecrets": {
+    "GITHUB_TOKEN": "secret://env/GITHUB_TOKEN"
+  }
+}
+```
+
+Bash does **not** inherit the full Strike environment (minimal documented
+keys only — PATH, HOME, locale, common toolchain roots). Secret values never
+appear in events or logs. See [secrets.md](secrets.md).
+
+`/sandbox explain` prints the effective allowlist, degrade policy, an
+`egress enforcement:` line, and bash `network: on/off`. Prefer `webfetch` for
+ordinary page fetches; use allowlisted curl when agents still shell out.
 
 **Web search (`webSearch`):** configures the `websearch` tool backend. Search
 discovers titles/URLs/snippets; use `webfetch` to retrieve a selected page.
@@ -1613,6 +1633,9 @@ Lifecycle hooks live in the same JSON config under `hooks` (global then
 project **concatenate**). Each entry is either a **declarative rule**
 (`action`) or a **shell command** (`command`) — not both.
 
+**Vocabulary version:** `1.0.0` (`tool.LifecycleVocabularyVersion`). Bump only
+when event names or payload contracts change in a breaking way.
+
 ```json
 {
   "hooks": [
@@ -1628,6 +1651,11 @@ project **concatenate**). Each entry is either a **declarative rule**
       "message": "writes blocked by policy"
     },
     {
+      "event": "session_start",
+      "action": "notify",
+      "message": "session began"
+    },
+    {
       "event": "post_tool_use",
       "matcher": "edit",
       "command": "echo ok",
@@ -1639,32 +1667,74 @@ project **concatenate**). Each entry is either a **declarative rule**
 
 | Field | Notes |
 |---|---|
-| `event` | `pre_tool_use`, `post_tool_use`, `turn_start`, `turn_end` |
-| `matcher` | doublestar on tool name; empty/`*` = all (turn events: empty/`*` only) |
-| `action` | `log`, `block`, or `notify` (block only on `pre_tool_use`) |
+| `event` | lifecycle name (see table below) |
+| `matcher` | doublestar on **subject** (tool name, phase, permission, child id, …); empty/`*` = all; subject-less events match empty/`*` only |
+| `action` | `log`, `block`, or `notify` (**block only on `pre_tool_use`**) |
 | `message` | optional block/notify text |
-| `command` | `bash -c` with event JSON on stdin (shell hooks: tool events) |
+| `command` | `bash -c` with event JSON on stdin |
 | `timeoutMs` | shell bound; default 30000, max 120000 |
+
+### Lifecycle events (v1.0.0)
+
+| Event | When | Shell may block? |
+|---|---|---|
+| `session_start` | fresh engine `Run` (no resume seed) | no |
+| `session_resume` | `QuietStartup` or seeded `InitialMessages` | no |
+| `session_end` | engine `Run` shutdown | no |
+| `turn_start` / `turn_end` | each user turn | no |
+| `provider_attempt` | each provider stream attempt | no |
+| `provider_retry` | transient provider retry scheduled | no |
+| `permission_resolution` | after each `PermissionDecided` | no |
+| `compaction` | after successful history compaction | no |
+| `phase_transition` | workflow phase enter/clear/recovery | no |
+| `child_lifecycle` | child agent started / completed | no |
+| `verification_gate` | independent completion gates start/result | no |
+| `pre_tool_use` | before tool Execute | **yes** (exit ≠ 0 or `action: block`) |
+| `post_tool_use` | after tool Execute | no (observe / inject only; non-zero is observe-only for shell on non-pre events — post shell non-zero still marks feedback blocked for **compat**) |
+
+### Dispatch order
+
+1. **Declarative rules** for the event (config order; first-match block on `pre_tool_use` wins last message).
+2. **Shell hooks** for the event (config order).
+
+Tool path specifically:
+
+`declarative pre_tool_use` → `shell pre_tool_use` → **Execute** → `shell post_tool_use` → `declarative post_tool_use`
+
+### Failure, timeout, cancellation
+
+| Condition | Policy |
+|---|---|
+| Shell exit 0 | allow; stdout may inject into tool feedback |
+| Shell exit ≠ 0 on `pre_tool_use` | **block** tool (no Execute) |
+| Shell exit ≠ 0 on other events | **fail-open** (observe-only); inject recorded when useful |
+| Timeout / start failure | **fail-open** |
+| Context cancel | return cancel; partial inject kept |
+| Hard permission **deny** | evaluated **before** hooks; hooks **cannot widen** a hard deny into allow |
+| Completed side effects | hooks after Execute cannot roll back tool work; post hooks are observational (+ optional feedback inject) |
 
 Invalid rows are dropped at load. Peer event-name mapping (CC/OpenCode/Crush):
 [peer-ecosystem.md](peer-ecosystem.md#hooks-alignment).
 
 ### Shell hook stdin payload
 
-Shell hooks (`command`) receive one JSON object on stdin (not env vars):
+Shell hooks (`command`) receive one JSON object on stdin (not env vars). Payloads
+are **secret-redacted** and **field-bounded** before marshal (`schema_version` =
+vocabulary version).
 
 | Field | When | Notes |
 |---|---|---|
-| `event` | always | `pre_tool_use` or `post_tool_use` |
+| `schema_version` | always | e.g. `1.0.0` |
+| `event` | always | lifecycle name |
 | `session_id` | always | session id |
+| `turn_id` / `provider_request_id` / `attempt` / `depth` / `parent_session_id` | when known | stable correlation for replay |
 | `cwd` | always | engine workdir |
-| `tool_name` | tool events | e.g. `edit`, `write` |
-| `tool_call_id` | tool events | call id |
-| `tool_input` | tool events | raw tool args object (`filePath` for `edit`/`write`) |
-| `tool_output` | `post_tool_use` | tool result text |
-| `is_error` | `post_tool_use` | `true` when the tool failed |
+| `subject` | when set | matcher target (tool, phase, permission, …) |
+| `tool_name` / `tool_call_id` / `tool_input` | tool events | args redacted+bounded |
+| `tool_output` / `is_error` | `post_tool_use` | output redacted+bounded |
+| `status` / `detail` | lifecycle events | short machine label + redacted detail |
 
-Exit **0** allows; non-zero **blocks** (pre: deny tool; post: mark the completed call blocked and replace feedback). Timeouts and start failures **fail-open**. Prefer always-exit-0 recipes for non-blocking side effects (formatters, notify).
+Exit **0** allows; non-zero **blocks only on `pre_tool_use`**. Timeouts and start failures **fail-open**. Prefer always-exit-0 recipes for non-blocking side effects (formatters, notify). **Compat:** `post_tool_use` shell non-zero still marks the completed call's feedback blocked (historical behavior) but cannot undo side effects.
 
 ### Post-edit formatters (recipe)
 
