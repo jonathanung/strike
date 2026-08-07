@@ -499,8 +499,10 @@ type Engine struct {
 	activeTurnID string
 	// pendingSteer holds at most one active-turn redirect. Applied at the next
 	// safe Provider.Stream boundary (never mid-tool-call). Replaces prior
-	// pending steer text rather than queueing.
-	pendingSteer *pendingSteer
+	// pending steer text rather than queueing. Guarded by pendingSteerMu
+	// (Run handleOp vs turn worker).
+	pendingSteerMu sync.Mutex
+	pendingSteer   *pendingSteer
 
 	// mailbox holds unread peer/team messages for this session. Delivery is
 	// at tool-round / turn boundaries (injectPendingMailbox /

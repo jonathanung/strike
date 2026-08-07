@@ -112,22 +112,40 @@ func (e *Engine) handleSteer(op protocol.Steer) {
 		return
 	}
 	// Replace prior pending steer (latest redirect wins).
+	e.pendingSteerMu.Lock()
 	e.pendingSteer = &pendingSteer{
 		text:         op.Text,
 		images:       append([]protocol.ImageAttachment(nil), op.Images...),
 		targetTurnID: e.activeTurnID,
 	}
+	e.pendingSteerMu.Unlock()
+}
+
+// takePendingSteer atomically clears and returns any pending steer.
+func (e *Engine) takePendingSteer() *pendingSteer {
+	e.pendingSteerMu.Lock()
+	ps := e.pendingSteer
+	e.pendingSteer = nil
+	e.pendingSteerMu.Unlock()
+	return ps
+}
+
+// hasPendingSteer reports whether a steer is waiting (racy peek for branch
+// decisions; takePendingSteer is the authoritative claim).
+func (e *Engine) hasPendingSteer() bool {
+	e.pendingSteerMu.Lock()
+	defer e.pendingSteerMu.Unlock()
+	return e.pendingSteer != nil
 }
 
 // applyPendingSteer injects pending steer as a user message at a safe history
 // boundary and emits a durable TurnSteered event. No-op when none pending.
 // Never called mid-tool-call.
 func (e *Engine) applyPendingSteer(turnID, mode string) {
-	ps := e.pendingSteer
+	ps := e.takePendingSteer()
 	if ps == nil {
 		return
 	}
-	e.pendingSteer = nil
 	corr := e.baseCorr()
 	corr.TurnID = turnID
 	// Durable user.message so resume sees the guidance in the transcript.
@@ -149,11 +167,10 @@ func (e *Engine) applyPendingSteer(turnID, mode string) {
 // with a visible TurnSteered(queued_fallback) event. Used on cancel/interrupt
 // when a boundary was never reached.
 func (e *Engine) fallbackSteerToQueue(turnID string) {
-	ps := e.pendingSteer
+	ps := e.takePendingSteer()
 	if ps == nil {
 		return
 	}
-	e.pendingSteer = nil
 	corr := e.baseCorr()
 	corr.TurnID = turnID
 	e.emit(protocol.TurnSteered{
