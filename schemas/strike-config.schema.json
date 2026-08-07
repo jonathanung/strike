@@ -25,7 +25,12 @@
     },
     "systemPrompt": {
       "type": "string",
-      "description": "Optional extra system prompt text."
+      "description": "User system prompt. Replaces the provider overlay (mode=overlay, default) or shared+provider defaults (mode=defaults). Whitespace-only is ignored. Custom agent persona bodies win over this when that agent is selected."
+    },
+    "systemPromptMode": {
+      "type": "string",
+      "description": "How systemPrompt composes with builtins: overlay (replace provider slot only; default) or defaults (replace shared+provider; tools/env/instructions stay).",
+      "enum": ["overlay", "defaults"]
     },
     "leanCode": {
       "type": "string",

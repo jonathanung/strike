@@ -1495,6 +1495,23 @@ func TestNormalizePruneProtectTools(t *testing.T) {
 	}
 }
 
+func TestNormalizeSystemPromptMode(t *testing.T) {
+	cases := map[string]string{
+		"":                 SystemPromptModeOverlay,
+		"overlay":          SystemPromptModeOverlay,
+		"OVERLAY":          SystemPromptModeOverlay,
+		"defaults":         SystemPromptModeDefaults,
+		"default":          SystemPromptModeDefaults,
+		"replace-defaults": SystemPromptModeDefaults,
+		"unknown-mode-xyz": SystemPromptModeOverlay,
+	}
+	for in, want := range cases {
+		if got := NormalizeSystemPromptMode(in); got != want {
+			t.Errorf("NormalizeSystemPromptMode(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestNormalizeLeanCode(t *testing.T) {
 	cases := map[string]string{
 		"":        "",

@@ -34,6 +34,12 @@ type Config struct {
 	Model        string          `json:"model,omitempty"`
 	Effort       protocol.Effort `json:"effort,omitempty"`
 	SystemPrompt string          `json:"systemPrompt,omitempty"`
+	// SystemPromptMode controls how systemPrompt composes with builtins:
+	// "overlay" (default) replaces the provider/persona overlay slot only;
+	// "defaults" replaces shared + provider/persona with the user text while
+	// keeping tools, environment, instructions, memory, and ledger layers.
+	// Empty means overlay. Unknown values are ignored at load time.
+	SystemPromptMode string `json:"systemPromptMode,omitempty"`
 	// LeanCode is agent-scoped lean-code guidance intensity: off|lite|full.
 	// Empty means lite (default). Unknown values are ignored at load time.
 	LeanCode string `json:"leanCode,omitempty"`
@@ -930,6 +936,7 @@ func read(path string) (Config, error) {
 	c.Notify = NormalizeNotify(c.Notify)
 	c.Autoupdate = NormalizeAutoupdate(c.Autoupdate)
 	c.LeanCode = NormalizeLeanCode(c.LeanCode)
+	c.SystemPromptMode = NormalizeSystemPromptMode(c.SystemPromptMode)
 	c.DeferTools = NormalizeDeferTools(c.DeferTools)
 	// Keybinds: unknown ids / invalid chords fail the layer (and thus Load).
 	if err := ValidateKeybinds(c.Keybinds); err != nil {
@@ -1266,6 +1273,25 @@ func EffectiveAutoupdate(s string) string {
 	return AutoupdateNotify
 }
 
+// SystemPromptMode values for Config.SystemPromptMode / engine composition.
+const (
+	SystemPromptModeOverlay  = "overlay"
+	SystemPromptModeDefaults = "defaults"
+)
+
+// NormalizeSystemPromptMode maps config aliases to overlay|defaults.
+// Empty and unknown values default to overlay (preserve historical behavior).
+func NormalizeSystemPromptMode(s string) string {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case SystemPromptModeDefaults, "default", "replace-defaults", "replace_defaults":
+		return SystemPromptModeDefaults
+	case SystemPromptModeOverlay, "provider", "persona", "":
+		return SystemPromptModeOverlay
+	default:
+		return SystemPromptModeOverlay
+	}
+}
+
 // LeanCode intensity values for Config.LeanCode / engine lean-code overlays.
 const (
 	LeanCodeOff  = "off"
@@ -1274,7 +1300,7 @@ const (
 )
 
 // NormalizeLeanCode maps config aliases to off|lite|full.
-// Empty and unknown values become "" (engine default = lite).
+// Empty and unknown values default to lite.
 func NormalizeLeanCode(s string) string {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "off", "false", "0", "no", "never", "none":
@@ -1343,6 +1369,9 @@ func merge(base, layer Config) Config {
 	}
 	if layer.SystemPrompt != "" {
 		base.SystemPrompt = layer.SystemPrompt
+	}
+	if layer.SystemPromptMode != "" {
+		base.SystemPromptMode = layer.SystemPromptMode
 	}
 	if layer.LeanCode != "" {
 		base.LeanCode = layer.LeanCode

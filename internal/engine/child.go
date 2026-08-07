@@ -379,6 +379,7 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 		Memory:                     e.opts.Memory,
 		Ledger:                     e.opts.Ledger,
 		SystemPrompt:               e.opts.SystemPrompt,
+		SystemPromptMode:           e.opts.SystemPromptMode,
 		LeanCode:                   e.opts.LeanCode,
 		HarnessRegistry:            e.opts.HarnessRegistry,
 		Scheduler:                  e.opts.Scheduler,          // share process-local pools
