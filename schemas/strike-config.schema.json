@@ -551,11 +551,25 @@
           "description": "Bound traces/runs by total bytes (0 = unlimited).",
           "minimum": 0
         },
+        "maxSessionCostUSD": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Outer session cost envelope in USD (#577). Zero = unlimited. Enforced when catalog pricing is available."
+        },
+        "maxTurnTokens": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Per-turn accumulated stream token ceiling (#577). Zero = unlimited."
+        },
         "agentBudget": {
           "$ref": "#/$defs/agentBudget"
         },
         "delegationPolicy": {
           "$ref": "#/$defs/delegationPolicy"
+        },
+        "turnTimeoutS": {
+          "type": "integer",
+          "description": "Root-turn wall-clock deadline in seconds. 0/omitted = default 1800 (30m). Negative disables. Fresh per turn; resume does not inherit an expired deadline."
         },
         "auditRetentionMaxEvents": {
           "type": "integer",

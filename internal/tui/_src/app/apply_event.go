@@ -345,6 +345,8 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 			m.setNotice(msg, ev.Level == protocol.ContextFitCritical)
 		}
 		cmd = m.broadcastContextState()
+	case protocol.SessionBudgetWarning:
+		cmd = m.applySessionBudgetWarning(ev)
 	case protocol.DiagnosticBundle:
 		cmd = m.applyDiagnosticBundle(ev)
 	case protocol.CompactionCompleted:
@@ -822,6 +824,8 @@ func eventCorrelation(ev protocol.Event) (protocol.Correlation, bool) {
 	case protocol.EffectivePrompt:
 		return e.Correlation, true
 	case protocol.ContextFitWarning:
+		return e.Correlation, true
+	case protocol.SessionBudgetWarning:
 		return e.Correlation, true
 	case protocol.ContextControlsSelected:
 		return e.Correlation, true

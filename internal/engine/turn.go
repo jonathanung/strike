@@ -211,6 +211,12 @@ func (e *Engine) startNextPendingUserInput(ctx context.Context) bool {
 	if e.turnActive() || e.prov == nil || ctx.Err() != nil {
 		return false
 	}
+	if e.sessionBudget != nil && e.sessionBudget.Exhausted() {
+		// Drop queued input; surface the envelope stop once.
+		e.pendingUserInputs = nil
+		_ = e.rejectUserInputIfBudgetExhausted()
+		return false
+	}
 	item := e.pendingUserInputs[0]
 	e.pendingUserInputs = e.pendingUserInputs[1:]
 	if len(e.pendingUserInputs) == 0 {
@@ -313,6 +319,13 @@ func (e *Engine) runTurn(ctx context.Context, text string, images []protocol.Ima
 	}
 	// Promote soft-budget finalization armed → active for this turn (#879).
 	e.noteBudgetFinalizationTurnStart()
+	// Per-turn token ceiling resets each turn (#577).
+	if e.turnTokens != nil {
+		e.turnTokens.reset()
+	}
+	e.sessionBudgetStop = false
+	e.sessionBudgetStopKind = ""
+	e.sessionBudgetStopMsg = ""
 	e.emit(protocol.UserMessage{Correlation: turnCorr, Text: text, Images: images})
 	e.maybeTitleSession(text)
 	e.emit(protocol.TurnStarted{Correlation: turnCorr})
@@ -376,6 +389,12 @@ func (e *Engine) runTurn(ctx context.Context, text string, images []protocol.Ima
 			ToolCalls: outcome.calls,
 			Reasoning: outcome.reasoning,
 		})
+		// Session / per-turn envelope hard stop (#577): end after this stream
+		// with a renderable event (already emitted from emitUsage).
+		if e.sessionBudgetStop {
+			e.finishSessionBudgetStop(ctx, finishing, reqCorr)
+			return
+		}
 		if len(outcome.calls) == 0 {
 			// Final assistant message with no tools. If a steer arrived during
 			// this stream, continue the turn with cancel_restart semantics
@@ -421,6 +440,15 @@ func (e *Engine) runTurn(ctx context.Context, text string, images []protocol.Ima
 		// Apply tool-queued agent switch so the next Stream uses the new
 		// agent system prompt (not only after TurnCompleted).
 		e.applyPendingAgent()
+		// Envelope may have tripped via child usage while tools ran (#577).
+		if e.sessionBudgetStop || (e.sessionBudget != nil && e.sessionBudget.Exhausted()) {
+			if !e.sessionBudgetStop {
+				e.armSessionBudgetStop(protocol.SessionBudgetKindCostUSD,
+					"session cost budget exhausted")
+			}
+			e.finishSessionBudgetStop(ctx, finishing, reqCorr)
+			return
+		}
 	}
 }
 
@@ -1321,15 +1349,21 @@ func (e *Engine) recordSessionPR(corr protocol.Correlation) func(tool.SessionPR)
 // canceledOrTimeoutToolResult settles a started tool that ended via cancel or
 // deadline. Partial Output from the tool is preserved and marked incomplete;
 // empty output uses the standard canceled/timeout feedback text.
+//
+// DeadlineExceeded on ctx wins over a tool-stamped canceled code: tools often
+// observe ctx.Done() and report canceled generically, but the turn wall-clock
+// must surface as timeout so operators can distinguish interrupt from expiry.
 func (e *Engine) canceledOrTimeoutToolResult(ctx context.Context, callID string, corr protocol.Correlation, res tool.Result) provider.Message {
 	code := res.ErrorCode
 	switch {
+	case ctx != nil && errors.Is(ctx.Err(), context.DeadlineExceeded):
+		code = protocol.ErrorCodeTimeout
 	case code == tool.ErrorCodeTimeout || code == protocol.ErrorCodeTimeout:
 		code = protocol.ErrorCodeTimeout
 	case code == tool.ErrorCodeCanceled || code == protocol.ErrorCodeCanceled:
 		code = protocol.ErrorCodeCanceled
-	case ctx != nil && errors.Is(ctx.Err(), context.DeadlineExceeded):
-		code = protocol.ErrorCodeTimeout
+	case errors.Is(ctx.Err(), context.Canceled):
+		code = protocol.ErrorCodeCanceled
 	default:
 		code = protocol.ErrorCodeCanceled
 	}
@@ -1476,6 +1510,10 @@ func (e *Engine) fireHookRules(corr protocol.Correlation, event, subject, callID
 // used = InputTokens + CacheReadTokens + CacheCreationTokens + OutputTokens;
 // if all those are 0 but TotalTokens > 0, used = TotalTokens and input/output/
 // cache stay unknown (a total alone is not a measured zero on the parts).
+//
+// Also accumulates session cost / per-turn token envelopes and emits
+// SessionBudgetWarning at 50/80/100% (#577). Hard stop is armed here; the
+// turn loop ends the turn with a renderable EngineError (not a silent halt).
 func (e *Engine) emitUsage(corr protocol.Correlation, u *provider.Usage) {
 	if u == nil {
 		return
@@ -1507,6 +1545,112 @@ func (e *Engine) emitUsage(corr protocol.Correlation, u *provider.Usage) {
 		Used:          protocol.KnownTokens(used),
 		Source:        source,
 	})
+	e.noteSessionBudgets(corr, *u, used)
+}
+
+// noteSessionBudgets updates shared session cost and per-turn token ceilings.
+func (e *Engine) noteSessionBudgets(corr protocol.Correlation, u provider.Usage, usedTokens int) {
+	if e == nil {
+		return
+	}
+	// Session cost envelope (shared root + children).
+	if e.sessionBudget != nil {
+		note := e.sessionBudget.noteUsage(e.provName, e.model, u)
+		for _, level := range note.Warnings {
+			atCap := level == protocol.SessionBudgetLevel100
+			msg := sessionBudgetCostMessage(level, note.CostUSD, note.MaxCostUSD, atCap)
+			e.emit(protocol.SessionBudgetWarning{
+				Correlation: corr,
+				Level:       level,
+				Kind:        protocol.SessionBudgetKindCostUSD,
+				Exhausted:   atCap,
+				CostUSD:     note.CostUSD,
+				MaxCostUSD:  note.MaxCostUSD,
+				Ratio:       safeRatio(note.CostUSD, note.MaxCostUSD),
+				Message:     msg,
+			})
+		}
+		if note.Exhausted {
+			msg := sessionBudgetCostMessage(protocol.SessionBudgetLevel100, note.CostUSD, note.MaxCostUSD, true)
+			e.armSessionBudgetStop(protocol.SessionBudgetKindCostUSD, msg)
+		}
+	}
+	// Per-turn token ceiling (this engine only).
+	if e.turnTokens != nil && usedTokens > 0 {
+		tn := e.turnTokens.note(usedTokens)
+		for _, level := range tn.Warnings {
+			atCap := level == protocol.SessionBudgetLevel100
+			msg := sessionBudgetTurnMessage(level, tn.Used, tn.Max, atCap)
+			e.emit(protocol.SessionBudgetWarning{
+				Correlation: corr,
+				Level:       level,
+				Kind:        protocol.SessionBudgetKindTurnTokens,
+				Exhausted:   atCap,
+				TokensUsed:  tn.Used,
+				MaxTokens:   tn.Max,
+				Ratio:       safeRatio(float64(tn.Used), float64(tn.Max)),
+				Message:     msg,
+			})
+		}
+		if tn.Exhausted {
+			msg := sessionBudgetTurnMessage(protocol.SessionBudgetLevel100, tn.Used, tn.Max, true)
+			e.armSessionBudgetStop(protocol.SessionBudgetKindTurnTokens, msg)
+		}
+	}
+}
+
+func safeRatio(used, max float64) float64 {
+	if max <= 0 {
+		return 0
+	}
+	return used / max
+}
+
+func (e *Engine) armSessionBudgetStop(kind, msg string) {
+	if e == nil {
+		return
+	}
+	e.sessionBudgetStop = true
+	if e.sessionBudgetStopKind == "" {
+		e.sessionBudgetStopKind = kind
+	}
+	if e.sessionBudgetStopMsg == "" {
+		e.sessionBudgetStopMsg = msg
+	}
+}
+
+// finishSessionBudgetStop emits EngineError + TurnCompleted for a hard envelope stop.
+func (e *Engine) finishSessionBudgetStop(ctx context.Context, finishing chan struct{}, corr protocol.Correlation) {
+	msg := e.sessionBudgetStopMsg
+	if msg == "" {
+		msg = "session budget exhausted"
+	}
+	e.emit(protocol.EngineError{
+		Correlation: corr,
+		Message:     msg,
+		Code:        protocol.ErrorCodeBudgetExhausted,
+	})
+	e.completeTurn(ctx, finishing, corr, "budget_exhausted")
+}
+
+// rejectUserInputIfBudgetExhausted blocks new turns when the shared session
+// cost tracker has crossed its ceiling. The Options.SessionBudgetExhausted hook
+// alone still only gates delegation fan-out (policy), not idle UserInput.
+// Returns true when the input was rejected. EngineError is emitted once per
+// reject; SessionBudgetWarning is not re-fired (already emitted at trip).
+func (e *Engine) rejectUserInputIfBudgetExhausted() bool {
+	if e == nil || e.sessionBudget == nil || !e.sessionBudget.Exhausted() {
+		return false
+	}
+	cost, _ := e.sessionBudget.CostUSD()
+	max := e.sessionBudget.MaxCostUSD()
+	msg := sessionBudgetCostMessage(protocol.SessionBudgetLevel100, cost, max, true)
+	e.emit(protocol.EngineError{
+		Correlation: e.sessionCorr(),
+		Message:     msg,
+		Code:        protocol.ErrorCodeBudgetExhausted,
+	})
+	return true
 }
 
 func (e *Engine) toolNames() string {

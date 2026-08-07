@@ -971,6 +971,7 @@ func TestEventTypeCoverage(t *testing.T) {
 		"prompt.effective":       EffectivePrompt{},
 		"diagnostic.bundle":      DiagnosticBundle{},
 		"context.fit_warning":    ContextFitWarning{},
+		"session.budget_warning": SessionBudgetWarning{},
 		"context.controls":       ContextControlsSelected{},
 	}
 	for typ, ev := range want {

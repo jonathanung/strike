@@ -140,7 +140,10 @@ type Options struct {
 	// TurnTimeout bounds each turn independently of the Run parent context.
 	// Zero means no per-turn deadline (cancel only via Interrupt / parent ctx).
 	// On expiry the turn ends with stopReason "timeout" and tool results use
-	// error code timeout when applicable.
+	// error code timeout when applicable. The CLI composition root applies a
+	// product default (session.turnTimeoutS / --turn-timeout; 30m) for root
+	// engines; embedders and tests keep zero-off unless set. Each startTurn
+	// mints a fresh deadline — resume does not inherit an expired wall clock.
 	TurnTimeout time.Duration
 	// StreamRetryBackoff returns the wait before starting nextAttempt
 	// (1-based, >=2). nil uses a small exponential default. Tests may return
@@ -284,17 +287,30 @@ type Options struct {
 	OverlapPolicy string
 	// DefaultChildBudget is the session default for per-child limits (#774).
 	// Spawn-time task budget fields overlay non-zero values. Zero fields mean
-	// unlimited (soft stall/loop signals still apply). Nested under any future
-	// session maxSessionCostUSD (#577) outer envelope.
+	// unlimited (soft stall/loop signals still apply). Nested under the
+	// session maxSessionCostUSD (#577) outer envelope when configured.
 	DefaultChildBudget tool.AgentBudgetLimits
+	// MaxSessionCostUSD is the outer session cost envelope in USD (#577).
+	// Zero means unlimited. Shared across root + children via SessionBudget.
+	MaxSessionCostUSD float64
+	// MaxTurnTokens caps accumulated stream tokens (used) within one engine
+	// turn (#577). Zero means unlimited. Per-engine (not shared with children).
+	MaxTurnTokens int
+	// EstimateUsageCost prices a provider.Usage report in USD. nil disables
+	// cost accumulation (limits accepted but not enforced until pricing lands).
+	EstimateUsageCost EstimateUsageCostFunc
+	// SessionBudget is the shared cost tracker for this root lineage. Root New
+	// creates one when MaxSessionCostUSD > 0 or EstimateUsageCost is set;
+	// children inherit the pointer. Tests may inject a prebuilt tracker.
+	SessionBudget *sessionBudget
 	// DelegationPolicy is the pre-spawn worthiness gate (#876). Empty mode
 	// stays off (legacy always-spawn for tests/embedders); the CLI sets
 	// enforce when config omits the block. Soft "local" refuses bare
 	// tiny/overlap spawns unless force_delegate; hard ceilings never override.
 	DelegationPolicy DelegationPolicyConfig
 	// SessionBudgetExhausted, when set, is consulted by the delegation policy
-	// hard ceiling (budget_exhausted). Intended for session cost envelope
-	// (#577); nil means cost does not block fan-out.
+	// hard ceiling (budget_exhausted). When nil and SessionBudget is set, New
+	// wires it to SessionBudget.Exhausted automatically (#577).
 	SessionBudgetExhausted func() bool
 	// PersistSessionMeta, when set, writes durable session metadata (sidecar).
 	// The engine emits protocol.SessionMeta after a successful persist.
@@ -578,6 +594,16 @@ type Engine struct {
 	budgetFinalKind     string
 	budgetFinalTurnDone bool
 
+	// sessionBudget is the shared outer cost envelope (#577); may be nil.
+	sessionBudget *sessionBudget
+	// turnTokens tracks per-turn token ceiling (#577); nil when unlimited.
+	turnTokens *turnTokenTracker
+	// sessionBudgetStop is set when a hard session/turn envelope trip should
+	// end the active turn after the current stream (not a silent halt).
+	sessionBudgetStop     bool
+	sessionBudgetStopKind string // cost_usd | turn_tokens
+	sessionBudgetStopMsg  string
+
 	// sessionTemp is the private OS temp scratch dir for path tools.
 	sessionTempMu sync.Mutex
 	sessionTemp   sessionTempState
@@ -719,6 +745,25 @@ func New(opts Options) *Engine {
 	}
 	opts.Team = team
 
+	// Session cost envelope (#577): share one tracker across root + children.
+	sb := opts.SessionBudget
+	if sb == nil && (opts.MaxSessionCostUSD > 0 || opts.EstimateUsageCost != nil) {
+		sb = newSessionBudget(opts.MaxSessionCostUSD, opts.EstimateUsageCost)
+	}
+	if sb != nil && opts.MaxSessionCostUSD > 0 && sb.maxCostUSD <= 0 {
+		// Prefer explicit Options ceiling when injecting a bare tracker in tests.
+		sb.mu.Lock()
+		sb.maxCostUSD = opts.MaxSessionCostUSD
+		sb.mu.Unlock()
+	}
+	if sb != nil && opts.EstimateUsageCost != nil && sb.estimate == nil {
+		sb.estimate = opts.EstimateUsageCost
+	}
+	opts.SessionBudget = sb
+	if opts.SessionBudgetExhausted == nil && sb != nil {
+		opts.SessionBudgetExhausted = sb.Exhausted
+	}
+
 	ckpt := tool.NewCheckpointStore()
 	persistDir := strings.TrimSpace(opts.CheckpointDir)
 	if persistDir == "-" {
@@ -750,6 +795,10 @@ func New(opts Options) *Engine {
 		priority:            opts.InitialPriority,
 		titled:              opts.InitialTitled,
 		phaseIndex:          -1,
+		sessionBudget:       sb,
+	}
+	if opts.MaxTurnTokens > 0 {
+		e.turnTokens = newTurnTokenTracker(opts.MaxTurnTokens)
 	}
 	if len(opts.InitialMessages) > 0 {
 		e.messages = append([]provider.Message(nil), opts.InitialMessages...)
