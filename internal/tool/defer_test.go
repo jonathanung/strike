@@ -10,10 +10,10 @@ import (
 )
 
 func TestIsCoreTool(t *testing.T) {
+	// Minimal always-visible coding surface (#988).
 	for _, name := range []string{
 		"read", "glob", "grep", "edit", "write", "apply_patch", "move", "delete", "bash",
-		"task", "task_status", "delegate", "wait", "agent_roster", "agent_ownership", "agent_message", "agent_broadcast", "agent_thread", "team_task",
-		"plan_write", "plan_read", "plan_delegate", "toolsearch", "question", "enter_plan_mode",
+		"task", "toolsearch", "question",
 	} {
 		if !IsCoreTool(name) {
 			t.Errorf("IsCoreTool(%q) = false, want true", name)
@@ -22,10 +22,18 @@ func TestIsCoreTool(t *testing.T) {
 			t.Errorf("IsDeferredTool(%q) = true, want false", name)
 		}
 	}
+	// Orchestration, compatibility shims, plan tools, and optional built-ins defer.
 	for _, name := range []string{
+		"task_status", "task_read", "task_message", "task_interrupt",
+		"delegate", "wait",
+		"agent_roster", "agent_ownership", "agent_message", "agent_broadcast", "agent_thread",
+		"team_task", "patch_collab",
+		"plan_write", "plan_read", "plan_delegate",
+		"enter_plan_mode", "exit_plan_mode", "phase_done",
 		"webfetch", "websearch", "sleep", "skill", "todowrite", "memory_read",
 		"issue_write", "notebook_edit", "mcp_demo_ping",
 		"definition", "references", "symbols", "diagnostics",
+		"artifact_write", "artifact_read", "ledger_write", "ledger_read", "context_bundle",
 	} {
 		if IsCoreTool(name) {
 			t.Errorf("IsCoreTool(%q) = true, want false", name)
@@ -80,6 +88,41 @@ func TestSchemasForProviderOmitUntilDiscover(t *testing.T) {
 	if !reg.Discovered("webfetch") || reg.Discovered("sleep") {
 		t.Fatalf("Discovered flags wrong: webfetch=%v sleep=%v",
 			reg.Discovered("webfetch"), reg.Discovered("sleep"))
+	}
+}
+
+func TestSchemasForProviderOmitsOrchestrationUntilDiscover(t *testing.T) {
+	reg := NewRegistry(
+		NewRead(), NewBash(), NewTask(), NewQuestion(),
+		NewDelegate(), NewWait(), NewAgentRoster(), NewAgentMessage(),
+		NewTeamTask(), NewEnterPlanMode(), NewExitPlanMode(), NewPhaseDone(),
+	)
+	// plan tools need a store; use stubs via Register of tools that don't need store if possible
+	reg.Register(NewToolSearch(reg))
+	reg.SetDeferLoading(true)
+
+	names := schemaNameSet(reg.SchemasForProvider())
+	for _, core := range []string{"read", "bash", "task", "question", "toolsearch"} {
+		if !names[core] {
+			t.Errorf("core %q missing under defer: %v", core, names)
+		}
+	}
+	for _, deferred := range []string{
+		"delegate", "wait", "agent_roster", "agent_message", "team_task",
+		"enter_plan_mode", "exit_plan_mode", "phase_done",
+	} {
+		if names[deferred] {
+			t.Errorf("orchestration %q should be deferred: %v", deferred, names)
+		}
+	}
+
+	reg.Discover("delegate", "agent_roster", "enter_plan_mode")
+	names = schemaNameSet(reg.SchemasForProvider())
+	if !names["delegate"] || !names["agent_roster"] || !names["enter_plan_mode"] {
+		t.Fatalf("discovered orchestration missing: %v", names)
+	}
+	if names["wait"] || names["team_task"] {
+		t.Fatalf("undiscovered orchestration leaked: %v", names)
 	}
 }
 

@@ -464,6 +464,10 @@ func TestWebFetchNetworkAllowlist(t *testing.T) {
 		if !strings.Contains(err.Error(), "allowlist") {
 			t.Fatalf("err = %v", err)
 		}
+		var ce *CodedError
+		if !errors.As(err, &ce) || ce.Code != CodeNetworkDenied {
+			t.Fatalf("err = %v (%T), want network_denied", err, err)
+		}
 	})
 
 	t.Run("redirect off allowlist denies", func(t *testing.T) {

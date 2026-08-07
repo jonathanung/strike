@@ -314,15 +314,12 @@ func (r Rule) matches(permission, pattern string) bool {
 // Evaluate flattens the rulesets in order and returns the action of the last
 // matching rule, so later layers (project config, session grants) override
 // earlier ones. Default is Ask.
+//
+// For bash and selected tools, evaluation may consult authoritative action
+// facts (#888); see EvaluateDetailed. Non-authoritative parses never drive
+// deny — only the raw pattern path applies.
 func Evaluate(permission, pattern string, sets ...Ruleset) Action {
-	action := Ask
-	for _, set := range sets {
-		for _, rule := range set {
-			if rule.matches(permission, pattern) {
-				action = rule.Action
-			}
-		}
-	}
+	action, _ := EvaluateDetailed(permission, pattern, sets...)
 	return action
 }
 
@@ -692,8 +689,8 @@ func (s *Service) AskWithCorrelation(ctx context.Context, req tool.AskRequest, c
 func (s *Service) ask(ctx context.Context, req tool.AskRequest, corr protocol.Correlation) error {
 	s.mu.Lock()
 	s.pruneExpiredLocked(s.now())
-	action := s.evaluateLocked(req.Permission, req.Patterns)
-	ex := s.explainWorstLocked(req.Permission, req.Patterns)
+	det := s.evaluateDetailedLocked(req.Permission, req.Patterns)
+	action := det.Action
 
 	// Tool-chain correlation runs after ruleset + mode so multi-step abuse can
 	// still Ask/Deny under yolo. Check before recording this step.
@@ -726,9 +723,9 @@ func (s *Service) ask(ctx context.Context, req tool.AskRequest, corr protocol.Co
 		if chainHit != nil && chainHit.Action == Deny {
 			// Chain hard-deny (e.g. retry storm) owns the model-facing reason.
 			reason = chainHit.Summary
-			ex.Action = Deny
+			det.Action = Deny
 		}
-		s.emitDecided(corr, req, action, "", "", ex, chainHit)
+		s.emitDecided(corr, req, action, "", "", det, chainHit)
 		return &DeniedError{Reason: reason}
 	}
 	s.nextID++
@@ -758,7 +755,7 @@ func (s *Service) ask(ctx context.Context, req tool.AskRequest, corr protocol.Co
 		Metadata:    req.Metadata,
 	})
 	// Audit: ask suspended (timeline KindPermission waiting).
-	s.emitDecided(corr, req, Ask, id, "", ex, chainHit)
+	s.emitDecided(corr, req, Ask, id, "", det, chainHit)
 
 	// Mark announced only after PermissionAsked returns. Any Reply that ran
 	// while unannounced left a deferred resolution for us to emit now.
@@ -802,17 +799,12 @@ func (s *Service) ask(ctx context.Context, req tool.AskRequest, corr protocol.Co
 
 // explainWorstLocked returns explain for the worst-case pattern (mu held).
 func (s *Service) explainWorstLocked(permission string, patterns []string) Explanation {
-	if len(patterns) == 0 {
-		patterns = []string{"*"}
-	}
-	worst := s.explainLocked(permission, patterns[0])
-	for _, pat := range patterns[1:] {
-		ex := s.explainLocked(permission, pat)
-		if ActionRank(ex.Action) < ActionRank(worst.Action) {
-			worst = ex
-		}
-	}
-	return worst
+	return s.evaluateDetailedLocked(permission, patterns).Explanation
+}
+
+// explainDetailedWorstLocked returns fact-aware explain for audit (mu held).
+func (s *Service) explainDetailedWorstLocked(permission string, patterns []string) DetailedExplanation {
+	return s.evaluateDetailedLocked(permission, patterns)
 }
 
 func actionFromDecision(d protocol.Decision) Action {
@@ -824,7 +816,7 @@ func actionFromDecision(d protocol.Decision) Action {
 
 // emitDecided publishes a redaction-safe audit event for timeline consumers.
 // chainHit may be nil; when set, ChainID/Rule/Summary are attached for forensics.
-func (s *Service) emitDecided(corr protocol.Correlation, req tool.AskRequest, action Action, requestID string, decision protocol.Decision, ex Explanation, chainHit *ChainHit) {
+func (s *Service) emitDecided(corr protocol.Correlation, req tool.AskRequest, action Action, requestID string, decision protocol.Decision, ex DetailedExplanation, chainHit *ChainHit) {
 	ev := protocol.PermissionDecided{
 		Correlation: corr,
 		RequestID:   requestID,
@@ -838,6 +830,12 @@ func (s *Service) emitDecided(corr protocol.Correlation, req tool.AskRequest, ac
 		ev.RulePermission = ex.Matched.Permission
 		ev.RulePattern = ex.Matched.Pattern
 		ev.RuleAction = string(ex.Matched.Action)
+	}
+	if ex.EvalPath != "" && ex.EvalPath != EvalPathNone {
+		ev.EvalPath = ex.EvalPath
+	}
+	if ex.FactSummary != "" {
+		ev.FactSummary = ex.FactSummary
 	}
 	if chainHit != nil {
 		ev.ChainID = chainHit.ChainID
@@ -927,7 +925,7 @@ func (s *Service) Reply(r protocol.PermissionReply) {
 		collect(other.id, other.p, resolvedReply.Decision)
 	}
 	// Snapshot explain for audit after grants applied.
-	primaryEx := s.explainWorstLocked(p.permission, p.patterns)
+	primaryEx := s.explainDetailedWorstLocked(p.permission, p.patterns)
 	type auditPend struct {
 		id   string
 		pend *pending
@@ -974,19 +972,46 @@ func (s *Service) Reply(r protocol.PermissionReply) {
 // upgrade Ask→Allow (yolo / accept-edits) without widening Deny.
 // Caller must hold mu; expired scoped grants should already be pruned.
 func (s *Service) evaluateLocked(permission string, patterns []string) Action {
-	sets := append([]Ruleset{}, s.base...)
-	sets = append(sets, s.project, s.agent, s.granted, s.scopedRulesLocked(), s.modeLate, s.phase, s.managed)
-	worst := Allow
+	return s.evaluateDetailedLocked(permission, patterns).Action
+}
+
+// evaluateDetailedLocked is evaluateLocked with fact diagnostics for audit/explain.
+func (s *Service) evaluateDetailedLocked(permission string, patterns []string) DetailedExplanation {
+	layers := s.labeledLayersLocked()
 	if len(patterns) == 0 {
 		patterns = []string{"*"}
 	}
-	for _, pat := range patterns {
-		switch Evaluate(permission, pat, sets...) {
-		case Deny:
-			return Deny
-		case Ask:
-			worst = Ask
+	worst := ExplainDetailed(permission, patterns[0], layers)
+	for _, pat := range patterns[1:] {
+		ex := ExplainDetailed(permission, pat, layers)
+		if ActionRank(ex.Action) < ActionRank(worst.Action) {
+			worst = ex
 		}
 	}
-	return ApplyMode(s.permMode, permission, worst)
+	if len(patterns) > 1 {
+		worst.Pattern = strings.Join(patterns, ", ")
+	}
+	before := worst.Action
+	worst.Action = ApplyMode(s.permMode, permission, worst.Action)
+	if worst.Action != before && before == Ask {
+		worst.ModeApplied = true
+		worst.Mode = s.permMode
+		m := Match{
+			Layer:      LayerModeUpgrade,
+			LayerIndex: -1,
+			RuleIndex:  -1,
+			Permission: permission,
+			Pattern:    worst.Pattern,
+			Action:     Allow,
+		}
+		worst.Trail = append(worst.Trail, m)
+		worst.Matched = &m
+		// Mode upgrade is not a fact match.
+		if worst.EvalPath == EvalPathFacts {
+			// keep facts path on the underlying rule; note mode separately
+		}
+	} else {
+		worst.Mode = s.permMode
+	}
+	return worst
 }

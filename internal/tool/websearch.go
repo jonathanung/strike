@@ -305,7 +305,7 @@ func resolveWebSearchBackend(s WebSearchSettings, timeout time.Duration, allow [
 		return nil, "", err
 	}
 	if err := sandbox.CheckNetworkAllow(apiHost, allow); err != nil {
-		return nil, "", err
+		return nil, "", ErrNetworkDenied(err.Error())
 	}
 	apiKey := strings.TrimSpace(os.Getenv(apiKeyEnv))
 	if apiKey == "" {

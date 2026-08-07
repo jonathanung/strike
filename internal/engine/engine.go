@@ -797,12 +797,13 @@ func (e *Engine) cleanupSessionTemp() {
 }
 
 // ExplainPermission returns last-match-wins detail for a sample tool call
-// against the live permission service (agent/phase/session grants included).
-func (e *Engine) ExplainPermission(permissionName, pattern string) permission.Explanation {
+// against the live permission service (agent/phase/session grants included),
+// including action-fact diagnostics when applicable (#888).
+func (e *Engine) ExplainPermission(permissionName, pattern string) permission.DetailedExplanation {
 	if e == nil || e.perms == nil {
-		return permission.Explain(permissionName, pattern)
+		return permission.ExplainDetailed(permissionName, pattern, nil)
 	}
-	return e.perms.Explain(permissionName, pattern)
+	return e.perms.ExplainDetailed(permissionName, pattern)
 }
 
 // PermissionService exposes the live ask service for host adapters (explain,

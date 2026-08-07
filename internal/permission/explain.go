@@ -64,110 +64,34 @@ func Explain(permission, pattern string, sets ...Ruleset) Explanation {
 }
 
 // ExplainLabeled is Explain with explicit layer names (defaults, config, …).
+// Uses action facts for bash/selected tools when enforcement-eligible (#888).
 func ExplainLabeled(permission, pattern string, layers []LabeledLayer) Explanation {
-	if pattern == "" {
-		pattern = "*"
-	}
-	ex := Explanation{
-		Permission: permission,
-		Pattern:    pattern,
-		Action:     Ask,
-	}
-	var trail []Match
-	var last *Match
-	for li, layer := range layers {
-		name := layer.Name
-		if name == "" {
-			name = fmt.Sprintf("layer-%d", li)
-		}
-		for ri, rule := range layer.Rules {
-			if !rule.matches(permission, pattern) {
-				continue
-			}
-			m := Match{
-				Layer:      name,
-				LayerIndex: li,
-				RuleIndex:  ri,
-				Permission: rule.Permission,
-				Pattern:    normalizePattern(rule.Pattern),
-				Action:     rule.Action,
-			}
-			trail = append(trail, m)
-			cp := m
-			last = &cp
-			ex.Action = rule.Action
-		}
-	}
-	ex.Trail = trail
-	ex.Matched = last
-	if last == nil {
-		// No rule matched — default Ask with synthetic source.
-		ex.Matched = &Match{
-			Layer:      LayerDefaultAction,
-			LayerIndex: -1,
-			RuleIndex:  -1,
-			Permission: permission,
-			Pattern:    pattern,
-			Action:     Ask,
-		}
-	}
-	return ex
+	return ExplainDetailed(permission, pattern, layers).Explanation
 }
 
 // Explain applies live service layers (including scoped grants and mode).
 // Empty patterns default to "*". When multiple patterns are given, the
-// worst-case action is reported on the primary result and PerPattern holds
-// each pattern's explanation.
+// worst-case action is reported. Uses action facts for bash/selected tools
+// when the parse is enforcement-eligible (#888).
 func (s *Service) Explain(permission string, patterns ...string) Explanation {
+	return s.ExplainDetailed(permission, patterns...).Explanation
+}
+
+// ExplainDetailed is Explain with fact-path diagnostics for /permission explain.
+func (s *Service) ExplainDetailed(permission string, patterns ...string) DetailedExplanation {
 	if s == nil {
-		return Explain(permission, firstPattern(patterns))
+		return ExplainDetailed(permission, firstPattern(patterns), nil)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.pruneExpiredLocked(s.now())
-	if len(patterns) == 0 {
-		patterns = []string{"*"}
-	}
-	// Worst-case across patterns (deny > ask > allow), matching evaluateLocked.
-	var worst Explanation
-	for i, pat := range patterns {
-		ex := s.explainLocked(permission, pat)
-		if i == 0 {
-			worst = ex
-			continue
-		}
-		if ActionRank(ex.Action) < ActionRank(worst.Action) {
-			worst = ex
-		}
-	}
-	if len(patterns) > 1 {
-		worst.Pattern = strings.Join(patterns, ", ")
-	}
-	return worst
+	return s.evaluateDetailedLocked(permission, patterns)
 }
 
 // explainLocked assumes mu held and expired grants pruned.
+// Prefer evaluateDetailedLocked for new call sites.
 func (s *Service) explainLocked(permission, pattern string) Explanation {
-	layers := s.labeledLayersLocked()
-	ex := ExplainLabeled(permission, pattern, layers)
-	before := ex.Action
-	ex.Mode = s.permMode
-	ex.Action = ApplyMode(s.permMode, permission, ex.Action)
-	if ex.Action != before && before == Ask {
-		ex.ModeApplied = true
-		// Synthetic match for mode upgrade so operators see why Ask became Allow.
-		m := Match{
-			Layer:      LayerModeUpgrade,
-			LayerIndex: -1,
-			RuleIndex:  -1,
-			Permission: permission,
-			Pattern:    pattern,
-			Action:     Allow,
-		}
-		ex.Trail = append(ex.Trail, m)
-		ex.Matched = &m
-	}
-	return ex
+	return s.evaluateDetailedLocked(permission, []string{pattern}).Explanation
 }
 
 // labeledLayersLocked returns evaluation layers in last-match-wins order.

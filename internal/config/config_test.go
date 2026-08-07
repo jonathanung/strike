@@ -1655,7 +1655,8 @@ func TestNormalizeDeferTools(t *testing.T) {
 			t.Errorf("NormalizeDeferTools(%q) = %q, want %q", in, got, want)
 		}
 	}
-	if !DeferToolsEnabled("on") || DeferToolsEnabled("off") || DeferToolsEnabled("") {
+	// Empty defaults to on (#988); only explicit off disables.
+	if !DeferToolsEnabled("on") || DeferToolsEnabled("off") || !DeferToolsEnabled("") {
 		t.Fatal("DeferToolsEnabled mismatch")
 	}
 }

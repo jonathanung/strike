@@ -441,23 +441,39 @@ func TestPlanWriteWorkspaceMutationStillSeparate(t *testing.T) {
 	}
 }
 
-func TestPlanToolsCoreAndDeferred(t *testing.T) {
-	if !IsCoreTool("plan_write") || !IsCoreTool("plan_read") || !IsCoreTool("plan_delegate") {
-		t.Fatal("plan_write/plan_read/plan_delegate should be core so plan mode always sees them")
+func TestPlanToolsDeferredUntilDiscover(t *testing.T) {
+	// Plan tools are deferred under the minimal core surface (#988); workflow
+	// activation (#991) or toolsearch/direct call promotes them.
+	if IsCoreTool("plan_write") || IsCoreTool("plan_read") || IsCoreTool("plan_delegate") {
+		t.Fatal("plan_write/plan_read/plan_delegate should not be core")
 	}
-	if IsDeferredTool("plan_write") || IsDeferredTool("plan_read") || IsDeferredTool("plan_delegate") {
-		t.Fatal("plan tools must not be deferred")
+	if !IsDeferredTool("plan_write") || !IsDeferredTool("plan_read") || !IsDeferredTool("plan_delegate") {
+		t.Fatal("plan tools must be deferred")
 	}
 	store := openPlan(t)
-	reg := NewRegistry(NewRead(), NewPlanWrite(store), NewPlanRead(store))
+	reg := NewRegistry(NewRead(), NewPlanWrite(store), NewPlanRead(store), NewPlanDelegate(store))
 	reg.Register(NewToolSearch(reg))
 	reg.SetDeferLoading(true)
 	names := map[string]bool{}
 	for _, s := range reg.SchemasForProvider() {
 		names[s.Name] = true
 	}
-	if !names["plan_write"] || !names["plan_read"] || !names["read"] {
-		t.Fatalf("core plan tools missing under defer: %v", names)
+	if names["plan_write"] || names["plan_read"] || names["plan_delegate"] {
+		t.Fatalf("plan tools should be omitted under defer: %v", names)
+	}
+	if !names["read"] || !names["toolsearch"] {
+		t.Fatalf("core missing under defer: %v", names)
+	}
+	reg.Discover("plan_write", "plan_read")
+	names = map[string]bool{}
+	for _, s := range reg.SchemasForProvider() {
+		names[s.Name] = true
+	}
+	if !names["plan_write"] || !names["plan_read"] {
+		t.Fatalf("plan tools missing after Discover: %v", names)
+	}
+	if names["plan_delegate"] {
+		t.Fatalf("undiscovered plan_delegate leaked: %v", names)
 	}
 }
 

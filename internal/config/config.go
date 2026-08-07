@@ -38,9 +38,11 @@ type Config struct {
 	// Empty means lite (default). Unknown values are ignored at load time.
 	LeanCode string `json:"leanCode,omitempty"`
 	// DeferTools controls toolsearch-backed schema deferral: on|off.
-	// When on, non-core tools (optional built-ins + MCP) are omitted from the
-	// provider tools[] until toolsearch discovers them (or they are called).
-	// Empty means off (default). Unknown values are ignored at load time.
+	// When on (default), non-core tools (orchestration, optional built-ins,
+	// MCP) are omitted from the provider tools[] until toolsearch discovers
+	// them, they are called by name, or workflow activation promotes them.
+	// Empty means on (default). Set "off" for the full permitted registry.
+	// Unknown values are ignored at load time.
 	DeferTools   string `json:"deferTools,omitempty"`
 	DefaultAgent string `json:"defaultAgent,omitempty"`
 	// Theme is the preferred TUI color theme id (bundled or JSON under
@@ -170,6 +172,10 @@ type Config struct {
 	// Prefer mcp.jsonc (see Load). When a layer sets servers (including {}),
 	// it replaces the previous layer's server map.
 	MCP MCPConfig `json:"mcp,omitempty"`
+	// Container configures native containerization (E12). Also loadable from
+	// dedicated container.jsonc/json (global/project), same pattern as mcp.jsonc.
+	// Merge: defaults → global → project → managed. See docs/config.md.
+	Container ContainerConfig `json:"container,omitempty"`
 	// LSP configures external language servers (JSON-RPC over stdio). When a
 	// layer sets servers (including {}), it replaces the previous layer's map.
 	// Registry is keyed by file extension via each server's extensions list.
@@ -513,6 +519,8 @@ func Default() Config {
 		// Default language servers (E2.3). Missing binaries degrade to
 		// per-server error status; clear with "lsp": {"servers": {}}.
 		LSP: LSPConfig{Servers: DefaultLSPServers()},
+		// Container defaults (E12.2); layered JSON / container.jsonc overlay.
+		Container: DefaultContainer(),
 	}
 }
 
@@ -660,6 +668,12 @@ func Load(workDir string) (Config, error) {
 	} else {
 		cfg.MCP = mergeMCP(cfg.MCP, mc)
 	}
+	// Global container.jsonc/json (optional).
+	if cc, ok, err := loadContainerFileLayer(GlobalRoot()); err != nil {
+		return cfg, err
+	} else if ok {
+		cfg.Container = mergeContainer(cfg.Container, cc)
+	}
 	// Global providers.jsonc/json (optional; loads even when config is absent).
 	if pf, err := loadProvidersFileLayer(GlobalRoot()); err != nil {
 		return cfg, err
@@ -696,6 +710,11 @@ func Load(workDir string) (Config, error) {
 			return cfg, err
 		} else {
 			cfg.MCP = mergeMCP(cfg.MCP, mc)
+		}
+		if cc, ok, err := loadContainerFileLayer(projectRoot(workDir)); err != nil {
+			return cfg, err
+		} else if ok {
+			cfg.Container = mergeContainer(cfg.Container, cc)
 		}
 		if pf, err := loadProvidersFileLayer(projectRoot(workDir)); err != nil {
 			return cfg, err
@@ -734,6 +753,11 @@ func Load(workDir string) (Config, error) {
 		cfg.Managed = info
 	}
 	cfg.Provider = CanonicalProviderID(cfg.Provider)
+	norm, err := NormalizeContainer(cfg.Container)
+	if err != nil {
+		return cfg, err
+	}
+	cfg.Container = norm
 	return cfg, nil
 }
 
@@ -1277,7 +1301,7 @@ const (
 )
 
 // NormalizeDeferTools maps config aliases to on|off.
-// Empty and unknown values become "" (default off).
+// Empty and unknown values become "" (runtime default = on via DeferToolsEnabled).
 func NormalizeDeferTools(s string) string {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "on", "true", "1", "yes", "enable", "enabled":
@@ -1290,8 +1314,9 @@ func NormalizeDeferTools(s string) string {
 }
 
 // DeferToolsEnabled reports whether deferred tool schemas are active.
+// Empty/unset defaults to on; only an explicit off disables deferral.
 func DeferToolsEnabled(s string) bool {
-	return NormalizeDeferTools(s) == DeferToolsOn
+	return NormalizeDeferTools(s) != DeferToolsOff
 }
 
 // NormalizeWebSearch trims webSearch fields.
@@ -1462,6 +1487,7 @@ func merge(base, layer Config) Config {
 	base.Providers = mergeProviders(base.Providers, layer.Providers)
 	base.Keybinds = MergeKeybinds(base.Keybinds, layer.Keybinds)
 	base.MCP = mergeMCP(base.MCP, layer.MCP)
+	base.Container = mergeContainer(base.Container, layer.Container)
 	base.LSP = mergeLSP(base.LSP, layer.LSP)
 	base.Harnesses = mergeHarnesses(base.Harnesses, layer.Harnesses)
 	base.Scheduler = mergeScheduler(base.Scheduler, layer.Scheduler)

@@ -202,15 +202,14 @@ func ReplacePresetLayer(layers []LabeledLayer, presetID string) ([]LabeledLayer,
 	return out, nil
 }
 
-// ExplainWithPreset dry-runs ExplainLabeled after swapping the preset layer.
+// ExplainWithPreset dry-runs ExplainDetailed after swapping the preset layer.
 // Session grants and live service state are not mutated.
-func ExplainWithPreset(layers []LabeledLayer, presetID, permission, pattern string) (Explanation, error) {
+func ExplainWithPreset(layers []LabeledLayer, presetID, permission, pattern string) (DetailedExplanation, error) {
 	replaced, err := ReplacePresetLayer(layers, presetID)
 	if err != nil {
-		return Explanation{}, err
+		return DetailedExplanation{}, err
 	}
-	ex := ExplainLabeled(permission, pattern, replaced)
-	return ex, nil
+	return ExplainDetailed(permission, pattern, replaced), nil
 }
 
 // CeilingInfo describes whether the managed deny ceiling blocks a widen
@@ -312,7 +311,15 @@ func FormatSandboxBits(s SandboxExplainBits) string {
 
 // FormatExplanationFull appends optional ceiling + sandbox lines to FormatExplanation.
 func FormatExplanationFull(ex Explanation, ceiling *CeilingInfo, sandbox *SandboxExplainBits) string {
-	s := FormatExplanation(ex)
+	return appendCeilingSandbox(FormatExplanation(ex), ceiling, sandbox)
+}
+
+// FormatDetailedExplanationFull is FormatDetailedExplanation plus ceiling/sandbox.
+func FormatDetailedExplanationFull(ex DetailedExplanation, ceiling *CeilingInfo, sandbox *SandboxExplainBits) string {
+	return appendCeilingSandbox(FormatDetailedExplanation(ex), ceiling, sandbox)
+}
+
+func appendCeilingSandbox(s string, ceiling *CeilingInfo, sandbox *SandboxExplainBits) string {
 	if ceiling != nil && ceiling.Summary != "" {
 		s += "\n  " + ceiling.Summary
 	}
