@@ -65,6 +65,17 @@ type AgentCapabilities struct {
 	SessionCapabilities map[string]any     `json:"sessionCapabilities,omitempty"`
 }
 
+// LoadSessionParams is session/load request body (ACP subset).
+type LoadSessionParams struct {
+	SessionID string `json:"sessionId"`
+	Cwd       string `json:"cwd,omitempty"`
+}
+
+// LoadSessionResult is session/load response body.
+type LoadSessionResult struct {
+	SessionID string `json:"sessionId"`
+}
+
 // PromptCapabilities lists optional prompt content types.
 type PromptCapabilities struct {
 	Image           bool `json:"image"`

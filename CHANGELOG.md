@@ -14,6 +14,14 @@ materially affect the shipped product.
 
 ## [Unreleased]
 
+### Added
+
+- **Public session lifecycle contract** — list/get/fork/fork_at/load/rewind_points
+  shared across RPC, HTTP, ACP, and `pkg/sdk` with capability discovery and
+  structured errors (`session_not_found`, `session_busy`, …). Wire schema
+  `protocol.Version` 1.16.0
+  ([#1038](https://github.com/jonathanung/strike/issues/1038)).
+
 ### Changed
 
 - **Progressive disclosure validation** — offline fixture pack compares full vs
