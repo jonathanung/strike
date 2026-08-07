@@ -22,6 +22,12 @@ materially affect the shipped product.
   Structured `network_denied` on the tool result/timeline. `/sandbox explain`
   shows `egress enforcement: preflight` and documents that OS backends still
   have no per-host filter ([#892](https://github.com/jonathanung/strike/issues/892)).
+- **Container runtime foundation (E12.0)** — `internal/container` shells out to
+  `docker`/`podman` via an injectable `ExecFunc` (no Moby SDK). Low-level
+  `Runtime` (pull/create/start/stop/rm/exec/cp), deterministic
+  `strike-<repo>-<hash>` names, and `com.strike.*` labels. Decision and boundary
+  documented in `docs/container.md`
+  ([#582](https://github.com/jonathanung/strike/issues/582)).
 
 - **Plugin theme contributions** — theme packages load through the plugin
   catalog/lifecycle (same lockfile and integrity path). `/theme` shows plugin
