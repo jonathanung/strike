@@ -89,6 +89,12 @@ materially affect the shipped product.
   labels; managed-ceiling and sandbox/`network.allow` notes on the explain
   surface; HTTP `preset=` + `/v1/permissions/diff`
   ([#895](https://github.com/jonathanung/strike/issues/895)).
+- **Launch inside container (E12.4)** — `--launch-inside-container` and
+  `container.execution: container` preflight the engine/Dockerfile, start the
+  managed container, copy the strike binary, and `docker exec -it` with
+  `STRIKE_ISOLATION=container`. Credentials forward via env; session worktree
+  is mounted when worktrees are enabled
+  ([#586](https://github.com/jonathanung/strike/issues/586)).
 - **Container Dockerfile eject (E12.3)** — `strike container eject` writes
   `Dockerfile.devcontainer` with a config-hash header; `strike container drift`
   checks staleness; `--force` / `--dockerfile` supported. Template drops Zone

@@ -63,7 +63,20 @@ Materializes `Dockerfile.devcontainer` (commit by default) with a
 `--dockerfile` uses a hand-edited file as the body while still stamping the hash.
 `Manager` prefers the ejected file when present.
 
-Still later: `--launch-inside-container` UX (E12.4), attach prompts (E12.6).
+### Launch inside (E12.4)
+
+```sh
+strike --launch-inside-container
+# or config: "container": { "execution": "container" }
+```
+
+Preflight codes: `already_inside_container`, `engine_not_found`,
+`engine_unavailable`, `no_dockerfile`, `dockerfile_drift`, `required_env`.
+On success: build/start Manager container, copy host `strike` binary, 
+`docker exec -it` with workspace mount and credential env. Nested launch is
+refused via `STRIKE_ISOLATION`.
+
+Still later: attach prompts (E12.6), isolation badge (E12.7).
 
 ## Binary selection
 

@@ -221,6 +221,10 @@ func openResumeSession(sessions *session.Manager, id string) (resumeOpened, erro
 // Activate keep additional roots live in-process. PendingResume remains a
 // fallback when Roots cannot open a past session (should be rare).
 func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
+	if err := maybeLaunchInsideContainer(opts, stderr); err != nil {
+		return err
+	}
+	// If launch-inside re-exec'd successfully it never returns; if skipped, continue.
 	warnedDangerous := false
 	for {
 		a, err := assemble(opts, false)
