@@ -276,6 +276,15 @@ func (m Model) memberPreferredSizes(g windowGroup, outerW, outerH int, compact, 
 		case "activity":
 			// Activity is the flex feed: grow into leftover space.
 			pref[i] = 0
+		case queueWindowID:
+			// Prefer content height when sparse; flex when empty so activity keeps room.
+			body := m.queuePaneContentRows()
+			if body <= 1 && len(m.inputQueue) == 0 && len(m.loops) == 0 &&
+				strings.TrimSpace(m.queueLabel) == "" && len(m.queuePools) == 0 {
+				pref[i] = min(maxPref, chrome+1)
+			} else {
+				pref[i] = min(maxPref, chrome+max(1, body))
+			}
 		default:
 			if pw, ok := w.(pluginPaneWindow); ok && pw.prefHeight > 0 {
 				pref[i] = min(maxPref, chrome+max(1, pw.prefHeight))

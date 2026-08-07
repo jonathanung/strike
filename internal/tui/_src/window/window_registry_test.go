@@ -174,10 +174,10 @@ func TestCompactRightPaneIsBorderlessAndUsesFullBodyDimensionsAtThresholds(t *te
 
 func TestDefaultWindowRegistryHasUniqueWidthSafeWindows(t *testing.T) {
 	r := newWindowRegistry()
-	if len(r.windows) != 13 {
-		t.Fatalf("window count = %d, want 13", len(r.windows))
+	if len(r.windows) != 14 {
+		t.Fatalf("window count = %d, want 14", len(r.windows))
 	}
-	wantIDs := []string{"context", "activity", "telemetry", "agents", "visualizer", "files", "diagnostics", "memory", "issues", "plans", "markdown", "editor", "pets"}
+	wantIDs := []string{"context", "activity", "queue", "telemetry", "agents", "visualizer", "files", "diagnostics", "memory", "issues", "plans", "markdown", "editor", "pets"}
 	seenIDs, seenTitles := map[string]bool{}, map[string]bool{}
 	for i, w := range r.windows {
 		if w.id() != wantIDs[i] {
@@ -249,7 +249,7 @@ func TestDefaultWindowRegistryHasUniqueWidthSafeWindows(t *testing.T) {
 					t.Errorf("plans line width = %d, want <= 24: %q", got, line)
 				}
 			}
-		case "activity":
+		case "activity", "queue":
 			if _, ok := w.(namedWindow); !ok {
 				t.Errorf("window = %#v, want a namedWindow", w)
 			}
@@ -376,8 +376,8 @@ func TestDefaultWindowRegistryHasUniqueWidthSafeWindows(t *testing.T) {
 			t.Errorf("unexpected window id %q", w.id())
 		}
 	}
-	if !seenIDs["context"] || !seenIDs["activity"] || !seenIDs["telemetry"] || !seenIDs["agents"] || !seenIDs["visualizer"] || !seenIDs["files"] || !seenIDs["diagnostics"] || !seenIDs["memory"] || !seenIDs["issues"] || !seenIDs["plans"] || !seenIDs["markdown"] || !seenIDs["editor"] || !seenIDs["pets"] {
-		t.Errorf("default registry ids = %v, want context, activity, telemetry, agents, visualizer, files, diagnostics, memory, issues, plans, markdown, editor, and pets", seenIDs)
+	if !seenIDs["context"] || !seenIDs["activity"] || !seenIDs["queue"] || !seenIDs["telemetry"] || !seenIDs["agents"] || !seenIDs["visualizer"] || !seenIDs["files"] || !seenIDs["diagnostics"] || !seenIDs["memory"] || !seenIDs["issues"] || !seenIDs["plans"] || !seenIDs["markdown"] || !seenIDs["editor"] || !seenIDs["pets"] {
+		t.Errorf("default registry ids = %v, want context, activity, queue, telemetry, agents, visualizer, files, diagnostics, memory, issues, plans, markdown, editor, and pets", seenIDs)
 	}
 
 	// Full Model.View at split size shows real context content, not a placeholder.
@@ -454,22 +454,22 @@ func TestWindowRegistryReplaceByID(t *testing.T) {
 func TestWindowRegistryCycleIncludesFilesAndMarkdown(t *testing.T) {
 	r := newWindowRegistry()
 	var order []string
-	// Telemetry on by default — 13 cycleable windows + wrap.
-	for range 14 {
+	// Telemetry on by default — 14 cycleable windows + wrap.
+	for range 15 {
 		order = append(order, r.active().id())
 		r = r.cycle()
 	}
-	wantOn := []string{"context", "activity", "telemetry", "agents", "visualizer", "files", "diagnostics", "memory", "issues", "plans", "markdown", "editor", "pets", "context"}
+	wantOn := []string{"context", "activity", "queue", "telemetry", "agents", "visualizer", "files", "diagnostics", "memory", "issues", "plans", "markdown", "editor", "pets", "context"}
 	if !stringsEqual(order, wantOn) {
 		t.Errorf("cycle with telemetry = %q, want %q", order, wantOn)
 	}
 	r, _ = setTelemetryEnabled(newWindowRegistry(), false)
 	order = nil
-	for range 13 {
+	for range 14 {
 		order = append(order, r.active().id())
 		r = r.cycle()
 	}
-	wantOff := []string{"context", "activity", "agents", "visualizer", "files", "diagnostics", "memory", "issues", "plans", "markdown", "editor", "pets", "context"}
+	wantOff := []string{"context", "activity", "queue", "agents", "visualizer", "files", "diagnostics", "memory", "issues", "plans", "markdown", "editor", "pets", "context"}
 	if !stringsEqual(order, wantOff) {
 		t.Errorf("cycle without telemetry = %q, want %q", order, wantOff)
 	}
@@ -504,6 +504,7 @@ func TestWindowRegistryPreservesMarkdownScrollAcrossCycle(t *testing.T) {
 	r = r.cycle() // pets
 	r = r.cycle() // context
 	r = r.cycle() // activity
+	r = r.cycle() // queue
 	r = r.cycle() // telemetry
 	r = r.cycle() // agents
 	r = r.cycle() // visualizer
@@ -537,7 +538,7 @@ func TestDefaultWindowGroupsPairRelatedPanes(t *testing.T) {
 		id      string
 		members []string
 	}{
-		{"session", []string{"context", "activity", "telemetry"}},
+		{"session", []string{"context", "activity", "queue", "telemetry"}},
 		{"agents", []string{"agents", "visualizer"}},
 		{"files", []string{"files", "diagnostics"}},
 		{"project", []string{"memory", "issues", "plans"}},
@@ -573,7 +574,7 @@ func TestDefaultWindowGroupsPairRelatedPanes(t *testing.T) {
 			got = append(got, r.windows[mi].id())
 		}
 	}
-	if !stringsEqual(got, []string{"context", "activity"}) {
+	if !stringsEqual(got, []string{"context", "activity", "queue"}) {
 		t.Errorf("session without telemetry = %q", got)
 	}
 }
@@ -581,13 +582,13 @@ func TestDefaultWindowGroupsPairRelatedPanes(t *testing.T) {
 func TestWindowRegistryFocusCycleIsDeterministicAcrossGroups(t *testing.T) {
 	r := newWindowRegistry()
 	var order []string
-	for range 16 {
+	for range 17 {
 		order = append(order, r.active().id())
 		r = r.cycleBy(1)
 	}
 	want := []string{
-		"context", "activity", "telemetry", "agents", "visualizer", "files", "diagnostics", "memory",
-		"issues", "plans", "markdown", "editor", "pets", "context", "activity", "telemetry",
+		"context", "activity", "queue", "telemetry", "agents", "visualizer", "files", "diagnostics", "memory",
+		"issues", "plans", "markdown", "editor", "pets", "context", "activity", "queue",
 	}
 	if !stringsEqual(order, want) {
 		t.Errorf("cycle order = %q, want %q", order, want)
@@ -648,7 +649,7 @@ func TestWindowRegistryCycleGroupByJumpsToGroupFirstMember(t *testing.T) {
 		panes = append(panes, r.active().id())
 		r = r.cycleBy(1)
 	}
-	if !stringsEqual(panes, []string{"context", "activity", "telemetry", "agents"}) {
+	if !stringsEqual(panes, []string{"context", "activity", "queue", "telemetry"}) {
 		t.Errorf("pane cycle still broken: %q", panes)
 	}
 }
@@ -754,8 +755,8 @@ func TestStackedRightPaneShowsPairedGroupTitles(t *testing.T) {
 		want       []string
 		wantAbsent []string
 	}{
-		{"session", "context", true, []string{"context", "activity", "system"}, nil},
-		{"session-no-telemetry", "context", false, []string{"context", "activity"}, []string{"system"}},
+		{"session", "context", true, []string{"context", "activity", "queue", "system"}, nil},
+		{"session-no-telemetry", "context", false, []string{"context", "activity", "queue"}, []string{"system"}},
 		{"agents", "agents", true, []string{"agents", "visualizer"}, nil},
 		{"project", "memory", true, []string{"memory", "issues", "plans"}, nil},
 	} {

@@ -556,6 +556,9 @@ func (m Model) rightPaneSingle(width, height int, compact bool, active window, f
 		if !compact && active.id() == agentsWindowID {
 			footer = agentsPaneFooter(m.th, ui.PanelInnerWidth(m.th, width))
 		}
+		if !compact && active.id() == queueWindowID {
+			footer = queuePaneFooter(m.th, ui.PanelInnerWidth(m.th, width))
+		}
 		innerW, innerH := width, height
 		if nw, ok := active.(namedWindow); ok {
 			if nw.width > 0 {
@@ -581,6 +584,8 @@ func (m Model) rightPaneSingle(width, height int, compact bool, active window, f
 			body = m.contextPaneBody(max(0, innerW), max(0, innerH))
 		case "activity":
 			body = m.activityPaneBody(max(0, innerW), max(0, innerH))
+		case queueWindowID:
+			body = m.queuePaneBody(max(0, innerW), max(0, innerH))
 		default:
 			body = active.view(m.th)
 		}

@@ -98,22 +98,23 @@ and jumps to the first pane of the next/previous group. See [usage.md](usage.md)
 | `ctrl+y` | yank |
 | `↑` / `↓` | prompt history (when composer has no multiline cursor motion) |
 
-## Input queue (prompts typed while a turn runs)
+## Queue pane (prompts, loops, pool waits)
 
 | Key / command | Action |
 |---|---|
-| `/queue` | open queue browser (reorder, edit, delete, promote, run next) |
+| `/queue` | focus the queue right pane (buffered prompts, `/loop` jobs, scheduler waits) |
 | empty composer + `bksp` | pop last queued prompt into the composer |
 | idle `esc` | clear the whole queue (when no turn is running) |
-| queue modal `↑`/`↓` / `j`/`k` | move selection |
-| queue modal `shift+↑`/`shift+↓` or `K`/`J` | reorder selected item |
-| queue modal `enter` | edit selected prompt text in place |
-| queue modal `e` | load selected into composer and close |
-| queue modal `p` | promote selected to next (FIFO head) |
-| queue modal `d` / `delete` / `bksp` | remove selected |
-| queue modal `c` | clear all |
-| queue modal `x` | interrupt running turn (if any) and run the FIFO head next |
-| queue modal `esc` / `q` | close |
+| queue pane `↑`/`↓` / `j`/`k` | move selection |
+| queue pane `shift+↑`/`shift+↓` or `K`/`J` | reorder selected prompt |
+| queue pane `enter` | edit selected prompt text (opens overlay editor) |
+| queue pane `e` | load selected prompt into composer |
+| queue pane `p` | promote selected prompt to next (FIFO head) |
+| queue pane `d` / `delete` / `bksp` | remove selected prompt or stop selected loop |
+| queue pane `c` | clear all buffered prompts |
+| queue pane `x` | interrupt running turn (if any) and run the FIFO head next |
+| queue pane `m` | open full-screen queue overlay browser |
+| queue modal `esc` / `q` | close overlay |
 
 ## Agents pane (concurrent roots)
 
