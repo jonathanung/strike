@@ -14,6 +14,14 @@ materially affect the shipped product.
 
 ## [Unreleased]
 
+### Added
+
+- **Active-turn steering** — new `steer` op redirects a running root turn at the
+  next safe request boundary (distinct from queued `user.input` and
+  `interrupt`). Durable `turn.steered` events record boundary /
+  cancel_restart / queued_fallback decisions. Wire schema 1.16.0
+  ([#1039](https://github.com/jonathanung/strike/issues/1039)).
+
 ### Changed
 
 - **Progressive disclosure validation** — offline fixture pack compares full vs

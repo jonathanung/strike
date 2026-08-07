@@ -94,7 +94,7 @@ type bootstrapResponse struct {
 var browserProtocolOps = []string{
 	"compact", "context.controls", "inspect.prompt", "interrupt", "permission.reply", "question.reply",
 	"rewind", "select.agent", "select.model", "set.autonomy", "set.effort",
-	"set.fast", "set.permission_mode", "user.input",
+	"set.fast", "set.permission_mode", "steer", "user.input",
 	"workflow.start", "workflow.stop",
 }
 

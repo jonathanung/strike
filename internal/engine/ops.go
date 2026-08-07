@@ -106,6 +106,8 @@ func (e *Engine) handleOp(ctx context.Context, op protocol.Op) {
 		if e.turnCancel != nil {
 			e.turnCancel()
 		}
+	case protocol.Steer:
+		e.handleSteer(op)
 	case protocol.FilesChanged:
 		e.handleFilesChanged(op)
 	case protocol.Compact:
