@@ -272,17 +272,18 @@ func (w agentsWindow) renderFocusPet(th theme.Theme) (string, int) {
 		return "", 0
 	}
 	lines := make([]string, 0, 8)
-	stateStyle := th.AgentStateStyle(state)
+	nameStyle := th.AgentStateStrongStyle(state)
+	artStyle := th.AgentStateStyle(state)
 	nameLabel := sanitizeDisplayData(p.Name)
-	// Muted status word next to the pet name when not ready.
+	// Status word next to the pet name when not ready (theme separator glyph).
 	if state != theme.AgentStateReady {
-		sep := th.Icons.DetailSeparator
-		if strings.TrimSpace(sep) == "" {
-			sep = "·"
+		sep := strings.TrimSpace(th.Icons.DetailSeparator)
+		if sep == "" {
+			sep = " "
 		}
 		nameLabel = nameLabel + " " + sep + " " + state.Label()
 	}
-	lines = append(lines, petsCenterLine(th, stateStyle.Bold(true).Render(nameLabel), w.width))
+	lines = append(lines, petsCenterLine(th, nameStyle.Render(nameLabel), w.width))
 	art := frames[w.petFrame%len(frames)]
 	artRows := strings.Split(art, "\n")
 	// Budget: leave at least 2 rows for the tree when possible.
@@ -299,7 +300,7 @@ func (w agentsWindow) renderFocusPet(th theme.Theme) (string, int) {
 		artRows = artRows[:artBudget]
 	}
 	for _, row := range artRows {
-		lines = append(lines, petsCenterLine(th, stateStyle.Render(row), w.width))
+		lines = append(lines, petsCenterLine(th, artStyle.Render(row), w.width))
 	}
 	// Trailing blank separator when space remains for the tree.
 	if w.height > len(lines)+1 {
