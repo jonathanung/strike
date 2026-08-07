@@ -558,6 +558,38 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		}
 		return n
 	}
+	// Session cost envelope pricing (#577): models.dev rates (USD / million tokens).
+	// Returns 0 when pricing is unknown — engine never invents a dollar figure.
+	estimateUsageCost := func(providerName, model string, u provider.Usage) float64 {
+		if providerName == "" || model == "" {
+			return 0
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		// Prefer host catalog (includes providers.jsonc overlays).
+		infos, err := modelCatalog.Models(ctx, providerName)
+		if err == nil {
+			for _, info := range infos {
+				if info.ID == model && info.HasCost {
+					return usageCostUSD(info.InputCost, info.OutputCost, u)
+				}
+			}
+		}
+		cat, err := models.Load(ctx)
+		if err != nil {
+			return 0
+		}
+		for _, info := range cat.Infos(providerName) {
+			if info.ID == model && info.HasCost {
+				return usageCostUSD(info.InputCost, info.OutputCost, u)
+			}
+		}
+		return 0
+	}
+	maxSessionCost := cfg.Session.MaxSessionCostUSD
+	if opts.maxCostSet {
+		maxSessionCost = opts.maxCost
+	}
 
 	// Process-local scheduler shared by every root and child engine so model
 	// and bash (process/build/test) pools cap aggregate concurrency inside
@@ -740,6 +772,9 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 				StallAfterS:       cfg.Session.AgentBudget.StallAfterS,
 				LoopDetectN:       cfg.Session.AgentBudget.LoopDetectN,
 			},
+			MaxSessionCostUSD: maxSessionCost,
+			MaxTurnTokens:     cfg.Session.MaxTurnTokens,
+			EstimateUsageCost: estimateUsageCost,
 			DelegationPolicy: func() engine.DelegationPolicyConfig {
 				// Product default is enforce when config omits the block.
 				p := engine.DelegationPolicyConfig{
@@ -1266,4 +1301,13 @@ func toolRetryBackoffFromConfig(tr config.ToolRetryConfig) func(int) time.Durati
 	return func(nextAttempt int) time.Duration {
 		return tool.ToolRetryDelay(nextAttempt, base, max)
 	}
+}
+
+// usageCostUSD estimates USD from catalog rates (per million tokens) and usage.
+func usageCostUSD(inputPerM, outputPerM float64, u provider.Usage) float64 {
+	in := float64(u.InputTokens) / 1e6 * inputPerM
+	out := float64(u.OutputTokens) / 1e6 * outputPerM
+	// Cache tokens: treat cache read/write as input-priced when no separate rate.
+	cache := float64(u.CacheReadTokens+u.CacheCreationTokens) / 1e6 * inputPerM
+	return in + out + cache
 }

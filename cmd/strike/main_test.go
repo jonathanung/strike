@@ -48,6 +48,7 @@ Options:
   --container-attach-stale           with --launch-inside-container: attach to a stale live container (E12.6)
   --container-cancel                 with --launch-inside-container: cancel when the live container is stale (E12.6)
   --telemetry                        show local system metrics pane (CPU/RAM/disk); on by default
+  --max-cost <usd>                   session cost envelope in USD (hard stop; overrides config session.maxSessionCostUSD)
   --upgrade                          download and install the latest GitHub Release
   --version                          print version and exit
   -h, --help                         show help
@@ -118,6 +119,16 @@ func TestParseCLIOptionsValueFormsAndProviderExplicitness(t *testing.T) {
 			name: "telemetry flag",
 			args: []string{"--telemetry"},
 			want: cliOptions{telemetry: true},
+		},
+		{
+			name: "max-cost flag",
+			args: []string{"--max-cost", "1.5"},
+			want: cliOptions{maxCost: 1.5, maxCostSet: true},
+		},
+		{
+			name: "max-cost equals",
+			args: []string{"--max-cost=2"},
+			want: cliOptions{maxCost: 2, maxCostSet: true},
 		},
 	}
 	for _, tt := range tests {
