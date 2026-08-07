@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -120,6 +121,11 @@ func (m Model) handleCommand(text string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.setNotice(m.sandboxStatusNotice(), false)
+		return m, nil
+	case "/container":
+		m.resetComposer()
+		m.clearNotice()
+		m.setNotice(m.containerPostureNotice(), false)
 		return m, nil
 	case "/permission", "/permissions":
 		return m.handlePermissionCommand(fields[1:])
@@ -1656,6 +1662,30 @@ func (m Model) sandboxStatusNotice() string {
 	fmt.Fprintf(&b, "%spermissionMode: %s", dot, m.permMode.Normalize())
 	b.WriteString(" " + ic.DetailSeparator + " sandbox=what is possible, permissionMode=when asked")
 	b.WriteString(dot + "/sandbox explain for generated profile")
+	return b.String()
+}
+
+// containerPostureNotice is the full isolation posture view for /container (E12.7).
+// Descriptive only — states what the posture is, does not grade it.
+func (m Model) containerPostureNotice() string {
+	iso := m.isolationLabel()
+	ic := m.themeIcons()
+	dot := " " + ic.Dot + " "
+	var b strings.Builder
+	fmt.Fprintf(&b, "isolation: %s", iso)
+	b.WriteString(dot + protocol.IsolationDescribe(iso))
+	b.WriteString("\nladder: host+yolo → host+default → host+sandbox → container → container+no-network")
+	mode := strings.TrimSpace(m.sandboxMode)
+	if mode == "" {
+		mode = "workspace-write"
+	}
+	fmt.Fprintf(&b, "\nhost dials: permissionMode=%s%ssandbox=%s", m.permMode.Normalize(), dot, mode)
+	if env := strings.TrimSpace(os.Getenv(protocol.IsolationEnvKey)); env != "" {
+		fmt.Fprintf(&b, "\n%s=%s (injected at launch)", protocol.IsolationEnvKey, env)
+	} else {
+		fmt.Fprintf(&b, "\n%s unset (computed from dials)", protocol.IsolationEnvKey)
+	}
+	b.WriteString(dot + "CLI: strike container ls|status")
 	return b.String()
 }
 

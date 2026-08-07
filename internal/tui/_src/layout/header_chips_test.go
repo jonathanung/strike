@@ -5,6 +5,10 @@ import (
 	"testing"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
+
+	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike-cli/internal/tui/theme"
 )
 
 func TestFitHeaderChipsDropsLowestPriorityFirst(t *testing.T) {
@@ -61,5 +65,15 @@ func TestFitHeaderChipsDropsLowestPriorityFirst(t *testing.T) {
 	// Zero budget yields empty.
 	if got := fitHeaderChips(chips, 0, firstGap, restGap); got != "" {
 		t.Fatalf("zero budget: %q", got)
+	}
+}
+
+func TestHeaderIsolationBadge(t *testing.T) {
+	m := Model{isolation: protocol.IsolationContainer, th: theme.Default(), width: 120}
+	// ensure model has enough width fields
+	m.width = 120
+	plain := ansi.Strip(m.headerView(120))
+	if !strings.Contains(plain, "container") {
+		t.Fatalf("header missing isolation badge:\n%s", plain)
 	}
 }

@@ -108,6 +108,9 @@ func (m Model) homeContextParts(th theme.Theme) []string {
 	} else {
 		parts = append(parts, "default permissions")
 	}
+	if iso := m.isolationLabel(); iso != "" {
+		parts = append(parts, iso)
+	}
 	if m.firstRun {
 		parts = append(parts, "first run")
 	}

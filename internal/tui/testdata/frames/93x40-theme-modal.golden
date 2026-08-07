@@ -1,6 +1,6 @@
-⚡ strike /tmp/strike-golden   no model                                                 ready
+⚡ strike /tmp/strike-golden   no model   host+sandbox                                  ready
 ╭─ context ─────────────────────────────────────────────────────────────────────────────────╮
-│ supervised · 1 skills · default permissions · /provider to connect                        │
+│ supervised · 1 skills · default permissions · host+sandbox · /provider to connect         │
 ╰───────────────────────────────────────────────────────────────────────────────────────────╯
 
 

@@ -1,15 +1,15 @@
-⚡ strike /tmp/strike-golden   echo/echo-1   ·   ◆ build                                                           ready
+⚡ strike /tmp/strike-golden   echo/echo-1   ·   ◆ build   host+sandbox                                            ready
 ╭─ Refactor the auth store. ───────────────────────────────────────────────────╮ ╭─ context ───────────────────────────╮
 │ ❯ you                                                                        │ │ model  echo/echo-1                  │
 │   Refactor the auth store.                                                   │ │ agent  build                        │
 │                                                                              │ │ autonomy  supervised                │
-│ ● strike                                                                     │ │ auth  offline dev provider          │
-│   Reading the store, then running tests.                                     │ │ skills  1                           │
-│                                                                              │ ╰─────────────────────────────────────╯
-│ ⚙ read · internal/auth/store.go ✓                                            │
+│ ● strike                                                                     │ │ isolation  host+sandbox             │
+│   Reading the store, then running tests.                                     │ │ auth  offline dev provider          │
+│                                                                              │ │ skills  1                           │
+│ ⚙ read · internal/auth/store.go ✓                                            │ ╰─────────────────────────────────────╯
+│                                                                              │
 │                                                                              │ ╭─ activity ──────────────────────────╮
 │                                                                              │ │   internal/auth/store.go — done  ✓  │
-│                                                                              │ │                                     │
 │                                                                              │ │                                     │
 │                                                                              │ │                                     │
 │                                                                              │ │                                     │

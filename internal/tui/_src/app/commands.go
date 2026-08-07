@@ -17,6 +17,7 @@ const (
 	commandAutonomy        commandID = "autonomy"
 	commandMode            commandID = "mode"
 	commandSandbox         commandID = "sandbox"
+	commandContainer       commandID = "container"
 	commandPermission      commandID = "permission"
 	commandAuth            commandID = "auth"
 	commandSettings        commandID = "settings"
@@ -128,6 +129,7 @@ var builtinCommandSpecs = []commandSpec{
 	{ID: commandAutonomy, Name: "/autonomy", Description: "set exit-gate policy (supervised/agent/checks/skip-all)", ArgsHint: "[mode]", Source: commandSourceBuiltin},
 	{ID: commandMode, Name: "/mode", Description: "set permission posture (default/plan/accept-edits/yolo)", ArgsHint: "[mode]", Source: commandSourceBuiltin},
 	{ID: commandSandbox, Name: "/sandbox", Description: "show OS sandbox policy; /sandbox explain for generated profile", Source: commandSourceBuiltin},
+	{ID: commandContainer, Name: "/container", Description: "show isolation posture ladder (host/container) and container status", Source: commandSourceBuiltin},
 	{ID: commandPermission, Name: "/permission", Description: "explain/diff tool permissions or list presets", ArgsHint: "[explain [--preset id] <tool> [pattern]|diff <a> <b>|presets]", Source: commandSourceBuiltin},
 	{ID: commandAuth, Name: "/auth", Description: "manage provider authentication", ArgsHint: "[provider]", Source: commandSourceBuiltin},
 	{ID: commandSettings, Name: "/settings", Description: "defaults (theme, sandbox, notify, autoupdate, mode) and custom providers", Source: commandSourceBuiltin},
@@ -244,6 +246,7 @@ var reservedCommandNames = map[string]struct{}{
 	"autonomy":         {},
 	"mode":             {},
 	"sandbox":          {},
+	"container":        {},
 	"permission":       {},
 	"auth":             {},
 	"settings":         {},

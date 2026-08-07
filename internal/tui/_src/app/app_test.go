@@ -1072,7 +1072,7 @@ func TestDangerousPermissionsIndicatorRemainsVisibleWithActiveModals(t *testing.
 
 			},
 
-			content: []string{"Command palette", "Keyboard shortcuts", "/provider", "/settings"},
+			content: []string{"Command palette", "Keyboard shortcuts", "/provider", "/sandbox"},
 		},
 	}
 

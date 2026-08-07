@@ -10,6 +10,23 @@ const (
 	LegacyVersion = pub.LegacyVersion
 )
 
+// Isolation posture ladder (E12.7) + env key.
+const (
+	IsolationEnvKey         = pub.IsolationEnvKey
+	IsolationHostYolo       = pub.IsolationHostYolo
+	IsolationHostDefault    = pub.IsolationHostDefault
+	IsolationHostSandbox    = pub.IsolationHostSandbox
+	IsolationContainer      = pub.IsolationContainer
+	IsolationContainerNoNet = pub.IsolationContainerNoNet
+)
+
+var (
+	ComputeIsolation  = pub.ComputeIsolation
+	ParseIsolationEnv = pub.ParseIsolationEnv
+	IsolationDescribe = pub.IsolationDescribe
+	IsolationShort    = pub.IsolationShort
+)
+
 // Effort ladder.
 type Effort = pub.Effort
 

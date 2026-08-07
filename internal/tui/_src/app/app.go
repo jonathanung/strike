@@ -159,6 +159,10 @@ type Options struct {
 	// SandboxExplain is the multi-line generated profile text for /sandbox explain.
 	// Compiled from config permission layers at process start.
 	SandboxExplain string
+	// Isolation is the E12.7 posture ladder label (host+yolo|host+default|
+	// host+sandbox|container|container+no-network). Injected at launch via
+	// STRIKE_ISOLATION; do not infer from /.dockerenv.
+	Isolation string
 	// Replay is a prior session event log for --continue / --session. Seeded
 	// via cellsFromEvents + silent selection/child state — never fed through
 	// applyEvent (avoids stuck turns, zombie permission modals, orphan children).
@@ -285,6 +289,8 @@ type Model struct {
 	permMode protocol.PermissionMode
 	// sandboxMode is the process OS sandbox dial (config/CLI); default workspace-write.
 	sandboxMode string
+	// isolation is the E12.7 posture ladder label for header badge /container.
+	isolation string
 	// sandboxBackend is bwrap|sandbox-exec|"" for /sandbox status.
 	sandboxBackend string
 	// sandboxAvailable is whether the OS backend can apply isolation.
@@ -622,6 +628,9 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 			m.sandboxBackend = option.SandboxBackend
 			m.sandboxAvailable = option.SandboxAvailable
 			m.sandboxExplain = option.SandboxExplain
+		}
+		if option.Isolation != "" {
+			m.isolation = option.Isolation
 		}
 		if option.PermissionAutoApproveSeconds != 0 {
 			m.permissionAutoApproveSeconds = option.PermissionAutoApproveSeconds
