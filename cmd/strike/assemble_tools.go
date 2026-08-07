@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jonathanung/strike-cli/internal/admission"
@@ -560,31 +561,57 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	}
 	// Session cost envelope pricing (#577): models.dev rates (USD / million tokens).
 	// Returns 0 when pricing is unknown — engine never invents a dollar figure.
+	// Rates are cached per provider/model for the process lifetime.
+	type costRate struct {
+		in, out float64
+		ok      bool
+	}
+	var costRateMu sync.Mutex
+	costRateCache := map[string]costRate{}
 	estimateUsageCost := func(providerName, model string, u provider.Usage) float64 {
 		if providerName == "" || model == "" {
 			return 0
 		}
+		key := providerName + "/" + model
+		costRateMu.Lock()
+		if cached, hit := costRateCache[key]; hit {
+			costRateMu.Unlock()
+			if !cached.ok {
+				return 0
+			}
+			return usageCostUSD(cached.in, cached.out, u)
+		}
+		costRateMu.Unlock()
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		// Prefer host catalog (includes providers.jsonc overlays).
+		var rate costRate
 		infos, err := modelCatalog.Models(ctx, providerName)
 		if err == nil {
 			for _, info := range infos {
 				if info.ID == model && info.HasCost {
-					return usageCostUSD(info.InputCost, info.OutputCost, u)
+					rate = costRate{in: info.InputCost, out: info.OutputCost, ok: true}
+					break
 				}
 			}
 		}
-		cat, err := models.Load(ctx)
-		if err != nil {
-			return 0
-		}
-		for _, info := range cat.Infos(providerName) {
-			if info.ID == model && info.HasCost {
-				return usageCostUSD(info.InputCost, info.OutputCost, u)
+		if !rate.ok {
+			if cat, err := models.Load(ctx); err == nil {
+				for _, info := range cat.Infos(providerName) {
+					if info.ID == model && info.HasCost {
+						rate = costRate{in: info.InputCost, out: info.OutputCost, ok: true}
+						break
+					}
+				}
 			}
 		}
-		return 0
+		costRateMu.Lock()
+		costRateCache[key] = rate // may be negative cache
+		costRateMu.Unlock()
+		if !rate.ok {
+			return 0
+		}
+		return usageCostUSD(rate.in, rate.out, u)
 	}
 	maxSessionCost := cfg.Session.MaxSessionCostUSD
 	if opts.maxCostSet {

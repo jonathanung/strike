@@ -1521,27 +1521,15 @@ func (e *Engine) finishSessionBudgetStop(ctx context.Context, finishing chan str
 // rejectUserInputIfBudgetExhausted blocks new turns when the shared session
 // cost tracker has crossed its ceiling. The Options.SessionBudgetExhausted hook
 // alone still only gates delegation fan-out (policy), not idle UserInput.
-// Returns true when the input was rejected.
+// Returns true when the input was rejected. EngineError is emitted once per
+// reject; SessionBudgetWarning is not re-fired (already emitted at trip).
 func (e *Engine) rejectUserInputIfBudgetExhausted() bool {
 	if e == nil || e.sessionBudget == nil || !e.sessionBudget.Exhausted() {
 		return false
 	}
-	var cost, max float64
-	if e.sessionBudget != nil {
-		cost, _ = e.sessionBudget.CostUSD()
-		max = e.sessionBudget.MaxCostUSD()
-	}
+	cost, _ := e.sessionBudget.CostUSD()
+	max := e.sessionBudget.MaxCostUSD()
 	msg := sessionBudgetCostMessage(protocol.SessionBudgetLevel100, cost, max, true)
-	e.emit(protocol.SessionBudgetWarning{
-		Correlation: e.sessionCorr(),
-		Level:       protocol.SessionBudgetLevel100,
-		Kind:        protocol.SessionBudgetKindCostUSD,
-		Exhausted:   true,
-		CostUSD:     cost,
-		MaxCostUSD:  max,
-		Ratio:       safeRatio(cost, max),
-		Message:     msg,
-	})
 	e.emit(protocol.EngineError{
 		Correlation: e.sessionCorr(),
 		Message:     msg,
