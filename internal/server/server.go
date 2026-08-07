@@ -189,6 +189,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/issues/{id}/close", s.handleIssueClose)
 	s.mux.HandleFunc("GET /v1/issues", s.handleIssues)
 	s.mux.HandleFunc("GET /v1/permissions/explain", s.handlePermissionExplain)
+	s.mux.HandleFunc("GET /v1/permissions/diff", s.handlePermissionDiff)
 	s.mux.HandleFunc("GET /v1/permissions/presets", s.handlePermissionPresets)
 	s.mux.HandleFunc("GET /v1/plans", s.handlePlansList)
 	s.mux.HandleFunc("POST /v1/plans", s.handlePlanCreate)

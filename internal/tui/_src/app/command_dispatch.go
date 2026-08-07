@@ -1769,7 +1769,7 @@ func stringSetRemove(ss []string, v string) []string {
 	return out
 }
 
-// handlePermissionCommand implements /permission [explain|presets].
+// handlePermissionCommand implements /permission [explain|diff|presets].
 func (m *Model) handlePermissionCommand(args []string) (tea.Model, tea.Cmd) {
 	m.resetComposer()
 	m.clearNotice()
@@ -1778,7 +1778,7 @@ func (m *Model) handlePermissionCommand(args []string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if len(args) == 0 {
-		m.setNotice("usage: /permission explain <tool> [pattern] | /permission presets", true)
+		m.setNotice("usage: /permission explain [--preset <id>] <tool> [pattern] | /permission diff <presetA> <presetB> | /permission presets", true)
 		return m, nil
 	}
 	switch strings.ToLower(args[0]) {
@@ -1795,21 +1795,49 @@ func (m *Model) handlePermissionCommand(args []string) (tea.Model, tea.Cmd) {
 		}
 		m.setNotice(b.String(), false)
 		return m, nil
-	case "explain", "why":
-		if len(args) < 2 {
-			m.setNotice("usage: /permission explain <tool> [pattern]", true)
+	case "diff":
+		if len(args) < 3 {
+			m.setNotice("usage: /permission diff <presetA> <presetB>", true)
 			return m, nil
 		}
-		toolName := args[1]
+		leftID := strings.TrimPrefix(strings.ToLower(args[1]), "preset:")
+		rightID := strings.TrimPrefix(strings.ToLower(args[2]), "preset:")
+		d, err := m.services.Permissions.DiffPresets(leftID, rightID)
+		if err != nil {
+			m.setNotice(err.Error(), true)
+			return m, nil
+		}
+		if strings.TrimSpace(d.Summary) == "" {
+			m.setNotice(fmt.Sprintf("permission diff %s → %s (no changes)", d.LeftLabel, d.RightLabel), false)
+			return m, nil
+		}
+		m.setNotice(d.Summary, false)
+		return m, nil
+	case "explain", "why":
+		rest := args[1:]
+		presetID, rest, err := parsePermissionExplainArgs(rest)
+		if err != nil {
+			m.setNotice(err.Error(), true)
+			return m, nil
+		}
+		if len(rest) < 1 {
+			m.setNotice("usage: /permission explain [--preset <id>] <tool> [pattern]", true)
+			return m, nil
+		}
+		toolName := rest[0]
 		pattern := "*"
-		if len(args) >= 3 {
-			// Join remaining fields so patterns with spaces work when quoted by shell-ish input.
-			pattern = strings.TrimSpace(strings.Join(args[2:], " "))
+		if len(rest) >= 2 {
+			pattern = strings.TrimSpace(strings.Join(rest[1:], " "))
 			if pattern == "" {
 				pattern = "*"
 			}
 		}
-		ex := m.services.Permissions.Explain(toolName, pattern)
+		var ex host.PermissionExplanation
+		if presetID != "" {
+			ex = m.services.Permissions.ExplainPreset(toolName, pattern, presetID)
+		} else {
+			ex = m.services.Permissions.Explain(toolName, pattern)
+		}
 		if strings.TrimSpace(ex.Summary) == "" {
 			m.setNotice(fmt.Sprintf("%s %s → %s", toolName, pattern, ex.Action), false)
 			return m, nil
@@ -1834,4 +1862,26 @@ func (m *Model) handlePermissionCommand(args []string) (tea.Model, tea.Cmd) {
 		m.setNotice(ex.Summary, false)
 		return m, nil
 	}
+}
+
+// parsePermissionExplainArgs pulls optional --preset <id> (or -p <id>) from args.
+func parsePermissionExplainArgs(args []string) (presetID string, rest []string, err error) {
+	rest = args
+	for len(rest) > 0 {
+		a := rest[0]
+		switch {
+		case a == "--preset" || a == "-p":
+			if len(rest) < 2 {
+				return "", nil, fmt.Errorf("usage: /permission explain --preset <id> <tool> [pattern]")
+			}
+			presetID = strings.TrimPrefix(strings.ToLower(strings.TrimSpace(rest[1])), "preset:")
+			rest = rest[2:]
+		case strings.HasPrefix(a, "--preset="):
+			presetID = strings.TrimPrefix(strings.ToLower(strings.TrimSpace(strings.TrimPrefix(a, "--preset="))), "preset:")
+			rest = rest[1:]
+		default:
+			return presetID, rest, nil
+		}
+	}
+	return presetID, rest, nil
 }
