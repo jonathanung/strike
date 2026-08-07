@@ -289,7 +289,17 @@ scanners, and fail-open/closed behavior: [admission.md](admission.md).
 
 **Explain:** `/permission explain <tool> [pattern]` (or the
 `permission.Explain` / `Service.Explain` API) returns the effective action,
-matched rule, layer name, and match trail for a sample tool call.
+matched rule, layer name, and match trail for a sample tool call. For bash
+(and selected tools), explain also reports whether the decisive match used
+**action facts** or the raw **pattern** path (`eval=facts` / `eval=pattern`)
+plus a short fact summary (#888). See [isolation.md](isolation.md#action-facts-semantic-permission-projection-888).
+
+**Action facts + last-match-wins:** when a bash command parses completely,
+rules may match semantic keys (e.g. inner `rm *` inside `bash -c '…'`, path
+`**/.env`, `host:example.com`) in addition to the raw command string. Each
+rule uses **either** facts or pattern — not both — so deny cannot double-fire.
+Incomplete parses (expansions, `eval`, opaque scripts) never drive deny via
+facts; legacy pattern matching alone applies.
 
 **Dry-run preset:** `/permission explain --preset <id> <tool> [pattern]`
 evaluates under an alternate shipped preset without mutating the session
