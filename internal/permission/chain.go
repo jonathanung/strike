@@ -512,7 +512,8 @@ func normalizePathKey(p string) string {
 	return path.Clean(p)
 }
 
-// bashReferencesPath reports whether a bash command likely executes or sources pathKey.
+// bashReferencesPath reports whether a bash command likely *executes* or
+// sources pathKey (not merely mentions it, e.g. ls/cat/rm).
 // Content-free: token/path match only, no shell evaluation.
 func bashReferencesPath(command, pathKey string) bool {
 	cmd := strings.TrimSpace(command)
@@ -521,70 +522,69 @@ func bashReferencesPath(command, pathKey string) bool {
 		return false
 	}
 	base := path.Base(key)
-	// Normalize command for simple contains checks.
-	c := filepath.ToSlash(cmd)
-
-	candidates := []string{
-		key,
-		"./" + key,
-		base,
-		"./" + base,
+	candidates := []string{key, "./" + key}
+	if base != "" && base != "." && base != key {
+		candidates = append(candidates, base, "./"+base)
 	}
-	// Also try if key has directories — bash may use only basename.
+
+	// Direct execution: command is exactly the path (optionally with args).
 	for _, cand := range candidates {
 		if cand == "" || cand == "." {
 			continue
 		}
-		if commandHasPathToken(c, cand) {
+		if commandStartsWithPath(cmd, cand) {
 			return true
 		}
 	}
-	return false
-}
-
-func commandHasPathToken(command, token string) bool {
-	// Fast path: exact command is the path or ./path
-	trim := strings.TrimSpace(command)
-	if trim == token || trim == "./"+strings.TrimPrefix(token, "./") {
-		return true
-	}
-	// Split on common shell metacharacters into rough tokens.
-	fields := strings.FieldsFunc(command, func(r rune) bool {
-		switch r {
-		case ' ', '\t', '\n', '|', '&', ';', '(', ')', '<', '>':
-			return true
-		default:
-			return false
-		}
-	})
-	for _, f := range fields {
-		f = strings.Trim(f, "'\"")
-		f = strings.TrimPrefix(f, "./")
-		tok := strings.TrimPrefix(token, "./")
-		if f == tok || f == token {
-			return true
-		}
-		// bash script.sh / sh -c is separate; "bash path" / "sh path" / "source path"
-	}
-	// Patterns: bash <path>, sh <path>, source <path>, . <path>
-	lower := strings.ToLower(command)
+	// Interpreter / source forms: bash|sh|zsh|source|. <path>
+	lower := strings.ToLower(cmd)
 	for _, prefix := range []string{"bash ", "sh ", "zsh ", "source ", ". "} {
-		if idx := strings.Index(lower, prefix); idx >= 0 {
-			rest := strings.TrimSpace(command[idx+len(prefix):])
-			// first arg
+		idx := 0
+		for {
+			at := strings.Index(lower[idx:], prefix)
+			if at < 0 {
+				break
+			}
+			at += idx
+			// Only treat as interpreter when at statement start (start or after ;|&).
+			if at > 0 {
+				prev := lower[at-1]
+				if prev != ';' && prev != '|' && prev != '&' && prev != '\n' && prev != ' ' && prev != '\t' {
+					idx = at + len(prefix)
+					continue
+				}
+			}
+			rest := strings.TrimSpace(cmd[at+len(prefix):])
 			arg := rest
 			if sp := strings.IndexAny(rest, " \t|&;<>"); sp >= 0 {
 				arg = rest[:sp]
 			}
 			arg = strings.Trim(arg, "'\"")
 			arg = strings.TrimPrefix(filepath.ToSlash(arg), "./")
-			tok := strings.TrimPrefix(token, "./")
-			if arg == tok || path.Base(arg) == path.Base(tok) && path.Base(tok) != "" && path.Base(tok) != "." {
-				// Require full key match or basename when unique enough
+			for _, cand := range candidates {
+				tok := strings.TrimPrefix(cand, "./")
 				if arg == tok || arg == path.Base(tok) {
 					return true
 				}
 			}
+			idx = at + len(prefix)
+		}
+	}
+	return false
+}
+
+// commandStartsWithPath reports whether cmd runs path as argv0 (with optional args).
+func commandStartsWithPath(command, token string) bool {
+	trim := strings.TrimSpace(command)
+	tok := strings.TrimPrefix(token, "./")
+	// Strip a single leading ./ on the command for comparison.
+	forms := []string{tok, "./" + tok}
+	for _, f := range forms {
+		if trim == f {
+			return true
+		}
+		if strings.HasPrefix(trim, f+" ") || strings.HasPrefix(trim, f+"\t") {
+			return true
 		}
 	}
 	return false

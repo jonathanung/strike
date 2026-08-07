@@ -117,7 +117,7 @@ rolling correlator on the permission service for the active turn:
 | Rule id | Trigger | Default action |
 |---|---|---|
 | `sensitive_read_egress` | `read` of a sensitive-class path, then `webfetch` / `websearch` / `bash` within the lookback window | **ask** (even under `yolo`) |
-| `write_exec_bash` | `write`/`edit` of an executable/script path, then `bash` that references that path | **ask** |
+| `write_exec_bash` | `write`/`edit` of an executable/script path, then `bash` that executes/sources that path | **ask** |
 | `retry_storm` | ≥ N identical permission denials in-turn (same permission + pattern) | **deny** |
 
 Reasons and timeline fields cite **prior tool names and classes** (and a

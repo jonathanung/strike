@@ -348,9 +348,11 @@ func TestBashReferencesPath(t *testing.T) {
 	}{
 		{"bash scripts/pwn.sh", "scripts/pwn.sh", true},
 		{"./scripts/pwn.sh", "scripts/pwn.sh", true},
+		{"./scripts/pwn.sh --flag", "scripts/pwn.sh", true},
 		{"sh ./scripts/pwn.sh --flag", "scripts/pwn.sh", true},
 		{"source scripts/pwn.sh", "scripts/pwn.sh", true},
-		{"ls scripts/pwn.sh", "scripts/pwn.sh", true}, // token present
+		{"ls scripts/pwn.sh", "scripts/pwn.sh", false},  // mention only
+		{"cat scripts/pwn.sh", "scripts/pwn.sh", false}, // mention only
 		{"echo hello", "scripts/pwn.sh", false},
 		{"bash other.sh", "scripts/pwn.sh", false},
 	}
