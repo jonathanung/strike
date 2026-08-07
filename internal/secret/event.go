@@ -56,6 +56,8 @@ func RedactEvent(ev protocol.Event) protocol.Event {
 		e.Layer = redact.String(e.Layer)
 		e.RulePermission = redact.String(e.RulePermission)
 		e.RuleAction = redact.String(e.RuleAction)
+		e.EvalPath = redact.String(e.EvalPath)
+		e.FactSummary = redact.String(e.FactSummary)
 		return e
 	case protocol.AgentMessage:
 		e.Body = redact.String(e.Body)

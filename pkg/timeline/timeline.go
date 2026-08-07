@@ -409,6 +409,12 @@ func (b *Builder) Observe(ev protocol.Event, t time.Time) {
 		if e.RulePermission != "" {
 			summary += " rule=" + e.RulePermission + " " + e.RulePattern + "→" + e.RuleAction
 		}
+		if e.EvalPath != "" {
+			summary += " eval=" + e.EvalPath
+		}
+		if e.FactSummary != "" {
+			summary += " facts=" + e.FactSummary
+		}
 		ent.OutputPreview = clip(redact.String(summary), b.opts.OutputPreviewMax)
 		switch e.Action {
 		case "ask":

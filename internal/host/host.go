@@ -858,6 +858,10 @@ type PermissionExplanation struct {
 	Matched    PermissionMatch
 	Trail      []PermissionMatch
 	Summary    string // multi-line human text for notices
+	// EvalPath is pattern|facts|none when action facts were considered (#888).
+	EvalPath string
+	// FactSummary is a short action-fact projection for explain/audit (#888).
+	FactSummary string
 }
 
 // PermissionPresetInfo is one shipped permission preset (read-only, dev, …).

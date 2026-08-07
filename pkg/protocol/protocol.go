@@ -1199,6 +1199,10 @@ type PermissionDecided struct {
 	RulePermission string `json:"rulePermission,omitempty"`
 	RulePattern    string `json:"rulePattern,omitempty"`
 	RuleAction     string `json:"ruleAction,omitempty"`
+	// EvalPath is pattern|facts when action facts influenced the match (#888).
+	EvalPath string `json:"evalPath,omitempty"`
+	// FactSummary is a short redaction-friendly action-fact projection (#888).
+	FactSummary string `json:"factSummary,omitempty"`
 }
 
 // QuestionOption is one selectable choice on a QuestionPrompt.

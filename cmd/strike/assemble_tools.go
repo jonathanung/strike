@@ -920,7 +920,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	)
 	if first != nil && first.eng != nil {
 		eng := first.eng
-		permHost.SetLive(func(perm, pat string) permission.Explanation {
+		permHost.SetLive(func(perm, pat string) permission.DetailedExplanation {
 			return eng.ExplainPermission(perm, pat)
 		})
 	}

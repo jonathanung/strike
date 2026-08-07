@@ -11,7 +11,7 @@ import (
 type Permissions struct {
 	mu     sync.Mutex
 	layers []permission.LabeledLayer
-	live   func(permission, pattern string) permission.Explanation
+	live   func(permission, pattern string) permission.DetailedExplanation
 }
 
 // NewPermissions builds a host adapter from base evaluation layers.
@@ -30,7 +30,7 @@ func NewPermissions(layers []permission.Ruleset, names []string) *Permissions {
 
 // SetLive installs a callback for live service explain (agent/phase/session).
 // nil clears (falls back to base layers only).
-func (p *Permissions) SetLive(fn func(permission, pattern string) permission.Explanation) {
+func (p *Permissions) SetLive(fn func(permission, pattern string) permission.DetailedExplanation) {
 	if p == nil {
 		return
 	}
@@ -42,7 +42,7 @@ func (p *Permissions) SetLive(fn func(permission, pattern string) permission.Exp
 // Explain implements host.Permissions.
 func (p *Permissions) Explain(perm, pattern string) host.PermissionExplanation {
 	if p == nil {
-		return toHost(permission.Explain(perm, pattern))
+		return toHost(permission.ExplainDetailed(perm, pattern, nil))
 	}
 	p.mu.Lock()
 	live := p.live
@@ -51,7 +51,7 @@ func (p *Permissions) Explain(perm, pattern string) host.PermissionExplanation {
 	if live != nil {
 		return toHost(live(perm, pattern))
 	}
-	return toHost(permission.ExplainLabeled(perm, pattern, layers))
+	return toHost(permission.ExplainDetailed(perm, pattern, layers))
 }
 
 // Presets implements host.Permissions.
@@ -68,12 +68,14 @@ func (p *Permissions) Presets() []host.PermissionPresetInfo {
 	return out
 }
 
-func toHost(ex permission.Explanation) host.PermissionExplanation {
+func toHost(ex permission.DetailedExplanation) host.PermissionExplanation {
 	h := host.PermissionExplanation{
-		Permission: ex.Permission,
-		Pattern:    ex.Pattern,
-		Action:     string(ex.Action),
-		Summary:    permission.FormatExplanation(ex),
+		Permission:  ex.Permission,
+		Pattern:     ex.Pattern,
+		Action:      string(ex.Action),
+		Summary:     permission.FormatDetailedExplanation(ex),
+		EvalPath:    ex.EvalPath,
+		FactSummary: ex.FactSummary,
 	}
 	if ex.Matched != nil {
 		h.Layer = ex.Matched.Layer
