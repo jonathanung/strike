@@ -16,6 +16,10 @@ materially affect the shipped product.
 
 ### Added
 
+- **Hardened path I/O helpers** — `internal/safefile` centralizes FIFO/special
+  file rejection, symlink-leaf refuse on write, timed reads, path identity for
+  grant/overlap matching, and atomic replace; adopted by read/write/edit/
+  apply_patch ([#896](https://github.com/jonathanung/strike/issues/896)).
 - **Permission explain dry-run + diff** — `/permission explain --preset <id>`
   evaluates under an alternate shipped preset without applying it;
   `/permission diff <a> <b>` lists added/removed/changed rules with layer
