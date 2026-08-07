@@ -176,6 +176,13 @@ type AgentBudgetSnapshot struct {
 	// Stall is true when no progress for the stall threshold (soft or hard).
 	// Folds stale-child detection (#517) into the same signal.
 	Stall bool `json:"stall,omitempty"`
+	// IdleS is seconds since last progress (or since start when never progressed).
+	IdleS int `json:"idle_s,omitempty"`
+	// LastProgressAt is RFC3339 time of last progress when known.
+	LastProgressAt string `json:"last_progress_at,omitempty"`
+	// StallAfterSEffective is the stall threshold in seconds used for Stall
+	// (hard StallAfterS when set, else the soft default).
+	StallAfterSEffective int `json:"stall_after_s,omitempty"`
 	// Loop is true when the recent tool pattern looks stuck.
 	Loop           bool   `json:"loop,omitempty"`
 	Escalated      bool   `json:"escalated,omitempty"`

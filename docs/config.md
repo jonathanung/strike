@@ -774,8 +774,15 @@ notice is delivered. Soft stall (default 300s idle) and loop (default 6
 identical tools) flags always appear on `task_status` / `agent_roster` without
 killing when no hard threshold is set.
 
-**Stale children (#517):** folded into stall — same `stall` signal and optional
-`stallAfterS` hard threshold; not a second detector.
+**Stale children (#517):** folded into stall — not a second detector.
+
+| Mode | Trigger | Parent-visible | Kills child? |
+|---|---|---|---|
+| **Soft stall** | Default **300s** without progress (or `stallAfterS` when set, for the soft flag) | `budget.stall=true`, `idle_s`, `last_progress_at`, `stall_after_s` on `task_status` / `agent_roster`; live state `needs_attention` + `block_reason`; rising-edge `child.escalated` with `action=signaled` + lead mailbox; `wait` on `task.stale` or `task.blocked` | **No** |
+| **Hard stall** | `stallAfterS` / spawn `stall_after_s` configured and idle ≥ threshold | Same pulse fields + `child.escalated` `interrupted`/`finalizing`, terminal `blocked`, mailbox | **Yes** (after optional finalization) |
+
+Progress clears soft stall flags and allows a later rising-edge signal. Prefer
+`wait` / `task` action=wait over busy-polling status.
 
 **Session cost envelope (#577 / #542):** when `maxSessionCostUSD` is configured
 it remains the **outer** cost cap for the whole session. Per-agent

@@ -10,11 +10,11 @@ import (
 )
 
 func TestNormalizeWaitEvents(t *testing.T) {
-	got, err := NormalizeWaitEvents([]string{"task.done", "blocked", "task.completed", "FAILED"})
+	got, err := NormalizeWaitEvents([]string{"task.done", "blocked", "task.completed", "FAILED", "stall"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{WaitEventTaskDone, WaitEventTaskBlocked, WaitEventTaskFailed}
+	want := []string{WaitEventTaskDone, WaitEventTaskBlocked, WaitEventTaskFailed, WaitEventTaskStale}
 	if len(got) != len(want) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
