@@ -1249,6 +1249,9 @@ func (h *childHandle) statusSnapshot(includeRecent bool) tool.TaskStatusResult {
 		state = "failed"
 	case h.awaitingPerm || h.awaitingQ:
 		state = "needs_attention"
+	case h.budget != nil && h.budget.softStall:
+		// Soft stale (#517): parent-visible without kill.
+		state = "needs_attention"
 	case len(h.queuePools) > 0:
 		// Waiting on a pool is still live work — never report idle/starting.
 		state = "working"
@@ -1273,6 +1276,8 @@ func (h *childHandle) statusSnapshot(includeRecent bool) tool.TaskStatusResult {
 		out.LastAction = h.budget.lastAction
 		if h.budget.escalated && h.budget.reason != "" {
 			out.BlockReason = h.budget.reason
+		} else if h.budget.softStall {
+			out.BlockReason = h.budget.softStallReason(now, h.startedAt)
 		}
 		out.Budget = h.budget.snapshot(now, h.startedAt)
 		out.HasBudget = true

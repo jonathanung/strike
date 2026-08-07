@@ -70,13 +70,16 @@ func (editTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 	if err != nil {
 		return Result{}, err
 	}
+	if isSymlinkLeaf(tc.WorkDir, tempDir, a.FilePath) {
+		return Result{}, ErrPrecondition(fmt.Sprintf("%s is a symlink; refuse to edit through symlinks", rel))
+	}
 	if err := tc.Files.CheckFresh(path, rel); err != nil {
 		return Result{}, err
 	}
 	if err := CheckBaseHash(path, a.BaseHash, rel); err != nil {
 		return Result{}, err
 	}
-	data, err := os.ReadFile(path)
+	data, err := safeReadFile(ctx, path)
 	if err != nil {
 		return Result{}, err
 	}

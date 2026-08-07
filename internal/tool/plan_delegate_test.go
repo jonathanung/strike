@@ -141,12 +141,12 @@ func TestPlanDelegateChildCannotDispatch(t *testing.T) {
 	}
 }
 
-func TestPlanDelegatePermissionAndCore(t *testing.T) {
-	if !IsCoreTool("plan_delegate") {
-		t.Fatal("plan_delegate should be core")
+func TestPlanDelegatePermissionAndDeferred(t *testing.T) {
+	if IsCoreTool("plan_delegate") {
+		t.Fatal("plan_delegate should not be core (#988)")
 	}
-	if IsDeferredTool("plan_delegate") {
-		t.Fatal("plan_delegate must not be deferred")
+	if !IsDeferredTool("plan_delegate") {
+		t.Fatal("plan_delegate must be deferred")
 	}
 
 	store := openPlan(t)

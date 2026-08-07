@@ -143,6 +143,7 @@ type (
 	PermissionAsked         = pub.PermissionAsked
 	PermissionResolved      = pub.PermissionResolved
 	PermissionDecided       = pub.PermissionDecided
+	AdmissionDecided        = pub.AdmissionDecided
 	QuestionAsked           = pub.QuestionAsked
 	QuestionResolved        = pub.QuestionResolved
 	TurnCompleted           = pub.TurnCompleted

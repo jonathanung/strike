@@ -38,7 +38,7 @@ func BuiltinSkills() []Skill {
 		if err := ValidateSkillName(name); err != nil {
 			continue
 		}
-		skills = append(skills, Skill{Name: name, Description: meta["description"], Template: body})
+		skills = append(skills, Skill{Name: name, Description: meta["description"], Template: body, Builtin: true})
 	}
 	return skills
 }

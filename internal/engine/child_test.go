@@ -1818,9 +1818,12 @@ func TestReviewerChildHardDenyFeedsNextProviderTurn(t *testing.T) {
 		Rules:           []permission.Ruleset{permission.Defaults()},
 		Agents: []engine.Agent{
 			{Name: "build"},
+			// Hard-deny all bash. (A trailing `git *` allow would now also cover
+			// `git diff origin/main` via action-fact command-class keys #888;
+			// previously doublestar `*` did not cross `/`, so that allow was a
+			// no-op for this command. Keep the deny-only profile the test needs.)
 			{Name: "reviewer", Permissions: permission.Ruleset{
 				{Permission: "bash", Pattern: "*", Action: permission.Deny},
-				{Permission: "bash", Pattern: "git *", Action: permission.Allow},
 			}},
 		},
 		InitialAgent: "build",

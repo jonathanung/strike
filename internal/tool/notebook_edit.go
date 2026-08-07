@@ -96,7 +96,7 @@ func (notebookEditTool) Execute(ctx context.Context, args json.RawMessage, tc *C
 		return Result{}, fmt.Errorf("file must be a Jupyter notebook (.ipynb)")
 	}
 
-	data, err := os.ReadFile(path)
+	data, err := safeReadFile(ctx, path)
 	if err != nil {
 		return Result{}, err
 	}
