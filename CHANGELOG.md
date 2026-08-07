@@ -52,6 +52,10 @@ materially affect the shipped product.
   naming/hash/labels, `/devcontainer` skill contract, offline eject→launch→exec
   round-trip (E12.8 / [#590](https://github.com/jonathanung/strike/issues/590)).
 
+- **Eval container pool** — SWE-bench runner uses `internal/container` CLI
+  runtime and acquires `scheduler.PoolContainer` for the full instance
+  lifecycle (admit before create; always release) ([#592](https://github.com/jonathanung/strike/issues/592)).
+
 - **Isolation indicator** — header badge and `/container` show the E12.7 posture
   ladder (`host+yolo` → `host+default` → `host+sandbox` → `container` →
   `container+no-network`). `STRIKE_ISOLATION` is injected at launch (not
