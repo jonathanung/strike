@@ -122,6 +122,21 @@ func (m *Manager) Build(ctx context.Context, opts BuildOpts) (string, error) {
 	return id, nil
 }
 
+// LaunchMode reports whether Launch attached to an existing container or started a new one.
+// Session model (E12.6): one managed container per repo path (ContainerName); N sessions join it.
+type LaunchMode string
+
+const (
+	// LaunchModeAttached reused a compatible running container.
+	LaunchModeAttached LaunchMode = "attached"
+	// LaunchModeStarted created and started a new container.
+	LaunchModeStarted LaunchMode = "started"
+	// LaunchModeRestarted started an exited container that still matched config.
+	LaunchModeRestarted LaunchMode = "restarted"
+	// LaunchModeRebuilt replaced a drifted container after an explicit rebuild choice.
+	LaunchModeRebuilt LaunchMode = "rebuilt"
+)
+
 // LaunchOpts configures Launch.
 type LaunchOpts struct {
 	// ForceRebuild rebuilds even when hash matches.
@@ -136,103 +151,185 @@ type LaunchOpts struct {
 	AsRoot bool
 	// Headless skips attach and returns after start.
 	Headless bool
-	// Replace stops an existing running container before create.
+	// Replace stops an existing running container before create (rebuild path).
 	Replace bool
+	// AttachStale attaches to a drifted running container without rebuilding
+	// (user chose "attach anyway" after StaleContainerError).
+	AttachStale bool
+}
+
+// LaunchResult is the outcome of Launch / LaunchWithResult (E12.6).
+type LaunchResult struct {
+	ID   string
+	Name string
+	Mode LaunchMode
 }
 
 // Launch implements build-if-needed → create → start → optional attach.
+// Prefer LaunchWithResult when the caller needs attached-vs-started messaging.
 func (m *Manager) Launch(ctx context.Context, opts LaunchOpts) (containerID string, err error) {
+	res, err := m.LaunchWithResult(ctx, opts)
+	return res.ID, err
+}
+
+// LaunchWithResult is Launch plus mode (attached | started | restarted | rebuilt).
+func (m *Manager) LaunchWithResult(ctx context.Context, opts LaunchOpts) (LaunchResult, error) {
+	var zero LaunchResult
 	if err := m.RT.Available(ctx); err != nil {
-		return "", err
+		return zero, err
 	}
 	if err := ValidateRequiredEnv(m.Cfg.Auth.RequiredEnv, m.Cfg.Auth.EnvFile, m.RepoDir); err != nil {
-		return "", err
+		return zero, err
 	}
 	if err := m.Cache.EnsureDir(); err != nil {
-		return "", err
+		return zero, err
 	}
 
-	// Reuse running container when labels match.
-	if existing, _ := m.Cache.ContainerID(); existing != "" {
-		st, ierr := m.RT.InspectContainer(ctx, existing)
-		if ierr == nil && st.Running {
+	name := ContainerName(m.RepoDir)
+
+	// Reuse running container when labels match (cache id or deterministic name).
+	if st, err := m.findExisting(ctx); err == nil && st != nil {
+		_ = m.Cache.SetContainerID(st.ID)
+		if st.Running {
 			if changed, reason := m.runningChanged(st); changed {
+				if opts.AttachStale {
+					return m.finishAttach(ctx, st.ID, name, LaunchModeAttached, opts)
+				}
 				if !opts.Replace {
-					return "", fmt.Errorf("%w: %s (pass Replace to rebuild)", ErrConfigDrift, reason)
+					_, want, _ := m.dockerfileAndHash()
+					have := ""
+					if st.Labels != nil {
+						have = st.Labels[LabelConfigHash]
+					}
+					return zero, &StaleContainerError{
+						Reason:      reason,
+						ContainerID: st.ID,
+						Name:        name,
+						WantHash:    want,
+						HaveHash:    have,
+					}
 				}
 				_ = m.Stop(ctx)
-			} else {
-				if opts.Attach && !opts.Headless {
-					cmd := opts.Cmd
-					if len(cmd) == 0 {
-						cmd = []string{m.Cfg.shell()}
-					}
-					return st.ID, m.attach(ctx, st.ID, cmd, opts.AsRoot)
+				// fall through to rebuild
+				res, err := m.createPath(ctx, opts)
+				if err != nil {
+					return zero, err
 				}
-				return st.ID, nil
+				res.Mode = LaunchModeRebuilt
+				return res, nil
 			}
-		} else if ierr == nil && !st.Running {
-			// restart exited container if hash still matches
-			if changed, _ := m.runningChanged(st); !changed && !opts.ForceRebuild {
-				if err := m.RT.Start(ctx, st.ID); err == nil {
-					if opts.Attach && !opts.Headless {
-						cmd := opts.Cmd
-						if len(cmd) == 0 {
-							cmd = []string{m.Cfg.shell()}
-						}
-						return st.ID, m.attach(ctx, st.ID, cmd, opts.AsRoot)
-					}
-					return st.ID, nil
-				}
-			}
-			_ = m.RT.Remove(ctx, st.ID)
-			_ = m.Cache.ClearRuntime()
-		} else {
-			// stale id
-			_ = m.Cache.ClearRuntime()
+			return m.finishAttach(ctx, st.ID, name, LaunchModeAttached, opts)
 		}
+		// exited container
+		if changed, _ := m.runningChanged(st); !changed && !opts.ForceRebuild && !opts.Replace {
+			if err := m.RT.Start(ctx, st.ID); err == nil {
+				_ = m.Cache.SetContainerID(st.ID)
+				return m.finishAttach(ctx, st.ID, name, LaunchModeRestarted, opts)
+			}
+		}
+		_ = m.RT.Remove(ctx, st.ID)
+		_ = m.Cache.ClearRuntime()
 	}
 
-	if m.NeedsBuild(ctx, opts.ForceRebuild) {
-		if _, err := m.Build(ctx, BuildOpts{NoCache: opts.NoCache}); err != nil {
-			return "", err
-		}
-	}
-	img, err := m.Cache.ImageID()
-	if err != nil || img == "" {
-		return "", fmt.Errorf("container: no image id after build")
-	}
+	return m.createPath(ctx, opts)
+}
 
-	id, err := m.createAndStart(ctx, img)
+// findExisting locates the per-repo container via cache id, then ContainerName.
+func (m *Manager) findExisting(ctx context.Context) (*InspectState, error) {
+	if existing, _ := m.Cache.ContainerID(); existing != "" {
+		st, err := m.RT.InspectContainer(ctx, existing)
+		if err == nil {
+			return st, nil
+		}
+		// stale cache entry
+		_ = m.Cache.ClearRuntime()
+	}
+	// Folder → container mapping (E12.6): deterministic name from repo path.
+	name := ContainerName(m.RepoDir)
+	st, err := m.RT.InspectContainer(ctx, name)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
+	return st, nil
+}
+
+func (m *Manager) finishAttach(ctx context.Context, id, name string, mode LaunchMode, opts LaunchOpts) (LaunchResult, error) {
+	res := LaunchResult{ID: id, Name: name, Mode: mode}
 	if opts.Headless || !opts.Attach {
-		return id, nil
+		return res, nil
 	}
 	cmd := opts.Cmd
 	if len(cmd) == 0 {
 		cmd = []string{m.Cfg.shell()}
 	}
-	return id, m.attach(ctx, id, cmd, opts.AsRoot)
+	return res, m.attach(ctx, id, cmd, opts.AsRoot)
+}
+
+func (m *Manager) createPath(ctx context.Context, opts LaunchOpts) (LaunchResult, error) {
+	var zero LaunchResult
+	name := ContainerName(m.RepoDir)
+	if m.NeedsBuild(ctx, opts.ForceRebuild) {
+		if _, err := m.Build(ctx, BuildOpts{NoCache: opts.NoCache}); err != nil {
+			return zero, err
+		}
+	}
+	img, err := m.Cache.ImageID()
+	if err != nil || img == "" {
+		return zero, fmt.Errorf("container: no image id after build")
+	}
+
+	id, err := m.createAndStart(ctx, img)
+	if err != nil {
+		return zero, err
+	}
+	res := LaunchResult{ID: id, Name: name, Mode: LaunchModeStarted}
+	if opts.Headless || !opts.Attach {
+		return res, nil
+	}
+	cmd := opts.Cmd
+	if len(cmd) == 0 {
+		cmd = []string{m.Cfg.shell()}
+	}
+	return res, m.attach(ctx, id, cmd, opts.AsRoot)
 }
 
 func (m *Manager) runningChanged(st *InspectState) (bool, string) {
+	ok, reason, _, _ := m.compatibility(st)
+	return !ok, reason
+}
+
+// Compatibility reports whether st matches the current recipe (config hash / image id).
+// have/want are config-hash labels (want may be empty if hash compute failed).
+func (m *Manager) Compatibility(st *InspectState) (ok bool, reason, have, want string) {
+	return m.compatibility(st)
+}
+
+func (m *Manager) compatibility(st *InspectState) (ok bool, reason, have, want string) {
 	_, hash, err := m.dockerfileAndHash()
+	want = hash
 	if err != nil {
-		return true, "hash compute failed"
+		return false, "hash compute failed", "", ""
+	}
+	if st == nil {
+		return false, "no container", "", want
+	}
+	if st.Labels != nil {
+		have = st.Labels[LabelConfigHash]
 	}
 	if st.Labels == nil {
-		return true, "missing labels"
+		return false, "missing labels", have, want
 	}
 	if got := st.Labels[LabelConfigHash]; got != "" && got != hash {
-		return true, fmt.Sprintf("config hash %s != %s", got, hash)
+		return false, fmt.Sprintf("config hash %s != %s", shortHash(got), shortHash(hash)), have, want
+	}
+	if got := st.Labels[LabelConfigHash]; got == "" {
+		return false, "missing config hash label", have, want
 	}
 	img, _ := m.Cache.ImageID()
 	if img != "" && st.Labels[LabelImageID] != "" && st.Labels[LabelImageID] != img {
-		return true, "image id mismatch"
+		return false, "image id mismatch", have, want
 	}
-	return false, ""
+	return true, "", have, want
 }
 
 func (m *Manager) createAndStart(ctx context.Context, imageID string) (string, error) {

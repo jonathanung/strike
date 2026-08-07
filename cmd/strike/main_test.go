@@ -44,6 +44,9 @@ Options:
   --session <id>                     resume a specific session by id (model history + selections)
   --worktree                         run this session in an isolated git worktree under .strike/worktrees/
   --launch-inside-container          build/start the project container and re-exec strike inside it (E12.4)
+  --container-rebuild                with --launch-inside-container: rebuild when the live container is stale (E12.6)
+  --container-attach-stale           with --launch-inside-container: attach to a stale live container (E12.6)
+  --container-cancel                 with --launch-inside-container: cancel when the live container is stale (E12.6)
   --telemetry                        show local system metrics pane (CPU/RAM/disk); on by default
   --upgrade                          download and install the latest GitHub Release
   --version                          print version and exit

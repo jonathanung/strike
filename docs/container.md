@@ -94,7 +94,32 @@ Config fields: `needsNode` / `nodeVersion`, `needsPython` / `pythonVersion`,
 `needsGo` / `goVersion`, `needsRust` (plus existing `packages`, `network`,
 `resources`).
 
-Still later: attach prompts (E12.6), isolation badge (E12.7).
+### Attach live container (E12.6)
+
+**Session model:** one managed container per repo path
+(`ContainerName(repoPath)` → `strike-<repo>-<sha256[:16]>`). Multiple strike
+sessions **attach** to that container rather than creating a second.
+
+```sh
+strike --launch-inside-container
+# on stale live container (interactive TTY):
+#   attach anyway [a] / rebuild [r] / cancel [c]
+strike --launch-inside-container --container-attach-stale
+strike --launch-inside-container --container-rebuild
+strike --launch-inside-container --container-cancel   # non-interactive refuse
+
+strike container ls            # this repo mapping + live state
+strike container ls --all      # every com.strike.managed container
+strike container status        # running + config-hash compatibility
+```
+
+`Manager.LaunchWithResult` returns mode `attached` | `started` | `restarted` |
+`rebuilt`. Launch prints e.g. `strike: attached to existing container …`.
+Stale config raises `*StaleContainerError` (unwraps `ErrConfigDrift`) with
+question options attach/rebuild/cancel for CLI or the `question` tool.
+
+Still later: isolation badge (E12.7).
+
 
 ## Binary selection
 
