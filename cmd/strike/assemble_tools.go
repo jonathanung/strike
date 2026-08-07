@@ -788,6 +788,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			CollectDiagnostics:   makeLSPCollectDiagnostics(lspMgr, toolDir, cfg.LSP),
 			MaxChildDepth:        cfg.MaxChildDepth,
 			TurnTimeout:          resolveRootTurnTimeout(cfg, opts),
+			ChildIsolation:       cfg.Session.ChildIsolation,
 			MaxToolRetryAttempts: cfg.ToolRetry.MaxAttempts,
 			ToolLoopThreshold:    cfg.ToolRetry.LoopThreshold,
 			ToolRetryBackoff:     toolRetryBackoffFromConfig(cfg.ToolRetry),

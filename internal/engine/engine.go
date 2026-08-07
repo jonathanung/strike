@@ -292,9 +292,13 @@ type Options struct {
 	OverlapPolicy string
 	// DefaultChildBudget is the session default for per-child limits (#774).
 	// Spawn-time task budget fields overlay non-zero values. Zero fields mean
-	// unlimited (soft stall/loop signals still apply). Nested under the
-	// session maxSessionCostUSD (#577) outer envelope when configured.
+	// unlimited (soft stall/loop signals still apply). Nested under any future
+	// session maxSessionCostUSD (#577) outer envelope.
 	DefaultChildBudget tool.AgentBudgetLimits
+	// ChildIsolation is the default filesystem mode for task children (#1036):
+	// off|shared (same WorkDir) or worktree (per-child git worktree). Spawn-time
+	// task.isolation overlays. Empty means shared.
+	ChildIsolation string
 	// MaxSessionCostUSD is the outer session cost envelope in USD (#577).
 	// Zero means unlimited. Shared across root + children via SessionBudget.
 	MaxSessionCostUSD float64

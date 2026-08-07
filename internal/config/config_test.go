@@ -2082,3 +2082,24 @@ func TestLoadSessionTurnTimeoutMerge(t *testing.T) {
 		t.Fatalf("turnTimeoutS = %d, want -1 (project disable)", cfg.Session.TurnTimeoutS)
 	}
 }
+
+func TestNormalizeChildIsolation(t *testing.T) {
+	if got := NormalizeChildIsolation(""); got != ChildIsolationOff {
+		t.Fatalf("empty = %q", got)
+	}
+	if got := NormalizeChildIsolation("worktree"); got != ChildIsolationWorktree {
+		t.Fatalf("worktree = %q", got)
+	}
+	if got := NormalizeChildIsolation("shared"); got != ChildIsolationShared {
+		t.Fatalf("shared = %q", got)
+	}
+	if !WantChildWorktree("worktree", "") {
+		t.Fatal("session default worktree")
+	}
+	if WantChildWorktree("worktree", "shared") {
+		t.Fatal("spawn override shared")
+	}
+	if !WantChildWorktree("off", "worktree") {
+		t.Fatal("spawn override worktree")
+	}
+}

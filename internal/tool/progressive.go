@@ -61,6 +61,8 @@ type progressiveArgs struct {
 	ContextBundle ContextBundle     `json:"context_bundle"`
 	// ForceDelegate overrides soft local-prefer policy (#876).
 	ForceDelegate bool `json:"force_delegate"`
+	// Isolation is shared|worktree for this spawn (#1036). Empty inherits session default.
+	Isolation string `json:"isolation"`
 	// Continue allows resume of a terminal child as an explicit continuation (#1035).
 	Continue bool `json:"continue"`
 
@@ -314,6 +316,7 @@ func progressiveCreate(ctx context.Context, source, permission string, a progres
 		Budget:        a.Budget,
 		ContextBundle: bundle,
 		ForceDelegate: a.ForceDelegate,
+		Isolation:     a.Isolation,
 	})
 	if err != nil {
 		return Result{}, err
