@@ -22,11 +22,40 @@ const Placeholder = "[REDACTED]"
 // output (env dumps, nested echoes) that did not match a named pattern.
 const PlaceholderHighEntropy = "[REDACTED_HIGH_ENTROPY]"
 
+// Finding is one credential-shaped match. Used by write-time content guards
+// (#890) and tests; redaction still uses String/ScrubToolOutput.
+type Finding struct {
+	// RuleID is a stable machine id (e.g. pem_private_key, aws_access_key_id).
+	RuleID string
+	// Kind is always "credential" for findings from this package.
+	Kind string
+}
+
+// KindCredential is Finding.Kind for secret-shaped spans.
+const KindCredential = "credential"
+
+// Stable rule ids for credential patterns (write guards + docs).
+const (
+	RulePEMPrivateKey  = "pem_private_key"
+	RuleAnthropicKey   = "anthropic_api_key"
+	RuleXAIKey         = "xai_api_key"
+	RuleOpenAIKey      = "openai_api_key"
+	RuleGitHubToken    = "github_token"
+	RuleSlackToken     = "slack_token"
+	RuleAWSAccessKeyID = "aws_access_key_id"
+	RuleBearerToken    = "bearer_token"
+	RuleLabeledSecret  = "labeled_secret"
+	RuleProviderEnvKey = "provider_env_key"
+	RuleGenericToken   = "generic_token"
+	RuleJSONCredential = "json_credential_field"
+)
+
 // pattern is one replace rule. When keepPrefix is true, submatch group 1 is
 // preserved and group 2 (the secret) is replaced with repl (or Placeholder).
 // When the match has three groups (e.g. JSON "key":"value"), group 3 is kept
 // after the placeholder.
 type pattern struct {
+	id         string
 	re         *regexp.Regexp
 	repl       string
 	keepPrefix bool
@@ -36,30 +65,30 @@ type pattern struct {
 // API token forms. Order matters for overlapping prefixes (more specific first).
 var patterns = []pattern{
 	// PEM private keys (multiline).
-	{re: regexp.MustCompile(`-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----`), repl: "[REDACTED_PRIVATE_KEY]"},
+	{id: RulePEMPrivateKey, re: regexp.MustCompile(`-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----`), repl: "[REDACTED_PRIVATE_KEY]"},
 	// Anthropic keys (sk-ant-…).
-	{re: regexp.MustCompile(`(?i)\bsk-ant-[a-z0-9_-]{8,}\b`), repl: "[REDACTED_ANTHROPIC_KEY]"},
+	{id: RuleAnthropicKey, re: regexp.MustCompile(`(?i)\bsk-ant-[a-z0-9_-]{8,}\b`), repl: "[REDACTED_ANTHROPIC_KEY]"},
 	// xAI keys.
-	{re: regexp.MustCompile(`(?i)\bxai-[a-z0-9_-]{8,}\b`), repl: "[REDACTED_XAI_KEY]"},
+	{id: RuleXAIKey, re: regexp.MustCompile(`(?i)\bxai-[a-z0-9_-]{8,}\b`), repl: "[REDACTED_XAI_KEY]"},
 	// OpenAI-ish sk-… (after sk-ant so ant keys are not double-matched).
-	{re: regexp.MustCompile(`(?i)\bsk-[a-z0-9_-]{8,}\b`), repl: "[REDACTED_API_KEY]"},
+	{id: RuleOpenAIKey, re: regexp.MustCompile(`(?i)\bsk-[a-z0-9_-]{8,}\b`), repl: "[REDACTED_API_KEY]"},
 	// GitHub tokens.
-	{re: regexp.MustCompile(`(?i)\b(?:ghp|gho|ghu|ghs|ghr)_[a-z0-9_]{20,}\b`), repl: "[REDACTED_GITHUB_TOKEN]"},
-	{re: regexp.MustCompile(`(?i)\bgithub_pat_[a-z0-9_]{20,}\b`), repl: "[REDACTED_GITHUB_TOKEN]"},
+	{id: RuleGitHubToken, re: regexp.MustCompile(`(?i)\b(?:ghp|gho|ghu|ghs|ghr)_[a-z0-9_]{20,}\b`), repl: "[REDACTED_GITHUB_TOKEN]"},
+	{id: RuleGitHubToken, re: regexp.MustCompile(`(?i)\bgithub_pat_[a-z0-9_]{20,}\b`), repl: "[REDACTED_GITHUB_TOKEN]"},
 	// Slack tokens.
-	{re: regexp.MustCompile(`(?i)\bxox[baprs]-[a-z0-9-]{10,}\b`), repl: "[REDACTED_SLACK_TOKEN]"},
+	{id: RuleSlackToken, re: regexp.MustCompile(`(?i)\bxox[baprs]-[a-z0-9-]{10,}\b`), repl: "[REDACTED_SLACK_TOKEN]"},
 	// AWS access key ids.
-	{re: regexp.MustCompile(`\bAKIA[A-Z0-9]{16}\b`), repl: "[REDACTED_AWS_KEY]"},
+	{id: RuleAWSAccessKeyID, re: regexp.MustCompile(`\bAKIA[A-Z0-9]{16}\b`), repl: "[REDACTED_AWS_KEY]"},
 	// Bearer tokens (keep scheme).
-	{re: regexp.MustCompile(`(?i)\b(Bearer\s+)([a-z0-9._\-+/=]{12,})`), repl: Placeholder, keepPrefix: true},
+	{id: RuleBearerToken, re: regexp.MustCompile(`(?i)\b(Bearer\s+)([a-z0-9._\-+/=]{12,})`), repl: Placeholder, keepPrefix: true},
 	// Labeled assignments: api_key=, password:, etc.
-	{re: regexp.MustCompile(`(?i)\b((?:api[_-]?key|api[_-]?secret|access[_-]?token|refresh[_-]?token|secret[_-]?key|client[_-]?secret|password|passwd)\s*[=:]\s*["']?)(\S+)`), repl: Placeholder, keepPrefix: true},
+	{id: RuleLabeledSecret, re: regexp.MustCompile(`(?i)\b((?:api[_-]?key|api[_-]?secret|access[_-]?token|refresh[_-]?token|secret[_-]?key|client[_-]?secret|password|passwd)\s*[=:]\s*["']?)(\S+)`), repl: Placeholder, keepPrefix: true},
 	// Provider env keys used by internal/auth (and common aliases).
-	{re: regexp.MustCompile(`(?i)\b((?:ANTHROPIC|OPENAI|XAI|OPENROUTER|GEMINI|GOOGLE|KIMI|DEEPSEEK|GITHUB)_(?:API_)?KEY\s*[=:]\s*)(\S+)`), repl: Placeholder, keepPrefix: true},
+	{id: RuleProviderEnvKey, re: regexp.MustCompile(`(?i)\b((?:ANTHROPIC|OPENAI|XAI|OPENROUTER|GEMINI|GOOGLE|KIMI|DEEPSEEK|GITHUB)_(?:API_)?KEY\s*[=:]\s*)(\S+)`), repl: Placeholder, keepPrefix: true},
 	// Generic TOKEN= / SECRET= env-style (high entropy values only via length).
-	{re: regexp.MustCompile(`(?i)\b((?:AUTH_)?TOKEN\s*[=:]\s*)([^\s"'\\]{12,})`), repl: Placeholder, keepPrefix: true},
+	{id: RuleGenericToken, re: regexp.MustCompile(`(?i)\b((?:AUTH_)?TOKEN\s*[=:]\s*)([^\s"'\\]{12,})`), repl: Placeholder, keepPrefix: true},
 	// Auth-store JSON credential fields.
-	{re: regexp.MustCompile(`(?i)("(?:apiKey|access|refresh|idToken|clientSecret|token)"\s*:\s*")([^"]{6,})(")`), repl: Placeholder, keepPrefix: true},
+	{id: RuleJSONCredential, re: regexp.MustCompile(`(?i)("(?:apiKey|access|refresh|idToken|clientSecret|token)"\s*:\s*")([^"]{6,})(")`), repl: Placeholder, keepPrefix: true},
 }
 
 var highEntropyRE = regexp.MustCompile(`\b[A-Za-z0-9_-]{40,}\b`)
@@ -241,6 +270,32 @@ func ContainsSecret(s string) bool {
 	}
 	// If redaction changes the string, a secret-shaped span was present.
 	return String(s) != s
+}
+
+// Findings returns credential-shaped matches in s (deduped by RuleID, pattern
+// order). Empty input or no matches returns nil. Does not include high-entropy
+// ScrubToolOutput heuristics — those are egress-only and too noisy for write
+// guards. Callers that need a boolean can use ContainsSecret or len(Findings)>0.
+func Findings(s string) []Finding {
+	if s == "" {
+		return nil
+	}
+	seen := make(map[string]struct{}, 8)
+	var out []Finding
+	for _, p := range patterns {
+		if p.id == "" || !p.re.MatchString(s) {
+			continue
+		}
+		if _, ok := seen[p.id]; ok {
+			continue
+		}
+		seen[p.id] = struct{}{}
+		out = append(out, Finding{RuleID: p.id, Kind: KindCredential})
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // Bytes is String for byte slices; nil/empty input returns the input unchanged.

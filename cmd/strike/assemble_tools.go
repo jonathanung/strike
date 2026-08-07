@@ -760,6 +760,11 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			InitialPermissionMode: initialPermMode,
 			SandboxMode:           sandboxMode,
 			NetworkAllow:          sandbox.CloneNetworkAllow(cfg.Network.Allow),
+			ContentGuard: tool.ContentGuardSettings{
+				Mode:       cfg.ContentGuard.Mode,
+				PathAllow:  append([]string(nil), cfg.ContentGuard.PathAllow...),
+				ForcedDeny: cfg.Managed.ContentGuardForcedDeny,
+			},
 			WebSearch: tool.WebSearchSettings{
 				Provider:  cfg.WebSearch.Provider,
 				APIKeyEnv: cfg.WebSearch.APIKeyEnv,
