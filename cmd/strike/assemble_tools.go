@@ -1395,7 +1395,6 @@ func cloneBashSecrets(in map[string]string) map[string]string {
 	}
 	return out
 }
-}
 
 // resolveRootTurnTimeout picks CLI --turn-timeout over session.turnTimeoutS,
 // then applies the product default (30m) when unset. Negative config/CLI
