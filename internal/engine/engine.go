@@ -795,7 +795,7 @@ func New(opts Options) *Engine {
 	if len(opts.InitialMessages) > 0 {
 		e.messages = append([]provider.Message(nil), opts.InitialMessages...)
 	}
-	e.perms = permission.New(e.emit, opts.Rules...)
+	e.perms = permission.New(e.emitPermission, opts.Rules...)
 	if len(opts.RuleLayerNames) > 0 {
 		e.perms.SetBaseLayerNames(opts.RuleLayerNames...)
 	}
@@ -988,6 +988,7 @@ func (e *Engine) Run(ctx context.Context) {
 	// Dissolve the team after children shut down so terminal members stay
 	// listable for the lead's lifetime, then clear on lead exit.
 	defer e.closeEvents()
+	defer e.fireSessionEnd()
 	defer e.dissolveTeamIfLead()
 	defer e.detachMailbox()
 	defer e.shutdownChildren()
@@ -1047,6 +1048,8 @@ func (e *Engine) Run(ctx context.Context) {
 	if len(e.opts.InitialAlwaysGrants) > 0 {
 		e.perms.SeedAlwaysGrants(e.opts.InitialAlwaysGrants)
 	}
+	// Session lifecycle hooks observe start vs resume before quietStartup clears.
+	e.fireSessionLifecycle()
 	e.quietStartup = false
 	oneshotTurnSeen := false
 	for {
