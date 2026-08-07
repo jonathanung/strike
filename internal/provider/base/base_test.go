@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jonathanung/strike-cli/internal/provider"
 )
@@ -146,5 +147,127 @@ func TestClientName(t *testing.T) {
 	c := &Client{ProviderName: "xai"}
 	if c.Name() != "xai" {
 		t.Errorf("Name = %q", c.Name())
+	}
+}
+
+func TestParseRetryAfter(t *testing.T) {
+	t.Parallel()
+	future := time.Now().UTC().Add(12 * time.Second).Format(http.TimeFormat)
+	past := time.Now().UTC().Add(-5 * time.Second).Format(http.TimeFormat)
+	far := time.Now().UTC().Add(2 * time.Hour).Format(http.TimeFormat)
+
+	cases := []struct {
+		name string
+		raw  string
+		want time.Duration // 0 = invalid/missing/excessive
+		min  time.Duration // for HTTP-date, allow slack
+		max  time.Duration
+	}{
+		{name: "empty", raw: "", want: 0},
+		{name: "spaces", raw: "  ", want: 0},
+		{name: "delay seconds", raw: "7", want: 7 * time.Second},
+		{name: "delay zero", raw: "0", want: 0},
+		{name: "delay negative", raw: "-3", want: 0},
+		{name: "delay excessive", raw: "120", want: 0}, // > MaxRetryAfter
+		{name: "delay at cap", raw: "60", want: 60 * time.Second},
+		{name: "garbage", raw: "soon", want: 0},
+		{name: "http-date future", raw: future, min: 5 * time.Second, max: 12 * time.Second},
+		{name: "http-date past", raw: past, want: 0},
+		{name: "http-date excessive", raw: far, want: 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ParseRetryAfter(tc.raw)
+			if tc.min > 0 || tc.max > 0 {
+				if got < tc.min || got > tc.max {
+					t.Fatalf("ParseRetryAfter(%q) = %v, want in [%v, %v]", tc.raw, got, tc.min, tc.max)
+				}
+				return
+			}
+			if got != tc.want {
+				t.Fatalf("ParseRetryAfter(%q) = %v, want %v", tc.raw, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestPostJSONPreservesRetryAfter(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "5")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"error": map[string]string{"type": "rate_limit_error", "message": "slow down"},
+		})
+	}))
+	defer srv.Close()
+
+	c := &Client{ProviderName: "test", HTTP: srv.Client()}
+	err := c.PostJSON(context.Background(), srv.URL, map[string]string{}, &struct{}{})
+	var se *StatusError
+	if !errors.As(err, &se) {
+		t.Fatalf("err = %v, want StatusError", err)
+	}
+	if se.Status != http.StatusTooManyRequests || !se.Retryable() {
+		t.Fatalf("StatusError = %#v", se)
+	}
+	if se.RetryAfter != 5*time.Second {
+		t.Fatalf("RetryAfter = %v, want 5s", se.RetryAfter)
+	}
+	d, ok := se.RetryAfterDelay()
+	if !ok || d != 5*time.Second {
+		t.Fatalf("RetryAfterDelay = %v, %v", d, ok)
+	}
+}
+
+func TestPostSSEPreservesRetryAfter(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "not-a-delay")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte("nope"))
+	}))
+	defer srv.Close()
+
+	c := &Client{ProviderName: "sse", HTTP: srv.Client()}
+	_, err := c.PostSSE(context.Background(), srv.URL, map[string]string{})
+	var se *StatusError
+	if !errors.As(err, &se) {
+		t.Fatalf("err = %v", err)
+	}
+	if se.RetryAfter != 0 {
+		t.Fatalf("invalid Retry-After should be zero, got %v", se.RetryAfter)
+	}
+	if _, ok := se.RetryAfterDelay(); ok {
+		t.Fatal("RetryAfterDelay ok=true for invalid header")
+	}
+}
+
+func TestPostJSONMissingRetryAfter(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte("busy"))
+	}))
+	defer srv.Close()
+
+	c := &Client{ProviderName: "test", HTTP: srv.Client()}
+	err := c.PostJSON(context.Background(), srv.URL, map[string]string{}, &struct{}{})
+	var se *StatusError
+	if !errors.As(err, &se) || se.RetryAfter != 0 {
+		t.Fatalf("StatusError = %#v", err)
+	}
+}
+
+func TestPostJSONExcessiveRetryAfterDropped(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "3600")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte("wait forever"))
+	}))
+	defer srv.Close()
+
+	c := &Client{ProviderName: "test", HTTP: srv.Client()}
+	err := c.PostJSON(context.Background(), srv.URL, map[string]string{}, &struct{}{})
+	var se *StatusError
+	if !errors.As(err, &se) || se.RetryAfter != 0 {
+		t.Fatalf("excessive Retry-After must be dropped: %#v", se)
 	}
 }

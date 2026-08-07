@@ -159,6 +159,16 @@ func (s *Sink) Record(family string, sessionID, turnID, toolCallID, chainID stri
 
 // Observe maps selected protocol events into audit records (best-effort).
 // Unknown / non-security events are ignored. Never stores full transcripts.
+// Covers every documented family with a production path (#1032):
+//
+//	permission       ← PermissionDecided
+//	toolchain_match  ← PermissionDecided with ChainRule
+//	sandbox          ← ToolCallEnd sandbox_denied (+ degraded metadata)
+//	egress           ← ToolCallEnd network_denied
+//	content_guard    ← ToolCallEnd content_guard_denied
+//	admission        ← Scheduler* + AdmissionDecided
+//	hook             ← HookMatched (shell_* and declarative block)
+//	secret_ref_use   ← direct Record (see RecordSecretRefUse)
 func (s *Sink) Observe(ev protocol.Event) error {
 	if s == nil || ev == nil {
 		return nil
@@ -180,19 +190,104 @@ func (s *Sink) Observe(ev protocol.Event) error {
 			SessionID:      e.SessionID,
 			TurnID:         e.TurnID,
 		}
-		return s.Record(FamilyPermission, e.SessionID, e.TurnID, "", "", payload)
+		if err := s.Record(FamilyPermission, e.SessionID, e.TurnID, "", e.ChainID, payload); err != nil {
+			return err
+		}
+		// Tool-chain correlation match (#891) → dedicated family.
+		if e.ChainRule != "" {
+			tc := ToolchainMatchPayload{
+				Tool:    e.Permission,
+				Matched: redact.String(e.ChainSummary),
+				Action:  e.Action,
+				Source:  e.ChainRule,
+			}
+			if err := s.Record(FamilyToolchainMatch, e.SessionID, e.TurnID, "", e.ChainID, tc); err != nil {
+				return err
+			}
+		}
+		// content_guard permission asks/denies.
+		if e.Permission == "content_guard" {
+			cg := ContentGuardPayload{
+				Action: e.Action,
+				Reason: redact.String(e.RulePattern),
+				Tool:   e.Permission,
+				RuleID: e.RulePermission,
+			}
+			return s.Record(FamilyContentGuard, e.SessionID, e.TurnID, "", e.ChainID, cg)
+		}
+		return nil
 	case protocol.ToolCallEnd:
-		if !e.IsError || e.ErrorCode != "sandbox_denied" {
+		if !e.IsError {
+			// Successful sandbox apply is not audited (noise); denials only.
 			return nil
 		}
-		payload := telemetry.SandboxEvent{
-			Reason:     redact.String(e.Output),
-			ErrorCode:  e.ErrorCode,
-			SessionID:  e.SessionID,
-			TurnID:     e.TurnID,
-			ToolCallID: e.CallID,
+		switch e.ErrorCode {
+		case "sandbox_denied":
+			payload := telemetry.SandboxEvent{
+				Reason:     redact.String(e.Output),
+				ErrorCode:  e.ErrorCode,
+				SessionID:  e.SessionID,
+				TurnID:     e.TurnID,
+				ToolCallID: e.CallID,
+			}
+			return s.Record(FamilySandbox, e.SessionID, e.TurnID, e.CallID, "", payload)
+		case "network_denied":
+			payload := telemetry.EgressEvent{
+				Destination:      "", // host may appear in redacted output only
+				DestinationClass: "denied",
+				Tool:             e.Title,
+				Action:           "deny",
+				Reason:           redact.String(e.Output),
+				SessionID:        e.SessionID,
+				TurnID:           e.TurnID,
+				ToolCallID:       e.CallID,
+			}
+			return s.Record(FamilyEgress, e.SessionID, e.TurnID, e.CallID, "", payload)
+		case "content_guard_denied":
+			payload := ContentGuardPayload{
+				Action: "deny",
+				Reason: redact.String(e.Output),
+				Tool:   e.Title,
+			}
+			return s.Record(FamilyContentGuard, e.SessionID, e.TurnID, e.CallID, "", payload)
+		case "blocked":
+			// Hook / phase policy block — also covered by HookMatched when present.
+			payload := HookPayload{
+				Event:    "tool_blocked",
+				Action:   "block",
+				Tool:     e.Title,
+				Reason:   redact.String(e.Output),
+				CallID:   e.CallID,
+				Decision: "block",
+			}
+			return s.Record(FamilyHook, e.SessionID, e.TurnID, e.CallID, "", payload)
+		default:
+			return nil
 		}
-		return s.Record(FamilySandbox, e.SessionID, e.TurnID, e.CallID, "", payload)
+	case protocol.HookMatched:
+		action := e.Action
+		decision := "allow"
+		if strings.Contains(action, "block") || strings.Contains(action, "fail_closed") {
+			decision = "block"
+		}
+		payload := HookPayload{
+			Event:    e.Event,
+			Action:   action,
+			Tool:     e.Tool,
+			Reason:   redact.String(e.Message),
+			CallID:   e.CallID,
+			Decision: decision,
+		}
+		return s.Record(FamilyHook, e.SessionID, e.TurnID, e.CallID, "", payload)
+	case protocol.AdmissionDecided:
+		payload := telemetry.AdmissionEvent{
+			Pool:      e.Surface + ":" + e.Target,
+			State:     e.Action,
+			Reason:    redact.String(e.Reason),
+			SessionID: e.SessionID,
+			TurnID:    e.TurnID,
+		}
+		return s.Record(FamilyAdmission, e.SessionID, e.TurnID, "", "", payload)
 	case protocol.SchedulerQueued:
 		payload := telemetry.AdmissionEvent{
 			Pool:      firstPool(e.Pools),
@@ -227,6 +322,17 @@ func (s *Sink) Observe(ev protocol.Event) error {
 	default:
 		return nil
 	}
+}
+
+// RecordSecretRefUse appends a secret_ref_use record (class/hash only — never
+// the resolved value). Call at resolve/inject time from production paths.
+func (s *Sink) RecordSecretRefUse(sessionID, turnID, toolCallID, refClass, refHash, action, toolName string) error {
+	return s.Record(FamilySecretRefUse, sessionID, turnID, toolCallID, "", SecretRefUsePayload{
+		RefClass: refClass,
+		RefHash:  refHash,
+		Action:   action,
+		Tool:     toolName,
+	})
 }
 
 func firstPool(pools []string) string {

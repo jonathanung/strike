@@ -19,6 +19,8 @@ const (
 	FamilyAdmission      = "admission"
 	FamilyEgress         = "egress"
 	FamilyToolchainMatch = "toolchain_match"
+	// FamilyHook is shell/declarative hook enforcement outcomes (#1031/#1032).
+	FamilyHook = "hook"
 )
 
 // Record is one append-only audit line (already redacted when written).
@@ -33,7 +35,7 @@ type Record struct {
 	Payload       json.RawMessage `json:"payload"`
 }
 
-// Families lists v1 security families.
+// Families lists v1 security families actually emitted in production.
 var Families = []string{
 	FamilyPermission,
 	FamilySandbox,
@@ -42,6 +44,17 @@ var Families = []string{
 	FamilyAdmission,
 	FamilyEgress,
 	FamilyToolchainMatch,
+	FamilyHook,
+}
+
+// HookPayload is family hook (shell/declarative enforcement).
+type HookPayload struct {
+	Event    string `json:"event" telemetry:"redact=none"`
+	Action   string `json:"action" telemetry:"redact=none"` // shell_allow|shell_block|shell_fail_closed|…
+	Tool     string `json:"tool,omitempty" telemetry:"redact=none"`
+	Reason   string `json:"reason,omitempty" telemetry:"redact=scrub"`
+	CallID   string `json:"callId,omitempty" telemetry:"redact=none"`
+	Decision string `json:"decision,omitempty" telemetry:"redact=none"` // allow|block
 }
 
 // SecretRefUsePayload is family secret_ref_use (class/hash only, never raw).
@@ -100,6 +113,14 @@ func redactPayload(family string, payload any) (json.RawMessage, error) {
 		return json.Marshal(v)
 	case FamilyToolchainMatch:
 		var v ToolchainMatchPayload
+		b, _ := json.Marshal(payload)
+		_ = json.Unmarshal(b, &v)
+		if err := telemetry.RedactRecord(&v); err != nil {
+			return nil, err
+		}
+		return json.Marshal(v)
+	case FamilyHook:
+		var v HookPayload
 		b, _ := json.Marshal(payload)
 		_ = json.Unmarshal(b, &v)
 		if err := telemetry.RedactRecord(&v); err != nil {

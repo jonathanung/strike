@@ -52,11 +52,51 @@ func runFakeMCP(mode string) {
 		}
 		switch req.Method {
 		case "initialize":
+			caps := map[string]any{"tools": map[string]any{"listChanged": true}}
+			if mode == "full-caps" || mode == "prompts-resources" {
+				caps["prompts"] = map[string]any{"listChanged": true}
+				caps["resources"] = map[string]any{"listChanged": true}
+			}
+			if mode == "prompts-only" {
+				caps = map[string]any{"prompts": map[string]any{}}
+			}
+			if mode == "no-tools" {
+				caps = map[string]any{"resources": map[string]any{}}
+			}
 			writeRPC(*req.ID, map[string]any{
 				"protocolVersion": ProtocolVersion,
-				"capabilities":    map[string]any{"tools": map[string]any{}},
+				"capabilities":    caps,
 				"serverInfo":      map[string]string{"name": "fake", "version": "0.0.1"},
 			}, nil)
+		case "prompts/list":
+			writeRPC(*req.ID, map[string]any{"prompts": []map[string]any{
+				{"name": "greet", "description": "say hi", "arguments": []map[string]any{
+					{"name": "who", "required": true},
+				}},
+			}}, nil)
+		case "prompts/get":
+			var p getPromptParams
+			_ = json.Unmarshal(req.Params, &p)
+			who := "world"
+			if p.Arguments != nil && p.Arguments["who"] != "" {
+				who = p.Arguments["who"]
+			}
+			writeRPC(*req.ID, map[string]any{
+				"description": "greeting",
+				"messages": []map[string]any{
+					{"role": "user", "content": "Hello " + who},
+				},
+			}, nil)
+		case "resources/list":
+			writeRPC(*req.ID, map[string]any{"resources": []map[string]any{
+				{"uri": "memo://notes/1", "name": "note1", "description": "a note"},
+			}}, nil)
+		case "resources/read":
+			var p readResourceParams
+			_ = json.Unmarshal(req.Params, &p)
+			writeRPC(*req.ID, map[string]any{"contents": []map[string]any{
+				{"uri": p.URI, "mimeType": "text/plain", "text": "secret=sk-ant-api03-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa note body"},
+			}}, nil)
 		case "tools/list":
 			tools := []map[string]any{
 				{

@@ -11,6 +11,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/jonathanung/strike-cli/internal/provider"
 )
@@ -95,7 +98,7 @@ func (c *Client) PostJSON(ctx context.Context, url string, in any, out any) erro
 		return err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return statusError(c.ProviderName, resp.StatusCode, data)
+		return statusError(c.ProviderName, resp.StatusCode, data, resp.Header)
 	}
 	if err := json.Unmarshal(data, out); err != nil {
 		return fmt.Errorf("%s: bad response (%s): %.200s", c.ProviderName, resp.Status, data)
@@ -121,8 +124,9 @@ func (c *Client) PostSSE(ctx context.Context, url string, in any) (io.ReadCloser
 	}
 	if resp.StatusCode != http.StatusOK {
 		data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		hdr := resp.Header.Clone()
 		resp.Body.Close()
-		return nil, statusError(c.ProviderName, resp.StatusCode, data)
+		return nil, statusError(c.ProviderName, resp.StatusCode, data, hdr)
 	}
 	return resp.Body, nil
 }
@@ -143,6 +147,10 @@ func Fail(ch chan<- provider.StreamEvent, err error) {
 	ch <- provider.StreamEvent{Type: provider.EventError, Err: err}
 }
 
+// MaxRetryAfter is the upper bound for honoring a provider Retry-After value.
+// Larger or invalid guidance falls back to the engine's local backoff policy.
+const MaxRetryAfter = 60 * time.Second
+
 // StatusError is a non-OK HTTP response from a provider API.
 type StatusError struct {
 	Provider string
@@ -150,6 +158,10 @@ type StatusError struct {
 	Type     string // API error type when the body parsed
 	Message  string
 	Body     string // body snippet when unparsed
+	// RetryAfter is a parsed Retry-After delay when the response carried a
+	// valid delay-seconds or HTTP-date value within MaxRetryAfter. Zero means
+	// missing, invalid, or excessive — callers should use local backoff.
+	RetryAfter time.Duration
 }
 
 func (e *StatusError) Error() string {
@@ -167,21 +179,76 @@ func (e *StatusError) Retryable() bool {
 	return e.Status == 408 || e.Status == 429 || e.Status >= 500
 }
 
-func statusError(provider string, status int, data []byte) error {
+// RetryAfterDelay implements provider.retryAfterCarrier so the engine can
+// prefer server retry guidance over local backoff.
+func (e *StatusError) RetryAfterDelay() (time.Duration, bool) {
+	if e == nil || e.RetryAfter <= 0 {
+		return 0, false
+	}
+	return e.RetryAfter, true
+}
+
+func statusError(provider string, status int, data []byte, hdr http.Header) error {
+	retryAfter := parseRetryAfterHeader(hdr)
 	var apiErr apiError
 	if json.Unmarshal(data, &apiErr) == nil && apiErr.Error != nil {
 		return &StatusError{
-			Provider: provider,
-			Status:   status,
-			Type:     apiErr.Error.Type,
-			Message:  apiErr.Error.Message,
+			Provider:   provider,
+			Status:     status,
+			Type:       apiErr.Error.Type,
+			Message:    apiErr.Error.Message,
+			RetryAfter: retryAfter,
 		}
 	}
 	body := string(data)
 	if len(body) > 200 {
 		body = body[:200]
 	}
-	return &StatusError{Provider: provider, Status: status, Body: body}
+	return &StatusError{Provider: provider, Status: status, Body: body, RetryAfter: retryAfter}
+}
+
+// ParseRetryAfter parses a Retry-After header value (delay-seconds or HTTP-date).
+// Returns 0 when the value is missing, unparsable, non-positive, or exceeds
+// MaxRetryAfter (callers then use local backoff).
+func ParseRetryAfter(raw string) time.Duration {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0
+	}
+	// delay-seconds (RFC 9110): non-negative integer
+	if sec, err := strconv.ParseInt(raw, 10, 64); err == nil {
+		if sec <= 0 {
+			return 0
+		}
+		d := time.Duration(sec) * time.Second
+		if d > MaxRetryAfter {
+			return 0
+		}
+		return d
+	}
+	// HTTP-date forms
+	for _, layout := range []string{
+		http.TimeFormat, // RFC1123
+		time.RFC1123Z,   // RFC1123 with numeric zone
+		time.RFC850,     // obsolete
+		time.ANSIC,      // obsolete
+	} {
+		if t, err := time.Parse(layout, raw); err == nil {
+			d := time.Until(t)
+			if d <= 0 || d > MaxRetryAfter {
+				return 0
+			}
+			return d
+		}
+	}
+	return 0
+}
+
+func parseRetryAfterHeader(hdr http.Header) time.Duration {
+	if hdr == nil {
+		return 0
+	}
+	return ParseRetryAfter(hdr.Get("Retry-After"))
 }
 
 // OpenAIEffort spells the normalized reasoning dial the way the OpenAI family

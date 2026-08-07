@@ -380,6 +380,21 @@ type MCPServer struct {
 	URL string `json:"url,omitempty"`
 	// Headers are sent on every HTTP request; never logged (e.g. Authorization).
 	Headers map[string]string `json:"headers,omitempty"`
+	// OAuth configures HTTP MCP OAuth discovery/login/refresh/revoke (optional).
+	OAuth *MCPOAuth `json:"oauth,omitempty"`
+}
+
+// MCPOAuth is the JSON oauth object on an HTTP MCP server entry.
+type MCPOAuth struct {
+	ClientID     string `json:"clientId,omitempty"`
+	ClientSecret string `json:"clientSecret,omitempty"`
+	Scopes       string `json:"scopes,omitempty"`
+	AuthorizeURL string `json:"authorizeUrl,omitempty"`
+	TokenURL     string `json:"tokenUrl,omitempty"`
+	RevokeURL    string `json:"revokeUrl,omitempty"`
+	DiscoveryURL string `json:"discoveryUrl,omitempty"`
+	TokenFile    string `json:"tokenFile,omitempty"`
+	RedirectURL  string `json:"redirectUrl,omitempty"`
 }
 
 // LSPConfig is the JSON "lsp" object.
@@ -1976,6 +1991,10 @@ func cloneMCPServers(in map[string]MCPServer) map[string]MCPServer {
 			for hk, hv := range v.Headers {
 				s.Headers[hk] = hv
 			}
+		}
+		if v.OAuth != nil {
+			oa := *v.OAuth
+			s.OAuth = &oa
 		}
 		out[k] = s
 	}

@@ -923,7 +923,26 @@
             "type": "string"
           },
           "description": "HTTP headers (e.g. Authorization); never logged."
+        },
+        "oauth": {
+          "$ref": "#/$defs/mcpOAuth"
         }
+      }
+    },
+    "mcpOAuth": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Optional OAuth for HTTP MCP (discovery, refresh, revoke). Tokens never logged.",
+      "properties": {
+        "clientId": { "type": "string" },
+        "clientSecret": { "type": "string" },
+        "scopes": { "type": "string" },
+        "authorizeUrl": { "type": "string" },
+        "tokenUrl": { "type": "string" },
+        "revokeUrl": { "type": "string" },
+        "discoveryUrl": { "type": "string" },
+        "tokenFile": { "type": "string" },
+        "redirectUrl": { "type": "string" }
       }
     },
     "lsp": {

@@ -1,6 +1,8 @@
 package tool
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"strings"
@@ -72,7 +74,20 @@ func bashEnv(tc *Context) ([]string, error) {
 	if len(refs) == 0 {
 		return base, nil
 	}
-	return secret.MergeEnv(base, refs)
+	merged, err := secret.MergeEnv(base, refs)
+	if err != nil {
+		return nil, err
+	}
+	// Audit secret-ref use without values (class + short hash of env name).
+	if tc.OnSecretRefUse != nil {
+		for dest, ref := range refs {
+			_ = dest
+			sum := sha256.Sum256([]byte(ref.Kind + "/" + ref.Name))
+			hash := hex.EncodeToString(sum[:8])
+			tc.OnSecretRefUse(ref.Kind, hash, "inject")
+		}
+	}
+	return merged, nil
 }
 
 // minimalEnvFromHost copies selected keys from the host environment.

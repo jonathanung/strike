@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"strings"
+	"time"
 )
 
 // ErrIncompleteStream is returned when a provider channel closes without a
@@ -16,6 +17,26 @@ var ErrIncompleteStream = errors.New("provider stream closed without terminal ev
 // is safe (no partial commit). Used by HTTP status errors from base.
 type retryMarker interface {
 	Retryable() bool
+}
+
+// retryAfterCarrier is implemented by errors that carry server Retry-After
+// guidance (delay-seconds or HTTP-date, already bounded by the adapter).
+type retryAfterCarrier interface {
+	RetryAfterDelay() (time.Duration, bool)
+}
+
+// RetryAfter reports a preferred wait before the next attempt when err carries
+// valid server Retry-After guidance. ok is false when guidance is missing,
+// invalid, or excessive — callers should use local backoff instead.
+func RetryAfter(err error) (d time.Duration, ok bool) {
+	if err == nil {
+		return 0, false
+	}
+	var carrier retryAfterCarrier
+	if errors.As(err, &carrier) {
+		return carrier.RetryAfterDelay()
+	}
+	return 0, false
 }
 
 // IsRetryable reports whether err is a transient provider/transport failure
