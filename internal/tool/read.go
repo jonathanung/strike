@@ -68,7 +68,7 @@ func (readTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 	if err := tc.Ask(ctx, AskRequest{Permission: "read", Patterns: []string{relPath(tc.WorkDir, path)}, Always: []string{"*"}}); err != nil {
 		return Result{}, err
 	}
-	data, err := os.ReadFile(path)
+	data, err := safeReadFile(ctx, path)
 	if err != nil {
 		return Result{}, err
 	}

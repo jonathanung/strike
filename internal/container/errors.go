@@ -18,4 +18,8 @@ var (
 
 	// ErrEmptyID is returned when the engine creates a container but prints no id.
 	ErrEmptyID = errors.New("container engine returned an empty container id")
+
+	// ErrConfigDrift is returned when a running container's labels do not match
+	// the current config/image hash (refuse silent attach into stale env).
+	ErrConfigDrift = errors.New("running container does not match current config")
 )

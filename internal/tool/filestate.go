@@ -1,6 +1,7 @@
 package tool
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -137,7 +138,7 @@ func (s *FileState) CheckFresh(path, display string) error {
 		return PreconditionFailed(fmt.Sprintf("%s was modified externally since it was read; read it again before editing", display))
 	}
 	if snap.hash != "" {
-		data, err := os.ReadFile(path)
+		data, err := safeReadFile(context.Background(), path)
 		if err != nil {
 			return err
 		}
@@ -165,7 +166,7 @@ func CheckBaseHash(path, expected, display string) error {
 			return InvalidArgs(fmt.Sprintf("baseHash for %s must be a 64-char sha256 hex digest", display))
 		}
 	}
-	data, err := os.ReadFile(path)
+	data, err := safeReadFile(context.Background(), path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return PreconditionFailed(fmt.Sprintf("%s: baseHash precondition failed (file missing)", display))
@@ -186,7 +187,7 @@ func CheckContentUnchanged(path string, expected []byte, display string) error {
 	if path == "" {
 		return nil
 	}
-	data, err := os.ReadFile(path)
+	data, err := safeReadFile(context.Background(), path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return PreconditionFailed(fmt.Sprintf("%s changed concurrently (file missing); re-read before editing", display))
