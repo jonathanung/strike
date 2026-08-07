@@ -392,6 +392,23 @@ Shift+Tab or `/mode` persist in the session JSONL, not back into this file.
 Distinct from `/autonomy` (workflow exit gates) and from `sandbox` (OS
 isolation).
 
+**User system prompt:** `systemPrompt` is optional user text that **replaces**
+(not appends) a composition slot. Whitespace-only values are ignored (they do
+not blank the overlay).
+
+| `systemPromptMode` | Behavior |
+|---|---|
+| `overlay` (default) | Replace the provider overlay only; shared baseline stays |
+| `defaults` | Replace **shared + provider** with `systemPrompt`; tools, environment, instructions, memory, and ledger still append |
+
+**Precedence** for the overlay/defaults slot: custom agent persona body
+(`agents/*.md`) **wins over** config `systemPrompt`, which **wins over** the
+built-in provider overlay. When a persona wins, shared baseline still applies
+even if `systemPromptMode` is `defaults` (defaults mode only applies when the
+config prompt is the active slot content). Visible in `/context` and `/diag`
+as kind `config` with source `config:systemPrompt+mode:overlay|defaults`.
+Details: [agents-skills.md](agents-skills.md#system-prompt-layers).
+
 **Lean code:** `leanCode` is `off` | `lite` (default) | `full`. Injects
 agent-scoped efficiency guidance into the system prompt (strict ladder for
 build/general/debugger; softer scaling-aware lean for plan/orchestrator;

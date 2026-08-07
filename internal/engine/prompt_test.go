@@ -320,6 +320,95 @@ func TestSystemPromptConfigOverridesProviderForBuild(t *testing.T) {
 	}
 }
 
+func TestSystemPromptDefaultsModeReplacesShared(t *testing.T) {
+	sys := captureSystemPrompt(t, engine.Options{
+		WorkDir:          t.TempDir(),
+		Agents:           []engine.Agent{{Name: "build"}},
+		SystemPrompt:     "USER_DEFAULTS_PROMPT",
+		SystemPromptMode: engine.SystemPromptModeDefaults,
+		Registry:         fullToolRegistry(t),
+	}, "anthropic", "claude-sonnet-5")
+
+	if !strings.Contains(sys, "USER_DEFAULTS_PROMPT") {
+		t.Fatal("config systemPrompt not applied in defaults mode")
+	}
+	if strings.Contains(sys, "Response contract (ADHD-shaped, always on)") {
+		t.Fatal("shared baseline must be omitted in defaults mode")
+	}
+	if strings.Contains(sys, "Provider notes (Anthropic / Claude)") {
+		t.Fatal("provider overlay must be omitted in defaults mode")
+	}
+	// Safety rails: tools guidance and environment stay.
+	if !strings.Contains(sys, "# Available tools") {
+		t.Fatal("tools layer must remain in defaults mode")
+	}
+	if !strings.Contains(sys, "Working directory:") {
+		t.Fatalf("environment layer missing in defaults mode:\n%s", sys)
+	}
+}
+
+func TestSystemPromptOverlayModePreservesShared(t *testing.T) {
+	sys := captureSystemPrompt(t, engine.Options{
+		WorkDir:          t.TempDir(),
+		Agents:           []engine.Agent{{Name: "plan"}},
+		InitialAgent:     "plan",
+		SystemPrompt:     "PLAN_OVERLAY_PROMPT",
+		SystemPromptMode: engine.SystemPromptModeOverlay,
+	}, "openai", "gpt-5.5")
+
+	if !strings.Contains(sys, "PLAN_OVERLAY_PROMPT") {
+		t.Fatal("config systemPrompt should apply to non-build agents")
+	}
+	if !strings.Contains(sys, "Response contract (ADHD-shaped, always on)") {
+		t.Fatal("overlay mode must keep shared baseline")
+	}
+	if strings.Contains(sys, "Provider notes (OpenAI / GPT)") {
+		t.Fatal("provider overlay should be replaced")
+	}
+}
+
+func TestSystemPromptWhitespaceDoesNotBlankOverlay(t *testing.T) {
+	sys := captureSystemPrompt(t, engine.Options{
+		WorkDir:      t.TempDir(),
+		Agents:       []engine.Agent{{Name: "build"}},
+		SystemPrompt: "   \n\t  ",
+	}, "anthropic", "claude-sonnet-5")
+
+	if strings.Contains(sys, "CUSTOM_SYSTEM_OVERLAY") {
+		t.Fatal("unexpected custom text")
+	}
+	if !strings.Contains(sys, "Provider notes (Anthropic / Claude)") {
+		t.Fatal("whitespace systemPrompt must not blank the provider overlay")
+	}
+	if !strings.Contains(sys, "Response contract (ADHD-shaped, always on)") {
+		t.Fatal("shared baseline must remain")
+	}
+}
+
+func TestSystemPromptPersonaWinsOverConfig(t *testing.T) {
+	sys := captureSystemPrompt(t, engine.Options{
+		WorkDir: t.TempDir(),
+		Agents: []engine.Agent{
+			{Name: "build"},
+			{Name: "reviewer", Prompt: "PERSONA_REVIEWER"},
+		},
+		InitialAgent:     "reviewer",
+		SystemPrompt:     "CONFIG_SHOULD_LOSE",
+		SystemPromptMode: engine.SystemPromptModeDefaults,
+	}, "openai", "gpt-5.5")
+
+	if !strings.Contains(sys, "PERSONA_REVIEWER") {
+		t.Fatal("persona must win over config systemPrompt")
+	}
+	if strings.Contains(sys, "CONFIG_SHOULD_LOSE") {
+		t.Fatal("config systemPrompt must not apply when persona is set")
+	}
+	// Persona keeps shared even when mode is defaults (defaults only applies to config).
+	if !strings.Contains(sys, "Response contract (ADHD-shaped, always on)") {
+		t.Fatal("shared baseline must remain when persona wins")
+	}
+}
+
 func TestSystemPromptCustomAgentPersona(t *testing.T) {
 	sys := captureSystemPrompt(t, engine.Options{
 		WorkDir: t.TempDir(),
