@@ -1,4 +1,5 @@
 package engine_test
+// Steer op race coverage (CI).
 
 import (
 	"context"
