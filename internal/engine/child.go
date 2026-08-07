@@ -886,6 +886,8 @@ func (e *Engine) finishChild(h *childHandle, completed protocol.ChildCompleted) 
 	if h == nil {
 		return
 	}
+	// Take cancel under mu: startChildBudgetWatch may still be assigning it
+	// when a fast child completes (TestChildSharedIsolationDefault race).
 	h.mu.Lock()
 	cancelWatch := h.budgetWatchCancel
 	h.budgetWatchCancel = nil
