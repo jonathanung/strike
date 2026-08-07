@@ -176,6 +176,9 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 	if len(args) > 0 && args[0] == "plugin" {
 		return runPluginCLI(args[1:], stdout, stderr)
 	}
+	if len(args) > 0 && args[0] == "container" {
+		return runContainerCLI(args[1:], stdout, stderr)
+	}
 	if len(args) > 0 && args[0] == "eval" {
 		return runEvalCLI(args[1:], stdout, stderr)
 	}
@@ -339,6 +342,7 @@ func writeUsage(w io.Writer) {
 	fmt.Fprintln(w, "  strike mcp-serve [options]")
 	fmt.Fprintln(w, "  strike auth <command> [arguments]")
 	fmt.Fprintln(w, "  strike plugin <command> [arguments]")
+	fmt.Fprintln(w, "  strike container <command> [arguments]")
 	fmt.Fprintln(w, "  strike eval <command> [arguments]")
 	fmt.Fprintln(w, "  strike restore [options]")
 	fmt.Fprintln(w, "  strike workflow <command> [arguments]")
