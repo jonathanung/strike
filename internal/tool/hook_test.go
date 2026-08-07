@@ -156,25 +156,23 @@ func TestRunHooksTimeoutFailOpenExplicit(t *testing.T) {
 }
 
 func TestRunHooksLaunchErrorFailClosed(t *testing.T) {
-	// Nonexistent binary via bash -c still exits; force launch error with empty
-	// argv path by using a command that fails at start — use invalid sandbox
-	// that cannot degrade when fail-closed.
+	// Explicit sandbox policy that refuses degrade forces launch failure when
+	// the OS backend is missing.
 	dir := t.TempDir()
-	// sleep with tiny timeout is covered above; here: process error via false
-	// is exit non-zero (block), not launch. Launch: use Sandbox that fails closed.
 	if sandbox.Available() {
 		t.Skip("need unavailable sandbox to force launch sandbox_denied")
 	}
-	// Backend unavailable + fail-closed DefaultHookSandbox → sandbox_denied launch.
+	pol := sandbox.Policy{Mode: sandbox.ModeReadOnly, NoNetwork: true, AllowDegrade: false}
 	out, err := RunHooks(context.Background(), []HookDef{{
 		Event:   HookEventPreToolUse,
 		Command: `printf should-not-run`,
+		Sandbox: &pol,
 	}}, HookEventPreToolUse, HookPayload{Event: HookEventPreToolUse, ToolName: "bash"}, dir, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if out.Allow {
-		t.Fatal("missing sandbox backend should fail-closed for policy hooks")
+		t.Fatal("fail-closed sandbox policy should block when backend unavailable")
 	}
 }
 

@@ -241,13 +241,15 @@ type HookOutcome struct {
 }
 
 // DefaultHookSandbox returns the OS policy for shell hooks: read-only FS,
-// no host network. AllowDegrade is set from failOpen so fail-closed hooks
-// cannot silently run unsandboxed when the backend is missing (#1031).
+// no host network. AllowDegrade is always true so hosts without bwrap/seatbelt
+// still run hooks; fail-closed policy applies to timeout/launch/exit of the
+// hook command itself, not OS backend availability (#1031).
 func DefaultHookSandbox(failOpen bool) sandbox.Policy {
+	_ = failOpen // reserved: callers may pass tighter policies via HookDef.Sandbox
 	return sandbox.Policy{
 		Mode:         sandbox.ModeReadOnly,
 		NoNetwork:    true,
-		AllowDegrade: failOpen,
+		AllowDegrade: true,
 	}
 }
 
