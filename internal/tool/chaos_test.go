@@ -83,8 +83,9 @@ func TestChaosBashKillDuringRun(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	tc := &Context{
-		WorkDir: t.TempDir(),
-		Ask:     func(context.Context, AskRequest) error { return nil },
+		WorkDir:     t.TempDir(),
+		SandboxMode: "off",
+		Ask:         func(context.Context, AskRequest) error { return nil },
 	}
 	res, err := b.Execute(ctx, []byte(`{"command":"sleep 30"}`), tc)
 	if err != nil {

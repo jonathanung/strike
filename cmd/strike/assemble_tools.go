@@ -823,7 +823,9 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			InitialAutonomy:       initialAutonomy,
 			InitialPermissionMode: initialPermMode,
 			SandboxMode:           sandboxMode,
+			SandboxAllowDegrade:   cfg.SandboxAllowDegrade,
 			NetworkAllow:          sandbox.CloneNetworkAllow(cfg.Network.Allow),
+			BashSecrets:           cloneBashSecrets(cfg.BashSecrets),
 			ContentGuard: tool.ContentGuardSettings{
 				Mode:       cfg.ContentGuard.Mode,
 				PathAllow:  append([]string(nil), cfg.ContentGuard.PathAllow...),
@@ -907,6 +909,38 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			},
 			CloseChildSession: func(childID string) error {
 				return sessions.Close(childID)
+			},
+			LoadChildSession: func(childID string) (engine.ChildSessionSnapshot, error) {
+				childID = strings.TrimSpace(childID)
+				if childID == "" {
+					return engine.ChildSessionSnapshot{}, fmt.Errorf("child session id is empty")
+				}
+				meta, err := session.ReadMeta(sessionDir, childID)
+				if err != nil {
+					return engine.ChildSessionSnapshot{}, err
+				}
+				// Missing meta with no log → not found.
+				evs, err := sessions.Replay(childID)
+				if err != nil {
+					return engine.ChildSessionSnapshot{}, err
+				}
+				if len(evs) == 0 && strings.TrimSpace(meta.ParentSessionID) == "" {
+					// Distinguish empty/unknown: require parent lineage for resume.
+					if _, statErr := os.Stat(sessions.Path(childID)); statErr != nil {
+						return engine.ChildSessionSnapshot{}, fmt.Errorf("child session %q not found", childID)
+					}
+				}
+				return engine.ChildSessionSnapshot{
+					SessionID:       childID,
+					ParentSessionID: meta.ParentSessionID,
+					LeadSessionID:   meta.LeadSessionID,
+					Title:           meta.Title,
+					Events:          evs,
+				}, nil
+			},
+			ReopenChildSession: func(childID string) error {
+				_, err := sessions.Open(childID)
+				return err
 			},
 		})
 		return &rootSlot{
@@ -1037,6 +1071,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		basePermLayers...,
 	)
 	sandboxPolicy.NetworkAllow = sandbox.CloneNetworkAllow(cfg.Network.Allow)
+	sandboxPolicy.AllowDegrade = cfg.SandboxAllowDegrade
 	sandboxExplain := sandbox.Explain(sandboxPolicy)
 	services.Shell = local.NewShell(workDir, sandboxPolicy)
 	// Permission explain/presets for /permission. Live explain binds to the
@@ -1348,6 +1383,18 @@ func configMCPOAuth(o *config.MCPOAuth) *mcp.OAuthConfig {
 		TokenFile:    o.TokenFile,
 		RedirectURL:  o.RedirectURL,
 	}
+}
+
+func cloneBashSecrets(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
 }
 
 // resolveRootTurnTimeout picks CLI --turn-timeout over session.turnTimeoutS,

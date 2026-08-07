@@ -169,6 +169,7 @@ func TestChaosPermissionFlipMidTurn(t *testing.T) {
 		InitialProvider: "scripted",
 		Registry:        tool.NewRegistry(tool.NewBash()),
 		WorkDir:         t.TempDir(),
+		SandboxMode:     "off",
 		Rules:           []permission.Ruleset{permission.Defaults()},
 	})
 	ctx, cancel := context.WithCancel(context.Background())
@@ -236,6 +237,7 @@ func TestChaosPermissionHardDenyMidTurn(t *testing.T) {
 		InitialProvider: "scripted",
 		Registry:        tool.NewRegistry(tool.NewBash()),
 		WorkDir:         t.TempDir(),
+		SandboxMode:     "off",
 		Rules: []permission.Ruleset{{
 			{Permission: "bash", Pattern: "*", Action: permission.Deny},
 		}},

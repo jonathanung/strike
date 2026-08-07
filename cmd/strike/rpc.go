@@ -42,7 +42,22 @@ params=OpEnvelope (same shape as POST /v1/ops and the WebSocket). Events are
 always method=event with params=Event envelope (session JSONL shape).
 
 Permission and question asks are emitted as events; reply with
-permission.reply / question.reply (or pass --auto to skip configured asks).`
+permission.reply / question.reply (or pass --auto to skip configured asks).
+
+Session lifecycle (host-level; same contract as HTTP/TUI/SDK):
+
+  → {"jsonrpc":"2.0","id":5,"method":"session.capabilities"}
+  → {"jsonrpc":"2.0","id":6,"method":"session.list","params":{"rootsOnly":true}}
+  → {"jsonrpc":"2.0","id":7,"method":"session.get","params":{"id":"…"}}
+  → {"jsonrpc":"2.0","id":8,"method":"session.fork","params":{"id":"…"}}
+  → {"jsonrpc":"2.0","id":9,"method":"session.fork_at","params":{"id":"…","keepEvents":4}}
+  → {"jsonrpc":"2.0","id":10,"method":"session.rewind_points","params":{"id":"…"}}
+  → {"jsonrpc":"2.0","id":11,"method":"session.load","params":{"id":"…"}}  // active id only
+  → {"jsonrpc":"2.0","id":12,"method":"rewind","params":{"restoreFiles":true}}  // engine op
+
+initialize / rpc.ready include a "lifecycle" capability object. Unsupported
+or conflicting calls return structured error data.code (session_not_found,
+session_busy, session_corrupt, unsupported, invalid_session).`
 
 // runRPCCLI parses `strike rpc` args and runs the stdio JSON-RPC bridge.
 func runRPCCLI(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
@@ -222,6 +237,7 @@ func runRPC(opts cliOptions, stdin io.Reader, stdout, stderr io.Writer) (runErr 
 				}
 			},
 			SubmitTimeout: 5 * time.Second,
+			Lifecycle:     newRPCLifecycle(a.sessions, a.services.Sessions, sessionID, ""),
 		})
 		return srv.Run(ctx, bridged)
 	})

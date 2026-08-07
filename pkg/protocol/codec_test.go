@@ -929,6 +929,7 @@ func TestEventTypeCoverage(t *testing.T) {
 		"admission.decided":      AdmissionDecided{},
 		"question.asked":         QuestionAsked{},
 		"question.resolved":      QuestionResolved{},
+		"turn.steered":           TurnSteered{Mode: SteerModeBoundary},
 		"turn.completed":         TurnCompleted{},
 		"verification.started":   VerificationStarted{},
 		"verification.completed": VerificationCompleted{},

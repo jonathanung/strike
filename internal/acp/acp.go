@@ -25,7 +25,21 @@ import (
 	"time"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
+	pkgproto "github.com/jonathanung/strike-cli/pkg/protocol"
 )
+
+// Lifecycle is the optional host-level session surface (list/fork/load).
+// Same shape as internal/rpc.Lifecycle; defined here to avoid an rpc import.
+type Lifecycle interface {
+	Capabilities() pkgproto.LifecycleCapabilities
+	List(ctx context.Context, rootsOnly bool) ([]pkgproto.SessionSummary, error)
+	Get(ctx context.Context, id string) (pkgproto.SessionSummary, error)
+	Fork(ctx context.Context, id string) (pkgproto.SessionSummary, error)
+	ForkAt(ctx context.Context, id string, keepEvents int) (pkgproto.SessionSummary, error)
+	Load(ctx context.Context, id string) (pkgproto.SessionLoadResult, error)
+	RewindPoints(ctx context.Context, id string) ([]pkgproto.RewindPoint, error)
+	Replay(ctx context.Context, id string) ([]byte, error)
+}
 
 const (
 	jsonrpcVersion = "2.0"
@@ -59,6 +73,9 @@ type Options struct {
 	SubmitTimeout time.Duration
 	// PermissionTimeout bounds waiting for a client permission response (default 10m).
 	PermissionTimeout time.Duration
+	// Lifecycle, when set, enables session/list, session/load (active id), and
+	// strike extensions _session/fork + _session/rewind_points.
+	Lifecycle Lifecycle
 }
 
 // Server is a single-session ACP agent over a byte stream.
@@ -261,12 +278,30 @@ func (s *Server) handleLine(ctx context.Context, line []byte) error {
 		}
 		return s.handleSessionNew(msg.ID, msg.Params)
 
-	case "session/load", "session/resume", "session/list", "session/delete", "session/close",
+	case "session/load":
+		if isNotification {
+			return nil
+		}
+		return s.handleSessionLoad(ctx, msg.ID, msg.Params)
+
+	case "session/list":
+		if isNotification {
+			return nil
+		}
+		return s.handleSessionList(ctx, msg.ID, msg.Params)
+
+	case "session/resume", "session/delete", "session/close",
 		"session/set_mode", "session/set_config_option":
 		if isNotification {
 			return nil
 		}
-		return s.replyError(msg.ID, CodeMethodNotFound, "method not supported: "+msg.Method, nil)
+		return s.replyLifecycleUnsupported(msg.ID, msg.Method)
+
+	case "_session/fork", "_session/fork_at", "_session/rewind_points", "_session/capabilities":
+		if isNotification {
+			return nil
+		}
+		return s.handleSessionExtension(ctx, msg.ID, msg.Method, msg.Params)
 
 	case "session/prompt":
 		if isNotification {
@@ -323,10 +358,27 @@ func (s *Server) handleInitialize(id json.RawMessage, params json.RawMessage) er
 	if s.opts.AgentTitle != "" {
 		info.Title = s.opts.AgentTitle
 	}
+	// Advertise the ACP-supported lifecycle subset. loadSession is true when
+	// we can confirm the bound session (always for a configured SessionID).
+	loadSession := s.opts.SessionID != ""
+	sessCaps := map[string]any{
+		"load":         loadSession,
+		"list":         s.opts.Lifecycle != nil,
+		"fork":         s.opts.Lifecycle != nil,
+		"forkAt":       s.opts.Lifecycle != nil,
+		"rewindPoints": s.opts.Lifecycle != nil,
+		"engineRewind": true,
+		// Strike extensions (underscore methods) for ops ACP does not name.
+		"extensions": []string{"_session/fork", "_session/fork_at", "_session/rewind_points", "_session/capabilities"},
+	}
+	if s.opts.Lifecycle != nil {
+		lc := s.opts.Lifecycle.Capabilities()
+		sessCaps["lifecycle"] = lc
+	}
 	result := InitializeResult{
 		ProtocolVersion: negotiated,
 		AgentCapabilities: AgentCapabilities{
-			LoadSession: false,
+			LoadSession: loadSession,
 			PromptCapabilities: PromptCapabilities{
 				Image:           false,
 				Audio:           false,
@@ -336,12 +388,151 @@ func (s *Server) handleInitialize(id json.RawMessage, params json.RawMessage) er
 				HTTP: false,
 				SSE:  false,
 			},
-			SessionCapabilities: map[string]any{},
+			SessionCapabilities: sessCaps,
 		},
 		AuthMethods: []any{},
 		AgentInfo:   info,
 	}
 	return s.replyResult(id, result)
+}
+
+func (s *Server) replyLifecycleUnsupported(id json.RawMessage, method string) error {
+	return s.replyError(id, CodeMethodNotFound, "method not supported: "+method, map[string]any{
+		"code": pkgproto.ErrorCodeUnsupported,
+	})
+}
+
+func (s *Server) handleSessionLoad(ctx context.Context, id json.RawMessage, params json.RawMessage) error {
+	if !s.opts.AgentCapabilitiesLoad() {
+		return s.replyLifecycleUnsupported(id, "session/load")
+	}
+	var p LoadSessionParams
+	if len(params) > 0 && string(params) != "null" {
+		if err := json.Unmarshal(params, &p); err != nil {
+			return s.replyError(id, CodeInvalidParams, "invalid session/load params: "+err.Error(), nil)
+		}
+	}
+	sid := strings.TrimSpace(p.SessionID)
+	if sid == "" {
+		return s.replyError(id, CodeInvalidParams, "sessionId is required", map[string]any{
+			"code": pkgproto.ErrorCodeInvalidSession,
+		})
+	}
+	if s.opts.Lifecycle != nil {
+		res, err := s.opts.Lifecycle.Load(ctx, sid)
+		if err != nil {
+			return s.replyLifecycleErr(id, err)
+		}
+		s.mu.Lock()
+		s.sessionReady = true
+		s.mu.Unlock()
+		return s.replyResult(id, LoadSessionResult{SessionID: res.ID})
+	}
+	// Without a lifecycle handler, only the process-bound session is loadable.
+	if sid != s.opts.SessionID {
+		return s.replyError(id, CodeInvalidParams, fmt.Sprintf("session %q is not the live acp session %q", sid, s.opts.SessionID), map[string]any{
+			"code":      pkgproto.ErrorCodeSessionBusy,
+			"sessionId": sid,
+		})
+	}
+	s.mu.Lock()
+	s.sessionReady = true
+	s.mu.Unlock()
+	return s.replyResult(id, LoadSessionResult{SessionID: sid})
+}
+
+func (s *Server) handleSessionList(ctx context.Context, id json.RawMessage, params json.RawMessage) error {
+	if s.opts.Lifecycle == nil {
+		return s.replyLifecycleUnsupported(id, "session/list")
+	}
+	rootsOnly := true
+	if len(params) > 0 && string(params) != "null" {
+		var check struct {
+			RootsOnly *bool `json:"rootsOnly"`
+		}
+		if err := json.Unmarshal(params, &check); err != nil {
+			return s.replyError(id, CodeInvalidParams, "invalid session/list params: "+err.Error(), nil)
+		}
+		if check.RootsOnly != nil {
+			rootsOnly = *check.RootsOnly
+		}
+	}
+	list, err := s.opts.Lifecycle.List(ctx, rootsOnly)
+	if err != nil {
+		return s.replyLifecycleErr(id, err)
+	}
+	if list == nil {
+		list = []pkgproto.SessionSummary{}
+	}
+	return s.replyResult(id, pkgproto.SessionListResult{Sessions: list})
+}
+
+func (s *Server) handleSessionExtension(ctx context.Context, id json.RawMessage, method string, params json.RawMessage) error {
+	if s.opts.Lifecycle == nil {
+		return s.replyLifecycleUnsupported(id, method)
+	}
+	switch method {
+	case "_session/capabilities":
+		return s.replyResult(id, s.opts.Lifecycle.Capabilities())
+	case "_session/fork":
+		var p pkgproto.SessionIDParams
+		if err := json.Unmarshal(params, &p); err != nil {
+			return s.replyError(id, CodeInvalidParams, err.Error(), nil)
+		}
+		sum, err := s.opts.Lifecycle.Fork(ctx, strings.TrimSpace(p.ID))
+		if err != nil {
+			return s.replyLifecycleErr(id, err)
+		}
+		return s.replyResult(id, sum)
+	case "_session/fork_at":
+		var p pkgproto.SessionForkAtParams
+		if err := json.Unmarshal(params, &p); err != nil {
+			return s.replyError(id, CodeInvalidParams, err.Error(), nil)
+		}
+		sum, err := s.opts.Lifecycle.ForkAt(ctx, strings.TrimSpace(p.ID), p.KeepEvents)
+		if err != nil {
+			return s.replyLifecycleErr(id, err)
+		}
+		return s.replyResult(id, sum)
+	case "_session/rewind_points":
+		var p pkgproto.SessionIDParams
+		if err := json.Unmarshal(params, &p); err != nil {
+			return s.replyError(id, CodeInvalidParams, err.Error(), nil)
+		}
+		points, err := s.opts.Lifecycle.RewindPoints(ctx, strings.TrimSpace(p.ID))
+		if err != nil {
+			return s.replyLifecycleErr(id, err)
+		}
+		if points == nil {
+			points = []pkgproto.RewindPoint{}
+		}
+		return s.replyResult(id, pkgproto.SessionRewindPointsResult{Points: points})
+	default:
+		return s.replyLifecycleUnsupported(id, method)
+	}
+}
+
+func (s *Server) replyLifecycleErr(id json.RawMessage, err error) error {
+	var le *pkgproto.LifecycleError
+	if errors.As(err, &le) && le != nil {
+		code := CodeServerError
+		switch le.Code {
+		case pkgproto.ErrorCodeSessionNotFound, pkgproto.ErrorCodeInvalidSession:
+			code = CodeInvalidParams
+		case pkgproto.ErrorCodeUnsupported:
+			code = CodeMethodNotFound
+		}
+		return s.replyError(id, code, le.Message, map[string]any{
+			"code":      le.Code,
+			"sessionId": le.SessionID,
+		})
+	}
+	return s.replyError(id, CodeServerError, err.Error(), nil)
+}
+
+// AgentCapabilitiesLoad reports whether session/load is advertised.
+func (o Options) AgentCapabilitiesLoad() bool {
+	return strings.TrimSpace(o.SessionID) != ""
 }
 
 func (s *Server) handleSessionNew(id json.RawMessage, params json.RawMessage) error {

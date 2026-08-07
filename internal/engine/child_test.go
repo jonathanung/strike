@@ -1043,6 +1043,7 @@ func TestChildPermissionReplyRouting(t *testing.T) {
 		InitialProvider: "scripted",
 		Registry:        tool.NewRegistry(tool.NewTask(), tool.NewBash()),
 		WorkDir:         t.TempDir(),
+		SandboxMode:     "off",
 		Rules:           []permission.Ruleset{permission.Defaults()},
 	})
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1815,6 +1816,7 @@ func TestReviewerChildHardDenyFeedsNextProviderTurn(t *testing.T) {
 		InitialProvider: "scripted",
 		Registry:        tool.NewRegistry(tool.NewTask(), tool.NewBash()),
 		WorkDir:         t.TempDir(),
+		SandboxMode:     "off",
 		Rules:           []permission.Ruleset{permission.Defaults()},
 		Agents: []engine.Agent{
 			{Name: "build"},

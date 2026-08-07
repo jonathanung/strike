@@ -568,6 +568,7 @@ func TestChildPhaseCannotWidenParentDenyEvenWithAuto(t *testing.T) {
 		InitialProvider:            "scripted",
 		Registry:                   tool.NewRegistry(tool.NewBash()),
 		WorkDir:                    dir,
+		SandboxMode:                "off",
 		Rules:                      childRules,
 		Agents:                     []engine.Agent{{Name: "build"}},
 		Workflows:                  []config.Workflow{childWF},
