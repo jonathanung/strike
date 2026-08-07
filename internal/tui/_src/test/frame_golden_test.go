@@ -22,6 +22,11 @@ import (
 //
 //	UPDATE_GOLDEN=1 go test ./internal/tui/ -run TestFrameGolden -count=1
 func TestFrameGolden(t *testing.T) {
+	// Pin tip rotation so day-of-year does not flake empty-composer frames (#664).
+	prevTipDay := tipDayOverride
+	tipDayOverride = 1
+	t.Cleanup(func() { tipDayOverride = prevTipDay })
+
 	dir := filepath.Join(moduleRoot(t), "internal", "tui", "testdata", "frames")
 	cases := []struct {
 		file          string
