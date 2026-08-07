@@ -61,6 +61,8 @@ func ScanPlugin(pol Policy, sub PluginSubject) []security.Finding {
 	}
 
 	for _, cap := range sub.Capabilities {
+		// Capability tags are informational audit only (trust still gates start).
+		// Keep at info so strict does not warn on every declared MCP/harness plugin.
 		switch strings.TrimSpace(cap) {
 		case "mcp.stdio", "mcp.http":
 			out = append(out, security.Finding{
@@ -68,7 +70,7 @@ func ScanPlugin(pol Policy, sub PluginSubject) []security.Finding {
 				Surface:  surface,
 				Target:   id,
 				Message:  "plugin declares MCP executable capability",
-				Severity: security.SeverityLow,
+				Severity: security.SeverityInfo,
 				Evidence: cap,
 			})
 		case "harnesses", "hooks.command", "panes.process":
@@ -77,7 +79,7 @@ func ScanPlugin(pol Policy, sub PluginSubject) []security.Finding {
 				Surface:  surface,
 				Target:   id,
 				Message:  "plugin declares process/shell capability",
-				Severity: security.SeverityLow,
+				Severity: security.SeverityInfo,
 				Evidence: cap,
 			})
 		}

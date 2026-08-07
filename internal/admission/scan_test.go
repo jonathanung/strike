@@ -203,3 +203,23 @@ func TestAdmitPluginUntrustedExecutable(t *testing.T) {
 		t.Fatalf("action=%s findings=%v", v.Action, v.Findings)
 	}
 }
+
+func TestAdmitPluginCapabilityIsInfoOnly(t *testing.T) {
+	home := t.TempDir()
+	pol, err := admission.Resolve(admission.Config{Preset: admission.PresetStrict}, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pol.Home = home
+	v := admission.AdmitPlugin(pol, admission.PluginSubject{
+		ID:           "acme.tools",
+		Root:         filepath.Join(home, ".strike", "plugins", "acme.tools"),
+		Trusted:      true,
+		Capabilities: []string{"mcp.stdio", "harnesses"},
+		WorkDir:      "",
+	})
+	// info → allow even under strict
+	if v.Action != admission.ActionAllow {
+		t.Fatalf("action=%s findings=%v", v.Action, v.Findings)
+	}
+}
