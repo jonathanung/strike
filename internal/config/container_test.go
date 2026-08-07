@@ -55,12 +55,34 @@ func TestContainerToRuntime(t *testing.T) {
 	c := DefaultContainer()
 	c.Packages = []string{"git"}
 	c.Resources.Memory = "512m"
+	yes := true
+	c.NeedsNode = &yes
+	c.NodeVersion = "20"
+	c.NeedsGo = &yes
+	c.GoVersion = "1.22"
 	rt := c.ToRuntime("vtest")
 	if rt.BaseImage != c.BaseImage || rt.TemplateVersion != "vtest" {
 		t.Fatalf("%+v", rt)
 	}
 	if len(rt.AptPackages) != 1 || rt.Resources.Memory != "512m" {
 		t.Fatalf("%+v", rt)
+	}
+	if !rt.NeedsNode || rt.NodeVersion != "20" || !rt.NeedsGo || rt.GoVersion != "1.22" {
+		t.Fatalf("toolchain: %+v", rt)
+	}
+}
+
+func TestMergeContainerToolchains(t *testing.T) {
+	base := DefaultContainer()
+	yes := true
+	no := false
+	layer := ContainerConfig{NeedsNode: &yes, NodeVersion: "22", NeedsPython: &no}
+	got := mergeContainer(base, layer)
+	if got.NeedsNode == nil || !*got.NeedsNode || got.NodeVersion != "22" {
+		t.Fatalf("%+v", got)
+	}
+	if got.NeedsPython == nil || *got.NeedsPython {
+		t.Fatalf("python should be false: %+v", got)
 	}
 }
 

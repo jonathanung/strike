@@ -251,6 +251,8 @@ sidecar `.meta.json`).
 | `/learn` | extract non-obvious learnings into AGENTS.md |
 | `/deslop` | remove AI style slop from the branch diff |
 | `/verify` | run project gates; fix branch-related failures |
+| `/devcontainer` | detect deps, ask, write container config, eject Dockerfile (E12.5) |
+| `/write-guards` | how to write clean files under content guards |
 
 Peer import inventory and hooks mapping: [peer-ecosystem.md](peer-ecosystem.md).
 
