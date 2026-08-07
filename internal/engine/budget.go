@@ -409,7 +409,9 @@ func (e *Engine) startChildBudgetWatch(h *childHandle) {
 		parentLife = context.Background()
 	}
 	ctx, cancel := context.WithCancel(parentLife)
+	h.mu.Lock()
 	h.budgetWatchCancel = cancel
+	h.mu.Unlock()
 	go func() {
 		ticker := time.NewTicker(budgetWatchInterval)
 		defer ticker.Stop()
