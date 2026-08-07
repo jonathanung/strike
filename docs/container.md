@@ -137,6 +137,12 @@ Still later: isolation badge (E12.7).
 - Credentials are forwarded as env at launch time — never baked into images
   (E12.4).
 
+## Zone archive (E12.9)
+
+[`peasant-community/zone`](https://github.com/peasant-community/zone) is
+**archived**. Containerization lives only in strike. Provenance and MIT
+attribution are recorded in the repository root `NOTICE`.
+
 ## Related
 
 - [isolation.md](isolation.md) — how containers compose with OS sandbox and worktrees
