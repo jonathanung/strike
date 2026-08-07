@@ -277,6 +277,19 @@ scanners, and fail-open/closed behavior: [admission.md](admission.md).
 `permission.Explain` / `Service.Explain` API) returns the effective action,
 matched rule, layer name, and match trail for a sample tool call.
 
+**Dry-run preset:** `/permission explain --preset <id> <tool> [pattern]`
+evaluates under an alternate shipped preset without mutating the session
+(`ExplainPreset`). Useful for “what would `read-only` do on this call?”
+
+**Diff:** `/permission diff <presetA> <presetB>` lists added/removed/changed
+rules with layer labels (`permission.DiffPresets`). HTTP:
+`GET /v1/permissions/diff?left=&right=`, and explain accepts optional
+`preset=` for dry-run.
+
+**Managed ceiling:** explain output notes when the managed/MDM deny layer
+blocks a widen (stricter than the stack without managed). Sandbox dial and
+`network.allow` appear on the same explain surface when the host provides them.
+
 **Scoped approvals:** runtime grants may be bounded by scope and optional
 wall-clock TTL (`session`, `path-prefix`, `tool`, `command-class`). A scoped
 grant that would override a parent **Deny** is rejected (does not silently
