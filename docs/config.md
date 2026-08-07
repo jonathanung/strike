@@ -985,11 +985,20 @@ killing when no hard threshold is set.
 Progress clears soft stall flags and allows a later rising-edge signal. Prefer
 `wait` / `task` action=wait over busy-polling status.
 
-**Session cost envelope (#577 / #542):** when `maxSessionCostUSD` is configured
-it remains the **outer** cost cap for the whole session. Per-agent
+**Session cost envelope (#577 / #542):**
+
+| Field | Meaning |
+|---|---|
+| `session.maxSessionCostUSD` | Outer USD ceiling for the whole session (0 = unlimited). CLI `--max-cost` overrides. |
+| `session.maxTurnTokens` | Per-turn accumulated stream token ceiling (0 = unlimited). |
+
+When `maxSessionCostUSD` is set it is the **outer** cost cap. Per-agent
 `maxCostUsd` nests inside that envelope and never raises the session ceiling.
-Until session cost pricing ships, `maxCostUsd` is accepted and exposed but not
-enforced (usage stays 0).
+Cost is estimated from models.dev / catalog rates on each `usage.reported`.
+At 50% / 80% / 100% the engine emits `session.budget_warning`; at 100% it hard-
+stops with `EngineError` code `budget_exhausted` and `TurnCompleted`
+`stopReason=budget_exhausted` (not a silent halt). The TUI status bar shows a
+budget chip at those thresholds. Delegation fan-out is denied while exhausted.
 
 **Isolated worktree path (explicit apply):** for true filesystem isolation,
 prefer separate root sessions with `session.worktree=always` (or

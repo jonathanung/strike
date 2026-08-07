@@ -144,7 +144,7 @@ type TaskRequest struct {
 
 // AgentBudgetLimits are optional per-child resource bounds.
 // Zero means unlimited / inherit (soft stall/loop signals still apply).
-// Session maxSessionCostUSD (#577), when present, remains the outer envelope;
+// Session maxSessionCostUSD (#577), when configured, is the outer envelope;
 // per-agent MaxCostUSD nests inside it and is only enforced once cost pricing
 // is wired.
 type AgentBudgetLimits struct {

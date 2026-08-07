@@ -29,15 +29,17 @@ type cliOptions struct {
 	dangerouslySkipPermissions bool
 	providerSet                bool
 	continueSession            bool
-	sessionID                  string // --session: resume a specific root session
-	worktree                   bool   // --worktree: force a git worktree for this session
-	turnTimeout                string // --turn-timeout: root-turn wall-clock deadline (duration or off)
-	turnTimeoutSet             bool   // true when --turn-timeout was explicitly passed
-	launchInsideContainer      bool   // --launch-inside-container: re-exec strike in managed container
-	containerRebuild           bool   // --container-rebuild: replace stale live container
-	containerAttachStale       bool   // --container-attach-stale: join drifted container
-	containerCancelStale       bool   // --container-cancel: refuse stale container non-interactively
-	telemetry                  bool   // --telemetry: show local system metrics pane
+	sessionID                  string  // --session: resume a specific root session
+	worktree                   bool    // --worktree: force a git worktree for this session
+	turnTimeout                string  // --turn-timeout: root-turn wall-clock deadline (duration or off)
+	turnTimeoutSet             bool    // true when --turn-timeout was explicitly passed
+	launchInsideContainer      bool    // --launch-inside-container: re-exec strike in managed container
+	containerRebuild           bool    // --container-rebuild: replace stale live container
+	containerAttachStale       bool    // --container-attach-stale: join drifted container
+	containerCancelStale       bool    // --container-cancel: refuse stale container non-interactively
+	telemetry                  bool    // --telemetry: show local system metrics pane
+	maxCost                    float64 // --max-cost: session cost envelope USD (#577)
+	maxCostSet                 bool
 	upgrade                    bool
 	version                    bool
 }
@@ -160,6 +162,14 @@ var optionSpecs = []optionSpec{
 		description: "show local system metrics pane (CPU/RAM/disk); on by default",
 		register: func(fs *flag.FlagSet, opts *cliOptions) {
 			fs.BoolVar(&opts.telemetry, "telemetry", false, "")
+		},
+	},
+	{
+		names:       []string{"max-cost"},
+		valueName:   "usd",
+		description: "session cost envelope in USD (hard stop; overrides config session.maxSessionCostUSD)",
+		register: func(fs *flag.FlagSet, opts *cliOptions) {
+			fs.Float64Var(&opts.maxCost, "max-cost", 0, "")
 		},
 	},
 	{
@@ -300,6 +310,9 @@ func parseCLIOptions(args []string) (cliOptions, error) {
 		}
 		if f.Name == "turn-timeout" {
 			opts.turnTimeoutSet = true
+		}
+		if f.Name == "max-cost" {
+			opts.maxCostSet = true
 		}
 	})
 	if fs.NArg() != 0 {

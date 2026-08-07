@@ -350,10 +350,16 @@ type Model struct {
 	usageSession                                                           usageTotals
 	modelInputCost, modelOutputCost                                        float64
 	modelHasCost                                                           bool
-	contextLimit                                                           int
-	contextLimitKnown                                                      bool
-	outputLimit                                                            int
-	outputLimitKnown                                                       bool
+	// Session cost envelope (#577): from SessionBudgetWarning events.
+	sessionBudgetMaxUSD    float64
+	sessionBudgetCostUSD   float64
+	sessionBudgetKnown     bool
+	sessionBudgetLevel     string // last warning level 50|80|100
+	sessionBudgetExhausted bool
+	contextLimit           int
+	contextLimitKnown      bool
+	outputLimit            int
+	outputLimitKnown       bool
 	// modelAttachment caches catalog multimodal support for the selection.
 	modelAttachment      bool
 	modelAttachmentKnown bool

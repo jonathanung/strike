@@ -443,11 +443,17 @@ type SessionConfig struct {
 	// AuditRetentionMaxAgeDays deletes audit rows older than N days
 	// (0 = package default 90 when both audit axes unset).
 	AuditRetentionMaxAgeDays int `json:"auditRetentionMaxAgeDays,omitempty"`
+	// MaxSessionCostUSD is the outer session cost envelope in USD (#577).
+	// Zero means unlimited. Enforced in the engine turn loop when pricing is
+	// available; nests above per-agent maxCostUsd.
+	MaxSessionCostUSD float64 `json:"maxSessionCostUSD,omitempty"`
+	// MaxTurnTokens caps accumulated stream tokens within one engine turn
+	// (#577). Zero means unlimited.
+	MaxTurnTokens int `json:"maxTurnTokens,omitempty"`
 	// AgentBudget is the default per-child resource limit for task spawns
 	// (#774). Spawn-time task.budget fields overlay non-zero values. Zero
 	// means unlimited for that dimension (soft stall/loop signals still
-	// apply). Distinct from future session maxSessionCostUSD (#577), which
-	// remains the outer cost envelope when configured.
+	// apply). Nested under maxSessionCostUSD when that outer envelope is set.
 	AgentBudget AgentBudgetConfig `json:"agentBudget,omitempty"`
 	// DelegationPolicy is the pre-spawn worthiness gate (#876): whether to
 	// fan out vs run locally. See docs/config.md.
@@ -1566,6 +1572,12 @@ func merge(base, layer Config) Config {
 	}
 	if layer.Session.AuditRetentionMaxAgeDays != 0 {
 		base.Session.AuditRetentionMaxAgeDays = layer.Session.AuditRetentionMaxAgeDays
+	}
+	if layer.Session.MaxSessionCostUSD != 0 {
+		base.Session.MaxSessionCostUSD = layer.Session.MaxSessionCostUSD
+	}
+	if layer.Session.MaxTurnTokens != 0 {
+		base.Session.MaxTurnTokens = layer.Session.MaxTurnTokens
 	}
 	base.Session.AgentBudget = mergeAgentBudgetConfig(base.Session.AgentBudget, layer.Session.AgentBudget)
 	base.Session.DelegationPolicy = mergeDelegationPolicyConfig(base.Session.DelegationPolicy, layer.Session.DelegationPolicy)
