@@ -26,6 +26,12 @@ materially affect the shipped product.
   `internal/security.Finding` types for future write-time content guards.
   Docs: [docs/admission.md](docs/admission.md)
   ([#889](https://github.com/jonathanung/strike/issues/889)).
+- **Container runtime foundation (E12.0)** — `internal/container` shells out to
+  `docker`/`podman` via an injectable `ExecFunc` (no Moby SDK). Low-level
+  `Runtime` (pull/create/start/stop/rm/exec/cp), deterministic
+  `strike-<repo>-<hash>` names, and `com.strike.*` labels. Decision and boundary
+  documented in `docs/container.md`
+  ([#582](https://github.com/jonathanung/strike/issues/582)).
 - **Plugin theme contributions** — theme packages load through the plugin
   catalog/lifecycle (same lockfile and integrity path). `/theme` shows plugin
   provenance and collision winners, live-previews on cursor move without
