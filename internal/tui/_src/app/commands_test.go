@@ -31,7 +31,7 @@ func TestCommandCatalogContainsBuiltinsAndSkillsOnceWithMetadata(t *testing.T) {
 		"/autonomy":         {"set exit-gate policy (supervised/agent/checks/skip-all)", "[mode]", commandSourceBuiltin},
 		"/mode":             {"set permission posture (default/plan/accept-edits/yolo)", "[mode]", commandSourceBuiltin},
 		"/sandbox":          {"show OS sandbox policy; /sandbox explain for generated profile", "", commandSourceBuiltin},
-		"/permission":       {"explain a tool permission or list presets", "[explain <tool> [pattern]|presets]", commandSourceBuiltin},
+		"/permission":       {"explain/diff tool permissions or list presets", "[explain [--preset id] <tool> [pattern]|diff <a> <b>|presets]", commandSourceBuiltin},
 		"/auth":             {"manage provider authentication", "[provider]", commandSourceBuiltin},
 		"/agent":            {"select an agent", "[name]", commandSourceBuiltin},
 		"/agents":           {"focus the agents right pane", "", commandSourceBuiltin},
