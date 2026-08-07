@@ -171,6 +171,16 @@ func (m Model) homeCenterBand(width, height, promptOuterH int, compact bool, pop
 		recentH = 1
 	}
 
+	// Tip strip above the centered prompt when composer is empty (#664).
+	tip := ""
+	tipH := 0
+	if m.showComposerTip() && height >= promptOuterH+2 {
+		tip = m.tipView(min(width, promptW+8))
+		if tip != "" {
+			tipH = 1
+		}
+	}
+
 	// Gaps: one row under logo, one under prompt before recent.
 	gapLogo, gapRecent := 1, 0
 	if logoH > 0 {
@@ -182,21 +192,26 @@ func (m Model) homeCenterBand(width, height, promptOuterH int, compact bool, pop
 		gapRecent = 1
 	}
 
-	blockH := logoH + gapLogo + popupH + promptOuterH + gapRecent + recentH
-	// If the band is too short, drop logo then recent to keep the prompt.
+	blockH := logoH + gapLogo + popupH + tipH + promptOuterH + gapRecent + recentH
+	// If the band is too short, drop tip then logo then recent to keep the prompt.
+	for blockH > height && tipH > 0 {
+		tip, tipH = "", 0
+		blockH = logoH + gapLogo + popupH + tipH + promptOuterH + gapRecent + recentH
+	}
 	for blockH > height && logoH > 0 {
 		logo, logoH, gapLogo = "", 0, 0
-		blockH = logoH + gapLogo + popupH + promptOuterH + gapRecent + recentH
+		blockH = logoH + gapLogo + popupH + tipH + promptOuterH + gapRecent + recentH
 	}
 	for blockH > height && recentH > 0 {
 		recent, recentH, gapRecent = "", 0, 0
-		blockH = logoH + gapLogo + popupH + promptOuterH + gapRecent + recentH
+		blockH = logoH + gapLogo + popupH + tipH + promptOuterH + gapRecent + recentH
 	}
 	if promptOuterH+popupH > height {
 		promptOuterH = max(0, height-popupH)
 		blockH = popupH + promptOuterH
 		logo, logoH, gapLogo = "", 0, 0
 		recent, recentH, gapRecent = "", 0, 0
+		tip, tipH = "", 0
 	}
 
 	topPad := max(0, (height-blockH)/2)
@@ -214,6 +229,9 @@ func (m Model) homeCenterBand(width, height, promptOuterH int, compact bool, pop
 	}
 	if popupH > 0 && popup != "" {
 		parts = append(parts, centerHomeBlock(th, popup, width))
+	}
+	if tipH > 0 && tip != "" {
+		parts = append(parts, centerHomeBlock(th, tip, width))
 	}
 	prompt := m.composerView(compact, promptW, promptOuterH)
 	parts = append(parts, centerHomeBlock(th, prompt, width))

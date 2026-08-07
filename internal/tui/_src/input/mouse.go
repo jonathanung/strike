@@ -113,8 +113,8 @@ func (m Model) paneFocusAtMouse(x, y int) (paneFocus, bool) {
 	if m.splitOrientation != orientVertical {
 		leftWidth = computePaneGeometry(m.width, gutter, m.focus).leftCandidateWidth(m.width)
 	}
-	l := computeLayout(leftWidth, m.height, m.composer.Height(), m.completionPopupHeightFor(leftWidth), m.showDangerBanner(), m.noticeRowsFor(leftWidth))
-	bodyHeight := l.transcript + l.notice + l.popup + l.composer
+	l := computeLayout(leftWidth, m.height, m.composer.Height(), m.completionPopupHeightFor(leftWidth), m.showDangerBanner(), m.noticeRowsFor(leftWidth), m.tipRowsFor())
+	bodyHeight := l.transcript + l.notice + l.tip + l.popup + l.composer
 	bodyY := l.header
 
 	if m.splitOrientation == orientVertical {
@@ -126,7 +126,7 @@ func (m Model) paneFocusAtMouse(x, y int) (paneFocus, bool) {
 			return focusLeft, false
 		}
 		l = l.withBodyHeight(geo.leftHeight)
-		leftHeight := l.transcript + l.notice + l.popup + l.composer
+		leftHeight := l.transcript + l.notice + l.tip + l.popup + l.composer
 		if y >= bodyY && y < bodyY+leftHeight {
 			return focusLeft, true
 		}

@@ -79,8 +79,8 @@ func (m *Model) reflow() {
 	}
 
 	if m.ready {
-		l := computeLayout(leftWidth, m.height, composerRows, popupHeight, m.showDangerBanner(), m.noticeRowsFor(leftWidth))
-		bodyHeight := l.transcript + l.notice + l.popup + l.composer
+		l := computeLayout(leftWidth, m.height, composerRows, popupHeight, m.showDangerBanner(), m.noticeRowsFor(leftWidth), m.tipRowsFor())
+		bodyHeight := l.transcript + l.notice + l.tip + l.popup + l.composer
 		rightWidth, rightHeight := m.width, bodyHeight
 		rightCompact := m.width < compactWidth || m.height < compactHeight
 
