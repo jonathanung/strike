@@ -45,8 +45,14 @@ internal/container
   Labels                       com.strike.* (was com.zone.*)
 ```
 
-Still later: layered JSON config (E12.2), Dockerfile eject (E12.3),
-`--launch-inside-container` UX (E12.4), attach prompts (E12.6).
+### Config (E12.2)
+
+Layered JSON `container` block and optional `container.jsonc` (defaults →
+global → project → managed). See [config.md](config.md#container-native-containerization-e12).
+`config.ContainerConfig.ToRuntime` feeds `Manager`.
+
+Still later: Dockerfile eject (E12.3), `--launch-inside-container` UX (E12.4),
+attach prompts (E12.6).
 
 ## Binary selection
 

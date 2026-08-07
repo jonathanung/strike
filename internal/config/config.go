@@ -172,6 +172,10 @@ type Config struct {
 	// Prefer mcp.jsonc (see Load). When a layer sets servers (including {}),
 	// it replaces the previous layer's server map.
 	MCP MCPConfig `json:"mcp,omitempty"`
+	// Container configures native containerization (E12). Also loadable from
+	// dedicated container.jsonc/json (global/project), same pattern as mcp.jsonc.
+	// Merge: defaults → global → project → managed. See docs/config.md.
+	Container ContainerConfig `json:"container,omitempty"`
 	// LSP configures external language servers (JSON-RPC over stdio). When a
 	// layer sets servers (including {}), it replaces the previous layer's map.
 	// Registry is keyed by file extension via each server's extensions list.
@@ -509,6 +513,8 @@ func Default() Config {
 		// Default language servers (E2.3). Missing binaries degrade to
 		// per-server error status; clear with "lsp": {"servers": {}}.
 		LSP: LSPConfig{Servers: DefaultLSPServers()},
+		// Container defaults (E12.2); layered JSON / container.jsonc overlay.
+		Container: DefaultContainer(),
 	}
 }
 
@@ -656,6 +662,12 @@ func Load(workDir string) (Config, error) {
 	} else {
 		cfg.MCP = mergeMCP(cfg.MCP, mc)
 	}
+	// Global container.jsonc/json (optional).
+	if cc, ok, err := loadContainerFileLayer(GlobalRoot()); err != nil {
+		return cfg, err
+	} else if ok {
+		cfg.Container = mergeContainer(cfg.Container, cc)
+	}
 	// Global providers.jsonc/json (optional; loads even when config is absent).
 	if pf, err := loadProvidersFileLayer(GlobalRoot()); err != nil {
 		return cfg, err
@@ -692,6 +704,11 @@ func Load(workDir string) (Config, error) {
 			return cfg, err
 		} else {
 			cfg.MCP = mergeMCP(cfg.MCP, mc)
+		}
+		if cc, ok, err := loadContainerFileLayer(projectRoot(workDir)); err != nil {
+			return cfg, err
+		} else if ok {
+			cfg.Container = mergeContainer(cfg.Container, cc)
 		}
 		if pf, err := loadProvidersFileLayer(projectRoot(workDir)); err != nil {
 			return cfg, err
@@ -730,6 +747,11 @@ func Load(workDir string) (Config, error) {
 		cfg.Managed = info
 	}
 	cfg.Provider = CanonicalProviderID(cfg.Provider)
+	norm, err := NormalizeContainer(cfg.Container)
+	if err != nil {
+		return cfg, err
+	}
+	cfg.Container = norm
 	return cfg, nil
 }
 
@@ -1453,6 +1475,7 @@ func merge(base, layer Config) Config {
 	base.Providers = mergeProviders(base.Providers, layer.Providers)
 	base.Keybinds = MergeKeybinds(base.Keybinds, layer.Keybinds)
 	base.MCP = mergeMCP(base.MCP, layer.MCP)
+	base.Container = mergeContainer(base.Container, layer.Container)
 	base.LSP = mergeLSP(base.LSP, layer.LSP)
 	base.Harnesses = mergeHarnesses(base.Harnesses, layer.Harnesses)
 	base.Scheduler = mergeScheduler(base.Scheduler, layer.Scheduler)
