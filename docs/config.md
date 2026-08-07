@@ -534,6 +534,15 @@ promotes it. Providers always see a single tool named `task`; the executor
 accepts the full argument surface regardless of the schema level currently
 advertised. Session resume restores advanced when history used advanced args.
 
+**Workflow tool activation:** when `deferTools` is on, deterministic engine
+state promotes deferred families without `toolsearch` or a classifier:
+plan mode / plan agent / active workflow / active plan handoff → plan tools
+(`plan_write`/`plan_read`/`plan_delegate`, `enter_plan_mode`/`exit_plan_mode`/
+`phase_done`); any live or historical child → roster/messaging/ownership plus
+advanced `task`; two or more live children → team tools (`agent_broadcast`,
+`team_task`, `patch_collab`). Hard-denied tools stay omitted. Guidance source
+tags include `+activate:<families>`.
+
 **Permission soft-approve / auto-approve:** session mode `soft-approve`
 (`permissionMode`, `/mode`, Shift+Tab) arms a **visible** 15s countdown on
 permission asks and submits **allow once** at zero if the user does nothing.
