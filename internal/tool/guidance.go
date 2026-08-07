@@ -27,7 +27,7 @@ var shortPurposes = map[string]string{
 	"move":            "rename or move a file within allowed roots",
 	"delete":          "delete a file or directory within allowed roots",
 	"bash":            "run a shell command",
-	"task":            "progressive delegation: spawn (prompt-only or advanced) + get/status/message/wait/transition/cancel",
+	"task":            "progressive delegation: basic create/status/wait/cancel; advanced via toolsearch",
 	"task_status":     "compat: check child status (prefer task action=status)",
 	"task_read":       "compat: read child transcript slice (prefer task action=read)",
 	"task_message":    "compat: steer a running child (prefer task action=message)",

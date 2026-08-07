@@ -160,9 +160,11 @@ func (t *toolSearchTool) Execute(ctx context.Context, args json.RawMessage, tc *
 	}
 
 	// Promote matches into provider Tools for subsequent streams (same turn
-	// tool loop and later turns). No-op when defer loading is off.
+	// tool loop and later turns). Discover is a no-op when defer loading is
+	// off; PromoteSchema elevates progressive tools (e.g. task) to advanced.
 	if len(matchNames) > 0 {
 		t.reg.Discover(matchNames...)
+		t.reg.PromoteSchema(matchNames...)
 	}
 
 	var out string
@@ -170,8 +172,21 @@ func (t *toolSearchTool) Execute(ctx context.Context, args json.RawMessage, tc *
 		out = fmt.Sprintf("No tools matched %q", query)
 	} else {
 		out = strings.Join(matches, "\n")
+		note := ""
 		if t.reg.DeferLoading() {
-			out += "\n\nDiscovered tools are available with full schemas on the next model request."
+			note = "Discovered tools are available with full schemas on the next model request."
+		}
+		// Progressive matches (e.g. task) also load advanced schemas next request.
+		for _, n := range matchNames {
+			if t.reg.SchemaAdvanced(n) {
+				if note == "" {
+					note = "Matching progressive tools now expose their advanced schemas on the next model request."
+				}
+				break
+			}
+		}
+		if note != "" {
+			out += "\n\n" + note
 		}
 	}
 	meta, _ := json.Marshal(map[string]any{

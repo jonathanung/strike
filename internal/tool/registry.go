@@ -1,6 +1,8 @@
 package tool
 
 import (
+	"encoding/json"
+	"strings"
 	"sync"
 
 	"github.com/jonathanung/strike-cli/internal/provider"
@@ -12,6 +14,10 @@ import (
 // When defer loading is enabled (SetDeferLoading), SchemasForProvider omits
 // non-core tools until Discover promotes them (toolsearch or direct call).
 // Schemas() always returns the full registered set (used by toolsearch).
+//
+// Progressive tools (Progressive interface) start with a compact basic schema
+// in SchemasForProvider until PromoteSchema elevates them to the full advanced
+// form. Schemas() always exposes the advanced/full contract for discovery.
 type Registry struct {
 	order []string
 	tools map[string]Tool
@@ -19,6 +25,8 @@ type Registry struct {
 	mu         sync.RWMutex
 	deferLoad  bool
 	discovered map[string]struct{}
+	// advanced tracks progressive tools promoted to full schema.
+	advanced map[string]struct{}
 }
 
 func NewRegistry(tools ...Tool) *Registry {
@@ -55,6 +63,11 @@ func (r *Registry) Unregister(names ...string) {
 	if r.discovered != nil {
 		for _, name := range names {
 			delete(r.discovered, name)
+		}
+	}
+	if r.advanced != nil {
+		for _, name := range names {
+			delete(r.advanced, name)
 		}
 	}
 	r.mu.Unlock()
@@ -128,6 +141,77 @@ func (r *Registry) Discover(names ...string) {
 	}
 }
 
+// PromoteSchema elevates progressive tools to their advanced/full provider
+// schema for subsequent streams. Non-progressive and unknown names are ignored.
+func (r *Registry) PromoteSchema(names ...string) {
+	if r == nil || len(names) == 0 {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.advanced == nil {
+		r.advanced = map[string]struct{}{}
+	}
+	for _, name := range names {
+		if name == "" {
+			continue
+		}
+		t, ok := r.tools[name]
+		if !ok {
+			continue
+		}
+		if _, prog := progressiveTool(t); !prog {
+			continue
+		}
+		r.advanced[name] = struct{}{}
+	}
+}
+
+// NoteToolCall records a model tool call: discovers deferred tools and
+// promotes progressive schemas when args require the advanced surface (or
+// when the tool is progressive and was invoked — basic calls stay basic
+// unless args need advanced). Always safe; no-op for unknown names.
+func (r *Registry) NoteToolCall(name string, args json.RawMessage) {
+	if r == nil {
+		return
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return
+	}
+	r.Discover(name)
+	if ArgsNeedAdvancedSchema(name, args) {
+		r.PromoteSchema(name)
+	}
+}
+
+// SchemaLevel returns the current provider schema level for name.
+// Non-progressive tools always report SchemaAdvanced.
+func (r *Registry) SchemaLevel(name string) SchemaLevel {
+	if r == nil {
+		return SchemaAdvanced
+	}
+	t, ok := r.tools[name]
+	if !ok {
+		return SchemaAdvanced
+	}
+	if _, prog := progressiveTool(t); !prog {
+		return SchemaAdvanced
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if _, ok := r.advanced[name]; ok {
+		return SchemaAdvanced
+	}
+	return SchemaBasic
+}
+
+// SchemaAdvanced reports whether name is on the advanced progressive schema
+// (true for non-progressive tools when registered).
+func (r *Registry) SchemaAdvanced(name string) bool {
+	return r.SchemaLevel(name) == SchemaAdvanced
+}
+
 // Discovered reports whether name has been promoted (always true for core
 // tools when registered; false when defer is off for non-core).
 func (r *Registry) Discovered(name string) bool {
@@ -173,7 +257,8 @@ func (r *Registry) DeferredPendingCount() int {
 
 // Schemas returns the full model-facing declarations in registration order.
 // Used by toolsearch to scan the whole registry. Prefer SchemasForProvider
-// for the provider Tools array when defer loading may be on.
+// for the provider Tools array when defer loading or progressive schemas
+// may apply. Progressive tools always contribute their advanced Schema().
 func (r *Registry) Schemas() []provider.ToolSchema {
 	if r == nil {
 		return nil
@@ -216,7 +301,8 @@ func (r *Registry) Contracts() map[string]Contract {
 }
 
 // SchemasForProvider returns schemas for provider Request.Tools: full set
-// when defer is off; core + discovered when on.
+// when defer is off; core + discovered when on. Progressive tools use the
+// basic schema until PromoteSchema elevates them.
 func (r *Registry) SchemasForProvider() []provider.ToolSchema {
 	if r == nil {
 		return nil
@@ -225,31 +311,53 @@ func (r *Registry) SchemasForProvider() []provider.ToolSchema {
 	deferLoad := r.deferLoad
 	r.mu.RUnlock()
 	if !deferLoad {
-		return r.Schemas()
+		return r.providerSchemas(false)
 	}
+	return r.providerSchemas(true)
+}
+
+// providerSchemas builds provider tool schemas. When filterDefer is true,
+// omit non-core tools that are not yet discovered.
+func (r *Registry) providerSchemas(filterDefer bool) []provider.ToolSchema {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	out := make([]provider.ToolSchema, 0, len(r.order))
 	for _, name := range r.order {
-		if !IsCoreTool(name) {
+		if filterDefer && !IsCoreTool(name) {
 			if _, ok := r.discovered[name]; !ok {
 				continue
 			}
 		}
 		t := r.tools[name]
-		out = append(out, provider.ToolSchema{
-			Name:        t.Name(),
-			Description: t.Description(),
-			InputSchema: t.Schema(),
-		})
+		out = append(out, r.schemaForLocked(t))
 	}
 	return out
 }
 
+// schemaForLocked builds one provider schema. Caller must hold r.mu (RLock ok).
+func (r *Registry) schemaForLocked(t Tool) provider.ToolSchema {
+	name := t.Name()
+	desc := t.Description()
+	schema := t.Schema()
+	if p, ok := progressiveTool(t); ok {
+		if _, adv := r.advanced[name]; !adv {
+			schema = p.BasicSchema()
+			if bd := p.BasicDescription(); bd != "" {
+				desc = bd
+			}
+		}
+	}
+	return provider.ToolSchema{
+		Name:        name,
+		Description: desc,
+		InputSchema: schema,
+	}
+}
+
 // CloneWithout returns a new registry with the same tools in registration
 // order, omitting any whose name is listed. Used to build child-session
-// registries without the task tool. Copies defer-loading mode and the
-// discovered set (minus omitted names).
+// registries without the task tool. Copies defer-loading mode, the
+// discovered set, and progressive advanced promotions (minus omitted names).
 func (r *Registry) CloneWithout(names ...string) *Registry {
 	if r == nil {
 		return NewRegistry()
@@ -280,15 +388,30 @@ func (r *Registry) CloneWithout(names ...string) *Registry {
 			}
 		}
 	}
+	var adv map[string]struct{}
+	if r.advanced != nil {
+		adv = make(map[string]struct{}, len(r.advanced))
+		for name := range r.advanced {
+			if _, omit := skip[name]; omit {
+				continue
+			}
+			if _, ok := out.tools[name]; ok {
+				adv[name] = struct{}{}
+			}
+		}
+	}
 	r.mu.RUnlock()
+	out.mu.Lock()
 	if deferLoad {
-		out.mu.Lock()
 		out.deferLoad = true
 		out.discovered = disc
 		if out.discovered == nil {
 			out.discovered = map[string]struct{}{}
 		}
-		out.mu.Unlock()
 	}
+	if len(adv) > 0 {
+		out.advanced = adv
+	}
+	out.mu.Unlock()
 	return out
 }

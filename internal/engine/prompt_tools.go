@@ -60,20 +60,26 @@ func (e *Engine) effectiveToolSchemas() (schemas []provider.ToolSchema, omitted 
 
 // discoverToolsFromHistory promotes deferred tools that already appear as
 // assistant tool calls in model history so resume keeps their schemas loaded.
+// Progressive tools (e.g. task) restore advanced schema when history args
+// required it; basic-only history stays on the compact schema.
 func (e *Engine) discoverToolsFromHistory() {
-	if e == nil || e.opts.Registry == nil || !e.opts.Registry.DeferLoading() {
+	if e == nil || e.opts.Registry == nil {
 		return
 	}
-	var names []string
+	// Progressive schema restore runs even when defer loading is off.
 	for _, m := range e.messages {
 		for _, c := range m.ToolCalls {
-			if n := strings.TrimSpace(c.Name); n != "" {
-				names = append(names, n)
+			name := strings.TrimSpace(c.Name)
+			if name == "" {
+				continue
+			}
+			if e.opts.Registry.DeferLoading() {
+				e.opts.Registry.Discover(name)
+			}
+			if tool.ArgsNeedAdvancedSchema(name, c.Args) {
+				e.opts.Registry.PromoteSchema(name)
 			}
 		}
-	}
-	if len(names) > 0 {
-		e.opts.Registry.Discover(names...)
 	}
 }
 
