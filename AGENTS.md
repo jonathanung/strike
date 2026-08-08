@@ -48,7 +48,7 @@ service/theme token).
 | `cmd/strike` | CLI flags + auth/exec/rpc/acp/serve subcommands (`main.go`), composition root wiring (`wire.go`) |
 | `internal/rpc` | Stdio JSON-RPC 2.0 Op/Event bridge (`strike rpc`: NDJSON ops in, event envelopes out) |
 | `internal/acp` | Agent Client Protocol adapter (`strike acp`: ACP session/prompt ↔ Op/Event for Zed/Devin) |
-| `internal/server` | Experimental read-only HTTP attach (`strike serve`: /health, SSE events, attach page) |
+| `internal/server` | `strike serve` web cockpit: REST/SSE/WS, attach + live ops, progressive Chat/Code/Team/Project/Ops UI |
 | `pkg/protocol` | Public Ops/Events wire schema; JSONL envelopes (semver `Version`) |
 | `pkg/redact` | Shared credential-shaped string scrubbing + Findings (exports, inspect, traces, write guards) |
 | `pkg/timeline` | Structured run timeline builder + redacted JSON/JSONL export |

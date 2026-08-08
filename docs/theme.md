@@ -182,8 +182,9 @@ Semantic roles map as `--ink`←Text, `--muted`←TextMuted, `--ground`←Backgr
 `--surface`/`--raised`/`--surface-muted`←Surface*, `--rule`←Border,
 `--acid`←Accent, `--accent-alt`←AccentAlt, `--signal`←Error, `--danger`←Danger,
 `--user`/`--tool`← transcript labels, `--diff-add`/`--diff-del`←diff roles.
-Parity is guarded by `web/src/theme.test.ts`. User-selected TUI JSON themes are
-not yet applied to the web UI.
+Parity is guarded by `web/src/theme.test.ts`. The web settings dialog loads the
+host theme catalog (`/v1/themes`), supports preview/apply, and maps portable
+semantic roles onto CSS custom properties (`web/src/themeCatalog.ts`, WEBUI.11).
 
 See also [ARCHITECTURE.md](ARCHITECTURE.md) (theme tokens recipe),
 [web.md](web.md), and the `tui-components` skill catalog.

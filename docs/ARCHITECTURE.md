@@ -48,7 +48,7 @@ TUI rendered from (see `pkg/protocol/codec.go`).
 | `cmd/strike` | CLI entry (`main.go`) + composition root (`wire.go` stub; `assemble_tools.go`, `session_lifecycle.go`, `exec.go`, `rpc.go`, `acp.go`, `serve.go`, `multiroot.go`) | anything — the only package that wires the whole tree |
 | `internal/rpc` | Stdio JSON-RPC 2.0 bridge for Op/Event (`strike rpc`: NDJSON ops in, event envelopes out) | `protocol`, stdlib |
 | `internal/acp` | Agent Client Protocol (ACP) agent adapter (`strike acp`: session/prompt/tool-call ↔ Op/Event) | `protocol`, stdlib |
-| `internal/server` | Experimental read-only HTTP attach: `/health`, SSE session event tail, minimal attach page (`strike serve`) | `session`, `version`, `protocol` (via session JSONL), stdlib |
+| `internal/server` | `strike serve` web cockpit (REST/SSE/WS, attach + live mutations, embedded React UI) | `session`, `host`, `engine`, `version`, `protocol`, embedded `static/` |
 | `internal/version` | Build-time Version/Commit stamped via `-ldflags` | stdlib |
 | `internal/update` | GitHub Releases self-update (check, download, sha256, atomic replace, re-exec) | `version`, stdlib, net/http |
 | `pkg/protocol` | **Public** Op/Event wire schema between engine and frontends; JSONL envelopes (`codec.go` / `op_codec.go`) are the session persistence + transport format (includes harness/verification events and `scheduler.queued` / `admitted` / `canceled`). Semver via `Version`; unknown event types decode as `UnknownEvent` (forward-compat). Consumer contract: [protocol.md](protocol.md) | stdlib only |

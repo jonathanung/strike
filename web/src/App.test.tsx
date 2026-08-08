@@ -1092,15 +1092,21 @@ describe("App", () => {
     }));
     render(<App />);
     await screen.findByText("Current");
-    expect(await screen.findByRole("button", { name: /Project:/ })).toHaveAttribute("aria-pressed", "true");
-    // Desktop: tab strip; phone sheet uses listbox options (WEBUI.12).
-    const plansTab = screen.queryByRole("tab", { name: "plans" });
-    if (plansTab) {
-      expect(plansTab).toHaveAttribute("aria-selected", "true");
-    } else {
-      expect(screen.getByRole("option", { name: /plans/i })).toHaveAttribute("aria-selected", "true");
-    }
-    expect(screen.getByRole("button", { name: "Toggle inspector" })).toHaveAttribute("aria-pressed", "true");
+    // Deep-link apply is async after bootstrap; wait for mode + surface.
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Project:/ })).toHaveAttribute("aria-pressed", "true");
+    });
+    await waitFor(() => {
+      const plansTab = screen.queryByRole("tab", { name: "plans" });
+      if (plansTab) {
+        expect(plansTab).toHaveAttribute("aria-selected", "true");
+      } else {
+        expect(screen.getByRole("option", { name: /plans/i })).toHaveAttribute("aria-selected", "true");
+      }
+    });
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Toggle inspector" })).toHaveAttribute("aria-pressed", "true");
+    });
   });
 
 

@@ -5,8 +5,9 @@ Normative product contract for the cohesive multi-agent web cockpit
 Child issues WEBUI.2–WEBUI.21 (#1071–#1090) implement against this document.
 Do not re-decide product here without updating this file.
 
-**Status:** contract freeze (WEBUI.1 / #1070). Documentation-only; no shell or
-protocol implementation in this issue.
+**Status:** contract freeze (WEBUI.1 / #1070) + **conformance closeout**
+(WEBUI.21 / #1090). Matrix rows below reflect shipped epic #1069 children;
+residual gaps are explicit non-goals or deferred follow-ups with owners.
 
 **Companion docs:**
 
@@ -90,8 +91,8 @@ and which surfaces may auto-disclose. They never hide Chat permanently.
 
 | Mode | Surfaces (stable ids) | Owner issues |
 |---|---|---|
-| Chat | `transcript`, `composer`, `queue`, `asks`, `runtime`, `context`, `sessions-rail` | preserve shipped; polish #1075, #1078 |
-| Code | `files`, `file-read`, `markdown`, `diff`, `changed-files`, `diagnostics`, `file-apply` | #1080, #1084; diagnostics partial today |
+| Chat | `transcript`, `composer`, `queue`, `asks`, `runtime`, `context`, `sessions-rail` | shipped |
+| Code | `files`, `file-read`, `markdown`, `diff`, `changed-files`, `diagnostics`, `file-apply` | shipped |
 | Team | `roster`, `agent-detail`, `board`, `team-attention`, `handoffs`, `artifacts`, `decisions`, `conflicts`, `team-controls` | #1081, #1083, #1082, #1086, #1085, #1088, #1089 |
 | Project | `plans`, `goals`, `issues`, `memory`, `workflows`, `project-export` | regroup #1079; most list UIs shipped |
 | Ops | `settings`, `providers`, `auth`, `mcp`, `plugins`, `panes`, `timeline`, `diag-export`, `permissions`, `sandbox` | #1077, #1076, #1079 |
@@ -126,20 +127,20 @@ WEBUI.3 (#1073) introduces a typed registry. Until then, this section is the
 | `composer` | chat | `live` | — | none | false | mutate-blocked | B | shipped |
 | `queue` | chat | `live` | `surface=queue` | badge | true | mutate-blocked | B | shipped; polish #1078 |
 | `asks` | chat | `live` | — | needs-you | false | mutate-blocked | B | shipped |
-| `runtime` | chat | `live` | `surface=runtime` | none | false | mutate-blocked | B | partial → #1077 |
+| `runtime` | chat | `live` | `surface=runtime` | none | false | mutate-blocked | B | shipped |
 | `context` | chat / ops | `always` | `surface=context` | badge | true | read | B | shipped |
-| `files` | code | `files` | `surface=files` | badge | true | read | B | partial → #1080 |
+| `files` | code | `files` | `surface=files` | badge | true | read | B | shipped |
 | `file-read` | code | `files` | `path=` | none | true | read | B | #1080 |
 | `markdown` | code | `files` | `path=` | none | true | read | B | #1080 |
-| `diff` | code | `files` | `path=` | none | true | read | B | partial (changed-files) → #1075/#1080 |
+| `diff` | code | `files` | `path=` | none | true | read | B | shipped |
 | `changed-files` | code | `files` | `surface=files` | badge | true | read | B | shipped list |
 | `diagnostics` | code / ops | `lsp` | `surface=diagnostics` | badge | true | read | B | shipped |
 | `file-apply` | code | `files` + live | — | none | true | mutate-blocked | **C** | #1084 |
-| `roster` | team | multi-agent events / future cap | `surface=roster` | badge | true | read | B | partial ChildAgents → #1081/#1083 |
-| `agent-detail` | team | same | `agent=` | none | true | read | B | partial #937 → #1083 |
+| `roster` | team | multi-agent events / `team` | `surface=roster` | badge | true | read | B | shipped |
+| `agent-detail` | team | same | `agent=` | none | true | read | B | shipped |
 | `board` | team | same | `surface=board` | badge | true | read | B | #1083 |
 | `team-attention` | team | same | `surface=attention` | needs-you | true | read | B | #1083 |
-| `handoffs` | team | same | `surface=handoffs` | badge | true | read | B | partial → #1086 |
+| `handoffs` | team | same | `surface=review` | badge | true | read | B | shipped |
 | `artifacts` | team / project | future `artifacts` | `surface=artifacts` | badge | true | read | B | #1082/#1086 |
 | `decisions` | team / project | future `ledger` | `surface=decisions` | badge | true | read | B | #1082/#1086 |
 | `conflicts` | team | same | `surface=conflicts` | needs-you | true | read | B | #1086 |
@@ -151,8 +152,8 @@ WEBUI.3 (#1073) introduces a typed registry. Until then, this section is the
 | `workflows` | project | `workflows` | `surface=workflows` | badge | true | read† | B | shipped |
 | `project-export` | project | memory/issues/… | — | none | true | read | B | shipped exports |
 | `settings` | ops | `settings` | `surface=settings` | none | true | mutate-blocked | B | shipped; gaps #1077 |
-| `providers` | ops | `auth` / `catalog` | `surface=providers` | none | true | mutate-blocked | **C** | partial → #1077 |
-| `auth` | ops | `auth` | `surface=auth` | none | true | mutate-blocked | **C** | partial → #1077 |
+| `providers` | ops | `auth` / `catalog` | `surface=providers` | none | true | mutate-blocked | **C** | shipped |
+| `auth` | ops | `auth` | `surface=auth` | none | true | mutate-blocked | **C** | shipped |
 | `mcp` | ops | `mcp` | `surface=mcp` | badge | true | read† | B | shipped |
 | `plugins` | ops | `plugins` | `surface=plugins` | none | true | read† | B | shipped |
 | `panes` | ops | `panes` | `surface=panes` / `pane=` | none | true | read† | B | shipped; host #1079 |
@@ -162,7 +163,7 @@ WEBUI.3 (#1073) introduces a typed registry. Until then, this section is the
 | `sandbox` | ops | `sandbox` | `surface=sandbox` | none | true | mutate-blocked | **C** | shipped explain/default |
 | `theme` | ops | `settings` / local | `surface=theme` | none | true | read (local ok) | B | appearance local; catalog #1076 |
 | `command-palette` | any | `always` | — | none | true | read | B | #1078 |
-| `help` | any | `always` | `surface=help` | none | true | read | A | #1078 / #1090 |
+| `help` | any | `always` | palette / `/help` | none | true | read | A | shipped |
 
 † Project/Ops list **reads** allowed in attach-only when capability is on;
   **writes** fail closed (403 / UI disabled) — see §6.
@@ -415,40 +416,40 @@ touched; unresolved rows **must** keep the listed tier.
 | Compact | `/compact` | slash + `compact` op | shipped | preserve | B | mutate-blocked |
 | Interrupt | keybind / op | `/interrupt`, op | shipped | preserve | B | mutate-blocked |
 | Thinking display | `/think` | THINK toggle + transcript | shipped | polish #1075 | B | read |
-| Tool cards / expand | cells + keys | `Transcript.tsx` | partial | #1075 | B | read |
-| Diff in transcript | `edit_meta`, apply diff modal | partial tool rendering | partial | #1075 | B | read |
-| Cost / token chrome | `cost_modal.go`, usage | context inspector + `/cost` | partial | #1075 | B | read |
+| Tool cards / expand | cells + keys | `Transcript.tsx` tool cards + exploration groups | shipped | #1075 | B | read |
+| Diff in transcript | `edit_meta`, apply diff modal | `DiffViewer` in tool cards | shipped | #1075 | B | read |
+| Cost / token chrome | `cost_modal.go`, usage | context inspector + `/cost` + usage.reported | shipped | #1075 | B | read |
 | Markdown export | `/export`, cell export | `exportMarkdown.ts`, header ↓ | shipped | preserve | B | read (client) |
 | Copy last assistant | `/copy` | slash `/copy` | shipped | preserve | B | read |
-| `@file` attach in prompt | TUI input | missing | missing | #1078 | B | mutate-blocked |
-| Composer history (up/down) | input history | partial `/v1/history` | partial | #1078 | B | read list / mutate-blocked send |
-| Command palette | `palette.go` | missing unified palette | missing | #1078 | B | read |
-| Slash catalog parity | `commands.go` | `slash.ts` subset | partial | #1078 | B | per-command |
-| Contextual help / legend | `help_modal`, `legend_modal` | `/help` slash only | partial | #1078/#1090 | A/B | read |
+| `@file` attach in prompt | TUI input | composer `@` + `/v1/files/search` | shipped | #1078 | B | mutate-blocked |
+| Composer history (up/down) | input history | ↑/↓ browse + `/v1/history` | shipped | #1078 | B | read list / mutate-blocked send |
+| Command palette | `palette.go` | `CommandPalette.tsx` (⌘/Ctrl+K) | shipped | #1078 | B | read |
+| Slash catalog parity | `commands.go` | `slash.ts` + palette catalog | shipped | #1078 | B | per-command |
+| Contextual help / legend | `help_modal`, `legend_modal` | `/help`, palette, onboarding tip | shipped | #1078/#1090 | A/B | read |
 | FTUE wizard | `ftue_modal.go` | non-goal blocking wizard | non-goal | contextual #1078 | B | n/a |
-| `/init` AGENTS.md | `init_modal.go` | capability `projectInit` gap | missing | #1078/#1077 | B | mutate-blocked |
+| `/init` AGENTS.md | `init_modal.go` | not exposed on serve (`projectInit` false) | deferred | follow-up: TUI `/init` remains; web non-blocking | B | mutate-blocked |
 
 ### 8.2 Runtime, auth, settings, theme
 
 | Feature | TUI entry/file | Web file/API today | Status | Owner | Tier | Attach-only |
 |---|---|---|---|---|---|---|
-| Provider select | `/provider`, provider modal | runtime Field + `select.model` | partial | #1077 | C | mutate-blocked |
-| Model select | `/model`, model modal | runtime + `/v1/models` | partial | #1077 | B | mutate-blocked |
+| Provider select | `/provider`, provider modal | runtime Field + auth settings | shipped | #1077 | C | mutate-blocked |
+| Model select | `/model`, model modal | runtime + `/v1/models` + rates | shipped | #1077 | B | mutate-blocked |
 | Agent select | `/agent`, agent modal | runtime Field | shipped | polish #1077 | B | mutate-blocked |
 | Effort | `/effort` | runtime + op | shipped | preserve | B | mutate-blocked |
 | Autonomy | `/autonomy` | runtime + op | shipped | preserve | B | mutate-blocked |
 | Permission mode | `/mode` | runtime + op | shipped | preserve | B | mutate-blocked |
 | Fast tier | `/fast` | FAST toggle + op | shipped | preserve | B | mutate-blocked |
 | Sandbox dial + explain | `/sandbox` | `/v1/sandbox` GET/PATCH | shipped | preserve | C | read explain; PATCH blocked |
-| Permission presets/explain | `/permission` | `/v1/permissions/*` | partial UI | #1077 | B | read |
-| Scheduler presets | `scheduler_presets_modal.go` | missing | missing | #1077 | B | mutate-blocked |
-| Provider auth login | `auth.go` modal | `POST /v1/auth/key` partial | partial | #1077 | **C** | mutate-blocked |
-| Provider logout | auth modal | `DELETE /v1/auth/{provider}` | partial | #1077 | **C** | mutate-blocked |
-| Custom providers | `custom_provider_modal.go` | settings gap | missing | #1077 | C | mutate-blocked |
+| Permission presets/explain | `/permission` | explain dialog + `/v1/permissions/*` | shipped | #1077 | B | read |
+| Scheduler presets | `scheduler_presets_modal.go` | Settings + `/v1/scheduler/presets` | shipped | #1077 | B | mutate-blocked |
+| Provider auth login | `auth.go` modal | key/OAuth/device flows in Settings | shipped | #1077 | **C** | mutate-blocked |
+| Provider logout | auth modal | Settings provider rows + DELETE | shipped | #1077 | **C** | mutate-blocked |
+| Custom providers | `custom_provider_modal.go` | Settings custom provider CRUD | shipped | #1077 | C | mutate-blocked |
 | Settings dials | `settings_modal.go` | `Settings.tsx`, `/v1/settings` | shipped | gaps #1077 | B | GET read; PATCH blocked |
 | Config file picker/edit | `/config`, config modal | missing (no embedded editor) | non-goal / host files | #1077 docs | B | n/a |
-| Theme catalog + preview | `theme_modal.go` | CSS default + appearance only | partial | #1076 | B | local appearance ok |
-| Theme provenance | theme package | missing | missing | #1076 | B | read |
+| Theme catalog + preview | `theme_modal.go` | Settings catalog preview/apply | shipped | #1076 | B | local appearance ok |
+| Theme provenance | theme package | catalog provenance labels | shipped | #1076 | B | read |
 | Keybind editor | `keybind_editor.go` | non-goal (browser shortcuts subset) | non-goal | help docs | A | n/a |
 
 ### 8.3 Code and files
@@ -456,12 +457,12 @@ touched; unresolved rows **must** keep the listed tier.
 | Feature | TUI entry/file | Web file/API today | Status | Owner | Tier | Attach-only |
 |---|---|---|---|---|---|---|
 | Changed files list | `files_window.go` | inspector files + `/v1/changed-files` | shipped | preserve | B | read |
-| File tree browse | files window | missing full tree | missing | #1080 | B | read |
-| File read | `/v1/file` server exists | minimal client use | partial | #1080 | B | read |
-| Markdown preview | `markdown_window.go`, `/md-read` | missing dedicated surface | missing | #1080 | B | read |
-| Diff review | apply diff modal | expanded diffs in files panel | partial | #1075/#1080 | B | read |
-| Reviewed file apply | apply diff modal | missing confined apply | missing | #1084 | **C** | mutate-blocked |
-| LSP status | `/lsp` | `/v1/lsp` | partial via diagnostics | #1080/#1079 | B | read |
+| File tree browse | files window | `CodeExplorer` tree + search | shipped | #1080 | B | read |
+| File read | `/v1/file` server exists | Code explorer read pane | shipped | #1080 | B | read |
+| Markdown preview | `markdown_window.go`, `/md-read` | Code explorer markdown toggle | shipped | #1080 | B | read |
+| Diff review | apply diff modal | Code explorer + changed-files diffs | shipped | #1075/#1080 | B | read |
+| Reviewed file apply | apply diff modal | confined apply API + Code UI | shipped | #1084 | **C** | mutate-blocked |
+| LSP status | `/lsp` | Diagnostics panel + `/v1/lsp` | shipped | #1080/#1079 | B | read |
 | Diagnostics pane | `diagnostics_window.go` | `Diagnostics.tsx`, `/v1/diagnostics` | shipped | preserve | B | read |
 | Embedded vim/nano | `/vim`, `/nano`, terminal window | — | non-goal | browser non-goal | — | n/a |
 | PTY shell | `terminal_window.go` | — | non-goal | browser non-goal | — | n/a |
@@ -485,18 +486,18 @@ touched; unresolved rows **must** keep the listed tier.
 
 | Feature | TUI entry/file | Web file/API today | Status | Owner | Tier | Attach-only |
 |---|---|---|---|---|---|---|
-| Child agent list | agents window, `team_ui.go` | `ChildAgents.tsx` | partial | #1081/#1083 | B | read |
-| Child transcript open | session nav | open child SSE | partial | #1083 | B | read |
-| Handoff quality chips | team_ui / visualizer | quality on ChildAgent type | partial | #1086 | B | read |
-| Roster / task board | visualizer + team events | missing board | missing | #1083 | B | read |
-| Team attention rollup | visualizer | root attention only | partial | #1083 | B | read |
-| Path ownership / conflicts | visualizer, patch_collab | missing | missing | #1086 | B | read |
-| Artifacts read API | artifact tools / host | missing | missing | #1082 | B | read |
-| Decision ledger read API | ledger tools / host | missing | missing | #1082 | B | read |
-| Artifact/decision review UI | TUI panes | missing | missing | #1086 | B | read |
-| Human orchestration ops | engine/team tools | missing public Op contract | missing | #1085 | **C** | mutate-blocked |
-| Implement approved ops | protocol/engine | missing | missing | #1088 | **C** | mutate-blocked |
-| Safe Team control UI | TUI controls | missing | missing | #1089 | **C** | mutate-blocked |
+| Child agent list | agents window, `team_ui.go` | `ChildAgents.tsx` + Team roster | shipped | #1081/#1083 | B | read |
+| Child transcript open | session nav | open child historical SSE | shipped | #1083 | B | read |
+| Handoff quality chips | team_ui / visualizer | Team review + child quality | shipped | #1086 | B | read |
+| Roster / task board | visualizer + team events | `Team.tsx` roster + board | shipped | #1083 | B | read |
+| Team attention rollup | visualizer | Team attention + mode badge | shipped | #1083 | B | read |
+| Path ownership / conflicts | visualizer, patch_collab | Team review path overlaps | shipped | #1086 | B | read |
+| Artifacts read API | artifact tools / host | `GET /v1/artifacts*` | shipped | #1082 | B | read |
+| Decision ledger read API | ledger tools / host | `GET /v1/ledger*` | shipped | #1082 | B | read |
+| Artifact/decision review UI | TUI panes | `ArtifactsReview.tsx` | shipped | #1086 | B | read |
+| Human orchestration ops | engine/team tools | `docs/human-orchestration-ops.md` + protocol Ops | shipped | #1085 | **C** | mutate-blocked |
+| Implement approved ops | protocol/engine | team.* Ops in engine/server | shipped | #1088 | **C** | mutate-blocked |
+| Safe Team control UI | TUI controls | Team controls tab + CAS/idempotency | shipped | #1089 | **C** | mutate-blocked |
 | Graph visualizer clone | `visualizer_window.go` | — | non-goal | list/board/review only | — | n/a |
 | Pets | `pets_window.go` | — | non-goal | — | — | n/a |
 
@@ -508,7 +509,7 @@ touched; unresolved rows **must** keep the listed tier.
 | Plugin manager | `/plugin`, plugin modal | `Plugins.tsx`, `/v1/plugins*` | shipped | #1079 | B | read; trust/install blocked |
 | Plugin panes `pane/1` | plugin pane windows | `Panes.tsx`, `/v1/panes*` | shipped | host polish #1079 | B | read; input blocked |
 | Telemetry CPU/RAM | `/telemetry`, telemetry window | capability flag only | non-goal | browser non-goal | — | n/a |
-| Doctor modal | `doctor_modal.go` | partial via diag/context | partial | #1079 | B | read |
+| Doctor modal | `doctor_modal.go` | context doctor + diag export | shipped | #1079 | B | read |
 | Upgrade in-app | `/upgrade` | — | non-goal | CLI/release | — | n/a |
 | Quit/exit | `/exit` | — | non-goal | close browser tab | — | n/a |
 
@@ -518,35 +519,57 @@ touched; unresolved rows **must** keep the listed tier.
 |---|---|---|---|---|---|---|
 | Long transcript virtualization | paint budgets | VirtualList + stream batch + bounds | shipped | #1087 | B | read |
 | Large team roster perf | visualizer bounds | memo transcript + roster scroll region | shipped | #1087 | B | read |
-| Visual + a11y foundation | theme + tui/ui | CSS tokens partial | partial | #1072 | B | n/a |
-| Surface registry + mode shell | window registry analogue | hardcoded inspector tabs | missing | #1073 | B | n/a |
-| Responsive shell | layout package | drawers only | partial | #1074 | B | n/a |
-| Real-browser a11y/responsive tests | — | vitest unit only | missing | #1071 | B | n/a |
-| Final parity conformance | — | — | missing | #1090 | A/B | matrix closeout |
+| Visual + a11y foundation | theme + tui/ui | `web/src/ui/*` + tokens | shipped | #1072 | B | n/a |
+| Surface registry + mode shell | window registry analogue | `surfaces.ts` + mode shell + deep links | shipped | #1073 | B | n/a |
+| Responsive shell | layout package | desktop/tablet/phone shell | shipped | #1074 | B | n/a |
+| Real-browser a11y/responsive tests | — | Playwright `web/e2e` + `make web-e2e` | shipped | #1071 | B | n/a |
+| Final parity conformance | — | this document + `docs/web.md` § Conformance | shipped | #1090 | A/B | matrix closeout |
 
-### 8.8 Coverage checklist (acceptance)
+### 8.8 Coverage checklist (acceptance) — closed by #1090
 
-Every major family below resolves to `shipped`, a `WEBUI.N` owner, or `non-goal`:
+Every major family resolves to `shipped`, `non-goal` with rationale, or an
+explicit deferred follow-up (no unknown/partial without owner):
 
 | Family | Resolution |
 |---|---|
-| Themes | partial → **#1076**; local appearance shipped |
-| Config sources | settings API shipped; file editor **non-goal** / #1077 docs |
-| FTUE/init | blocking FTUE **non-goal**; contextual **#1078**; init **#1077/#1078** |
-| Loop | `/loop` **non-goal**; goals/workflows **#1079** |
-| Scheduler presets | **#1077** |
-| Permission presets | API shipped; UI **#1077** |
-| Cost | partial → **#1075** |
+| Themes | **shipped** (#1076 catalog/preview/provenance) |
+| Config sources | settings API **shipped**; embedded file editor **non-goal** |
+| FTUE/init | blocking FTUE **non-goal**; contextual tip **shipped** (#1078); `/init` **deferred** (TUI remains; `projectInit` not on serve) |
+| Loop | `/loop` **non-goal**; goals/workflows **shipped** (#1079) |
+| Scheduler presets | **shipped** (#1077 Settings + API) |
+| Permission presets | **shipped** (explain UI + API) |
+| Cost | **shipped** (#1075) |
 | Telemetry (host metrics) | **non-goal** |
-| Provider auth/logout | **#1077** (Tier C) |
-| Files | list shipped; explorer **#1080**; apply **#1084** (Tier C) |
-| Agents / team | partial → **#1081/#1083/#1086**; controls **#1085/#1088/#1089** |
-| Artifacts | **#1082/#1086** |
-| Ledger | **#1082/#1086** |
-| Help | **#1078/#1090** |
+| Provider auth/logout | **shipped** (#1077, Tier C) |
+| Files | explorer + reviewed apply **shipped** (#1080/#1084) |
+| Agents / team | observation + board + review + controls **shipped** (#1081–#1089) |
+| Artifacts / ledger | read APIs + review UI **shipped** (#1082/#1086) |
+| Help | palette + slash + tip **shipped** (#1078) |
 | Exports | markdown/memory/issues/diag/timeline **shipped** |
-| Plugins / panes | **shipped**; regroup **#1079** |
+| Plugins / panes | **shipped** (#1079) |
+| Long session / large team perf | **shipped** (#1087) |
 | Terminal-only (vim/nano/PTY/pets/exact keymaps) | **non-goal** |
+| Native app / offline / push / remote approval | **non-goal** (→ #1060) |
+| Human collaboration comments/roles | **non-goal** (→ #1056) |
+| Adaptive orchestration policy choice | **non-goal** (→ #1058; web displays decisions only) |
+| Serve transport/auth hardening beyond shipped | coordinate **#541** / **#1032** — not absorbed |
+
+### 8.9 Conformance evidence (WEBUI.21)
+
+| Gate | Evidence |
+|---|---|
+| Child delivery | All #1070–#1089 closed; PRs #1101–#1123 (see GitHub epic #1069) |
+| Unit / component | `cd web && npm test` (includes perf fixture CI subset) |
+| Typecheck + embed | `make web-check` → `tsc` + Vite build into `internal/server/static` |
+| Go | `make test && make vet && make build` |
+| Real browser | `make web-e2e` — desktop/tablet/320px, keyboard, multi-root, deep links, attach-only |
+| Trust boundaries | attach-only e2e + server tests for auth redaction, path confinement, CAS/idempotency on team/file ops |
+| Performance | #1087 thresholds in `web/src/perf/thresholds.ts`; `npm run profile:perf` |
+| Operator docs | `docs/web.md` (modes, registry, deep links, endpoints, smokes) |
+
+**Deferred (explicit, non-blocking for epic close):** web `/init` / `projectInit`
+capability remains off on `strike serve`. Operators use TUI `/init` or host
+files. Track only if product prioritizes browser project bootstrap.
 
 ---
 
