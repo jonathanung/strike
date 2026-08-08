@@ -33,6 +33,17 @@ import {
   type ProviderStatus,
   type SchedulerPreset,
 } from "./providers";
+import {
+  applyThemeColors,
+  applyThemeDefault,
+  clearThemeColors,
+  fetchThemes,
+  themeColors,
+  themeId,
+  themeName,
+  themeProvenance,
+  type ThemeInfo,
+} from "./themeCatalog";
 
 export type UserSettings = {
   provider?: string;
@@ -165,6 +176,14 @@ export function SettingsDialog({
   const [schedEnabled, setSchedEnabled] = useState<string[]>([]);
   const [configSources, setConfigSources] = useState<ConfigSource[]>([]);
 
+  // Theme catalog (WEBUI.11)
+  const [themes, setThemes] = useState<ThemeInfo[]>([]);
+  const [themesLoading, setThemesLoading] = useState(false);
+  const [themeActive, setThemeActive] = useState("");
+  const [themePreview, setThemePreview] = useState("");
+  const [themeBaseline, setThemeBaseline] = useState(""); // applied id before preview
+  const [themeSaving, setThemeSaving] = useState(false);
+
   // Runtime defaults
   const [defProvider, setDefProvider] = useState("");
   const [defModel, setDefModel] = useState("");
@@ -284,6 +303,25 @@ export function SettingsDialog({
 
   const agents = boot?.agents?.map((a) => a.name) || [];
 
+  const themesCap = Boolean(boot?.capabilities.themes || boot?.capabilities.settings);
+
+  useEffect(() => {
+    if (!themesCap) return;
+    setThemesLoading(true);
+    fetchThemes(rootID)
+      .then((res) => {
+        setThemes(res.themes || []);
+        const active = (res.active || "").trim();
+        setThemeActive(active);
+        setThemeBaseline(active);
+        setThemePreview(active);
+        const match = (res.themes || []).find((th) => themeId(th) === active);
+        if (match) applyThemeColors(themeColors(match), loadAppearance());
+      })
+      .catch(() => { /* catalog optional */ })
+      .finally(() => setThemesLoading(false));
+  }, [themesCap, rootID]);
+
   useEffect(() => {
     if (!settingsCap) return;
     setLoading(true);
@@ -308,6 +346,11 @@ export function SettingsDialog({
         setCompBuffer(dialOrEmpty(s.compactionBuffer, "default"));
         setKeepUserTurns(dialOrEmpty(s.keepUserTurns, "default"));
         setPruneProtectTools((s.pruneProtectTools || []).join(", "));
+        if (s.theme) {
+          setThemeActive(s.theme);
+          setThemeBaseline(s.theme);
+          setThemePreview((prev) => prev || s.theme || "");
+        }
       })
       .catch((err: Error) => setError(err.message))
       .finally(() => setLoading(false));
@@ -316,6 +359,45 @@ export function SettingsDialog({
   const onAppearance = (value: Appearance) => {
     setAppearance(value);
     applyAppearance(value);
+    const id = themePreview || themeActive;
+    const match = themes.find((th) => themeId(th) === id);
+    if (match) applyThemeColors(themeColors(match), value);
+  };
+
+  const onPreviewTheme = (id: string) => {
+    setThemePreview(id);
+    const match = themes.find((th) => themeId(th) === id);
+    if (match) applyThemeColors(themeColors(match), appearance);
+    else if (!id) clearThemeColors();
+  };
+
+  const onRevertTheme = () => {
+    const back = themeBaseline || themeActive || "";
+    setThemePreview(back);
+    const match = themes.find((th) => themeId(th) === back);
+    if (match) applyThemeColors(themeColors(match), appearance);
+    else clearThemeColors();
+  };
+
+  const onApplyTheme = async () => {
+    const id = (themePreview || "").trim();
+    if (!id || !settingsCap) return;
+    setThemeSaving(true);
+    setError("");
+    try {
+      const saved = await applyThemeDefault(id);
+      const next = saved.theme || id;
+      setThemeActive(next);
+      setThemeBaseline(next);
+      setThemePreview(next);
+      const match = themes.find((th) => themeId(th) === next);
+      if (match) applyThemeColors(themeColors(match), appearance);
+    } catch (err) {
+      setError((err as Error).message);
+      onRevertTheme();
+    } finally {
+      setThemeSaving(false);
+    }
   };
 
   const toggleExclude = (name: string) => {
@@ -774,8 +856,76 @@ export function SettingsDialog({
           values={[...appearanceValues]}
           onChange={(v) => onAppearance(v as Appearance)}
         />
-        <p className="muted">Local to this browser. Auto follows the system preference.</p>
+        <p className="muted">Local to this browser. Auto follows the system preference. Independent of the theme catalog below.</p>
       </fieldset>
+
+      {themesCap ? (
+        <fieldset>
+          <legend>Theme catalog</legend>
+          <p className="muted">
+            Bundled, user, and project themes with portable color roles.
+            Preview paints immediately; Apply saves the default via settings.
+          </p>
+          {themesLoading ? (
+            <LoadingState label="Loading themes…" />
+          ) : themes.length === 0 ? (
+            <p className="muted">No themes reported by this host.</p>
+          ) : (
+            <>
+              <label>
+                Theme
+                <select
+                  aria-label="Theme catalog"
+                  value={themePreview}
+                  onChange={(e) => onPreviewTheme(e.target.value)}
+                >
+                  <option value="">— stock CSS (no catalog override) —</option>
+                  {themes.map((th) => {
+                    const id = themeId(th);
+                    const label = `${themeName(th)} (${themeProvenance(th)})`;
+                    return <option key={id} value={id}>{label}</option>;
+                  })}
+                </select>
+              </label>
+              {themePreview && (
+                <p className="muted" aria-live="polite">
+                  Previewing <code>{themePreview}</code>
+                  {themeActive && themePreview !== themeActive ? ` · saved default is ${themeActive}` : ""}
+                  {themeActive && themePreview === themeActive ? " · saved default" : ""}
+                </p>
+              )}
+              <div className="dialog-actions" style={{ justifyContent: "flex-start", gap: "0.5rem" }}>
+                <Button
+                  type="button"
+                  disabled={!themePreview || themePreview === themeBaseline || themeSaving}
+                  onClick={() => onRevertTheme()}
+                >
+                  Revert preview
+                </Button>
+                <Button
+                  type="button"
+                  variant="primary"
+                  disabled={
+                    !themePreview
+                    || !settingsCap
+                    || Boolean(boot?.attachOnly)
+                    || themeSaving
+                    || themePreview === themeActive
+                  }
+                  onClick={() => void onApplyTheme()}
+                >
+                  {themeSaving ? "Applying…" : "Apply theme"}
+                </Button>
+              </div>
+              {boot?.attachOnly && (
+                <p className="muted">Attach-only is read-only — preview works; Apply is disabled.</p>
+              )}
+            </>
+          )}
+        </fieldset>
+      ) : (
+        <CapabilityUnavailable name="Theme catalog" />
+      )}
 
       {!settingsCap ? (
         <CapabilityUnavailable name="Saved defaults" />

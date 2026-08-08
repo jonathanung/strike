@@ -1024,3 +1024,87 @@ func TestIssuesMutatingRoutes(t *testing.T) {
 type errNotFound string
 
 func (e errNotFound) Error() string { return string(e) }
+
+type testThemes struct {
+	list []host.ThemeInfo
+}
+
+func (t testThemes) List(string) []host.ThemeInfo { return t.list }
+func (t testThemes) Get(_ string, id string) (host.ThemeInfo, bool) {
+	for _, th := range t.list {
+		if th.ID == id {
+			return th, true
+		}
+	}
+	return host.ThemeInfo{}, false
+}
+
+func TestThemesCatalogAPI(t *testing.T) {
+	themes := testThemes{list: []host.ThemeInfo{
+		{
+			ID: "strike", Name: "Strike", Appearance: "adaptive", Provenance: "builtin",
+			Colors: host.ThemeColors{
+				Text:   host.ColorPair{Light: "#1a1528", Dark: "#f3f1fa"},
+				Accent: host.ColorPair{Light: "#6d28d9", Dark: "#c4b5fd"},
+			},
+		},
+		{
+			ID: "nord", Name: "Nord", Appearance: "adaptive", Provenance: "builtin",
+			Colors: host.ThemeColors{
+				Text: host.ColorPair{Light: "#2e3440", Dark: "#d8dee9"},
+			},
+		},
+	}}
+	services := &host.Services{
+		Themes:   themes,
+		Settings: testSettings{defaults: host.UserDefaults{Theme: "strike"}},
+	}
+	srv, err := New(Options{SessionDir: t.TempDir(), Services: services})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	list := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/v1/themes", nil))
+	if list.Code != http.StatusOK {
+		t.Fatalf("list = %d %s", list.Code, list.Body.String())
+	}
+	body := list.Body.String()
+	if !strings.Contains(body, `"id":"strike"`) || !strings.Contains(body, "nord") {
+		t.Fatalf("list body missing themes: %s", body)
+	}
+	if !strings.Contains(body, `"active":"strike"`) {
+		t.Fatalf("expected active strike: %s", body)
+	}
+	if !strings.Contains(body, "builtin") {
+		t.Fatalf("expected provenance: %s", body)
+	}
+
+	one := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(one, httptest.NewRequest(http.MethodGet, "/v1/themes/nord", nil))
+	if one.Code != http.StatusOK || !strings.Contains(one.Body.String(), "nord") {
+		t.Fatalf("get nord = %d %s", one.Code, one.Body.String())
+	}
+
+	missing := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(missing, httptest.NewRequest(http.MethodGet, "/v1/themes/nope", nil))
+	if missing.Code != http.StatusNotFound {
+		t.Fatalf("missing = %d %s", missing.Code, missing.Body.String())
+	}
+
+	off, err := New(Options{SessionDir: t.TempDir(), Services: &host.Services{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := httptest.NewRecorder()
+	off.Handler().ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/v1/themes", nil))
+	if res.Code != http.StatusNotImplemented {
+		t.Fatalf("cap off = %d %s", res.Code, res.Body.String())
+	}
+
+	boot := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(boot, httptest.NewRequest(http.MethodGet, "/v1/bootstrap", nil))
+	if !strings.Contains(boot.Body.String(), `"themes":true`) {
+		t.Fatalf("bootstrap themes cap: %s", boot.Body.String())
+	}
+}

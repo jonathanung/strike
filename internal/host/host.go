@@ -1025,6 +1025,59 @@ type Permissions interface {
 	Presets() []PermissionPresetInfo
 }
 
+// ColorPair is a light/dark hex pair for one portable semantic color role.
+// Empty sides mean unknown; frontends must fall back to the stock palette.
+type ColorPair struct {
+	Light string `json:"light,omitempty"`
+	Dark  string `json:"dark,omitempty"`
+}
+
+// ThemeColors carries only browser-portable semantic roles (WEBUI.11).
+// TUI-only glyph, border-style, chrome, and terminal quantization fields are omitted.
+type ThemeColors struct {
+	Text         ColorPair `json:"text"`
+	TextMuted    ColorPair `json:"textMuted"`
+	Accent       ColorPair `json:"accent"`
+	AccentAlt    ColorPair `json:"accentAlt"`
+	Highlight    ColorPair `json:"highlight"`
+	Success      ColorPair `json:"success"`
+	Warning      ColorPair `json:"warning"`
+	Error        ColorPair `json:"error"`
+	Danger       ColorPair `json:"danger"`
+	Background   ColorPair `json:"background"`
+	Surface      ColorPair `json:"surface"`
+	SurfaceFocus ColorPair `json:"surfaceFocus"`
+	SurfaceMuted ColorPair `json:"surfaceMuted"`
+	Border       ColorPair `json:"border"`
+	BorderFocus  ColorPair `json:"borderFocus"`
+	BorderMuted  ColorPair `json:"borderMuted"`
+	UserLabel    ColorPair `json:"userLabel"`
+	ToolLabel    ColorPair `json:"toolLabel"`
+	DiffAdded    ColorPair `json:"diffAdded"`
+	DiffRemoved  ColorPair `json:"diffRemoved"`
+	OverlayScrim ColorPair `json:"overlayScrim"`
+}
+
+// ThemeInfo is one catalog entry for web/TUI theme pickers.
+type ThemeInfo struct {
+	ID         string      `json:"id"`                 // stable id (file stem / BuiltinID)
+	Name       string      `json:"name"`               // display name
+	Appearance string      `json:"appearance"`         // adaptive | light | dark
+	Provenance string      `json:"provenance"`         // builtin | user | project | plugin[:id]
+	Overrode   string      `json:"overrode,omitempty"` // previous provenance when this id won a collision
+	Colors     ThemeColors `json:"colors"`             // portable roles only; incomplete maps are valid
+}
+
+// Themes lists host-safe theme catalog entries. Nil when unsupported.
+// Apply goes through Settings.SaveTheme; this interface is read-only.
+type Themes interface {
+	// List returns merged catalog order (builtin → user → plugin → project).
+	// workDir scopes project/plugin layers; empty skips project.
+	List(workDir string) []ThemeInfo
+	// Get returns one theme by id from List(workDir), or false when missing.
+	Get(workDir, id string) (ThemeInfo, bool)
+}
+
 // Services bundles everything a frontend receives from its host. Any field
 // may be nil/empty when a capability is absent (tests, future frontends);
 // frontends must degrade gracefully.
@@ -1032,6 +1085,7 @@ type Services struct {
 	Auth        Auth
 	Catalog     Catalog
 	Settings    Settings
+	Themes      Themes      // theme catalog (read-only); nil when unsupported
 	ConfigFiles ConfigFiles // /config picker paths; nil when unsupported
 	Onboarding  Onboarding  // global FTUE state; nil when unsupported
 	History     History
