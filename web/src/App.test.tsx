@@ -1070,6 +1070,8 @@ describe("App", () => {
   });
 
   it("restores mode and surface from deep link after bootstrap", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1280 });
+    window.dispatchEvent(new Event("resize"));
     window.history.replaceState(null, "", "/?mode=project&surface=plans&entity=plan-1");
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const url = String(input);

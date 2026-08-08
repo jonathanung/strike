@@ -28,28 +28,28 @@ var ErrInitExists = errors.New("AGENTS.md already exists")
 // state, with capability flags so frontends stay data-driven (adding a
 // provider must not require frontend edits).
 type ProviderStatus struct {
-	Name      string    // e.g. "anthropic"
-	Detail    string    // human-readable credential state: "none", "oauth+key", "offline dev provider"
-	Authed    bool      // usable right now
-	Builtin   bool      // no credentials needed (echo)
-	Custom    bool      // user-declared self-hosted / gateway provider
-	OAuth     bool      // supports browser OAuth login
-	Device    bool      // supports RFC 8628 device flow
-	APIKey    bool      // supports pasted API key
-	WireAPI   string    // custom only: "openai" | "anthropic"
-	BaseURL   string    // custom only: endpoint origin (no secrets)
-	ExpiresAt time.Time // OAuth token expiry; zero = unknown/N/A
+	Name      string    `json:"name"`                // e.g. "anthropic"
+	Detail    string    `json:"detail"`              // human-readable credential state: "none", "oauth+key", "offline dev provider"
+	Authed    bool      `json:"authed"`              // usable right now
+	Builtin   bool      `json:"builtin,omitempty"`   // no credentials needed (echo)
+	Custom    bool      `json:"custom,omitempty"`    // user-declared self-hosted / gateway provider
+	OAuth     bool      `json:"oauth,omitempty"`     // supports browser OAuth login
+	Device    bool      `json:"device,omitempty"`    // supports RFC 8628 device flow
+	APIKey    bool      `json:"apiKey,omitempty"`    // supports pasted API key
+	WireAPI   string    `json:"wireAPI,omitempty"`   // custom only: "openai" | "anthropic"
+	BaseURL   string    `json:"baseURL,omitempty"`   // custom only: endpoint origin (no secrets)
+	ExpiresAt time.Time `json:"expiresAt,omitempty"` // OAuth token expiry; zero = unknown/N/A
 }
 
 // CustomProvider is a user-declared LLM endpoint. API keys are never included;
 // set them through Auth.SetAPIKey using Name as the provider id.
 type CustomProvider struct {
-	Name      string
-	BaseURL   string
-	API       string // wire dialect: "openai" | "anthropic"
-	Headers   map[string]string
-	APIKeyEnv string
-	Models    []string
+	Name      string            `json:"name"`
+	BaseURL   string            `json:"baseURL"`
+	API       string            `json:"api"` // wire dialect: "openai" | "anthropic"
+	Headers   map[string]string `json:"headers,omitempty"`
+	APIKeyEnv string            `json:"apiKeyEnv,omitempty"`
+	Models    []string          `json:"models,omitempty"`
 }
 
 // Providers manages custom/self-hosted provider definitions (config only).
@@ -98,19 +98,19 @@ const (
 // ModelInfo is picker-facing metadata for one catalog model. Zero fields mean
 // unknown or unsupported; frontends must omit them from display.
 type ModelInfo struct {
-	ID         string
-	Provider   string  // owning provider id (set by Catalog.Models / ModelsForProviders)
-	Name       string  // display label; empty means use ID
-	Context    int     // context window tokens; 0 = unknown
-	Output     int     // max output tokens; 0 = unknown
-	InputCost  float64 // USD per million input tokens
-	OutputCost float64 // USD per million output tokens
-	HasCost    bool
-	ToolCall   bool
-	Reasoning  bool
-	Attachment bool     // multimodal / file attachments
-	VariantIDs []string // config effort/reasoning variant ids
-	Source     string   // ModelSourceCatalog | ModelSourceConfig | ModelSourceMerge
+	ID         string   `json:"id"`
+	Provider   string   `json:"provider"`             // owning provider id
+	Name       string   `json:"name,omitempty"`       // display label; empty means use ID
+	Context    int      `json:"context,omitempty"`    // context window tokens; 0 = unknown
+	Output     int      `json:"output,omitempty"`     // max output tokens; 0 = unknown
+	InputCost  float64  `json:"inputCost,omitempty"`  // USD per million input tokens
+	OutputCost float64  `json:"outputCost,omitempty"` // USD per million output tokens
+	HasCost    bool     `json:"hasCost,omitempty"`
+	ToolCall   bool     `json:"toolCall,omitempty"`
+	Reasoning  bool     `json:"reasoning,omitempty"`
+	Attachment bool     `json:"attachment,omitempty"` // multimodal / file attachments
+	VariantIDs []string `json:"variantIds,omitempty"` // config effort/reasoning variant ids
+	Source     string   `json:"source,omitempty"`     // catalog | config | merge
 }
 
 // Catalog lists model ids and limits for a provider (may hit network/cache;
