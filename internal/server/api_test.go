@@ -264,7 +264,8 @@ func TestAttachOnlyBootstrapPermissionsFalse(t *testing.T) {
 func TestAuthServiceAPIs(t *testing.T) {
 	auth := &testAuth{}
 	services := &host.Services{Auth: auth}
-	srv, err := New(Options{SessionDir: t.TempDir(), Services: services})
+	live := NewLive("live", t.TempDir(), nil, make(chan protocol.Op, 1))
+	srv, err := New(Options{SessionDir: t.TempDir(), Services: services, Live: live})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -274,15 +275,29 @@ func TestAuthServiceAPIs(t *testing.T) {
 	if providers.Code != http.StatusOK || !strings.Contains(providers.Body.String(), "echo") {
 		t.Fatalf("providers = %d %s", providers.Code, providers.Body.String())
 	}
+	if !strings.Contains(providers.Body.String(), `"methods"`) {
+		t.Fatalf("providers missing methods: %s", providers.Body.String())
+	}
 	key := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(key, httptest.NewRequest(http.MethodPost, "/v1/auth/key", strings.NewReader(`{"provider":"openai","key":"fixture-only"}`)))
 	if key.Code != http.StatusOK || auth.keyProvider != "openai" || auth.key != "fixture-only" {
-		t.Fatalf("key = %d, auth = %#v", key.Code, auth)
+		t.Fatalf("key = %d, auth = %#v body %s", key.Code, auth, key.Body.String())
 	}
 	logout := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(logout, httptest.NewRequest(http.MethodDelete, "/v1/auth/openai", nil))
-	if logout.Code != http.StatusNoContent || auth.logout != "openai" {
-		t.Fatalf("logout = %d, auth = %#v", logout.Code, auth)
+	if logout.Code != http.StatusOK || auth.logout != "openai" {
+		t.Fatalf("logout = %d, auth = %#v body %s", logout.Code, auth, logout.Body.String())
+	}
+
+	// Attach-only blocks credential mutations.
+	ro, err := New(Options{SessionDir: t.TempDir(), Services: services})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deny := httptest.NewRecorder()
+	ro.Handler().ServeHTTP(deny, httptest.NewRequest(http.MethodPost, "/v1/auth/key", strings.NewReader(`{"provider":"openai","key":"x"}`)))
+	if deny.Code != http.StatusForbidden {
+		t.Fatalf("attach-only key = %d %s", deny.Code, deny.Body.String())
 	}
 }
 
@@ -389,7 +404,7 @@ func TestModelsServiceAPI(t *testing.T) {
 		t.Fatalf("all models = %d %s", all.Code, all.Body.String())
 	}
 	body := all.Body.String()
-	for _, want := range []string{"gpt-a", "grok-b", "echo", `"Provider":"openai"`, `"Provider":"xai"`} {
+	for _, want := range []string{"gpt-a", "grok-b", "echo", `"provider":"openai"`, `"provider":"xai"`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("all models missing %q: %s", want, body)
 		}
@@ -409,7 +424,8 @@ func (a *testAuthMulti) Statuses() []host.ProviderStatus { return a.statuses }
 func TestHistoryAndSettingsServiceAPIs(t *testing.T) {
 	saved := make(chan [5]string, 1)
 	services := &host.Services{History: testHistory{entries: []string{"first", "second"}}, Settings: testSettings{saved: saved}}
-	srv, err := New(Options{SessionDir: t.TempDir(), Services: services})
+	live := NewLive("live", t.TempDir(), nil, make(chan protocol.Op, 1))
+	srv, err := New(Options{SessionDir: t.TempDir(), Services: services, Live: live})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -433,7 +449,8 @@ func TestHistoryAndSettingsServiceAPIs(t *testing.T) {
 
 func TestSettingsRejectsUnknownAndOversizePayloads(t *testing.T) {
 	services := &host.Services{Settings: testSettings{saved: make(chan [5]string, 1)}}
-	srv, err := New(Options{SessionDir: t.TempDir(), Services: services})
+	live := NewLive("live", t.TempDir(), nil, make(chan protocol.Op, 1))
+	srv, err := New(Options{SessionDir: t.TempDir(), Services: services, Live: live})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -545,10 +562,12 @@ func TestSandboxPatchYoloOffRequiresIKnow(t *testing.T) {
 		defaults:  host.UserDefaults{PermissionMode: "yolo", Sandbox: "workspace-write"},
 		savedDial: dials,
 	}
+	live := NewLive("live", t.TempDir(), nil, make(chan protocol.Op, 1))
 	srv, err := New(Options{
 		SessionDir: t.TempDir(),
 		Services:   &host.Services{Settings: settings},
 		Sandbox:    &SandboxSnapshot{Mode: "workspace-write", Available: true},
+		Live:       live,
 	})
 	if err != nil {
 		t.Fatal(err)

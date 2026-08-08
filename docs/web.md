@@ -734,6 +734,23 @@ Fixed chrome uses `safe-area-inset-*`. Phone composer uses a sticky row and 44px
 8. `./strike serve --addr 0.0.0.0:8787` → error (loopback only).
 9. `./strike serve --expose` → error with SSH migration hint.
 
+### Provider auth & policy (WEBUI.10)
+
+| Method | Path | Notes |
+|---|---|---|
+| `GET` | `/v1/providers` | Provider rows with authed state + methods (`apiKey`/`device`/`oauth`); no secrets |
+| `POST` | `/v1/auth/key` | Set API key (live only; attach-only 403) |
+| `DELETE` | `/v1/auth/{provider}` | Logout |
+| `POST` | `/v1/auth/device` | Start device login → code + verification URL |
+| `GET`/`DELETE` | `/v1/auth/device/{id}` | Poll status / cancel |
+| `POST` | `/v1/auth/oauth` | Start paste-assisted OAuth (no invented browser callback) |
+| `POST` | `/v1/auth/oauth/{id}/complete` | Paste redirect URL or code |
+| `GET`/`POST`/`DELETE` | `/v1/custom-providers` | Custom provider CRUD (capability `providers`) |
+| `GET`/`POST` | `/v1/scheduler/presets` | Scheduler preset catalog + apply |
+| `GET` | `/v1/config-sources` | Typed config source inspection (no raw file editor) |
+
+Attach-only permits status/catalog reads; credential and settings mutations return **403**.
+
 ### Settings dials (`GET`/`PATCH /v1/settings`)
 
 Wire fields match `host.UserDefaults` / TUI `/settings` vocabulary. `PATCH` is
