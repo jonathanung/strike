@@ -198,6 +198,22 @@ JSON objects with a `type` and optional `data`:
 | `select.model` | `{ "provider", "model?" }` |
 | `set.permission_mode` | `{ "mode": "default\|plan\|accept-edits\|yolo" }` |
 | `set.autonomy` | `{ "mode": "supervised\|agent\|checks\|skip-all" }` |
+| `team.spawn` | `{ "idempotencyKey", "objective", "agent?", "name?", "isolation?", "budget?", "rootSessionId?" }` |
+| `team.message` | `{ "idempotencyKey", "to", "body", "kind?", "urgency?", "taskId?" }` |
+| `team.broadcast` | `{ "idempotencyKey", "body", "urgency?", "taskId?" }` |
+| `team.child_interrupt` | `{ "idempotencyKey", "childSessionId", "reason?" }` |
+| `team.task_transition` | `{ "idempotencyKey", "delegationId", "expectedVersion", "toState", "reason?" }` |
+| `team.board_create` | `{ "idempotencyKey", "title", "body?", "assignee?" }` |
+| `team.board_claim` | `{ "idempotencyKey", "taskId", "expectedVersion" }` |
+| `team.board_complete` | `{ "idempotencyKey", "taskId", "expectedVersion", "summary?" }` |
+
+Human team-control Ops (WEBUI.18) are advertised on bootstrap when live:
+`capabilities.teamControl: true` and the `team.*` names above appear in
+`protocolOps`. HTTP waits for the engine outcome and returns structured
+`{ ok, childSessionId?, taskId?, … }` or stable errors (`attach_only`,
+`cross_root_denied`, `conflict` + `currentVersion`, `idempotency_conflict`,
+`permission_denied`, `team_unavailable`). Full contract:
+[human-orchestration-ops.md](human-orchestration-ops.md).
 
 ### OS sandbox (web parity)
 

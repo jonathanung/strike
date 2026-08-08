@@ -496,6 +496,11 @@ type Engine struct {
 	// engines; only the lead dissolves it on Run exit.
 	team *Team
 
+	// teamIdem is the process-local human orchestration Op idempotency cache
+	// (WEBUI.18). Lazy-init under teamIdemMu.
+	teamIdemMu sync.Mutex
+	teamIdem   *teamIdempotencyCache
+
 	// childDone delivers ChildCompleted from drain goroutines to Run so the
 	// parent can inject a model-visible summary and auto-nudge when idle.
 	// Buffered; non-blocking send on the drain side if Run is shutting down.

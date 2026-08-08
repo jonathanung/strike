@@ -29,6 +29,14 @@ func TestWrapOpDecodeRoundTrip(t *testing.T) {
 		},
 		InspectDiagnosticBundle{},
 		Rewind{RestoreFiles: true},
+		TeamSpawn{teamControlFields: teamControlFields{IdempotencyKey: "k1"}, Objective: "do x", Agent: "build"},
+		TeamMessage{teamControlFields: teamControlFields{IdempotencyKey: "k2"}, To: "child", Body: "hi"},
+		TeamBroadcast{teamControlFields: teamControlFields{IdempotencyKey: "k3"}, Body: "all"},
+		TeamChildInterrupt{teamControlFields: teamControlFields{IdempotencyKey: "k4"}, ChildSessionID: "c1"},
+		TeamTaskTransition{teamControlFields: teamControlFields{IdempotencyKey: "k5"}, DelegationID: "d1", ExpectedVersion: 1, ToState: "blocked"},
+		TeamBoardCreate{teamControlFields: teamControlFields{IdempotencyKey: "k6"}, Title: "t"},
+		TeamBoardClaim{teamControlFields: teamControlFields{IdempotencyKey: "k7"}, TaskID: "t1", ExpectedVersion: 1},
+		TeamBoardComplete{teamControlFields: teamControlFields{IdempotencyKey: "k8"}, TaskID: "t1", ExpectedVersion: 2},
 	}
 	for _, op := range cases {
 		env, err := WrapOp(op)

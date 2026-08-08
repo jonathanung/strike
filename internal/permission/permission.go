@@ -44,6 +44,8 @@ var knownPermissions = map[string]struct{}{
 	"task_interrupt": {}, "wait": {}, "agent_roster": {}, "agent_ownership": {},
 	"agent_message": {}, "agent_broadcast": {}, "agent_thread": {},
 	"team_task": {}, "patch_collab": {}, "delegate": {},
+	// Human orchestration Ops (WEBUI.18 / docs/human-orchestration-ops.md).
+	"team.spawn": {}, "team.message": {}, "team.interrupt": {}, "team.board": {},
 	"webfetch": {}, "websearch": {}, "todowrite": {}, "todoread": {},
 	"memory_write": {}, "memory_read": {}, "issue_write": {}, "issue_read": {},
 	"plan_write": {}, "plan_read": {}, "plan_delegate": {},

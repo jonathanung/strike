@@ -55,6 +55,22 @@ func opType(op Op) string {
 		return "inspect.diagnostic"
 	case Rewind:
 		return "rewind"
+	case TeamSpawn:
+		return OpTeamSpawn
+	case TeamMessage:
+		return OpTeamMessage
+	case TeamBroadcast:
+		return OpTeamBroadcast
+	case TeamChildInterrupt:
+		return OpTeamChildInterrupt
+	case TeamTaskTransition:
+		return OpTeamTaskTransition
+	case TeamBoardCreate:
+		return OpTeamBoardCreate
+	case TeamBoardClaim:
+		return OpTeamBoardClaim
+	case TeamBoardComplete:
+		return OpTeamBoardComplete
 	default:
 		return ""
 	}
@@ -128,6 +144,22 @@ func (e OpEnvelope) Decode() (Op, error) {
 		return InspectDiagnosticBundle{}, nil
 	case "rewind":
 		op = &Rewind{}
+	case OpTeamSpawn:
+		op = &TeamSpawn{}
+	case OpTeamMessage:
+		op = &TeamMessage{}
+	case OpTeamBroadcast:
+		op = &TeamBroadcast{}
+	case OpTeamChildInterrupt:
+		op = &TeamChildInterrupt{}
+	case OpTeamTaskTransition:
+		op = &TeamTaskTransition{}
+	case OpTeamBoardCreate:
+		op = &TeamBoardCreate{}
+	case OpTeamBoardClaim:
+		op = &TeamBoardClaim{}
+	case OpTeamBoardComplete:
+		op = &TeamBoardComplete{}
 	default:
 		return nil, fmt.Errorf("protocol: unknown op envelope type %q", e.Type)
 	}
@@ -171,6 +203,22 @@ func derefOp(op Op) Op {
 	case *SetContextControls:
 		return *v
 	case *Rewind:
+		return *v
+	case *TeamSpawn:
+		return *v
+	case *TeamMessage:
+		return *v
+	case *TeamBroadcast:
+		return *v
+	case *TeamChildInterrupt:
+		return *v
+	case *TeamTaskTransition:
+		return *v
+	case *TeamBoardCreate:
+		return *v
+	case *TeamBoardClaim:
+		return *v
+	case *TeamBoardComplete:
 		return *v
 	default:
 		return op

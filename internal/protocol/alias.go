@@ -143,6 +143,17 @@ type (
 	SetContextControls      = pub.SetContextControls
 	InspectDiagnosticBundle = pub.InspectDiagnosticBundle
 	Rewind                  = pub.Rewind
+	// Human orchestration Ops (WEBUI.18).
+	TeamSpawn          = pub.TeamSpawn
+	TeamMessage        = pub.TeamMessage
+	TeamBroadcast      = pub.TeamBroadcast
+	TeamChildInterrupt = pub.TeamChildInterrupt
+	TeamTaskTransition = pub.TeamTaskTransition
+	TeamBoardCreate    = pub.TeamBoardCreate
+	TeamBoardClaim     = pub.TeamBoardClaim
+	TeamBoardComplete  = pub.TeamBoardComplete
+	TeamOpOutcome      = pub.TeamOpOutcome
+	TeamSpawnBudget    = pub.TeamSpawnBudget
 )
 
 // Events.
@@ -340,6 +351,18 @@ func WrapOp(op Op) (OpEnvelope, error)          { return pub.WrapOp(op) }
 func RewindPoints(events []Event) []RewindPoint { return pub.RewindPoints(events) }
 func IsUnknown(ev Event) bool                   { return pub.IsUnknown(ev) }
 
+// Human orchestration Ops helpers (WEBUI.18).
+func TeamControlOpNames() []string { return pub.TeamControlOpNames() }
+func IsTeamControlOp(op Op) bool   { return pub.IsTeamControlOp(op) }
+func TeamControlReply(op Op) chan<- TeamOpOutcome {
+	return pub.TeamControlReply(op)
+}
+func WithTeamControlReply(op Op, reply chan<- TeamOpOutcome) Op {
+	return pub.WithTeamControlReply(op, reply)
+}
+func TeamControlRootSessionID(op Op) string  { return pub.TeamControlRootSessionID(op) }
+func TeamControlIdempotencyKey(op Op) string { return pub.TeamControlIdempotencyKey(op) }
+
 func ToolFeedbackPermissionDenied(reason string) string {
 	return pub.ToolFeedbackPermissionDenied(reason)
 }
@@ -369,6 +392,27 @@ const (
 	ErrorCodeNetworkDenied      = pub.ErrorCodeNetworkDenied
 	ErrorCodeQueueFull          = pub.ErrorCodeQueueFull
 	ErrorCodeBudgetExhausted    = pub.ErrorCodeBudgetExhausted
+
+	// Human orchestration Ops (WEBUI.18).
+	OpTeamSpawn          = pub.OpTeamSpawn
+	OpTeamMessage        = pub.OpTeamMessage
+	OpTeamBroadcast      = pub.OpTeamBroadcast
+	OpTeamChildInterrupt = pub.OpTeamChildInterrupt
+	OpTeamTaskTransition = pub.OpTeamTaskTransition
+	OpTeamBoardCreate    = pub.OpTeamBoardCreate
+	OpTeamBoardClaim     = pub.OpTeamBoardClaim
+	OpTeamBoardComplete  = pub.OpTeamBoardComplete
+
+	ErrTeamCapabilityUnavailable = pub.ErrTeamCapabilityUnavailable
+	ErrTeamAttachOnly            = pub.ErrTeamAttachOnly
+	ErrTeamReadOnly              = pub.ErrTeamReadOnly
+	ErrTeamCrossRoot             = pub.ErrTeamCrossRoot
+	ErrTeamNotLead               = pub.ErrTeamNotLead
+	ErrTeamUnavailable           = pub.ErrTeamUnavailable
+	ErrTeamConflict              = pub.ErrTeamConflict
+	ErrTeamIdempotencyConflict   = pub.ErrTeamIdempotencyConflict
+	ErrTeamValidation            = pub.ErrTeamValidation
+	ErrTeamPermissionDenied      = pub.ErrTeamPermissionDenied
 
 	// Session lifecycle (#1038).
 	ErrorCodeSessionNotFound = pub.ErrorCodeSessionNotFound
