@@ -144,10 +144,11 @@ func TestEventsSSETailsNewAppends(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/v1/sessions/"+id+"/events?token=secret", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/v1/sessions/"+id+"/events", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	req.Header.Set("Authorization", "Bearer secret")
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -178,7 +179,12 @@ func TestEventsNotFoundAndBadID(t *testing.T) {
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 
-	res, err := http.Get(ts.URL + "/v1/sessions/missing/events?token=secret")
+	req, err := http.NewRequest(http.MethodGet, ts.URL+"/v1/sessions/missing/events", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer secret")
+	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +193,12 @@ func TestEventsNotFoundAndBadID(t *testing.T) {
 		t.Fatalf("missing status = %d, want 404", res.StatusCode)
 	}
 
-	res, err = http.Get(ts.URL + "/v1/sessions/../etc/events?token=secret")
+	req, err = http.NewRequest(http.MethodGet, ts.URL+"/v1/sessions/../etc/events", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer secret")
+	res, err = http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +223,7 @@ func TestAttachPage(t *testing.T) {
 	}
 }
 
-func TestAuthAcceptsBearerCookieAndQuery(t *testing.T) {
+func TestAuthAcceptsBearerAndCookieRejectsQuery(t *testing.T) {
 	srv := testServer(t, t.TempDir(), "secret")
 	cases := []struct {
 		name string
@@ -240,9 +251,9 @@ func TestAuthAcceptsBearerCookieAndQuery(t *testing.T) {
 			code: http.StatusUnauthorized,
 		},
 		{
-			name: "query token",
+			name: "query token rejected",
 			mod:  func(r *http.Request) { r.URL.RawQuery = "token=secret" },
-			code: http.StatusOK,
+			code: http.StatusUnauthorized,
 		},
 		{
 			name: "bad query token",
@@ -272,12 +283,12 @@ func TestAuthAcceptsBearerCookieAndQuery(t *testing.T) {
 			code: http.StatusOK,
 		},
 		{
-			name: "bad bearer still allows valid query",
+			name: "valid query does not override bad bearer",
 			mod: func(r *http.Request) {
 				r.Header.Set("Authorization", "Bearer wrong")
 				r.URL.RawQuery = "token=secret"
 			},
-			code: http.StatusOK,
+			code: http.StatusUnauthorized,
 		},
 	}
 	for _, tc := range cases {

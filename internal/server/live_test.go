@@ -269,10 +269,11 @@ func TestLiveEventsSSE(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/v1/live/events?token=t", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/v1/live/events", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	req.Header.Set("Authorization", "Bearer t")
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -396,8 +397,8 @@ func TestWebSocketOpsAndEvents(t *testing.T) {
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 
-	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/v1/ws?token=secret"
-	conn, err := dialWS(t, wsURL)
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/v1/ws"
+	conn, err := dialWS(t, wsURL, "Authorization: Bearer secret")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -517,9 +518,9 @@ type testWS struct {
 	bufr *bufio.Reader
 }
 
-func dialWS(t *testing.T, url string) (*testWS, error) {
+func dialWS(t *testing.T, url string, extraHeaders ...string) (*testWS, error) {
 	t.Helper()
-	// url like ws://127.0.0.1:port/v1/ws?token=secret
+	// url like ws://127.0.0.1:port/v1/ws
 	u := strings.TrimPrefix(url, "ws://")
 	hostPath := u
 	path := "/"
@@ -539,7 +540,14 @@ func dialWS(t *testing.T, url string) (*testWS, error) {
 		"Upgrade: websocket\r\n" +
 		"Connection: Upgrade\r\n" +
 		"Sec-WebSocket-Key: " + key + "\r\n" +
-		"Sec-WebSocket-Version: 13\r\n\r\n"
+		"Sec-WebSocket-Version: 13\r\n"
+	for _, h := range extraHeaders {
+		h = strings.TrimSpace(h)
+		if h != "" {
+			req += h + "\r\n"
+		}
+	}
+	req += "\r\n"
 	if _, err := c.Write([]byte(req)); err != nil {
 		_ = c.Close()
 		return nil, err

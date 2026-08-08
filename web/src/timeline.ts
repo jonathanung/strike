@@ -54,15 +54,10 @@ export type TimelineTrace = {
 export const fetchTimeline = (sessionID: string) =>
   request<TimelineTrace>(`/v1/sessions/${encodeURIComponent(sessionID)}/timeline`);
 
-// Token may arrive via ?token= before the server handoff redirect strips it.
-const queryToken = new URLSearchParams(location.search).get("token") || "";
-
 /** Download a redacted timeline export (JSON or JSONL) via authenticated fetch. */
 export async function downloadTimeline(sessionID: string, format: "json" | "jsonl" = "json"): Promise<void> {
   const path = `/v1/sessions/${encodeURIComponent(sessionID)}/timeline/export?format=${format}`;
-  const headers = new Headers();
-  if (queryToken) headers.set("Authorization", `Bearer ${queryToken}`);
-  const response = await fetch(path, { credentials: "same-origin", headers });
+  const response = await fetch(path, { credentials: "same-origin" });
   if (!response.ok) {
     const err = await response.json().catch(() => null);
     throw new Error(err?.error || `${response.status} ${response.statusText}`);
