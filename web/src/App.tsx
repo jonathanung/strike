@@ -4,6 +4,8 @@ import { ChildAgentsPanel } from "./ChildAgents";
 import { buildExportMarkdown, defaultExportFilename, downloadTextFile } from "./exportMarkdown";
 import { clearQueue, editQueuedText, moveQueuedAt, removeQueuedAt, type QueuedPrompt } from "./queueOps";
 import { initialClientState, reduceClient, selectedSlice, setAdd, setRemove } from "./reducer";
+import { buildCommandCatalog, insertMention, isFileMentionTrigger, type CatalogCommand } from "./commands";
+import { CommandPalette } from "./CommandPalette";
 import { formatCostNotice, formatSlashHelp, resolveSlash, WEB_SLASH_COMMANDS } from "./slash";
 import { applyAppearance, loadAppearance, SettingsDialog } from "./Settings";
 import { Transcript } from "./Transcript";
@@ -190,8 +192,17 @@ export default function App() {
   const [providers, setProviders] = useState<string[]>([]);
   const [models, setModels] = useState<string[]>([]);
   const [history, setHistory] = useState<string[]>([]);
+  const [historyBrowse, setHistoryBrowse] = useState<{ index: number; draft: string } | null>(null);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [fileHits, setFileHits] = useState<string[]>([]);
+  const [mention, setMention] = useState<{ start: number; query: string } | null>(null);
+  const [onboardingHint, setOnboardingHint] = useState(() => {
+    try { return localStorage.getItem("strike.web.onboard.v1") !== "1"; } catch { return false; }
+  });
   const [runtimeOpen, setRuntimeOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const promptRef = useRef<HTMLTextAreaElement>(null);
+  const paletteInvoker = useRef<HTMLElement | null>(null);
   const [showThinking, setShowThinking] = useState(readShowThinking);
   const [modelRates, setModelRates] = useState<{ inputPerM: number; outputPerM: number; hasCost: boolean; context?: number }>();
   const [sandboxInfo, setSandboxInfo] = useState<SandboxInfo>();
@@ -240,8 +251,19 @@ export default function App() {
   }, []);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        paletteInvoker.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        setPaletteOpen(true);
+        return;
+      }
       if (event.key !== "Escape") return;
       if (document.querySelector("dialog[open]")) return;
+      if (paletteOpen) {
+        event.preventDefault();
+        setPaletteOpen(false);
+        return;
+      }
       if (inspectorOpen) {
         event.preventDefault();
         setInspectorOpen(false);
@@ -254,7 +276,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [inspectorOpen, navOpen, shellProfile]);
+  }, [inspectorOpen, navOpen, shellProfile, paletteOpen]);
   useEffect(() => {
     // roots is optional (attach-only returns 503) — do not fail the whole boot.
     Promise.all([
@@ -367,11 +389,42 @@ export default function App() {
   } as React.CSSProperties;
   const phoneModes = modesInBottomBar(shellProfile);
   const overlayOpen = shellProfile !== "desktop" && (navOpen || inspectorOpen);
+  const catalog = useMemo(
+    () => buildCommandCatalog({ skills: boot?.skills, attachOnly: boot?.attachOnly, capabilities: boot?.capabilities }),
+    [boot],
+  );
   const completions = useMemo(() => {
+    if (mention && fileHits.length) {
+      return fileHits.map((path) => ({ label: path, detail: "workspace file", insert: path }));
+    }
     const token = draft.split(/\s/).at(-1) || "";
-    if (token.startsWith("/")) return [...slashCommands, ...(boot?.skills || []).map((skill) => ({ label: `/${skill.name}`, detail: skill.description || "Skill", insert: `/${skill.name}` }))].filter((item) => item.label.startsWith(token));
+    if (token.startsWith("/")) {
+      return [...slashCommands, ...(boot?.skills || []).map((skill) => ({ label: `/${skill.name}`, detail: skill.description || "Skill", insert: `/${skill.name}` }))].filter((item) => item.label.startsWith(token));
+    }
     return [];
-  }, [draft, boot]);
+  }, [draft, boot, mention, fileHits]);
+
+  useEffect(() => {
+    if (!mention || !boot?.capabilities.files) {
+      setFileHits([]);
+      return;
+    }
+    const q = mention.query;
+    const handle = window.setTimeout(() => {
+      void request<{ paths: string[] }>(`/v1/files/search?q=${encodeURIComponent(q)}&limit=12`)
+        .then((res) => setFileHits(res.paths || []))
+        .catch(() => setFileHits([]));
+    }, 120);
+    return () => window.clearTimeout(handle);
+  }, [mention, boot?.capabilities.files]);
+
+  const enqueueHistory = (prompt: string) => {
+    if (!boot?.capabilities.history || !prompt.trim()) return;
+    void request("/v1/history", { method: "POST", body: JSON.stringify({ prompt }) })
+      .then(() => request<{ entries: string[] }>("/v1/history"))
+      .then((v) => setHistory(v.entries || []))
+      .catch(() => {});
+  };
 
   const notice = (title: string, body: string) => { if (!selectedID) return; dispatch({ type: "client.event", id: selectedID, envelope: { type: "local.system", time: String(Date.now()), data: { title, text: body } } }); };
   const exportSession = () => {
@@ -390,6 +443,7 @@ export default function App() {
     const resolved = resolveSlash(command, skillNames);
     switch (resolved.kind) {
       case "pass":
+        enqueueHistory(command);
         void op("user.input", { text: command, images: attached.map(({ mime, data }) => ({ mime, data })) }, selectedID);
         return;
       case "unknown":
@@ -463,10 +517,102 @@ export default function App() {
   };
   const submit = (event: FormEvent) => {
     event.preventDefault(); const text = draft.trim(); if (!text || !isLive) return;
-    if (state.status.busy) setQueue((items) => [...items, { text, images }]); else execute(text, images);
+    if (state.status.busy) {
+      enqueueHistory(text);
+      setQueue((items) => [...items, { text, images }]);
+    } else execute(text, images);
+    setHistoryBrowse(null);
     setDraft(""); setImages([]);
+    setMention(null);
   };
-  const selectCompletion = (item: Completion) => setDraft((value) => `${value.slice(0, value.lastIndexOf(value.split(/\s/).at(-1) || ""))}${item.insert} `);
+  const selectCompletion = (item: Completion) => {
+    if (mention) {
+      const cursor = promptRef.current?.selectionStart ?? draft.length;
+      setDraft(insertMention(draft, mention.start, cursor, item.insert));
+      setMention(null);
+      setFileHits([]);
+      return;
+    }
+    setDraft((value) => `${value.slice(0, value.lastIndexOf(value.split(/\s/).at(-1) || ""))}${item.insert} `);
+  };
+  const runCatalogCommand = (cmd: CatalogCommand) => {
+    const a = cmd.action;
+    if (cmd.requiresLive && (!isLive || boot?.attachOnly)) {
+      notice("Unavailable", boot?.attachOnly ? "Attach-only: this action requires a live workspace." : "Not available without a live session.");
+      return;
+    }
+    if (cmd.requiresCapability && boot && !boot.capabilities[cmd.requiresCapability]) {
+      notice("Unavailable", `${cmd.requiresCapability} capability is not available on this host.`);
+      return;
+    }
+    switch (a.type) {
+      case "mode":
+        setMode(a.mode, { openDrawer: a.mode !== "chat" });
+        return;
+      case "surface":
+        setMode(a.mode, { openDrawer: true, surface: a.surface });
+        return;
+      case "slash":
+        if (a.run) {
+          execute(a.insert.trim(), []);
+        } else {
+          setDraft(a.insert);
+          promptRef.current?.focus();
+        }
+        return;
+      case "session":
+        if (a.action === "export") exportSession();
+        else if (a.action === "help") notice("Help", formatSlashHelp(boot?.skills || []));
+        else if (a.action === "settings") setSettingsOpen(true);
+        else if (a.action === "cost") notice("Cost", formatCostNotice(state.status));
+        else if (a.action === "fork") void sessionAction("fork");
+        else if (a.action === "interrupt") void op("interrupt");
+        return;
+      case "notice":
+        notice(a.title, a.body);
+        return;
+    }
+  };
+  const onComposerKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    const el = event.currentTarget;
+    if (event.key === "Enter" && !event.shiftKey && !completions.length) {
+      event.preventDefault();
+      el.form?.requestSubmit();
+      return;
+    }
+    // History browse when draft empty or already browsing (TUI parity).
+    const atStart = el.selectionStart === 0 && el.selectionEnd === 0;
+    if ((event.key === "ArrowUp" || event.key === "ArrowDown") && history.length && (historyBrowse || (draft === "" && atStart))) {
+      event.preventDefault();
+      if (event.key === "ArrowUp") {
+        if (!historyBrowse) {
+          setHistoryBrowse({ index: history.length - 1, draft });
+          setDraft(history[history.length - 1] || "");
+        } else {
+          const next = Math.max(0, historyBrowse.index - 1);
+          setHistoryBrowse({ ...historyBrowse, index: next });
+          setDraft(history[next] || "");
+        }
+      } else if (historyBrowse) {
+        if (historyBrowse.index >= history.length - 1) {
+          setDraft(historyBrowse.draft);
+          setHistoryBrowse(null);
+        } else {
+          const next = historyBrowse.index + 1;
+          setHistoryBrowse({ ...historyBrowse, index: next });
+          setDraft(history[next] || "");
+        }
+      }
+      return;
+    }
+  };
+  const onComposerChange = (value: string) => {
+    if (historyBrowse) setHistoryBrowse(null);
+    setDraft(value);
+    const cursor = promptRef.current?.selectionStart ?? value.length;
+    const trig = isFileMentionTrigger(value, cursor);
+    setMention(trig.active ? { start: trig.start, query: trig.query } : null);
+  };
   const attach = async (files: FileList | null) => { if (!files) return; try { const added = await Promise.all([...files].map(readAttachment)); setImages((old) => [...old, ...added]); } catch (error) { window.alert((error as Error).message); } };
   const selectProvider = async (provider: string) => {
     void op("select.model", { provider }, selectedID);
@@ -778,6 +924,17 @@ export default function App() {
         }}
       >☰</button>
       <div className="wordmark"><span className="mark">S</span><strong>STRIKE</strong><small>workspace</small></div>
+      <button
+        type="button"
+        className="palette-trigger"
+        aria-label="Open command palette"
+        onClick={() => {
+          paletteInvoker.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+          setPaletteOpen(true);
+        }}
+      >
+        Commands <kbd>⌘K</kbd>
+      </button>
       {!phoneModes && renderModeButtons("mode-switch header-mode-switch")}
       <div className="session-line" aria-live="polite">
         <span className={state.status.busy ? "pulse busy" : "pulse"} />
@@ -862,7 +1019,25 @@ export default function App() {
       <RuntimeStatus status={state.status} modelRates={modelRates} />
       </div>
       <section className="transcript" aria-live="polite" aria-label="Conversation transcript">{!boot && transport !== "connecting" ? <div className="empty-state" role="alert"><span>ERROR</span><h1>{transport}</h1><p>Failed to load cockpit. Open the URL printed by <code>strike serve</code> (one-time <code>?token=</code> handoff sets a cookie), or send <code>Authorization: Bearer</code>.</p></div> : !state.items.length && <div className="empty-state"><span>01 / READY</span><h1>{boot?.attachOnly ? "Inspect the record." : "Direct the work."}</h1><p>{boot?.attachOnly ? "Select a durable session from the rail." : "Describe an outcome. Strike will plan, act, and report through the live engine seam."}</p></div>}{state.items.map((item) => <Transcript key={item.id} item={item} showThinking={showThinking} />)}<div ref={endRef} /></section>
-      <form className="composer" onSubmit={submit}><label htmlFor="prompt">Instruction {state.status.busy && "— send to queue"}</label><textarea aria-label="Instruction" id="prompt" value={draft} disabled={!isLive} placeholder={isLive ? "Describe the next outcome…  / command" : "Historical session — read only"} onPaste={(event) => void attach(event.clipboardData.files)} onDrop={(event) => { event.preventDefault(); void attach(event.dataTransfer.files); }} onDragOver={(event) => event.preventDefault()} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !completions.length) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} />{completions.length > 0 && <div className="completion" role="listbox" aria-label="Composer completions">{completions.slice(0, 8).map((item) => <button type="button" role="option" key={item.label} onClick={() => selectCompletion(item)}><strong>{item.label}</strong><span>{item.detail}</span></button>)}</div>}{images.length > 0 && <div className="attachments">{images.map((image, index) => <button type="button" key={`${image.name}-${index}`} onClick={() => setImages((list) => list.filter((_, i) => i !== index))}>{image.name} ×</button>)}</div>}{queue.length > 0 && <div className="prompt-queue-wrap"><ol ref={queueRef} className="prompt-queue" aria-label="Queued prompts">{queue.map((item, index) => <li key={index}>{queueEdit?.index === index ? <input className="queue-edit" aria-label={`Queued prompt text ${index + 1}`} value={queueEdit.text} autoFocus onChange={(event) => setQueueEdit({ index, text: event.target.value })} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); queueEditCancel.current = false; setQueue((list) => editQueuedText(list, index, queueEdit.text)); setQueueEdit(null); } if (event.key === "Escape") { event.preventDefault(); queueEditCancel.current = true; setQueueEdit(null); } }} onBlur={() => { if (!queueEditCancel.current) setQueue((list) => editQueuedText(list, index, queueEdit.text)); queueEditCancel.current = false; setQueueEdit(null); }} /> : <span>{item.text}{item.images.length > 0 ? ` (${item.images.length} img)` : ""}</span>}<span className="queue-actions"><button type="button" aria-label={`Move queued prompt ${index + 1} up`} disabled={index === 0} onClick={() => setQueue((list) => moveQueuedAt(list, index, -1))}>↑</button><button type="button" aria-label={`Move queued prompt ${index + 1} down`} disabled={index === queue.length - 1} onClick={() => setQueue((list) => moveQueuedAt(list, index, 1))}>↓</button><button type="button" aria-label={`Edit queued prompt ${index + 1}`} onClick={() => { queueEditCancel.current = false; setQueueEdit({ index, text: item.text }); }}>✎</button><button type="button" aria-label={`Remove queued prompt ${index + 1}`} onClick={() => { setQueue((list) => removeQueuedAt(list, index)); setQueueEdit((cur) => cur?.index === index ? null : cur); }}>×</button></span></li>)}</ol><div className="queue-toolbar"><button type="button" onClick={() => { setQueue(clearQueue()); setQueueEdit(null); }}>Clear queue</button></div></div>}<div><span><kbd>↵</kbd> send · <kbd>⇧↵</kbd> newline</span><span><input ref={fileRef} hidden type="file" accept="image/*" multiple onChange={(event) => void attach(event.target.files)} /><button type="button" onClick={() => fileRef.current?.click()}>Attach</button>{history.length > 0 && <button type="button" onClick={() => setDraft(history.at(-1) || "")}>History</button>}<button type="button" onClick={() => exportSession()} disabled={!state.items.length}>Export</button>{state.status.busy && <button type="button" className="stop" onClick={() => void op("interrupt")}>Interrupt</button>}<button type="submit" disabled={!draft.trim() || !isLive}>{state.status.busy ? "Queue" : "Send"}</button></span></div></form>
+      {onboardingHint && (
+        <div className="onboard-hint" role="status">
+          <p>Tip: <kbd>⌘K</kbd> command palette · <code>/</code> slash commands · <code>@</code> mention files</p>
+          <button type="button" onClick={() => { try { localStorage.setItem("strike.web.onboard.v1", "1"); } catch { /* */ } setOnboardingHint(false); }}>Dismiss</button>
+        </div>
+      )}
+      <form className="composer" onSubmit={submit}><label htmlFor="prompt">Instruction {state.status.busy && "— send to queue"}</label><textarea ref={promptRef} aria-label="Instruction" id="prompt" value={draft} disabled={!isLive} placeholder={isLive ? "Describe the next outcome…  / command · @file" : "Historical session — read only"} onPaste={(event) => void attach(event.clipboardData.files)} onDrop={(event) => { event.preventDefault(); void attach(event.dataTransfer.files); }} onDragOver={(event) => event.preventDefault()} onChange={(event) => onComposerChange(event.target.value)} onKeyDown={onComposerKeyDown} />{completions.length > 0 && <div className="completion" role="listbox" aria-label="Composer completions">{completions.slice(0, 8).map((item) => <button type="button" role="option" key={item.label} onClick={() => selectCompletion(item)}><strong>{item.label}</strong><span>{item.detail}</span></button>)}</div>}{images.length > 0 && <div className="attachments">{images.map((image, index) => <button type="button" key={`${image.name}-${index}`} onClick={() => setImages((list) => list.filter((_, i) => i !== index))}>{image.name} ×</button>)}</div>}{queue.length > 0 && <div className="prompt-queue-wrap"><ol ref={queueRef} className="prompt-queue" aria-label="Queued prompts">{queue.map((item, index) => <li key={index}>{queueEdit?.index === index ? <input className="queue-edit" aria-label={`Queued prompt text ${index + 1}`} value={queueEdit.text} autoFocus onChange={(event) => setQueueEdit({ index, text: event.target.value })} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); queueEditCancel.current = false; setQueue((list) => editQueuedText(list, index, queueEdit.text)); setQueueEdit(null); } if (event.key === "Escape") { event.preventDefault(); queueEditCancel.current = true; setQueueEdit(null); } }} onBlur={() => { if (!queueEditCancel.current) setQueue((list) => editQueuedText(list, index, queueEdit.text)); queueEditCancel.current = false; setQueueEdit(null); }} /> : <span>{item.text}{item.images.length > 0 ? ` (${item.images.length} img)` : ""}</span>}<span className="queue-actions"><button type="button" aria-label={`Move queued prompt ${index + 1} up`} disabled={index === 0} onClick={() => setQueue((list) => moveQueuedAt(list, index, -1))}>↑</button><button type="button" aria-label={`Move queued prompt ${index + 1} down`} disabled={index === queue.length - 1} onClick={() => setQueue((list) => moveQueuedAt(list, index, 1))}>↓</button><button type="button" aria-label={`Edit queued prompt ${index + 1}`} onClick={() => { queueEditCancel.current = false; setQueueEdit({ index, text: item.text }); }}>✎</button><button type="button" aria-label={`Remove queued prompt ${index + 1}`} onClick={() => { setQueue((list) => removeQueuedAt(list, index)); setQueueEdit((cur) => cur?.index === index ? null : cur); }}>×</button></span></li>)}</ol><div className="queue-toolbar"><button type="button" onClick={() => { setQueue(clearQueue()); setQueueEdit(null); }}>Clear queue</button></div></div>}<div><span><kbd>↵</kbd> send · <kbd>⇧↵</kbd> newline · <kbd>↑</kbd> history</span><span><input ref={fileRef} hidden type="file" accept="image/*" multiple onChange={(event) => void attach(event.target.files)} /><button type="button" onClick={() => fileRef.current?.click()}>Attach</button>{history.length > 0 && <button type="button" onClick={() => setDraft(history.at(-1) || "")}>History</button>}<button type="button" onClick={() => exportSession()} disabled={!state.items.length}>Export</button>{state.status.busy && <button type="button" className="stop" onClick={() => void op("interrupt")}>Interrupt</button>}<button type="submit" disabled={!draft.trim() || !isLive}>{state.status.busy ? "Queue" : "Send"}</button></span></div></form>
+      <CommandPalette
+        open={paletteOpen}
+        commands={catalog}
+        onClose={() => {
+          setPaletteOpen(false);
+          const prev = paletteInvoker.current;
+          if (prev && document.contains(prev)) {
+            try { prev.focus(); } catch { /* */ }
+          }
+        }}
+        onRun={runCatalogCommand}
+      />
     </main>
     <aside className={`inspector ${inspectorOpen ? "open" : "collapsed"}`} aria-label="Inspector">
       <PanelResize label="Resize inspector panel" value={inspectorWidth} min={240} max={520} onChange={setInspectorWidth} side="inspector" />

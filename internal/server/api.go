@@ -256,7 +256,43 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 		capabilityUnavailable(w, "history")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"entries": s.opts.Services.History.Entries()})
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, http.StatusOK, map[string]any{"entries": s.opts.Services.History.Entries()})
+	case http.MethodPost:
+		if !s.requireMutable(w) {
+			return
+		}
+		var body struct {
+			Prompt string `json:"prompt"`
+		}
+		if err := decodeBody(w, r, &body); err != nil {
+			writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+			return
+		}
+		prompt := strings.TrimSpace(body.Prompt)
+		if prompt == "" {
+			writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "prompt is required"})
+			return
+		}
+		// Enqueue is async; wait briefly for durable result.
+		ch := s.opts.Services.History.Enqueue(prompt)
+		select {
+		case err := <-ch:
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, opErrorResponse{Error: err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusOK, opOKResponse{OK: true})
+		case <-r.Context().Done():
+			writeJSON(w, http.StatusRequestTimeout, opErrorResponse{Error: "history enqueue canceled"})
+		case <-time.After(3 * time.Second):
+			// Still accepted; persistence continues in background.
+			writeJSON(w, http.StatusAccepted, opOKResponse{OK: true})
+		}
+	default:
+		writeJSON(w, http.StatusMethodNotAllowed, opErrorResponse{Error: "method not allowed"})
+	}
 }
 
 // settingsResponse is the GET /v1/settings payload (host.UserDefaults wire form).
@@ -864,6 +900,31 @@ func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"entries": items})
+}
+
+// handleFilesSearch is GET /v1/files/search?q=&limit= (WEBUI.6 / #1078).
+// Root-scoped via host.Files.SearchFiles; never escapes the work directory.
+func (s *Server) handleFilesSearch(w http.ResponseWriter, r *http.Request) {
+	if s.opts.Services == nil || s.opts.Services.Files == nil {
+		capabilityUnavailable(w, "files")
+		return
+	}
+	q := r.URL.Query()
+	limit := 20
+	if raw := strings.TrimSpace(q.Get("limit")); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	paths, err := s.opts.Services.Files.SearchFiles(q.Get("q"), limit)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	if paths == nil {
+		paths = []string{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"paths": paths, "query": q.Get("q"), "limit": limit})
 }
 
 type changedFileItem struct {
