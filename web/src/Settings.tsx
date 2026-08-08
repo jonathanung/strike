@@ -1,6 +1,7 @@
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { downloadDiagnostics, request } from "./api";
 import type { Bootstrap, Status } from "./types";
+import { Button, CapabilityUnavailable, Dialog, LoadingState } from "./ui";
 
 export type UserSettings = {
   provider?: string;
@@ -102,21 +103,11 @@ function floatDial(n: number | undefined): string {
   return String(n);
 }
 
-function CapabilityUnavailable({ name }: { name: string }) {
-  return (
-    <section className="unavailable" role="status">
-      <strong>{name} unavailable</strong>
-      <p>The configured host did not provide this capability. No action was attempted.</p>
-    </section>
-  );
-}
-
 export function SettingsDialog({
   boot, status, providers, onClose, rootID, isLive,
 }: {
   boot?: Bootstrap; status: Status; providers: string[]; onClose: () => void; rootID?: string; isLive?: boolean;
 }) {
-  const ref = useRef<HTMLDialogElement>(null);
   const [provider, setProvider] = useState(String(status.provider || providers[0] || ""));
   const [key, setKey] = useState("");
   const [loading, setLoading] = useState(false);
@@ -152,8 +143,6 @@ export function SettingsDialog({
 
   const settingsCap = Boolean(boot?.capabilities.settings);
   const agents = boot?.agents?.map((a) => a.name) || [];
-
-  useEffect(() => { ref.current?.showModal(); }, []);
 
   useEffect(() => {
     if (!settingsCap) return;
@@ -265,11 +254,19 @@ export function SettingsDialog({
     }
   };
 
-  return (
-    <dialog ref={ref} className="settings-dialog wide" aria-labelledby="settings-title" onClose={onClose}>
-      <div className="dialog-rule" />
-      <h2 id="settings-title">Workspace settings</h2>
+  const footerActions = (!settingsCap || loading) ? (
+    <Button type="button" onClick={onClose}>Close</Button>
+  ) : undefined;
 
+  return (
+    <Dialog
+      title="Workspace settings"
+      className="settings-dialog"
+      wide
+      mode="modal"
+      onClose={onClose}
+      actions={footerActions}
+    >
       {boot?.capabilities.auth ? (
         <fieldset>
           <legend>Provider authentication</legend>
@@ -283,13 +280,13 @@ export function SettingsDialog({
             API key
             <input value={key} onChange={(e) => setKey(e.target.value)} placeholder="Stored locally by strike" aria-label="API key" />
           </label>
-          <button
+          <Button
             type="button"
             disabled={!provider || !key}
             onClick={() => void request("/v1/auth/key", { method: "POST", body: JSON.stringify({ provider, key }) }).then(() => setKey("")).catch((err: Error) => setError(err.message))}
           >
             Save key
-          </button>
+          </Button>
         </fieldset>
       ) : (
         <CapabilityUnavailable name="Provider authentication" />
@@ -309,7 +306,7 @@ export function SettingsDialog({
       {!settingsCap ? (
         <CapabilityUnavailable name="Saved defaults" />
       ) : loading ? (
-        <section className="unavailable" role="status"><strong>Loading settings…</strong></section>
+        <LoadingState label="Loading settings…" />
       ) : (
         <form className="settings-form" onSubmit={(e) => void save(e)}>
           <fieldset>
@@ -320,9 +317,9 @@ export function SettingsDialog({
             <SelectField label="Agent" value={defAgent} values={["", ...agents]} onChange={setDefAgent} />
             <SelectField label="Effort" value={defEffort} values={effortValues} onChange={setDefEffort} />
             <SelectField label="Permission mode" value={defMode} values={modeValues} onChange={setDefMode} />
-            <button type="button" disabled={saving || !status.provider} onClick={() => void saveRuntimeDefaults()}>
+            <Button type="button" disabled={saving || !status.provider} onClick={() => void saveRuntimeDefaults()}>
               Use current runtime
-            </button>
+            </Button>
           </fieldset>
 
           <fieldset>
@@ -369,31 +366,20 @@ export function SettingsDialog({
 
           {error && <p className="settings-error" role="alert">{error}</p>}
           <div className="dialog-actions">
-            <button type="button" onClick={onClose}>Close</button>
-            <button type="submit" disabled={saving}>{saving ? "Saving…" : "Save settings"}</button>
+            <Button type="button" onClick={onClose}>Close</Button>
+            <Button type="submit" variant="primary" disabled={saving}>{saving ? "Saving…" : "Save settings"}</Button>
           </div>
         </form>
       )}
 
-      
       <fieldset>
         <legend>Support</legend>
         <p className="muted">Export a redacted prompt/config diagnostic bundle (same scrubbing as TUI <code>/diag</code>).</p>
-        <button type="button" disabled={!Boolean(boot?.capabilities.diag && isLive)} aria-label="Download diagnostics" onClick={() => void downloadDiagnostics(rootID || "").catch((error) => window.alert((error as Error).message))}>Download diagnostics</button>
+        <Button type="button" disabled={!Boolean(boot?.capabilities.diag && isLive)} aria-label="Download diagnostics" onClick={() => void downloadDiagnostics(rootID || "").catch((error) => window.alert((error as Error).message))}>Download diagnostics</Button>
         {!boot?.capabilities.diag && <p className="muted">Unavailable on this host (no live engine).</p>}
       </fieldset>
 
-      {!settingsCap && (
-        <div className="dialog-actions">
-          <button type="button" onClick={onClose}>Close</button>
-        </div>
-      )}
-      {settingsCap && loading && (
-        <div className="dialog-actions">
-          <button type="button" onClick={onClose}>Close</button>
-        </div>
-      )}
       {error && !settingsCap && <p className="settings-error" role="alert">{error}</p>}
-    </dialog>
+    </Dialog>
   );
 }

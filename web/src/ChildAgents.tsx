@@ -1,4 +1,5 @@
 import type { ChildAgent } from "./types";
+import { IconButton, StatusBadge, StatusDot, statusKindFrom } from "./ui";
 
 // WEB.11 (#937): list + handoff detail only. Full multi-agent graph / team board
 // visualizer remains #523 — do not grow this panel into a visualizer.
@@ -38,6 +39,7 @@ export function ChildAgentsPanel({
       <div className="children" role="list">
         {children.map(([id, child]) => {
           const active = id === selectedId;
+          const kind = statusKindFrom(child.status);
           return (
             <button
               type="button"
@@ -48,7 +50,7 @@ export function ChildAgentsPanel({
               aria-label={`Child ${label(id, child)}`}
               onClick={() => onSelect(active ? undefined : id)}
             >
-              <span className={`child-state ${child.status}`} aria-hidden />
+              <StatusDot kind={kind} label={child.status || kind} className={`child-state ${child.status || ""}`} />
               <span className="child-label">{label(id, child)}</span>
               <span className="child-meta">
                 <small>{child.status}</small>
@@ -84,15 +86,16 @@ export function ChildDetail({
   const budgetStop = child.budgetKind
     ? [child.budgetKind, child.finalization && child.finalization !== "none" ? `finalization ${child.finalization}` : ""].filter(Boolean).join(" · ")
     : child.escalateReason || undefined;
+  const kind = statusKindFrom(child.status);
   return (
     <section className="child-detail" aria-label="Child handoff detail">
       <header>
         <h3>{label(id, child)}</h3>
-        <button type="button" className="icon-button" aria-label="Close child detail" onClick={onClose}>×</button>
+        <IconButton label="Close child detail" onClick={onClose}>×</IconButton>
       </header>
       <dl>
         <dt>Status</dt>
-        <dd>{child.status}</dd>
+        <dd><StatusBadge kind={kind} label={child.status || kind} /></dd>
         {child.quality ? <><dt>Handoff quality</dt><dd><span className={qualityClass(child.quality)}>{child.quality}</span></dd></> : null}
         {child.summary ? <><dt>Summary</dt><dd>{child.summary}</dd></> : null}
         {budgetStop ? <><dt>Budget / stop</dt><dd>{budgetStop}</dd></> : null}
