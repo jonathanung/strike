@@ -1652,6 +1652,8 @@ func (m Model) sandboxStatusNotice() string {
 	switch {
 	case mode == "off":
 		b.WriteString(" (OS isolation disabled)")
+	case m.sandboxBackend == "unprobed":
+		b.WriteString(dot + "backend status unprobed (checked when bash first runs)")
 	case m.sandboxAvailable && m.sandboxBackend != "":
 		fmt.Fprintf(&b, "%sbackend %s", dot, m.sandboxBackend)
 	case m.sandboxAvailable:

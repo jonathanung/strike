@@ -198,11 +198,6 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		_ = historyStore.Close()
 		return nil, err
 	}
-	// Loud once when OS sandbox backend is missing/blocked (bash degrades).
-	// Skip when the dial is off — operator chose no isolation.
-	if sandbox.ResolveMode(sandboxMode) != sandbox.ModeOff {
-		sandbox.WarnUnavailable()
-	}
 	if opts.providerSet && opts.provider != "" {
 		cfg.Provider = config.CanonicalProviderID(opts.provider)
 	}

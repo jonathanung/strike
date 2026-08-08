@@ -217,8 +217,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		// Process-level sandbox chrome (same dial for every root from this serve).
 		sandboxSnap = &server.SandboxSnapshot{
 			Mode:         a.sandboxMode,
-			Backend:      sandbox.BackendName(),
-			Available:    sandbox.Available(),
+			Backend:      sandbox.BackendUnprobed,
 			NetworkAllow: sandbox.CloneNetworkAllow(a.cfg.Network.Allow),
 			Explain:      a.sandboxExplain,
 		}

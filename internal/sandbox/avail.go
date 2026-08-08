@@ -10,14 +10,15 @@ type availInfo struct {
 }
 
 var (
-	availMu     sync.Mutex
-	availOnce   sync.Once
-	availCached availInfo
+	availMu       sync.Mutex
+	availOnce     sync.Once
+	availCached   availInfo
+	platformProbe = probePlatform
 )
 
 func availability() availInfo {
 	availOnce.Do(func() {
-		availCached = probePlatform()
+		availCached = platformProbe()
 	})
 	availMu.Lock()
 	defer availMu.Unlock()
