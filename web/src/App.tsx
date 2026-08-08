@@ -591,6 +591,8 @@ export default function App() {
     dispatch({ type: "client.ensure", id });
     setSelectedIsLive(isLive);
     setModelRates(undefined);
+    setSurfaceEntity("");
+    setSelectedChildId(undefined);
     if (!isLive || !boot?.capabilities.roots || boot.attachOnly) return;
     try {
       await activateRoot(id);
@@ -1231,7 +1233,14 @@ function InspectorBody({ tab, boot, workspace, data, loading, expandedDiffs, tog
   if (loading) return <section className="unavailable" role="status"><strong>Loading {tab}</strong></section>;
   if (tab === "files") return <FilesPanel boot={boot} data={data} expandedDiffs={expandedDiffs} toggleDiff={toggleDiff} />;
   if (tab === "memory") return <MemoryPanel boot={boot} data={data} onRefresh={onRefresh || (() => {})} />;
-  return <IssuesPanel boot={boot} data={data} onRefresh={onRefresh || (() => {})} />;
+  if (tab === "issues") return <IssuesPanel boot={boot} data={data} onRefresh={onRefresh || (() => {})} />;
+  const label = getSurface(tab)?.label || tab || "surface";
+  return (
+    <section className="unavailable" role="status">
+      <strong>{label}</strong>
+      <p>This surface is registered but has no mount in this build yet.</p>
+    </section>
+  );
 }
 
 function FilesPanel({ boot, data, expandedDiffs, toggleDiff }: { boot?: Bootstrap; data: unknown; expandedDiffs: Set<string>; toggleDiff: (path: string) => void }) {
