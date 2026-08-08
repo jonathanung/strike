@@ -17,6 +17,16 @@ materially affect the shipped product.
 ### Security
 
 - **Web cockpit auth** — `/v1/*` no longer accepts `?token=` query credentials (they leak via shell history, proxy logs, and `Referer`). Open the printed `/attach?token=…` URL once for HttpOnly cookie handoff, or send `Authorization: Bearer` ([#574](https://github.com/jonathanung/strike/issues/574)).
+- **Web cockpit bind** — `strike serve --expose` / `--allow-cidr` removed. Serve binds loopback only; remote access is `ssh -L 8787:127.0.0.1:8787` (no cleartext LAN control plane) ([#575](https://github.com/jonathanung/strike/issues/575)).
+- **Web cockpit ops** — per-IP rate limit on `POST /v1/ops` and WS op frames; `serve_op` audit records (type + source IP); optional `--read-only` rejects mutating ops ([#576](https://github.com/jonathanung/strike/issues/576)).
+
+### Added
+
+- **`strike serve --read-only`** — reject mutating protocol ops while keeping attach/SSE ([#576](https://github.com/jonathanung/strike/issues/576)).
+
+### Removed
+
+- **`strike serve --expose` / `--allow-cidr`** — legacy flags error with an SSH migration hint. **Upgrade note:** replace LAN expose with SSH local forward; non-loopback `--addr` is rejected.
 
 ## [v0.3.1] - 2026-08-07
 

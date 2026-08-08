@@ -49,17 +49,25 @@ type Options struct {
 	// events, and WebSocket are scoped to ?root=<id>. Nil means single-root
 	// via Live (or attach-only when both are nil).
 	LiveHub *LiveHub
-	// Expose enables LAN-oriented CORS (private-network browser origins) in
-	// addition to localhost. Set when strike serve --expose is used.
-	Expose bool
 	// AllowCIDRs, when non-empty, rejects requests whose client IP falls
-	// outside the list (all routes including /health).
+	// outside the list (all routes including /health). Unused by strike serve
+	// CLI (loopback-only bind); retained for programmatic hosts.
 	AllowCIDRs []*net.IPNet
 	// Services exposes optional frontend host capabilities.
 	Services *host.Services
 	// Sandbox enables the sandbox capability and seeds live roots that do not
 	// call Live.SetSandbox themselves. Nil keeps capabilities.sandbox false.
 	Sandbox *SandboxSnapshot
+	// ReadOnly rejects mutating protocol ops (POST /v1/ops and WS op frames).
+	ReadOnly bool
+	// Audit receives serve_op records (op type + source IP). Nil disables.
+	Audit OpAuditor
+	// OpsRate is tokens/sec per client IP for ops (default 10). <=0 uses default.
+	OpsRate float64
+	// OpsBurst is the per-IP burst (default 20). <=0 uses default.
+	OpsBurst int
+	// OpsClock overrides time.Now for rate-limit tests.
+	OpsClock func() time.Time
 }
 
 // Server is an HTTP server for session attach and optional live cockpit.
@@ -71,6 +79,7 @@ type Server struct {
 
 	// paneHost supervises process panes for the web cockpit (#732).
 	paneHost *paneHost
+	opsLimit *opLimiter
 }
 
 // New validates options and builds a Server. Does not listen.
@@ -95,7 +104,12 @@ func New(opts Options) (*Server, error) {
 	if static == nil {
 		static = staticFS
 	}
-	s := &Server{opts: opts, static: static, mux: http.NewServeMux()}
+	s := &Server{
+		opts:     opts,
+		static:   static,
+		mux:      http.NewServeMux(),
+		opsLimit: newOpLimiter(opts.OpsRate, opts.OpsBurst, opts.OpsClock),
+	}
 	s.routes()
 	s.http = &http.Server{
 		Addr:              opts.Addr,
@@ -289,7 +303,7 @@ func (s *Server) withMiddleware(next http.Handler) http.Handler {
 			return
 		}
 		if stateChanging(r.Method) {
-			if origin := r.Header.Get("Origin"); origin != "" && !originAllowed(origin, s.opts.Expose) {
+			if origin := r.Header.Get("Origin"); origin != "" && !originAllowed(origin) {
 				http.Error(w, "origin not allowed", http.StatusForbidden)
 				return
 			}
@@ -431,7 +445,7 @@ func (s *Server) maybeHandoffToken(w http.ResponseWriter, r *http.Request) bool 
 
 func (s *Server) applyCORS(w http.ResponseWriter, r *http.Request) {
 	origin := r.Header.Get("Origin")
-	if originAllowed(origin, s.opts.Expose) {
+	if originAllowed(origin) {
 		w.Header().Set("Access-Control-Allow-Origin", origin)
 		w.Header().Set("Vary", "Origin")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
@@ -439,7 +453,9 @@ func (s *Server) applyCORS(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func originAllowed(origin string, expose bool) bool {
+// originAllowed permits only loopback browser origins (localhost / 127.0.0.1 /
+// ::1). Remote access is via SSH local forward, not cleartext LAN CORS.
+func originAllowed(origin string) bool {
 	if origin == "" {
 		return false
 	}
@@ -455,15 +471,7 @@ func originAllowed(origin string, expose bool) bool {
 		return true
 	}
 	ip := net.ParseIP(host)
-	if ip == nil {
-		return false
-	}
-	if ip.IsLoopback() {
-		return true
-	}
-	// With --expose, allow private/LAN browser origins (e.g. Vite on another
-	// device). Public internet origins stay denied.
-	return expose && IsPrivateOrLoopbackIP(ip)
+	return ip != nil && ip.IsLoopback()
 }
 
 func originHost(origin string) string {
