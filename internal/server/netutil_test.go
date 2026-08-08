@@ -2,45 +2,41 @@ package server
 
 import (
 	"net"
+	"strings"
 	"testing"
 )
 
 func TestResolveBindAddr(t *testing.T) {
 	cases := []struct {
-		addr   string
-		expose bool
-		want   string
-		err    bool
+		addr string
+		want string
+		err  bool
 	}{
-		{"127.0.0.1:8787", false, "127.0.0.1:8787", false},
-		{"localhost:9", false, "localhost:9", false},
-		{"[::1]:8787", false, "[::1]:8787", false},
-		{"0.0.0.0:8787", false, "", true},
-		{"192.168.1.5:8787", false, "", true},
-		{":8787", false, "", true},
-		{"127.0.0.1:8787", true, "0.0.0.0:8787", false},
-		{"localhost:9999", true, "0.0.0.0:9999", false},
-		{"0.0.0.0:8787", true, "0.0.0.0:8787", false},
-		{"192.168.1.5:8787", true, "192.168.1.5:8787", false},
-		{":8787", true, "0.0.0.0:8787", false},
-		{"", false, "127.0.0.1:8787", false},
-		{"", true, "0.0.0.0:8787", false},
-		{"not-an-addr", false, "", true},
+		{"127.0.0.1:8787", "127.0.0.1:8787", false},
+		{"localhost:9", "localhost:9", false},
+		{"[::1]:8787", "[::1]:8787", false},
+		{"0.0.0.0:8787", "", true},
+		{"192.168.1.5:8787", "", true},
+		{":8787", "", true},
+		{"", "127.0.0.1:8787", false},
+		{"not-an-addr", "", true},
 	}
 	for _, tc := range cases {
-		got, err := ResolveBindAddr(tc.addr, tc.expose)
+		got, err := ResolveBindAddr(tc.addr)
 		if tc.err {
 			if err == nil {
-				t.Errorf("ResolveBindAddr(%q, %v) = %q, want error", tc.addr, tc.expose, got)
+				t.Errorf("ResolveBindAddr(%q) = %q, want error", tc.addr, got)
+			} else if !strings.Contains(err.Error(), "loopback") && !strings.Contains(err.Error(), "invalid") {
+				t.Errorf("ResolveBindAddr(%q) err = %v, want loopback/invalid hint", tc.addr, err)
 			}
 			continue
 		}
 		if err != nil {
-			t.Errorf("ResolveBindAddr(%q, %v): %v", tc.addr, tc.expose, err)
+			t.Errorf("ResolveBindAddr(%q): %v", tc.addr, err)
 			continue
 		}
 		if got != tc.want {
-			t.Errorf("ResolveBindAddr(%q, %v) = %q, want %q", tc.addr, tc.expose, got, tc.want)
+			t.Errorf("ResolveBindAddr(%q) = %q, want %q", tc.addr, got, tc.want)
 		}
 	}
 }

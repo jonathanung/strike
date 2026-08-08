@@ -76,13 +76,12 @@ Defaults to the offline `echo` provider. The TUI remains primary.
 
 ```sh
 make serve
-# or: ./strike serve --addr 127.0.0.1:8787 --token <secret> --provider echo
+# or: ./strike serve --addr 127.0.0.1:8787 --auth --token <secret> --provider echo
 curl -s http://127.0.0.1:8787/health
 # open http://127.0.0.1:8787/attach?token=<secret>
 
-# LAN (phone/laptop on same network) — loud WARNING, no TLS:
-./strike serve --expose --token <secret>
-# optional: --allow-cidr 192.168.0.0/16
+# remote access (encrypted tunnel — no cleartext LAN bind):
+ssh -L 8787:127.0.0.1:8787 user@strike-host
 ```
 
 - `GET /health` — JSON `{ok, version, commit}` (no auth)
@@ -92,9 +91,8 @@ curl -s http://127.0.0.1:8787/health
 - `GET /v1/live/events`, `/v1/status`, `/v1/agents`, `/v1/sessions`
 - `GET /v1/sessions/{id}/events` — SSE JSONL tail
 
-Default bind is loopback-only. Non-loopback requires `--expose` (token + WARNING).
-Open `/attach?token=…` once for cookie handoff; `/v1/*` rejects query tokens.
-Optional Vite dev proxy lives in `web/`. Details and threat model:
+Bind is loopback-only. Open `/attach?token=…` once for cookie handoff; `/v1/*`
+rejects query tokens. Optional Vite dev proxy lives in `web/`. Details:
 [docs/web.md](docs/web.md).
 
 ## Docs

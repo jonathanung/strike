@@ -28,10 +28,8 @@ strike mints a token when `--auth` is used without `--token`.
 
 | Flag | Meaning |
 |---|---|
-| `--addr` | Bind address (default `127.0.0.1:8787`) |
+| `--addr` | Loopback bind address (default `127.0.0.1:8787`; non-loopback rejected) |
 | `--auth` | Require bearer authentication; auto-mint a token when omitted |
-| `--expose` | Bind `0.0.0.0` (LAN). Requires `--auth`; loud WARNING; prints LAN URLs |
-| `--allow-cidr` | With `--expose`, only accept client IPs in these CIDRs (repeatable) |
 | `--token` | Bearer token for `/v1/*`; requires `--auth` |
 | `--provider` | Live engine provider (default `echo`) |
 | `--model` | Optional model id |
@@ -45,46 +43,31 @@ Open the cockpit:
 http://127.0.0.1:8787/attach
 ```
 
-## LAN expose (`--expose`)
+## Remote access (SSH local forward)
+
+`strike serve` binds **loopback only**. There is no cleartext LAN expose and no
+built-in TLS. Non-loopback `--addr` values are rejected. Legacy `--expose` /
+`--allow-cidr` flags error with a migration hint.
+
+For phone/laptop access to a remote host, forward the loopback port over SSH:
 
 ```sh
-./strike serve --auth --expose --token "$STRIKE_SERVE_TOKEN" --provider echo
-# optional client allowlist:
-./strike serve --auth --expose --allow-cidr 192.168.0.0/16 --token "$STRIKE_SERVE_TOKEN"
+# on the machine running strike:
+./strike serve --auth --token "$STRIKE_SERVE_TOKEN" --provider echo
+# on the client:
+ssh -L 8787:127.0.0.1:8787 user@strike-host
+# open http://127.0.0.1:8787/attach?token=...
 ```
-
-Behavior:
-
-- Default without `--expose` stays **localhost-only**. A non-loopback `--addr`
-  (e.g. `0.0.0.0:8787`) is **rejected** unless `--expose` is set.
-- `--expose` rewrites a loopback `--addr` host to `0.0.0.0` (same port). An
-  explicit non-loopback host is kept (bind one interface).
-- Auth is required for network exposure. The full cockpit URL
-  including `?token=` is printed **once** on stdout together with detected LAN
-  IPs.
-- A loud WARNING is printed on stderr (no TLS; token is bearer secret).
-- Optional `--allow-cidr` denies clients outside the list (including `/health`).
 
 ### Threat model
 
 | Risk | Notes |
 |---|---|
-| Session transcripts on LAN | Anyone with the token can SSE/WS read JSONL and live events |
+| Session transcripts | Token holders can SSE/WS read JSONL and live events on the bound interface |
 | Live control plane | Token holders can submit ops (prompts, permission replies, tools) |
-| No TLS | Tokens and payloads are cleartext on the wire — untrusted Wi‑Fi is unsafe |
+| Cleartext LAN | Not supported — use SSH (encrypted tunnel) instead of binding off localhost |
 | Token in URL | Cockpit open uses a one-time `?token=` handoff that sets a cookie and redirects; `/v1/*` rejects query tokens (use Bearer or cookie) |
-| CSRF / CORS | Localhost origins always allowed; with `--expose`, private-network browser origins are also allowed for Vite-style dev. Public internet origins are never reflected |
-| Shared networks | Prefer `--allow-cidr` to your LAN, or do not use `--expose` |
-
-**Safer alternative:** keep loopback bind and forward with SSH:
-
-```sh
-# on the machine running strike:
-./strike serve --auth --token "$STRIKE_SERVE_TOKEN"
-# on the laptop/phone-side jump host:
-ssh -L 8787:127.0.0.1:8787 user@strike-host
-# open http://127.0.0.1:8787/attach?token=...
-```
+| CSRF / CORS | Only loopback browser origins are reflected (`localhost` / `127.0.0.1` / `::1`). Public and private LAN origins are never reflected |
 
 ## Endpoints
 
@@ -152,8 +135,6 @@ ssh -L 8787:127.0.0.1:8787 user@strike-host
 | `POST` | `/v1/workflows/stop` | **yes** | Clear active workflow phase |
 | `POST` | `/v1/workflow-drafts/review` | **yes** | Structured draft review (checks + widening) |
 | `POST` | `/v1/workflow-drafts/save` | **yes** | Save draft JSON with explicit `confirm` |
-
-\*Still subject to `--allow-cidr` when set.
 
 With `--auth`, authenticate `/v1/*` using either of:
 
@@ -655,18 +636,18 @@ a process supervisor). Strike does not spawn Vite as a child.
 
 ## Security (summary)
 
-- Default bind is **loopback** (`127.0.0.1:8787`).
-- Non-loopback binds require **`--auth`** and **`--expose`**.
-- CORS allows localhost always; with `--expose`, also private-network origins.
+- Bind is **loopback only** (`127.0.0.1:8787` default). Non-loopback `--addr` is rejected.
+- Remote access: `ssh -L 8787:127.0.0.1:8787 user@host` (no cleartext LAN expose / no TLS terminator in-process).
+- CORS reflects loopback browser origins only.
 - Treat the token like a password; do not commit it.
-- See **Threat model** under LAN expose above.
+- See **Threat model** under Remote access above.
 
 ## Layout
 
 | Path | Role |
 |---|---|
-| `cmd/strike/serve.go` | `strike serve` CLI + live engine wiring + `--expose` |
-| `internal/server` | HTTP/SSE/WS handlers, live hub, bind/CIDR helpers |
+| `cmd/strike/serve.go` | `strike serve` CLI + live engine wiring |
+| `internal/server` | HTTP/SSE/WS handlers, live hub, bind helpers |
 | `internal/server/static` | embedded cockpit page |
 | `web/` | optional Vite dev proxy + `npm run build` |
 | `pkg/protocol` | Event + Op JSON envelopes (public; `internal/protocol` re-exports) |
@@ -680,9 +661,9 @@ a process supervisor). Strike does not spawn Vite as a child.
 5. RO attach: pick another session id → SSE transcript only.
 6. Multi-session: see **Manual smoke (multi-session)** under the multi-session UX contract
    (requires WEBSESS.2+ UI; contract-only changes need no runtime check).
-7. `./strike serve --auth --expose --token test` → WARNING on stderr; phone on LAN loads
-   printed cockpit URL; `/health` and live stream work with token.
-8. `./strike serve --addr 0.0.0.0:8787` without `--expose` → error.
+7. `./strike serve --auth --token test` → open printed cockpit URL; cookie handoff + live stream.
+8. `./strike serve --addr 0.0.0.0:8787` → error (loopback only).
+9. `./strike serve --expose` → error with SSH migration hint.
 
 ### Settings dials (`GET`/`PATCH /v1/settings`)
 
