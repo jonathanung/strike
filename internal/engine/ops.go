@@ -123,6 +123,22 @@ func (e *Engine) handleOp(ctx context.Context, op protocol.Op) {
 		e.handleInspectDiagnosticBundle()
 	case protocol.Rewind:
 		e.handleRewind(op)
+	case protocol.TeamSpawn:
+		e.handleTeamSpawn(ctx, op)
+	case protocol.TeamMessage:
+		e.handleTeamMessage(ctx, op)
+	case protocol.TeamBroadcast:
+		e.handleTeamBroadcast(ctx, op)
+	case protocol.TeamChildInterrupt:
+		e.handleTeamChildInterrupt(ctx, op)
+	case protocol.TeamTaskTransition:
+		e.handleTeamTaskTransition(ctx, op)
+	case protocol.TeamBoardCreate:
+		e.handleTeamBoardCreate(ctx, op)
+	case protocol.TeamBoardClaim:
+		e.handleTeamBoardClaim(ctx, op)
+	case protocol.TeamBoardComplete:
+		e.handleTeamBoardComplete(ctx, op)
 	}
 }
 

@@ -40,11 +40,20 @@ type agentsResponse struct {
 }
 
 type opErrorResponse struct {
-	Error string `json:"error"`
+	Error          string `json:"error"`
+	Code           string `json:"code,omitempty"`
+	CurrentVersion int    `json:"currentVersion,omitempty"`
 }
 
 type opOKResponse struct {
-	OK bool `json:"ok"`
+	OK              bool   `json:"ok"`
+	ChildSessionID  string `json:"childSessionId,omitempty"`
+	Name            string `json:"name,omitempty"`
+	DelegationID    string `json:"delegationId,omitempty"`
+	TaskID          string `json:"taskId,omitempty"`
+	MessageID       string `json:"messageId,omitempty"`
+	Version         int    `json:"version,omitempty"`
+	AlreadyTerminal bool   `json:"alreadyTerminal,omitempty"`
 }
 
 const maxHTTPPayload = 8 << 20
@@ -85,6 +94,9 @@ type capabilities struct {
 	// Team is true when live multi-agent observation snapshots are available
 	// (GET /v1/team). Observe-only; human control Ops are separate (WEBUI.17+).
 	Team bool `json:"team"`
+	// TeamControl is true when human orchestration Ops (team.spawn, …) are wired
+	// on the live engine (WEBUI.18).
+	TeamControl bool `json:"teamControl"`
 	// Artifacts is true when host.Services.Artifacts is wired (read-only list/get).
 	Artifacts bool `json:"artifacts"`
 	// Ledger is true when host.Services.Ledger is wired (read-only active/history).
@@ -109,9 +121,17 @@ var browserProtocolOps = []string{
 	"workflow.start", "workflow.stop",
 }
 
+func browserProtocolOpsWithTeamControl() []string {
+	out := append([]string(nil), browserProtocolOps...)
+	out = append(out, protocol.TeamControlOpNames()...)
+	return out
+}
+
 func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 	// Timeline is host-safe and derived from SessionDir JSONL (always available).
-	c := capabilities{Live: s.hasLive(), Roots: s.opts.LiveHub != nil, Timeline: true, Sandbox: s.hasSandbox(), Diag: s.hasLive(), Team: s.hasLive()}
+	// TeamControl shares the live gate: Ops are handled by the same engine path.
+	live := s.hasLive()
+	c := capabilities{Live: live, Roots: s.opts.LiveHub != nil, Timeline: true, Sandbox: s.hasSandbox(), Diag: live, Team: live, TeamControl: live}
 	var skills []map[string]any
 	if h := s.opts.Services; h != nil {
 		c.Auth, c.Catalog, c.Settings, c.History = h.Auth != nil, h.Catalog != nil, h.Settings != nil, h.History != nil
@@ -152,10 +172,10 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 		status, agents = &v, s.opts.Live.Agents()
 	}
 	var protocolOps []string
-	if s.hasLive() {
-		protocolOps = browserProtocolOps
+	if live {
+		protocolOps = browserProtocolOpsWithTeamControl()
 	}
-	writeJSON(w, http.StatusOK, bootstrapResponse{Version: version.Version, AuthRequired: s.opts.Auth, AttachOnly: !s.hasLive(), Capabilities: c, Status: status, Agents: agents, Skills: skills, ProtocolOps: protocolOps})
+	writeJSON(w, http.StatusOK, bootstrapResponse{Version: version.Version, AuthRequired: s.opts.Auth, AttachOnly: !live, Capabilities: c, Status: status, Agents: agents, Skills: skills, ProtocolOps: protocolOps})
 }
 
 func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
@@ -1030,11 +1050,6 @@ func decodeBody(w http.ResponseWriter, r *http.Request, dst any) error {
 }
 
 func (s *Server) handleOps(w http.ResponseWriter, r *http.Request) {
-	live := s.resolveLive(w, r)
-	if live == nil {
-		http.Error(w, "live session unavailable", http.StatusServiceUnavailable)
-		return
-	}
 	var env protocol.OpEnvelope
 	r.Body = http.MaxBytesReader(w, r.Body, maxHTTPPayload)
 	dec := json.NewDecoder(r.Body)
@@ -1052,16 +1067,31 @@ func (s *Server) handleOps(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
 		return
 	}
+	live := s.resolveLive(w, r)
+	if live == nil {
+		// Attach-only: team-control Ops get a stable 403; other ops keep 503.
+		if protocol.IsTeamControlOp(op) && !s.hasLive() {
+			writeJSON(w, http.StatusForbidden, opErrorResponse{Error: protocol.ErrTeamAttachOnly, Code: protocol.ErrTeamAttachOnly})
+			return
+		}
+		http.Error(w, "live session unavailable", http.StatusServiceUnavailable)
+		return
+	}
 	sessionID := live.SessionID()
 	if err := s.admitOp(r, "http", env.Type, sessionID); err != nil {
 		switch {
 		case errors.Is(err, errOpsReadOnly):
-			writeJSON(w, http.StatusForbidden, opErrorResponse{Error: err.Error()})
+			writeJSON(w, http.StatusForbidden, opErrorResponse{Error: err.Error(), Code: protocol.ErrTeamReadOnly})
 		case errors.Is(err, errOpsRateLimited):
 			writeJSON(w, http.StatusTooManyRequests, opErrorResponse{Error: err.Error()})
 		default:
 			writeJSON(w, http.StatusForbidden, opErrorResponse{Error: err.Error()})
 		}
+		return
+	}
+	// Team-control Ops wait for engine outcome so CAS/idempotency map to HTTP.
+	if protocol.IsTeamControlOp(op) {
+		s.handleTeamControlOp(w, r, live, env.Type, sessionID, op)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
@@ -1073,6 +1103,90 @@ func (s *Server) handleOps(w http.ResponseWriter, r *http.Request) {
 	}
 	s.auditOpOK(r, "http", env.Type, sessionID)
 	writeJSON(w, http.StatusOK, opOKResponse{OK: true})
+}
+
+func (s *Server) handleTeamControlOp(w http.ResponseWriter, r *http.Request, live *Live, opType, sessionID string, op protocol.Op) {
+	// Cross-root: optional rootSessionId must match the bound live root.
+	if root := strings.TrimSpace(protocol.TeamControlRootSessionID(op)); root != "" && root != live.SessionID() {
+		s.recordServeOp(sessionID, opType, s.clientIPString(r), "http", "denied")
+		writeJSON(w, http.StatusForbidden, opErrorResponse{Error: protocol.ErrTeamCrossRoot, Code: protocol.ErrTeamCrossRoot})
+		return
+	}
+	reply := make(chan protocol.TeamOpOutcome, 1)
+	op = protocol.WithTeamControlReply(op, reply)
+	// Spawn/interrupt may wait on child start/stop; allow a longer budget.
+	timeout := 15 * time.Second
+	switch op.(type) {
+	case protocol.TeamSpawn, protocol.TeamChildInterrupt:
+		timeout = 45 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
+	defer cancel()
+	if err := live.Submit(ctx, op); err != nil {
+		s.recordServeOpError(r, "http", opType, sessionID)
+		writeJSON(w, http.StatusConflict, opErrorResponse{Error: err.Error()})
+		return
+	}
+	select {
+	case out := <-reply:
+		s.writeTeamOpOutcome(w, r, opType, sessionID, out)
+	case <-ctx.Done():
+		s.recordServeOpError(r, "http", opType, sessionID)
+		writeJSON(w, http.StatusGatewayTimeout, opErrorResponse{Error: "team control op timed out"})
+	}
+}
+
+func (s *Server) writeTeamOpOutcome(w http.ResponseWriter, r *http.Request, opType, sessionID string, out protocol.TeamOpOutcome) {
+	if out.OK {
+		s.auditOpOK(r, "http", opType, sessionID)
+		writeJSON(w, http.StatusOK, opOKResponse{
+			OK:              true,
+			ChildSessionID:  out.ChildSessionID,
+			Name:            out.Name,
+			DelegationID:    out.DelegationID,
+			TaskID:          out.TaskID,
+			MessageID:       out.MessageID,
+			Version:         out.Version,
+			AlreadyTerminal: out.AlreadyTerminal,
+		})
+		return
+	}
+	code := strings.TrimSpace(out.Code)
+	if code == "" {
+		code = out.Error
+	}
+	outcome := "error"
+	status := http.StatusBadRequest
+	switch code {
+	case protocol.ErrTeamAttachOnly, protocol.ErrTeamReadOnly, protocol.ErrTeamCrossRoot,
+		protocol.ErrTeamNotLead, protocol.ErrTeamPermissionDenied:
+		status = http.StatusForbidden
+		outcome = "denied"
+	case protocol.ErrTeamConflict, protocol.ErrTeamIdempotencyConflict, protocol.ErrTeamUnavailable:
+		status = http.StatusConflict
+		if code == protocol.ErrTeamConflict {
+			outcome = "conflict"
+		}
+	case protocol.ErrTeamCapabilityUnavailable:
+		status = http.StatusNotImplemented
+	case protocol.ErrTeamValidation:
+		status = http.StatusBadRequest
+	default:
+		if strings.Contains(code, "permission") {
+			status = http.StatusForbidden
+			outcome = "denied"
+		}
+	}
+	s.recordServeOp(sessionID, opType, s.clientIPString(r), "http", outcome)
+	errMsg := out.Error
+	if strings.TrimSpace(errMsg) == "" {
+		errMsg = code
+	}
+	writeJSON(w, status, opErrorResponse{
+		Error:          errMsg,
+		Code:           code,
+		CurrentVersion: out.CurrentVersion,
+	})
 }
 
 func ensureEOF(dec *json.Decoder) error {
@@ -1201,6 +1315,57 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			if err := s.admitOp(r, "ws", env.Type, sessionID); err != nil {
 				msg, _ := json.Marshal(map[string]any{"type": "error", "data": map[string]string{"message": err.Error()}})
 				_ = ws.WriteText(string(msg))
+				continue
+			}
+			if protocol.IsTeamControlOp(op) {
+				if root := strings.TrimSpace(protocol.TeamControlRootSessionID(op)); root != "" && root != live.SessionID() {
+					s.recordServeOp(sessionID, env.Type, s.clientIPString(r), "ws", "denied")
+					msg, _ := json.Marshal(map[string]any{"type": "error", "data": map[string]string{"message": protocol.ErrTeamCrossRoot, "code": protocol.ErrTeamCrossRoot}})
+					_ = ws.WriteText(string(msg))
+					continue
+				}
+				reply := make(chan protocol.TeamOpOutcome, 1)
+				op = protocol.WithTeamControlReply(op, reply)
+				timeout := 15 * time.Second
+				switch op.(type) {
+				case protocol.TeamSpawn, protocol.TeamChildInterrupt:
+					timeout = 45 * time.Second
+				}
+				submitCtx, submitCancel := context.WithTimeout(ctx, timeout)
+				err = live.Submit(submitCtx, op)
+				if err != nil {
+					submitCancel()
+					s.recordServeOpError(r, "ws", env.Type, sessionID)
+					msg, _ := json.Marshal(map[string]any{"type": "error", "data": map[string]string{"message": err.Error()}})
+					_ = ws.WriteText(string(msg))
+					continue
+				}
+				select {
+				case out := <-reply:
+					submitCancel()
+					if out.OK {
+						s.auditOpOK(r, "ws", env.Type, sessionID)
+						payload, _ := json.Marshal(map[string]any{"type": "op.result", "data": out})
+						_ = ws.WriteText(string(payload))
+					} else {
+						s.recordServeOp(sessionID, env.Type, s.clientIPString(r), "ws", "error")
+						msgText := out.Error
+						if strings.TrimSpace(msgText) == "" {
+							msgText = out.Code
+						}
+						payload, _ := json.Marshal(map[string]any{"type": "error", "data": map[string]any{
+							"message":        msgText,
+							"code":           out.Code,
+							"currentVersion": out.CurrentVersion,
+						}})
+						_ = ws.WriteText(string(payload))
+					}
+				case <-submitCtx.Done():
+					submitCancel()
+					s.recordServeOpError(r, "ws", env.Type, sessionID)
+					msg, _ := json.Marshal(map[string]any{"type": "error", "data": map[string]string{"message": "team control op timed out"}})
+					_ = ws.WriteText(string(msg))
+				}
 				continue
 			}
 			submitCtx, submitCancel := context.WithTimeout(ctx, 5*time.Second)

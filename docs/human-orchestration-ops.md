@@ -1,7 +1,7 @@
 # RFC: Public human orchestration operations (WEBUI.17 / #1085)
 
-**Status:** Accepted for implementation scoping (v1 actions bounded below)  
-**Tier:** A (specification only — no Ops/UI code in this document)  
+**Status:** Accepted; v1 Ops implemented in WEBUI.18 (#1088)  
+**Tier:** A (specification); implementation is Tier C in engine/server/protocol  
 **Parent:** [#1069](https://github.com/jonathanung/strike/issues/1069)  
 **Blocks:** WEBUI.18 (#1088) protocol/engine implementation, WEBUI.19 (#1089) Team control UI  
 **Depends:** WEBUI.1 contract (#1070), WEBUI.13 observation (#1081)  
