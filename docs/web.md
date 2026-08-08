@@ -695,13 +695,15 @@ a process supervisor). Strike does not spawn Vite as a child.
 
 ## Layout
 
-| Path | Role |
-|---|---|
-| `cmd/strike/serve.go` | `strike serve` CLI + live engine wiring |
-| `internal/server` | HTTP/SSE/WS handlers, live hub, bind helpers |
-| `internal/server/static` | embedded cockpit page |
-| `web/` | optional Vite dev proxy + `npm run build` |
-| `pkg/protocol` | Event + Op JSON envelopes (public; `internal/protocol` re-exports) |
+Responsive shell profiles (WEBUI.4 / #1074; contract §4):
+
+| Profile | Width | Chrome |
+|---|---|---|
+| Desktop | ≥ 1024 CSS px | Rail + canvas + optional inspector drawer |
+| Tablet | 600–1023 | Canvas; rail and inspector as overlay drawers + backdrop |
+| Phone | ≤ 599 (down to 320) | Single canvas; bottom mode bar; rail/inspector as bottom sheets |
+
+Fixed chrome uses `safe-area-inset-*`. Phone composer uses a sticky row and 44px primary controls; `prefers-reduced-motion` disables nonessential transitions. Escape closes overlay panels (not blocking ask dialogs).
 
 ## Manual checklist
 

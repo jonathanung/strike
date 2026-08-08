@@ -43,6 +43,11 @@ import {
   type ActivitySignals,
   type WorkspaceMode,
 } from "./surfaces";
+import {
+  modesInBottomBar,
+  shellProfileFromWidth,
+  type ShellProfile,
+} from "./shellProfile";
 import "./styles.css";
 
 type Completion = { label: string; detail: string; insert: string };
@@ -171,7 +176,12 @@ export default function App() {
   const [surfaceEntity, setSurfaceEntity] = useState("");
   const [surfaceUnavailable, setSurfaceUnavailable] = useState<{ id: string; reason: string } | undefined>();
   const deepLinkApplied = useRef(false);
-  const [navOpen, setNavOpen] = useState(true);
+  const [shellProfile, setShellProfile] = useState<ShellProfile>(() =>
+    typeof window !== "undefined" ? shellProfileFromWidth(window.innerWidth) : "desktop",
+  );
+  const [navOpen, setNavOpen] = useState(() =>
+    typeof window !== "undefined" ? shellProfileFromWidth(window.innerWidth) === "desktop" : true,
+  );
   const [navWidth, setNavWidth] = useState(240);
   const [inspectorWidth, setInspectorWidth] = useState(340);
   const [projectData, setProjectData] = useState<unknown>();
@@ -213,6 +223,38 @@ export default function App() {
   const refreshSessions = () => loadSessions().then((list) => { setSessions(list.sessions || []); setLiveID(list.liveId || ""); return list; });
   const refreshRoots = () => loadRoots().then((r) => { setActiveRoots(r.roots || []); setActiveRootID(r.activeId || ""); return r; }).catch(() => undefined);
   useEffect(() => { applyAppearance(loadAppearance()); }, []);
+  useEffect(() => {
+    const sync = () => {
+      const next = shellProfileFromWidth(window.innerWidth);
+      setShellProfile((prev) => {
+        if (prev !== next) {
+          setNavOpen(next === "desktop");
+          if (next !== "desktop") setInspectorOpen(false);
+        }
+        return next;
+      });
+    };
+    sync();
+    window.addEventListener("resize", sync);
+    return () => window.removeEventListener("resize", sync);
+  }, []);
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      if (document.querySelector("dialog[open]")) return;
+      if (inspectorOpen) {
+        event.preventDefault();
+        setInspectorOpen(false);
+        return;
+      }
+      if (navOpen && shellProfile !== "desktop") {
+        event.preventDefault();
+        setNavOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [inspectorOpen, navOpen, shellProfile]);
   useEffect(() => {
     // roots is optional (attach-only returns 503) — do not fail the whole boot.
     Promise.all([
@@ -319,7 +361,12 @@ export default function App() {
   const activeInspector = inspectorTabs.includes(inspector)
     ? inspector
     : (inspectorTabs[0] || "");
-  const shellStyle = { "--nav-width": navOpen ? `${navWidth}px` : "0px", "--inspector-width": inspectorOpen ? `${inspectorWidth}px` : "0px" } as React.CSSProperties;
+  const shellStyle = {
+    "--nav-width": shellProfile === "desktop" ? (navOpen ? `${navWidth}px` : "0px") : `${navWidth}px`,
+    "--inspector-width": shellProfile === "desktop" ? (inspectorOpen ? `${inspectorWidth}px` : "0px") : `${inspectorWidth}px`,
+  } as React.CSSProperties;
+  const phoneModes = modesInBottomBar(shellProfile);
+  const overlayOpen = shellProfile !== "desktop" && (navOpen || inspectorOpen);
   const completions = useMemo(() => {
     const token = draft.split(/\s/).at(-1) || "";
     if (token.startsWith("/")) return [...slashCommands, ...(boot?.skills || []).map((skill) => ({ label: `/${skill.name}`, detail: skill.description || "Skill", insert: `/${skill.name}` }))].filter((item) => item.label.startsWith(token));
@@ -692,36 +739,84 @@ export default function App() {
     ? `${attentionCount} need${attentionCount === 1 ? "s" : ""} you`
     : "";
 
-  return <div className="app-shell" style={shellStyle}>
+  const renderModeButtons = (className: string) => (
+    <nav className={className} aria-label="Workspace mode">
+      {WORKSPACE_MODES.map((mode) => {
+        const preset = MODE_PRESETS[mode];
+        const attention = modeAttention(mode, activitySignals);
+        const selected = workspaceMode === mode;
+        return (
+          <button
+            key={mode}
+            type="button"
+            className={selected ? "mode-btn active" : "mode-btn"}
+            aria-pressed={selected}
+            aria-current={selected ? "page" : undefined}
+            aria-label={`${preset.label}: ${preset.description}${attention === "needs-you" ? ", needs attention" : attention === "badge" ? ", activity" : ""}`}
+            onClick={() => {
+              if (phoneModes) setNavOpen(false);
+              setMode(mode, { openDrawer: mode !== "chat" });
+            }}
+          >
+            <span>{preset.label}</span>
+            {attention !== "none" && <span className={attention === "needs-you" ? "mode-attn needs-you" : "mode-attn"} aria-hidden />}
+          </button>
+        );
+      })}
+    </nav>
+  );
+
+  return <div className="app-shell" style={shellStyle} data-shell={shellProfile}>
     <header>
-      <button className="icon-button" aria-label="Toggle agents panel" aria-pressed={navOpen} onClick={() => setNavOpen((open) => !open)}>☰</button>
+      <button
+        className="icon-button"
+        aria-label="Toggle agents panel"
+        aria-pressed={navOpen}
+        onClick={() => {
+          setInspectorOpen(false);
+          setNavOpen((open) => !open);
+        }}
+      >☰</button>
       <div className="wordmark"><span className="mark">S</span><strong>STRIKE</strong><small>workspace</small></div>
-      <nav className="mode-switch" aria-label="Workspace mode">
-        {WORKSPACE_MODES.map((mode) => {
-          const preset = MODE_PRESETS[mode];
-          const attention = modeAttention(mode, activitySignals);
-          const selected = workspaceMode === mode;
-          return (
-            <button
-              key={mode}
-              type="button"
-              className={selected ? "mode-btn active" : "mode-btn"}
-              aria-pressed={selected}
-              aria-current={selected ? "page" : undefined}
-              aria-label={`${preset.label}: ${preset.description}${attention === "needs-you" ? ", needs attention" : attention === "badge" ? ", activity" : ""}`}
-              onClick={() => setMode(mode, { openDrawer: mode !== "chat" })}
-            >
-              <span>{preset.label}</span>
-              {attention !== "none" && <span className={attention === "needs-you" ? "mode-attn needs-you" : "mode-attn"} aria-hidden />}
-            </button>
-          );
-        })}
-      </nav>
-      <div className="session-line" aria-live="polite"><span className={state.status.busy ? "pulse busy" : "pulse"} />{state.status.busy ? "agent working" : transport}{headerAttention && <button type="button" className="attention-summary" aria-label={headerAttention} onClick={() => { const target = needsYouRoots[0]; if (target) void selectWorkspace(target.id, true); }}>{headerAttention}</button>}</div>
+      {!phoneModes && renderModeButtons("mode-switch header-mode-switch")}
+      <div className="session-line" aria-live="polite">
+        <span className={state.status.busy ? "pulse busy" : "pulse"} />
+        {!phoneModes && (state.status.busy ? "agent working" : transport)}
+        {headerAttention && (
+          <button
+            type="button"
+            className="attention-summary"
+            aria-label={headerAttention}
+            onClick={() => {
+              const target = needsYouRoots[0];
+              if (target) void selectWorkspace(target.id, true);
+            }}
+          >{headerAttention}</button>
+        )}
+      </div>
       <button className="icon-button" aria-label="Export markdown" title="Export markdown" onClick={() => exportSession()}>↓</button>
       <button className="icon-button" aria-label="Open settings" onClick={() => setSettingsOpen(true)}>⚙</button>
-      <button className="icon-button" aria-label="Toggle inspector" aria-pressed={inspectorOpen} onClick={() => setInspectorOpen((open) => !open)}>◫</button>
+      <button
+        className="icon-button"
+        aria-label="Toggle inspector"
+        aria-pressed={inspectorOpen}
+        onClick={() => {
+          if (shellProfile !== "desktop") setNavOpen(false);
+          setInspectorOpen((open) => !open);
+        }}
+      >◫</button>
     </header>
+    {overlayOpen && (
+      <button
+        type="button"
+        className="shell-backdrop visible"
+        aria-label="Close panel"
+        onClick={() => {
+          setNavOpen(false);
+          setInspectorOpen(false);
+        }}
+      />
+    )}
     <aside className={`navigation ${navOpen ? "open" : "collapsed"}`} aria-label="Agents panel" tabIndex={0} onKeyDown={(event) => {
       if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
       if (event.key === "ArrowDown" || event.key === "j") { event.preventDefault(); cycleWorkspace(1); }
@@ -815,6 +910,7 @@ export default function App() {
 {undoDialog && <UndoPreviewDialog preview={lastUndoPreview} preferFiles={undoDialog.preferFiles} onCancel={() => setUndoDialog(null)} onConfirm={confirmUndo} />}
     {state.permission && <PermissionDialog permission={state.permission} rootID={selectedID} canExplain={Boolean(boot?.capabilities.permissions)} />}
     {state.question && <QuestionDialog question={state.question} rootID={selectedID} />}
+    {phoneModes && renderModeButtons("mode-bottom-bar")}
   </div>;
 }
 
