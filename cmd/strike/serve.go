@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jonathanung/strike-cli/internal/audit"
 	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/sandbox"
@@ -37,6 +38,7 @@ Options:
   --provider <name>      live engine provider (default echo)
   --model <id>           model id for the live provider
   --attach-only          read-only JSONL attach (no live engine)
+  --read-only            reject mutating protocol ops (POST /v1/ops + WS frames)
   --auto, --dangerously-skip-permissions
                          auto-allow permission asks in the live engine
   -h, --help             show help
@@ -79,6 +81,7 @@ type serveOptions struct {
 	provider                   string
 	model                      string
 	attachOnly                 bool
+	readOnly                   bool
 	dangerouslySkipPermissions bool
 }
 
@@ -127,6 +130,7 @@ func parseServeArgs(args []string) (serveOptions, error) {
 	fs.StringVar(&opts.provider, "provider", "echo", "")
 	fs.StringVar(&opts.model, "model", "", "")
 	fs.BoolVar(&opts.attachOnly, "attach-only", false, "")
+	fs.BoolVar(&opts.readOnly, "read-only", false, "")
 	fs.BoolVar(&opts.dangerouslySkipPermissions, "auto", false, "")
 	fs.BoolVar(&opts.dangerouslySkipPermissions, "dangerously-skip-permissions", false, "")
 	if err := fs.Parse(args); err != nil {
@@ -436,6 +440,12 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		writeDangerousPermissionsWarning(stderr, opts.dangerouslySkipPermissions)
 	}
 
+	auditSink, err := audit.Open(audit.Options{})
+	if err != nil {
+		return fmt.Errorf("open audit sink: %w", err)
+	}
+	defer func() { _ = auditSink.Close() }()
+
 	srv, err := server.New(server.Options{
 		Addr:       opts.addr,
 		Auth:       opts.auth,
@@ -444,6 +454,8 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		LiveHub:    liveHub,
 		Services:   services,
 		Sandbox:    sandboxSnap,
+		ReadOnly:   opts.readOnly,
+		Audit:      auditSink,
 	})
 	if err != nil {
 		return err
@@ -464,6 +476,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		liveHub:    liveHub,
 		provider:   opts.provider,
 		sessionDir: sessionDir,
+		readOnly:   opts.readOnly,
 	})
 
 	errCh := make(chan error, 1)
@@ -494,6 +507,7 @@ type serveBanner struct {
 	liveHub    *server.LiveHub
 	provider   string
 	sessionDir string
+	readOnly   bool
 }
 
 func printServeBanner(w io.Writer, b serveBanner) {
@@ -513,6 +527,9 @@ func printServeBanner(w io.Writer, b serveBanner) {
 	} else {
 		fmt.Fprintln(w, "  mode:    attach-only (read-only JSONL)")
 	}
+	if b.readOnly {
+		fmt.Fprintln(w, "  ops:     read-only (mutating ops rejected)")
+	}
 	if !b.auth {
 		fmt.Fprintln(w, "  auth:    off (loopback only)")
 	} else if b.minted {
@@ -521,6 +538,7 @@ func printServeBanner(w io.Writer, b serveBanner) {
 		fmt.Fprintln(w, "  token:   (from --token)")
 	}
 	fmt.Fprintf(w, "  sessions dir: %s\n", b.sessionDir)
+	fmt.Fprintln(w, "  audit:   serve ops → ~/.strike/audit (family serve_op)")
 	fmt.Fprintln(w, "  remote:  ssh -L 8787:127.0.0.1:8787 user@host  (loopback only; see docs/web.md)")
 	fmt.Fprintln(w, "experimental web cockpit — TUI remains primary")
 }

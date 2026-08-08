@@ -35,6 +35,7 @@ strike mints a token when `--auth` is used without `--token`.
 | `--model` | Optional model id |
 | `--session-dir` | Sessions directory for `--attach-only`; rejected in live mode |
 | `--attach-only` | No live engine — JSONL SSE attach only |
+| `--read-only` | Reject mutating protocol ops (`POST /v1/ops` + WS op frames); status/SSE still work |
 | `--auto`, `--dangerously-skip-permissions` | Auto-allow permission asks in the live engine (equivalent) |
 
 Open the cockpit:
@@ -68,6 +69,9 @@ ssh -L 8787:127.0.0.1:8787 user@strike-host
 | Cleartext LAN | Not supported — use SSH (encrypted tunnel) instead of binding off localhost |
 | Token in URL | Cockpit open uses a one-time `?token=` handoff that sets a cookie and redirects; `/v1/*` rejects query tokens (use Bearer or cookie) |
 | CSRF / CORS | Only loopback browser origins are reflected (`localhost` / `127.0.0.1` / `::1`). Public and private LAN origins are never reflected |
+| Ops flood | Per-IP token bucket on `POST /v1/ops` and WS op frames (default 10/s, burst 20) → HTTP 429 / WS error |
+| Ops audit | Every admitted/denied op is logged to `~/.strike/audit` as family `serve_op` (type + source IP + channel + outcome; no bodies) |
+| Read-only | `--read-only` rejects mutating ops with HTTP 403 / WS error while keeping attach/SSE |
 
 ## Endpoints
 
@@ -148,6 +152,19 @@ history, proxy logs, and `Referer`). Opening the cockpit URL printed by
 handoff: valid tokens become a `SameSite=Strict` HttpOnly cookie so subsequent
 same-origin `fetch` / EventSource / WebSocket calls succeed without leaving the
 secret in the address bar.
+
+### Ops rate limit, audit, and read-only
+
+- **Rate limit:** each client IP has a token bucket (default **10 ops/s**, burst
+  **20**) shared by `POST /v1/ops` and WebSocket op frames. Exceeding the limit
+  returns **HTTP 429** or a WS `error` frame (`ops rate limited`).
+- **Audit:** every op attempt is appended to the security audit sink
+  (`~/.strike/audit`, family `serve_op`) with `opType`, `sourceIp`, `channel`
+  (`http`|`ws`), and `outcome` (`ok`|`rate_limited`|`read_only`|`error`). Op
+  bodies are never stored. See [audit.md](audit.md).
+- **`--read-only`:** rejects mutating protocol ops (same paths) with **HTTP 403**
+  / WS error while leaving bootstrap, status, and SSE attach available.
+  `status.get` on the WebSocket is still allowed.
 
 ### Op envelopes (client → engine)
 

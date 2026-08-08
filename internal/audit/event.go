@@ -21,6 +21,8 @@ const (
 	FamilyToolchainMatch = "toolchain_match"
 	// FamilyHook is shell/declarative hook enforcement outcomes (#1031/#1032).
 	FamilyHook = "hook"
+	// FamilyServeOp is strike serve control-plane ops (type + source IP only).
+	FamilyServeOp = "serve_op"
 )
 
 // Record is one append-only audit line (already redacted when written).
@@ -45,6 +47,7 @@ var Families = []string{
 	FamilyEgress,
 	FamilyToolchainMatch,
 	FamilyHook,
+	FamilyServeOp,
 }
 
 // HookPayload is family hook (shell/declarative enforcement).
@@ -127,6 +130,13 @@ func redactPayload(family string, payload any) (json.RawMessage, error) {
 			return nil, err
 		}
 		return json.Marshal(v)
+	case FamilyServeOp:
+		// server.ServeOpPayload — keep known fields only via generic marshal.
+		b, err := json.Marshal(payload)
+		if err != nil {
+			return nil, err
+		}
+		return b, nil
 	default:
 		// Unknown: marshal then scrub string values best-effort via telemetry tool-like path.
 		b, err := json.Marshal(payload)

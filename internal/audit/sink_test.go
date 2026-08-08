@@ -263,6 +263,15 @@ func TestObserveAllFamilies(t *testing.T) {
 	if err := s.RecordSecretRefUse("s1", "t1", "c5", "env", "abcd1234", "inject", "bash"); err != nil {
 		t.Fatal(err)
 	}
+	// serve_op (strike serve control plane — type + IP only)
+	if err := s.Record(audit.FamilyServeOp, "s1", "", "", "", map[string]string{
+		"opType":   "interrupt",
+		"sourceIp": "127.0.0.1",
+		"channel":  "http",
+		"outcome":  "ok",
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	out := filepath.Join(t.TempDir(), "all.json")
 	if err := s.ExportBundle(out); err != nil {
@@ -286,6 +295,7 @@ func TestObserveAllFamilies(t *testing.T) {
 		"hook":            false,
 		"admission":       false,
 		"secret_ref_use":  false,
+		"serve_op":        false,
 	}
 	var bundle struct {
 		Records []struct {
