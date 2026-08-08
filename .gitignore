@@ -7,6 +7,12 @@ coverage.out
 */worktrees
 web/node_modules/
 web/dist/
+web/e2e-results/
+web/e2e-report/
+web/e2e-artifacts/
+web/test-results/
+web/playwright-report/
+web/.pw-browsers/
 
 # Generated flatten of internal/tui/_src/ (go generate ./internal/tui).
 # Source of truth is _src/<group>/; make build/test and CI run generate first.

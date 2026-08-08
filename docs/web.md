@@ -44,6 +44,24 @@ Open the cockpit:
 http://127.0.0.1:8787/attach
 ```
 
+### Real-browser smokes (`make web-e2e`)
+
+Offline Playwright harness (WEBUI.5 / #1071) against temporary `strike serve`
+fixtures (echo provider + attach-only). Does **not** replace unit tests:
+
+```sh
+make web-check   # fast default: typecheck, vite build, vitest/jsdom
+make web-e2e     # boots servers, installs Chromium once, runs web/e2e
+```
+
+Coverage includes bootstrap, one streamed echo turn, permission dialog,
+multi-root switching, additive `?mode=`/`?surface=` deep-link safety,
+attach-only mutation lockout, keyboard focus for settings/send, and
+desktop/tablet/720/320 viewport overflow checks. Failure traces and
+screenshots land in `web/e2e-artifacts/` (CI uploads the same path).
+Honors `prefers-reduced-motion` via Playwright `reducedMotion: "reduce"`.
+No real provider keys or network model calls.
+
 ## Remote access (SSH local forward)
 
 `strike serve` binds **loopback only**. There is no cleartext LAN expose and no
