@@ -106,4 +106,12 @@ describe("web theme parity with TUI Default()", () => {
     expect(css).toMatch(/color-scheme:\s*dark\s+light/);
     expect(css).toMatch(/@media\s*\(prefers-color-scheme:\s*light\)/);
   });
+
+  it("supports explicit data-appearance light/dark overrides", () => {
+    expect(css).toMatch(/:root\[data-appearance="light"\]/);
+    expect(css).toMatch(/:root\[data-appearance="dark"\]/);
+    const lightExplicit = varsInBlock(css, ':root[data-appearance="light"]');
+    expect(lightExplicit["--ink"]).toBe(TUI_DEFAULT.text.light.toLowerCase());
+    expect(lightExplicit["--acid"]).toBe(TUI_DEFAULT.accent.light.toLowerCase());
+  });
 });
