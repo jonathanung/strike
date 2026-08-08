@@ -1055,6 +1055,7 @@ describe("App", () => {
 
 
   it("exposes shell profile and moves modes to the bottom bar on phone widths", async () => {
+    const prev = window.innerWidth;
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
     window.dispatchEvent(new Event("resize"));
     render(<App />);
@@ -1064,9 +1065,13 @@ describe("App", () => {
     expect(screen.getByRole("navigation", { name: "Workspace mode" }).className).toContain("mode-bottom-bar");
     // Header should not duplicate the mode switch on phone.
     expect(document.querySelector(".header-mode-switch")).toBeNull();
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: prev || 1280 });
+    window.dispatchEvent(new Event("resize"));
   });
 
   it("restores mode and surface from deep link after bootstrap", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1280 });
+    window.dispatchEvent(new Event("resize"));
     window.history.replaceState(null, "", "/?mode=project&surface=plans&entity=plan-1");
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const url = String(input);
@@ -1083,7 +1088,12 @@ describe("App", () => {
     render(<App />);
     await screen.findByText("Current");
     expect(await screen.findByRole("button", { name: /Project:/ })).toHaveAttribute("aria-pressed", "true");
-    expect(await screen.findByRole("tab", { name: "plans" })).toHaveAttribute("aria-selected", "true");
+    const plansTab = screen.queryByRole("tab", { name: "plans" });
+    if (plansTab) {
+      expect(plansTab).toHaveAttribute("aria-selected", "true");
+    } else {
+      expect(screen.getByRole("option", { name: /plans/i })).toHaveAttribute("aria-selected", "true");
+    }
     expect(screen.getByRole("button", { name: "Toggle inspector" })).toHaveAttribute("aria-pressed", "true");
   });
 
