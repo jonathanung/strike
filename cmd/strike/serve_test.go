@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"flag"
-	"net"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -24,8 +22,16 @@ func TestParseServeArgs(t *testing.T) {
 	if opts.sessionDir != session.DefaultDir() {
 		t.Fatalf("sessionDir = %q, want default", opts.sessionDir)
 	}
-	if opts.provider != "echo" || opts.attachOnly || opts.expose || opts.dangerouslySkipPermissions {
-		t.Fatalf("defaults provider/attach/expose/danger = %+v", opts)
+	if opts.provider != "echo" || opts.attachOnly || opts.readOnly || opts.dangerouslySkipPermissions {
+		t.Fatalf("defaults provider/attach/readOnly/danger = %+v", opts)
+	}
+
+	opts, err = parseServeArgs([]string{"--read-only"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !opts.readOnly {
+		t.Fatalf("--read-only not set: %+v", opts)
 	}
 
 	opts, err = parseServeArgs([]string{"--auto"})
@@ -55,25 +61,13 @@ func TestParseServeArgs(t *testing.T) {
 		t.Fatalf("explicit live --session-dir err = %v", err)
 	}
 
-	opts, err = parseServeArgs([]string{"--auth", "--expose", "--allow-cidr", "192.168.0.0/16", "--allow-cidr", "10.0.0.0/8"})
-	if err != nil {
-		t.Fatal(err)
+	_, err = parseServeArgs([]string{"--auth", "--expose", "--token", "t"})
+	if err == nil || !strings.Contains(err.Error(), "--expose was removed") {
+		t.Fatalf("legacy --expose err = %v", err)
 	}
-	if !opts.expose || len(opts.allowCIDR) != 2 {
-		t.Fatalf("expose/cidr opts = %+v", opts)
-	}
-
-	opts, err = parseServeArgs([]string{"--auth", "--expose", "--allow-cidr", "10.0.0.0/8,172.16.0.0/12"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(opts.allowCIDR) != 2 {
-		t.Fatalf("comma cidr = %v", opts.allowCIDR)
-	}
-
 	_, err = parseServeArgs([]string{"--allow-cidr", "10.0.0.0/8"})
-	if err == nil || !strings.Contains(err.Error(), "--expose") {
-		t.Fatalf("allow-cidr without expose err = %v", err)
+	if err == nil || !strings.Contains(err.Error(), "--expose was removed") {
+		t.Fatalf("legacy --allow-cidr err = %v", err)
 	}
 
 	_, err = parseServeArgs([]string{"--help"})
@@ -102,11 +96,17 @@ func TestRunCLIServeHelp(t *testing.T) {
 	if !strings.Contains(stdout.String(), "/v1/ws") {
 		t.Fatalf("usage missing /v1/ws: %q", stdout.String())
 	}
-	if !strings.Contains(stdout.String(), "--expose") {
-		t.Fatalf("usage missing --expose: %q", stdout.String())
+	if strings.Contains(stdout.String(), "--expose") {
+		t.Fatalf("usage must not advertise --expose: %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "ssh -L") {
+		t.Fatalf("usage missing ssh -L remote path: %q", stdout.String())
 	}
 	if !strings.Contains(stdout.String(), "--auto") || !strings.Contains(stdout.String(), "--dangerously-skip-permissions") {
 		t.Fatalf("usage missing --auto / --dangerously-skip-permissions: %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "--read-only") {
+		t.Fatalf("usage missing --read-only: %q", stdout.String())
 	}
 }
 
@@ -123,72 +123,54 @@ func TestRunCLIServeDefaultsToLocalNoAuth(t *testing.T) {
 	}
 }
 
-func TestServeResolveExposeGuard(t *testing.T) {
+func TestServeResolveLoopbackOnly(t *testing.T) {
 	opts, err := parseServeArgs([]string{"--addr", "0.0.0.0:8787", "--auth", "--token", "t", "--attach-only"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = server.ResolveBindAddr(opts.addr, opts.expose)
+	_, err = server.ResolveBindAddr(opts.addr)
 	if err == nil {
-		t.Fatal("want resolve error without --expose")
+		t.Fatal("want resolve error for non-loopback")
+	}
+	if !strings.Contains(err.Error(), "loopback") && !strings.Contains(err.Error(), "ssh -L") {
+		t.Fatalf("resolve err = %v", err)
 	}
 
-	opts, err = parseServeArgs([]string{"--auth", "--expose", "--token", "t", "--attach-only"})
+	opts, err = parseServeArgs([]string{"--auth", "--token", "t", "--attach-only"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := server.ResolveBindAddr(opts.addr, opts.expose)
+	got, err := server.ResolveBindAddr(opts.addr)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != "0.0.0.0:8787" {
+	if got != "127.0.0.1:8787" {
 		t.Fatalf("got %q", got)
 	}
 }
 
-func TestCockpitURL(t *testing.T) {
-	u := cockpitURL("192.168.1.10", "8787", "sec ret")
-	if !strings.HasPrefix(u, "http://192.168.1.10:8787/attach?token=") {
-		t.Fatalf("url = %q", u)
-	}
-	if !strings.Contains(u, "sec+ret") && !strings.Contains(u, "sec%20ret") {
-		t.Fatalf("token not escaped: %q", u)
-	}
-}
-
-func TestPrintServeBannerExpose(t *testing.T) {
+func TestPrintServeBanner(t *testing.T) {
 	var buf bytes.Buffer
 	printServeBanner(&buf, serveBanner{
-		listenAddr: "0.0.0.0:8787",
-		port:       "8787",
+		listenAddr: "127.0.0.1:8787",
 		token:      "tok123",
 		auth:       true,
 		minted:     true,
-		exposed:    true,
 		sessionDir: "/tmp/s",
-		allowCIDR:  []string{"192.168.0.0/16"},
 	})
 	out := buf.String()
-	if !strings.Contains(out, "EXPOSE") {
-		t.Fatalf("missing EXPOSE: %s", out)
-	}
 	if !strings.Contains(out, "tok123") {
 		t.Fatalf("missing token in banner: %s", out)
 	}
-	if !strings.Contains(out, "192.168.0.0/16") {
-		t.Fatalf("missing allow: %s", out)
+	if !strings.Contains(out, "ssh -L") {
+		t.Fatalf("missing remote ssh hint: %s", out)
+	}
+	if strings.Contains(out, "EXPOSE") {
+		t.Fatalf("banner must not advertise EXPOSE: %s", out)
 	}
 }
 
-func TestWriteExposeWarning(t *testing.T) {
-	var buf bytes.Buffer
-	writeExposeWarning(&buf)
-	if !strings.Contains(buf.String(), "WARNING") || !strings.Contains(buf.String(), "NO TLS") {
-		t.Fatalf("warning = %q", buf.String())
-	}
-}
-
-func TestRunServeRejectsNonLocalWithoutExpose(t *testing.T) {
+func TestRunServeRejectsNonLocal(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	err := runServe(serveOptions{
 		addr:       "0.0.0.0:0",
@@ -198,30 +180,7 @@ func TestRunServeRejectsNonLocalWithoutExpose(t *testing.T) {
 		sessionDir: t.TempDir(),
 		provider:   "echo",
 	}, &stdout, &stderr)
-	if err == nil || !strings.Contains(err.Error(), "--expose") {
+	if err == nil || (!strings.Contains(err.Error(), "loopback") && !strings.Contains(err.Error(), "ssh -L") && !strings.Contains(err.Error(), "non-localhost")) {
 		t.Fatalf("err = %v", err)
-	}
-}
-
-func TestServeExposeResolvePortPreserved(t *testing.T) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Skip(err)
-	}
-	port := ln.Addr().(*net.TCPAddr).Port
-	_ = ln.Close()
-
-	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
-	got, err := server.ResolveBindAddr(addr, false)
-	if err != nil || got != addr {
-		t.Fatalf("resolve localhost = %q err=%v", got, err)
-	}
-	got, err = server.ResolveBindAddr(addr, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := net.JoinHostPort("0.0.0.0", strconv.Itoa(port))
-	if got != want {
-		t.Fatalf("expose resolve = %q, want %q", got, want)
 	}
 }

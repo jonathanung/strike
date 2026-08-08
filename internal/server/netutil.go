@@ -6,11 +6,10 @@ import (
 	"strings"
 )
 
-// ResolveBindAddr applies --expose semantics to a configured host:port.
-// Without expose, non-loopback binds are rejected. With expose, a loopback
-// host is rewritten to 0.0.0.0 (all interfaces) while keeping the port;
-// an explicit non-loopback host is kept as-is.
-func ResolveBindAddr(addr string, expose bool) (string, error) {
+// ResolveBindAddr validates a loopback-only host:port for strike serve.
+// Non-loopback binds are rejected; remote access is via SSH local forward
+// (ssh -L), not cleartext LAN expose.
+func ResolveBindAddr(addr string) (string, error) {
 	addr = strings.TrimSpace(addr)
 	if addr == "" {
 		addr = "127.0.0.1:8787"
@@ -19,14 +18,8 @@ func ResolveBindAddr(addr string, expose bool) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("invalid --addr %q: %w", addr, err)
 	}
-	if !expose {
-		if !IsLocalhostBind(addr) {
-			return "", fmt.Errorf("non-localhost --addr %s requires --expose (see docs/web.md)", addr)
-		}
-		return net.JoinHostPort(host, port), nil
-	}
-	if IsLocalhostBind(addr) || strings.TrimSpace(host) == "" {
-		return net.JoinHostPort("0.0.0.0", port), nil
+	if !IsLocalhostBind(addr) {
+		return "", fmt.Errorf("non-localhost --addr %s rejected: strike serve binds loopback only; use ssh -L 8787:127.0.0.1:8787 (see docs/web.md)", addr)
 	}
 	return net.JoinHostPort(host, port), nil
 }
