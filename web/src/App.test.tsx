@@ -9,13 +9,20 @@ const response = (body: unknown, status = 200) => Promise.resolve(new Response(s
 
 describe("App", () => {
   beforeEach(() => {
+    try { window.history.replaceState(null, "", "/"); } catch { /* jsdom */ }
     FakeEventSource.instances = []; FakeWebSocket.instances = [];
     vi.stubGlobal("EventSource", FakeEventSource); vi.stubGlobal("WebSocket", FakeWebSocket);
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => String(input).includes("bootstrap") ? response({ version: "test", authRequired: false, attachOnly: false, capabilities: { live: true, diag: true, files: false, memory: false, issues: false, roots: false }, protocolOps: ["user.input", "compact", "rewind"], status: { sessionId: "live", provider: "echo", busy: false }, agents: [{ name: "build" }], skills: [{ name: "ship", description: "Ship changes" }] }) : String(input).includes("sessions") ? response({ sessions: [{ id: "live", title: "Current" }], liveId: "live" }) : response({ ok: true })));
     Element.prototype.scrollIntoView = vi.fn();
     vi.stubGlobal("URL", { ...URL, createObjectURL: vi.fn(() => "blob:diag"), revokeObjectURL: vi.fn() });
   });
-  afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    // Deep-link replaceState must not leak mode/surface across tests.
+    try { window.history.replaceState(null, "", "/"); } catch { /* jsdom */ }
+  });
 
 
   it("exposes skip-all in the autonomy control and wires set.autonomy", async () => {
@@ -1015,6 +1022,56 @@ describe("App", () => {
     expect(screen.queryByRole("button", { name: "ACTIVE" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "+ New workspace" })).not.toBeInTheDocument();
     expect(screen.queryByText("NEEDS YOU")).not.toBeInTheDocument();
+  });
+
+  it("switches workspace modes via the mode shell without dropping the session", async () => {
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("bootstrap")) return response({
+        version: "test", authRequired: false, attachOnly: false,
+        capabilities: { live: true, files: true, plans: true, memory: true, issues: true, goals: true, mcp: true, timeline: true },
+        protocolOps: ["user.input"], status: { sessionId: "live", provider: "echo", busy: false },
+        agents: [{ name: "build" }], skills: [],
+      });
+      if (url.includes("sessions")) return response({ sessions: [{ id: "live", title: "Current" }], liveId: "live" });
+      if (url.includes("changed-files")) return response({ files: [] });
+      if (url.includes("plans")) return response({ plans: [] });
+      return response({ ok: true });
+    }));
+    render(<App />);
+    await screen.findByText("Current");
+    expect(screen.getByRole("button", { name: /Chat:/ })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.change(screen.getByLabelText("Instruction"), { target: { value: "keep me" } });
+    fireEvent.click(screen.getByRole("button", { name: /Project:/ }));
+    expect(screen.getByRole("button", { name: /Project:/ })).toHaveAttribute("aria-pressed", "true");
+    expect(await screen.findByRole("tab", { name: "plans" })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "mcp" })).not.toBeInTheDocument();
+    // Draft preserved across mode switch (per-root composer state).
+    expect(screen.getByLabelText("Instruction")).toHaveValue("keep me");
+    fireEvent.click(screen.getByRole("button", { name: /Chat:/ }));
+    expect(screen.getByRole("button", { name: /Chat:/ })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByLabelText("Instruction")).toHaveValue("keep me");
+  });
+
+  it("restores mode and surface from deep link after bootstrap", async () => {
+    window.history.replaceState(null, "", "/?mode=project&surface=plans&entity=plan-1");
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("bootstrap")) return response({
+        version: "test", authRequired: false, attachOnly: false,
+        capabilities: { live: true, plans: true, files: true },
+        protocolOps: ["user.input"], status: { sessionId: "live", provider: "echo", busy: false },
+        agents: [], skills: [],
+      });
+      if (url.includes("sessions")) return response({ sessions: [{ id: "live", title: "Current" }], liveId: "live" });
+      if (url.includes("plans")) return response({ plans: [] });
+      return response({ ok: true });
+    }));
+    render(<App />);
+    await screen.findByText("Current");
+    expect(await screen.findByRole("button", { name: /Project:/ })).toHaveAttribute("aria-pressed", "true");
+    expect(await screen.findByRole("tab", { name: "plans" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("button", { name: "Toggle inspector" })).toHaveAttribute("aria-pressed", "true");
   });
 
 

@@ -537,6 +537,22 @@ other query params):
 Shareable example (after auth handoff): `/attach?session=<durableId>` or
 `/attach?root=<liveId>`.
 
+Additive workspace navigation (WEBUI.3 / #1073; normative detail in
+`docs/web-cockpit-contract.md` §5):
+
+| Query | Meaning |
+|---|---|
+| `?mode=` | `chat` \| `code` \| `team` \| `project` \| `ops` (default `chat`) |
+| `?surface=` | Registry surface id (`plans`, `files`, `roster`, …) |
+| `?entity=` | Opaque entity id for the surface |
+| `?path=` | Workspace-relative file path (implies Code) |
+| `?agent=` | Child agent id (implies Team) |
+| `?pane=` | Plugin pane id (implies Ops panes) |
+
+Example: `/attach?root=<liveId>&mode=project&surface=plans&entity=<planId>`.
+Invalid or unsupported mode/surface falls back safely; `root`/`session` resolution is unchanged.
+
+
 Additive mode/surface/entity deep links (`mode`, `surface`, `path`, `agent`,
 `pane`, `entity`) are specified in
 [web-cockpit-contract.md §5](web-cockpit-contract.md#5-deep-link-grammar-additive)
