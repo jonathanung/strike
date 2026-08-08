@@ -14,10 +14,23 @@ import (
 )
 
 const lifecycleLockName = "lifecycle.lock"
+const attachLockName = "attach.lock"
 
 // lockLifecycle serializes managed-container discovery and mutation across
 // Strike processes for one repository.
 func lockLifecycle(ctx context.Context, path string) (func() error, error) {
+	return lockContainerFile(ctx, path, unix.LOCK_EX)
+}
+
+func lockAttachShared(ctx context.Context, path string) (func() error, error) {
+	return lockContainerFile(ctx, path, unix.LOCK_SH)
+}
+
+func lockAttachExclusive(ctx context.Context, path string) (func() error, error) {
+	return lockContainerFile(ctx, path, unix.LOCK_EX)
+}
+
+func lockContainerFile(ctx context.Context, path string, mode int) (func() error, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, fmt.Errorf("container lifecycle lock: mkdir: %w", err)
 	}
@@ -26,7 +39,7 @@ func lockLifecycle(ctx context.Context, path string) (func() error, error) {
 		return nil, fmt.Errorf("container lifecycle lock: open: %w", err)
 	}
 	for {
-		err = unix.Flock(fd, unix.LOCK_EX|unix.LOCK_NB)
+		err = unix.Flock(fd, mode|unix.LOCK_NB)
 		if err == nil {
 			break
 		}

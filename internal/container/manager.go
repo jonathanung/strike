@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -184,7 +185,7 @@ func (m *Manager) LaunchWithResult(ctx context.Context, opts LaunchOpts) (Launch
 	if err := m.Cache.EnsureDir(); err != nil {
 		return zero, err
 	}
-	unlock, err := lockLifecycle(ctx, filepath.Join(m.Cache.Dir(), lifecycleLockName))
+	unlock, err := lockLifecycle(ctx, m.lockPath(lifecycleLockName))
 	if err != nil {
 		return zero, err
 	}
@@ -216,23 +217,10 @@ func (m *Manager) launchLocked(ctx context.Context, opts LaunchOpts) (LaunchResu
 				if !opts.Replace {
 					return zero, m.staleContainerError(st, reason)
 				}
-				_ = m.Stop(ctx)
-				// fall through to rebuild
-				res, err := m.createPath(ctx, opts)
-				if err != nil {
-					return zero, err
-				}
-				res.Mode = LaunchModeRebuilt
-				return res, nil
+				return m.rebuildPath(ctx, opts)
 			}
 			if opts.Replace && opts.ForceRebuild {
-				_ = m.Stop(ctx)
-				res, err := m.createPath(ctx, opts)
-				if err != nil {
-					return zero, err
-				}
-				res.Mode = LaunchModeRebuilt
-				return res, nil
+				return m.rebuildPath(ctx, opts)
 			}
 			return LaunchResult{ID: st.ID, Name: name, Mode: LaunchModeAttached}, nil
 		}
@@ -247,7 +235,50 @@ func (m *Manager) launchLocked(ctx context.Context, opts LaunchOpts) (LaunchResu
 		_ = m.Cache.ClearRuntime()
 	}
 
-	return m.createPath(ctx, opts)
+	return m.createPath(ctx, opts, false)
+}
+
+func (m *Manager) lockPath(name string) string {
+	return filepath.Join(m.Cache.Dir(), name)
+}
+
+// rebuildPath holds the exclusive attach lease while replacing the live
+// container. Active sessions retain shared leases, so rebuild waits for them
+// instead of killing their execs.
+func (m *Manager) rebuildPath(ctx context.Context, opts LaunchOpts) (LaunchResult, error) {
+	var zero LaunchResult
+	release, err := lockAttachExclusive(ctx, m.lockPath(attachLockName))
+	if err != nil {
+		return zero, err
+	}
+	defer release()
+
+	st, err := m.RT.InspectContainer(ctx, ContainerName(m.RepoDir))
+	if err == nil && st != nil {
+		_ = m.Cache.SetContainerID(st.ID)
+		if st.Running {
+			changed, reason := m.runningChanged(st)
+			if changed && !opts.Replace {
+				return zero, m.staleContainerError(st, reason)
+			}
+			if !changed && !(opts.Replace && opts.ForceRebuild) {
+				return LaunchResult{ID: st.ID, Name: ContainerName(m.RepoDir), Mode: LaunchModeAttached}, nil
+			}
+			_ = m.Stop(ctx)
+		} else {
+			_ = m.RT.Remove(ctx, st.ID)
+			_ = m.Cache.ClearRuntime()
+		}
+	} else if err != nil && !errors.Is(err, ErrNoContainer) {
+		return zero, err
+	}
+
+	res, err := m.createPath(ctx, opts, true)
+	if err != nil {
+		return zero, err
+	}
+	res.Mode = LaunchModeRebuilt
+	return res, nil
 }
 
 func (m *Manager) staleContainerError(st *InspectState, reason string) *StaleContainerError {
@@ -289,14 +320,49 @@ func (m *Manager) finishAttach(ctx context.Context, id, name string, mode Launch
 	if opts.Headless || !opts.Attach {
 		return res, nil
 	}
+	res, release, err := m.acquireAttachLease(ctx, res, opts.AttachStale)
+	if err != nil {
+		return LaunchResult{}, err
+	}
 	cmd := opts.Cmd
 	if len(cmd) == 0 {
 		cmd = []string{m.Cfg.shell()}
 	}
-	return res, m.attach(ctx, id, cmd, opts.AsRoot)
+	attachErr := m.attach(ctx, res.ID, cmd, opts.AsRoot)
+	if unlockErr := release(); attachErr == nil && unlockErr != nil {
+		return res, unlockErr
+	}
+	return res, attachErr
 }
 
-func (m *Manager) createPath(ctx context.Context, opts LaunchOpts) (LaunchResult, error) {
+func (m *Manager) acquireAttachLease(ctx context.Context, res LaunchResult, attachStale bool) (LaunchResult, func() error, error) {
+	var zero LaunchResult
+	release, err := lockAttachShared(ctx, m.lockPath(attachLockName))
+	if err != nil {
+		return zero, nil, err
+	}
+	st, err := m.RT.InspectContainer(ctx, ContainerName(m.RepoDir))
+	if err != nil {
+		_ = release()
+		return zero, nil, err
+	}
+	if !st.Running {
+		_ = release()
+		return zero, nil, fmt.Errorf("%w: container not running (%s)", ErrNoContainer, st.Status)
+	}
+	if changed, reason := m.runningChanged(st); changed && !attachStale {
+		_ = release()
+		return zero, nil, m.staleContainerError(st, reason)
+	}
+	if res.ID != st.ID {
+		res.Mode = LaunchModeAttached
+	}
+	res.ID = st.ID
+	res.Name = ContainerName(m.RepoDir)
+	return res, release, nil
+}
+
+func (m *Manager) createPath(ctx context.Context, opts LaunchOpts, attachExclusive bool) (LaunchResult, error) {
 	var zero LaunchResult
 	name := ContainerName(m.RepoDir)
 	if m.NeedsBuild(ctx, opts.ForceRebuild) {
@@ -311,7 +377,7 @@ func (m *Manager) createPath(ctx context.Context, opts LaunchOpts) (LaunchResult
 
 	id, err := m.createAndStart(ctx, img)
 	if err != nil {
-		return m.recoverCreateConflict(ctx, opts, err)
+		return m.recoverCreateConflict(ctx, opts, err, attachExclusive)
 	}
 	return LaunchResult{ID: id, Name: name, Mode: LaunchModeStarted}, nil
 }
@@ -319,7 +385,7 @@ func (m *Manager) createPath(ctx context.Context, opts LaunchOpts) (LaunchResult
 // recoverCreateConflict re-inspects the deterministic name after create
 // fails. Another process may have won creation before adopting the lifecycle
 // lock; a compatible live container is safe to join.
-func (m *Manager) recoverCreateConflict(ctx context.Context, opts LaunchOpts, createErr error) (LaunchResult, error) {
+func (m *Manager) recoverCreateConflict(ctx context.Context, opts LaunchOpts, createErr error, attachExclusive bool) (LaunchResult, error) {
 	var zero LaunchResult
 	name := ContainerName(m.RepoDir)
 	st, err := m.RT.InspectContainer(ctx, name)
@@ -334,6 +400,14 @@ func (m *Manager) recoverCreateConflict(ctx context.Context, opts LaunchOpts, cr
 		}
 		if !opts.Replace {
 			return zero, m.staleContainerError(st, reason)
+		}
+		if !attachExclusive {
+			release, err := lockAttachExclusive(ctx, m.lockPath(attachLockName))
+			if err != nil {
+				return zero, err
+			}
+			defer release()
+			return m.recoverCreateConflict(ctx, opts, createErr, true)
 		}
 		_ = m.RT.Stop(ctx, st.ID, 5)
 		_ = m.RT.Remove(ctx, st.ID)
@@ -676,10 +750,18 @@ func (m *Manager) Attach(ctx context.Context, cmd []string, asRoot bool) error {
 	if !st.Running {
 		return fmt.Errorf("%w: container not running", ErrNoContainer)
 	}
+	res, release, err := m.acquireAttachLease(ctx, LaunchResult{ID: st.ID, Name: ContainerName(m.RepoDir), Mode: LaunchModeAttached}, true)
+	if err != nil {
+		return err
+	}
 	if len(cmd) == 0 {
 		cmd = []string{m.Cfg.shell()}
 	}
-	return m.attach(ctx, st.ID, cmd, asRoot)
+	attachErr := m.attach(ctx, res.ID, cmd, asRoot)
+	if unlockErr := release(); attachErr == nil && unlockErr != nil {
+		return unlockErr
+	}
+	return attachErr
 }
 
 // Status returns inspect state for the managed container, or ErrNoContainer.

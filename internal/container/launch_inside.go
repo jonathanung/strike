@@ -82,6 +82,11 @@ func (m *Manager) LaunchInsideWithResult(ctx context.Context, opts LaunchInsideO
 	if err != nil {
 		return zero, err
 	}
+	res, release, err := m.acquireAttachLease(ctx, res, opts.AttachStale)
+	if err != nil {
+		return zero, err
+	}
+	defer release()
 	if opts.OnResult != nil {
 		opts.OnResult(res)
 	}

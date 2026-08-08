@@ -320,6 +320,57 @@ func TestConcurrentStaleRebuildReinspectsBeforeAttach(t *testing.T) {
 	}
 }
 
+func TestRebuildWaitsForActiveAttach(t *testing.T) {
+	repo := t.TempDir()
+	fake := newLifecycleFakeRuntime()
+	fake.stopEntered = make(chan struct{}, 1)
+	m1, m2, _ := newLifecycleTestManagers(t, repo, fake)
+	fake.current = &InspectState{
+		ID: "cid-stale", Name: ContainerName(repo), Running: true, Status: "running", Image: fake.imageID,
+		Labels: map[string]string{LabelManaged: "true", LabelConfigHash: "stale", LabelImageID: fake.imageID},
+	}
+	if err := m1.Cache.SetContainerID(fake.current.ID); err != nil {
+		t.Fatal(err)
+	}
+	attachEntered := make(chan struct{}, 1)
+	attachRelease := make(chan struct{})
+	m1.AttachFn = func(context.Context, string, string, []string, bool) error {
+		attachEntered <- struct{}{}
+		<-attachRelease
+		return nil
+	}
+
+	attached := launchAsync(m1, LaunchOpts{Attach: true, AttachStale: true})
+	requireSignal(t, attachEntered, "active attach")
+	requireSignal(t, fake.infoCalls, "attach availability check")
+	released := false
+	defer func() {
+		if !released {
+			close(attachRelease)
+		}
+	}()
+
+	rebuilt := launchAsync(m2, LaunchOpts{Headless: true, Replace: true})
+	requireSignal(t, fake.infoCalls, "rebuild availability check")
+	requireBlocked(t, rebuilt, "rebuild with active attach")
+	select {
+	case <-fake.stopEntered:
+		t.Fatal("rebuild stopped the container while attach lease was active")
+	default:
+	}
+
+	close(attachRelease)
+	released = true
+	requireSignal(t, fake.stopEntered, "stop after attach release")
+	attachOutcome, rebuildOutcome := requireOutcome(t, attached), requireOutcome(t, rebuilt)
+	if attachOutcome.err != nil || rebuildOutcome.err != nil {
+		t.Fatalf("launch errors: attach=%v rebuild=%v", attachOutcome.err, rebuildOutcome.err)
+	}
+	if rebuildOutcome.result.Mode != LaunchModeRebuilt || rebuildOutcome.result.ID == attachOutcome.result.ID {
+		t.Fatalf("outcomes: attach=%+v rebuild=%+v", attachOutcome.result, rebuildOutcome.result)
+	}
+}
+
 func TestCreateConflictAdoptsCompatibleWinner(t *testing.T) {
 	repo := t.TempDir()
 	fake := newLifecycleFakeRuntime()
