@@ -1,5 +1,7 @@
 /** Web-safe slash catalog and dispatch (subset of TUI builtins). */
 
+export { formatCostNotice } from "./cost";
+
 export type SlashCompletion = { label: string; detail: string; insert: string };
 
 export const WEB_SLASH_COMMANDS: SlashCompletion[] = [
@@ -135,20 +137,3 @@ export function formatSlashHelp(skills: { name: string; description?: string }[]
   return rows.join("\n");
 }
 
-export function formatCostNotice(status: {
-  provider?: string;
-  model?: string;
-  contextUsed?: number;
-  contextLimit?: number;
-}): string {
-  const ctx =
-    status.contextUsed !== undefined && status.contextLimit !== undefined
-      ? `${status.contextUsed.toLocaleString()} / ${status.contextLimit.toLocaleString()}`
-      : "not reported";
-  return [
-    `Provider: ${status.provider || "—"}`,
-    `Model: ${status.model || "—"}`,
-    `Context: ${ctx}`,
-    "Cost: not reported",
-  ].join("\n");
-}

@@ -2321,3 +2321,36 @@ dialog fieldset small { color: var(--muted); }
 .pane-meter-fill.tone-error, .pane-meter-fill.tone-danger { background: var(--signal); }
 .pane-divider { border: 0; border-top: 1px solid var(--rule); margin: 6px 0; }
 .pane-spacer { width: 100%; }
+
+/* WEBUI.7 transcript / tool / diff */
+.tool-card summary { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; cursor: pointer; padding: 8px 10px; }
+.tool-name { font-weight: 600; font-family: var(--mono, ui-monospace, monospace); }
+.tool-state { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.tool-state-running { color: var(--acid); }
+.tool-state-error { color: var(--diff-del); }
+.tool-state-denied { color: var(--warn, #eab308); }
+.tool-duration { color: var(--muted); }
+.tool-args { padding: 8px 10px; border-top: 1px solid var(--rule); }
+.tool-args pre, .tool-output { margin: 0; max-height: 280px; overflow: auto; font-size: 11px; }
+.diff-viewer { border-top: 1px solid var(--rule); }
+.diff-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 6px 10px; font-size: 11px; }
+.diff-wrap { display: inline-flex; gap: 4px; align-items: center; color: var(--muted); }
+.diff.wrap { white-space: pre-wrap; word-break: break-word; }
+.diff .hunk { color: var(--muted); }
+.copy-btn { font-size: 10px; padding: 2px 6px; }
+button.file-ref { background: none; border: 0; padding: 0; color: var(--acid); cursor: pointer; text-decoration: underline; font: inherit; }
+.exploration-group summary { cursor: pointer; padding: 8px 10px; display: flex; gap: 8px; align-items: center; }
+.exploration-body { display: grid; gap: 6px; padding: 0 8px 8px; }
+.semantic-event p { margin: 0; color: var(--text); }
+.jump-latest {
+  position: sticky; bottom: 12px; margin: 0 auto; display: block;
+  z-index: 2; padding: 8px 14px; border-radius: 999px;
+  border: 1px solid var(--rule); background: var(--panel, var(--bg));
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--text) 12%, transparent);
+  cursor: pointer;
+}
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+.code-block figcaption { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
