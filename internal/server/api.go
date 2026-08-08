@@ -101,6 +101,8 @@ type capabilities struct {
 	Artifacts bool `json:"artifacts"`
 	// Ledger is true when host.Services.Ledger is wired (read-only active/history).
 	Ledger bool `json:"ledger"`
+	// Themes is true when host.Services.Themes is wired (catalog list/get).
+	Themes bool `json:"themes"`
 }
 
 type bootstrapResponse struct {
@@ -151,6 +153,7 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 		// Plugin lifecycle + pane contributions via /v1/plugins* and /v1/panes* (#732).
 		c.Plugins = h.Plugins != nil
 		c.Panes = h.Panes != nil
+		c.Themes = h.Themes != nil
 		// Capabilities describe browser surfaces, not merely host interfaces.
 		// Roots, custom providers, project init, and telemetry remain false
 		// until this server exposes their service operations.
@@ -1094,6 +1097,44 @@ func (s *Server) handlePermissionPresets(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"presets": s.opts.Services.Permissions.Presets()})
+}
+
+// handleThemesList returns the portable theme catalog (WEBUI.11).
+// Project-scoped themes resolve against the live session cwd when present.
+func (s *Server) handleThemesList(w http.ResponseWriter, r *http.Request) {
+	if s.opts.Services == nil || s.opts.Services.Themes == nil {
+		capabilityUnavailable(w, "themes")
+		return
+	}
+	workDir := s.currentCWD(r)
+	list := s.opts.Services.Themes.List(workDir)
+	active := ""
+	if s.opts.Services.Settings != nil {
+		active = strings.TrimSpace(s.opts.Services.Settings.Defaults().Theme)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"themes": list,
+		"active": active,
+	})
+}
+
+// handleThemeGet returns one theme by id.
+func (s *Server) handleThemeGet(w http.ResponseWriter, r *http.Request) {
+	if s.opts.Services == nil || s.opts.Services.Themes == nil {
+		capabilityUnavailable(w, "themes")
+		return
+	}
+	id := strings.TrimSpace(r.PathValue("id"))
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "theme id is required"})
+		return
+	}
+	info, ok := s.opts.Services.Themes.Get(s.currentCWD(r), id)
+	if !ok {
+		writeJSON(w, http.StatusNotFound, opErrorResponse{Error: "theme not found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, info)
 }
 
 func capabilityUnavailable(w http.ResponseWriter, name string) {
