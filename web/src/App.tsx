@@ -5,9 +5,10 @@ import { TeamWorkspace } from "./Team";
 import { buildExportMarkdown, defaultExportFilename, downloadTextFile } from "./exportMarkdown";
 import { clearQueue, editQueuedText, moveQueuedAt, removeQueuedAt, type QueuedPrompt } from "./queueOps";
 import { initialClientState, reduceClient, selectedSlice, setAdd, setRemove } from "./reducer";
-import { formatCostNotice, formatSlashHelp, resolveSlash, WEB_SLASH_COMMANDS } from "./slash";
+import { formatSlashHelp, resolveSlash, WEB_SLASH_COMMANDS } from "./slash";
 import { applyAppearance, loadAppearance, SettingsDialog } from "./Settings";
-import { Transcript } from "./Transcript";
+import { formatCostLabel, formatCostNotice } from "./cost";
+import { TranscriptList } from "./Transcript";
 import type {
   SandboxInfo, ActiveRoot, Bootstrap, Capabilities, FitWarning, ImageAttachment,
   RequestAttribution, Session, Status, TokenCount, WorkspaceState,
@@ -81,31 +82,7 @@ export function formatContextLabel(status: Status): string {
   return "not reported";
 }
 
-export function formatCostLabel(status: Status, rates?: { inputPerM: number; outputPerM: number; hasCost: boolean }): string {
-  const parts: string[] = [];
-  if (status.inputTokens !== undefined) parts.push(`in ${status.inputTokens.toLocaleString()}`);
-  if (status.outputTokens !== undefined) parts.push(`out ${status.outputTokens.toLocaleString()}`);
-  if (status.cacheReadTokens !== undefined) parts.push(`cache ${status.cacheReadTokens.toLocaleString()}`);
-  if (!parts.length) return "not reported";
-  let usd = "";
-  if (rates?.hasCost) {
-    let total = 0;
-    let ok = false;
-    if (status.inputTokens !== undefined) { total += status.inputTokens * rates.inputPerM / 1_000_000; ok = true; }
-    if (status.outputTokens !== undefined) { total += status.outputTokens * rates.outputPerM / 1_000_000; ok = true; }
-    if (ok) {
-      if (total > 0 && total < 0.01) usd = "<$0.01";
-      else {
-        let s = total.toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
-        if (!s || s === "-") s = "0";
-        usd = `$${s}`;
-      }
-      if (status.inputTokens === undefined || status.outputTokens === undefined) usd += " partial";
-      if (status.usageSource === "estimated" || status.usageSource?.startsWith("mixed")) usd += " est.";
-    }
-  }
-  return usd ? `${usd} · ${parts.join(" · ")}` : parts.join(" · ");
-}
+export { formatCostLabel } from "./cost";
 const slashCommands: Completion[] = WEB_SLASH_COMMANDS;
 
 const op = (type: string, data?: unknown, rootID?: string) => sendOp(type, data, rootID).catch((error) => window.alert(error.message));
@@ -199,6 +176,10 @@ export default function App() {
   const [sandboxExplainOpen, setSandboxExplainOpen] = useState(false);
   const [selectedChildId, setSelectedChildId] = useState<string>();
   const endRef = useRef<HTMLDivElement>(null);
+  const transcriptRef = useRef<HTMLElement>(null);
+  const stickToBottomRef = useRef(true);
+  const [showJumpLatest, setShowJumpLatest] = useState(false);
+  const [liveStatusAnn, setLiveStatusAnn] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
   const setDraft = (value: string | ((prev: string) => string)) => {
     if (!selectedID) return;
@@ -331,7 +312,51 @@ export default function App() {
       .catch(() => {});
     return () => { cancelled = true; };
   }, [selectedID, boot?.capabilities.sessions]);
-  useEffect(() => { endRef.current?.scrollIntoView({ block: "end" }); }, [state.items]);
+  useEffect(() => {
+    const el = transcriptRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
+      const atBottom = dist < 80;
+      stickToBottomRef.current = atBottom;
+      setShowJumpLatest(!atBottom && state.items.length > 0);
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, [state.items.length]);
+  useEffect(() => {
+    if (!stickToBottomRef.current) {
+      setShowJumpLatest(state.items.length > 0);
+      return;
+    }
+    endRef.current?.scrollIntoView({ block: "end" });
+    setShowJumpLatest(false);
+  }, [state.items]);
+  // Batched status announcements (not per-token transcript floods).
+  useEffect(() => {
+    const bits: string[] = [];
+    if (state.status.busy) bits.push("Agent working");
+    else if (state.items.length) bits.push("Agent idle");
+    if (state.permission) bits.push("Permission required");
+    if (state.question) bits.push("Question pending");
+    const next = bits.join(". ");
+    const t = window.setTimeout(() => setLiveStatusAnn(next), 400);
+    return () => window.clearTimeout(t);
+  }, [state.status.busy, state.permission, state.question, state.items.length]);
+  const openFileRef = (path: string, _line?: number) => {
+    setSurfaceUnavailable(undefined);
+    setSurfaceEntity(path);
+    writeDeepLinkToLocation({ mode: "code", surface: "files", entity: path });
+    setWorkspaceMode("code");
+    setInspector("files");
+    setInspectorOpen(true);
+    void inspectProject("files");
+  };
+  const jumpToLatest = () => {
+    stickToBottomRef.current = true;
+    setShowJumpLatest(false);
+    endRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
+  };
   useEffect(() => {
     if (!selectedID || state.status.busy || !queue.length || !selectedIsLive) return;
     const [next, ...rest] = queue;
@@ -413,7 +438,7 @@ export default function App() {
         notice("Queue", queue.length ? `${queue.length} prompt(s) queued — reorder, edit, or clear below the composer.` : "Queue is empty. Prompts sent while the agent is busy land here.");
         return;
       case "cost":
-        notice("Cost", formatCostNotice(state.status));
+        notice("Cost", formatCostNotice(state.status, modelRates));
         return;
       case "copy": {
         const last = [...state.items].reverse().find((item) => item.kind === "assistant" && item.text.trim());
@@ -865,7 +890,8 @@ export default function App() {
       </section>
       <RuntimeStatus status={state.status} modelRates={modelRates} />
       </div>
-      <section className="transcript" aria-live="polite" aria-label="Conversation transcript">{!boot && transport !== "connecting" ? <div className="empty-state" role="alert"><span>ERROR</span><h1>{transport}</h1><p>Failed to load cockpit. Open the URL printed by <code>strike serve</code> (one-time <code>?token=</code> handoff sets a cookie), or send <code>Authorization: Bearer</code>.</p></div> : !state.items.length && <div className="empty-state"><span>01 / READY</span><h1>{boot?.attachOnly ? "Inspect the record." : "Direct the work."}</h1><p>{boot?.attachOnly ? "Select a durable session from the rail." : "Describe an outcome. Strike will plan, act, and report through the live engine seam."}</p></div>}{state.items.map((item) => <Transcript key={item.id} item={item} showThinking={showThinking} />)}<div ref={endRef} /></section>
+      <div className="sr-only" aria-live="polite" aria-atomic="true">{liveStatusAnn}</div>
+      <section ref={transcriptRef} className="transcript" aria-label="Conversation transcript">{!boot && transport !== "connecting" ? <div className="empty-state" role="alert"><span>ERROR</span><h1>{transport}</h1><p>Failed to load cockpit. Open the URL printed by <code>strike serve</code> (one-time <code>?token=</code> handoff sets a cookie), or send <code>Authorization: Bearer</code>.</p></div> : !state.items.length && <div className="empty-state"><span>01 / READY</span><h1>{boot?.attachOnly ? "Inspect the record." : "Direct the work."}</h1><p>{boot?.attachOnly ? "Select a durable session from the rail." : "Describe an outcome. Strike will plan, act, and report through the live engine seam."}</p></div>}<TranscriptList items={state.items} showThinking={showThinking} onFileRef={openFileRef} /><div ref={endRef} />{showJumpLatest && <button type="button" className="jump-latest" onClick={jumpToLatest}>New activity — jump to latest</button>}</section>
       <form className="composer" onSubmit={submit}><label htmlFor="prompt">Instruction {state.status.busy && "— send to queue"}</label><textarea aria-label="Instruction" id="prompt" value={draft} disabled={!isLive} placeholder={isLive ? "Describe the next outcome…  / command" : "Historical session — read only"} onPaste={(event) => void attach(event.clipboardData.files)} onDrop={(event) => { event.preventDefault(); void attach(event.dataTransfer.files); }} onDragOver={(event) => event.preventDefault()} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !completions.length) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} />{completions.length > 0 && <div className="completion" role="listbox" aria-label="Composer completions">{completions.slice(0, 8).map((item) => <button type="button" role="option" key={item.label} onClick={() => selectCompletion(item)}><strong>{item.label}</strong><span>{item.detail}</span></button>)}</div>}{images.length > 0 && <div className="attachments">{images.map((image, index) => <button type="button" key={`${image.name}-${index}`} onClick={() => setImages((list) => list.filter((_, i) => i !== index))}>{image.name} ×</button>)}</div>}{queue.length > 0 && <div className="prompt-queue-wrap"><ol ref={queueRef} className="prompt-queue" aria-label="Queued prompts">{queue.map((item, index) => <li key={index}>{queueEdit?.index === index ? <input className="queue-edit" aria-label={`Queued prompt text ${index + 1}`} value={queueEdit.text} autoFocus onChange={(event) => setQueueEdit({ index, text: event.target.value })} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); queueEditCancel.current = false; setQueue((list) => editQueuedText(list, index, queueEdit.text)); setQueueEdit(null); } if (event.key === "Escape") { event.preventDefault(); queueEditCancel.current = true; setQueueEdit(null); } }} onBlur={() => { if (!queueEditCancel.current) setQueue((list) => editQueuedText(list, index, queueEdit.text)); queueEditCancel.current = false; setQueueEdit(null); }} /> : <span>{item.text}{item.images.length > 0 ? ` (${item.images.length} img)` : ""}</span>}<span className="queue-actions"><button type="button" aria-label={`Move queued prompt ${index + 1} up`} disabled={index === 0} onClick={() => setQueue((list) => moveQueuedAt(list, index, -1))}>↑</button><button type="button" aria-label={`Move queued prompt ${index + 1} down`} disabled={index === queue.length - 1} onClick={() => setQueue((list) => moveQueuedAt(list, index, 1))}>↓</button><button type="button" aria-label={`Edit queued prompt ${index + 1}`} onClick={() => { queueEditCancel.current = false; setQueueEdit({ index, text: item.text }); }}>✎</button><button type="button" aria-label={`Remove queued prompt ${index + 1}`} onClick={() => { setQueue((list) => removeQueuedAt(list, index)); setQueueEdit((cur) => cur?.index === index ? null : cur); }}>×</button></span></li>)}</ol><div className="queue-toolbar"><button type="button" onClick={() => { setQueue(clearQueue()); setQueueEdit(null); }}>Clear queue</button></div></div>}<div><span><kbd>↵</kbd> send · <kbd>⇧↵</kbd> newline</span><span><input ref={fileRef} hidden type="file" accept="image/*" multiple onChange={(event) => void attach(event.target.files)} /><button type="button" onClick={() => fileRef.current?.click()}>Attach</button>{history.length > 0 && <button type="button" onClick={() => setDraft(history.at(-1) || "")}>History</button>}<button type="button" onClick={() => exportSession()} disabled={!state.items.length}>Export</button>{state.status.busy && <button type="button" className="stop" onClick={() => void op("interrupt")}>Interrupt</button>}<button type="submit" disabled={!draft.trim() || !isLive}>{state.status.busy ? "Queue" : "Send"}</button></span></div></form>
     </main>
     <aside className={`inspector ${inspectorOpen ? "open" : "collapsed"}`} aria-label="Inspector">
