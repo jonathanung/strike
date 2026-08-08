@@ -1306,6 +1306,11 @@ function InspectorBody({ tab, boot, workspace, data, loading, expandedDiffs, tog
         onOpenTranscript={onOpenChildTranscript}
         readOnly={!isLive || Boolean(boot?.attachOnly)}
         compact={typeof window !== "undefined" && window.innerWidth < 720}
+        protocolOps={boot?.protocolOps}
+        teamControl={boot?.capabilities?.teamControl}
+        agents={(boot?.agents || []).map((a) => a.name)}
+        rootSessionId={selectedID}
+        sendOp={isLive && !boot?.attachOnly ? (type, data) => sendOp(type, data, selectedID) : undefined}
       />
     );
   }

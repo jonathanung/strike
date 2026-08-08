@@ -66,4 +66,103 @@ describe("TeamWorkspace", () => {
     expect(screen.getByText(/Team dissolved/)).toBeInTheDocument();
     expect(screen.getByText(/read-only/i)).toBeInTheDocument();
   });
+
+  it("shows controls when team Ops are advertised and hides when attach-only", async () => {
+    const team = sampleTeam();
+    const sendOp = vi.fn().mockResolvedValue({ ok: true, childSessionId: "child-9" });
+    const ops = [
+      "team.spawn", "team.message", "team.broadcast", "team.child_interrupt",
+      "team.task_transition", "team.board_create", "team.board_claim", "team.board_complete",
+    ];
+    const { rerender } = render(
+      <TeamWorkspace
+        team={team}
+        onSelect={() => {}}
+        protocolOps={ops}
+        teamControl
+        agents={["build", "explore"]}
+        rootSessionId="lead-1"
+        sendOp={sendOp}
+      />,
+    );
+    fireEvent.click(screen.getByRole("tab", { name: "controls" }));
+    expect(screen.getByLabelText("Team controls")).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText(/What should the child do/), {
+      target: { value: "Implement feature X" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Spawn" }));
+    await vi.waitFor(() => expect(sendOp).toHaveBeenCalled());
+    const [type, data] = sendOp.mock.calls[0];
+    expect(type).toBe("team.spawn");
+    expect(data).toMatchObject({
+      objective: "Implement feature X",
+      rootSessionId: "lead-1",
+    });
+    expect(data.idempotencyKey).toBeTruthy();
+
+    rerender(
+      <TeamWorkspace
+        team={team}
+        onSelect={() => {}}
+        protocolOps={ops}
+        teamControl
+        readOnly
+        sendOp={sendOp}
+      />,
+    );
+    // read-only still shows controls tab with explanation when ops were known
+    fireEvent.click(screen.getByRole("tab", { name: "controls" }));
+    expect(screen.getByText(/Attach-only|disabled/i)).toBeInTheDocument();
+  });
+
+  it("confirms interrupt and sends child_interrupt", async () => {
+    const team = sampleTeam();
+    const sendOp = vi.fn().mockResolvedValue({ ok: true, alreadyTerminal: false });
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const ops = ["team.child_interrupt", "team.message"];
+    render(
+      <TeamWorkspace
+        team={team}
+        selectedId="c1"
+        onSelect={() => {}}
+        protocolOps={ops}
+        teamControl
+        rootSessionId="lead-1"
+        sendOp={sendOp}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Interrupt" }));
+    expect(confirm).toHaveBeenCalled();
+    await vi.waitFor(() => expect(sendOp).toHaveBeenCalledWith(
+      "team.child_interrupt",
+      expect.objectContaining({ childSessionId: "c1", rootSessionId: "lead-1" }),
+    ));
+    confirm.mockRestore();
+  });
+
+  it("blocks duplicate in-flight spawn clicks", async () => {
+    const team = sampleTeam();
+    let resolve!: (v: unknown) => void;
+    const sendOp = vi.fn().mockImplementation(() => new Promise((r) => { resolve = r; }));
+    const ops = ["team.spawn"];
+    render(
+      <TeamWorkspace
+        team={team}
+        onSelect={() => {}}
+        protocolOps={ops}
+        teamControl
+        rootSessionId="lead-1"
+        sendOp={sendOp}
+      />,
+    );
+    fireEvent.click(screen.getByRole("tab", { name: "controls" }));
+    fireEvent.change(screen.getByPlaceholderText(/What should the child do/), {
+      target: { value: "slow spawn" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Spawn" }));
+    fireEvent.click(screen.getByRole("button", { name: "Spawn" }));
+    await vi.waitFor(() => expect(sendOp).toHaveBeenCalledTimes(1));
+    resolve({ ok: true, childSessionId: "c-new" });
+    await vi.waitFor(() => expect(screen.getByText(/Spawned|OK/i)).toBeInTheDocument());
+  });
 });
