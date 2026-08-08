@@ -84,6 +84,9 @@ func TestComputeLayoutBudgetsTipAndDropsUnderPressure(t *testing.T) {
 }
 
 func TestTipViewRendersMutedStrikeCopy(t *testing.T) {
+	prevTipDay := tipDayOverride
+	tipDayOverride = 1
+	t.Cleanup(func() { tipDayOverride = prevTipDay })
 	m, _ := newAppTestModelHome(nil, nil)
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 	out := ansi.Strip(m.tipView(60))
