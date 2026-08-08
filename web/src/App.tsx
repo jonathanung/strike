@@ -3,6 +3,7 @@ import { activateRoot, bootstrap, closeRoot, createRoot, fetchTeam, historicalCo
 import { ChildAgentsPanel } from "./ChildAgents";
 import { TeamWorkspace } from "./Team";
 import { CodeExplorer } from "./CodeExplorer";
+import { ArtifactsPanel, LedgerPanel, TeamReviewPanel } from "./ArtifactsReview";
 import { buildExportMarkdown, defaultExportFilename, downloadTextFile } from "./exportMarkdown";
 import { clearQueue, editQueuedText, moveQueuedAt, removeQueuedAt, type QueuedPrompt } from "./queueOps";
 import { initialClientState, reduceClient, selectedSlice, setAdd, setRemove } from "./reducer";
@@ -1511,6 +1512,32 @@ function InspectorBody({ tab, boot, workspace, data, loading, expandedDiffs, tog
         agents={(boot?.agents || []).map((a) => a.name)}
         rootSessionId={selectedID}
         sendOp={isLive && !boot?.attachOnly ? (type, data) => sendOp(type, data, selectedID) : undefined}
+      />
+    );
+  }
+  if (tab === "artifacts") {
+    return (
+      <ArtifactsPanel
+        available={Boolean(boot?.capabilities.artifacts)}
+        rootID={selectedID}
+        entity={entity}
+        onOpenFile={(path) => {
+          writeDeepLinkToLocation({ mode: "code", surface: "files", entity: path, root: selectedID || undefined });
+        }}
+      />
+    );
+  }
+  if (tab === "ledger") {
+    return <LedgerPanel available={Boolean(boot?.capabilities.ledger)} rootID={selectedID} />;
+  }
+  if (tab === "review") {
+    return (
+      <TeamReviewPanel
+        team={workspace.team}
+        onSelectAgent={onSelectChild}
+        onOpenFile={(path) => {
+          writeDeepLinkToLocation({ mode: "code", surface: "files", entity: path, root: selectedID || undefined });
+        }}
       />
     );
   }

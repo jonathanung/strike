@@ -2619,3 +2619,41 @@ button.file-ref { background: none; border: 0; padding: 0; color: var(--acid); c
 }
 .code-apply button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
 .code-apply-preview { max-height: 160px; overflow: auto; }
+
+/* WEBUI.16 artifacts / ledger / review */
+.review-panel { display: grid; gap: 10px; }
+.review-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.review-head h2 { margin: 0; }
+.review-tabs { display: flex; gap: 6px; margin-left: auto; }
+.review-tabs button, .review-filter select, .review-head button {
+  border: 1px solid var(--rule); background: transparent; padding: 4px 10px;
+  border-radius: 999px; cursor: pointer; font-size: 12px; color: inherit;
+}
+.review-tabs button.active { background: var(--text); color: var(--bg); border-color: var(--text); }
+.review-filter { display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--muted); }
+.review-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.review-list > li > button {
+  width: 100%; text-align: left; display: grid; gap: 2px;
+  border: 1px solid var(--rule); background: var(--code-bg); padding: 8px; border-radius: 6px; cursor: pointer; color: inherit;
+}
+.review-list > li > button.active { border-color: var(--acid); }
+.review-detail {
+  border: 1px solid var(--rule); border-radius: 8px; padding: 10px; background: var(--code-bg);
+}
+.review-detail header { display: flex; justify-content: space-between; align-items: center; }
+.review-detail h3 { margin: 0; }
+.review-detail dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; font-size: 12px; }
+.review-detail dt { color: var(--muted); }
+.review-detail dd { margin: 0; }
+.review-content {
+  max-height: 280px; overflow: auto; padding: 8px; border-radius: 6px;
+  background: var(--bg); border: 1px solid var(--rule); font-size: 12px; white-space: pre-wrap;
+}
+.review-paths { margin: 4px 0 0; padding-left: 16px; }
+.ledger-row { border: 1px solid var(--rule); border-radius: 6px; padding: 8px; background: var(--code-bg); }
+.ledger-row-head { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 4px; }
+.ledger-meta { font-size: 11px; }
+button.linkish { border: 0; background: transparent; color: var(--acid); cursor: pointer; padding: 0; font: inherit; }
+@media (max-width: 720px) {
+  .review-content { max-height: 200px; }
+}
