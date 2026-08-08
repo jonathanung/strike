@@ -2396,15 +2396,53 @@ dialog fieldset small { color: var(--muted); }
 .team-board-col h4 { margin: 0 0 8px; font-size: 12px; text-transform: capitalize; }
 .team-board-col ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .team-board-card {
-  width: 100%; text-align: left; display: grid; gap: 2px;
-  border: 1px solid var(--rule); background: var(--bg); padding: 8px; border-radius: 6px; cursor: pointer;
+  width: 100%; text-align: left; display: grid; gap: 4px;
+  border: 1px solid var(--rule); background: var(--bg); padding: 8px; border-radius: 6px;
 }
+.team-board-card-main {
+  width: 100%; text-align: left; display: grid; gap: 2px;
+  border: 0; background: transparent; padding: 0; cursor: pointer; color: inherit;
+}
+.team-board-actions, .team-control-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.team-board-actions button, .team-control-row button, .team-controls-inline button {
+  border: 1px solid var(--rule); background: transparent; padding: 4px 8px;
+  border-radius: 6px; cursor: pointer; font-size: 12px;
+}
+.team-board-actions button:disabled, .team-control-row button:disabled { opacity: 0.5; cursor: not-allowed; }
 .team-board-reason { font-size: 11px; color: var(--muted); }
 .team-messages { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .team-messages li { display: grid; gap: 2px; padding: 8px; border: 1px solid var(--rule); border-radius: 6px; }
+.team-control-status {
+  margin: 0; padding: 8px 10px; border-radius: 6px; font-size: 12px;
+  border: 1px solid var(--rule); background: color-mix(in srgb, var(--acid) 10%, transparent);
+}
+.team-controls { display: grid; gap: 12px; }
+.team-control-block {
+  border: 1px solid var(--rule); border-radius: 8px; padding: 10px;
+  display: grid; gap: 8px; margin: 0; background: var(--code-bg);
+}
+.team-control-block legend { padding: 0 4px; font-weight: 600; }
+.team-control-block label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+.team-control-block input, .team-control-block textarea, .team-control-block select {
+  width: 100%; border: 1px solid var(--rule); border-radius: 6px;
+  background: var(--bg); color: var(--text); padding: 6px 8px; font: inherit;
+}
+.team-control-block button.primary {
+  justify-self: start; background: var(--text); color: var(--bg); border-color: var(--text);
+  padding: 6px 12px; border-radius: 6px; cursor: pointer;
+}
+.team-control-block button.linkish {
+  justify-self: start; border: 0; background: transparent; color: var(--acid);
+  cursor: pointer; padding: 0; text-align: left;
+}
+.team-control-advanced { display: grid; gap: 8px; }
+.team-local-board { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.team-local-board li { display: grid; gap: 4px; padding: 8px; border: 1px solid var(--rule); border-radius: 6px; background: var(--bg); }
+.team-controls-inline { margin-top: 8px; }
 @media (max-width: 720px) {
   .team-board { flex-direction: column; overflow-x: visible; }
   .team-board-col { min-width: 0; max-width: none; width: 100%; }
+  .team-control-block { padding: 8px; }
 }
 /* WEBUI.7 transcript / tool / diff */
 .tool-card summary { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; cursor: pointer; padding: 8px 10px; }
@@ -2438,3 +2476,58 @@ button.file-ref { background: none; border: 0; padding: 0; color: var(--acid); c
   overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
 }
 .code-block figcaption { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+
+/* WEBUI.8 Code explorer */
+.code-explorer { display: grid; gap: 10px; }
+.code-explorer-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.code-explorer-head h2 { margin: 0; }
+.code-view-tabs { display: flex; gap: 6px; margin-left: auto; }
+.code-view-tabs button, .code-md-toggle button {
+  border: 1px solid var(--rule); background: transparent; padding: 4px 10px;
+  border-radius: 999px; cursor: pointer; font-size: 12px;
+}
+.code-view-tabs button.active, .code-md-toggle button.active {
+  background: var(--text); color: var(--bg); border-color: var(--text);
+}
+.code-explorer-body {
+  display: grid; grid-template-columns: minmax(160px, 240px) 1fr; gap: 12px; min-height: 280px;
+}
+.code-sidebar { display: grid; gap: 8px; align-content: start; }
+.code-search { display: flex; gap: 6px; align-items: center; }
+.code-search input {
+  flex: 1; border: 1px solid var(--rule); border-radius: 6px;
+  background: var(--bg); color: var(--text); padding: 6px 8px; font: inherit;
+}
+.code-breadcrumbs { font-size: 12px; color: var(--muted); }
+.code-breadcrumbs button {
+  border: 0; background: transparent; color: var(--acid); cursor: pointer; padding: 0;
+}
+.code-tree, .code-search-hits { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; max-height: 360px; overflow: auto; }
+.code-tree button, .code-search-hits button {
+  width: 100%; text-align: left; border: 1px solid transparent; background: transparent;
+  padding: 4px 6px; border-radius: 4px; cursor: pointer; color: inherit; font: inherit;
+}
+.code-tree button:hover, .code-search-hits button:hover, .code-tree button.active {
+  border-color: var(--rule); background: var(--code-bg);
+}
+.code-viewer {
+  border: 1px solid var(--rule); border-radius: 8px; padding: 10px;
+  background: var(--code-bg); min-width: 0; overflow: auto;
+}
+.code-viewer-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
+.code-viewer-head h3 { margin: 0; font-size: 13px; word-break: break-all; }
+.code-raw { margin: 0; font-family: var(--mono, ui-monospace, monospace); font-size: 12px; line-height: 1.45; }
+.code-line { display: grid; grid-template-columns: 3em 1fr; gap: 8px; }
+.code-line.focus { background: color-mix(in srgb, var(--acid) 18%, transparent); }
+.code-gutter { color: var(--muted); text-align: right; user-select: none; }
+.code-text { white-space: pre-wrap; word-break: break-word; }
+.code-md-preview { font-size: 13px; line-height: 1.5; }
+.code-md-preview h2, .code-md-preview h3, .code-md-preview h4 { margin: 0.8em 0 0.3em; }
+.code-md-preview p { margin: 0.4em 0; }
+.code-md-preview pre.md-code {
+  overflow: auto; padding: 8px; border-radius: 6px; background: var(--bg); border: 1px solid var(--rule);
+}
+@media (max-width: 720px) {
+  .code-explorer-body { grid-template-columns: 1fr; }
+  .code-tree, .code-search-hits { max-height: 200px; }
+}

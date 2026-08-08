@@ -28,9 +28,49 @@ export const patchSandbox = (mode: string, iKnow = false, rootID?: string) => {
   const qs = rootID ? `?root=${encodeURIComponent(rootID)}` : "";
   return request<SandboxInfo>(`/v1/sandbox${qs}`, { method: "PATCH", body: JSON.stringify({ mode, iKnow }) });
 };
-export const sendOp = (type: string, data?: unknown, rootID?: string) => {
+/** Structured outcome from POST /v1/ops (team-control Ops return extra fields). */
+export type OpResult = {
+  ok: boolean;
+  childSessionId?: string;
+  name?: string;
+  delegationId?: string;
+  taskId?: string;
+  messageId?: string;
+  version?: number;
+  alreadyTerminal?: boolean;
+  error?: string;
+  code?: string;
+  currentVersion?: number;
+};
+
+export class OpError extends Error {
+  code?: string;
+  currentVersion?: number;
+  constructor(message: string, code?: string, currentVersion?: number) {
+    super(message);
+    this.name = "OpError";
+    this.code = code;
+    this.currentVersion = currentVersion;
+  }
+}
+
+export const sendOp = async (type: string, data?: unknown, rootID?: string): Promise<OpResult> => {
   const qs = rootID ? `?root=${encodeURIComponent(rootID)}` : "";
-  return request<{ ok: boolean }>(`/v1/ops${qs}`, { method: "POST", body: JSON.stringify({ type, ...(data === undefined ? {} : { data }) }) });
+  const response = await fetch(`/v1/ops${qs}`, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ type, ...(data === undefined ? {} : { data }) }),
+  });
+  const body = (await response.json().catch(() => null)) as OpResult | null;
+  if (!response.ok) {
+    throw new OpError(
+      body?.error || `${response.status} ${response.statusText}`,
+      body?.code,
+      body?.currentVersion,
+    );
+  }
+  return body || { ok: true };
 };
 
 /** Download a redacted prompt/config diagnostic bundle (live host only). */
