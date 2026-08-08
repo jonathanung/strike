@@ -85,6 +85,10 @@ type capabilities struct {
 	// Team is true when live multi-agent observation snapshots are available
 	// (GET /v1/team). Observe-only; human control Ops are separate (WEBUI.17+).
 	Team bool `json:"team"`
+	// Artifacts is true when host.Services.Artifacts is wired (read-only list/get).
+	Artifacts bool `json:"artifacts"`
+	// Ledger is true when host.Services.Ledger is wired (read-only active/history).
+	Ledger bool `json:"ledger"`
 }
 
 type bootstrapResponse struct {
@@ -112,6 +116,7 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 	if h := s.opts.Services; h != nil {
 		c.Auth, c.Catalog, c.Settings, c.History = h.Auth != nil, h.Catalog != nil, h.Settings != nil, h.History != nil
 		c.Files, c.Memory, c.Issues, c.Plans = h.Files != nil, h.Memory != nil, h.Issues != nil, h.Plans != nil
+		c.Artifacts, c.Ledger = h.Artifacts != nil, h.Ledger != nil
 		c.Sessions = h.Sessions != nil
 		c.SessionLifecycle = h.Sessions != nil
 		// Workflow authoring is exposed via /v1/workflows* and /v1/workflow-drafts*.

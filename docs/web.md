@@ -796,3 +796,21 @@ Permission asks appear as `permission.asked` events; resolve with
 | `POST` | `/v1/issues/{id}/close` | **yes** | Close issue; blocked in attach-only |
 | `GET` | `/v1/issues/export` | mode | Download portable `strike-issues.json` (TUI format) |
 | `POST` | `/v1/issues/import` | **yes** | Import (`{path}` or `{data}`, `replace?`); blocked in attach-only |
+
+### Artifacts & decision ledger (read-only, WEBUI.15 / #1082)
+
+Bootstrap advertises `capabilities.artifacts` / `capabilities.ledger` only when
+the host wires those stores. There are **no** browser write routes — artifact
+create/update and ledger append/invalidate/supersede stay agent/tool-owned.
+Attach-only may read authorized rows; missing capability returns **501**.
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET` | `/v1/artifacts` | mode | Bounded list (`type`, `scope`, `sessionId`, `includeExpired`, `limit`≤200, `offset`). Visibility uses `actorSession` + `actorRoot` (default: live/`?root=` session). Owner-access rows require matching owner session; team-access requires matching owner root. |
+| `GET` | `/v1/artifacts/{id}` | mode | Full artifact (`?version=` optional). **404** when missing or not visible. Content/title are credential-scrubbed. |
+| `GET` | `/v1/ledger` | mode | History list (`status`, `kind`, `path`, `taskId`, `authorSession`, `limit`, `offset`) or active slice (`active=1` + optional `path`/`taskId`). Includes invalidated/superseded provenance fields. |
+| `GET` | `/v1/ledger/{id}` | mode | One ledger entry (any status). **404** when missing. Statements/evidence scrubbed. |
+
+Limits default to 100 (max 200). DTOs expose version/CAS and lifecycle fields
+only — never store filesystem paths or internal Go types. Concurrent agent
+writes remain coherent via the underlying stores; browser reads are race-safe.
