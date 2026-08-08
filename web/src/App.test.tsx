@@ -1053,6 +1053,19 @@ describe("App", () => {
     expect(screen.getByLabelText("Instruction")).toHaveValue("keep me");
   });
 
+
+  it("exposes shell profile and moves modes to the bottom bar on phone widths", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    window.dispatchEvent(new Event("resize"));
+    render(<App />);
+    await screen.findByText("Current");
+    const shell = document.querySelector(".app-shell");
+    expect(shell).toHaveAttribute("data-shell", "phone");
+    expect(screen.getByRole("navigation", { name: "Workspace mode" }).className).toContain("mode-bottom-bar");
+    // Header should not duplicate the mode switch on phone.
+    expect(document.querySelector(".header-mode-switch")).toBeNull();
+  });
+
   it("restores mode and surface from deep link after bootstrap", async () => {
     window.history.replaceState(null, "", "/?mode=project&surface=plans&entity=plan-1");
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
