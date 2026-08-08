@@ -1,4 +1,4 @@
-import { FormEvent, lazy, Suspense, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { FormEvent, lazy, Suspense, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { activateRoot, bootstrap, closeRoot, createRoot, fetchTeam, historicalConnection, liveConnection, request, resumeRoot, roots as loadRoots, sendOp, sessions as loadSessions, sessionChildren, getSandbox, patchSandbox, downloadDiagnostics, closeIssue, createIssue, deleteMemory, exportIssues, exportMemory, putMemory } from "./api";
 import { ChildAgentsPanel } from "./ChildAgents";
 import { buildExportMarkdown, defaultExportFilename, downloadTextFile } from "./exportMarkdown";
@@ -406,7 +406,7 @@ export default function App() {
     const t = window.setTimeout(() => setLiveStatusAnn(next), 400);
     return () => window.clearTimeout(t);
   }, [state.status.busy, state.permission, state.question, state.items.length]);
-  const openFileRef = (path: string, _line?: number) => {
+  const openFileRefImpl = (path: string, _line?: number) => {
     setSurfaceUnavailable(undefined);
     setSurfaceEntity(path);
     writeDeepLinkToLocation({ mode: "code", surface: "files", entity: path });
@@ -415,6 +415,11 @@ export default function App() {
     setInspectorOpen(true);
     void inspectProject("files");
   };
+  const openFileRefImplRef = useRef(openFileRefImpl);
+  openFileRefImplRef.current = openFileRefImpl;
+  const openFileRef = useCallback((path: string, line?: number) => {
+    openFileRefImplRef.current(path, line);
+  }, []);
   const jumpToLatest = () => {
     stickToBottomRef.current = true;
     setShowJumpLatest(false);
