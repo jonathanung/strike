@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useReducer, useRef, useState } from "react";
-import { activateRoot, bootstrap, closeRoot, createRoot, historicalConnection, liveConnection, request, resumeRoot, roots as loadRoots, sendOp, sessions as loadSessions, sessionChildren, getSandbox, patchSandbox, downloadDiagnostics, closeIssue, createIssue, deleteMemory, exportIssues, exportMemory, putMemory } from "./api";
+import { activateRoot, bootstrap, closeRoot, createRoot, fetchTeam, historicalConnection, liveConnection, request, resumeRoot, roots as loadRoots, sendOp, sessions as loadSessions, sessionChildren, getSandbox, patchSandbox, downloadDiagnostics, closeIssue, createIssue, deleteMemory, exportIssues, exportMemory, putMemory } from "./api";
 import { ChildAgentsPanel } from "./ChildAgents";
 import { buildExportMarkdown, defaultExportFilename, downloadTextFile } from "./exportMarkdown";
 import { clearQueue, editQueuedText, moveQueuedAt, removeQueuedAt, type QueuedPrompt } from "./queueOps";
@@ -499,6 +499,12 @@ export default function App() {
     try {
       await activateRoot(id);
       await refreshRoots();
+      if (boot?.capabilities.team) {
+        const snap = await fetchTeam(id).catch(() => null);
+        if (snap) {
+          dispatch({ type: "client.event", id, envelope: { type: "team.snapshot", time: `snap:${id}`, data: snap } });
+        }
+      }
     } catch (error) {
       window.alert((error as Error).message);
     }
