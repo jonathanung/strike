@@ -1,16 +1,17 @@
 import { useEffect, useState } from "react";
 import { disableMCP, listMCP, retryMCP, type MCPServerStatus } from "./mcp";
+import { CapabilityUnavailable, LoadingState, StatusBadge, statusKindFrom } from "./ui";
 
-function stateClass(state: string): string {
+function mcpStatusKind(state: string) {
   switch (state) {
     case "up":
-      return "mcp-state up";
+      return statusKindFrom("complete");
     case "disabled":
-      return "mcp-state disabled";
+      return statusKindFrom("canceled");
     case "error":
-      return "mcp-state error";
+      return statusKindFrom("failed");
     default:
-      return "mcp-state down";
+      return statusKindFrom("blocked");
   }
 }
 
@@ -40,12 +41,7 @@ export function MCPPanel({ available }: { available: boolean }) {
   }, [available]);
 
   if (!available) {
-    return (
-      <section className="unavailable" role="status">
-        <strong>MCP unavailable</strong>
-        <p>The configured host did not provide this capability. No action was attempted.</p>
-      </section>
-    );
+    return <CapabilityUnavailable name="MCP" />;
   }
 
   const onRetry = async (name?: string) => {
@@ -102,7 +98,7 @@ export function MCPPanel({ available }: { available: boolean }) {
           <p>{error}</p>
         </section>
       )}
-      {loading && !items.length ? <p className="muted">Loading MCP status…</p> : null}
+      {loading && !items.length ? <LoadingState label="Loading MCP status…" /> : null}
       {!loading && !items.length && !error ? (
         <p className="muted">No MCP servers configured. Add servers in ~/.strike/mcp.jsonc.</p>
       ) : null}
@@ -114,7 +110,7 @@ export function MCPPanel({ available }: { available: boolean }) {
             <article key={server.name} className="mcp-card" role="listitem">
               <header>
                 <h3>{server.name}</h3>
-                <span className={stateClass(server.state)}>{server.state}</span>
+                <StatusBadge kind={mcpStatusKind(server.state)} label={server.state} className={`mcp-state ${server.state}`} />
               </header>
               <p>
                 <span>{transport}</span>
