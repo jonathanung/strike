@@ -516,8 +516,8 @@ touched; unresolved rows **must** keep the listed tier.
 
 | Feature | TUI entry/file | Web file/API today | Status | Owner | Tier | Attach-only |
 |---|---|---|---|---|---|---|
-| Long transcript virtualization | paint budgets | unbounded DOM risk | missing | #1087 | B | read |
-| Large team roster perf | visualizer bounds | missing | missing | #1087 | B | read |
+| Long transcript virtualization | paint budgets | VirtualList + stream batch + bounds | shipped | #1087 | B | read |
+| Large team roster perf | visualizer bounds | memo transcript + roster scroll region | shipped | #1087 | B | read |
 | Visual + a11y foundation | theme + tui/ui | CSS tokens partial | partial | #1072 | B | n/a |
 | Surface registry + mode shell | window registry analogue | hardcoded inspector tabs | missing | #1073 | B | n/a |
 | Responsive shell | layout package | drawers only | partial | #1074 | B | n/a |

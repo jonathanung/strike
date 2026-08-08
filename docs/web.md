@@ -662,6 +662,46 @@ When `capabilities.plugins` / `capabilities.panes` are true, the inspector expos
 
 Mutations that change trust or install state require a live host (not attach-only).
 
+## Long-session performance (WEBUI.20 / #1087)
+
+Long historical transcripts and large team rosters stay responsive by bounding
+**paint work**, not by deleting durable events:
+
+| Mechanism | Behavior |
+|---|---|
+| Stream batching | WS/SSE envelopes coalesce to **≤1 React commit per animation frame** (`web/src/streamBatch.ts` → `client.events`) |
+| Transcript virtualization | Windowed DOM via `VirtualList` — full `items[]` stays in memory; mounted rows capped (~80) |
+| Content bounds | Markdown, fenced code, diffs, and tool output are chunked/truncated for display; session memory retains full text |
+| Lazy surfaces | Team / Code / Project / Ops panels load with `React.lazy` so Chat startup does not pull those bundles |
+| Team isolation | `TranscriptList` is memoized; roster/task/attention updates do not rerender the transcript when `items` is unchanged |
+| Scroll anchors | Prepend/backfill preserves scroll position; jump-to-latest + unread count track while scrolled up |
+| Live region | Status announcements stay batched (not per-token) to avoid screen-reader floods |
+
+### Fixture and thresholds
+
+Deterministic fixture: `web/src/perf/fixture.ts` (≥10 000 protocol events, mixed
+stream/tool/diff cells, 50-agent roster with task/attention updates).
+
+Committed CI gates: `web/src/perf/thresholds.ts` + `web/src/perf/perf.test.ts`
+(reduce wall time, mounted-cell bound, stream batching, roster size).
+
+Local reference profile (desktop + throttled-mobile budgets for TTI, longest
+main-thread task, DOM nodes, heap trend, input/scroll latency):
+
+```sh
+cd web && npm run profile:perf
+```
+
+Browser measurement: DevTools Performance on a hydrated long session; for
+mobile guidance use CPU 4× throttling. Advisory budgets live in
+`PERF_THRESHOLDS_LOCAL` — CI runs the stable subset only.
+
+### Accessibility
+
+Virtualization keeps semantic message labels, keyboard focus order inside the
+mounted window, and search/export over the full in-memory transcript. The
+transcript `role="log"` does not announce token-by-token deltas.
+
 ## Vite dev / production web toolchain
 
 Production cockpit HTML is **embedded** in the Go binary

@@ -417,3 +417,44 @@ describe("tokenCount / applyUsageReported", () => {
     expect(status.usageReports).toBe(1);
   });
 });
+
+describe("client.events batching", () => {
+  it("applies many envelopes in one reduce without dropping order", () => {
+    let state = reduceClient(initialClientState(), { type: "client.ensure", id: "A" });
+    state = reduceClient(state, {
+      type: "client.events",
+      id: "A",
+      envelopes: [
+        { type: "user.message", time: "1", data: { text: "hi", turnId: "t1" } },
+        { type: "text.delta", time: "2", data: { text: "Hel", turnId: "t1" } },
+        { type: "text.delta", time: "3", data: { text: "lo", turnId: "t1" } },
+        { type: "team.roster", time: "4", data: { members: [{ sessionId: "c1", name: "worker", state: "running" }] } },
+      ],
+    });
+    const slice = selectedSlice(state);
+    expect(slice.items.some((i) => i.kind === "user" && i.text === "hi")).toBe(true);
+    const assistant = slice.items.find((i) => i.kind === "assistant");
+    expect(assistant?.text).toBe("Hello");
+    expect(slice.team.members["c1"]?.name).toBe("worker");
+  });
+
+  it("team-only batch keeps items reference stable when no transcript events", () => {
+    let state = reduceClient(initialClientState(), { type: "client.ensure", id: "A" });
+    state = reduceClient(state, {
+      type: "client.event",
+      id: "A",
+      envelope: { type: "user.message", time: "1", data: { text: "x", turnId: "t" } },
+    });
+    const before = selectedSlice(state).items;
+    state = reduceClient(state, {
+      type: "client.events",
+      id: "A",
+      envelopes: [
+        { type: "team.roster", time: "2", data: { members: [{ sessionId: "c2", name: "w2", state: "running" }] } },
+      ],
+    });
+    const after = selectedSlice(state).items;
+    expect(after).toBe(before);
+    expect(selectedSlice(state).team.members["c2"]?.name).toBe("w2");
+  });
+});
