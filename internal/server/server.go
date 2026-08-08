@@ -58,6 +58,16 @@ type Options struct {
 	// Sandbox enables the sandbox capability and seeds live roots that do not
 	// call Live.SetSandbox themselves. Nil keeps capabilities.sandbox false.
 	Sandbox *SandboxSnapshot
+	// ReadOnly rejects mutating protocol ops (POST /v1/ops and WS op frames).
+	ReadOnly bool
+	// Audit receives serve_op records (op type + source IP). Nil disables.
+	Audit OpAuditor
+	// OpsRate is tokens/sec per client IP for ops (default 10). <=0 uses default.
+	OpsRate float64
+	// OpsBurst is the per-IP burst (default 20). <=0 uses default.
+	OpsBurst int
+	// OpsClock overrides time.Now for rate-limit tests.
+	OpsClock func() time.Time
 }
 
 // Server is an HTTP server for session attach and optional live cockpit.
@@ -69,6 +79,7 @@ type Server struct {
 
 	// paneHost supervises process panes for the web cockpit (#732).
 	paneHost *paneHost
+	opsLimit *opLimiter
 }
 
 // New validates options and builds a Server. Does not listen.
@@ -93,7 +104,12 @@ func New(opts Options) (*Server, error) {
 	if static == nil {
 		static = staticFS
 	}
-	s := &Server{opts: opts, static: static, mux: http.NewServeMux()}
+	s := &Server{
+		opts:     opts,
+		static:   static,
+		mux:      http.NewServeMux(),
+		opsLimit: newOpLimiter(opts.OpsRate, opts.OpsBurst, opts.OpsClock),
+	}
 	s.routes()
 	s.http = &http.Server{
 		Addr:              opts.Addr,

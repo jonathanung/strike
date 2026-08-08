@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -1043,12 +1044,26 @@ func (s *Server) handleOps(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
 		return
 	}
+	sessionID := live.SessionID()
+	if err := s.admitOp(r, "http", env.Type, sessionID); err != nil {
+		switch {
+		case errors.Is(err, errOpsReadOnly):
+			writeJSON(w, http.StatusForbidden, opErrorResponse{Error: err.Error()})
+		case errors.Is(err, errOpsRateLimited):
+			writeJSON(w, http.StatusTooManyRequests, opErrorResponse{Error: err.Error()})
+		default:
+			writeJSON(w, http.StatusForbidden, opErrorResponse{Error: err.Error()})
+		}
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 	if err := live.Submit(ctx, op); err != nil {
+		s.recordServeOpError(r, "http", env.Type, sessionID)
 		writeJSON(w, http.StatusConflict, opErrorResponse{Error: err.Error()})
 		return
 	}
+	s.auditOpOK(r, "http", env.Type, sessionID)
 	writeJSON(w, http.StatusOK, opOKResponse{OK: true})
 }
 
@@ -1162,7 +1177,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				_ = ws.WriteText(`{"type":"error","data":{"message":"invalid json"}}`)
 				continue
 			}
-			// Allow status request control message.
+			// Allow status request control message (not a mutating engine op).
 			if env.Type == "status.get" {
 				b, _ := json.Marshal(map[string]any{"type": "status", "data": live.Status()})
 				_ = ws.WriteText(string(b))
@@ -1174,13 +1189,22 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				_ = ws.WriteText(string(msg))
 				continue
 			}
+			sessionID := live.SessionID()
+			if err := s.admitOp(r, "ws", env.Type, sessionID); err != nil {
+				msg, _ := json.Marshal(map[string]any{"type": "error", "data": map[string]string{"message": err.Error()}})
+				_ = ws.WriteText(string(msg))
+				continue
+			}
 			submitCtx, submitCancel := context.WithTimeout(ctx, 5*time.Second)
 			err = live.Submit(submitCtx, op)
 			submitCancel()
 			if err != nil {
+				s.recordServeOpError(r, "ws", env.Type, sessionID)
 				msg, _ := json.Marshal(map[string]any{"type": "error", "data": map[string]string{"message": err.Error()}})
 				_ = ws.WriteText(string(msg))
+				continue
 			}
+			s.auditOpOK(r, "ws", env.Type, sessionID)
 		}
 	}()
 

@@ -22,8 +22,16 @@ func TestParseServeArgs(t *testing.T) {
 	if opts.sessionDir != session.DefaultDir() {
 		t.Fatalf("sessionDir = %q, want default", opts.sessionDir)
 	}
-	if opts.provider != "echo" || opts.attachOnly || opts.dangerouslySkipPermissions {
-		t.Fatalf("defaults provider/attach/danger = %+v", opts)
+	if opts.provider != "echo" || opts.attachOnly || opts.readOnly || opts.dangerouslySkipPermissions {
+		t.Fatalf("defaults provider/attach/readOnly/danger = %+v", opts)
+	}
+
+	opts, err = parseServeArgs([]string{"--read-only"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !opts.readOnly {
+		t.Fatalf("--read-only not set: %+v", opts)
 	}
 
 	opts, err = parseServeArgs([]string{"--auto"})
@@ -96,6 +104,9 @@ func TestRunCLIServeHelp(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "--auto") || !strings.Contains(stdout.String(), "--dangerously-skip-permissions") {
 		t.Fatalf("usage missing --auto / --dangerously-skip-permissions: %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "--read-only") {
+		t.Fatalf("usage missing --read-only: %q", stdout.String())
 	}
 }
 
