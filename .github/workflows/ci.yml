@@ -83,6 +83,44 @@ jobs:
         continue-on-error: true
         run: make cover-check
 
+  # Real-browser web smokes (WEBUI.5). Offline echo provider only; does not
+  # replace unit tests (make web-check remains the fast default).
+  web-e2e:
+    runs-on: ubuntu-latest
+    if: hashFiles('web/package.json') != ''
+    timeout-minutes: 25
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Setup Go
+        uses: actions/setup-go@0c52d547c9bc32b1aa3301fd7a9cb496313a4491 # v5.0.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Generate TUI flatten
+        run: go generate ./internal/tui
+
+      - name: Real-browser web e2e
+        run: make web-e2e
+
+      - name: Upload Playwright artifacts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: web-e2e-artifacts
+          path: web/e2e-artifacts/
+          if-no-files-found: ignore
+          retention-days: 14
+
   # Darwin-only tests (//go:build darwin) never compile on ubuntu-latest, so a
   # broken libSystem trampoline or wrong-sysctl path ships green (#521, #602).
   # Restrict to packages with _darwin.go — not the full suite — because macOS

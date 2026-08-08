@@ -615,7 +615,7 @@ export default function App() {
       <section className="runtime" aria-label="Runtime controls">
         <Field label="Provider" value={state.status.provider} values={providers.length ? providers : state.status.provider ? [state.status.provider] : []} disabled={runtimeBusy || !boot?.capabilities.auth} onChange={(name) => void selectProvider(name)} />
         <Field label="Model" value={state.status.model} values={models.length ? models : state.status.model ? [state.status.model] : []} disabled={runtimeBusy || !boot?.capabilities.catalog} onChange={(model) => void op("select.model", { provider: state.status.provider, model }, selectedID)} />
-        <Field label="Agent" value={state.status.agent} values={boot?.agents.map((agent) => agent.name) || []} disabled={runtimeBusy} onChange={(name) => void op("select.agent", { name }, selectedID)} />
+        <Field label="Agent" value={state.status.agent} values={(boot?.agents || []).map((agent) => agent.name)} disabled={runtimeBusy} onChange={(name) => void op("select.agent", { name }, selectedID)} />
         <div className="runtime-more">
           <button type="button" className="runtime-disclosure" aria-expanded={runtimeOpen} aria-controls="runtime-secondary" onClick={() => setRuntimeOpen((open) => !open)}>
             <span>Runtime…</span>
@@ -978,7 +978,7 @@ function InspectorBody({ tab, boot, workspace, data, loading, expandedDiffs, tog
       live={isLive}
       rootID={selectedID}
       activeWorkflow={status.workflow}
-      agents={boot?.agents.map((a) => a.name) || []}
+      agents={(boot?.agents || []).map((a) => a.name)}
       busy={Boolean(status.busy)}
     />;
   }
