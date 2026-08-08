@@ -1,15 +1,20 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   BUILTIN_SURFACES,
+  clearDynamicSurfaces,
   defaultSurfaceForMode,
   getSurface,
   inspectorSurfaces,
   inspectorSurfacesForShell,
   listSurfaces,
+  LOOP_SUPERSEDED_NOTE,
   modeAttention,
   MODE_PRESETS,
+  paneSurfaceFromInfo,
+  registerDynamicSurface,
   resolveModeSurface,
   surfaceCapabilityAllowed,
+  unregisterDynamicSurface,
   WORKSPACE_MODES,
 } from "./surfaces";
 import type { Capabilities } from "./types";
@@ -33,6 +38,8 @@ const fullCaps: Capabilities = {
   diag: true,
   auth: true,
   catalog: true,
+  permissions: true,
+  sandbox: true,
 };
 
 describe("surface registry", () => {
@@ -41,6 +48,7 @@ describe("surface registry", () => {
     for (const id of [
       "context", "files", "memory", "issues", "plans", "goals", "workflows",
       "mcp", "plugins", "panes", "timeline", "diagnostics", "roster", "settings",
+      "providers", "auth", "permissions", "sandbox", "theme", "project-export", "diag-export",
       "transcript", "composer",
     ]) {
       expect(ids).toContain(id);
@@ -55,7 +63,7 @@ describe("surface registry", () => {
     expect(code).not.toContain("diagnostics"); // lsp false
 
     const project = inspectorSurfaces("project", caps).map((s) => s.id);
-    expect(project).toEqual(["plans"]);
+    expect(project).toEqual(["plans", "project-export"]);
     expect(project).not.toContain("memory");
   });
 
@@ -80,8 +88,21 @@ describe("surface registry", () => {
     expect(chat).toContain("mcp");
 
     const project = inspectorSurfacesForShell("project", fullCaps).map((s) => s.id);
-    expect(project).toEqual(["plans", "goals", "issues", "memory", "workflows"]);
+    expect(project).toEqual(["plans", "goals", "issues", "memory", "workflows", "project-export"]);
     expect(project).not.toContain("mcp");
+  });
+
+  it("ops mode groups providers/settings before integrations and observe", () => {
+    const ops = inspectorSurfacesForShell("ops", fullCaps).map((s) => s.id);
+    expect(ops[0]).toBe("settings");
+    expect(ops.indexOf("settings")).toBeLessThan(ops.indexOf("mcp"));
+    expect(ops.indexOf("mcp")).toBeLessThan(ops.indexOf("plugins"));
+    expect(ops.indexOf("plugins")).toBeLessThan(ops.indexOf("panes"));
+    expect(ops.indexOf("panes")).toBeLessThan(ops.indexOf("diagnostics"));
+    expect(ops.indexOf("diagnostics")).toBeLessThan(ops.indexOf("timeline"));
+    expect(ops).toContain("providers");
+    expect(ops).toContain("theme");
+    expect(ops).not.toContain("plans");
   });
 
   it("activity disclosure badges modes without implying navigation", () => {
@@ -95,6 +116,7 @@ describe("surface registry", () => {
   it("defaults surface per mode from preset when available", () => {
     expect(defaultSurfaceForMode("project", fullCaps)).toBe("plans");
     expect(defaultSurfaceForMode("code", fullCaps)).toBe("files");
+    expect(defaultSurfaceForMode("ops", { settings: true, mcp: true })).toBe("settings");
     expect(defaultSurfaceForMode("ops", { mcp: true })).toBe("mcp");
     expect(defaultSurfaceForMode("chat", fullCaps)).toBe("context");
   });
@@ -130,5 +152,38 @@ describe("surface registry", () => {
       expect(MODE_PRESETS[id].id).toBe(id);
       expect(MODE_PRESETS[id].label.length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe("dynamic pane surfaces (WEBUI.12)", () => {
+  afterEach(() => {
+    clearDynamicSurfaces();
+  });
+
+  it("registers pane contributions under ops without shadowing builtins", () => {
+    const def = paneSurfaceFromInfo({ id: "weather", title: "Weather" });
+    expect(def?.id).toBe("pane:weather");
+    registerDynamicSurface(def!);
+    registerDynamicSurface({ ...def!, id: "settings" }); // must not shadow
+    expect(getSurface("settings")?.label).toBe("settings");
+    const ops = inspectorSurfaces("ops", { panes: true }).map((s) => s.id);
+    expect(ops).toContain("pane:weather");
+    unregisterDynamicSurface("pane:weather");
+    expect(getSurface("pane:weather")).toBeUndefined();
+  });
+
+  it("bounds and strips control chars from pane titles", () => {
+    const def = paneSurfaceFromInfo({
+      id: "x",
+      title: "Bad\u0000Title\u001b[31m" + "y".repeat(100),
+    });
+    expect(def?.label.includes("\u0000")).toBe(false);
+    expect(def!.label.length).toBeLessThanOrEqual(64);
+  });
+
+  it("documents /loop as superseded by goals/workflows", () => {
+    expect(LOOP_SUPERSEDED_NOTE.toLowerCase()).toContain("goals");
+    expect(LOOP_SUPERSEDED_NOTE.toLowerCase()).toContain("workflows");
+    expect(LOOP_SUPERSEDED_NOTE.toLowerCase()).toContain("/loop");
   });
 });
