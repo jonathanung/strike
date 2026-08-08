@@ -1,9 +1,6 @@
-import { FormEvent, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { FormEvent, lazy, Suspense, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { activateRoot, bootstrap, closeRoot, createRoot, fetchTeam, historicalConnection, liveConnection, request, resumeRoot, roots as loadRoots, sendOp, sessions as loadSessions, sessionChildren, getSandbox, patchSandbox, downloadDiagnostics, closeIssue, createIssue, deleteMemory, exportIssues, exportMemory, putMemory } from "./api";
 import { ChildAgentsPanel } from "./ChildAgents";
-import { TeamWorkspace } from "./Team";
-import { CodeExplorer } from "./CodeExplorer";
-import { ArtifactsPanel, LedgerPanel, TeamReviewPanel } from "./ArtifactsReview";
 import { buildExportMarkdown, defaultExportFilename, downloadTextFile } from "./exportMarkdown";
 import { clearQueue, editQueuedText, moveQueuedAt, removeQueuedAt, type QueuedPrompt } from "./queueOps";
 import { initialClientState, reduceClient, selectedSlice, setAdd, setRemove } from "./reducer";
@@ -13,17 +10,32 @@ import { formatSlashHelp, resolveSlash, WEB_SLASH_COMMANDS } from "./slash";
 import { applyAppearance, loadAppearance, SettingsDialog } from "./Settings";
 import { formatCostLabel, formatCostNotice } from "./cost";
 import { TranscriptList } from "./Transcript";
+import { createStreamBatcher } from "./streamBatch";
+import type { Envelope } from "./types";
+
+/** Lazy non-Chat surfaces — Chat startup must not pull team/workflow/plugin/pane bundles (WEBUI.20). */
+const TeamWorkspace = lazy(() => import("./Team").then((m) => ({ default: m.TeamWorkspace })));
+const CodeExplorer = lazy(() => import("./CodeExplorer").then((m) => ({ default: m.CodeExplorer })));
+const ArtifactsPanel = lazy(() => import("./ArtifactsReview").then((m) => ({ default: m.ArtifactsPanel })));
+const LedgerPanel = lazy(() => import("./ArtifactsReview").then((m) => ({ default: m.LedgerPanel })));
+const TeamReviewPanel = lazy(() => import("./ArtifactsReview").then((m) => ({ default: m.TeamReviewPanel })));
+const MCPPanel = lazy(() => import("./MCP").then((m) => ({ default: m.MCPPanel })));
+const PluginsPanel = lazy(() => import("./Plugins").then((m) => ({ default: m.PluginsPanel })));
+const PanesPanel = lazy(() => import("./Panes").then((m) => ({ default: m.PanesPanel })));
+const TimelinePanel = lazy(() => import("./Timeline").then((m) => ({ default: m.TimelinePanel })));
+const DiagnosticsPanel = lazy(() => import("./Diagnostics").then((m) => ({ default: m.DiagnosticsPanel })));
+const PlansPanel = lazy(() => import("./Plans").then((m) => ({ default: m.PlansPanel })));
+const GoalsPanel = lazy(() => import("./Goals").then((m) => ({ default: m.GoalsPanel })));
+const WorkflowsPanel = lazy(() => import("./Workflows").then((m) => ({ default: m.WorkflowsPanel })));
+
+function SurfaceFallback({ label }: { label: string }) {
+  return <section className="unavailable" role="status"><strong>Loading {label}…</strong></section>;
+}
 import type {
   SandboxInfo, ActiveRoot, Bootstrap, Capabilities, FitWarning, ImageAttachment,
   RequestAttribution, Session, Status, TokenCount, WorkspaceState,
 } from "./types";
 import { LAYER_KINDS } from "./types";
-import { MCPPanel } from "./MCP";
-import { PluginsPanel } from "./Plugins";
-import { PanesPanel } from "./Panes";
-import { TimelinePanel } from "./Timeline";
-import { DiagnosticsPanel } from "./Diagnostics";
-import { PlansPanel } from "./Plans";
 import {
   defaultRestoreFiles,
   emptyUndoPreview,
@@ -31,8 +43,6 @@ import {
   formatUndoPreviewLines,
   type UndoPreview,
 } from "./undoPreview";
-import { GoalsPanel } from "./Goals";
-import { WorkflowsPanel } from "./Workflows";
 import { SurfaceNav } from "./SurfaceNav";
 import {
   deepLinkWorkspaceID,
@@ -196,6 +206,8 @@ export default function App() {
   const transcriptRef = useRef<HTMLElement>(null);
   const stickToBottomRef = useRef(true);
   const [showJumpLatest, setShowJumpLatest] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const baselineItemsRef = useRef(0);
   const [liveStatusAnn, setLiveStatusAnn] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
   const setDraft = (value: string | ((prev: string) => string)) => {
@@ -322,13 +334,27 @@ export default function App() {
     dispatch({ type: "client.ensure", id: selectedID });
     setSelectedChildId(undefined);
     const id = selectedID;
+    // Coalesce stream/SSE envelopes to ≤1 React commit per animation frame (WEBUI.20).
+    const batcher = createStreamBatcher<Envelope>((envelopes) => {
+      dispatch({ type: "client.events", id, envelopes });
+    });
+    const onEnvelope = (envelope: Envelope) => batcher.push(envelope);
     // One WS (or SSE) for the *viewed* root only. Background attention (#919) may
     // add multiplexed subscriptions later without changing this viewed-root path.
     if (!selectedIsLive) {
-      return historicalConnection(id, (envelope) => dispatch({ type: "client.event", id, envelope }), (message) => setTransport(message));
+      const stop = historicalConnection(id, onEnvelope, (message) => setTransport(message));
+      return () => {
+        batcher.flush();
+        batcher.clear();
+        stop();
+      };
     }
-    const live = liveConnection(id, (envelope) => dispatch({ type: "client.event", id, envelope }), setTransport);
-    return () => live.close();
+    const live = liveConnection(id, onEnvelope, setTransport);
+    return () => {
+      batcher.flush();
+      batcher.clear();
+      live.close();
+    };
   }, [selectedID, selectedIsLive]);
   useEffect(() => {
     if (!selectedID || !boot?.capabilities.sessions) return;
@@ -347,6 +373,10 @@ export default function App() {
       const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
       const atBottom = dist < 80;
       stickToBottomRef.current = atBottom;
+      if (atBottom) {
+        setUnreadCount(0);
+        baselineItemsRef.current = state.items.length;
+      }
       setShowJumpLatest(!atBottom && state.items.length > 0);
     };
     el.addEventListener("scroll", onScroll, { passive: true });
@@ -354,9 +384,14 @@ export default function App() {
   }, [state.items.length]);
   useEffect(() => {
     if (!stickToBottomRef.current) {
+      const grew = state.items.length - baselineItemsRef.current;
+      if (grew > 0) setUnreadCount((n) => n + grew);
       setShowJumpLatest(state.items.length > 0);
+      baselineItemsRef.current = state.items.length;
       return;
     }
+    setUnreadCount(0);
+    baselineItemsRef.current = state.items.length;
     endRef.current?.scrollIntoView({ block: "end" });
     setShowJumpLatest(false);
   }, [state.items]);
@@ -371,7 +406,7 @@ export default function App() {
     const t = window.setTimeout(() => setLiveStatusAnn(next), 400);
     return () => window.clearTimeout(t);
   }, [state.status.busy, state.permission, state.question, state.items.length]);
-  const openFileRef = (path: string, _line?: number) => {
+  const openFileRefImpl = (path: string, _line?: number) => {
     setSurfaceUnavailable(undefined);
     setSurfaceEntity(path);
     writeDeepLinkToLocation({ mode: "code", surface: "files", entity: path });
@@ -380,9 +415,16 @@ export default function App() {
     setInspectorOpen(true);
     void inspectProject("files");
   };
+  const openFileRefImplRef = useRef(openFileRefImpl);
+  openFileRefImplRef.current = openFileRefImpl;
+  const openFileRef = useCallback((path: string, line?: number) => {
+    openFileRefImplRef.current(path, line);
+  }, []);
   const jumpToLatest = () => {
     stickToBottomRef.current = true;
     setShowJumpLatest(false);
+    setUnreadCount(0);
+    baselineItemsRef.current = state.items.length;
     endRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
   };
   useEffect(() => {
@@ -1075,7 +1117,7 @@ export default function App() {
       <RuntimeStatus status={state.status} modelRates={modelRates} />
       </div>
       <div className="sr-only" aria-live="polite" aria-atomic="true">{liveStatusAnn}</div>
-      <section ref={transcriptRef} className="transcript" aria-label="Conversation transcript">{!boot && transport !== "connecting" ? <div className="empty-state" role="alert"><span>ERROR</span><h1>{transport}</h1><p>Failed to load cockpit. Open the URL printed by <code>strike serve</code> (one-time <code>?token=</code> handoff sets a cookie), or send <code>Authorization: Bearer</code>.</p></div> : !state.items.length && <div className="empty-state"><span>01 / READY</span><h1>{boot?.attachOnly ? "Inspect the record." : "Direct the work."}</h1><p>{boot?.attachOnly ? "Select a durable session from the rail." : "Describe an outcome. Strike will plan, act, and report through the live engine seam."}</p></div>}<TranscriptList items={state.items} showThinking={showThinking} onFileRef={openFileRef} /><div ref={endRef} />{showJumpLatest && <button type="button" className="jump-latest" onClick={jumpToLatest}>New activity — jump to latest</button>}</section>
+      <section ref={transcriptRef} className="transcript" aria-label="Conversation transcript">{!boot && transport !== "connecting" ? <div className="empty-state" role="alert"><span>ERROR</span><h1>{transport}</h1><p>Failed to load cockpit. Open the URL printed by <code>strike serve</code> (one-time <code>?token=</code> handoff sets a cookie), or send <code>Authorization: Bearer</code>.</p></div> : !state.items.length && <div className="empty-state"><span>01 / READY</span><h1>{boot?.attachOnly ? "Inspect the record." : "Direct the work."}</h1><p>{boot?.attachOnly ? "Select a durable session from the rail." : "Describe an outcome. Strike will plan, act, and report through the live engine seam."}</p></div>}<TranscriptList items={state.items} showThinking={showThinking} onFileRef={openFileRef} scrollRef={transcriptRef} stickToBottom={stickToBottomRef.current} /><div ref={endRef} />{showJumpLatest && <button type="button" className="jump-latest" onClick={jumpToLatest}>{unreadCount > 0 ? `${unreadCount} new — jump to latest` : "New activity — jump to latest"}</button>}</section>
 {onboardingHint && (
         <div className="onboard-hint" role="status">
           <p>Tip: <kbd>⌘K</kbd> command palette · <code>/</code> slash commands · <code>@</code> mention files</p>
@@ -1111,26 +1153,28 @@ export default function App() {
       />
       <div className="inspector-body" id={activeInspector ? `inspector-panel-${activeInspector}` : undefined} role="tabpanel">
         {inspectorTabs.length ? (
-          <InspectorBody
-            tab={activeInspector}
-            boot={boot}
-            workspace={state}
-            data={projectData}
-            loading={projectLoading}
-            expandedDiffs={expandedDiffs}
-            toggleDiff={toggleDiff}
-            isLive={isLive}
-            selectedID={selectedID}
-            onRefresh={() => void inspectProject(activeInspector)}
-            sandbox={sandboxInfo}
-            onExplainSandbox={() => void openSandboxExplain()}
-            unavailable={surfaceUnavailable?.id === activeInspector ? surfaceUnavailable : undefined}
-            childrenEntries={children}
-            selectedChildId={selectedChildId}
-            onSelectChild={setSelectedChildId}
-            onOpenChildTranscript={openChildTranscript}
-            entity={surfaceEntity}
-          />
+          <Suspense fallback={<SurfaceFallback label={activeInspector || "surface"} />}>
+            <InspectorBody
+              tab={activeInspector}
+              boot={boot}
+              workspace={state}
+              data={projectData}
+              loading={projectLoading}
+              expandedDiffs={expandedDiffs}
+              toggleDiff={toggleDiff}
+              isLive={isLive}
+              selectedID={selectedID}
+              onRefresh={() => void inspectProject(activeInspector)}
+              sandbox={sandboxInfo}
+              onExplainSandbox={() => void openSandboxExplain()}
+              unavailable={surfaceUnavailable?.id === activeInspector ? surfaceUnavailable : undefined}
+              childrenEntries={children}
+              selectedChildId={selectedChildId}
+              onSelectChild={setSelectedChildId}
+              onOpenChildTranscript={openChildTranscript}
+              entity={surfaceEntity}
+            />
+          </Suspense>
         ) : (
           <p className="muted">No surfaces available for {MODE_PRESETS[workspaceMode].label} on this host.</p>
         )}

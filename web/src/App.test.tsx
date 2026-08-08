@@ -14,7 +14,9 @@ describe("App", () => {
     vi.stubGlobal("EventSource", FakeEventSource); vi.stubGlobal("WebSocket", FakeWebSocket);
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => String(input).includes("bootstrap") ? response({ version: "test", authRequired: false, attachOnly: false, capabilities: { live: true, diag: true, files: false, memory: false, issues: false, roots: false }, protocolOps: ["user.input", "compact", "rewind"], status: { sessionId: "live", provider: "echo", busy: false }, agents: [{ name: "build" }], skills: [{ name: "ship", description: "Ship changes" }] }) : String(input).includes("sessions") ? response({ sessions: [{ id: "live", title: "Current" }], liveId: "live" }) : response({ ok: true })));
     Element.prototype.scrollIntoView = vi.fn();
-    vi.stubGlobal("URL", { ...URL, createObjectURL: vi.fn(() => "blob:diag"), revokeObjectURL: vi.fn() });
+    // Preserve URL constructor (React.lazy / Vite dynamic import need it); only stub blob helpers.
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:diag");
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
   });
   afterEach(() => {
     cleanup();
@@ -852,7 +854,7 @@ describe("App", () => {
         });
       }
       if (url.includes("/v1/lsp")) return response({ servers: [] });
-      if (url.includes("/v1/diagnostics")) return response({ findings: [] });
+      if (url.includes("/v1/diagnostics")) return response({ diagnostics: [], count: 0 });
       if (url.includes("sessions")) return response({ sessions: [{ id: "live", title: "Current" }], liveId: "live" });
       return response({ ok: true });
     }));
@@ -860,7 +862,10 @@ describe("App", () => {
     await screen.findByText("Current");
     expect(screen.getByRole("tab", { name: "diagnostics" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: "diagnostics" }));
-    expect(await screen.findByRole("heading", { name: "Diagnostics" })).toBeInTheDocument();
+    // Lazy surface + async LSP fetch — wait past Suspense fallback and loading state.
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Diagnostics" })).toBeInTheDocument();
+    }, { timeout: 4000 });
   });
 
 

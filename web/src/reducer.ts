@@ -408,6 +408,8 @@ export type ClientAction =
   | { type: "client.ensure"; id: string }
   | { type: "client.reset"; id: string }
   | { type: "client.event"; id: string; envelope: Envelope }
+  /** Apply many envelopes in one React commit (stream rAF batching, WEBUI.20). */
+  | { type: "client.events"; id: string; envelopes: Envelope[] }
   | { type: "client.composer"; id: string; patch: Partial<WorkspaceComposer> }
   | { type: "client.drop"; id: string };
 
@@ -451,6 +453,29 @@ export function reduceClient(state: ClientState, action: ClientAction): ClientSt
       return {
         ...state,
         byID: { ...state.byID, [action.id]: { ...current, ...reduced } },
+      };
+    }
+    case "client.events": {
+      const current = state.byID[action.id] || emptySlice(action.id);
+      let slice = current;
+      let workspace = asWorkspaceState(current);
+      for (const envelope of action.envelopes) {
+        if (envelope.type === "workspace.reset") {
+          const cleared = emptySlice(action.id);
+          cleared.draft = slice.draft;
+          cleared.queue = slice.queue;
+          cleared.images = slice.images;
+          cleared.fast = slice.fast;
+          slice = cleared;
+          workspace = asWorkspaceState(cleared);
+          continue;
+        }
+        workspace = reduceEvent(workspace, envelope);
+        slice = { ...slice, ...workspace };
+      }
+      return {
+        ...state,
+        byID: { ...state.byID, [action.id]: slice },
       };
     }
     case "client.composer": {

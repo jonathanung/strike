@@ -1,11 +1,15 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { memo, useCallback, useMemo, useState, type ReactNode, type RefObject } from "react";
 import type { TranscriptItem } from "./types";
+import { VirtualList } from "./VirtualList";
 
 const filePattern = /(?:^|[\s(`])([\w./-]+\.[a-zA-Z0-9]+)(?::(\d+))?(?=[:\s)`]|$)/g;
 const EXPLORATION_TOOLS = new Set(["read", "glob", "grep", "toolsearch", "definition", "references", "symbols"]);
 const DIFF_TOOLS = new Set(["edit", "write", "apply_patch", "apply-patch", "notebook_edit"]);
 const MAX_TOOL_TAIL = 40;
 const MAX_SUMMARY_CHARS = 4000;
+const MAX_MARKDOWN_CHARS = 12_000;
+const MAX_CODE_BLOCK_LINES = 400;
+const MAX_DIFF_LINES = 800;
 
 export type FileRefHandler = (path: string, line?: number) => void;
 
@@ -61,17 +65,29 @@ function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) 
 }
 
 export function Markdown({ text, onFileRef }: { text: string; onFileRef?: FileRefHandler }) {
-  const blocks = text.split(/(```[\s\S]*?```)/g);
+  const { text: bounded, truncated } = boundText(text, MAX_MARKDOWN_CHARS);
+  const blocks = bounded.split(/(```[\s\S]*?```)/g);
   return <div className="markdown">{blocks.map((block, index) => {
     if (block.startsWith("```")) {
       const lines = block.slice(3, -3).replace(/^\n/, "").split("\n");
       const language = lines[0].match(/^[\w+-]+$/) ? lines.shift() : "text";
-      const code = lines.join("\n");
+      let codeLines = lines;
+      let codeTrunc = false;
+      if (codeLines.length > MAX_CODE_BLOCK_LINES) {
+        codeTrunc = true;
+        codeLines = [
+          ...codeLines.slice(0, Math.floor(MAX_CODE_BLOCK_LINES / 2)),
+          `… ${lines.length - MAX_CODE_BLOCK_LINES} lines omitted …`,
+          ...codeLines.slice(-Math.floor(MAX_CODE_BLOCK_LINES / 2)),
+        ];
+      }
+      const code = codeLines.join("\n");
+      const fullCode = lines.join("\n");
       return (
         <figure className="code-block" key={index}>
           <figcaption>
-            <span>{language}</span>
-            <CopyButton text={code} />
+            <span>{language}{codeTrunc ? " · bounded" : ""}</span>
+            <CopyButton text={fullCode} />
           </figcaption>
           <pre><code>{code}</code></pre>
         </figure>
@@ -88,7 +104,7 @@ export function Markdown({ text, onFileRef }: { text: string; onFileRef?: FileRe
       if (/^[-*] /.test(line)) return <div className="list-line" key={lineIndex}>— <Inline text={line.slice(2)} onFileRef={onFileRef} /></div>;
       return line ? <p key={lineIndex}><Inline text={line} onFileRef={onFileRef} /></p> : <br key={lineIndex} />;
     });
-  })}</div>;
+  })}{truncated && <p className="muted">Message truncated for display; full text remains in session memory.</p>}</div>;
 }
 
 export function DiffViewer({
@@ -102,7 +118,7 @@ export function DiffViewer({
 }) {
   const [wrap, setWrap] = useState(false);
   const lines = text.split("\n");
-  const bounded = lines.length > 800 ? [...lines.slice(0, 400), `… ${lines.length - 800} lines omitted …`, ...lines.slice(-400)] : lines;
+  const bounded = lines.length > MAX_DIFF_LINES ? [...lines.slice(0, Math.floor(MAX_DIFF_LINES / 2)), `… ${lines.length - MAX_DIFF_LINES} lines omitted …`, ...lines.slice(-Math.floor(MAX_DIFF_LINES / 2))] : lines;
   return (
     <div className="diff-viewer">
       <div className="diff-toolbar">
@@ -170,10 +186,10 @@ function isDiffText(raw: string): boolean {
   return raw.includes("@@") && (/^\+\+\+/m.test(raw) || /^---/m.test(raw));
 }
 
-function boundText(raw: string): { text: string; truncated: boolean } {
-  if (raw.length <= MAX_SUMMARY_CHARS) return { text: raw, truncated: false };
+function boundText(raw: string, limit = MAX_SUMMARY_CHARS): { text: string; truncated: boolean } {
+  if (raw.length <= limit) return { text: raw, truncated: false };
   return {
-    text: `${raw.slice(0, MAX_SUMMARY_CHARS)}\n… truncated (${raw.length.toLocaleString()} chars; full scaling in WEBUI.20)`,
+    text: `${raw.slice(0, limit)}\n… truncated (${raw.length.toLocaleString()} chars; full text retained in session memory)`,
     truncated: true,
   };
 }
@@ -357,30 +373,78 @@ export function Transcript({
   );
 }
 
-export function TranscriptList({
-  items,
-  showThinking = true,
-  onFileRef,
-}: {
+export type TranscriptListProps = {
   items: TranscriptItem[];
   showThinking?: boolean;
   onFileRef?: FileRefHandler;
-}) {
+  /** Scroll container for windowing (transcript section). */
+  scrollRef?: RefObject<HTMLElement | null>;
+  /** Stick to bottom while the user is following the live tail. */
+  stickToBottom?: boolean;
+  /** Enable window virtualization (default true when items are large). */
+  virtualize?: boolean;
+};
+
+function renderGroup(
+  g: TranscriptGroup,
+  showThinking: boolean,
+  onFileRef?: FileRefHandler,
+) {
+  if (g.kind === "exploration") {
+    return (
+      <article className="message tool exploration" aria-label={`Exploration ${g.items.length} steps`}>
+        <div className="message-label">Exploration</div>
+        <ExplorationGroup items={g.items} onFileRef={onFileRef} />
+      </article>
+    );
+  }
+  return <Transcript item={g.item} showThinking={showThinking} onFileRef={onFileRef} />;
+}
+
+function TranscriptListImpl({
+  items,
+  showThinking = true,
+  onFileRef,
+  scrollRef,
+  stickToBottom = false,
+  virtualize,
+}: TranscriptListProps) {
   const groups = useMemo(() => groupTranscriptItems(items), [items]);
+  const shouldVirtualize = virtualize ?? groups.length > 40;
+  const itemKey = useCallback((g: TranscriptGroup) => (g.kind === "exploration" ? g.id : g.item.id), []);
+  const renderItem = useCallback(
+    (g: TranscriptGroup) => renderGroup(g, showThinking, onFileRef),
+    [showThinking, onFileRef],
+  );
+
+  if (!shouldVirtualize) {
+    return (
+      <div className="transcript-list" role="log" aria-label="Conversation messages" data-virtual-mounted={groups.length} data-virtual-total={groups.length}>
+        {groups.map((g) => (
+          <div key={itemKey(g)}>{renderGroup(g, showThinking, onFileRef)}</div>
+        ))}
+      </div>
+    );
+  }
+
   return (
-    <>
-      {groups.map((g) =>
-        g.kind === "exploration" ? (
-          <article className="message tool exploration" key={g.id}>
-            <div className="message-label">Exploration</div>
-            <ExplorationGroup items={g.items} onFileRef={onFileRef} />
-          </article>
-        ) : (
-          <Transcript key={g.item.id} item={g.item} showThinking={showThinking} onFileRef={onFileRef} />
-        ),
-      )}
-    </>
+    <VirtualList
+      className="transcript-list"
+      items={groups}
+      itemKey={itemKey}
+      renderItem={renderItem}
+      scrollRef={scrollRef}
+      stickToBottom={stickToBottom}
+      estimateHeight={120}
+      overscan={8}
+      maxMounted={80}
+      aria-label="Conversation messages"
+    />
   );
 }
+
+/** Memoized so team/roster updates do not rerender the transcript DOM. */
+export const TranscriptList = memo(TranscriptListImpl);
+
 
 export { formatCostNotice } from "./cost";

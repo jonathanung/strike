@@ -2657,3 +2657,20 @@ button.linkish { border: 0; background: transparent; color: var(--acid); cursor:
 @media (max-width: 720px) {
   .review-content { max-height: 200px; }
 }
+
+
+/* WEBUI.20 virtualization */
+.virtual-list {
+  position: relative;
+  min-height: 0;
+}
+.virtual-list-spacer {
+  width: 100%;
+}
+.transcript-list {
+  min-height: 0;
+}
+.team-roster {
+  max-height: min(60vh, 520px);
+  overflow: auto;
+}
