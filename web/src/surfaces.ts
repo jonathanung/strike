@@ -39,6 +39,8 @@ export type SurfaceDef = {
   inspector?: boolean;
   /** Sort order within inspector (ascending). */
   order?: number;
+  /** Per-mode sort override (Ops/Project regroup without disturbing Chat union). */
+  modeOrder?: Partial<Record<WorkspaceMode, number>>;
 };
 
 export type ModePreset = {
@@ -100,9 +102,9 @@ export const MODE_PRESETS: Record<WorkspaceMode, ModePreset> = {
   ops: {
     id: "ops",
     label: "Ops",
-    description: "Settings, MCP, plugins, panes, timeline",
+    description: "Providers, settings, MCP, plugins, panes, diagnostics",
     primarySurface: "settings",
-    defaultSurface: "mcp",
+    defaultSurface: "settings",
   },
 };
 
@@ -172,6 +174,7 @@ export const BUILTIN_SURFACES: readonly SurfaceDef[] = [
     placement: { desktop: "drawer", tablet: "drawer", phone: "sheet" },
     inspector: true,
     order: 10,
+    modeOrder: { ops: 280 },
   },
   {
     id: "files",
@@ -196,6 +199,7 @@ export const BUILTIN_SURFACES: readonly SurfaceDef[] = [
     placement: { desktop: "drawer", tablet: "drawer", phone: "sheet" },
     inspector: true,
     order: 30,
+    modeOrder: { ops: 270 },
   },
   {
     id: "roster",
@@ -220,6 +224,7 @@ export const BUILTIN_SURFACES: readonly SurfaceDef[] = [
     placement: { desktop: "drawer", tablet: "drawer", phone: "sheet" },
     inspector: true,
     order: 50,
+    modeOrder: { ops: 290, team: 50 },
   },
   {
     id: "plans",
@@ -282,6 +287,91 @@ export const BUILTIN_SURFACES: readonly SurfaceDef[] = [
     order: 100,
   },
   {
+    id: "project-export",
+    label: "exports",
+    modes: ["project"],
+    capability: "project-export",
+    attention: "none",
+    lazyMount: true,
+    attach: "read",
+    placement: { desktop: "drawer", tablet: "drawer", phone: "sheet" },
+    inspector: true,
+    order: 105,
+  },
+  // --- Ops mode (WEBUI.12): providers/settings first, then integrations, then observe ---
+  {
+    id: "settings",
+    label: "settings",
+    modes: ["ops"],
+    capability: "settings",
+    attention: "none",
+    lazyMount: true,
+    attach: "mutate-blocked",
+    placement: { desktop: "drawer", tablet: "drawer", phone: "sheet" },
+    inspector: true,
+    order: 200,
+  },
+  {
+    id: "providers",
+    label: "providers",
+    modes: ["ops"],
+    capability: "auth",
+    attention: "none",
+    lazyMount: true,
+    attach: "mutate-blocked",
+    placement: { desktop: "drawer", tablet: "drawer", phone: "sheet" },
+    inspector: true,
+    order: 210,
+  },
+  {
+    id: "auth",
+    label: "auth",
+    modes: ["ops"],
+    capability: "auth",
+    attention: "none",
+    lazyMount: true,
+    attach: "mutate-blocked",
+    placement: { desktop: "drawer", tablet: "drawer", phone: "sheet" },
+    inspector: true,
+    order: 215,
+  },
+  {
+    id: "permissions",
+    label: "permissions",
+    modes: ["ops"],
+    capability: "permissions",
+    attention: "none",
+    lazyMount: true,
+    attach: "read",
+    placement: { desktop: "drawer", tablet: "drawer", phone: "sheet" },
+    inspector: true,
+    order: 220,
+  },
+  {
+    id: "sandbox",
+    label: "sandbox",
+    modes: ["ops"],
+    capability: "sandbox",
+    attention: "none",
+    lazyMount: true,
+    attach: "mutate-blocked",
+    placement: { desktop: "drawer", tablet: "drawer", phone: "sheet" },
+    inspector: true,
+    order: 225,
+  },
+  {
+    id: "theme",
+    label: "theme",
+    modes: ["ops"],
+    capability: "settings",
+    attention: "none",
+    lazyMount: true,
+    attach: "read",
+    placement: { desktop: "drawer", tablet: "drawer", phone: "sheet" },
+    inspector: true,
+    order: 230,
+  },
+  {
     id: "mcp",
     label: "mcp",
     modes: ["ops"],
@@ -291,7 +381,7 @@ export const BUILTIN_SURFACES: readonly SurfaceDef[] = [
     attach: "read",
     placement: { desktop: "drawer", tablet: "drawer", phone: "sheet" },
     inspector: true,
-    order: 110,
+    order: 240,
   },
   {
     id: "plugins",
@@ -303,7 +393,7 @@ export const BUILTIN_SURFACES: readonly SurfaceDef[] = [
     attach: "read",
     placement: { desktop: "drawer", tablet: "drawer", phone: "sheet" },
     inspector: true,
-    order: 120,
+    order: 250,
   },
   {
     id: "panes",
@@ -315,26 +405,80 @@ export const BUILTIN_SURFACES: readonly SurfaceDef[] = [
     attach: "read",
     placement: { desktop: "drawer", tablet: "drawer", phone: "sheet" },
     inspector: true,
-    order: 130,
+    order: 260,
   },
   {
-    id: "settings",
-    label: "settings",
+    id: "diag-export",
+    label: "diagnostics export",
     modes: ["ops"],
-    capability: "settings",
+    capability: "diag",
     attention: "none",
     lazyMount: true,
     attach: "mutate-blocked",
-    placement: { desktop: "dialog", tablet: "dialog", phone: "dialog" },
-    inspector: false,
-    order: 140,
+    placement: { desktop: "drawer", tablet: "drawer", phone: "sheet" },
+    inspector: true,
+    order: 300,
   },
 ] as const;
 
-const byId = new Map(BUILTIN_SURFACES.map((s) => [s.id, s]));
+/** Dynamic pane/1 contributions registered at runtime (WEBUI.12). */
+const dynamicSurfaces = new Map<string, SurfaceDef>();
+
+/** Register or replace a dynamic surface (plugin pane). Ids must be unique. */
+export function registerDynamicSurface(def: SurfaceDef): void {
+  if (!def.id || BUILTIN_SURFACES.some((s) => s.id === def.id)) {
+    // Never shadow builtins; ignore malformed empty ids.
+    return;
+  }
+  dynamicSurfaces.set(def.id, def);
+}
+
+/** Drop one dynamic surface (pane unmounted / plugin disabled). */
+export function unregisterDynamicSurface(id: string): void {
+  dynamicSurfaces.delete(id);
+}
+
+/** Clear all dynamic surfaces (session reset). */
+export function clearDynamicSurfaces(): void {
+  dynamicSurfaces.clear();
+}
+
+/** Build a bounded pane surface from host pane metadata. */
+export function paneSurfaceFromInfo(pane: {
+  id?: string;
+  title?: string;
+  loadError?: string;
+}): SurfaceDef | undefined {
+  const id = String(pane.id || "").trim();
+  if (!id) return undefined;
+  // Bound id/label; strip C0 controls. Renderer still escapes text nodes.
+  const safeId = id.replace(/[^\w.:@+-]+/g, "-").slice(0, 96);
+  if (!safeId) return undefined;
+  const surfaceId = safeId.startsWith("pane:") ? safeId : `pane:${safeId}`;
+  const rawTitle = String(pane.title || id).replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 64);
+  return {
+    id: surfaceId,
+    label: rawTitle || surfaceId,
+    modes: ["ops"],
+    capability: "panes",
+    attention: pane.loadError ? "badge" : "none",
+    lazyMount: true,
+    attach: "read",
+    placement: { desktop: "drawer", tablet: "drawer", phone: "sheet" },
+    inspector: true,
+    order: 265,
+  };
+}
+
+function allSurfaces(): SurfaceDef[] {
+  if (dynamicSurfaces.size === 0) return [...BUILTIN_SURFACES];
+  return [...BUILTIN_SURFACES, ...dynamicSurfaces.values()];
+}
+
+const byId = () => new Map(allSurfaces().map((s) => [s.id, s]));
 
 export function getSurface(id: string): SurfaceDef | undefined {
-  return byId.get(id);
+  return byId().get(id);
 }
 
 export function isWorkspaceMode(value: string): value is WorkspaceMode {
@@ -359,6 +503,10 @@ export function surfaceCapabilityAllowed(
   if (c === "live") return Boolean(opts?.isLive ?? caps?.live);
   if (c === "team") return true;
   if (c === "sessions") return Boolean(caps?.sessions || caps?.roots);
+  // Project exports when any project data surface is available (WEBUI.12).
+  if (c === "project-export") {
+    return Boolean(caps?.memory || caps?.issues || caps?.plans || caps?.goals || caps?.workflows);
+  }
   if (!caps) return false;
   return Boolean(caps[c]);
 }
@@ -388,7 +536,7 @@ export type ListSurfacesOpts = {
  */
 export function listSurfaces(opts: ListSurfacesOpts = {}): SurfaceDef[] {
   const force = new Set(opts.forceIds || []);
-  return BUILTIN_SURFACES.filter((surface) => {
+  return allSurfaces().filter((surface) => {
     if (opts.inspectorOnly && !surface.inspector) return false;
     if (opts.mode && !surfaceInMode(surface, opts.mode)) {
       if (!force.has(surface.id)) return false;
@@ -399,7 +547,14 @@ export function listSurfaces(opts: ListSurfacesOpts = {}): SurfaceDef[] {
     const allowed = surfaceCapabilityAllowed(surface, opts.caps, { isLive: opts.isLive });
     if (!allowed && !force.has(surface.id)) return false;
     return true;
-  }).sort((a, b) => (a.order ?? 500) - (b.order ?? 500));
+  }).sort((a, b) => surfaceOrder(a, opts.mode) - surfaceOrder(b, opts.mode));
+}
+
+function surfaceOrder(s: SurfaceDef, mode?: WorkspaceMode): number {
+  if (mode && s.modeOrder && s.modeOrder[mode] !== undefined) {
+    return s.modeOrder[mode] as number;
+  }
+  return s.order ?? 500;
 }
 
 /** Inspector tabs for a mode (capability-gated). */
@@ -539,7 +694,7 @@ export function resolveModeSurface(input: {
         mode,
         surface: def.id,
         openDrawer: Boolean(def.inspector),
-        openSettings: def.id === "settings",
+        openSettings: def.id === "settings" || def.id === "theme" || def.id === "providers" || def.id === "auth",
         unavailable: {
           id: def.id,
           reason: !attachOk
@@ -552,7 +707,7 @@ export function resolveModeSurface(input: {
       mode,
       surface: def.id,
       openDrawer: Boolean(def.inspector) || def.placement.desktop === "drawer",
-      openSettings: def.id === "settings",
+      openSettings: def.id === "settings" || def.id === "theme" || def.id === "providers" || def.id === "auth",
     };
   }
 
@@ -573,3 +728,22 @@ export function resolveModeSurface(input: {
     openSettings: defSurface === "settings",
   };
 }
+
+/** Project mode surface ids in list-first order (WEBUI.12). */
+export const PROJECT_SURFACE_IDS = [
+  "plans", "goals", "issues", "memory", "workflows", "project-export",
+] as const;
+
+/** Ops mode surface ids in coherent groups (WEBUI.12). */
+export const OPS_SURFACE_IDS = [
+  "settings", "providers", "auth", "permissions", "sandbox", "theme",
+  "mcp", "plugins", "panes",
+  "diagnostics", "context", "timeline", "diag-export",
+] as const;
+
+/**
+ * TUI `/loop` is superseded on web by durable Goals and Workflows controls.
+ * No session-only loop engine is exposed in the cockpit (WEBUI.12 non-goal).
+ */
+export const LOOP_SUPERSEDED_NOTE =
+  "The TUI /loop shortcut is superseded here by Goals and Workflows. Use Project → goals or workflows for durable automation.";

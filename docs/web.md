@@ -711,6 +711,9 @@ a process supervisor). Strike does not spawn Vite as a child.
 
 ## Layout
 
+> **Web cockpit:** The TUI `/loop` shortcut is superseded by durable **Goals** and **Workflows** controls under Project mode (WEBUI.12). The browser does not add a session-only loop engine.
+
+
 Responsive shell profiles (WEBUI.4 / #1074; contract §4):
 
 | Profile | Width | Chrome |
