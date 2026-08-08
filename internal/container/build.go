@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -155,12 +156,15 @@ func (c *CLI) RemoveNetwork(ctx context.Context, name string) error {
 
 // InspectState holds a subset of container inspect fields.
 type InspectState struct {
-	ID      string
-	Name    string
-	Running bool
-	Status  string
-	Image   string
-	Labels  map[string]string
+	ID        string
+	Name      string
+	Running   bool
+	Status    string
+	Image     string
+	ExitCode  int
+	OOMKilled bool
+	Error     string
+	Labels    map[string]string
 }
 
 // InspectContainer returns state for nameOrID or ErrNoContainer.
@@ -168,7 +172,7 @@ func (c *CLI) InspectContainer(ctx context.Context, nameOrID string) (*InspectSt
 	if nameOrID == "" {
 		return nil, ErrNoContainer
 	}
-	format := "{{.Id}}|{{.Name}}|{{.State.Running}}|{{.State.Status}}|{{.Config.Image}}"
+	format := "{{.Id}}|{{.Name}}|{{.State.Running}}|{{.State.Status}}|{{.Config.Image}}|{{.State.ExitCode}}|{{.State.OOMKilled}}|{{.State.Error}}"
 	stdout, stderr, code, err := c.run(ctx, "inspect", "--format", format, nameOrID)
 	if err != nil {
 		return nil, fmt.Errorf("container: inspect: %w", err)
@@ -180,7 +184,7 @@ func (c *CLI) InspectContainer(ctx context.Context, nameOrID string) (*InspectSt
 		}
 		return nil, fmt.Errorf("container: inspect: exit %d: %s", code, strings.TrimSpace(stderr))
 	}
-	parts := strings.Split(strings.TrimSpace(stdout), "|")
+	parts := strings.SplitN(strings.TrimSpace(stdout), "|", 8)
 	if len(parts) < 5 {
 		return nil, fmt.Errorf("container: inspect: unexpected format %q", stdout)
 	}
@@ -191,6 +195,15 @@ func (c *CLI) InspectContainer(ctx context.Context, nameOrID string) (*InspectSt
 		Image:  parts[4],
 	}
 	st.Running = parts[2] == "true"
+	if len(parts) > 5 {
+		st.ExitCode, _ = strconv.Atoi(parts[5])
+	}
+	if len(parts) > 6 {
+		st.OOMKilled = parts[6] == "true"
+	}
+	if len(parts) > 7 {
+		st.Error = strings.TrimSpace(parts[7])
+	}
 	labOut, _, labCode, _ := c.run(ctx, "inspect", "--format", "{{json .Config.Labels}}", nameOrID)
 	if labCode == 0 {
 		st.Labels = parseLabelJSON(strings.TrimSpace(labOut))

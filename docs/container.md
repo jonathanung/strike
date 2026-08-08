@@ -115,6 +115,9 @@ strike container status        # running + config-hash compatibility
 
 `Manager.LaunchWithResult` returns mode `attached` | `started` | `restarted` |
 `rebuilt`. Launch prints e.g. `strike: attached to existing container …`.
+Discovery, creation, and explicit rebuild are serialized per repository across
+processes; active sessions hold shared attach leases, so rebuild waits instead
+of killing them. A concurrent launch re-inspects and joins the compatible winner.
 Stale config raises `*StaleContainerError` (unwraps `ErrConfigDrift`) with
 question options attach/rebuild/cancel for CLI or the `question` tool.
 
