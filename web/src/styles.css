@@ -480,6 +480,66 @@ header {
 }
 .wordmark small { color: var(--muted); font-size: 9px; }
 .session-line { margin-left: auto; text-transform: uppercase; font-size: 10px; color: var(--muted); }
+
+.mode-switch {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 12px;
+  padding: 2px;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--surface-muted);
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: auto;
+}
+.mode-btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  padding: 6px 10px;
+  min-height: 32px;
+  border-radius: 3px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.mode-btn:hover, .mode-btn:focus-visible {
+  color: var(--ink);
+  outline: none;
+  background: var(--surface);
+}
+.mode-btn.active {
+  background: var(--raised);
+  color: var(--acid);
+  font-weight: 600;
+}
+.mode-attn {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-alt);
+  flex-shrink: 0;
+}
+.mode-attn.needs-you {
+  background: var(--warning);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--warning) 30%, transparent);
+}
+.surface-roster h2 {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  margin: 0 0 12px;
+  color: var(--muted);
+}
+
 .pulse {
   display: inline-block;
   width: 7px;
@@ -1169,6 +1229,10 @@ dialog input { padding: 12px; color: var(--ink); }
   .composer { margin: 0 10px 10px; }
   .empty-state { margin-top: 6vh; }
   .session-line { font-size: 0; }
+  .mode-switch { margin-left: 4px; }
+  .mode-btn { padding: 6px 8px; font-size: 9px; }
+  .mode-btn span:first-child { max-width: 4.5em; overflow: hidden; text-overflow: ellipsis; }
+
   .session-line .pulse { margin: 0; }
 }
 
