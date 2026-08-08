@@ -49,11 +49,9 @@ type Options struct {
 	// events, and WebSocket are scoped to ?root=<id>. Nil means single-root
 	// via Live (or attach-only when both are nil).
 	LiveHub *LiveHub
-	// Expose enables LAN-oriented CORS (private-network browser origins) in
-	// addition to localhost. Set when strike serve --expose is used.
-	Expose bool
 	// AllowCIDRs, when non-empty, rejects requests whose client IP falls
-	// outside the list (all routes including /health).
+	// outside the list (all routes including /health). Unused by strike serve
+	// CLI (loopback-only bind); retained for programmatic hosts.
 	AllowCIDRs []*net.IPNet
 	// Services exposes optional frontend host capabilities.
 	Services *host.Services
@@ -289,7 +287,7 @@ func (s *Server) withMiddleware(next http.Handler) http.Handler {
 			return
 		}
 		if stateChanging(r.Method) {
-			if origin := r.Header.Get("Origin"); origin != "" && !originAllowed(origin, s.opts.Expose) {
+			if origin := r.Header.Get("Origin"); origin != "" && !originAllowed(origin) {
 				http.Error(w, "origin not allowed", http.StatusForbidden)
 				return
 			}
@@ -431,7 +429,7 @@ func (s *Server) maybeHandoffToken(w http.ResponseWriter, r *http.Request) bool 
 
 func (s *Server) applyCORS(w http.ResponseWriter, r *http.Request) {
 	origin := r.Header.Get("Origin")
-	if originAllowed(origin, s.opts.Expose) {
+	if originAllowed(origin) {
 		w.Header().Set("Access-Control-Allow-Origin", origin)
 		w.Header().Set("Vary", "Origin")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
@@ -439,7 +437,9 @@ func (s *Server) applyCORS(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func originAllowed(origin string, expose bool) bool {
+// originAllowed permits only loopback browser origins (localhost / 127.0.0.1 /
+// ::1). Remote access is via SSH local forward, not cleartext LAN CORS.
+func originAllowed(origin string) bool {
 	if origin == "" {
 		return false
 	}
@@ -455,15 +455,7 @@ func originAllowed(origin string, expose bool) bool {
 		return true
 	}
 	ip := net.ParseIP(host)
-	if ip == nil {
-		return false
-	}
-	if ip.IsLoopback() {
-		return true
-	}
-	// With --expose, allow private/LAN browser origins (e.g. Vite on another
-	// device). Public internet origins stay denied.
-	return expose && IsPrivateOrLoopbackIP(ip)
+	return ip != nil && ip.IsLoopback()
 }
 
 func originHost(origin string) string {

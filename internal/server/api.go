@@ -1115,7 +1115,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "live session unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	if origin := r.Header.Get("Origin"); origin != "" && !originAllowed(origin, s.opts.Expose) {
+	if origin := r.Header.Get("Origin"); origin != "" && !originAllowed(origin) {
 		http.Error(w, "websocket origin not allowed", http.StatusForbidden)
 		return
 	}

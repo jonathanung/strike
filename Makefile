@@ -1,4 +1,4 @@
-.PHONY: build run run-echo serve serve-expose web-build web-test web-check test vet cover cover-check clean setup restore tui-gen prompt-reg chaos harness-eval swebench-eval telemetry-check container-smoke
+.PHONY: build run run-echo serve web-build web-test web-check test vet cover cover-check clean setup restore tui-gen prompt-reg chaos harness-eval swebench-eval telemetry-check container-smoke
 
 # Overall statement-coverage floor for `make cover-check` (local / optional CI).
 # Soft baseline ~77%; keep below measured total so the gate does not flake.
@@ -39,10 +39,6 @@ run-echo: build
 # Web workspace (unauthenticated loopback by default — see docs/web.md).
 serve: build
 	./strike serve --addr 127.0.0.1:8787
-
-# LAN expose (WARNING: no TLS; authenticated with an auto-minted token).
-serve-expose: build
-	./strike serve --auth --expose
 
 # Vite workspace: builds production assets embedded by the Go binary.
 web-build:
