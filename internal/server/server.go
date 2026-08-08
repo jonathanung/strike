@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jonathanung/strike-cli/internal/host"
@@ -76,6 +77,9 @@ type Server struct {
 	mux    *http.ServeMux
 	http   *http.Server
 	static fs.FS
+
+	authFlowOnce   sync.Once
+	authFlowsStore *authFlowStore
 
 	// paneHost supervises process panes for the web cockpit (#732).
 	paneHost *paneHost
@@ -184,6 +188,19 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/providers", s.handleProviders)
 	s.mux.HandleFunc("POST /v1/auth/key", s.handleAuthKey)
 	s.mux.HandleFunc("DELETE /v1/auth/{provider}", s.handleAuthLogout)
+	s.mux.HandleFunc("POST /v1/auth/device", s.handleAuthDeviceStart)
+	s.mux.HandleFunc("GET /v1/auth/device/{id}", s.handleAuthDeviceStatus)
+	s.mux.HandleFunc("DELETE /v1/auth/device/{id}", s.handleAuthDeviceCancel)
+	s.mux.HandleFunc("POST /v1/auth/oauth", s.handleAuthOAuthStart)
+	s.mux.HandleFunc("GET /v1/auth/oauth/{id}", s.handleAuthOAuthStatus)
+	s.mux.HandleFunc("POST /v1/auth/oauth/{id}/complete", s.handleAuthOAuthComplete)
+	s.mux.HandleFunc("DELETE /v1/auth/oauth/{id}", s.handleAuthOAuthCancel)
+	s.mux.HandleFunc("GET /v1/custom-providers", s.handleCustomProviders)
+	s.mux.HandleFunc("POST /v1/custom-providers", s.handleCustomProviders)
+	s.mux.HandleFunc("DELETE /v1/custom-providers/{name}", s.handleCustomProviderDelete)
+	s.mux.HandleFunc("GET /v1/scheduler/presets", s.handleSchedulerPresets)
+	s.mux.HandleFunc("POST /v1/scheduler/presets", s.handleSchedulerPresetsApply)
+	s.mux.HandleFunc("GET /v1/config-sources", s.handleConfigSources)
 	s.mux.HandleFunc("GET /v1/models", s.handleModels)
 	s.mux.HandleFunc("GET /v1/history", s.handleHistory)
 	s.mux.HandleFunc("POST /v1/history", s.handleHistory)

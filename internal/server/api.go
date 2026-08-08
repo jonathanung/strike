@@ -105,6 +105,10 @@ type capabilities struct {
 	// FileApply is true when live + Files host can run reviewed ApplyEdit/ApplyPatch
 	// (WEBUI.9). False for attach-only and --read-only.
 	FileApply bool `json:"fileApply"`
+	// Scheduler is true when host.Services.SchedulerPresets is wired.
+	Scheduler bool `json:"scheduler"`
+	// ConfigFiles is true when host.Services.ConfigFiles is wired (typed source list).
+	ConfigFiles bool `json:"configFiles"`
 	// Themes is true when host.Services.Themes is wired (catalog list/get).
 	Themes bool `json:"themes"`
 }
@@ -159,10 +163,12 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 		// Plugin lifecycle + pane contributions via /v1/plugins* and /v1/panes* (#732).
 		c.Plugins = h.Plugins != nil
 		c.Panes = h.Panes != nil
+		c.Providers = h.Providers != nil
+		c.Scheduler = h.SchedulerPresets != nil
+		c.ConfigFiles = h.ConfigFiles != nil
 		c.Themes = h.Themes != nil
 		// Capabilities describe browser surfaces, not merely host interfaces.
-		// Roots, custom providers, project init, and telemetry remain false
-		// until this server exposes their service operations.
+		// Roots, project init, and telemetry remain false until exposed.
 		for _, skill := range h.Skills {
 			skills = append(skills, map[string]any{"name": skill.Name, "description": skill.Description})
 		}
@@ -185,55 +191,6 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 		protocolOps = browserProtocolOpsWithTeamControl()
 	}
 	writeJSON(w, http.StatusOK, bootstrapResponse{Version: version.Version, AuthRequired: s.opts.Auth, AttachOnly: !live, Capabilities: c, Status: status, Agents: agents, Skills: skills, ProtocolOps: protocolOps})
-}
-
-func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
-	if s.opts.Services == nil || s.opts.Services.Auth == nil {
-		capabilityUnavailable(w, "auth")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"providers": s.opts.Services.Auth.Statuses()})
-}
-
-func (s *Server) handleAuthKey(w http.ResponseWriter, r *http.Request) {
-	if s.opts.Services == nil || s.opts.Services.Auth == nil {
-		capabilityUnavailable(w, "auth")
-		return
-	}
-	var body struct {
-		Provider string `json:"provider"`
-		Key      string `json:"key"`
-	}
-	if err := decodeBody(w, r, &body); err != nil {
-		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
-		return
-	}
-	if strings.TrimSpace(body.Provider) == "" || strings.TrimSpace(body.Key) == "" {
-		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "provider and key are required"})
-		return
-	}
-	if err := s.opts.Services.Auth.SetAPIKey(body.Provider, body.Key); err != nil {
-		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
-		return
-	}
-	writeJSON(w, http.StatusOK, opOKResponse{OK: true})
-}
-
-func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
-	if s.opts.Services == nil || s.opts.Services.Auth == nil {
-		capabilityUnavailable(w, "auth")
-		return
-	}
-	provider := strings.TrimSpace(r.PathValue("provider"))
-	if provider == "" {
-		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "provider is required"})
-		return
-	}
-	if err := s.opts.Services.Auth.Logout(provider); err != nil {
-		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
@@ -440,6 +397,9 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 	settings := s.opts.Services.Settings
 	if r.Method == http.MethodGet {
 		writeJSON(w, http.StatusOK, settingsFromDefaults(settings.Defaults()))
+		return
+	}
+	if !s.requireMutable(w) {
 		return
 	}
 	var body settingsPatchBody

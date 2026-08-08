@@ -2477,6 +2477,32 @@ button.file-ref { background: none; border: 0; padding: 0; color: var(--acid); c
 }
 .code-block figcaption { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 
+/* Provider auth rows (WEBUI.10) */
+.provider-rows { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 0.75rem; }
+.provider-row {
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+  background: var(--surface-muted);
+}
+.provider-row header { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; }
+.provider-row .badge {
+  font-size: 0.75rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+}
+.provider-row .badge.ok { border-color: var(--success); color: var(--success); }
+.model-meta ul { margin: 0.25rem 0 0; padding-left: 1.1rem; }
+.device-flow, .oauth-flow {
+  margin-top: 0.5rem;
+  padding: 0.5rem;
+  border: 1px dashed var(--rule);
+  border-radius: 8px;
+}
+.custom-provider-list { list-style: none; padding: 0; margin: 0 0 0.5rem; }
+.custom-provider-list li { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-bottom: 0.35rem; }
 /* WEBUI.8 Code explorer */
 .code-explorer { display: grid; gap: 10px; }
 .code-explorer-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
