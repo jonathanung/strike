@@ -3,6 +3,14 @@
 `strike serve` hosts a React workspace that can drive a **live** engine session
 and read-only attach to durable session JSONL logs.
 
+**Progressive workspace contract (epic [#1069](https://github.com/jonathanung/strike/issues/1069)):**
+modes (`Chat` default, `Code`, `Team`, `Project`, `Ops`), surface registry,
+additive deep links, attach-only matrix, and exhaustive TUI→web parity inventory
+live in **[docs/web-cockpit-contract.md](web-cockpit-contract.md)** (WEBUI.1 /
+[#1070](https://github.com/jonathanung/strike/issues/1070)). Implementers of
+WEBUI.2–WEBUI.21 must follow that document; this page remains the operator
+reference for start flags, endpoints, multi-session UX (#467), and security.
+
 ## Start
 
 ```sh
@@ -303,6 +311,12 @@ Normative product contract for the web cockpit multi-session experience
 WEBSESS.2–.6 (#917–#921) must follow this section; do not re-decide product
 here without updating this doc.
 
+For progressive **modes**, **surface registry**, **parity inventory**, and
+extended deep-link grammar (`mode` / `surface` / …), see
+[web-cockpit-contract.md](web-cockpit-contract.md). When the two docs disagree
+on root/session transport, **this section wins**; on modes/surfaces/parity, the
+cockpit contract wins.
+
 **Status:** contract freeze for wave 1. UI and server behavior changes land in
 child issues; this section is the source of truth for information architecture,
 flows, attention, state isolation, and known API gaps.
@@ -506,6 +520,11 @@ other query params):
 Shareable example (after auth handoff): `/attach?session=<durableId>` or
 `/attach?root=<liveId>`.
 
+Additive mode/surface/entity deep links (`mode`, `surface`, `path`, `agent`,
+`pane`, `entity`) are specified in
+[web-cockpit-contract.md §5](web-cockpit-contract.md#5-deep-link-grammar-additive)
+and must not break the `root` / `session` semantics above.
+
 **Keyboard (rail focused):** `j` / `ArrowDown` next workspace, `k` / `ArrowUp`
 previous. Ignored while focus is in an input/textarea (composer safe).
 
@@ -541,8 +560,8 @@ buses) unless a child issue records a hard gap and updates this section.
 | Broad v0.2.x feature parity (plans, goals, MCP, …) | #516 |
 | Cockpit auth/TLS/rate-limit hardening | #541 |
 | Harness trust UX / timeline export entry points | #809 (TUI-first; web residual under #516) |
-| Subagent tree visualizer | #523 (TUI-first; web non-goal) |
-| Full TUI multi-agent parity | non-goal for #467 |
+| Subagent tree **graph** visualizer | #523 (TUI-first). Epic #1069 extends the former web non-goal to observe-first list/board/review only — graph clone remains out of scope ([web-cockpit-contract.md](web-cockpit-contract.md)) |
+| Full TUI multi-agent parity | non-goal for #467; Team observe/control track is #1081–#1089 |
 | Implementing UI/server in this contract issue | #917–#921 |
 | Persisting drafts across full page reload | non-goal for #918 |
 | Sound / desktop notifications | optional later |
