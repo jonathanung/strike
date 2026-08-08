@@ -63,3 +63,49 @@ func (e *StaleContainerError) Unwrap() error { return ErrConfigDrift }
 func (e *StaleContainerError) QuestionOptions() []string {
 	return []string{"attach", "rebuild", "cancel"}
 }
+
+// ExecTerminationError adds container state to an unexpected interactive exec
+// exit while preserving the underlying *exec.ExitError for its exit status.
+type ExecTerminationError struct {
+	Err               error
+	ExecExitCode      int
+	ContainerRunning  bool
+	ContainerStatus   string
+	ContainerExitCode int
+	OOMKilled         bool
+	ContainerError    string
+	InspectErr        error
+}
+
+func (e *ExecTerminationError) Error() string {
+	if e == nil {
+		return "container exec terminated"
+	}
+	if e.OOMKilled {
+		return fmt.Sprintf("container exec terminated: container was OOM-killed (exec exit %d, container exit %d)", e.ExecExitCode, e.ContainerExitCode)
+	}
+	if e.InspectErr != nil {
+		if e.ExecExitCode == 137 || e.ExecExitCode < 0 {
+			return fmt.Sprintf("container exec was killed (exit %d); container inspection failed: %v", e.ExecExitCode, e.InspectErr)
+		}
+		return fmt.Sprintf("container exec exited with status %d; container inspection failed: %v", e.ExecExitCode, e.InspectErr)
+	}
+	if e.ContainerStatus != "" && !e.ContainerRunning {
+		msg := fmt.Sprintf("container exec terminated because the container exited (status %s, exec exit %d, container exit %d)", e.ContainerStatus, e.ExecExitCode, e.ContainerExitCode)
+		if e.ContainerError != "" {
+			msg += ": " + e.ContainerError
+		}
+		return msg
+	}
+	if e.ExecExitCode == 137 || e.ExecExitCode < 0 {
+		return fmt.Sprintf("container exec was killed (exit %d) while the container remained running; check container memory/PID limits and runtime events", e.ExecExitCode)
+	}
+	return fmt.Sprintf("container exec exited with status %d while the container remained running", e.ExecExitCode)
+}
+
+func (e *ExecTerminationError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}

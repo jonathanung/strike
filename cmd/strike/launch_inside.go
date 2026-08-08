@@ -108,6 +108,7 @@ func maybeLaunchInsideContainer(opts cliOptions, stderr io.Writer) error {
 	}
 	var ee *exec.ExitError
 	if errors.As(err, &ee) {
+		fmt.Fprintf(stderr, "strike: %v\n", err)
 		os.Exit(ee.ExitCode())
 	}
 	// Surface preflight codes clearly.

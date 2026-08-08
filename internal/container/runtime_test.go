@@ -224,6 +224,24 @@ func TestCLIInspectMissing(t *testing.T) {
 	}
 }
 
+func TestCLIInspectContainerExitContext(t *testing.T) {
+	c := NewCLI("docker")
+	c.LookPath = func(string) (string, error) { return "docker", nil }
+	c.ExecFn = func(_ context.Context, _ string, args ...string) (string, string, int, error) {
+		if strings.Contains(args[2], "json .Config.Labels") {
+			return `{}`, "", 0, nil
+		}
+		return "cid|/strike-test|false|exited|img|137|true|out of memory", "", 0, nil
+	}
+	state, err := c.InspectContainer(context.Background(), "cid")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Running || state.ExitCode != 137 || !state.OOMKilled || state.Error != "out of memory" {
+		t.Fatalf("state = %+v", state)
+	}
+}
+
 func TestCLICopy(t *testing.T) {
 	dir := t.TempDir()
 	dst := filepath.Join(dir, "out")

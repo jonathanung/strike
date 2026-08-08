@@ -2,11 +2,13 @@ package container
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // LaunchInsideOpts configures re-exec of strike inside the managed container.
@@ -138,7 +140,27 @@ func (m *Manager) execStrikeTTY(ctx context.Context, id, strikePath string, args
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	runErr := cmd.Run()
+	if runErr == nil {
+		return nil
+	}
+	exitCode := -1
+	var exitErr *exec.ExitError
+	if errors.As(runErr, &exitErr) {
+		exitCode = exitErr.ExitCode()
+	}
+	inspectCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	st, inspectErr := m.RT.InspectContainer(inspectCtx, id)
+	termErr := &ExecTerminationError{Err: runErr, ExecExitCode: exitCode, InspectErr: inspectErr}
+	if st != nil {
+		termErr.ContainerRunning = st.Running
+		termErr.ContainerStatus = st.Status
+		termErr.ContainerExitCode = st.ExitCode
+		termErr.OOMKilled = st.OOMKilled
+		termErr.ContainerError = st.Error
+	}
+	return termErr
 }
 
 func shouldForwardInner(key string, patterns []string) bool {
