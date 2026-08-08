@@ -353,17 +353,15 @@ func (s *Server) authorized(r *http.Request) bool {
 	if want == "" {
 		return false
 	}
-	// Any valid source is enough: Bearer header, HttpOnly cookie from attach
-	// handoff, or ?token= for EventSource/WebSocket clients that cannot set
-	// headers. Empty candidates are ignored so a missing Bearer still allows
-	// cookie/query auth.
+	// Bearer header or HttpOnly cookie from attach handoff only. Query-string
+	// tokens are rejected on /v1/* — they leak into shell history, proxy logs,
+	// and Referer. Open /attach?token=… (or /?token=…) once; the handoff sets
+	// the cookie and strips the secret from the URL so same-origin
+	// fetch/EventSource/WebSocket authenticate without a query param.
 	if tokenEqual(bearerToken(r.Header.Get("Authorization")), want) {
 		return true
 	}
 	if tokenEqual(cookieToken(r), want) {
-		return true
-	}
-	if tokenEqual(strings.TrimSpace(r.URL.Query().Get("token")), want) {
 		return true
 	}
 	return false

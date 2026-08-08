@@ -1,13 +1,12 @@
 import type { Bootstrap, Envelope, RootsResponse, RootCreateResult, RootResumeResult, SandboxInfo, Session } from "./types";
 
-// Token may arrive via ?token= before the server handoff redirect strips it and
-// sets an HttpOnly cookie. After handoff, same-origin cookies authenticate
-// fetch / EventSource / WebSocket without a query param.
-const queryToken = new URLSearchParams(location.search).get("token") || "";
+// Auth is cookie (attach handoff) or Bearer set by the caller. Opening
+// /attach?token=… sets an HttpOnly cookie and redirects; same-origin
+// fetch / EventSource / WebSocket then send the cookie automatically.
+// Query-string tokens are not accepted on /v1/* (they leak via logs/Referer).
 export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const requestHeaders = new Headers(init.headers);
   requestHeaders.set("Content-Type", "application/json");
-  if (queryToken) requestHeaders.set("Authorization", `Bearer ${queryToken}`);
   // same-origin credentials so the attach handoff cookie is always sent.
   const response = await fetch(path, { credentials: "same-origin", ...init, headers: requestHeaders });
   if (!response.ok) throw new Error((await response.json().catch(() => null))?.error || `${response.status} ${response.statusText}`);
@@ -32,9 +31,7 @@ export const sendOp = (type: string, data?: unknown, rootID?: string) => {
 /** Download a redacted prompt/config diagnostic bundle (live host only). */
 export async function downloadDiagnostics(rootID?: string): Promise<void> {
   const qs = rootID ? `?root=${encodeURIComponent(rootID)}` : "";
-  const headers = new Headers();
-  if (queryToken) headers.set("Authorization", `Bearer ${queryToken}`);
-  const response = await fetch(`/v1/diag${qs}`, { credentials: "same-origin", headers });
+  const response = await fetch(`/v1/diag${qs}`, { credentials: "same-origin" });
   if (!response.ok) {
     const err = await response.json().catch(() => null) as { error?: string } | null;
     throw new Error(err?.error || `${response.status} ${response.statusText}`);
@@ -77,11 +74,9 @@ export const createIssue = (title: string, body = "") =>
   request<IssueDTO>("/v1/issues", { method: "POST", body: JSON.stringify({ title, body }) });
 export const closeIssue = (id: number) => request<IssueDTO>(`/v1/issues/${id}/close`, { method: "POST", body: JSON.stringify({}) });
 
-/** Download portable export (same format as TUI). Uses cookie/bearer auth. */
+/** Download portable export (same format as TUI). Uses cookie auth. */
 export async function downloadExport(path: string, filename: string): Promise<void> {
-  const headers = new Headers();
-  if (queryToken) headers.set("Authorization", `Bearer ${queryToken}`);
-  const response = await fetch(path, { credentials: "same-origin", headers });
+  const response = await fetch(path, { credentials: "same-origin" });
   if (!response.ok) {
     const err = await response.json().catch(() => null);
     throw new Error(err?.error || `${response.status} ${response.statusText}`);
@@ -103,9 +98,9 @@ export function liveConnection(rootID: string, onEvent: (event: Envelope) => voi
   let closed = false;
   const connect = () => {
     const scheme = location.protocol === "https:" ? "wss:" : "ws:";
-    const token = queryToken ? `?token=${encodeURIComponent(queryToken)}` : "";
-    const rootParam = rootID ? `${token ? "&" : "?"}root=${encodeURIComponent(rootID)}` : "";
-    socket = new WebSocket(`${scheme}//${location.host}/v1/ws${token}${rootParam}`);
+    // Cookie auth only — browsers send the attach handoff cookie on same-origin WS.
+    const rootParam = rootID ? `?root=${encodeURIComponent(rootID)}` : "";
+    socket = new WebSocket(`${scheme}//${location.host}/v1/ws${rootParam}`);
     socket.onopen = () => { retry = 0; onState("connected"); };
     socket.onmessage = (message) => { try { onEvent(JSON.parse(message.data)); } catch { onState("invalid event"); } };
     socket.onerror = () => onState("transport error");
@@ -124,8 +119,8 @@ export function liveConnection(rootID: string, onEvent: (event: Envelope) => voi
 }
 
 export function historicalConnection(id: string, onEvent: (event: Envelope) => void, onError: (message: string) => void = () => {}) {
-  const token = queryToken ? `?token=${encodeURIComponent(queryToken)}` : "";
-  const source = new EventSource(`/v1/sessions/${encodeURIComponent(id)}/events${token}`);
+  // EventSource is same-origin and sends the attach handoff cookie automatically.
+  const source = new EventSource(`/v1/sessions/${encodeURIComponent(id)}/events`);
   source.onmessage = (event) => { try { onEvent(JSON.parse(event.data)); } catch { onError("invalid historical event"); } };
   source.onerror = () => onError("history reconnecting");
   return () => source.close();
