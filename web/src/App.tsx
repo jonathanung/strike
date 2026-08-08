@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { activateRoot, bootstrap, closeRoot, createRoot, fetchTeam, historicalConnection, liveConnection, request, resumeRoot, roots as loadRoots, sendOp, sessions as loadSessions, sessionChildren, getSandbox, patchSandbox, downloadDiagnostics, closeIssue, createIssue, deleteMemory, exportIssues, exportMemory, putMemory } from "./api";
 import { ChildAgentsPanel } from "./ChildAgents";
+import { TeamWorkspace } from "./Team";
 import { buildExportMarkdown, defaultExportFilename, downloadTextFile } from "./exportMarkdown";
 import { clearQueue, editQueuedText, moveQueuedAt, removeQueuedAt, type QueuedPrompt } from "./queueOps";
 import { initialClientState, reduceClient, selectedSlice, setAdd, setRemove } from "./reducer";
@@ -353,7 +354,10 @@ export default function App() {
   const inspectorTabs = useMemo(() => inspectorTabDefs.map((s) => s.id), [inspectorTabDefs]);
   const activitySignals: ActivitySignals = useMemo(() => ({
     changedFiles: state.changedFiles?.length || 0,
-    teamMembers: Object.keys(state.children || {}).length,
+    teamMembers: Math.max(
+      Object.keys(state.children || {}).length,
+      Object.keys(state.team?.members || {}).length,
+    ),
     permissionPending: Boolean(state.permission) || activeRoots.some((r) => r.permissionPending),
     questionPending: Boolean(state.question) || activeRoots.some((r) => r.questionPending),
     fitWarning: Boolean(state.fitWarning),
@@ -1268,22 +1272,15 @@ function InspectorBody({ tab, boot, workspace, data, loading, expandedDiffs, tog
     );
   }
   if (tab === "roster") {
-    const entries = childrenEntries || [];
     return (
-      <section className="surface-roster" aria-label="Team agents">
-        <h2>Agents</h2>
-        {entries.length ? (
-          <ChildAgentsPanel
-            children={entries}
-            selectedId={selectedChildId}
-            onSelect={onSelectChild || (() => {})}
-            onOpenTranscript={onOpenChildTranscript || (() => {})}
-          />
-        ) : (
-          <p className="muted">No child agents in this workspace yet. Team mode stays available for deep links and explicit navigation.</p>
-        )}
-        {entity ? <p className="muted">Focused entity: {entity}</p> : null}
-      </section>
+      <TeamWorkspace
+        team={workspace.team}
+        selectedId={selectedChildId || entity}
+        onSelect={onSelectChild || (() => {})}
+        onOpenTranscript={onOpenChildTranscript}
+        readOnly={!isLive || Boolean(boot?.attachOnly)}
+        compact={typeof window !== "undefined" && window.innerWidth < 720}
+      />
     );
   }
   if (tab === "context") return <ContextDoctor workspace={workspace} isLive={isLive} selectedID={selectedID} />;
