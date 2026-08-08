@@ -2601,3 +2601,21 @@ button.file-ref { background: none; border: 0; padding: 0; color: var(--acid); c
   .code-explorer-body { grid-template-columns: 1fr; }
   .code-tree, .code-search-hits { max-height: 200px; }
 }
+
+/* WEBUI.9 reviewed apply */
+.code-apply {
+  margin-top: 12px; border: 1px solid var(--rule); border-radius: 8px;
+  padding: 10px; display: grid; gap: 8px; background: var(--bg);
+}
+.code-apply legend { font-weight: 600; padding: 0 4px; }
+.code-apply label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+.code-apply textarea {
+  width: 100%; border: 1px solid var(--rule); border-radius: 6px;
+  background: var(--code-bg); color: var(--text); padding: 6px 8px; font: inherit;
+}
+.code-apply button.primary {
+  justify-self: start; background: var(--text); color: var(--bg);
+  border: 1px solid var(--text); border-radius: 6px; padding: 6px 12px; cursor: pointer;
+}
+.code-apply button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
+.code-apply-preview { max-height: 160px; overflow: auto; }

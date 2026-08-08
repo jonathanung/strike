@@ -33,6 +33,8 @@ type Props = {
   expandedDiffs?: Set<string>;
   toggleDiff?: (path: string) => void;
   readOnly?: boolean;
+  /** Reviewed ApplyEdit/ApplyPatch available (live + fileApply cap). */
+  canApply?: boolean;
 };
 
 function qs(rootID?: string, extra: Record<string, string> = {}): string {
@@ -51,6 +53,7 @@ export function CodeExplorer({
   expandedDiffs,
   toggleDiff,
   readOnly,
+  canApply,
 }: Props) {
   const [dir, setDir] = useState("");
   const [entries, setEntries] = useState<DirEntryDTO[]>([]);
@@ -71,6 +74,10 @@ export function CodeExplorer({
   const [mdMode, setMdMode] = useState<"preview" | "raw">("preview");
   // Default to changed-files summary (legacy Files panel behavior); Browse is explicit.
   const [view, setView] = useState<"browse" | "changed">("changed");
+  const [applyOld, setApplyOld] = useState("");
+  const [applyNew, setApplyNew] = useState("");
+  const [applyBusy, setApplyBusy] = useState(false);
+  const [applyMsg, setApplyMsg] = useState("");
 
   const crumbs = useMemo(() => breadcrumbs(dir), [dir]);
   const bodyRef = useRef<HTMLPreElement | null>(null);
@@ -371,6 +378,66 @@ export function CodeExplorer({
                     })}
                   </pre>
                 )}
+                {canApply && !readOnly && selectedPath && !skipped ? (
+                  <fieldset className="code-apply" aria-label="Reviewed apply edit">
+                    <legend>Apply edit (reviewed)</legend>
+                    <p className="muted">
+                      Target <code>{selectedPath}</code>. Preview the replacement, then confirm.
+                      No free-form write API.
+                    </p>
+                    <label>
+                      Find (oldString)
+                      <textarea value={applyOld} onChange={(e) => setApplyOld(e.target.value)} rows={3} disabled={applyBusy} />
+                    </label>
+                    <label>
+                      Replace (newString)
+                      <textarea value={applyNew} onChange={(e) => setApplyNew(e.target.value)} rows={3} disabled={applyBusy} />
+                    </label>
+                    {(applyOld || applyNew) ? (
+                      <pre className="diff-view code-apply-preview" aria-label="Apply preview">
+                        {`- ${applyOld.split("\n").join("\n- ")}\n+ ${applyNew.split("\n").join("\n+ ")}`}
+                      </pre>
+                    ) : null}
+                    {applyMsg ? <p className="muted" role="status">{applyMsg}</p> : null}
+                    <button
+                      type="button"
+                      className="primary"
+                      disabled={applyBusy || !applyOld || applyOld === applyNew}
+                      onClick={() => {
+                        if (!window.confirm(`Apply edit to ${selectedPath}?`)) return;
+                        setApplyBusy(true);
+                        setApplyMsg("");
+                        void request<{ ok?: boolean; path?: string; count?: number; already?: boolean }>(
+                          `/v1/files/apply-edit${qs(rootID)}`,
+                          {
+                            method: "POST",
+                            body: JSON.stringify({
+                              path: selectedPath,
+                              oldString: applyOld,
+                              newString: applyNew,
+                            }),
+                          },
+                        )
+                          .then((res) => {
+                            setApplyMsg(
+                              res.already
+                                ? "Already applied (no write)."
+                                : `Applied ${res.count ?? 1} replacement(s) to ${res.path || selectedPath}`,
+                            );
+                            setApplyOld("");
+                            setApplyNew("");
+                            void openFile(selectedPath, focusLine);
+                          })
+                          .catch((err) => {
+                            setApplyMsg(err instanceof Error ? err.message : String(err));
+                          })
+                          .finally(() => setApplyBusy(false));
+                      }}
+                    >
+                      Confirm apply
+                    </button>
+                  </fieldset>
+                ) : null}
               </>
             )}
           </div>

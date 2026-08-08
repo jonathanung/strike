@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -101,6 +102,9 @@ type capabilities struct {
 	Artifacts bool `json:"artifacts"`
 	// Ledger is true when host.Services.Ledger is wired (read-only active/history).
 	Ledger bool `json:"ledger"`
+	// FileApply is true when live + Files host can run reviewed ApplyEdit/ApplyPatch
+	// (WEBUI.9). False for attach-only and --read-only.
+	FileApply bool `json:"fileApply"`
 	// Scheduler is true when host.Services.SchedulerPresets is wired.
 	Scheduler bool `json:"scheduler"`
 	// ConfigFiles is true when host.Services.ConfigFiles is wired (typed source list).
@@ -142,6 +146,8 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 	if h := s.opts.Services; h != nil {
 		c.Auth, c.Catalog, c.Settings, c.History = h.Auth != nil, h.Catalog != nil, h.Settings != nil, h.History != nil
 		c.Files, c.Memory, c.Issues, c.Plans = h.Files != nil, h.Memory != nil, h.Issues != nil, h.Plans != nil
+		// Reviewed apply requires live engine + Files + not --read-only.
+		c.FileApply = live && h.Files != nil && !s.opts.ReadOnly
 		c.Artifacts, c.Ledger = h.Artifacts != nil, h.Ledger != nil
 		c.Sessions = h.Sessions != nil
 		c.SessionLifecycle = h.Sessions != nil
@@ -976,6 +982,142 @@ func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, item)
+}
+
+// Max sizes for reviewed apply payloads (WEBUI.9). Bodies never go to audit.
+const (
+	maxApplyEditFieldRunes = 256 * 1024
+	maxApplyPatchBytes     = 512 * 1024
+)
+
+type applyEditRequest struct {
+	Path       string `json:"path"`
+	OldString  string `json:"oldString"`
+	NewString  string `json:"newString"`
+	ReplaceAll bool   `json:"replaceAll,omitempty"`
+}
+
+type applyPatchRequest struct {
+	Patch string `json:"patch"`
+}
+
+// admitFileMutation enforces read-only + rate limit for file apply endpoints.
+func (s *Server) admitFileMutation(r *http.Request, opType string) (sessionID string, err error) {
+	if live := s.resolveLive(nil, r); live != nil {
+		sessionID = live.SessionID()
+	}
+	return sessionID, s.admitOp(r, "http", opType, sessionID)
+}
+
+func (s *Server) handleFilesApplyEdit(w http.ResponseWriter, r *http.Request) {
+	if s.opts.Services == nil || s.opts.Services.Files == nil {
+		capabilityUnavailable(w, "files")
+		return
+	}
+	if !s.hasLive() {
+		writeJSON(w, http.StatusForbidden, opErrorResponse{Error: "attach_only", Code: "attach_only"})
+		return
+	}
+	sessionID, err := s.admitFileMutation(r, "files.apply_edit")
+	if err != nil {
+		switch {
+		case errors.Is(err, errOpsReadOnly):
+			writeJSON(w, http.StatusForbidden, opErrorResponse{Error: err.Error(), Code: "read_only"})
+		case errors.Is(err, errOpsRateLimited):
+			writeJSON(w, http.StatusTooManyRequests, opErrorResponse{Error: err.Error()})
+		default:
+			writeJSON(w, http.StatusForbidden, opErrorResponse{Error: err.Error()})
+		}
+		return
+	}
+	var req applyEditRequest
+	if err := decodeBody(w, r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "validation: " + err.Error()})
+		return
+	}
+	req.Path = strings.TrimSpace(req.Path)
+	if req.Path == "" {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "validation: path is required"})
+		return
+	}
+	if utf8.RuneCountInString(req.OldString) > maxApplyEditFieldRunes || utf8.RuneCountInString(req.NewString) > maxApplyEditFieldRunes {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "validation: oldString/newString exceed size limit"})
+		return
+	}
+	res, err := s.opts.Services.Files.ApplyEdit(host.EditApply{
+		Path:       req.Path,
+		OldString:  req.OldString,
+		NewString:  req.NewString,
+		ReplaceAll: req.ReplaceAll,
+	})
+	if err != nil {
+		s.recordServeOpError(r, "http", "files.apply_edit", sessionID)
+		// Do not echo file contents in errors.
+		msg := err.Error()
+		if len(msg) > 240 {
+			msg = msg[:240] + "…"
+		}
+		writeJSON(w, http.StatusConflict, opErrorResponse{Error: msg})
+		return
+	}
+	s.auditOpOK(r, "http", "files.apply_edit", sessionID)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":      true,
+		"path":    res.Path,
+		"count":   res.Count,
+		"already": res.Already,
+	})
+}
+
+func (s *Server) handleFilesApplyPatch(w http.ResponseWriter, r *http.Request) {
+	if s.opts.Services == nil || s.opts.Services.Files == nil {
+		capabilityUnavailable(w, "files")
+		return
+	}
+	if !s.hasLive() {
+		writeJSON(w, http.StatusForbidden, opErrorResponse{Error: "attach_only", Code: "attach_only"})
+		return
+	}
+	sessionID, err := s.admitFileMutation(r, "files.apply_patch")
+	if err != nil {
+		switch {
+		case errors.Is(err, errOpsReadOnly):
+			writeJSON(w, http.StatusForbidden, opErrorResponse{Error: err.Error(), Code: "read_only"})
+		case errors.Is(err, errOpsRateLimited):
+			writeJSON(w, http.StatusTooManyRequests, opErrorResponse{Error: err.Error()})
+		default:
+			writeJSON(w, http.StatusForbidden, opErrorResponse{Error: err.Error()})
+		}
+		return
+	}
+	var req applyPatchRequest
+	if err := decodeBody(w, r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "validation: " + err.Error()})
+		return
+	}
+	if len(req.Patch) > maxApplyPatchBytes {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "validation: patch exceeds size limit"})
+		return
+	}
+	if strings.TrimSpace(req.Patch) == "" {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "validation: patch is required"})
+		return
+	}
+	summary, err := s.opts.Services.Files.ApplyPatch(req.Patch)
+	if err != nil {
+		s.recordServeOpError(r, "http", "files.apply_patch", sessionID)
+		msg := err.Error()
+		if len(msg) > 240 {
+			msg = msg[:240] + "…"
+		}
+		writeJSON(w, http.StatusConflict, opErrorResponse{Error: msg})
+		return
+	}
+	s.auditOpOK(r, "http", "files.apply_patch", sessionID)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":      true,
+		"summary": summary,
+	})
 }
 
 func (s *Server) handleMemory(w http.ResponseWriter, r *http.Request) {

@@ -221,6 +221,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/files/search", s.handleFilesSearch)
 	s.mux.HandleFunc("GET /v1/changed-files", s.handleChangedFiles)
 	s.mux.HandleFunc("GET /v1/file", s.handleFile)
+	// Reviewed file mutations (WEBUI.9 / #1084) — typed apply only, no free-form write.
+	s.mux.HandleFunc("POST /v1/files/apply-edit", s.handleFilesApplyEdit)
+	s.mux.HandleFunc("POST /v1/files/apply-patch", s.handleFilesApplyPatch)
 	s.mux.HandleFunc("GET /v1/memory", s.handleMemory)
 	s.mux.HandleFunc("GET /v1/memory/export", s.handleMemoryExport)
 	s.mux.HandleFunc("POST /v1/memory/import", s.handleMemoryImport)
