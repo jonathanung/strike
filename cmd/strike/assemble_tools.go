@@ -1100,6 +1100,8 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	services.Permissions = permHost
 	services.Goals = local.NewGoals(goalStore, workDir)
 	services.Plans = local.NewPlans(planStore)
+	services.Artifacts = local.NewArtifacts(artifactStore)
+	services.Ledger = local.NewLedger(ledgerStore)
 	services.Sessions = local.NewSessions(sessions, projectIdentity.Key)
 	services.Init = local.NewProjectInit(workDir)
 	services.MCP = local.NewMCP(mcpMgr)
