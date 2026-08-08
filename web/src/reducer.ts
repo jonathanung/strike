@@ -3,9 +3,10 @@ import type {
   Status, TokenCount, TranscriptItem, WorkspaceComposer, WorkspaceSlice, WorkspaceState,
 } from "./types";
 import { isRootLineage, parseUndoPreview, type UndoPreview } from "./undoPreview";
+import { applyTeamSnapshot, emptyTeam, reduceTeamEvent, type TeamObservation } from "./team";
 
 export const initialState = (): WorkspaceState => ({
-  items: [], seen: new Set(), status: {}, children: {}, changedFiles: [], undoStack: [],
+  items: [], seen: new Set(), status: {}, children: {}, team: emptyTeam(), changedFiles: [], undoStack: [],
   layers: [], pinnedKinds: [], excludedKinds: [], shedKinds: [],
 });
 
@@ -186,6 +187,7 @@ export function reduceEvent(state: WorkspaceState, env: Envelope): WorkspaceStat
   let permission = state.permission;
   let question = state.question;
   const children = { ...state.children };
+  let team: TeamObservation = state.team || emptyTeam();
   let changedFiles = state.changedFiles;
   let undoStack = state.undoStack;
   let attribution = state.attribution;
@@ -250,6 +252,7 @@ export function reduceEvent(state: WorkspaceState, env: Envelope): WorkspaceStat
           prompt: optionalText(d, "prompt"),
         });
       }
+      team = reduceTeamEvent(team, env.type, d, env.time);
       break;
     }
     case "child.completed": {
@@ -266,6 +269,7 @@ export function reduceEvent(state: WorkspaceState, env: Envelope): WorkspaceStat
           finalization: optionalText(d, "finalization"),
         });
       }
+      team = reduceTeamEvent(team, env.type, d, env.time);
       break;
     }
     case "child.escalated": {
@@ -283,6 +287,7 @@ export function reduceEvent(state: WorkspaceState, env: Envelope): WorkspaceStat
           budgetKind: optionalText(d, "kind") || prev?.budgetKind,
         });
       }
+      team = reduceTeamEvent(team, env.type, d, env.time);
       break;
     }
     case "children.seed": {
@@ -296,6 +301,18 @@ export function reduceEvent(state: WorkspaceState, env: Envelope): WorkspaceStat
       }
       break;
     }
+    case "team.roster":
+    case "delegation.changed":
+    case "agent.message":
+    case "path.overlap":
+    case "artifact.updated":
+    case "ledger.updated":
+    case "team.unavailable":
+      team = reduceTeamEvent(team, env.type, d, env.time);
+      break;
+    case "team.snapshot":
+      team = applyTeamSnapshot(team, d as unknown as TeamObservation);
+      break;
     case "engine.error": items = append(items, { id: `error:${items.length}`, kind: "error", text: text(d, "message") }); break;
     case "provider.retrying": items = append(items, { id: `retry:${items.length}`, kind: "system", title: "Retrying provider", text: text(d, "error") }); break;
     case "prompt.effective": {
@@ -342,7 +359,7 @@ export function reduceEvent(state: WorkspaceState, env: Envelope): WorkspaceStat
     }
   }
   return {
-    ...state, seen, items, status, permission, question, children, changedFiles, undoStack,
+    ...state, seen, items, status, permission, question, children, team, changedFiles, undoStack,
     attribution, layers, pinnedKinds, excludedKinds, shedKinds, fitWarning,
     promptScope, systemChars, messageCount,
   };
@@ -371,6 +388,7 @@ function asWorkspaceState(slice: WorkspaceSlice): WorkspaceState {
     permission: slice.permission,
     question: slice.question,
     children: slice.children,
+    team: slice.team || emptyTeam(),
     changedFiles: slice.changedFiles,
     undoStack: slice.undoStack,
     attribution: slice.attribution,

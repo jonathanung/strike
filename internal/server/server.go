@@ -176,6 +176,7 @@ func IsLocalhostBind(addr string) bool {
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /health", s.handleHealth)
 	s.mux.HandleFunc("GET /v1/bootstrap", s.handleBootstrap)
+	s.mux.HandleFunc("GET /v1/team", s.handleTeam)
 	s.mux.HandleFunc("GET /v1/providers", s.handleProviders)
 	s.mux.HandleFunc("POST /v1/auth/key", s.handleAuthKey)
 	s.mux.HandleFunc("DELETE /v1/auth/{provider}", s.handleAuthLogout)

@@ -322,6 +322,60 @@ type SandboxSnapshot struct {
 	CanChangeDefault bool     `json:"canChangeDefault"`
 }
 
+// TeamMemberSnapshot is one observe-only roster row for GET /v1/team.
+type TeamMemberSnapshot struct {
+	SessionID       string         `json:"sessionId"`
+	Name            string         `json:"name,omitempty"`
+	Agent           string         `json:"agent,omitempty"`
+	State           string         `json:"state"`
+	Role            string         `json:"role,omitempty"`
+	ParentSessionID string         `json:"parentSessionId,omitempty"`
+	TerminalSummary string         `json:"terminalSummary,omitempty"`
+	Objective       string         `json:"objective,omitempty"`
+	BlockReason     string         `json:"blockReason,omitempty"`
+	Budget          map[string]any `json:"budget,omitempty"`
+	Terminal        bool           `json:"terminal,omitempty"`
+}
+
+// DelegationSnapshot is one delegation/task board row.
+type DelegationSnapshot struct {
+	ID             string `json:"id"`
+	State          string `json:"state"`
+	Prev           string `json:"prev,omitempty"`
+	Version        int    `json:"version,omitempty"`
+	SessionID      string `json:"sessionId,omitempty"`
+	Name           string `json:"name,omitempty"`
+	Reason         string `json:"reason,omitempty"`
+	OwnerSessionID string `json:"ownerSessionId,omitempty"`
+}
+
+// TeamMessageSnapshot is a bounded mailbox note for late join.
+type TeamMessageSnapshot struct {
+	MessageID string `json:"messageId,omitempty"`
+	From      string `json:"from,omitempty"`
+	To        string `json:"to,omitempty"`
+	Body      string `json:"body,omitempty"`
+	Summary   string `json:"summary,omitempty"`
+	TaskID    string `json:"taskId,omitempty"`
+	Urgency   string `json:"urgency,omitempty"`
+	Kind      string `json:"kind,omitempty"`
+	Time      string `json:"time,omitempty"`
+}
+
+// TeamSnapshot is the root-scoped observe-only team projection for reload/late join.
+type TeamSnapshot struct {
+	Available         bool                          `json:"available"`
+	UnavailableReason string                        `json:"unavailableReason,omitempty"`
+	LeadID            string                        `json:"leadId,omitempty"`
+	Members           map[string]TeamMemberSnapshot `json:"members"`
+	Delegations       map[string]DelegationSnapshot `json:"delegations"`
+	Messages          []TeamMessageSnapshot         `json:"messages"`
+	PathOverlaps      []map[string]any              `json:"pathOverlaps"`
+	Artifacts         map[string]map[string]any     `json:"artifacts"`
+	Ledger            map[string]map[string]any     `json:"ledger"`
+	Verifications     []map[string]any              `json:"verifications"`
+}
+
 // Live bridges a running engine to HTTP/WebSocket clients.
 type Live struct {
 	sessionID string
@@ -334,9 +388,11 @@ type Live struct {
 	status StatusSnapshot
 	// sandboxExplain is the compiled profile text for GET /v1/sandbox.
 	sandboxExplain string
-	subs           map[chan protocol.Event]struct{}
-	closed         bool
-	closeCh        chan struct{}
+	// team is the observe-only multi-agent projection (WEBUI.13).
+	team    TeamSnapshot
+	subs    map[chan protocol.Event]struct{}
+	closed  bool
+	closeCh chan struct{}
 }
 
 // NewLive creates a live session bridge. ops must be the engine Ops channel.
@@ -352,8 +408,61 @@ func NewLive(sessionID, cwd string, agents []AgentInfo, ops chan<- protocol.Op) 
 			SessionID: sessionID,
 			CWD:       cwd,
 		},
+		team: emptyTeamSnapshot(),
 	}
 	return l
+}
+
+func emptyTeamSnapshot() TeamSnapshot {
+	return TeamSnapshot{
+		Available:     true,
+		Members:       map[string]TeamMemberSnapshot{},
+		Delegations:   map[string]DelegationSnapshot{},
+		Messages:      nil,
+		PathOverlaps:  nil,
+		Artifacts:     map[string]map[string]any{},
+		Ledger:        map[string]map[string]any{},
+		Verifications: nil,
+	}
+}
+
+// Team returns a deep-ish copy of the observe-only team snapshot for this root.
+func (l *Live) Team() TeamSnapshot {
+	if l == nil {
+		return TeamSnapshot{Available: false, UnavailableReason: "live session unavailable", Members: map[string]TeamMemberSnapshot{}, Delegations: map[string]DelegationSnapshot{}, Artifacts: map[string]map[string]any{}, Ledger: map[string]map[string]any{}}
+	}
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return cloneTeamSnapshot(l.team)
+}
+
+func cloneTeamSnapshot(in TeamSnapshot) TeamSnapshot {
+	out := emptyTeamSnapshot()
+	out.Available = in.Available
+	out.UnavailableReason = in.UnavailableReason
+	out.LeadID = in.LeadID
+	for k, v := range in.Members {
+		out.Members[k] = v
+	}
+	for k, v := range in.Delegations {
+		out.Delegations[k] = v
+	}
+	if len(in.Messages) > 0 {
+		out.Messages = append([]TeamMessageSnapshot(nil), in.Messages...)
+	}
+	if len(in.PathOverlaps) > 0 {
+		out.PathOverlaps = append([]map[string]any(nil), in.PathOverlaps...)
+	}
+	for k, v := range in.Artifacts {
+		out.Artifacts[k] = v
+	}
+	for k, v := range in.Ledger {
+		out.Ledger[k] = v
+	}
+	if len(in.Verifications) > 0 {
+		out.Verifications = append([]map[string]any(nil), in.Verifications...)
+	}
+	return out
 }
 
 // SetSandbox seeds OS sandbox chrome on the live status snapshot and stores
@@ -575,5 +684,227 @@ func (l *Live) applyStatus(ev protocol.Event) {
 		if e.EstimatedTokens > 0 && l.status.ContextUsed == 0 {
 			l.status.ContextUsed = e.EstimatedTokens
 		}
+	case protocol.TeamRoster:
+		l.applyTeamRoster(e)
+	case protocol.ChildStarted:
+		l.applyChildStarted(e)
+	case protocol.ChildCompleted:
+		l.applyChildCompleted(e)
+	case protocol.DelegationChanged:
+		l.applyDelegation(e)
+	case protocol.AgentMessage:
+		l.applyAgentMessage(e)
+	case protocol.PathOverlap:
+		l.applyPathOverlap(e)
+	case protocol.ArtifactUpdated:
+		l.applyArtifact(e)
+	case protocol.LedgerUpdated:
+		l.applyLedger(e)
+	}
+}
+
+func teamTerminal(state string) bool {
+	switch strings.ToLower(strings.TrimSpace(state)) {
+	case "completed", "failed", "canceled", "cancelled", "blocked":
+		return true
+	default:
+		return false
+	}
+}
+
+func (l *Live) upsertMember(m TeamMemberSnapshot) {
+	if l.team.Members == nil {
+		l.team.Members = map[string]TeamMemberSnapshot{}
+	}
+	prev, ok := l.team.Members[m.SessionID]
+	if ok && (prev.Terminal || teamTerminal(prev.State)) && !teamTerminal(m.State) {
+		// Never revive terminal agents from late roster rows.
+		m.State = prev.State
+		m.Terminal = true
+		if m.TerminalSummary == "" {
+			m.TerminalSummary = prev.TerminalSummary
+		}
+	}
+	if teamTerminal(m.State) {
+		m.Terminal = true
+	}
+	if m.Name == "" {
+		m.Name = prev.Name
+	}
+	if m.Agent == "" {
+		m.Agent = prev.Agent
+	}
+	l.team.Members[m.SessionID] = m
+	l.team.Available = true
+	l.team.UnavailableReason = ""
+}
+
+func (l *Live) applyTeamRoster(e protocol.TeamRoster) {
+	if e.LeadID != "" {
+		l.team.LeadID = e.LeadID
+	}
+	for _, m := range e.Members {
+		sid := strings.TrimSpace(m.SessionID)
+		if sid == "" {
+			continue
+		}
+		row := TeamMemberSnapshot{
+			SessionID:       sid,
+			Name:            m.Name,
+			Agent:           m.Agent,
+			State:           m.State,
+			Role:            m.Role,
+			ParentSessionID: m.ParentSessionID,
+			TerminalSummary: m.TerminalSummary,
+			Objective:       m.Objective,
+			BlockReason:     m.BlockReason,
+		}
+		if m.Budget != nil {
+			row.Budget = map[string]any{
+				"tokensUsed":  m.Budget.TokensUsed,
+				"costUsdUsed": m.Budget.CostUSDUsed,
+				"toolCalls":   m.Budget.ToolCalls,
+				"elapsedS":    m.Budget.ElapsedS,
+				"stall":       m.Budget.Stall,
+				"loop":        m.Budget.Loop,
+			}
+		}
+		l.upsertMember(row)
+	}
+}
+
+func (l *Live) applyChildStarted(e protocol.ChildStarted) {
+	sid := strings.TrimSpace(e.SessionID)
+	if sid == "" {
+		return
+	}
+	l.upsertMember(TeamMemberSnapshot{
+		SessionID: sid,
+		Name:      e.Name,
+		Agent:     e.Agent,
+		State:     "running",
+		Objective: e.Prompt,
+	})
+}
+
+func (l *Live) applyChildCompleted(e protocol.ChildCompleted) {
+	sid := strings.TrimSpace(e.SessionID)
+	if sid == "" {
+		return
+	}
+	state := string(e.Status)
+	if state == "" {
+		state = "completed"
+	}
+	summary := e.Summary
+	if summary == "" {
+		summary = e.Handoff.Summary
+	}
+	l.upsertMember(TeamMemberSnapshot{
+		SessionID:       sid,
+		Name:            e.Name,
+		State:           state,
+		TerminalSummary: summary,
+		Terminal:        true,
+	})
+	if e.Verification != nil {
+		l.team.Verifications = append(l.team.Verifications, map[string]any{
+			"sessionId": sid,
+			"passed":    e.Verification.Passed,
+			"claimed":   e.Verification.Claimed,
+			"verified":  e.Verification.Verified,
+			"summary":   e.Verification.Summary,
+		})
+		if len(l.team.Verifications) > 40 {
+			l.team.Verifications = l.team.Verifications[len(l.team.Verifications)-40:]
+		}
+	}
+}
+
+func (l *Live) applyDelegation(e protocol.DelegationChanged) {
+	id := strings.TrimSpace(e.ID)
+	if id == "" {
+		return
+	}
+	if l.team.Delegations == nil {
+		l.team.Delegations = map[string]DelegationSnapshot{}
+	}
+	l.team.Delegations[id] = DelegationSnapshot{
+		ID:             id,
+		State:          string(e.State),
+		Prev:           string(e.Prev),
+		Version:        e.Version,
+		SessionID:      e.SessionID,
+		Name:           e.Name,
+		Reason:         e.Reason,
+		OwnerSessionID: e.OwnerSessionID,
+	}
+	l.team.Available = true
+}
+
+func (l *Live) applyAgentMessage(e protocol.AgentMessage) {
+	msg := TeamMessageSnapshot{
+		MessageID: e.MessageID,
+		From:      e.From,
+		To:        e.To,
+		Body:      e.Body,
+		Summary:   e.Summary,
+		TaskID:    e.TaskID,
+		Urgency:   e.Urgency,
+		Kind:      e.Kind,
+	}
+	l.team.Messages = append(l.team.Messages, msg)
+	if len(l.team.Messages) > 100 {
+		l.team.Messages = l.team.Messages[len(l.team.Messages)-100:]
+	}
+}
+
+func (l *Live) applyPathOverlap(e protocol.PathOverlap) {
+	row := map[string]any{"path": e.Path, "policy": e.Policy, "blocked": e.Blocked}
+	if len(e.Holders) > 0 {
+		sessions := make([]string, 0, len(e.Holders))
+		for _, h := range e.Holders {
+			if sid := strings.TrimSpace(h.SessionID); sid != "" {
+				sessions = append(sessions, sid)
+			}
+		}
+		if len(sessions) > 0 {
+			row["sessions"] = sessions
+		}
+	}
+	l.team.PathOverlaps = append(l.team.PathOverlaps, row)
+	if len(l.team.PathOverlaps) > 50 {
+		l.team.PathOverlaps = l.team.PathOverlaps[len(l.team.PathOverlaps)-50:]
+	}
+}
+
+func (l *Live) applyArtifact(e protocol.ArtifactUpdated) {
+	id := strings.TrimSpace(e.ID)
+	if id == "" {
+		return
+	}
+	if l.team.Artifacts == nil {
+		l.team.Artifacts = map[string]map[string]any{}
+	}
+	l.team.Artifacts[id] = map[string]any{
+		"id": id, "type": e.Type, "version": e.Version, "title": e.Title, "op": e.Op, "scope": e.Scope,
+	}
+}
+
+func (l *Live) applyLedger(e protocol.LedgerUpdated) {
+	id := strings.TrimSpace(e.ID)
+	if id == "" {
+		return
+	}
+	if l.team.Ledger == nil {
+		l.team.Ledger = map[string]map[string]any{}
+	}
+	// Bound statement length; full history remains tool-backed.
+	stmt := e.Statement
+	if len(stmt) > 2000 {
+		stmt = stmt[:2000]
+	}
+	l.team.Ledger[id] = map[string]any{
+		"id": id, "kind": e.Kind, "status": e.Status, "op": e.Op, "statement": stmt,
 	}
 }

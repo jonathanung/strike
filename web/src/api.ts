@@ -15,6 +15,11 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
 }
 export const bootstrap = () => request<Bootstrap>("/v1/bootstrap");
 export const sessions = () => request<{ sessions: Session[]; liveId?: string }>("/v1/sessions");
+/** Observe-only multi-agent snapshot for late join / reload (WEBUI.13). */
+export const fetchTeam = (rootID?: string) => {
+  const qs = rootID ? `?root=${encodeURIComponent(rootID)}` : "";
+  return request<Record<string, unknown>>(`/v1/team${qs}`);
+};
 export const getSandbox = (rootID?: string) => {
   const qs = rootID ? `?root=${encodeURIComponent(rootID)}` : "";
   return request<SandboxInfo>(`/v1/sandbox${qs}`);

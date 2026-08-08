@@ -82,6 +82,9 @@ type capabilities struct {
 	// SessionLifecycle is true when list/fork/fork_at/rewind_points are exposed
 	// under /v1/session-lifecycle and /v1/sessions/{id}/* (#1038).
 	SessionLifecycle bool `json:"sessionLifecycle"`
+	// Team is true when live multi-agent observation snapshots are available
+	// (GET /v1/team). Observe-only; human control Ops are separate (WEBUI.17+).
+	Team bool `json:"team"`
 }
 
 type bootstrapResponse struct {
@@ -104,7 +107,7 @@ var browserProtocolOps = []string{
 
 func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 	// Timeline is host-safe and derived from SessionDir JSONL (always available).
-	c := capabilities{Live: s.hasLive(), Roots: s.opts.LiveHub != nil, Timeline: true, Sandbox: s.hasSandbox(), Diag: s.hasLive()}
+	c := capabilities{Live: s.hasLive(), Roots: s.opts.LiveHub != nil, Timeline: true, Sandbox: s.hasSandbox(), Diag: s.hasLive(), Team: s.hasLive()}
 	var skills []map[string]any
 	if h := s.opts.Services; h != nil {
 		c.Auth, c.Catalog, c.Settings, c.History = h.Auth != nil, h.Catalog != nil, h.Settings != nil, h.History != nil
@@ -1287,6 +1290,24 @@ func (s *Server) handleRoots(w http.ResponseWriter, r *http.Request) {
 		Roots:    s.opts.LiveHub.List(),
 		ActiveID: s.opts.LiveHub.ActiveID(),
 	})
+}
+
+// handleTeam returns the observe-only multi-agent snapshot for one root (WEBUI.13).
+// Late join / reload uses this; live updates continue via SSE/WS events.
+func (s *Server) handleTeam(w http.ResponseWriter, r *http.Request) {
+	live := s.liveForRequest(r)
+	if live == nil {
+		writeJSON(w, http.StatusOK, TeamSnapshot{
+			Available:         false,
+			UnavailableReason: "team observation unavailable (no live root)",
+			Members:           map[string]TeamMemberSnapshot{},
+			Delegations:       map[string]DelegationSnapshot{},
+			Artifacts:         map[string]map[string]any{},
+			Ledger:            map[string]map[string]any{},
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, live.Team())
 }
 
 func (s *Server) handleRootCreate(w http.ResponseWriter, r *http.Request) {
