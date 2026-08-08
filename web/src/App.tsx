@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useMemo, useReducer, useRef, useState } from "rea
 import { activateRoot, bootstrap, closeRoot, createRoot, fetchTeam, historicalConnection, liveConnection, request, resumeRoot, roots as loadRoots, sendOp, sessions as loadSessions, sessionChildren, getSandbox, patchSandbox, downloadDiagnostics, closeIssue, createIssue, deleteMemory, exportIssues, exportMemory, putMemory } from "./api";
 import { ChildAgentsPanel } from "./ChildAgents";
 import { TeamWorkspace } from "./Team";
+import { CodeExplorer } from "./CodeExplorer";
 import { buildExportMarkdown, defaultExportFilename, downloadTextFile } from "./exportMarkdown";
 import { clearQueue, editQueuedText, moveQueuedAt, removeQueuedAt, type QueuedPrompt } from "./queueOps";
 import { initialClientState, reduceClient, selectedSlice, setAdd, setRemove } from "./reducer";
@@ -1505,6 +1506,11 @@ function InspectorBody({ tab, boot, workspace, data, loading, expandedDiffs, tog
         onOpenTranscript={onOpenChildTranscript}
         readOnly={!isLive || Boolean(boot?.attachOnly)}
         compact={typeof window !== "undefined" && window.innerWidth < 720}
+        protocolOps={boot?.protocolOps}
+        teamControl={boot?.capabilities?.teamControl}
+        agents={(boot?.agents || []).map((a) => a.name)}
+        rootSessionId={selectedID}
+        sendOp={isLive && !boot?.attachOnly ? (type, data) => sendOp(type, data, selectedID) : undefined}
       />
     );
   }
@@ -1626,7 +1632,30 @@ function InspectorBody({ tab, boot, workspace, data, loading, expandedDiffs, tog
     return <PanesPanel available={Boolean(boot?.capabilities.panes)} focusId={paneId} />;
   }
   if (loading) return <section className="unavailable" role="status"><strong>Loading {tab}</strong></section>;
-  if (tab === "files") return <FilesPanel boot={boot} data={data} expandedDiffs={expandedDiffs} toggleDiff={toggleDiff} />;
+  if (tab === "files") {
+    const files = ((data as { files?: ChangedFile[] } | undefined)?.files || []);
+    const err = (data as { error?: string } | undefined)?.error;
+    return (
+      <CodeExplorer
+        available={Boolean(boot?.capabilities.files)}
+        rootID={selectedID}
+        entity={entity}
+        readOnly={Boolean(boot?.attachOnly)}
+        changedFiles={err ? [] : files}
+        expandedDiffs={expandedDiffs}
+        toggleDiff={toggleDiff}
+        onOpenPath={(path, line) => {
+          // Keep deep link in sync for shareable Code mode URLs.
+          writeDeepLinkToLocation({
+            mode: "code",
+            surface: "files",
+            entity: line ? `${path}:${line}` : path,
+            root: selectedID || undefined,
+          });
+        }}
+      />
+    );
+  }
   if (tab === "memory") return <MemoryPanel boot={boot} data={data} onRefresh={onRefresh || (() => {})} />;
   if (tab === "issues") return <IssuesPanel boot={boot} data={data} onRefresh={onRefresh || (() => {})} />;
   const label = getSurface(tab)?.label || tab || "surface";
