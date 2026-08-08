@@ -1088,6 +1088,7 @@ describe("App", () => {
     render(<App />);
     await screen.findByText("Current");
     expect(await screen.findByRole("button", { name: /Project:/ })).toHaveAttribute("aria-pressed", "true");
+    // Desktop: tab strip; phone sheet uses listbox options (WEBUI.12).
     const plansTab = screen.queryByRole("tab", { name: "plans" });
     if (plansTab) {
       expect(plansTab).toHaveAttribute("aria-selected", "true");

@@ -1374,6 +1374,50 @@ dialog input { padding: 12px; color: var(--ink); }
 
 /* Desktop keeps header modes; hide bottom bar */
 .mode-bottom-bar { display: none; }
+
+/* Phone surface subnav: accessible list/sheet (WEBUI.12) — not a compressed tab strip. */
+.surface-nav-sheet {
+  border-bottom: 1px solid var(--rule);
+  max-height: 40vh;
+  overflow: auto;
+  background: var(--surface-muted);
+}
+.surface-nav-list {
+  list-style: none;
+  margin: 0;
+  padding: 0.35rem 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.surface-nav-item {
+  display: flex;
+  width: 100%;
+  min-height: 44px;
+  align-items: center;
+  justify-content: flex-start;
+  text-align: left;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+.surface-nav-item:hover,
+.surface-nav-item:focus-visible {
+  border-color: var(--border-focus);
+  outline: none;
+  background: var(--raised);
+}
+.surface-nav-item.active {
+  background: var(--surface);
+  border-color: var(--rule);
+  font-weight: 600;
+}
+.surface-nav-label { text-transform: lowercase; }
+
 .app-shell[data-shell="phone"] main { min-width: 0; }
 
 

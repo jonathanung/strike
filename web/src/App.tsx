@@ -32,7 +32,7 @@ import {
 } from "./undoPreview";
 import { GoalsPanel } from "./Goals";
 import { WorkflowsPanel } from "./Workflows";
-import { Tabs } from "./ui";
+import { SurfaceNav } from "./SurfaceNav";
 import {
   deepLinkWorkspaceID,
   resolveDeepLink,
@@ -42,6 +42,10 @@ import {
   defaultSurfaceForMode,
   getSurface,
   inspectorSurfacesForShell,
+  registerDynamicSurface,
+  clearDynamicSurfaces,
+  paneSurfaceFromInfo,
+  LOOP_SUPERSEDED_NOTE,
   modeAttention,
   MODE_PRESETS,
   WORKSPACE_MODES,
@@ -685,10 +689,12 @@ export default function App() {
   }, [boot?.capabilities.catalog, state.status.provider, state.status.model]);
   const inspectProject = async (tab: string, opts?: { open?: boolean; mode?: WorkspaceMode }) => {
     setInspector(tab);
-    if (tab === "settings") {
+    if (tab === "settings" || tab === "theme" || tab === "providers" || tab === "auth") {
       setSettingsOpen(true);
-      if (opts?.open !== false) setInspectorOpen(false);
+      // Keep inspector open for ops list-first navigation; settings is also a dialog.
+      if (opts?.open !== false) setInspectorOpen(true);
       setSurfaceUnavailable(undefined);
+      setInspector(tab);
       return;
     }
     const def = getSurface(tab);
@@ -747,6 +753,25 @@ export default function App() {
       entity: opts?.entity || surfaceEntity,
     });
   };
+
+
+  // Register enabled pane/1 contributions as Ops surfaces (WEBUI.12).
+  useEffect(() => {
+    if (!boot?.capabilities.panes) {
+      clearDynamicSurfaces();
+      return;
+    }
+    let cancelled = false;
+    void import("./panes").then(({ listPanes }) => listPanes()).then((res) => {
+      if (cancelled) return;
+      clearDynamicSurfaces();
+      for (const pane of res.panes || []) {
+        const def = paneSurfaceFromInfo(pane);
+        if (def) registerDynamicSurface(def);
+      }
+    }).catch(() => { /* panes optional */ });
+    return () => { cancelled = true; };
+  }, [boot?.capabilities.panes, boot?.version]);
 
   // Apply additive deep-link mode/surface once bootstrap is ready. Root/session handled above.
   useEffect(() => {
@@ -1072,17 +1097,16 @@ export default function App() {
     </main>
     <aside className={`inspector ${inspectorOpen ? "open" : "collapsed"}`} aria-label="Inspector">
       <PanelResize label="Resize inspector panel" value={inspectorWidth} min={240} max={520} onChange={setInspectorWidth} side="inspector" />
-      <Tabs
-        className="inspector-tabs"
-        label={`${MODE_PRESETS[workspaceMode].label} surfaces`}
-        value={activeInspector}
-        items={inspectorTabDefs.map((tab) => ({ id: tab.id, label: tab.label }))}
+      <SurfaceNav
+        modeLabel={MODE_PRESETS[workspaceMode].label}
+        surfaces={inspectorTabDefs}
+        activeId={activeInspector}
+        profile={shellProfile}
         onChange={(id) => {
           setSurfaceUnavailable(undefined);
           writeDeepLinkToLocation({ mode: workspaceMode, surface: id, entity: surfaceEntity });
           void inspectProject(id);
         }}
-        panelIdPrefix="inspector-panel"
       />
       <div className="inspector-body" id={activeInspector ? `inspector-panel-${activeInspector}` : undefined} role="tabpanel">
         {inspectorTabs.length ? (
@@ -1529,6 +1553,83 @@ function InspectorBody({ tab, boot, workspace, data, loading, expandedDiffs, tog
   }
   if (tab === "diagnostics") {
     return <DiagnosticsPanel available={Boolean(boot?.capabilities.lsp)} />;
+  }
+  if (tab === "settings" || tab === "theme" || tab === "providers" || tab === "auth") {
+    return (
+      <section className="ops-settings-hint" aria-label="Settings">
+        <h2>{tab === "theme" ? "Theme" : tab === "providers" || tab === "auth" ? "Providers & auth" : "Settings"}</h2>
+        <p className="muted">
+          {tab === "theme"
+            ? "Theme catalog and appearance open in the settings dialog."
+            : tab === "providers" || tab === "auth"
+              ? "Provider authentication and API keys open in the settings dialog."
+              : "Workspace defaults, sandbox, and support tools open in the settings dialog."}
+        </p>
+        <p className="muted">Use the header gear or the dialog already opened for full controls.</p>
+      </section>
+    );
+  }
+  if (tab === "permissions") {
+    return (
+      <section aria-label="Permissions">
+        <h2>Permissions</h2>
+        <p className="muted">Explain and presets are available from permission asks and host APIs. Browse presets via the live permission dialog when the engine requests approval.</p>
+        {!boot?.capabilities.permissions && <CapabilityUnavailable name="Permissions" />}
+      </section>
+    );
+  }
+  if (tab === "sandbox") {
+    return (
+      <section aria-label="Sandbox">
+        <h2>Sandbox</h2>
+        {sandbox ? (
+          <dl className="sandbox-summary">
+            <dt>Active</dt><dd>{sandbox.mode}</dd>
+            <dt>Default</dt><dd>{sandbox.defaultMode || "—"}</dd>
+            <dt>Backend</dt><dd>{sandbox.backend || (sandbox.available ? "available" : "unavailable")}</dd>
+          </dl>
+        ) : (
+          <p className="muted">No sandbox snapshot loaded.</p>
+        )}
+        {onExplainSandbox && (
+          <button type="button" onClick={() => onExplainSandbox()}>Explain sandbox</button>
+        )}
+        {!boot?.capabilities.sandbox && <CapabilityUnavailable name="Sandbox" />}
+      </section>
+    );
+  }
+  if (tab === "diag-export") {
+    return (
+      <section aria-label="Diagnostics export">
+        <h2>Diagnostics export</h2>
+        <p className="muted">Redacted prompt/config bundle (same scrubbing as TUI <code>/diag</code>).</p>
+        <button
+          type="button"
+          disabled={!Boolean(boot?.capabilities.diag && isLive)}
+          onClick={() => void downloadDiagnostics(selectedID).catch((e) => window.alert((e as Error).message))}
+        >
+          Download diagnostics
+        </button>
+        {!boot?.capabilities.diag && <p className="muted">Unavailable without a live engine.</p>}
+      </section>
+    );
+  }
+  if (tab === "project-export") {
+    return (
+      <section aria-label="Project exports">
+        <h2>Project exports</h2>
+        <p className="muted">Portable memory and issues exports (TUI parity).</p>
+        <div className="panel-actions">
+          <button type="button" disabled={!boot?.capabilities.memory} onClick={() => void exportMemory().catch((e) => window.alert((e as Error).message))}>Export memory</button>
+          <button type="button" disabled={!boot?.capabilities.issues} onClick={() => void exportIssues().catch((e) => window.alert((e as Error).message))}>Export issues</button>
+        </div>
+        <p className="muted">{LOOP_SUPERSEDED_NOTE}</p>
+      </section>
+    );
+  }
+  if (tab.startsWith("pane:")) {
+    const paneId = tab.slice("pane:".length);
+    return <PanesPanel available={Boolean(boot?.capabilities.panes)} focusId={paneId} />;
   }
   if (loading) return <section className="unavailable" role="status"><strong>Loading {tab}</strong></section>;
   if (tab === "files") {

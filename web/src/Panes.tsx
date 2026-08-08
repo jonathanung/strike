@@ -10,7 +10,7 @@ import {
   type PaneSnapshot,
 } from "./panes";
 
-export function PanesPanel({ available }: { available: boolean }) {
+export function PanesPanel({ available, focusId }: { available: boolean; focusId?: string }) {
   const [items, setItems] = useState<PaneInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -35,6 +35,7 @@ export function PanesPanel({ available }: { available: boolean }) {
   useEffect(() => {
     void refresh();
   }, [available]);
+
 
   useEffect(() => {
     if (!active) {
@@ -87,6 +88,14 @@ export function PanesPanel({ available }: { available: boolean }) {
       setBusy(false);
     }
   };
+
+
+  useEffect(() => {
+    if (!focusId || !items.length) return;
+    const hit = items.find((p) => p.id === focusId);
+    if (hit && active !== focusId) void open(hit);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusId, items]);
 
   const close = async () => {
     if (!active) return;
