@@ -2349,6 +2349,63 @@ dialog fieldset small { color: var(--muted); }
   background: color-mix(in srgb, var(--acid) 8%, transparent); margin: 0 0 8px; font-size: 12px;
 }
 .onboard-hint p { margin: 0; }
+/* WEBUI.14 Team workspace */
+.team-workspace { display: grid; gap: 12px; }
+.team-workspace-head { display: flex; align-items: center; gap: 8px; }
+.team-workspace-head h2 { margin: 0; }
+.team-attention-entry {
+  width: 100%; text-align: left; padding: 8px 10px;
+  border: 1px solid var(--rule); background: color-mix(in srgb, var(--acid) 8%, transparent);
+  cursor: pointer; border-radius: 6px; font-weight: 600;
+}
+.team-attention ul { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 4px; }
+.team-attention li button {
+  width: 100%; display: flex; gap: 8px; align-items: flex-start;
+  text-align: left; padding: 8px; border: 1px solid var(--rule); background: var(--code-bg);
+  cursor: pointer; border-radius: 6px;
+}
+.team-attention li strong { display: block; }
+.team-attention li small { display: block; color: var(--muted); }
+.team-view-tabs, .team-filters { display: flex; flex-wrap: wrap; gap: 6px; }
+.team-view-tabs button, .team-filters button {
+  border: 1px solid var(--rule); background: transparent; padding: 4px 10px;
+  border-radius: 999px; cursor: pointer; font-size: 12px; text-transform: capitalize;
+}
+.team-view-tabs button.active, .team-filters button.active,
+.team-view-tabs button[aria-selected="true"], .team-filters button[aria-pressed="true"] {
+  background: var(--text); color: var(--bg); border-color: var(--text);
+}
+.team-roster { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.team-detail { border: 1px solid var(--rule); padding: 10px; border-radius: 8px; background: var(--code-bg); }
+.team-detail header { display: flex; justify-content: space-between; align-items: center; }
+.team-detail h3 { margin: 0; }
+.team-detail dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; margin: 8px 0; font-size: 12px; }
+.team-detail dt { color: var(--muted); }
+.team-detail dd { margin: 0; }
+.team-files { margin: 0; padding-left: 16px; }
+.team-detail-actions { display: flex; gap: 8px; }
+.team-board {
+  display: flex; gap: 10px; overflow-x: auto; padding-bottom: 8px;
+  scroll-snap-type: x mandatory;
+}
+.team-board-col {
+  min-width: 160px; max-width: 220px; flex: 0 0 auto;
+  border: 1px solid var(--rule); border-radius: 8px; padding: 8px;
+  scroll-snap-align: start; background: var(--code-bg);
+}
+.team-board-col h4 { margin: 0 0 8px; font-size: 12px; text-transform: capitalize; }
+.team-board-col ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.team-board-card {
+  width: 100%; text-align: left; display: grid; gap: 2px;
+  border: 1px solid var(--rule); background: var(--bg); padding: 8px; border-radius: 6px; cursor: pointer;
+}
+.team-board-reason { font-size: 11px; color: var(--muted); }
+.team-messages { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.team-messages li { display: grid; gap: 2px; padding: 8px; border: 1px solid var(--rule); border-radius: 6px; }
+@media (max-width: 720px) {
+  .team-board { flex-direction: column; overflow-x: visible; }
+  .team-board-col { min-width: 0; max-width: none; width: 100%; }
+}
 /* WEBUI.7 transcript / tool / diff */
 .tool-card summary { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; cursor: pointer; padding: 8px 10px; }
 .tool-name { font-weight: 600; font-family: var(--mono, ui-monospace, monospace); }
