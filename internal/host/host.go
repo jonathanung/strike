@@ -722,6 +722,112 @@ type PlanMeta struct {
 	UpdatedAt    time.Time
 }
 
+// ArtifactMeta is list/index metadata for one shared artifact (content omitted).
+type ArtifactMeta struct {
+	ID           string
+	Type         string
+	Title        string
+	Version      int
+	Scope        string // project | session
+	SessionID    string
+	Access       string // owner | team
+	OwnerSession string
+	OwnerRoot    string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	ExpiresAt    *time.Time
+}
+
+// Artifact is one versioned typed collaboration object (findings, patches, …).
+type Artifact struct {
+	ID           string
+	Type         string
+	Title        string
+	Content      string
+	Version      int
+	Scope        string
+	SessionID    string
+	Access       string
+	OwnerSession string
+	OwnerRoot    string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	ExpiresAt    *time.Time
+}
+
+// ArtifactListFilter selects artifacts for Artifacts.List.
+type ArtifactListFilter struct {
+	Type      string // empty = any
+	Scope     string // empty = any
+	SessionID string // when set, only session-scoped with this session_id
+	// IncludeExpired keeps expired rows (default drops them).
+	IncludeExpired bool
+	// Limit caps results (implementations enforce a maximum; 0 = default).
+	Limit int
+	// Offset skips the first N results after filter/sort (newest first).
+	Offset int
+}
+
+// Artifacts is the read-only host surface over the shared multi-agent artifact
+// store. Nil means the capability is absent; frontends must degrade gracefully.
+// Writes remain agent/tool-owned — this interface exposes list/get only.
+// Visibility is enforced with actorSession + actorRoot (owner|team matrix).
+type Artifacts interface {
+	// List returns metadata newest-UpdatedAt first, filtered and access-checked.
+	List(actorSession, actorRoot string, filter ArtifactListFilter) ([]ArtifactMeta, error)
+	// Get returns the latest version the actor may read.
+	Get(id, actorSession, actorRoot string) (Artifact, bool, error)
+	// GetVersion returns a specific version when the actor may read it.
+	GetVersion(id string, version int, actorSession, actorRoot string) (Artifact, bool, error)
+}
+
+// LedgerEntry is one durable decision/assumption/constraint record.
+type LedgerEntry struct {
+	ID                 string
+	Kind               string // decision | assumption | constraint
+	Statement          string
+	Confidence         string
+	EvidenceRefs       []string
+	Status             string // active | invalidated | superseded
+	ScopePaths         []string
+	ScopeTaskIDs       []string
+	AuthorSession      string
+	AuthorAgent        string
+	AuthorRoot         string
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	InvalidateReason   string
+	InvalidateEvidence []string
+	InvalidatedAt      *time.Time
+	SupersededBy       string
+	Supersedes         string
+}
+
+// LedgerListFilter selects ledger rows for history reads.
+type LedgerListFilter struct {
+	Status        string // empty = any
+	Kind          string // empty = any
+	Path          string
+	TaskID        string
+	AuthorSession string
+	// Limit caps results (implementations enforce a maximum; 0 = default).
+	Limit int
+	// Offset skips the first N results after filter (stable id order from store).
+	Offset int
+}
+
+// Ledger is the read-only host surface over the shared decision ledger.
+// Nil means the capability is absent; frontends must degrade gracefully.
+// Append/invalidate/supersede remain out of browser scope.
+type Ledger interface {
+	// ActiveSlice returns active entries relevant to path/task (bundle semantics).
+	ActiveSlice(path, taskID string) ([]LedgerEntry, error)
+	// List returns history including invalidated/superseded rows when filter allows.
+	List(filter LedgerListFilter) ([]LedgerEntry, error)
+	// Get returns one entry by id (any status).
+	Get(id string) (LedgerEntry, bool, error)
+}
+
 // Plans is project-scoped durable structured plans for the plan window and tools.
 // Nil means the capability is absent; frontends must degrade gracefully.
 // Mutations require the owning root session id and an expected Version for CAS.
@@ -934,6 +1040,8 @@ type Services struct {
 	Memory      Memory
 	Issues      Issues
 	Plans       Plans     // structured root-owned plans; nil when unsupported
+	Artifacts   Artifacts // shared typed artifacts (read-only); nil when unsupported
+	Ledger      Ledger    // decision ledger (read-only); nil when unsupported
 	Goals       Goals     // loop harness; nil when unsupported
 	Sessions    Sessions  // durable session list/replay; nil when unsupported
 	Roots       Roots     // concurrent parent sessions; nil when single-root only
