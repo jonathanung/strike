@@ -830,3 +830,12 @@ Attach-only may read authorized rows; missing capability returns **501**.
 Limits default to 100 (max 200). DTOs expose version/CAS and lifecycle fields
 only — never store filesystem paths or internal Go types. Concurrent agent
 writes remain coherent via the underlying stores; browser reads are race-safe.
+
+### Command discovery (WEBUI.6 / #1078)
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET` | `/v1/files/search` | mode | Workspace file search (`q`, `limit`≤50) for `@file` completion; root-scoped via `host.Files.SearchFiles` |
+| `POST` | `/v1/history` | **yes** | Enqueue one prompt (`{prompt}`) into project history; blocked in attach-only. Web client calls once per accepted `user.input` (not on replay). |
+
+Composer: Ctrl/Cmd+K opens the command palette (modes, surfaces, slash, skills). Arrow Up/Down on an empty eligible composer walks prompt history. `@` triggers file search (not email-like tokens). Quiet first-run tip teaches palette / slash / `@file`.
