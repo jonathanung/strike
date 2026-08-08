@@ -63,8 +63,9 @@ Endpoints:
   POST /v1/workflow-drafts/save     save draft JSON with confirm
 
 Auth: loopback is unauthenticated by default. Under --auth, use
-Authorization: Bearer <token>, the strike_serve_token cookie (set by opening
-/attach?token=…), or ?token= on /v1/* routes.
+Authorization: Bearer <token> or the strike_serve_token cookie (set by opening
+/attach?token=… once; the server strips the query secret). Query tokens are
+not accepted on /v1/* routes.
 
 DANGER: --expose (or any non-loopback bind) puts session transcripts and the
 live control plane on the network. There is no TLS. Prefer loopback + SSH -L
@@ -583,12 +584,12 @@ func printServeBanner(w io.Writer, b serveBanner) {
 		}
 		if b.exposed {
 			if ips := server.LANIPs(); len(ips) > 0 {
-				fmt.Fprintf(w, "  ws:      ws://%s/v1/ws?token=<token>\n", net.JoinHostPort(ips[0], b.port))
+				fmt.Fprintf(w, "  ws:      ws://%s/v1/ws  (cookie or Bearer)\n", net.JoinHostPort(ips[0], b.port))
 			} else {
-				fmt.Fprintf(w, "  ws:      ws://<lan-ip>:%s/v1/ws?token=<token>\n", b.port)
+				fmt.Fprintf(w, "  ws:      ws://<lan-ip>:%s/v1/ws  (cookie or Bearer)\n", b.port)
 			}
 		} else {
-			fmt.Fprintf(w, "  ws:      ws://%s/v1/ws?token=<token>\n", b.listenAddr)
+			fmt.Fprintf(w, "  ws:      ws://%s/v1/ws  (cookie or Bearer)\n", b.listenAddr)
 		}
 	} else {
 		fmt.Fprintln(w, "  mode:    attach-only (read-only JSONL)")

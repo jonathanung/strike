@@ -14,6 +14,10 @@ materially affect the shipped product.
 
 ## [Unreleased]
 
+### Security
+
+- **Web cockpit auth** — `/v1/*` no longer accepts `?token=` query credentials (they leak via shell history, proxy logs, and `Referer`). Open the printed `/attach?token=…` URL once for HttpOnly cookie handoff, or send `Authorization: Bearer` ([#574](https://github.com/jonathanung/strike/issues/574)).
+
 ## [v0.3.1] - 2026-08-07
 
 Patch release: child permission-mode inheritance and spawned-root welcome

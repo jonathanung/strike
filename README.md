@@ -87,12 +87,13 @@ curl -s http://127.0.0.1:8787/health
 
 - `GET /health` — JSON `{ok, version, commit}` (no auth)
 - `GET /attach` — cockpit page (composer, transcript, permission modal)
-- `GET /v1/ws` — WebSocket ops in / events out (`?token=` or Bearer)
+- `GET /v1/ws` — WebSocket ops in / events out (cookie or Bearer; no query token)
 - `POST /v1/ops` — submit one op envelope
 - `GET /v1/live/events`, `/v1/status`, `/v1/agents`, `/v1/sessions`
 - `GET /v1/sessions/{id}/events` — SSE JSONL tail
 
 Default bind is loopback-only. Non-loopback requires `--expose` (token + WARNING).
+Open `/attach?token=…` once for cookie handoff; `/v1/*` rejects query tokens.
 Optional Vite dev proxy lives in `web/`. Details and threat model:
 [docs/web.md](docs/web.md).
 

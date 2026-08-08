@@ -72,7 +72,7 @@ Behavior:
 | Session transcripts on LAN | Anyone with the token can SSE/WS read JSONL and live events |
 | Live control plane | Token holders can submit ops (prompts, permission replies, tools) |
 | No TLS | Tokens and payloads are cleartext on the wire — untrusted Wi‑Fi is unsafe |
-| Token in URL | Query `?token=` may land in browser history / proxies; prefer Bearer when scripting |
+| Token in URL | Cockpit open uses a one-time `?token=` handoff that sets a cookie and redirects; `/v1/*` rejects query tokens (use Bearer or cookie) |
 | CSRF / CORS | Localhost origins always allowed; with `--expose`, private-network browser origins are also allowed for Vite-style dev. Public internet origins are never reflected |
 | Shared networks | Prefer `--allow-cidr` to your LAN, or do not use `--expose` |
 
@@ -155,17 +155,18 @@ ssh -L 8787:127.0.0.1:8787 user@strike-host
 
 \*Still subject to `--allow-cidr` when set.
 
-With `--auth`, authenticate `/v1/*` using any of:
+With `--auth`, authenticate `/v1/*` using either of:
 
 - `Authorization: Bearer <token>`
 - HttpOnly `strike_serve_token` cookie (set automatically when you open
   `/attach?token=…` or `/?token=…` — the server redirects to a token-free URL)
-- `?token=<token>` (EventSource / WebSocket query fallback)
 
-Opening the cockpit URL printed by `strike serve` (includes `?token=`) performs
-a one-time handoff: valid tokens become a `SameSite=Strict` HttpOnly cookie so
-subsequent same-origin `fetch` / EventSource / WebSocket calls succeed without
-leaving the secret in the address bar.
+Query-string `?token=` is **not** accepted on `/v1/*` (it leaks into shell
+history, proxy logs, and `Referer`). Opening the cockpit URL printed by
+`strike serve` (includes `?token=` on `/attach` only) performs a one-time
+handoff: valid tokens become a `SameSite=Strict` HttpOnly cookie so subsequent
+same-origin `fetch` / EventSource / WebSocket calls succeed without leaving the
+secret in the address bar.
 
 ### Op envelopes (client → engine)
 
@@ -701,17 +702,13 @@ The cockpit Settings dialog loads `GET`, edits sections, and saves via `PATCH`.
 Browser color scheme (auto/dark/light) is local-only (`data-appearance` +
 `localStorage`), not a host config key.
 
-With `--auth`, authenticate `/v1/*` using any of:
+With `--auth`, authenticate `/v1/*` using either of:
 
 - `Authorization: Bearer <token>`
 - HttpOnly `strike_serve_token` cookie (set automatically when you open
   `/attach?token=…` or `/?token=…` — the server redirects to a token-free URL)
-- `?token=<token>` (EventSource / WebSocket query fallback)
 
-Opening the cockpit URL printed by `strike serve` (includes `?token=`) performs
-a one-time handoff: valid tokens become a `SameSite=Strict` HttpOnly cookie so
-subsequent same-origin `fetch` / EventSource / WebSocket calls succeed without
-leaving the secret in the address bar.
+Query-string `?token=` is **not** accepted on `/v1/*`.
 
 
 | `GET` | `/v1/goals` | **yes** | List loop-harness goals (host-safe DTOs) |
