@@ -1539,7 +1539,8 @@ function InspectorBody({ tab, boot, workspace, data, loading, expandedDiffs, tog
         available={Boolean(boot?.capabilities.files)}
         rootID={selectedID}
         entity={entity}
-        readOnly={Boolean(boot?.attachOnly)}
+        readOnly={Boolean(boot?.attachOnly) || !isLive}
+        canApply={Boolean(boot?.capabilities.fileApply) && isLive && !boot?.attachOnly}
         changedFiles={err ? [] : files}
         expandedDiffs={expandedDiffs}
         toggleDiff={toggleDiff}
