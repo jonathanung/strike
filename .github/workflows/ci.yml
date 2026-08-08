@@ -85,21 +85,29 @@ jobs:
 
   # Real-browser web smokes (WEBUI.5). Offline echo provider only; does not
   # replace unit tests (make web-check remains the fast default).
+  # Note: hashFiles is step-scoped only — do not use it on job-level `if`.
   web-e2e:
     runs-on: ubuntu-latest
-    if: hashFiles('web/package.json') != ''
     timeout-minutes: 25
     steps:
       - name: Checkout code
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
 
+      - name: Detect web package
+        id: web
+        run: |
+          if [ -f web/package.json ]; then echo "present=true" >> "$GITHUB_OUTPUT"
+          else echo "present=false" >> "$GITHUB_OUTPUT"; fi
+
       - name: Setup Go
+        if: steps.web.outputs.present == 'true'
         uses: actions/setup-go@0c52d547c9bc32b1aa3301fd7a9cb496313a4491 # v5.0.0
         with:
           go-version-file: go.mod
           cache-dependency-path: go.sum
 
       - name: Setup Node
+        if: steps.web.outputs.present == 'true'
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22"
@@ -107,13 +115,15 @@ jobs:
           cache-dependency-path: web/package-lock.json
 
       - name: Generate TUI flatten
+        if: steps.web.outputs.present == 'true'
         run: go generate ./internal/tui
 
       - name: Real-browser web e2e
+        if: steps.web.outputs.present == 'true'
         run: make web-e2e
 
       - name: Upload Playwright artifacts
-        if: always()
+        if: always() && steps.web.outputs.present == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: web-e2e-artifacts
