@@ -471,6 +471,8 @@ button:disabled, select:disabled, input:disabled, textarea:disabled {
 }
 header {
   grid-column: 1 / -1;
+  /* above shell backdrop so toggles stay clickable */
+  z-index: 10;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -1341,9 +1343,10 @@ dialog input { padding: 12px; color: var(--ink); }
   }
   .navigation.open, .inspector.open { transform: translateY(0); }
   .shell-backdrop {
-    top: 0;
+    top: calc(52px + env(safe-area-inset-top, 0px));
     z-index: 7;
   }
+  header { z-index: 10; }
   .mode-bottom-bar {
     display: flex;
     align-items: stretch;

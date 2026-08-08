@@ -128,7 +128,15 @@ test.describe("mobile sheet density", () => {
     const navToggle = page.getByRole("button", { name: "Toggle agents panel" });
     await expect(navToggle).toBeVisible();
     await navToggle.click();
-    await navToggle.click();
+    await expect(navToggle).toHaveAttribute("aria-pressed", "true");
+    // Close via backdrop (header toggle stays above backdrop).
+    const backdrop = page.getByRole("button", { name: "Close panel" });
+    if (await backdrop.isVisible().catch(() => false)) {
+      await backdrop.click();
+    } else {
+      await page.keyboard.press("Escape");
+    }
+    await expect(navToggle).toHaveAttribute("aria-pressed", "false");
     await expectNoPageHScroll(page);
   });
 });
