@@ -698,6 +698,14 @@ Cockpit colors track the stock TUI palette in `internal/tui/theme.Default()`
 in `web/src/styles.css`; keep them aligned when changing `theme.go` (see
 `web/src/theme.test.ts` and [theme.md](theme.md)).
 
+**Catalog (WEBUI.11):** `GET /v1/themes` lists bundled/user/project/plugin themes
+with portable semantic color roles and provenance. `GET /v1/themes/{id}` returns
+one entry. Selecting a theme in Settings **previews** immediately (CSS variable
+overrides); **Apply** persists via `PATCH /v1/settings` `{ "theme": "<id>" }`.
+Cancel/Revert restores the prior applied theme. Appearance (`auto`/`light`/`dark`)
+stays a separate browser control (`data-appearance`). TUI-only glyph/chrome fields
+are omitted from the wire payload.
+
 Lifecycle: run Vite as a **sibling** process of `strike serve` (two terminals or
 a process supervisor). Strike does not spawn Vite as a child.
 

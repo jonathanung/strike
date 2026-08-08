@@ -1114,6 +1114,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		Agents:  agentNames,
 	})
 	services.WorkflowDrafts = local.NewWorkflowDrafts(workDir)
+	services.Themes = themesAdapter{}
 
 	spawn := rootSpawner(func(id string) (*rootSlot, error) {
 		slot, _, err := openRoot(id, false)

@@ -2,6 +2,17 @@ import { FormEvent, useEffect, useState } from "react";
 import { downloadDiagnostics, request } from "./api";
 import type { Bootstrap, Status } from "./types";
 import { Button, CapabilityUnavailable, Dialog, LoadingState } from "./ui";
+import {
+  applyThemeColors,
+  applyThemeDefault,
+  clearThemeColors,
+  fetchThemes,
+  themeColors,
+  themeId,
+  themeName,
+  themeProvenance,
+  type ThemeInfo,
+} from "./themeCatalog";
 
 export type UserSettings = {
   provider?: string;
@@ -115,6 +126,14 @@ export function SettingsDialog({
   const [error, setError] = useState("");
   const [appearance, setAppearance] = useState<Appearance>(() => loadAppearance());
 
+  // Theme catalog (WEBUI.11)
+  const [themes, setThemes] = useState<ThemeInfo[]>([]);
+  const [themesLoading, setThemesLoading] = useState(false);
+  const [themeActive, setThemeActive] = useState("");
+  const [themePreview, setThemePreview] = useState("");
+  const [themeBaseline, setThemeBaseline] = useState(""); // applied id before preview
+  const [themeSaving, setThemeSaving] = useState(false);
+
   // Runtime defaults
   const [defProvider, setDefProvider] = useState("");
   const [defModel, setDefModel] = useState("");
@@ -144,6 +163,25 @@ export function SettingsDialog({
   const settingsCap = Boolean(boot?.capabilities.settings);
   const agents = boot?.agents?.map((a) => a.name) || [];
 
+  const themesCap = Boolean(boot?.capabilities.themes || boot?.capabilities.settings);
+
+  useEffect(() => {
+    if (!themesCap) return;
+    setThemesLoading(true);
+    fetchThemes(rootID)
+      .then((res) => {
+        setThemes(res.themes || []);
+        const active = (res.active || "").trim();
+        setThemeActive(active);
+        setThemeBaseline(active);
+        setThemePreview(active);
+        const match = (res.themes || []).find((th) => themeId(th) === active);
+        if (match) applyThemeColors(themeColors(match), loadAppearance());
+      })
+      .catch(() => { /* catalog optional */ })
+      .finally(() => setThemesLoading(false));
+  }, [themesCap, rootID]);
+
   useEffect(() => {
     if (!settingsCap) return;
     setLoading(true);
@@ -168,6 +206,11 @@ export function SettingsDialog({
         setCompBuffer(dialOrEmpty(s.compactionBuffer, "default"));
         setKeepUserTurns(dialOrEmpty(s.keepUserTurns, "default"));
         setPruneProtectTools((s.pruneProtectTools || []).join(", "));
+        if (s.theme) {
+          setThemeActive(s.theme);
+          setThemeBaseline(s.theme);
+          setThemePreview((prev) => prev || s.theme || "");
+        }
       })
       .catch((err: Error) => setError(err.message))
       .finally(() => setLoading(false));
@@ -176,6 +219,45 @@ export function SettingsDialog({
   const onAppearance = (value: Appearance) => {
     setAppearance(value);
     applyAppearance(value);
+    const id = themePreview || themeActive;
+    const match = themes.find((th) => themeId(th) === id);
+    if (match) applyThemeColors(themeColors(match), value);
+  };
+
+  const onPreviewTheme = (id: string) => {
+    setThemePreview(id);
+    const match = themes.find((th) => themeId(th) === id);
+    if (match) applyThemeColors(themeColors(match), appearance);
+    else if (!id) clearThemeColors();
+  };
+
+  const onRevertTheme = () => {
+    const back = themeBaseline || themeActive || "";
+    setThemePreview(back);
+    const match = themes.find((th) => themeId(th) === back);
+    if (match) applyThemeColors(themeColors(match), appearance);
+    else clearThemeColors();
+  };
+
+  const onApplyTheme = async () => {
+    const id = (themePreview || "").trim();
+    if (!id || !settingsCap) return;
+    setThemeSaving(true);
+    setError("");
+    try {
+      const saved = await applyThemeDefault(id);
+      const next = saved.theme || id;
+      setThemeActive(next);
+      setThemeBaseline(next);
+      setThemePreview(next);
+      const match = themes.find((th) => themeId(th) === next);
+      if (match) applyThemeColors(themeColors(match), appearance);
+    } catch (err) {
+      setError((err as Error).message);
+      onRevertTheme();
+    } finally {
+      setThemeSaving(false);
+    }
   };
 
   const toggleExclude = (name: string) => {
