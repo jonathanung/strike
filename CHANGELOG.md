@@ -23,6 +23,16 @@ materially affect the shipped product.
 ### Added
 
 - **`strike serve --read-only`** — reject mutating protocol ops while keeping attach/SSE ([#576](https://github.com/jonathanung/strike/issues/576)).
+- **Cohesive responsive multi-agent web cockpit** (epic [#1069](https://github.com/jonathanung/strike/issues/1069)) — `strike serve` is a progressive Chat/Code/Team/Project/Ops workspace for desktop, tablet, and phone:
+  - Progressive mode shell, surface registry, and deep links (`?mode=` / `?surface=` / `?entity=`) with root isolation
+  - Command palette, slash help, composer history, and `@file` completion
+  - Transcript tool/diff/cost cards; long-session virtualization and stream batching
+  - Scoped Code explorer with reviewed, confined file apply
+  - Observe-first Team roster/board/attention plus artifacts, ledger, handoff/conflict review
+  - Public human orchestration Ops with safe Team controls (CAS, idempotency, attach-only blocks)
+  - Provider auth (key/OAuth/device), theme catalog preview/apply, scheduler presets, Project/Ops regroup (MCP, plugins, panes)
+  - Real-browser smokes (`make web-e2e`) and operator conformance docs ([docs/web.md](docs/web.md), [docs/web-cockpit-contract.md](docs/web-cockpit-contract.md))
+  - **Not claimed:** native apps, offline execution, push notifications, multi-user collaboration, or cross-device controller arbitration (see #1056 / #1060)
 
 ### Removed
 

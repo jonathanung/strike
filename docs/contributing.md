@@ -22,7 +22,7 @@ internal/tool/         tool contract + registry (read/glob/grep/edit/write/
                        phase_done/toolsearch — full list: ARCHITECTURE.md)
 internal/permission/   rulesets + suspend/resume ask service
 internal/session/      JSONL event-log persistence
-internal/server/       experimental read-only HTTP attach (strike serve)
+internal/server/       strike serve web cockpit (REST/SSE/WS + embedded UI)
 internal/config/       layered config + agents/skills/workflows
 internal/host/         frontend-facing host-service contract (stdlib-only);
                        local/ wraps auth/config/models/history/memory/issue/files

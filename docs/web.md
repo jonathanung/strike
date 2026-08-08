@@ -1,15 +1,20 @@
 # Web workspace
 
-`strike serve` hosts a React workspace that can drive a **live** engine session
-and read-only attach to durable session JSONL logs.
+`strike serve` hosts a cohesive React **cockpit** for solo and multi-agent work
+on desktop, tablet, and phone. It can drive a **live** engine session (mutations
+via REST/WebSocket ops) and **attach-only** read historical session JSONL logs.
+
+This is **not** a read-only status page: live mode exposes Chat, Code, Team,
+Project, and Ops surfaces (plugins, panes, MCP, auth, reviewed file apply, team
+controls) behind capability gates and attach-only / `--read-only` blocks.
 
 **Progressive workspace contract (epic [#1069](https://github.com/jonathanung/strike/issues/1069)):**
 modes (`Chat` default, `Code`, `Team`, `Project`, `Ops`), surface registry,
-additive deep links, attach-only matrix, and exhaustive TUI→web parity inventory
-live in **[docs/web-cockpit-contract.md](web-cockpit-contract.md)** (WEBUI.1 /
-[#1070](https://github.com/jonathanung/strike/issues/1070)). Implementers of
-WEBUI.2–WEBUI.21 must follow that document; this page remains the operator
-reference for start flags, endpoints, multi-session UX (#467), and security.
+additive deep links, attach-only matrix, TUI→web parity inventory, and
+conformance closeout live in
+**[docs/web-cockpit-contract.md](web-cockpit-contract.md)** (WEBUI.1 / #1070 +
+WEBUI.21 / #1090). This page is the operator reference for start flags,
+endpoints, multi-session UX (#467), smokes, and security.
 
 ## Start
 
@@ -701,6 +706,131 @@ mobile guidance use CPU 4× throttling. Advisory budgets live in
 Virtualization keeps semantic message labels, keyboard focus order inside the
 mounted window, and search/export over the full in-memory transcript. The
 transcript `role="log"` does not announce token-by-token deltas.
+
+
+## Progressive modes and surface registry
+
+| Mode | Primary | Typical secondary surfaces |
+|---|---|---|
+| **Chat** (default) | transcript + composer | context, runtime, queue, asks |
+| **Code** | file tree / read / markdown / diff | changed files, diagnostics, reviewed apply |
+| **Team** | roster / agent detail | board, attention, messages, artifacts, ledger, controls |
+| **Project** | plans / goals / issues / memory | workflows, project exports |
+| **Ops** | providers / settings | MCP, plugins, panes, timeline, diagnostics, sandbox |
+
+Surfaces register in `web/src/surfaces.ts` (built-ins + dynamic `pane/1`).
+Capability-missing surfaces hide; deep links that name an unavailable surface
+show an empty-state without attempting mutations.
+
+### Deep links
+
+Compatible with existing `?root=` / `?session=` / attach handoff. Additive:
+
+| Param | Meaning |
+|---|---|
+| `mode` | `chat` \| `code` \| `team` \| `project` \| `ops` |
+| `surface` | registry id (`roster`, `files`, `mcp`, …) |
+| `entity` | path, artifact id, agent id, … |
+| `agent` | child/agent session focus |
+| `pane` | plugin pane id (Ops) |
+
+Root isolation: every live query, event, and mutation is scoped to one root.
+Switching roots never merges transcript caches (`ClientState.byID`).
+
+### Attach-only and `--read-only`
+
+| Mode | Transcript | Mutations (ops, file apply, team control, settings PATCH) |
+|---|---|---|
+| Live | WS stream | Allowed when capability + auth admit |
+| Attach-only | SSE history | **Blocked** (HTTP 403 / UI disabled) |
+| `--read-only` serve | Live or attach | **Blocked** at server admit layer |
+
+Team human controls and reviewed file apply require public Ops, actor,
+permission, audit, CAS, and idempotency (see
+[human-orchestration-ops.md](human-orchestration-ops.md)).
+
+### Security boundaries (summary)
+
+- Loopback bind only; remote access via SSH local forward (see above).
+- Auth: one-time `/attach?token=` cookie handoff or `Authorization: Bearer` — not
+  long-lived `?token=` on `/v1/*`.
+- Credentials redacted in exports, diag, timeline, and transcript scrapes.
+- Path confinement on file read/apply; wrong-root denial on multi-root ops.
+- Stale CAS / idempotency keys fail closed on team and file mutations.
+- Unsupported capability → hide or 501; never a silent no-op success.
+
+Sibling epic boundaries (not absorbed by #1069): **#541** / **#1032** (serve
+hardening & security audit depth), **#1056** (human collaboration), **#1058**
+(adaptive orchestration policy), **#1060** (cross-device continuity, push,
+remote approval).
+
+## Operator smoke checklist
+
+Run against `make serve` (echo provider) unless noted.
+
+### Chat
+1. Send a turn; confirm user + assistant cells stream.
+2. Queue a second prompt while busy; reorder/edit/clear queue.
+3. Trigger a permission ask (`run echo hi`); Allow once; dialog dismisses.
+4. `/export` or header ↓ downloads markdown of the loaded transcript.
+
+### Code
+1. Mode **Code** → files surface; tree/search/read a workspace file.
+2. Open a changed-file diff; with live + `fileApply`, review and apply a confined edit (or confirm attach-only blocks apply).
+
+### Team
+1. With multi-agent activity (or deep link `?mode=team&surface=roster`), open roster/board/attention.
+2. Open artifacts/ledger/review when capabilities allow.
+3. Live only: team control actions show CAS/idempotency errors clearly when stale; attach-only shows controls disabled.
+
+### Project
+1. Plans / goals / issues / memory list; create/edit where not attach-only.
+2. Workflows catalog; start blocked in attach-only.
+3. Export memory/issues from project export surface.
+
+### Ops
+1. Settings: appearance, theme catalog preview/apply, provider auth row.
+2. MCP status; plugins list; panes list/mount when caps true.
+3. Timeline + diagnostics export; sandbox explain.
+
+### Trust-boundary smoke
+1. Attach-only: composer disabled; POST `/v1/ops` → 403.
+2. Wrong `?root=` / activate another root: events do not leak across caches.
+3. File apply outside workspace → denied; audit/permission correlation preserved.
+4. Team op with stale CAS or replayed idempotency key → conflict/reject, no double apply.
+5. Missing capability surface deep link → unavailable empty-state, no mutation.
+
+### Automated browser smoke
+
+```sh
+make web-e2e
+```
+
+Covers desktop, tablet, **320 CSS px** mobile, keyboard/focus, reduced-motion
+friendly paths, multi-root switch, reconnect/deep links, and attach-only
+(`web/e2e/cockpit.spec.ts`, `attach-only.spec.ts`). Artifacts under
+`web/e2e-artifacts/`.
+
+### Performance
+
+See [Long-session performance](#long-session-performance-webui20--1087). CI
+enforces the stable fixture subset; full browser profile is local via
+`cd web && npm run profile:perf`.
+
+## Conformance closeout (WEBUI.21 / #1090)
+
+Epic [#1069](https://github.com/jonathanung/strike/issues/1069) is complete when:
+
+1. Parity matrix in [web-cockpit-contract.md](web-cockpit-contract.md) §8 has no
+   unknown/partial row without owner — **done** (shipped / non-goal / deferred `/init`).
+2. This operator doc covers modes, registry, deep links, capabilities, endpoints,
+   root isolation, attach-only, Team observe/control, and security — **done**.
+3. Stale “read-only server” / “no web plugins” descriptions corrected — **done**.
+4. Operator + automated smokes above are the release gate — run before tagging.
+5. Long-session thresholds from #1087 met or tracked — **committed in**
+   `web/src/perf/thresholds.ts`.
+6. Sibling boundaries #541, #1032, #1056, #1058, #1060 unchanged — **done**.
+7. Changelog summarizes the cohesive workspace without claiming native/offline/push/collaboration features not shipped — see `CHANGELOG.md` `[Unreleased]`.
 
 ## Vite dev / production web toolchain
 
