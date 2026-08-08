@@ -74,6 +74,44 @@ func TestWrapModeOffUnchanged(t *testing.T) {
 	}
 }
 
+func TestAvailabilityProbeIsLazy(t *testing.T) {
+	ResetWarnForTest()
+	oldProbe := platformProbe
+	called := 0
+	platformProbe = func() availInfo {
+		called++
+		return availInfo{ok: true, name: "test"}
+	}
+	t.Cleanup(func() {
+		platformProbe = oldProbe
+		resetAvailabilityForTest()
+	})
+
+	explain := Explain(Policy{Mode: ModeWorkspaceWrite, WorkDir: t.TempDir()})
+	if !strings.Contains(explain, "backend: "+BackendUnprobed) {
+		t.Fatalf("Explain = %q, want unprobed backend", explain)
+	}
+	if called != 0 {
+		t.Fatalf("probe calls after Explain = %d, want 0", called)
+	}
+
+	off := WrapResult([]string{"bash", "-c", "true"}, Policy{Mode: ModeOff, WorkDir: t.TempDir()})
+	if off.Applied {
+		t.Fatalf("off result = %+v", off)
+	}
+	if called != 0 {
+		t.Fatalf("probe calls after ModeOff = %d, want 0", called)
+	}
+
+	res := WrapResult([]string{"bash", "-c", "true"}, Policy{Mode: ModeWorkspaceWrite, WorkDir: t.TempDir()})
+	if called != 1 {
+		t.Fatalf("probe calls = %d, want 1", called)
+	}
+	if !res.Applied || res.Backend != "test" {
+		t.Fatalf("result = %+v", res)
+	}
+}
+
 func TestWrapEmptyArgv(t *testing.T) {
 	ResetWarnForTest()
 	forceSetAvailabilityForTest(availInfo{ok: true, name: "bwrap"})

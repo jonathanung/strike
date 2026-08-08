@@ -33,6 +33,10 @@ const (
 // DefaultMode is the product default when config/CLI omit sandbox.
 const DefaultMode = ModeWorkspaceWrite
 
+// BackendUnprobed marks sandbox status assembled before the first sandboxed
+// command checks the platform backend.
+const BackendUnprobed = "unprobed"
+
 // String returns the canonical config/CLI token for m.
 func (m Mode) String() string {
 	switch m {
@@ -183,18 +187,10 @@ func Explain(p Policy) string {
 	if len(p.DenyWritePaths) > 0 {
 		fmt.Fprintf(&b, "deny-write paths: %s\n", strings.Join(p.DenyWritePaths, ", "))
 	}
-	backend := BackendName()
-	if backend == "" {
-		backend = "(unavailable)"
-	}
-	fmt.Fprintf(&b, "backend: %s\n", backend)
-	if !Available() && p.Mode != ModeOff {
-		if p.AllowDegrade {
-			b.WriteString("backend status: unavailable (degrade allowed — bash runs unsandboxed)\n")
-		} else {
-			b.WriteString("backend status: unavailable (degrade denied — bash blocked)\n")
-		}
-	}
+	// Explain is assembled at startup, before any bash command needs a backend.
+	// Do not turn a descriptive UI command into an eager platform probe.
+	fmt.Fprintf(&b, "backend: %s\n", BackendUnprobed)
+	b.WriteString("backend status: unknown (checked when bash first runs)\n")
 	b.WriteString("profile:\n")
 	b.WriteString(ProfileText(p))
 	return b.String()
