@@ -1,8 +1,9 @@
 /**
- * Observe-first Team workspace (WEBUI.14 / #1083).
- * Driven by WEBUI.13 team observation state — no human mutations.
+ * Team workspace: observe-first (WEBUI.14) + safe human controls (WEBUI.19).
+ * Mutations go only through public team.* Ops (WEBUI.18) via sendOp.
  */
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
+import { OpError, type OpResult } from "./api";
 import type {
   DelegationTask,
   TeamMember,
@@ -10,7 +11,20 @@ import type {
   TeamObservation,
   VerificationNote,
 } from "./team";
+import {
+  applyBoardClaim,
+  applyBoardComplete,
+  applyBoardCreate,
+  hasTeamOp,
+  newIdempotencyKey,
+  teamControlUnavailableReason,
+  unavailableMessage,
+  type LocalBoardTask,
+  type TeamOpName,
+} from "./teamControl";
 import { ListRow, StatusBadge, StatusDot, statusKindFrom } from "./ui";
+
+export type TeamSendOp = (type: string, data?: unknown) => Promise<OpResult>;
 
 export type TeamFilter = "all" | "working" | "needs-you" | "blocked" | "completed" | "failed" | "hidden";
 
@@ -151,12 +165,14 @@ function MemberDetail({
   onOpenTranscript,
   onClose,
   verification,
+  controls,
 }: {
   member: TeamMember;
   isLead: boolean;
   onOpenTranscript?: (id: string) => void;
   onClose: () => void;
   verification?: VerificationNote;
+  controls?: ReactNode;
 }) {
   const kind = statusKindFrom(member.state);
   return (
@@ -198,7 +214,7 @@ function MemberDetail({
           <button type="button" onClick={() => onOpenTranscript(member.sessionId)}>Open transcript (RO)</button>
         </div>
       )}
-      <p className="muted">Observe-only — human controls require WEBUI.17–19.</p>
+      {controls}
     </section>
   );
 }
@@ -207,10 +223,16 @@ function Board({
   delegations,
   members,
   onSelectOwner,
+  onTransition,
+  canTransition,
+  busy,
 }: {
   delegations: Record<string, DelegationTask>;
   members: Record<string, TeamMember>;
   onSelectOwner?: (sessionId: string) => void;
+  onTransition?: (d: DelegationTask, toState: string) => void;
+  canTransition?: boolean;
+  busy?: boolean;
 }) {
   const byCol = useMemo(() => {
     const map = new Map<string, DelegationTask[]>();
@@ -240,16 +262,29 @@ function Board({
               const ownerLabel = owner && members[owner] ? memberLabel(members[owner]) : owner?.slice(0, 8);
               return (
                 <li key={d.id}>
-                  <button
-                    type="button"
-                    className="team-board-card"
-                    onClick={() => owner && onSelectOwner?.(owner)}
-                  >
-                    <strong>{d.name || d.id.slice(0, 10)}</strong>
-                    <span className="muted">{ownerLabel || "unassigned"}</span>
-                    {d.reason ? <span className="team-board-reason">{d.reason}</span> : null}
-                    {d.version !== undefined ? <small>v{d.version}</small> : null}
-                  </button>
+                  <div className="team-board-card">
+                    <button
+                      type="button"
+                      className="team-board-card-main"
+                      onClick={() => owner && onSelectOwner?.(owner)}
+                    >
+                      <strong>{d.name || d.id.slice(0, 10)}</strong>
+                      <span className="muted">{ownerLabel || "unassigned"}</span>
+                      {d.reason ? <span className="team-board-reason">{d.reason}</span> : null}
+                      {d.version !== undefined ? <small>v{d.version}</small> : null}
+                    </button>
+                    {canTransition && onTransition && !["done", "completed", "failed", "canceled", "cancelled"].includes(normalizeState(d.state)) ? (
+                      <div className="team-board-actions">
+                        <button type="button" disabled={busy} onClick={() => onTransition(d, "blocked")}>Block</button>
+                        <button type="button" disabled={busy} onClick={() => {
+                          if (window.confirm(`Mark ${d.name || d.id} completed?`)) onTransition(d, "completed");
+                        }}>Complete</button>
+                        <button type="button" disabled={busy} onClick={() => {
+                          if (window.confirm(`Cancel ${d.name || d.id}?`)) onTransition(d, "canceled");
+                        }}>Cancel</button>
+                      </div>
+                    ) : null}
+                  </div>
                 </li>
               );
             })}
@@ -275,6 +310,19 @@ function Messages({ messages }: { messages: TeamMessage[] }) {
   );
 }
 
+function formatOpError(err: unknown): string {
+  if (err instanceof OpError) {
+    if (err.code === "conflict" && err.currentVersion !== undefined) {
+      return `Conflict (current v${err.currentVersion}). Refresh and retry.`;
+    }
+    if (err.code === "idempotency_conflict") return "Duplicate action with different payload.";
+    if (err.code === "attach_only") return "Attach-only — mutations disabled.";
+    if (err.code === "permission_denied") return "Permission denied.";
+    return err.message || err.code || "Operation failed";
+  }
+  return err instanceof Error ? err.message : String(err);
+}
+
 export function TeamWorkspace({
   team,
   selectedId,
@@ -282,6 +330,11 @@ export function TeamWorkspace({
   onOpenTranscript,
   readOnly,
   compact,
+  protocolOps,
+  teamControl,
+  agents,
+  rootSessionId,
+  sendOp,
 }: {
   team: TeamObservation;
   selectedId?: string;
@@ -290,9 +343,27 @@ export function TeamWorkspace({
   readOnly?: boolean;
   /** Phone: list-first density */
   compact?: boolean;
+  protocolOps?: string[];
+  teamControl?: boolean;
+  agents?: string[];
+  rootSessionId?: string;
+  sendOp?: TeamSendOp;
 }) {
   const [filter, setFilter] = useState<TeamFilter>("all");
-  const [view, setView] = useState<"roster" | "board" | "attention" | "messages">("roster");
+  const [view, setView] = useState<"roster" | "board" | "attention" | "messages" | "controls">("roster");
+  const [statusMsg, setStatusMsg] = useState<string>("");
+  const [busy, setBusy] = useState(false);
+  const [objective, setObjective] = useState("");
+  const [spawnAgent, setSpawnAgent] = useState(agents?.[0] || "build");
+  const [spawnName, setSpawnName] = useState("");
+  const [showAdvancedSpawn, setShowAdvancedSpawn] = useState(false);
+  const [maxTurns, setMaxTurns] = useState("");
+  const [msgBody, setMsgBody] = useState("");
+  const [msgTo, setMsgTo] = useState("");
+  const [boardTitle, setBoardTitle] = useState("");
+  const [localBoard, setLocalBoard] = useState<LocalBoardTask[]>([]);
+  const inflight = useRef(new Set<string>());
+
   const members = useMemo(() => orderedMembers(team), [team]);
   const filtered = useMemo(
     () => members.filter((m) => matchesFilter(m, filter, team.leadId)),
@@ -303,6 +374,146 @@ export function TeamWorkspace({
   const verification = selected
     ? [...team.verifications].reverse().find((v) => v.sessionId === selected.sessionId)
     : undefined;
+
+  const unavailable = teamControlUnavailableReason({
+    attachOnly: readOnly,
+    teamControl,
+    protocolOps,
+  });
+  const controlsOn = Boolean(sendOp && !unavailable && !readOnly);
+
+  const can = useCallback(
+    (op: TeamOpName) => controlsOn && hasTeamOp(protocolOps, op),
+    [controlsOn, protocolOps],
+  );
+
+  const runOp = useCallback(
+    async (logicalKey: string, type: TeamOpName, data: Record<string, unknown>) => {
+      if (!sendOp || !can(type)) {
+        setStatusMsg(unavailableMessage(unavailable) || "Control unavailable");
+        return null;
+      }
+      if (inflight.current.has(logicalKey)) {
+        setStatusMsg("Already in flight — wait for the previous request.");
+        return null;
+      }
+      inflight.current.add(logicalKey);
+      setBusy(true);
+      setStatusMsg("");
+      const idempotencyKey = newIdempotencyKey();
+      const payload = {
+        ...data,
+        idempotencyKey,
+        ...(rootSessionId ? { rootSessionId } : {}),
+      };
+      try {
+        const res = await sendOp(type, payload);
+        setStatusMsg(res.ok ? "OK" : res.error || "done");
+        return res;
+      } catch (err) {
+        setStatusMsg(formatOpError(err));
+        return null;
+      } finally {
+        inflight.current.delete(logicalKey);
+        setBusy(false);
+      }
+    },
+    [sendOp, can, unavailable, rootSessionId],
+  );
+
+  const onSpawn = async () => {
+    const obj = objective.trim();
+    if (!obj) {
+      setStatusMsg("Objective is required");
+      return;
+    }
+    const data: Record<string, unknown> = { objective: obj, agent: spawnAgent || undefined };
+    if (spawnName.trim()) data.name = spawnName.trim();
+    if (showAdvancedSpawn && maxTurns.trim()) {
+      const n = Number(maxTurns);
+      if (Number.isFinite(n) && n > 0) data.budget = { maxTurns: n };
+    }
+    const res = await runOp("spawn", "team.spawn", data);
+    if (res?.ok) {
+      setObjective("");
+      setSpawnName("");
+      setStatusMsg(res.childSessionId ? `Spawned ${res.childSessionId.slice(0, 8)}` : "Spawned");
+    }
+  };
+
+  const onMessage = async (broadcast: boolean) => {
+    const body = msgBody.trim();
+    if (!body) {
+      setStatusMsg("Message body is required");
+      return;
+    }
+    if (broadcast) {
+      await runOp("broadcast", "team.broadcast", { body });
+    } else {
+      const to = (msgTo || selectedId || "").trim();
+      if (!to) {
+        setStatusMsg("Select a target agent");
+        return;
+      }
+      await runOp(`msg-${to}`, "team.message", { to, body, kind: "message" });
+    }
+    setMsgBody("");
+  };
+
+  const onInterrupt = async (childSessionId: string) => {
+    const m = team.members[childSessionId];
+    const label = m ? memberLabel(m) : childSessionId.slice(0, 8);
+    if (!window.confirm(`Interrupt ${label}? Active work will be canceled.`)) return;
+    await runOp(`intr-${childSessionId}`, "team.child_interrupt", {
+      childSessionId,
+      reason: "human interrupt",
+    });
+  };
+
+  const onTransition = async (d: DelegationTask, toState: string) => {
+    const res = await runOp(`tr-${d.id}-${toState}`, "team.task_transition", {
+      delegationId: d.id,
+      expectedVersion: d.version ?? 0,
+      toState,
+    });
+    if (!res && statusMsg.includes("Conflict")) {
+      setStatusMsg((s) => `${s} — reload team snapshot.`);
+    }
+  };
+
+  const onBoardCreate = async () => {
+    const title = boardTitle.trim();
+    if (!title) {
+      setStatusMsg("Board title is required");
+      return;
+    }
+    const res = await runOp("board-create", "team.board_create", { title });
+    if (res?.ok && res.taskId) {
+      setLocalBoard((list) => applyBoardCreate(list, res.taskId!, title, res.version || 1));
+      setBoardTitle("");
+    }
+  };
+
+  const onBoardClaim = async (t: LocalBoardTask) => {
+    const res = await runOp(`claim-${t.id}`, "team.board_claim", {
+      taskId: t.id,
+      expectedVersion: t.version,
+    });
+    if (res?.ok) {
+      setLocalBoard((list) => applyBoardClaim(list, t.id, res.version || t.version + 1));
+    }
+  };
+
+  const onBoardComplete = async (t: LocalBoardTask) => {
+    if (!window.confirm(`Complete board task ${t.title}?`)) return;
+    const res = await runOp(`complete-${t.id}`, "team.board_complete", {
+      taskId: t.id,
+      expectedVersion: t.version,
+    });
+    if (res?.ok) {
+      setLocalBoard((list) => applyBoardComplete(list, t.id, res.version || t.version + 1));
+    }
+  };
 
   if (!team.available) {
     return (
@@ -315,13 +526,39 @@ export function TeamWorkspace({
   }
 
   const hasActivity = members.length > 0 || Object.keys(team.delegations).length > 0;
+  const tabs = (["roster", "board", "messages", ...(controlsOn || unavailable ? ["controls"] as const : [])] as const);
+
+  const memberControls = selected && !selected.terminal && selected.sessionId !== team.leadId && can("team.child_interrupt") ? (
+    <div className="team-detail-actions team-controls-inline" aria-label="Agent controls">
+      <button type="button" disabled={busy} onClick={() => void onInterrupt(selected.sessionId)}>
+        Interrupt
+      </button>
+      {can("team.message") ? (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => {
+            setMsgTo(selected.sessionId);
+            setView("controls");
+          }}
+        >
+          Message
+        </button>
+      ) : null}
+    </div>
+  ) : null;
 
   return (
     <section className={`team-workspace ${compact ? "compact" : ""}`} aria-label="Team workspace">
       <header className="team-workspace-head">
         <h2>Team</h2>
         {readOnly ? <StatusBadge kind="idle" label="read-only" /> : null}
+        {controlsOn ? <StatusBadge kind="busy" label="controls" /> : null}
       </header>
+
+      {statusMsg ? (
+        <p className="team-control-status" role="status">{statusMsg}</p>
+      ) : null}
 
       {attention.length > 0 && (
         <div className="team-attention" aria-label="Team attention">
@@ -352,7 +589,7 @@ export function TeamWorkspace({
       )}
 
       <div className="team-view-tabs" role="tablist" aria-label="Team views">
-        {(["roster", "board", "messages"] as const).map((v) => (
+        {tabs.map((v) => (
           <button
             key={v}
             type="button"
@@ -413,6 +650,9 @@ export function TeamWorkspace({
         <Board
           delegations={team.delegations}
           members={team.members}
+          canTransition={can("team.task_transition")}
+          busy={busy}
+          onTransition={(d, to) => void onTransition(d, to)}
           onSelectOwner={(id) => {
             onSelect(id);
             setView("roster");
@@ -422,6 +662,130 @@ export function TeamWorkspace({
 
       {view === "messages" && <Messages messages={team.messages} />}
 
+      {view === "controls" && (
+        <section className="team-controls" aria-label="Team controls">
+          {unavailable ? (
+            <p className="muted" role="status">{unavailableMessage(unavailable)}</p>
+          ) : (
+            <>
+              {can("team.spawn") && (
+                <fieldset className="team-control-block">
+                  <legend>Spawn agent</legend>
+                  <label>
+                    Objective
+                    <textarea
+                      value={objective}
+                      onChange={(e) => setObjective(e.target.value)}
+                      rows={compact ? 2 : 3}
+                      placeholder="What should the child do?"
+                      disabled={busy}
+                    />
+                  </label>
+                  <label>
+                    Agent
+                    <select value={spawnAgent} onChange={(e) => setSpawnAgent(e.target.value)} disabled={busy}>
+                      {(agents?.length ? agents : ["build", "explore", "general"]).map((a) => (
+                        <option key={a} value={a}>{a}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <button type="button" className="linkish" onClick={() => setShowAdvancedSpawn((v) => !v)}>
+                    {showAdvancedSpawn ? "Hide advanced" : "Advanced…"}
+                  </button>
+                  {showAdvancedSpawn && (
+                    <div className="team-control-advanced">
+                      <label>
+                        Alias
+                        <input value={spawnName} onChange={(e) => setSpawnName(e.target.value)} disabled={busy} />
+                      </label>
+                      <label>
+                        Max turns
+                        <input value={maxTurns} onChange={(e) => setMaxTurns(e.target.value)} inputMode="numeric" disabled={busy} />
+                      </label>
+                    </div>
+                  )}
+                  <button type="button" className="primary" disabled={busy || !objective.trim()} onClick={() => void onSpawn()}>
+                    Spawn
+                  </button>
+                </fieldset>
+              )}
+
+              {(can("team.message") || can("team.broadcast")) && (
+                <fieldset className="team-control-block">
+                  <legend>Message</legend>
+                  <label>
+                    To (session id)
+                    <input
+                      value={msgTo}
+                      onChange={(e) => setMsgTo(e.target.value)}
+                      placeholder={selectedId || "child session id"}
+                      disabled={busy}
+                      list="team-member-ids"
+                    />
+                    <datalist id="team-member-ids">
+                      {members.map((m) => (
+                        <option key={m.sessionId} value={m.sessionId}>{memberLabel(m)}</option>
+                      ))}
+                    </datalist>
+                  </label>
+                  <label>
+                    Body
+                    <textarea value={msgBody} onChange={(e) => setMsgBody(e.target.value)} rows={2} disabled={busy} />
+                  </label>
+                  <div className="team-control-row">
+                    {can("team.message") ? (
+                      <button type="button" disabled={busy || !msgBody.trim()} onClick={() => void onMessage(false)}>
+                        Send
+                      </button>
+                    ) : null}
+                    {can("team.broadcast") ? (
+                      <button type="button" disabled={busy || !msgBody.trim()} onClick={() => void onMessage(true)}>
+                        Broadcast
+                      </button>
+                    ) : null}
+                  </div>
+                </fieldset>
+              )}
+
+              {can("team.board_create") && (
+                <fieldset className="team-control-block">
+                  <legend>Board task</legend>
+                  <label>
+                    Title
+                    <input value={boardTitle} onChange={(e) => setBoardTitle(e.target.value)} disabled={busy} />
+                  </label>
+                  <button type="button" disabled={busy || !boardTitle.trim()} onClick={() => void onBoardCreate()}>
+                    Create
+                  </button>
+                  {localBoard.length > 0 && (
+                    <ul className="team-local-board" aria-label="Local board tasks">
+                      {localBoard.map((t) => (
+                        <li key={t.id}>
+                          <strong>{t.title}</strong>
+                          <span className="muted">{t.status} · v{t.version} · {t.id}</span>
+                          <div className="team-control-row">
+                            {can("team.board_claim") && t.status === "pending" ? (
+                              <button type="button" disabled={busy} onClick={() => void onBoardClaim(t)}>Claim</button>
+                            ) : null}
+                            {can("team.board_complete") && t.status !== "completed" ? (
+                              <button type="button" disabled={busy} onClick={() => void onBoardComplete(t)}>Complete</button>
+                            ) : null}
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </fieldset>
+              )}
+
+              <p className="muted">
+                Root <code>{rootSessionId || team.leadId || "—"}</code>. Outcomes apply via live events; no second client store.
+              </p>
+            </>
+          )}
+        </section>
+      )}
+
       {selected && (
         <MemberDetail
           member={selected}
@@ -429,6 +793,7 @@ export function TeamWorkspace({
           onClose={() => onSelect(undefined)}
           onOpenTranscript={onOpenTranscript}
           verification={verification}
+          controls={memberControls}
         />
       )}
     </section>

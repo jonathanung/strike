@@ -2396,15 +2396,53 @@ dialog fieldset small { color: var(--muted); }
 .team-board-col h4 { margin: 0 0 8px; font-size: 12px; text-transform: capitalize; }
 .team-board-col ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .team-board-card {
-  width: 100%; text-align: left; display: grid; gap: 2px;
-  border: 1px solid var(--rule); background: var(--bg); padding: 8px; border-radius: 6px; cursor: pointer;
+  width: 100%; text-align: left; display: grid; gap: 4px;
+  border: 1px solid var(--rule); background: var(--bg); padding: 8px; border-radius: 6px;
 }
+.team-board-card-main {
+  width: 100%; text-align: left; display: grid; gap: 2px;
+  border: 0; background: transparent; padding: 0; cursor: pointer; color: inherit;
+}
+.team-board-actions, .team-control-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.team-board-actions button, .team-control-row button, .team-controls-inline button {
+  border: 1px solid var(--rule); background: transparent; padding: 4px 8px;
+  border-radius: 6px; cursor: pointer; font-size: 12px;
+}
+.team-board-actions button:disabled, .team-control-row button:disabled { opacity: 0.5; cursor: not-allowed; }
 .team-board-reason { font-size: 11px; color: var(--muted); }
 .team-messages { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .team-messages li { display: grid; gap: 2px; padding: 8px; border: 1px solid var(--rule); border-radius: 6px; }
+.team-control-status {
+  margin: 0; padding: 8px 10px; border-radius: 6px; font-size: 12px;
+  border: 1px solid var(--rule); background: color-mix(in srgb, var(--acid) 10%, transparent);
+}
+.team-controls { display: grid; gap: 12px; }
+.team-control-block {
+  border: 1px solid var(--rule); border-radius: 8px; padding: 10px;
+  display: grid; gap: 8px; margin: 0; background: var(--code-bg);
+}
+.team-control-block legend { padding: 0 4px; font-weight: 600; }
+.team-control-block label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+.team-control-block input, .team-control-block textarea, .team-control-block select {
+  width: 100%; border: 1px solid var(--rule); border-radius: 6px;
+  background: var(--bg); color: var(--text); padding: 6px 8px; font: inherit;
+}
+.team-control-block button.primary {
+  justify-self: start; background: var(--text); color: var(--bg); border-color: var(--text);
+  padding: 6px 12px; border-radius: 6px; cursor: pointer;
+}
+.team-control-block button.linkish {
+  justify-self: start; border: 0; background: transparent; color: var(--acid);
+  cursor: pointer; padding: 0; text-align: left;
+}
+.team-control-advanced { display: grid; gap: 8px; }
+.team-local-board { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.team-local-board li { display: grid; gap: 4px; padding: 8px; border: 1px solid var(--rule); border-radius: 6px; background: var(--bg); }
+.team-controls-inline { margin-top: 8px; }
 @media (max-width: 720px) {
   .team-board { flex-direction: column; overflow-x: visible; }
   .team-board-col { min-width: 0; max-width: none; width: 100%; }
+  .team-control-block { padding: 8px; }
 }
 /* WEBUI.7 transcript / tool / diff */
 .tool-card summary { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; cursor: pointer; padding: 8px 10px; }
