@@ -14,6 +14,11 @@ materially affect the shipped product.
 
 ## [Unreleased]
 
+## [v0.4.0] - 2026-08-12
+
+Minor release: cohesive web cockpit, serve security hardening, nested
+`AGENTS.md`, WSL2-only Windows posture, and session resume performance.
+
 ### Security
 
 - **Web cockpit auth** — `/v1/*` no longer accepts `?token=` query credentials (they leak via shell history, proxy logs, and `Referer`). Open the printed `/attach?token=…` URL once for HttpOnly cookie handoff, or send `Authorization: Bearer` ([#574](https://github.com/jonathanung/strike/issues/574)).
@@ -40,13 +45,17 @@ materially affect the shipped product.
 - **Windows support** — v1 is macOS, Linux, and Windows via WSL2 only. Native Windows is not supported ([#579](https://github.com/jonathanung/strike/issues/579)).
 - **Nested project instructions** — `AGENTS.md` / `CLAUDE.md` from the workspace root down to the working directory are merged (root first, deepest last) instead of first-match-wins walking up. Global `~/.strike/AGENTS.md` still layers first ([#578](https://github.com/jonathanung/strike/issues/578)).
 
-### Fixed
-
-- **Resume from welcome** — opening a previous session from the home/welcome screen loads that session's transcript instead of staying on a blank new session. JSONL replay and cell rebuild run off the UI thread so composer input stays responsive ([#1126](https://github.com/jonathanung/strike/issues/1126)).
-
 ### Removed
 
 - **`strike serve --expose` / `--allow-cidr`** — legacy flags error with an SSH migration hint. **Upgrade note:** replace LAN expose with SSH local forward; non-loopback `--addr` is rejected.
+
+### Fixed
+
+- **Session resume** — opening or continuing a previous session from the welcome screen restores the transcript instead of a blank session, and JSONL replay no longer freezes the composer. Turns started while the session is still loading stay on `/timeline` ([#1126](https://github.com/jonathanung/strike/issues/1126), [#1134](https://github.com/jonathanung/strike/pull/1134)).
+- **Sandbox probe** — macOS Seatbelt availability is checked on first bash, not at startup ([#1098](https://github.com/jonathanung/strike/issues/1098), [#1125](https://github.com/jonathanung/strike/pull/1125)).
+- **Echo catalog on serve** — `GET /v1/models?provider=echo` returns 200 with synthetic models instead of 502 ([#1131](https://github.com/jonathanung/strike/pull/1131)).
+
+**Full changelog:** [v0.3.1...v0.4.0](https://github.com/jonathanung/strike/compare/v0.3.1...v0.4.0)
 
 ## [v0.3.1] - 2026-08-07
 
@@ -764,7 +773,8 @@ Initial public release.
 
 **Full changelog:** [commits through v0.0.1](https://github.com/jonathanung/strike/commits/v0.0.1)
 
-[Unreleased]: https://github.com/jonathanung/strike/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/jonathanung/strike/compare/v0.4.0...HEAD
+[v0.4.0]: https://github.com/jonathanung/strike/compare/v0.3.1...v0.4.0
 [v0.3.1]: https://github.com/jonathanung/strike/compare/v0.3.0...v0.3.1
 [v0.3.0]: https://github.com/jonathanung/strike/compare/v0.2.2...v0.3.0
 [v0.2.2]: https://github.com/jonathanung/strike/compare/v0.2.0...v0.2.2
