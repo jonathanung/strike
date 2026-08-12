@@ -333,6 +333,21 @@ type Model struct {
 	// pendingResume is set when /session picks another root session; the
 	// composition root reads PendingResume after tea.Quit and reopens it.
 	pendingResume string
+	// replayPending is true while an in-process session open is decoding JSONL
+	// off the Update thread (#1126). Suppresses the blank home/welcome so a
+	// resume is not mistaken for a new session.
+	replayPending bool
+	// replayID is the session id whose JSONL seed is in flight. Loading chrome
+	// only shows when this matches sessionID so a spawn/switch mid-load does
+	// not stick on “loading session…”.
+	replayID string
+	// replayGenByID is the last begun seed generation per session id. Stale
+	// replaySeedMsg values are dropped even after replayID is cleared.
+	replayGenByID map[string]int
+	// replayGapEvents holds protocol events that arrived for an id while its
+	// JSONL seed was in flight. Observed onto the seeded builder so /timeline
+	// is not missing a turn started during “loading session…” (#1126).
+	replayGapEvents map[string][]replayGapEvent
 	// pendingUpgrade is set by /upgrade; the composition root runs self-update
 	// after tea.Quit (alt screen torn down) and re-execs the new binary.
 	pendingUpgrade bool
@@ -851,6 +866,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pendingResume = id
 		m.clearModalStack()
 		return m, tea.Quit
+
+	case replaySeedMsg:
+		cmd := m.applyReplaySeed(msg)
+		return m, cmd
 
 	case engineEventMsg:
 		rootID := m.rootForEvent(msg.ev)

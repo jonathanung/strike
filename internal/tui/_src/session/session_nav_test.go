@@ -552,6 +552,324 @@ func TestSeedFromReplayNoLiveSideEffects(t *testing.T) {
 	}
 }
 
+func TestSeedFromReplaySkipsStreamDeltasInLiveTimeline(t *testing.T) {
+	events := []protocol.Event{protocol.UserMessage{Text: "hi"}}
+	for i := 0; i < 250; i++ {
+		events = append(events, protocol.TextDelta{Text: "x"})
+	}
+	events = append(events, protocol.TurnCompleted{StopReason: "end_turn"})
+	var m Model
+	seedFromReplay(&m, events)
+	if len(m.cells) < 2 {
+		t.Fatalf("cells = %d, want user+assistant snapshot", len(m.cells))
+	}
+	if m.runTimeline == nil {
+		t.Fatal("expected timeline builder")
+	}
+	tr := m.runTimeline.Trace()
+	if len(tr.Entries) >= 250 {
+		t.Fatalf("timeline entries = %d; seed applied every TextDelta into the live model", len(tr.Entries))
+	}
+}
+
+func TestWelcomeSessionResumeLoadsTranscript(t *testing.T) {
+	fs := newFakeSessions()
+	log := mustSessionJSONL(t,
+		protocol.UserMessage{Text: "prior prompt from old session"},
+		protocol.TextDelta{Text: "prior reply"},
+		protocol.TurnCompleted{StopReason: "end_turn"},
+	)
+	fs.put(host.Session{ID: "past", Title: "old work"}, log)
+
+	fr := &fakeRoots{active: "fresh", live: []string{"fresh"}}
+	m, _ := newAppTestModelHome(nil, nil)
+	m.sessionID = "fresh"
+	m.services.Roots = fr
+	m.services.Sessions = fs
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 40})
+	if !m.showHomeLayout() {
+		t.Fatal("want home layout on blank welcome session")
+	}
+
+	next, cmd := m.Update(sessionResumeMsg{id: "past"})
+	m = next.(Model)
+	if m.sessionID != "past" {
+		t.Fatalf("sessionID = %q, want past", m.sessionID)
+	}
+	if m.PendingResume() != "" {
+		t.Fatalf("in-process open quit unexpectedly: PendingResume=%q", m.PendingResume())
+	}
+	if m.showHomeLayout() {
+		t.Fatal("blank home still showing after resume (should be loading or transcript)")
+	}
+	if len(m.cells) != 0 {
+		t.Fatalf("Update applied %d cells on the UI thread; want async snapshot", len(m.cells))
+	}
+	if cmd == nil {
+		t.Fatal("expected async JSONL seed cmd")
+	}
+	m = applyAppCmds(t, m, cmd)
+	if m.replayPending {
+		t.Fatal("replay still pending after seed cmd")
+	}
+	if len(m.cells) < 2 {
+		t.Fatalf("cells = %d, want resumed transcript (not a blank session)", len(m.cells))
+	}
+	if m.showHomeLayout() {
+		t.Fatal("home layout after seed — continued with a blank session")
+	}
+	plain := ansi.Strip(viewString(m))
+	if !strings.Contains(plain, "prior prompt from old session") {
+		t.Fatalf("view missing resumed transcript:\n%s", plain)
+	}
+}
+
+func TestLoadRootPaneRestoresRunTimeline(t *testing.T) {
+	fs := newFakeSessions()
+	log := mustSessionJSONL(t,
+		protocol.UserMessage{Text: "prior prompt from old session"},
+		protocol.TextDelta{Text: "prior reply"},
+		protocol.TurnCompleted{StopReason: "end_turn"},
+	)
+	fs.put(host.Session{ID: "past", Title: "old work"}, log)
+	fr := &fakeRoots{active: "fresh", live: []string{"fresh"}}
+	m, _ := newAppTestModelHome(nil, nil)
+	m.sessionID = "fresh"
+	m.services.Roots = fr
+	m.services.Sessions = fs
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 40})
+	next, cmd := m.Update(sessionResumeMsg{id: "past"})
+	m = next.(Model)
+	m = applyAppCmds(t, m, cmd)
+	histN := len(m.timelineTrace().Entries)
+	if histN == 0 {
+		t.Fatal("seeded timeline empty")
+	}
+	m.stashActiveRoot()
+	m.loadRootPane(&rootPane{sessionID: "other", toolByID: map[string]*toolCell{}})
+	past := m.roots["past"]
+	if past == nil {
+		t.Fatal("past pane missing")
+	}
+	m.loadRootPane(past)
+	m.observeTimeline(protocol.TurnStarted{
+		Correlation: protocol.Correlation{SessionID: "past", TurnID: "new"},
+	}, time.Now())
+	tr := m.timelineTrace()
+	if len(tr.Entries) <= 1 {
+		t.Fatalf("timeline entries = %d after new turn; want history plus new observe (not only the new turn)", len(tr.Entries))
+	}
+	if len(tr.Entries) < histN {
+		t.Fatalf("timeline entries = %d, want at least seeded %d", len(tr.Entries), histN)
+	}
+}
+
+func TestBackgroundRootEventsReachTimeline(t *testing.T) {
+	fs := newFakeSessions()
+	log := mustSessionJSONL(t,
+		protocol.UserMessage{Text: "prior prompt from old session"},
+		protocol.TextDelta{Text: "prior reply"},
+		protocol.TurnCompleted{StopReason: "end_turn"},
+	)
+	fs.put(host.Session{ID: "past", Title: "old work"}, log)
+	fr := &fakeRoots{active: "fresh", live: []string{"fresh"}}
+	m, _ := newAppTestModelHome(nil, nil)
+	m.sessionID = "fresh"
+	m.services.Roots = fr
+	m.services.Sessions = fs
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 40})
+	next, cmd := m.Update(sessionResumeMsg{id: "past"})
+	m = next.(Model)
+	m = applyAppCmds(t, m, cmd)
+	histN := len(m.timelineTrace().Entries)
+	if histN == 0 {
+		t.Fatal("seeded timeline empty")
+	}
+	m.stashActiveRoot()
+	m.loadRootPane(&rootPane{sessionID: "other", toolByID: map[string]*toolCell{}})
+	corr := protocol.Correlation{SessionID: "past", TurnID: "bg"}
+	_ = m.applyEventToRoot("past", protocol.TurnStarted{Correlation: corr})
+	_ = m.applyEventToRoot("past", protocol.TurnCompleted{Correlation: corr, StopReason: "end_turn"})
+	past := m.roots["past"]
+	if past == nil {
+		t.Fatal("past pane missing")
+	}
+	m.loadRootPane(past)
+	tr := m.timelineTrace()
+	if len(tr.Entries) <= histN {
+		t.Fatalf("background turn missing from timeline: hist=%d now=%d", histN, len(tr.Entries))
+	}
+}
+
+func TestReplaySeedPreservesInFlightTurn(t *testing.T) {
+	m, _ := newAppTestModelHome(nil, nil)
+	m.sessionID = "past"
+	m.replayPending = true
+	m.replayID = "past"
+	m.replayGenByID = map[string]int{"past": 1}
+	m.turnRunning = true
+	m.cells = []cell{&userCell{text: "typed during load"}}
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 40})
+	hist := &Model{
+		cells: []cell{
+			&userCell{text: "old prompt"},
+			&assistantCell{text: "old reply", complete: true},
+		},
+		toolByID: map[string]*toolCell{},
+	}
+	cmd := m.applyReplaySeed(replaySeedMsg{id: "past", gen: 1, tmp: hist})
+	_ = cmd
+	if !m.turnRunning {
+		t.Fatal("seed wiped in-flight turnRunning")
+	}
+	if len(m.cells) < 3 {
+		t.Fatalf("cells = %d, want history prefix + live suffix", len(m.cells))
+	}
+	if u, ok := m.cells[len(m.cells)-1].(*userCell); !ok || u.text != "typed during load" {
+		t.Fatalf("live suffix lost: %#v", m.cells[len(m.cells)-1])
+	}
+	if u, ok := m.cells[0].(*userCell); !ok || u.text != "old prompt" {
+		t.Fatalf("history prefix missing: %#v", m.cells[0])
+	}
+	p := m.roots["past"]
+	if p == nil {
+		t.Fatal("active pane not stashed after seed")
+	}
+	if len(p.cells) != len(m.cells) {
+		t.Fatalf("pane cells = %d, live cells = %d (seed concatenated onto stash)", len(p.cells), len(m.cells))
+	}
+}
+
+func TestReplaySeedKeepsInFlightTimelineEvents(t *testing.T) {
+	m, _ := newAppTestModelHome(nil, nil)
+	m.sessionID = "past"
+	m.replayPending = true
+	m.replayID = "past"
+	m.replayGenByID = map[string]int{"past": 1}
+	m.turnRunning = true
+	m.cells = []cell{&userCell{text: "typed during load"}}
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 40})
+	m.resetRunTimeline()
+
+	hist := &Model{sessionID: "past", toolByID: map[string]*toolCell{}}
+	seedFromReplay(hist, []protocol.Event{
+		protocol.UserMessage{Text: "old prompt"},
+		protocol.TurnCompleted{StopReason: "end_turn"},
+	})
+	histN := len(hist.timelineTrace().Entries)
+	if histN == 0 {
+		t.Fatal("historical timeline empty")
+	}
+
+	corr := protocol.Correlation{SessionID: "past", TurnID: "live"}
+	m.observeTimeline(protocol.TurnStarted{Correlation: corr}, time.Now())
+	if len(m.replayGapEvents["past"]) == 0 {
+		t.Fatal("expected gap buffer while replayPending")
+	}
+
+	_ = m.applyReplaySeed(replaySeedMsg{id: "past", gen: 1, tmp: hist})
+	tr := m.timelineTrace()
+	if len(tr.Entries) <= histN {
+		t.Fatalf("in-flight TurnStarted missing after seed: hist=%d now=%d", histN, len(tr.Entries))
+	}
+	if len(m.replayGapEvents["past"]) != 0 {
+		t.Fatal("gap buffer not flushed")
+	}
+}
+
+func TestReplaySeedDropsStaleGeneration(t *testing.T) {
+	m, _ := newAppTestModelHome(nil, nil)
+	m.sessionID = "past"
+	m.replayPending = true
+	m.replayID = "past"
+	m.replayGenByID = map[string]int{"past": 2}
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 40})
+	newer := &Model{
+		cells: []cell{
+			&userCell{text: "prompt"},
+			&assistantCell{text: "reply", complete: true},
+		},
+		toolByID: map[string]*toolCell{},
+	}
+	older := &Model{
+		cells: []cell{
+			&userCell{text: "prompt"},
+			&assistantCell{text: "reply", complete: true},
+		},
+		toolByID: map[string]*toolCell{},
+	}
+	_ = m.applyReplaySeed(replaySeedMsg{id: "past", gen: 2, tmp: newer})
+	if n := len(m.cells); n != 2 {
+		t.Fatalf("after gen=2: cells = %d, want 2", n)
+	}
+	_ = m.applyReplaySeed(replaySeedMsg{id: "past", gen: 1, tmp: older})
+	if n := len(m.cells); n != 2 {
+		t.Fatalf("stale gen=1 grew cells to %d", n)
+	}
+}
+
+func TestReplayPendingDoesNotStickAfterSpawn(t *testing.T) {
+	fs := newFakeSessions()
+	log := mustSessionJSONL(t, protocol.UserMessage{Text: "old"})
+	fs.put(host.Session{ID: "past", Title: "old"}, log)
+	fr := &fakeRoots{active: "fresh", live: []string{"fresh"}}
+	m, _ := newAppTestModelHome(nil, nil)
+	m.sessionID = "fresh"
+	m.services.Roots = fr
+	m.services.Sessions = fs
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 40})
+
+	next, cmd := m.Update(sessionResumeMsg{id: "past"})
+	m = next.(Model)
+	if !m.replayLoading() {
+		t.Fatal("want loading chrome on past session")
+	}
+	// Spawn a new root before the seed returns.
+	spawnCmd := m.spawnRoot()
+	_ = spawnCmd
+	if m.sessionID == "past" {
+		t.Fatal("spawn did not switch away from past")
+	}
+	if m.replayLoading() {
+		t.Fatal("new session stuck on loading session…")
+	}
+	if m.showHomeLayout() && m.replayPending && m.replayID == m.sessionID {
+		t.Fatal("home/loading chrome leaked onto spawned root")
+	}
+	// Historical seed still applies to the stashed pane.
+	m = applyAppCmds(t, m, cmd)
+	if p := m.roots["past"]; p == nil || len(p.cells) == 0 {
+		t.Fatal("stashed past pane missing transcript after late seed")
+	}
+}
+
+func TestSessionResumeOpenFailureFallsBackToQuit(t *testing.T) {
+	fr := &fakeRoots{active: "fresh", live: []string{"fresh"}, err: errFake("open failed")}
+	m, _ := newAppTestModelHome(nil, nil)
+	m.sessionID = "fresh"
+	m.services.Roots = fr
+	next, cmd := m.Update(sessionResumeMsg{id: "past"})
+	nm := next.(Model)
+	if nm.PendingResume() != "past" {
+		t.Fatalf("PendingResume = %q, want process-restart fallback", nm.PendingResume())
+	}
+	if cmd == nil {
+		t.Fatal("expected tea.Quit")
+	}
+}
+
+func applyAppCmds(t *testing.T, m Model, cmd tea.Cmd) Model {
+	t.Helper()
+	for _, msg := range runAllAppCmds(t, cmd) {
+		updated, next := m.Update(msg)
+		m = updated.(Model)
+		if next != nil {
+			m = applyAppCmds(t, m, next)
+		}
+	}
+	return m
+}
+
 func TestChildrenFromEventsMarksIncompleteCanceled(t *testing.T) {
 	events := []protocol.Event{
 		protocol.ChildStarted{Correlation: protocol.Correlation{SessionID: "c1"}, Agent: "a", Prompt: "p"},

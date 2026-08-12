@@ -8,6 +8,7 @@ import (
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
+	"github.com/jonathanung/strike-cli/pkg/timeline"
 )
 
 // rootPane holds frozen UI state for one parent session so concurrent roots can
@@ -20,6 +21,9 @@ type rootPane struct {
 	cells    []cell
 	toolByID map[string]*toolCell
 	children []childActivity
+	// runTimeline is the seeded/live builder for this root. Restored on
+	// loadRootPane so /timeline after a later turn is not only the new events.
+	runTimeline *timeline.Builder
 	// pathOverlaps retains root-session PathOverlap warnings while stashed (#922).
 	pathOverlaps []childPathOverlap
 	teamMessages []teamMessage
@@ -92,6 +96,7 @@ func (m *Model) stashActiveRoot() {
 		titleTopic:         m.titleTopic,
 		cells:              append([]cell(nil), m.cells...),
 		toolByID:           toolByID,
+		runTimeline:        m.runTimeline,
 		children:           children,
 		pathOverlaps:       pathOverlaps,
 		teamMessages:       teamMsgs,
@@ -143,16 +148,12 @@ func (m *Model) loadRootPane(p *rootPane) {
 	m.sessionID = p.sessionID
 	m.workDir = p.workDir
 	m.titleTopic = p.titleTopic
-	// Rebuild timeline for the activated root (live builder is per-active model).
-	m.resetRunTimeline()
-	if m.services.Sessions != nil && strings.TrimSpace(p.sessionID) != "" {
-		if data, err := m.services.Sessions.ReplayJSONL(p.sessionID); err == nil {
-			if events, err := timedEventsFromJSONL(data); err == nil {
-				for _, te := range events {
-					m.observeTimeline(te.Event, te.Time)
-				}
-			}
-		}
+	// Restore the stashed builder. Do not fold JSONL on the Update thread
+	// (#1126). An empty pane still gets a fresh builder.
+	if p.runTimeline != nil {
+		m.runTimeline = p.runTimeline
+	} else {
+		m.resetRunTimeline()
 	}
 	m.cells = append([]cell(nil), p.cells...)
 	m.toolByID = map[string]*toolCell{}
@@ -347,6 +348,7 @@ func (m *Model) applyEventToRoot(rootID string, ev protocol.Event) tea.Cmd {
 	if p == nil {
 		return nil
 	}
+	m.bufferReplayGap(rootID, ev, time.Now())
 	applyEventToPane(p, ev)
 	// Keep live activity snapshot for the agents tree.
 	cmd := m.broadcastAgentsState()
@@ -363,6 +365,9 @@ func (m *Model) applyEventToRoot(rootID string, ev protocol.Event) tea.Cmd {
 func applyEventToPane(p *rootPane, ev protocol.Event) {
 	if p == nil {
 		return
+	}
+	if p.runTimeline != nil {
+		p.runTimeline.Observe(ev, time.Now())
 	}
 	if p.toolByID == nil {
 		p.toolByID = map[string]*toolCell{}
@@ -619,16 +624,18 @@ func (m *Model) activateRoot(id string) tea.Cmd {
 	m.unhideAgent(id)
 	m.stashActiveRoot()
 	p := m.ensureRootPane(id)
-	// If pane is empty (just opened live), seed from durable log.
-	if p != nil && len(p.cells) == 0 && m.services.Sessions != nil {
-		if data, err := m.services.Sessions.ReplayJSONL(id); err == nil {
-			if events, err := decodeSessionJSONL(data); err == nil {
-				seedPaneFromReplay(p, events)
+	// If pane is empty (just opened live), seed from durable log off the
+	// Update thread so composer input stays responsive (#1126).
+	var seedCmd tea.Cmd
+	if p != nil {
+		if m.services.Sessions != nil {
+			if info, ok, err := m.services.Sessions.Get(id); err == nil && ok {
+				if t := strings.TrimSpace(info.Title); t != "" {
+					p.titleTopic = t
+				}
 			}
-		}
-		if info, ok, err := m.services.Sessions.Get(id); err == nil && ok {
-			if t := strings.TrimSpace(info.Title); t != "" {
-				p.titleTopic = t
+			if len(p.cells) == 0 {
+				seedCmd = m.beginReplaySeed(id)
 			}
 		}
 		if wd := m.services.Roots.WorkDir(id); wd != "" {
@@ -640,7 +647,7 @@ func (m *Model) activateRoot(id string) tea.Cmd {
 	m.reflow()
 	m.refreshViewport()
 	m.viewport.GotoBottom()
-	return tea.Batch(m.broadcastContextState(), m.broadcastAgentsState())
+	return tea.Batch(m.broadcastContextState(), m.broadcastAgentsState(), seedCmd)
 }
 
 // activateRootByIndex jumps to the Nth concurrently visible living root (0-indexed).
@@ -727,21 +734,25 @@ func (m *Model) openRootInProcess(id string) tea.Cmd {
 		}
 	}
 	if err := m.services.Roots.Open(id); err != nil {
-		// Fall back to composition-root resume loop.
-		return func() tea.Msg { return sessionResumeMsg{id: id} }
+		// Do not re-emit sessionResumeMsg — Update would loop forever while
+		// Roots is set. Fall back to process restart when idle.
+		if m.turnRunning {
+			m.setNotice("wait for the current turn to finish before switching sessions", true)
+			return nil
+		}
+		m.pendingResume = id
+		m.clearModalStack()
+		return tea.Quit
 	}
 	m.unhideAgent(id)
 	m.stashActiveRoot()
 	p := m.ensureRootPane(id)
-	if p != nil && m.services.Sessions != nil {
-		if data, err := m.services.Sessions.ReplayJSONL(id); err == nil {
-			if events, err := decodeSessionJSONL(data); err == nil {
-				seedPaneFromReplay(p, events)
-			}
-		}
-		if info, ok, err := m.services.Sessions.Get(id); err == nil && ok {
-			if t := strings.TrimSpace(info.Title); t != "" {
-				p.titleTopic = t
+	if p != nil {
+		if m.services.Sessions != nil {
+			if info, ok, err := m.services.Sessions.Get(id); err == nil && ok {
+				if t := strings.TrimSpace(info.Title); t != "" {
+					p.titleTopic = t
+				}
 			}
 		}
 		if wd := m.services.Roots.WorkDir(id); wd != "" {
@@ -753,46 +764,21 @@ func (m *Model) openRootInProcess(id string) tea.Cmd {
 	m.reflow()
 	m.refreshViewport()
 	m.viewport.GotoBottom()
-	return tea.Batch(m.broadcastContextState(), m.broadcastAgentsState())
+	seedCmd := m.beginReplaySeed(id)
+	return tea.Batch(m.broadcastContextState(), m.broadcastAgentsState(), seedCmd)
 }
 
 func seedPaneFromReplay(p *rootPane, events []protocol.Event) {
 	if p == nil || len(events) == 0 {
 		return
 	}
-	// Build a throwaway Model to reuse seedFromReplay, then copy fields.
 	tmp := &Model{
 		sessionID: p.sessionID,
 		toolByID:  map[string]*toolCell{},
 		autonomy:  protocol.AutonomySupervised,
 	}
 	seedFromReplay(tmp, events)
-	p.cells = tmp.cells
-	p.toolByID = tmp.toolByID
-	p.children = tmp.children
-	p.teamMessages = tmp.teamMessages
-	p.titleTopic = tmp.titleTopic
-	p.providerName = tmp.providerName
-	p.modelName = tmp.modelName
-	p.agentName = tmp.agentName
-	p.phaseName = tmp.phaseName
-	p.phaseWorkflow = tmp.phaseWorkflow
-	p.phaseGate = tmp.phaseGate
-	p.phaseSource = tmp.phaseSource
-	p.phaseFingerprint = tmp.phaseFingerprint
-	p.phaseStatus = tmp.phaseStatus
-	p.effort = tmp.effort
-	p.autonomy = tmp.autonomy
-	p.fastEnabled = tmp.fastEnabled
-	p.usageInput = tmp.usageInput
-	p.usageOutput = tmp.usageOutput
-	p.usageUsed = tmp.usageUsed
-	p.usageSource = tmp.usageSource
-	p.usageSession = tmp.usageSession
-	// seedFromReplay rebuilds undoStack from durable TurnCompleted events.
-	p.undoStack = append([]undoPreview(nil), tmp.undoStack...)
-	p.turnRunning = false
-	p.awaitingPermission = false
+	copyReplayStateToPane(p, tmp)
 }
 
 // interruptRoot sends Interrupt to a live root (empty = active).

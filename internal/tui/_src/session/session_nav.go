@@ -14,6 +14,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/tui/ui"
+	"github.com/jonathanung/strike-cli/pkg/timeline"
 )
 
 // Leader key (ctrl+x) then a chord navigates subagent transcripts, matching
@@ -550,6 +551,285 @@ func sessionHeaderSchemaVersion(raw []byte) (int, bool) {
 	return probe.SchemaVersion, true
 }
 
+// seedTimelineEvent reports whether a historical event should be folded into
+// the live timeline builder during resume. Stream deltas are skipped: Observe
+// ignores them, and applying every token stalls the UI on long sessions (#1126).
+func seedTimelineEvent(ev protocol.Event) bool {
+	switch ev.(type) {
+	case protocol.TextDelta, protocol.ReasoningDelta, protocol.ToolCallOutput:
+		return false
+	default:
+		return ev != nil
+	}
+}
+
+// replaySeedMsg is a prebuilt transcript snapshot decoded off the Update
+// thread. Applied onto the live model (or a background pane) in one copy.
+type replaySeedMsg struct {
+	id  string
+	gen int
+	tmp *Model
+	err error
+}
+
+// replayLoading reports whether the active session is waiting on an async JSONL seed.
+func (m Model) replayLoading() bool {
+	return m.replayPending && m.replayID == m.sessionID
+}
+
+type replayGapEvent struct {
+	ev protocol.Event
+	t  time.Time
+}
+
+func (m *Model) bufferReplayGap(id string, ev protocol.Event, t time.Time) {
+	if m == nil || !m.replayPending || ev == nil {
+		return
+	}
+	id = strings.TrimSpace(id)
+	if id == "" || id != m.replayID || !seedTimelineEvent(ev) {
+		return
+	}
+	if m.replayGapEvents == nil {
+		m.replayGapEvents = map[string][]replayGapEvent{}
+	}
+	if t.IsZero() {
+		t = time.Now()
+	}
+	m.replayGapEvents[id] = append(m.replayGapEvents[id], replayGapEvent{ev: ev, t: t})
+}
+
+func (m *Model) flushReplayGap(id string, b *timeline.Builder) {
+	if m == nil {
+		return
+	}
+	id = strings.TrimSpace(id)
+	gap := m.replayGapEvents[id]
+	delete(m.replayGapEvents, id)
+	if b == nil {
+		return
+	}
+	for _, ge := range gap {
+		if ge.ev == nil {
+			continue
+		}
+		b.Observe(ge.ev, ge.t)
+	}
+}
+
+// beginReplaySeed marks resume as in-flight and returns a cmd that decodes
+// JSONL + cellsFromEvents off the UI thread.
+func (m *Model) beginReplaySeed(id string) tea.Cmd {
+	id = strings.TrimSpace(id)
+	if id == "" || m.services.Sessions == nil {
+		if m.replayID == id || id == "" {
+			m.replayPending = false
+			m.replayID = ""
+		}
+		return nil
+	}
+	m.replayPending = true
+	m.replayID = id
+	if m.replayGenByID == nil {
+		m.replayGenByID = map[string]int{}
+	}
+	m.replayGenByID[id]++
+	delete(m.replayGapEvents, id)
+	gen := m.replayGenByID[id]
+	sessions := m.services.Sessions
+	return func() tea.Msg {
+		data, err := sessions.ReplayJSONL(id)
+		if err != nil {
+			return replaySeedMsg{id: id, gen: gen, err: err}
+		}
+		events, err := decodeSessionJSONL(data)
+		if err != nil {
+			return replaySeedMsg{id: id, gen: gen, err: err}
+		}
+		tmp := &Model{
+			sessionID: id,
+			toolByID:  map[string]*toolCell{},
+			autonomy:  protocol.AutonomySupervised,
+		}
+		seedFromReplay(tmp, events)
+		return replaySeedMsg{id: id, gen: gen, tmp: tmp}
+	}
+}
+
+// applyReplaySeed copies a snapshot onto the live model or a stashed pane.
+// Live progress (typed/submitted turns) is kept as a suffix so an in-flight
+// turn is not wiped when the historical snapshot arrives (#1126).
+func (m *Model) applyReplaySeed(msg replaySeedMsg) tea.Cmd {
+	// Drop a superseded seed for this id even after replayID was cleared by a
+	// newer apply. A seed for a different id still paints its stashed pane.
+	if begun := m.replayGenByID[msg.id]; begun != 0 && msg.gen != begun {
+		return nil
+	}
+	if m.replayID == msg.id {
+		m.replayPending = false
+		m.replayID = ""
+	}
+	if msg.err != nil {
+		delete(m.replayGapEvents, msg.id)
+		if msg.id == m.sessionID {
+			m.setNotice("session transcript: "+msg.err.Error(), true)
+		}
+		return nil
+	}
+	if msg.tmp == nil {
+		delete(m.replayGapEvents, msg.id)
+		return nil
+	}
+	if msg.id == m.sessionID {
+		applySeedToModel(m, msg.tmp)
+		m.flushReplayGap(msg.id, m.runTimeline)
+		m.stashActiveRoot()
+		m.reflow()
+		m.refreshViewport()
+		m.viewport.GotoBottom()
+		return tea.Batch(m.broadcastContextState(), m.broadcastAgentsState())
+	}
+	if m.roots != nil {
+		if p := m.roots[msg.id]; p != nil {
+			applySeedToPane(p, msg.tmp)
+			m.flushReplayGap(msg.id, p.runTimeline)
+			return nil
+		}
+	}
+	delete(m.replayGapEvents, msg.id)
+	return nil
+}
+
+func applySeedToModel(dst *Model, src *Model) {
+	if dst == nil || src == nil {
+		return
+	}
+	progressed := dst.turnRunning || dst.awaitingPermission || len(dst.cells) > 0
+	liveCells := append([]cell(nil), dst.cells...)
+	liveTools := dst.toolByID
+	liveTurn := dst.turnRunning
+	liveAwait := dst.awaitingPermission
+	liveChildren := append([]childActivity(nil), dst.children...)
+	copyReplayState(dst, src)
+	if !progressed {
+		return
+	}
+	dst.cells = append(append([]cell(nil), src.cells...), liveCells...)
+	if dst.toolByID == nil {
+		dst.toolByID = map[string]*toolCell{}
+	}
+	for k, v := range liveTools {
+		dst.toolByID[k] = v
+	}
+	dst.turnRunning = liveTurn
+	dst.awaitingPermission = liveAwait
+	if len(liveChildren) > 0 {
+		dst.children = liveChildren
+	}
+}
+
+func applySeedToPane(p *rootPane, src *Model) {
+	if p == nil || src == nil {
+		return
+	}
+	progressed := p.turnRunning || p.awaitingPermission || len(p.cells) > 0
+	liveCells := append([]cell(nil), p.cells...)
+	liveTools := p.toolByID
+	liveTurn := p.turnRunning
+	liveAwait := p.awaitingPermission
+	liveChildren := append([]childActivity(nil), p.children...)
+	copyReplayStateToPane(p, src)
+	if !progressed {
+		return
+	}
+	p.cells = append(append([]cell(nil), src.cells...), liveCells...)
+	if p.toolByID == nil {
+		p.toolByID = map[string]*toolCell{}
+	}
+	for k, v := range liveTools {
+		p.toolByID[k] = v
+	}
+	p.turnRunning = liveTurn
+	p.awaitingPermission = liveAwait
+	if len(liveChildren) > 0 {
+		p.children = liveChildren
+	}
+}
+
+func copyReplayState(dst *Model, src *Model) {
+	if dst == nil || src == nil {
+		return
+	}
+	dst.cells = src.cells
+	dst.toolByID = src.toolByID
+	if dst.toolByID == nil {
+		dst.toolByID = map[string]*toolCell{}
+	}
+	dst.children = src.children
+	dst.teamMessages = src.teamMessages
+	dst.titleTopic = src.titleTopic
+	dst.providerName = src.providerName
+	dst.modelName = src.modelName
+	dst.agentName = src.agentName
+	dst.phaseName = src.phaseName
+	dst.phaseWorkflow = src.phaseWorkflow
+	dst.phaseGate = src.phaseGate
+	dst.phaseSource = src.phaseSource
+	dst.phaseFingerprint = src.phaseFingerprint
+	dst.phaseStatus = src.phaseStatus
+	dst.effort = src.effort
+	dst.autonomy = src.autonomy
+	dst.fastEnabled = src.fastEnabled
+	dst.usageInput = src.usageInput
+	dst.usageOutput = src.usageOutput
+	dst.usageUsed = src.usageUsed
+	dst.usageSource = src.usageSource
+	dst.usageSession = src.usageSession
+	dst.undoStack = append([]undoPreview(nil), src.undoStack...)
+	dst.turnRunning = false
+	dst.awaitingPermission = false
+	if src.runTimeline != nil {
+		dst.runTimeline = src.runTimeline
+	}
+}
+
+func copyReplayStateToPane(p *rootPane, src *Model) {
+	if p == nil || src == nil {
+		return
+	}
+	p.cells = src.cells
+	p.toolByID = src.toolByID
+	if p.toolByID == nil {
+		p.toolByID = map[string]*toolCell{}
+	}
+	p.children = src.children
+	p.teamMessages = src.teamMessages
+	p.titleTopic = src.titleTopic
+	p.providerName = src.providerName
+	p.modelName = src.modelName
+	p.agentName = src.agentName
+	p.phaseName = src.phaseName
+	p.phaseWorkflow = src.phaseWorkflow
+	p.phaseGate = src.phaseGate
+	p.phaseSource = src.phaseSource
+	p.phaseFingerprint = src.phaseFingerprint
+	p.phaseStatus = src.phaseStatus
+	p.effort = src.effort
+	p.autonomy = src.autonomy
+	p.fastEnabled = src.fastEnabled
+	p.usageInput = src.usageInput
+	p.usageOutput = src.usageOutput
+	p.usageUsed = src.usageUsed
+	p.usageSource = src.usageSource
+	p.usageSession = src.usageSession
+	p.undoStack = append([]undoPreview(nil), src.undoStack...)
+	p.turnRunning = false
+	p.awaitingPermission = false
+	if src.runTimeline != nil {
+		p.runTimeline = src.runTimeline
+	}
+}
+
 // seedFromReplay rebuilds transcript cells and durable UI selection state from
 // a prior session log without live side effects: no modals, notices, working
 // state, or permission attention. Incomplete ChildStarted rows are marked
@@ -558,11 +838,16 @@ func seedFromReplay(m *Model, events []protocol.Event) {
 	if m == nil || len(events) == 0 {
 		return
 	}
-	// Rebuild structured timeline from the durable log (synthetic 1ms steps
-	// when envelope times are unavailable — live Observe uses wall clock).
+	// Rebuild structured timeline from durable events, skipping high-frequency
+	// stream deltas so resume does not apply every token into the live builder
+	// on the UI thread (#1126). Observe ignores those types anyway; skipping
+	// avoids per-event lock overhead on long JSONL logs.
 	m.resetRunTimeline()
 	base := time.Unix(0, 0).UTC()
 	for i, ev := range events {
+		if !seedTimelineEvent(ev) {
+			continue
+		}
 		m.observeTimeline(ev, base.Add(time.Duration(i)*time.Millisecond))
 	}
 	m.cells, m.toolByID = cellsFromEvents(events)

@@ -40,6 +40,10 @@ materially affect the shipped product.
 - **Windows support** — v1 is macOS, Linux, and Windows via WSL2 only. Native Windows is not supported ([#579](https://github.com/jonathanung/strike/issues/579)).
 - **Nested project instructions** — `AGENTS.md` / `CLAUDE.md` from the workspace root down to the working directory are merged (root first, deepest last) instead of first-match-wins walking up. Global `~/.strike/AGENTS.md` still layers first ([#578](https://github.com/jonathanung/strike/issues/578)).
 
+### Fixed
+
+- **Resume from welcome** — opening a previous session from the home/welcome screen loads that session's transcript instead of staying on a blank new session. JSONL replay and cell rebuild run off the UI thread so composer input stays responsive ([#1126](https://github.com/jonathanung/strike/issues/1126)).
+
 ### Removed
 
 - **`strike serve --expose` / `--allow-cidr`** — legacy flags error with an SSH migration hint. **Upgrade note:** replace LAN expose with SSH local forward; non-loopback `--addr` is rejected.
