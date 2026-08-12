@@ -344,6 +344,10 @@ type Model struct {
 	// replayGenByID is the last begun seed generation per session id. Stale
 	// replaySeedMsg values are dropped even after replayID is cleared.
 	replayGenByID map[string]int
+	// replayGapEvents holds protocol events that arrived for an id while its
+	// JSONL seed was in flight. Observed onto the seeded builder so /timeline
+	// is not missing a turn started during “loading session…” (#1126).
+	replayGapEvents map[string][]replayGapEvent
 	// pendingUpgrade is set by /upgrade; the composition root runs self-update
 	// after tea.Quit (alt screen torn down) and re-execs the new binary.
 	pendingUpgrade bool

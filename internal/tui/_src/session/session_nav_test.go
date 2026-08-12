@@ -740,6 +740,43 @@ func TestReplaySeedPreservesInFlightTurn(t *testing.T) {
 	}
 }
 
+func TestReplaySeedKeepsInFlightTimelineEvents(t *testing.T) {
+	m, _ := newAppTestModelHome(nil, nil)
+	m.sessionID = "past"
+	m.replayPending = true
+	m.replayID = "past"
+	m.replayGenByID = map[string]int{"past": 1}
+	m.turnRunning = true
+	m.cells = []cell{&userCell{text: "typed during load"}}
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 40})
+	m.resetRunTimeline()
+
+	hist := &Model{sessionID: "past", toolByID: map[string]*toolCell{}}
+	seedFromReplay(hist, []protocol.Event{
+		protocol.UserMessage{Text: "old prompt"},
+		protocol.TurnCompleted{StopReason: "end_turn"},
+	})
+	histN := len(hist.timelineTrace().Entries)
+	if histN == 0 {
+		t.Fatal("historical timeline empty")
+	}
+
+	corr := protocol.Correlation{SessionID: "past", TurnID: "live"}
+	m.observeTimeline(protocol.TurnStarted{Correlation: corr}, time.Now())
+	if len(m.replayGapEvents["past"]) == 0 {
+		t.Fatal("expected gap buffer while replayPending")
+	}
+
+	_ = m.applyReplaySeed(replaySeedMsg{id: "past", gen: 1, tmp: hist})
+	tr := m.timelineTrace()
+	if len(tr.Entries) <= histN {
+		t.Fatalf("in-flight TurnStarted missing after seed: hist=%d now=%d", histN, len(tr.Entries))
+	}
+	if len(m.replayGapEvents["past"]) != 0 {
+		t.Fatal("gap buffer not flushed")
+	}
+}
+
 func TestReplaySeedDropsStaleGeneration(t *testing.T) {
 	m, _ := newAppTestModelHome(nil, nil)
 	m.sessionID = "past"

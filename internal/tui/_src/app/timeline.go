@@ -51,6 +51,7 @@ func (m *Model) observeTimeline(ev protocol.Event, t time.Time) {
 	if m == nil || ev == nil {
 		return
 	}
+	m.bufferReplayGap(m.sessionID, ev, t)
 	if m.runTimeline == nil {
 		m.resetRunTimeline()
 	}

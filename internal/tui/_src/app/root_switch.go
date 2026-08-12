@@ -348,6 +348,7 @@ func (m *Model) applyEventToRoot(rootID string, ev protocol.Event) tea.Cmd {
 	if p == nil {
 		return nil
 	}
+	m.bufferReplayGap(rootID, ev, time.Now())
 	applyEventToPane(p, ev)
 	// Keep live activity snapshot for the agents tree.
 	cmd := m.broadcastAgentsState()

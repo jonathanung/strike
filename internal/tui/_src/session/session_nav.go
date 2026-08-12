@@ -14,6 +14,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/tui/ui"
+	"github.com/jonathanung/strike-cli/pkg/timeline"
 )
 
 // Leader key (ctrl+x) then a chord navigates subagent transcripts, matching
@@ -576,6 +577,46 @@ func (m Model) replayLoading() bool {
 	return m.replayPending && m.replayID == m.sessionID
 }
 
+type replayGapEvent struct {
+	ev protocol.Event
+	t  time.Time
+}
+
+func (m *Model) bufferReplayGap(id string, ev protocol.Event, t time.Time) {
+	if m == nil || !m.replayPending || ev == nil {
+		return
+	}
+	id = strings.TrimSpace(id)
+	if id == "" || id != m.replayID || !seedTimelineEvent(ev) {
+		return
+	}
+	if m.replayGapEvents == nil {
+		m.replayGapEvents = map[string][]replayGapEvent{}
+	}
+	if t.IsZero() {
+		t = time.Now()
+	}
+	m.replayGapEvents[id] = append(m.replayGapEvents[id], replayGapEvent{ev: ev, t: t})
+}
+
+func (m *Model) flushReplayGap(id string, b *timeline.Builder) {
+	if m == nil {
+		return
+	}
+	id = strings.TrimSpace(id)
+	gap := m.replayGapEvents[id]
+	delete(m.replayGapEvents, id)
+	if b == nil {
+		return
+	}
+	for _, ge := range gap {
+		if ge.ev == nil {
+			continue
+		}
+		b.Observe(ge.ev, ge.t)
+	}
+}
+
 // beginReplaySeed marks resume as in-flight and returns a cmd that decodes
 // JSONL + cellsFromEvents off the UI thread.
 func (m *Model) beginReplaySeed(id string) tea.Cmd {
@@ -593,6 +634,7 @@ func (m *Model) beginReplaySeed(id string) tea.Cmd {
 		m.replayGenByID = map[string]int{}
 	}
 	m.replayGenByID[id]++
+	delete(m.replayGapEvents, id)
 	gen := m.replayGenByID[id]
 	sessions := m.services.Sessions
 	return func() tea.Msg {
@@ -628,16 +670,19 @@ func (m *Model) applyReplaySeed(msg replaySeedMsg) tea.Cmd {
 		m.replayID = ""
 	}
 	if msg.err != nil {
+		delete(m.replayGapEvents, msg.id)
 		if msg.id == m.sessionID {
 			m.setNotice("session transcript: "+msg.err.Error(), true)
 		}
 		return nil
 	}
 	if msg.tmp == nil {
+		delete(m.replayGapEvents, msg.id)
 		return nil
 	}
 	if msg.id == m.sessionID {
 		applySeedToModel(m, msg.tmp)
+		m.flushReplayGap(msg.id, m.runTimeline)
 		m.stashActiveRoot()
 		m.reflow()
 		m.refreshViewport()
@@ -647,8 +692,11 @@ func (m *Model) applyReplaySeed(msg replaySeedMsg) tea.Cmd {
 	if m.roots != nil {
 		if p := m.roots[msg.id]; p != nil {
 			applySeedToPane(p, msg.tmp)
+			m.flushReplayGap(msg.id, p.runTimeline)
+			return nil
 		}
 	}
+	delete(m.replayGapEvents, msg.id)
 	return nil
 }
 
