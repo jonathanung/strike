@@ -36,6 +36,7 @@ materially affect the shipped product.
 
 ### Changed
 
+- **Windows support** — v1 is macOS, Linux, and Windows via WSL2 only. Native Windows is not supported ([#579](https://github.com/jonathanung/strike/issues/579)).
 - **Nested project instructions** — `AGENTS.md` / `CLAUDE.md` from the workspace root down to the working directory are merged (root first, deepest last) instead of first-match-wins walking up. Global `~/.strike/AGENTS.md` still layers first ([#578](https://github.com/jonathanung/strike/issues/578)).
 
 ### Removed
