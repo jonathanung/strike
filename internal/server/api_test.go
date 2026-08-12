@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/jonathanung/strike-cli/internal/host"
+	"github.com/jonathanung/strike-cli/internal/host/local"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 )
 
@@ -411,6 +412,52 @@ func TestModelsServiceAPI(t *testing.T) {
 	}
 	if strings.Contains(body, "anthropic") {
 		t.Errorf("unauthenticated provider leaked: %s", body)
+	}
+}
+
+func TestModelsCatalogErrorIs502(t *testing.T) {
+	cat := testCatalog{ids: map[string][]string{"openai": {"gpt-a"}}}
+	srv, err := New(Options{SessionDir: t.TempDir(), Services: &host.Services{Catalog: cat}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/v1/models?provider=xai", nil))
+	if res.Code != http.StatusBadGateway || !strings.Contains(res.Body.String(), "no models listed for xai") {
+		t.Fatalf("catalog miss = %d %s, want 502 empty-list error", res.Code, res.Body.String())
+	}
+}
+
+func TestModelsEchoOfflineReturns200(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	cacheDir := filepath.Join(home, ".strike", "cache")
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	catalog := `{"anthropic":{"id":"anthropic","name":"Anthropic","models":{"claude-sonnet-5":{"id":"claude-sonnet-5","name":"Sonnet"}}}}`
+	if err := os.WriteFile(filepath.Join(cacheDir, "models.json"), []byte(catalog), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	svc := local.New(nil, nil, nil, nil, nil, nil, nil, "")
+	srv, err := New(Options{SessionDir: t.TempDir(), Services: &svc})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	echo := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(echo, httptest.NewRequest(http.MethodGet, "/v1/models?provider=echo", nil))
+	if echo.Code != http.StatusOK {
+		t.Fatalf("echo models = %d %s, want 200", echo.Code, echo.Body.String())
+	}
+	if !strings.Contains(echo.Body.String(), `"id":"echo"`) || !strings.Contains(echo.Body.String(), `"provider":"echo"`) {
+		t.Fatalf("echo models body = %s, want synthetic echo model", echo.Body.String())
+	}
+
+	miss := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(miss, httptest.NewRequest(http.MethodGet, "/v1/models?provider=xai", nil))
+	if miss.Code != http.StatusBadGateway || !strings.Contains(miss.Body.String(), "no models listed for xai on models.dev") {
+		t.Fatalf("xai catalog miss = %d %s, want 502", miss.Code, miss.Body.String())
 	}
 }
 
