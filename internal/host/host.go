@@ -117,7 +117,8 @@ type ModelInfo struct {
 // ctx-aware).
 type Catalog interface {
 	// ModelIDs returns the provider's available model ids, or an error when
-	// the catalog is unreachable or lists no models for the provider.
+	// the catalog is unreachable or lists no models for an API provider.
+	// Builtin echo (offline) always yields at least the synthetic default id.
 	ModelIDs(ctx context.Context, provider string) ([]string, error)
 	// Models returns the provider's models with catalog metadata (context,
 	// cost, capabilities), sorted by id. Each ModelInfo.Provider is set.
