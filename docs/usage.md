@@ -161,7 +161,7 @@ strike launches without any provider configured. Pick one inside the TUI:
 | `/session <id>` | resume that root session by id (works across workspaces; list filter does not apply) |
 | `/rename [title]` | rename the current session (brief auto-titles; agents pane `r` too) |
 | `/fork` | copy the current session JSONL into a new id (idle only) |
-| `/undo` | undo last turn in place (idle only); bare opens picker with **path preview** (harness create/update/delete from the last turn), **skipped-file count**, and coverage warnings; `chat` keeps disk; `files` restores per-file checkpoints from that turn (never `git reset --hard`). Files over **2 MiB** (`DefaultCheckpointMaxBytes`) or unreadable originals are skipped and counted. **Bash** mutations are covered via a per-session shadow-git baseline reconciled at turn end (formatters, codegen, `sed -i`, `go generate`, …). If shadow-git is unavailable, the turn is marked *uncovered* and the notice warns that shell changes may remain. Checkpoint stack persists under `~/.strike/checkpoints/<session-id>/` so `--continue` can still restore files (retention: last 50 turns; removed with the session) |
+| `/undo` | undo last turn in place (idle only); bare opens picker with **path preview** (harness create/update/delete from the last turn), **skipped-file count**, and coverage warnings; `chat` keeps disk; `files` restores per-file checkpoints from that turn (never `git reset --hard`). Files over **2 MiB** (`DefaultCheckpointMaxBytes`) or unreadable originals are skipped and counted. **Bash** mutations are covered via a per-session shadow-git baseline reconciled at turn end (formatters, codegen, `sed -i`, `go generate`, …). If shadow-git is unavailable, the turn is marked *uncovered* and the notice warns that shell changes may remain. Checkpoint stack persists under `~/.strike/checkpoints/<session-id>/` so `--continue` can still restore files (retention: last 50 turns; removed with the session). Limits and coverage: [config.md](config.md#checkpoints-undo-file-restore) |
 | `/rewind` | fork a **new** session from a completed turn (idle only); original session stays listable; bare opens turn picker; `/rewind n` keeps turns 1..n. Workspace file revert is not part of rewind (use `/undo files` on the live session) |
 | `/export` | dump the visible transcript to markdown (user/assistant/tool summaries); redacts credentials via `pkg/redact` (see [secrets.md](secrets.md)); default path under `.strike/exports/` or tmp; `--open` launches `$EDITOR`. Human-readable only (#221) — machine-readable session packages and log durability live in `internal/session` (#803); checkpoint stack across `--continue` lives under `~/.strike/checkpoints/` |
 | `/timeline` | collapsed structured run timeline (turns/tools/provider attempts/children/**permission decisions**/verification with durations); `/timeline export [path]` writes versioned redacted JSON (or `.jsonl`). Complements session JSONL and agent roster/budget fields — not a second full transcript. Related library (no slash command yet): multi-agent **run snapshots** in `internal/replay` (`RunSnapshot`) capture delegated spawn identity + handoff/gates for offline echo replay/compare under `~/.strike/runs/` — compact complement to JSONL, not a full transcript duplicate (#782) |
@@ -327,7 +327,34 @@ build outputs, and similar noise. Add more basename skips (one per line) in
 skipped with a notice). `@folder/` attaches an **immediate child listing
 only** (not a recursive multi-file dump). Transcript/history keep the `@path`
 tokens. Emails (`user@host`) are not treated as mentions. Paths cannot escape
-the project root (symlink-safe).
+the project root (symlink-safe). File bodies in the model context are
+untrusted — [threat-model.md](threat-model.md#file-contents).
+
+### Composer: images
+
+The composer accepts **png / jpeg / webp / gif** attachments and sends them as
+`UserInput.images` (base64 payload, no `data:` prefix on the wire).
+
+**How to attach one**
+
+1. **Paste** into the focused composer: a data URI (`data:image/png;base64,…`),
+   raw image bytes, or a filesystem path / `file://` URI (drag-drop often
+   pastes a path). A `[image N]` chip appears in the input.
+2. **`ctrl+v`** on macOS (cgo build) reads an image from the **clipboard**
+   (distinct from terminal bracketed paste). Other platforms notice that
+   clipboard images are unavailable.
+3. **Protocol / SDK:** `UserInput.images` or `pkg/sdk` `Client.Prompt(text, images…)`.
+   `Steer` can carry images the same way. `strike exec` is text-only.
+
+Limits: **5 MiB** per image, **4** pending chips. Unsupported formats or
+oversize pastes show a notice and do not attach. The **echo** provider never
+accepts images; other models are optimistic until the catalog `Attachment`
+flag is known — if the selected model is known not to support images, send
+is refused with “selected model does not support image attachments.”
+
+Transcript and prompt history show `[image N]` labels, never raw base64.
+Queued prompts keep attachments when you edit the text. Image-only sends
+(empty text, one or more chips) are allowed.
 
 Submitting a prompt before selecting shows "No model selected" in the
 notice line above the composer (your prompt stays in the input). Talking to
@@ -482,7 +509,8 @@ without swapping those chords. `ctrl+k` opens the command palette (when
 kill-to-end does not delete); `f1` (or `/keys`) opens a filterable keybind
 cheatsheet. Enter sends;
 `ctrl+j`, Shift+Enter, or Alt+Enter inserts a newline (Shift+Enter CSI
-rewrites to Alt+Enter).
+rewrites to Alt+Enter). Paste images as described under
+[Composer: images](#composer-images).
 `pgup`/`pgdn` (and `ctrl+up`/`ctrl+down`)
 scroll the transcript; `ctrl+t` jumps to the latest output. The transcript
 sticks to the bottom while you are already anchored, and keeps your scroll

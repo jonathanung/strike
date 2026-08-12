@@ -172,7 +172,7 @@ Each model request composes the system prompt in layers (like opencode):
 4. **Plan / phase overlay** — phase context when a workflow phase is active; else plan overlay while the plan agent is active
 5. **Lean code** — agent-scoped efficiency guidance (see below); off via config `leanCode`
 6. **Environment** — workdir, workspace root, git, platform, date, model id (**never dropped** by defaults mode)
-7. **Instructions** — `AGENTS.md` / `CLAUDE.md` from `~/.strike` and the project (walked up to the git root). Create or refresh the project file with `/init` (confirms before replacing an existing `AGENTS.md`; light local scan only — no secrets).
+7. **Instructions** — global `~/.strike/AGENTS.md` (else `~/.claude/CLAUDE.md`), then every non-empty `AGENTS.md` or `CLAUDE.md` from the project root down to the working directory (root first, deepest last so nested files specialize; `AGENTS.md` preferred over `CLAUDE.md` per directory). Discovery never walks above the project root. `/init` still writes only the workDir `AGENTS.md` (confirms before replacing; light local scan only — no secrets).
 8. **Project memory** — entries tagged `instruction`, `preference`, or `project-convention` (capped; untrusted). Untagged notes and issues stay on-demand via tools.
 9. **Decision ledger** — active decisions/assumptions/constraints (capped; untrusted)
 

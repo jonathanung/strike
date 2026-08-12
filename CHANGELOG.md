@@ -22,6 +22,7 @@ materially affect the shipped product.
 
 ### Added
 
+- **Docs (accuracy)** — prompt caching (Anthropic three-breakpoint strategy, thinking-block skip, agent-switch miss; OpenAI/xAI/ChatGPT `prompt_cache_key`; Google unwired), image attach how-to, provider stream retry vs overflow compaction, checkpoint coverage/limits, permission/sandbox honesty, and [threat-model.md](docs/threat-model.md) for injection via files, MCP, and webfetch ([#546](https://github.com/jonathanung/strike/issues/546)).
 - **`strike serve --read-only`** — reject mutating protocol ops while keeping attach/SSE ([#576](https://github.com/jonathanung/strike/issues/576)).
 - **Cohesive responsive multi-agent web cockpit** (epic [#1069](https://github.com/jonathanung/strike/issues/1069)) — `strike serve` is a progressive Chat/Code/Team/Project/Ops workspace for desktop, tablet, and phone:
   - Progressive mode shell, surface registry, and deep links (`?mode=` / `?surface=` / `?entity=`) with root isolation
@@ -37,6 +38,7 @@ materially affect the shipped product.
 ### Changed
 
 - **Windows support** — v1 is macOS, Linux, and Windows via WSL2 only. Native Windows is not supported ([#579](https://github.com/jonathanung/strike/issues/579)).
+- **Nested project instructions** — `AGENTS.md` / `CLAUDE.md` from the workspace root down to the working directory are merged (root first, deepest last) instead of first-match-wins walking up. Global `~/.strike/AGENTS.md` still layers first ([#578](https://github.com/jonathanung/strike/issues/578)).
 
 ### Fixed
 

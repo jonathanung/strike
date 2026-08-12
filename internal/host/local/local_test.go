@@ -713,6 +713,22 @@ func TestCatalogFromCache(t *testing.T) {
 	if err == nil || err.Error() != "no models listed for xai on models.dev" {
 		t.Errorf("empty-list error = %v, want \"no models listed for xai on models.dev\"", err)
 	}
+
+	// echo is never on models.dev; listing it must not fail (serve cockpit /model).
+	echoIDs, err := svc.Catalog.ModelIDs(context.Background(), "echo")
+	if err != nil {
+		t.Fatalf("echo ModelIDs: %v", err)
+	}
+	if want := []string{"echo"}; !reflect.DeepEqual(echoIDs, want) {
+		t.Errorf("echo ModelIDs = %v, want %v", echoIDs, want)
+	}
+	echoInfos, err := svc.Catalog.Models(context.Background(), "echo")
+	if err != nil {
+		t.Fatalf("echo Models: %v", err)
+	}
+	if len(echoInfos) != 1 || echoInfos[0].ID != "echo" || echoInfos[0].Provider != "echo" {
+		t.Errorf("echo Models = %#v, want synthetic echo/echo", echoInfos)
+	}
 }
 
 func TestCatalogGoogleAndGeminiAliasUseGoogleModelsDev(t *testing.T) {
