@@ -34,6 +34,10 @@ materially affect the shipped product.
   - Real-browser smokes (`make web-e2e`) and operator conformance docs ([docs/web.md](docs/web.md), [docs/web-cockpit-contract.md](docs/web-cockpit-contract.md))
   - **Not claimed:** native apps, offline execution, push notifications, multi-user collaboration, or cross-device controller arbitration (see #1056 / #1060)
 
+### Changed
+
+- **Windows support** — v1 is macOS, Linux, and Windows via WSL2 only. Native Windows is not supported ([#579](https://github.com/jonathanung/strike/issues/579)).
+
 ### Removed
 
 - **`strike serve --expose` / `--allow-cidr`** — legacy flags error with an SSH migration hint. **Upgrade note:** replace LAN expose with SSH local forward; non-loopback `--addr` is rejected.

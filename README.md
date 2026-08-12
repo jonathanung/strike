@@ -10,6 +10,9 @@ Architecture is informed by deep-dives into
 [codex](https://github.com/openai/codex). Full package map and dependency
 rules: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
+**Supported platforms:** macOS, Linux, and Windows via WSL2. Native Windows
+is not supported in v1.
+
 ## Install
 
 ```sh

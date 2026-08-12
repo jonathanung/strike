@@ -1,5 +1,14 @@
 # Install & build
 
+**Supported platforms:** macOS, Linux, and Windows via WSL2. Native Windows
+is not supported in v1.
+
+The install script accepts `linux` and `darwin` only. On Windows, install and
+run strike inside WSL2 (Ubuntu or similar): `uname` reports `Linux`, so the
+one-liner, `~/.strike/bin` PATH, and self-update work the same as on Linux.
+Do not run the installer or binary from native Windows (cmd, PowerShell, or
+Git Bash).
+
 ## One-liner (recommended)
 
 ```sh
@@ -69,7 +78,8 @@ may desktop-notify per the `notify` dial). `auto` is opt-in and only replaces a
 writable non-Nix binary; Nix installs always get a lock/input hint instead.
 See [config.md](config.md#autoupdate-autoupdate).
 
-Windows self-update is unsupported in v1; re-download from Releases.
+Self-update is supported on macOS, Linux, and Windows via WSL2. Native
+Windows is not supported in v1.
 
 ## Nix
 
