@@ -5,7 +5,7 @@ import {
   stopWorkflow, validateWorkflow,
   type WorkflowDocument, type WorkflowDraftReview, type WorkflowPermission,
   type WorkflowPhaseDocument, type WorkflowSummary,
-} from "./workflows";
+} from "./workflowsApi";
 
 const gates = ["agent", "user", "check"] as const;
 const actions = ["allow", "ask", "deny"] as const;

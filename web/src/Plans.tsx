@@ -4,7 +4,7 @@ import {
   planStatus, planTitle, planVersion, reopenPlan, sectionBody, sectionID, sectionTitle,
   setPlanStatus, updatePlanSection, updatePlanTitle,
   type Plan, type PlanMeta, type PlanSection,
-} from "./plans";
+} from "./plansApi";
 
 export function PlansPanel({
   available, live, rootID,

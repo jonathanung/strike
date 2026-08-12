@@ -15,8 +15,8 @@ import {
   type PluginInfo,
   type PluginTrustPreview,
   type PluginUpdateReview,
-} from "./plugins";
-import { listPanes, mountPane, unmountPane, type PaneInfo, type PaneSnapshot } from "./panes";
+} from "./pluginsApi";
+import { listPanes, mountPane, unmountPane, type PaneInfo, type PaneSnapshot } from "./panesApi";
 import { PaneView } from "./PaneView";
 
 function trustClass(state?: string): string {
@@ -473,7 +473,7 @@ export function PluginsPanel({
             </section>
           ) : (
             <div className="plugin-pane-body">
-              <PaneView node={(paneSnap.view as import("./panes").PaneViewNode) || null} feeds={paneSnap.feeds} />
+              <PaneView node={(paneSnap.view as import("./panesApi").PaneViewNode) || null} feeds={paneSnap.feeds} />
             </div>
           )}
         </section>

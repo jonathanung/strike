@@ -1,6 +1,6 @@
 import { cleanup, render, screen, fireEvent } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { emptyTeam } from "./team";
+import { emptyTeam } from "./teamModel";
 import { orderedMembers, teamAttentionItems, TeamWorkspace } from "./Team";
 
 afterEach(() => cleanup());

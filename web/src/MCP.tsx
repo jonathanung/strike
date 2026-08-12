@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { disableMCP, listMCP, retryMCP, type MCPServerStatus } from "./mcp";
+import { disableMCP, listMCP, retryMCP, type MCPServerStatus } from "./mcpApi";
 import { CapabilityUnavailable, LoadingState, StatusBadge, statusKindFrom } from "./ui";
 
 function mcpStatusKind(state: string) {
