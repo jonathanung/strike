@@ -1,7 +1,7 @@
 import { cleanup, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ArtifactsPanel, LedgerPanel, TeamReviewPanel, verificationLabel } from "./ArtifactsReview";
-import { emptyTeam } from "./team";
+import { emptyTeam } from "./teamModel";
 
 afterEach(() => {
   cleanup();

@@ -7,7 +7,7 @@ import {
   parentPath,
   parseFileEntity,
   renderMarkdownSafe,
-} from "./codeExplorer";
+} from "./codeExplorerPaths";
 
 describe("codeExplorer helpers", () => {
   it("joins and parents paths", () => {

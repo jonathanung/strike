@@ -8,7 +8,7 @@ import {
   unmountPane,
   type PaneInfo,
   type PaneSnapshot,
-} from "./panes";
+} from "./panesApi";
 
 export function PanesPanel({ available, focusId }: { available: boolean; focusId?: string }) {
   const [items, setItems] = useState<PaneInfo[]>([]);

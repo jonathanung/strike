@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GoalsPanel } from "./Goals";
-import { canAbort, canPause, canResume, canRun } from "./goals";
+import { canAbort, canPause, canResume, canRun } from "./goalsApi";
 
 const response = (body: unknown, status = 200) =>
   Promise.resolve(new Response(status === 204 ? null : JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } }));

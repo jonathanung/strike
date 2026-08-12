@@ -3,7 +3,7 @@ import type {
   Status, TokenCount, TranscriptItem, WorkspaceComposer, WorkspaceSlice, WorkspaceState,
 } from "./types";
 import { isRootLineage, parseUndoPreview, type UndoPreview } from "./undoPreview";
-import { applyTeamSnapshot, emptyTeam, reduceTeamEvent, type TeamObservation } from "./team";
+import { applyTeamSnapshot, emptyTeam, reduceTeamEvent, type TeamObservation } from "./teamModel";
 
 export const initialState = (): WorkspaceState => ({
   items: [], seen: new Set(), status: {}, children: {}, team: emptyTeam(), changedFiles: [], undoStack: [],

@@ -805,7 +805,7 @@ export default function App() {
       return;
     }
     let cancelled = false;
-    void import("./panes").then(({ listPanes }) => listPanes()).then((res) => {
+    void import("./panesApi").then(({ listPanes }) => listPanes()).then((res) => {
       if (cancelled) return;
       clearDynamicSurfaces();
       for (const pane of res.panes || []) {
