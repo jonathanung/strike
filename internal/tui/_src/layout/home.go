@@ -24,7 +24,7 @@ const homePromptMinWidth = 28
 // testForceMultiPane lets unit tests keep the multi-pane surface without
 // seeding a fake user message.
 func (m Model) showHomeLayout() bool {
-	if m.testForceMultiPane || m.homePanesOpen || m.replayPending {
+	if m.testForceMultiPane || m.homePanesOpen || m.replayLoading() {
 		return false
 	}
 	return len(m.displayCells()) == 0 && !m.viewingChild()

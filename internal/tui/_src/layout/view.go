@@ -295,7 +295,7 @@ func (m Model) transcriptView(compact bool, width, height int) string {
 		return ""
 	}
 	if len(m.displayCells()) == 0 {
-		if m.replayPending {
+		if m.replayLoading() {
 			body := m.th.Resolve().S().Muted.Render("loading session…")
 			if compact {
 				return body

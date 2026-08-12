@@ -571,15 +571,24 @@ type replaySeedMsg struct {
 	err error
 }
 
+// replayLoading reports whether the active session is waiting on an async JSONL seed.
+func (m Model) replayLoading() bool {
+	return m.replayPending && m.replayID == m.sessionID
+}
+
 // beginReplaySeed marks resume as in-flight and returns a cmd that decodes
 // JSONL + cellsFromEvents off the UI thread.
 func (m *Model) beginReplaySeed(id string) tea.Cmd {
 	id = strings.TrimSpace(id)
 	if id == "" || m.services.Sessions == nil {
-		m.replayPending = false
+		if m.replayID == id || id == "" {
+			m.replayPending = false
+			m.replayID = ""
+		}
 		return nil
 	}
 	m.replayPending = true
+	m.replayID = id
 	m.replayGen++
 	gen := m.replayGen
 	sessions := m.services.Sessions
@@ -603,12 +612,17 @@ func (m *Model) beginReplaySeed(id string) tea.Cmd {
 }
 
 // applyReplaySeed copies a snapshot onto the live model or a stashed pane.
+// Live progress (typed/submitted turns) is kept as a suffix so an in-flight
+// turn is not wiped when the historical snapshot arrives (#1126).
 func (m *Model) applyReplaySeed(msg replaySeedMsg) tea.Cmd {
-	if msg.gen != m.replayGen {
+	// Drop only a superseded seed for the same in-flight id. A seed for a
+	// previous session must still paint its stashed pane after a spawn/switch.
+	if msg.id == m.replayID && msg.gen != m.replayGen {
 		return nil
 	}
-	if msg.id == m.sessionID {
+	if m.replayID == msg.id {
 		m.replayPending = false
+		m.replayID = ""
 	}
 	if msg.err != nil {
 		if msg.id == m.sessionID {
@@ -620,9 +634,9 @@ func (m *Model) applyReplaySeed(msg replaySeedMsg) tea.Cmd {
 		return nil
 	}
 	if msg.id == m.sessionID {
-		copyReplayState(m, msg.tmp)
+		applySeedToModel(m, msg.tmp)
 		if p := m.ensureRootPane(msg.id); p != nil {
-			copyReplayStateToPane(p, msg.tmp)
+			applySeedToPane(p, msg.tmp)
 		}
 		m.reflow()
 		m.refreshViewport()
@@ -631,10 +645,66 @@ func (m *Model) applyReplaySeed(msg replaySeedMsg) tea.Cmd {
 	}
 	if m.roots != nil {
 		if p := m.roots[msg.id]; p != nil {
-			copyReplayStateToPane(p, msg.tmp)
+			applySeedToPane(p, msg.tmp)
 		}
 	}
 	return nil
+}
+
+func applySeedToModel(dst *Model, src *Model) {
+	if dst == nil || src == nil {
+		return
+	}
+	progressed := dst.turnRunning || dst.awaitingPermission || len(dst.cells) > 0
+	liveCells := append([]cell(nil), dst.cells...)
+	liveTools := dst.toolByID
+	liveTurn := dst.turnRunning
+	liveAwait := dst.awaitingPermission
+	liveChildren := append([]childActivity(nil), dst.children...)
+	copyReplayState(dst, src)
+	if !progressed {
+		return
+	}
+	dst.cells = append(append([]cell(nil), src.cells...), liveCells...)
+	if dst.toolByID == nil {
+		dst.toolByID = map[string]*toolCell{}
+	}
+	for k, v := range liveTools {
+		dst.toolByID[k] = v
+	}
+	dst.turnRunning = liveTurn
+	dst.awaitingPermission = liveAwait
+	if len(liveChildren) > 0 {
+		dst.children = liveChildren
+	}
+}
+
+func applySeedToPane(p *rootPane, src *Model) {
+	if p == nil || src == nil {
+		return
+	}
+	progressed := p.turnRunning || p.awaitingPermission || len(p.cells) > 0
+	liveCells := append([]cell(nil), p.cells...)
+	liveTools := p.toolByID
+	liveTurn := p.turnRunning
+	liveAwait := p.awaitingPermission
+	liveChildren := append([]childActivity(nil), p.children...)
+	copyReplayStateToPane(p, src)
+	if !progressed {
+		return
+	}
+	p.cells = append(append([]cell(nil), src.cells...), liveCells...)
+	if p.toolByID == nil {
+		p.toolByID = map[string]*toolCell{}
+	}
+	for k, v := range liveTools {
+		p.toolByID[k] = v
+	}
+	p.turnRunning = liveTurn
+	p.awaitingPermission = liveAwait
+	if len(liveChildren) > 0 {
+		p.children = liveChildren
+	}
 }
 
 func copyReplayState(dst *Model, src *Model) {

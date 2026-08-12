@@ -624,6 +624,73 @@ func TestWelcomeSessionResumeLoadsTranscript(t *testing.T) {
 	}
 }
 
+func TestReplaySeedPreservesInFlightTurn(t *testing.T) {
+	m, _ := newAppTestModelHome(nil, nil)
+	m.sessionID = "past"
+	m.replayPending = true
+	m.replayID = "past"
+	m.replayGen = 1
+	m.turnRunning = true
+	m.cells = []cell{&userCell{text: "typed during load"}}
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 40})
+	hist := &Model{
+		cells: []cell{
+			&userCell{text: "old prompt"},
+			&assistantCell{text: "old reply", complete: true},
+		},
+		toolByID: map[string]*toolCell{},
+	}
+	cmd := m.applyReplaySeed(replaySeedMsg{id: "past", gen: 1, tmp: hist})
+	_ = cmd
+	if !m.turnRunning {
+		t.Fatal("seed wiped in-flight turnRunning")
+	}
+	if len(m.cells) < 3 {
+		t.Fatalf("cells = %d, want history prefix + live suffix", len(m.cells))
+	}
+	if u, ok := m.cells[len(m.cells)-1].(*userCell); !ok || u.text != "typed during load" {
+		t.Fatalf("live suffix lost: %#v", m.cells[len(m.cells)-1])
+	}
+	if u, ok := m.cells[0].(*userCell); !ok || u.text != "old prompt" {
+		t.Fatalf("history prefix missing: %#v", m.cells[0])
+	}
+}
+
+func TestReplayPendingDoesNotStickAfterSpawn(t *testing.T) {
+	fs := newFakeSessions()
+	log := mustSessionJSONL(t, protocol.UserMessage{Text: "old"})
+	fs.put(host.Session{ID: "past", Title: "old"}, log)
+	fr := &fakeRoots{active: "fresh", live: []string{"fresh"}}
+	m, _ := newAppTestModelHome(nil, nil)
+	m.sessionID = "fresh"
+	m.services.Roots = fr
+	m.services.Sessions = fs
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 40})
+
+	next, cmd := m.Update(sessionResumeMsg{id: "past"})
+	m = next.(Model)
+	if !m.replayLoading() {
+		t.Fatal("want loading chrome on past session")
+	}
+	// Spawn a new root before the seed returns.
+	spawnCmd := m.spawnRoot()
+	_ = spawnCmd
+	if m.sessionID == "past" {
+		t.Fatal("spawn did not switch away from past")
+	}
+	if m.replayLoading() {
+		t.Fatal("new session stuck on loading session…")
+	}
+	if m.showHomeLayout() && m.replayPending && m.replayID == m.sessionID {
+		t.Fatal("home/loading chrome leaked onto spawned root")
+	}
+	// Historical seed still applies to the stashed pane.
+	m = applyAppCmds(t, m, cmd)
+	if p := m.roots["past"]; p == nil || len(p.cells) == 0 {
+		t.Fatal("stashed past pane missing transcript after late seed")
+	}
+}
+
 func TestSessionResumeOpenFailureFallsBackToQuit(t *testing.T) {
 	fr := &fakeRoots{active: "fresh", live: []string{"fresh"}, err: errFake("open failed")}
 	m, _ := newAppTestModelHome(nil, nil)

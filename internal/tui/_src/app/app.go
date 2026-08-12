@@ -337,7 +337,12 @@ type Model struct {
 	// off the Update thread (#1126). Suppresses the blank home/welcome so a
 	// resume is not mistaken for a new session.
 	replayPending bool
-	// replayGen invalidates stale replaySeedMsg snapshots after another open.
+	// replayID is the session id whose JSONL seed is in flight. Loading chrome
+	// only shows when this matches sessionID so a spawn/switch mid-load does
+	// not stick on “loading session…”.
+	replayID string
+	// replayGen invalidates stale replaySeedMsg snapshots after another open
+	// of the same id.
 	replayGen int
 	// pendingUpgrade is set by /upgrade; the composition root runs self-update
 	// after tea.Quit (alt screen torn down) and re-execs the new binary.
