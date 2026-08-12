@@ -341,9 +341,9 @@ type Model struct {
 	// only shows when this matches sessionID so a spawn/switch mid-load does
 	// not stick on “loading session…”.
 	replayID string
-	// replayGen invalidates stale replaySeedMsg snapshots after another open
-	// of the same id.
-	replayGen int
+	// replayGenByID is the last begun seed generation per session id. Stale
+	// replaySeedMsg values are dropped even after replayID is cleared.
+	replayGenByID map[string]int
 	// pendingUpgrade is set by /upgrade; the composition root runs self-update
 	// after tea.Quit (alt screen torn down) and re-execs the new binary.
 	pendingUpgrade bool

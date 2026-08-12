@@ -629,7 +629,7 @@ func TestReplaySeedPreservesInFlightTurn(t *testing.T) {
 	m.sessionID = "past"
 	m.replayPending = true
 	m.replayID = "past"
-	m.replayGen = 1
+	m.replayGenByID = map[string]int{"past": 1}
 	m.turnRunning = true
 	m.cells = []cell{&userCell{text: "typed during load"}}
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 40})
@@ -653,6 +653,44 @@ func TestReplaySeedPreservesInFlightTurn(t *testing.T) {
 	}
 	if u, ok := m.cells[0].(*userCell); !ok || u.text != "old prompt" {
 		t.Fatalf("history prefix missing: %#v", m.cells[0])
+	}
+	p := m.roots["past"]
+	if p == nil {
+		t.Fatal("active pane not stashed after seed")
+	}
+	if len(p.cells) != len(m.cells) {
+		t.Fatalf("pane cells = %d, live cells = %d (seed concatenated onto stash)", len(p.cells), len(m.cells))
+	}
+}
+
+func TestReplaySeedDropsStaleGeneration(t *testing.T) {
+	m, _ := newAppTestModelHome(nil, nil)
+	m.sessionID = "past"
+	m.replayPending = true
+	m.replayID = "past"
+	m.replayGenByID = map[string]int{"past": 2}
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 40})
+	newer := &Model{
+		cells: []cell{
+			&userCell{text: "prompt"},
+			&assistantCell{text: "reply", complete: true},
+		},
+		toolByID: map[string]*toolCell{},
+	}
+	older := &Model{
+		cells: []cell{
+			&userCell{text: "prompt"},
+			&assistantCell{text: "reply", complete: true},
+		},
+		toolByID: map[string]*toolCell{},
+	}
+	_ = m.applyReplaySeed(replaySeedMsg{id: "past", gen: 2, tmp: newer})
+	if n := len(m.cells); n != 2 {
+		t.Fatalf("after gen=2: cells = %d, want 2", n)
+	}
+	_ = m.applyReplaySeed(replaySeedMsg{id: "past", gen: 1, tmp: older})
+	if n := len(m.cells); n != 2 {
+		t.Fatalf("stale gen=1 grew cells to %d", n)
 	}
 }
 

@@ -589,8 +589,11 @@ func (m *Model) beginReplaySeed(id string) tea.Cmd {
 	}
 	m.replayPending = true
 	m.replayID = id
-	m.replayGen++
-	gen := m.replayGen
+	if m.replayGenByID == nil {
+		m.replayGenByID = map[string]int{}
+	}
+	m.replayGenByID[id]++
+	gen := m.replayGenByID[id]
 	sessions := m.services.Sessions
 	return func() tea.Msg {
 		data, err := sessions.ReplayJSONL(id)
@@ -615,9 +618,9 @@ func (m *Model) beginReplaySeed(id string) tea.Cmd {
 // Live progress (typed/submitted turns) is kept as a suffix so an in-flight
 // turn is not wiped when the historical snapshot arrives (#1126).
 func (m *Model) applyReplaySeed(msg replaySeedMsg) tea.Cmd {
-	// Drop only a superseded seed for the same in-flight id. A seed for a
-	// previous session must still paint its stashed pane after a spawn/switch.
-	if msg.id == m.replayID && msg.gen != m.replayGen {
+	// Drop a superseded seed for this id even after replayID was cleared by a
+	// newer apply. A seed for a different id still paints its stashed pane.
+	if begun := m.replayGenByID[msg.id]; begun != 0 && msg.gen != begun {
 		return nil
 	}
 	if m.replayID == msg.id {
@@ -635,9 +638,7 @@ func (m *Model) applyReplaySeed(msg replaySeedMsg) tea.Cmd {
 	}
 	if msg.id == m.sessionID {
 		applySeedToModel(m, msg.tmp)
-		if p := m.ensureRootPane(msg.id); p != nil {
-			applySeedToPane(p, msg.tmp)
-		}
+		m.stashActiveRoot()
 		m.reflow()
 		m.refreshViewport()
 		m.viewport.GotoBottom()
