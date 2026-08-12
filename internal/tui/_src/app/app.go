@@ -333,6 +333,12 @@ type Model struct {
 	// pendingResume is set when /session picks another root session; the
 	// composition root reads PendingResume after tea.Quit and reopens it.
 	pendingResume string
+	// replayPending is true while an in-process session open is decoding JSONL
+	// off the Update thread (#1126). Suppresses the blank home/welcome so a
+	// resume is not mistaken for a new session.
+	replayPending bool
+	// replayGen invalidates stale replaySeedMsg snapshots after another open.
+	replayGen int
 	// pendingUpgrade is set by /upgrade; the composition root runs self-update
 	// after tea.Quit (alt screen torn down) and re-execs the new binary.
 	pendingUpgrade bool
@@ -851,6 +857,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pendingResume = id
 		m.clearModalStack()
 		return m, tea.Quit
+
+	case replaySeedMsg:
+		cmd := m.applyReplaySeed(msg)
+		return m, cmd
 
 	case engineEventMsg:
 		rootID := m.rootForEvent(msg.ev)

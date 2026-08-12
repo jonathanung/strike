@@ -295,6 +295,20 @@ func (m Model) transcriptView(compact bool, width, height int) string {
 		return ""
 	}
 	if len(m.displayCells()) == 0 {
+		if m.replayPending {
+			body := m.th.Resolve().S().Muted.Render("loading session…")
+			if compact {
+				return body
+			}
+			return ui.Panel(m.th, ui.PanelOpts{
+				Title:   m.sessionPanelTitle(),
+				Footer:  m.transcriptFooter(),
+				Width:   width,
+				Height:  height,
+				Focused: m.focus == focusLeft && m.modal == nil,
+				Dim:     m.focus == focusRight || m.modal != nil,
+			}, body)
+		}
 		if m.viewingChild() {
 			// Empty subagent log still shows a panel (not the root welcome card).
 			// Distinguish live children so a brief empty poll is not alarming.

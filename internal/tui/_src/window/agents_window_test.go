@@ -400,7 +400,25 @@ func (f *fakeRoots) Spawn() (string, error) {
 	f.active = id
 	return id, nil
 }
-func (f *fakeRoots) Open(id string) error { return f.Activate(id) }
+func (f *fakeRoots) Open(id string) error {
+	if f.err != nil {
+		return f.err
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return errFake("session id is empty")
+	}
+	for _, live := range f.live {
+		if live == id {
+			f.active = id
+			return nil
+		}
+	}
+	// Match production hub.Open: bring a durable id live without process restart.
+	f.live = append(f.live, id)
+	f.active = id
+	return nil
+}
 func (f *fakeRoots) Interrupt(id string) error {
 	if f.err != nil {
 		return f.err
