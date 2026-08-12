@@ -365,6 +365,9 @@ func applyEventToPane(p *rootPane, ev protocol.Event) {
 	if p == nil {
 		return
 	}
+	if p.runTimeline != nil {
+		p.runTimeline.Observe(ev, time.Now())
+	}
 	if p.toolByID == nil {
 		p.toolByID = map[string]*toolCell{}
 	}
