@@ -4,8 +4,8 @@
  * and a 50-agent roster with task/attention updates.
  */
 import type { Envelope } from "../types";
-import type { DelegationTask, TeamMember, TeamObservation } from "../team";
-import { emptyTeam } from "../team";
+import type { DelegationTask, TeamMember, TeamObservation } from "../teamModel";
+import { emptyTeam } from "../teamModel";
 import { PERF_FIXTURE } from "./thresholds";
 
 export type PerfFixture = {

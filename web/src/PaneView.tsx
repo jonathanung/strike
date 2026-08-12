@@ -1,4 +1,4 @@
-import { resolveFrom, type PaneViewNode } from "./panes";
+import { resolveFrom, type PaneViewNode } from "./panesApi";
 
 function roleClass(style?: string): string {
   const s = (style || "body").toLowerCase();

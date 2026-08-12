@@ -19,7 +19,7 @@ import {
   renderMarkdownSafe,
   type DirEntryDTO,
   type FileContentDTO,
-} from "./codeExplorer";
+} from "./codeExplorerPaths";
 
 export type ChangedFile = { path: string; added: number; deleted: number; diff: string };
 

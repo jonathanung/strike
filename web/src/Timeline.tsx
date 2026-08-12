@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { downloadTimeline, fetchTimeline, type TimelineEntry, type TimelineTrace } from "./timeline";
+import { downloadTimeline, fetchTimeline, type TimelineEntry, type TimelineTrace } from "./timelineApi";
 
 function formatDuration(ms?: number | null): string {
   if (ms == null || Number.isNaN(ms)) return "";
