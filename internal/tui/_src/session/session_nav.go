@@ -777,6 +777,9 @@ func copyReplayStateToPane(p *rootPane, src *Model) {
 	p.undoStack = append([]undoPreview(nil), src.undoStack...)
 	p.turnRunning = false
 	p.awaitingPermission = false
+	if src.runTimeline != nil {
+		p.runTimeline = src.runTimeline
+	}
 }
 
 // seedFromReplay rebuilds transcript cells and durable UI selection state from

@@ -624,6 +624,46 @@ func TestWelcomeSessionResumeLoadsTranscript(t *testing.T) {
 	}
 }
 
+func TestLoadRootPaneRestoresRunTimeline(t *testing.T) {
+	fs := newFakeSessions()
+	log := mustSessionJSONL(t,
+		protocol.UserMessage{Text: "prior prompt from old session"},
+		protocol.TextDelta{Text: "prior reply"},
+		protocol.TurnCompleted{StopReason: "end_turn"},
+	)
+	fs.put(host.Session{ID: "past", Title: "old work"}, log)
+	fr := &fakeRoots{active: "fresh", live: []string{"fresh"}}
+	m, _ := newAppTestModelHome(nil, nil)
+	m.sessionID = "fresh"
+	m.services.Roots = fr
+	m.services.Sessions = fs
+	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 40})
+	next, cmd := m.Update(sessionResumeMsg{id: "past"})
+	m = next.(Model)
+	m = applyAppCmds(t, m, cmd)
+	histN := len(m.timelineTrace().Entries)
+	if histN == 0 {
+		t.Fatal("seeded timeline empty")
+	}
+	m.stashActiveRoot()
+	m.loadRootPane(&rootPane{sessionID: "other", toolByID: map[string]*toolCell{}})
+	past := m.roots["past"]
+	if past == nil {
+		t.Fatal("past pane missing")
+	}
+	m.loadRootPane(past)
+	m.observeTimeline(protocol.TurnStarted{
+		Correlation: protocol.Correlation{SessionID: "past", TurnID: "new"},
+	}, time.Now())
+	tr := m.timelineTrace()
+	if len(tr.Entries) <= 1 {
+		t.Fatalf("timeline entries = %d after new turn; want history plus new observe (not only the new turn)", len(tr.Entries))
+	}
+	if len(tr.Entries) < histN {
+		t.Fatalf("timeline entries = %d, want at least seeded %d", len(tr.Entries), histN)
+	}
+}
+
 func TestReplaySeedPreservesInFlightTurn(t *testing.T) {
 	m, _ := newAppTestModelHome(nil, nil)
 	m.sessionID = "past"

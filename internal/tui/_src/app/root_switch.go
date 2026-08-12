@@ -8,6 +8,7 @@ import (
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
+	"github.com/jonathanung/strike-cli/pkg/timeline"
 )
 
 // rootPane holds frozen UI state for one parent session so concurrent roots can
@@ -20,6 +21,9 @@ type rootPane struct {
 	cells    []cell
 	toolByID map[string]*toolCell
 	children []childActivity
+	// runTimeline is the seeded/live builder for this root. Restored on
+	// loadRootPane so /timeline after a later turn is not only the new events.
+	runTimeline *timeline.Builder
 	// pathOverlaps retains root-session PathOverlap warnings while stashed (#922).
 	pathOverlaps []childPathOverlap
 	teamMessages []teamMessage
@@ -92,6 +96,7 @@ func (m *Model) stashActiveRoot() {
 		titleTopic:         m.titleTopic,
 		cells:              append([]cell(nil), m.cells...),
 		toolByID:           toolByID,
+		runTimeline:        m.runTimeline,
 		children:           children,
 		pathOverlaps:       pathOverlaps,
 		teamMessages:       teamMsgs,
@@ -143,9 +148,13 @@ func (m *Model) loadRootPane(p *rootPane) {
 	m.sessionID = p.sessionID
 	m.workDir = p.workDir
 	m.titleTopic = p.titleTopic
-	// Live timeline is per-active model. Do not fold the full JSONL into the
-	// builder here (#1126); /timeline falls back to durable JSONL when empty.
-	m.resetRunTimeline()
+	// Restore the stashed builder. Do not fold JSONL on the Update thread
+	// (#1126). An empty pane still gets a fresh builder.
+	if p.runTimeline != nil {
+		m.runTimeline = p.runTimeline
+	} else {
+		m.resetRunTimeline()
+	}
 	m.cells = append([]cell(nil), p.cells...)
 	m.toolByID = map[string]*toolCell{}
 	for k, v := range p.toolByID {
