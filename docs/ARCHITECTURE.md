@@ -532,7 +532,14 @@ stack — do not fork a second file-state system:
 
 `FileState` answers “did *this* agent re-read after an external change?”;
 ownership answers “is another active worker claiming this path?”; checkpoints
-answer “what bytes do we restore on undo?”.
+answer “what bytes do we restore on undo?”
+
+**Checkpoint limits:** restore is per-file only (never `git reset --hard`).
+Files over 2 MiB, unreadable originals, symlinks, directories, and specials
+are skipped. The durable stack keeps the last 50 turns under
+`~/.strike/checkpoints/<session-id>/`. Bash coverage needs shadow-git (`git`
+available); otherwise `TurnCompleted.Uncovered` stays `"bash"`. Operator
+write-up: [config.md](config.md#checkpoints-undo-file-restore).
 
 ## Engine source map (selected)
 
@@ -584,3 +591,10 @@ Review visual changes with this checklist:
 - Every `ui` visual-modifier argument traces to a resolved theme value.
 - Unknown or interprocedural modifier origins are reviewed manually.
 - New colors, glyphs, borders, spacing, and emphasis live in `theme`.
+
+## Related docs
+
+- [config.md](config.md) — permissions, sandbox, caching, retry, checkpoints
+- [isolation.md](isolation.md) — sandbox × permission matrix
+- [threat-model.md](threat-model.md) — prompt injection via files, MCP, webfetch
+- [usage.md](usage.md) — slash commands, images, `/undo`

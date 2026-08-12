@@ -8,7 +8,7 @@ session worktrees.
 
 | Layer | What it isolates | Config / dial | Backend | Failure signal |
 |---|---|---|---|---|
-| **Permission ruleset** | *When* a tool may run (allow / ask / deny) | `permissionMode`, rules, presets | `internal/permission` + `internal/actionfacts` | `permission_denied` on tool result + timeline |
+| **Permission ruleset** | *When* a tool may run (allow / ask / deny). Does **not** inspect tool output or block prompt injection | `permissionMode`, rules, presets | `internal/permission` + `internal/actionfacts` | `permission_denied` on tool result + timeline |
 | **OS process sandbox** | *What* bash can touch (FS + optional net) | `sandbox`: `off` \| `read-only` \| `workspace-write` | Linux `bwrap`, macOS `sandbox-exec` | `sandbox_denied` + human reason when applied; degrade warning if backend missing |
 | **Session worktree** | Tool CWD / git branch per root session | `session.worktree`: `off` \| `auto` \| `always` | `git worktree` under `.strike/worktrees/` | Soft-fail to launch cwd when not a git repo |
 | **Scheduler pools** | Concurrent bash/model/build/test inside one process | `scheduler.limits` / presets | `internal/scheduler` | Wait / `scheduler.canceled`; not a security boundary |
@@ -49,7 +49,9 @@ public telemetry without redaction; OS egress filtering (see #892).
 
 `yolo` does not disable the OS sandbox. `sandbox: off` does not skip asks.
 `yolo` + `sandbox: off` requires `--i-know`. See [config.md](config.md) and
-[usage.md](usage.md#os-sandbox-dial).
+[usage.md](usage.md#os-sandbox-dial). Permission rules do not protect against
+prompt injection in file, MCP, or web-fetch **content** —
+[threat-model.md](threat-model.md).
 
 ## OS sandbox (in-place, #537)
 
@@ -220,5 +222,6 @@ external audit DB.
 - [config.md](config.md) — sandbox dial, scheduler, worktrees, network.allow
 - [usage.md](usage.md) — `/sandbox`, `/permission`, worktree UX
 - [ARCHITECTURE.md](ARCHITECTURE.md) — cancel/deadline/backpressure, package map
+- [threat-model.md](threat-model.md) — prompt injection via files, MCP, webfetch
 - [harnesses.md](harnesses.md) — external harnesses are not OS-sandboxed today
 - [protocol.md](protocol.md) — `permission.decided` chain fields (wire 1.13+)
