@@ -110,6 +110,7 @@ ssh -L 8787:127.0.0.1:8787 user@strike-host
 | `GET` | `/v1/sandbox` | **yes** | Active OS sandbox dial, backend, network.allow summary, explain profile |
 | `PATCH` | `/v1/sandbox` | **yes** | Persist sandbox default (`mode`, optional `iKnow`); new sessions only |
 | `GET` | `/v1/agents` | **yes** | Selectable agent names |
+| `GET` | `/v1/models` | mode | `{ "models": [...] }` (`?provider=` optional). Echo (offline default) is **200** with a synthetic `echo` model, not 502. Catalog fetch / empty models.dev lists for API providers are **502**. |
 | `GET` | `/v1/sessions` | **yes** | Durable session list (roots only) + `liveId` |
 | `GET`/`POST` | `/v1/diag` | **yes** | Redacted prompt/config diagnostic bundle (JSON download; live only; `?root=` when multi-root). Bootstrap capability `diag`. **503** when unsupported (attach-only / no live). |
 | `GET` | `/v1/sessions` | **yes** | Session list + `liveId` |
@@ -920,6 +921,7 @@ Fixed chrome uses `safe-area-inset-*`. Phone composer uses a sticky row and 44px
 | Method | Path | Notes |
 |---|---|---|
 | `GET` | `/v1/providers` | Provider rows with authed state + methods (`apiKey`/`device`/`oauth`); no secrets |
+| `GET` | `/v1/models` | Catalog models (`?provider=`). Echo returns **200** `{ "models": [{ "id": "echo", "provider": "echo", … }] }`; genuine catalog failures stay **502** |
 | `POST` | `/v1/auth/key` | Set API key (live only; attach-only 403) |
 | `DELETE` | `/v1/auth/{provider}` | Logout |
 | `POST` | `/v1/auth/device` | Start device login → code + verification URL |

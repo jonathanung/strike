@@ -447,7 +447,8 @@ structured `precondition_failed` error with setup steps — it does not scrape
 the open web as a silent fallback. Project layers replace the whole
 `webSearch` object when any field is set. Permission default is **ask** (same
 family as `webfetch`). Queries and snippets pass through the usual tool-args /
-tool-output redaction and session audit paths.
+tool-output redaction and session audit paths. Fetched and search text is
+untrusted model context — [threat-model.md](threat-model.md#web-fetch-and-search).
 
 **Write-time content guards (`contentGuard`):** scan proposed file content on
 `write` / `edit` / `apply_patch` / `notebook_edit` **before** disk commit.
@@ -484,15 +485,25 @@ Mid-session `/mode yolo` is also rejected while sandbox is off without that
 startup override. This is the only supported way to run with neither OS
 isolation nor permission prompts.
 
-**Not a security boundary alone:** permission rules and modes (including
-`yolo` / `--auto` / `--dangerously-skip-permissions`) only control whether the
-agent is *asked* before a tool runs. Prefer keeping `sandbox` at
-`workspace-write` (or `read-only`) so OS isolation still applies. The bash
-tool also applies a separate best-effort static path guard on a small set of
-destructive command forms; that guard is incomplete and must not be treated as
-isolation. Linux glob denials expand existing paths at compile time (new files
-matching a deny glob are covered on the next compile / seatbelt regex on
-macOS).
+**What permission rules protect — and what they do not:**
+
+| They **do** | They **do not** |
+|---|---|
+| Decide *when* a named tool may run: last-match-wins **allow / ask / deny** on tool name + glob pattern (or bash/tool **action facts**) | Inspect tool **output** for prompt injection, malware, or “ignore previous instructions” |
+| Skip **asks** in `yolo` / `--auto` / `--dangerously-skip-permissions` (explicit **deny** still wins) | Constrain bash syscalls — that is the **sandbox** dial |
+| Compile hard `write`/`edit` denies into the bash OS profile | Filter `read` / `@file` / MCP / `webfetch` **content** before it reaches the model |
+| Raise `permission_denied` (and timeline/`permission.decided` for deny/ask/reply) | Make `yolo` + `sandbox: off` safe — that pair requires `--i-know` because neither prompts nor OS isolation remain |
+
+Prefer keeping `sandbox` at `workspace-write` (or `read-only`) so OS isolation
+still applies when asks are skipped. The bash tool also applies a separate
+best-effort static path guard on a small set of destructive command forms;
+that guard is incomplete and must not be treated as isolation. Linux glob
+denials expand existing paths at compile time (new files matching a deny glob
+are covered on the next compile / seatbelt regex on macOS).
+
+Prompt injection via file contents, MCP servers, and web fetch results:
+[threat-model.md](threat-model.md). Isolation matrix:
+[isolation.md](isolation.md).
 
 **Permission mode dial:** `permissionMode` sets the default tool-permission
 posture for **new** sessions: `default` | `plan` | `soft-approve` |
@@ -603,7 +614,9 @@ idempotency** (see `internal/tool/retry.go`):
 
 Mutative tools (`edit` / `write` / `apply_patch` / `bash` / …) never
 auto-retry on generic or transient failure — that prevents double-apply.
-Provider stream retries remain separate (`MaxStreamAttempts` in the engine).
+Provider **stream** retries are a separate policy (`MaxStreamAttempts` in the
+engine; default **3**, including the first attempt). See
+[Provider stream retry](#provider-stream-retry) below.
 
 | Key | Meaning | Default |
 |---|---|---|
@@ -615,6 +628,44 @@ Provider stream retries remain separate (`MaxStreamAttempts` in the engine).
 When the loop detector trips the engine emits `tool.loop_detected`, settles the
 tool as blocked, and ends the turn (`stopReason: loop_detected`). Auto-retries
 emit `tool.retrying` (timeline) before each backoff sleep.
+
+### Provider stream retry
+
+Transient **model HTTP / transport** failures retry with a fresh attempt
+identity **before any tools from that stream run**, so a retry cannot
+double-apply tool side effects (`internal/provider/retry.go`,
+`internal/engine/turn.go` `streamModel`). Default `MaxStreamAttempts` is **3**.
+Set the engine option to `1` to disable (not a config JSON key today).
+
+**Retried** (when `IsRetryable`):
+
+| Class | Details |
+|---|---|
+| HTTP status | **408**, **429**, and **≥500** (`base.StatusError.Retryable`) |
+| Incomplete stream | provider channel closed without `EventDone` / `EventError` |
+| Transport | `net.Error` timeouts, `io.EOF` / `io.ErrUnexpectedEOF` |
+| Conservative substrings | rate-limit / overloaded / timeout / connection reset / 502–504 wording when adapters still return plain errors |
+
+`Retry-After` on the error is honored up to **60s**; otherwise backoff is
+200ms × 2^(attempt−2) capped at 2s with full jitter. The engine emits
+`provider.retrying` and a `provider_retry` hook before sleeping.
+
+**Not retried:**
+
+| Class | What happens instead |
+|---|---|
+| `context.Canceled` / interrupt | turn ends; no further Stream |
+| Permanent **4xx** other than 408/429 (auth, validation, 404, …) | fail the stream |
+| **Context-window overflow** | **not** an `IsRetryable` retry — see below |
+
+**Overflow vs compaction:** `IsContextOverflow` matches conservative
+context-length wording (`context_length_exceeded`, `prompt too long`, …).
+That path is **not** a stream retry. The engine runs **at most one**
+history compaction (`reason: overflow`) and a **single model-only** Stream
+afterward — no tool replay. If compaction cannot shrink history, or the
+retry still overflows, the turn fails. Threshold/manual `/compact` is
+separate (occupancy dials below); overflow recovery still compact-and-retry
+even when threshold compaction is disabled (`compactionThreshold >= 1`).
 
 
 ## Desktop notifications (`notify`)
@@ -943,6 +994,40 @@ Sidecar retention uses the same count/age/size axes as session retention:
 
 Build the sidecar policy with `session.TraceRetentionFromConfig` from
 `traceRetentionMax*`. Not automatic on launch.
+
+### Checkpoints (`/undo` file restore)
+
+Per-turn snapshots power `/undo files` (chat undo without disk is `/undo chat`).
+Implementation: `internal/tool/checkpoint.go` + shadow-git
+(`internal/tool/shadowgit.go`). Architecture table:
+[ARCHITECTURE.md](ARCHITECTURE.md#filesystem-transaction-safety-tools).
+UX: [usage.md](usage.md) `/undo`.
+
+**Covered**
+
+- First-touch originals for mutating harness tools (`edit` / `write` /
+  `apply_patch` / `notebook_edit`, and other snapshot callers).
+- **Bash** mutations when shadow-git can capture a worktree baseline at first
+  uncovered bash and reconcile at `CommitTurn` (formatters, `sed -i`,
+  `go generate`, …). Success clears the pending `"bash"` uncovered reason.
+- Durable stack under `~/.strike/checkpoints/<session-id>/` so `--continue`
+  can still restore (trimmed to the last **50** turns; removed with session
+  destroy/retention).
+
+**Limits (not a full VCS undo)**
+
+| Limit | Behavior |
+|---|---|
+| Per-file only | Restore writes original bytes or deletes a created path. **Never** `git reset --hard`. |
+| 2 MiB per file | `DefaultCheckpointMaxBytes`; larger files are skipped and counted. |
+| Non-regular paths | Symlinks, directories, and specials are skipped (not snapshotted). Directory deletes are not fully covered. |
+| Unreadable originals | Skipped; `/undo` shows a skipped-file count. |
+| Shadow-git unavailable | `git` missing or init failure: bash stays **uncovered**; the UI warns that shell changes may remain. |
+| Stack depth | Last **50** committed turns (`DefaultCheckpointMaxTurns`); older frames drop. |
+| `/rewind` | Forks a **new** session; does not revert workspace files (use `/undo files` on the live session). |
+
+Checkpoints answer “what bytes do we restore on undo?” They are not a
+security boundary and do not replace the OS sandbox.
 
 Lead and children can query the map with `agent_ownership` (`list`), and claim
 path prefixes with `lease` / `release` (exclusive or shared). Finished children
@@ -1293,7 +1378,9 @@ OS-sandboxed); brokered tools keep normal permission/sandbox policy.
 Connect external [Model Context Protocol](https://modelcontextprotocol.io)
 servers so their tools appear in the model registry as `mcp_<server>_<tool>`.
 Supported transports: **stdio** (local subprocess) and **streamable HTTP**
-(remote endpoint; JSON or SSE responses).
+(remote endpoint; JSON or SSE responses). MCP tool results are untrusted
+model-facing text — see [threat-model.md](threat-model.md#mcp-servers).
+Admission at bind time: [admission.md](admission.md).
 
 Prefer **`mcp.jsonc`** (or `mcp.json`) for server definitions. The legacy
 `mcp` object in config still works. Layers merge last-wins by file:
@@ -1873,6 +1960,53 @@ provider errors regardless of threshold.
 
 On summarize failure the engine falls back to trim and emits a notice. The
 summary path never re-runs tools.
+
+## Prompt caching
+
+Strike sets **request-side** cache controls so stable prefixes can hit
+provider prompt caches. There is no user config key; the engine always stamps
+what the adapter supports. Investigation notes:
+[investigations/491-cross-provider-prompt-cache.md](investigations/491-cross-provider-prompt-cache.md).
+
+### Anthropic — three breakpoints
+
+`internal/provider/anthropic` `applyPromptCache` places
+`cache_control: { "type": "ephemeral" }` on up to **3** of Anthropic’s 4
+allowed breakpoints (OpenCode / Claude Code pattern):
+
+1. **Last system text block** — agent/system prompt (stable across turns).
+2. **Last tool definition** — tool schema prefix (stable while the registry is).
+3. **Last eligible message content block** — conversation prefix through the
+   prior tail; walks backward each request so growing history stays cacheable.
+
+Eligible message blocks: `text`, `tool_use`, `tool_result`, `image`.
+**`thinking` / `redacted_thinking` are skipped** — the API rejects
+`cache_control` on them.
+
+**Agent-switch invalidation:** switching agent rewrites system and/or tools,
+so the cached prefix misses. That is intentional (correctness over thrash),
+not a bug. The same miss happens when `toolsearch` / `deferTools` promotes
+schemas or compaction/prune rewrites earlier history.
+
+### OpenAI-compatible, xAI, ChatGPT
+
+The engine sets `provider.Request.CacheKey` to the **session id**
+(`internal/engine/turn.go`). Adapters emit `prompt_cache_key` on
+chat-completions and Responses bodies (`openaicompat`, `chatgpt`). Empty key
+omits the field. ChatGPT never sends `prompt_cache_retention` (backend 400s).
+
+OpenAI automatic caching is prefix-based (eligible models, typically long
+prompts). A new session id means no cross-session sticky routing.
+
+### Google
+
+The Gemini adapter does **not** set per-request cache breakpoints. Google’s
+explicit context-cache API (`cachedContents`) is a different product and is
+not wired.
+
+Usage events expose `cacheRead` / `cacheCreation` when the vendor reports
+them. Compaction and prune that rewrite history shorten or change the shared
+prefix until it is rewritten.
 
 ## Reasoning effort
 

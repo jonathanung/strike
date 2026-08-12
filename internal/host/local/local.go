@@ -330,6 +330,12 @@ func (c catalogAdapter) Models(ctx context.Context, provider string) ([]host.Mod
 		}
 		return tagProvider(provider, modelDefsToInfo(defs, host.ModelSourceConfig)), nil
 	}
+	// echo is the builtin offline provider and is not listed on models.dev.
+	// Returning a synthetic default (or config overlay) keeps /model and
+	// GET /v1/models?provider=echo from treating an empty catalog as failure.
+	if provider == "echo" {
+		return echoOfflineModels(overlay), nil
+	}
 	catalog, err := models.Load(ctx)
 	if err != nil {
 		return nil, err
@@ -339,6 +345,17 @@ func (c catalogAdapter) Models(ctx context.Context, provider string) ([]host.Mod
 		return nil, fmt.Errorf("no models listed for %s on models.dev", provider)
 	}
 	return tagProvider(provider, mergeCatalogAndOverlay(infos, overlay)), nil
+}
+
+func echoOfflineModels(overlay []config.ModelDef) []host.ModelInfo {
+	if len(overlay) > 0 {
+		return tagProvider("echo", mergeCatalogAndOverlay(nil, overlay))
+	}
+	id := config.DefaultModel("echo")
+	return tagProvider("echo", []host.ModelInfo{{
+		ID:   id,
+		Name: id,
+	}})
 }
 
 func (c catalogAdapter) ModelsForProviders(ctx context.Context, providers []string) ([]host.ModelInfo, error) {
