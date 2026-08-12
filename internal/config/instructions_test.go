@@ -7,74 +7,226 @@ import (
 	"testing"
 )
 
-func TestLoadInstructionsProjectWalkUp(t *testing.T) {
-	root := t.TempDir()
-	nested := filepath.Join(root, "a", "b")
-	if err := os.MkdirAll(nested, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	agents := filepath.Join(root, "AGENTS.md")
-	if err := os.WriteFile(agents, []byte("project rules"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	// Nested CLAUDE.md should win when starting from nested (first match walking up).
-	// Start at nested with only root AGENTS.md → finds root.
-	got := LoadInstructions(nested, root)
-	if len(got) != 1 || !strings.Contains(got[0], "project rules") || !strings.Contains(got[0], agents) {
-		t.Fatalf("LoadInstructions = %#v", got)
+func TestLoadInstructions(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	type files map[string]string // relative path → body
+	tests := []struct {
+		name       string
+		files      files
+		workRel    string // relative to project root; empty means project root
+		outerFile  string // AGENTS.md body written above projectRoot
+		globalFile string // ~/.strike/AGENTS.md body
+		wantBodies []string
+		wantRels   []string // project-relative paths expected in block order (skip globals)
+		wantNoneOf []string
+	}{
+		{
+			name:       "root-only",
+			files:      files{"AGENTS.md": "root rules"},
+			wantBodies: []string{"root rules"},
+			wantRels:   []string{"AGENTS.md"},
+		},
+		{
+			name:       "nested-only",
+			files:      files{"a/b/AGENTS.md": "nested rules"},
+			workRel:    "a/b",
+			wantBodies: []string{"nested rules"},
+			wantRels:   []string{"a/b/AGENTS.md"},
+		},
+		{
+			name: "root+nested concatenation order",
+			files: files{
+				"AGENTS.md":     "root rules",
+				"a/b/AGENTS.md": "nested rules",
+			},
+			workRel:    "a/b",
+			wantBodies: []string{"root rules", "nested rules"},
+			wantRels:   []string{"AGENTS.md", "a/b/AGENTS.md"},
+		},
+		{
+			name: "three-level chain",
+			files: files{
+				"AGENTS.md":       "root",
+				"a/AGENTS.md":     "mid",
+				"a/b/c/AGENTS.md": "leaf",
+			},
+			workRel:    "a/b/c",
+			wantBodies: []string{"root", "mid", "leaf"},
+			wantRels:   []string{"AGENTS.md", "a/AGENTS.md", "a/b/c/AGENTS.md"},
+		},
+		{
+			name: "CLAUDE.md fallback per dir",
+			files: files{
+				"CLAUDE.md":     "root claude",
+				"a/b/CLAUDE.md": "nested claude",
+			},
+			workRel:    "a/b",
+			wantBodies: []string{"root claude", "nested claude"},
+			wantRels:   []string{"CLAUDE.md", "a/b/CLAUDE.md"},
+		},
+		{
+			name: "prefers AGENTS.md over CLAUDE.md in same dir",
+			files: files{
+				"AGENTS.md": "agents",
+				"CLAUDE.md": "claude",
+			},
+			wantBodies: []string{"agents"},
+			wantRels:   []string{"AGENTS.md"},
+			wantNoneOf: []string{"claude"},
+		},
+		{
+			name: "nested AGENTS.md with root CLAUDE.md",
+			files: files{
+				"CLAUDE.md":     "root claude",
+				"pkg/AGENTS.md": "pkg agents",
+			},
+			workRel:    "pkg",
+			wantBodies: []string{"root claude", "pkg agents"},
+			wantRels:   []string{"CLAUDE.md", "pkg/AGENTS.md"},
+		},
+		{
+			name:       "does not escape projectRoot",
+			files:      files{},
+			outerFile:  "outside",
+			wantBodies: nil,
+			wantNoneOf: []string{"outside"},
+		},
+		{
+			name: "does not escape projectRoot with nested workDir",
+			files: files{
+				"a/AGENTS.md": "inside",
+			},
+			workRel:    "a",
+			outerFile:  "outside",
+			wantBodies: []string{"inside"},
+			wantRels:   []string{"a/AGENTS.md"},
+			wantNoneOf: []string{"outside"},
+		},
+		{
+			name: "empty skipped at root",
+			files: files{
+				"AGENTS.md":     "  \n",
+				"a/b/AGENTS.md": "nested rules",
+			},
+			workRel:    "a/b",
+			wantBodies: []string{"nested rules"},
+			wantRels:   []string{"a/b/AGENTS.md"},
+		},
+		{
+			name: "empty skipped at nested",
+			files: files{
+				"AGENTS.md":     "root rules",
+				"a/b/AGENTS.md": "  \n",
+			},
+			workRel:    "a/b",
+			wantBodies: []string{"root rules"},
+			wantRels:   []string{"AGENTS.md"},
+		},
+		{
+			name: "empty skipped both",
+			files: files{
+				"AGENTS.md":     "  \n",
+				"a/b/CLAUDE.md": "\t",
+			},
+			workRel:    "a/b",
+			wantBodies: nil,
+		},
+		{
+			name:       "global still first",
+			files:      files{"AGENTS.md": "project rules"},
+			globalFile: "global rules",
+			wantBodies: []string{"global rules", "project rules"},
+			wantRels:   []string{"AGENTS.md"},
+		},
 	}
 
-	claude := filepath.Join(nested, "CLAUDE.md")
-	if err := os.WriteFile(claude, []byte("nested rules"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	got = LoadInstructions(nested, root)
-	if len(got) != 1 || !strings.Contains(got[0], "nested rules") {
-		t.Fatalf("expected nested CLAUDE.md first, got %#v", got)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.globalFile != "" {
+				home := t.TempDir()
+				t.Setenv("HOME", home)
+				strike := filepath.Join(home, ".strike")
+				if err := os.MkdirAll(strike, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(strike, "AGENTS.md"), []byte(tt.globalFile), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				t.Setenv("HOME", t.TempDir())
+			}
+
+			outer := t.TempDir()
+			root := filepath.Join(outer, "repo")
+			if err := os.MkdirAll(root, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if tt.outerFile != "" {
+				if err := os.WriteFile(filepath.Join(outer, "AGENTS.md"), []byte(tt.outerFile), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for rel, body := range tt.files {
+				path := filepath.Join(root, filepath.FromSlash(rel))
+				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			workDir := root
+			if tt.workRel != "" {
+				workDir = filepath.Join(root, filepath.FromSlash(tt.workRel))
+				if err := os.MkdirAll(workDir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			got := LoadInstructions(workDir, root)
+			if len(got) != len(tt.wantBodies) {
+				t.Fatalf("LoadInstructions returned %d blocks, want %d: %#v", len(got), len(tt.wantBodies), got)
+			}
+			for i, body := range tt.wantBodies {
+				if !strings.Contains(got[i], body) {
+					t.Errorf("block %d = %q, want to contain %q", i, got[i], body)
+				}
+			}
+			offset := 0
+			if tt.globalFile != "" {
+				offset = 1
+			}
+			for i, rel := range tt.wantRels {
+				wantPath := filepath.Join(root, filepath.FromSlash(rel))
+				block := got[i+offset]
+				if !strings.Contains(block, wantPath) {
+					t.Errorf("block %d missing path %s: %q", i+offset, wantPath, block)
+				}
+			}
+			for _, n := range tt.wantNoneOf {
+				for _, block := range got {
+					if strings.Contains(block, n) {
+						t.Errorf("unexpected %q in %#v", n, got)
+					}
+				}
+			}
+		})
 	}
 }
 
-func TestLoadInstructionsPrefersAGENTSOverCLAUDEInSameDir(t *testing.T) {
-	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte("agents"), 0o644); err != nil {
+func TestLoadInstructionsEmptyWorkDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.MkdirAll(filepath.Join(home, ".strike"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "CLAUDE.md"), []byte("claude"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(home, ".strike", "AGENTS.md"), []byte("global only"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got := LoadInstructions(root, root)
-	if len(got) != 1 || !strings.Contains(got[0], "agents") || strings.Contains(got[0], "claude") {
-		t.Fatalf("got %#v", got)
-	}
-}
-
-func TestLoadInstructionsDoesNotWalkAboveProjectRoot(t *testing.T) {
-	outer := t.TempDir()
-	root := filepath.Join(outer, "repo")
-	if err := os.MkdirAll(root, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(outer, "AGENTS.md"), []byte("outside"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	got := LoadInstructions(root, root)
-	for _, block := range got {
-		if strings.Contains(block, "outside") {
-			t.Fatalf("leaked outer instruction: %#v", got)
-		}
-	}
-}
-
-func TestLoadInstructionsSkipsEmpty(t *testing.T) {
-	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte("  \n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	got := LoadInstructions(root, root)
-	// May still include a global file from the real home; none should be empty-only project.
-	for _, block := range got {
-		if strings.Contains(block, root) {
-			t.Fatalf("empty project file should be skipped: %#v", got)
-		}
+	got := LoadInstructions("", "")
+	if len(got) != 1 || !strings.Contains(got[0], "global only") {
+		t.Fatalf("empty workDir should return global only, got %#v", got)
 	}
 }

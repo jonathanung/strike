@@ -34,6 +34,10 @@ materially affect the shipped product.
   - Real-browser smokes (`make web-e2e`) and operator conformance docs ([docs/web.md](docs/web.md), [docs/web-cockpit-contract.md](docs/web-cockpit-contract.md))
   - **Not claimed:** native apps, offline execution, push notifications, multi-user collaboration, or cross-device controller arbitration (see #1056 / #1060)
 
+### Changed
+
+- **Nested project instructions** — `AGENTS.md` / `CLAUDE.md` from the workspace root down to the working directory are merged (root first, deepest last) instead of first-match-wins walking up. Global `~/.strike/AGENTS.md` still layers first ([#578](https://github.com/jonathanung/strike/issues/578)).
+
 ### Removed
 
 - **`strike serve --expose` / `--allow-cidr`** — legacy flags error with an SSH migration hint. **Upgrade note:** replace LAN expose with SSH local forward; non-loopback `--addr` is rejected.
