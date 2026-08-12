@@ -4,7 +4,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { request } from "./api";
-import type { TeamObservation } from "./team";
+import type { TeamObservation } from "./teamModel";
 import { StatusBadge, statusKindFrom } from "./ui";
 
 export type ArtifactMeta = {

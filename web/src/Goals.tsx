@@ -3,7 +3,7 @@ import {
   abortGoal, canAbort, canPause, canResume, canRun, getGoal, goalLog, listGoals,
   pauseGoal, resumeGoal, runGoal, setGoal,
   type Goal, type GoalIteration,
-} from "./goals";
+} from "./goalsApi";
 
 export function GoalsPanel({ available, live }: { available: boolean; live: boolean }) {
   const [items, setItems] = useState<Goal[]>([]);

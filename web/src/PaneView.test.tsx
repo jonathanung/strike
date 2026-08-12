@@ -1,7 +1,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { PaneView } from "./PaneView";
-import { resolveFrom } from "./panes";
+import { resolveFrom } from "./panesApi";
 
 afterEach(() => cleanup());
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveFrom } from "./panes";
+import { resolveFrom } from "./panesApi";
 
 describe("resolveFrom", () => {
   const feeds = {

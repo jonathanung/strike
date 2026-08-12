@@ -10,7 +10,7 @@ import type {
   TeamMessage,
   TeamObservation,
   VerificationNote,
-} from "./team";
+} from "./teamModel";
 import {
   applyBoardClaim,
   applyBoardComplete,

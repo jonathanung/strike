@@ -63,7 +63,7 @@ export type WorkspaceState = {
   permission?: Record<string, unknown>; question?: Record<string, unknown>;
   children: Record<string, ChildAgent>;
   /** Observe-only multi-agent projection (WEBUI.13). */
-  team: import("./team").TeamObservation;
+  team: import("./teamModel").TeamObservation;
   changedFiles: string[];
   /** Stack of last-turn harness previews; top is current /rewind target (TUI undoStack). */
   undoStack: import("./undoPreview").UndoPreview[];

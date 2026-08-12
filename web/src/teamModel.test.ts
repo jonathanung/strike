@@ -4,7 +4,7 @@ import {
   emptyTeam,
   mergeMember,
   reduceTeamEvent,
-} from "./team";
+} from "./teamModel";
 import { initialState, reduceClient, reduceEvent } from "./reducer";
 
 describe("mergeMember", () => {
