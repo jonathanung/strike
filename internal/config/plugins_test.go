@@ -463,6 +463,31 @@ func TestApplyPluginExecutables_TrustedMCPAndHookOrder(t *testing.T) {
 	}
 }
 
+func TestPluginPassiveLoad_APSSkillCatalog(t *testing.T) {
+	home := t.TempDir()
+	work := t.TempDir()
+	t.Setenv("HOME", home)
+	ResetPluginCache()
+
+	gPlug := filepath.Join(home, ".strike", "plugins", "acme.skills")
+	writeTree(t, gPlug, map[string]string{
+		"plugin.json": `{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "acme.skills",
+  "version": "1.0.0"
+}`,
+		"skills/foo/SKILL.md": "---\ndescription: foo skill\n---\nDo foo $ARGUMENTS\n",
+	})
+
+	skills, err := LoadSkillsWithError(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := lookupSkill(skills, "foo"); !ok {
+		t.Fatal("missing APS plugin skill foo")
+	}
+}
+
 func indexOf(ss []string, want string) int {
 	for i, s := range ss {
 		if s == want {

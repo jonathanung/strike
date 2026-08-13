@@ -152,7 +152,7 @@ func Disable(opts EnableOptions) error {
 
 func setEnabled(opts EnableOptions, enabled bool) error {
 	id := strings.TrimSpace(opts.ID)
-	if err := ValidatePluginID(id); err != nil {
+	if err := ValidatePluginKey(id); err != nil {
 		return err
 	}
 	roots, scope, err := resolveManageScope(opts)
@@ -196,7 +196,7 @@ func Remove(opts RemoveOptions) error {
 		return fmt.Errorf("remove requires confirmation (--yes)")
 	}
 	id := strings.TrimSpace(opts.ID)
-	if err := ValidatePluginID(id); err != nil {
+	if err := ValidatePluginKey(id); err != nil {
 		return err
 	}
 	roots, scope, err := resolveManageScope(EnableOptions{

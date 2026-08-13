@@ -1411,6 +1411,8 @@ Bare server map or wrapped `servers` object; JSONC comments allowed:
 }
 ```
 
+Optional stdio `cwd` sets the subprocess working directory (default: process launch directory). Plugin-sourced Agent Plugins MCP servers set `cwd` to the plugin root (or an expanded `${PLUGIN_DATA}` path) and inject `PLUGIN_ROOT` / `PLUGIN_DATA` into `env`.
+
 Equivalent wrapped form:
 
 ```jsonc

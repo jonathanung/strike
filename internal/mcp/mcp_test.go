@@ -438,6 +438,15 @@ func TestConfigsFromMap(t *testing.T) {
 	}
 }
 
+func TestConfigsFromMap_PerServerCwd(t *testing.T) {
+	got := ConfigsFromMap(map[string]ServerConfigFields{
+		"plug": {Command: "npx", Cwd: "/plugin/root"},
+	}, "/tmp/work")
+	if len(got) != 1 || got[0].WorkDir != "/plugin/root" {
+		t.Fatalf("got %+v", got)
+	}
+}
+
 func TestManagerDisableAndRetry(t *testing.T) {
 	cmd, args, env := helperCommand(t, "")
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)

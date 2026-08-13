@@ -12,19 +12,23 @@ import (
 // SchemaVersion is the highest manifest schema this loader implements.
 const SchemaVersion = 1
 
-// Manifest is the root plugin.json / plugin.jsonc document (schemaVersion 1).
+// Manifest is the root plugin.json / plugin.jsonc document.
+// Legacy Strike packages use schemaVersion 1 + contributions.
+// APS packages use $schema Agent Plugins 1.0.0; ID is the APS name.
 type Manifest struct {
-	SchemaVersion int             `json:"schemaVersion"`
-	ID            string          `json:"id"`
-	Version       string          `json:"version"`
-	Name          string          `json:"name"`
-	Description   string          `json:"description,omitempty"`
-	Strike        StrikeRange     `json:"strike"`
-	Source        json.RawMessage `json:"source,omitempty"` // install lockfile overrides; ignored at load
-	Contributions Contributions   `json:"contributions"`
-	Capabilities  []string        `json:"capabilities,omitempty"`
-	Digest        string          `json:"digest,omitempty"`
-	Schema        string          `json:"$schema,omitempty"` // editor only; ignored
+	SchemaVersion int                 `json:"schemaVersion"`
+	ID            string              `json:"id"`
+	Version       string              `json:"version"`
+	Name          string              `json:"name"`
+	Description   string              `json:"description,omitempty"`
+	Strike        StrikeRange         `json:"strike"`
+	Source        json.RawMessage     `json:"source,omitempty"` // install lockfile overrides; ignored at load
+	Contributions Contributions       `json:"contributions"`
+	Capabilities  []string            `json:"capabilities,omitempty"`
+	Digest        string              `json:"digest,omitempty"`
+	Schema        string              `json:"$schema,omitempty"` // APS canonical URI, or editor-only on legacy
+	Format        ManifestFormat      `json:"-"`
+	StrikeCLI     *StrikeCLIExtension `json:"-"`
 }
 
 // StrikeRange is the Strike binary compatibility window.
@@ -67,50 +71,144 @@ var pluginIDSingleRE = regexp.MustCompile(`^[a-z][a-z0-9-]{1,63}$`)
 // bundleVersionRE is a practical semver 2.0 check (core + optional pre/build).
 var bundleVersionRE = regexp.MustCompile(`^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$`)
 
-// ParseManifest decodes plugin.json / plugin.jsonc bytes with strict unknown-field rejection.
+// ParseManifest decodes plugin.json / plugin.jsonc bytes.
+// APS 1.0.0 packages are strict JSON; legacy Strike packages still allow JSONC
+// and reject unknown fields.
 func ParseManifest(data []byte) (Manifest, error) {
-	stripped, err := stripJSONC(data)
+	m, _, err := parseManifestBytes(data, "plugin.json")
+	return m, err
+}
+
+// ReadManifest reads and parses plugin.json or plugin.jsonc from a plugin root.
+func ReadManifest(root string) (Manifest, string, error) {
+	m, path, _, err := readManifest(root)
+	return m, path, err
+}
+
+func readManifest(root string) (Manifest, string, []Diagnostic, error) {
+	jsonPath := filepath.Join(root, "plugin.json")
+	data, err := os.ReadFile(jsonPath)
+	if err == nil {
+		m, diags, err := parseManifestBytes(data, "plugin.json")
+		if err != nil {
+			return Manifest{}, jsonPath, diags, fmt.Errorf("%s: %w", jsonPath, err)
+		}
+		return m, jsonPath, diags, nil
+	}
+	if !os.IsNotExist(err) {
+		return Manifest{}, "", nil, err
+	}
+	jsoncPath := filepath.Join(root, "plugin.jsonc")
+	data, err = os.ReadFile(jsoncPath)
 	if err != nil {
-		return Manifest{}, err
+		if os.IsNotExist(err) {
+			return Manifest{}, "", nil, fmt.Errorf("no plugin.json or plugin.jsonc in %s", root)
+		}
+		return Manifest{}, "", nil, err
 	}
-	stripped = bytesTrimSpace(stripped)
-	if len(stripped) == 0 {
-		return Manifest{}, fmt.Errorf("empty manifest")
+	m, diags, err := parseManifestBytes(data, "plugin.jsonc")
+	if err != nil {
+		return Manifest{}, jsoncPath, diags, fmt.Errorf("%s: %w", jsoncPath, err)
 	}
+	return m, jsoncPath, diags, nil
+}
+
+func parseManifestBytes(data []byte, fileName string) (Manifest, []Diagnostic, error) {
+	trimmed := bytesTrimSpace(data)
+	if len(trimmed) == 0 {
+		return Manifest{}, nil, fmt.Errorf("empty manifest")
+	}
+
+	usedJSONC := false
+	raw, err := decodeTopObject(trimmed)
+	if err != nil {
+		stripped, stripErr := stripJSONC(trimmed)
+		if stripErr != nil {
+			return Manifest{}, nil, fmt.Errorf("parse manifest: %w", err)
+		}
+		stripped = bytesTrimSpace(stripped)
+		if len(stripped) == 0 {
+			return Manifest{}, nil, fmt.Errorf("empty manifest")
+		}
+		raw, err = decodeTopObject(stripped)
+		if err != nil {
+			return Manifest{}, nil, fmt.Errorf("parse manifest: %w", err)
+		}
+		usedJSONC = true
+		trimmed = stripped
+	}
+
+	format, ferr := detectManifestFormat(raw)
+	if ferr != nil {
+		return Manifest{}, nil, ferr
+	}
+	if format == FormatAPS {
+		if fileName == "plugin.jsonc" || usedJSONC {
+			return Manifest{}, nil, fmt.Errorf("Agent Plugins packages must use plugin.json (JSON only), not plugin.jsonc")
+		}
+		m, diags, err := parseAPSManifest(raw)
+		if err != nil {
+			return Manifest{}, diags, err
+		}
+		return m, diags, nil
+	}
+
+	m, err := parseLegacyManifest(trimmed)
+	if err != nil {
+		return Manifest{}, nil, err
+	}
+	return m, nil, nil
+}
+
+func decodeTopObject(data []byte) (map[string]json.RawMessage, error) {
+	dec := json.NewDecoder(strings.NewReader(string(data)))
+	var raw map[string]json.RawMessage
+	if err := dec.Decode(&raw); err != nil {
+		return nil, err
+	}
+	if err := dec.Decode(&struct{}{}); err == nil {
+		return nil, fmt.Errorf("trailing data after JSON value")
+	}
+	if raw == nil {
+		return nil, fmt.Errorf("manifest must be a JSON object")
+	}
+	return raw, nil
+}
+
+func detectManifestFormat(raw map[string]json.RawMessage) (ManifestFormat, error) {
+	schema := jsonRawString(raw["$schema"])
+	if schema == APSPluginSchemaV1 {
+		return FormatAPS, nil
+	}
+	if isAPSPluginSchemaURL(schema) {
+		return "", unsupportedSchemaError{schema: schema}
+	}
+	if _, ok := raw["schemaVersion"]; ok {
+		_, hasID := raw["id"]
+		_, hasContrib := raw["contributions"]
+		if hasID || hasContrib {
+			return FormatLegacy, nil
+		}
+		return "", fmt.Errorf("schemaVersion present but missing Strike id/contributions")
+	}
+	return "", fmt.Errorf("manifest is neither Agent Plugins 1.0.0 nor a Strike-native schemaVersion package")
+}
+
+func parseLegacyManifest(stripped []byte) (Manifest, error) {
 	var m Manifest
 	dec := json.NewDecoder(strings.NewReader(string(stripped)))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&m); err != nil {
 		return Manifest{}, fmt.Errorf("parse manifest: %w", err)
 	}
-	// Reject trailing junk.
 	if err := dec.Decode(&struct{}{}); err == nil {
 		return Manifest{}, fmt.Errorf("parse manifest: trailing data after JSON value")
 	}
+	m.Format = FormatLegacy
 	if err := validateManifest(m); err != nil {
 		return Manifest{}, err
 	}
 	return m, nil
-}
-
-// ReadManifest reads and parses plugin.json or plugin.jsonc from a plugin root.
-func ReadManifest(root string) (Manifest, string, error) {
-	for _, name := range []string{"plugin.json", "plugin.jsonc"} {
-		path := filepath.Join(root, name)
-		data, err := os.ReadFile(path)
-		if err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-			return Manifest{}, "", err
-		}
-		m, err := ParseManifest(data)
-		if err != nil {
-			return Manifest{}, path, fmt.Errorf("%s: %w", path, err)
-		}
-		return m, path, nil
-	}
-	return Manifest{}, "", fmt.Errorf("no plugin.json or plugin.jsonc in %s", root)
 }
 
 func validateManifest(m Manifest) error {

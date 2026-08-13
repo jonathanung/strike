@@ -97,7 +97,7 @@ func validateCatalog(c Catalog) error {
 	}
 	seen := map[string]struct{}{}
 	for i, p := range c.Packages {
-		if err := ValidatePluginID(p.ID); err != nil {
+		if err := ValidatePluginKey(p.ID); err != nil {
 			return fmt.Errorf("packages[%d].id: %w", i, err)
 		}
 		id := strings.TrimSpace(p.ID)

@@ -40,6 +40,7 @@ type DoctorPlugin struct {
 	LockDigest    string          `json:"lockDigest,omitempty"`
 	Source        *SourceIdentity `json:"source,omitempty"`
 	TrustState    string          `json:"trustState"` // none | trusted | stale | n/a-passive-only
+	Format        ManifestFormat  `json:"format,omitempty"`
 	Contributions DoctorContribs  `json:"contributions"`
 	Findings      []Diagnostic    `json:"findings,omitempty"`
 }
@@ -185,6 +186,7 @@ func doctorOne(ip InstalledPlugin, strikeVer string) DoctorPlugin {
 	}
 	dp.Version = m.Version
 	dp.Name = m.Name
+	dp.Format = m.Format
 
 	// Passive-run loadOne for path/version issues without requiring enablement.
 	if p, diags := loadOne(ip.Root, ip.Scope, strikeVer); p != nil {
@@ -203,6 +205,9 @@ func doctorOne(ip InstalledPlugin, strikeVer string) DoctorPlugin {
 
 	// Executable contributions: summarize without secrets; report trust state.
 	mcp, harnesses, hooks, panes := summarizeExecutables(m.Contributions)
+	if m.Format == FormatAPS {
+		mcp = summarizeAPSMCP(ip.Root)
+	}
 	dp.Contributions.MCP = mcp
 	dp.Contributions.Harnesses = harnesses
 	dp.Contributions.Hooks = hooks
@@ -299,6 +304,39 @@ func summarizeExecutables(c Contributions) (mcp []DoctorMCP, harnesses []DoctorH
 	return mcp, harnesses, hooks, panes
 }
 
+func summarizeAPSMCP(root string) []DoctorMCP {
+	f, _, err := loadAPSMCPFile(root)
+	if err != nil || f.disabled {
+		return []DoctorMCP{{Name: "(disabled)"}}
+	}
+	var mcp []DoctorMCP
+	for _, s := range f.servers {
+		if s.Skip {
+			continue
+		}
+		var envKeys []string
+		for k := range s.Env {
+			envKeys = append(envKeys, k)
+		}
+		sort.Strings(envKeys)
+		var headerKeys []string
+		for k := range s.Headers {
+			headerKeys = append(headerKeys, k)
+		}
+		sort.Strings(headerKeys)
+		mcp = append(mcp, DoctorMCP{
+			Name:       s.Name,
+			Transport:  s.Transport,
+			Command:    s.Command,
+			Args:       s.Args,
+			EnvKeys:    envKeys,
+			URL:        scrubURL(s.URL),
+			HeaderKeys: headerKeys,
+		})
+	}
+	return mcp
+}
+
 func findPassiveCollisions(plugins []Plugin) []Diagnostic {
 	type owner struct {
 		pluginID string
@@ -315,7 +353,7 @@ func findPassiveCollisions(plugins []Plugin) []Diagnostic {
 	note := func(kind, name string, ref FileRef, seen map[string]owner) {
 		// Derive contribution public name from filename stem when we only have path.
 		if name == "" {
-			name = strings.TrimSuffix(filepath.Base(ref.RelPath), filepath.Ext(ref.RelPath))
+			name = contributionPublicName(ref.RelPath)
 		}
 		o := owner{pluginID: ref.PluginID, scope: ref.Source, path: ref.RelPath}
 		if prev, ok := seen[name]; ok {
@@ -349,6 +387,19 @@ func findPassiveCollisions(plugins []Plugin) []Diagnostic {
 		}
 	}
 	return diags
+}
+
+// contributionPublicName is the collision key for a passive contribution path.
+// APS (and SKILL.md layouts) use the parent directory as the public skill name.
+func contributionPublicName(relPath string) string {
+	base := filepath.Base(relPath)
+	if strings.EqualFold(base, "SKILL.md") {
+		dir := filepath.Base(filepath.Dir(relPath))
+		if dir != "" && dir != "." {
+			return dir
+		}
+	}
+	return strings.TrimSuffix(base, filepath.Ext(relPath))
 }
 
 func scrubSource(s *SourceIdentity) *SourceIdentity {
@@ -405,6 +456,9 @@ func FormatDoctorText(r DoctorReport) string {
 			fmt.Fprintf(&b, "  source:    %s\n", p.Source.String())
 		}
 		fmt.Fprintf(&b, "  trust:     %s\n", p.TrustState)
+		if p.Format != "" {
+			fmt.Fprintf(&b, "  format:    %s\n", p.Format)
+		}
 		c := p.Contributions
 		fmt.Fprintf(&b, "  contribs:  agents=%d skills=%d workflows=%d themes=%d providers=%d\n",
 			c.Agents, c.Skills, c.Workflows, c.Themes, c.Providers)
