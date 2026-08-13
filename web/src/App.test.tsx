@@ -280,9 +280,9 @@ describe("App", () => {
     expect(list.parentElement).toHaveClass("composer-field");
     expect(list.parentElement?.querySelector("textarea")).toBeTruthy();
     fireEvent.keyDown(box, { key: "ArrowDown" });
-    expect(within(list).getAllByRole("option")[1]).toHaveAttribute("aria-selected", "true");
+    await waitFor(() => expect(within(list).getAllByRole("option")[1]).toHaveAttribute("aria-selected", "true"));
     fireEvent.keyDown(box, { key: "ArrowUp" });
-    expect(within(list).getAllByRole("option")[0]).toHaveAttribute("aria-selected", "true");
+    await waitFor(() => expect(within(list).getAllByRole("option")[0]).toHaveAttribute("aria-selected", "true"));
     fireEvent.keyDown(box, { key: "Enter" });
     expect((box as HTMLTextAreaElement).value).toContain("@go.mod");
     expect((box as HTMLTextAreaElement).value).not.toContain("@go\n");
