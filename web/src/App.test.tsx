@@ -170,9 +170,20 @@ describe("App", () => {
     expect(help).toHaveAttribute("aria-selected", "true");
     expect(help).not.toHaveClass("composer-send");
 
+    const options = within(list).getAllByRole("option");
+    expect(options.length).toBeGreaterThan(2);
+    expect(options[0]).toHaveAccessibleName(/help/i);
+    expect(options[1]).toHaveAccessibleName(/export/i);
+    expect(options[0].compareDocumentPosition(options[1]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
     fireEvent.keyDown(box, { key: "ArrowDown" });
-    expect(screen.getByRole("option", { name: /export/i })).toHaveAttribute("aria-selected", "true");
+    expect(within(list).getAllByRole("option")[1]).toHaveAttribute("aria-selected", "true");
     expect(help).toHaveAttribute("aria-selected", "false");
+    fireEvent.keyDown(box, { key: "ArrowUp" });
+    expect(within(list).getAllByRole("option")[0]).toHaveAttribute("aria-selected", "true");
+    fireEvent.keyDown(box, { key: "n", ctrlKey: true });
+    expect(within(list).getAllByRole("option")[1]).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("option", { name: /export/i })).toHaveAttribute("aria-selected", "true");
 
     fireEvent.keyDown(box, { key: "Enter", shiftKey: true });
     expect(box).toHaveValue("/");
@@ -257,10 +268,17 @@ describe("App", () => {
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
     const box = screen.getByLabelText("Instruction") as HTMLTextAreaElement;
     fireEvent.change(box, { target: { value: "@go", selectionStart: 3, selectionEnd: 3 } });
-    const option = await screen.findByRole("option", { name: /go\.mod/ });
-    expect(option).toHaveAttribute("aria-selected", "true");
-    expect(option).not.toHaveClass("composer-send");
-    expect(screen.getByRole("listbox", { name: "Composer completions" })).toHaveClass("completion");
+    const list = await screen.findByRole("listbox", { name: "Composer completions" });
+    const options = within(list).getAllByRole("option");
+    expect(options[0]).toHaveAccessibleName(/go\.mod/);
+    expect(options[1]).toHaveAccessibleName(/LICENSE/);
+    expect(options[0]).toHaveAttribute("aria-selected", "true");
+    expect(options[0]).not.toHaveClass("composer-send");
+    expect(list).toHaveClass("completion");
+    fireEvent.keyDown(box, { key: "ArrowDown" });
+    expect(within(list).getAllByRole("option")[1]).toHaveAttribute("aria-selected", "true");
+    fireEvent.keyDown(box, { key: "ArrowUp" });
+    expect(within(list).getAllByRole("option")[0]).toHaveAttribute("aria-selected", "true");
     fireEvent.keyDown(box, { key: "Enter" });
     expect((box as HTMLTextAreaElement).value).toContain("@go.mod");
     expect((box as HTMLTextAreaElement).value).not.toContain("@go\n");
