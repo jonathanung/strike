@@ -447,9 +447,79 @@ func TestCLIRuntimePullUsesAmd64ForSWEBenchImages(t *testing.T) {
 }
 
 func TestBuildTestCommandDjango(t *testing.T) {
-	cmd := buildTestCommand("django/django", []string{"test_foo"})
+	cmd := buildTestCommand("django/django", []string{
+		"test_accent (dbshell.test_postgresql.PostgreSqlDbshellCommandTestCase)",
+		"SIGINT is ignored in Python and passed to psql to abort quries.",
+		"test_basic (dbshell.test_postgresql.PostgreSqlDbshellCommandTestCase)",
+	})
 	if !strings.Contains(cmd, "runtests.py") {
 		t.Fatalf("%s", cmd)
+	}
+	if !strings.Contains(cmd, "--settings=test_sqlite") {
+		t.Fatalf("missing sqlite settings: %s", cmd)
+	}
+	if !strings.Contains(cmd, "dbshell.test_postgresql.PostgreSqlDbshellCommandTestCase.test_accent") {
+		t.Fatalf("unittest selector not converted: %s", cmd)
+	}
+	if strings.Contains(cmd, "test_accent (") || strings.Contains(cmd, "SIGINT") {
+		t.Fatalf("raw FAIL_TO_PASS leaked: %s", cmd)
+	}
+}
+
+func TestDjangoTestSelector(t *testing.T) {
+	got := djangoTestSelector("test_foo (mod.Class)")
+	if got != "mod.Class.test_foo" {
+		t.Fatalf("%q", got)
+	}
+	if djangoTestSelector("a docstring used as a name.") != "" {
+		t.Fatal("expected skip")
+	}
+}
+
+func TestParseInstanceEvalScript(t *testing.T) {
+	raw := []byte(`{"instance_id":"django__django-1","repo":"django/django","base_commit":"abc","problem_statement":"fix","eval_script":"#!/bin/bash\necho hi\n","FAIL_TO_PASS":["t"],"PASS_TO_PASS":[]}`)
+	var in Instance
+	if err := json.Unmarshal(raw, &in); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(in.EvalScript, "echo hi") {
+		t.Fatalf("%q", in.EvalScript)
+	}
+}
+
+func TestDockerGraderUsesEvalScript(t *testing.T) {
+	var copied []string
+	var scripts []string
+	rt := &recordingRuntime{
+		onCopyTo: func(src, dst string) {
+			copied = append(copied, dst)
+			if dst == "/tmp/test.sh" {
+				b, _ := os.ReadFile(src)
+				scripts = append(scripts, string(b))
+			}
+		},
+		onExec: func(cmd []string) (string, string, int, error) {
+			return "ok", "", 0, nil
+		},
+	}
+	g := &DockerGrader{RT: rt, WorkRoot: t.TempDir(), Pull: false, Timeout: time.Minute}
+	in := Instance{
+		InstanceID: "django__django-1",
+		Repo:       "django/django",
+		TestPatch:  "diff --git a/t b/t\n+x\n",
+		EvalScript: "#!/bin/bash\n./tests/runtests.py --verbosity 2 dbshell.test_postgresql\n",
+		FailToPass: []string{"test_accent (dbshell.test_postgresql.Cls)"},
+	}
+	if _, err := g.Grade(context.Background(), in, "diff --git a/x b/x\n+fix\n", ""); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range copied {
+		if c == "/tmp/test.patch" {
+			t.Fatalf("eval_script path should not pre-apply test.patch: %v", copied)
+		}
+	}
+	if len(scripts) != 1 || !strings.Contains(scripts[0], "dbshell.test_postgresql") {
+		t.Fatalf("eval script not used: %v", scripts)
 	}
 }
 
@@ -626,6 +696,44 @@ func TestExtractPatchExcludesStrikeConfig(t *testing.T) {
 	}
 	if strings.Contains(patch, ".strike") || strings.Contains(patch, "leanCode") {
 		t.Fatalf("project config leaked into patch: %s", patch)
+	}
+}
+
+func TestExtractPatchExcludesRepro(t *testing.T) {
+	dir := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := execCommand(dir, args...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v: %s", err, out)
+		}
+	}
+	run("git", "init")
+	run("git", "config", "user.email", "t@example.com")
+	run("git", "config", "user.name", "t")
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run("git", "add", "a.txt")
+	run("git", "commit", "-m", "init")
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("two\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "repro.py"), []byte("print(1)\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "repro_pg.py"), []byte("print(2)\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	patch, err := ExtractPatch(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(patch, "a.txt") {
+		t.Fatalf("expected a.txt in patch: %s", patch)
+	}
+	if strings.Contains(patch, "repro.py") || strings.Contains(patch, "repro_pg.py") {
+		t.Fatalf("repro helper leaked into patch: %s", patch)
 	}
 }
 

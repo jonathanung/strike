@@ -232,6 +232,7 @@ func FormatAgentPrompt(in Instance, evalContainer string) string {
 		b.WriteString("  eval-test python -m pytest path/to/test.py -q --tb=short\n")
 		fmt.Fprintf(&b, "Raw equivalent: docker exec -w /testbed %s bash -lc 'source /opt/miniconda3/etc/profile.d/conda.sh && conda activate testbed && <cmd>'\n", evalContainer)
 		b.WriteString("STRIKE_EVAL_CONTAINER is set. Prefer eval-test over host Python.\n")
+		b.WriteString("Delete repro.py / helper files before finishing so they are not in the git diff.\n")
 	}
 	fmt.Fprintf(&b, "\nInstance: %s\n", in.InstanceID)
 	if in.Repo != "" {

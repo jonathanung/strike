@@ -20,20 +20,28 @@ func ExtractPatch(workDir string) (string, error) {
 		return extractPatchNoGit(workDir)
 	}
 	// Intent-to-add untracked so they appear in git diff.
-	// Exclude .strike/ (eval project-config overlays for parameter sweeps).
-	_ = runGit(workDir, "add", "-N", "--", ".", ":(exclude).strike", ":(exclude).strike/**")
-	// Unstage is unnecessary for diff; -N is enough.
-	out, err := runGitOutput(workDir, "diff", "HEAD", "--", ".", ":(exclude).strike", ":(exclude).strike/**")
+	// Exclude .strike/ (eval project-config overlays) and agent repro helpers.
+	spec := []string{
+		"--", ".",
+		":(exclude).strike",
+		":(exclude).strike/**",
+		":(exclude,glob)repro.py",
+		":(exclude,glob)repro_*.py",
+		":(exclude,glob)**/repro.py",
+		":(exclude,glob)**/repro_*.py",
+	}
+	_ = runGit(workDir, append([]string{"add", "-N"}, spec...)...)
+	out, err := runGitOutput(workDir, append([]string{"diff", "HEAD"}, spec...)...)
 	if err != nil {
 		// Fallback: diff without HEAD (unborn / odd states).
-		out2, err2 := runGitOutput(workDir, "diff", "--", ".", ":(exclude).strike", ":(exclude).strike/**")
+		out2, err2 := runGitOutput(workDir, append([]string{"diff"}, spec...)...)
 		if err2 != nil {
 			return "", fmt.Errorf("swebench: git diff: %w", err)
 		}
 		out = out2
 	}
 	// Also include staged-only changes (still exclude .strike/).
-	staged, err := runGitOutput(workDir, "diff", "--cached", "--", ".", ":(exclude).strike", ":(exclude).strike/**")
+	staged, err := runGitOutput(workDir, append([]string{"diff", "--cached"}, spec...)...)
 	if err == nil && len(bytes.TrimSpace(staged)) > 0 {
 		if len(bytes.TrimSpace(out)) == 0 {
 			out = staged
