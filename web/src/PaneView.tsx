@@ -1,4 +1,8 @@
+import type { CSSProperties } from "react";
 import { resolveFrom, type PaneViewNode } from "./panesApi";
+
+/** Per-child minimum used for TUI-like too-narrow column fallback (matches prior 80px basis). */
+const ROW_CELL_MIN_PX = 80;
 
 function roleClass(style?: string): string {
   const s = (style || "body").toLowerCase();
@@ -29,6 +33,53 @@ function textOf(node: PaneViewNode, feeds?: Record<string, unknown>): string {
   return node.text || "";
 }
 
+function truncateStyle(truncate?: string): CSSProperties | undefined {
+  if (!truncate) return undefined;
+  return { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 };
+}
+
+/** Closed icon set — unknown names omitted (same mapping as TUI paneIconGlyph). */
+function paneIconGlyph(name?: string): string {
+  switch ((name || "").trim().toLowerCase()) {
+    case "check":
+    case "ok":
+      return "✓";
+    case "warn":
+    case "warning":
+      return "◦";
+    case "error":
+    case "err":
+      return "✗";
+    case "agent":
+      return "◆";
+    case "folder":
+    case "file":
+      return "·";
+    default:
+      return "";
+  }
+}
+
+function rowCellStyle(child: PaneViewNode): CSSProperties {
+  const style: CSSProperties = {};
+  if (child.flex != null && child.flex > 0) style.flexGrow = child.flex;
+  if (child.min != null && child.min > 0) style.minWidth = `${child.min}ch`;
+  return style;
+}
+
+function listItemLabel(item: NonNullable<PaneViewNode["items"]>[number]) {
+  const glyph = paneIconGlyph(item.icon);
+  return (
+    <>
+      <span>
+        {glyph ? <span aria-hidden="true">{glyph} </span> : null}
+        <strong>{item.label || item.id}</strong>
+      </span>
+      {item.detail ? <span className="muted"> {item.detail}</span> : null}
+    </>
+  );
+}
+
 export function PaneView({
   node,
   feeds,
@@ -54,17 +105,33 @@ export function PaneView({
           ))}
         </div>
       );
-    case "row":
+    case "row": {
+      const children = node.children || [];
+      const nChild = children.length;
+      const gapPx = node.gap ? node.gap * 4 : 0;
+      const wrap = Boolean(node.wrap);
+      const gutter = nChild > 1 ? gapPx * (nChild - 1) : 0;
+      const rowStyle: CSSProperties & { ["--stack-at"]?: string } = { gap: gapPx || undefined };
+      if (!wrap && nChild > 0) {
+        rowStyle["--stack-at"] = `${nChild * ROW_CELL_MIN_PX + gutter}px`;
+      }
       return (
-        <div className={`pane-row${node.wrap ? " wrap" : ""}`} style={{ gap: node.gap ? `${node.gap * 4}px` : undefined }}>
-          {(node.children || []).map((c, i) => (
-            <PaneView key={i} node={c} feeds={feeds} depth={depth + 1} onSelect={onSelect} />
+        <div className={wrap ? "pane-row wrap" : "pane-row"} style={rowStyle}>
+          {children.map((c, i) => (
+            <div key={i} className="pane-row-cell" style={rowCellStyle(c)}>
+              <PaneView node={c} feeds={feeds} depth={depth + 1} onSelect={onSelect} />
+            </div>
           ))}
         </div>
       );
+    }
     case "text":
     case "markdown":
-      return <p className={roleClass(node.style)}>{textOf(node, feeds)}</p>;
+      return (
+        <p className={roleClass(node.style)} style={truncateStyle(node.truncate)}>
+          {textOf(node, feeds)}
+        </p>
+      );
     case "kv":
       return (
         <dl className="pane-kv">
@@ -90,14 +157,10 @@ export function PaneView({
               >
                 {node.selectable && item.id ? (
                   <button type="button" className="pane-list-btn" onClick={() => onSelect?.(item.id!)}>
-                    <strong>{item.label || item.id}</strong>
-                    {item.detail ? <span className="muted"> {item.detail}</span> : null}
+                    {listItemLabel(item)}
                   </button>
                 ) : (
-                  <>
-                    <strong>{item.label || item.id}</strong>
-                    {item.detail ? <span className="muted"> {item.detail}</span> : null}
-                  </>
+                  listItemLabel(item)
                 )}
               </li>
             );
