@@ -147,6 +147,20 @@ describe("surface registry", () => {
     expect(resolveModeSurface({ pane: "p1", caps: { panes: true } }).surface).toBe("panes");
   });
 
+  it("keeps settings/theme/providers/auth in the inspector instead of opening the dialog", () => {
+    for (const surface of ["settings", "theme", "providers", "auth"] as const) {
+      const r = resolveModeSurface({ mode: "ops", surface, caps: fullCaps });
+      expect(r.mode).toBe("ops");
+      expect(r.surface).toBe(surface);
+      expect(r.openDrawer).toBe(true);
+      expect(r).not.toHaveProperty("openSettings", true);
+    }
+    const entering = resolveModeSurface({ mode: "ops", caps: fullCaps });
+    expect(entering.surface).toBe("settings");
+    expect(entering.openDrawer).toBe(true);
+    expect(entering).not.toHaveProperty("openSettings", true);
+  });
+
   it("mode presets cover all workspace modes", () => {
     for (const id of WORKSPACE_MODES) {
       expect(MODE_PRESETS[id].id).toBe(id);

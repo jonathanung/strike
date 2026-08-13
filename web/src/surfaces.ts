@@ -692,7 +692,6 @@ export function resolveModeSurface(input: {
   surface?: string;
   openDrawer: boolean;
   unavailable?: { id: string; reason: string };
-  openSettings?: boolean;
 } {
   const modeProvided = Boolean(input.mode && isWorkspaceMode(input.mode));
   let mode: WorkspaceMode = modeProvided ? (input.mode as WorkspaceMode) : "chat";
@@ -733,7 +732,6 @@ export function resolveModeSurface(input: {
         mode,
         surface: def.id,
         openDrawer: Boolean(def.inspector),
-        openSettings: def.id === "settings" || def.id === "theme" || def.id === "providers" || def.id === "auth",
         unavailable: {
           id: def.id,
           reason: !attachOk
@@ -746,7 +744,6 @@ export function resolveModeSurface(input: {
       mode,
       surface: def.id,
       openDrawer: Boolean(def.inspector) || def.placement.desktop === "drawer",
-      openSettings: def.id === "settings" || def.id === "theme" || def.id === "providers" || def.id === "auth",
     };
   }
 
@@ -758,13 +755,12 @@ export function resolveModeSurface(input: {
     isLive: input.isLive,
   });
   if (mode === "ops" && !defSurface) {
-    return { mode, surface: "settings", openDrawer: false, openSettings: true };
+    return { mode, surface: "settings", openDrawer: false };
   }
   return {
     mode,
     surface: defSurface,
     openDrawer: Boolean(defSurface),
-    openSettings: defSurface === "settings",
   };
 }
 

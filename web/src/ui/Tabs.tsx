@@ -1,6 +1,7 @@
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
+  useEffect,
   useId,
   useRef,
 } from "react";
@@ -36,6 +37,14 @@ export function Tabs({
   const baseId = useId();
   const listRef = useRef<HTMLDivElement>(null);
   const enabled = items.filter((t) => !t.disabled);
+
+  useEffect(() => {
+    const escaped = typeof CSS !== "undefined" && typeof CSS.escape === "function"
+      ? CSS.escape(value)
+      : value.replace(/["\\]/g, "");
+    const el = listRef.current?.querySelector<HTMLElement>(`[data-tab-id="${escaped}"]`);
+    el?.scrollIntoView?.({ inline: "nearest", block: "nearest" });
+  }, [value]);
 
   const move = (from: string, delta: number) => {
     if (!enabled.length) return;

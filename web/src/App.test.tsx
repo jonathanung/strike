@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App, { formatCostLabel, formatContextLabel } from "./App";
 
@@ -1107,6 +1107,58 @@ describe("App", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Toggle inspector" })).toHaveAttribute("aria-pressed", "true");
     });
+  });
+
+  it("keeps Ops settings in the inspector instead of opening the workspace dialog", async () => {
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("bootstrap")) return response({
+        version: "test", authRequired: false, attachOnly: false,
+        capabilities: { live: true, settings: true, mcp: true, auth: true, plugins: true },
+        protocolOps: ["user.input"], status: { sessionId: "live", provider: "echo", busy: false },
+        agents: [], skills: [],
+      });
+      if (url.includes("sessions")) return response({ sessions: [{ id: "live", title: "Current" }], liveId: "live" });
+      if (url.includes("/v1/mcp")) return response({ servers: [] });
+      return response({ ok: true });
+    }));
+    render(<App />);
+    await screen.findByText("Current");
+    fireEvent.click(screen.getByRole("button", { name: /Ops:/ }));
+    expect(screen.queryByRole("dialog", { name: "Workspace settings" })).not.toBeInTheDocument();
+    expect(await screen.findByRole("tab", { name: "settings" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "mcp" }));
+    expect(await screen.findByRole("heading", { name: "MCP servers" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Workspace settings" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Open settings" }));
+    expect(screen.getByRole("dialog", { name: "Workspace settings" })).toBeInTheDocument();
+  });
+
+  it("ranks Open MCP first in the palette for query mcp and Enter opens MCP", async () => {
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("bootstrap")) return response({
+        version: "test", authRequired: false, attachOnly: false,
+        capabilities: { live: true, settings: true, mcp: true },
+        protocolOps: ["user.input"], status: { sessionId: "live", provider: "echo", busy: false },
+        agents: [], skills: [],
+      });
+      if (url.includes("sessions")) return response({ sessions: [{ id: "live", title: "Current" }], liveId: "live" });
+      if (url.includes("/v1/mcp")) return response({ servers: [] });
+      return response({ ok: true });
+    }));
+    render(<App />);
+    await screen.findByText("Current");
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+    const filter = await screen.findByLabelText("Filter commands");
+    fireEvent.change(filter, { target: { value: "mcp" } });
+    const options = within(screen.getByRole("listbox", { name: "Commands" })).getAllByRole("option");
+    expect(options[0]).toHaveTextContent("Open MCP");
+    fireEvent.keyDown(filter, { key: "Enter" });
+    expect(screen.getByRole("button", { name: /Ops:/ })).toHaveAttribute("aria-pressed", "true");
+    expect(await screen.findByRole("tab", { name: "mcp" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.queryByRole("dialog", { name: "Workspace settings" })).not.toBeInTheDocument();
   });
 
 

@@ -169,4 +169,16 @@ describe("token CSS foundation", () => {
     const workflowBlocks = css.split("/* Workflow authoring").length - 1;
     expect(workflowBlocks).toBe(1);
   });
+
+  it("does not flex-squeeze inspector tab labels", () => {
+    const dir = dirname(fileURLToPath(import.meta.url));
+    const css = readFileSync(resolve(dir, "../styles.css"), "utf8");
+    const inspectorRule = css.match(/\.inspector-tabs \.ui-tab,\s*\.inspector-tabs button \{[\s\S]*?\n\}/);
+    expect(inspectorRule?.[0]).toBeTruthy();
+    expect(inspectorRule?.[0]).toMatch(/flex:\s*0\s+0\s+auto/);
+    expect(inspectorRule?.[0]).toMatch(/min-width:\s*max-content/);
+    expect(inspectorRule?.[0]).not.toMatch(/flex:\s*1\b/);
+    const size = inspectorRule?.[0].match(/font-size:\s*(\d+)px/);
+    expect(Number(size?.[1])).toBeGreaterThanOrEqual(11);
+  });
 });
