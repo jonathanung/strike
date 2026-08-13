@@ -120,6 +120,67 @@ func TestRunPluginLifecycleCLI(t *testing.T) {
 	}
 }
 
+func TestRunPluginInspectAPS(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	work := t.TempDir()
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(work); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+
+	src := filepath.Join(t.TempDir(), "acme.skills")
+	if err := os.MkdirAll(filepath.Join(src, "skills", "foo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	man := `{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "acme.skills",
+  "version": "1.0.0"
+}`
+	if err := os.WriteFile(filepath.Join(src, "plugin.json"), []byte(man), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	skill := "---\ndescription: skill foo\n---\nDo foo $ARGUMENTS\n"
+	if err := os.WriteFile(filepath.Join(src, "skills", "foo", "SKILL.md"), []byte(skill), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mcp := `{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "lint": { "type": "stdio", "command": "echo" },
+    "cloud": { "type": "streamable-http", "url": "https://mcp.example.com/acme" }
+  }
+}`
+	if err := os.WriteFile(filepath.Join(src, "mcp.json"), []byte(mcp), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errBuf bytes.Buffer
+	code := runPluginCLI([]string{"install", src, "--scope", "global"}, &out, &errBuf)
+	if code != 0 {
+		t.Fatalf("install: code=%d err=%s out=%s", code, errBuf.String(), out.String())
+	}
+
+	out.Reset()
+	errBuf.Reset()
+	code = runPluginCLI([]string{"inspect", "acme.skills"}, &out, &errBuf)
+	if code != 0 {
+		t.Fatalf("inspect: code=%d err=%s out=%s", code, errBuf.String(), out.String())
+	}
+	got := out.String()
+	if !strings.Contains(got, "format:   aps") {
+		t.Fatalf("missing APS format:\n%s", got)
+	}
+	if !strings.Contains(got, "skills=1") || !strings.Contains(got, "mcp=2") {
+		t.Fatalf("want skills=1 mcp=2:\n%s", got)
+	}
+}
+
 func TestRunPluginTrustCLI(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

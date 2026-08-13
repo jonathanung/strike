@@ -79,6 +79,9 @@ func InferCapabilitiesAt(m Manifest, pluginRoot string) []string {
 		set[CapPanes] = struct{}{}
 		set[CapPanesProcess] = struct{}{}
 	}
+	if m.Format == FormatAPS && pluginRoot != "" {
+		inferAPSMCPCaps(pluginRoot, set)
+	}
 	return sortedKeys(set)
 }
 
@@ -105,7 +108,13 @@ func HasExecutableContributionsAt(m Manifest, pluginRoot string) bool {
 	if HasExecutableContributions(m) {
 		return true
 	}
-	return pluginRoot != "" && HasProcessPanes(m, pluginRoot)
+	if pluginRoot != "" && HasProcessPanes(m, pluginRoot) {
+		return true
+	}
+	if m.Format == FormatAPS && pluginRoot != "" {
+		return apsHasExecutableMCP(pluginRoot)
+	}
+	return false
 }
 
 // TrustMatch explains whether a trust record still authorizes execution.
@@ -179,7 +188,7 @@ type TrustResult struct {
 // inferred capability set. Passive contributions do not require this grant.
 func Trust(opts TrustOptions) (TrustResult, error) {
 	id := strings.TrimSpace(opts.ID)
-	if err := ValidatePluginID(id); err != nil {
+	if err := ValidatePluginKey(id); err != nil {
 		return TrustResult{}, err
 	}
 	ip, roots, err := resolveInstalledForTrust(opts)
@@ -256,7 +265,7 @@ func Trust(opts TrustOptions) (TrustResult, error) {
 // executables stay inactive until Trust is granted again.
 func Untrust(opts TrustOptions) error {
 	id := strings.TrimSpace(opts.ID)
-	if err := ValidatePluginID(id); err != nil {
+	if err := ValidatePluginKey(id); err != nil {
 		return err
 	}
 	_, roots, err := resolveInstalledForTrust(opts)
