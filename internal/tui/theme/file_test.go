@@ -4,7 +4,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"charm.land/lipgloss/v2"
 )
@@ -294,6 +296,48 @@ func TestCatalogPluginThemes_APSStrikeCLIEscapeRejected(t *testing.T) {
 	cat := Catalog(work)
 	if _, ok := Lookup(cat, "escaped-theme"); ok {
 		t.Fatal("symlink-escaped APS theme must not appear in catalog")
+	}
+}
+
+func TestCatalogPluginThemes_APSSkipsNonRegular(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	work := t.TempDir()
+
+	plug := filepath.Join(work, ".strike", "plugins", "acme.fifo")
+	themeDir := filepath.Join(plug, "com.strike.cli", "themes")
+	if err := os.MkdirAll(themeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "acme.fifo",
+  "version": "1.0.0"
+}`
+	if err := os.WriteFile(filepath.Join(plug, "plugin.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	good := `{"name":"OK","id":"ok-theme","colors":{"accent":"#123456"}}`
+	if err := os.WriteFile(filepath.Join(themeDir, "ok.json"), []byte(good), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fifo := filepath.Join(themeDir, "block.json")
+	if err := syscall.Mkfifo(fifo, 0o644); err != nil {
+		t.Skipf("mkfifo unavailable: %v", err)
+	}
+
+	done := make(chan []Entry, 1)
+	go func() { done <- Catalog(work) }()
+	select {
+	case cat := <-done:
+		if _, ok := Lookup(cat, "ok-theme"); !ok {
+			t.Fatal("regular APS theme missing")
+		}
+		if _, ok := Lookup(cat, "block"); ok {
+			t.Fatal("FIFO theme must be skipped")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Catalog blocked on non-regular theme file")
 	}
 }
 

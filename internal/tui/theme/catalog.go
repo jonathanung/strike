@@ -222,6 +222,10 @@ func loadPluginThemeLayer(strikeRoot string, extraDisabled map[string]bool) []En
 			if err != nil {
 				continue
 			}
+			st, err := os.Stat(abs)
+			if err != nil || !st.Mode().IsRegular() {
+				continue
+			}
 			data, err := os.ReadFile(abs)
 			if err != nil {
 				continue
@@ -336,7 +340,12 @@ func readPluginThemePaths(root string) (id string, paths []string, ok bool) {
 		sort.Strings(names)
 		for _, name := range names {
 			rel := "com.strike.cli/themes/" + name
-			if _, err := resolveUnderPluginRoot(root, rel); err != nil {
+			abs, err := resolveUnderPluginRoot(root, rel)
+			if err != nil {
+				continue
+			}
+			st, err := os.Stat(abs)
+			if err != nil || !st.Mode().IsRegular() {
 				continue
 			}
 			paths = append(paths, rel)

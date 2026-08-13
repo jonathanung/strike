@@ -456,6 +456,17 @@ func PluginPaneRefs(m Manifest, root string) []PaneRef {
 	return out
 }
 
+// APSExecCounts returns discovered Strike-only executable/pane counts for an
+// APS plugin (harnesses/hooks/panes under com.strike.cli/). Zero when the
+// extension object has an invalid known-key type.
+func APSExecCounts(m Manifest, root string) (harnesses, hooks, panes int) {
+	if m.Format != FormatAPS || skipStrikeCLI(m) || root == "" {
+		return 0, 0, 0
+	}
+	h, hooks, panes := summarizeStrikeCLIExec(root)
+	return len(h), hooks, panes
+}
+
 func summarizeStrikeCLIExec(root string) (harnesses []DoctorHarness, hooks, panes int) {
 	raws, _ := loadStrikeCLIHarnessRaws(root, Diagnostic{})
 	for _, raw := range raws {
