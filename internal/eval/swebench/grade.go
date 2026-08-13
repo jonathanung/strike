@@ -169,6 +169,12 @@ fi
 	}
 	detail := strings.TrimSpace(stdout + "\n" + stderr)
 	resolved := code == 0
+	if useEval {
+		if section, ok := evalTestSection(detail); ok {
+			resolved = evalTestsPassed(section)
+			detail = section
+		}
+	}
 	// Best-effort counts: without log parsers we treat whole-suite exit as all-or-nothing.
 	gr := GradeResult{
 		Resolved:    resolved,
@@ -300,6 +306,43 @@ func shellQuote(s string) string {
 		return "''"
 	}
 	return "'" + strings.ReplaceAll(s, "'", `'"'"'`) + "'"
+}
+
+const (
+	evalTestStart = ">>>>> Start Test Output"
+	evalTestEnd   = ">>>>> End Test Output"
+)
+
+func evalTestSection(log string) (string, bool) {
+	i := strings.Index(log, evalTestStart)
+	j := strings.Index(log, evalTestEnd)
+	if i < 0 || j < 0 || j <= i {
+		return "", false
+	}
+	return strings.TrimSpace(log[i:j]), true
+}
+
+func evalTestsPassed(section string) bool {
+	if section == "" {
+		return false
+	}
+	if hasPytestCount(section, "failed") || hasPytestCount(section, "error") {
+		return false
+	}
+	if hasPytestCount(section, "passed") {
+		return true
+	}
+	if strings.Contains(section, " ... FAIL") || strings.Contains(section, " ... ERROR") || strings.Contains(section, "_FailedTest") {
+		return false
+	}
+	if strings.Contains(section, " ... ok") || strings.Contains(section, " ... OK") {
+		return true
+	}
+	return false
+}
+
+func hasPytestCount(section, word string) bool {
+	return strings.Contains(section, " "+word+",") || strings.Contains(section, " "+word+" in ")
 }
 
 // NoneGrader skips grading.

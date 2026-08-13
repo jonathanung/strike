@@ -523,6 +523,29 @@ func TestDockerGraderUsesEvalScript(t *testing.T) {
 	}
 }
 
+func TestEvalTestsPassed(t *testing.T) {
+	pass := ">>>>> Start Test Output\n==================== 340 passed, 1 warnings in 1.91 seconds ====================\n"
+	if !evalTestsPassed(pass) {
+		t.Fatal("expected pass")
+	}
+	fail := ">>>>> Start Test Output\n==================== 1 failed, 339 passed in 1.91 seconds ====================\n"
+	if evalTestsPassed(fail) {
+		t.Fatal("expected fail")
+	}
+	djangoOK := "test_basic (dbshell.test_postgresql.Cls) ... ok\n"
+	if !evalTestsPassed(djangoOK) {
+		t.Fatal("django ok")
+	}
+	djangoFail := "test_basic (dbshell.test_postgresql.Cls) ... FAIL\n"
+	if evalTestsPassed(djangoFail) {
+		t.Fatal("django fail")
+	}
+	sec, ok := evalTestSection("noise\n>>>>> Start Test Output\n340 passed, 1 warnings in 1.91 seconds\n>>>>> End Test Output\ngit checkout fail\n")
+	if !ok || !evalTestsPassed(sec) {
+		t.Fatalf("section=%q ok=%v", sec, ok)
+	}
+}
+
 func TestDockerGraderAppliesTestPatchFirst(t *testing.T) {
 	var execScripts []string
 	var copied []string
