@@ -2,7 +2,7 @@ import { FormEvent, lazy, Suspense, useCallback, useEffect, useMemo, useReducer,
 import { activateRoot, bootstrap, closeRoot, createRoot, fetchTeam, historicalConnection, liveConnection, request, resumeRoot, roots as loadRoots, sendOp, sessions as loadSessions, sessionChildren, getSandbox, patchSandbox, downloadDiagnostics, closeIssue, createIssue, deleteMemory, exportIssues, exportMemory, putMemory } from "./api";
 import { ChildAgentsPanel } from "./ChildAgents";
 import { buildExportMarkdown, defaultExportFilename, downloadTextFile } from "./exportMarkdown";
-import { clearQueue, editQueuedText, moveQueuedAt, removeQueuedAt, type QueuedPrompt } from "./queueOps";
+import { ChatSessionGroup, PromptQueue } from "./SessionGroup";
 import { initialClientState, reduceClient, selectedSlice, setAdd, setRemove } from "./reducer";
 import { buildCommandCatalog, insertMention, isFileMentionTrigger, type CatalogCommand } from "./commands";
 import { CommandPalette } from "./CommandPalette";
@@ -468,6 +468,7 @@ export default function App() {
   } as React.CSSProperties;
   const phoneModes = modesInBottomBar(shellProfile);
   const overlayOpen = shellProfile !== "desktop" && (navOpen || inspectorOpen);
+  const chatSessionGroupOpen = inspectorOpen && workspaceMode === "chat";
   const catalog = useMemo(
     () => buildCommandCatalog({ skills: boot?.skills, attachOnly: boot?.attachOnly, capabilities: boot?.capabilities }),
     [boot],
@@ -551,7 +552,7 @@ export default function App() {
         return;
       case "queue":
         queueRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-        notice("Queue", queue.length ? `${queue.length} prompt(s) queued — reorder, edit, or clear below the composer.` : "Queue is empty. Prompts sent while the agent is busy land here.");
+        notice("Queue", queue.length ? `${queue.length} prompt(s) queued — reorder, edit, or clear.` : "Queue is empty. Prompts sent while the agent is busy land here.");
         return;
       case "cost":
         notice("Cost", formatCostNotice(state.status, modelRates));
@@ -1124,7 +1125,7 @@ export default function App() {
                     <span className="session-main"><span className="session-title">{session.title || shortID(session.id)}</span><span className="session-meta">{[shortID(session.id), age].filter(Boolean).join(" · ")}</span></span>
                     <span className="session-flags">{live && <small className="live-badge">LIVE</small>}</span>
                   </button>;
-                })}</nav>{boot?.capabilities.sessions && selectedID && <div className="session-actions" aria-label="Session actions"><SessionMenu onAction={(action) => void sessionAction(action)} /></div>}</>}<ChildAgentsPanel children={children} selectedId={selectedChildId} onSelect={setSelectedChildId} onOpenTranscript={openChildTranscript} /><details className="workspace-meta"><summary>Workspace</summary><span>ROOT</span><code>{state.status.cwd || "unavailable"}</code><span>BUILD</span><code>{boot?.version || "…"}</code></details></aside>
+                })}</nav>{boot?.capabilities.sessions && selectedID && <div className="session-actions" aria-label="Session actions"><SessionMenu onAction={(action) => void sessionAction(action)} /></div>}</>}{!chatSessionGroupOpen && <ChildAgentsPanel children={children} selectedId={selectedChildId} onSelect={setSelectedChildId} onOpenTranscript={openChildTranscript} />}<details className="workspace-meta"><summary>Workspace</summary><span>ROOT</span><code>{state.status.cwd || "unavailable"}</code><span>BUILD</span><code>{boot?.version || "…"}</code></details></aside>
     <main>
       <div className="runtime-stack">
       <section className="runtime" aria-label="Runtime controls">
@@ -1156,7 +1157,7 @@ export default function App() {
           <button type="button" onClick={() => { try { localStorage.setItem("strike.web.onboard.v1", "1"); } catch { /* */ } setOnboardingHint(false); }}>Dismiss</button>
         </div>
       )}
-      <form className="composer" onSubmit={submit}><label htmlFor="prompt">Instruction {state.status.busy && "— send to queue"}</label><textarea ref={promptRef} aria-label="Instruction" id="prompt" value={draft} disabled={!isLive} placeholder={isLive ? "Describe the next outcome…  / command · @file" : "Historical session — read only"} onPaste={(event) => void attach(event.clipboardData.files)} onDrop={(event) => { event.preventDefault(); void attach(event.dataTransfer.files); }} onDragOver={(event) => event.preventDefault()} onChange={(event) => onComposerChange(event.target.value)} onKeyDown={onComposerKeyDown} />{shownCompletions.length > 0 && <div className="completion" role="listbox" aria-label="Composer completions">{shownCompletions.map((item, i) => <button type="button" role="option" key={item.label} aria-selected={i === activeCompletion} className={i === activeCompletion ? "active" : ""} onMouseEnter={() => setCompletionIndex(i)} onClick={() => selectCompletion(item)}><strong>{item.label}</strong><span>{item.detail}</span></button>)}</div>}{images.length > 0 && <div className="attachments">{images.map((image, index) => <button type="button" key={`${image.name}-${index}`} onClick={() => setImages((list) => list.filter((_, i) => i !== index))}>{image.name} ×</button>)}</div>}{queue.length > 0 && <div className="prompt-queue-wrap"><ol ref={queueRef} className="prompt-queue" aria-label="Queued prompts">{queue.map((item, index) => <li key={index}>{queueEdit?.index === index ? <input className="queue-edit" aria-label={`Queued prompt text ${index + 1}`} value={queueEdit.text} autoFocus onChange={(event) => setQueueEdit({ index, text: event.target.value })} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); queueEditCancel.current = false; setQueue((list) => editQueuedText(list, index, queueEdit.text)); setQueueEdit(null); } if (event.key === "Escape") { event.preventDefault(); queueEditCancel.current = true; setQueueEdit(null); } }} onBlur={() => { if (!queueEditCancel.current) setQueue((list) => editQueuedText(list, index, queueEdit.text)); queueEditCancel.current = false; setQueueEdit(null); }} /> : <span>{item.text}{item.images.length > 0 ? ` (${item.images.length} img)` : ""}</span>}<span className="queue-actions"><button type="button" aria-label={`Move queued prompt ${index + 1} up`} disabled={index === 0} onClick={() => setQueue((list) => moveQueuedAt(list, index, -1))}>↑</button><button type="button" aria-label={`Move queued prompt ${index + 1} down`} disabled={index === queue.length - 1} onClick={() => setQueue((list) => moveQueuedAt(list, index, 1))}>↓</button><button type="button" aria-label={`Edit queued prompt ${index + 1}`} onClick={() => { queueEditCancel.current = false; setQueueEdit({ index, text: item.text }); }}>✎</button><button type="button" aria-label={`Remove queued prompt ${index + 1}`} onClick={() => { setQueue((list) => removeQueuedAt(list, index)); setQueueEdit((cur) => cur?.index === index ? null : cur); }}>×</button></span></li>)}</ol><div className="queue-toolbar"><button type="button" onClick={() => { setQueue(clearQueue()); setQueueEdit(null); }}>Clear queue</button></div></div>}<div className="composer-bar"><span><kbd>↵</kbd> send · <kbd>⇧↵</kbd> newline · <kbd>↑</kbd> history</span><span><input ref={fileRef} hidden type="file" accept="image/*" multiple onChange={(event) => void attach(event.target.files)} /><button type="button" className="composer-secondary" onClick={() => fileRef.current?.click()}>Attach</button>{history.length > 0 && <button type="button" className="composer-secondary" onClick={() => setDraft(history.at(-1) || "")}>History</button>}<button type="button" className="composer-secondary" onClick={() => exportSession()} disabled={!state.items.length}>Export</button>{state.status.busy && <button type="button" className="stop" onClick={() => void op("interrupt")}>Interrupt</button>}<button type="submit" className="composer-send" disabled={!draft.trim() || !isLive}>{state.status.busy ? "Queue" : "Send"}</button></span></div></form>
+      <form className="composer" onSubmit={submit}><label htmlFor="prompt">Instruction {state.status.busy && "— send to queue"}</label><textarea ref={promptRef} aria-label="Instruction" id="prompt" value={draft} disabled={!isLive} placeholder={isLive ? "Describe the next outcome…  / command · @file" : "Historical session — read only"} onPaste={(event) => void attach(event.clipboardData.files)} onDrop={(event) => { event.preventDefault(); void attach(event.dataTransfer.files); }} onDragOver={(event) => event.preventDefault()} onChange={(event) => onComposerChange(event.target.value)} onKeyDown={onComposerKeyDown} />{shownCompletions.length > 0 && <div className="completion" role="listbox" aria-label="Composer completions">{shownCompletions.map((item, i) => <button type="button" role="option" key={item.label} aria-selected={i === activeCompletion} className={i === activeCompletion ? "active" : ""} onMouseEnter={() => setCompletionIndex(i)} onClick={() => selectCompletion(item)}><strong>{item.label}</strong><span>{item.detail}</span></button>)}</div>}{images.length > 0 && <div className="attachments">{images.map((image, index) => <button type="button" key={`${image.name}-${index}`} onClick={() => setImages((list) => list.filter((_, i) => i !== index))}>{image.name} ×</button>)}</div>}{!chatSessionGroupOpen && <PromptQueue queue={queue} queueEdit={queueEdit} setQueueEdit={setQueueEdit} queueEditCancel={queueEditCancel} queueRef={queueRef} setQueue={setQueue} />}<div className="composer-bar"><span><kbd>↵</kbd> send · <kbd>⇧↵</kbd> newline · <kbd>↑</kbd> history</span><span><input ref={fileRef} hidden type="file" accept="image/*" multiple onChange={(event) => void attach(event.target.files)} /><button type="button" className="composer-secondary" onClick={() => fileRef.current?.click()}>Attach</button>{history.length > 0 && <button type="button" className="composer-secondary" onClick={() => setDraft(history.at(-1) || "")}>History</button>}<button type="button" className="composer-secondary" onClick={() => exportSession()} disabled={!state.items.length}>Export</button>{state.status.busy && <button type="button" className="stop" onClick={() => void op("interrupt")}>Interrupt</button>}<button type="submit" className="composer-send" disabled={!draft.trim() || !isLive}>{state.status.busy ? "Queue" : "Send"}</button></span></div></form>
       <CommandPalette
         open={paletteOpen}
         commands={catalog}
@@ -1172,6 +1173,25 @@ export default function App() {
     </main>
     <aside className={`inspector ${inspectorOpen ? "open" : "collapsed"}`} aria-label="Inspector">
       <PanelResize label="Resize inspector panel" value={inspectorWidth} min={240} max={520} onChange={setInspectorWidth} side="inspector" />
+      {chatSessionGroupOpen && (
+        <ChatSessionGroup
+          contextLabel={formatContextLabel(state.status)}
+          provider={state.status.provider}
+          model={state.status.model}
+          phase={state.status.phase}
+          fitWarning={state.fitWarning}
+          childrenEntries={children}
+          selectedChildId={selectedChildId}
+          onSelectChild={setSelectedChildId}
+          onOpenChildTranscript={openChildTranscript}
+          queue={queue}
+          queueEdit={queueEdit}
+          setQueueEdit={setQueueEdit}
+          queueEditCancel={queueEditCancel}
+          queueRef={queueRef}
+          setQueue={setQueue}
+        />
+      )}
       <SurfaceNav
         modeLabel={MODE_PRESETS[workspaceMode].label}
         surfaces={inspectorTabDefs}
