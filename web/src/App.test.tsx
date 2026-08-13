@@ -331,6 +331,8 @@ describe("App", () => {
     const list = await screen.findByRole("listbox", { name: "Composer completions" });
     expect(list).toHaveClass("completion");
     expect(list).toHaveTextContent(/no files match/i);
+    expect(list.firstElementChild?.tagName).toBe("DIV");
+    expect(list.querySelector(":scope > span")).toBeNull();
     expect(within(list).queryByRole("option")).not.toBeInTheDocument();
     fireEvent.keyDown(box, { key: "ArrowUp" });
     expect(box.selectionStart).toBe(5);
