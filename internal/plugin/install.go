@@ -357,7 +357,7 @@ func ParseInstallSource(arg string) (localPath, gitURL, catalogPackage, catalogV
 			return "", "", "", "", fmt.Errorf("catalog: requires package id")
 		}
 		pkg, ver := splitPackageVersion(rest)
-		if err := ValidatePluginID(pkg); err != nil {
+		if err := ValidatePluginKey(pkg); err != nil {
 			return "", "", "", "", fmt.Errorf("catalog package: %w", err)
 		}
 		return "", "", pkg, ver, nil

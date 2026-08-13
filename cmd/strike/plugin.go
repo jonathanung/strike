@@ -243,8 +243,8 @@ func runPluginInspect(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "contribs: agents=%d skills=%d workflows=%d themes=%d providers=%d mcp=%d harnesses=%d hooks=%d panes=%d\n",
 			len(c.Agents), len(c.Skills), len(c.Workflows), len(c.Themes), len(c.Providers),
 			len(c.MCP), len(c.Harnesses), len(c.Hooks), len(c.Panes))
-		if plugin.HasExecutableContributions(*p.Manifest) {
-			caps := plugin.InferCapabilities(*p.Manifest)
+		if plugin.HasExecutableContributionsAt(*p.Manifest, p.Root) {
+			caps := plugin.InferCapabilitiesAt(*p.Manifest, p.Root)
 			digest := p.Digest
 			if live, err := plugin.ComputeDigest(p.Root); err == nil {
 				digest = live

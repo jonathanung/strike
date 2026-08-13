@@ -68,6 +68,7 @@ type CompiledMCP struct {
 	Command   string // absolute when relative was resolved
 	Args      []string
 	Env       map[string]string
+	Cwd       string // subprocess working directory; empty inherits
 	URL       string
 	Headers   map[string]string
 }
@@ -204,7 +205,7 @@ func CompileExecutables(opts Options, userMCP, userHarnesses map[string]struct{}
 		trusted := match.OK
 
 		if trusted {
-			mcpList, mcpDiags := compileMCP(p, userMCP, out.MCPByName)
+			mcpList, mcpDiags := compileMCP(p, opts, userMCP, out.MCPByName)
 			out.Diagnostics = append(out.Diagnostics, mcpDiags...)
 			for _, cm := range mcpList {
 				if _, blocked := mcpBlocked[cm.Name]; blocked {
@@ -308,7 +309,135 @@ func lockEntryFor(id string, scope Scope, global, project Lockfile) (LockfileEnt
 	return LockfileEntry{}, false
 }
 
-func compileMCP(p Plugin, userNames map[string]struct{}, claimed map[string]string) ([]CompiledMCP, []Diagnostic) {
+func compileMCP(p Plugin, opts Options, userNames map[string]struct{}, claimed map[string]string) ([]CompiledMCP, []Diagnostic) {
+	if p.Manifest.Format == FormatAPS {
+		return compileAPSMCP(p, opts, userNames)
+	}
+	return compileLegacyMCP(p, userNames, claimed)
+}
+
+func compileAPSMCP(p Plugin, opts Options, userNames map[string]struct{}) ([]CompiledMCP, []Diagnostic) {
+	var out []CompiledMCP
+	var diags []Diagnostic
+	base := Diagnostic{PluginID: p.ID, Version: p.Version, Source: p.Source, Path: p.Root}
+
+	file, fileDiags, err := loadAPSMCPFile(p.Root)
+	if err != nil {
+		d := base
+		d.Severity = SeverityWarning
+		d.Code = "malformed"
+		d.Message = err.Error() + "; MCP disabled for this plugin"
+		return nil, append(diags, d)
+	}
+	for _, d := range fileDiags {
+		d.PluginID = p.ID
+		d.Version = p.Version
+		d.Source = p.Source
+		if d.Path == "" {
+			d.Path = "mcp.json"
+		}
+		diags = append(diags, d)
+	}
+	if file.disabled {
+		return nil, diags
+	}
+
+	pluginRoot := resolvedPluginRoot(p.Root)
+	dataDir := PluginDataDir(p.Source, p.ID, opts)
+
+	for _, e := range file.servers {
+		if e.Skip {
+			d := base
+			d.Severity = SeverityWarning
+			d.Code = e.SkipCode
+			if d.Code == "" {
+				d.Code = "malformed"
+			}
+			d.Message = e.SkipMsg
+			d.Path = "mcp.json"
+			diags = append(diags, d)
+			continue
+		}
+		name := e.Name
+		if _, ok := userNames[name]; ok {
+			d := base
+			d.Severity = SeverityWarning
+			d.Code = "collision"
+			d.Collision = name
+			d.Message = fmt.Sprintf("mcp server %q skipped: user config overrides plugin", name)
+			diags = append(diags, d)
+			continue
+		}
+		cm := CompiledMCP{
+			PluginID:  p.ID,
+			Version:   p.Version,
+			Scope:     p.Source,
+			Name:      name,
+			Transport: e.Transport,
+			URL:       e.URL,
+			Headers:   copyStringMap(e.Headers),
+		}
+		if e.Transport == "http" {
+			out = append(out, cm)
+			continue
+		}
+
+		cmd, err := resolveAPSCommand(pluginRoot, e.Command)
+		if err != nil {
+			d := base
+			d.Severity = SeverityError
+			d.Code = "path"
+			d.Message = fmt.Sprintf("mcp %q command: %v", name, err)
+			diags = append(diags, d)
+			continue
+		}
+		if dataDir != "" {
+			if err := EnsurePluginDataDir(dataDir); err != nil {
+				d := base
+				d.Severity = SeverityError
+				d.Code = "path"
+				d.Message = fmt.Sprintf("mcp %q PLUGIN_DATA: %v", name, err)
+				diags = append(diags, d)
+				continue
+			}
+		}
+		dataAbs := dataDir
+		if dataAbs != "" {
+			if a, err := filepath.Abs(dataAbs); err == nil {
+				dataAbs = a
+			}
+		}
+		cwd, err := resolveAPSCWD(pluginRoot, dataAbs, e.Cwd)
+		if err != nil {
+			d := base
+			d.Severity = SeverityError
+			d.Code = "path"
+			d.Message = fmt.Sprintf("mcp %q cwd: %v", name, err)
+			diags = append(diags, d)
+			continue
+		}
+		args := make([]string, len(e.Args))
+		for i, a := range e.Args {
+			args[i] = expandPluginPlaceholders(a, pluginRoot, dataAbs)
+		}
+		env := map[string]string{}
+		for k, v := range e.Env {
+			env[k] = expandPluginPlaceholders(v, pluginRoot, dataAbs)
+		}
+		// Spec §9.1: overlay configured env, then set PLUGIN_ROOT / PLUGIN_DATA.
+		env["PLUGIN_ROOT"] = pluginRoot
+		env["PLUGIN_DATA"] = dataAbs
+		cm.Command = cmd
+		cm.Args = args
+		cm.Env = env
+		cm.Cwd = cwd
+		cm.Transport = "stdio"
+		out = append(out, cm)
+	}
+	return out, diags
+}
+
+func compileLegacyMCP(p Plugin, userNames map[string]struct{}, claimed map[string]string) ([]CompiledMCP, []Diagnostic) {
 	var out []CompiledMCP
 	var diags []Diagnostic
 	base := Diagnostic{PluginID: p.ID, Version: p.Version, Source: p.Source}

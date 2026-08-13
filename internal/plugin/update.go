@@ -151,7 +151,7 @@ func Update(ctx context.Context, opts UpdateOptions) (UpdateResult, error) {
 		return UpdateResult{}, fmt.Errorf("update requires confirmation (--yes) after review")
 	}
 	id := strings.TrimSpace(opts.ID)
-	if err := ValidatePluginID(id); err != nil {
+	if err := ValidatePluginKey(id); err != nil {
 		return UpdateResult{}, err
 	}
 	ip, err := Inspect(EnableOptions{

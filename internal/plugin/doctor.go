@@ -203,6 +203,9 @@ func doctorOne(ip InstalledPlugin, strikeVer string) DoctorPlugin {
 
 	// Executable contributions: summarize without secrets; report trust state.
 	mcp, harnesses, hooks, panes := summarizeExecutables(m.Contributions)
+	if m.Format == FormatAPS {
+		mcp = summarizeAPSMCP(ip.Root)
+	}
 	dp.Contributions.MCP = mcp
 	dp.Contributions.Harnesses = harnesses
 	dp.Contributions.Hooks = hooks
@@ -297,6 +300,39 @@ func summarizeExecutables(c Contributions) (mcp []DoctorMCP, harnesses []DoctorH
 		})
 	}
 	return mcp, harnesses, hooks, panes
+}
+
+func summarizeAPSMCP(root string) []DoctorMCP {
+	f, _, err := loadAPSMCPFile(root)
+	if err != nil || f.disabled {
+		return nil
+	}
+	var mcp []DoctorMCP
+	for _, s := range f.servers {
+		if s.Skip {
+			continue
+		}
+		var envKeys []string
+		for k := range s.Env {
+			envKeys = append(envKeys, k)
+		}
+		sort.Strings(envKeys)
+		var headerKeys []string
+		for k := range s.Headers {
+			headerKeys = append(headerKeys, k)
+		}
+		sort.Strings(headerKeys)
+		mcp = append(mcp, DoctorMCP{
+			Name:       s.Name,
+			Transport:  s.Transport,
+			Command:    s.Command,
+			Args:       s.Args,
+			EnvKeys:    envKeys,
+			URL:        scrubURL(s.URL),
+			HeaderKeys: headerKeys,
+		})
+	}
+	return mcp
 }
 
 func findPassiveCollisions(plugins []Plugin) []Diagnostic {
