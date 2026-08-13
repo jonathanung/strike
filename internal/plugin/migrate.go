@@ -369,7 +369,7 @@ func planLegacyMigrate(src string, m Manifest) (MigratePlan, error) {
 		if name == "" {
 			name = fmt.Sprintf("harness-%d", i+1)
 		}
-		to := strikeCLIRel("harnesses", sanitizeJSONFileName(name))
+		to := uniqueRel(used, strikeCLIRel("harnesses", sanitizeJSONFileName(name)))
 		note := "strike-only"
 		if err != nil {
 			note = "strike-only (invalid harness kept as JSON)"
@@ -405,6 +405,7 @@ func planLegacyMigrate(src string, m Manifest) (MigratePlan, error) {
 	if len(c.MCP) > 0 {
 		plan.Notes = append(plan.Notes, "emit mcp.json from contributions.mcp (http → streamable-http; relative commands become ./…)")
 	}
+	plan.Notes = append(plan.Notes, leftoverSkillNotes(src, m)...)
 	plan.Notes = append(plan.Notes, "write plugin.json with APS $schema and extensions.com.strike.cli")
 	return plan, nil
 }
@@ -532,7 +533,7 @@ func writeMigratedTree(src, dest string, m Manifest, plan MigratePlan) error {
 	if err := copyMigratedSkills(src, dest, m, plan); err != nil {
 		return err
 	}
-	if err := writeHarnessFiles(src, dest, m, relocatedBins); err != nil {
+	if err := writeHarnessFiles(src, dest, m, plan, relocatedBins); err != nil {
 		return err
 	}
 	if err := writeHookFiles(src, dest, m, relocatedBins); err != nil {
@@ -547,10 +548,50 @@ func writeMigratedTree(src, dest string, m Manifest, plan MigratePlan) error {
 	return nil
 }
 
+func leftoverSkillNotes(src string, m Manifest) []string {
+	declared := map[string]struct{}{}
+	for _, e := range m.Contributions.Skills {
+		rel := filepath.ToSlash(strings.TrimSpace(e.Path))
+		if rel == "" {
+			continue
+		}
+		if strings.EqualFold(filepath.Base(rel), "SKILL.md") {
+			dir := filepath.ToSlash(filepath.Dir(rel))
+			if dir != "" && dir != "." {
+				declared[dir] = struct{}{}
+			}
+			continue
+		}
+		declared[rel] = struct{}{}
+	}
+	entries, err := os.ReadDir(filepath.Join(src, "skills"))
+	if err != nil {
+		return nil
+	}
+	var notes []string
+	for _, e := range entries {
+		rel := filepath.ToSlash(filepath.Join("skills", e.Name()))
+		if _, ok := declared[rel]; ok {
+			continue
+		}
+		if e.IsDir() {
+			if _, err := os.Stat(filepath.Join(src, "skills", e.Name(), "SKILL.md")); err != nil {
+				continue
+			}
+			notes = append(notes, "skip undeclared leftover skill dir "+rel+" (not in contributions.skills)")
+			continue
+		}
+		notes = append(notes, "skip undeclared leftover "+rel+" (not in contributions.skills)")
+	}
+	return notes
+}
+
 func migrateSkipSet(src string, m Manifest) (map[string]struct{}, error) {
 	skip := map[string]struct{}{
 		"plugin.json":  {},
 		"plugin.jsonc": {},
+		"mcp.json":     {},
+		"skills":       {},
 	}
 	add := func(rel string) {
 		rel = filepath.ToSlash(strings.TrimSpace(rel))
@@ -876,15 +917,19 @@ func rewriteRelCommand(command string, relocated map[string]string) string {
 	return command
 }
 
-func writeHarnessFiles(src, dest string, m Manifest, relocated map[string]string) error {
+func writeHarnessFiles(src, dest string, m Manifest, plan MigratePlan, relocated map[string]string) error {
 	_ = src
+	idx := map[string]string{}
+	for _, mv := range plan.Moves {
+		idx[mv.From] = mv.To
+	}
 	for i, raw := range m.Contributions.Harnesses {
-		e, err := parseHarnessEntry(raw)
-		name := strings.TrimSpace(e.Name)
-		if name == "" {
-			name = fmt.Sprintf("harness-%d", i+1)
+		from := "contributions.harnesses[" + strconv.Itoa(i) + "]"
+		toRel, ok := idx[from]
+		if !ok {
+			return fmt.Errorf("internal: missing migrate plan for %s", from)
 		}
-		toRel := strikeCLIRel("harnesses", sanitizeJSONFileName(name))
+		e, err := parseHarnessEntry(raw)
 		out := raw
 		if err == nil && strings.TrimSpace(e.Command) != "" {
 			newCmd := rewriteRelCommand(e.Command, relocated)

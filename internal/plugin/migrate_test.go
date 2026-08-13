@@ -603,3 +603,112 @@ func TestMigrate_LockfileWriteFailureLeavesLegacy(t *testing.T) {
 		t.Fatalf("want legacy remaining after lockfile failure, got %+v %v", m, err)
 	}
 }
+
+func TestMigrate_LeftoverUndeclaredSkillNotCopied(t *testing.T) {
+	src := t.TempDir()
+	writePlugin(t, src, "acme.pack", map[string]string{
+		"plugin.json": `{
+  "schemaVersion": 1,
+  "id": "acme.pack",
+  "version": "1.0.0",
+  "name": "Pack",
+  "strike": { "min": "0.1.0" },
+  "contributions": { "skills": [{ "path": "skills/ship-review/SKILL.md" }] }
+}`,
+		"skills/ship-review/SKILL.md": validSkillMD("ship-review"),
+		"skills/wip/SKILL.md":         validSkillMD("wip"),
+		"mcp.json": `{
+  "$schema": "https://raw.githubusercontent.com/anthropics/agent-plugins/v1.0.0/schemas/schema.json",
+  "mcpServers": {
+    "leftover": { "type": "stdio", "command": "echo" }
+  }
+}
+`,
+	})
+	before, diags := LoadOne(src, ScopeGlobal, "0.2.0")
+	if before == nil {
+		t.Fatalf("legacy load: %v", diags)
+	}
+	if len(before.Skills) != 1 || before.Skills[0].RelPath != "skills/ship-review/SKILL.md" {
+		t.Fatalf("legacy skills=%v", before.Skills)
+	}
+
+	dry, err := Migrate(MigrateOptions{Target: src, StrikeVersion: "0.2.0", DryRun: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := dry.Plan.Format()
+	if !strings.Contains(plan, "skip undeclared leftover skill dir skills/wip") {
+		t.Fatalf("dry-run missing leftover skip note:\n%s", plan)
+	}
+
+	if _, err := Migrate(MigrateOptions{Target: src, StrikeVersion: "0.2.0"}); err != nil {
+		t.Fatal(err)
+	}
+	after, diags := LoadOne(src, ScopeGlobal, "0.2.0")
+	if after == nil {
+		t.Fatalf("aps load: %v", diags)
+	}
+	if len(after.Skills) != 1 || after.Skills[0].RelPath != "skills/ship-review/SKILL.md" {
+		t.Fatalf("want only declared skill, got %v", after.Skills)
+	}
+	if _, err := os.Stat(filepath.Join(src, "skills/wip/SKILL.md")); !os.IsNotExist(err) {
+		t.Fatal("undeclared leftover skill should not be copied")
+	}
+	if after.MCPCount != 0 {
+		t.Fatalf("leftover mcp.json must not become APS MCP, got %d", after.MCPCount)
+	}
+}
+
+func TestMigrate_HarnessNameCollisionUniquified(t *testing.T) {
+	src := t.TempDir()
+	writePlugin(t, src, "acme.pack", map[string]string{
+		"plugin.json": `{
+  "schemaVersion": 1,
+  "id": "acme.pack",
+  "version": "1.0.0",
+  "name": "Pack",
+  "strike": { "min": "0.1.0" },
+  "capabilities": ["harnesses"],
+  "contributions": {
+    "harnesses": [
+      { "name": "foo bar", "command": "bin/a" },
+      { "name": "foo-bar", "command": "bin/b" }
+    ]
+  }
+}`,
+		"bin/a": "#!/bin/sh\necho a\n",
+		"bin/b": "#!/bin/sh\necho b\n",
+	})
+	if _, err := Migrate(MigrateOptions{Target: src, StrikeVersion: "0.2.0"}); err != nil {
+		t.Fatal(err)
+	}
+	first, err := os.ReadFile(filepath.Join(src, "com.strike.cli/harnesses/foo-bar.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := os.ReadFile(filepath.Join(src, "com.strike.cli/harnesses/foo-bar-2.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(first), `"name": "foo bar"`) && !strings.Contains(string(second), `"name": "foo bar"`) {
+		t.Fatalf("lost foo bar harness: %s %s", first, second)
+	}
+	if !strings.Contains(string(first), `"name": "foo-bar"`) && !strings.Contains(string(second), `"name": "foo-bar"`) {
+		t.Fatalf("lost foo-bar harness: %s %s", first, second)
+	}
+	if strings.Contains(string(first), string(second)) {
+		t.Fatal("harness files should not be identical")
+	}
+	a, err := os.ReadFile(filepath.Join(src, "com.strike.cli/bin/a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(src, "com.strike.cli/bin/b"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(a), "echo a") || !strings.Contains(string(b), "echo b") {
+		t.Fatalf("binaries: %q %q", a, b)
+	}
+}
