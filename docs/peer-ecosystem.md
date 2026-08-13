@@ -34,7 +34,7 @@ license-incompatible copy-paste, default product stays lean.
 | Security review pack | CC security-review | gap (use `/review` + focus args) | gap |
 | Changelog / translate packs | OpenCode commands | gap (user skills) | gap |
 | Node plugin hosts | OpenCode plugins | **out of scope** | wont |
-| Versioned contribution bundles | — | Strike plugin packages (manifest + trust; no Node/Go in-process ABI) | contract [plugins.md](plugins.md) (#725); pane ABI [plugin-panes.md](plugin-panes.md) (#522); loaders later |
+| Versioned contribution bundles | Agent Plugins 1.0.0 | Strike is an Agent Plugins client for skills + MCP; Strike-only assets in `com.strike.cli`; no Node/Go in-process ABI | contract [plugins.md](plugins.md) ([#1142](https://github.com/jonathanung/strike/issues/1142), epic [#1141](https://github.com/jonathanung/strike/issues/1141)); pane ABI [plugin-panes.md](plugin-panes.md) (#522) |
 | Full IDE extensions | peers | **out of scope** | wont |
 
 ## Built-in skills (this wave)
@@ -163,7 +163,7 @@ does not skip asks. `yolo` + `sandbox: off` requires `--i-know`.
 | Managed / MDM settings | CC/OC enterprise | shipped (`managed-config` + deny ceiling; #764) | shipped |
 | JSON schema `$schema` | both | shipped (main config; `schemas/strike-config.schema.json`, runtime ignores/`no fetch`) | shipped (main); sidecars later |
 | Main config JSONC | OC | partial (`mcp`/`providers`/`keybinds` JSONC; main `config` is JSON) | gap |
-| Plugins / Node hosts | OC plugins | **out of scope** (Node host); Strike contribution bundles: [plugins.md](plugins.md) | wont / contract |
+| Plugins / Node hosts | OC plugins | **out of scope** (Node host); Strike packages: [Agent Plugins](https://agent-plugins.org/) + `com.strike.cli` ([plugins.md](plugins.md)) | wont / contract |
 
 ### `/settings` coverage
 

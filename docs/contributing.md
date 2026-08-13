@@ -163,7 +163,7 @@ matching paths (and keep relative links valid):
 | CLI flags / `exec` | `cmd/strike` + `strike --help` | [install.md](install.md), [usage.md](usage.md) |
 | Config / custom providers / `vimMode`/`nanoMode` | `internal/config` | [config.md](config.md) |
 | Agents, skills, workflows | `internal/config` builtins + loaders | [agents-skills.md](agents-skills.md) |
-| Plugin bundles (contract) | docs only until loaders (#726+) | [plugins.md](plugins.md) |
+| Plugin bundles (contract) | [plugins.md](plugins.md) (Agent Plugins 1.0.0; #1142) | [plugins.md](plugins.md) |
 | Plugin panes (ABI) | docs only until TUI/web hosts (#731/#732) | [plugin-panes.md](plugin-panes.md) |
 | Tool inventory | `internal/tool` + `cmd/strike/wire.go` | [ARCHITECTURE.md](ARCHITECTURE.md) |
 | Index | — | [README.md](../README.md) |
