@@ -14,6 +14,10 @@ materially affect the shipped product.
 
 ## [Unreleased]
 
+### Added
+
+- **`strike plugin migrate`** — convert a legacy Strike-native bundle to Agent Plugins 1.0.0 (`plugin.json`, portable `skills/` + `mcp.json`, Strike-only files under `com.strike.cli/`). Atomic: stage, validate, then replace. Installed plugins require `--yes`; digest is recomputed and trust is cleared (not auto-granted). `--dry-run` prints the plan. Already-APS packages are refused ([#1145](https://github.com/jonathanung/strike/issues/1145)).
+
 ### Changed
 
 - **Plugin contract** — native on-disk format is [Agent Plugins](https://agent-plugins.org/) 1.0.0 (`plugin.json`, portable `skills/` + `mcp.json`). Strike-only assets use `com.strike.cli`. See [docs/plugins.md](docs/plugins.md) ([#1142](https://github.com/jonathanung/strike/issues/1142)).

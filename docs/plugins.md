@@ -193,6 +193,7 @@ binaries, and config that ship in the package.
 | `search <query> --registry <url>` | Search a remote catalog index. |
 | `outdated [--registry]` | List catalog-sourced installs with a newer published version. |
 | `update <name> --yes` | Show contribution/capability review, then install newer catalog version (rollback-safe). |
+| `migrate <name\|path>` | Convert a **legacy** Strike-native bundle to Agent Plugins 1.0.0. Stage, validate with the APS loader, then replace. Failed migrate leaves the prior tree enabled. Installed plugins require `--yes`; `--dry-run` prints the plan. After an installed migrate: recompute digest, **clear trust**, print a review summary (do not auto-trust). Refuse already-APS packages. |
 | `list` / `inspect <name>` | Show installed plugins (including disabled) with scope, digest, source, trust state. |
 | `enable` / `disable <name>` | Toggle lockfile `enabled`. Disable **preserves** source files; disabled plugins contribute nothing (passive or executable) on next launch. |
 | `trust <name>` | Record executable trust for the current content digest + source identity + capability set. Required before MCP/harness/shell-hook/process-pane activation. |
@@ -206,7 +207,8 @@ to replace. Project scope uses the process working directory's `./.strike`.
 Install destinations cannot escape the configured plugins roots. Lockfile
 updates use an exclusive advisory lock plus atomic rename so concurrent
 lifecycle ops are safe. Updates are never unattended (`--yes` required after
-review).
+review). `migrate` of an installed plugin is never unattended (`--yes` after
+the plan).
 
 Drop a validated bundle under a plugins root manually if needed (directory name
 need not match `name`; the manifest `name` is authoritative). Restart Strike to
@@ -1038,6 +1040,7 @@ authoring format from this contract forward.
 | Pane host / web | #731 #732 | implement [plugin-panes.md](plugin-panes.md); no TUI type leakage to web |
 | APS portable load | #1143 | skills/`SKILL.md` + `mcp.json` |
 | APS Strike-only load | #1144 (`com.strike.cli/`) | §3.4, §3.8, §7.1–7.5, §7.7–7.9 |
+| Legacy → APS migrate | #1145 (`strike plugin migrate`) | §2.3, §3.10 |
 
 ---
 
@@ -1053,8 +1056,8 @@ authoring format from this contract forward.
 - Inventing a second portable component type beyond skills and MCP.
 - Changing the pane ABI (definition schema, render tree, process protocol)
   beyond how panes are packaged.
-- Loader/CLI implementation, `strike plugin migrate`, or refusing new legacy
-  installs (APS.2–APS.6).
+- Loader/CLI implementation or refusing new legacy
+  installs (APS.2–APS.3, APS.6). `strike plugin migrate` is #1145.
 
 ## 13. Acceptance mapping (#1142)
 

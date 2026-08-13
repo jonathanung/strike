@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -23,6 +24,7 @@ Usage:
   strike plugin search <query> --registry <url>
   strike plugin outdated [--registry <url>] [--scope global|project]
   strike plugin update <id> --yes [--registry <url>] [--version <ver>] [--scope global|project]
+  strike plugin migrate <id|path> [--yes] [--dry-run] [--scope global|project]
   strike plugin enable <id> [--scope global|project]
   strike plugin disable <id> [--scope global|project]
   strike plugin trust <id> [--scope global|project]
@@ -47,6 +49,11 @@ Update options:
   --force                  Allow reinstall when not strictly newer
   --scope global|project
 
+Migrate options:
+  --yes                    Confirm modifying an installed plugin (required)
+  --dry-run                Print the conversion plan without writing
+  --scope global|project   Resolve an installed id (when target is not a path)
+
 Scopes:
   global   ~/.strike/plugins/<id>/  + ~/.strike/plugins.lock.json
   project  ./.strike/plugins/<id>/  + ./.strike/plugins.lock.json  (cwd)
@@ -59,6 +66,9 @@ Notes:
   - Catalog metadata cannot enable or execute content; trust is separate (#728).
   - Updates that change digest/source/executable contributions clear prior trust.
   - Failed download, verification, validation, or activation preserves the prior version.
+  - migrate converts a legacy Strike-native bundle to Agent Plugins 1.0.0.
+    Failed migrate leaves the prior tree enabled. Installed plugins require --yes;
+    trust is cleared (layout changed) and is not auto-granted.
   - disable keeps files; remove deletes files and lockfile entry (--yes required).
   - trust grants executable MCP/harness/shell-hook activation for the current
     content digest + source identity + capability set; untrust revokes it.
@@ -85,6 +95,8 @@ func runPluginCLI(args []string, stdout, stderr io.Writer) int {
 		return runPluginOutdated(args[1:], stdout, stderr)
 	case "update":
 		return runPluginUpdate(args[1:], stdout, stderr)
+	case "migrate":
+		return runPluginMigrate(args[1:], stdout, stderr)
 	case "enable":
 		return runPluginEnable(args[1:], stdout, stderr, true)
 	case "disable":
@@ -505,6 +517,64 @@ func runPluginUpdate(args []string, stdout, stderr io.Writer) int {
 	fmt.Fprintf(stdout, "  digest: %s\n", res.Install.Digest)
 	if res.Review.TrustInvalidated {
 		fmt.Fprintln(stdout, "  trust:  invalidated (re-review required for executable activation)")
+	}
+	return 0
+}
+
+func runPluginMigrate(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("plugin migrate", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	scopeFlag := parsePluginScope(fs)
+	yes := fs.Bool("yes", false, "confirm modifying an installed plugin")
+	dryRun := fs.Bool("dry-run", false, "print the plan without writing")
+	flagArgs, pos := splitPluginArgs(args, map[string]bool{"scope": true})
+	if err := fs.Parse(flagArgs); err != nil {
+		return 2
+	}
+	if len(pos) < 1 {
+		fmt.Fprintln(stderr, "usage: strike plugin migrate <id|path> [--yes] [--dry-run] [--scope global|project]")
+		return 2
+	}
+	scope, err := scopeFromFlag(*scopeFlag)
+	if err != nil {
+		fmt.Fprintln(stderr, "strike plugin migrate:", err)
+		return 2
+	}
+	opts := pluginDiscoverOpts()
+	res, err := plugin.Migrate(plugin.MigrateOptions{
+		Target:  pos[0],
+		Scope:   scope,
+		WorkDir: opts.WorkDir,
+		DryRun:  *dryRun,
+		Confirm: *yes,
+	})
+	if err != nil {
+		if res.Plan.ID != "" {
+			fmt.Fprint(stdout, res.Plan.Format())
+		}
+		if errors.Is(err, plugin.ErrAlreadyAPS) {
+			fmt.Fprintf(stderr, "strike plugin migrate: plugin %q is already an Agent Plugins 1.0.0 package; nothing to migrate\n", res.ID)
+			return 1
+		}
+		if errors.Is(err, plugin.ErrNeedYes) {
+			fmt.Fprintln(stderr, "strike plugin migrate: re-run with --yes to modify the installed plugin")
+			return 2
+		}
+		fmt.Fprintln(stderr, "strike plugin migrate:", err)
+		return 1
+	}
+	fmt.Fprint(stdout, res.Plan.Format())
+	if *dryRun || !res.Applied {
+		fmt.Fprintln(stdout, "(dry-run: no files changed)")
+		return 0
+	}
+	fmt.Fprintf(stdout, "Migrated %s@%s to Agent Plugins 1.0.0\n", res.ID, res.Version)
+	fmt.Fprintf(stdout, "  root:   %s\n", res.Root)
+	if res.Digest != "" {
+		fmt.Fprintf(stdout, "  digest: %s\n", res.Digest)
+	}
+	if res.Review != "" {
+		fmt.Fprint(stdout, res.Review)
 	}
 	return 0
 }
