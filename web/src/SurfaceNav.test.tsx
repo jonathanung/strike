@@ -119,8 +119,15 @@ describe("SurfaceNav", () => {
     expect(rule?.[0]).not.toMatch(/flex-wrap:\s*nowrap/);
     expect(rule?.[0]).toMatch(/overflow-x:\s*hidden/);
     expect(rule?.[0]).not.toMatch(/overflow-x:\s*auto/);
+    expect(rule?.[0]).toMatch(/flex:\s*0\s+0\s+auto/);
     const sheet = css.match(/\.surface-nav-sheet\s*\{[\s\S]*?\n\}/);
     expect(sheet?.[0]).toMatch(/max-height:\s*40vh/);
     expect(css).toMatch(/\.surface-nav-list\s*\{[\s\S]*flex-direction:\s*column/);
+    const inspector = css.match(/^\.inspector \{[\s\S]*?\n\}/m);
+    expect(inspector?.[0]).toMatch(/flex-direction:\s*column/);
+    const body = css.match(/\.inspector-body\s*\{[\s\S]*?\n\}/);
+    expect(body?.[0]).toMatch(/flex:\s*1/);
+    expect(body?.[0]).toMatch(/min-height:\s*0/);
+    expect(body?.[0]).not.toMatch(/calc\(100%\s*-\s*48px\)/);
   });
 });

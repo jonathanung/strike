@@ -315,6 +315,7 @@ button:disabled, select:disabled, input:disabled, textarea:disabled {
   display: flex;
   flex-wrap: wrap;
   align-content: flex-start;
+  flex: 0 0 auto;
   width: 100%;
   min-width: 0;
   overflow-x: hidden;
@@ -956,7 +957,13 @@ main {
   filter: none;
 }
 
-.inspector { border-left: 1px solid var(--rule); min-width: 0; overflow: hidden; }
+.inspector {
+  border-left: 1px solid var(--rule);
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
 .navigation.collapsed, .inspector.collapsed { opacity: 0; pointer-events: none; }
 .panel-resize {
   position: absolute;
@@ -984,7 +991,13 @@ main {
   background: color-mix(in srgb, var(--acid) 55%, transparent);
 }
 
-.inspector-body { height: calc(100% - 48px); overflow: auto; padding: 20px 16px; }
+.inspector-body {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+  overflow: auto;
+  padding: 20px 16px;
+}
 .inspector h2 {
   margin: 8px 0 16px;
   font-family: Georgia, "Times New Roman", serif;
@@ -1412,6 +1425,7 @@ dialog input { padding: 12px; color: var(--ink); }
 
 /* Phone surface subnav: accessible list/sheet (WEBUI.12) — not a compressed tab strip. */
 .surface-nav-sheet {
+  flex: 0 0 auto;
   border-bottom: 1px solid var(--rule);
   max-height: 40vh;
   overflow: auto;
