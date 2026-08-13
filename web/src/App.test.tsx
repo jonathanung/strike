@@ -443,7 +443,7 @@ describe("App", () => {
       }),
     } as MessageEvent);
     expect(await screen.findByRole("alert", { name: "Context fit warning" })).toHaveTextContent("projected prompt");
-    expect(screen.getByText("90,000 / 200,000")).toBeInTheDocument();
+    expect(screen.getAllByText("90,000 / 200,000").length).toBeGreaterThanOrEqual(1);
 
     ws.onmessage?.({
       data: JSON.stringify({
@@ -782,10 +782,97 @@ describe("App", () => {
     expect(screen.queryByText("None dispatched")).not.toBeInTheDocument();
     expect(screen.queryByText("CHILD AGENTS")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Child agents")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Session group")).not.toBeInTheDocument();
     // workspace meta is collapsed details, not a permanent ROOT/BUILD footer competing with sessions
     const meta = screen.getByText("Workspace").closest("details");
     expect(meta).toBeTruthy();
     expect(meta).not.toHaveAttribute("open");
+  });
+
+  it("stacks context, activity, and queue in the Chat inspector without exclusive tabs", async () => {
+    render(<App />);
+    await screen.findByText("Current");
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    expect(screen.getByRole("button", { name: "Toggle inspector" })).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(screen.getByRole("button", { name: "Toggle inspector" }));
+    const group = screen.getByLabelText("Session group");
+    expect(group).toContainElement(screen.getByLabelText("Context summary"));
+    expect(group).toContainElement(screen.getByLabelText("Activity"));
+    expect(group).toContainElement(screen.getByLabelText("Queue"));
+    expect(screen.getByLabelText("Activity")).toHaveTextContent("No child agents");
+    expect(screen.getByLabelText("Queue")).toHaveTextContent(/Queue is empty/);
+    expect(screen.getByRole("heading", { name: "Context doctor" })).toBeInTheDocument();
+    FakeWebSocket.instances[0].onmessage?.({
+      data: JSON.stringify({ type: "turn.started", data: { turnId: "t" } }),
+    } as MessageEvent);
+    fireEvent.change(screen.getByLabelText(/Instruction/), { target: { value: "queued while open" } });
+    fireEvent.submit(screen.getByLabelText(/Instruction/).closest("form")!);
+    const list = screen.getByRole("list", { name: "Queued prompts" });
+    expect(list).toHaveTextContent("queued while open");
+    expect(group).toContainElement(list);
+    fireEvent.click(screen.getByRole("button", { name: "Clear queue" }));
+    expect(screen.queryByRole("list", { name: "Queued prompts" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Toggle inspector" }));
+    expect(screen.queryByLabelText("Session group")).not.toBeInTheDocument();
+    expect(document.querySelector(".app-shell")).toHaveStyle({ "--inspector-width": "0px" });
+  });
+
+  it("keeps the session group visible when switching Chat inspector tabs", async () => {
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("bootstrap")) return response({ version: "test", authRequired: false, attachOnly: false, capabilities: { live: true, files: true, issues: true }, protocolOps: ["user.input"], status: { sessionId: "live", provider: "echo", busy: false }, agents: [{ name: "build" }], skills: [] });
+      if (url.includes("sessions")) return response({ sessions: [{ id: "live", title: "Current" }], liveId: "live" });
+      if (url.includes("changed-files")) return response({ files: [] });
+      if (url.includes("issues")) return response({ issues: [] });
+      return response({ ok: true });
+    }));
+    render(<App />);
+    await screen.findByText("Current");
+    fireEvent.click(screen.getByRole("button", { name: "Toggle inspector" }));
+    expect(screen.getByLabelText("Session group")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "files" }));
+    expect(await screen.findByText("No changed files reported.")).toBeInTheDocument();
+    expect(screen.getByLabelText("Session group")).toBeInTheDocument();
+    expect(screen.getByLabelText("Context summary")).toBeInTheDocument();
+    expect(screen.getByLabelText("Activity")).toBeInTheDocument();
+    expect(screen.getByLabelText("Queue")).toBeInTheDocument();
+  });
+
+  it("shows child activity in the session group instead of duplicating the rail", async () => {
+    render(<App />);
+    await screen.findByText("Current");
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    FakeWebSocket.instances[0].onmessage?.({
+      data: JSON.stringify({ type: "child.started", time: "1", data: { sessionId: "c1", agent: "explore", name: "scout" } }),
+    } as MessageEvent);
+    expect(await screen.findByLabelText("Child scout")).toBeInTheDocument();
+    expect(screen.getByLabelText("Child agents")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Toggle inspector" }));
+    expect(screen.getAllByLabelText("Child scout")).toHaveLength(1);
+    expect(screen.getByLabelText("Session group")).toContainElement(screen.getByLabelText("Child scout"));
+    fireEvent.click(screen.getByRole("button", { name: "Toggle inspector" }));
+    expect(screen.getByLabelText("Child scout")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Session group")).not.toBeInTheDocument();
+  });
+
+  it("hides the Chat session group when leaving Chat mode", async () => {
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("bootstrap")) return response({
+        version: "test", authRequired: false, attachOnly: false,
+        capabilities: { live: true, settings: true },
+        protocolOps: ["user.input"], status: { sessionId: "live", provider: "echo", busy: false },
+        agents: [], skills: [],
+      });
+      if (url.includes("sessions")) return response({ sessions: [{ id: "live", title: "Current" }], liveId: "live" });
+      return response({ ok: true });
+    }));
+    render(<App />);
+    await screen.findByText("Current");
+    fireEvent.click(screen.getByRole("button", { name: "Toggle inspector" }));
+    expect(screen.getByLabelText("Session group")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Ops:/ }));
+    expect(screen.queryByLabelText("Session group")).not.toBeInTheDocument();
   });
 
   it("keeps fork/rename/delete behind a Session menu when sessions capability is on", async () => {
