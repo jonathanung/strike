@@ -437,3 +437,116 @@ func TestValidatePluginKey_Union(t *testing.T) {
 		t.Fatal("expected error")
 	}
 }
+
+func TestDiscover_APSInvalidMCPJSONDiagnostic(t *testing.T) {
+	home := t.TempDir()
+	root := filepath.Join(home, ".strike", "plugins", "acme.tools")
+	writePlugin(t, root, "acme.tools", map[string]string{
+		"plugin.json":         apsManifest("acme.tools"),
+		"skills/foo/SKILL.md": validSkillMD("foo"),
+		"mcp.json": `{
+  "$schema": "https://example.com/not-aps.json",
+  "mcpServers": { "x": { "type": "stdio", "command": "echo" } }
+}`,
+	})
+	res := Discover(Options{GlobalRoot: filepath.Join(home, ".strike"), StrikeVersion: "0.2.0"})
+	if len(res.Plugins) != 1 {
+		t.Fatalf("plugin should still load: plugins=%d diags=%v", len(res.Plugins), res.Diagnostics)
+	}
+	var found bool
+	for _, d := range res.Diagnostics {
+		if d.Path == "mcp.json" && (d.Code == "schema_version" || strings.Contains(d.Message, "MCP disabled")) {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected mcp.json diagnostic: %v", res.Diagnostics)
+	}
+	if res.Plugins[0].MCPCount != 0 {
+		t.Fatalf("MCPCount=%d", res.Plugins[0].MCPCount)
+	}
+}
+
+func TestDoctor_APSSKILLMDNamesDoNotCollideWithinPlugin(t *testing.T) {
+	home := t.TempDir()
+	root := filepath.Join(home, ".strike", "plugins", "acme.skills")
+	writePlugin(t, root, "acme.skills", map[string]string{
+		"plugin.json":         apsManifest("acme.skills"),
+		"skills/foo/SKILL.md": validSkillMD("foo"),
+		"skills/bar/SKILL.md": validSkillMD("bar"),
+	})
+	report, err := Doctor(DoctorOptions{GlobalRoot: filepath.Join(home, ".strike"), StrikeVersion: "0.2.0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range report.Findings {
+		if f.Code == "collision" {
+			t.Fatalf("false collision: %+v", f)
+		}
+	}
+	if contributionPublicName("skills/foo/SKILL.md") != "foo" {
+		t.Fatalf("public name=%s", contributionPublicName("skills/foo/SKILL.md"))
+	}
+}
+
+func TestDoctor_APSInvalidMCPShowsDisabled(t *testing.T) {
+	home := t.TempDir()
+	root := filepath.Join(home, ".strike", "plugins", "acme.tools")
+	writePlugin(t, root, "acme.tools", map[string]string{
+		"plugin.json": apsManifest("acme.tools"),
+		"mcp.json":    `{"$schema":"https://example.com/not-aps.json","mcpServers":{}}`,
+	})
+	report, err := Doctor(DoctorOptions{GlobalRoot: filepath.Join(home, ".strike"), StrikeVersion: "0.2.0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Plugins) != 1 {
+		t.Fatalf("plugins=%d", len(report.Plugins))
+	}
+	mcp := report.Plugins[0].Contributions.MCP
+	if len(mcp) != 1 || mcp[0].Name != "(disabled)" {
+		t.Fatalf("want MCP disabled, got %+v", mcp)
+	}
+}
+
+func TestBuildUpdateReview_APSMCPVisible(t *testing.T) {
+	oldRoot := t.TempDir()
+	writePlugin(t, oldRoot, "acme.tools", map[string]string{
+		"plugin.json":         apsManifest("acme.tools"),
+		"skills/foo/SKILL.md": validSkillMD("foo"),
+	})
+	newRoot := t.TempDir()
+	writeAPSExecPlugin(t, newRoot)
+	oldMan, _, err := ReadManifest(oldRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newMan, _, err := ReadManifest(newRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := InstalledPlugin{
+		ID:       "acme.tools",
+		Version:  "1.0.0",
+		Root:     oldRoot,
+		Manifest: &oldMan,
+	}
+	src := SourceIdentity{Type: SourceLocal}
+	rev := BuildUpdateReview(old, newMan, src, "sha256:"+strings.Repeat("c", 64), newRoot)
+	text := rev.Format()
+	if !rev.ExecutableChanged {
+		t.Fatalf("expected APS mcp.json to count as executable change:\n%s", text)
+	}
+	if !strings.Contains(text, "mcp:") {
+		t.Fatalf("expected mcp fingerprint in review:\n%s", text)
+	}
+	var hasMCP bool
+	for _, tpe := range rev.ContribAdded {
+		if tpe == "mcp" {
+			hasMCP = true
+		}
+	}
+	if !hasMCP {
+		t.Fatalf("expected types + mcp, got added=%v text=\n%s", rev.ContribAdded, text)
+	}
+}

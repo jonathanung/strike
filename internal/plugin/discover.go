@@ -48,6 +48,10 @@ type Plugin struct {
 	Workflows []FileRef
 	Themes    []FileRef
 	Providers []FileRef
+
+	// MCPCount is discovered MCP servers (legacy contributions.mcp or APS mcp.json
+	// entries that are not skipped). Trust is not applied here.
+	MCPCount int
 }
 
 // Result is the outcome of Discover.
@@ -333,6 +337,33 @@ func loadOne(root string, scope Scope, strikeVer string) (*Plugin, []Diagnostic)
 		skillRefs, skillDiags := discoverAPSSkills(root, base)
 		diags = append(diags, skillDiags...)
 		p.Skills = skillRefs
+		mcpFile, mcpDiags, mcpErr := loadAPSMCPFile(root)
+		if mcpErr != nil {
+			d := base
+			d.Severity = SeverityWarning
+			d.Code = "malformed"
+			d.Path = "mcp.json"
+			d.Message = mcpErr.Error() + "; MCP disabled for this plugin"
+			diags = append(diags, d)
+		}
+		for _, d := range mcpDiags {
+			d.PluginID = m.ID
+			d.Version = m.Version
+			d.Source = scope
+			if d.Path == "" {
+				d.Path = "mcp.json"
+			}
+			diags = append(diags, d)
+		}
+		if !mcpFile.disabled {
+			n := 0
+			for _, s := range mcpFile.servers {
+				if !s.Skip {
+					n++
+				}
+			}
+			p.MCPCount = n
+		}
 	} else {
 		p.Agents = resolve("agents", m.Contributions.Agents, func(p string) bool {
 			return strings.EqualFold(filepath.Ext(p), ".md")
@@ -347,6 +378,7 @@ func loadOne(root string, scope Scope, strikeVer string) (*Plugin, []Diagnostic)
 		p.Themes = resolve("themes", m.Contributions.Themes, func(p string) bool {
 			return strings.EqualFold(filepath.Ext(p), ".json")
 		})
+		p.MCPCount = len(m.Contributions.MCP)
 	}
 
 	// Providers with optional profileName (legacy only; APS.3 loads com.strike.cli).
@@ -471,4 +503,9 @@ func (r Result) AllFileRefs(kind string) []FileRef {
 		}
 	}
 	return out
+}
+
+// LoadOne validates a plugin root the same way Discover does (no enablement filter).
+func LoadOne(root string, scope Scope, strikeVer string) (*Plugin, []Diagnostic) {
+	return loadOne(root, scope, strikeVer)
 }

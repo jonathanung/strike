@@ -467,7 +467,7 @@ func TestBuildUpdateReview_ExecutableDiffNoSecrets(t *testing.T) {
 		},
 	}
 	src := SourceIdentity{Type: SourceCatalog, Registry: "https://r", Package: "acme.tools", Version: "2.0.0", URL: "https://r/a", Digest: "sha256:" + strings.Repeat("b", 64)}
-	rev := BuildUpdateReview(old, newMan, src, "sha256:"+strings.Repeat("c", 64))
+	rev := BuildUpdateReview(old, newMan, src, "sha256:"+strings.Repeat("c", 64), "")
 	text := rev.Format()
 	if strings.Contains(text, "never-print-me") || strings.Contains(text, "also-secret") {
 		t.Fatalf("leaked secret in review:\n%s", text)

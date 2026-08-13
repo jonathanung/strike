@@ -305,7 +305,7 @@ func summarizeExecutables(c Contributions) (mcp []DoctorMCP, harnesses []DoctorH
 func summarizeAPSMCP(root string) []DoctorMCP {
 	f, _, err := loadAPSMCPFile(root)
 	if err != nil || f.disabled {
-		return nil
+		return []DoctorMCP{{Name: "(disabled)"}}
 	}
 	var mcp []DoctorMCP
 	for _, s := range f.servers {
@@ -351,7 +351,7 @@ func findPassiveCollisions(plugins []Plugin) []Diagnostic {
 	note := func(kind, name string, ref FileRef, seen map[string]owner) {
 		// Derive contribution public name from filename stem when we only have path.
 		if name == "" {
-			name = strings.TrimSuffix(filepath.Base(ref.RelPath), filepath.Ext(ref.RelPath))
+			name = contributionPublicName(ref.RelPath)
 		}
 		o := owner{pluginID: ref.PluginID, scope: ref.Source, path: ref.RelPath}
 		if prev, ok := seen[name]; ok {
@@ -385,6 +385,19 @@ func findPassiveCollisions(plugins []Plugin) []Diagnostic {
 		}
 	}
 	return diags
+}
+
+// contributionPublicName is the collision key for a passive contribution path.
+// APS (and SKILL.md layouts) use the parent directory as the public skill name.
+func contributionPublicName(relPath string) string {
+	base := filepath.Base(relPath)
+	if strings.EqualFold(base, "SKILL.md") {
+		dir := filepath.Base(filepath.Dir(relPath))
+		if dir != "" && dir != "." {
+			return dir
+		}
+	}
+	return strings.TrimSuffix(base, filepath.Ext(relPath))
 }
 
 func scrubSource(s *SourceIdentity) *SourceIdentity {

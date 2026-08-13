@@ -105,7 +105,7 @@ func CheckOutdated(ctx context.Context, opts OutdatedOptions) ([]OutdatedItem, e
 			Digest:   latest.Digest,
 		}
 		contentDig := latest.ContentDigest
-		review := BuildUpdateReview(ip, newMan, newSrc, contentDig)
+		review := BuildUpdateReview(ip, newMan, newSrc, contentDig, "")
 		// Catalog-only review cannot see executable diffs until download; mark version bump.
 		if review.OldVersion != review.NewVersion {
 			// Trust invalidation on version change when trust present is already handled.
@@ -239,7 +239,7 @@ func Update(ctx context.Context, opts UpdateOptions) (UpdateResult, error) {
 	} else {
 		newMan = Manifest{ID: res.ID, Version: res.Version}
 	}
-	review := BuildUpdateReview(ip, newMan, res.Source, res.Digest)
+	review := BuildUpdateReview(ip, newMan, res.Source, res.Digest, res.Root)
 
 	// Clear trust on lockfile when invalidated (executable/digest/source change).
 	if review.TrustInvalidated || review.ExecutableChanged || !digestsEqual(ip.Digest, res.Digest) {
@@ -359,7 +359,7 @@ func PreviewUpdate(ctx context.Context, opts UpdateOptions) (UpdateReview, Catal
 		return UpdateReview{}, CatalogVersion{}, fmt.Errorf("content digest mismatch: catalog %s computed %s", ver.ContentDigest, contentDig)
 	}
 
-	review := BuildUpdateReview(ip, newMan, src, contentDig)
+	review := BuildUpdateReview(ip, newMan, src, contentDig, tmp)
 	// Version bump with prior trust always invalidates (fail closed).
 	if review.HadTrust && review.OldVersion != review.NewVersion {
 		review.TrustInvalidated = true

@@ -239,10 +239,32 @@ func runPluginInspect(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	if p.Manifest != nil {
+		switch p.Manifest.Format {
+		case plugin.FormatAPS:
+			fmt.Fprintln(stdout, "format:   aps")
+		case plugin.FormatLegacy:
+			fmt.Fprintln(stdout, "format:   legacy (deprecated)")
+		}
 		c := p.Manifest.Contributions
+		agents, skills, workflows, themes, providers := len(c.Agents), len(c.Skills), len(c.Workflows), len(c.Themes), len(c.Providers)
+		mcp, harnesses, hooks, panes := len(c.MCP), len(c.Harnesses), len(c.Hooks), len(c.Panes)
+		loaded, diags := plugin.LoadOne(p.Root, p.Scope, "")
+		if loaded != nil {
+			agents = len(loaded.Agents)
+			skills = len(loaded.Skills)
+			workflows = len(loaded.Workflows)
+			themes = len(loaded.Themes)
+			providers = len(loaded.Providers)
+			mcp = loaded.MCPCount
+		}
 		fmt.Fprintf(stdout, "contribs: agents=%d skills=%d workflows=%d themes=%d providers=%d mcp=%d harnesses=%d hooks=%d panes=%d\n",
-			len(c.Agents), len(c.Skills), len(c.Workflows), len(c.Themes), len(c.Providers),
-			len(c.MCP), len(c.Harnesses), len(c.Hooks), len(c.Panes))
+			agents, skills, workflows, themes, providers, mcp, harnesses, hooks, panes)
+		for _, d := range diags {
+			if d.Message == "" {
+				continue
+			}
+			fmt.Fprintf(stdout, "note:     [%s] %s\n", d.Code, d.Message)
+		}
 		if plugin.HasExecutableContributionsAt(*p.Manifest, p.Root) {
 			caps := plugin.InferCapabilitiesAt(*p.Manifest, p.Root)
 			digest := p.Digest
