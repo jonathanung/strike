@@ -498,7 +498,7 @@ export default function App() {
     ];
     return matchSlashCompletions(catalogItems, token.query);
   }, [draft, boot, fileMentionActive, fileHits, composerCursor]);
-  const shownCompletions = completionDismissed || historyBrowse ? [] : completions.slice(0, 8);
+  const shownCompletions = completionDismissed || historyBrowse ? [] : completions;
   const showFileEmptyHint = fileMentionActive && !completionDismissed && !historyBrowse && shownCompletions.length === 0 && fileSearchHint !== "";
   const completionPopupOpen = shownCompletions.length > 0 || showFileEmptyHint;
   const activeCompletion = Math.min(completionIndex, Math.max(0, shownCompletions.length - 1));
@@ -649,6 +649,8 @@ export default function App() {
     setComposerCursor(0);
   };
   const selectCompletion = (item: Completion) => {
+    // TUI applyCompletion nils completion until the next edit (reflow does not recompute).
+    setCompletionDismissed(true);
     if (mention) {
       const cursor = promptRef.current?.selectionStart ?? composerCursor;
       const next = insertMention(draft, mention.start, cursor, item.insert);

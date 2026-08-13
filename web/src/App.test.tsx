@@ -172,6 +172,7 @@ describe("App", () => {
     expect(field?.querySelector("textarea")).toBeTruthy();
     expect(field?.parentElement).toHaveClass("composer");
     expect(screen.getAllByRole("option").length).toBeGreaterThan(6);
+    expect(screen.getByRole("option", { name: /^\/provider/i })).toBeInTheDocument();
     const help = screen.getByRole("option", { name: /help/i });
     expect(help).toHaveAttribute("aria-selected", "true");
     expect(help).not.toHaveClass("composer-send");
@@ -228,6 +229,9 @@ describe("App", () => {
     expect(screen.getByRole("option", { name: /help/i })).toBeInTheDocument();
     fireEvent.keyDown(box, { key: "Tab" });
     expect(box).toHaveValue("/help\nimplement the feature");
+    expect(screen.queryByRole("listbox", { name: "Composer completions" })).not.toBeInTheDocument();
+    fireEvent.keyDown(box, { key: "Enter" });
+    expect(box).toHaveValue("");
   });
 
   it("does not steal ArrowUp/Enter from history browse when the recalled prompt is a slash token", async () => {
@@ -390,6 +394,32 @@ describe("App", () => {
     fireEvent.keyDown(box, { key: "Enter" });
     expect(box).toHaveValue("see @internal/tui/app.go extra");
     expect(box.selectionStart).toBe("see @internal/tui/app.go ".length);
+    expect(screen.queryByRole("listbox", { name: "Composer completions" })).not.toBeInTheDocument();
+  });
+
+  it("closes @file completion after accept when the rest starts with a newline", async () => {
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("bootstrap")) {
+        return response({
+          version: "test", authRequired: false, attachOnly: false,
+          capabilities: { live: true, files: true, roots: false },
+          protocolOps: ["user.input"], status: { sessionId: "live", provider: "echo", busy: false },
+          agents: [], skills: [],
+        });
+      }
+      if (url.includes("sessions")) return response({ sessions: [{ id: "live", title: "Current" }], liveId: "live" });
+      if (url.includes("/v1/files/search")) return response({ paths: ["internal/tui/app.go"] });
+      return response({ ok: true });
+    }));
+    render(<App />);
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    const box = screen.getByLabelText("Instruction") as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: "see @src/old.go\nextra", selectionStart: 8, selectionEnd: 8 } });
+    await screen.findByRole("option", { name: /internal\/tui\/app\.go/ });
+    fireEvent.keyDown(box, { key: "Enter" });
+    expect(box).toHaveValue("see @internal/tui/app.go\nextra");
+    expect(screen.queryByRole("listbox", { name: "Composer completions" })).not.toBeInTheDocument();
   });
 
   it("rejects unknown slash commands with feedback and runs /help", async () => {
