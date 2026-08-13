@@ -145,6 +145,9 @@ describe("PaneView", () => {
       />,
     );
     expect(screen.getByText(/Ready/).closest("li")?.textContent).toMatch(/✓/);
+    const labelGroup = screen.getByText("Ready").parentElement;
+    expect(labelGroup?.textContent).toMatch(/✓/);
+    expect(labelGroup).not.toBe(screen.getByText(/Ready/).closest("li"));
     expect(screen.getByText(/Other/).closest("li")?.textContent).not.toMatch(/not-an-icon/);
   });
 });

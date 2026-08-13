@@ -71,8 +71,10 @@ function listItemLabel(item: NonNullable<PaneViewNode["items"]>[number]) {
   const glyph = paneIconGlyph(item.icon);
   return (
     <>
-      {glyph ? <span aria-hidden="true">{glyph} </span> : null}
-      <strong>{item.label || item.id}</strong>
+      <span>
+        {glyph ? <span aria-hidden="true">{glyph} </span> : null}
+        <strong>{item.label || item.id}</strong>
+      </span>
       {item.detail ? <span className="muted"> {item.detail}</span> : null}
     </>
   );
