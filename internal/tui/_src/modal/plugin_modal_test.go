@@ -141,16 +141,25 @@ func (f *fakePlugins) Update(ctx context.Context, id, scope, registry string, co
 func samplePlugins() []host.PluginInfo {
 	return []host.PluginInfo{
 		{
-			ID: "acme.ui", Version: "1.0.0", Name: "UI Pack", Scope: host.PluginScopeGlobal,
+			ID: "acme.ui", Version: "1.0.0", Name: "acme.ui", DisplayName: "UI Pack",
+			Format: "agent-plugins", Schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+			Scope:   host.PluginScopeGlobal,
 			Enabled: true, Status: "enabled", TrustState: host.PluginTrustPassiveOnly,
-			Agents: 1, Skills: 2, SourceType: "local", SourceLabel: "local:/tmp/x",
+			Skills: 2, SourceType: "local", SourceLabel: "local:/tmp/x",
 		},
 		{
-			ID: "acme.exec", Version: "2.0.0", Scope: host.PluginScopeProject,
+			ID: "acme.exec", Version: "2.0.0", Name: "acme.exec", Format: "agent-plugins",
+			Scope:   host.PluginScopeProject,
 			Enabled: true, Status: "enabled", TrustState: host.PluginTrustNone,
 			HasExecutable: true, Capabilities: []string{"mcp.stdio"},
 			MCP:        []host.PluginMCP{{Name: "demo", Command: "bin/server", EnvKeys: []string{"SECRET"}}},
 			SourceType: "catalog", SourceLabel: "catalog:https://example.com#acme.exec@2.0.0",
+		},
+		{
+			ID: "acme.legacy", Version: "1.0.0", Name: "Legacy Pack", Format: "legacy",
+			Scope:   host.PluginScopeGlobal,
+			Enabled: true, Status: "enabled", TrustState: host.PluginTrustPassiveOnly,
+			Agents: 1, SourceType: "local", SourceLabel: "local:/tmp/legacy",
 		},
 	}
 }
@@ -158,7 +167,7 @@ func samplePlugins() []host.PluginInfo {
 func TestPluginModalBrowseAndDetail(t *testing.T) {
 	fp := &fakePlugins{list: samplePlugins()}
 	m := newPluginModal(fp)
-	if m.phase != pluginPhaseBrowse || len(m.all) != 2 {
+	if m.phase != pluginPhaseBrowse || len(m.all) != 3 {
 		t.Fatalf("init: phase=%v n=%d", m.phase, len(m.all))
 	}
 	// Plain letters filter; actions use ctrl+ chords.
@@ -227,7 +236,7 @@ func TestPluginModalRemoveRequiresConfirm(t *testing.T) {
 		t.Fatal("remove called without confirm=true")
 	}
 	m.applyMsg(done)
-	if len(fp.list) != 1 {
+	if len(fp.list) != 2 {
 		t.Fatalf("list after remove: %+v", fp.list)
 	}
 }
@@ -361,6 +370,42 @@ func keyMsg(s string) tea.KeyPressMsg {
 
 func ctrlKey(r rune) tea.KeyPressMsg {
 	return tea.KeyPressMsg{Code: r, Mod: tea.ModCtrl}
+}
+
+func TestPluginModalListsAPSByNameAndLegacyDeprecation(t *testing.T) {
+	fp := &fakePlugins{list: samplePlugins()}
+	m := newPluginModal(fp)
+	browse := stripANSI(m.view(72, theme.Default()))
+	if !strings.Contains(browse, "acme.ui") {
+		t.Fatalf("browse must list APS plugin by name:\n%s", browse)
+	}
+	if strings.Contains(browse, "UI Pack") {
+		t.Fatalf("browse must not prefer displayName over APS name:\n%s", browse)
+	}
+	if !strings.Contains(browse, "legacy (deprecated)") {
+		t.Fatalf("browse missing legacy deprecation:\n%s", browse)
+	}
+
+	m.cursor = 0
+	nm, _ := m.update(keyMsg("enter"))
+	m = nm.(*pluginModal)
+	detail := stripANSI(m.view(72, theme.Default()))
+	if !strings.Contains(detail, "acme.ui") || !strings.Contains(detail, "agent-plugins") {
+		t.Fatalf("APS detail missing identity:\n%s", detail)
+	}
+	if !strings.Contains(detail, "UI Pack") {
+		t.Fatalf("APS detail missing displayName:\n%s", detail)
+	}
+
+	nm, _ = m.update(keyMsg("esc"))
+	m = nm.(*pluginModal)
+	m.cursor = 2
+	nm, _ = m.update(keyMsg("enter"))
+	m = nm.(*pluginModal)
+	legacy := stripANSI(m.view(72, theme.Default()))
+	if !strings.Contains(legacy, "legacy (deprecated)") {
+		t.Fatalf("legacy detail missing deprecation:\n%s", legacy)
+	}
 }
 
 func stripANSI(s string) string { return ansi.Strip(s) }

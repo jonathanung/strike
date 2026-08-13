@@ -43,6 +43,56 @@ func TestParseCatalog_ValidAndRejects(t *testing.T) {
 	if c.Packages[0].ID != "acme.pack" {
 		t.Fatalf("%+v", c)
 	}
+	aps := `{
+  "schemaVersion": 1,
+  "registry": "https://example.com/strike-plugins",
+  "packages": [{
+    "id": "acme.example",
+    "name": "Acme Example",
+    "versions": [{
+      "version": "1.0.0",
+      "url": "https://example.com/acme-1.0.0.tar.gz",
+      "digest": "sha256:` + strings.Repeat("ab", 32) + `",
+      "$schema": "agent-plugins:1.0.0"
+    }]
+  }]
+}`
+	got, err := ParseCatalog([]byte(aps))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Packages[0].Versions[0].Schema != CatalogAPSSchema {
+		t.Fatalf("schema=%q", got.Packages[0].Versions[0].Schema)
+	}
+	legacySchema := `{
+  "schemaVersion": 1,
+  "packages": [{
+    "id": "acme.pack",
+    "versions": [{
+      "version": "1.0.0",
+      "url": "https://example.com/a.tar.gz",
+      "digest": "sha256:` + strings.Repeat("ab", 32) + `",
+      "manifestSchema": 1
+    }]
+  }]
+}`
+	if _, err := ParseCatalog([]byte(legacySchema)); err != nil {
+		t.Fatalf("legacy manifestSchema must remain optional: %v", err)
+	}
+	if _, err := ParseCatalog([]byte(`{
+  "schemaVersion": 1,
+  "packages": [{
+    "id": "acme.pack",
+    "versions": [{
+      "version": "1.0.0",
+      "url": "https://example.com/a.tar.gz",
+      "digest": "sha256:` + strings.Repeat("ab", 32) + `",
+      "$schema": "not-a-real-schema"
+    }]
+  }]
+}`)); err == nil {
+		t.Fatal("expected unsupported $schema")
+	}
 	// Unknown field rejected.
 	if _, err := ParseCatalog([]byte(`{"schemaVersion":1,"packages":[],"extra":true}`)); err == nil {
 		t.Fatal("expected unknown field error")
@@ -123,8 +173,8 @@ func TestExtractArchive_ZipSlipRejected(t *testing.T) {
 
 func TestExtractArchive_TarGzRoundTrip(t *testing.T) {
 	files := map[string]string{
-		"plugin.json": manifest("acme.pack", `{"agents":[{"path":"agents/a.md"}]}`),
-		"agents/a.md": validAgentMD("a"),
+		"plugin.json":          apsManifest("acme.pack"),
+		"skills/demo/SKILL.md": validSkillMD("demo"),
 	}
 	data := mustTarGz(t, files)
 	dest := t.TempDir()
@@ -138,8 +188,8 @@ func TestExtractArchive_TarGzRoundTrip(t *testing.T) {
 
 func TestExtractArchive_FlattenSingleRoot(t *testing.T) {
 	files := map[string]string{
-		"acme.pack/plugin.json": manifest("acme.pack", `{"agents":[{"path":"agents/a.md"}]}`),
-		"acme.pack/agents/a.md": validAgentMD("a"),
+		"acme.pack/plugin.json":          apsManifest("acme.pack"),
+		"acme.pack/skills/demo/SKILL.md": validSkillMD("demo"),
 	}
 	data := mustTarGz(t, files)
 	dest := t.TempDir()
@@ -224,6 +274,75 @@ func TestCatalogInstall_PinsVersionAndDigest(t *testing.T) {
 	}
 	if e.Source.Registry == "" || e.Source.Package != "acme.catalog" || e.Source.URL == "" {
 		t.Fatalf("incomplete provenance: %+v", e.Source)
+	}
+}
+
+func TestCatalogInstall_APSTarball(t *testing.T) {
+	bundle := testdataFiles(t, "aps/example-pack")
+	archive := mustTarGz(t, bundle)
+	sum := sha256.Sum256(archive)
+	dig := "sha256:" + hex.EncodeToString(sum[:])
+	contentDig, err := contentDigestOfMap(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/catalog.json"):
+			cat := Catalog{
+				SchemaVersion: 1,
+				Registry:      "http://" + r.Host + "/strike-plugins",
+				Packages: []CatalogPackage{{
+					ID:   "acme.example",
+					Name: "Acme Example",
+					Versions: []CatalogVersion{{
+						Version:       "1.0.0",
+						URL:           "http://" + r.Host + "/artifacts/acme-example-1.0.0.tar.gz",
+						Digest:        dig,
+						ContentDigest: contentDig,
+						Schema:        CatalogAPSSchema,
+						Capabilities:  []string{"skills", "mcp.stdio"},
+					}},
+				}},
+			}
+			_ = json.NewEncoder(w).Encode(cat)
+		case strings.Contains(r.URL.Path, "acme-example-1.0.0.tar.gz"):
+			_, _ = w.Write(archive)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	home := t.TempDir()
+	res, err := Install(context.Background(), InstallOptions{
+		Scope:           ScopeGlobal,
+		GlobalRoot:      filepath.Join(home, ".strike"),
+		CatalogRegistry: srv.URL + "/strike-plugins",
+		CatalogPackage:  "acme.example",
+		CatalogVersion:  "1.0.0",
+		HTTPClient:      srv.Client(),
+		StrikeVersion:   "0.2.0",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.ID != "acme.example" || res.Digest != contentDig {
+		t.Fatalf("install: %+v digest want %s", res, contentDig)
+	}
+	if res.Source.Digest != dig {
+		t.Fatalf("artifact digest: %s want %s", res.Source.Digest, dig)
+	}
+	loaded, diags := LoadOne(res.Root, ScopeGlobal, "0.2.0")
+	if loaded == nil {
+		t.Fatalf("loader failed: %v", diags)
+	}
+	if loaded.Manifest.Format != FormatAPS || loaded.Manifest.ID != "acme.example" {
+		t.Fatalf("manifest: %+v", loaded.Manifest)
+	}
+	if len(loaded.Skills) != 1 || loaded.MCPCount != 1 {
+		t.Fatalf("skills=%d mcp=%d diags=%v", len(loaded.Skills), loaded.MCPCount, diags)
 	}
 }
 

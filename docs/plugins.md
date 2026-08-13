@@ -199,7 +199,7 @@ binaries, and config that ship in the package.
 | `trust <name>` | Record executable trust for the current content digest + source identity + capability set. Required before MCP/harness/shell-hook/process-pane activation. |
 | `untrust <name>` | Remove the trust grant; executables stay inactive on next launch. Passive load is unaffected. |
 | `remove <name> --yes` | Delete install directory and lockfile entry (confirmation required). |
-| `doctor [name]` | Paths, provenance, contribution summary, collisions, trust state (`none` / `trusted` / `stale` / `n/a-passive-only`), format (`aps` / `legacy`). Never prints secrets or MCP/harness env values (keys only). |
+| `doctor [name]` | Paths, provenance, contribution summary, collisions, trust state (`none` / `trusted` / `stale` / `n/a-passive-only`), format (`agent-plugins` / `legacy`). Never prints secrets or MCP/harness env values (keys only). |
 
 Flags: `--scope global|project` (install defaults to global), git `--ref` /
 `--commit` / `--subdir`, catalog `--registry` / `--version`, install `--force`
@@ -780,7 +780,7 @@ Plugins).
           "contentDigest": "sha256:…",
           "capabilities": ["agents", "skills", "mcp.stdio"],
           "strike": { "min": "0.2.0" },
-          "manifestSchema": 1,
+          "$schema": "agent-plugins:1.0.0",
           "size": 12345
         }
       ]
@@ -790,12 +790,16 @@ Plugins).
 ```
 
 `packages[].id` is the install identity (APS `name` or legacy `id`).
-`packages[].name` is a display string. `manifestSchema` is the **catalog
-record** schema (still integer `1`); it is not the Agent Plugins `$schema`.
-Clients detect APS vs legacy from the extracted `plugin.json`.
+`packages[].name` is a display string. `versions[].$schema` records the package
+format; prefer `"agent-plugins:1.0.0"` (the canonical plugin.json `$schema` URI
+is also accepted). `manifestSchema` is optional/legacy (integer Strike
+`schemaVersion`) and is **not** the Agent Plugins `$schema`. Clients detect APS
+vs legacy from the extracted `plugin.json`.
 
 | Field | Rules |
 |---|---|
+| `$schema` | Optional. Prefer `"agent-plugins:1.0.0"`; the plugin.json `$schema` URI is also accepted. |
+| `manifestSchema` | Optional/legacy integer Strike `schemaVersion`. Prefer `$schema`. |
 | `digest` | **Required.** SHA-256 of artifact bytes; install fails on mismatch. |
 | `contentDigest` | Optional. Must match `ComputeDigest` of extracted tree when set. |
 | `signature` | Reserved; v1 verifies digests only. Presence does not grant trust. |

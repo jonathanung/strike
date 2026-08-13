@@ -72,6 +72,13 @@ Notes:
   - disable keeps files; remove deletes files and lockfile entry (--yes required).
   - trust grants executable MCP/harness/shell-hook activation for the current
     content digest + source identity + capability set; untrust revokes it.
+  - Native packages are Agent Plugins 1.0.0: plugin.json $schema, skills/<name>/SKILL.md,
+    and root mcp.json. Identity is the APS name (lockfile / install directory key).
+    Optional display string: extensions.com.strike.cli.displayName.
+  - list/inspect/doctor print format=agent-plugins|legacy, APS name, displayName,
+    $schema, extension capabilities, and skill/MCP counts from those fixed locations.
+  - Legacy Strike-native plugin.json (schemaVersion + contributions) still loads
+    (deprecated). migrate converts it to Agent Plugins 1.0.0.
   - doctor prints paths, provenance, and trust state; never secrets or env values.
 
   - Changes apply on next Strike launch (no hot reload).
@@ -176,8 +183,15 @@ func runPluginList(args []string, stdout, stderr io.Writer) int {
 		if p.LoadError != "" {
 			state = "invalid"
 		}
+		format := ""
+		if p.Manifest != nil {
+			format = string(p.Manifest.Format)
+		}
 		fmt.Fprintf(stdout, "%s\t%s\t%s\t%s", p.ID, p.Version, p.Scope, state)
-		if p.Name != "" {
+		if format != "" {
+			fmt.Fprintf(stdout, "\tformat=%s", format)
+		}
+		if p.Name != "" && p.Name != p.ID {
 			fmt.Fprintf(stdout, "\t%s", p.Name)
 		}
 		fmt.Fprintln(stdout)
@@ -217,7 +231,21 @@ func runPluginInspect(args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintf(stdout, "id:       %s\n", p.ID)
 	fmt.Fprintf(stdout, "version:  %s\n", p.Version)
-	fmt.Fprintf(stdout, "name:     %s\n", p.Name)
+	if p.Manifest != nil && p.Manifest.Format == plugin.FormatAPS {
+		fmt.Fprintf(stdout, "name:     %s\n", p.ID)
+		display := ""
+		if p.Manifest.StrikeCLI != nil {
+			display = strings.TrimSpace(p.Manifest.StrikeCLI.DisplayName)
+		}
+		if display == "" && p.Name != "" && p.Name != p.ID {
+			display = p.Name
+		}
+		if display != "" {
+			fmt.Fprintf(stdout, "displayName: %s\n", display)
+		}
+	} else if p.Name != "" {
+		fmt.Fprintf(stdout, "name:     %s\n", p.Name)
+	}
 	fmt.Fprintf(stdout, "scope:    %s\n", p.Scope)
 	fmt.Fprintf(stdout, "enabled:  %v\n", p.Enabled)
 	fmt.Fprintf(stdout, "root:     %s\n", p.Root)
@@ -254,9 +282,15 @@ func runPluginInspect(args []string, stdout, stderr io.Writer) int {
 	if p.Manifest != nil {
 		switch p.Manifest.Format {
 		case plugin.FormatAPS:
-			fmt.Fprintln(stdout, "format:   aps")
+			fmt.Fprintln(stdout, "format:   agent-plugins")
 		case plugin.FormatLegacy:
 			fmt.Fprintln(stdout, "format:   legacy (deprecated)")
+		}
+		if schema := strings.TrimSpace(p.Manifest.Schema); schema != "" {
+			fmt.Fprintf(stdout, "$schema:  %s\n", schema)
+		}
+		if len(p.Manifest.Capabilities) > 0 {
+			fmt.Fprintf(stdout, "capabilities: %s\n", strings.Join(p.Manifest.Capabilities, ","))
 		}
 		c := p.Manifest.Contributions
 		agents, skills, workflows, themes, providers := len(c.Agents), len(c.Skills), len(c.Workflows), len(c.Themes), len(c.Providers)

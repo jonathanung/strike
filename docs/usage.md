@@ -181,9 +181,30 @@ strike launches without any provider configured. Pick one inside the TUI:
 | `/init` | light local scan → write `AGENTS.md`; confirms before overwrite |
 | `/ftue` | setup wizard composing provider connect, model pick, optional `/init`, a skippable feature tour (panes, agents, permissions, autonomy, keys, commands), optional scheduler build-system presets (checkbox catalog with rule/limit preview; apply writes global `scheduler.presets` atomically and preserves custom limits/rules), and first-prompt guidance; opening does not change settings; tour copy uses live keybinds and omits unavailable surfaces; Finish focuses the composer; esc dismisses. Finish/dismiss acknowledge global onboarding so auto-open does not repeat; manual `/ftue` stays available. Child pickers/tour/presets return to the same wizard step |
 | `/mcp` | MCP status (`up`/`down`/`error`/`disabled`); `/mcp retry [name]`, `/mcp disable <name>` (see [config.md](config.md#mcp-servers-stdio--http)) |
-| `/plugin` | TUI plugin manager: browse installed/remote plugins, inspect capabilities, install/update/enable/disable/remove/trust with confirmation (see [plugins.md](plugins.md)) |
+| `/plugin` | TUI plugin manager: browse installed/remote plugins by Agent Plugins `name`, inspect capabilities, install/update/enable/disable/remove/trust with confirmation. Legacy Strike-native installs show as deprecated (see [plugins.md](plugins.md)) |
 | `/lsp` | language server status; `/lsp retry [name]`, `/lsp disable <name>` (see [config.md](config.md#language-servers-lsp)) |
 | `/diagnostics` | focus the diagnostics right pane (live language-server findings) |
+
+### Plugin CLI (`strike plugin`)
+
+Author new packages as [Agent Plugins](https://agent-plugins.org/) 1.0.0:
+`plugin.json` with `$schema` `https://agent-plugins.org/schemas/1.0.0/plugin.schema.json`,
+portable skills under `skills/<name>/SKILL.md`, and MCP servers in root `mcp.json`.
+Identity is the APS `name`. Optional display string:
+`extensions.com.strike.cli.displayName`.
+
+```sh
+strike plugin list
+strike plugin inspect <name>
+strike plugin doctor [name]
+strike plugin install <path|git-url|catalog:pkg[@ver]>
+```
+
+`list` / `inspect` / `doctor` print `format=agent-plugins|legacy`, APS `name`,
+displayName, `$schema`, extension capabilities, and skill/MCP counts from those
+fixed locations. They never print secrets or MCP env values. Legacy Strike-native
+`plugin.json` (`schemaVersion` + `contributions`) still loads until APS.6;
+`strike plugin migrate` converts it. Full contract: [plugins.md](plugins.md).
 
 ### Agent teams
 

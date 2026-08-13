@@ -22,8 +22,13 @@ const (
 type ManifestFormat string
 
 const (
-	FormatAPS    ManifestFormat = "aps"
+	// FormatAPS is the native Agent Plugins identity shown by list/inspect/doctor/TUI.
+	FormatAPS ManifestFormat = "agent-plugins"
+	// FormatLegacy is the deprecated Strike-native plugin.json / plugin.jsonc format.
 	FormatLegacy ManifestFormat = "legacy"
+	// CatalogAPSSchema is the catalog-record shorthand for Agent Plugins 1.0.0
+	// (distinct from plugin.json $schema URI).
+	CatalogAPSSchema = "agent-plugins:1.0.0"
 )
 
 const (

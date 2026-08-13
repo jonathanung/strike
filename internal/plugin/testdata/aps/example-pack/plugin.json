@@ -1,0 +1,12 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "acme.example",
+  "version": "1.0.0",
+  "description": "Example Agent Plugins package for CLI, catalog, and doctor goldens",
+  "extensions": {
+    "com.strike.cli": {
+      "displayName": "Acme Example",
+      "capabilities": ["skills", "mcp.stdio"]
+    }
+  }
+}

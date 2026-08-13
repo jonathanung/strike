@@ -333,7 +333,7 @@ func TestMigrate_InstalledClearsTrustAndUpdatesDigest(t *testing.T) {
 		}
 	}
 	text := FormatDoctorText(report)
-	if !strings.Contains(text, "format:    aps") {
+	if !strings.Contains(text, "format:    agent-plugins") {
 		t.Fatalf("doctor text:\n%s", text)
 	}
 }
