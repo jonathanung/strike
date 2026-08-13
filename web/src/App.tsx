@@ -482,7 +482,7 @@ export default function App() {
     }
     return [];
   }, [draft, boot, mention, fileHits]);
-  const shownCompletions = completionDismissed ? [] : completions.slice(0, 8);
+  const shownCompletions = completionDismissed || historyBrowse ? [] : completions.slice(0, 8);
   const activeCompletion = Math.min(completionIndex, Math.max(0, shownCompletions.length - 1));
   useEffect(() => {
     setCompletionIndex((i) => Math.min(i, Math.max(0, shownCompletions.length - 1)));
@@ -670,7 +670,7 @@ export default function App() {
         setCompletionIndex((i) => Math.max(0, i - 1));
         return;
       }
-      if ((event.key === "Enter" && !event.shiftKey) || event.key === "Tab") {
+      if ((event.key === "Enter" && !event.shiftKey) || (event.key === "Tab" && !event.shiftKey)) {
         event.preventDefault();
         const item = shownCompletions[activeCompletion] || shownCompletions[0];
         if (item) selectCompletion(item);
