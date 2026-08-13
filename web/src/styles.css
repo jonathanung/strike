@@ -25,6 +25,7 @@
  * --code-bg      inset code / tool surfaces (SurfaceMuted step)
  * --overlay      OverlayScrim (dialog backdrop tint)
  * --mark-ink     wordmark glyph on Accent fill
+ * --text/--bg/--border/--panel/--accent  aliases of --ink/--ground/--rule/--surface/--acid
  */
 :root {
   color-scheme: dark light;
@@ -59,6 +60,11 @@
   --shadow: #00000088;
   --cap-border: #4f4d63;
   --unavailable-bg: #2a1a1c;
+  --text: var(--ink);
+  --bg: var(--ground);
+  --border: var(--rule);
+  --panel: var(--surface);
+  --accent: var(--acid);
   font-family: "SFMono-Regular", "Cascadia Code", "Liberation Mono", monospace;
   background: var(--ground);
   color: var(--ink);
@@ -309,8 +315,21 @@ button:disabled, select:disabled, input:disabled, textarea:disabled {
 }
 .ui-tab:disabled { opacity: .35; }
 .ui-tabpanel { min-width: 0; }
-/* Inspector tabs reuse the shared tab look; never shrink below label width. */
-.inspector-tabs { display: flex; flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; border-bottom: 1px solid var(--rule); scrollbar-width: thin; }
+/* Inspector tabs wrap instead of clipping into a horizontal scroller.
+   overflow-x:hidden (not visible) so overflow-y:auto cannot compute x back to auto. */
+.inspector-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  flex: 0 0 auto;
+  width: 100%;
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  max-height: 40vh;
+  border-bottom: 1px solid var(--rule);
+  scrollbar-width: thin;
+}
 .inspector-tabs .ui-tab,
 .inspector-tabs button {
   flex: 0 0 auto;
@@ -646,7 +665,7 @@ header {
 .child-agents { display: grid; gap: 0; min-height: 0; }
 .children { font-size: 11px; padding: 0 9px; display: grid; gap: 2px; }
 .child-row { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border-radius: 4px; border: 1px solid transparent; background: transparent; color: inherit; width: 100%; text-align: left; cursor: pointer; font: inherit; }
-.child-row:hover, .child-row.active { border-color: var(--border); background: color-mix(in srgb, var(--panel) 80%, transparent); }
+.child-row:hover, .child-row.active { border-color: var(--rule); background: color-mix(in srgb, var(--surface) 80%, transparent); }
 .child-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .child-meta { display: flex; gap: 4px; align-items: center; flex-shrink: 0; }
 .children small, .children p { color: var(--muted); }
@@ -659,7 +678,7 @@ header {
 .quality.complete { color: var(--success); }
 .quality.partial { color: var(--warning); }
 .quality.unavailable { color: var(--signal); }
-.child-detail { margin: 6px 9px 10px; padding: 8px; border: 1px solid var(--border); border-radius: 6px; display: grid; gap: 6px; font-size: 11px; }
+.child-detail { margin: 6px 9px 10px; padding: 8px; border: 1px solid var(--rule); border-radius: 6px; display: grid; gap: 6px; font-size: 11px; }
 .child-detail header { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
 .child-detail h3 { margin: 0; font-size: 12px; font-weight: 600; }
 .child-detail dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; margin: 0; }
@@ -668,7 +687,7 @@ header {
 .child-detail code { font-size: 10px; }
 .child-prompt { margin: 0; white-space: pre-wrap; font-size: 10px; }
 .child-detail-actions { display: flex; gap: 6px; }
-.child-detail-actions button { font: inherit; font-size: 10px; padding: 3px 8px; border-radius: 4px; border: 1px solid var(--border); background: transparent; color: inherit; cursor: pointer; }
+.child-detail-actions button { font: inherit; font-size: 10px; padding: 3px 8px; border-radius: 4px; border: 1px solid var(--rule); background: transparent; color: inherit; cursor: pointer; }
 .child-detail-actions button:hover { border-color: var(--border-focus); color: var(--acid); }
 .child-detail-note { margin: 0; font-size: 9px; }
 
@@ -944,7 +963,13 @@ main {
   filter: none;
 }
 
-.inspector { border-left: 1px solid var(--rule); min-width: 0; overflow: hidden; }
+.inspector {
+  border-left: 1px solid var(--rule);
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
 .navigation.collapsed, .inspector.collapsed { opacity: 0; pointer-events: none; }
 .panel-resize {
   position: absolute;
@@ -972,7 +997,13 @@ main {
   background: color-mix(in srgb, var(--acid) 55%, transparent);
 }
 
-.inspector-body { height: calc(100% - 48px); overflow: auto; padding: 20px 16px; }
+.inspector-body {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+  overflow: auto;
+  padding: 20px 16px;
+}
 .inspector h2 {
   margin: 8px 0 16px;
   font-family: Georgia, "Times New Roman", serif;
@@ -1400,6 +1431,7 @@ dialog input { padding: 12px; color: var(--ink); }
 
 /* Phone surface subnav: accessible list/sheet (WEBUI.12) — not a compressed tab strip. */
 .surface-nav-sheet {
+  flex: 0 0 auto;
   border-bottom: 1px solid var(--rule);
   max-height: 40vh;
   overflow: auto;
@@ -1679,7 +1711,7 @@ dialog input { padding: 12px; color: var(--ink); }
 .queue-edit {
   width: 100%;
   font: inherit;
-  color: var(--text);
+  color: var(--ink);
   background: var(--raised);
   border: 1px solid var(--rule);
   padding: 4px 6px;
@@ -2411,7 +2443,7 @@ dialog fieldset small { color: var(--muted); }
 .palette-trigger kbd { font-size: 10px; }
 .palette-input {
   width: 100%; padding: 10px 12px; border: 1px solid var(--rule);
-  background: var(--code-bg); color: var(--text); border-radius: 8px; margin-bottom: 10px;
+  background: var(--code-bg); color: var(--ink); border-radius: 8px; margin-bottom: 10px;
 }
 .palette-list { list-style: none; margin: 0; padding: 0; max-height: 360px; overflow: auto; display: grid; gap: 2px; }
 .palette-list button {
@@ -2453,7 +2485,7 @@ dialog fieldset small { color: var(--muted); }
 }
 .team-view-tabs button.active, .team-filters button.active,
 .team-view-tabs button[aria-selected="true"], .team-filters button[aria-pressed="true"] {
-  background: var(--text); color: var(--bg); border-color: var(--text);
+  background: var(--acid); color: var(--mark-ink); border-color: var(--ink);
 }
 .team-roster { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
 .team-detail { border: 1px solid var(--rule); padding: 10px; border-radius: 8px; background: var(--code-bg); }
@@ -2477,7 +2509,7 @@ dialog fieldset small { color: var(--muted); }
 .team-board-col ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .team-board-card {
   width: 100%; text-align: left; display: grid; gap: 4px;
-  border: 1px solid var(--rule); background: var(--bg); padding: 8px; border-radius: 6px;
+  border: 1px solid var(--rule); background: var(--ground); padding: 8px; border-radius: 6px;
 }
 .team-board-card-main {
   width: 100%; text-align: left; display: grid; gap: 2px;
@@ -2505,10 +2537,10 @@ dialog fieldset small { color: var(--muted); }
 .team-control-block label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
 .team-control-block input, .team-control-block textarea, .team-control-block select {
   width: 100%; border: 1px solid var(--rule); border-radius: 6px;
-  background: var(--bg); color: var(--text); padding: 6px 8px; font: inherit;
+  background: var(--ground); color: var(--ink); padding: 6px 8px; font: inherit;
 }
 .team-control-block button.primary {
-  justify-self: start; background: var(--text); color: var(--bg); border-color: var(--text);
+  justify-self: start; background: var(--acid); color: var(--mark-ink); border-color: var(--ink);
   padding: 6px 12px; border-radius: 6px; cursor: pointer;
 }
 .team-control-block button.linkish {
@@ -2517,7 +2549,7 @@ dialog fieldset small { color: var(--muted); }
 }
 .team-control-advanced { display: grid; gap: 8px; }
 .team-local-board { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
-.team-local-board li { display: grid; gap: 4px; padding: 8px; border: 1px solid var(--rule); border-radius: 6px; background: var(--bg); }
+.team-local-board li { display: grid; gap: 4px; padding: 8px; border: 1px solid var(--rule); border-radius: 6px; background: var(--ground); }
 .team-controls-inline { margin-top: 8px; }
 @media (max-width: 720px) {
   .team-board { flex-direction: column; overflow-x: visible; }
@@ -2593,7 +2625,7 @@ button.file-ref { background: none; border: 0; padding: 0; color: var(--acid); c
   border-radius: 999px; cursor: pointer; font-size: 12px;
 }
 .code-view-tabs button.active, .code-md-toggle button.active {
-  background: var(--text); color: var(--bg); border-color: var(--text);
+  background: var(--acid); color: var(--mark-ink); border-color: var(--ink);
 }
 .code-explorer-body {
   display: grid; grid-template-columns: minmax(160px, 240px) 1fr; gap: 12px; min-height: 280px;
@@ -2602,7 +2634,7 @@ button.file-ref { background: none; border: 0; padding: 0; color: var(--acid); c
 .code-search { display: flex; gap: 6px; align-items: center; }
 .code-search input {
   flex: 1; border: 1px solid var(--rule); border-radius: 6px;
-  background: var(--bg); color: var(--text); padding: 6px 8px; font: inherit;
+  background: var(--ground); color: var(--ink); padding: 6px 8px; font: inherit;
 }
 .code-breadcrumbs { font-size: 12px; color: var(--muted); }
 .code-breadcrumbs button {
@@ -2631,7 +2663,7 @@ button.file-ref { background: none; border: 0; padding: 0; color: var(--acid); c
 .code-md-preview h2, .code-md-preview h3, .code-md-preview h4 { margin: 0.8em 0 0.3em; }
 .code-md-preview p { margin: 0.4em 0; }
 .code-md-preview pre.md-code {
-  overflow: auto; padding: 8px; border-radius: 6px; background: var(--bg); border: 1px solid var(--rule);
+  overflow: auto; padding: 8px; border-radius: 6px; background: var(--ground); border: 1px solid var(--rule);
 }
 @media (max-width: 720px) {
   .code-explorer-body { grid-template-columns: 1fr; }
@@ -2641,17 +2673,17 @@ button.file-ref { background: none; border: 0; padding: 0; color: var(--acid); c
 /* WEBUI.9 reviewed apply */
 .code-apply {
   margin-top: 12px; border: 1px solid var(--rule); border-radius: 8px;
-  padding: 10px; display: grid; gap: 8px; background: var(--bg);
+  padding: 10px; display: grid; gap: 8px; background: var(--ground);
 }
 .code-apply legend { font-weight: 600; padding: 0 4px; }
 .code-apply label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
 .code-apply textarea {
   width: 100%; border: 1px solid var(--rule); border-radius: 6px;
-  background: var(--code-bg); color: var(--text); padding: 6px 8px; font: inherit;
+  background: var(--code-bg); color: var(--ink); padding: 6px 8px; font: inherit;
 }
 .code-apply button.primary {
-  justify-self: start; background: var(--text); color: var(--bg);
-  border: 1px solid var(--text); border-radius: 6px; padding: 6px 12px; cursor: pointer;
+  justify-self: start; background: var(--acid); color: var(--mark-ink);
+  border: 1px solid var(--ink); border-radius: 6px; padding: 6px 12px; cursor: pointer;
 }
 .code-apply button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
 .code-apply-preview { max-height: 160px; overflow: auto; }
@@ -2665,7 +2697,7 @@ button.file-ref { background: none; border: 0; padding: 0; color: var(--acid); c
   border: 1px solid var(--rule); background: transparent; padding: 4px 10px;
   border-radius: 999px; cursor: pointer; font-size: 12px; color: inherit;
 }
-.review-tabs button.active { background: var(--text); color: var(--bg); border-color: var(--text); }
+.review-tabs button.active { background: var(--acid); color: var(--mark-ink); border-color: var(--ink); }
 .review-filter { display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--muted); }
 .review-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .review-list > li > button {
@@ -2683,7 +2715,7 @@ button.file-ref { background: none; border: 0; padding: 0; color: var(--acid); c
 .review-detail dd { margin: 0; }
 .review-content {
   max-height: 280px; overflow: auto; padding: 8px; border-radius: 6px;
-  background: var(--bg); border: 1px solid var(--rule); font-size: 12px; white-space: pre-wrap;
+  background: var(--ground); border: 1px solid var(--rule); font-size: 12px; white-space: pre-wrap;
 }
 .review-paths { margin: 4px 0 0; padding-left: 16px; }
 .ledger-row { border: 1px solid var(--rule); border-radius: 6px; padding: 8px; background: var(--code-bg); }
