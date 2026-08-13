@@ -46,6 +46,7 @@ import {
 import { SurfaceNav } from "./SurfaceNav";
 import {
   deepLinkWorkspaceID,
+  parseDeepLink,
   resolveDeepLink,
   writeDeepLinkToLocation,
 } from "./deepLink";
@@ -861,10 +862,11 @@ export default function App() {
   }, [boot]);
 
   // Apply additive deep-link mode/surface once bootstrap is ready. Root/session handled above.
-  // Wait until pane contributions are registered (or skipped) so ?surface=pane:* resolves.
+  // Only wait for pane contributions when the URL names a pane:* surface.
   useEffect(() => {
     if (!boot || deepLinkApplied.current) return;
-    if (paneSurfacesRev === 0) return;
+    const wantsPaneSurface = parseDeepLink(location.search).raw.surface.startsWith("pane:");
+    if (wantsPaneSurface && paneSurfacesRev === 0) return;
     deepLinkApplied.current = true;
     const resolved = resolveDeepLink(location.search, boot.capabilities, {
       attachOnly: boot.attachOnly,

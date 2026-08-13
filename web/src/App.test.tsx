@@ -400,7 +400,7 @@ describe("App", () => {
     await screen.findByText("Current");
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
     expect(screen.getByRole("tab", { name: "context" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "files" })).toHaveAttribute("aria-selected", "true");
+    await waitFor(() => expect(screen.getByRole("tab", { name: "files" })).toHaveAttribute("aria-selected", "true"));
     expect(screen.getByRole("tab", { name: "issues" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "workflows" })).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "memory" })).not.toBeInTheDocument();
