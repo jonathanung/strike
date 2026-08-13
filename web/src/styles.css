@@ -1597,40 +1597,58 @@ dialog input { padding: 12px; color: var(--ink); }
 .diff .add { color: var(--diff-add); background: var(--diff-add-bg); }
 .diff .del { color: var(--diff-del); background: var(--diff-del-bg); }
 
+.composer-field {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
 .completion {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 100%;
+  --completion-max-rows: 6;
+  --completion-row-height: 28px;
   display: flex;
   flex-direction: column;
   background: var(--raised);
-  border: 1px solid var(--rule);
-  box-shadow: 0 -12px 30px var(--shadow);
-  max-height: 240px;
+  border-bottom: 1px solid var(--rule);
+  max-height: calc(var(--completion-max-rows) * var(--completion-row-height));
   overflow: auto;
-  z-index: 3;
 }
 .completion button {
+  box-sizing: border-box;
   width: 100%;
-  display: grid;
-  grid-template-columns: 150px 1fr;
-  gap: 12px;
+  min-height: var(--completion-row-height);
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
   text-align: left;
-  padding: 8px 12px;
+  padding: 4px 12px;
   border: 0;
-  border-bottom: 1px solid var(--rule);
   border-radius: 0;
   background: transparent;
   color: inherit;
   text-transform: none;
   font-size: 12px;
   font-weight: inherit;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
 }
 .completion button.active, .completion button[aria-selected="true"] {
   background: color-mix(in srgb, var(--acid) 14%, transparent);
 }
-.completion span { color: var(--muted); }
+.completion button strong {
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.completion span {
+  color: var(--muted);
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.completion span::before { content: "— "; }
 .attachments {
   display: flex;
   gap: 6px;

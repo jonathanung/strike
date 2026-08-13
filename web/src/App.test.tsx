@@ -163,7 +163,11 @@ describe("App", () => {
     fireEvent.change(box, { target: { value: "/" } });
     const list = screen.getByRole("listbox", { name: "Composer completions" });
     expect(list.className).toContain("completion");
-    expect(list.parentElement).toHaveClass("composer");
+    const field = list.parentElement;
+    expect(field).toHaveClass("composer-field");
+    expect(field?.querySelector("textarea")).toBeTruthy();
+    expect(field?.parentElement).toHaveClass("composer");
+    expect(screen.getAllByRole("option").length).toBeGreaterThan(6);
     const help = screen.getByRole("option", { name: /help/i });
     expect(help).toHaveAttribute("aria-selected", "true");
     expect(help).not.toHaveClass("composer-send");
@@ -258,7 +262,10 @@ describe("App", () => {
     const option = await screen.findByRole("option", { name: /go\.mod/ });
     expect(option).toHaveAttribute("aria-selected", "true");
     expect(option).not.toHaveClass("composer-send");
-    expect(screen.getByRole("listbox", { name: "Composer completions" })).toHaveClass("completion");
+    const fileList = screen.getByRole("listbox", { name: "Composer completions" });
+    expect(fileList).toHaveClass("completion");
+    expect(fileList.parentElement).toHaveClass("composer-field");
+    expect(fileList.parentElement?.querySelector("textarea")).toBeTruthy();
     fireEvent.keyDown(box, { key: "Enter" });
     expect((box as HTMLTextAreaElement).value).toContain("@go.mod");
     expect((box as HTMLTextAreaElement).value).not.toContain("@go\n");
