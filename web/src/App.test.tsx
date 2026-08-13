@@ -163,7 +163,11 @@ describe("App", () => {
     fireEvent.change(box, { target: { value: "/" } });
     const list = screen.getByRole("listbox", { name: "Composer completions" });
     expect(list.className).toContain("completion");
-    expect(list.parentElement).toHaveClass("composer");
+    const field = list.parentElement;
+    expect(field).toHaveClass("composer-field");
+    expect(field?.querySelector("textarea")).toBeTruthy();
+    expect(field?.parentElement).toHaveClass("composer");
+    expect(screen.getAllByRole("option").length).toBeGreaterThan(6);
     const help = screen.getByRole("option", { name: /help/i });
     expect(help).toHaveAttribute("aria-selected", "true");
     expect(help).not.toHaveClass("composer-send");
@@ -273,10 +277,12 @@ describe("App", () => {
     expect(options[0]).toHaveAttribute("aria-selected", "true");
     expect(options[0]).not.toHaveClass("composer-send");
     expect(list).toHaveClass("completion");
+    expect(list.parentElement).toHaveClass("composer-field");
+    expect(list.parentElement?.querySelector("textarea")).toBeTruthy();
     fireEvent.keyDown(box, { key: "ArrowDown" });
-    expect(within(list).getAllByRole("option")[1]).toHaveAttribute("aria-selected", "true");
+    await waitFor(() => expect(within(list).getAllByRole("option")[1]).toHaveAttribute("aria-selected", "true"));
     fireEvent.keyDown(box, { key: "ArrowUp" });
-    expect(within(list).getAllByRole("option")[0]).toHaveAttribute("aria-selected", "true");
+    await waitFor(() => expect(within(list).getAllByRole("option")[0]).toHaveAttribute("aria-selected", "true"));
     fireEvent.keyDown(box, { key: "Enter" });
     expect((box as HTMLTextAreaElement).value).toContain("@go.mod");
     expect((box as HTMLTextAreaElement).value).not.toContain("@go\n");
