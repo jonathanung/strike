@@ -592,6 +592,7 @@ func migrateSkipSet(src string, m Manifest) (map[string]struct{}, error) {
 		"plugin.jsonc": {},
 		"mcp.json":     {},
 		"skills":       {},
+		strikeCLIDir:   {},
 	}
 	add := func(rel string) {
 		rel = filepath.ToSlash(strings.TrimSpace(rel))
@@ -1197,21 +1198,17 @@ func copyLeftovers(src, dest string, skip map[string]struct{}) error {
 			}
 			return nil
 		}
+		if d.Type()&fs.ModeSymlink != 0 {
+			return copyConfinedSymlink(srcAbs, path, filepath.Join(dest, rel), relSlash)
+		}
 		if d.IsDir() {
 			return nil
-		}
-		if d.Type()&fs.ModeSymlink != 0 {
-			return copyTreeFile(srcAbs, dest, relSlash)
 		}
 		if !d.Type().IsRegular() {
 			return nil
 		}
 		return copyFile(path, filepath.Join(dest, rel))
 	})
-}
-
-func copyTreeFile(srcRoot, destRoot, relSlash string) error {
-	return copyFile(filepath.Join(srcRoot, filepath.FromSlash(relSlash)), filepath.Join(destRoot, filepath.FromSlash(relSlash)))
 }
 
 func commitInstalledMigrate(opts MigrateOptions, resolved migrateTarget, m Manifest, staging, digest string, stagingOK *bool) (trustCleared bool, err error) {

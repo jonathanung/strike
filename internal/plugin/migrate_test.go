@@ -712,3 +712,105 @@ func TestMigrate_HarnessNameCollisionUniquified(t *testing.T) {
 		t.Fatalf("binaries: %q %q", a, b)
 	}
 }
+
+func TestMigrate_LeftoverStrikeCLINotCopied(t *testing.T) {
+	src := t.TempDir()
+	writePlugin(t, src, "acme.pack", map[string]string{
+		"plugin.json": `{
+  "schemaVersion": 1,
+  "id": "acme.pack",
+  "version": "1.0.0",
+  "name": "Pack",
+  "strike": { "min": "0.1.0" },
+  "contributions": { "agents": [{ "path": "agents/good.md" }] }
+}`,
+		"agents/good.md":                validAgentMD("good"),
+		"com.strike.cli/agents/evil.md": validAgentMD("evil"),
+	})
+	before, diags := LoadOne(src, ScopeGlobal, "0.2.0")
+	if before == nil {
+		t.Fatalf("legacy load: %v", diags)
+	}
+	if len(before.Agents) != 1 || before.Agents[0].RelPath != "agents/good.md" {
+		t.Fatalf("legacy agents=%v", before.Agents)
+	}
+	if _, err := Migrate(MigrateOptions{Target: src, StrikeVersion: "0.2.0"}); err != nil {
+		t.Fatal(err)
+	}
+	after, diags := LoadOne(src, ScopeGlobal, "0.2.0")
+	if after == nil {
+		t.Fatalf("aps load: %v", diags)
+	}
+	if len(after.Agents) != 1 || after.Agents[0].RelPath != "com.strike.cli/agents/good.md" {
+		t.Fatalf("want only declared agent, got %v", after.Agents)
+	}
+	if _, err := os.Stat(filepath.Join(src, "com.strike.cli/agents/evil.md")); !os.IsNotExist(err) {
+		t.Fatal("leftover com.strike.cli agent should not be copied")
+	}
+}
+
+func TestMigrate_LeftoverDirSymlinkCopiedAsSymlink(t *testing.T) {
+	src := t.TempDir()
+	writePlugin(t, src, "acme.pack", map[string]string{
+		"plugin.json": `{
+  "schemaVersion": 1,
+  "id": "acme.pack",
+  "version": "1.0.0",
+  "name": "Pack",
+  "strike": { "min": "0.1.0" },
+  "contributions": { "agents": [{ "path": "agents/a.md" }] }
+}`,
+		"agents/a.md":           validAgentMD("a"),
+		"documentation/note.md": "notes\n",
+	})
+	if err := os.Symlink("documentation", filepath.Join(src, "docs")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if _, err := Migrate(MigrateOptions{Target: src, StrikeVersion: "0.2.0"}); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Lstat(filepath.Join(src, "docs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("leftover dir symlink should remain a symlink")
+	}
+	got, err := os.Readlink(filepath.Join(src, "docs"))
+	if err != nil || got != "documentation" {
+		t.Fatalf("symlink target=%q err=%v", got, err)
+	}
+	body, err := os.ReadFile(filepath.Join(src, "documentation/note.md"))
+	if err != nil || string(body) != "notes\n" {
+		t.Fatalf("documentation copy: %q %v", body, err)
+	}
+}
+
+func TestMigrate_LeftoverEscapingSymlinkRejected(t *testing.T) {
+	src := t.TempDir()
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "secret.md"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writePlugin(t, src, "acme.pack", map[string]string{
+		"plugin.json": `{
+  "schemaVersion": 1,
+  "id": "acme.pack",
+  "version": "1.0.0",
+  "name": "Pack",
+  "strike": { "min": "0.1.0" },
+  "contributions": { "agents": [{ "path": "agents/a.md" }] }
+}`,
+		"agents/a.md": validAgentMD("a"),
+	})
+	if err := os.Symlink(filepath.Join(outside, "secret.md"), filepath.Join(src, "leak.md")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if _, err := Migrate(MigrateOptions{Target: src, StrikeVersion: "0.2.0"}); err == nil {
+		t.Fatal("expected escaping leftover symlink to fail migrate")
+	}
+	m, _, err := ReadManifest(src)
+	if err != nil || m.Format != FormatLegacy {
+		t.Fatalf("want legacy remaining after symlink rejection, got %+v %v", m, err)
+	}
+}
