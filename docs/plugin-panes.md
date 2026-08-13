@@ -4,12 +4,12 @@ Normative contract for **user pane contributions** (epic
 [#451](https://github.com/jonathanung/strike/issues/451), PLUGIN.8
 [#522](https://github.com/jonathanung/strike/issues/522)).
 
-Builds on the versioned plugin bundle contract
-([plugins.md](plugins.md)). This document freezes pane identity, definition
-shape, execution model, render/input primitives, permissions, lifecycle,
-sizing, failure isolation, versioning, and web mapping **before** TUI host
-([#731](https://github.com/jonathanung/strike/issues/731)) or web parity
-([#732](https://github.com/jonathanung/strike/issues/732)) land.
+Builds on the plugin bundle contract ([plugins.md](plugins.md)). Native
+packages are [Agent Plugins](https://agent-plugins.org/) 1.0.0; panes are a
+**Strike-only** contribution under `com.strike.cli/panes/` (this document does
+not change the pane ABI — only how panes are packaged). This document freezes
+pane identity, definition shape, execution model, render/input primitives,
+permissions, lifecycle, sizing, failure isolation, versioning, and web mapping.
 
 | Status | Meaning |
 |---|---|
@@ -88,35 +88,45 @@ logic under the same trust gates as other executables.
 
 | Term | Rule |
 |---|---|
-| **Pane ID** | Stable string `contributions.panes[].id`. Pattern: same as plugin-scoped slugs — `^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)*$`, max 64 chars. Recommended: `<plugin-id-suffix>.<pane>` (e.g. `acme.status`). |
+| **Pane ID** | Stable string from the pane **definition** `id` (native packages: files under `com.strike.cli/panes/`). Legacy packages: `contributions.panes[].id`, which MUST equal definition `id`. Pattern: `^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)*$`, max 64 chars. Recommended: `<plugin-name-suffix>.<pane>` (e.g. `acme.status`). |
 | **Uniqueness** | Pane IDs must be unique across **enabled** plugins. Collision → **fail closed** for the colliding contribution; diagnostic names both plugins (same posture as MCP/harness name collision in [plugins.md](plugins.md#44-collisions)). |
 | **Title** | Human label for chrome / window cycle UI (1–40 chars). From definition `title`, overridable at runtime by `pane.meta` (process) within the same length cap. |
-| **Provenance** | Diagnostics and plugin manager show `plugin=<id>@<version> pane=<pane-id> mode=<static\|process>`. |
+| **Provenance** | Diagnostics and plugin manager show `plugin=<name>@<version> pane=<pane-id> mode=<static\|process>`. |
 | **Slash / jump** | Hosts MAY expose `/pane <id>` or catalog entries; IDs are the stable handle. Built-in window IDs remain reserved and must not be claimed by plugins (`context`, `activity`, `agents`, `visualizer`, `files`, `diagnostics`, `memory`, `issues`, `plans`, `markdown`, `editor`, `pets`, `system`, and any future built-in listed in docs). |
 
 Built-in windows are **not** plugin panes and do not use this ABI.
 
 ---
 
-## 4. Manifest contribution entry
+## 4. Packaging
 
-Extends [plugins.md](plugins.md) §7.9. `schemaVersion` of the **plugin**
-manifest stays `1`; pane **definition** files carry their own
-`schemaVersion` (this ABI starts at **1**).
+Extends [plugins.md](plugins.md) §7.9. Native plugin manifests are Agent
+Plugins 1.0.0 (`$schema`); they MUST NOT list panes inline. Pane **definition**
+files carry their own `schemaVersion` (this ABI starts at **1**). `schemaVersion`
+1 implies ABI `pane/1`.
 
-### 4.1 Entry fields
+### 4.1 Native discovery (`com.strike.cli/panes/`)
+
+Directory discovery of JSON/JSONC files under `com.strike.cli/panes/`. Pane
+`id` comes from the definition file. Path confinement per
+[plugins.md](plugins.md#9-path-confinement-normative).
+
+### 4.2 Legacy manifest entry (deprecated load path)
+
+Legacy Strike packages still declare panes in `contributions.panes[]`:
 
 | Field | Required | Type | Rules |
 |---|---|---|---|
-| `id` | yes | string | Pane ID (§3). |
-| `path` | yes | string | Relative path to the pane definition JSON/JSONC under plugin root. Path confinement per [plugins.md](plugins.md#9-path-confinement). |
-| `abi` | yes | string | Must be `"pane/1"` for this contract. Legacy placeholder `"reserved"` is **rejected** once pane loaders exist; until then loaders ignore pane activation. |
+| `id` | yes | string | Pane ID (§3). MUST equal definition `id`. |
+| `path` | yes | string | Relative path to the pane definition JSON/JSONC under plugin root. |
+| `abi` | yes | string | Must be `"pane/1"` for this contract. Legacy placeholder `"reserved"` is **rejected**. |
 
-Unknown entry fields: rejected on strict decode (plugin manifest posture).
+Unknown entry fields: rejected on strict decode (legacy plugin manifest posture).
 
-### 4.2 Capability tags
+### 4.3 Capability tags
 
-Plugins that contribute panes SHOULD declare capability tags:
+Plugins that contribute panes SHOULD declare capability tags under
+`extensions.com.strike.cli.capabilities` (legacy: top-level `capabilities`):
 
 | Tag | Meaning |
 |---|---|
@@ -124,33 +134,32 @@ Plugins that contribute panes SHOULD declare capability tags:
 | `panes.process` | At least one `mode: process` pane (executable trust). |
 | `panes.host.<name>` | Optional finer tags for host data feeds requested (e.g. `panes.host.session.summary`). |
 
-### 4.3 Example manifest fragment
+### 4.4 Example (native package)
 
-```jsonc
-"contributions": {
-  "panes": [
-    {
-      "id": "acme.status",
-      "path": "panes/status.json",
-      "abi": "pane/1"
-    }
-  ]
-}
+```text
+acme.review-pack/
+  plugin.json
+  com.strike.cli/
+    panes/
+      status.json
 ```
+
+`extensions.com.strike.cli.capabilities` SHOULD include `"panes"` (and
+`"panes.process"` when any definition is `mode: process`).
 
 ---
 
 ## 5. Pane definition file (`schemaVersion: 1`)
 
-File at `contributions.panes[].path`. JSON or JSONC. Strict unknown-field
-reject.
+File under `com.strike.cli/panes/` (native) or `contributions.panes[].path`
+(legacy). JSON or JSONC. Strict unknown-field reject.
 
 ### 5.1 Top-level fields
 
 | Field | Required | Type | Rules |
 |---|---|---|---|
 | `schemaVersion` | yes | integer | `1` for this ABI. |
-| `id` | yes | string | Must equal manifest `contributions.panes[].id`. |
+| `id` | yes | string | Pane ID (§3). Native: authoritative. Legacy: must equal `contributions.panes[].id`. |
 | `title` | yes | string | Display title (1–40 chars). |
 | `mode` | yes | string | `"static"` or `"process"`. |
 | `permissions` | yes | object | §8. Required even for static (declares host feeds). |
@@ -159,14 +168,14 @@ reject.
 | `view` | static: yes | object | Initial / only view tree (§6). Ignored as sole UI source in process mode (process sends `pane.render`). |
 | `command` | process: yes | string | Relative executable under plugin root (or reviewed absolute — same rules as MCP/harness). |
 | `args` | no | string[] | Process argv after command. |
-| `env` | no | object | Env map; values secret refs or non-secret literals ([plugins.md](plugins.md#10-secret-handling)). |
+| `env` | no | object | Env map; values secret refs or non-secret literals ([plugins.md](plugins.md#10-secret-handling-normative)). |
 | `timeouts` | no | object | §10 overrides. |
 | `group` | no | string | Optional stack-group hint (§9.3). |
 
 ### 5.2 Static definition example
 
 ```jsonc
-// panes/status.json — static pane driven by host subscriptions
+// com.strike.cli/panes/status.json — static pane driven by host subscriptions
 {
   "schemaVersion": 1,
   "id": "acme.status",
@@ -230,13 +239,13 @@ the host.
 ### 5.3 Process definition example
 
 ```jsonc
-// panes/board.json — external process pane
+// com.strike.cli/panes/board.json — external process pane
 {
   "schemaVersion": 1,
   "id": "acme.board",
   "title": "Review Board",
   "mode": "process",
-  "command": "bin/review-board-pane",
+  "command": "com.strike.cli/bin/review-board-pane",
   "args": ["--jsonl"],
   "permissions": {
     "host": ["session.summary", "agents.roster"],
@@ -754,10 +763,10 @@ action later without changing this ABI.
 
 | Layer | Field | Policy |
 |---|---|---|
-| Plugin manifest | `schemaVersion` | Unchanged by this ABI; still `1`. |
+| Plugin manifest | APS `$schema` (native) / legacy `schemaVersion` | Unchanged by this ABI. Native: Agent Plugins 1.0.0. Legacy: still `1`. |
 | Pane definition | `schemaVersion` | Integer; this doc = **1**. |
 | Process messages | `version` | Integer; this doc = **1**. |
-| Manifest `abi` | `pane/1` | Major in the string; `pane/2` only with breaking change. |
+| ABI string | `pane/1` | Implied by definition `schemaVersion` 1 on native packages; legacy manifest `abi` field. `pane/2` only with breaking change. |
 
 Compatibility:
 
@@ -792,41 +801,33 @@ terminal escape passthrough, Bubble Tea commands.
 
 ## 15. Complete end-to-end example
 
-Bundle layout:
+Bundle layout (native Agent Plugins package):
 
 ```text
-acme-review-pack/
+acme.review-pack/
   plugin.json
-  panes/
-    status.json          # static (§5.2)
-    board.json           # process (§5.3)
-  bin/
-    review-board-pane    # process executable
+  com.strike.cli/
+    panes/
+      status.json          # static (§5.2)
+      board.json           # process (§5.3)
+    bin/
+      review-board-pane    # process executable
 ```
 
 `plugin.json` (excerpt):
 
 ```json
 {
-  "schemaVersion": 1,
-  "id": "acme.review-pack",
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "acme.review-pack",
   "version": "1.2.0",
-  "name": "Acme Review Pack",
-  "strike": { "min": "0.2.0" },
-  "capabilities": ["panes", "panes.process", "agents", "skills"],
-  "contributions": {
-    "panes": [
-      {
-        "id": "acme.status",
-        "path": "panes/status.json",
-        "abi": "pane/1"
-      },
-      {
-        "id": "acme.board",
-        "path": "panes/board.json",
-        "abi": "pane/1"
-      }
-    ]
+  "description": "Acme review panes",
+  "extensions": {
+    "com.strike.cli": {
+      "displayName": "Acme Review Pack",
+      "strike": { "min": "0.2.0" },
+      "capabilities": ["panes", "panes.process", "agents", "skills"]
+    }
   }
 }
 ```
@@ -877,7 +878,7 @@ touching the private Go `window` interface.
 
 | Stage | Issue | Touchpoints |
 |---|---|---|
-| Bundle contract | #725 | `panes/` tree; reserved entries → this ABI |
+| Bundle contract | #725 / #1142 | Native: `com.strike.cli/panes/`; legacy: `contributions.panes[]` → this ABI |
 | Pane ABI | #522 (this doc) | Definition, process protocol, permissions, isolation |
 | Passive/exec loaders | #726 #728 | Register descriptors; trust for `panes.process` |
 | Plugin manager | #730 | Enable/disable, provenance, recovery actions |

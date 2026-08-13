@@ -111,7 +111,7 @@ rejects query tokens. Optional Vite dev proxy lives in `web/`. Details:
 | [Auth & providers](docs/auth.md) | credentials, OAuth, billing routing |
 | [Config](docs/config.md) | JSON, permissions, custom providers, `vimMode`/`nanoMode` |
 | [Agents & skills](docs/agents-skills.md) | personas, skills, workflows / autonomy |
-| [Plugins](docs/plugins.md) | versioned plugin bundle contract (manifest, trust) |
+| [Plugins](docs/plugins.md) | Agent Plugins 1.0.0 contract (skills, MCP, `com.strike.cli`, trust) |
 | [Web cockpit](docs/web.md) | experimental `strike serve` (live + RO) |
 | [Web cockpit contract](docs/web-cockpit-contract.md) | progressive modes, parity matrix, attach-only (#1069) |
 | [Go SDK](docs/sdk.md) | `pkg/sdk` client over `pkg/protocol` |
