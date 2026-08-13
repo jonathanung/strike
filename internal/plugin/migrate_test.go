@@ -429,3 +429,177 @@ func TestIsPortableAgentSkill(t *testing.T) {
 		t.Fatal("missing frontmatter is not a valid Agent Skill")
 	}
 }
+
+func TestMigrate_DirectorySkillOutsideSkillsRemaps(t *testing.T) {
+	src := t.TempDir()
+	writePlugin(t, src, "acme.pack", map[string]string{
+		"plugin.json": `{
+  "schemaVersion": 1,
+  "id": "acme.pack",
+  "version": "1.0.0",
+  "name": "Pack",
+  "strike": { "min": "0.1.0" },
+  "contributions": { "skills": [{ "path": "vendor/ship-review/SKILL.md" }] }
+}`,
+		"vendor/ship-review/SKILL.md":      validSkillMD("ship-review"),
+		"vendor/ship-review/scripts/do.sh": "#!/bin/sh\necho hi\n",
+	})
+	if _, err := Migrate(MigrateOptions{Target: src, StrikeVersion: "0.2.0"}); err != nil {
+		t.Fatal(err)
+	}
+	p, diags := LoadOne(src, ScopeGlobal, "0.2.0")
+	if p == nil {
+		t.Fatalf("load: %v", diags)
+	}
+	if len(p.Skills) != 1 || p.Skills[0].RelPath != "skills/ship-review/SKILL.md" {
+		t.Fatalf("skills=%v", p.Skills)
+	}
+	if _, err := os.Stat(filepath.Join(src, "skills/ship-review/scripts/do.sh")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMigrate_ProviderProfileNameRewritten(t *testing.T) {
+	src := t.TempDir()
+	writePlugin(t, src, "acme.pack", map[string]string{
+		"plugin.json": `{
+  "schemaVersion": 1,
+  "id": "acme.pack",
+  "version": "1.0.0",
+  "name": "Pack",
+  "strike": { "min": "0.1.0" },
+  "contributions": { "providers": [{ "path": "providers/p.json", "profileName": "acme-proxy" }] }
+}`,
+		"providers/p.json": validProviderJSON("ignored"),
+	})
+	if _, err := Migrate(MigrateOptions{Target: src, StrikeVersion: "0.2.0"}); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(src, "com.strike.cli/providers/p.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"acme-proxy"`) || strings.Contains(string(raw), `"ignored"`) {
+		t.Fatalf("provider json: %s", raw)
+	}
+}
+
+func TestMigrate_MCPSSEMapsToStreamableHTTP(t *testing.T) {
+	src := t.TempDir()
+	writePlugin(t, src, "acme.pack", map[string]string{
+		"plugin.json": `{
+  "schemaVersion": 1,
+  "id": "acme.pack",
+  "version": "1.0.0",
+  "name": "Pack",
+  "strike": { "min": "0.1.0" },
+  "contributions": {
+    "mcp": [{ "name": "cloud", "transport": "sse", "url": "https://mcp.example.com/sse" }]
+  }
+}`,
+	})
+	if _, err := Migrate(MigrateOptions{Target: src, StrikeVersion: "0.2.0"}); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(src, "mcp.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"streamable-http"`) || strings.Contains(string(raw), `"sse"`) {
+		t.Fatalf("mcp.json: %s", raw)
+	}
+	p, diags := LoadOne(src, ScopeGlobal, "0.2.0")
+	if p == nil || p.MCPCount != 1 {
+		t.Fatalf("mcp count=%v diags=%v", p, diags)
+	}
+}
+
+func TestMigrate_BasenameCollisionPreservesBoth(t *testing.T) {
+	src := t.TempDir()
+	writePlugin(t, src, "acme.pack", map[string]string{
+		"plugin.json": `{
+  "schemaVersion": 1,
+  "id": "acme.pack",
+  "version": "1.0.0",
+  "name": "Pack",
+  "strike": { "min": "0.1.0" },
+  "contributions": {
+    "agents": [
+      { "path": "agents/a.md" },
+      { "path": "extra/a.md" }
+    ],
+    "harnesses": [{ "name": "h1", "command": "bin/run" }],
+    "hooks": [{ "event": "pre_tool_use", "type": "command", "command": "scripts/run" }]
+  }
+}`,
+		"agents/a.md": validAgentMD("agents-a"),
+		"extra/a.md":  validAgentMD("extra-a"),
+		"bin/run":     "#!/bin/sh\necho bin\n",
+		"scripts/run": "#!/bin/sh\necho scripts\n",
+	})
+	if _, err := Migrate(MigrateOptions{Target: src, StrikeVersion: "0.2.0"}); err != nil {
+		t.Fatal(err)
+	}
+	p, diags := LoadOne(src, ScopeGlobal, "0.2.0")
+	if p == nil {
+		t.Fatalf("load: %v", diags)
+	}
+	if len(p.Agents) != 2 {
+		t.Fatalf("agents=%v", p.Agents)
+	}
+	seen := map[string]bool{}
+	for _, a := range p.Agents {
+		seen[filepath.Base(a.RelPath)] = true
+	}
+	if !seen["a.md"] || !seen["a-2.md"] {
+		t.Fatalf("want unique agent dests, got %v", p.Agents)
+	}
+	binBody, err := os.ReadFile(filepath.Join(src, "com.strike.cli/bin/run"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	scriptBody, err := os.ReadFile(filepath.Join(src, "com.strike.cli/bin/scripts/run"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(binBody), "echo bin") || !strings.Contains(string(scriptBody), "echo scripts") {
+		t.Fatalf("binaries collided: %q %q", binBody, scriptBody)
+	}
+}
+
+func TestMigrate_LockfileWriteFailureLeavesLegacy(t *testing.T) {
+	home := t.TempDir()
+	gRoot := filepath.Join(home, ".strike")
+	src := t.TempDir()
+	writePlugin(t, src, "acme.pack", map[string]string{
+		"plugin.json": manifest("acme.pack", `{"agents":[{"path":"agents/a.md"}]}`),
+		"agents/a.md": validAgentMD("a"),
+	})
+	inst, err := Install(context.Background(), InstallOptions{
+		Scope:         ScopeGlobal,
+		GlobalRoot:    gRoot,
+		LocalPath:     src,
+		StrikeVersion: "0.2.0",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeLockfileAfterSwap = func(string, Lockfile) error {
+		return errors.New("injected lock write failure")
+	}
+	t.Cleanup(func() { writeLockfileAfterSwap = WriteLockfile })
+
+	_, err = Migrate(MigrateOptions{
+		Target: inst.ID, Scope: ScopeGlobal, GlobalRoot: gRoot, StrikeVersion: "0.2.0", Confirm: true,
+	})
+	if err == nil {
+		t.Fatal("expected lockfile failure")
+	}
+	if !strings.Contains(err.Error(), "injected lock write failure") {
+		t.Fatalf("want injected lock write error, got %v", err)
+	}
+	m, _, err := ReadManifest(inst.Root)
+	if err != nil || m.Format != FormatLegacy {
+		t.Fatalf("want legacy remaining after lockfile failure, got %+v %v", m, err)
+	}
+}

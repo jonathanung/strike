@@ -20,6 +20,10 @@ var ErrAlreadyAPS = errors.New("already an Agent Plugins 1.0.0 package")
 // ErrNeedYes is returned when modifying an installed plugin without Confirm.
 var ErrNeedYes = errors.New("migrating an installed plugin requires --yes")
 
+// writeLockfileAfterSwap persists the lockfile after the migrated tree is swapped
+// in. Tests override it to inject a write failure after the filesystem rename.
+var writeLockfileAfterSwap = WriteLockfile
+
 // MigrateOptions controls Migrate.
 type MigrateOptions struct {
 	// Target is an installed plugin id or a filesystem path to a plugin root.
@@ -222,21 +226,22 @@ func Migrate(opts MigrateOptions) (MigrateResult, error) {
 		return MigrateResult{}, fmt.Errorf("compute digest: %w", err)
 	}
 
+	result.Root = src
+	result.Digest = newDigest
+	if resolved.installed {
+		cleared, err := commitInstalledMigrate(opts, resolved, m, staging, newDigest, &stagingOK)
+		if err != nil {
+			return MigrateResult{}, err
+		}
+		result.Applied = true
+		result.TrustCleared = cleared
+		result.Review = formatMigrateReview(result)
+		return result, nil
+	}
 	if err := commitMigratedTree(resolved, staging, &stagingOK); err != nil {
 		return MigrateResult{}, err
 	}
-
-	result.Root = src
-	result.Digest = newDigest
 	result.Applied = true
-	if resolved.installed {
-		cleared, rerr := updateLockfileAfterMigrate(opts, resolved, m, newDigest)
-		if rerr != nil {
-			return MigrateResult{}, rerr
-		}
-		result.TrustCleared = cleared
-		result.Review = formatMigrateReview(result)
-	}
 	return result, nil
 }
 
@@ -330,13 +335,14 @@ func planLegacyMigrate(src string, m Manifest) (MigratePlan, error) {
 		Version:     m.Version,
 	}
 	c := m.Contributions
+	used := map[string]struct{}{}
 	for _, e := range c.Agents {
 		plan.Moves = append(plan.Moves, MigrateMove{
-			From: e.Path, To: strikeCLIRel("agents", filepath.Base(e.Path)), Note: "strike-only",
+			From: e.Path, To: uniqueStrikeCLIDest(used, "agents", e.Path), Note: "strike-only",
 		})
 	}
 	for _, e := range c.Skills {
-		to, note, err := planSkillMove(src, e.Path)
+		to, note, err := planSkillMove(src, e.Path, used)
 		if err != nil {
 			return MigratePlan{}, err
 		}
@@ -344,17 +350,17 @@ func planLegacyMigrate(src string, m Manifest) (MigratePlan, error) {
 	}
 	for _, e := range c.Workflows {
 		plan.Moves = append(plan.Moves, MigrateMove{
-			From: e.Path, To: strikeCLIRel("workflows", filepath.Base(e.Path)), Note: "strike-only",
+			From: e.Path, To: uniqueStrikeCLIDest(used, "workflows", e.Path), Note: "strike-only",
 		})
 	}
 	for _, e := range c.Themes {
 		plan.Moves = append(plan.Moves, MigrateMove{
-			From: e.Path, To: strikeCLIRel("themes", filepath.Base(e.Path)), Note: "strike-only",
+			From: e.Path, To: uniqueStrikeCLIDest(used, "themes", e.Path), Note: "strike-only",
 		})
 	}
 	for _, e := range c.Providers {
 		plan.Moves = append(plan.Moves, MigrateMove{
-			From: e.Path, To: strikeCLIRel("providers", filepath.Base(e.Path)), Note: "strike-only",
+			From: e.Path, To: uniqueStrikeCLIDest(used, "providers", e.Path), Note: "strike-only",
 		})
 	}
 	for i, raw := range c.Harnesses {
@@ -379,15 +385,13 @@ func planLegacyMigrate(src string, m Manifest) (MigratePlan, error) {
 	for i, raw := range c.Panes {
 		e, err := ParsePaneEntry(raw)
 		from := "contributions.panes[" + strconv.Itoa(i) + "]"
-		base := fmt.Sprintf("pane-%d.json", i+1)
+		to := uniqueStrikeCLIDest(used, "panes", fmt.Sprintf("pane-%d.json", i+1))
 		if err == nil {
 			from = e.Path
-			if b := filepath.Base(e.Path); b != "" && b != "." {
-				base = b
-			}
+			to = uniqueStrikeCLIDest(used, "panes", e.Path)
 		}
 		plan.Moves = append(plan.Moves, MigrateMove{
-			From: from, To: strikeCLIRel("panes", base), Note: "strike-only",
+			From: from, To: to, Note: "strike-only",
 		})
 	}
 	for _, raw := range c.MCP {
@@ -405,15 +409,15 @@ func planLegacyMigrate(src string, m Manifest) (MigratePlan, error) {
 	return plan, nil
 }
 
-func planSkillMove(src, rel string) (to, note string, err error) {
+func planSkillMove(src, rel string, used map[string]struct{}) (to, note string, err error) {
 	rel = strings.TrimSpace(rel)
 	base := filepath.Base(rel)
 	if strings.EqualFold(base, "SKILL.md") {
-		dir := filepath.ToSlash(filepath.Dir(rel))
+		dir := filepath.Base(filepath.Dir(rel))
 		if dir == "" || dir == "." {
 			return "", "", fmt.Errorf("skill path %q is not a directory SKILL.md", rel)
 		}
-		return filepath.ToSlash(filepath.Join(dir, "SKILL.md")), "portable", nil
+		return uniqueRel(used, filepath.ToSlash(filepath.Join("skills", dir, "SKILL.md"))), "portable", nil
 	}
 	stem := strings.TrimSuffix(base, filepath.Ext(base))
 	abs, rerr := ResolveUnderRoot(src, rel)
@@ -425,9 +429,45 @@ func planSkillMove(src, rel string) (to, note string, err error) {
 		return "", "", fmt.Errorf("skill %q: %w", rel, rerr)
 	}
 	if isPortableAgentSkill(data, stem) {
-		return filepath.ToSlash(filepath.Join("skills", stem, "SKILL.md")), "portable wrap", nil
+		return uniqueRel(used, filepath.ToSlash(filepath.Join("skills", stem, "SKILL.md"))), "portable wrap", nil
 	}
-	return strikeCLIRel("skills", base), "strike-only extra", nil
+	return uniqueStrikeCLIDest(used, "skills", rel), "strike-only extra", nil
+}
+
+func uniqueStrikeCLIDest(used map[string]struct{}, kind, rel string) string {
+	base := filepath.Base(filepath.ToSlash(strings.TrimSpace(rel)))
+	if base == "" || base == "." {
+		base = "entry"
+	}
+	dest := filepath.ToSlash(filepath.Join(strikeCLIDir, kind, base))
+	return uniqueRel(used, dest)
+}
+
+func uniqueRel(used map[string]struct{}, dest string) string {
+	dest = filepath.ToSlash(dest)
+	if _, ok := used[dest]; !ok {
+		used[dest] = struct{}{}
+		return dest
+	}
+	if strings.EqualFold(filepath.Base(dest), "SKILL.md") {
+		dir := filepath.ToSlash(filepath.Dir(dest))
+		for i := 2; ; i++ {
+			cand := filepath.ToSlash(filepath.Join(fmt.Sprintf("%s-%d", dir, i), "SKILL.md"))
+			if _, ok := used[cand]; !ok {
+				used[cand] = struct{}{}
+				return cand
+			}
+		}
+	}
+	ext := filepath.Ext(dest)
+	stem := strings.TrimSuffix(dest, ext)
+	for i := 2; ; i++ {
+		cand := fmt.Sprintf("%s-%d%s", stem, i, ext)
+		if _, ok := used[cand]; !ok {
+			used[cand] = struct{}{}
+			return cand
+		}
+	}
 }
 
 func strikeCLIRel(kind, name string) string {
@@ -477,19 +517,17 @@ func writeMigratedTree(src, dest string, m Manifest, plan MigratePlan) error {
 	if err := writeAPSPluginJSON(dest, m); err != nil {
 		return err
 	}
-	if err := copyPathEntries(src, dest, m.Contributions.Agents, "agents"); err != nil {
+	if err := copyPlannedFiles(src, dest, plan, pathList(m.Contributions.Agents)); err != nil {
 		return err
 	}
-	if err := copyPathEntries(src, dest, m.Contributions.Workflows, "workflows"); err != nil {
+	if err := copyPlannedFiles(src, dest, plan, pathList(m.Contributions.Workflows)); err != nil {
 		return err
 	}
-	if err := copyPathEntries(src, dest, m.Contributions.Themes, "themes"); err != nil {
+	if err := copyPlannedFiles(src, dest, plan, pathList(m.Contributions.Themes)); err != nil {
 		return err
 	}
-	for _, e := range m.Contributions.Providers {
-		if err := copyFileTo(src, dest, e.Path, strikeCLIRel("providers", filepath.Base(e.Path))); err != nil {
-			return err
-		}
+	if err := copyMigratedProviders(src, dest, m, plan); err != nil {
+		return err
 	}
 	if err := copyMigratedSkills(src, dest, m, plan); err != nil {
 		return err
@@ -500,7 +538,7 @@ func writeMigratedTree(src, dest string, m Manifest, plan MigratePlan) error {
 	if err := writeHookFiles(src, dest, m, relocatedBins); err != nil {
 		return err
 	}
-	if err := copyPaneFiles(src, dest, m, relocatedBins); err != nil {
+	if err := copyPaneFiles(src, dest, m, plan, relocatedBins); err != nil {
 		return err
 	}
 	if err := writeAPSMCPJSON(dest, m); err != nil {
@@ -584,14 +622,98 @@ func markDirSkipped(root, rel string, skip map[string]struct{}) error {
 	})
 }
 
-func copyPathEntries(src, dest string, entries []PathEntry, kind string) error {
-	for _, e := range entries {
-		to := strikeCLIRel(kind, filepath.Base(e.Path))
-		if err := copyFileTo(src, dest, e.Path, to); err != nil {
+func copyPlannedFiles(src, dest string, plan MigratePlan, froms []string) error {
+	idx := map[string]string{}
+	for _, mv := range plan.Moves {
+		idx[mv.From] = mv.To
+	}
+	for _, from := range froms {
+		to, ok := idx[from]
+		if !ok {
+			return fmt.Errorf("internal: missing migrate plan for %s", from)
+		}
+		if err := copyFileTo(src, dest, from, to); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func pathList(entries []PathEntry) []string {
+	out := make([]string, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, e.Path)
+	}
+	return out
+}
+
+func copyMigratedProviders(src, dest string, m Manifest, plan MigratePlan) error {
+	idx := map[string]string{}
+	for _, mv := range plan.Moves {
+		idx[mv.From] = mv.To
+	}
+	for _, e := range m.Contributions.Providers {
+		to, ok := idx[e.Path]
+		if !ok {
+			return fmt.Errorf("internal: missing migrate plan for %s", e.Path)
+		}
+		if err := copyFileTo(src, dest, e.Path, to); err != nil {
+			return err
+		}
+		if strings.TrimSpace(e.ProfileName) == "" {
+			continue
+		}
+		abs := filepath.Join(dest, filepath.FromSlash(to))
+		data, err := os.ReadFile(abs)
+		if err != nil {
+			return err
+		}
+		rewritten, err := rewriteProviderProfileName(data, e.ProfileName)
+		if err != nil {
+			return fmt.Errorf("provider %s: %w", e.Path, err)
+		}
+		if err := os.WriteFile(abs, rewritten, 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func rewriteProviderProfileName(data []byte, profileName string) ([]byte, error) {
+	profileName = strings.TrimSpace(profileName)
+	stripped, err := stripJSONC(data)
+	if err != nil {
+		stripped = data
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(bytesTrimSpace(stripped), &obj); err != nil {
+		return nil, err
+	}
+	skip := map[string]struct{}{"$schema": {}}
+	var keys []string
+	for k := range obj {
+		if _, ok := skip[k]; ok {
+			continue
+		}
+		keys = append(keys, k)
+	}
+	if len(keys) != 1 {
+		return append(append([]byte(nil), bytesTrimSpace(stripped)...), '\n'), nil
+	}
+	if keys[0] == profileName {
+		out, err := json.MarshalIndent(obj, "", "  ")
+		if err != nil {
+			return nil, err
+		}
+		return append(out, '\n'), nil
+	}
+	obj[profileName] = obj[keys[0]]
+	delete(obj, keys[0])
+	out, err := json.MarshalIndent(obj, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	return append(out, '\n'), nil
 }
 
 func copyMigratedSkills(src, dest string, m Manifest, plan MigratePlan) error {
@@ -606,9 +728,18 @@ func copyMigratedSkills(src, dest string, m Manifest, plan MigratePlan) error {
 		}
 		base := filepath.Base(e.Path)
 		if strings.EqualFold(base, "SKILL.md") {
-			dir := filepath.Dir(e.Path)
-			if err := copyTree(filepath.Join(src, filepath.FromSlash(dir)), filepath.Join(dest, filepath.FromSlash(dir))); err != nil {
-				return fmt.Errorf("copy skill dir %s: %w", dir, err)
+			fromDir := filepath.Dir(e.Path)
+			toDir := filepath.Dir(mv.To)
+			fromAbs, err := ResolveUnderRoot(src, fromDir)
+			if err != nil {
+				return fmt.Errorf("skill dir %s: %w", fromDir, err)
+			}
+			toAbs := filepath.Join(dest, filepath.FromSlash(toDir))
+			if err := confineDestPath(dest, toAbs); err != nil {
+				return err
+			}
+			if err := copyTree(fromAbs, toAbs); err != nil {
+				return fmt.Errorf("copy skill dir %s: %w", fromDir, err)
 			}
 			continue
 		}
@@ -647,6 +778,7 @@ func confineDestPath(root, abs string) error {
 }
 
 func relocateStrikeBinaries(src, dest string, m Manifest, relocated map[string]string) error {
+	used := map[string]struct{}{}
 	consider := func(command string) error {
 		command = strings.TrimSpace(command)
 		if command == "" || filepath.IsAbs(command) {
@@ -659,17 +791,14 @@ func relocateStrikeBinaries(src, dest string, m Manifest, relocated map[string]s
 		if _, ok := relocated[rel]; ok {
 			return nil
 		}
-		fromAbs, err := ResolveUnderRoot(src, rel)
-		if err != nil {
+		if _, err := ResolveUnderRoot(src, rel); err != nil {
 			// Command may be reviewed-absolute-style or missing; leave as-is.
 			return nil
 		}
-		base := filepath.Base(rel)
-		toRel := strikeCLIRel("bin", base)
+		toRel := uniqueRel(used, strikeCLIBinDest(rel))
 		if err := copyFileTo(src, dest, rel, toRel); err != nil {
 			return fmt.Errorf("copy binary %s: %w", rel, err)
 		}
-		_ = fromAbs
 		relocated[rel] = toRel
 		return nil
 	}
@@ -710,6 +839,14 @@ func relocateStrikeBinaries(src, dest string, m Manifest, relocated map[string]s
 		}
 	}
 	return nil
+}
+
+func strikeCLIBinDest(rel string) string {
+	rel = strings.TrimPrefix(filepath.ToSlash(rel), "./")
+	if strings.HasPrefix(rel, "bin/") {
+		return filepath.ToSlash(filepath.Join(strikeCLIDir, rel))
+	}
+	return filepath.ToSlash(filepath.Join(strikeCLIDir, "bin", rel))
 }
 
 func mcpUsesRelCommand(m Manifest, rel string) bool {
@@ -781,35 +918,31 @@ func writeHookFiles(src, dest string, m Manifest, relocated map[string]string) e
 	return nil
 }
 
-func copyPaneFiles(src, dest string, m Manifest, relocated map[string]string) error {
-	used := map[string]int{}
+func copyPaneFiles(src, dest string, m Manifest, plan MigratePlan, relocated map[string]string) error {
+	idx := map[string]string{}
+	for _, mv := range plan.Moves {
+		idx[mv.From] = mv.To
+	}
 	for i, raw := range m.Contributions.Panes {
 		e, err := ParsePaneEntry(raw)
-		base := fmt.Sprintf("pane-%d.json", i+1)
-		from := ""
+		from := "contributions.panes[" + strconv.Itoa(i) + "]"
 		if err == nil {
 			from = e.Path
-			if b := filepath.Base(e.Path); b != "" && b != "." {
-				base = b
-			}
 		}
-		if n := used[base]; n > 0 {
-			ext := filepath.Ext(base)
-			stem := strings.TrimSuffix(base, ext)
-			base = fmt.Sprintf("%s-%d%s", stem, n+1, ext)
+		toRel, ok := idx[from]
+		if !ok {
+			return fmt.Errorf("internal: missing migrate plan for pane %s", from)
 		}
-		used[filepath.Base(base)]++
-		toRel := strikeCLIRel("panes", base)
-		if from == "" {
+		if err != nil || strings.TrimSpace(e.Path) == "" {
 			if err := writeJSONFile(dest, toRel, raw); err != nil {
 				return err
 			}
 			continue
 		}
-		if err := copyFileTo(src, dest, from, toRel); err != nil {
+		if err := copyFileTo(src, dest, e.Path, toRel); err != nil {
 			return err
 		}
-		d, _, err := ReadPaneDefinition(src, from)
+		d, _, err := ReadPaneDefinition(src, e.Path)
 		if err != nil || strings.TrimSpace(d.Command) == "" {
 			continue
 		}
@@ -949,10 +1082,8 @@ func writeAPSMCPJSON(dest string, m Manifest) error {
 			} else {
 				typ = "stdio"
 			}
-		case "http", "streamable-http", "streamable_http":
+		case "http", "streamable-http", "streamable_http", "sse":
 			typ = "streamable-http"
-		case "sse":
-			typ = "sse"
 		}
 		srv := apsMCPServerJSON{Type: typ}
 		if typ == "stdio" {
@@ -1038,6 +1169,66 @@ func copyTreeFile(srcRoot, destRoot, relSlash string) error {
 	return copyFile(filepath.Join(srcRoot, filepath.FromSlash(relSlash)), filepath.Join(destRoot, filepath.FromSlash(relSlash)))
 }
 
+func commitInstalledMigrate(opts MigrateOptions, resolved migrateTarget, m Manifest, staging, digest string, stagingOK *bool) (trustCleared bool, err error) {
+	roots, err := ResolveRoots(resolved.scope, Options{
+		WorkDir:     opts.WorkDir,
+		GlobalRoot:  opts.GlobalRoot,
+		ProjectRoot: opts.ProjectRoot,
+	})
+	if err != nil {
+		return false, err
+	}
+	dest := resolved.root
+	var backup string
+	err = WithLockfileLock(roots.LockPath, func(lf Lockfile) (Lockfile, bool, error) {
+		backup = filepath.Join(roots.PluginsDir, ".bak-migrate-"+sanitizeDirComponent(m.ID)+"-"+strconv.Itoa(os.Getpid()))
+		_ = os.RemoveAll(backup)
+		if err := os.Rename(dest, backup); err != nil {
+			backup = ""
+			return lf, true, fmt.Errorf("replace existing tree: %w", err)
+		}
+		if err := os.Rename(staging, dest); err != nil {
+			_ = os.Rename(backup, dest)
+			backup = ""
+			return lf, true, fmt.Errorf("activate migrated tree: %w", err)
+		}
+		*stagingOK = true
+		e := lf.Plugins[m.ID]
+		if e.Trust != nil {
+			trustCleared = true
+		}
+		e.Digest = digest
+		e.Version = m.Version
+		e.Trust = nil
+		if e.InstalledAt == "" {
+			e.InstalledAt = nowRFC3339()
+		}
+		lf = setLockEntry(lf, m.ID, e)
+		if err := writeLockfileAfterSwap(roots.LockPath, lf); err != nil {
+			return lf, true, fmt.Errorf("write lockfile: %w", err)
+		}
+		return lf, true, nil
+	})
+	if err != nil {
+		if *stagingOK {
+			_ = roots.removeAllUnderPlugins(dest)
+			if backup != "" {
+				_ = os.Rename(backup, dest)
+				backup = ""
+			}
+			*stagingOK = false
+		}
+		if backup != "" {
+			_ = roots.removeAllUnderPlugins(backup)
+		}
+		return false, err
+	}
+	if backup != "" {
+		_ = roots.removeAllUnderPlugins(backup)
+	}
+	return trustCleared, nil
+}
+
 func commitMigratedTree(resolved migrateTarget, staging string, stagingOK *bool) error {
 	dest := resolved.root
 	backupParent := filepath.Dir(dest)
@@ -1060,32 +1251,6 @@ func (t migrateTarget) idOrBase() string {
 		return t.id
 	}
 	return filepath.Base(t.root)
-}
-
-func updateLockfileAfterMigrate(opts MigrateOptions, resolved migrateTarget, m Manifest, digest string) (trustCleared bool, err error) {
-	roots, err := ResolveRoots(resolved.scope, Options{
-		WorkDir:     opts.WorkDir,
-		GlobalRoot:  opts.GlobalRoot,
-		ProjectRoot: opts.ProjectRoot,
-	})
-	if err != nil {
-		return false, err
-	}
-	err = WithLockfileLock(roots.LockPath, func(lf Lockfile) (Lockfile, bool, error) {
-		e := lf.Plugins[m.ID]
-		if e.Trust != nil {
-			trustCleared = true
-		}
-		e.Digest = digest
-		e.Version = m.Version
-		e.Trust = nil
-		if e.InstalledAt == "" {
-			e.InstalledAt = nowRFC3339()
-		}
-		lf = setLockEntry(lf, m.ID, e)
-		return lf, false, nil
-	})
-	return trustCleared, err
 }
 
 func formatMigrateReview(res MigrateResult) string {
