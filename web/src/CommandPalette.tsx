@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { type CatalogCommand, filterCommands } from "./commands";
-import { Dialog } from "./ui";
+import { Dialog, ListRow } from "./ui";
 
 export function CommandPalette({
   open,
@@ -67,17 +67,14 @@ export function CommandPalette({
       <ul className="palette-list" role="listbox" aria-label="Commands">
         {filtered.map((cmd, i) => (
           <li key={cmd.id}>
-            <button
-              type="button"
+            <ListRow
               role="option"
-              aria-selected={i === index}
-              className={i === index ? "active" : ""}
+              active={i === index}
+              title={cmd.label}
+              meta={cmd.detail}
               onMouseEnter={() => setIndex(i)}
               onClick={() => run(cmd)}
-            >
-              <strong>{cmd.label}</strong>
-              <span>{cmd.detail}</span>
-            </button>
+            />
           </li>
         ))}
         {!filtered.length && <li className="muted">No matching commands</li>}
