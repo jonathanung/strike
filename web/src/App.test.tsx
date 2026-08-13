@@ -216,6 +216,16 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: "Attach" })).not.toHaveClass("composer-send");
   });
 
+  it("keeps a following newline when accepting a leading slash token", async () => {
+    render(<App />);
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    const box = screen.getByLabelText("Instruction") as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: "/he\nimplement the feature", selectionStart: 3, selectionEnd: 3 } });
+    expect(screen.getByRole("option", { name: /help/i })).toBeInTheDocument();
+    fireEvent.keyDown(box, { key: "Tab" });
+    expect(box).toHaveValue("/help\nimplement the feature");
+  });
+
   it("does not steal ArrowUp/Enter from history browse when the recalled prompt is a slash token", async () => {
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const url = String(input);

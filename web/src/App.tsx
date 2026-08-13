@@ -658,8 +658,8 @@ export default function App() {
     }
     const token = leadingSlashToken(draft, composerCursor);
     const start = token?.start ?? 0;
-    const rest = token ? draft.slice(token.end).replace(/^\s*/, "") : "";
-    const pad = item.insert.endsWith(" ") ? "" : " ";
+    const rest = token ? draft.slice(token.end) : "";
+    const pad = item.insert.endsWith(" ") || /^\s/.test(rest) ? "" : " ";
     const next = `${draft.slice(0, start)}${item.insert}${pad}${rest}`;
     const caret = start + item.insert.length + pad.length;
     restoreCaret.current = caret;

@@ -62,6 +62,9 @@ describe("commands catalog", () => {
     expect(insertMention("see @src/old.go extra", 4, 8, "internal/tui/app.go")).toBe(
       "see @internal/tui/app.go extra",
     );
+    expect(insertMention("see @src/old.go\nextra", 4, 8, "internal/tui/app.go")).toBe(
+      "see @internal/tui/app.go\nextra",
+    );
     expect(mentionInsertCaret(4, "internal/tui/app.go", "see @internal/tui/app.go extra")).toBe(
       "see @internal/tui/app.go ".length,
     );

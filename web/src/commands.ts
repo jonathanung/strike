@@ -221,7 +221,7 @@ export function insertMention(text: string, start: number, cursor: number, path:
   const tokenEnd = Math.max(cursor, fileMentionTokenEnd(text, start));
   const before = text.slice(0, start);
   const after = text.slice(tokenEnd);
-  const pad = after.startsWith(" ") ? "" : " ";
+  const pad = /^\s/.test(after) ? "" : " ";
   return `${before}@${path}${pad}${after}`;
 }
 
