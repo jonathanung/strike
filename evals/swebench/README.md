@@ -29,6 +29,12 @@ fetch at start:
 strike eval swebench --dataset /path/to/verified.jsonl ...
 ```
 
+On Apple Silicon, official `sweb.eval.x86_64.*` images are pulled with
+`--platform linux/amd64` (qemu). The runner bind-mounts the host checkout into
+a live eval container so the agent can `docker exec` the conda testbed instead
+of host Python. Eval `strike exec` defaults to `--sandbox=off` so that path
+can reach the Docker socket; isolation remains the per-instance container.
+
 Official harness grading (when `pip install swebench` is available):
 
 ```bash

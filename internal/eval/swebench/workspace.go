@@ -100,7 +100,35 @@ func MaterializeWorkspace(ctx context.Context, rt Runtime, instanceID, hostDir s
 
 	cleanup = false
 	_ = rt.Remove(context.Background(), id)
-	return MaterializeResult{WorkDir: repo, Image: image}, nil
+
+	liveID := startLiveEvalContainer(ctx, rt, image, repo)
+	return MaterializeResult{WorkDir: repo, Image: image, ContainerID: liveID}, nil
+}
+
+// startLiveEvalContainer bind-mounts the host checkout at /testbed so the
+// agent can docker exec into the official conda env. Best-effort: empty id
+// on failure (agent can still edit the host tree).
+func startLiveEvalContainer(ctx context.Context, rt Runtime, image, repo string) string {
+	if rt == nil || repo == "" {
+		return ""
+	}
+	abs, err := filepath.Abs(repo)
+	if err != nil {
+		abs = repo
+	}
+	id, err := rt.Create(ctx, image, CreateOpts{
+		WorkDir:    TestbedPath,
+		Entrypoint: []string{"sleep", "infinity"},
+		HostBinds:  []string{abs + ":" + TestbedPath},
+	})
+	if err != nil {
+		return ""
+	}
+	if err := rt.Start(ctx, id); err != nil {
+		_ = rt.Remove(context.Background(), id)
+		return ""
+	}
+	return id
 }
 
 // copyDir recursively copies a directory (best-effort fallback).

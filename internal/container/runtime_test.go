@@ -200,6 +200,50 @@ func TestCLIAvailablePullCreateLifecycle(t *testing.T) {
 	}
 }
 
+func TestCLIPullCreateHonorsPlatform(t *testing.T) {
+	var calls [][]string
+	c := NewCLI("docker")
+	c.Platform = "linux/amd64"
+	c.LookPath = func(string) (string, error) { return "/usr/bin/docker", nil }
+	c.ExecFn = func(_ context.Context, _ string, args ...string) (string, string, int, error) {
+		calls = append(calls, append([]string{}, args...))
+		if len(args) > 0 && args[0] == "create" {
+			return "cid\n", "", 0, nil
+		}
+		return "", "", 0, nil
+	}
+	if err := c.Pull(context.Background(), "img:latest"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Create(context.Background(), "img:latest", CreateOpts{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Create(context.Background(), "img:latest", CreateOpts{Platform: "linux/arm64"}); err != nil {
+		t.Fatal(err)
+	}
+	var pull, createDefault, createOverride []string
+	for _, call := range calls {
+		switch {
+		case len(call) > 0 && call[0] == "pull" && pull == nil:
+			pull = call
+		case len(call) > 0 && call[0] == "create" && createDefault == nil:
+			createDefault = call
+		case len(call) > 0 && call[0] == "create":
+			createOverride = call
+		}
+	}
+	joined := func(a []string) string { return strings.Join(a, " ") }
+	if !strings.Contains(joined(pull), "--platform linux/amd64") {
+		t.Fatalf("pull missing platform: %v", pull)
+	}
+	if !strings.Contains(joined(createDefault), "--platform linux/amd64") {
+		t.Fatalf("create missing CLI platform: %v", createDefault)
+	}
+	if !strings.Contains(joined(createOverride), "--platform linux/arm64") {
+		t.Fatalf("create missing opts override: %v", createOverride)
+	}
+}
+
 func TestCLIAvailableDaemonDown(t *testing.T) {
 	c := NewCLI("docker")
 	c.LookPath = func(string) (string, error) { return "docker", nil }

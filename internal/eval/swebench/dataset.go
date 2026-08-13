@@ -167,35 +167,55 @@ func (c *DatasetClient) fetchPage(ctx context.Context, offset, length int) ([]In
 	}
 	req.Header.Set("Accept", "application/json")
 
-	res, err := c.http().Do(req)
-	if err != nil {
-		return nil, 0, fmt.Errorf("swebench: dataset fetch: %w", err)
-	}
-	defer res.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(res.Body, 32<<20))
-	if err != nil {
-		return nil, 0, fmt.Errorf("swebench: dataset read: %w", err)
-	}
-	if res.StatusCode != http.StatusOK {
-		return nil, 0, fmt.Errorf("swebench: dataset HTTP %s: %s", res.Status, truncate(string(body), 200))
-	}
-	var parsed hfRowsResponse
-	if err := json.Unmarshal(body, &parsed); err != nil {
-		return nil, 0, fmt.Errorf("swebench: dataset decode: %w", err)
-	}
-	out := make([]Instance, 0, len(parsed.Rows))
-	for i, row := range parsed.Rows {
-		var in Instance
-		if err := json.Unmarshal(row.Row, &in); err != nil {
-			return nil, 0, fmt.Errorf("swebench: dataset row %d: %w", offset+i, err)
+	var lastErr error
+	for attempt := 0; attempt < 4; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return nil, 0, ctx.Err()
+			case <-time.After(time.Duration(attempt) * 2 * time.Second):
+			}
 		}
-		out = append(out, in)
+		res, err := c.http().Do(req.Clone(ctx))
+		if err != nil {
+			lastErr = fmt.Errorf("swebench: dataset fetch: %w", err)
+			continue
+		}
+		body, err := io.ReadAll(io.LimitReader(res.Body, 32<<20))
+		res.Body.Close()
+		if err != nil {
+			lastErr = fmt.Errorf("swebench: dataset read: %w", err)
+			continue
+		}
+		if res.StatusCode >= 500 {
+			lastErr = fmt.Errorf("swebench: dataset HTTP %s: %s", res.Status, truncate(string(body), 200))
+			continue
+		}
+		if res.StatusCode != http.StatusOK {
+			return nil, 0, fmt.Errorf("swebench: dataset HTTP %s: %s", res.Status, truncate(string(body), 200))
+		}
+		var parsed hfRowsResponse
+		if err := json.Unmarshal(body, &parsed); err != nil {
+			return nil, 0, fmt.Errorf("swebench: dataset decode: %w", err)
+		}
+		out := make([]Instance, 0, len(parsed.Rows))
+		for i, row := range parsed.Rows {
+			var in Instance
+			if err := json.Unmarshal(row.Row, &in); err != nil {
+				return nil, 0, fmt.Errorf("swebench: dataset row %d: %w", offset+i, err)
+			}
+			out = append(out, in)
+		}
+		total := parsed.NumRowsTotal
+		if total == 0 {
+			total = offset + len(out)
+		}
+		return out, total, nil
 	}
-	total := parsed.NumRowsTotal
-	if total == 0 {
-		total = offset + len(out)
+	if lastErr == nil {
+		lastErr = fmt.Errorf("swebench: dataset fetch failed")
 	}
-	return out, total, nil
+	return nil, 0, lastErr
 }
 
 func truncate(s string, n int) string {

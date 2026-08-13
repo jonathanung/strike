@@ -3,6 +3,7 @@ package swebench
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -10,6 +11,44 @@ import (
 	"github.com/jonathanung/strike-cli/internal/container"
 	"github.com/jonathanung/strike-cli/internal/scheduler"
 )
+
+func TestNewContainerRuntimeSetsAmd64Platform(t *testing.T) {
+	rt := NewContainerRuntime("docker")
+	if rt.CLI == nil || rt.CLI.Platform != EvalImagePlatform {
+		t.Fatalf("platform=%q want %q", rt.CLI.Platform, EvalImagePlatform)
+	}
+	var saw [][]string
+	rt.CLI.LookPath = func(string) (string, error) { return "/usr/bin/docker", nil }
+	rt.CLI.ExecFn = func(_ context.Context, _ string, args ...string) (string, string, int, error) {
+		saw = append(saw, append([]string{}, args...))
+		if len(args) > 0 && args[0] == "create" {
+			return "cid\n", "", 0, nil
+		}
+		return "", "", 0, nil
+	}
+	if err := rt.Pull(context.Background(), DockerImageName("django__django-10973")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rt.Create(context.Background(), DockerImageName("django__django-10973"), CreateOpts{}); err != nil {
+		t.Fatal(err)
+	}
+	joined := ""
+	for _, a := range saw {
+		joined += strings.Join(a, " ") + "\n"
+	}
+	if !strings.Contains(joined, "--platform "+EvalImagePlatform) {
+		t.Fatalf("missing platform flag:\n%s", joined)
+	}
+}
+
+func TestDockerPlatformArgs(t *testing.T) {
+	if got := dockerPlatformArgs(DockerImageName("astropy__astropy-7336")); len(got) != 2 || got[1] != EvalImagePlatform {
+		t.Fatalf("swebench image: %v", got)
+	}
+	if got := dockerPlatformArgs("alpine:latest"); got != nil {
+		t.Fatalf("generic image should not force amd64: %v", got)
+	}
+}
 
 func TestContainerRuntimeAvailableMapsEngine(t *testing.T) {
 	cli := container.NewCLI("docker")

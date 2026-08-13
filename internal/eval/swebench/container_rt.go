@@ -16,8 +16,12 @@ type ContainerRuntime struct {
 
 // NewContainerRuntime returns a Runtime backed by the shared container CLI.
 // engine is "docker", "podman", or empty (auto).
+// Pull/create always request linux/amd64 so official SWE-bench x86_64 images
+// work on Apple Silicon (qemu) as well as native amd64 hosts.
 func NewContainerRuntime(engine string) *ContainerRuntime {
-	return &ContainerRuntime{CLI: container.NewCLI(engine)}
+	cli := container.NewCLI(engine)
+	cli.Platform = EvalImagePlatform
+	return &ContainerRuntime{CLI: cli}
 }
 
 // Available implements Runtime.
@@ -42,6 +46,7 @@ func (r *ContainerRuntime) Create(ctx context.Context, image string, opts Create
 		Entrypoint: opts.Entrypoint,
 		Cmd:        opts.Cmd,
 		HostBinds:  opts.HostBinds,
+		Platform:   EvalImagePlatform,
 	})
 }
 

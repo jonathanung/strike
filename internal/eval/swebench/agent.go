@@ -209,11 +209,27 @@ func ParseExecJSON(stdout []byte) (ExecResult, error) {
 
 // BuildAgentPrompt formats the SWE-bench problem for strike exec.
 func BuildAgentPrompt(in Instance) string {
+	return FormatAgentPrompt(in, "")
+}
+
+// FormatAgentPrompt is BuildAgentPrompt plus optional live-eval container instructions.
+func FormatAgentPrompt(in Instance, evalContainer string) string {
 	var b strings.Builder
-	b.WriteString("You are fixing a real GitHub issue inside a checked-out repository at the current working directory.\n")
-	b.WriteString("Implement a minimal correct patch that resolves the issue. Do not modify tests unless required.\n")
-	b.WriteString("When done, ensure the working tree contains your changes (git-tracked edits).\n\n")
-	fmt.Fprintf(&b, "Instance: %s\n", in.InstanceID)
+	b.WriteString("You are solving a SWE-bench instance. The repository is already checked out at the current working directory.\n")
+	b.WriteString("Produce a minimal correct source patch that fixes the issue. Official tests run later in Docker and are the score.\n\n")
+	b.WriteString("Rules:\n")
+	b.WriteString("- Do not modify tests, fixtures, or add docs unless the issue requires it.\n")
+	b.WriteString("- Do not add explanatory comments. Do not commit, push, or rewrite git history.\n")
+	b.WriteString("- Leave edits in the working tree as git-tracked file changes. An empty diff fails.\n")
+	b.WriteString("- Host Python/packages will NOT match the eval image. Do not spend turns debugging host imports (numpy, pkg_resources, version mismatches).\n")
+	b.WriteString("- `python3 -c` / interpreter one-liners are blocked. Write a small .py file and run that file instead.\n")
+	b.WriteString("- Read existing tests that already describe the bug, then change production code.\n")
+	if evalContainer != "" {
+		b.WriteString("\nA Linux eval container has this repo bind-mounted at /testbed. Run commands in its conda env:\n")
+		fmt.Fprintf(&b, "  docker exec -w /testbed %s bash -lc 'source /opt/miniconda3/etc/profile.d/conda.sh && conda activate testbed && <cmd>'\n", evalContainer)
+		b.WriteString("The container id is also in STRIKE_EVAL_CONTAINER. Prefer this over host Python.\n")
+	}
+	fmt.Fprintf(&b, "\nInstance: %s\n", in.InstanceID)
 	if in.Repo != "" {
 		fmt.Fprintf(&b, "Repository: %s\n", in.Repo)
 	}
@@ -221,4 +237,21 @@ func BuildAgentPrompt(in Instance) string {
 	b.WriteString(strings.TrimSpace(in.ProblemStatement))
 	b.WriteString("\n")
 	return b.String()
+}
+
+// WithEvalExecDefaults appends eval-friendly strike exec flags unless already set.
+// Host OS sandbox blocks docker.sock and some test runners; eval isolation is Docker.
+func WithEvalExecDefaults(extra []string) []string {
+	hasSandbox := false
+	for _, a := range extra {
+		if a == "--sandbox" || strings.HasPrefix(a, "--sandbox=") {
+			hasSandbox = true
+			break
+		}
+	}
+	out := append([]string{}, extra...)
+	if !hasSandbox {
+		out = append(out, "--sandbox=off")
+	}
+	return out
 }

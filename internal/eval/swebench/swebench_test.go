@@ -96,6 +96,32 @@ func TestBuildAgentPrompt(t *testing.T) {
 	if !strings.Contains(p, "fixture__repo-1") || !strings.Contains(p, "Fix add()") {
 		t.Fatalf("prompt: %s", p)
 	}
+	for _, want := range []string{"Do not modify tests", "python3 -c", "Host Python"} {
+		if !strings.Contains(p, want) {
+			t.Fatalf("prompt missing %q:\n%s", want, p)
+		}
+	}
+	if strings.Contains(p, "docker exec") {
+		t.Fatalf("no-container prompt should omit docker exec")
+	}
+}
+
+func TestFormatAgentPromptEvalContainer(t *testing.T) {
+	p := FormatAgentPrompt(Instance{InstanceID: "x", ProblemStatement: "y"}, "abc123")
+	if !strings.Contains(p, "docker exec -w /testbed abc123") {
+		t.Fatalf("container prompt: %s", p)
+	}
+}
+
+func TestWithEvalExecDefaults(t *testing.T) {
+	got := WithEvalExecDefaults(nil)
+	if len(got) != 1 || got[0] != "--sandbox=off" {
+		t.Fatalf("%v", got)
+	}
+	keep := WithEvalExecDefaults([]string{"--sandbox=workspace-write"})
+	if len(keep) != 1 || keep[0] != "--sandbox=workspace-write" {
+		t.Fatalf("override: %v", keep)
+	}
 }
 
 func TestExtractPatch(t *testing.T) {
@@ -320,6 +346,10 @@ func TestRunnerDryRunAndMock(t *testing.T) {
 	if agent.calls != 1 {
 		t.Fatalf("agent calls %d", agent.calls)
 	}
+	joined := strings.Join(agent.opts.ExtraArgs, " ")
+	if !strings.Contains(joined, "--sandbox=off") {
+		t.Fatalf("eval exec defaults: %v", agent.opts.ExtraArgs)
+	}
 }
 
 func TestCLIRuntimeCreateArgs(t *testing.T) {
@@ -344,6 +374,31 @@ func TestCLIRuntimeCreateArgs(t *testing.T) {
 	joined := strings.Join(saw, " ")
 	if !strings.Contains(joined, "create") || !strings.Contains(joined, "img:latest") {
 		t.Fatalf("args %v", saw)
+	}
+}
+
+func TestCLIRuntimePullUsesAmd64ForSWEBenchImages(t *testing.T) {
+	var saw []string
+	rt := &CLIRuntime{
+		LookPath: func(string) (string, error) { return "/usr/bin/docker", nil },
+		Run: func(ctx context.Context, name string, args ...string) (string, string, int, error) {
+			saw = args
+			return "", "", 0, nil
+		},
+	}
+	img := DockerImageName("astropy__astropy-7336")
+	if err := rt.Pull(context.Background(), img); err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(saw, " ")
+	if !strings.Contains(joined, "--platform "+EvalImagePlatform) || !strings.Contains(joined, img) {
+		t.Fatalf("pull args %v", saw)
+	}
+	if err := rt.Pull(context.Background(), "alpine:latest"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(strings.Join(saw, " "), "--platform") {
+		t.Fatalf("generic pull should not force platform: %v", saw)
 	}
 }
 
@@ -468,10 +523,12 @@ type fakeAgent struct {
 	res   ExecResult
 	err   error
 	calls int
+	opts  AgentOpts
 }
 
-func (f *fakeAgent) Run(context.Context, string, string, AgentOpts) (ExecResult, error) {
+func (f *fakeAgent) Run(_ context.Context, _ string, _ string, opts AgentOpts) (ExecResult, error) {
 	f.calls++
+	f.opts = opts
 	return f.res, f.err
 }
 
