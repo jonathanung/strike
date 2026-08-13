@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "acme.review-pack",
+  "version": "1.2.0",
+  "name": "Acme Review Pack",
+  "description": "Legacy Strike-native fixture retained until APS.6 (#1147).",
+  "strike": {
+    "min": "0.2.0"
+  },
+  "contributions": {
+    "agents": [
+      { "path": "agents/reviewer.md" }
+    ]
+  }
+}

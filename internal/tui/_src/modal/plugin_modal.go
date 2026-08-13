@@ -127,8 +127,8 @@ func (m *pluginModal) filtered() []host.PluginInfo {
 
 func pluginMatches(p host.PluginInfo, q string) bool {
 	fields := []string{
-		p.ID, p.Name, p.Version, p.Scope, p.Status, p.TrustState,
-		p.SourceType, p.SourceLabel, p.UpdateAvailable,
+		p.ID, p.Name, p.DisplayName, p.Version, p.Scope, p.Status, p.TrustState,
+		p.SourceType, p.SourceLabel, p.UpdateAvailable, p.Format, p.Schema,
 	}
 	for _, f := range fields {
 		if strings.Contains(strings.ToLower(f), q) {
@@ -797,8 +797,10 @@ func (m *pluginModal) viewBrowse(width int, th theme.Theme, inner int) string {
 }
 
 func pluginListLabel(p host.PluginInfo) string {
+	// APS packages are listed by Agent Plugins name (host ID). DisplayName is
+	// detail-only so identity stays stable.
 	name := p.ID
-	if p.Name != "" && p.Name != p.ID {
+	if p.Format != "agent-plugins" && p.Name != "" && p.Name != p.ID {
 		name = p.Name
 	}
 	ver := p.Version
@@ -809,7 +811,15 @@ func pluginListLabel(p host.PluginInfo) string {
 }
 
 func pluginListDetail(th theme.Theme, p host.PluginInfo) string {
-	parts := []string{p.Scope, p.Status, "trust:" + p.TrustState}
+	parts := []string{p.Scope, p.Status}
+	if p.Format != "" {
+		label := p.Format
+		if p.Format == "legacy" {
+			label = "legacy (deprecated)"
+		}
+		parts = append(parts, label)
+	}
+	parts = append(parts, "trust:"+p.TrustState)
 	if p.SourceType != "" {
 		parts = append(parts, p.SourceType)
 	}
@@ -820,6 +830,15 @@ func pluginListDetail(th theme.Theme, p host.PluginInfo) string {
 		parts = append(parts, "↑"+p.UpdateAvailable)
 	}
 	return strings.Join(parts, themedSpace(th.Spacing.XS)+th.Icons.Dot+themedSpace(th.Spacing.XS))
+}
+
+func pluginFormatLabel(p host.PluginInfo) string {
+	switch p.Format {
+	case "legacy":
+		return "legacy (deprecated)"
+	default:
+		return p.Format
+	}
 }
 
 func pluginContribCount(p host.PluginInfo) int {
@@ -863,6 +882,9 @@ func pluginDetailLines(th theme.Theme, p host.PluginInfo) []string {
 	}
 	kv("id", p.ID)
 	kv("name", p.Name)
+	kv("displayName", p.DisplayName)
+	kv("format", pluginFormatLabel(p))
+	kv("$schema", p.Schema)
 	kv("version", p.Version)
 	kv("scope", p.Scope)
 	kv("status", p.Status)
@@ -874,6 +896,9 @@ func pluginDetailLines(th theme.Theme, p host.PluginInfo) []string {
 	}
 	if p.LoadError != "" {
 		lines = append(lines, st.Error.Render(sanitizeDisplayData(p.LoadError)))
+	}
+	if p.Format == "legacy" {
+		lines = append(lines, st.Warning.Render("deprecated: Strike-native plugin.json (migrate with strike plugin migrate)"))
 	}
 	// Contribution counts
 	var counts []string

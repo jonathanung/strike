@@ -15,10 +15,41 @@ func testBundle(t *testing.T, dir, id string) string {
 	t.Helper()
 	root := filepath.Join(dir, "src-"+id)
 	writePlugin(t, root, id, map[string]string{
-		"plugin.json": manifest(id, `{"agents":[{"path":"agents/a.md"}]}`),
-		"agents/a.md": validAgentMD("agent-" + id),
+		"plugin.json":          apsManifest(id),
+		"skills/demo/SKILL.md": validSkillMD("demo"),
 	})
 	return root
+}
+
+func testdataFiles(t *testing.T, rel string) map[string]string {
+	t.Helper()
+	root := filepath.Join("testdata", filepath.FromSlash(rel))
+	files := map[string]string{}
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		relPath, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		files[filepath.ToSlash(relPath)] = string(b)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) == 0 {
+		t.Fatalf("no files under testdata/%s", rel)
+	}
+	return files
 }
 
 func TestInstallLocal_AtomicAndLockfile(t *testing.T) {

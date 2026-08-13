@@ -151,20 +151,24 @@ func (a pluginsAdapter) Inspect(id, scope string) (host.PluginInfo, error) {
 
 func doctorPluginToInfo(dp plugin.DoctorPlugin) host.PluginInfo {
 	info := host.PluginInfo{
-		ID:         dp.ID,
-		Version:    dp.Version,
-		Name:       dp.Name,
-		Scope:      pluginScopeString(dp.Scope),
-		Enabled:    dp.Enabled,
-		Digest:     dp.Digest,
-		TrustState: dp.TrustState,
-		Agents:     dp.Contributions.Agents,
-		Skills:     dp.Contributions.Skills,
-		Workflows:  dp.Contributions.Workflows,
-		Themes:     dp.Contributions.Themes,
-		Providers:  dp.Contributions.Providers,
-		Hooks:      dp.Contributions.Hooks,
-		Panes:      dp.Contributions.Panes,
+		ID:           dp.ID,
+		Version:      dp.Version,
+		Name:         dp.Name,
+		DisplayName:  dp.DisplayName,
+		Format:       string(dp.Format),
+		Schema:       dp.Schema,
+		Scope:        pluginScopeString(dp.Scope),
+		Enabled:      dp.Enabled,
+		Digest:       dp.Digest,
+		TrustState:   dp.TrustState,
+		Agents:       dp.Contributions.Agents,
+		Skills:       dp.Contributions.Skills,
+		Workflows:    dp.Contributions.Workflows,
+		Themes:       dp.Contributions.Themes,
+		Providers:    dp.Contributions.Providers,
+		Hooks:        dp.Contributions.Hooks,
+		Panes:        dp.Contributions.Panes,
+		Capabilities: append([]string(nil), dp.Capabilities...),
 	}
 	if dp.Enabled {
 		info.Status = "enabled"
@@ -234,7 +238,7 @@ func doctorPluginToInfo(dp plugin.DoctorPlugin) host.PluginInfo {
 		if hasProcessPanes {
 			caps = append(caps, plugin.CapPanesProcess)
 		}
-		info.Capabilities = uniqueSorted(caps)
+		info.Capabilities = uniqueSorted(append(info.Capabilities, caps...))
 	}
 	if info.TrustState == "" {
 		if info.HasExecutable {

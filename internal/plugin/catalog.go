@@ -43,7 +43,12 @@ type CatalogVersion struct {
 	Capabilities []string `json:"capabilities,omitempty"`
 	// Strike compatibility hint (install still validates the bundle manifest).
 	Strike StrikeRange `json:"strike,omitempty"`
-	// ManifestSchema is the plugin.json schemaVersion this artifact targets.
+	// Schema records the package format. Prefer CatalogAPSSchema ("agent-plugins:1.0.0").
+	// The canonical plugin.json $schema URI is also accepted.
+	Schema string `json:"$schema,omitempty"`
+	// ManifestSchema is the legacy integer plugin.json schemaVersion this artifact
+	// targets. Optional; prefer Schema. Clients detect APS vs legacy from the
+	// extracted plugin.json, not from this field.
 	ManifestSchema int `json:"manifestSchema,omitempty"`
 	// Size is optional expected artifact byte length (advisory upper bound).
 	Size int64 `json:"size,omitempty"`
@@ -132,12 +137,23 @@ func validateCatalog(c Catalog) error {
 			if v.Size < 0 {
 				return fmt.Errorf("package %q@%s size must be >= 0", id, ver)
 			}
+			if err := validateCatalogPackageSchema(v.Schema); err != nil {
+				return fmt.Errorf("package %q@%s $schema: %w", id, ver, err)
+			}
 			if v.ManifestSchema < 0 {
 				return fmt.Errorf("package %q@%s manifestSchema must be >= 0", id, ver)
 			}
 		}
 	}
 	return nil
+}
+
+func validateCatalogPackageSchema(schema string) error {
+	schema = strings.TrimSpace(schema)
+	if schema == "" || schema == CatalogAPSSchema || isAPSPluginSchemaURL(schema) {
+		return nil
+	}
+	return fmt.Errorf("unsupported value %q (want %q or Agent Plugins plugin.schema.json URI)", schema, CatalogAPSSchema)
 }
 
 // FetchCatalog downloads and parses a catalog from registryURL.

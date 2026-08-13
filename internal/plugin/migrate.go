@@ -1298,7 +1298,7 @@ func (t migrateTarget) idOrBase() string {
 func formatMigrateReview(res MigrateResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Migrate review: %s\n", res.ID)
-	fmt.Fprintf(&b, "  format:   legacy → aps\n")
+	fmt.Fprintf(&b, "  format:   legacy → agent-plugins\n")
 	fmt.Fprintf(&b, "  digest:   %s → %s\n", emptyDash(res.OldDigest), emptyDash(res.Digest))
 	if res.TrustCleared {
 		fmt.Fprintf(&b, "  trust:    CLEARED (re-review required before executable activation)\n")

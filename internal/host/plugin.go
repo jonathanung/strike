@@ -27,6 +27,12 @@ type PluginInfo struct {
 	// Status is a short lifecycle label: enabled | disabled | invalid.
 	Status string
 	Digest string
+	// Format is agent-plugins | legacy (empty when unknown).
+	Format string
+	// Schema is plugin.json $schema (APS URI); empty on legacy packages.
+	Schema string
+	// DisplayName is extensions.com.strike.cli.displayName when set.
+	DisplayName string
 	// SourceType is local | git | catalog (empty when unknown).
 	SourceType string
 	// SourceLabel is a scrubbed provenance line (no credentials).

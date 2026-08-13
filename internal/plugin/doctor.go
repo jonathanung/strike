@@ -32,7 +32,10 @@ type DoctorReport struct {
 type DoctorPlugin struct {
 	ID            string          `json:"id"`
 	Version       string          `json:"version,omitempty"`
-	Name          string          `json:"name,omitempty"`
+	Name          string          `json:"name,omitempty"` // APS name or legacy display name
+	DisplayName   string          `json:"displayName,omitempty"`
+	Schema        string          `json:"schema,omitempty"` // plugin.json $schema URI
+	Capabilities  []string        `json:"capabilities,omitempty"`
 	Scope         Scope           `json:"scope"`
 	Enabled       bool            `json:"enabled"`
 	Root          string          `json:"root"`
@@ -185,8 +188,20 @@ func doctorOne(ip InstalledPlugin, strikeVer string) DoctorPlugin {
 		return dp
 	}
 	dp.Version = m.Version
-	dp.Name = m.Name
 	dp.Format = m.Format
+	dp.Schema = strings.TrimSpace(m.Schema)
+	dp.Capabilities = append([]string(nil), m.Capabilities...)
+	if m.Format == FormatAPS {
+		dp.Name = m.ID
+		if m.StrikeCLI != nil {
+			dp.DisplayName = strings.TrimSpace(m.StrikeCLI.DisplayName)
+		}
+		if dp.DisplayName == "" && m.Name != "" && m.Name != m.ID {
+			dp.DisplayName = m.Name
+		}
+	} else {
+		dp.Name = m.Name
+	}
 
 	// Passive-run loadOne for path/version issues without requiring enablement.
 	if p, diags := loadOne(ip.Root, ip.Scope, strikeVer); p != nil {
@@ -449,8 +464,24 @@ func FormatDoctorText(r DoctorReport) string {
 			fmt.Fprintf(&b, "@%s", p.Version)
 		}
 		fmt.Fprintf(&b, " (%s)\n", p.Scope)
+		if p.Format != "" {
+			fmt.Fprintf(&b, "  format:    %s", p.Format)
+			if p.Format == FormatLegacy {
+				b.WriteString(" (deprecated)")
+			}
+			b.WriteByte('\n')
+		}
 		if p.Name != "" {
 			fmt.Fprintf(&b, "  name:      %s\n", p.Name)
+		}
+		if p.DisplayName != "" {
+			fmt.Fprintf(&b, "  displayName: %s\n", p.DisplayName)
+		}
+		if p.Schema != "" {
+			fmt.Fprintf(&b, "  $schema:   %s\n", p.Schema)
+		}
+		if len(p.Capabilities) > 0 {
+			fmt.Fprintf(&b, "  capabilities: %s\n", strings.Join(p.Capabilities, ","))
 		}
 		fmt.Fprintf(&b, "  enabled:   %v\n", p.Enabled)
 		fmt.Fprintf(&b, "  root:      %s\n", p.Root)
@@ -461,9 +492,6 @@ func FormatDoctorText(r DoctorReport) string {
 			fmt.Fprintf(&b, "  source:    %s\n", p.Source.String())
 		}
 		fmt.Fprintf(&b, "  trust:     %s\n", p.TrustState)
-		if p.Format != "" {
-			fmt.Fprintf(&b, "  format:    %s\n", p.Format)
-		}
 		c := p.Contributions
 		fmt.Fprintf(&b, "  contribs:  agents=%d skills=%d workflows=%d themes=%d providers=%d\n",
 			c.Agents, c.Skills, c.Workflows, c.Themes, c.Providers)

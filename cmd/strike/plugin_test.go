@@ -8,7 +8,34 @@ import (
 	"testing"
 )
 
-func writeTestPluginBundle(t *testing.T, dir, id string) string {
+func writeAPSPluginBundle(t *testing.T, dir, name string) string {
+	t.Helper()
+	root := filepath.Join(dir, name)
+	if err := os.MkdirAll(filepath.Join(root, "skills", "demo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	man := `{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "` + name + `",
+  "version": "1.0.0",
+  "extensions": {
+    "com.strike.cli": {
+      "displayName": "Test Pack",
+      "capabilities": ["skills"]
+    }
+  }
+}`
+	if err := os.WriteFile(filepath.Join(root, "plugin.json"), []byte(man), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	skill := "---\ndescription: skill demo\n---\nDo demo $ARGUMENTS\n"
+	if err := os.WriteFile(filepath.Join(root, "skills", "demo", "SKILL.md"), []byte(skill), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+func writeLegacyPluginBundle(t *testing.T, dir, id string) string {
 	t.Helper()
 	root := filepath.Join(dir, id)
 	if err := os.MkdirAll(filepath.Join(root, "agents"), 0o755); err != nil {
@@ -41,6 +68,9 @@ func TestRunPluginCLIHelp(t *testing.T) {
 	if !strings.Contains(out.String(), "strike plugin install") {
 		t.Fatalf("usage: %s", out.String())
 	}
+	if !strings.Contains(out.String(), "Agent Plugins 1.0.0") {
+		t.Fatalf("help should describe Agent Plugins authoring format:\n%s", out.String())
+	}
 }
 
 func TestRunPluginLifecycleCLI(t *testing.T) {
@@ -56,7 +86,7 @@ func TestRunPluginLifecycleCLI(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chdir(cwd) })
-	src := writeTestPluginBundle(t, t.TempDir(), "acme.cli")
+	src := writeAPSPluginBundle(t, t.TempDir(), "acme.cli")
 
 	var out, errBuf bytes.Buffer
 	code := runPluginCLI([]string{"install", src, "--scope", "global"}, &out, &errBuf)
@@ -73,12 +103,21 @@ func TestRunPluginLifecycleCLI(t *testing.T) {
 	if code != 0 || !strings.Contains(out.String(), "acme.cli") {
 		t.Fatalf("list: code=%d out=%s err=%s", code, out.String(), errBuf.String())
 	}
+	if !strings.Contains(out.String(), "format=agent-plugins") {
+		t.Fatalf("list missing APS format:\n%s", out.String())
+	}
 
 	out.Reset()
 	errBuf.Reset()
 	code = runPluginCLI([]string{"inspect", "acme.cli"}, &out, &errBuf)
 	if code != 0 || !strings.Contains(out.String(), "digest:") {
 		t.Fatalf("inspect: code=%d out=%s err=%s", code, out.String(), errBuf.String())
+	}
+	if !strings.Contains(out.String(), "format:   agent-plugins") ||
+		!strings.Contains(out.String(), "name:     acme.cli") ||
+		!strings.Contains(out.String(), "displayName: Test Pack") ||
+		!strings.Contains(out.String(), "$schema:") {
+		t.Fatalf("inspect missing APS identity:\n%s", out.String())
 	}
 
 	out.Reset()
@@ -103,6 +142,10 @@ func TestRunPluginLifecycleCLI(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "root:") {
 		t.Fatalf("doctor out: %s", out.String())
+	}
+	if !strings.Contains(out.String(), "format:    agent-plugins") ||
+		!strings.Contains(out.String(), "displayName: Test Pack") {
+		t.Fatalf("doctor missing APS identity:\n%s", out.String())
 	}
 
 	out.Reset()
@@ -173,8 +216,11 @@ func TestRunPluginInspectAPS(t *testing.T) {
 		t.Fatalf("inspect: code=%d err=%s out=%s", code, errBuf.String(), out.String())
 	}
 	got := out.String()
-	if !strings.Contains(got, "format:   aps") {
+	if !strings.Contains(got, "format:   agent-plugins") {
 		t.Fatalf("missing APS format:\n%s", got)
+	}
+	if !strings.Contains(got, "$schema:") {
+		t.Fatalf("missing $schema:\n%s", got)
 	}
 	if !strings.Contains(got, "skills=1") || !strings.Contains(got, "mcp=2") {
 		t.Fatalf("want skills=1 mcp=2:\n%s", got)
@@ -260,16 +306,20 @@ func TestRunPluginTrustCLI(t *testing.T) {
 		t.Fatal(err)
 	}
 	man := `{
-  "schemaVersion": 1,
-  "id": "acme.exec",
-  "version": "1.0.0",
-  "name": "Exec",
-  "strike": { "min": "0.1.0" },
-  "contributions": {
-    "mcp": [{ "name": "x", "transport": "stdio", "command": "bin/mcp.sh" }]
-  }
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "acme.exec",
+  "version": "1.0.0"
 }`
 	if err := os.WriteFile(filepath.Join(src, "plugin.json"), []byte(man), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mcp := `{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "x": { "type": "stdio", "command": "./bin/mcp.sh" }
+  }
+}`
+	if err := os.WriteFile(filepath.Join(src, "mcp.json"), []byte(mcp), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -283,7 +333,7 @@ func TestRunPluginTrustCLI(t *testing.T) {
 	out.Reset()
 	errBuf.Reset()
 	// Install a passive-only plugin and ensure trust fails.
-	passive := writeTestPluginBundle(t, t.TempDir(), "acme.passive")
+	passive := writeAPSPluginBundle(t, t.TempDir(), "acme.passive")
 	code = runPluginCLI([]string{"install", passive, "--scope", "global"}, &out, &errBuf)
 	if code != 0 {
 		t.Fatalf("install passive: %s", errBuf.String())
@@ -379,7 +429,7 @@ func TestRunPluginMigrateCLI(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	chdirTemp(t)
-	src := writeTestPluginBundle(t, t.TempDir(), "acme.migrate")
+	src := writeLegacyPluginBundle(t, t.TempDir(), "acme.migrate")
 
 	var out, errBuf bytes.Buffer
 	code := runPluginCLI([]string{"install", src, "--scope", "global"}, &out, &errBuf)
@@ -427,14 +477,14 @@ func TestRunPluginMigrateCLI(t *testing.T) {
 	out.Reset()
 	errBuf.Reset()
 	code = runPluginCLI([]string{"inspect", "acme.migrate"}, &out, &errBuf)
-	if code != 0 || !strings.Contains(out.String(), "format:   aps") {
+	if code != 0 || !strings.Contains(out.String(), "format:   agent-plugins") {
 		t.Fatalf("inspect after migrate: %s %s", out.String(), errBuf.String())
 	}
 
 	out.Reset()
 	errBuf.Reset()
 	code = runPluginCLI([]string{"doctor", "acme.migrate"}, &out, &errBuf)
-	if code != 0 || !strings.Contains(out.String(), "format:    aps") {
+	if code != 0 || !strings.Contains(out.String(), "format:    agent-plugins") {
 		t.Fatalf("doctor after migrate: %s %s", out.String(), errBuf.String())
 	}
 
@@ -456,7 +506,7 @@ func TestRunPluginMigrateCLIRollback(t *testing.T) {
 
 	// Valid Strike id, too long for APS name — convert fails before replace.
 	id := "acme." + strings.Repeat("z", 60)
-	src := writeTestPluginBundle(t, t.TempDir(), id)
+	src := writeLegacyPluginBundle(t, t.TempDir(), id)
 	var out, errBuf bytes.Buffer
 	code := runPluginCLI([]string{"install", src, "--scope", "global"}, &out, &errBuf)
 	if code != 0 {

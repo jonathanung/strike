@@ -580,7 +580,7 @@ func TestDoctor_APSInvalidMCPShowsDisabled(t *testing.T) {
 	if report.Plugins[0].Format != FormatAPS {
 		t.Fatalf("format=%s", report.Plugins[0].Format)
 	}
-	if !strings.Contains(FormatDoctorText(report), "format:    aps") {
+	if !strings.Contains(FormatDoctorText(report), "format:    agent-plugins") {
 		t.Fatalf("doctor text missing format:\n%s", FormatDoctorText(report))
 	}
 	mcp := report.Plugins[0].Contributions.MCP
@@ -628,5 +628,55 @@ func TestBuildUpdateReview_APSMCPVisible(t *testing.T) {
 	}
 	if !hasMCP {
 		t.Fatalf("expected types + mcp, got added=%v text=\n%s", rev.ContribAdded, text)
+	}
+}
+
+func TestDoctor_APSExampleFixtureIdentity(t *testing.T) {
+	home := t.TempDir()
+	root := filepath.Join(home, ".strike", "plugins", "acme.example")
+	writePlugin(t, root, "acme.example", testdataFiles(t, "aps/example-pack"))
+	report, err := Doctor(DoctorOptions{GlobalRoot: filepath.Join(home, ".strike"), StrikeVersion: "0.2.0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Plugins) != 1 {
+		t.Fatalf("plugins=%d", len(report.Plugins))
+	}
+	p := report.Plugins[0]
+	if p.Format != FormatAPS || p.Name != "acme.example" || p.DisplayName != "Acme Example" {
+		t.Fatalf("identity: format=%s name=%s display=%s", p.Format, p.Name, p.DisplayName)
+	}
+	if p.Schema != APSPluginSchemaV1 {
+		t.Fatalf("schema=%q", p.Schema)
+	}
+	if p.Contributions.Skills != 1 || len(p.Contributions.MCP) != 1 {
+		t.Fatalf("counts skills=%d mcp=%v", p.Contributions.Skills, p.Contributions.MCP)
+	}
+	text := FormatDoctorText(report)
+	if !strings.Contains(text, "format:    agent-plugins") || !strings.Contains(text, "displayName: Acme Example") {
+		t.Fatalf("doctor text:\n%s", text)
+	}
+	if strings.Contains(text, "secret://") {
+		t.Fatalf("doctor printed MCP env value:\n%s", text)
+	}
+	if !strings.Contains(text, "EXAMPLE_TOKEN") {
+		t.Fatalf("doctor should list env key names:\n%s", text)
+	}
+}
+
+func TestDoctor_LegacyFixtureDeprecation(t *testing.T) {
+	home := t.TempDir()
+	root := filepath.Join(home, ".strike", "plugins", "acme.review-pack")
+	writePlugin(t, root, "acme.review-pack", testdataFiles(t, "legacy/acme.review-pack"))
+	report, err := Doctor(DoctorOptions{GlobalRoot: filepath.Join(home, ".strike"), StrikeVersion: "0.2.0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Plugins) != 1 || report.Plugins[0].Format != FormatLegacy {
+		t.Fatalf("want legacy, got %+v", report.Plugins)
+	}
+	text := FormatDoctorText(report)
+	if !strings.Contains(text, "format:    legacy (deprecated)") {
+		t.Fatalf("doctor text:\n%s", text)
 	}
 }
