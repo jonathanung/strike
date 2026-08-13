@@ -309,6 +309,40 @@ describe("App", () => {
     expect(list).toHaveClass("completion");
     expect(list).toHaveTextContent(/no files match/i);
     expect(within(list).queryByRole("option")).not.toBeInTheDocument();
+    fireEvent.keyDown(box, { key: "Enter" });
+    expect(box).toHaveValue("@nope");
+    expect(screen.getByRole("listbox", { name: "Composer completions" })).toBeInTheDocument();
+    const opsCalls = vi.mocked(fetch).mock.calls.filter(([url, init]) => String(url).includes("/v1/ops") && (init as RequestInit | undefined)?.method === "POST");
+    expect(opsCalls.some(([, init]) => String((init as RequestInit).body || "").includes("@nope"))).toBe(false);
+    fireEvent.keyDown(box, { key: "Escape" });
+    expect(screen.queryByRole("listbox", { name: "Composer completions" })).not.toBeInTheDocument();
+    expect(box).toHaveValue("@nope");
+  });
+
+  it("opens and closes @file completion when the caret moves in or out of the mention", async () => {
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("bootstrap")) {
+        return response({
+          version: "test", authRequired: false, attachOnly: false,
+          capabilities: { live: true, files: true, roots: false },
+          protocolOps: ["user.input"], status: { sessionId: "live", provider: "echo", busy: false },
+          agents: [], skills: [],
+        });
+      }
+      if (url.includes("sessions")) return response({ sessions: [{ id: "live", title: "Current" }], liveId: "live" });
+      if (url.includes("/v1/files/search")) return response({ paths: ["src/main.go"] });
+      return response({ ok: true });
+    }));
+    render(<App />);
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    const box = screen.getByLabelText("Instruction") as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: "see @src extra", selectionStart: 14, selectionEnd: 14 } });
+    expect(screen.queryByRole("listbox", { name: "Composer completions" })).not.toBeInTheDocument();
+    fireEvent.click(box, { target: { selectionStart: 8, selectionEnd: 8 } });
+    expect(await screen.findByRole("option", { name: /src\/main\.go/ })).toBeInTheDocument();
+    fireEvent.click(box, { target: { selectionStart: 0, selectionEnd: 0 } });
+    expect(screen.queryByRole("listbox", { name: "Composer completions" })).not.toBeInTheDocument();
   });
 
   it("rewrites the whole @file mention when accepting mid-token", async () => {

@@ -191,7 +191,6 @@ export default function App() {
   const [fileHits, setFileHits] = useState<string[]>([]);
   const [fileSearchHint, setFileSearchHint] = useState("");
   const [composerCursor, setComposerCursor] = useState(0);
-  const [mention, setMention] = useState<{ start: number; query: string } | null>(null);
   const [completionIndex, setCompletionIndex] = useState(0);
   const [completionDismissed, setCompletionDismissed] = useState(false);
   const [onboardingHint, setOnboardingHint] = useState(() => {
@@ -474,6 +473,10 @@ export default function App() {
     () => buildCommandCatalog({ skills: boot?.skills, attachOnly: boot?.attachOnly, capabilities: boot?.capabilities }),
     [boot],
   );
+  const mention = useMemo(() => {
+    const trig = isFileMentionTrigger(draft, composerCursor);
+    return trig.active ? { start: trig.start, query: trig.query } : null;
+  }, [draft, composerCursor]);
   const fileMentionActive = Boolean(mention && boot?.capabilities.files);
   const completions = useMemo(() => {
     if (fileMentionActive) {
@@ -489,6 +492,7 @@ export default function App() {
   }, [draft, boot, fileMentionActive, fileHits, composerCursor]);
   const shownCompletions = completionDismissed || historyBrowse ? [] : completions.slice(0, 8);
   const showFileEmptyHint = fileMentionActive && !completionDismissed && !historyBrowse && shownCompletions.length === 0 && fileSearchHint !== "";
+  const completionPopupOpen = shownCompletions.length > 0 || showFileEmptyHint;
   const activeCompletion = Math.min(completionIndex, Math.max(0, shownCompletions.length - 1));
   const completionOpenRef = useRef(false);
   useEffect(() => {
@@ -628,7 +632,6 @@ export default function App() {
     } else execute(text, images);
     setHistoryBrowse(null);
     setDraft(""); setImages([]);
-    setMention(null);
     setFileHits([]);
     setFileSearchHint("");
     setComposerCursor(0);
@@ -639,7 +642,6 @@ export default function App() {
       const next = insertMention(draft, mention.start, cursor, item.insert);
       setDraft(next);
       setComposerCursor(next.length);
-      setMention(null);
       setFileHits([]);
       setFileSearchHint("");
       return;
@@ -692,16 +694,16 @@ export default function App() {
   };
   const onComposerKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     const el = event.currentTarget;
-    if (shownCompletions.length > 0) {
+    if (completionPopupOpen) {
       const next =
         event.key === "ArrowDown" ||
         (event.ctrlKey && !event.metaKey && !event.altKey && event.key.toLowerCase() === "n");
-      if (next) {
+      if (next && shownCompletions.length > 0) {
         event.preventDefault();
         setCompletionIndex((i) => Math.min(shownCompletions.length - 1, i + 1));
         return;
       }
-      if (event.key === "ArrowUp") {
+      if (event.key === "ArrowUp" && shownCompletions.length > 0) {
         event.preventDefault();
         setCompletionIndex((i) => Math.max(0, i - 1));
         return;
@@ -759,8 +761,6 @@ export default function App() {
     setCompletionIndex(0);
     setDraft(value);
     setComposerCursor(cursor);
-    const trig = isFileMentionTrigger(value, cursor);
-    setMention(trig.active ? { start: trig.start, query: trig.query } : null);
   };
   const attach = async (files: FileList | null) => { if (!files) return; try { const added = await Promise.all([...files].map(readAttachment)); setImages((old) => [...old, ...added]); } catch (error) { window.alert((error as Error).message); } };
   const selectProvider = async (provider: string) => {
