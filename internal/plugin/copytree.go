@@ -47,27 +47,7 @@ func copyTree(src, dst string) error {
 		}
 		target := filepath.Join(dst, rel)
 		if d.Type()&fs.ModeSymlink != 0 {
-			link, err := os.Readlink(path)
-			if err != nil {
-				return err
-			}
-			// Resolve relative to link location and ensure still under src.
-			var referent string
-			if filepath.IsAbs(link) {
-				referent = filepath.Clean(link)
-			} else {
-				referent = filepath.Clean(filepath.Join(filepath.Dir(path), link))
-			}
-			if resolved, err := filepath.EvalSymlinks(referent); err == nil {
-				referent = resolved
-			}
-			if !isUnder(srcAbs, referent) && referent != srcAbs {
-				return fmt.Errorf("symlink %s escapes source root", rel)
-			}
-			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-				return err
-			}
-			return os.Symlink(link, target)
+			return copyConfinedSymlink(srcAbs, path, target, rel)
 		}
 		if d.IsDir() {
 			return os.MkdirAll(target, 0o755)
@@ -78,6 +58,31 @@ func copyTree(src, dst string) error {
 		}
 		return copyFile(path, target)
 	})
+}
+
+// copyConfinedSymlink copies path as a symlink at target when the referent stays
+// under srcAbs. Escaping symlinks are rejected (same policy as copyTree).
+func copyConfinedSymlink(srcAbs, path, target, rel string) error {
+	link, err := os.Readlink(path)
+	if err != nil {
+		return err
+	}
+	var referent string
+	if filepath.IsAbs(link) {
+		referent = filepath.Clean(link)
+	} else {
+		referent = filepath.Clean(filepath.Join(filepath.Dir(path), link))
+	}
+	if resolved, err := filepath.EvalSymlinks(referent); err == nil {
+		referent = resolved
+	}
+	if !isUnder(srcAbs, referent) && referent != srcAbs {
+		return fmt.Errorf("symlink %s escapes source root", rel)
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return err
+	}
+	return os.Symlink(link, target)
 }
 
 func copyFile(src, dst string) error {

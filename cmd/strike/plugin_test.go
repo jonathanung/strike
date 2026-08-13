@@ -361,3 +361,119 @@ func TestRunPluginInstallInvalid(t *testing.T) {
 		}
 	}
 }
+
+func chdirTemp(t *testing.T) {
+	t.Helper()
+	work := t.TempDir()
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(work); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+}
+
+func TestRunPluginMigrateCLI(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	chdirTemp(t)
+	src := writeTestPluginBundle(t, t.TempDir(), "acme.migrate")
+
+	var out, errBuf bytes.Buffer
+	code := runPluginCLI([]string{"install", src, "--scope", "global"}, &out, &errBuf)
+	if code != 0 {
+		t.Fatalf("install: %s %s", errBuf.String(), out.String())
+	}
+
+	out.Reset()
+	errBuf.Reset()
+	code = runPluginCLI([]string{"migrate", "acme.migrate", "--dry-run"}, &out, &errBuf)
+	if code != 0 {
+		t.Fatalf("dry-run: code=%d err=%s out=%s", code, errBuf.String(), out.String())
+	}
+	if !strings.Contains(out.String(), "legacy → Agent Plugins") || !strings.Contains(out.String(), "dry-run") {
+		t.Fatalf("dry-run out: %s", out.String())
+	}
+
+	out.Reset()
+	errBuf.Reset()
+	code = runPluginCLI([]string{"inspect", "acme.migrate"}, &out, &errBuf)
+	if code != 0 || !strings.Contains(out.String(), "format:   legacy") {
+		t.Fatalf("dry-run must leave legacy: %s %s", out.String(), errBuf.String())
+	}
+
+	out.Reset()
+	errBuf.Reset()
+	code = runPluginCLI([]string{"migrate", "acme.migrate"}, &out, &errBuf)
+	if code == 0 {
+		t.Fatal("installed migrate without --yes should fail")
+	}
+	if !strings.Contains(errBuf.String(), "--yes") {
+		t.Fatalf("want --yes hint, got %s / %s", errBuf.String(), out.String())
+	}
+
+	out.Reset()
+	errBuf.Reset()
+	code = runPluginCLI([]string{"migrate", "acme.migrate", "--yes"}, &out, &errBuf)
+	if code != 0 {
+		t.Fatalf("migrate: code=%d err=%s out=%s", code, errBuf.String(), out.String())
+	}
+	if !strings.Contains(out.String(), "Migrated acme.migrate") {
+		t.Fatalf("success out: %s", out.String())
+	}
+
+	out.Reset()
+	errBuf.Reset()
+	code = runPluginCLI([]string{"inspect", "acme.migrate"}, &out, &errBuf)
+	if code != 0 || !strings.Contains(out.String(), "format:   aps") {
+		t.Fatalf("inspect after migrate: %s %s", out.String(), errBuf.String())
+	}
+
+	out.Reset()
+	errBuf.Reset()
+	code = runPluginCLI([]string{"doctor", "acme.migrate"}, &out, &errBuf)
+	if code != 0 || !strings.Contains(out.String(), "format:    aps") {
+		t.Fatalf("doctor after migrate: %s %s", out.String(), errBuf.String())
+	}
+
+	out.Reset()
+	errBuf.Reset()
+	code = runPluginCLI([]string{"migrate", "acme.migrate", "--yes"}, &out, &errBuf)
+	if code == 0 {
+		t.Fatal("already-APS should refuse")
+	}
+	if !strings.Contains(errBuf.String(), "already an Agent Plugins") {
+		t.Fatalf("already-APS message: %s / %s", errBuf.String(), out.String())
+	}
+}
+
+func TestRunPluginMigrateCLIRollback(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	chdirTemp(t)
+
+	// Valid Strike id, too long for APS name — convert fails before replace.
+	id := "acme." + strings.Repeat("z", 60)
+	src := writeTestPluginBundle(t, t.TempDir(), id)
+	var out, errBuf bytes.Buffer
+	code := runPluginCLI([]string{"install", src, "--scope", "global"}, &out, &errBuf)
+	if code != 0 {
+		t.Fatalf("install: %s %s", errBuf.String(), out.String())
+	}
+
+	out.Reset()
+	errBuf.Reset()
+	code = runPluginCLI([]string{"migrate", id, "--yes"}, &out, &errBuf)
+	if code == 0 {
+		t.Fatal("expected migrate failure")
+	}
+
+	out.Reset()
+	errBuf.Reset()
+	code = runPluginCLI([]string{"inspect", id}, &out, &errBuf)
+	if code != 0 || !strings.Contains(out.String(), "format:   legacy") {
+		t.Fatalf("failed migrate must leave legacy enabled: %s %s", out.String(), errBuf.String())
+	}
+}
