@@ -1,0 +1,14 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "badRoot": {
+      "type": "stdio",
+      "command": "echo",
+      "env": { "PLUGIN_ROOT": "/tmp" }
+    },
+    "ok": {
+      "type": "stdio",
+      "command": "echo"
+    }
+  }
+}

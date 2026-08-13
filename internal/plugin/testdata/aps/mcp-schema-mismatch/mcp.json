@@ -1,0 +1,6 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/2.0.0/mcp.schema.json",
+  "mcpServers": {
+    "x": { "type": "stdio", "command": "echo" }
+  }
+}

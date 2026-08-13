@@ -1,0 +1,22 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "local": {
+      "type": "stdio",
+      "command": "./bin/server.sh",
+      "args": ["--data", "${PLUGIN_DATA}/cache", "--root", "${PLUGIN_ROOT}/cfg"],
+      "env": {
+        "CONFIG": "${PLUGIN_ROOT}/config.json",
+        "PLAIN": "ok"
+      },
+      "cwd": "${PLUGIN_ROOT}"
+    },
+    "cloud": {
+      "type": "streamable-http",
+      "url": "https://mcp.example.com/v1",
+      "headers": {
+        "X-Tenant": "public"
+      }
+    }
+  }
+}

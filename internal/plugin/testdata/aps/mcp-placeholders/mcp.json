@@ -1,0 +1,22 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "local": {
+      "type": "stdio",
+      "command": "./bin/server.sh",
+      "args": ["${PLUGIN_ROOT}/a", "${PLUGIN_DATA}/b", "${UNRECOGNIZED}"],
+      "env": {
+        "ROOT": "${PLUGIN_ROOT}",
+        "DATA": "${PLUGIN_DATA}",
+        "NESTED": "${PLUGIN_ROOT}${PLUGIN_DATA}"
+      }
+    },
+    "remote": {
+      "type": "streamable-http",
+      "url": "https://example.com/${PLUGIN_ROOT}",
+      "headers": {
+        "X-Root": "${PLUGIN_DATA}"
+      }
+    }
+  }
+}
