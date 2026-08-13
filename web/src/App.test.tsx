@@ -156,6 +156,10 @@ describe("App", () => {
     expect(screen.getByRole("option", { name: /export/ })).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText(/Instruction/), { target: { value: "/he" } });
     expect(screen.getByRole("option", { name: /help/ })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/Instruction/), { target: { value: "/hlp" } });
+    expect(screen.getByRole("option", { name: /help/ })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/Instruction/), { target: { value: "note\n/he" } });
+    expect(screen.queryByRole("listbox", { name: "Composer completions" })).not.toBeInTheDocument();
   });
 
   it("accepts slash completions with keyboard and keeps footer Send as the only primary", async () => {
@@ -170,6 +174,7 @@ describe("App", () => {
     expect(field?.querySelector("textarea")).toBeTruthy();
     expect(field?.parentElement).toHaveClass("composer");
     expect(screen.getAllByRole("option").length).toBeGreaterThan(6);
+    expect(screen.getByRole("option", { name: /^\/provider/i })).toBeInTheDocument();
     const help = screen.getByRole("option", { name: /help/i });
     expect(help).toHaveAttribute("aria-selected", "true");
     expect(help).not.toHaveClass("composer-send");
@@ -216,6 +221,35 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: "Attach" })).toHaveClass("composer-secondary");
     expect(screen.getByRole("button", { name: "Export" })).toHaveClass("composer-secondary");
     expect(screen.getByRole("button", { name: "Attach" })).not.toHaveClass("composer-send");
+  });
+
+  it("keeps a following newline when accepting a leading slash token", async () => {
+    render(<App />);
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    const box = screen.getByLabelText("Instruction") as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: "/he\nimplement the feature", selectionStart: 3, selectionEnd: 3 } });
+    expect(screen.getByRole("option", { name: /help/i })).toBeInTheDocument();
+    fireEvent.keyDown(box, { key: "Tab" });
+    expect(box).toHaveValue("/help\nimplement the feature");
+    expect(screen.queryByRole("listbox", { name: "Composer completions" })).not.toBeInTheDocument();
+    fireEvent.keyDown(box, { key: "Enter" });
+    expect(box).toHaveValue("");
+  });
+
+  it("does not double-space when accepting an arg-taking slash over existing remainder", async () => {
+    render(<App />);
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    const box = screen.getByLabelText("Instruction") as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: "/prv argument", selectionStart: 4, selectionEnd: 4 } });
+    expect(screen.getByRole("option", { name: /^\/provider/i })).toBeInTheDocument();
+    fireEvent.keyDown(box, { key: "Tab" });
+    expect(box).toHaveValue("/provider argument");
+    expect(screen.queryByRole("listbox", { name: "Composer completions" })).not.toBeInTheDocument();
+
+    fireEvent.change(box, { target: { value: "/prv\nargument", selectionStart: 4, selectionEnd: 4 } });
+    expect(screen.getByRole("option", { name: /^\/provider/i })).toBeInTheDocument();
+    fireEvent.keyDown(box, { key: "Tab" });
+    expect(box).toHaveValue("/provider\nargument");
   });
 
   it("does not steal ArrowUp/Enter from history browse when the recalled prompt is a slash token", async () => {
@@ -281,13 +315,131 @@ describe("App", () => {
     expect(list).toHaveClass("completion");
     expect(list.parentElement).toHaveClass("composer-field");
     expect(list.parentElement?.querySelector("textarea")).toBeTruthy();
+    box.selectionStart = 3;
+    box.selectionEnd = 3;
     fireEvent.keyDown(box, { key: "ArrowDown" });
     await waitFor(() => expect(within(list).getAllByRole("option")[1]).toHaveAttribute("aria-selected", "true"));
     fireEvent.keyDown(box, { key: "ArrowUp" });
     await waitFor(() => expect(within(list).getAllByRole("option")[0]).toHaveAttribute("aria-selected", "true"));
     fireEvent.keyDown(box, { key: "Enter" });
-    expect((box as HTMLTextAreaElement).value).toContain("@go.mod");
-    expect((box as HTMLTextAreaElement).value).not.toContain("@go\n");
+    expect(box).toHaveValue("@go.mod ");
+    expect(box.selectionStart).toBe("@go.mod ".length);
+    expect(screen.queryByRole("listbox", { name: "Composer completions" })).not.toBeInTheDocument();
+  });
+
+  it("shows an empty @file hint when search returns no hits", async () => {
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("bootstrap")) {
+        return response({
+          version: "test", authRequired: false, attachOnly: false,
+          capabilities: { live: true, files: true, roots: false },
+          protocolOps: ["user.input"], status: { sessionId: "live", provider: "echo", busy: false },
+          agents: [], skills: [],
+        });
+      }
+      if (url.includes("sessions")) return response({ sessions: [{ id: "live", title: "Current" }], liveId: "live" });
+      if (url.includes("/v1/files/search")) return response({ paths: [] });
+      return response({ ok: true });
+    }));
+    render(<App />);
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    const box = screen.getByLabelText("Instruction") as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: "@nope", selectionStart: 5, selectionEnd: 5 } });
+    const list = await screen.findByRole("listbox", { name: "Composer completions" });
+    expect(list).toHaveClass("completion");
+    expect(list).toHaveTextContent(/no files match/i);
+    expect(list.firstElementChild?.tagName).toBe("DIV");
+    expect(list.querySelector(":scope > span")).toBeNull();
+    expect(within(list).queryByRole("option")).not.toBeInTheDocument();
+    fireEvent.keyDown(box, { key: "ArrowUp" });
+    expect(box.selectionStart).toBe(5);
+    expect(screen.getByRole("listbox", { name: "Composer completions" })).toBeInTheDocument();
+    fireEvent.keyDown(box, { key: "Enter" });
+    expect(box).toHaveValue("@nope");
+    expect(screen.getByRole("listbox", { name: "Composer completions" })).toBeInTheDocument();
+    const opsCalls = vi.mocked(fetch).mock.calls.filter(([url, init]) => String(url).includes("/v1/ops") && (init as RequestInit | undefined)?.method === "POST");
+    expect(opsCalls.some(([, init]) => String((init as RequestInit).body || "").includes("@nope"))).toBe(false);
+    fireEvent.keyDown(box, { key: "Escape" });
+    expect(screen.queryByRole("listbox", { name: "Composer completions" })).not.toBeInTheDocument();
+    expect(box).toHaveValue("@nope");
+  });
+
+  it("opens and closes @file completion when the caret moves in or out of the mention", async () => {
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("bootstrap")) {
+        return response({
+          version: "test", authRequired: false, attachOnly: false,
+          capabilities: { live: true, files: true, roots: false },
+          protocolOps: ["user.input"], status: { sessionId: "live", provider: "echo", busy: false },
+          agents: [], skills: [],
+        });
+      }
+      if (url.includes("sessions")) return response({ sessions: [{ id: "live", title: "Current" }], liveId: "live" });
+      if (url.includes("/v1/files/search")) return response({ paths: ["src/main.go"] });
+      return response({ ok: true });
+    }));
+    render(<App />);
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    const box = screen.getByLabelText("Instruction") as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: "see @src extra", selectionStart: 14, selectionEnd: 14 } });
+    expect(screen.queryByRole("listbox", { name: "Composer completions" })).not.toBeInTheDocument();
+    fireEvent.click(box, { target: { selectionStart: 8, selectionEnd: 8 } });
+    expect(await screen.findByRole("option", { name: /src\/main\.go/ })).toBeInTheDocument();
+    fireEvent.click(box, { target: { selectionStart: 0, selectionEnd: 0 } });
+    expect(screen.queryByRole("listbox", { name: "Composer completions" })).not.toBeInTheDocument();
+  });
+
+  it("rewrites the whole @file mention when accepting mid-token", async () => {
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("bootstrap")) {
+        return response({
+          version: "test", authRequired: false, attachOnly: false,
+          capabilities: { live: true, files: true, roots: false },
+          protocolOps: ["user.input"], status: { sessionId: "live", provider: "echo", busy: false },
+          agents: [], skills: [],
+        });
+      }
+      if (url.includes("sessions")) return response({ sessions: [{ id: "live", title: "Current" }], liveId: "live" });
+      if (url.includes("/v1/files/search")) return response({ paths: ["internal/tui/app.go"] });
+      return response({ ok: true });
+    }));
+    render(<App />);
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    const box = screen.getByLabelText("Instruction") as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: "see @src/old.go extra", selectionStart: 8, selectionEnd: 8 } });
+    await screen.findByRole("option", { name: /internal\/tui\/app\.go/ });
+    fireEvent.keyDown(box, { key: "Enter" });
+    expect(box).toHaveValue("see @internal/tui/app.go extra");
+    expect(box.selectionStart).toBe("see @internal/tui/app.go ".length);
+    expect(screen.queryByRole("listbox", { name: "Composer completions" })).not.toBeInTheDocument();
+  });
+
+  it("closes @file completion after accept when the rest starts with a newline", async () => {
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("bootstrap")) {
+        return response({
+          version: "test", authRequired: false, attachOnly: false,
+          capabilities: { live: true, files: true, roots: false },
+          protocolOps: ["user.input"], status: { sessionId: "live", provider: "echo", busy: false },
+          agents: [], skills: [],
+        });
+      }
+      if (url.includes("sessions")) return response({ sessions: [{ id: "live", title: "Current" }], liveId: "live" });
+      if (url.includes("/v1/files/search")) return response({ paths: ["internal/tui/app.go"] });
+      return response({ ok: true });
+    }));
+    render(<App />);
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    const box = screen.getByLabelText("Instruction") as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: "see @src/old.go\nextra", selectionStart: 8, selectionEnd: 8 } });
+    await screen.findByRole("option", { name: /internal\/tui\/app\.go/ });
+    fireEvent.keyDown(box, { key: "Enter" });
+    expect(box).toHaveValue("see @internal/tui/app.go\nextra");
+    expect(screen.queryByRole("listbox", { name: "Composer completions" })).not.toBeInTheDocument();
   });
 
   it("rejects unknown slash commands with feedback and runs /help", async () => {

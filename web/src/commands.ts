@@ -165,25 +165,68 @@ export function filterCommands(commands: CatalogCommand[], query: string): Catal
     .slice(0, 50);
 }
 
-/** True when @ should open file search (not email-like). */
+/** TUI `isFileMentionPathRune` — letters, digits, and path punctuation. */
+export function isFileMentionPathChar(ch: string): boolean {
+  if (ch.length !== 1) return false;
+  if ("/\\.-_+~".includes(ch)) return true;
+  return /\p{L}|\p{N}/u.test(ch);
+}
+
+const inactiveMention = { active: false, query: "", start: -1 };
+
+/**
+ * TUI `atFileCompletion`: cursor-aware @-token after whitespace or line start.
+ * Query is the path fragment between '@' and the cursor (not the rest of the token).
+ */
 export function isFileMentionTrigger(text: string, cursor: number): { active: boolean; query: string; start: number } {
-  const before = text.slice(0, cursor);
-  const at = before.lastIndexOf("@");
-  if (at < 0) return { active: false, query: "", start: -1 };
-  const prev = at === 0 ? " " : before[at - 1];
-  if (prev && !/[\s(]/.test(prev)) return { active: false, query: "", start: -1 };
-  const frag = before.slice(at + 1);
-  if (frag.includes(" ") || frag.includes("\n")) return { active: false, query: "", start: -1 };
-  // Avoid bare email: require no domain-looking complete token without path sep when it has a dot mid-word only after chars
-  if (/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(before.slice(Math.max(0, at - 40)))) {
-    return { active: false, query: "", start: -1 };
+  if (cursor < 0 || cursor > text.length) return inactiveMention;
+  let start = cursor;
+  while (start > 0) {
+    const r = text[start - 1]!;
+    if (r === "\n") return inactiveMention;
+    if (isFileMentionPathChar(r)) {
+      start--;
+      continue;
+    }
+    if (r === "@") {
+      start--;
+      break;
+    }
+    return inactiveMention;
   }
-  return { active: true, query: frag, start: at };
+  if (start >= cursor || text[start] !== "@") return inactiveMention;
+  if (start > 0 && !/\s/.test(text[start - 1]!)) return inactiveMention;
+  if (cursor <= start) return inactiveMention;
+  const query = text.slice(start + 1, cursor);
+  for (const r of query) {
+    if (!isFileMentionPathChar(r)) return inactiveMention;
+  }
+  return { active: true, query, start };
+}
+
+/** TUI emptyHint when @file search returns no paths. */
+export function fileMentionEmptyHint(query: string, failed = false): string {
+  if (failed) return "file search unavailable";
+  if (query === "") return "no project files indexed (empty workdir or all ignored)";
+  return "no files match — try a fuller path; .plan/node_modules/… are hidden unless queried";
+}
+
+export function fileMentionTokenEnd(text: string, start: number): number {
+  let end = start + 1;
+  while (end < text.length && isFileMentionPathChar(text[end]!)) end++;
+  return end;
 }
 
 export function insertMention(text: string, start: number, cursor: number, path: string): string {
+  const tokenEnd = Math.max(cursor, fileMentionTokenEnd(text, start));
   const before = text.slice(0, start);
-  const after = text.slice(cursor);
-  const insert = path.endsWith("/") ? path : path;
-  return `${before}@${insert}${after.startsWith(" ") || after === "" ? after : ` ${after}`}`;
+  const after = text.slice(tokenEnd);
+  const pad = /^\s/.test(after) ? "" : " ";
+  return `${before}@${path}${pad}${after}`;
+}
+
+/** Caret after `@path` plus TUI delimiter space when one was inserted. */
+export function mentionInsertCaret(start: number, path: string, next: string): number {
+  const afterPath = start + 1 + path.length;
+  return next[afterPath] === " " ? afterPath + 1 : afterPath;
 }

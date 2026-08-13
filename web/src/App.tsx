@@ -1,12 +1,12 @@
-import { FormEvent, lazy, Suspense, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { FormEvent, lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { activateRoot, bootstrap, closeRoot, createRoot, fetchTeam, historicalConnection, liveConnection, request, resumeRoot, roots as loadRoots, sendOp, sessions as loadSessions, sessionChildren, getSandbox, patchSandbox, downloadDiagnostics, closeIssue, createIssue, deleteMemory, exportIssues, exportMemory, putMemory } from "./api";
 import { ChildAgentsPanel } from "./ChildAgents";
 import { buildExportMarkdown, defaultExportFilename, downloadTextFile } from "./exportMarkdown";
 import { ChatSessionGroup, PromptQueue } from "./SessionGroup";
 import { initialClientState, reduceClient, selectedSlice, setAdd, setRemove } from "./reducer";
-import { buildCommandCatalog, insertMention, isFileMentionTrigger, type CatalogCommand } from "./commands";
+import { buildCommandCatalog, fileMentionEmptyHint, insertMention, isFileMentionTrigger, mentionInsertCaret, type CatalogCommand } from "./commands";
 import { CommandPalette } from "./CommandPalette";
-import { formatSlashHelp, resolveSlash, WEB_SLASH_COMMANDS } from "./slash";
+import { formatSlashHelp, leadingSlashToken, matchSlashCompletions, resolveSlash, WEB_SLASH_COMMANDS } from "./slash";
 import { applyAppearance, loadAppearance, SettingsDialog } from "./Settings";
 import { formatCostLabel, formatCostNotice } from "./cost";
 import { TranscriptList } from "./Transcript";
@@ -191,7 +191,8 @@ export default function App() {
   const [historyBrowse, setHistoryBrowse] = useState<{ index: number; draft: string } | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [fileHits, setFileHits] = useState<string[]>([]);
-  const [mention, setMention] = useState<{ start: number; query: string } | null>(null);
+  const [fileSearchHint, setFileSearchHint] = useState("");
+  const [composerCursor, setComposerCursor] = useState(0);
   const [completionIndex, setCompletionIndex] = useState(0);
   const [completionDismissed, setCompletionDismissed] = useState(false);
   const [onboardingHint, setOnboardingHint] = useState(() => {
@@ -200,6 +201,7 @@ export default function App() {
   const [runtimeOpen, setRuntimeOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const promptRef = useRef<HTMLTextAreaElement>(null);
+  const restoreCaret = useRef<number | null>(null);
   const paletteInvoker = useRef<HTMLElement | null>(null);
   const [showThinking, setShowThinking] = useState(readShowThinking);
   const [modelRates, setModelRates] = useState<{ inputPerM: number; outputPerM: number; hasCost: boolean; context?: number }>();
@@ -471,21 +473,36 @@ export default function App() {
   const phoneModes = modesInBottomBar(shellProfile);
   const overlayOpen = shellProfile !== "desktop" && (navOpen || inspectorOpen);
   const chatSessionGroupOpen = inspectorOpen && workspaceMode === "chat";
+  useLayoutEffect(() => {
+    const pos = restoreCaret.current;
+    if (pos == null) return;
+    restoreCaret.current = null;
+    promptRef.current?.setSelectionRange(pos, pos);
+  });
   const catalog = useMemo(
     () => buildCommandCatalog({ skills: boot?.skills, attachOnly: boot?.attachOnly, capabilities: boot?.capabilities }),
     [boot],
   );
+  const mention = useMemo(() => {
+    const trig = isFileMentionTrigger(draft, composerCursor);
+    return trig.active ? { start: trig.start, query: trig.query } : null;
+  }, [draft, composerCursor]);
+  const fileMentionActive = Boolean(mention && boot?.capabilities.files);
   const completions = useMemo(() => {
-    if (mention && fileHits.length) {
+    if (fileMentionActive) {
       return fileHits.map((path) => ({ label: path, detail: "workspace file", insert: path }));
     }
-    const token = draft.split(/\s/).at(-1) || "";
-    if (token.startsWith("/")) {
-      return [...slashCommands, ...(boot?.skills || []).map((skill) => ({ label: `/${skill.name}`, detail: skill.description || "Skill", insert: `/${skill.name}` }))].filter((item) => item.label.startsWith(token));
-    }
-    return [];
-  }, [draft, boot, mention, fileHits]);
+    const token = leadingSlashToken(draft, composerCursor);
+    if (!token) return [];
+    const catalogItems: Completion[] = [
+      ...slashCommands,
+      ...(boot?.skills || []).map((skill) => ({ label: `/${skill.name}`, detail: skill.description || "Skill", insert: `/${skill.name}` })),
+    ];
+    return matchSlashCompletions(catalogItems, token.query);
+  }, [draft, boot, fileMentionActive, fileHits, composerCursor]);
   const shownCompletions = completionDismissed || historyBrowse ? [] : completions;
+  const showFileEmptyHint = fileMentionActive && !completionDismissed && !historyBrowse && shownCompletions.length === 0 && fileSearchHint !== "";
+  const completionPopupOpen = shownCompletions.length > 0 || showFileEmptyHint;
   const activeCompletion = Math.min(completionIndex, Math.max(0, shownCompletions.length - 1));
   const completionOpenRef = useRef(false);
   const completionListRef = useRef<HTMLDivElement>(null);
@@ -505,13 +522,21 @@ export default function App() {
   useEffect(() => {
     if (!mention || !boot?.capabilities.files) {
       setFileHits([]);
+      setFileSearchHint("");
       return;
     }
     const q = mention.query;
     const handle = window.setTimeout(() => {
       void request<{ paths: string[] }>(`/v1/files/search?q=${encodeURIComponent(q)}&limit=12`)
-        .then((res) => setFileHits(res.paths || []))
-        .catch(() => setFileHits([]));
+        .then((res) => {
+          const paths = res.paths || [];
+          setFileHits(paths);
+          setFileSearchHint(paths.length ? "" : fileMentionEmptyHint(q));
+        })
+        .catch(() => {
+          setFileHits([]);
+          setFileSearchHint(fileMentionEmptyHint(q, true));
+        });
     }, 120);
     return () => window.clearTimeout(handle);
   }, [mention, boot?.capabilities.files]);
@@ -621,17 +646,35 @@ export default function App() {
     } else execute(text, images);
     setHistoryBrowse(null);
     setDraft(""); setImages([]);
-    setMention(null);
+    setFileHits([]);
+    setFileSearchHint("");
+    setComposerCursor(0);
   };
   const selectCompletion = (item: Completion) => {
+    // TUI applyCompletion nils completion until the next edit (reflow does not recompute).
+    setCompletionDismissed(true);
     if (mention) {
-      const cursor = promptRef.current?.selectionStart ?? draft.length;
-      setDraft(insertMention(draft, mention.start, cursor, item.insert));
-      setMention(null);
+      const cursor = promptRef.current?.selectionStart ?? composerCursor;
+      const next = insertMention(draft, mention.start, cursor, item.insert);
+      const caret = mentionInsertCaret(mention.start, item.insert, next);
+      restoreCaret.current = caret;
+      setDraft(next);
+      setComposerCursor(caret);
       setFileHits([]);
+      setFileSearchHint("");
       return;
     }
-    setDraft((value) => `${value.slice(0, value.lastIndexOf(value.split(/\s/).at(-1) || ""))}${item.insert} `);
+    const token = leadingSlashToken(draft, composerCursor);
+    const start = token?.start ?? 0;
+    const rest = token ? draft.slice(token.end) : "";
+    // TUI inserts Spec.Name (no trailing space) then a delimiter only when the next rune is not whitespace.
+    const insert = item.insert.replace(/\s+$/, "");
+    const pad = /^\s/.test(rest) ? "" : " ";
+    const next = `${draft.slice(0, start)}${insert}${pad}${rest}`;
+    const caret = start + insert.length + pad.length;
+    restoreCaret.current = caret;
+    setDraft(next);
+    setComposerCursor(caret);
   };
   const runCatalogCommand = (cmd: CatalogCommand) => {
     const a = cmd.action;
@@ -673,18 +716,18 @@ export default function App() {
   };
   const onComposerKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     const el = event.currentTarget;
-    if (shownCompletions.length > 0) {
+    if (completionPopupOpen) {
       const next =
         event.key === "ArrowDown" ||
         (event.ctrlKey && !event.metaKey && !event.altKey && event.key.toLowerCase() === "n");
-      if (next) {
+      const prev = event.key === "ArrowUp";
+      if (next || prev) {
         event.preventDefault();
-        setCompletionIndex((i) => Math.min(shownCompletions.length - 1, i + 1));
-        return;
-      }
-      if (event.key === "ArrowUp") {
-        event.preventDefault();
-        setCompletionIndex((i) => Math.max(0, i - 1));
+        if (shownCompletions.length > 0) {
+          setCompletionIndex((i) =>
+            next ? Math.min(shownCompletions.length - 1, i + 1) : Math.max(0, i - 1),
+          );
+        }
         return;
       }
       if ((event.key === "Enter" && !event.shiftKey) || (event.key === "Tab" && !event.shiftKey)) {
@@ -731,14 +774,15 @@ export default function App() {
       return;
     }
   };
-  const onComposerChange = (value: string) => {
+  const syncComposerCursor = (el: HTMLTextAreaElement) => {
+    setComposerCursor(el.selectionStart ?? el.value.length);
+  };
+  const onComposerChange = (value: string, cursor: number) => {
     if (historyBrowse) setHistoryBrowse(null);
     setCompletionDismissed(false);
     setCompletionIndex(0);
     setDraft(value);
-    const cursor = promptRef.current?.selectionStart ?? value.length;
-    const trig = isFileMentionTrigger(value, cursor);
-    setMention(trig.active ? { start: trig.start, query: trig.query } : null);
+    setComposerCursor(cursor);
   };
   const attach = async (files: FileList | null) => { if (!files) return; try { const added = await Promise.all([...files].map(readAttachment)); setImages((old) => [...old, ...added]); } catch (error) { window.alert((error as Error).message); } };
   const selectProvider = async (provider: string) => {
@@ -1175,7 +1219,8 @@ export default function App() {
           <button type="button" onClick={() => { try { localStorage.setItem("strike.web.onboard.v1", "1"); } catch { /* */ } setOnboardingHint(false); }}>Dismiss</button>
         </div>
       )}
-      <form className="composer" onSubmit={submit}><label htmlFor="prompt">Instruction {state.status.busy && "— send to queue"}</label><div className="composer-field">{shownCompletions.length > 0 && <div ref={completionListRef} className="completion" role="listbox" aria-label="Composer completions">{shownCompletions.map((item, i) => <button type="button" role="option" key={item.label} aria-selected={i === activeCompletion} className={i === activeCompletion ? "active" : ""} onMouseEnter={() => setCompletionIndex(i)} onClick={() => selectCompletion(item)}><strong>{item.label}</strong><span>{item.detail}</span></button>)}</div>}<textarea ref={promptRef} aria-label="Instruction" id="prompt" value={draft} disabled={!isLive} placeholder={isLive ? "Describe the next outcome…  / command · @file" : "Historical session — read only"} onPaste={(event) => void attach(event.clipboardData.files)} onDrop={(event) => { event.preventDefault(); void attach(event.dataTransfer.files); }} onDragOver={(event) => event.preventDefault()} onChange={(event) => onComposerChange(event.target.value)} onKeyDown={onComposerKeyDown} /></div>{images.length > 0 && <div className="attachments">{images.map((image, index) => <button type="button" key={`${image.name}-${index}`} onClick={() => setImages((list) => list.filter((_, i) => i !== index))}>{image.name} ×</button>)}</div>}{!chatSessionGroupOpen && <PromptQueue queue={queue} queueEdit={queueEdit} setQueueEdit={setQueueEdit} queueEditCancel={queueEditCancel} queueRef={queueRef} setQueue={setQueue} />}<div className="composer-bar"><span><kbd>↵</kbd> send · <kbd>⇧↵</kbd> newline · <kbd>↑</kbd> history</span><span><input ref={fileRef} hidden type="file" accept="image/*" multiple onChange={(event) => void attach(event.target.files)} /><button type="button" className="composer-secondary" onClick={() => fileRef.current?.click()}>Attach</button>{history.length > 0 && <button type="button" className="composer-secondary" onClick={() => setDraft(history.at(-1) || "")}>History</button>}<button type="button" className="composer-secondary" onClick={() => exportSession()} disabled={!state.items.length}>Export</button>{state.status.busy && <button type="button" className="stop" onClick={() => void op("interrupt")}>Interrupt</button>}<button type="submit" className="composer-send" disabled={!draft.trim() || !isLive}>{state.status.busy ? "Queue" : "Send"}</button></span></div></form>      <CommandPalette
+      <form className="composer" onSubmit={submit}><label htmlFor="prompt">Instruction {state.status.busy && "— send to queue"}</label><div className="composer-field">{(shownCompletions.length > 0 || showFileEmptyHint) && <div ref={completionListRef} className="completion" role="listbox" aria-label="Composer completions">{shownCompletions.length === 0 ? <div>{fileSearchHint}</div> : shownCompletions.map((item, i) => <button type="button" role="option" key={item.label} aria-selected={i === activeCompletion} className={i === activeCompletion ? "active" : ""} onMouseEnter={() => setCompletionIndex(i)} onClick={() => selectCompletion(item)}><strong>{item.label}</strong><span>{item.detail}</span></button>)}</div>}<textarea ref={promptRef} aria-label="Instruction" id="prompt" value={draft} disabled={!isLive} placeholder={isLive ? "Describe the next outcome…  / command · @file" : "Historical session — read only"} onPaste={(event) => void attach(event.clipboardData.files)} onDrop={(event) => { event.preventDefault(); void attach(event.dataTransfer.files); }} onDragOver={(event) => event.preventDefault()} onChange={(event) => onComposerChange(event.currentTarget.value, event.currentTarget.selectionStart ?? event.currentTarget.value.length)} onSelect={(event) => syncComposerCursor(event.currentTarget)} onKeyUp={(event) => syncComposerCursor(event.currentTarget)} onClick={(event) => syncComposerCursor(event.currentTarget)} onKeyDown={onComposerKeyDown} /></div>{images.length > 0 && <div className="attachments">{images.map((image, index) => <button type="button" key={`${image.name}-${index}`} onClick={() => setImages((list) => list.filter((_, i) => i !== index))}>{image.name} ×</button>)}</div>}{!chatSessionGroupOpen && <PromptQueue queue={queue} queueEdit={queueEdit} setQueueEdit={setQueueEdit} queueEditCancel={queueEditCancel} queueRef={queueRef} setQueue={setQueue} />}<div className="composer-bar"><span><kbd>↵</kbd> send · <kbd>⇧↵</kbd> newline · <kbd>↑</kbd> history</span><span><input ref={fileRef} hidden type="file" accept="image/*" multiple onChange={(event) => void attach(event.target.files)} /><button type="button" className="composer-secondary" onClick={() => fileRef.current?.click()}>Attach</button>{history.length > 0 && <button type="button" className="composer-secondary" onClick={() => setDraft(history.at(-1) || "")}>History</button>}<button type="button" className="composer-secondary" onClick={() => exportSession()} disabled={!state.items.length}>Export</button>{state.status.busy && <button type="button" className="stop" onClick={() => void op("interrupt")}>Interrupt</button>}<button type="submit" className="composer-send" disabled={!draft.trim() || !isLive}>{state.status.busy ? "Queue" : "Send"}</button></span></div></form>
+      <CommandPalette
         open={paletteOpen}
         commands={catalog}
         onClose={() => {

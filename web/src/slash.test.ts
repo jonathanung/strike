@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatCostNotice, formatSlashHelp, resolveSlash, WEB_SLASH_COMMANDS } from "./slash";
+import { formatCostNotice, formatSlashHelp, leadingSlashToken, matchSlashCompletions, orderedSubsequence, resolveSlash, WEB_SLASH_COMMANDS } from "./slash";
 
 describe("resolveSlash", () => {
   it("passes through non-slash text", () => {
@@ -70,5 +70,58 @@ describe("formatCostNotice", () => {
       "10 / 100",
     );
     expect(formatCostNotice({})).toContain("Cost: not reported");
+  });
+});
+
+describe("slash completion matching (TUI parity)", () => {
+  const catalog = [
+    { label: "/praline" },
+    { label: "/provider" },
+    { label: "/project" },
+    { label: "/paper" },
+    { label: "/PR" },
+  ];
+
+  it("ranks exact, then prefix, then ordered subsequence", () => {
+    expect(matchSlashCompletions(catalog, "/Pr").map((c) => c.label)).toEqual([
+      "/PR",
+      "/praline",
+      "/provider",
+      "/project",
+      "/paper",
+    ]);
+    expect(matchSlashCompletions(catalog, "/zzz")).toEqual([]);
+  });
+
+  it("matches /he as prefix and /hlp as ordered subsequence of /help", () => {
+    const labels = WEB_SLASH_COMMANDS.map((c) => ({ label: c.label }));
+    expect(matchSlashCompletions(labels, "he").some((c) => c.label === "/help")).toBe(true);
+    expect(matchSlashCompletions(labels, "hlp").some((c) => c.label === "/help")).toBe(true);
+    expect(orderedSubsequence("help", "hlp")).toBe(true);
+    expect(orderedSubsequence("help", "he")).toBe(true);
+    expect(orderedSubsequence("help", "hpq")).toBe(false);
+  });
+
+  it("opens only on line 0 while the cursor is inside the first token", () => {
+    const cases: { name: string; value: string; cursor: number; open: boolean; query?: string; end?: number }[] = [
+      { name: "token middle", value: "/provider argument\nlater", cursor: 3, open: true, query: "pr", end: 9 },
+      { name: "token end", value: "/pr argument", cursor: 3, open: true, query: "pr", end: 3 },
+      { name: "cursor after token", value: "/pr argument", cursor: 4, open: false },
+      { name: "cursor at initial slash", value: "/pr", cursor: 0, open: false },
+      { name: "not leading", value: "x/pr", cursor: 4, open: false },
+      { name: "later line", value: "first\n/pr", cursor: 9, open: false },
+      { name: "bare slash", value: "/", cursor: 1, open: true, query: "", end: 1 },
+    ];
+    for (const tt of cases) {
+      const got = leadingSlashToken(tt.value, tt.cursor);
+      expect({ name: tt.name, open: got !== null }).toEqual({ name: tt.name, open: tt.open });
+      if (tt.open) {
+        expect({ name: tt.name, query: got?.query, end: got?.end }).toEqual({
+          name: tt.name,
+          query: tt.query,
+          end: tt.end,
+        });
+      }
+    }
   });
 });
