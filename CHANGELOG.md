@@ -14,6 +14,14 @@ materially affect the shipped product.
 
 ## [Unreleased]
 
+### Changed
+
+- **Plugin contract** — native on-disk format is [Agent Plugins](https://agent-plugins.org/) 1.0.0 (`plugin.json`, portable `skills/` + `mcp.json`). Strike-only assets use `com.strike.cli`. See [docs/plugins.md](docs/plugins.md) ([#1142](https://github.com/jonathanung/strike/issues/1142)).
+
+### Deprecated
+
+- Strike-native plugin authoring (`schemaVersion` + `contributions` + `plugin.jsonc`). Installed legacy bundles still load with a deprecation diagnostic until a future major.
+
 ## [v0.4.0] - 2026-08-12
 
 Minor release: cohesive web cockpit, serve security hardening, nested
