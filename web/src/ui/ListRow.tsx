@@ -7,6 +7,7 @@ export function ListRow({
   meta,
   trailing,
   className = "",
+  role,
   ...rest
 }: {
   active?: boolean;
@@ -15,11 +16,14 @@ export function ListRow({
   meta?: ReactNode;
   trailing?: ReactNode;
 } & ButtonHTMLAttributes<HTMLButtonElement>) {
+  const option = role === "option";
   return (
     <button
       type="button"
+      role={role}
       className={`ui-list-row ${active ? "active" : ""} ${className}`.trim()}
-      aria-pressed={active}
+      aria-pressed={option ? undefined : active}
+      aria-selected={option ? Boolean(active) : undefined}
       {...rest}
     >
       {leading}
