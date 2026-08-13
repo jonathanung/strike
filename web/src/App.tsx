@@ -4,9 +4,9 @@ import { ChildAgentsPanel } from "./ChildAgents";
 import { buildExportMarkdown, defaultExportFilename, downloadTextFile } from "./exportMarkdown";
 import { clearQueue, editQueuedText, moveQueuedAt, removeQueuedAt, type QueuedPrompt } from "./queueOps";
 import { initialClientState, reduceClient, selectedSlice, setAdd, setRemove } from "./reducer";
-import { buildCommandCatalog, insertMention, isFileMentionTrigger, type CatalogCommand } from "./commands";
+import { buildCommandCatalog, fileMentionEmptyHint, insertMention, isFileMentionTrigger, type CatalogCommand } from "./commands";
 import { CommandPalette } from "./CommandPalette";
-import { formatSlashHelp, resolveSlash, WEB_SLASH_COMMANDS } from "./slash";
+import { formatSlashHelp, leadingSlashToken, matchSlashCompletions, resolveSlash, WEB_SLASH_COMMANDS } from "./slash";
 import { applyAppearance, loadAppearance, SettingsDialog } from "./Settings";
 import { formatCostLabel, formatCostNotice } from "./cost";
 import { TranscriptList } from "./Transcript";
@@ -189,6 +189,8 @@ export default function App() {
   const [historyBrowse, setHistoryBrowse] = useState<{ index: number; draft: string } | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [fileHits, setFileHits] = useState<string[]>([]);
+  const [fileSearchHint, setFileSearchHint] = useState("");
+  const [composerCursor, setComposerCursor] = useState(0);
   const [mention, setMention] = useState<{ start: number; query: string } | null>(null);
   const [completionIndex, setCompletionIndex] = useState(0);
   const [completionDismissed, setCompletionDismissed] = useState(false);
@@ -472,17 +474,21 @@ export default function App() {
     () => buildCommandCatalog({ skills: boot?.skills, attachOnly: boot?.attachOnly, capabilities: boot?.capabilities }),
     [boot],
   );
+  const fileMentionActive = Boolean(mention && boot?.capabilities.files);
   const completions = useMemo(() => {
-    if (mention && fileHits.length) {
+    if (fileMentionActive) {
       return fileHits.map((path) => ({ label: path, detail: "workspace file", insert: path }));
     }
-    const token = draft.split(/\s/).at(-1) || "";
-    if (token.startsWith("/")) {
-      return [...slashCommands, ...(boot?.skills || []).map((skill) => ({ label: `/${skill.name}`, detail: skill.description || "Skill", insert: `/${skill.name}` }))].filter((item) => item.label.startsWith(token));
-    }
-    return [];
-  }, [draft, boot, mention, fileHits]);
+    const token = leadingSlashToken(draft, composerCursor);
+    if (!token) return [];
+    const catalogItems: Completion[] = [
+      ...slashCommands,
+      ...(boot?.skills || []).map((skill) => ({ label: `/${skill.name}`, detail: skill.description || "Skill", insert: `/${skill.name}` })),
+    ];
+    return matchSlashCompletions(catalogItems, token.query);
+  }, [draft, boot, fileMentionActive, fileHits, composerCursor]);
   const shownCompletions = completionDismissed || historyBrowse ? [] : completions.slice(0, 8);
+  const showFileEmptyHint = fileMentionActive && !completionDismissed && !historyBrowse && shownCompletions.length === 0 && fileSearchHint !== "";
   const activeCompletion = Math.min(completionIndex, Math.max(0, shownCompletions.length - 1));
   useEffect(() => {
     setCompletionIndex((i) => Math.min(i, Math.max(0, shownCompletions.length - 1)));
@@ -491,13 +497,21 @@ export default function App() {
   useEffect(() => {
     if (!mention || !boot?.capabilities.files) {
       setFileHits([]);
+      setFileSearchHint("");
       return;
     }
     const q = mention.query;
     const handle = window.setTimeout(() => {
       void request<{ paths: string[] }>(`/v1/files/search?q=${encodeURIComponent(q)}&limit=12`)
-        .then((res) => setFileHits(res.paths || []))
-        .catch(() => setFileHits([]));
+        .then((res) => {
+          const paths = res.paths || [];
+          setFileHits(paths);
+          setFileSearchHint(paths.length ? "" : fileMentionEmptyHint(q));
+        })
+        .catch(() => {
+          setFileHits([]);
+          setFileSearchHint(fileMentionEmptyHint(q, true));
+        });
     }, 120);
     return () => window.clearTimeout(handle);
   }, [mention, boot?.capabilities.files]);
@@ -608,16 +622,28 @@ export default function App() {
     setHistoryBrowse(null);
     setDraft(""); setImages([]);
     setMention(null);
+    setFileHits([]);
+    setFileSearchHint("");
+    setComposerCursor(0);
   };
   const selectCompletion = (item: Completion) => {
     if (mention) {
-      const cursor = promptRef.current?.selectionStart ?? draft.length;
-      setDraft(insertMention(draft, mention.start, cursor, item.insert));
+      const cursor = promptRef.current?.selectionStart ?? composerCursor;
+      const next = insertMention(draft, mention.start, cursor, item.insert);
+      setDraft(next);
+      setComposerCursor(next.length);
       setMention(null);
       setFileHits([]);
+      setFileSearchHint("");
       return;
     }
-    setDraft((value) => `${value.slice(0, value.lastIndexOf(value.split(/\s/).at(-1) || ""))}${item.insert} `);
+    const token = leadingSlashToken(draft, composerCursor);
+    const start = token?.start ?? 0;
+    const rest = token ? draft.slice(token.end).replace(/^\s*/, "") : "";
+    const pad = item.insert.endsWith(" ") ? "" : " ";
+    const next = `${draft.slice(0, start)}${item.insert}${pad}${rest}`;
+    setDraft(next);
+    setComposerCursor(start + item.insert.length + pad.length);
   };
   const runCatalogCommand = (cmd: CatalogCommand) => {
     const a = cmd.action;
@@ -714,12 +740,15 @@ export default function App() {
       return;
     }
   };
-  const onComposerChange = (value: string) => {
+  const syncComposerCursor = (el: HTMLTextAreaElement) => {
+    setComposerCursor(el.selectionStart ?? el.value.length);
+  };
+  const onComposerChange = (value: string, cursor: number) => {
     if (historyBrowse) setHistoryBrowse(null);
     setCompletionDismissed(false);
     setCompletionIndex(0);
     setDraft(value);
-    const cursor = promptRef.current?.selectionStart ?? value.length;
+    setComposerCursor(cursor);
     const trig = isFileMentionTrigger(value, cursor);
     setMention(trig.active ? { start: trig.start, query: trig.query } : null);
   };
@@ -1146,7 +1175,7 @@ export default function App() {
           <button type="button" onClick={() => { try { localStorage.setItem("strike.web.onboard.v1", "1"); } catch { /* */ } setOnboardingHint(false); }}>Dismiss</button>
         </div>
       )}
-      <form className="composer" onSubmit={submit}><label htmlFor="prompt">Instruction {state.status.busy && "— send to queue"}</label><textarea ref={promptRef} aria-label="Instruction" id="prompt" value={draft} disabled={!isLive} placeholder={isLive ? "Describe the next outcome…  / command · @file" : "Historical session — read only"} onPaste={(event) => void attach(event.clipboardData.files)} onDrop={(event) => { event.preventDefault(); void attach(event.dataTransfer.files); }} onDragOver={(event) => event.preventDefault()} onChange={(event) => onComposerChange(event.target.value)} onKeyDown={onComposerKeyDown} />{shownCompletions.length > 0 && <div className="completion" role="listbox" aria-label="Composer completions">{shownCompletions.map((item, i) => <button type="button" role="option" key={item.label} aria-selected={i === activeCompletion} className={i === activeCompletion ? "active" : ""} onMouseEnter={() => setCompletionIndex(i)} onClick={() => selectCompletion(item)}><strong>{item.label}</strong><span>{item.detail}</span></button>)}</div>}{images.length > 0 && <div className="attachments">{images.map((image, index) => <button type="button" key={`${image.name}-${index}`} onClick={() => setImages((list) => list.filter((_, i) => i !== index))}>{image.name} ×</button>)}</div>}{queue.length > 0 && <div className="prompt-queue-wrap"><ol ref={queueRef} className="prompt-queue" aria-label="Queued prompts">{queue.map((item, index) => <li key={index}>{queueEdit?.index === index ? <input className="queue-edit" aria-label={`Queued prompt text ${index + 1}`} value={queueEdit.text} autoFocus onChange={(event) => setQueueEdit({ index, text: event.target.value })} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); queueEditCancel.current = false; setQueue((list) => editQueuedText(list, index, queueEdit.text)); setQueueEdit(null); } if (event.key === "Escape") { event.preventDefault(); queueEditCancel.current = true; setQueueEdit(null); } }} onBlur={() => { if (!queueEditCancel.current) setQueue((list) => editQueuedText(list, index, queueEdit.text)); queueEditCancel.current = false; setQueueEdit(null); }} /> : <span>{item.text}{item.images.length > 0 ? ` (${item.images.length} img)` : ""}</span>}<span className="queue-actions"><button type="button" aria-label={`Move queued prompt ${index + 1} up`} disabled={index === 0} onClick={() => setQueue((list) => moveQueuedAt(list, index, -1))}>↑</button><button type="button" aria-label={`Move queued prompt ${index + 1} down`} disabled={index === queue.length - 1} onClick={() => setQueue((list) => moveQueuedAt(list, index, 1))}>↓</button><button type="button" aria-label={`Edit queued prompt ${index + 1}`} onClick={() => { queueEditCancel.current = false; setQueueEdit({ index, text: item.text }); }}>✎</button><button type="button" aria-label={`Remove queued prompt ${index + 1}`} onClick={() => { setQueue((list) => removeQueuedAt(list, index)); setQueueEdit((cur) => cur?.index === index ? null : cur); }}>×</button></span></li>)}</ol><div className="queue-toolbar"><button type="button" onClick={() => { setQueue(clearQueue()); setQueueEdit(null); }}>Clear queue</button></div></div>}<div className="composer-bar"><span><kbd>↵</kbd> send · <kbd>⇧↵</kbd> newline · <kbd>↑</kbd> history</span><span><input ref={fileRef} hidden type="file" accept="image/*" multiple onChange={(event) => void attach(event.target.files)} /><button type="button" className="composer-secondary" onClick={() => fileRef.current?.click()}>Attach</button>{history.length > 0 && <button type="button" className="composer-secondary" onClick={() => setDraft(history.at(-1) || "")}>History</button>}<button type="button" className="composer-secondary" onClick={() => exportSession()} disabled={!state.items.length}>Export</button>{state.status.busy && <button type="button" className="stop" onClick={() => void op("interrupt")}>Interrupt</button>}<button type="submit" className="composer-send" disabled={!draft.trim() || !isLive}>{state.status.busy ? "Queue" : "Send"}</button></span></div></form>
+      <form className="composer" onSubmit={submit}><label htmlFor="prompt">Instruction {state.status.busy && "— send to queue"}</label><textarea ref={promptRef} aria-label="Instruction" id="prompt" value={draft} disabled={!isLive} placeholder={isLive ? "Describe the next outcome…  / command · @file" : "Historical session — read only"} onPaste={(event) => void attach(event.clipboardData.files)} onDrop={(event) => { event.preventDefault(); void attach(event.dataTransfer.files); }} onDragOver={(event) => event.preventDefault()} onChange={(event) => onComposerChange(event.currentTarget.value, event.currentTarget.selectionStart ?? event.currentTarget.value.length)} onSelect={(event) => syncComposerCursor(event.currentTarget)} onKeyUp={(event) => syncComposerCursor(event.currentTarget)} onClick={(event) => syncComposerCursor(event.currentTarget)} onKeyDown={onComposerKeyDown} />{(shownCompletions.length > 0 || showFileEmptyHint) && <div className="completion" role="listbox" aria-label="Composer completions">{shownCompletions.length === 0 ? <span>{fileSearchHint}</span> : shownCompletions.map((item, i) => <button type="button" role="option" key={item.label} aria-selected={i === activeCompletion} className={i === activeCompletion ? "active" : ""} onMouseEnter={() => setCompletionIndex(i)} onClick={() => selectCompletion(item)}><strong>{item.label}</strong><span>{item.detail}</span></button>)}</div>}{images.length > 0 && <div className="attachments">{images.map((image, index) => <button type="button" key={`${image.name}-${index}`} onClick={() => setImages((list) => list.filter((_, i) => i !== index))}>{image.name} ×</button>)}</div>}{queue.length > 0 && <div className="prompt-queue-wrap"><ol ref={queueRef} className="prompt-queue" aria-label="Queued prompts">{queue.map((item, index) => <li key={index}>{queueEdit?.index === index ? <input className="queue-edit" aria-label={`Queued prompt text ${index + 1}`} value={queueEdit.text} autoFocus onChange={(event) => setQueueEdit({ index, text: event.target.value })} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); queueEditCancel.current = false; setQueue((list) => editQueuedText(list, index, queueEdit.text)); setQueueEdit(null); } if (event.key === "Escape") { event.preventDefault(); queueEditCancel.current = true; setQueueEdit(null); } }} onBlur={() => { if (!queueEditCancel.current) setQueue((list) => editQueuedText(list, index, queueEdit.text)); queueEditCancel.current = false; setQueueEdit(null); }} /> : <span>{item.text}{item.images.length > 0 ? ` (${item.images.length} img)` : ""}</span>}<span className="queue-actions"><button type="button" aria-label={`Move queued prompt ${index + 1} up`} disabled={index === 0} onClick={() => setQueue((list) => moveQueuedAt(list, index, -1))}>↑</button><button type="button" aria-label={`Move queued prompt ${index + 1} down`} disabled={index === queue.length - 1} onClick={() => setQueue((list) => moveQueuedAt(list, index, 1))}>↓</button><button type="button" aria-label={`Edit queued prompt ${index + 1}`} onClick={() => { queueEditCancel.current = false; setQueueEdit({ index, text: item.text }); }}>✎</button><button type="button" aria-label={`Remove queued prompt ${index + 1}`} onClick={() => { setQueue((list) => removeQueuedAt(list, index)); setQueueEdit((cur) => cur?.index === index ? null : cur); }}>×</button></span></li>)}</ol><div className="queue-toolbar"><button type="button" onClick={() => { setQueue(clearQueue()); setQueueEdit(null); }}>Clear queue</button></div></div>}<div className="composer-bar"><span><kbd>↵</kbd> send · <kbd>⇧↵</kbd> newline · <kbd>↑</kbd> history</span><span><input ref={fileRef} hidden type="file" accept="image/*" multiple onChange={(event) => void attach(event.target.files)} /><button type="button" className="composer-secondary" onClick={() => fileRef.current?.click()}>Attach</button>{history.length > 0 && <button type="button" className="composer-secondary" onClick={() => setDraft(history.at(-1) || "")}>History</button>}<button type="button" className="composer-secondary" onClick={() => exportSession()} disabled={!state.items.length}>Export</button>{state.status.busy && <button type="button" className="stop" onClick={() => void op("interrupt")}>Interrupt</button>}<button type="submit" className="composer-send" disabled={!draft.trim() || !isLive}>{state.status.busy ? "Queue" : "Send"}</button></span></div></form>
       <CommandPalette
         open={paletteOpen}
         commands={catalog}
