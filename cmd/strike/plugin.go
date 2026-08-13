@@ -41,6 +41,7 @@ Install options:
   --registry <url>         Catalog base or catalog.json URL (required for catalog: installs)
   --version <semver>       Pin catalog package version (default: latest)
   --force                  Replace an existing install of the same id
+  --legacy                 Allow installing a deprecated Strike-native tree
 
 Update options:
   --yes                    Confirm after review (required; no unattended updates)
@@ -60,6 +61,10 @@ Scopes:
 
 Notes:
   - Install is atomic: failed validation leaves no partially enabled plugin.
+  - Strike-native (schemaVersion + contributions) installs fail unless --legacy.
+    Convert with strike plugin migrate. See https://agent-plugins.org/.
+    --legacy still records deprecation in the lockfile; doctor shows deprecated.
+    Already-installed legacy packages continue to load until migrated or removed.
   - Git installs always pin a full commit SHA in the lockfile.
   - Catalog installs pin immutable version + verified artifact digest; lockfile
     records registry, package, version, artifact URL/digest, and content digest.
@@ -350,6 +355,7 @@ func runPluginInstall(args []string, stdout, stderr io.Writer) int {
 	registry := fs.String("registry", "", "catalog base or catalog.json URL")
 	version := fs.String("version", "", "catalog package version pin")
 	force := fs.Bool("force", false, "replace existing install")
+	legacy := fs.Bool("legacy", false, "allow installing a deprecated Strike-native tree")
 	flagArgs, pos := splitPluginArgs(args, map[string]bool{
 		"scope": true, "ref": true, "commit": true, "subdir": true,
 		"registry": true, "version": true,
@@ -358,7 +364,7 @@ func runPluginInstall(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if len(pos) < 1 {
-		fmt.Fprintln(stderr, "usage: strike plugin install <path|git-url|catalog:pkg[@ver]> [--scope] [--registry] [--version] [--ref] [--commit] [--subdir] [--force]")
+		fmt.Fprintln(stderr, "usage: strike plugin install <path|git-url|catalog:pkg[@ver]> [--scope] [--registry] [--version] [--ref] [--commit] [--subdir] [--force] [--legacy]")
 		return 2
 	}
 	scope, err := scopeFromFlag(*scopeFlag)
@@ -399,6 +405,7 @@ func runPluginInstall(args []string, stdout, stderr io.Writer) int {
 		CatalogPackage:  catPkg,
 		CatalogVersion:  catVer,
 		Force:           *force,
+		AllowLegacy:     *legacy,
 	})
 	if err != nil {
 		fmt.Fprintln(stderr, "strike plugin install:", err)
@@ -416,6 +423,10 @@ func runPluginInstall(args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintln(stdout, "  enabled: true (passive contributions load on next launch)")
 	fmt.Fprintln(stdout, "  trust:   none (catalog/install metadata cannot enable execution)")
+	if res.Deprecated {
+		fmt.Fprintln(stdout, "  deprecated: Strike-native plugin.json; convert with strike plugin migrate")
+		fmt.Fprintln(stdout, "              See https://agent-plugins.org/")
+	}
 	return 0
 }
 

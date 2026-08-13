@@ -198,13 +198,14 @@ strike plugin list
 strike plugin inspect <name>
 strike plugin doctor [name]
 strike plugin install <path|git-url|catalog:pkg[@ver]>
+strike plugin migrate <name|path>
 ```
 
 `list` / `inspect` / `doctor` print `format=agent-plugins|legacy`, APS `name`,
 displayName, `$schema`, extension capabilities, and skill/MCP counts from those
-fixed locations. They never print secrets or MCP env values. Legacy Strike-native
-`plugin.json` (`schemaVersion` + `contributions`) still loads until APS.6;
-`strike plugin migrate` converts it. Full contract: [plugins.md](plugins.md).
+fixed locations. They never print secrets or MCP env values. New Strike-native
+installs fail unless `--legacy`. Already-installed legacy packages still load
+(deprecated); `strike plugin migrate` converts them. Full contract: [plugins.md](plugins.md).
 
 ### Agent teams
 

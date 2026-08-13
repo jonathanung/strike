@@ -203,8 +203,8 @@ func TestExtractArchive_FlattenSingleRoot(t *testing.T) {
 
 func TestCatalogInstall_PinsVersionAndDigest(t *testing.T) {
 	bundle := map[string]string{
-		"plugin.json": manifest("acme.catalog", `{"agents":[{"path":"agents/a.md"}]}`),
-		"agents/a.md": validAgentMD("from-catalog"),
+		"plugin.json":          apsManifest("acme.catalog"),
+		"skills/demo/SKILL.md": validSkillMD("from-catalog"),
 	}
 	// Bump version in manifest to 1.0.0 (manifest helper uses 1.0.0 already).
 	archive := mustTarGz(t, bundle)
@@ -229,7 +229,7 @@ func TestCatalogInstall_PinsVersionAndDigest(t *testing.T) {
 						URL:           "http://" + r.Host + "/artifacts/acme-1.0.0.tar.gz",
 						Digest:        dig,
 						ContentDigest: contentDig,
-						Capabilities:  []string{"agents"},
+						Capabilities:  []string{"skills"},
 					}},
 				}},
 			}
@@ -410,7 +410,11 @@ func TestCatalogInstall_FailedValidationPreservesPrior(t *testing.T) {
 
 	// Bad catalog artifact: valid archive but invalid plugin (missing agent file).
 	bad := mustTarGz(t, map[string]string{
-		"plugin.json": manifest("acme.pack", `{"agents":[{"path":"agents/missing.md"}]}`),
+		"plugin.json": `{
+  "$schema": "https://agent-plugins.org/schemas/99.0.0/plugin.schema.json",
+  "name": "acme.pack",
+  "version": "2.0.0"
+}`,
 	})
 	sum := sha256.Sum256(bad)
 	dig := "sha256:" + hex.EncodeToString(sum[:])
@@ -461,33 +465,31 @@ func TestUpdate_InvalidatesTrustOnExecutableChange(t *testing.T) {
 
 	v1files := map[string]string{
 		"plugin.json": `{
-  "schemaVersion": 1,
-  "id": "acme.tools",
-  "version": "1.0.0",
-  "name": "Tools",
-  "strike": {"min": "0.1.0"},
-  "capabilities": ["agents"],
-  "contributions": {
-    "agents": [{"path": "agents/a.md"}]
-  }
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "acme.tools",
+  "version": "1.0.0"
 }`,
-		"agents/a.md": validAgentMD("a"),
+		"skills/demo/SKILL.md": validSkillMD("demo"),
 	}
 	v2files := map[string]string{
 		"plugin.json": `{
-  "schemaVersion": 1,
-  "id": "acme.tools",
-  "version": "2.0.0",
-  "name": "Tools",
-  "strike": {"min": "0.1.0"},
-  "capabilities": ["agents", "mcp.stdio"],
-  "contributions": {
-    "agents": [{"path": "agents/a.md"}],
-    "mcp": [{"name": "lint", "transport": "stdio", "command": "bin/lint", "args": ["--serve"], "env": {"TOK": "secret://env/TOK"}}]
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "acme.tools",
+  "version": "2.0.0"
+}`,
+		"skills/demo/SKILL.md": validSkillMD("demo"),
+		"mcp.json": `{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "lint": {
+      "type": "stdio",
+      "command": "./bin/lint",
+      "args": ["--serve"],
+      "env": {"TOK": "secret://env/TOK"}
+    }
   }
 }`,
-		"agents/a.md": validAgentMD("a"),
-		"bin/lint":    "#!/bin/sh\n",
+		"bin/lint": "#!/bin/sh\n",
 	}
 	a1 := mustTarGz(t, v1files)
 	a2 := mustTarGz(t, v2files)
@@ -504,8 +506,8 @@ func TestUpdate_InvalidatesTrustOnExecutableChange(t *testing.T) {
 				Packages: []CatalogPackage{{
 					ID: "acme.tools",
 					Versions: []CatalogVersion{
-						{Version: "1.0.0", URL: "http://" + r.Host + "/v1.tar.gz", Digest: d1, ContentDigest: cd1, Capabilities: []string{"agents"}},
-						{Version: "2.0.0", URL: "http://" + r.Host + "/v2.tar.gz", Digest: d2, Capabilities: []string{"agents", "mcp.stdio"}},
+						{Version: "1.0.0", URL: "http://" + r.Host + "/v1.tar.gz", Digest: d1, ContentDigest: cd1, Capabilities: []string{"skills"}},
+						{Version: "2.0.0", URL: "http://" + r.Host + "/v2.tar.gz", Digest: d2, Capabilities: []string{"skills", "mcp.stdio"}},
 					},
 				}},
 			})

@@ -21,10 +21,11 @@ materially affect the shipped product.
 ### Changed
 
 - **Plugin contract** — native on-disk format is [Agent Plugins](https://agent-plugins.org/) 1.0.0 (`plugin.json`, portable `skills/` + `mcp.json`). Strike-only assets use `com.strike.cli`. See [docs/plugins.md](docs/plugins.md) ([#1142](https://github.com/jonathanung/strike/issues/1142)).
+- **Upgrade note:** Agent Plugins is native. Strike-native plugin manifests (`schemaVersion` + `contributions`) are deprecated; removal is planned for a future major. Use `strike plugin migrate`. `strike plugin install` of a Strike-native tree fails unless `--legacy` is passed. Already-installed legacy packages continue to load ([#1147](https://github.com/jonathanung/strike/issues/1147)).
 
 ### Deprecated
 
-- Strike-native plugin authoring (`schemaVersion` + `contributions` + `plugin.jsonc`). Installed legacy bundles still load with a deprecation diagnostic until a future major.
+- Strike-native plugin authoring (`schemaVersion` + `contributions` + `plugin.jsonc`). Installed legacy bundles still load with a deprecation diagnostic until a future major. New installs require `strike plugin install --legacy` ([#1147](https://github.com/jonathanung/strike/issues/1147)).
 
 ## [v0.4.0] - 2026-08-12
 

@@ -23,17 +23,18 @@ type ListOptions struct {
 
 // InstalledPlugin is one on-disk install (enabled or disabled).
 type InstalledPlugin struct {
-	ID        string
-	Version   string
-	Name      string
-	Scope     Scope
-	Root      string
-	Enabled   bool
-	Digest    string
-	Source    *SourceIdentity
-	Trust     *TrustRecord
-	Manifest  *Manifest
-	LoadError string // non-empty when manifest/load failed
+	ID         string
+	Version    string
+	Name       string
+	Scope      Scope
+	Root       string
+	Enabled    bool
+	Digest     string
+	Source     *SourceIdentity
+	Trust      *TrustRecord
+	Deprecated bool
+	Manifest   *Manifest
+	LoadError  string // non-empty when manifest/load failed
 }
 
 // ListInstalled returns plugins found under configured roots (including disabled).
@@ -88,6 +89,7 @@ func ListInstalled(opts ListOptions) ([]InstalledPlugin, []Diagnostic, error) {
 					ip.Source = e.Source
 					ip.Trust = e.Trust
 					ip.Version = e.Version
+					ip.Deprecated = e.Deprecated
 				} else {
 					ip.Enabled = true
 				}
@@ -106,6 +108,7 @@ func ListInstalled(opts ListOptions) ([]InstalledPlugin, []Diagnostic, error) {
 				ip.Digest = e.Digest
 				ip.Source = e.Source
 				ip.Trust = e.Trust
+				ip.Deprecated = e.Deprecated
 				if e.Version != "" {
 					ip.Version = e.Version
 				}

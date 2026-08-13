@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,11 @@ import (
 
 	"github.com/jonathanung/strike-cli/internal/version"
 )
+
+// ErrLegacyManifest is returned when installing a Strike-native tree without AllowLegacy.
+var ErrLegacyManifest = errors.New("Strike-native plugin manifests are deprecated")
+
+const legacyInstallHint = "Agent Plugins is native. Convert with `strike plugin migrate` or pass --legacy. See https://agent-plugins.org/"
 
 // InstallOptions controls local, git, or catalog plugin installation.
 type InstallOptions struct {
@@ -46,17 +52,21 @@ type InstallOptions struct {
 	Force bool
 	// PreserveEnabled keeps prior lockfile enablement when Force-replacing (updates).
 	PreserveEnabled bool
+	// AllowLegacy permits installing a deprecated Strike-native tree (--legacy).
+	// Without it, legacy installs fail closed (no partial enablement).
+	AllowLegacy bool
 }
 
 // InstallResult is the outcome of a successful install.
 type InstallResult struct {
-	ID      string
-	Version string
-	Digest  string
-	Scope   Scope
-	Root    string
-	Source  SourceIdentity
-	Enabled bool
+	ID         string
+	Version    string
+	Digest     string
+	Scope      Scope
+	Root       string
+	Source     SourceIdentity
+	Enabled    bool
+	Deprecated bool
 }
 
 // Install validates and atomically installs a plugin from a local path, git, or catalog.
@@ -156,6 +166,9 @@ func Install(ctx context.Context, opts InstallOptions) (InstallResult, error) {
 	if err != nil {
 		return InstallResult{}, fmt.Errorf("validate manifest: %w", err)
 	}
+	if m.Format == FormatLegacy && !opts.AllowLegacy {
+		return InstallResult{}, fmt.Errorf("%w: %s", ErrLegacyManifest, legacyInstallHint)
+	}
 	// Catalog package id must match manifest id (reproducible identity).
 	if source.Type == SourceCatalog && source.Package != "" && m.ID != source.Package {
 		return InstallResult{}, fmt.Errorf("catalog package %q does not match manifest id %q", source.Package, m.ID)
@@ -224,12 +237,14 @@ func Install(ctx context.Context, opts InstallOptions) (InstallResult, error) {
 		if opts.PreserveEnabled && inLock {
 			enabled = EntryEnabled(prev)
 		}
+		deprecated := m.Format == FormatLegacy
 		entry := LockfileEntry{
 			Enabled:     boolPtr(enabled),
 			Version:     p.Version,
 			Digest:      digest,
 			Source:      &source,
 			InstalledAt: nowRFC3339(),
+			Deprecated:  deprecated,
 		}
 		// Invalidate prior trust on replace when digest/source/executable change.
 		if inLock && prev.Trust != nil {
@@ -243,13 +258,14 @@ func Install(ctx context.Context, opts InstallOptions) (InstallResult, error) {
 		// Fresh install: never copy trust from catalog metadata.
 		lf = setLockEntry(lf, p.ID, entry)
 		result = InstallResult{
-			ID:      p.ID,
-			Version: p.Version,
-			Digest:  digest,
-			Scope:   opts.Scope,
-			Root:    dest,
-			Source:  source,
-			Enabled: enabled,
+			ID:         p.ID,
+			Version:    p.Version,
+			Digest:     digest,
+			Scope:      opts.Scope,
+			Root:       dest,
+			Source:     source,
+			Enabled:    enabled,
+			Deprecated: deprecated,
 		}
 		return lf, false, nil
 	})
