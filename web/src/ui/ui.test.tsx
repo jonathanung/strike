@@ -215,5 +215,9 @@ describe("token CSS foundation", () => {
     );
     expect(selected?.[0]).toMatch(/color-mix\(in srgb,\s*var\(--acid\)/);
     expect(css).toMatch(/\.ui-list-row-main\s*\{[^}]*flex-direction:\s*row/);
+    const title = css.match(/\.ui-list-row-title,\s*\.completion button strong\s*\{[\s\S]*?\n\}/);
+    expect(title?.[0]).toMatch(/font-weight:\s*inherit/);
+    expect(title?.[0]).toMatch(/text-overflow:\s*ellipsis/);
+    expect(title?.[0]).toMatch(/min-width:\s*0/);
   });
 });

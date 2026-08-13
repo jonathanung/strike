@@ -442,8 +442,11 @@ button:disabled, select:disabled, input:disabled, textarea:disabled {
   gap: 8px;
   overflow: hidden;
 }
-.ui-list-row-title {
+.ui-list-row-title,
+.completion button strong {
   flex: 0 1 auto;
+  min-width: 0;
+  font-weight: inherit;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
