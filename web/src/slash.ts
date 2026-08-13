@@ -29,6 +29,53 @@ export const WEB_SLASH_COMMANDS: SlashCompletion[] = [
 
 const KNOWN = new Set(WEB_SLASH_COMMANDS.map((c) => c.label.slice(1)));
 
+/** TUI `orderedSubsequence`: query code points appear in order in value. */
+export function orderedSubsequence(value: string, query: string): boolean {
+  if (!query) return true;
+  const needle = [...query];
+  let matched = 0;
+  for (const r of value) {
+    if (r === needle[matched]) {
+      matched++;
+      if (matched === needle.length) return true;
+    }
+  }
+  return false;
+}
+
+/** TUI `commandMatches`: exact, then prefix, then ordered subsequence (catalog order within rank). */
+export function matchSlashCompletions<T extends { label: string }>(catalog: T[], query: string): T[] {
+  const q = query.toLowerCase().replace(/^\//, "");
+  const buckets: T[][] = [[], [], []];
+  for (const spec of catalog) {
+    const name = spec.label.toLowerCase().replace(/^\//, "");
+    let rank = -1;
+    if (name === q) rank = 0;
+    else if (name.startsWith(q)) rank = 1;
+    else if (orderedSubsequence(name, q)) rank = 2;
+    if (rank >= 0) buckets[rank]!.push(spec);
+  }
+  return buckets.flat();
+}
+
+export type SlashToken = { query: string; start: number; end: number };
+
+/**
+ * TUI `leadingSlashCompletion` activation: slash popup only on line 0 while the
+ * cursor sits inside the first whitespace-delimited token.
+ */
+export function leadingSlashToken(value: string, cursor: number): SlashToken | null {
+  if (cursor <= 0) return null;
+  const lineBreak = value.indexOf("\n");
+  const firstLen = lineBreak < 0 ? value.length : lineBreak;
+  if (cursor > firstLen) return null;
+  if (!value.startsWith("/")) return null;
+  let end = 0;
+  while (end < firstLen && !/\s/.test(value[end]!)) end++;
+  if (cursor > end) return null;
+  return { query: value.slice(1, Math.min(cursor, end)), start: 0, end };
+}
+
 export type SlashResult =
   | { kind: "pass" }
   | { kind: "unknown"; command: string }
