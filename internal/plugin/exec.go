@@ -321,25 +321,10 @@ func compileAPSMCP(p Plugin, opts Options, userNames map[string]struct{}) ([]Com
 	var diags []Diagnostic
 	base := Diagnostic{PluginID: p.ID, Version: p.Version, Source: p.Source, Path: p.Root}
 
-	file, fileDiags, err := loadAPSMCPFile(p.Root)
-	if err != nil {
-		d := base
-		d.Severity = SeverityWarning
-		d.Code = "malformed"
-		d.Message = err.Error() + "; MCP disabled for this plugin"
-		return nil, append(diags, d)
-	}
-	for _, d := range fileDiags {
-		d.PluginID = p.ID
-		d.Version = p.Version
-		d.Source = p.Source
-		if d.Path == "" {
-			d.Path = "mcp.json"
-		}
-		diags = append(diags, d)
-	}
-	if file.disabled {
-		return nil, diags
+	file, _, err := loadAPSMCPFile(p.Root)
+	if err != nil || file.disabled {
+		// Parse/schema/skip diagnostics already emitted by Discover/loadOne.
+		return nil, nil
 	}
 
 	pluginRoot := resolvedPluginRoot(p.Root)
@@ -347,15 +332,6 @@ func compileAPSMCP(p Plugin, opts Options, userNames map[string]struct{}) ([]Com
 
 	for _, e := range file.servers {
 		if e.Skip {
-			d := base
-			d.Severity = SeverityWarning
-			d.Code = e.SkipCode
-			if d.Code == "" {
-				d.Code = "malformed"
-			}
-			d.Message = e.SkipMsg
-			d.Path = "mcp.json"
-			diags = append(diags, d)
 			continue
 		}
 		name := e.Name

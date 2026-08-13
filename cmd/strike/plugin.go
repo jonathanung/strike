@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jonathanung/strike-cli/internal/plugin"
+	"github.com/jonathanung/strike-cli/internal/version"
 )
 
 const pluginUsage = `Manage plugin installs (local, Git, catalog) and executable trust.
@@ -248,7 +249,7 @@ func runPluginInspect(args []string, stdout, stderr io.Writer) int {
 		c := p.Manifest.Contributions
 		agents, skills, workflows, themes, providers := len(c.Agents), len(c.Skills), len(c.Workflows), len(c.Themes), len(c.Providers)
 		mcp, harnesses, hooks, panes := len(c.MCP), len(c.Harnesses), len(c.Hooks), len(c.Panes)
-		loaded, diags := plugin.LoadOne(p.Root, p.Scope, "")
+		loaded, diags := plugin.LoadOne(p.Root, p.Scope, version.Version)
 		if loaded != nil {
 			agents = len(loaded.Agents)
 			skills = len(loaded.Skills)

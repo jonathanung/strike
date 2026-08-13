@@ -354,6 +354,26 @@ func TestCompileExecutables_APSTrustedExpandsAndSetsEnv(t *testing.T) {
 	}
 }
 
+func TestCompileExecutables_APSTrustedSkipDiagsOnce(t *testing.T) {
+	home := t.TempDir()
+	gRoot := filepath.Join(home, ".strike")
+	root := filepath.Join(gRoot, "plugins", "acme.tools")
+	writeAPSExecPlugin(t, root)
+	if _, err := Trust(TrustOptions{ID: "acme.tools", GlobalRoot: gRoot, StrikeVersion: "0.2.0"}); err != nil {
+		t.Fatal(err)
+	}
+	set := CompileExecutables(Options{GlobalRoot: gRoot, StrikeVersion: "0.2.0"}, nil, nil)
+	n := 0
+	for _, d := range set.Diagnostics {
+		if d.Code == "unsupported_transport" && strings.Contains(d.Message, "legacyEvents") {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("want 1 sse skip diagnostic after trust, got %d: %v", n, set.Diagnostics)
+	}
+}
+
 func TestCompileExecutables_APSCommandCannotEscape(t *testing.T) {
 	home := t.TempDir()
 	gRoot := filepath.Join(home, ".strike")
