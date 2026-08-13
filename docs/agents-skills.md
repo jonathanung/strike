@@ -22,9 +22,11 @@ from several trees; **later roots override earlier ones by name**.
 - Markdown only — no OpenCode plugin JS/TS execution.
 - OpenCode-style `model: provider/id` splits into provider + model when `provider` is unset.
 - Nested Claude/OpenCode `permission:` maps map to strike permission rules (best-effort).
-- Future **plugin bundles** package agents/skills (and other surfaces) under a
-  versioned manifest + trust contract — see [plugins.md](plugins.md). Peer
-  trees above stay separate from that system.
+- **Plugin packages** use [Agent Plugins](https://agent-plugins.org/) 1.0.0:
+  portable skills from immediate `skills/<name>/SKILL.md` only (no recursive
+  search; no flat `name.md` in the portable tree). Strike-only agents and
+  extra flat skills live under `com.strike.cli/` — see [plugins.md](plugins.md).
+  Peer trees above stay separate from that system.
 
 ## Project process skills (`.claude/skills`)
 
