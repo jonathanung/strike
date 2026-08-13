@@ -71,6 +71,41 @@ test.describe("live echo cockpit", () => {
     await expect(page.getByLabel("Conversation transcript")).toBeVisible({ timeout: 30_000 });
   });
 
+  test("inspector tabs at 1440px stay clickable without opening settings", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto("/attach");
+    await expect(page.locator(".wordmark")).toBeVisible({ timeout: 30_000 });
+    await dismissBlockingDialogs(page);
+    const inspectorToggle = page.getByRole("button", { name: "Toggle inspector" });
+    if ((await inspectorToggle.getAttribute("aria-pressed")) !== "true") {
+      await inspectorToggle.click();
+    }
+    const chatTabs = page.getByRole("tablist", { name: /Chat surfaces/i }).getByRole("tab");
+    await expect(chatTabs.first()).toBeVisible();
+    const last = chatTabs.last();
+    await last.click();
+    await expect(last).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("dialog", { name: "Workspace settings" })).toHaveCount(0);
+
+    await page.getByRole("button", { name: /Ops:/ }).click();
+    await expect(page.getByRole("dialog", { name: "Workspace settings" })).toHaveCount(0);
+    const mcpTab = page.getByRole("tablist", { name: /Ops surfaces/i }).getByRole("tab", { name: /^mcp$/i });
+    await mcpTab.click();
+    await expect(mcpTab).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("heading", { name: /MCP/i })).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "Workspace settings" })).toHaveCount(0);
+
+    await page.keyboard.press("Control+k");
+    const filter = page.getByLabel("Filter commands");
+    await expect(filter).toBeVisible();
+    await filter.fill("mcp");
+    const first = page.getByRole("listbox", { name: "Commands" }).getByRole("option").first();
+    await expect(first).toContainText("Open MCP");
+    await filter.press("Enter");
+    await expect(page.getByRole("tablist", { name: /Ops surfaces/i }).getByRole("tab", { name: /^mcp$/i })).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("dialog", { name: "Workspace settings" })).toHaveCount(0);
+  });
+
   test("keyboard: settings dialog open/close and composer focus", async ({ page }) => {
     await openSettings(page);
     const dialog = page.getByRole("dialog", { name: "Workspace settings" });

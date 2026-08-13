@@ -10,6 +10,25 @@ describe("commands catalog", () => {
     expect(filterCommands(cat, "help").some((c) => c.label === "/help")).toBe(true);
   });
 
+  it("ranks Open MCP above Mode: Ops when the query is mcp", () => {
+    const cat = buildCommandCatalog({});
+    const ops = cat.find((c) => c.id === "mode:ops");
+    const mcp = cat.find((c) => c.id === "surface:mcp");
+    expect(ops?.detail.toLowerCase()).toContain("mcp");
+    expect(mcp?.label).toBe("Open MCP");
+    const ranked = filterCommands(cat, "mcp");
+    expect(ranked[0]?.id).toBe("surface:mcp");
+    expect(ranked[0]?.label).toBe("Open MCP");
+    const opsIdx = ranked.findIndex((c) => c.id === "mode:ops");
+    expect(opsIdx).toBeGreaterThan(0);
+  });
+
+  it("ranks the Settings dialog above a mode whose blurb mentions settings", () => {
+    const cat = buildCommandCatalog({});
+    const ranked = filterCommands(cat, "settings");
+    expect(ranked[0]?.id).toBe("session:settings");
+  });
+
   it("detects @file mentions without email false positives", () => {
     expect(isFileMentionTrigger("see @src", 8).active).toBe(true);
     expect(isFileMentionTrigger("see @src/a.go", 13).query).toBe("src/a.go");

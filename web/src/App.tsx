@@ -765,14 +765,6 @@ export default function App() {
   }, [boot?.capabilities.catalog, state.status.provider, state.status.model]);
   const inspectProject = async (tab: string, opts?: { open?: boolean; mode?: WorkspaceMode }) => {
     setInspector(tab);
-    if (tab === "settings" || tab === "theme" || tab === "providers" || tab === "auth") {
-      setSettingsOpen(true);
-      // Keep inspector open for ops list-first navigation; settings is also a dialog.
-      if (opts?.open !== false) setInspectorOpen(true);
-      setSurfaceUnavailable(undefined);
-      setInspector(tab);
-      return;
-    }
     const def = getSurface(tab);
     const unavailable = (() => {
       if (!def || !boot) return undefined;
@@ -820,8 +812,6 @@ export default function App() {
     });
     if (surface) {
       void inspectProject(surface, { open: opts?.openDrawer !== false, mode });
-    } else if (mode === "ops") {
-      setSettingsOpen(true);
     }
     writeDeepLinkToLocation({
       mode,
@@ -861,7 +851,6 @@ export default function App() {
     if (resolved.entity) setSurfaceEntity(resolved.entity);
     if (resolved.agent) setSelectedChildId(resolved.agent);
     if (resolved.unavailable) setSurfaceUnavailable(resolved.unavailable);
-    if (resolved.openSettings) setSettingsOpen(true);
     if (resolved.surface) {
       void inspectProject(resolved.surface, { open: resolved.openDrawer, mode: resolved.mode });
     } else {
@@ -1206,6 +1195,7 @@ export default function App() {
               onSelectChild={setSelectedChildId}
               onOpenChildTranscript={openChildTranscript}
               entity={surfaceEntity}
+              onOpenSettings={() => setSettingsOpen(true)}
             />
           </Suspense>
         ) : (
@@ -1545,7 +1535,7 @@ function AttributionTable({ attribution }: { attribution?: RequestAttribution })
   </section>;
 }
 
-function InspectorBody({ tab, boot, workspace, data, loading, expandedDiffs, toggleDiff, isLive, selectedID, onRefresh, sandbox, onExplainSandbox, unavailable, childrenEntries, selectedChildId, onSelectChild, onOpenChildTranscript, entity }: {
+function InspectorBody({ tab, boot, workspace, data, loading, expandedDiffs, toggleDiff, isLive, selectedID, onRefresh, sandbox, onExplainSandbox, unavailable, childrenEntries, selectedChildId, onSelectChild, onOpenChildTranscript, entity, onOpenSettings }: {
   tab: string;
   boot?: Bootstrap;
   workspace: WorkspaceState;
@@ -1564,6 +1554,7 @@ function InspectorBody({ tab, boot, workspace, data, loading, expandedDiffs, tog
   onSelectChild?: (id: string | undefined) => void;
   onOpenChildTranscript?: (id: string) => void;
   entity?: string;
+  onOpenSettings?: () => void;
 }) {
   const status = workspace.status;
   if (unavailable) {
@@ -1664,12 +1655,15 @@ function InspectorBody({ tab, boot, workspace, data, loading, expandedDiffs, tog
         <h2>{tab === "theme" ? "Theme" : tab === "providers" || tab === "auth" ? "Providers & auth" : "Settings"}</h2>
         <p className="muted">
           {tab === "theme"
-            ? "Theme catalog and appearance open in the settings dialog."
+            ? "Theme catalog and appearance live in the settings dialog."
             : tab === "providers" || tab === "auth"
-              ? "Provider authentication and API keys open in the settings dialog."
-              : "Workspace defaults, sandbox, and support tools open in the settings dialog."}
+              ? "Provider authentication and API keys live in the settings dialog."
+              : "Workspace defaults, sandbox, and support tools live in the settings dialog."}
         </p>
-        <p className="muted">Use the header gear or the dialog already opened for full controls.</p>
+        <p className="muted">Use the header gear or open the dialog from this surface. Inspector tabs stay in the drawer.</p>
+        {onOpenSettings && (
+          <button type="button" onClick={onOpenSettings}>Open settings dialog</button>
+        )}
       </section>
     );
   }

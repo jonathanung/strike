@@ -50,7 +50,7 @@ describe("TeamWorkspace", () => {
     const onOpen = vi.fn();
     const team = sampleTeam();
     render(<TeamWorkspace team={team} selectedId="c1" onSelect={onSelect} onOpenTranscript={onOpen} />);
-    fireEvent.click(screen.getByRole("tab", { name: "board" }));
+    fireEvent.click(screen.getByRole("button", { name: "board" }));
     expect(screen.getByLabelText("Task board")).toBeInTheDocument();
     expect(screen.getByText("Task A")).toBeInTheDocument();
     expect(screen.getByText(/Implement X/)).toBeInTheDocument();
@@ -85,7 +85,7 @@ describe("TeamWorkspace", () => {
         sendOp={sendOp}
       />,
     );
-    fireEvent.click(screen.getByRole("tab", { name: "controls" }));
+    fireEvent.click(screen.getByRole("button", { name: "controls" }));
     expect(screen.getByLabelText("Team controls")).toBeInTheDocument();
     fireEvent.change(screen.getByPlaceholderText(/What should the child do/), {
       target: { value: "Implement feature X" },
@@ -111,7 +111,7 @@ describe("TeamWorkspace", () => {
       />,
     );
     // read-only still shows controls tab with explanation when ops were known
-    fireEvent.click(screen.getByRole("tab", { name: "controls" }));
+    fireEvent.click(screen.getByRole("button", { name: "controls" }));
     expect(screen.getByText(/Attach-only|disabled/i)).toBeInTheDocument();
   });
 
@@ -155,7 +155,7 @@ describe("TeamWorkspace", () => {
         sendOp={sendOp}
       />,
     );
-    fireEvent.click(screen.getByRole("tab", { name: "controls" }));
+    fireEvent.click(screen.getByRole("button", { name: "controls" }));
     fireEvent.change(screen.getByPlaceholderText(/What should the child do/), {
       target: { value: "slow spawn" },
     });

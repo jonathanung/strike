@@ -126,14 +126,42 @@ export function buildCommandCatalog(opts: {
   return out;
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function hasWord(hay: string, q: string): boolean {
+  return new RegExp(`(?:^|\\s)${escapeRegExp(q)}(?:\\s|$)`).test(hay);
+}
+
+/** Higher is a better hit. Label/id matches beat a mode whose blurb mentions the query. */
+function commandMatchScore(c: CatalogCommand, q: string): number {
+  const label = c.label.toLowerCase();
+  const detail = (c.detail || "").toLowerCase();
+  const keywords = (c.keywords || "").toLowerCase();
+  if (label === q || label === `open ${q}`) return 400;
+  if (c.action.type === "surface" && c.action.surface.toLowerCase() === q) return 360;
+  if (c.action.type === "mode" && c.action.mode.toLowerCase() === q) return 350;
+  if (label.startsWith(`${q} `) || label.startsWith(`open ${q}`)) return 300;
+  if (hasWord(label, q)) return 250;
+  if (label.includes(q)) return 200;
+  if (hasWord(keywords, q)) return 80;
+  if (keywords.includes(q)) return 60;
+  if (hasWord(detail, q)) return 30;
+  if (detail.includes(q)) return 10;
+  return 1;
+}
+
 export function filterCommands(commands: CatalogCommand[], query: string): CatalogCommand[] {
   const q = query.trim().toLowerCase();
   if (!q) return commands.slice(0, 50);
+  const parts = q.split(/\s+/).filter(Boolean);
   return commands
     .filter((c) => {
       const hay = `${c.label} ${c.detail} ${c.keywords || ""}`.toLowerCase();
-      return hay.includes(q) || q.split(/\s+/).every((part) => hay.includes(part));
+      return hay.includes(q) || parts.every((part) => hay.includes(part));
     })
+    .sort((a, b) => commandMatchScore(b, q) - commandMatchScore(a, q))
     .slice(0, 50);
 }
 

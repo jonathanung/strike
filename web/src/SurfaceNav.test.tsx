@@ -61,4 +61,32 @@ describe("SurfaceNav", () => {
     fireEvent.click(screen.getByRole("button", { name: /goals/i }));
     expect(onChange).toHaveBeenCalledWith("goals");
   });
+
+  it("renders every inspector tab so later surfaces stay activatable", () => {
+    const many: SurfaceDef[] = Array.from({ length: 24 }, (_, i) => ({
+      id: i === 23 ? "mcp" : `surf-${i}`,
+      label: i === 23 ? "mcp" : `surf-${i}`,
+      modes: ["ops"],
+      capability: "always",
+      attention: "none",
+      lazyMount: true,
+      attach: "read",
+      placement: { desktop: "drawer", tablet: "drawer", phone: "sheet" },
+      inspector: true,
+    }));
+    const onChange = vi.fn();
+    render(
+      <SurfaceNav
+        modeLabel="Chat"
+        surfaces={many}
+        activeId="surf-0"
+        profile="desktop"
+        onChange={onChange}
+      />,
+    );
+    const tabs = screen.getAllByRole("tab");
+    expect(tabs).toHaveLength(24);
+    fireEvent.click(screen.getByRole("tab", { name: "mcp" }));
+    expect(onChange).toHaveBeenCalledWith("mcp");
+  });
 });

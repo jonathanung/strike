@@ -280,19 +280,25 @@ button:disabled, select:disabled, input:disabled, textarea:disabled {
 
 .ui-tabs {
   display: flex;
-  overflow: auto;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
   border-bottom: 1px solid var(--rule);
   gap: 0;
+  scrollbar-width: thin;
 }
 .ui-tab {
-  flex: 1;
+  /* Do not flex:1 squeeze labels — long inspector strips must scroll, not clip. */
+  flex: 0 0 auto;
+  min-width: max-content;
+  white-space: nowrap;
   border: 0;
   border-bottom: 2px solid transparent;
   background: transparent;
-  padding: 16px 7px;
+  padding: 10px 12px;
   text-transform: uppercase;
-  font-size: 8px;
-  letter-spacing: .08em;
+  font-size: 11px;
+  letter-spacing: .04em;
   color: var(--muted);
   border-radius: 0;
   min-height: var(--control-min-h);
@@ -303,17 +309,19 @@ button:disabled, select:disabled, input:disabled, textarea:disabled {
 }
 .ui-tab:disabled { opacity: .35; }
 .ui-tabpanel { min-width: 0; }
-/* Inspector tabs reuse the shared tab look */
-.inspector-tabs { display: flex; overflow: auto; border-bottom: 1px solid var(--rule); }
+/* Inspector tabs reuse the shared tab look; never shrink below label width. */
+.inspector-tabs { display: flex; flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; border-bottom: 1px solid var(--rule); scrollbar-width: thin; }
 .inspector-tabs .ui-tab,
 .inspector-tabs button {
-  flex: 1;
+  flex: 0 0 auto;
+  min-width: max-content;
+  white-space: nowrap;
   border: 0;
   border-bottom: 2px solid transparent;
   background: transparent;
-  padding: 16px 7px;
+  padding: 10px 12px;
   text-transform: uppercase;
-  font-size: 8px;
+  font-size: 11px;
   color: var(--muted);
 }
 .inspector-tabs .ui-tab[aria-selected="true"],
@@ -448,7 +456,7 @@ button:disabled, select:disabled, input:disabled, textarea:disabled {
   .ui-btn:not(.ui-btn-sm):not(.ui-btn-icon):not(.icon-button) {
     min-height: var(--touch-min);
   }
-  .ui-tab { min-height: 40px; padding: 12px 8px; font-size: 9px; }
+  .ui-tab { min-height: 40px; padding: 12px 12px; font-size: 12px; }
 }
 
 .app-shell {

@@ -130,7 +130,6 @@ export type ResolvedDeepLink = {
   pane: string;
   agent: string;
   openDrawer: boolean;
-  openSettings?: boolean;
   unavailable?: { id: string; reason: string };
 };
 
@@ -169,7 +168,6 @@ export function resolveDeepLink(
     pane: raw.pane,
     agent: raw.agent,
     openDrawer: resolved.openDrawer,
-    openSettings: resolved.openSettings,
     unavailable: resolved.unavailable,
   };
 }

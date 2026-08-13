@@ -588,13 +588,12 @@ export function TeamWorkspace({
         </div>
       )}
 
-      <div className="team-view-tabs" role="tablist" aria-label="Team views">
+      <div className="team-view-tabs" role="toolbar" aria-label="Team views">
         {tabs.map((v) => (
           <button
             key={v}
             type="button"
-            role="tab"
-            aria-selected={view === v}
+            aria-pressed={view === v}
             className={view === v ? "active" : ""}
             onClick={() => setView(v)}
           >
