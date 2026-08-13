@@ -221,5 +221,12 @@ export function insertMention(text: string, start: number, cursor: number, path:
   const tokenEnd = Math.max(cursor, fileMentionTokenEnd(text, start));
   const before = text.slice(0, start);
   const after = text.slice(tokenEnd);
-  return `${before}@${path}${after.startsWith(" ") || after === "" ? after : ` ${after}`}`;
+  const pad = after.startsWith(" ") ? "" : " ";
+  return `${before}@${path}${pad}${after}`;
+}
+
+/** Caret after `@path` plus TUI delimiter space when one was inserted. */
+export function mentionInsertCaret(start: number, path: string, next: string): number {
+  const afterPath = start + 1 + path.length;
+  return next[afterPath] === " " ? afterPath + 1 : afterPath;
 }

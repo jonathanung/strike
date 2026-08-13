@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildCommandCatalog, fileMentionEmptyHint, filterCommands, insertMention, isFileMentionTrigger } from "./commands";
+import { buildCommandCatalog, fileMentionEmptyHint, filterCommands, insertMention, isFileMentionTrigger, mentionInsertCaret } from "./commands";
 
 describe("commands catalog", () => {
   it("includes modes and slash from one catalog", () => {
@@ -36,7 +36,8 @@ describe("commands catalog", () => {
     expect(isFileMentionTrigger(" @y", 3).active).toBe(true);
     expect(isFileMentionTrigger("(@y", 3).active).toBe(false);
     const next = insertMention("see @sr", 4, 7, "src/main.go");
-    expect(next).toContain("@src/main.go");
+    expect(next).toBe("see @src/main.go ");
+    expect(mentionInsertCaret(4, "src/main.go", next)).toBe("see @src/main.go ".length);
   });
 
   it("is cursor-aware inside the @ token and rewrites the whole mention", () => {
@@ -60,6 +61,9 @@ describe("commands catalog", () => {
     }
     expect(insertMention("see @src/old.go extra", 4, 8, "internal/tui/app.go")).toBe(
       "see @internal/tui/app.go extra",
+    );
+    expect(mentionInsertCaret(4, "internal/tui/app.go", "see @internal/tui/app.go extra")).toBe(
+      "see @internal/tui/app.go ".length,
     );
   });
 

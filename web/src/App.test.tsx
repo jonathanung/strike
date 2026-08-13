@@ -282,8 +282,9 @@ describe("App", () => {
     fireEvent.keyDown(box, { key: "ArrowUp" });
     expect(within(list).getAllByRole("option")[0]).toHaveAttribute("aria-selected", "true");
     fireEvent.keyDown(box, { key: "Enter" });
-    expect((box as HTMLTextAreaElement).value).toContain("@go.mod");
-    expect((box as HTMLTextAreaElement).value).not.toContain("@go\n");
+    expect(box).toHaveValue("@go.mod ");
+    expect(box.selectionStart).toBe("@go.mod ".length);
+    expect(screen.queryByRole("listbox", { name: "Composer completions" })).not.toBeInTheDocument();
   });
 
   it("shows an empty @file hint when search returns no hits", async () => {
@@ -367,6 +368,7 @@ describe("App", () => {
     await screen.findByRole("option", { name: /internal\/tui\/app\.go/ });
     fireEvent.keyDown(box, { key: "Enter" });
     expect(box).toHaveValue("see @internal/tui/app.go extra");
+    expect(box.selectionStart).toBe("see @internal/tui/app.go ".length);
   });
 
   it("rejects unknown slash commands with feedback and runs /help", async () => {

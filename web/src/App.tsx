@@ -1,10 +1,10 @@
-import { FormEvent, lazy, Suspense, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { FormEvent, lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { activateRoot, bootstrap, closeRoot, createRoot, fetchTeam, historicalConnection, liveConnection, request, resumeRoot, roots as loadRoots, sendOp, sessions as loadSessions, sessionChildren, getSandbox, patchSandbox, downloadDiagnostics, closeIssue, createIssue, deleteMemory, exportIssues, exportMemory, putMemory } from "./api";
 import { ChildAgentsPanel } from "./ChildAgents";
 import { buildExportMarkdown, defaultExportFilename, downloadTextFile } from "./exportMarkdown";
 import { clearQueue, editQueuedText, moveQueuedAt, removeQueuedAt, type QueuedPrompt } from "./queueOps";
 import { initialClientState, reduceClient, selectedSlice, setAdd, setRemove } from "./reducer";
-import { buildCommandCatalog, fileMentionEmptyHint, insertMention, isFileMentionTrigger, type CatalogCommand } from "./commands";
+import { buildCommandCatalog, fileMentionEmptyHint, insertMention, isFileMentionTrigger, mentionInsertCaret, type CatalogCommand } from "./commands";
 import { CommandPalette } from "./CommandPalette";
 import { formatSlashHelp, leadingSlashToken, matchSlashCompletions, resolveSlash, WEB_SLASH_COMMANDS } from "./slash";
 import { applyAppearance, loadAppearance, SettingsDialog } from "./Settings";
@@ -199,6 +199,7 @@ export default function App() {
   const [runtimeOpen, setRuntimeOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const promptRef = useRef<HTMLTextAreaElement>(null);
+  const restoreCaret = useRef<number | null>(null);
   const paletteInvoker = useRef<HTMLElement | null>(null);
   const [showThinking, setShowThinking] = useState(readShowThinking);
   const [modelRates, setModelRates] = useState<{ inputPerM: number; outputPerM: number; hasCost: boolean; context?: number }>();
@@ -469,6 +470,12 @@ export default function App() {
   } as React.CSSProperties;
   const phoneModes = modesInBottomBar(shellProfile);
   const overlayOpen = shellProfile !== "desktop" && (navOpen || inspectorOpen);
+  useLayoutEffect(() => {
+    const pos = restoreCaret.current;
+    if (pos == null) return;
+    restoreCaret.current = null;
+    promptRef.current?.setSelectionRange(pos, pos);
+  });
   const catalog = useMemo(
     () => buildCommandCatalog({ skills: boot?.skills, attachOnly: boot?.attachOnly, capabilities: boot?.capabilities }),
     [boot],
@@ -640,8 +647,10 @@ export default function App() {
     if (mention) {
       const cursor = promptRef.current?.selectionStart ?? composerCursor;
       const next = insertMention(draft, mention.start, cursor, item.insert);
+      const caret = mentionInsertCaret(mention.start, item.insert, next);
+      restoreCaret.current = caret;
       setDraft(next);
-      setComposerCursor(next.length);
+      setComposerCursor(caret);
       setFileHits([]);
       setFileSearchHint("");
       return;
@@ -651,8 +660,10 @@ export default function App() {
     const rest = token ? draft.slice(token.end).replace(/^\s*/, "") : "";
     const pad = item.insert.endsWith(" ") ? "" : " ";
     const next = `${draft.slice(0, start)}${item.insert}${pad}${rest}`;
+    const caret = start + item.insert.length + pad.length;
+    restoreCaret.current = caret;
     setDraft(next);
-    setComposerCursor(start + item.insert.length + pad.length);
+    setComposerCursor(caret);
   };
   const runCatalogCommand = (cmd: CatalogCommand) => {
     const a = cmd.action;
