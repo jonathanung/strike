@@ -192,7 +192,7 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
-  background: radial-gradient(circle at 70% -20%, color-mix(in srgb, var(--acid) 18%, transparent) 0, transparent 38%), var(--ground);
+  background: var(--ground);
 }
 button, select, textarea, input { font: inherit; color: inherit; }
 button, select, input, textarea { border: 1px solid var(--rule); background: var(--surface); }
@@ -264,7 +264,6 @@ button:disabled, select:disabled, input:disabled, textarea:disabled {
   background: var(--surface);
   padding: 28px;
   color: var(--ink);
-  box-shadow: 0 30px 100px var(--shadow);
   position: relative;
 }
 .ui-dialog-wide { width: min(720px, calc(100vw - 24px)); }
@@ -274,7 +273,6 @@ button:disabled, select:disabled, input:disabled, textarea:disabled {
 }
 .ui-dialog-blocking { border-color: var(--warning); }
 .ui-dialog h2 {
-  font-family: Georgia, "Times New Roman", serif;
   font-size: 30px;
   margin: 0 0 20px;
 }
@@ -724,7 +722,6 @@ main {
   min-height: 0;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
-  background: linear-gradient(90deg, transparent 49.9%, color-mix(in srgb, var(--ink) 3%, transparent) 50%, transparent 50.1%);
 }
 .runtime {
   display: flex;
@@ -846,7 +843,6 @@ main {
 .empty-state { max-width: 620px; margin: 12vh auto 0; }
 .empty-state span { color: var(--acid); font-size: 10px; letter-spacing: .18em; }
 .empty-state h1 {
-  font-family: Georgia, "Times New Roman", serif;
   font-size: clamp(42px, 7vw, 78px);
   line-height: .9;
   margin: 18px 0;
@@ -894,7 +890,6 @@ main {
   margin: 0 clamp(14px, 4vw, 56px) 22px;
   border: 1px solid var(--rule);
   background: var(--surface);
-  box-shadow: 0 18px 60px var(--shadow);
   position: relative;
 }
 .composer label {
@@ -967,9 +962,45 @@ main {
   border-left: 1px solid var(--rule);
   min-width: 0;
   overflow: hidden;
+  position: relative;
   display: flex;
   flex-direction: column;
 }
+.session-group {
+  flex: 0 1 auto;
+  max-height: 55%;
+  overflow: auto;
+  padding: 12px 16px 8px;
+  border-bottom: 1px solid var(--rule);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+.session-group-pane { min-height: 0; }
+.session-group-facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 10px;
+  margin: 0 0 0;
+  font-size: 10px;
+}
+.inspector .session-group-facts {
+  margin: 0;
+  grid-template-columns: auto 1fr;
+}
+.inspector .session-group-facts dt,
+.inspector .session-group-facts dd {
+  margin: 0;
+  padding: 2px 0;
+  border: 0;
+}
+.session-group-facts dt { color: var(--muted); margin: 0; padding: 2px 0; border: 0; }
+.session-group-facts dd { margin: 0; padding: 2px 0; text-align: right; border: 0; overflow-wrap: anywhere; }
+.session-group-fit { font-size: 10px; margin: 8px 0 0; color: var(--warning); }
+.session-group-fit.critical { color: var(--signal); }
+.session-group-queue { margin: 0; }
+.session-group-queue .prompt-queue { padding-left: 22px; }
 .navigation.collapsed, .inspector.collapsed { opacity: 0; pointer-events: none; }
 .panel-resize {
   position: absolute;
@@ -1004,6 +1035,7 @@ main {
   overflow: auto;
   padding: 20px 16px;
 }
+/* Inspector titles keep serif as a pane-chrome exception (#1159 scoped empty-state/dialog). */
 .inspector h2 {
   margin: 8px 0 16px;
   font-family: Georgia, "Times New Roman", serif;
@@ -1169,7 +1201,6 @@ dialog {
   background: var(--surface);
   padding: 28px;
   color: var(--ink);
-  box-shadow: 0 30px 100px var(--shadow);
 }
 .dialog-rule {
   position: absolute;
@@ -1184,7 +1215,6 @@ dialog::backdrop {
   backdrop-filter: blur(5px);
 }
 dialog h2 {
-  font-family: Georgia, "Times New Roman", serif;
   font-size: 30px;
   margin: 0 0 20px;
 }
@@ -1587,6 +1617,7 @@ dialog input { padding: 12px; color: var(--ink); }
 .session.history-row { gap: 6px; }
 .session.history-row .live-badge { color: var(--accent-alt); }
 
+/* Markdown headings keep serif as a content-type exception; empty-state/dialog titles inherit the cockpit mono stack. */
 .markdown h2, .markdown h3 {
   font-family: Georgia, "Times New Roman", serif;
   margin: 16px 0 8px;
@@ -1629,41 +1660,59 @@ dialog input { padding: 12px; color: var(--ink); }
 .diff .add { color: var(--diff-add); background: var(--diff-add-bg); }
 .diff .del { color: var(--diff-del); background: var(--diff-del-bg); }
 
+.composer-field {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
 .completion {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 100%;
+  --completion-max-rows: 6;
+  --completion-row-height: 28px;
   display: flex;
   /* Top-down rank order (index 0 at top) even when the popup sits above the composer. */
   flex-direction: column;
   background: var(--raised);
-  border: 1px solid var(--rule);
-  box-shadow: 0 -12px 30px var(--shadow);
-  max-height: 240px;
+  border-bottom: 1px solid var(--rule);
+  max-height: calc(var(--completion-max-rows) * var(--completion-row-height));
   overflow: auto;
-  z-index: 3;
 }
 .completion button {
+  box-sizing: border-box;
   width: 100%;
-  display: grid;
-  grid-template-columns: 150px 1fr;
-  gap: 12px;
+  min-height: var(--completion-row-height);
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
   text-align: left;
-  padding: 8px 12px;
+  padding: 4px 12px;
   border: 0;
-  border-bottom: 1px solid var(--rule);
   border-radius: 0;
   background: transparent;
   color: inherit;
   text-transform: none;
   font-size: 12px;
   font-weight: inherit;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
 }
 .completion button.active, .completion button[aria-selected="true"] {
   background: color-mix(in srgb, var(--acid) 14%, transparent);
 }
-.completion span { color: var(--muted); }
+.completion button strong {
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.completion span {
+  color: var(--muted);
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.completion span::before { content: "— "; }
 .attachments {
   display: flex;
   gap: 6px;
@@ -2426,7 +2475,7 @@ dialog fieldset small { color: var(--muted); }
 .palette-trigger {
   margin-left: auto; display: inline-flex; align-items: center; gap: 6px;
   border: 1px solid var(--rule); background: transparent; padding: 4px 10px;
-  border-radius: 999px; cursor: pointer; font-size: 12px; color: var(--muted);
+  border-radius: 2px; cursor: pointer; font-size: 12px; color: var(--muted);
 }
 .palette-trigger kbd { font-size: 10px; }
 .palette-input {
@@ -2469,7 +2518,7 @@ dialog fieldset small { color: var(--muted); }
 .team-view-tabs, .team-filters { display: flex; flex-wrap: wrap; gap: 6px; }
 .team-view-tabs button, .team-filters button {
   border: 1px solid var(--rule); background: transparent; padding: 4px 10px;
-  border-radius: 999px; cursor: pointer; font-size: 12px; text-transform: capitalize;
+  border-radius: 2px; cursor: pointer; font-size: 12px; text-transform: capitalize;
 }
 .team-view-tabs button.active, .team-filters button.active,
 .team-view-tabs button[aria-selected="true"], .team-filters button[aria-pressed="true"] {
