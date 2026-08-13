@@ -153,7 +153,7 @@ func runStrikeExec(ctx context.Context, workDir, bin string, args []string, env 
 	cmd.Dir = workDir
 	cmd.Stdin = strings.NewReader(prompt)
 	if len(env) > 0 {
-		cmd.Env = append(os.Environ(), env...)
+		cmd.Env = mergeChildEnv(env)
 	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -225,9 +225,13 @@ func FormatAgentPrompt(in Instance, evalContainer string) string {
 	b.WriteString("- `python3 -c` / interpreter one-liners are blocked. Write a small .py file and run that file instead.\n")
 	b.WriteString("- Read existing tests that already describe the bug, then change production code.\n")
 	if evalContainer != "" {
-		b.WriteString("\nA Linux eval container has this repo bind-mounted at /testbed. Run commands in its conda env:\n")
-		fmt.Fprintf(&b, "  docker exec -w /testbed %s bash -lc 'source /opt/miniconda3/etc/profile.d/conda.sh && conda activate testbed && <cmd>'\n", evalContainer)
-		b.WriteString("The container id is also in STRIKE_EVAL_CONTAINER. Prefer this over host Python.\n")
+		b.WriteString("\nA Linux eval container has this repo bind-mounted at /testbed.\n")
+		b.WriteString("Verify with the `eval-test` helper on PATH (wraps docker exec + conda testbed).\n")
+		b.WriteString("Write repro scripts in this checkout (bind-mounted at /testbed), not host /tmp:\n")
+		b.WriteString("  eval-test python repro.py\n")
+		b.WriteString("  eval-test python -m pytest path/to/test.py -q --tb=short\n")
+		fmt.Fprintf(&b, "Raw equivalent: docker exec -w /testbed %s bash -lc 'source /opt/miniconda3/etc/profile.d/conda.sh && conda activate testbed && <cmd>'\n", evalContainer)
+		b.WriteString("STRIKE_EVAL_CONTAINER is set. Prefer eval-test over host Python.\n")
 	}
 	fmt.Fprintf(&b, "\nInstance: %s\n", in.InstanceID)
 	if in.Repo != "" {
@@ -252,6 +256,45 @@ func WithEvalExecDefaults(extra []string) []string {
 	out := append([]string{}, extra...)
 	if !hasSandbox {
 		out = append(out, "--sandbox=off")
+	}
+	return out
+}
+
+// mergeChildEnv overlays extra KEY=value pairs onto the current process env.
+// Duplicate keys are replaced (append-only would leave the original PATH first,
+// and Go's getenv uses the first match).
+func mergeChildEnv(extra []string) []string {
+	override := make(map[string]string, len(extra))
+	order := make([]string, 0, len(extra))
+	for _, kv := range extra {
+		k, v, ok := strings.Cut(kv, "=")
+		if !ok || k == "" {
+			continue
+		}
+		if _, seen := override[k]; !seen {
+			order = append(order, k)
+		}
+		override[k] = v
+	}
+	base := os.Environ()
+	out := make([]string, 0, len(base)+len(override))
+	for _, kv := range base {
+		k, _, ok := strings.Cut(kv, "=")
+		if !ok {
+			out = append(out, kv)
+			continue
+		}
+		if v, hit := override[k]; hit {
+			out = append(out, k+"="+v)
+			delete(override, k)
+			continue
+		}
+		out = append(out, kv)
+	}
+	for _, k := range order {
+		if v, ok := override[k]; ok {
+			out = append(out, k+"="+v)
+		}
 	}
 	return out
 }

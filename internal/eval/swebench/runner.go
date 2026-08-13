@@ -274,7 +274,15 @@ func (r *Runner) runOne(
 	agentStart := nowFn()
 	var env []string
 	if mat.ContainerID != "" {
+		if err := WriteEvalTestHelper(instDir); err != nil {
+			return finish(StatusError, "eval-test helper: "+err.Error())
+		}
 		env = append(env, "STRIKE_EVAL_CONTAINER="+mat.ContainerID)
+		if p := os.Getenv("PATH"); p != "" {
+			env = append(env, "PATH="+instDir+string(os.PathListSeparator)+p)
+		} else {
+			env = append(env, "PATH="+instDir)
+		}
 	}
 	execRes, agentErr := agent.Run(ctx, mat.WorkDir, prompt, AgentOpts{
 		Strike:    cfg.StrikeBin,

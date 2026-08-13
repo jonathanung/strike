@@ -111,6 +111,9 @@ func TestFormatAgentPromptEvalContainer(t *testing.T) {
 	if !strings.Contains(p, "docker exec -w /testbed abc123") {
 		t.Fatalf("container prompt: %s", p)
 	}
+	if !strings.Contains(p, "eval-test") {
+		t.Fatalf("helper missing: %s", p)
+	}
 }
 
 func TestWithEvalExecDefaults(t *testing.T) {
@@ -121,6 +124,47 @@ func TestWithEvalExecDefaults(t *testing.T) {
 	keep := WithEvalExecDefaults([]string{"--sandbox=workspace-write"})
 	if len(keep) != 1 || keep[0] != "--sandbox=workspace-write" {
 		t.Fatalf("override: %v", keep)
+	}
+}
+
+func TestMergeChildEnvOverridesPath(t *testing.T) {
+	t.Setenv("PATH", "/usr/bin")
+	t.Setenv("STRIKE_EVAL_CONTAINER", "old")
+	got := mergeChildEnv([]string{"PATH=/eval:/usr/bin", "STRIKE_EVAL_CONTAINER=cid"})
+	var path, cid string
+	for _, kv := range got {
+		switch {
+		case strings.HasPrefix(kv, "PATH="):
+			if path != "" {
+				t.Fatalf("duplicate PATH: %v", got)
+			}
+			path = kv
+		case strings.HasPrefix(kv, "STRIKE_EVAL_CONTAINER="):
+			if cid != "" {
+				t.Fatalf("duplicate STRIKE_EVAL_CONTAINER: %v", got)
+			}
+			cid = kv
+		}
+	}
+	if path != "PATH=/eval:/usr/bin" {
+		t.Fatalf("PATH = %q", path)
+	}
+	if cid != "STRIKE_EVAL_CONTAINER=cid" {
+		t.Fatalf("cid = %q", cid)
+	}
+}
+
+func TestWriteEvalTestHelper(t *testing.T) {
+	dir := t.TempDir()
+	if err := WriteEvalTestHelper(dir); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "eval-test"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "STRIKE_EVAL_CONTAINER") || !strings.Contains(string(data), "docker exec") {
+		t.Fatalf("helper: %s", data)
 	}
 }
 

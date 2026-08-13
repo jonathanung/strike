@@ -37,6 +37,19 @@ func TestBashEnvMinimalNoHostLeak(t *testing.T) {
 	}
 }
 
+func TestBashEnvForwardsEvalContainer(t *testing.T) {
+	t.Setenv("PATH", "/bin")
+	t.Setenv("STRIKE_EVAL_CONTAINER", "cid123")
+	env, err := bashEnv(&Context{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(env, "\n")
+	if !strings.Contains(joined, "STRIKE_EVAL_CONTAINER=cid123") {
+		t.Fatalf("expected eval container in bash env: %v", env)
+	}
+}
+
 func TestBashEnvSecretRefs(t *testing.T) {
 	t.Setenv("PATH", "/bin")
 	t.Setenv("MY_TOKEN", "token-value-xyz")
