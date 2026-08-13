@@ -490,8 +490,15 @@ export default function App() {
   const shownCompletions = completionDismissed || historyBrowse ? [] : completions.slice(0, 8);
   const showFileEmptyHint = fileMentionActive && !completionDismissed && !historyBrowse && shownCompletions.length === 0 && fileSearchHint !== "";
   const activeCompletion = Math.min(completionIndex, Math.max(0, shownCompletions.length - 1));
+  const completionOpenRef = useRef(false);
   useEffect(() => {
-    setCompletionIndex((i) => Math.min(i, Math.max(0, shownCompletions.length - 1)));
+    const open = shownCompletions.length > 0;
+    if (open && !completionOpenRef.current) {
+      setCompletionIndex(0);
+    } else {
+      setCompletionIndex((i) => Math.min(i, Math.max(0, shownCompletions.length - 1)));
+    }
+    completionOpenRef.current = open;
   }, [shownCompletions.length]);
 
   useEffect(() => {
@@ -686,7 +693,10 @@ export default function App() {
   const onComposerKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     const el = event.currentTarget;
     if (shownCompletions.length > 0) {
-      if (event.key === "ArrowDown") {
+      const next =
+        event.key === "ArrowDown" ||
+        (event.ctrlKey && !event.metaKey && !event.altKey && event.key.toLowerCase() === "n");
+      if (next) {
         event.preventDefault();
         setCompletionIndex((i) => Math.min(shownCompletions.length - 1, i + 1));
         return;
