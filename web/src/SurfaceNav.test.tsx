@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, fireEvent } from "@testing-library/react";
 import { afterEach } from "vitest";
@@ -88,5 +91,43 @@ describe("SurfaceNav", () => {
     expect(tabs).toHaveLength(24);
     fireEvent.click(screen.getByRole("tab", { name: "mcp" }));
     expect(onChange).toHaveBeenCalledWith("mcp");
+    expect(screen.getByRole("tab", { name: "surf-0" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByRole("tab", { name: "mcp" }).getAttribute("aria-selected")).toBe("false");
+  });
+
+  it("renders a wrapping tab list on tablet, not a phone sheet", () => {
+    render(
+      <SurfaceNav
+        modeLabel="Ops"
+        surfaces={surfaces}
+        activeId="goals"
+        profile="tablet"
+        onChange={() => {}}
+      />,
+    );
+    expect(screen.getByRole("tablist", { name: /Ops surfaces/i })).toBeTruthy();
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(screen.getByRole("tab", { name: /goals/i }).getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("wraps inspector tabs instead of clipping them into a horizontal scroller", () => {
+    const dir = dirname(fileURLToPath(import.meta.url));
+    const css = readFileSync(resolve(dir, "styles.css"), "utf8");
+    const rule = css.match(/\.inspector-tabs\s*\{[\s\S]*?\n\}/);
+    expect(rule?.[0]).toBeTruthy();
+    expect(rule?.[0]).toMatch(/flex-wrap:\s*wrap/);
+    expect(rule?.[0]).not.toMatch(/flex-wrap:\s*nowrap/);
+    expect(rule?.[0]).toMatch(/overflow-x:\s*hidden/);
+    expect(rule?.[0]).not.toMatch(/overflow-x:\s*auto/);
+    expect(rule?.[0]).toMatch(/flex:\s*0\s+0\s+auto/);
+    const sheet = css.match(/\.surface-nav-sheet\s*\{[\s\S]*?\n\}/);
+    expect(sheet?.[0]).toMatch(/max-height:\s*40vh/);
+    expect(css).toMatch(/\.surface-nav-list\s*\{[\s\S]*flex-direction:\s*column/);
+    const inspector = css.match(/^\.inspector \{[\s\S]*?\n\}/m);
+    expect(inspector?.[0]).toMatch(/flex-direction:\s*column/);
+    const body = css.match(/\.inspector-body\s*\{[\s\S]*?\n\}/);
+    expect(body?.[0]).toMatch(/flex:\s*1/);
+    expect(body?.[0]).toMatch(/min-height:\s*0/);
+    expect(body?.[0]).not.toMatch(/calc\(100%\s*-\s*48px\)/);
   });
 });
