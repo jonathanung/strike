@@ -71,6 +71,9 @@ func TestRunPluginCLIHelp(t *testing.T) {
 	if !strings.Contains(out.String(), "Agent Plugins 1.0.0") {
 		t.Fatalf("help should describe Agent Plugins authoring format:\n%s", out.String())
 	}
+	if !strings.Contains(out.String(), "--legacy") {
+		t.Fatalf("help should document --legacy:\n%s", out.String())
+	}
 }
 
 func TestRunPluginLifecycleCLI(t *testing.T) {
@@ -412,6 +415,69 @@ func TestRunPluginInstallInvalid(t *testing.T) {
 	}
 }
 
+func TestRunPluginInstallRejectsLegacyByDefault(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	chdirTemp(t)
+	src := writeLegacyPluginBundle(t, t.TempDir(), "acme.legacy")
+	var out, errBuf bytes.Buffer
+	code := runPluginCLI([]string{"install", src, "--scope", "global"}, &out, &errBuf)
+	if code == 0 {
+		t.Fatal("legacy install must fail without --legacy")
+	}
+	msg := errBuf.String()
+	if !strings.Contains(msg, "deprecated") ||
+		!strings.Contains(msg, "strike plugin migrate") ||
+		!strings.Contains(msg, "https://agent-plugins.org/") ||
+		!strings.Contains(msg, "--legacy") {
+		t.Fatalf("want migrate/spec/--legacy hint, got %s", msg)
+	}
+	plugins := filepath.Join(home, ".strike", "plugins")
+	if entries, err := os.ReadDir(plugins); err == nil {
+		for _, e := range entries {
+			if !strings.HasPrefix(e.Name(), ".") {
+				t.Fatalf("partial enablement left %s", e.Name())
+			}
+		}
+	}
+	lf, err := os.ReadFile(filepath.Join(home, ".strike", "plugins.lock.json"))
+	if err == nil && strings.Contains(string(lf), "acme.legacy") {
+		t.Fatalf("lockfile must not record rejected install: %s", lf)
+	}
+}
+
+func TestRunPluginInstallLegacyFlag(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	chdirTemp(t)
+	src := writeLegacyPluginBundle(t, t.TempDir(), "acme.legacy")
+	var out, errBuf bytes.Buffer
+	code := runPluginCLI([]string{"install", src, "--scope", "global", "--legacy"}, &out, &errBuf)
+	if code != 0 {
+		t.Fatalf("install --legacy: code=%d err=%s out=%s", code, errBuf.String(), out.String())
+	}
+	if !strings.Contains(out.String(), "Installed acme.legacy") || !strings.Contains(out.String(), "deprecated") {
+		t.Fatalf("install out: %s", out.String())
+	}
+	lock, err := os.ReadFile(filepath.Join(home, ".strike", "plugins.lock.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(lock), `"deprecated": true`) {
+		t.Fatalf("lockfile missing deprecation: %s", lock)
+	}
+
+	out.Reset()
+	errBuf.Reset()
+	code = runPluginCLI([]string{"doctor", "acme.legacy"}, &out, &errBuf)
+	if code != 0 {
+		t.Fatalf("doctor: code=%d err=%s out=%s", code, errBuf.String(), out.String())
+	}
+	if !strings.Contains(out.String(), "legacy (deprecated)") {
+		t.Fatalf("doctor missing deprecation:\n%s", out.String())
+	}
+}
+
 func chdirTemp(t *testing.T) {
 	t.Helper()
 	work := t.TempDir()
@@ -432,7 +498,7 @@ func TestRunPluginMigrateCLI(t *testing.T) {
 	src := writeLegacyPluginBundle(t, t.TempDir(), "acme.migrate")
 
 	var out, errBuf bytes.Buffer
-	code := runPluginCLI([]string{"install", src, "--scope", "global"}, &out, &errBuf)
+	code := runPluginCLI([]string{"install", src, "--scope", "global", "--legacy"}, &out, &errBuf)
 	if code != 0 {
 		t.Fatalf("install: %s %s", errBuf.String(), out.String())
 	}
@@ -508,7 +574,7 @@ func TestRunPluginMigrateCLIRollback(t *testing.T) {
 	id := "acme." + strings.Repeat("z", 60)
 	src := writeLegacyPluginBundle(t, t.TempDir(), id)
 	var out, errBuf bytes.Buffer
-	code := runPluginCLI([]string{"install", src, "--scope", "global"}, &out, &errBuf)
+	code := runPluginCLI([]string{"install", src, "--scope", "global", "--legacy"}, &out, &errBuf)
 	if code != 0 {
 		t.Fatalf("install: %s %s", errBuf.String(), out.String())
 	}

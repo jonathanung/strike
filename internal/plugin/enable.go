@@ -29,6 +29,10 @@ type LockfileEntry struct {
 	Digest      string          `json:"digest,omitempty"` // content-tree digest
 	Source      *SourceIdentity `json:"source,omitempty"`
 	InstalledAt string          `json:"installedAt,omitempty"` // RFC3339
+	// Deprecated is true when this entry was installed as a Strike-native
+	// (legacy) tree via --legacy. Already-installed legacy packages without
+	// this flag still load; doctor infers deprecation from the manifest format.
+	Deprecated bool `json:"deprecated,omitempty"`
 	// Trust is the explicit executable grant (docs/plugins.md §5). Absent means
 	// passive-only load; MCP/harness/shell hooks stay inactive. Catalog/local
 	// updates that change digest, source identity, or executable contributions

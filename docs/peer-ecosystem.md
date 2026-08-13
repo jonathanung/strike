@@ -34,7 +34,8 @@ license-incompatible copy-paste, default product stays lean.
 | Security review pack | CC security-review | gap (use `/review` + focus args) | gap |
 | Changelog / translate packs | OpenCode commands | gap (user skills) | gap |
 | Node plugin hosts | OpenCode plugins | **out of scope** | wont |
-| Versioned contribution bundles | Agent Plugins 1.0.0 | Strike is an Agent Plugins client for skills + MCP; Strike-only assets in `com.strike.cli`; no Node/Go in-process ABI | contract [plugins.md](plugins.md) ([#1142](https://github.com/jonathanung/strike/issues/1142), epic [#1141](https://github.com/jonathanung/strike/issues/1141)); pane ABI [plugin-panes.md](plugin-panes.md) (#522) |
+| Versioned contribution bundles | Agent Plugins 1.0.0 | **Current.** Strike is an Agent Plugins client for skills + MCP; Strike-only assets in `com.strike.cli`; no Node/Go in-process ABI | current [plugins.md](plugins.md) ([#1142](https://github.com/jonathanung/strike/issues/1142), epic [#1141](https://github.com/jonathanung/strike/issues/1141)); pane ABI [plugin-panes.md](plugin-panes.md) (#522) |
+| Strike-native plugin.json | historical Strike `schemaVersion` + `contributions` | **Deprecated compatibility.** Existing installs still load; new `strike plugin install` fails without `--legacy`; convert with `strike plugin migrate` | deprecated [plugins.md](plugins.md) §3.10 ([#1147](https://github.com/jonathanung/strike/issues/1147)) |
 | Full IDE extensions | peers | **out of scope** | wont |
 
 ## Built-in skills (this wave)

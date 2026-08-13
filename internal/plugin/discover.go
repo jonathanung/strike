@@ -228,7 +228,7 @@ func loadOne(root string, scope Scope, strikeVer string) (*Plugin, []Diagnostic)
 		d := base
 		d.Severity = SeverityWarning
 		d.Code = "deprecated"
-		d.Message = "format=legacy"
+		d.Message = "format=legacy; convert with strike plugin migrate (https://agent-plugins.org/)"
 		diags = append(diags, d)
 	}
 

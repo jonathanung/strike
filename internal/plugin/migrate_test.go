@@ -265,6 +265,7 @@ func TestMigrate_InstalledClearsTrustAndUpdatesDigest(t *testing.T) {
 		GlobalRoot:    gRoot,
 		LocalPath:     src,
 		StrikeVersion: "0.2.0",
+		AllowLegacy:   true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -358,6 +359,7 @@ func TestMigrate_FailedValidationLeavesInstall(t *testing.T) {
 		GlobalRoot:    gRoot,
 		LocalPath:     src,
 		StrikeVersion: "99.0.0",
+		AllowLegacy:   true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -580,6 +582,7 @@ func TestMigrate_LockfileWriteFailureLeavesLegacy(t *testing.T) {
 		GlobalRoot:    gRoot,
 		LocalPath:     src,
 		StrikeVersion: "0.2.0",
+		AllowLegacy:   true,
 	})
 	if err != nil {
 		t.Fatal(err)

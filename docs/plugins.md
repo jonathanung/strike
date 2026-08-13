@@ -26,7 +26,9 @@ epic [#1141](https://github.com/jonathanung/strike/issues/1141)).
 | Status | Meaning |
 |---|---|
 | **Contract (this doc)** | Normative. Loaders and CLI must conform. Native format: Agent Plugins 1.0.0. |
-| **Shipped loaders** | Strike-native packages (#726–#730). Agent Plugins loaders: #1143+. |
+| **Agent Plugins (current)** | Native on-disk package. Author and install this format. |
+| **Strike-native (deprecated compatibility)** | Legacy `schemaVersion` + `contributions` load path only. New `strike plugin install` fails without `--legacy`. Removal planned for a future major. |
+| **Shipped loaders** | Agent Plugins loaders (#1143+). Strike-native packages (#726–#730) remain a deprecated compatibility load. |
 | **Passive load (#726)** | Discovery + load of agents, skills, workflows, themes, and provider profiles from enabled local plugin trees. |
 | **Lifecycle CLI (#727)** | `strike plugin` install/list/inspect/enable/disable/remove/doctor for local + Git sources. |
 | **Catalog / updates (#729)** | Remote `catalog.json`, search, catalog install, outdated, update with review; digest verify + zip-slip guards. |
@@ -189,7 +191,7 @@ binaries, and config that ship in the package.
 
 | Command | Behavior |
 |---|---|
-| `install <path\|git-url\|catalog:pkg[@ver]>` | Validate, copy/clone/download into scope root, write lockfile. Atomic: failed validation leaves no partially enabled plugin. |
+| `install <path\|git-url\|catalog:pkg[@ver]>` | Validate, copy/clone/download into scope root, write lockfile. Atomic: failed validation leaves no partially enabled plugin. Strike-native trees fail unless `--legacy`. |
 | `search <query> --registry <url>` | Search a remote catalog index. |
 | `outdated [--registry]` | List catalog-sourced installs with a newer published version. |
 | `update <name> --yes` | Show contribution/capability review, then install newer catalog version (rollback-safe). |
@@ -203,7 +205,9 @@ binaries, and config that ship in the package.
 
 Flags: `--scope global|project` (install defaults to global), git `--ref` /
 `--commit` / `--subdir`, catalog `--registry` / `--version`, install `--force`
-to replace. Project scope uses the process working directory's `./.strike`.
+to replace, install `--legacy` to allow a deprecated Strike-native tree
+(records `deprecated` in the lockfile; doctor shows deprecated). Project scope
+uses the process working directory's `./.strike`.
 Install destinations cannot escape the configured plugins roots. Lockfile
 updates use an exclusive advisory lock plus atomic rename so concurrent
 lifecycle ops are safe. Updates are never unattended (`--yes` required after
@@ -472,9 +476,10 @@ Relative `command` paths resolve inside the plugin root (confinement §9).
 ### 3.10 Legacy Strike manifest (deprecated)
 
 **Status:** deprecated **authoring** format. Still a **supported load path**
-until a future major removal (announced in CHANGELOG **Upgrade note**; APS.6
-[#1147](https://github.com/jonathanung/strike/issues/1147) stops *new* legacy
-installs). Existing installs MUST keep loading.
+until a future major removal (announced in CHANGELOG **Upgrade note**).
+`strike plugin install` of a legacy tree **fails closed** unless `--legacy`
+is passed (no partial enablement). Existing installs MUST keep loading.
+Do not auto-migrate on launch.
 
 Detection: root `plugin.json` or `plugin.jsonc` with integer `schemaVersion`
 and Strike fields (`id`, `contributions`, typically `strike`). Loaders emit a
@@ -1045,6 +1050,7 @@ authoring format from this contract forward.
 | APS portable load | #1143 | skills/`SKILL.md` + `mcp.json` |
 | APS Strike-only load | #1144 (`com.strike.cli/`) | §3.4, §3.8, §7.1–7.5, §7.7–7.9 |
 | Legacy → APS migrate | #1145 (`strike plugin migrate`) | §2.3, §3.10 |
+| Deprecate new Strike-native installs | #1147 (`install` fails without `--legacy`) | §2.3, §3.10 |
 
 ---
 
@@ -1060,8 +1066,8 @@ authoring format from this contract forward.
 - Inventing a second portable component type beyond skills and MCP.
 - Changing the pane ABI (definition schema, render tree, process protocol)
   beyond how panes are packaged.
-- Loader/CLI implementation or refusing new legacy
-  installs (APS.2–APS.3, APS.6). `strike plugin migrate` is #1145.
+- Removing the legacy Strike-native loader (future major). Do not auto-migrate
+  on launch. `strike plugin migrate` is #1145.
 
 ## 13. Acceptance mapping (#1142)
 

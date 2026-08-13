@@ -3,6 +3,7 @@ package plugin
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -50,6 +51,109 @@ func testdataFiles(t *testing.T, rel string) map[string]string {
 		t.Fatalf("no files under testdata/%s", rel)
 	}
 	return files
+}
+
+func TestInstallLocal_RejectsLegacyWithoutAllow(t *testing.T) {
+	home := t.TempDir()
+	src := t.TempDir()
+	writePlugin(t, src, "acme.legacy", map[string]string{
+		"plugin.json": manifest("acme.legacy", `{"agents":[{"path":"agents/a.md"}]}`),
+		"agents/a.md": validAgentMD("a"),
+	})
+	_, err := Install(context.Background(), InstallOptions{
+		Scope:         ScopeGlobal,
+		GlobalRoot:    filepath.Join(home, ".strike"),
+		LocalPath:     src,
+		StrikeVersion: "0.2.0",
+	})
+	if err == nil || !errors.Is(err, ErrLegacyManifest) {
+		t.Fatalf("want ErrLegacyManifest, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "strike plugin migrate") || !strings.Contains(err.Error(), "https://agent-plugins.org/") {
+		t.Fatalf("hint missing: %v", err)
+	}
+	pluginsDir := filepath.Join(home, ".strike", "plugins")
+	if entries, err := os.ReadDir(pluginsDir); err == nil {
+		for _, e := range entries {
+			if !strings.HasPrefix(e.Name(), ".") {
+				t.Fatalf("partial enablement: %s", e.Name())
+			}
+		}
+	}
+	lf, err := ReadLockfile(filepath.Join(home, ".strike", "plugins.lock.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lf.Plugins) != 0 {
+		t.Fatalf("lockfile should be empty, got %+v", lf.Plugins)
+	}
+}
+
+func TestInstallLocal_LegacyFlagRecordsDeprecation(t *testing.T) {
+	home := t.TempDir()
+	gRoot := filepath.Join(home, ".strike")
+	src := t.TempDir()
+	writePlugin(t, src, "acme.legacy", map[string]string{
+		"plugin.json": manifest("acme.legacy", `{"agents":[{"path":"agents/a.md"}]}`),
+		"agents/a.md": validAgentMD("a"),
+	})
+	res, err := Install(context.Background(), InstallOptions{
+		Scope:         ScopeGlobal,
+		GlobalRoot:    gRoot,
+		LocalPath:     src,
+		StrikeVersion: "0.2.0",
+		AllowLegacy:   true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Deprecated {
+		t.Fatal("result should record deprecation")
+	}
+	lf, err := ReadLockfile(filepath.Join(gRoot, "plugins.lock.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, ok := lf.Plugins["acme.legacy"]
+	if !ok || !e.Deprecated || !EntryEnabled(e) {
+		t.Fatalf("lock entry: %+v", e)
+	}
+	report, err := Doctor(DoctorOptions{GlobalRoot: gRoot, StrikeVersion: "0.2.0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := FormatDoctorText(report)
+	if !strings.Contains(text, "legacy (deprecated)") {
+		t.Fatalf("doctor missing deprecation:\n%s", text)
+	}
+}
+
+func TestDiscover_AlreadyInstalledLegacyStillLoads(t *testing.T) {
+	home := t.TempDir()
+	gRoot := filepath.Join(home, ".strike")
+	root := filepath.Join(gRoot, "plugins", "acme.pack")
+	writePlugin(t, root, "acme.pack", map[string]string{
+		"plugin.json": manifest("acme.pack", `{"agents":[{"path":"agents/a.md"}]}`),
+		"agents/a.md": validAgentMD("a"),
+	})
+	lf := emptyLockfile()
+	lf.Plugins["acme.pack"] = LockfileEntry{Enabled: boolPtr(true), Version: "1.0.0"}
+	if err := WriteLockfile(filepath.Join(gRoot, LockfileName), lf); err != nil {
+		t.Fatal(err)
+	}
+	res := Discover(Options{GlobalRoot: gRoot, StrikeVersion: "0.2.0"})
+	if len(res.Plugins) != 1 || res.Plugins[0].ID != "acme.pack" {
+		t.Fatalf("already-installed legacy must load: %+v diags=%v", res.Plugins, res.Diagnostics)
+	}
+	var found bool
+	for _, d := range res.Diagnostics {
+		if d.Code == "deprecated" && strings.Contains(d.Message, "format=legacy") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected format=legacy diagnostic: %v", res.Diagnostics)
+	}
 }
 
 func TestInstallLocal_AtomicAndLockfile(t *testing.T) {
@@ -414,8 +518,8 @@ func TestInstallGit_PinsCommit(t *testing.T) {
 	repo := t.TempDir()
 	pluginDir := filepath.Join(repo, "bundle")
 	writePlugin(t, pluginDir, "acme.gitpack", map[string]string{
-		"plugin.json": manifest("acme.gitpack", `{"agents":[{"path":"agents/a.md"}]}`),
-		"agents/a.md": validAgentMD("from-git"),
+		"plugin.json":          apsManifest("acme.gitpack"),
+		"skills/demo/SKILL.md": validSkillMD("from-git"),
 	})
 	run := func(args ...string) {
 		t.Helper()
