@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App, { formatCostLabel, formatContextLabel } from "./App";
+import { clearDynamicSurfaces } from "./surfaces";
 
 class FakeEventSource { static instances: FakeEventSource[] = []; onmessage?: (event: MessageEvent) => void; onerror?: () => void; close = vi.fn(); constructor(public url: string) { FakeEventSource.instances.push(this); } }
 class FakeWebSocket { static OPEN = 1; static instances: FakeWebSocket[] = []; readyState = 1; onopen?: () => void; onmessage?: (event: MessageEvent) => void; onerror?: () => void; onclose?: () => void; send = vi.fn(); close = vi.fn(); constructor(public url: string) { FakeWebSocket.instances.push(this); queueMicrotask(() => this.onopen?.()); } }
@@ -20,6 +21,7 @@ describe("App", () => {
   });
   afterEach(() => {
     cleanup();
+    clearDynamicSurfaces();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
     // Deep-link replaceState must not leak mode/surface across tests.
@@ -556,7 +558,7 @@ describe("App", () => {
     await screen.findByText("Current");
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
     expect(screen.getByRole("tab", { name: "context" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "files" })).toHaveAttribute("aria-selected", "true");
+    await waitFor(() => expect(screen.getByRole("tab", { name: "files" })).toHaveAttribute("aria-selected", "true"));
     expect(screen.getByRole("tab", { name: "issues" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "workflows" })).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "memory" })).not.toBeInTheDocument();
@@ -1530,6 +1532,164 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: /Ops:/ })).toHaveAttribute("aria-pressed", "true");
     expect(await screen.findByRole("tab", { name: "mcp" })).toHaveAttribute("aria-selected", "true");
     expect(screen.queryByRole("dialog", { name: "Workspace settings" })).not.toBeInTheDocument();
+  });
+
+  it("docks enabled plugin panes as Chat inspector surfaces without switching to Ops", async () => {
+    const pane = {
+      id: "weather",
+      pluginId: "acme.weather",
+      title: "Weather",
+      mode: "static",
+      trusted: true,
+      provenance: "plugin=acme.weather pane=weather",
+    };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = (init?.method || "GET").toUpperCase();
+      if (url.includes("bootstrap")) {
+        return response({
+          version: "test", authRequired: false, attachOnly: false,
+          capabilities: { live: true, panes: true, roots: false },
+          protocolOps: ["user.input"], status: { sessionId: "live", provider: "echo", busy: false },
+          agents: [], skills: [],
+        });
+      }
+      if (url.includes("sessions")) return response({ sessions: [{ id: "live", title: "Current" }], liveId: "live" });
+      if (url.endsWith("/v1/panes") && method === "GET") return response({ panes: [pane] });
+      if (url.includes("/v1/panes/weather/mount")) {
+        return response({
+          id: "weather", title: "Weather", mode: "static", mounted: true,
+          view: { type: "text", text: "72° clear", style: "title" },
+        });
+      }
+      if (url.includes("/v1/panes/weather/snapshot")) {
+        return response({
+          id: "weather", title: "Weather", mode: "static", mounted: true,
+          view: { type: "text", text: "72° clear", style: "title" },
+        });
+      }
+      return response({ ok: true });
+    }));
+    render(<App />);
+    await screen.findByText("Current");
+    expect(screen.getByRole("button", { name: "Toggle inspector" })).toHaveAttribute("aria-pressed", "false");
+    expect(await screen.findByRole("tab", { name: "Weather" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Chat:/ })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Toggle inspector" })).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(screen.getByRole("tab", { name: "Weather" }));
+    expect(await screen.findByText("72° clear")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Chat:/ })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: /Ops:/ })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: "Toggle inspector" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("restores a pane:* Chat deep link after plugin panes register", async () => {
+    window.history.replaceState(null, "", "/?surface=pane:weather");
+    const pane = {
+      id: "weather",
+      pluginId: "acme.weather",
+      title: "Weather",
+      mode: "static",
+      trusted: true,
+      provenance: "plugin=acme.weather pane=weather",
+    };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = (init?.method || "GET").toUpperCase();
+      if (url.includes("bootstrap")) {
+        return response({
+          version: "test", authRequired: false, attachOnly: false,
+          capabilities: { live: true, panes: true, roots: false },
+          protocolOps: ["user.input"], status: { sessionId: "live", provider: "echo", busy: false },
+          agents: [], skills: [],
+        });
+      }
+      if (url.includes("sessions")) return response({ sessions: [{ id: "live", title: "Current" }], liveId: "live" });
+      if (url.endsWith("/v1/panes") && method === "GET") return response({ panes: [pane] });
+      if (url.includes("/v1/panes/weather/mount") || url.includes("/v1/panes/weather/snapshot")) {
+        return response({
+          id: "weather", title: "Weather", mode: "static", mounted: true,
+          view: { type: "text", text: "72° clear", style: "title" },
+        });
+      }
+      return response({ ok: true });
+    }));
+    render(<App />);
+    await screen.findByText("Current");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Chat:/ })).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByRole("tab", { name: "Weather" })).toHaveAttribute("aria-selected", "true");
+    });
+    expect(await screen.findByText("72° clear")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Toggle inspector" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: /Ops:/ })).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("keeps the panes catalog empty-state under Ops when no plugins are enabled", async () => {
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("bootstrap")) {
+        return response({
+          version: "test", authRequired: false, attachOnly: false,
+          capabilities: { live: true, panes: true, settings: true, roots: false },
+          protocolOps: ["user.input"], status: { sessionId: "live", provider: "echo", busy: false },
+          agents: [], skills: [],
+        });
+      }
+      if (url.includes("sessions")) return response({ sessions: [{ id: "live", title: "Current" }], liveId: "live" });
+      if (url.endsWith("/v1/panes")) return response({ panes: [] });
+      return response({ ok: true });
+    }));
+    render(<App />);
+    await screen.findByText("Current");
+    fireEvent.click(screen.getByRole("button", { name: /Ops:/ }));
+    fireEvent.click(await screen.findByRole("tab", { name: "panes" }));
+    expect(await screen.findByText(/No enabled plugin panes/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Ops:/ })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByRole("tab", { name: "Weather" })).not.toBeInTheDocument();
+  });
+
+  it("blocks pane input in attach-only Chat", async () => {
+    const pane = {
+      id: "board",
+      pluginId: "acme.board",
+      title: "Board",
+      mode: "process",
+      trusted: true,
+      provenance: "plugin=acme.board pane=board",
+    };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = (init?.method || "GET").toUpperCase();
+      if (url.includes("bootstrap")) {
+        return response({
+          version: "test", authRequired: false, attachOnly: true,
+          capabilities: { live: false, panes: true, sessions: true, roots: false },
+          protocolOps: null, agents: [], skills: [],
+        });
+      }
+      if (url.includes("sessions")) return response({ sessions: [{ id: "saved", title: "Saved" }] });
+      if (url.includes("roots")) return Promise.resolve(new Response("multi-root unavailable", { status: 503 }));
+      if (url.endsWith("/v1/panes") && method === "GET") return response({ panes: [pane] });
+      if (url.includes("/v1/panes/board/mount") || url.includes("/v1/panes/board/snapshot")) {
+        return response({
+          id: "board", title: "Board", mode: "process", mounted: true,
+          view: { type: "text", text: "board view", style: "title" },
+        });
+      }
+      return response({ ok: true });
+    }));
+    render(<App />);
+    await screen.findByText("Saved");
+    fireEvent.click(await screen.findByRole("tab", { name: "Board" }));
+    expect(await screen.findByText("board view")).toBeInTheDocument();
+    expect(screen.getByText("read-only")).toBeInTheDocument();
+    const surface = screen.getByLabelText("Board");
+    fireEvent.keyDown(surface, { key: "a" });
+    const inputCalls = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.filter((c) =>
+      String(c[0]).includes("/input"),
+    );
+    expect(inputCalls).toHaveLength(0);
   });
 
 

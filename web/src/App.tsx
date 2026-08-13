@@ -46,6 +46,7 @@ import {
 import { SurfaceNav } from "./SurfaceNav";
 import {
   deepLinkWorkspaceID,
+  parseDeepLink,
   resolveDeepLink,
   writeDeepLinkToLocation,
 } from "./deepLink";
@@ -171,6 +172,7 @@ export default function App() {
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [surfaceEntity, setSurfaceEntity] = useState("");
   const [surfaceUnavailable, setSurfaceUnavailable] = useState<{ id: string; reason: string } | undefined>();
+  const [paneSurfacesRev, setPaneSurfacesRev] = useState(0);
   const deepLinkApplied = useRef(false);
   const [shellProfile, setShellProfile] = useState<ShellProfile>(() =>
     typeof window !== "undefined" ? shellProfileFromWidth(window.innerWidth) : "desktop",
@@ -448,7 +450,7 @@ export default function App() {
       isLive: selectedIsLive,
       forceIds: surfaceUnavailable ? [surfaceUnavailable.id] : [],
     }),
-    [boot, workspaceMode, selectedIsLive, surfaceUnavailable],
+    [boot, workspaceMode, selectedIsLive, surfaceUnavailable, paneSurfacesRev],
   );
   const inspectorTabs = useMemo(() => inspectorTabDefs.map((s) => s.id), [inspectorTabDefs]);
   const activitySignals: ActivitySignals = useMemo(() => ({
@@ -880,10 +882,13 @@ export default function App() {
   };
 
 
-  // Register enabled pane/1 contributions as Ops surfaces (WEBUI.12).
+  // Register enabled pane/1 contributions as Chat + Ops inspector surfaces (WEBUI.12 / #1155).
+  // Bump paneSurfacesRev only after boot so deep-link apply can wait for pane:* registration.
   useEffect(() => {
-    if (!boot?.capabilities.panes) {
+    if (!boot) return;
+    if (!boot.capabilities.panes) {
       clearDynamicSurfaces();
+      setPaneSurfacesRev((n) => n + 1);
       return;
     }
     let cancelled = false;
@@ -894,13 +899,22 @@ export default function App() {
         const def = paneSurfaceFromInfo(pane);
         if (def) registerDynamicSurface(def);
       }
-    }).catch(() => { /* panes optional */ });
-    return () => { cancelled = true; };
-  }, [boot?.capabilities.panes, boot?.version]);
+      setPaneSurfacesRev((n) => n + 1);
+    }).catch(() => {
+      if (!cancelled) setPaneSurfacesRev((n) => n + 1);
+    });
+    return () => {
+      cancelled = true;
+      clearDynamicSurfaces();
+    };
+  }, [boot]);
 
   // Apply additive deep-link mode/surface once bootstrap is ready. Root/session handled above.
+  // Only wait for pane contributions when the URL names a pane:* surface.
   useEffect(() => {
     if (!boot || deepLinkApplied.current) return;
+    const wantsPaneSurface = parseDeepLink(location.search).raw.surface.startsWith("pane:");
+    if (wantsPaneSurface && paneSurfacesRev === 0) return;
     deepLinkApplied.current = true;
     const resolved = resolveDeepLink(location.search, boot.capabilities, {
       attachOnly: boot.attachOnly,
@@ -920,8 +934,8 @@ export default function App() {
         void inspectProject(preferred, { open: false, mode: "chat" });
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot when boot lands
-  }, [boot]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot after boot + pane registration
+  }, [boot, paneSurfacesRev]);
   const sessionAction = async (action: "fork" | "rename" | "delete") => {
     if (!boot?.capabilities.sessions || !selectedID) return;
     const id = selectedID;
@@ -1719,7 +1733,7 @@ function InspectorBody({ tab, boot, workspace, data, loading, expandedDiffs, tog
     );
   }
   if (tab === "panes") {
-    return <PanesPanel available={Boolean(boot?.capabilities.panes)} />;
+    return <PanesPanel available={Boolean(boot?.capabilities.panes)} readOnly={!isLive || Boolean(boot?.attachOnly)} />;
   }
   if (tab === "timeline") {
     return <TimelinePanel available={Boolean(boot?.capabilities.timeline)} sessionID={selectedID} />;
@@ -1805,7 +1819,7 @@ function InspectorBody({ tab, boot, workspace, data, loading, expandedDiffs, tog
   }
   if (tab.startsWith("pane:")) {
     const paneId = tab.slice("pane:".length);
-    return <PanesPanel available={Boolean(boot?.capabilities.panes)} focusId={paneId} />;
+    return <PanesPanel available={Boolean(boot?.capabilities.panes)} focusId={paneId} readOnly={!isLive || Boolean(boot?.attachOnly)} />;
   }
   if (loading) return <section className="unavailable" role="status"><strong>Loading {tab}</strong></section>;
   if (tab === "files") {
