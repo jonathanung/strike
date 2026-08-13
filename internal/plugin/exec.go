@@ -151,13 +151,8 @@ func CompileExecutables(opts Options, userMCP, userHarnesses map[string]struct{}
 	out.Diagnostics = append(out.Diagnostics, lockDiags...)
 
 	disc := Discover(opts)
-	// Prefer Compile-specific trust diagnostics over Discover's inactive notes.
-	for _, d := range disc.Diagnostics {
-		if d.Code == "executable_inactive" {
-			continue
-		}
-		out.Diagnostics = append(out.Diagnostics, d)
-	}
+	// Discover parse/skip/deprecation diagnostics are printed by config.Load.
+	// CompileExecutables only reports activation (trust, collision, command/cwd).
 
 	for _, p := range disc.Plugins {
 		// Install-scope lockfile owns provenance/trust for that install.

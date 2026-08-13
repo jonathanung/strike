@@ -362,15 +362,26 @@ func TestCompileExecutables_APSTrustedSkipDiagsOnce(t *testing.T) {
 	if _, err := Trust(TrustOptions{ID: "acme.tools", GlobalRoot: gRoot, StrikeVersion: "0.2.0"}); err != nil {
 		t.Fatal(err)
 	}
-	set := CompileExecutables(Options{GlobalRoot: gRoot, StrikeVersion: "0.2.0"}, nil, nil)
-	n := 0
-	for _, d := range set.Diagnostics {
+	opts := Options{GlobalRoot: gRoot, StrikeVersion: "0.2.0"}
+	disc := Discover(opts)
+	nDiscover := 0
+	for _, d := range disc.Diagnostics {
 		if d.Code == "unsupported_transport" && strings.Contains(d.Message, "legacyEvents") {
-			n++
+			nDiscover++
 		}
 	}
-	if n != 1 {
-		t.Fatalf("want 1 sse skip diagnostic after trust, got %d: %v", n, set.Diagnostics)
+	if nDiscover != 1 {
+		t.Fatalf("want 1 sse skip on Discover, got %d: %v", nDiscover, disc.Diagnostics)
+	}
+	set := CompileExecutables(opts, nil, nil)
+	nCompile := 0
+	for _, d := range set.Diagnostics {
+		if d.Code == "unsupported_transport" && strings.Contains(d.Message, "legacyEvents") {
+			nCompile++
+		}
+	}
+	if nCompile != 0 {
+		t.Fatalf("CompileExecutables should not re-emit Discover skip diags, got %d: %v", nCompile, set.Diagnostics)
 	}
 }
 

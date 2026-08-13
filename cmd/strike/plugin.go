@@ -261,7 +261,7 @@ func runPluginInspect(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "contribs: agents=%d skills=%d workflows=%d themes=%d providers=%d mcp=%d harnesses=%d hooks=%d panes=%d\n",
 			agents, skills, workflows, themes, providers, mcp, harnesses, hooks, panes)
 		for _, d := range diags {
-			if d.Message == "" {
+			if d.Message == "" || d.Code == "deprecated" {
 				continue
 			}
 			fmt.Fprintf(stdout, "note:     [%s] %s\n", d.Code, d.Message)
