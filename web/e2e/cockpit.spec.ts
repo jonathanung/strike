@@ -150,6 +150,15 @@ test.describe("live echo cockpit", () => {
       return { bg: s.backgroundColor, transform: s.textTransform };
     });
     expect(listDir).toBe("column");
+    const tops = await list.getByRole("option").evaluateAll((els) => els.map((el) => el.getBoundingClientRect().top));
+    expect(tops.length).toBeGreaterThan(1);
+    for (let i = 1; i < tops.length; i++) {
+      expect(tops[i], `option ${i} should sit below option ${i - 1}`).toBeGreaterThan(tops[i - 1]);
+    }
+    await box.press("ArrowDown");
+    await expect(list.getByRole("option").nth(1)).toHaveAttribute("aria-selected", "true");
+    await box.press("ArrowUp");
+    await expect(list.getByRole("option").first()).toHaveAttribute("aria-selected", "true");
     expect(optionStyle.transform).not.toBe("uppercase");
     expect(optionStyle.bg).not.toBe(sendStyle.bg);
     expect(sendStyle.transform).toBe("uppercase");

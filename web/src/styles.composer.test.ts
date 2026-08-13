@@ -12,7 +12,9 @@ describe("composer CSS scoping", () => {
     expect(css).toMatch(/\.composer-bar\s*\{/);
     expect(css).toMatch(/\.composer-send\s*\{/);
     expect(css).toMatch(/\.composer-secondary\s*\{/);
-    expect(css).toMatch(/\.completion\s*\{[^}]*flex-direction:\s*column/);
+    const completionBlock = css.match(/\.completion\s*\{[^}]*\}/)?.[0] ?? "";
+    expect(completionBlock).toMatch(/flex-direction:\s*column\s*;/);
+    expect(completionBlock).not.toMatch(/column-reverse/);
     expect(css).toMatch(/\.completion button\s*\{[^}]*text-transform:\s*none/);
   });
 });
