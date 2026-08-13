@@ -710,14 +710,14 @@ export default function App() {
       const next =
         event.key === "ArrowDown" ||
         (event.ctrlKey && !event.metaKey && !event.altKey && event.key.toLowerCase() === "n");
-      if (next && shownCompletions.length > 0) {
+      const prev = event.key === "ArrowUp";
+      if (next || prev) {
         event.preventDefault();
-        setCompletionIndex((i) => Math.min(shownCompletions.length - 1, i + 1));
-        return;
-      }
-      if (event.key === "ArrowUp" && shownCompletions.length > 0) {
-        event.preventDefault();
-        setCompletionIndex((i) => Math.max(0, i - 1));
+        if (shownCompletions.length > 0) {
+          setCompletionIndex((i) =>
+            next ? Math.min(shownCompletions.length - 1, i + 1) : Math.max(0, i - 1),
+          );
+        }
         return;
       }
       if ((event.key === "Enter" && !event.shiftKey) || (event.key === "Tab" && !event.shiftKey)) {

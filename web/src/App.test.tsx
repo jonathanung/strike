@@ -277,6 +277,8 @@ describe("App", () => {
     expect(options[0]).toHaveAttribute("aria-selected", "true");
     expect(options[0]).not.toHaveClass("composer-send");
     expect(list).toHaveClass("completion");
+    box.selectionStart = 3;
+    box.selectionEnd = 3;
     fireEvent.keyDown(box, { key: "ArrowDown" });
     expect(within(list).getAllByRole("option")[1]).toHaveAttribute("aria-selected", "true");
     fireEvent.keyDown(box, { key: "ArrowUp" });
@@ -310,6 +312,9 @@ describe("App", () => {
     expect(list).toHaveClass("completion");
     expect(list).toHaveTextContent(/no files match/i);
     expect(within(list).queryByRole("option")).not.toBeInTheDocument();
+    fireEvent.keyDown(box, { key: "ArrowUp" });
+    expect(box.selectionStart).toBe(5);
+    expect(screen.getByRole("listbox", { name: "Composer completions" })).toBeInTheDocument();
     fireEvent.keyDown(box, { key: "Enter" });
     expect(box).toHaveValue("@nope");
     expect(screen.getByRole("listbox", { name: "Composer completions" })).toBeInTheDocument();
