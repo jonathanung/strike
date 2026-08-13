@@ -262,6 +262,41 @@ func TestCatalogPluginThemes_APSStrikeCLI(t *testing.T) {
 	}
 }
 
+func TestCatalogPluginThemes_APSStrikeCLIEscapeRejected(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	work := t.TempDir()
+
+	plug := filepath.Join(work, ".strike", "plugins", "acme.escape")
+	if err := os.MkdirAll(plug, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "acme.escape",
+  "version": "1.0.0"
+}`
+	if err := os.WriteFile(filepath.Join(plug, "plugin.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(home, "outside")
+	if err := os.MkdirAll(filepath.Join(outside, "themes"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	escaped := `{"name":"Escaped","id":"escaped-theme","colors":{"accent":"#ff0000"}}`
+	if err := os.WriteFile(filepath.Join(outside, "themes", "escaped.json"), []byte(escaped), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(plug, "com.strike.cli")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	cat := Catalog(work)
+	if _, ok := Lookup(cat, "escaped-theme"); ok {
+		t.Fatal("symlink-escaped APS theme must not appear in catalog")
+	}
+}
+
 func TestCatalogPluginThemeCollisionAndInvalidSkipped(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

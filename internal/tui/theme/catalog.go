@@ -306,8 +306,20 @@ func readPluginThemePaths(root string) (id string, paths []string, ok bool) {
 		if strikeCLISkipFromExtensions(doc.Extensions) {
 			return id, nil, false
 		}
+		extDir := filepath.Join(root, "com.strike.cli")
+		if _, err := confinedExistingPath(root, extDir); err != nil {
+			return id, nil, false
+		}
 		themeDir := filepath.Join(root, "com.strike.cli", "themes")
-		entries, err := os.ReadDir(themeDir)
+		resolvedThemes, err := confinedExistingPath(root, themeDir)
+		if err != nil {
+			return id, nil, false
+		}
+		st, err := os.Stat(resolvedThemes)
+		if err != nil || !st.IsDir() {
+			return id, nil, false
+		}
+		entries, err := os.ReadDir(resolvedThemes)
 		if err != nil {
 			return id, nil, false
 		}
@@ -414,11 +426,61 @@ func resolveUnderPluginRoot(root, rel string) (string, error) {
 		rootAbs = resolved
 	}
 	joined := filepath.Clean(filepath.Join(rootAbs, filepath.FromSlash(rel)))
-	sep := string(os.PathSeparator)
-	if joined != rootAbs && !strings.HasPrefix(joined, rootAbs+sep) {
+	if !pathUnderRoot(rootAbs, joined) {
 		return "", fs.ErrInvalid
 	}
+	if fi, err := os.Lstat(joined); err == nil {
+		if fi.Mode()&os.ModeSymlink != 0 || fi.IsDir() {
+			resolved, err := filepath.EvalSymlinks(joined)
+			if err != nil {
+				return "", err
+			}
+			if !pathUnderRoot(rootAbs, resolved) {
+				return "", fs.ErrInvalid
+			}
+			return resolved, nil
+		}
+		parent := filepath.Dir(joined)
+		if resolvedParent, err := filepath.EvalSymlinks(parent); err == nil {
+			resolved := filepath.Join(resolvedParent, filepath.Base(joined))
+			if !pathUnderRoot(rootAbs, resolved) {
+				return "", fs.ErrInvalid
+			}
+			return resolved, nil
+		}
+	}
 	return joined, nil
+}
+
+func confinedExistingPath(root, path string) (string, error) {
+	rootAbs, err := filepath.Abs(root)
+	if err != nil {
+		return "", err
+	}
+	if resolved, err := filepath.EvalSymlinks(rootAbs); err == nil {
+		rootAbs = resolved
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		abs = resolved
+	}
+	if !pathUnderRoot(rootAbs, abs) {
+		return "", fs.ErrInvalid
+	}
+	return abs, nil
+}
+
+func pathUnderRoot(root, path string) bool {
+	root = filepath.Clean(root)
+	path = filepath.Clean(path)
+	if root == path {
+		return true
+	}
+	sep := string(os.PathSeparator)
+	return strings.HasPrefix(path, root+sep)
 }
 
 // Lookup finds an entry by id (case-sensitive).
