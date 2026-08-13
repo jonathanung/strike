@@ -124,6 +124,43 @@ test.describe("live echo cockpit", () => {
     await page.keyboard.type("e2e-focus-check");
     await expect(box).toHaveValue(/e2e-focus-check/);
   });
+
+  test("slash completions are a vertical listbox and Enter accepts", async ({ page }) => {
+    const box = page.getByLabel("Instruction");
+    await expect(box).toBeEnabled({ timeout: 10_000 });
+    await box.click();
+    await box.pressSequentially("/");
+    const list = page.getByRole("listbox", { name: "Composer completions" });
+    await expect(list).toBeVisible();
+    const first = list.getByRole("option").first();
+    await expect(first).toHaveAttribute("aria-selected", "true");
+
+    const optionStyle = await first.evaluate((el) => {
+      const s = getComputedStyle(el);
+      return { bg: s.backgroundColor, transform: s.textTransform, display: s.display };
+    });
+    const listDir = await list.evaluate((el) => getComputedStyle(el).flexDirection);
+    const send = page.getByRole("button", { name: "Send" });
+    const sendStyle = await send.evaluate((el) => {
+      const s = getComputedStyle(el);
+      return { bg: s.backgroundColor, transform: s.textTransform };
+    });
+    const attachStyle = await page.getByRole("button", { name: "Attach" }).evaluate((el) => {
+      const s = getComputedStyle(el);
+      return { bg: s.backgroundColor, transform: s.textTransform };
+    });
+    expect(listDir).toBe("column");
+    expect(optionStyle.transform).not.toBe("uppercase");
+    expect(optionStyle.bg).not.toBe(sendStyle.bg);
+    expect(sendStyle.transform).toBe("uppercase");
+    expect(attachStyle.bg).not.toBe(sendStyle.bg);
+    expect(attachStyle.transform).not.toBe("uppercase");
+
+    await box.press("Enter");
+    await expect(box).toHaveValue(/^\/help /);
+    await expect(box).not.toHaveValue("/\n");
+    await expect(list).toBeHidden();
+  });
 });
 
 test.describe("responsive viewports", () => {
