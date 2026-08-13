@@ -531,6 +531,9 @@ func ConfigsFromMap(servers map[string]ServerConfigFields, workDir string) []Ser
 			Headers:   copyEnv(f.Headers),
 			OAuth:     cloneOAuth(f.OAuth),
 		}
+		if cwd := strings.TrimSpace(f.Cwd); cwd != "" {
+			cfg.WorkDir = cwd
+		}
 		switch transport {
 		case TransportHTTP:
 			if cfg.URL == "" {
@@ -552,6 +555,7 @@ type ServerConfigFields struct {
 	Command string            `json:"command,omitempty"`
 	Args    []string          `json:"args,omitempty"`
 	Env     map[string]string `json:"env,omitempty"`
+	Cwd     string            `json:"cwd,omitempty"`
 	URL     string            `json:"url,omitempty"`
 	Headers map[string]string `json:"headers,omitempty"`
 	OAuth   *OAuthConfig      `json:"oauth,omitempty"`

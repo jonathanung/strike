@@ -914,6 +914,10 @@
             "type": "string"
           }
         },
+        "cwd": {
+          "type": "string",
+          "description": "Stdio subprocess working directory. Empty inherits the process launch directory. Plugin-sourced Agent Plugins servers set this to the plugin root or an expanded PLUGIN_DATA path."
+        },
         "url": {
           "type": "string"
         },

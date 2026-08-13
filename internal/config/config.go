@@ -376,6 +376,10 @@ type MCPServer struct {
 	Command string            `json:"command,omitempty"`
 	Args    []string          `json:"args,omitempty"`
 	Env     map[string]string `json:"env,omitempty"`
+	// Cwd is the stdio subprocess working directory. Empty inherits the
+	// assemble launch directory. Plugin-sourced APS servers set this to the
+	// plugin root (or an expanded ${PLUGIN_ROOT}/${PLUGIN_DATA} path).
+	Cwd string `json:"cwd,omitempty"`
 	// HTTP (streamable HTTP endpoint)
 	URL string `json:"url,omitempty"`
 	// Headers are sent on every HTTP request; never logged (e.g. Authorization).
@@ -1978,6 +1982,7 @@ func cloneMCPServers(in map[string]MCPServer) map[string]MCPServer {
 			Type:    strings.TrimSpace(v.Type),
 			Command: strings.TrimSpace(v.Command),
 			Args:    append([]string(nil), v.Args...),
+			Cwd:     strings.TrimSpace(v.Cwd),
 			URL:     strings.TrimSpace(v.URL),
 		}
 		if len(v.Env) > 0 {

@@ -80,7 +80,9 @@ func emptyDash(s string) string {
 
 // BuildUpdateReview compares an installed plugin (old) with a candidate manifest/source.
 // newContentDigest may be empty when not yet computed.
-func BuildUpdateReview(old InstalledPlugin, newMan Manifest, newSource SourceIdentity, newContentDigest string) UpdateReview {
+// newRoot is the candidate plugin tree (preview extract or post-install). Empty
+// means catalog-only review: both sides stay manifest-only (no APS tree scan).
+func BuildUpdateReview(old InstalledPlugin, newMan Manifest, newSource SourceIdentity, newContentDigest, newRoot string) UpdateReview {
 	r := UpdateReview{
 		ID:         old.ID,
 		OldVersion: old.Version,
@@ -92,16 +94,25 @@ func BuildUpdateReview(old InstalledPlugin, newMan Manifest, newSource SourceIde
 		HadTrust:   old.Trust != nil && old.Trust.Digest != "",
 	}
 
-	oldCaps := capabilitySet(old)
-	newCaps := stringSliceSet(mergeCapabilityTags(newMan))
+	oldMan := Manifest{}
+	if old.Manifest != nil {
+		oldMan = *old.Manifest
+	}
+	oldRoot := ""
+	if newRoot != "" {
+		oldRoot = old.Root
+	}
+
+	oldCaps := stringSliceSet(mergeCapabilityTagsAt(oldMan, oldRoot))
+	newCaps := stringSliceSet(mergeCapabilityTagsAt(newMan, newRoot))
 	r.CapabilityAdded, r.CapabilityRemoved = diffStringSets(oldCaps, newCaps)
 
-	oldTypes := contribTypeSet(old)
-	newTypes := contribTypeSetFromManifest(newMan)
+	oldTypes := contribTypeSetFromManifestAt(oldMan, oldRoot)
+	newTypes := contribTypeSetFromManifestAt(newMan, newRoot)
 	r.ContribAdded, r.ContribRemoved = diffStringSets(oldTypes, newTypes)
 
-	oldExec := executableSnapshot(old)
-	newExec := executableSnapshotFromManifest(newMan)
+	oldExec := executableSnapshotFromManifestAt(oldMan, oldRoot)
+	newExec := executableSnapshotFromManifestAt(newMan, newRoot)
 	r.ExecutableDiffs = diffExecutableSnapshots(oldExec, newExec)
 	r.ExecutableChanged = len(r.ExecutableDiffs) > 0 || oldExec.fingerprint != newExec.fingerprint
 
@@ -125,13 +136,6 @@ func BuildUpdateReview(old InstalledPlugin, newMan Manifest, newSource SourceIde
 		r.TrustInvalidated = true
 	}
 	return r
-}
-
-func capabilitySet(ip InstalledPlugin) map[string]struct{} {
-	if ip.Manifest == nil {
-		return map[string]struct{}{}
-	}
-	return stringSliceSet(mergeCapabilityTags(*ip.Manifest))
 }
 
 func stringSliceSet(ss []string) map[string]struct{} {
@@ -195,11 +199,27 @@ func mergeCapabilityTags(m Manifest) []string {
 	return out
 }
 
-func contribTypeSet(ip InstalledPlugin) map[string]struct{} {
-	if ip.Manifest == nil {
-		return map[string]struct{}{}
+func mergeCapabilityTagsAt(m Manifest, root string) []string {
+	seen := stringSliceSet(mergeCapabilityTags(m))
+	if m.Format == FormatAPS && root != "" {
+		skills, _ := discoverAPSSkills(root, Diagnostic{})
+		if len(skills) > 0 {
+			seen["skills"] = struct{}{}
+		}
+		inferAPSMCPCaps(root, seen)
+		if _, ok := seen[CapMCPStdio]; ok {
+			seen["mcp"] = struct{}{}
+		}
+		if _, ok := seen[CapMCPHTTP]; ok {
+			seen["mcp"] = struct{}{}
+		}
 	}
-	return contribTypeSetFromManifest(*ip.Manifest)
+	out := make([]string, 0, len(seen))
+	for k := range seen {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func contribTypeSetFromManifest(m Manifest) map[string]struct{} {
@@ -235,6 +255,27 @@ func contribTypeSetFromManifest(m Manifest) map[string]struct{} {
 	return out
 }
 
+func contribTypeSetFromManifestAt(m Manifest, root string) map[string]struct{} {
+	out := contribTypeSetFromManifest(m)
+	if m.Format != FormatAPS || root == "" {
+		return out
+	}
+	skills, _ := discoverAPSSkills(root, Diagnostic{})
+	if len(skills) > 0 {
+		out["skills"] = struct{}{}
+	}
+	f, _, err := loadAPSMCPFile(root)
+	if err == nil && !f.disabled {
+		for _, s := range f.servers {
+			if !s.Skip {
+				out["mcp"] = struct{}{}
+				break
+			}
+		}
+	}
+	return out
+}
+
 func diffStringSets(old, new map[string]struct{}) (added, removed []string) {
 	for k := range new {
 		if _, ok := old[k]; !ok {
@@ -256,13 +297,6 @@ type execSnap struct {
 	lines       []string // stable sorted summary lines
 }
 
-func executableSnapshot(ip InstalledPlugin) execSnap {
-	if ip.Manifest == nil {
-		return execSnap{}
-	}
-	return executableSnapshotFromManifest(*ip.Manifest)
-}
-
 func executableSnapshotFromManifest(m Manifest) execSnap {
 	var lines []string
 	for _, raw := range m.Contributions.MCP {
@@ -277,6 +311,48 @@ func executableSnapshotFromManifest(m Manifest) execSnap {
 	for _, raw := range m.Contributions.Panes {
 		// Process panes are executable-class; include in fingerprint.
 		lines = append(lines, "pane:"+safeExecJSONLine(raw))
+	}
+	sort.Strings(lines)
+	return execSnap{
+		fingerprint: strings.Join(lines, "\n"),
+		lines:       lines,
+	}
+}
+
+func executableSnapshotFromManifestAt(m Manifest, root string) execSnap {
+	snap := executableSnapshotFromManifest(m)
+	if m.Format != FormatAPS || root == "" {
+		return snap
+	}
+	f, _, err := loadAPSMCPFile(root)
+	if err != nil || f.disabled {
+		return snap
+	}
+	lines := append([]string(nil), snap.lines...)
+	for _, s := range f.servers {
+		if s.Skip {
+			continue
+		}
+		obj := map[string]any{
+			"name":      s.Name,
+			"transport": s.Transport,
+			"command":   s.Command,
+			"url":       s.URL,
+		}
+		if len(s.Args) > 0 {
+			obj["args"] = s.Args
+		}
+		if len(s.Env) > 0 {
+			obj["env"] = s.Env
+		}
+		if len(s.Headers) > 0 {
+			obj["headers"] = s.Headers
+		}
+		raw, err := json.Marshal(obj)
+		if err != nil {
+			continue
+		}
+		lines = append(lines, "mcp:"+safeExecJSONLine(raw))
 	}
 	sort.Strings(lines)
 	return execSnap{
