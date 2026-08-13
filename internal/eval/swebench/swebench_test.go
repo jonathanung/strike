@@ -544,6 +544,11 @@ func TestEvalTestsPassed(t *testing.T) {
 	if !ok || !evalTestsPassed(sec) {
 		t.Fatalf("section=%q ok=%v", sec, ok)
 	}
+	// Pytest on stdout, xtrace markers on stderr — still score from the summary.
+	split := "==================== 340 passed, 1 warnings in 1.91 seconds ====================\n+ : '>>>>> Start Test Output'\n+ pytest -q\n+ : '>>>>> End Test Output'\nerror: pathspec\n"
+	if !evalTestsPassed(split) {
+		t.Fatal("expected full-log pass when summary is outside the marker sandwich")
+	}
 }
 
 func TestDockerGraderAppliesTestPatchFirst(t *testing.T) {

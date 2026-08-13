@@ -170,10 +170,10 @@ fi
 	detail := strings.TrimSpace(stdout + "\n" + stderr)
 	resolved := code == 0
 	if useEval {
-		if section, ok := evalTestSection(detail); ok {
-			resolved = evalTestsPassed(section)
-			detail = section
-		}
+		// xtrace (set -x) is on stderr; pytest is on stdout. Concatenation
+		// splits the official Start/End markers away from the summary line,
+		// so score the full log.
+		resolved = evalTestsPassed(detail)
 	}
 	// Best-effort counts: without log parsers we treat whole-suite exit as all-or-nothing.
 	gr := GradeResult{
