@@ -190,6 +190,8 @@ export default function App() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [fileHits, setFileHits] = useState<string[]>([]);
   const [mention, setMention] = useState<{ start: number; query: string } | null>(null);
+  const [completionIndex, setCompletionIndex] = useState(0);
+  const [completionDismissed, setCompletionDismissed] = useState(false);
   const [onboardingHint, setOnboardingHint] = useState(() => {
     try { return localStorage.getItem("strike.web.onboard.v1") !== "1"; } catch { return false; }
   });
@@ -480,6 +482,11 @@ export default function App() {
     }
     return [];
   }, [draft, boot, mention, fileHits]);
+  const shownCompletions = completionDismissed ? [] : completions.slice(0, 8);
+  const activeCompletion = Math.min(completionIndex, Math.max(0, shownCompletions.length - 1));
+  useEffect(() => {
+    setCompletionIndex((i) => Math.min(i, Math.max(0, shownCompletions.length - 1)));
+  }, [shownCompletions.length]);
 
   useEffect(() => {
     if (!mention || !boot?.capabilities.files) {
@@ -652,7 +659,31 @@ export default function App() {
   };
   const onComposerKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     const el = event.currentTarget;
-    if (event.key === "Enter" && !event.shiftKey && !completions.length) {
+    if (shownCompletions.length > 0) {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        setCompletionIndex((i) => Math.min(shownCompletions.length - 1, i + 1));
+        return;
+      }
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        setCompletionIndex((i) => Math.max(0, i - 1));
+        return;
+      }
+      if ((event.key === "Enter" && !event.shiftKey) || event.key === "Tab") {
+        event.preventDefault();
+        const item = shownCompletions[activeCompletion] || shownCompletions[0];
+        if (item) selectCompletion(item);
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        setCompletionDismissed(true);
+        return;
+      }
+    }
+    if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       el.form?.requestSubmit();
       return;
@@ -685,6 +716,8 @@ export default function App() {
   };
   const onComposerChange = (value: string) => {
     if (historyBrowse) setHistoryBrowse(null);
+    setCompletionDismissed(false);
+    setCompletionIndex(0);
     setDraft(value);
     const cursor = promptRef.current?.selectionStart ?? value.length;
     const trig = isFileMentionTrigger(value, cursor);
@@ -1124,7 +1157,7 @@ export default function App() {
           <button type="button" onClick={() => { try { localStorage.setItem("strike.web.onboard.v1", "1"); } catch { /* */ } setOnboardingHint(false); }}>Dismiss</button>
         </div>
       )}
-      <form className="composer" onSubmit={submit}><label htmlFor="prompt">Instruction {state.status.busy && "— send to queue"}</label><textarea ref={promptRef} aria-label="Instruction" id="prompt" value={draft} disabled={!isLive} placeholder={isLive ? "Describe the next outcome…  / command · @file" : "Historical session — read only"} onPaste={(event) => void attach(event.clipboardData.files)} onDrop={(event) => { event.preventDefault(); void attach(event.dataTransfer.files); }} onDragOver={(event) => event.preventDefault()} onChange={(event) => onComposerChange(event.target.value)} onKeyDown={onComposerKeyDown} />{completions.length > 0 && <div className="completion" role="listbox" aria-label="Composer completions">{completions.slice(0, 8).map((item) => <button type="button" role="option" key={item.label} onClick={() => selectCompletion(item)}><strong>{item.label}</strong><span>{item.detail}</span></button>)}</div>}{images.length > 0 && <div className="attachments">{images.map((image, index) => <button type="button" key={`${image.name}-${index}`} onClick={() => setImages((list) => list.filter((_, i) => i !== index))}>{image.name} ×</button>)}</div>}{queue.length > 0 && <div className="prompt-queue-wrap"><ol ref={queueRef} className="prompt-queue" aria-label="Queued prompts">{queue.map((item, index) => <li key={index}>{queueEdit?.index === index ? <input className="queue-edit" aria-label={`Queued prompt text ${index + 1}`} value={queueEdit.text} autoFocus onChange={(event) => setQueueEdit({ index, text: event.target.value })} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); queueEditCancel.current = false; setQueue((list) => editQueuedText(list, index, queueEdit.text)); setQueueEdit(null); } if (event.key === "Escape") { event.preventDefault(); queueEditCancel.current = true; setQueueEdit(null); } }} onBlur={() => { if (!queueEditCancel.current) setQueue((list) => editQueuedText(list, index, queueEdit.text)); queueEditCancel.current = false; setQueueEdit(null); }} /> : <span>{item.text}{item.images.length > 0 ? ` (${item.images.length} img)` : ""}</span>}<span className="queue-actions"><button type="button" aria-label={`Move queued prompt ${index + 1} up`} disabled={index === 0} onClick={() => setQueue((list) => moveQueuedAt(list, index, -1))}>↑</button><button type="button" aria-label={`Move queued prompt ${index + 1} down`} disabled={index === queue.length - 1} onClick={() => setQueue((list) => moveQueuedAt(list, index, 1))}>↓</button><button type="button" aria-label={`Edit queued prompt ${index + 1}`} onClick={() => { queueEditCancel.current = false; setQueueEdit({ index, text: item.text }); }}>✎</button><button type="button" aria-label={`Remove queued prompt ${index + 1}`} onClick={() => { setQueue((list) => removeQueuedAt(list, index)); setQueueEdit((cur) => cur?.index === index ? null : cur); }}>×</button></span></li>)}</ol><div className="queue-toolbar"><button type="button" onClick={() => { setQueue(clearQueue()); setQueueEdit(null); }}>Clear queue</button></div></div>}<div><span><kbd>↵</kbd> send · <kbd>⇧↵</kbd> newline · <kbd>↑</kbd> history</span><span><input ref={fileRef} hidden type="file" accept="image/*" multiple onChange={(event) => void attach(event.target.files)} /><button type="button" onClick={() => fileRef.current?.click()}>Attach</button>{history.length > 0 && <button type="button" onClick={() => setDraft(history.at(-1) || "")}>History</button>}<button type="button" onClick={() => exportSession()} disabled={!state.items.length}>Export</button>{state.status.busy && <button type="button" className="stop" onClick={() => void op("interrupt")}>Interrupt</button>}<button type="submit" disabled={!draft.trim() || !isLive}>{state.status.busy ? "Queue" : "Send"}</button></span></div></form>
+      <form className="composer" onSubmit={submit}><label htmlFor="prompt">Instruction {state.status.busy && "— send to queue"}</label><textarea ref={promptRef} aria-label="Instruction" id="prompt" value={draft} disabled={!isLive} placeholder={isLive ? "Describe the next outcome…  / command · @file" : "Historical session — read only"} onPaste={(event) => void attach(event.clipboardData.files)} onDrop={(event) => { event.preventDefault(); void attach(event.dataTransfer.files); }} onDragOver={(event) => event.preventDefault()} onChange={(event) => onComposerChange(event.target.value)} onKeyDown={onComposerKeyDown} />{shownCompletions.length > 0 && <div className="completion" role="listbox" aria-label="Composer completions">{shownCompletions.map((item, i) => <button type="button" role="option" key={item.label} aria-selected={i === activeCompletion} className={i === activeCompletion ? "active" : ""} onMouseEnter={() => setCompletionIndex(i)} onClick={() => selectCompletion(item)}><strong>{item.label}</strong><span>{item.detail}</span></button>)}</div>}{images.length > 0 && <div className="attachments">{images.map((image, index) => <button type="button" key={`${image.name}-${index}`} onClick={() => setImages((list) => list.filter((_, i) => i !== index))}>{image.name} ×</button>)}</div>}{queue.length > 0 && <div className="prompt-queue-wrap"><ol ref={queueRef} className="prompt-queue" aria-label="Queued prompts">{queue.map((item, index) => <li key={index}>{queueEdit?.index === index ? <input className="queue-edit" aria-label={`Queued prompt text ${index + 1}`} value={queueEdit.text} autoFocus onChange={(event) => setQueueEdit({ index, text: event.target.value })} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); queueEditCancel.current = false; setQueue((list) => editQueuedText(list, index, queueEdit.text)); setQueueEdit(null); } if (event.key === "Escape") { event.preventDefault(); queueEditCancel.current = true; setQueueEdit(null); } }} onBlur={() => { if (!queueEditCancel.current) setQueue((list) => editQueuedText(list, index, queueEdit.text)); queueEditCancel.current = false; setQueueEdit(null); }} /> : <span>{item.text}{item.images.length > 0 ? ` (${item.images.length} img)` : ""}</span>}<span className="queue-actions"><button type="button" aria-label={`Move queued prompt ${index + 1} up`} disabled={index === 0} onClick={() => setQueue((list) => moveQueuedAt(list, index, -1))}>↑</button><button type="button" aria-label={`Move queued prompt ${index + 1} down`} disabled={index === queue.length - 1} onClick={() => setQueue((list) => moveQueuedAt(list, index, 1))}>↓</button><button type="button" aria-label={`Edit queued prompt ${index + 1}`} onClick={() => { queueEditCancel.current = false; setQueueEdit({ index, text: item.text }); }}>✎</button><button type="button" aria-label={`Remove queued prompt ${index + 1}`} onClick={() => { setQueue((list) => removeQueuedAt(list, index)); setQueueEdit((cur) => cur?.index === index ? null : cur); }}>×</button></span></li>)}</ol><div className="queue-toolbar"><button type="button" onClick={() => { setQueue(clearQueue()); setQueueEdit(null); }}>Clear queue</button></div></div>}<div className="composer-bar"><span><kbd>↵</kbd> send · <kbd>⇧↵</kbd> newline · <kbd>↑</kbd> history</span><span><input ref={fileRef} hidden type="file" accept="image/*" multiple onChange={(event) => void attach(event.target.files)} /><button type="button" className="composer-secondary" onClick={() => fileRef.current?.click()}>Attach</button>{history.length > 0 && <button type="button" className="composer-secondary" onClick={() => setDraft(history.at(-1) || "")}>History</button>}<button type="button" className="composer-secondary" onClick={() => exportSession()} disabled={!state.items.length}>Export</button>{state.status.busy && <button type="button" className="stop" onClick={() => void op("interrupt")}>Interrupt</button>}<button type="submit" className="composer-send" disabled={!draft.trim() || !isLive}>{state.status.busy ? "Queue" : "Send"}</button></span></div></form>
       <CommandPalette
         open={paletteOpen}
         commands={catalog}

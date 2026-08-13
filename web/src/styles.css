@@ -890,7 +890,7 @@ main {
   padding: 14px;
   line-height: 1.5;
 }
-.composer > div {
+.composer-bar {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -899,7 +899,7 @@ main {
   color: var(--muted);
   font-size: 9px;
 }
-.composer button {
+.composer-send {
   background: var(--acid);
   color: var(--mark-ink);
   border-color: var(--acid);
@@ -908,18 +908,33 @@ main {
   font-size: 10px;
   font-weight: 600;
 }
-.composer button:hover:not(:disabled),
-.composer button:focus-visible {
+.composer-send:hover:not(:disabled),
+.composer-send:focus-visible {
   color: var(--mark-ink);
   border-color: var(--border-focus);
   filter: brightness(1.05);
 }
-.composer button.stop {
+.composer-bar .stop {
   background: var(--signal);
   border-color: var(--signal);
   color: var(--mark-ink);
 }
-.composer button:disabled { opacity: .35; cursor: not-allowed; }
+.composer-send:disabled { opacity: .35; cursor: not-allowed; }
+.composer-secondary {
+  background: var(--surface);
+  color: var(--ink);
+  border-color: var(--rule);
+  padding: 7px 12px;
+  text-transform: none;
+  font-size: 10px;
+  font-weight: 500;
+}
+.composer-secondary:hover:not(:disabled),
+.composer-secondary:focus-visible {
+  color: var(--acid);
+  border-color: var(--acid);
+  filter: none;
+}
 
 .inspector { border-left: 1px solid var(--rule); min-width: 0; overflow: hidden; }
 .navigation.collapsed, .inspector.collapsed { opacity: 0; pointer-events: none; }
@@ -1316,7 +1331,7 @@ dialog input { padding: 12px; color: var(--ink); }
     min-height: 44px;
     font-size: 16px; /* avoid iOS focus zoom */
   }
-  .composer button,
+  .composer-bar button,
   .composer .queue-toolbar button {
     min-height: 44px;
     min-width: 44px;
@@ -1579,11 +1594,14 @@ dialog input { padding: 12px; color: var(--ink); }
   left: 0;
   right: 0;
   bottom: 100%;
+  display: flex;
+  flex-direction: column;
   background: var(--raised);
   border: 1px solid var(--rule);
   box-shadow: 0 -12px 30px var(--shadow);
   max-height: 240px;
   overflow: auto;
+  z-index: 3;
 }
 .completion button {
   width: 100%;
@@ -1594,6 +1612,15 @@ dialog input { padding: 12px; color: var(--ink); }
   padding: 8px 12px;
   border: 0;
   border-bottom: 1px solid var(--rule);
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  text-transform: none;
+  font-size: 12px;
+  font-weight: inherit;
+}
+.completion button.active, .completion button[aria-selected="true"] {
+  background: color-mix(in srgb, var(--acid) 14%, transparent);
 }
 .completion span { color: var(--muted); }
 .attachments {
