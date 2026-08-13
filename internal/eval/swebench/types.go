@@ -23,7 +23,7 @@ type Instance struct {
 	ProblemStatement string `json:"problem_statement"`
 	// TestPatch adds the FAIL_TO_PASS tests (and related fixtures). Must be
 	// applied before grading; the agent does not see it during the run.
-	TestPatch  string   `json:"test_patch,omitempty"`
+	TestPatch string `json:"test_patch,omitempty"`
 	// EvalScript is the official SWE-bench eval.sh (conda, test_patch, test cmd).
 	// When present the docker grader runs it instead of a reconstructed command.
 	EvalScript string   `json:"eval_script,omitempty"`
