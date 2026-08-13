@@ -1609,6 +1609,7 @@ dialog input { padding: 12px; color: var(--ink); }
   right: 0;
   bottom: 100%;
   display: flex;
+  /* Top-down rank order (index 0 at top) even when the popup sits above the composer. */
   flex-direction: column;
   background: var(--raised);
   border: 1px solid var(--rule);
