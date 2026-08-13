@@ -40,6 +40,7 @@ type DoctorPlugin struct {
 	LockDigest    string          `json:"lockDigest,omitempty"`
 	Source        *SourceIdentity `json:"source,omitempty"`
 	TrustState    string          `json:"trustState"` // none | trusted | stale | n/a-passive-only
+	Format        ManifestFormat  `json:"format,omitempty"`
 	Contributions DoctorContribs  `json:"contributions"`
 	Findings      []Diagnostic    `json:"findings,omitempty"`
 }
@@ -185,6 +186,7 @@ func doctorOne(ip InstalledPlugin, strikeVer string) DoctorPlugin {
 	}
 	dp.Version = m.Version
 	dp.Name = m.Name
+	dp.Format = m.Format
 
 	// Passive-run loadOne for path/version issues without requiring enablement.
 	if p, diags := loadOne(ip.Root, ip.Scope, strikeVer); p != nil {
@@ -454,6 +456,9 @@ func FormatDoctorText(r DoctorReport) string {
 			fmt.Fprintf(&b, "  source:    %s\n", p.Source.String())
 		}
 		fmt.Fprintf(&b, "  trust:     %s\n", p.TrustState)
+		if p.Format != "" {
+			fmt.Fprintf(&b, "  format:    %s\n", p.Format)
+		}
 		c := p.Contributions
 		fmt.Fprintf(&b, "  contribs:  agents=%d skills=%d workflows=%d themes=%d providers=%d\n",
 			c.Agents, c.Skills, c.Workflows, c.Themes, c.Providers)

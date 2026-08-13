@@ -446,6 +446,49 @@ func TestResolveAPSCommand_BareAndRelative(t *testing.T) {
 	}
 }
 
+func TestResolveAPSCWD_DotSlashForms(t *testing.T) {
+	root := t.TempDir()
+	sub := filepath.Join(root, "subdir")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data := filepath.Join(root, "data")
+	if err := os.Mkdir(data, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	canon := func(p string) string {
+		abs, err := filepath.Abs(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r, err := filepath.EvalSymlinks(abs); err == nil {
+			return r
+		}
+		return abs
+	}
+	got, err := resolveAPSCWD(root, data, "./")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if canon(got) != canon(root) {
+		t.Fatalf("./ cwd=%s want root %s", got, root)
+	}
+	got, err = resolveAPSCWD(root, data, "./subdir")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if canon(got) != canon(sub) {
+		t.Fatalf("./subdir cwd=%s want %s", got, sub)
+	}
+	got, err = resolveAPSCWD(root, data, "./subdir/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if canon(got) != canon(sub) {
+		t.Fatalf("./subdir/ cwd=%s want %s", got, sub)
+	}
+}
+
 func TestExpandPluginPlaceholders_NonRecursive(t *testing.T) {
 	got := expandPluginPlaceholders("a ${PLUGIN_ROOT} b ${PLUGIN_DATA} c", "/root", "/data")
 	if got != "a /root b /data c" {
@@ -533,6 +576,12 @@ func TestDoctor_APSInvalidMCPShowsDisabled(t *testing.T) {
 	}
 	if len(report.Plugins) != 1 {
 		t.Fatalf("plugins=%d", len(report.Plugins))
+	}
+	if report.Plugins[0].Format != FormatAPS {
+		t.Fatalf("format=%s", report.Plugins[0].Format)
+	}
+	if !strings.Contains(FormatDoctorText(report), "format:    aps") {
+		t.Fatalf("doctor text missing format:\n%s", FormatDoctorText(report))
 	}
 	mcp := report.Plugins[0].Contributions.MCP
 	if len(mcp) != 1 || mcp[0].Name != "(disabled)" {

@@ -889,7 +889,10 @@ func resolveAPSCWD(root, dataDir, cwd string) (string, error) {
 	case cwd == placeholderData || strings.HasPrefix(cwd, placeholderData+"/"):
 		return confineUnder(dataDir, expanded, "PLUGIN_DATA")
 	case strings.HasPrefix(cwd, "./"):
-		rel := strings.TrimPrefix(cwd, "./")
+		rel := filepath.Clean(strings.TrimPrefix(cwd, "./"))
+		if rel == "." || rel == "" {
+			return root, nil
+		}
 		return ResolveUnderRoot(root, rel)
 	default:
 		return confineUnder(root, expanded, "plugin root")
