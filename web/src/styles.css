@@ -192,7 +192,7 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
-  background: radial-gradient(circle at 70% -20%, color-mix(in srgb, var(--acid) 18%, transparent) 0, transparent 38%), var(--ground);
+  background: var(--ground);
 }
 button, select, textarea, input { font: inherit; color: inherit; }
 button, select, input, textarea { border: 1px solid var(--rule); background: var(--surface); }
@@ -264,7 +264,6 @@ button:disabled, select:disabled, input:disabled, textarea:disabled {
   background: var(--surface);
   padding: 28px;
   color: var(--ink);
-  box-shadow: 0 30px 100px var(--shadow);
   position: relative;
 }
 .ui-dialog-wide { width: min(720px, calc(100vw - 24px)); }
@@ -274,7 +273,6 @@ button:disabled, select:disabled, input:disabled, textarea:disabled {
 }
 .ui-dialog-blocking { border-color: var(--warning); }
 .ui-dialog h2 {
-  font-family: Georgia, "Times New Roman", serif;
   font-size: 30px;
   margin: 0 0 20px;
 }
@@ -724,7 +722,6 @@ main {
   min-height: 0;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
-  background: linear-gradient(90deg, transparent 49.9%, color-mix(in srgb, var(--ink) 3%, transparent) 50%, transparent 50.1%);
 }
 .runtime {
   display: flex;
@@ -846,7 +843,6 @@ main {
 .empty-state { max-width: 620px; margin: 12vh auto 0; }
 .empty-state span { color: var(--acid); font-size: 10px; letter-spacing: .18em; }
 .empty-state h1 {
-  font-family: Georgia, "Times New Roman", serif;
   font-size: clamp(42px, 7vw, 78px);
   line-height: .9;
   margin: 18px 0;
@@ -894,7 +890,6 @@ main {
   margin: 0 clamp(14px, 4vw, 56px) 22px;
   border: 1px solid var(--rule);
   background: var(--surface);
-  box-shadow: 0 18px 60px var(--shadow);
   position: relative;
 }
 .composer label {
@@ -1040,6 +1035,7 @@ main {
   overflow: auto;
   padding: 20px 16px;
 }
+/* Inspector titles keep serif as a pane-chrome exception (#1159 scoped empty-state/dialog). */
 .inspector h2 {
   margin: 8px 0 16px;
   font-family: Georgia, "Times New Roman", serif;
@@ -1205,7 +1201,6 @@ dialog {
   background: var(--surface);
   padding: 28px;
   color: var(--ink);
-  box-shadow: 0 30px 100px var(--shadow);
 }
 .dialog-rule {
   position: absolute;
@@ -1220,7 +1215,6 @@ dialog::backdrop {
   backdrop-filter: blur(5px);
 }
 dialog h2 {
-  font-family: Georgia, "Times New Roman", serif;
   font-size: 30px;
   margin: 0 0 20px;
 }
@@ -1623,6 +1617,7 @@ dialog input { padding: 12px; color: var(--ink); }
 .session.history-row { gap: 6px; }
 .session.history-row .live-badge { color: var(--accent-alt); }
 
+/* Markdown headings keep serif as a content-type exception; empty-state/dialog titles inherit the cockpit mono stack. */
 .markdown h2, .markdown h3 {
   font-family: Georgia, "Times New Roman", serif;
   margin: 16px 0 8px;
@@ -2492,7 +2487,7 @@ dialog fieldset small { color: var(--muted); }
 .palette-trigger {
   margin-left: auto; display: inline-flex; align-items: center; gap: 6px;
   border: 1px solid var(--rule); background: transparent; padding: 4px 10px;
-  border-radius: 999px; cursor: pointer; font-size: 12px; color: var(--muted);
+  border-radius: 2px; cursor: pointer; font-size: 12px; color: var(--muted);
 }
 .palette-trigger kbd { font-size: 10px; }
 .palette-input {
@@ -2535,7 +2530,7 @@ dialog fieldset small { color: var(--muted); }
 .team-view-tabs, .team-filters { display: flex; flex-wrap: wrap; gap: 6px; }
 .team-view-tabs button, .team-filters button {
   border: 1px solid var(--rule); background: transparent; padding: 4px 10px;
-  border-radius: 999px; cursor: pointer; font-size: 12px; text-transform: capitalize;
+  border-radius: 2px; cursor: pointer; font-size: 12px; text-transform: capitalize;
 }
 .team-view-tabs button.active, .team-filters button.active,
 .team-view-tabs button[aria-selected="true"], .team-filters button[aria-pressed="true"] {
