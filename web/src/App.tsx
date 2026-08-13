@@ -833,8 +833,10 @@ export default function App() {
 
 
   // Register enabled pane/1 contributions as Chat + Ops inspector surfaces (WEBUI.12 / #1155).
+  // Bump paneSurfacesRev only after boot so deep-link apply can wait for pane:* registration.
   useEffect(() => {
-    if (!boot?.capabilities.panes) {
+    if (!boot) return;
+    if (!boot.capabilities.panes) {
       clearDynamicSurfaces();
       setPaneSurfacesRev((n) => n + 1);
       return;
@@ -848,16 +850,20 @@ export default function App() {
         if (def) registerDynamicSurface(def);
       }
       setPaneSurfacesRev((n) => n + 1);
-    }).catch(() => { /* panes optional */ });
+    }).catch(() => {
+      if (!cancelled) setPaneSurfacesRev((n) => n + 1);
+    });
     return () => {
       cancelled = true;
       clearDynamicSurfaces();
     };
-  }, [boot?.capabilities.panes, boot?.version]);
+  }, [boot]);
 
   // Apply additive deep-link mode/surface once bootstrap is ready. Root/session handled above.
+  // Wait until pane contributions are registered (or skipped) so ?surface=pane:* resolves.
   useEffect(() => {
     if (!boot || deepLinkApplied.current) return;
+    if (paneSurfacesRev === 0) return;
     deepLinkApplied.current = true;
     const resolved = resolveDeepLink(location.search, boot.capabilities, {
       attachOnly: boot.attachOnly,
@@ -877,8 +883,8 @@ export default function App() {
         void inspectProject(preferred, { open: false, mode: "chat" });
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot when boot lands
-  }, [boot]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot after boot + pane registration
+  }, [boot, paneSurfacesRev]);
   const sessionAction = async (action: "fork" | "rename" | "delete") => {
     if (!boot?.capabilities.sessions || !selectedID) return;
     const id = selectedID;

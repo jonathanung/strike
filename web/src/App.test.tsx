@@ -1330,11 +1330,54 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: "Toggle inspector" })).toHaveAttribute("aria-pressed", "false");
     expect(await screen.findByRole("tab", { name: "Weather" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Chat:/ })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Toggle inspector" })).toHaveAttribute("aria-pressed", "false");
     fireEvent.click(screen.getByRole("tab", { name: "Weather" }));
     expect(await screen.findByText("72° clear")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Chat:/ })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: /Ops:/ })).toHaveAttribute("aria-pressed", "false");
     expect(screen.getByRole("button", { name: "Toggle inspector" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("restores a pane:* Chat deep link after plugin panes register", async () => {
+    window.history.replaceState(null, "", "/?surface=pane:weather");
+    const pane = {
+      id: "weather",
+      pluginId: "acme.weather",
+      title: "Weather",
+      mode: "static",
+      trusted: true,
+      provenance: "plugin=acme.weather pane=weather",
+    };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = (init?.method || "GET").toUpperCase();
+      if (url.includes("bootstrap")) {
+        return response({
+          version: "test", authRequired: false, attachOnly: false,
+          capabilities: { live: true, panes: true, roots: false },
+          protocolOps: ["user.input"], status: { sessionId: "live", provider: "echo", busy: false },
+          agents: [], skills: [],
+        });
+      }
+      if (url.includes("sessions")) return response({ sessions: [{ id: "live", title: "Current" }], liveId: "live" });
+      if (url.endsWith("/v1/panes") && method === "GET") return response({ panes: [pane] });
+      if (url.includes("/v1/panes/weather/mount") || url.includes("/v1/panes/weather/snapshot")) {
+        return response({
+          id: "weather", title: "Weather", mode: "static", mounted: true,
+          view: { type: "text", text: "72° clear", style: "title" },
+        });
+      }
+      return response({ ok: true });
+    }));
+    render(<App />);
+    await screen.findByText("Current");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Chat:/ })).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByRole("tab", { name: "Weather" })).toHaveAttribute("aria-selected", "true");
+    });
+    expect(await screen.findByText("72° clear")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Toggle inspector" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: /Ops:/ })).toHaveAttribute("aria-pressed", "false");
   });
 
   it("keeps the panes catalog empty-state under Ops when no plugins are enabled", async () => {
