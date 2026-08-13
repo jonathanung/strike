@@ -81,6 +81,9 @@ func InferCapabilitiesAt(m Manifest, pluginRoot string) []string {
 	}
 	if m.Format == FormatAPS && pluginRoot != "" {
 		inferAPSMCPCaps(pluginRoot, set)
+		if !skipStrikeCLI(m) {
+			inferStrikeCLICaps(pluginRoot, set)
+		}
 	}
 	return sortedKeys(set)
 }
@@ -112,7 +115,12 @@ func HasExecutableContributionsAt(m Manifest, pluginRoot string) bool {
 		return true
 	}
 	if m.Format == FormatAPS && pluginRoot != "" {
-		return apsHasExecutableMCP(pluginRoot)
+		if apsHasExecutableMCP(pluginRoot) {
+			return true
+		}
+		if !skipStrikeCLI(m) && strikeCLIHasExecutable(pluginRoot) {
+			return true
+		}
 	}
 	return false
 }

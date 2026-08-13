@@ -48,6 +48,7 @@ type Plugin struct {
 	Workflows []FileRef
 	Themes    []FileRef
 	Providers []FileRef
+	Panes     []FileRef
 
 	// MCPCount is discovered MCP servers (legacy contributions.mcp or APS mcp.json
 	// entries that are not skipped). Trust is not applied here.
@@ -332,8 +333,6 @@ func loadOne(root string, scope Scope, strikeVer string) (*Plugin, []Diagnostic)
 	}
 
 	if m.Format == FormatAPS {
-		// Portable skills from skills/<dir>/SKILL.md only. Strike-only
-		// contributions (agents/workflows/…) land in APS.3 (#1144).
 		skillRefs, skillDiags := discoverAPSSkills(root, base)
 		diags = append(diags, skillDiags...)
 		p.Skills = skillRefs
@@ -364,6 +363,16 @@ func loadOne(root string, scope Scope, strikeVer string) (*Plugin, []Diagnostic)
 			}
 			p.MCPCount = n
 		}
+		if !skipStrikeCLI(m) {
+			agents, extraSkills, workflows, themes, providers, panes, extDiags := discoverStrikeCLIContributions(root, base, p.Skills)
+			diags = append(diags, extDiags...)
+			p.Agents = agents
+			p.Skills = append(p.Skills, extraSkills...)
+			p.Workflows = workflows
+			p.Themes = themes
+			p.Providers = providers
+			p.Panes = panes
+		}
 	} else {
 		p.Agents = resolve("agents", m.Contributions.Agents, func(p string) bool {
 			return strings.EqualFold(filepath.Ext(p), ".md")
@@ -381,37 +390,38 @@ func loadOne(root string, scope Scope, strikeVer string) (*Plugin, []Diagnostic)
 		p.MCPCount = len(m.Contributions.MCP)
 	}
 
-	// Providers with optional profileName (legacy only; APS.3 loads com.strike.cli).
-	provEntries := append([]ProviderEntry(nil), m.Contributions.Providers...)
-	sort.SliceStable(provEntries, func(i, j int) bool { return provEntries[i].Path < provEntries[j].Path })
-	for _, e := range provEntries {
-		abs, err := ResolveUnderRoot(root, e.Path)
-		if err != nil {
-			d := base
-			d.Severity = SeverityError
-			d.Code = "path"
-			d.Path = e.Path
-			d.Message = err.Error()
-			diags = append(diags, d)
-			continue
+	if m.Format != FormatAPS {
+		provEntries := append([]ProviderEntry(nil), m.Contributions.Providers...)
+		sort.SliceStable(provEntries, func(i, j int) bool { return provEntries[i].Path < provEntries[j].Path })
+		for _, e := range provEntries {
+			abs, err := ResolveUnderRoot(root, e.Path)
+			if err != nil {
+				d := base
+				d.Severity = SeverityError
+				d.Code = "path"
+				d.Path = e.Path
+				d.Message = err.Error()
+				diags = append(diags, d)
+				continue
+			}
+			if st, err := os.Stat(abs); err != nil || st.IsDir() {
+				d := base
+				d.Severity = SeverityError
+				d.Code = "missing"
+				d.Path = e.Path
+				d.Message = "provider contribution file not found"
+				diags = append(diags, d)
+				continue
+			}
+			p.Providers = append(p.Providers, FileRef{
+				PluginID:    m.ID,
+				Version:     m.Version,
+				Source:      scope,
+				RelPath:     e.Path,
+				AbsPath:     abs,
+				ProfileName: strings.TrimSpace(e.ProfileName),
+			})
 		}
-		if st, err := os.Stat(abs); err != nil || st.IsDir() {
-			d := base
-			d.Severity = SeverityError
-			d.Code = "missing"
-			d.Path = e.Path
-			d.Message = "provider contribution file not found"
-			diags = append(diags, d)
-			continue
-		}
-		p.Providers = append(p.Providers, FileRef{
-			PluginID:    m.ID,
-			Version:     m.Version,
-			Source:      scope,
-			RelPath:     e.Path,
-			AbsPath:     abs,
-			ProfileName: strings.TrimSpace(e.ProfileName),
-		})
 	}
 
 	if m.Format != FormatAPS {

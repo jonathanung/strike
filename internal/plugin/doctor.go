@@ -207,6 +207,11 @@ func doctorOne(ip InstalledPlugin, strikeVer string) DoctorPlugin {
 	mcp, harnesses, hooks, panes := summarizeExecutables(m.Contributions)
 	if m.Format == FormatAPS {
 		mcp = summarizeAPSMCP(ip.Root)
+		if skipStrikeCLI(*m) {
+			harnesses, hooks, panes = nil, 0, 0
+		} else {
+			harnesses, hooks, panes = summarizeStrikeCLIExec(ip.Root)
+		}
 	}
 	dp.Contributions.MCP = mcp
 	dp.Contributions.Harnesses = harnesses

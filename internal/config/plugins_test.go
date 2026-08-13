@@ -488,6 +488,78 @@ func TestPluginPassiveLoad_APSSkillCatalog(t *testing.T) {
 	}
 }
 
+func TestPluginPassiveLoad_APSStrikeCLISurfaces(t *testing.T) {
+	home := t.TempDir()
+	work := t.TempDir()
+	t.Setenv("HOME", home)
+	ResetPluginCache()
+
+	gPlug := filepath.Join(home, ".strike", "plugins", "acme.review")
+	writeTree(t, gPlug, map[string]string{
+		"plugin.json": `{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "acme.review",
+  "version": "1.0.0",
+  "extensions": {
+    "com.strike.cli": {"displayName": "Acme Review"}
+  }
+}`,
+		"com.strike.cli/agents/reviewer.md": "---\ndescription: r\n---\nReview agent.\n",
+		"com.strike.cli/workflows/review-gate.json": `{
+  "schemaVersion": 1,
+  "name": "review-gate",
+  "phases": [{ "name": "one", "agent": "build", "exit": { "type": "agent" } }]
+}`,
+		"com.strike.cli/providers/proxy.json": `{
+  "acme-proxy": {
+    "api": "openai",
+    "baseURL": "https://proxy.example.com/v1",
+    "apiKeyEnv": "ACME_KEY",
+    "models": ["m1"]
+  }
+}`,
+		"skills/ship/SKILL.md": "---\ndescription: ship\n---\nShip $ARGUMENTS\n",
+	})
+
+	agents, err := LoadAgentsWithError(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := lookupAgent(agents, "reviewer"); !ok {
+		t.Fatal("missing APS Strike-only agent reviewer")
+	}
+
+	skills, err := LoadSkillsWithError(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := lookupSkill(skills, "ship"); !ok {
+		t.Fatal("missing portable APS skill")
+	}
+
+	workflows, err := LoadWorkflows(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := FindWorkflow(workflows, "review-gate"); !ok {
+		t.Fatal("missing APS Strike-only workflow")
+	}
+
+	cfg, err := Load(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var foundProv bool
+	for _, p := range cfg.Providers {
+		if p.Name == "acme-proxy" {
+			foundProv = true
+		}
+	}
+	if !foundProv {
+		t.Fatalf("missing APS provider in %#v", cfg.Providers)
+	}
+}
+
 func indexOf(ss []string, want string) int {
 	for i, s := range ss {
 		if s == want {

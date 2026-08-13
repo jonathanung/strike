@@ -282,11 +282,13 @@ func readPluginThemePaths(root string) (id string, paths []string, ok bool) {
 	if err != nil {
 		return "", nil, false
 	}
-	// Strip line comments for jsonc.
 	cleaned := stripLineComments(data)
 	var doc struct {
-		SchemaVersion int    `json:"schemaVersion"`
-		ID            string `json:"id"`
+		Schema        string                     `json:"$schema"`
+		SchemaVersion int                        `json:"schemaVersion"`
+		ID            string                     `json:"id"`
+		Name          string                     `json:"name"`
+		Extensions    map[string]json.RawMessage `json:"extensions"`
 		Contributions struct {
 			Themes []struct {
 				Path string `json:"path"`
@@ -295,6 +297,42 @@ func readPluginThemePaths(root string) (id string, paths []string, ok bool) {
 	}
 	if err := json.Unmarshal(cleaned, &doc); err != nil {
 		return "", nil, false
+	}
+	if strings.TrimSpace(doc.Schema) == "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json" {
+		id = strings.TrimSpace(doc.Name)
+		if id == "" {
+			return "", nil, false
+		}
+		if strikeCLISkipFromExtensions(doc.Extensions) {
+			return id, nil, false
+		}
+		themeDir := filepath.Join(root, "com.strike.cli", "themes")
+		entries, err := os.ReadDir(themeDir)
+		if err != nil {
+			return id, nil, false
+		}
+		var names []string
+		for _, e := range entries {
+			if e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+				continue
+			}
+			if !strings.EqualFold(filepath.Ext(e.Name()), ".json") {
+				continue
+			}
+			names = append(names, e.Name())
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			rel := "com.strike.cli/themes/" + name
+			if _, err := resolveUnderPluginRoot(root, rel); err != nil {
+				continue
+			}
+			paths = append(paths, rel)
+		}
+		if len(paths) == 0 {
+			return id, nil, false
+		}
+		return id, paths, true
 	}
 	if doc.SchemaVersion != 1 || strings.TrimSpace(doc.ID) == "" {
 		return "", nil, false
@@ -308,6 +346,45 @@ func readPluginThemePaths(root string) (id string, paths []string, ok bool) {
 		return doc.ID, nil, false
 	}
 	return doc.ID, paths, true
+}
+
+func strikeCLISkipFromExtensions(ext map[string]json.RawMessage) bool {
+	raw, ok := ext["com.strike.cli"]
+	if !ok {
+		return false
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return true
+	}
+	if v, ok := obj["displayName"]; ok {
+		var s string
+		if err := json.Unmarshal(v, &s); err != nil {
+			return true
+		}
+	}
+	if v, ok := obj["strike"]; ok {
+		var sr struct {
+			Min string `json:"min"`
+			Max string `json:"max"`
+		}
+		if err := json.Unmarshal(v, &sr); err != nil {
+			return true
+		}
+	}
+	if v, ok := obj["capabilities"]; ok {
+		var caps []string
+		if err := json.Unmarshal(v, &caps); err != nil {
+			return true
+		}
+	}
+	if v, ok := obj["digest"]; ok {
+		var s string
+		if err := json.Unmarshal(v, &s); err != nil {
+			return true
+		}
+	}
+	return false
 }
 
 func stripLineComments(data []byte) []byte {

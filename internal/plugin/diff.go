@@ -213,6 +213,10 @@ func mergeCapabilityTagsAt(m Manifest, root string) []string {
 		if _, ok := seen[CapMCPHTTP]; ok {
 			seen["mcp"] = struct{}{}
 		}
+		if !skipStrikeCLI(m) {
+			inferStrikeCLIPassiveTags(root, seen)
+			inferStrikeCLICaps(root, seen)
+		}
 	}
 	out := make([]string, 0, len(seen))
 	for k := range seen {
@@ -273,6 +277,9 @@ func contribTypeSetFromManifestAt(m Manifest, root string) map[string]struct{} {
 			}
 		}
 	}
+	if !skipStrikeCLI(m) {
+		inferStrikeCLIPassiveTags(root, out)
+	}
 	return out
 }
 
@@ -326,38 +333,43 @@ func executableSnapshotFromManifestAt(m Manifest, root string) execSnap {
 	}
 	f, _, err := loadAPSMCPFile(root)
 	if err != nil || f.disabled {
-		return snap
+		// still include Strike-only executables below
+	} else {
+		lines := append([]string(nil), snap.lines...)
+		for _, s := range f.servers {
+			if s.Skip {
+				continue
+			}
+			obj := map[string]any{
+				"name":      s.Name,
+				"transport": s.Transport,
+				"command":   s.Command,
+				"url":       s.URL,
+			}
+			if len(s.Args) > 0 {
+				obj["args"] = s.Args
+			}
+			if len(s.Env) > 0 {
+				obj["env"] = s.Env
+			}
+			if len(s.Headers) > 0 {
+				obj["headers"] = s.Headers
+			}
+			raw, err := json.Marshal(obj)
+			if err != nil {
+				continue
+			}
+			lines = append(lines, "mcp:"+safeExecJSONLine(raw))
+		}
+		snap.lines = lines
 	}
-	lines := append([]string(nil), snap.lines...)
-	for _, s := range f.servers {
-		if s.Skip {
-			continue
-		}
-		obj := map[string]any{
-			"name":      s.Name,
-			"transport": s.Transport,
-			"command":   s.Command,
-			"url":       s.URL,
-		}
-		if len(s.Args) > 0 {
-			obj["args"] = s.Args
-		}
-		if len(s.Env) > 0 {
-			obj["env"] = s.Env
-		}
-		if len(s.Headers) > 0 {
-			obj["headers"] = s.Headers
-		}
-		raw, err := json.Marshal(obj)
-		if err != nil {
-			continue
-		}
-		lines = append(lines, "mcp:"+safeExecJSONLine(raw))
+	if !skipStrikeCLI(m) {
+		snap.lines = append(snap.lines, strikeCLIExecSnapshotLines(root)...)
 	}
-	sort.Strings(lines)
+	sort.Strings(snap.lines)
 	return execSnap{
-		fingerprint: strings.Join(lines, "\n"),
-		lines:       lines,
+		fingerprint: strings.Join(snap.lines, "\n"),
+		lines:       snap.lines,
 	}
 }
 

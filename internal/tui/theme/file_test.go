@@ -220,6 +220,48 @@ func TestCatalogPluginThemes(t *testing.T) {
 	}
 }
 
+func TestCatalogPluginThemes_APSStrikeCLI(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	work := t.TempDir()
+
+	plug := filepath.Join(work, ".strike", "plugins", "acme.themes")
+	if err := os.MkdirAll(filepath.Join(plug, "com.strike.cli", "themes"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "acme.themes",
+  "version": "1.0.0"
+}`
+	if err := os.WriteFile(filepath.Join(plug, "plugin.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	themeBody := `{"name":"APS Theme","id":"aps-theme","colors":{"accent":"#654321"}}`
+	if err := os.WriteFile(filepath.Join(plug, "com.strike.cli", "themes", "aps.json"), []byte(themeBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Top-level themes/ and other namespaces must not load for APS.
+	if err := os.MkdirAll(filepath.Join(plug, "themes"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(plug, "themes", "legacy.json"), []byte(`{"name":"No","id":"no-theme","colors":{"accent":"#000000"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cat := Catalog(work)
+	e, ok := Lookup(cat, "aps-theme")
+	if !ok {
+		t.Fatal("APS plugin theme missing from catalog")
+	}
+	if e.Source != SourcePlugin || e.PluginID != "acme.themes" || e.Name != "APS Theme" {
+		t.Fatalf("entry=%+v", e)
+	}
+	if _, ok := Lookup(cat, "no-theme"); ok {
+		t.Fatal("top-level themes/ must not load for APS packages")
+	}
+}
+
 func TestCatalogPluginThemeCollisionAndInvalidSkipped(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

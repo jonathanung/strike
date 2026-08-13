@@ -382,6 +382,12 @@ func IsProcessPane(pluginRoot string, raw json.RawMessage) bool {
 
 // HasProcessPanes reports whether the manifest contributes any process pane.
 func HasProcessPanes(m Manifest, pluginRoot string) bool {
+	if m.Format == FormatAPS {
+		if skipStrikeCLI(m) || pluginRoot == "" {
+			return false
+		}
+		return strikeCLIHasProcessPanes(pluginRoot)
+	}
 	for _, raw := range m.Contributions.Panes {
 		if IsProcessPane(pluginRoot, raw) {
 			return true

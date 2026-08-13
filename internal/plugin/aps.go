@@ -34,13 +34,15 @@ const (
 
 var apsSchemaRE = regexp.MustCompile(`^https://agent-plugins\.org/schemas/([^/]+)/plugin\.schema\.json$`)
 
-// StrikeCLIExtension is the parsed extensions.com.strike.cli object (APS.2
-// reads metadata only; contribution directory loading is APS.3 / #1144).
+// StrikeCLIExtension is the parsed extensions.com.strike.cli object.
 type StrikeCLIExtension struct {
 	DisplayName  string
 	Strike       StrikeRange
 	Capabilities []string
 	Digest       string
+	// SkipContributions is set when a known key has an invalid type. Strike-only
+	// files under com.strike.cli/ are not loaded; portable skills/MCP still are.
+	SkipContributions bool
 }
 
 // PluginDataDir returns the Strike-managed PLUGIN_DATA directory for an
@@ -257,9 +259,9 @@ func parseStrikeCLIExtension(raw json.RawMessage) (*StrikeCLIExtension, []Diagno
 		diags = append(diags, Diagnostic{
 			Severity: SeverityWarning,
 			Code:     "malformed",
-			Message:  "extensions.com.strike.cli is not an object; ignoring Strike extension metadata",
+			Message:  "extensions.com.strike.cli is not an object; skipping Strike-only contributions",
 		})
-		return nil, diags, nil
+		return &StrikeCLIExtension{SkipContributions: true}, diags, nil
 	}
 	known := map[string]struct{}{
 		"displayName": {}, "strike": {}, "capabilities": {}, "digest": {},
@@ -278,7 +280,8 @@ func parseStrikeCLIExtension(raw json.RawMessage) (*StrikeCLIExtension, []Diagno
 	if v, ok := obj["displayName"]; ok {
 		s, err := decodeJSONString(v, "extensions.com.strike.cli.displayName")
 		if err != nil {
-			diags = append(diags, Diagnostic{Severity: SeverityWarning, Code: "malformed", Message: err.Error()})
+			ext.SkipContributions = true
+			diags = append(diags, Diagnostic{Severity: SeverityWarning, Code: "malformed", Message: err.Error() + "; skipping Strike-only contributions"})
 		} else {
 			s = strings.TrimSpace(s)
 			if s != "" && len(s) > 80 {
@@ -295,10 +298,11 @@ func parseStrikeCLIExtension(raw json.RawMessage) (*StrikeCLIExtension, []Diagno
 	if v, ok := obj["strike"]; ok {
 		var sr StrikeRange
 		if err := json.Unmarshal(v, &sr); err != nil {
+			ext.SkipContributions = true
 			diags = append(diags, Diagnostic{
 				Severity: SeverityWarning,
 				Code:     "malformed",
-				Message:  "extensions.com.strike.cli.strike has invalid type; ignoring Strike range",
+				Message:  "extensions.com.strike.cli.strike has invalid type; skipping Strike-only contributions",
 			})
 		} else {
 			if min := strings.TrimSpace(sr.Min); min != "" && !bundleVersionRE.MatchString(min) {
@@ -321,10 +325,11 @@ func parseStrikeCLIExtension(raw json.RawMessage) (*StrikeCLIExtension, []Diagno
 	if v, ok := obj["capabilities"]; ok {
 		var caps []string
 		if err := json.Unmarshal(v, &caps); err != nil {
+			ext.SkipContributions = true
 			diags = append(diags, Diagnostic{
 				Severity: SeverityWarning,
 				Code:     "malformed",
-				Message:  "extensions.com.strike.cli.capabilities has invalid type; ignoring",
+				Message:  "extensions.com.strike.cli.capabilities has invalid type; skipping Strike-only contributions",
 			})
 		} else {
 			ext.Capabilities = caps
@@ -333,7 +338,8 @@ func parseStrikeCLIExtension(raw json.RawMessage) (*StrikeCLIExtension, []Diagno
 	if v, ok := obj["digest"]; ok {
 		s, err := decodeJSONString(v, "extensions.com.strike.cli.digest")
 		if err != nil {
-			diags = append(diags, Diagnostic{Severity: SeverityWarning, Code: "malformed", Message: err.Error()})
+			ext.SkipContributions = true
+			diags = append(diags, Diagnostic{Severity: SeverityWarning, Code: "malformed", Message: err.Error() + "; skipping Strike-only contributions"})
 		} else if strings.TrimSpace(s) != "" {
 			if err := validateDigestString(s); err != nil {
 				diags = append(diags, Diagnostic{
