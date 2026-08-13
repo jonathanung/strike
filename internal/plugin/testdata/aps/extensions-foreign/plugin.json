@@ -1,0 +1,10 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "cf.ext-foreign",
+  "extensions": {
+    "com.other.client": {
+      "notAStrikeKey": [1, 2, {"nested": true}],
+      "also": "string-is-fine-for-unimplemented"
+    }
+  }
+}

@@ -917,21 +917,27 @@ func confineUnder(base, path, label string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	clean := filepath.Clean(abs)
-	if !isUnder(baseAbs, clean) && baseAbs != clean {
+	check := resolveExistingPrefix(filepath.Clean(abs))
+	if !isUnder(baseAbs, check) && baseAbs != check {
 		return "", fmt.Errorf("path %q escapes %s", path, label)
 	}
-	if fi, err := os.Lstat(clean); err == nil {
-		if fi.Mode()&os.ModeSymlink != 0 || fi.IsDir() {
-			if resolved, err := filepath.EvalSymlinks(clean); err == nil {
-				if !isUnder(baseAbs, resolved) && baseAbs != resolved {
-					return "", fmt.Errorf("path %q escapes %s via symlink", path, label)
-				}
-				return resolved, nil
-			}
-		}
+	return check, nil
+}
+
+// resolveExistingPrefix EvalSymlinks as far as the path exists so macOS
+// /var vs /private/var (and similar aliasing) compare equal to a resolved base.
+func resolveExistingPrefix(path string) string {
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return resolved
 	}
-	return clean, nil
+	parent := filepath.Dir(path)
+	if parent == path {
+		return path
+	}
+	if resolvedParent, err := filepath.EvalSymlinks(parent); err == nil {
+		return filepath.Join(resolvedParent, filepath.Base(path))
+	}
+	return filepath.Join(resolveExistingPrefix(parent), filepath.Base(path))
 }
 
 func resolvedPluginRoot(root string) string {

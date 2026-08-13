@@ -87,7 +87,7 @@ func ReadManifest(root string) (Manifest, string, error) {
 
 func readManifest(root string) (Manifest, string, []Diagnostic, error) {
 	jsonPath := filepath.Join(root, "plugin.json")
-	data, err := os.ReadFile(jsonPath)
+	data, err := readConfinedRootFile(root, "plugin.json")
 	if err == nil {
 		m, diags, err := parseManifestBytes(data, "plugin.json")
 		if err != nil {
@@ -96,21 +96,42 @@ func readManifest(root string) (Manifest, string, []Diagnostic, error) {
 		return m, jsonPath, diags, nil
 	}
 	if !os.IsNotExist(err) {
-		return Manifest{}, "", nil, err
+		return Manifest{}, jsonPath, nil, err
 	}
 	jsoncPath := filepath.Join(root, "plugin.jsonc")
-	data, err = os.ReadFile(jsoncPath)
+	data, err = readConfinedRootFile(root, "plugin.jsonc")
 	if err != nil {
 		if os.IsNotExist(err) {
 			return Manifest{}, "", nil, fmt.Errorf("no plugin.json or plugin.jsonc in %s", root)
 		}
-		return Manifest{}, "", nil, err
+		return Manifest{}, jsoncPath, nil, err
 	}
 	m, diags, err := parseManifestBytes(data, "plugin.jsonc")
 	if err != nil {
 		return Manifest{}, jsoncPath, diags, fmt.Errorf("%s: %w", jsoncPath, err)
 	}
 	return m, jsoncPath, diags, nil
+}
+
+// readConfinedRootFile reads a root-level plugin file only when the
+// filesystem-resolved path stays inside root (Agent Plugins §4.1).
+func readConfinedRootFile(root, name string) ([]byte, error) {
+	path := filepath.Join(root, name)
+	if _, err := os.Lstat(path); err != nil {
+		return nil, err
+	}
+	abs, err := confinedExistingPath(root, path)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", name, err)
+	}
+	info, err := os.Stat(abs)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s is not a regular file", name)
+	}
+	return os.ReadFile(abs)
 }
 
 func parseManifestBytes(data []byte, fileName string) (Manifest, []Diagnostic, error) {

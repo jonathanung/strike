@@ -1,0 +1,58 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "goodStdio": {
+      "type": "stdio",
+      "command": "./bin/server.sh"
+    },
+    "goodHTTP": {
+      "type": "streamable-http",
+      "url": "https://mcp.example.com/v1"
+    },
+    "legacySSE": {
+      "type": "sse",
+      "url": "https://legacy.example.com/sse"
+    },
+    "unknownType": {
+      "type": "websocket",
+      "url": "wss://example.com"
+    },
+    "badCommand": {
+      "type": "stdio",
+      "command": "echo hello"
+    },
+    "escapeCmd": {
+      "type": "stdio",
+      "command": "./../outside"
+    },
+    "bareOk": {
+      "type": "stdio",
+      "command": "npx"
+    },
+    "badHTTP": {
+      "type": "streamable-http",
+      "url": "http://example.com/mcp"
+    },
+    "userinfo": {
+      "type": "streamable-http",
+      "url": "https://user:pass@example.com/mcp"
+    },
+    "fragment": {
+      "type": "streamable-http",
+      "url": "https://example.com/mcp#frag"
+    },
+    "dupHeaders": {
+      "type": "streamable-http",
+      "url": "https://example.com/mcp",
+      "headers": {
+        "X-A": "1",
+        "x-a": "2"
+      }
+    },
+    "badCwd": {
+      "type": "stdio",
+      "command": "echo",
+      "cwd": "data"
+    }
+  }
+}

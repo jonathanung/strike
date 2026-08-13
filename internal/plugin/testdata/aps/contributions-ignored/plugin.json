@@ -1,0 +1,7 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "cf.contrib-ignored",
+  "contributions": {
+    "skills": [{ "path": "skills/from-contrib/SKILL.md" }]
+  }
+}
