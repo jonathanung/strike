@@ -1,5 +1,6 @@
 /**
- * Mode secondary navigation: tab strip on desktop/tablet, accessible list/sheet on phone (WEBUI.12).
+ * Mode secondary navigation: wrapping tab list on desktop/tablet, accessible
+ * list/sheet on phone (WEBUI.12). Desktop must not clip into a horizontal scroller.
  */
 import type { SurfaceDef } from "./surfaces";
 import type { ShellProfile } from "./shellProfile";
@@ -16,7 +17,7 @@ export type SurfaceNavProps = {
 
 /**
  * Phone: vertical list (sheet-friendly, not a compressed tab strip).
- * Desktop/tablet: existing Tabs strip.
+ * Desktop/tablet: Tabs that wrap to a readable list instead of overflow-x clip.
  */
 export function SurfaceNav({
   modeLabel,
