@@ -967,9 +967,45 @@ main {
   border-left: 1px solid var(--rule);
   min-width: 0;
   overflow: hidden;
+  position: relative;
   display: flex;
   flex-direction: column;
 }
+.session-group {
+  flex: 0 1 auto;
+  max-height: 55%;
+  overflow: auto;
+  padding: 12px 16px 8px;
+  border-bottom: 1px solid var(--rule);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+.session-group-pane { min-height: 0; }
+.session-group-facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 10px;
+  margin: 0 0 0;
+  font-size: 10px;
+}
+.inspector .session-group-facts {
+  margin: 0;
+  grid-template-columns: auto 1fr;
+}
+.inspector .session-group-facts dt,
+.inspector .session-group-facts dd {
+  margin: 0;
+  padding: 2px 0;
+  border: 0;
+}
+.session-group-facts dt { color: var(--muted); margin: 0; padding: 2px 0; border: 0; }
+.session-group-facts dd { margin: 0; padding: 2px 0; text-align: right; border: 0; overflow-wrap: anywhere; }
+.session-group-fit { font-size: 10px; margin: 8px 0 0; color: var(--warning); }
+.session-group-fit.critical { color: var(--signal); }
+.session-group-queue { margin: 0; }
+.session-group-queue .prompt-queue { padding-left: 22px; }
 .navigation.collapsed, .inspector.collapsed { opacity: 0; pointer-events: none; }
 .panel-resize {
   position: absolute;
