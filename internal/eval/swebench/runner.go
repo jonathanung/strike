@@ -252,6 +252,10 @@ func (r *Runner) runOne(
 		return finish(StatusError, "materialize: "+err.Error())
 	}
 	row.Image = mat.Image
+	if mat.ContainerID != "" && r.RT != nil {
+		cid := mat.ContainerID
+		defer func() { _ = r.RT.Remove(context.Background(), cid) }()
+	}
 	if !cfg.KeepWorkspace {
 		defer os.RemoveAll(instDir)
 	}
@@ -262,19 +266,32 @@ func (r *Runner) runOne(
 		}
 	}
 
-	prompt := BuildAgentPrompt(in)
+	prompt := FormatAgentPrompt(in, mat.ContainerID)
 	agentTimeout := cfg.AgentTimeout
 	if agentTimeout <= 0 {
 		agentTimeout = 30 * time.Minute
 	}
 	agentStart := nowFn()
+	var env []string
+	if mat.ContainerID != "" {
+		if err := WriteEvalTestHelper(instDir); err != nil {
+			return finish(StatusError, "eval-test helper: "+err.Error())
+		}
+		env = append(env, "STRIKE_EVAL_CONTAINER="+mat.ContainerID)
+		if p := os.Getenv("PATH"); p != "" {
+			env = append(env, "PATH="+instDir+string(os.PathListSeparator)+p)
+		} else {
+			env = append(env, "PATH="+instDir)
+		}
+	}
 	execRes, agentErr := agent.Run(ctx, mat.WorkDir, prompt, AgentOpts{
 		Strike:    cfg.StrikeBin,
 		Provider:  cfg.Provider,
 		Model:     cfg.Model,
 		Effort:    cfg.Effort,
 		Timeout:   agentTimeout,
-		ExtraArgs: cfg.ExtraExecArgs,
+		ExtraArgs: WithEvalExecDefaults(cfg.ExtraExecArgs),
+		Env:       env,
 	})
 	row.AgentMs = nowFn().Sub(agentStart).Milliseconds()
 	row.SessionID = execRes.SessionID

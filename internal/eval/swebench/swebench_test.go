@@ -96,6 +96,76 @@ func TestBuildAgentPrompt(t *testing.T) {
 	if !strings.Contains(p, "fixture__repo-1") || !strings.Contains(p, "Fix add()") {
 		t.Fatalf("prompt: %s", p)
 	}
+	for _, want := range []string{"Do not modify tests", "python3 -c", "Host Python"} {
+		if !strings.Contains(p, want) {
+			t.Fatalf("prompt missing %q:\n%s", want, p)
+		}
+	}
+	if strings.Contains(p, "docker exec") {
+		t.Fatalf("no-container prompt should omit docker exec")
+	}
+}
+
+func TestFormatAgentPromptEvalContainer(t *testing.T) {
+	p := FormatAgentPrompt(Instance{InstanceID: "x", ProblemStatement: "y"}, "abc123")
+	if !strings.Contains(p, "docker exec -w /testbed abc123") {
+		t.Fatalf("container prompt: %s", p)
+	}
+	if !strings.Contains(p, "eval-test") {
+		t.Fatalf("helper missing: %s", p)
+	}
+}
+
+func TestWithEvalExecDefaults(t *testing.T) {
+	got := WithEvalExecDefaults(nil)
+	if len(got) != 1 || got[0] != "--sandbox=off" {
+		t.Fatalf("%v", got)
+	}
+	keep := WithEvalExecDefaults([]string{"--sandbox=workspace-write"})
+	if len(keep) != 1 || keep[0] != "--sandbox=workspace-write" {
+		t.Fatalf("override: %v", keep)
+	}
+}
+
+func TestMergeChildEnvOverridesPath(t *testing.T) {
+	t.Setenv("PATH", "/usr/bin")
+	t.Setenv("STRIKE_EVAL_CONTAINER", "old")
+	got := mergeChildEnv([]string{"PATH=/eval:/usr/bin", "STRIKE_EVAL_CONTAINER=cid"})
+	var path, cid string
+	for _, kv := range got {
+		switch {
+		case strings.HasPrefix(kv, "PATH="):
+			if path != "" {
+				t.Fatalf("duplicate PATH: %v", got)
+			}
+			path = kv
+		case strings.HasPrefix(kv, "STRIKE_EVAL_CONTAINER="):
+			if cid != "" {
+				t.Fatalf("duplicate STRIKE_EVAL_CONTAINER: %v", got)
+			}
+			cid = kv
+		}
+	}
+	if path != "PATH=/eval:/usr/bin" {
+		t.Fatalf("PATH = %q", path)
+	}
+	if cid != "STRIKE_EVAL_CONTAINER=cid" {
+		t.Fatalf("cid = %q", cid)
+	}
+}
+
+func TestWriteEvalTestHelper(t *testing.T) {
+	dir := t.TempDir()
+	if err := WriteEvalTestHelper(dir); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "eval-test"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "STRIKE_EVAL_CONTAINER") || !strings.Contains(string(data), "docker exec") {
+		t.Fatalf("helper: %s", data)
+	}
 }
 
 func TestExtractPatch(t *testing.T) {
@@ -320,6 +390,10 @@ func TestRunnerDryRunAndMock(t *testing.T) {
 	if agent.calls != 1 {
 		t.Fatalf("agent calls %d", agent.calls)
 	}
+	joined := strings.Join(agent.opts.ExtraArgs, " ")
+	if !strings.Contains(joined, "--sandbox=off") {
+		t.Fatalf("eval exec defaults: %v", agent.opts.ExtraArgs)
+	}
 }
 
 func TestCLIRuntimeCreateArgs(t *testing.T) {
@@ -347,10 +421,133 @@ func TestCLIRuntimeCreateArgs(t *testing.T) {
 	}
 }
 
+func TestCLIRuntimePullUsesAmd64ForSWEBenchImages(t *testing.T) {
+	var saw []string
+	rt := &CLIRuntime{
+		LookPath: func(string) (string, error) { return "/usr/bin/docker", nil },
+		Run: func(ctx context.Context, name string, args ...string) (string, string, int, error) {
+			saw = args
+			return "", "", 0, nil
+		},
+	}
+	img := DockerImageName("astropy__astropy-7336")
+	if err := rt.Pull(context.Background(), img); err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(saw, " ")
+	if !strings.Contains(joined, "--platform "+EvalImagePlatform) || !strings.Contains(joined, img) {
+		t.Fatalf("pull args %v", saw)
+	}
+	if err := rt.Pull(context.Background(), "alpine:latest"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(strings.Join(saw, " "), "--platform") {
+		t.Fatalf("generic pull should not force platform: %v", saw)
+	}
+}
+
 func TestBuildTestCommandDjango(t *testing.T) {
-	cmd := buildTestCommand("django/django", []string{"test_foo"})
+	cmd := buildTestCommand("django/django", []string{
+		"test_accent (dbshell.test_postgresql.PostgreSqlDbshellCommandTestCase)",
+		"SIGINT is ignored in Python and passed to psql to abort quries.",
+		"test_basic (dbshell.test_postgresql.PostgreSqlDbshellCommandTestCase)",
+	})
 	if !strings.Contains(cmd, "runtests.py") {
 		t.Fatalf("%s", cmd)
+	}
+	if !strings.Contains(cmd, "--settings=test_sqlite") {
+		t.Fatalf("missing sqlite settings: %s", cmd)
+	}
+	if !strings.Contains(cmd, "dbshell.test_postgresql.PostgreSqlDbshellCommandTestCase.test_accent") {
+		t.Fatalf("unittest selector not converted: %s", cmd)
+	}
+	if strings.Contains(cmd, "test_accent (") || strings.Contains(cmd, "SIGINT") {
+		t.Fatalf("raw FAIL_TO_PASS leaked: %s", cmd)
+	}
+}
+
+func TestDjangoTestSelector(t *testing.T) {
+	got := djangoTestSelector("test_foo (mod.Class)")
+	if got != "mod.Class.test_foo" {
+		t.Fatalf("%q", got)
+	}
+	if djangoTestSelector("a docstring used as a name.") != "" {
+		t.Fatal("expected skip")
+	}
+}
+
+func TestParseInstanceEvalScript(t *testing.T) {
+	raw := []byte(`{"instance_id":"django__django-1","repo":"django/django","base_commit":"abc","problem_statement":"fix","eval_script":"#!/bin/bash\necho hi\n","FAIL_TO_PASS":["t"],"PASS_TO_PASS":[]}`)
+	var in Instance
+	if err := json.Unmarshal(raw, &in); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(in.EvalScript, "echo hi") {
+		t.Fatalf("%q", in.EvalScript)
+	}
+}
+
+func TestDockerGraderUsesEvalScript(t *testing.T) {
+	var copied []string
+	var scripts []string
+	rt := &recordingRuntime{
+		onCopyTo: func(src, dst string) {
+			copied = append(copied, dst)
+			if dst == "/tmp/test.sh" {
+				b, _ := os.ReadFile(src)
+				scripts = append(scripts, string(b))
+			}
+		},
+		onExec: func(cmd []string) (string, string, int, error) {
+			return "ok", "", 0, nil
+		},
+	}
+	g := &DockerGrader{RT: rt, WorkRoot: t.TempDir(), Pull: false, Timeout: time.Minute}
+	in := Instance{
+		InstanceID: "django__django-1",
+		Repo:       "django/django",
+		TestPatch:  "diff --git a/t b/t\n+x\n",
+		EvalScript: "#!/bin/bash\n./tests/runtests.py --verbosity 2 dbshell.test_postgresql\n",
+		FailToPass: []string{"test_accent (dbshell.test_postgresql.Cls)"},
+	}
+	if _, err := g.Grade(context.Background(), in, "diff --git a/x b/x\n+fix\n", ""); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range copied {
+		if c == "/tmp/test.patch" {
+			t.Fatalf("eval_script path should not pre-apply test.patch: %v", copied)
+		}
+	}
+	if len(scripts) != 1 || !strings.Contains(scripts[0], "dbshell.test_postgresql") {
+		t.Fatalf("eval script not used: %v", scripts)
+	}
+}
+
+func TestEvalTestsPassed(t *testing.T) {
+	pass := ">>>>> Start Test Output\n==================== 340 passed, 1 warnings in 1.91 seconds ====================\n"
+	if !evalTestsPassed(pass) {
+		t.Fatal("expected pass")
+	}
+	fail := ">>>>> Start Test Output\n==================== 1 failed, 339 passed in 1.91 seconds ====================\n"
+	if evalTestsPassed(fail) {
+		t.Fatal("expected fail")
+	}
+	djangoOK := "test_basic (dbshell.test_postgresql.Cls) ... ok\n"
+	if !evalTestsPassed(djangoOK) {
+		t.Fatal("django ok")
+	}
+	djangoFail := "test_basic (dbshell.test_postgresql.Cls) ... FAIL\n"
+	if evalTestsPassed(djangoFail) {
+		t.Fatal("django fail")
+	}
+	sec, ok := evalTestSection("noise\n>>>>> Start Test Output\n340 passed, 1 warnings in 1.91 seconds\n>>>>> End Test Output\ngit checkout fail\n")
+	if !ok || !evalTestsPassed(sec) {
+		t.Fatalf("section=%q ok=%v", sec, ok)
+	}
+	// Pytest on stdout, xtrace markers on stderr — still score from the summary.
+	split := "==================== 340 passed, 1 warnings in 1.91 seconds ====================\n+ : '>>>>> Start Test Output'\n+ pytest -q\n+ : '>>>>> End Test Output'\nerror: pathspec\n"
+	if !evalTestsPassed(split) {
+		t.Fatal("expected full-log pass when summary is outside the marker sandwich")
 	}
 }
 
@@ -468,10 +665,12 @@ type fakeAgent struct {
 	res   ExecResult
 	err   error
 	calls int
+	opts  AgentOpts
 }
 
-func (f *fakeAgent) Run(context.Context, string, string, AgentOpts) (ExecResult, error) {
+func (f *fakeAgent) Run(_ context.Context, _ string, _ string, opts AgentOpts) (ExecResult, error) {
 	f.calls++
+	f.opts = opts
 	return f.res, f.err
 }
 
@@ -525,6 +724,44 @@ func TestExtractPatchExcludesStrikeConfig(t *testing.T) {
 	}
 	if strings.Contains(patch, ".strike") || strings.Contains(patch, "leanCode") {
 		t.Fatalf("project config leaked into patch: %s", patch)
+	}
+}
+
+func TestExtractPatchExcludesRepro(t *testing.T) {
+	dir := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := execCommand(dir, args...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v: %s", err, out)
+		}
+	}
+	run("git", "init")
+	run("git", "config", "user.email", "t@example.com")
+	run("git", "config", "user.name", "t")
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run("git", "add", "a.txt")
+	run("git", "commit", "-m", "init")
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("two\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "repro.py"), []byte("print(1)\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "repro_pg.py"), []byte("print(2)\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	patch, err := ExtractPatch(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(patch, "a.txt") {
+		t.Fatalf("expected a.txt in patch: %s", patch)
+	}
+	if strings.Contains(patch, "repro.py") || strings.Contains(patch, "repro_pg.py") {
+		t.Fatalf("repro helper leaked into patch: %s", patch)
 	}
 }
 

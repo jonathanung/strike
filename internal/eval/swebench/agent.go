@@ -153,7 +153,7 @@ func runStrikeExec(ctx context.Context, workDir, bin string, args []string, env 
 	cmd.Dir = workDir
 	cmd.Stdin = strings.NewReader(prompt)
 	if len(env) > 0 {
-		cmd.Env = append(os.Environ(), env...)
+		cmd.Env = mergeChildEnv(env)
 	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -209,11 +209,32 @@ func ParseExecJSON(stdout []byte) (ExecResult, error) {
 
 // BuildAgentPrompt formats the SWE-bench problem for strike exec.
 func BuildAgentPrompt(in Instance) string {
+	return FormatAgentPrompt(in, "")
+}
+
+// FormatAgentPrompt is BuildAgentPrompt plus optional live-eval container instructions.
+func FormatAgentPrompt(in Instance, evalContainer string) string {
 	var b strings.Builder
-	b.WriteString("You are fixing a real GitHub issue inside a checked-out repository at the current working directory.\n")
-	b.WriteString("Implement a minimal correct patch that resolves the issue. Do not modify tests unless required.\n")
-	b.WriteString("When done, ensure the working tree contains your changes (git-tracked edits).\n\n")
-	fmt.Fprintf(&b, "Instance: %s\n", in.InstanceID)
+	b.WriteString("You are solving a SWE-bench instance. The repository is already checked out at the current working directory.\n")
+	b.WriteString("Produce a minimal correct source patch that fixes the issue. Official tests run later in Docker and are the score.\n\n")
+	b.WriteString("Rules:\n")
+	b.WriteString("- Do not modify tests, fixtures, or add docs unless the issue requires it.\n")
+	b.WriteString("- Do not add explanatory comments. Do not commit, push, or rewrite git history.\n")
+	b.WriteString("- Leave edits in the working tree as git-tracked file changes. An empty diff fails.\n")
+	b.WriteString("- Host Python/packages will NOT match the eval image. Do not spend turns debugging host imports (numpy, pkg_resources, version mismatches).\n")
+	b.WriteString("- `python3 -c` / interpreter one-liners are blocked. Write a small .py file and run that file instead.\n")
+	b.WriteString("- Read existing tests that already describe the bug, then change production code.\n")
+	if evalContainer != "" {
+		b.WriteString("\nA Linux eval container has this repo bind-mounted at /testbed.\n")
+		b.WriteString("Verify with the `eval-test` helper on PATH (wraps docker exec + conda testbed).\n")
+		b.WriteString("Write repro scripts in this checkout (bind-mounted at /testbed), not host /tmp:\n")
+		b.WriteString("  eval-test python repro.py\n")
+		b.WriteString("  eval-test python -m pytest path/to/test.py -q --tb=short\n")
+		fmt.Fprintf(&b, "Raw equivalent: docker exec -w /testbed %s bash -lc 'source /opt/miniconda3/etc/profile.d/conda.sh && conda activate testbed && <cmd>'\n", evalContainer)
+		b.WriteString("STRIKE_EVAL_CONTAINER is set. Prefer eval-test over host Python.\n")
+		b.WriteString("Delete repro.py / helper files before finishing so they are not in the git diff.\n")
+	}
+	fmt.Fprintf(&b, "\nInstance: %s\n", in.InstanceID)
 	if in.Repo != "" {
 		fmt.Fprintf(&b, "Repository: %s\n", in.Repo)
 	}
@@ -221,4 +242,60 @@ func BuildAgentPrompt(in Instance) string {
 	b.WriteString(strings.TrimSpace(in.ProblemStatement))
 	b.WriteString("\n")
 	return b.String()
+}
+
+// WithEvalExecDefaults appends eval-friendly strike exec flags unless already set.
+// Host OS sandbox blocks docker.sock and some test runners; eval isolation is Docker.
+func WithEvalExecDefaults(extra []string) []string {
+	hasSandbox := false
+	for _, a := range extra {
+		if a == "--sandbox" || strings.HasPrefix(a, "--sandbox=") {
+			hasSandbox = true
+			break
+		}
+	}
+	out := append([]string{}, extra...)
+	if !hasSandbox {
+		out = append(out, "--sandbox=off")
+	}
+	return out
+}
+
+// mergeChildEnv overlays extra KEY=value pairs onto the current process env.
+// Duplicate keys are replaced (append-only would leave the original PATH first,
+// and Go's getenv uses the first match).
+func mergeChildEnv(extra []string) []string {
+	override := make(map[string]string, len(extra))
+	order := make([]string, 0, len(extra))
+	for _, kv := range extra {
+		k, v, ok := strings.Cut(kv, "=")
+		if !ok || k == "" {
+			continue
+		}
+		if _, seen := override[k]; !seen {
+			order = append(order, k)
+		}
+		override[k] = v
+	}
+	base := os.Environ()
+	out := make([]string, 0, len(base)+len(override))
+	for _, kv := range base {
+		k, _, ok := strings.Cut(kv, "=")
+		if !ok {
+			out = append(out, kv)
+			continue
+		}
+		if v, hit := override[k]; hit {
+			out = append(out, k+"="+v)
+			delete(override, k)
+			continue
+		}
+		out = append(out, kv)
+	}
+	for _, k := range order {
+		if v, ok := override[k]; ok {
+			out = append(out, k+"="+v)
+		}
+	}
+	return out
 }

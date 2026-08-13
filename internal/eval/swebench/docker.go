@@ -51,6 +51,12 @@ type ExecOpts struct {
 	Timeout time.Duration
 }
 
+// EvalImagePlatform is the OCI platform for official SWE-bench eval images.
+// They are published as linux/amd64 only (sweb.eval.x86_64.*). Apple Silicon
+// hosts must pull/create with this platform so Docker uses qemu instead of
+// failing with "no matching manifest for linux/arm64".
+const EvalImagePlatform = "linux/amd64"
+
 // DockerImageName returns the Docker Hub image for a SWE-bench instance.
 // Mirrors mini-swe-agent / SWE-bench convention:
 //
@@ -58,6 +64,20 @@ type ExecOpts struct {
 func DockerImageName(instanceID string) string {
 	id := strings.ReplaceAll(instanceID, "__", "_1776_")
 	return fmt.Sprintf("docker.io/swebench/sweb.eval.x86_64.%s:latest", strings.ToLower(id))
+}
+
+// dockerPlatformArgs returns --platform linux/amd64 for official SWE-bench
+// x86_64 images so Docker on Apple Silicon does not look for an arm64 manifest.
+func dockerPlatformArgs(image string) []string {
+	if !needsAmd64Platform(image) {
+		return nil
+	}
+	return []string{"--platform", EvalImagePlatform}
+}
+
+func needsAmd64Platform(image string) bool {
+	s := strings.ToLower(image)
+	return strings.Contains(s, "x86_64") || strings.Contains(s, "amd64") || strings.Contains(s, "sweb.eval")
 }
 
 // CLIRuntime implements Runtime via the docker CLI.
@@ -123,7 +143,9 @@ func (r *CLIRuntime) Available(ctx context.Context) error {
 
 // Pull implements Runtime.
 func (r *CLIRuntime) Pull(ctx context.Context, image string) error {
-	_, stderr, code, err := r.run(ctx, r.bin(), "pull", image)
+	args := append([]string{"pull"}, dockerPlatformArgs(image)...)
+	args = append(args, image)
+	_, stderr, code, err := r.run(ctx, r.bin(), args...)
 	if err != nil {
 		return fmt.Errorf("swebench: docker pull %s: %w", image, err)
 	}
@@ -136,6 +158,7 @@ func (r *CLIRuntime) Pull(ctx context.Context, image string) error {
 // Create implements Runtime.
 func (r *CLIRuntime) Create(ctx context.Context, image string, opts CreateOpts) (string, error) {
 	args := []string{"create"}
+	args = append(args, dockerPlatformArgs(image)...)
 	if opts.Name != "" {
 		args = append(args, "--name", opts.Name)
 	}

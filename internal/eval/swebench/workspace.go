@@ -100,7 +100,35 @@ func MaterializeWorkspace(ctx context.Context, rt Runtime, instanceID, hostDir s
 
 	cleanup = false
 	_ = rt.Remove(context.Background(), id)
-	return MaterializeResult{WorkDir: repo, Image: image}, nil
+
+	liveID := startLiveEvalContainer(ctx, rt, image, repo)
+	return MaterializeResult{WorkDir: repo, Image: image, ContainerID: liveID}, nil
+}
+
+// startLiveEvalContainer bind-mounts the host checkout at /testbed so the
+// agent can docker exec into the official conda env. Best-effort: empty id
+// on failure (agent can still edit the host tree).
+func startLiveEvalContainer(ctx context.Context, rt Runtime, image, repo string) string {
+	if rt == nil || repo == "" {
+		return ""
+	}
+	abs, err := filepath.Abs(repo)
+	if err != nil {
+		abs = repo
+	}
+	id, err := rt.Create(ctx, image, CreateOpts{
+		WorkDir:    TestbedPath,
+		Entrypoint: []string{"sleep", "infinity"},
+		HostBinds:  []string{abs + ":" + TestbedPath},
+	})
+	if err != nil {
+		return ""
+	}
+	if err := rt.Start(ctx, id); err != nil {
+		_ = rt.Remove(context.Background(), id)
+		return ""
+	}
+	return id
 }
 
 // copyDir recursively copies a directory (best-effort fallback).
@@ -149,4 +177,33 @@ func DefaultRunID(now time.Time) string {
 		now = time.Now().UTC()
 	}
 	return now.UTC().Format("20060102T150405Z")
+}
+
+const evalTestHelper = `#!/bin/bash
+set -euo pipefail
+cid="${STRIKE_EVAL_CONTAINER:-}"
+if [[ -z "$cid" ]]; then
+  echo "eval-test: STRIKE_EVAL_CONTAINER is unset" >&2
+  exit 1
+fi
+if [[ $# -eq 0 ]]; then
+  echo "usage: eval-test <command>..." >&2
+  exit 2
+fi
+# Quote each arg for the inner bash -lc so pytest paths survive.
+cmd=$(printf '%q ' "$@")
+exec docker exec -w /testbed "$cid" bash -lc "if [ -f /opt/miniconda3/etc/profile.d/conda.sh ]; then . /opt/miniconda3/etc/profile.d/conda.sh; conda activate testbed 2>/dev/null || true; elif [ -f /root/miniconda3/etc/profile.d/conda.sh ]; then . /root/miniconda3/etc/profile.d/conda.sh; conda activate testbed 2>/dev/null || true; fi; ${cmd}"
+`
+
+// WriteEvalTestHelper installs a PATH wrapper that docker-execs into the
+// live eval conda env. Lives next to repo/ so it is not part of model_patch.
+func WriteEvalTestHelper(instDir string) error {
+	if instDir == "" {
+		return fmt.Errorf("swebench: empty instDir")
+	}
+	if err := os.MkdirAll(instDir, 0o755); err != nil {
+		return err
+	}
+	path := filepath.Join(instDir, "eval-test")
+	return os.WriteFile(path, []byte(evalTestHelper), 0o755)
 }

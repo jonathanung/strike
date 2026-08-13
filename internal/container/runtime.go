@@ -54,6 +54,8 @@ type CreateOpts struct {
 	Network string
 	// ExtraArgs are appended before the image (escape hatch for ports, resources).
 	ExtraArgs []string
+	// Platform is passed as --platform (e.g. linux/amd64 for SWE-bench images).
+	Platform string
 }
 
 // ExecOpts configures container exec.
@@ -77,6 +79,11 @@ type CLI struct {
 	LookPath func(string) (string, error)
 
 	resolved string // cached binary after first resolve
+
+	// Platform, when set, is passed as --platform on pull and create
+	// unless CreateOpts.Platform overrides it. Used by eval so x86_64
+	// SWE-bench images run under qemu on Apple Silicon.
+	Platform string
 }
 
 // NewCLI returns a CLI runtime. binary may be empty for auto-detect.
@@ -181,7 +188,12 @@ func (c *CLI) Pull(ctx context.Context, image string) error {
 	if strings.TrimSpace(image) == "" {
 		return fmt.Errorf("container: pull: empty image")
 	}
-	_, stderr, code, err := c.run(ctx, "pull", image)
+	args := []string{"pull"}
+	if p := c.platform(); p != "" {
+		args = append(args, "--platform", p)
+	}
+	args = append(args, image)
+	_, stderr, code, err := c.run(ctx, args...)
 	if err != nil {
 		return fmt.Errorf("container: pull %s: %w", image, err)
 	}
@@ -191,12 +203,26 @@ func (c *CLI) Pull(ctx context.Context, image string) error {
 	return nil
 }
 
+func (c *CLI) platform() string {
+	if c != nil && strings.TrimSpace(c.Platform) != "" {
+		return strings.TrimSpace(c.Platform)
+	}
+	return ""
+}
+
 // Create implements Runtime.
 func (c *CLI) Create(ctx context.Context, image string, opts CreateOpts) (string, error) {
 	if strings.TrimSpace(image) == "" {
 		return "", fmt.Errorf("container: create: empty image")
 	}
 	args := []string{"create"}
+	platform := strings.TrimSpace(opts.Platform)
+	if platform == "" {
+		platform = c.platform()
+	}
+	if platform != "" {
+		args = append(args, "--platform", platform)
+	}
 	if opts.Name != "" {
 		args = append(args, "--name", opts.Name)
 	}

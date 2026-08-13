@@ -96,23 +96,27 @@ func (g *DockerGrader) Grade(ctx context.Context, in Instance, patch string, _ s
 	}
 	defer os.RemoveAll(tmpDir)
 
-	// Official harness order: apply test_patch (adds FAIL_TO_PASS tests), then
-	// the model patch. Without test_patch the FAIL_TO_PASS selectors often
-	// do not exist in the base checkout.
-	if tp := strings.TrimSpace(in.TestPatch); tp != "" {
-		tpPath := filepath.Join(tmpDir, "test.patch")
-		if err := os.WriteFile(tpPath, []byte(NormalizePatch(tp)), 0o600); err != nil {
-			return GradeResult{}, err
-		}
-		if err := g.RT.CopyTo(ctx, id, tpPath, "/tmp/test.patch"); err != nil {
-			return GradeResult{}, err
-		}
-		if err := g.applyInContainer(ctx, id, tmpDir, "/tmp/test.patch", "test_patch"); err != nil {
-			return GradeResult{
-				Resolved: false,
-				Detail:   err.Error(),
-				Duration: time.Since(start),
-			}, nil
+	// Official harness order: apply the model patch, then run eval.sh which
+	// restores tests, applies test_patch, and invokes the repo test runner.
+	// Without eval_script we approximate: apply test_patch then model patch,
+	// then a reconstructed command.
+	useEval := strings.TrimSpace(in.EvalScript) != ""
+	if !useEval {
+		if tp := strings.TrimSpace(in.TestPatch); tp != "" {
+			tpPath := filepath.Join(tmpDir, "test.patch")
+			if err := os.WriteFile(tpPath, []byte(NormalizePatch(tp)), 0o600); err != nil {
+				return GradeResult{}, err
+			}
+			if err := g.RT.CopyTo(ctx, id, tpPath, "/tmp/test.patch"); err != nil {
+				return GradeResult{}, err
+			}
+			if err := g.applyInContainer(ctx, id, tmpDir, "/tmp/test.patch", "test_patch"); err != nil {
+				return GradeResult{
+					Resolved: false,
+					Detail:   err.Error(),
+					Duration: time.Since(start),
+				}, nil
+			}
 		}
 	}
 
@@ -133,8 +137,12 @@ func (g *DockerGrader) Grade(ctx context.Context, in Instance, patch string, _ s
 
 	f2p := in.FailToPass
 	p2p := in.PassToPass
-	testCmd := buildTestCommand(in.Repo, append(append([]string{}, f2p...), p2p...))
-	testScript := `set -e
+	var testScript string
+	if useEval {
+		testScript = strings.TrimSpace(in.EvalScript) + "\n"
+	} else {
+		testCmd := buildTestCommand(in.Repo, append(append([]string{}, f2p...), p2p...))
+		testScript = `set -e
 cd /testbed
 # Activate common SWE-bench conda env when present.
 if [ -f /opt/miniconda3/etc/profile.d/conda.sh ]; then
@@ -145,6 +153,7 @@ elif [ -f /root/miniconda3/etc/profile.d/conda.sh ]; then
   conda activate testbed 2>/dev/null || true
 fi
 ` + testCmd + "\n"
+	}
 
 	testPath := filepath.Join(tmpDir, "test.sh")
 	if err := os.WriteFile(testPath, []byte(testScript), 0o700); err != nil {
@@ -160,6 +169,12 @@ fi
 	}
 	detail := strings.TrimSpace(stdout + "\n" + stderr)
 	resolved := code == 0
+	if useEval {
+		// xtrace (set -x) is on stderr; pytest is on stdout. Concatenation
+		// splits the official Start/End markers away from the summary line,
+		// so score the full log.
+		resolved = evalTestsPassed(detail)
+	}
 	// Best-effort counts: without log parsers we treat whole-suite exit as all-or-nothing.
 	gr := GradeResult{
 		Resolved:    resolved,
@@ -214,18 +229,22 @@ func buildTestCommand(repo string, tests []string) string {
 	if len(tests) == 0 {
 		return "echo 'no tests listed'; exit 1"
 	}
-	// Quote each test selector.
+	repo = strings.ToLower(repo)
+	if strings.Contains(repo, "django") {
+		tests = djangoRuntestsArgs(tests)
+		if len(tests) == 0 {
+			return "echo 'no tests listed'; exit 1"
+		}
+	}
 	quoted := make([]string, len(tests))
 	for i, t := range tests {
 		quoted[i] = shellQuote(t)
 	}
 	joined := strings.Join(quoted, " ")
-	repo = strings.ToLower(repo)
 	switch {
 	case strings.Contains(repo, "django"):
-		// Django tests often use runtests.py; fall back to pytest when present.
 		return fmt.Sprintf(`if [ -f tests/runtests.py ]; then
-  python tests/runtests.py --verbosity=2 %s
+  ./tests/runtests.py --verbosity 2 --settings=test_sqlite --parallel 1 %s
 elif command -v pytest >/dev/null 2>&1; then
   pytest -xvs %s
 else
@@ -240,11 +259,90 @@ fi`, joined, joined)
 	}
 }
 
+// djangoRuntestsArgs converts SWE-bench FAIL_TO_PASS names to runtests.py
+// selectors. Dataset rows look like `test_foo (module.Class)` or a docstring;
+// runtests.py wants `module.Class.test_foo`.
+func djangoRuntestsArgs(tests []string) []string {
+	out := make([]string, 0, len(tests))
+	seen := make(map[string]struct{}, len(tests))
+	for _, t := range tests {
+		sel := djangoTestSelector(t)
+		if sel == "" {
+			continue
+		}
+		if _, ok := seen[sel]; ok {
+			continue
+		}
+		seen[sel] = struct{}{}
+		out = append(out, sel)
+	}
+	return out
+}
+
+func djangoTestSelector(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	// "test_accent (dbshell.test_postgresql.PostgreSqlDbshellCommandTestCase)"
+	open := strings.Index(s, " (")
+	if open > 0 && strings.HasSuffix(s, ")") {
+		name := s[:open]
+		inner := strings.TrimSuffix(s[open+2:], ")")
+		if inner != "" && !strings.ContainsAny(name, " \t") && (strings.HasPrefix(name, "test") || strings.HasPrefix(name, "app_")) {
+			return inner + "." + name
+		}
+		return "" // docstring used as a test id; skip
+	}
+	// Already a dotted selector / path.
+	if strings.Contains(s, " ") {
+		return "" // prose / docstring
+	}
+	return s
+}
+
 func shellQuote(s string) string {
 	if s == "" {
 		return "''"
 	}
 	return "'" + strings.ReplaceAll(s, "'", `'"'"'`) + "'"
+}
+
+const (
+	evalTestStart = ">>>>> Start Test Output"
+	evalTestEnd   = ">>>>> End Test Output"
+)
+
+func evalTestSection(log string) (string, bool) {
+	i := strings.Index(log, evalTestStart)
+	j := strings.Index(log, evalTestEnd)
+	if i < 0 || j < 0 || j <= i {
+		return "", false
+	}
+	return strings.TrimSpace(log[i:j]), true
+}
+
+func evalTestsPassed(section string) bool {
+	if section == "" {
+		return false
+	}
+	if hasPytestCount(section, "failed") || hasPytestCount(section, "error") {
+		return false
+	}
+	if hasPytestCount(section, "passed") {
+		return true
+	}
+	if strings.Contains(section, " ... FAIL") || strings.Contains(section, " ... ERROR") || strings.Contains(section, "_FailedTest") {
+		return false
+	}
+	if strings.Contains(section, " ... ok") || strings.Contains(section, " ... OK") {
+		return true
+	}
+	return false
+}
+
+func hasPytestCount(section, word string) bool {
+	return strings.Contains(section, " "+word+",") || strings.Contains(section, " "+word+" in ")
 }
 
 // NoneGrader skips grading.
