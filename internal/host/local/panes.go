@@ -78,17 +78,17 @@ func (a panesAdapter) List() ([]host.PaneInfo, error) {
 			scopeOrd = 0
 		}
 
-		for _, raw := range m.Contributions.Panes {
-			entry, err := plugin.ParsePaneEntry(raw)
+		for _, pref := range plugin.PluginPaneRefs(m, dp.Root) {
+			def, _, err := plugin.ReadPaneDefinition(dp.Root, pref.RelPath)
 			if err != nil {
 				continue
 			}
-			def, _, err := plugin.ReadPaneDefinition(dp.Root, entry.Path)
-			if err != nil {
-				continue
-			}
-			if def.ID != entry.ID {
-				continue
+			paneID := def.ID
+			if pref.EntryID != "" {
+				if def.ID != pref.EntryID {
+					continue
+				}
+				paneID = pref.EntryID
 			}
 			net := strings.TrimSpace(def.Permissions.Network)
 			if net == "" {
@@ -120,7 +120,7 @@ func (a panesAdapter) List() ([]host.PaneInfo, error) {
 				continue
 			}
 			info := host.PaneInfo{
-				ID:             entry.ID,
+				ID:             paneID,
 				PluginID:       m.ID,
 				PluginVersion:  m.Version,
 				Scope:          pluginScopeString(dp.Scope),
@@ -131,12 +131,12 @@ func (a panesAdapter) List() ([]host.PaneInfo, error) {
 				DefinitionJSON: defJSON,
 				LoadError:      loadErr,
 			}
-			seenIDs[entry.ID] = append(seenIDs[entry.ID], m.ID)
+			seenIDs[paneID] = append(seenIDs[paneID], m.ID)
 			cands = append(cands, cand{
 				info:     info,
 				scopeOrd: scopeOrd,
 				pluginID: m.ID,
-				paneID:   entry.ID,
+				paneID:   paneID,
 			})
 		}
 	}

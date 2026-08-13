@@ -490,7 +490,17 @@ func compileHarnesses(p Plugin, userNames map[string]struct{}, claimed map[strin
 	base := Diagnostic{PluginID: p.ID, Version: p.Version, Source: p.Source}
 	_ = claimed
 
-	for i, raw := range p.Manifest.Contributions.Harnesses {
+	raws := p.Manifest.Contributions.Harnesses
+	if p.Manifest.Format == FormatAPS {
+		if skipStrikeCLI(p.Manifest) {
+			return nil, nil
+		}
+		var extra []Diagnostic
+		raws, extra = loadStrikeCLIHarnessRaws(p.Root, base)
+		diags = append(diags, extra...)
+	}
+
+	for i, raw := range raws {
 		e, err := parseHarnessEntry(raw)
 		if err != nil {
 			d := base
@@ -550,7 +560,17 @@ func compileHooks(p Plugin, trusted bool) ([]CompiledHook, []Diagnostic) {
 	var diags []Diagnostic
 	base := Diagnostic{PluginID: p.ID, Version: p.Version, Source: p.Source}
 
-	for i, raw := range p.Manifest.Contributions.Hooks {
+	raws := p.Manifest.Contributions.Hooks
+	if p.Manifest.Format == FormatAPS {
+		if skipStrikeCLI(p.Manifest) {
+			return nil, nil
+		}
+		var extra []Diagnostic
+		raws, extra = loadStrikeCLIHookRaws(p.Root, base)
+		diags = append(diags, extra...)
+	}
+
+	for i, raw := range raws {
 		e, err := parseHookEntry(raw)
 		if err != nil {
 			d := base

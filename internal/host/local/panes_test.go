@@ -146,3 +146,69 @@ func TestPanesListSkipsDisabled(t *testing.T) {
 		t.Fatalf("disabled plugin contributed panes: %+v", list)
 	}
 }
+
+func TestPanesList_APSStrikeCLI(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	global := filepath.Join(home, ".strike")
+	root := filepath.Join(global, "plugins", "acme.aps")
+	if err := os.MkdirAll(filepath.Join(root, "com.strike.cli", "panes"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "acme.aps",
+  "version": "1.0.0"
+}`
+	if err := os.WriteFile(filepath.Join(root, "plugin.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	static := `{
+  "schemaVersion": 1,
+  "id": "acme.status",
+  "title": "APS Status",
+  "mode": "static",
+  "permissions": {"host": [], "fs": "none", "network": "none", "command": "none"},
+  "view": {"type": "text", "text": "hi"}
+}`
+	proc := `{
+  "schemaVersion": 1,
+  "id": "acme.board",
+  "title": "APS Board",
+  "mode": "process",
+  "command": "com.strike.cli/bin/board",
+  "permissions": {"host": [], "fs": "none", "network": "none", "command": "none"}
+}`
+	if err := os.WriteFile(filepath.Join(root, "com.strike.cli", "panes", "status.json"), []byte(static), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "com.strike.cli", "panes", "board.json"), []byte(proc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewPanesForTest("", global, "")
+	list, err := svc.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := map[string]host.PaneInfo{}
+	for _, p := range list {
+		byID[p.ID] = p
+	}
+	st, ok := byID["acme.status"]
+	if !ok || st.Mode != host.PaneModeStatic || !st.Trusted {
+		t.Fatalf("static = %+v list=%+v", st, list)
+	}
+	if st.PluginID != "acme.aps" {
+		t.Fatalf("plugin id = %s", st.PluginID)
+	}
+	pr, ok := byID["acme.board"]
+	if !ok || pr.Mode != host.PaneModeProcess {
+		t.Fatalf("process = %+v", pr)
+	}
+	if pr.Trusted {
+		t.Fatal("process pane must stay untrusted until trust is granted")
+	}
+	if pr.LoadError == "" || !strings.Contains(pr.LoadError, "trust") {
+		t.Fatalf("want trust load error, got %q", pr.LoadError)
+	}
+}

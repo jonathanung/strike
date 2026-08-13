@@ -257,6 +257,9 @@ func runPluginInspect(args []string, stdout, stderr io.Writer) int {
 			themes = len(loaded.Themes)
 			providers = len(loaded.Providers)
 			mcp = loaded.MCPCount
+			if p.Manifest.Format == plugin.FormatAPS {
+				harnesses, hooks, panes = plugin.APSExecCounts(*p.Manifest, p.Root)
+			}
 		}
 		fmt.Fprintf(stdout, "contribs: agents=%d skills=%d workflows=%d themes=%d providers=%d mcp=%d harnesses=%d hooks=%d panes=%d\n",
 			agents, skills, workflows, themes, providers, mcp, harnesses, hooks, panes)

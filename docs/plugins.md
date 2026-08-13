@@ -409,7 +409,11 @@ discovery** under `com.strike.cli/`.
 Directory discovery: regular files matching the patterns above, sorted by
 relative path ascending. Invalid file → skip that entry with diagnostic;
 plugin continues. Missing `com.strike.cli/` is not an error. The directory
-MUST resolve inside the plugin root.
+MUST resolve inside the plugin root. Unknown keys inside
+`extensions.com.strike.cli` are **reported and ignored** (forward compatible;
+§3.4) — they do not reject the plugin or skip the directory. Invalid JSON
+types for **known** keys skip Strike-only contributions only; portable skills
+and `mcp.json` still load.
 
 ### 3.9 `com.strike.cli` example
 
@@ -1032,7 +1036,8 @@ authoring format from this contract forward.
 | Themes packaging | #511 (`theme.Catalog` + `/theme` preview) | §7.4 |
 | Pane ABI | #522 | §7.9 + [plugin-panes.md](plugin-panes.md) |
 | Pane host / web | #731 #732 | implement [plugin-panes.md](plugin-panes.md); no TUI type leakage to web |
-| APS loaders | #1143–#1148 | Implement this contract; not specified here as code |
+| APS portable load | #1143 | skills/`SKILL.md` + `mcp.json` |
+| APS Strike-only load | #1144 (`com.strike.cli/`) | §3.4, §3.8, §7.1–7.5, §7.7–7.9 |
 
 ---
 
@@ -1104,3 +1109,17 @@ authoring format from this contract forward.
 | Lockfile provenance enough to reproduce | `registry`, `package`, `version`, artifact `url`/`digest`, content `digest` |
 | Network + archive paths bounded; traversal tested | `downloadBytes` caps; `sanitizeArchivePath` / zip-slip tests in `catalog_test.go` |
 | Search / install / outdated / update CLI | `strike plugin search\|install catalog:…\|outdated\|update` |
+
+## 18. Acceptance mapping (#1144)
+
+| AC | Implementation |
+|---|---|
+| APS `com.strike.cli/` agents/workflows/themes/providers/extra skills load with plugin provenance | `Discover` + `config` loaders + `theme.Catalog` (`com.strike.cli/themes`) |
+| Extension harness/hook/process-pane stay inactive without trust | `CompileExecutables` + `HasProcessPanes` + `host/local` panes |
+| APS plugin with no `com.strike.cli/` dir remains valid | missing dir is not an error |
+| Unknown `extensions.com.strike.cli` keys reported and ignored | `parseStrikeCLIExtension`; directory still loads |
+| Invalid type for a known `com.strike.cli` key skips Strike-only files only | `StrikeCLIExtension.SkipContributions` |
+| Other reverse-domain dirs and other `extensions.*` namespaces ignored | directory discovery is `com.strike.cli/` only |
+| Path confinement: extension dir cannot escape plugin root | `resolveStrikeCLIDir` / `ResolveUnderRoot` |
+| Legacy packages keep `contributions` | APS branch only; legacy shim unchanged |
+

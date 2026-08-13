@@ -181,6 +181,64 @@ func TestRunPluginInspectAPS(t *testing.T) {
 	}
 }
 
+func TestRunPluginInspectAPSStrikeCLI(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	work := t.TempDir()
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(work); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+
+	src := filepath.Join(t.TempDir(), "acme.ext")
+	write := func(rel, body string) {
+		t.Helper()
+		p := filepath.Join(src, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("plugin.json", `{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "acme.ext",
+  "version": "1.0.0"
+}`)
+	write("com.strike.cli/agents/reviewer.md", "---\ndescription: r\n---\nReview.\n")
+	write("com.strike.cli/harnesses/choose.json", `{"name":"acme-choose","command":"com.strike.cli/bin/choose"}`)
+	write("com.strike.cli/hooks/pre.json", `{"event":"pre_tool_use","type":"command","command":"com.strike.cli/bin/hook.sh"}`)
+	write("com.strike.cli/panes/status.json", `{
+  "schemaVersion": 1, "id": "acme.status", "title": "S", "mode": "static",
+  "permissions": {"host": [], "fs": "none", "network": "none", "command": "none"},
+  "view": {"type": "text", "text": "hi"}
+}`)
+	write("com.strike.cli/bin/choose", "#!/bin/sh\n")
+	write("com.strike.cli/bin/hook.sh", "#!/bin/sh\n")
+
+	var out, errBuf bytes.Buffer
+	code := runPluginCLI([]string{"install", src, "--scope", "global"}, &out, &errBuf)
+	if code != 0 {
+		t.Fatalf("install: code=%d err=%s out=%s", code, errBuf.String(), out.String())
+	}
+	out.Reset()
+	errBuf.Reset()
+	code = runPluginCLI([]string{"inspect", "acme.ext"}, &out, &errBuf)
+	if code != 0 {
+		t.Fatalf("inspect: code=%d err=%s out=%s", code, errBuf.String(), out.String())
+	}
+	got := out.String()
+	if !strings.Contains(got, "agents=1") || !strings.Contains(got, "harnesses=1") ||
+		!strings.Contains(got, "hooks=1") || !strings.Contains(got, "panes=1") {
+		t.Fatalf("want APS Strike-only contrib counts:\n%s", got)
+	}
+}
+
 func TestRunPluginTrustCLI(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

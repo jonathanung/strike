@@ -4,7 +4,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"charm.land/lipgloss/v2"
 )
@@ -217,6 +219,125 @@ func TestCatalogPluginThemes(t *testing.T) {
 	cat2 := Catalog(work)
 	if _, ok := Lookup(cat2, "plug-theme"); ok {
 		t.Fatal("disabled plugin theme must not appear")
+	}
+}
+
+func TestCatalogPluginThemes_APSStrikeCLI(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	work := t.TempDir()
+
+	plug := filepath.Join(work, ".strike", "plugins", "acme.themes")
+	if err := os.MkdirAll(filepath.Join(plug, "com.strike.cli", "themes"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "acme.themes",
+  "version": "1.0.0"
+}`
+	if err := os.WriteFile(filepath.Join(plug, "plugin.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	themeBody := `{"name":"APS Theme","id":"aps-theme","colors":{"accent":"#654321"}}`
+	if err := os.WriteFile(filepath.Join(plug, "com.strike.cli", "themes", "aps.json"), []byte(themeBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Top-level themes/ and other namespaces must not load for APS.
+	if err := os.MkdirAll(filepath.Join(plug, "themes"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(plug, "themes", "legacy.json"), []byte(`{"name":"No","id":"no-theme","colors":{"accent":"#000000"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cat := Catalog(work)
+	e, ok := Lookup(cat, "aps-theme")
+	if !ok {
+		t.Fatal("APS plugin theme missing from catalog")
+	}
+	if e.Source != SourcePlugin || e.PluginID != "acme.themes" || e.Name != "APS Theme" {
+		t.Fatalf("entry=%+v", e)
+	}
+	if _, ok := Lookup(cat, "no-theme"); ok {
+		t.Fatal("top-level themes/ must not load for APS packages")
+	}
+}
+
+func TestCatalogPluginThemes_APSStrikeCLIEscapeRejected(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	work := t.TempDir()
+
+	plug := filepath.Join(work, ".strike", "plugins", "acme.escape")
+	if err := os.MkdirAll(plug, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "acme.escape",
+  "version": "1.0.0"
+}`
+	if err := os.WriteFile(filepath.Join(plug, "plugin.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(home, "outside")
+	if err := os.MkdirAll(filepath.Join(outside, "themes"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	escaped := `{"name":"Escaped","id":"escaped-theme","colors":{"accent":"#ff0000"}}`
+	if err := os.WriteFile(filepath.Join(outside, "themes", "escaped.json"), []byte(escaped), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(plug, "com.strike.cli")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	cat := Catalog(work)
+	if _, ok := Lookup(cat, "escaped-theme"); ok {
+		t.Fatal("symlink-escaped APS theme must not appear in catalog")
+	}
+}
+
+func TestCatalogPluginThemes_APSSkipsNonRegular(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	work := t.TempDir()
+
+	plug := filepath.Join(work, ".strike", "plugins", "acme.fifo")
+	themeDir := filepath.Join(plug, "com.strike.cli", "themes")
+	if err := os.MkdirAll(themeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "acme.fifo",
+  "version": "1.0.0"
+}`
+	if err := os.WriteFile(filepath.Join(plug, "plugin.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	good := `{"name":"OK","id":"ok-theme","colors":{"accent":"#123456"}}`
+	if err := os.WriteFile(filepath.Join(themeDir, "ok.json"), []byte(good), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fifo := filepath.Join(themeDir, "block.json")
+	if err := syscall.Mkfifo(fifo, 0o644); err != nil {
+		t.Skipf("mkfifo unavailable: %v", err)
+	}
+
+	done := make(chan []Entry, 1)
+	go func() { done <- Catalog(work) }()
+	select {
+	case cat := <-done:
+		if _, ok := Lookup(cat, "ok-theme"); !ok {
+			t.Fatal("regular APS theme missing")
+		}
+		if _, ok := Lookup(cat, "block"); ok {
+			t.Fatal("FIFO theme must be skipped")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Catalog blocked on non-regular theme file")
 	}
 }
 
