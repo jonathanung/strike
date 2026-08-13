@@ -1,10 +1,12 @@
 package plugin
 
 import (
+	"go/ast"
 	"go/parser"
 	"go/token"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -54,6 +56,7 @@ func TestAPSConformanceChecklistCoverage(t *testing.T) {
 	if len(apsAppendixA) == 0 {
 		t.Fatal("appendix A mapping is empty")
 	}
+	subtests := apsConformanceSubtests(t)
 	seen := map[string]struct{}{}
 	for _, item := range apsAppendixA {
 		if item.ID == "" || item.Bullet == "" || item.Coverage == "" {
@@ -67,10 +70,59 @@ func TestAPSConformanceChecklistCoverage(t *testing.T) {
 		if strings.HasPrefix(item.Coverage, "client-N/A:") {
 			continue
 		}
-		if !strings.HasPrefix(item.Coverage, "TestAPSConformance/") {
+		const prefix = "TestAPSConformance/"
+		if !strings.HasPrefix(item.Coverage, prefix) {
 			t.Errorf("%s: coverage %q must be TestAPSConformance/<subtest> or client-N/A:", item.ID, item.Coverage)
+			continue
+		}
+		name := strings.TrimPrefix(item.Coverage, prefix)
+		if _, ok := subtests[name]; !ok {
+			t.Errorf("%s: coverage subtest %q is not registered in TestAPSConformance", item.ID, name)
 		}
 	}
+}
+
+func apsConformanceSubtests(t *testing.T) map[string]struct{} {
+	t.Helper()
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "aps_conformance_test.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := map[string]struct{}{}
+	for _, decl := range f.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Name.Name != "TestAPSConformance" || fn.Body == nil {
+			continue
+		}
+		for _, stmt := range fn.Body.List {
+			call, ok := stmt.(*ast.ExprStmt)
+			if !ok {
+				continue
+			}
+			sel, ok := call.X.(*ast.CallExpr)
+			if !ok {
+				continue
+			}
+			fun, ok := sel.Fun.(*ast.SelectorExpr)
+			if !ok || fun.Sel.Name != "Run" || len(sel.Args) < 1 {
+				continue
+			}
+			lit, ok := sel.Args[0].(*ast.BasicLit)
+			if !ok || lit.Kind != token.STRING {
+				continue
+			}
+			name, err := strconv.Unquote(lit.Value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			out[name] = struct{}{}
+		}
+	}
+	if len(out) == 0 {
+		t.Fatal("no TestAPSConformance subtests found")
+	}
+	return out
 }
 
 func TestAPSConformance(t *testing.T) {
@@ -344,6 +396,21 @@ func testAPSMCPSchemaAndVariants(t *testing.T) {
 		return d.Path == "mcp.json" && (d.Code == "schema_version" || strings.Contains(d.Message, "MCP disabled"))
 	}) {
 		t.Fatalf("expected MCP disable diagnostic: %v", res.Diagnostics)
+	}
+
+	opts, _ = installAPSFixture(t, "mcp-extra-field")
+	res = Discover(opts)
+	p = mustAPSPlugin(t, res, "cf.mcp-extra")
+	if len(p.Skills) != 1 {
+		t.Fatalf("unknown mcp.json field must disable MCP only, skills=%+v diags=%v", p.Skills, res.Diagnostics)
+	}
+	if p.MCPCount != 0 {
+		t.Fatalf("closed mcp.json extra field MCPCount=%d", p.MCPCount)
+	}
+	if !diagContains(res.Diagnostics, func(d Diagnostic) bool {
+		return d.Path == "mcp.json" && strings.Contains(d.Message, "extra") && strings.Contains(d.Message, "MCP disabled")
+	}) {
+		t.Fatalf("expected unknown top-level mcp.json field diagnostic: %v", res.Diagnostics)
 	}
 
 	opts, _ = installAPSFixture(t, "mcp-mixed")
@@ -635,7 +702,10 @@ func testAPSIgnoreUnsupportedComponentTypes(t *testing.T) {
 	res := Discover(opts)
 	p := mustAPSPlugin(t, res, "cf.portable")
 	if p.Manifest.Format != FormatAPS || len(p.Skills) != 1 || p.MCPCount != 2 {
-		t.Fatalf("undeclared files (config.json, bin/) must be ignored: %+v diags=%v", p, res.Diagnostics)
+		t.Fatalf("skills+MCP must still load, got skills=%d mcp=%d diags=%v", len(p.Skills), p.MCPCount, res.Diagnostics)
+	}
+	if len(p.Agents) != 0 || len(p.Workflows) != 0 {
+		t.Fatalf("root agents/ and commands/ are not v1 portable types: agents=%+v workflows=%+v", p.Agents, p.Workflows)
 	}
 }
 
