@@ -114,4 +114,25 @@ describe("web theme parity with TUI Default()", () => {
     expect(lightExplicit["--ink"]).toBe(TUI_DEFAULT.text.light.toLowerCase());
     expect(lightExplicit["--acid"]).toBe(TUI_DEFAULT.accent.light.toLowerCase());
   });
+
+  it("aliases leftover token names onto cockpit roles", () => {
+    const root = css.slice(css.indexOf(":root {"), css.indexOf("}", css.indexOf(":root {")));
+    expect(root).toMatch(/--text:\s*var\(--ink\)/);
+    expect(root).toMatch(/--bg:\s*var\(--ground\)/);
+    expect(root).toMatch(/--border:\s*var\(--rule\)/);
+    expect(root).toMatch(/--panel:\s*var\(--surface\)/);
+    expect(root).toMatch(/--accent:\s*var\(--acid\)/);
+    expect(css).toMatch(/--text\/--bg\/--border\/--panel\/--accent/);
+  });
+
+  it("uses cockpit tokens for Team/Review selected tabs and child-agent cards", () => {
+    expect(css).toMatch(
+      /\.team-view-tabs button\.active[\s\S]*?background:\s*var\(--acid\);\s*color:\s*var\(--mark-ink\);\s*border-color:\s*var\(--ink\)/,
+    );
+    expect(css).toMatch(
+      /\.review-tabs button\.active\s*\{\s*background:\s*var\(--acid\);\s*color:\s*var\(--mark-ink\);\s*border-color:\s*var\(--ink\)/,
+    );
+    expect(css).toMatch(/\.child-row:hover,\s*\.child-row\.active\s*\{\s*border-color:\s*var\(--rule\);\s*background:\s*color-mix\(in srgb,\s*var\(--surface\)/);
+    expect(css).toMatch(/\.child-detail\s*\{[^}]*border:\s*1px solid var\(--rule\)/);
+  });
 });
