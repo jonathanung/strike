@@ -321,6 +321,7 @@ func ApplyPluginExecutables(workDir string, cfg Config, exec plugin.ExecutableSe
 				Command: m.Command,
 				Args:    append([]string(nil), m.Args...),
 				Env:     cloneStringMap(m.Env),
+				Cwd:     m.Cwd,
 				URL:     m.URL,
 				Headers: cloneStringMap(m.Headers),
 			}

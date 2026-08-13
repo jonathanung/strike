@@ -109,8 +109,12 @@ func TestResolveUnderRoot_RejectsEscape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(got, root) {
-		t.Fatalf("got %s not under %s", got, root)
+	wantRoot := root
+	if resolved, err := filepath.EvalSymlinks(root); err == nil {
+		wantRoot = resolved
+	}
+	if !strings.HasPrefix(got, wantRoot) {
+		t.Fatalf("got %s not under %s", got, wantRoot)
 	}
 }
 

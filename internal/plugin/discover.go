@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -47,6 +48,10 @@ type Plugin struct {
 	Workflows []FileRef
 	Themes    []FileRef
 	Providers []FileRef
+
+	// MCPCount is discovered MCP servers (legacy contributions.mcp or APS mcp.json
+	// entries that are not skipped). Trust is not applied here.
+	MCPCount int
 }
 
 // Result is the outcome of Discover.
@@ -180,17 +185,37 @@ func scanScope(strikeRoot string, scope Scope, strikeVer string, diags *[]Diagno
 
 func loadOne(root string, scope Scope, strikeVer string) (*Plugin, []Diagnostic) {
 	var diags []Diagnostic
-	m, manPath, err := ReadManifest(root)
+	m, manPath, parseDiags, err := readManifest(root)
 	if err != nil {
+		code := "malformed"
+		var unsupp unsupportedSchemaError
+		if errors.As(err, &unsupp) || strings.Contains(err.Error(), "unsupported Agent Plugins $schema") {
+			code = "schema_version"
+		}
 		diags = append(diags, Diagnostic{
 			Severity: SeverityError,
-			Code:     "malformed",
+			Code:     code,
 			Message:  err.Error(),
 			Source:   scope,
 			Path:     root,
 		})
 		return nil, diags
 	}
+	for i := range parseDiags {
+		if parseDiags[i].PluginID == "" {
+			parseDiags[i].PluginID = m.ID
+		}
+		if parseDiags[i].Version == "" {
+			parseDiags[i].Version = m.Version
+		}
+		if parseDiags[i].Source == "" {
+			parseDiags[i].Source = scope
+		}
+		if parseDiags[i].Path == "" {
+			parseDiags[i].Path = manPath
+		}
+	}
+	diags = append(diags, parseDiags...)
 	base := Diagnostic{
 		PluginID: m.ID,
 		Version:  m.Version,
@@ -198,7 +223,15 @@ func loadOne(root string, scope Scope, strikeVer string) (*Plugin, []Diagnostic)
 		Path:     manPath,
 	}
 
-	if m.SchemaVersion > SchemaVersion {
+	if m.Format == FormatLegacy {
+		d := base
+		d.Severity = SeverityWarning
+		d.Code = "deprecated"
+		d.Message = "format=legacy"
+		diags = append(diags, d)
+	}
+
+	if m.Format != FormatAPS && m.SchemaVersion > SchemaVersion {
 		d := base
 		d.Severity = SeverityError
 		d.Code = "schema_version"
@@ -207,13 +240,17 @@ func loadOne(root string, scope Scope, strikeVer string) (*Plugin, []Diagnostic)
 		return nil, diags
 	}
 
-	if ok, reason := strikeCompatible(strikeVer, m.Strike.Min, m.Strike.Max); !ok {
-		d := base
-		d.Severity = SeverityError
-		d.Code = "strike_version"
-		d.Message = reason
-		diags = append(diags, d)
-		return nil, diags
+	// APS: missing strike.min does not skip the plugin. Legacy still requires it
+	// (validated at parse). When APS extension provides a range, honor it.
+	if min := strings.TrimSpace(m.Strike.Min); min != "" {
+		if ok, reason := strikeCompatible(strikeVer, m.Strike.Min, m.Strike.Max); !ok {
+			d := base
+			d.Severity = SeverityError
+			d.Code = "strike_version"
+			d.Message = reason
+			diags = append(diags, d)
+			return nil, diags
+		}
 	}
 
 	if m.Digest != "" {
@@ -294,21 +331,57 @@ func loadOne(root string, scope Scope, strikeVer string) (*Plugin, []Diagnostic)
 		return refs
 	}
 
-	p.Agents = resolve("agents", m.Contributions.Agents, func(p string) bool {
-		return strings.EqualFold(filepath.Ext(p), ".md")
-	})
-	p.Skills = resolve("skills", m.Contributions.Skills, func(p string) bool {
-		base := filepath.Base(p)
-		return strings.EqualFold(filepath.Ext(p), ".md") || strings.EqualFold(base, "SKILL.md")
-	})
-	p.Workflows = resolve("workflows", m.Contributions.Workflows, func(p string) bool {
-		return strings.EqualFold(filepath.Ext(p), ".json")
-	})
-	p.Themes = resolve("themes", m.Contributions.Themes, func(p string) bool {
-		return strings.EqualFold(filepath.Ext(p), ".json")
-	})
+	if m.Format == FormatAPS {
+		// Portable skills from skills/<dir>/SKILL.md only. Strike-only
+		// contributions (agents/workflows/…) land in APS.3 (#1144).
+		skillRefs, skillDiags := discoverAPSSkills(root, base)
+		diags = append(diags, skillDiags...)
+		p.Skills = skillRefs
+		mcpFile, mcpDiags, mcpErr := loadAPSMCPFile(root)
+		if mcpErr != nil {
+			d := base
+			d.Severity = SeverityWarning
+			d.Code = "malformed"
+			d.Path = "mcp.json"
+			d.Message = mcpErr.Error() + "; MCP disabled for this plugin"
+			diags = append(diags, d)
+		}
+		for _, d := range mcpDiags {
+			d.PluginID = m.ID
+			d.Version = m.Version
+			d.Source = scope
+			if d.Path == "" {
+				d.Path = "mcp.json"
+			}
+			diags = append(diags, d)
+		}
+		if !mcpFile.disabled {
+			n := 0
+			for _, s := range mcpFile.servers {
+				if !s.Skip {
+					n++
+				}
+			}
+			p.MCPCount = n
+		}
+	} else {
+		p.Agents = resolve("agents", m.Contributions.Agents, func(p string) bool {
+			return strings.EqualFold(filepath.Ext(p), ".md")
+		})
+		p.Skills = resolve("skills", m.Contributions.Skills, func(p string) bool {
+			base := filepath.Base(p)
+			return strings.EqualFold(filepath.Ext(p), ".md") || strings.EqualFold(base, "SKILL.md")
+		})
+		p.Workflows = resolve("workflows", m.Contributions.Workflows, func(p string) bool {
+			return strings.EqualFold(filepath.Ext(p), ".json")
+		})
+		p.Themes = resolve("themes", m.Contributions.Themes, func(p string) bool {
+			return strings.EqualFold(filepath.Ext(p), ".json")
+		})
+		p.MCPCount = len(m.Contributions.MCP)
+	}
 
-	// Providers with optional profileName.
+	// Providers with optional profileName (legacy only; APS.3 loads com.strike.cli).
 	provEntries := append([]ProviderEntry(nil), m.Contributions.Providers...)
 	sort.SliceStable(provEntries, func(i, j int) bool { return provEntries[i].Path < provEntries[j].Path })
 	for _, e := range provEntries {
@@ -341,19 +414,21 @@ func loadOne(root string, scope Scope, strikeVer string) (*Plugin, []Diagnostic)
 		})
 	}
 
-	// If every passive path failed and there were passive entries, skip plugin
-	// entirely so it cannot partially shadow. Executable-only plugins are kept
-	// in the list with empty passive slices (no activation here).
-	passiveDeclared := len(m.Contributions.Agents)+len(m.Contributions.Skills)+
-		len(m.Contributions.Workflows)+len(m.Contributions.Themes)+len(m.Contributions.Providers) > 0
-	passiveOK := len(p.Agents)+len(p.Skills)+len(p.Workflows)+len(p.Themes)+len(p.Providers) > 0
-	if passiveDeclared && !passiveOK {
-		d := base
-		d.Severity = SeverityError
-		d.Code = "malformed"
-		d.Message = "no valid passive contributions; plugin skipped"
-		diags = append(diags, d)
-		return nil, diags
+	if m.Format != FormatAPS {
+		// If every passive path failed and there were passive entries, skip plugin
+		// entirely so it cannot partially shadow. Executable-only plugins are kept
+		// in the list with empty passive slices (no activation here).
+		passiveDeclared := len(m.Contributions.Agents)+len(m.Contributions.Skills)+
+			len(m.Contributions.Workflows)+len(m.Contributions.Themes)+len(m.Contributions.Providers) > 0
+		passiveOK := len(p.Agents)+len(p.Skills)+len(p.Workflows)+len(p.Themes)+len(p.Providers) > 0
+		if passiveDeclared && !passiveOK {
+			d := base
+			d.Severity = SeverityError
+			d.Code = "malformed"
+			d.Message = "no valid passive contributions; plugin skipped"
+			diags = append(diags, d)
+			return nil, diags
+		}
 	}
 
 	// Note executable contributions when present. CompileExecutables refines
@@ -428,4 +503,9 @@ func (r Result) AllFileRefs(kind string) []FileRef {
 		}
 	}
 	return out
+}
+
+// LoadOne validates a plugin root the same way Discover does (no enablement filter).
+func LoadOne(root string, scope Scope, strikeVer string) (*Plugin, []Diagnostic) {
+	return loadOne(root, scope, strikeVer)
 }

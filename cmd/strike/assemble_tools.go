@@ -1009,6 +1009,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 				Command: s.Command,
 				Args:    s.Args,
 				Env:     s.Env,
+				Cwd:     s.Cwd,
 				URL:     s.URL,
 				Headers: s.Headers,
 				OAuth:   configMCPOAuth(s.OAuth),
