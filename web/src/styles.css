@@ -309,8 +309,20 @@ button:disabled, select:disabled, input:disabled, textarea:disabled {
 }
 .ui-tab:disabled { opacity: .35; }
 .ui-tabpanel { min-width: 0; }
-/* Inspector tabs reuse the shared tab look; never shrink below label width. */
-.inspector-tabs { display: flex; flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; border-bottom: 1px solid var(--rule); scrollbar-width: thin; }
+/* Inspector tabs wrap instead of clipping into a horizontal scroller.
+   overflow-x:hidden (not visible) so overflow-y:auto cannot compute x back to auto. */
+.inspector-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  width: 100%;
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  max-height: 40vh;
+  border-bottom: 1px solid var(--rule);
+  scrollbar-width: thin;
+}
 .inspector-tabs .ui-tab,
 .inspector-tabs button {
   flex: 0 0 auto;
