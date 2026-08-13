@@ -16,5 +16,6 @@ describe("composer CSS scoping", () => {
     expect(completionBlock).toMatch(/flex-direction:\s*column\s*;/);
     expect(completionBlock).not.toMatch(/column-reverse/);
     expect(css).toMatch(/\.completion button\s*\{[^}]*text-transform:\s*none/);
+    expect(css).not.toMatch(/grid-template-columns:\s*150px/);
   });
 });

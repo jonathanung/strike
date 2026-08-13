@@ -8,6 +8,7 @@ import { Tabs } from "./Tabs";
 import { StatusBadge, statusKindFrom } from "./Status";
 import { CapabilityUnavailable, Notice } from "./Notice";
 import { Button } from "./Button";
+import { ListRow } from "./ListRow";
 import { listFocusable, trapTabKey } from "./focus";
 
 afterEach(() => cleanup());
@@ -154,6 +155,26 @@ describe("Button", () => {
   });
 });
 
+describe("ListRow", () => {
+  it("lays out title and muted meta on one compact row", () => {
+    render(<ListRow title="/help" meta="Show help" />);
+    const row = screen.getByRole("button", { name: /\/help/ });
+    expect(row).toHaveClass("ui-list-row");
+    expect(row.querySelector(".ui-list-row-main")).toBeTruthy();
+    expect(row.querySelector(".ui-list-row-title")).toHaveTextContent("/help");
+    expect(row.querySelector(".ui-list-row-meta")).toHaveTextContent("Show help");
+    expect(row).not.toHaveAttribute("aria-selected");
+  });
+
+  it("uses option roles without aria-pressed", () => {
+    render(<ListRow role="option" active title="Open MCP" meta="Ops · mcp" />);
+    const option = screen.getByRole("option", { name: /Open MCP/ });
+    expect(option).toHaveClass("ui-list-row", "active");
+    expect(option).toHaveAttribute("aria-selected", "true");
+    expect(option).not.toHaveAttribute("aria-pressed");
+  });
+});
+
 describe("token CSS foundation", () => {
   it("defines shared primitive classes and density variables", () => {
     const dir = dirname(fileURLToPath(import.meta.url));
@@ -180,5 +201,19 @@ describe("token CSS foundation", () => {
     expect(inspectorRule?.[0]).not.toMatch(/flex:\s*1\b/);
     const size = inspectorRule?.[0].match(/font-size:\s*(\d+)px/);
     expect(Number(size?.[1])).toBeGreaterThanOrEqual(11);
+  });
+
+  it("shares compact single-line chrome across ListRow, palette, and completion", () => {
+    const dir = dirname(fileURLToPath(import.meta.url));
+    const css = readFileSync(resolve(dir, "../styles.css"), "utf8");
+    expect(css).not.toMatch(/grid-template-columns:\s*150px/);
+    const family = css.match(/\.ui-list-row,[\s\S]*?\.completion button\s*\{[\s\S]*?\n\}/);
+    expect(family?.[0]).toMatch(/display:\s*flex/);
+    expect(family?.[0]).not.toMatch(/flex-direction:\s*column/);
+    const selected = css.match(
+      /\.ui-list-row\.active[\s\S]*?\.completion button\[aria-selected="true"\]\s*\{[\s\S]*?\n\}/,
+    );
+    expect(selected?.[0]).toMatch(/color-mix\(in srgb,\s*var\(--acid\)/);
+    expect(css).toMatch(/\.ui-list-row-main\s*\{[^}]*flex-direction:\s*row/);
   });
 });
