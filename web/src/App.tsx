@@ -665,9 +665,11 @@ export default function App() {
     const token = leadingSlashToken(draft, composerCursor);
     const start = token?.start ?? 0;
     const rest = token ? draft.slice(token.end) : "";
-    const pad = item.insert.endsWith(" ") || /^\s/.test(rest) ? "" : " ";
-    const next = `${draft.slice(0, start)}${item.insert}${pad}${rest}`;
-    const caret = start + item.insert.length + pad.length;
+    // TUI inserts Spec.Name (no trailing space) then a delimiter only when the next rune is not whitespace.
+    const insert = item.insert.replace(/\s+$/, "");
+    const pad = /^\s/.test(rest) ? "" : " ";
+    const next = `${draft.slice(0, start)}${insert}${pad}${rest}`;
+    const caret = start + insert.length + pad.length;
     restoreCaret.current = caret;
     setDraft(next);
     setComposerCursor(caret);

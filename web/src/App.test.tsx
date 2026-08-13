@@ -234,6 +234,22 @@ describe("App", () => {
     expect(box).toHaveValue("");
   });
 
+  it("does not double-space when accepting an arg-taking slash over existing remainder", async () => {
+    render(<App />);
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    const box = screen.getByLabelText("Instruction") as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: "/prv argument", selectionStart: 4, selectionEnd: 4 } });
+    expect(screen.getByRole("option", { name: /^\/provider/i })).toBeInTheDocument();
+    fireEvent.keyDown(box, { key: "Tab" });
+    expect(box).toHaveValue("/provider argument");
+    expect(screen.queryByRole("listbox", { name: "Composer completions" })).not.toBeInTheDocument();
+
+    fireEvent.change(box, { target: { value: "/prv\nargument", selectionStart: 4, selectionEnd: 4 } });
+    expect(screen.getByRole("option", { name: /^\/provider/i })).toBeInTheDocument();
+    fireEvent.keyDown(box, { key: "Tab" });
+    expect(box).toHaveValue("/provider\nargument");
+  });
+
   it("does not steal ArrowUp/Enter from history browse when the recalled prompt is a slash token", async () => {
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const url = String(input);
