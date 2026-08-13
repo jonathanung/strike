@@ -10,7 +10,7 @@ import {
   type PaneSnapshot,
 } from "./panesApi";
 
-export function PanesPanel({ available, focusId }: { available: boolean; focusId?: string }) {
+export function PanesPanel({ available, focusId, readOnly }: { available: boolean; focusId?: string; readOnly?: boolean }) {
   const [items, setItems] = useState<PaneInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -112,7 +112,7 @@ export function PanesPanel({ available, focusId }: { available: boolean; focusId
   };
 
   const onKey = async (key: string) => {
-    if (!active || !snap || snap.mode !== "process") return;
+    if (readOnly || !active || !snap || snap.mode !== "process") return;
     try {
       await paneInput(active, { kind: "key", key, mods: [] });
       const s = await paneSnapshot(active);
@@ -177,9 +177,9 @@ export function PanesPanel({ available, focusId }: { available: boolean; focusId
       {active && snap && (
         <section
           className="plugin-pane-surface"
-          tabIndex={0}
+          tabIndex={readOnly ? undefined : 0}
           aria-label={snap.title || snap.id}
-          onKeyDown={(e) => {
+          onKeyDown={readOnly ? undefined : (e) => {
             if (e.key === "Enter") {
               e.preventDefault();
               void onKey("enter");
@@ -201,6 +201,7 @@ export function PanesPanel({ available, focusId }: { available: boolean; focusId
             <strong>{snap.title || snap.id}</strong>
             {snap.status && <span className="muted">{snap.status}</span>}
             <span className="muted">{snap.mode}</span>
+            {readOnly && <span className="muted">read-only</span>}
           </header>
           {snap.error ? (
             <div className="pane-error" role="alert">

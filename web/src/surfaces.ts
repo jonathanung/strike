@@ -498,7 +498,7 @@ export function paneSurfaceFromInfo(pane: {
   return {
     id: surfaceId,
     label: rawTitle || surfaceId,
-    modes: ["ops"],
+    modes: ["chat", "ops"],
     capability: "panes",
     attention: pane.loadError ? "badge" : "none",
     lazyMount: true,

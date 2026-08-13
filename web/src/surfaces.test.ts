@@ -174,16 +174,43 @@ describe("dynamic pane surfaces (WEBUI.12)", () => {
     clearDynamicSurfaces();
   });
 
-  it("registers pane contributions under ops without shadowing builtins", () => {
+  it("registers pane contributions under chat and ops without shadowing builtins", () => {
     const def = paneSurfaceFromInfo({ id: "weather", title: "Weather" });
     expect(def?.id).toBe("pane:weather");
+    expect(def?.modes).toEqual(["chat", "ops"]);
     registerDynamicSurface(def!);
     registerDynamicSurface({ ...def!, id: "settings" }); // must not shadow
     expect(getSurface("settings")?.label).toBe("settings");
     const ops = inspectorSurfaces("ops", { panes: true }).map((s) => s.id);
     expect(ops).toContain("pane:weather");
+    expect(ops).toContain("panes");
+    const chat = inspectorSurfaces("chat", { panes: true }).map((s) => s.id);
+    expect(chat).toContain("pane:weather");
+    expect(chat).not.toContain("panes");
+    expect(inspectorSurfacesForShell("chat", { panes: true }).map((s) => s.id)).toContain("pane:weather");
     unregisterDynamicSurface("pane:weather");
     expect(getSurface("pane:weather")).toBeUndefined();
+  });
+
+  it("keeps chat mode when opening a pane surface from chat", () => {
+    const def = paneSurfaceFromInfo({ id: "weather", title: "Weather" });
+    registerDynamicSurface(def!);
+    const r = resolveModeSurface({
+      mode: "chat",
+      surface: "pane:weather",
+      caps: { panes: true },
+    });
+    expect(r.mode).toBe("chat");
+    expect(r.surface).toBe("pane:weather");
+    expect(r.openDrawer).toBe(true);
+  });
+
+  it("does not force the inspector open on cold chat load when panes exist", () => {
+    const def = paneSurfaceFromInfo({ id: "weather", title: "Weather" });
+    registerDynamicSurface(def!);
+    const r = resolveModeSurface({ caps: { panes: true, live: true } });
+    expect(r.mode).toBe("chat");
+    expect(r.openDrawer).toBe(false);
   });
 
   it("bounds and strips control chars from pane titles", () => {
