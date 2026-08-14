@@ -19,7 +19,7 @@ func FormatAgentPrompt(in Instance, evalContainer string) string {
 	b.WriteString("You are an autonomous agent working in a Linux terminal environment.\n")
 	if evalContainer != "" {
 		b.WriteString("The current directory is bind-mounted at /app in the task image.\n")
-		b.WriteString("The bash tool runs inside that image (cwd /app). Absolute /app paths work.\n")
+		b.WriteString("The bash tool runs inside that image (cwd /app). Absolute /app paths work in bash and in read/write/edit/glob.\n")
 		b.WriteString("Host Python/packages will NOT match the image. Prefer bash / eval-exec over host interpreters.\n")
 		b.WriteString("eval-exec on PATH wraps docker exec into the same image:\n")
 		b.WriteString("  eval-exec python3 script.py\n")

@@ -128,7 +128,7 @@ func resolveDanglingSymlink(rootReal, userPath, candidate string) (resolved, rel
 // display is workspace-relative when under workDir; for session-temp hits it is
 // the absolute resolved path (session-scoped; no unrelated host paths).
 func resolveAllowedPath(workDir, tempDir, path string) (resolved, display string, err error) {
-	path = strings.TrimSpace(path)
+	path = mapEvalMountPath(strings.TrimSpace(path), workDir)
 	if path == "" {
 		return "", "", fmt.Errorf("path is empty")
 	}

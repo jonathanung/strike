@@ -1,6 +1,8 @@
 package tool
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -70,6 +72,49 @@ func TestEvalContainerArgvRejectsUnsafeValues(t *testing.T) {
 		if _, ok := evalContainerArgv("true"); ok {
 			t.Fatalf("workdir %q should not route", work)
 		}
+	}
+}
+
+func TestMapEvalMountPath(t *testing.T) {
+	t.Setenv("STRIKE_EVAL_WORKDIR", "/app")
+	work := "/host/ws"
+	if got := mapEvalMountPath("/app/ssl/server.key", work); got != filepath.Join(work, "ssl/server.key") {
+		t.Fatalf("file: %s", got)
+	}
+	if got := mapEvalMountPath("/app", work); got != work {
+		t.Fatalf("root: %s", got)
+	}
+	if got := mapEvalMountPath("/app/../etc/passwd", work); strings.HasPrefix(filepath.Clean(got), work) {
+		t.Fatalf("escaped onto workspace: %s", got)
+	}
+	if got := mapEvalMountPath("ssl/server.key", work); got != "ssl/server.key" {
+		t.Fatalf("relative unchanged: %s", got)
+	}
+	t.Setenv("STRIKE_EVAL_WORKDIR", "")
+	if got := mapEvalMountPath("/app/x", work); got != "/app/x" {
+		t.Fatalf("no env: %s", got)
+	}
+}
+
+func TestResolveAllowedPathMapsEvalMount(t *testing.T) {
+	t.Setenv("STRIKE_EVAL_WORKDIR", "/app")
+	work := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(work, "ssl"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(work, "ssl", "server.key")
+	if err := os.WriteFile(want, []byte("k"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, rel, err := resolveAllowedPath(work, "", "/app/ssl/server.key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("resolved %s want %s", got, want)
+	}
+	if rel != "ssl/server.key" && rel != "ssl\\server.key" {
+		t.Fatalf("rel %s", rel)
 	}
 }
 

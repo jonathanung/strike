@@ -1,6 +1,6 @@
 # Campaign status
 
-**Now:** i1 **ACCEPT** (TB 21/25). Next: i2 (grade-in-live-container for system installs, or exec JSON/timeout leftovers).
+**Now:** i1 ACCEPT (21/25). **i2 TB DEV running** — map `/app` file-tool paths onto the host bind-mount.
 
 Honest DEV so far:
 - SWE 44/60, 45/60 (pair 3 pending)

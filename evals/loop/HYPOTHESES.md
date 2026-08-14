@@ -4,8 +4,9 @@ One change per iteration. Prefer HARNESS over PROMPT. No repo/task special cases
 
 | # | Bucket | Change | Why | Est. DEV salvage |
 |---|---|---|---|---|
-| 1 | HARNESS-TOOL | **i1 in tree:** TB live bind-mount + bash docker-exec + `--sandbox=off` | Host `network.allow` denies `python3`/`openssl`/`git`; `/app` does not exist on the host. Auto-route when `STRIKE_EVAL_CONTAINER` **and** `STRIKE_EVAL_WORKDIR` are set (SWE sets only the container id). | 3–6 / 25 TB (need ≥2σ ≈ 3 extra) |
-| 2 | HARNESS-LOOP | `strike exec --json` flush on agent timeout | gcode/chess 900s → empty stdout → StatusError, no grade | 1–2 / 25 TB |
+| 1 | HARNESS-TOOL | **i1 ACCEPT** TB live bind-mount + bash docker-exec | Host `network.allow` denied `python3`/`openssl`/`git` | 21/25 |
+| 2 | HARNESS-TOOL | **i2 running:** map `/app` → host workDir in read/write/edit/glob | i1 misses: write `/app/design.pl` escaped workspace; read `/app/plasmid.gb` not found | 1–3 / 25 TB |
+| 2b | HARNESS-LOOP | `strike exec --json` flush on agent timeout | gcode/chess 900s → empty stdout (less urgent; gcode now grades) | 0–1 / 25 TB |
 | 3 | HARNESS-TOOL | Bash output keep head+tail (pytest failures at end) | 16KB keep-first; seaborn/sklearn fails show trunc=4–7 | 1–3 SWE |
 | 4 | HARNESS-TOOL | Glob: implicit `**/` when pattern has no slash | `*.py` is cwd-only | 0–2 SWE+TB |
 | 5 | HARNESS-TOOL | `apply_patch` RecordBytes after write | Next edit hits CheckFresh false-positive | low — DEV fails use edit/write |

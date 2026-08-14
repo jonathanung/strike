@@ -108,6 +108,7 @@ func (readTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 }
 
 func absPath(workDir, p string) string {
+	p = mapEvalMountPath(p, workDir)
 	if filepath.IsAbs(p) {
 		return filepath.Clean(p)
 	}

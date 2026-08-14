@@ -2,6 +2,7 @@ package tool
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"unicode"
 )
@@ -42,6 +43,29 @@ func validEvalContainerID(id string) bool {
 		return false
 	}
 	return true
+}
+
+// mapEvalMountPath rewrites an in-image path (STRIKE_EVAL_WORKDIR, usually
+// /app) onto the host workspace so read/write/edit/glob see the bind-mount.
+// Paths outside the mount are returned unchanged.
+func mapEvalMountPath(path, workDir string) string {
+	mount := strings.TrimSpace(os.Getenv("STRIKE_EVAL_WORKDIR"))
+	if workDir == "" || !validEvalWorkdir(mount) {
+		return path
+	}
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return path
+	}
+	cleaned := filepath.Clean(path)
+	rel, err := filepath.Rel(mount, cleaned)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return path
+	}
+	if rel == "." {
+		return workDir
+	}
+	return filepath.Join(workDir, rel)
 }
 
 func validEvalWorkdir(p string) bool {
