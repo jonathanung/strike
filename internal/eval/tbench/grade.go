@@ -52,6 +52,10 @@ type DockerGrader struct {
 	Timeout  time.Duration // default 15m; overridden by instance VerifyTimeout
 	Pull     bool
 	WorkRoot string
+	// LiveContainer, when set, is the agent's bind-mounted task container.
+	// Tests run there (Harbor) so system-level pip/apt from the agent persist.
+	// The runner owns Remove. /app is not replaced; /tests and /logs/verifier are.
+	LiveContainer string
 }
 
 // Grade implements Grader.
@@ -105,29 +109,36 @@ func (g *DockerGrader) Grade(ctx context.Context, in Instance, workDir string) (
 		timeout = time.Duration(in.VerifyTimeout * float64(time.Second))
 	}
 
-	id, err := g.RT.Create(ctx, image, swebench.CreateOpts{
-		WorkDir:    WorkDirInContainer,
-		Entrypoint: []string{"sleep", "infinity"},
-	})
-	if err != nil {
-		return GradeResult{}, err
+	id := strings.TrimSpace(g.LiveContainer)
+	live := id != ""
+	if !live {
+		var err error
+		id, err = g.RT.Create(ctx, image, swebench.CreateOpts{
+			WorkDir:    WorkDirInContainer,
+			Entrypoint: []string{"sleep", "infinity"},
+		})
+		if err != nil {
+			return GradeResult{}, err
+		}
+		defer func() { _ = g.RT.Remove(context.Background(), id) }()
+		if err := g.RT.Start(ctx, id); err != nil {
+			return GradeResult{}, err
+		}
+		// Replace /app and /tests. docker cp of a directory into an existing path
+		// nests (e.g. /tests/tests); remove destinations first so cp creates them.
+		_, _, _, _ = g.RT.Exec(ctx, id, []string{"bash", "-lc",
+			"rm -rf /app /tests; mkdir -p /logs/verifier /logs/agent"},
+			swebench.ExecOpts{Timeout: 2 * time.Minute})
+		if err := g.RT.CopyTo(ctx, id, workDir, WorkDirInContainer); err != nil {
+			return GradeResult{}, fmt.Errorf("copy workspace: %w", err)
+		}
+	} else {
+		// Keep bind-mounted /app and any system packages the agent installed.
+		// Reset only verifier inputs/outputs so a leftover reward.txt cannot pass.
+		_, _, _, _ = g.RT.Exec(ctx, id, []string{"bash", "-lc",
+			"rm -rf /tests /logs/verifier /logs/agent; mkdir -p /logs/verifier /logs/agent"},
+			swebench.ExecOpts{Timeout: 2 * time.Minute})
 	}
-	defer func() { _ = g.RT.Remove(context.Background(), id) }()
-	if err := g.RT.Start(ctx, id); err != nil {
-		return GradeResult{}, err
-	}
-
-	// Replace /app and /tests. docker cp of a directory into an existing path
-	// nests (e.g. /tests/tests); remove destinations first so cp creates them.
-	_, _, _, _ = g.RT.Exec(ctx, id, []string{"bash", "-lc",
-		"rm -rf /app /tests; mkdir -p /logs/verifier /logs/agent"},
-		swebench.ExecOpts{Timeout: 2 * time.Minute})
-
-	// Copy workspace directory onto /app (destination must not already exist).
-	if err := g.RT.CopyTo(ctx, id, workDir, WorkDirInContainer); err != nil {
-		return GradeResult{}, fmt.Errorf("copy workspace: %w", err)
-	}
-	// Copy host .../tests onto /tests (same non-nesting rule).
 	if err := g.RT.CopyTo(ctx, id, testsDir, "/tests"); err != nil {
 		return GradeResult{}, fmt.Errorf("copy tests: %w", err)
 	}

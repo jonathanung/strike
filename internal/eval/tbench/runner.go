@@ -267,6 +267,9 @@ func (r *Runner) runOne(
 	if grader == nil {
 		return finish(StatusError, "nil grader")
 	}
+	if dg, ok := grader.(*DockerGrader); ok {
+		dg.LiveContainer = mat.ContainerID
+	}
 	gradeStart := nowFn()
 	gr, err := grader.Grade(ctx, in, mat.WorkDir)
 	row.GradeMs = nowFn().Sub(gradeStart).Milliseconds()

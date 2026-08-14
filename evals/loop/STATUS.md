@@ -1,6 +1,6 @@
 # Campaign status
 
-**Now:** i1 ACCEPT (21/25). **i2 TB DEV running** — map `/app` file-tool paths onto the host bind-mount.
+**Now:** i1 ACCEPT 21/25. i2 retain (21/25, path map). **i3 TB DEV running** — grade in the live task container so pip/apt persist.
 
 Honest DEV so far:
 - SWE 44/60, 45/60 (pair 3 pending)

@@ -383,6 +383,58 @@ func TestDockerGraderReadsReward(t *testing.T) {
 	}
 }
 
+func TestDockerGraderLiveSkipsAppReplace(t *testing.T) {
+	var execCmds []string
+	var copyDsts []string
+	rt := &recordingRuntime{
+		onCopyTo: func(src, dst string) {
+			copyDsts = append(copyDsts, dst)
+		},
+		onExec: func(cmd []string) (string, string, int, error) {
+			joined := strings.Join(cmd, " ")
+			execCmds = append(execCmds, joined)
+			if strings.Contains(joined, "cat /logs/verifier/reward.json") {
+				return "", "missing", 1, nil
+			}
+			if strings.Contains(joined, "cat /logs/verifier/reward.txt") {
+				return "1\n", "", 0, nil
+			}
+			return "ok", "", 0, nil
+		},
+	}
+	g := &DockerGrader{RT: rt, WorkRoot: t.TempDir(), Pull: false, Timeout: time.Minute, LiveContainer: "live-cid"}
+	gr, err := g.Grade(context.Background(), Instance{
+		InstanceID:  "fixture-task",
+		DockerImage: "fixture/tbench-task:test",
+		TaskDir:     filepath.Join("testdata", "fixture-task"),
+	}, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !gr.Resolved {
+		t.Fatalf("%+v cmds=%v", gr, execCmds)
+	}
+	for _, d := range copyDsts {
+		if d == "/app" {
+			t.Fatalf("live grade must not replace /app: %v", copyDsts)
+		}
+	}
+	foundTests := false
+	for _, d := range copyDsts {
+		if d == "/tests" {
+			foundTests = true
+		}
+	}
+	if !foundTests {
+		t.Fatalf("missing /tests copy: %v", copyDsts)
+	}
+	for _, c := range execCmds {
+		if strings.Contains(c, "rm -rf /app") {
+			t.Fatalf("live grade must not delete /app: %v", execCmds)
+		}
+	}
+}
+
 func TestDockerGraderMissingRewardUnresolved(t *testing.T) {
 	rt := &recordingRuntime{
 		onExec: func(cmd []string) (string, string, int, error) {
