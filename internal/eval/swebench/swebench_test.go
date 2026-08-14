@@ -88,6 +88,24 @@ func TestParseExecJSON(t *testing.T) {
 	}
 }
 
+func TestStrikeExecTimeoutReturnsUsage(t *testing.T) {
+	drv := &StrikeExec{
+		LookPath: func(string) (string, error) { return "/bin/strike", nil },
+		RunCommand: func(ctx context.Context, workDir, bin string, args []string, env []string) ([]byte, []byte, int, error) {
+			<-ctx.Done()
+			return nil, []byte("killed"), -1, ctx.Err()
+		},
+	}
+	dir := t.TempDir()
+	res, err := drv.Run(context.Background(), dir, "do the task", AgentOpts{Timeout: 20 * time.Millisecond})
+	if err == nil || !strings.Contains(err.Error(), "timeout") {
+		t.Fatalf("err=%v", err)
+	}
+	if res.Usage == nil {
+		t.Fatal("expected Usage so the runner grades instead of StatusError")
+	}
+}
+
 func TestBuildAgentPrompt(t *testing.T) {
 	p := BuildAgentPrompt(Instance{
 		InstanceID:       "fixture__repo-1",

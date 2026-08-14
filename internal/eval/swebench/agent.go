@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -121,6 +122,9 @@ func (s *StrikeExec) Run(ctx context.Context, workDir, prompt string, opts Agent
 	}
 	dur := time.Since(start)
 	if runErr != nil {
+		if deadlineExceeded(runCtx, ctx) {
+			return timeoutExecResult(dur, code, stdout, runErr)
+		}
 		return ExecResult{Duration: dur, ExitCode: code, Raw: stdout}, fmt.Errorf("swebench: strike exec: %w\nstderr: %s", runErr, truncate(string(stderr), 500))
 	}
 
@@ -129,6 +133,9 @@ func (s *StrikeExec) Run(ctx context.Context, workDir, prompt string, opts Agent
 	res.ExitCode = code
 	res.Raw = append([]byte(nil), stdout...)
 	if err != nil {
+		if deadlineExceeded(runCtx, ctx) {
+			return timeoutExecResult(dur, code, stdout, err)
+		}
 		// Still return partial result for metrics when possible.
 		if res.Error == "" {
 			res.Error = err.Error()
@@ -139,6 +146,34 @@ func (s *StrikeExec) Run(ctx context.Context, workDir, prompt string, opts Agent
 		res.Error = "strike exec reported ok=false"
 	}
 	return res, nil
+}
+
+func deadlineExceeded(ctxs ...context.Context) bool {
+	for _, c := range ctxs {
+		if c != nil && errors.Is(c.Err(), context.DeadlineExceeded) {
+			return true
+		}
+	}
+	return false
+}
+
+// timeoutExecResult lets the runner grade a partial workspace after the
+// agent wall-clock expires (empty --json stdout used to become StatusError).
+func timeoutExecResult(dur time.Duration, code int, stdout []byte, cause error) (ExecResult, error) {
+	res, _ := ParseExecJSON(stdout)
+	res.Duration = dur
+	res.ExitCode = code
+	res.Raw = append([]byte(nil), stdout...)
+	if res.Error == "" {
+		res.Error = "agent timeout"
+	}
+	if res.Usage == nil {
+		res.Usage = &Usage{}
+	}
+	if cause == nil {
+		cause = context.DeadlineExceeded
+	}
+	return res, fmt.Errorf("swebench: agent timeout: %w", cause)
 }
 
 func (s *StrikeExec) lookPath(file string) (string, error) {
