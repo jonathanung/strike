@@ -38,7 +38,8 @@ Options:
   --provider <provider>              provider to use (anthropic|openai|xai|google|kimi|deepseek|echo; gemini=google alias); overrides config
   --model <model>                    model id; overrides config
   --effort <level>                   reasoning effort (off|low|medium|high|xhigh|max); overrides config
-  --auto, --dangerously-skip-permissions skip configured permission prompts (agent profile denies still apply)
+  --auto                             skip configured permission prompts; network.allow and OS sandbox still apply
+  --dangerously-skip-permissions     skip permission prompts and bypass network.allow (OS sandbox still applies)
   --sandbox <mode>                   OS process sandbox for bash (off|read-only|workspace-write); overrides config
   --i-know                           allow permissionMode yolo when sandbox is off (explicit override)
   --continue                         resume the most recent root session (model history + selections)
@@ -194,25 +195,46 @@ func TestRunCLIEmptyProviderDoesNotOverrideOrEagerlyValidateConfiguredProvider(t
 
 func TestParseCLIOptionsDangerousBooleanForms(t *testing.T) {
 	tests := []struct {
-		args []string
-		want bool
+		args      []string
+		auto      bool
+		dangerous bool
 	}{
-		{args: []string{"--dangerously-skip-permissions"}, want: true},
-		{args: []string{"--dangerously-skip-permissions=true"}, want: true},
-		{args: []string{"--dangerously-skip-permissions=false"}, want: false},
-		{args: []string{"--auto"}, want: true},
-		{args: []string{"--auto=true"}, want: true},
-		{args: []string{"--auto=false"}, want: false},
-		{args: []string{"--auto", "--dangerously-skip-permissions"}, want: true},
+		{args: []string{"--dangerously-skip-permissions"}, dangerous: true},
+		{args: []string{"--dangerously-skip-permissions=true"}, dangerous: true},
+		{args: []string{"--dangerously-skip-permissions=false"}},
+		{args: []string{"--auto"}, auto: true},
+		{args: []string{"--auto=true"}, auto: true},
+		{args: []string{"--auto=false"}},
+		{args: []string{"--auto", "--dangerously-skip-permissions"}, auto: true, dangerous: true},
 	}
 	for _, tt := range tests {
 		opts, err := parseCLIOptions(tt.args)
 		if err != nil {
 			t.Fatalf("parseCLIOptions(%q): %v", tt.args, err)
 		}
-		if opts.dangerouslySkipPermissions != tt.want {
-			t.Errorf("parseCLIOptions(%q) dangerouslySkipPermissions = %t, want %t", tt.args, opts.dangerouslySkipPermissions, tt.want)
+		if opts.auto != tt.auto {
+			t.Errorf("parseCLIOptions(%q) auto = %t, want %t", tt.args, opts.auto, tt.auto)
 		}
+		if opts.dangerouslySkipPermissions != tt.dangerous {
+			t.Errorf("parseCLIOptions(%q) dangerouslySkipPermissions = %t, want %t", tt.args, opts.dangerouslySkipPermissions, tt.dangerous)
+		}
+		if opts.skipPermissionAsks() != (tt.auto || tt.dangerous) {
+			t.Errorf("parseCLIOptions(%q) skipPermissionAsks = %t", tt.args, opts.skipPermissionAsks())
+		}
+		if opts.skipNetworkAllow() != tt.dangerous {
+			t.Errorf("parseCLIOptions(%q) skipNetworkAllow = %t, want %t", tt.args, opts.skipNetworkAllow(), tt.dangerous)
+		}
+	}
+}
+
+func TestSessionNetworkAllowBypass(t *testing.T) {
+	cfg := []string{"api.github.com"}
+	got := sessionNetworkAllow(cfg, false)
+	if len(got) != 1 || got[0] != "api.github.com" {
+		t.Fatalf("keep allow: %#v", got)
+	}
+	if sessionNetworkAllow(cfg, true) != nil {
+		t.Fatal("--dangerously-skip-permissions must clear network.allow")
 	}
 }
 
@@ -524,9 +546,12 @@ func TestNormalPermissionLayersStillAskAndDeny(t *testing.T) {
 }
 
 func TestWarningTextAndPreflightFailuresDoNotWarn(t *testing.T) {
-	const wantWarning = "WARNING: --dangerously-skip-permissions is enabled; configured permission asks are skipped for this invocation. Active agent permission denies still apply. Workflow phase permission widening is auto-accepted; hard sandbox and path protections are unchanged."
+	const wantWarning = "WARNING: --dangerously-skip-permissions is enabled; configured permission asks are skipped and network.allow is bypassed for this invocation. Active agent permission denies still apply. OS sandbox and path protections are unchanged."
 	if dangerousPermissionsWarning != wantWarning {
 		t.Errorf("warning = %q, want %q", dangerousPermissionsWarning, wantWarning)
+	}
+	if !strings.Contains(autoPermissionsWarning, "network.allow are unchanged") {
+		t.Errorf("auto warning should keep network.allow: %q", autoPermissionsWarning)
 	}
 
 	homeFile := filepath.Join(t.TempDir(), "not-a-directory")
@@ -551,27 +576,39 @@ func TestWarningTextAndPreflightFailuresDoNotWarn(t *testing.T) {
 	}
 }
 
-func TestWriteDangerousPermissionsWarning(t *testing.T) {
+func TestWritePermissionsModeWarning(t *testing.T) {
 	tests := []struct {
-		name    string
-		enabled bool
-		want    string
+		name      string
+		auto      bool
+		dangerous bool
+		want      string
 	}{
 		{
-			name:    "enabled writes exactly one line",
-			enabled: true,
-			want:    dangerousPermissionsWarning + "\n",
+			name:      "dangerously-skip writes network bypass warning",
+			dangerous: true,
+			want:      dangerousPermissionsWarning + "\n",
 		},
 		{
-			name: "disabled writes nothing",
+			name: "auto writes keep-sandbox warning",
+			auto: true,
+			want: autoPermissionsWarning + "\n",
+		},
+		{
+			name:      "both prefers dangerously-skip warning",
+			auto:      true,
+			dangerous: true,
+			want:      dangerousPermissionsWarning + "\n",
+		},
+		{
+			name: "neither writes nothing",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var out bytes.Buffer
-			writeDangerousPermissionsWarning(&out, tt.enabled)
+			writePermissionsModeWarning(&out, tt.auto, tt.dangerous)
 			if out.String() != tt.want {
-				t.Errorf("writeDangerousPermissionsWarning(_, %t) = %q, want %q", tt.enabled, out.String(), tt.want)
+				t.Errorf("got %q, want %q", out.String(), tt.want)
 			}
 		})
 	}

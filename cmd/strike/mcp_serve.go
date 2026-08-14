@@ -32,8 +32,9 @@ Options:
   --effort <level>       reasoning effort (off|low|medium|high|xhigh|max)
   --sandbox <mode>       OS process sandbox for bash (off|read-only|workspace-write)
   --i-know               allow permissionMode yolo when sandbox is off
-  --auto, --dangerously-skip-permissions
-                         auto-allow permission asks (required for tools that would prompt)
+  --auto                 skip permission asks; network.allow still applies
+  --dangerously-skip-permissions
+                         skip permission asks and bypass network.allow
   -h, --help             show help
 
 Example (Claude Code / Codex mcp.json):
@@ -114,7 +115,7 @@ func parseMCPServeArgs(args []string) (cliOptions, error) {
 	fs.StringVar(&opts.effort, "effort", "", "")
 	fs.StringVar(&opts.sandbox, "sandbox", "", "")
 	fs.BoolVar(&opts.iKnow, "i-know", false, "")
-	fs.BoolVar(&opts.dangerouslySkipPermissions, "auto", false, "")
+	fs.BoolVar(&opts.auto, "auto", false, "")
 	fs.BoolVar(&opts.dangerouslySkipPermissions, "dangerously-skip-permissions", false, "")
 	if err := fs.Parse(args); err != nil {
 		return cliOptions{}, err
@@ -140,7 +141,7 @@ func parseMCPServeArgs(args []string) (cliOptions, error) {
 }
 
 func runMCPServe(opts cliOptions, stdin io.Reader, stdout, stderr io.Writer) error {
-	writeDangerousPermissionsWarning(stderr, opts.dangerouslySkipPermissions)
+	writePermissionsModeWarning(stderr, opts.auto, opts.dangerouslySkipPermissions)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

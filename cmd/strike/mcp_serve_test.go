@@ -28,7 +28,7 @@ func TestParseMCPServeArgs(t *testing.T) {
 		{
 			name: "provider model auto",
 			args: []string{"--provider", "echo", "--model", "m", "--auto"},
-			want: cliOptions{provider: "echo", model: "m", providerSet: true, dangerouslySkipPermissions: true},
+			want: cliOptions{provider: "echo", model: "m", providerSet: true, auto: true},
 		},
 		{
 			name: "equals flags",

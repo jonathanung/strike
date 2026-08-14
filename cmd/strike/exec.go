@@ -21,7 +21,7 @@ Usage:
   strike exec [options] -              read prompt from stdin
 
 Options are the same as strike ( --provider, --model, --effort, --sandbox,
---i-know, --auto / --dangerously-skip-permissions, --max-cost ), plus:
+--i-know, --auto, --dangerously-skip-permissions, --max-cost ), plus:
 
   --output-format <fmt>   text (default) | json | stream-json
   --json                  shorthand for --output-format=json

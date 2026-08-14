@@ -215,12 +215,11 @@ export ANTHROPIC_API_KEY=sk-ant-…   # or: strike auth login anthropic
 ```
 
 `--provider <provider>`, `--model <model>`, and `--effort <level>` may be
-combined. To bypass permission checks for one invocation, use `--auto` or
-`--dangerously-skip-permissions` (equivalent aliases).
-**Warning:** this allows all tool calls without asks or denies. It applies
-only to that process invocation, does not persist config or permission rules,
-and is visibly marked as dangerous mode in the TUI. Run `strike --help` for
-the authoritative CLI usage and option list.
+combined. `--auto` skips permission **asks** for one invocation; `network.allow`
+and the OS sandbox still apply. `--dangerously-skip-permissions` also skips
+asks **and** bypasses `network.allow` (OS sandbox still applies). Neither flag
+clears explicit **deny** rules. The choice is per-process and does not persist.
+Run `strike --help` for the authoritative CLI usage and option list.
 
 Defaults when a provider is chosen without a model: `claude-sonnet-5`,
 `gpt-5.5`, `grok-4.5`, `gemini-2.5-pro`, `moonshot-v1`, and `deepseek-chat`.

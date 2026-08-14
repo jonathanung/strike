@@ -172,7 +172,7 @@ func runRPC(opts cliOptions, stdin io.Reader, stdout, stderr io.Writer) (runErr 
 		}
 	}()
 
-	writeDangerousPermissionsWarning(stderr, opts.dangerouslySkipPermissions)
+	writePermissionsModeWarning(stderr, opts.auto, opts.dangerouslySkipPermissions)
 
 	// Live bridge tracks status chrome the same way serve's WebSocket path does.
 	agents := make([]server.AgentInfo, 0, len(a.services.Agents))

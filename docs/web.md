@@ -41,7 +41,8 @@ strike mints a token when `--auth` is used without `--token`.
 | `--session-dir` | Sessions directory for `--attach-only`; rejected in live mode |
 | `--attach-only` | No live engine — JSONL SSE attach only |
 | `--read-only` | Reject mutating protocol ops (`POST /v1/ops` + WS op frames); status/SSE still work |
-| `--auto`, `--dangerously-skip-permissions` | Auto-allow permission asks in the live engine (equivalent) |
+| `--auto` | Skip permission asks; `network.allow` still applies |
+| `--dangerously-skip-permissions` | Skip permission asks and bypass `network.allow` |
 
 Open the cockpit:
 

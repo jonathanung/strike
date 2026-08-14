@@ -20,6 +20,7 @@ materially affect the shipped product.
 
 ### Changed
 
+- **`--auto` vs `--dangerously-skip-permissions`** — they are no longer aliases. Both still skip configured permission asks (agent denies remain). Only `--dangerously-skip-permissions` bypasses `network.allow` (bash preflight, webfetch, websearch). `--auto` keeps the allowlist. OS sandbox is unchanged for both. Eval runners stay on `--auto` so isolation still holds.
 - **Plugin contract** — native on-disk format is [Agent Plugins](https://agent-plugins.org/) 1.0.0 (`plugin.json`, portable `skills/` + `mcp.json`). Strike-only assets use `com.strike.cli`. See [docs/plugins.md](docs/plugins.md) ([#1142](https://github.com/jonathanung/strike/issues/1142)).
 - **Upgrade note:** Agent Plugins is native. Strike-native plugin manifests (`schemaVersion` + `contributions`) are deprecated; removal is planned for a future major. Use `strike plugin migrate`. `strike plugin install` of a Strike-native tree fails unless `--legacy` is passed. Already-installed legacy packages continue to load ([#1147](https://github.com/jonathanung/strike/issues/1147)).
 

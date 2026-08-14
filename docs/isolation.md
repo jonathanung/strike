@@ -90,7 +90,8 @@ for application-layer egress:
 | Containers (#547) | Planned stronger plane; reuse the same allowlist shape |
 
 Empty/`[]` allowlist = unrestricted **public** hosts (SSRF private blocks on
-webfetch unchanged). `/sandbox explain` prints the allowlist, degrade policy,
+webfetch unchanged). `--auto` does **not** clear the list. `--dangerously-skip-permissions`
+does (session-only). `/sandbox explain` prints the allowlist, degrade policy,
 and `egress enforcement:` line. Prefer `webfetch` when you need fetch
 semantics; bash preflight is static argv classification, not a transparent
 userspace proxy.

@@ -490,7 +490,7 @@ isolation nor permission prompts.
 | They **do** | They **do not** |
 |---|---|
 | Decide *when* a named tool may run: last-match-wins **allow / ask / deny** on tool name + glob pattern (or bash/tool **action facts**) | Inspect tool **output** for prompt injection, malware, or “ignore previous instructions” |
-| Skip **asks** in `yolo` / `--auto` / `--dangerously-skip-permissions` (explicit **deny** still wins) | Constrain bash syscalls — that is the **sandbox** dial |
+| Skip **asks** in `yolo` / `--auto` / `--dangerously-skip-permissions` (explicit **deny** still wins). Only `--dangerously-skip-permissions` also bypasses `network.allow` | Constrain bash syscalls — that is the **sandbox** dial |
 | Compile hard `write`/`edit` denies into the bash OS profile | Filter `read` / `@file` / MCP / `webfetch` **content** before it reaches the model |
 | Raise `permission_denied` (and timeline/`permission.decided` for deny/ask/reply) | Make `yolo` + `sandbox: off` safe — that pair requires `--i-know` because neither prompts nor OS isolation remain |
 

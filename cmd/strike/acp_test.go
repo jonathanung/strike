@@ -23,7 +23,7 @@ func TestParseACPArgsProvider(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if opts.provider != "echo" || !opts.providerSet || !opts.dangerouslySkipPermissions {
+	if opts.provider != "echo" || !opts.providerSet || !opts.auto {
 		t.Fatalf("opts = %+v", opts)
 	}
 }

@@ -409,7 +409,8 @@ by default** (~1 Hz sampler). Disable with `/telemetry off`; re-enable with
 
 `--continue` and `--session` cannot be combined. `strike exec` accepts the
 same `--provider` / `--model` / `--effort` /
-`--auto` / `--dangerously-skip-permissions` / `--max-cost` flags as the TUI, plus
+`--auto` / `--dangerously-skip-permissions` (not aliases: only the latter
+bypasses `network.allow`) / `--max-cost` flags as the TUI, plus
 `--output-format text|json|stream-json` (default `text`) and `--json`
 (shorthand for `json`). Formats:
 

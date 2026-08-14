@@ -26,7 +26,8 @@ type cliOptions struct {
 	effort                     string
 	sandbox                    string // --sandbox: off|read-only|workspace-write
 	iKnow                      bool   // --i-know: allow yolo with sandbox off
-	dangerouslySkipPermissions bool
+	auto                       bool   // --auto: skip permission asks; network.allow stays
+	dangerouslySkipPermissions bool   // --dangerously-skip-permissions: skip asks + bypass network.allow
 	providerSet                bool
 	continueSession            bool
 	sessionID                  string  // --session: resume a specific root session
@@ -77,10 +78,16 @@ var optionSpecs = []optionSpec{
 		},
 	},
 	{
-		names:       []string{"auto", "dangerously-skip-permissions"},
-		description: "skip configured permission prompts (agent profile denies still apply)",
+		names:       []string{"auto"},
+		description: "skip configured permission prompts; network.allow and OS sandbox still apply",
 		register: func(fs *flag.FlagSet, opts *cliOptions) {
-			fs.BoolVar(&opts.dangerouslySkipPermissions, "auto", false, "")
+			fs.BoolVar(&opts.auto, "auto", false, "")
+		},
+	},
+	{
+		names:       []string{"dangerously-skip-permissions"},
+		description: "skip permission prompts and bypass network.allow (OS sandbox still applies)",
+		register: func(fs *flag.FlagSet, opts *cliOptions) {
 			fs.BoolVar(&opts.dangerouslySkipPermissions, "dangerously-skip-permissions", false, "")
 		},
 	},
@@ -192,7 +199,20 @@ var optionSpecs = []optionSpec{
 	},
 }
 
-const dangerousPermissionsWarning = "WARNING: --dangerously-skip-permissions is enabled; configured permission asks are skipped for this invocation. Active agent permission denies still apply. Workflow phase permission widening is auto-accepted; hard sandbox and path protections are unchanged."
+const autoPermissionsWarning = "WARNING: --auto is enabled; configured permission asks are skipped for this invocation. Active agent permission denies still apply. Workflow phase permission widening is auto-accepted; OS sandbox and network.allow are unchanged."
+
+const dangerousPermissionsWarning = "WARNING: --dangerously-skip-permissions is enabled; configured permission asks are skipped and network.allow is bypassed for this invocation. Active agent permission denies still apply. OS sandbox and path protections are unchanged."
+
+// skipPermissionAsks reports whether configured permission prompts are skipped.
+func (o cliOptions) skipPermissionAsks() bool {
+	return o.auto || o.dangerouslySkipPermissions
+}
+
+// skipNetworkAllow reports whether config network.allow is bypassed.
+// Only --dangerously-skip-permissions does this; --auto cannot.
+func (o cliOptions) skipNetworkAllow() bool {
+	return o.dangerouslySkipPermissions
+}
 
 func main() {
 	os.Exit(runCLI(os.Args[1:], os.Stdout, os.Stderr))
@@ -502,8 +522,21 @@ func permissionLayerNames(presetID string, dangerouslySkip bool) []string {
 	return names
 }
 
-func writeDangerousPermissionsWarning(w io.Writer, enabled bool) {
-	if enabled {
+func writePermissionsModeWarning(w io.Writer, auto, dangerouslySkip bool) {
+	if dangerouslySkip {
 		fmt.Fprintln(w, dangerousPermissionsWarning)
+		return
 	}
+	if auto {
+		fmt.Fprintln(w, autoPermissionsWarning)
+	}
+}
+
+// sessionNetworkAllow returns the session network.allow list. --dangerously-skip-permissions
+// clears it (unrestricted public hosts; SSRF private blocks remain). --auto does not.
+func sessionNetworkAllow(cfgAllow []string, skipNetwork bool) []string {
+	if skipNetwork {
+		return nil
+	}
+	return sandbox.CloneNetworkAllow(cfgAllow)
 }

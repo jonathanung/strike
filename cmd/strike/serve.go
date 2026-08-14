@@ -39,8 +39,9 @@ Options:
   --model <id>           model id for the live provider
   --attach-only          read-only JSONL attach (no live engine)
   --read-only            reject mutating protocol ops (POST /v1/ops + WS frames)
-  --auto, --dangerously-skip-permissions
-                         auto-allow permission asks in the live engine
+  --auto                 skip permission asks; network.allow still applies
+  --dangerously-skip-permissions
+                         skip permission asks and bypass network.allow
   -h, --help             show help
 
 Endpoints:
@@ -82,6 +83,7 @@ type serveOptions struct {
 	model                      string
 	attachOnly                 bool
 	readOnly                   bool
+	auto                       bool
 	dangerouslySkipPermissions bool
 }
 
@@ -131,7 +133,7 @@ func parseServeArgs(args []string) (serveOptions, error) {
 	fs.StringVar(&opts.model, "model", "", "")
 	fs.BoolVar(&opts.attachOnly, "attach-only", false, "")
 	fs.BoolVar(&opts.readOnly, "read-only", false, "")
-	fs.BoolVar(&opts.dangerouslySkipPermissions, "auto", false, "")
+	fs.BoolVar(&opts.auto, "auto", false, "")
 	fs.BoolVar(&opts.dangerouslySkipPermissions, "dangerously-skip-permissions", false, "")
 	if err := fs.Parse(args); err != nil {
 		return serveOptions{}, err
@@ -202,6 +204,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 			provider:                   opts.provider,
 			providerSet:                true,
 			model:                      opts.model,
+			auto:                       opts.auto,
 			dangerouslySkipPermissions: opts.dangerouslySkipPermissions,
 		}
 		a, err := assemble(cliOpts, true)
@@ -436,7 +439,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		}
 		defer func() { _ = cleanup() }()
 
-		writeDangerousPermissionsWarning(stderr, opts.dangerouslySkipPermissions)
+		writePermissionsModeWarning(stderr, opts.auto, opts.dangerouslySkipPermissions)
 	}
 
 	auditSink, err := audit.Open(audit.Options{})

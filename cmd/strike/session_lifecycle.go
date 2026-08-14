@@ -267,7 +267,7 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 			return err
 		}
 		if !warnedDangerous {
-			writeDangerousPermissionsWarning(stderr, opts.dangerouslySkipPermissions)
+			writePermissionsModeWarning(stderr, opts.auto, opts.dangerouslySkipPermissions)
 			warnedDangerous = true
 		}
 
@@ -382,7 +382,7 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 		// Persist posture on the session for E3 reproducibility.
 		_ = a.store.Append(protocol.SessionMeta{Isolation: isolation})
 		program := tea.NewProgram(tui.New(hub.Ops(), hub.Events(), a.services, tui.Options{
-			DangerouslySkipPermissions:   opts.dangerouslySkipPermissions,
+			DangerouslySkipPermissions:   opts.skipPermissionAsks(),
 			Theme:                        themePtr,
 			ThemeID:                      themeID,
 			SessionID:                    a.sessionID,
@@ -527,7 +527,7 @@ func runExecContext(ctx context.Context, opts cliOptions, prompt string, format 
 		}
 	}()
 
-	writeDangerousPermissionsWarning(stderr, opts.dangerouslySkipPermissions)
+	writePermissionsModeWarning(stderr, opts.auto, opts.dangerouslySkipPermissions)
 
 	storeOwned = true
 	hopts := headlessOpts{
@@ -586,7 +586,7 @@ func resolveIsolationPosture(opts cliOptions, a *assembled) string {
 		return p
 	}
 	perm := protocol.PermissionModeDefault
-	if opts.dangerouslySkipPermissions {
+	if opts.skipPermissionAsks() {
 		perm = protocol.PermissionModeYolo
 	} else if a != nil && a.cfg.PermissionMode != "" {
 		perm = a.cfg.PermissionMode.Normalize()

@@ -225,7 +225,7 @@ Or a single-line JSON array (same shape as config `permissions`), appended after
 permissions: [{"permission":"bash","pattern":"git *","action":"allow"}]
 ```
 
-Evaluation order: defaults → config → optional --auto / --dangerously-skip-permissions allow-all → active agent profile → session always grants (last-match-wins). Switching agents replaces the profile and clears session always-grants. Agent denies still apply under --auto / --dangerously-skip-permissions.
+Evaluation order: defaults → config → optional --auto / --dangerously-skip-permissions allow-all → active agent profile → session always grants (last-match-wins). Switching agents replaces the profile and clears session always-grants. Agent denies still apply under --auto / --dangerously-skip-permissions. `--auto` does not bypass `network.allow`; `--dangerously-skip-permissions` does.
 
 Task subagents (depth > 0) apply a filtered profile: agent **deny** always
 restricts further; agent **allow** upgrades parent Ask→Allow but cannot
@@ -338,8 +338,9 @@ above).
 phase transition, strike computes the effective grant delta and requires
 explicit approval (question prompt). Rejection leaves the current phase,
 permissions, and context unchanged. `--auto` / `--dangerously-skip-permissions`
-auto-accepts widening without a prompt but does not bypass hard sandbox or path
-protections. Approved decisions are session-persisted (`phase.grant_approved`)
+auto-accepts widening without a prompt. `--auto` does not bypass `network.allow`
+or the OS sandbox; `--dangerously-skip-permissions` bypasses `network.allow`
+only. Path protections remain. Approved decisions are session-persisted (`phase.grant_approved`)
 and restored on resume when the workflow fingerprint and grants are unchanged;
 edited workflow content invalidates prior approval. Child engines inherit the
 parent’s approved phase ceiling and cannot introduce additional widening.

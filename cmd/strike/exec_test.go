@@ -62,7 +62,7 @@ func TestParseExecArgsPromptForms(t *testing.T) {
 			name:       "auto flag",
 			args:       []string{"--auto", "hi"},
 			want:       "hi",
-			wantOpt:    cliOptions{dangerouslySkipPermissions: true},
+			wantOpt:    cliOptions{auto: true},
 			wantFormat: execFormatText,
 		},
 		{

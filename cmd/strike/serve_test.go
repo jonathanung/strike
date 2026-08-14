@@ -38,15 +38,15 @@ func TestParseServeArgs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !opts.dangerouslySkipPermissions {
-		t.Fatalf("--auto should set dangerouslySkipPermissions: %+v", opts)
+	if !opts.auto || opts.dangerouslySkipPermissions {
+		t.Fatalf("--auto should set auto only: %+v", opts)
 	}
 	opts, err = parseServeArgs([]string{"--dangerously-skip-permissions"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !opts.dangerouslySkipPermissions {
-		t.Fatalf("--dangerously-skip-permissions should set dangerouslySkipPermissions: %+v", opts)
+	if !opts.dangerouslySkipPermissions || opts.auto {
+		t.Fatalf("--dangerously-skip-permissions should set dangerous only: %+v", opts)
 	}
 
 	opts, err = parseServeArgs([]string{"--session-dir", "/tmp/sessions", "--provider", "anthropic", "--attach-only"})

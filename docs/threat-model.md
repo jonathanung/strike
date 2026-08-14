@@ -25,8 +25,9 @@ does not run a separate “ignore injected instructions” filter on tool output
 | **Content guards** | Scan **outbound** file writes for credential shapes / dangerous sinks | Scan inbound file/MCP/web text for prompt injection |
 | **Redaction** ([secrets.md](secrets.md)) | Scrub credential-shaped strings on logs and tool results | Remove attacker instructions |
 
-`yolo` / `--auto` / `--dangerously-skip-permissions` skip **asks**. Explicit
-**deny** rules still apply. Skipping asks does not add injection defense.
+`yolo` / `--auto` skip **asks**. `--dangerously-skip-permissions` skips asks
+and also bypasses `network.allow`. Explicit **deny** rules still apply.
+Skipping asks does not add injection defense.
 
 ## File contents
 

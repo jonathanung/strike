@@ -830,7 +830,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			InitialPermissionMode: initialPermMode,
 			SandboxMode:           sandboxMode,
 			SandboxAllowDegrade:   cfg.SandboxAllowDegrade,
-			NetworkAllow:          sandbox.CloneNetworkAllow(cfg.Network.Allow),
+			NetworkAllow:          sessionNetworkAllow(cfg.Network.Allow, opts.skipNetworkAllow()),
 			BashSecrets:           cloneBashSecrets(cfg.BashSecrets),
 			ContentGuard: tool.ContentGuardSettings{
 				Mode:       cfg.ContentGuard.Mode,
@@ -857,10 +857,10 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			InitialPlanHandoff:         initialPlanHandoff,
 			PlanStore:                  planStore,
 			QuietStartup:               quietStartup,
-			DangerouslySkipPermissions: opts.dangerouslySkipPermissions,
+			DangerouslySkipPermissions: opts.skipPermissionAsks(),
 			Workflows:                  workflows,
-			Rules:                      permissionLayersWithPreset(cfg.Permissions, cfg.PermissionPreset, opts.dangerouslySkipPermissions),
-			RuleLayerNames:             permissionLayerNames(cfg.PermissionPreset, opts.dangerouslySkipPermissions),
+			Rules:                      permissionLayersWithPreset(cfg.Permissions, cfg.PermissionPreset, opts.skipPermissionAsks()),
+			RuleLayerNames:             permissionLayerNames(cfg.PermissionPreset, opts.skipPermissionAsks()),
 			ManagedRules:               append(permission.Ruleset(nil), cfg.Managed.DenyRules...),
 			LockPermissionMode:         cfg.Managed.PermissionMode,
 			Hooks:                      hookDefs,
@@ -1071,13 +1071,13 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	services.Files = local.NewFiles(workDir)
 	// Compile base sandbox profile from defaults + config (+ optional dangerous
 	// allow-all). Engine recompiles per bash call with live agent/phase layers.
-	basePermLayers := permissionLayersWithPreset(cfg.Permissions, cfg.PermissionPreset, opts.dangerouslySkipPermissions)
+	basePermLayers := permissionLayersWithPreset(cfg.Permissions, cfg.PermissionPreset, opts.skipPermissionAsks())
 	sandboxPolicy := permission.CompileSandbox(
 		sandbox.ResolveMode(sandboxMode),
 		workDir,
 		basePermLayers...,
 	)
-	sandboxPolicy.NetworkAllow = sandbox.CloneNetworkAllow(cfg.Network.Allow)
+	sandboxPolicy.NetworkAllow = sessionNetworkAllow(cfg.Network.Allow, opts.skipNetworkAllow())
 	sandboxPolicy.AllowDegrade = cfg.SandboxAllowDegrade
 	sandboxExplain := sandbox.Explain(sandboxPolicy)
 	services.Shell = local.NewShell(workDir, sandboxPolicy)
@@ -1085,7 +1085,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	// first root engine; base layers cover startup before Run.
 	permHost := local.NewPermissions(
 		basePermLayers,
-		permissionLayerNames(cfg.PermissionPreset, opts.dangerouslySkipPermissions),
+		permissionLayerNames(cfg.PermissionPreset, opts.skipPermissionAsks()),
 	)
 	if first != nil && first.eng != nil {
 		eng := first.eng

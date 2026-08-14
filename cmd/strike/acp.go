@@ -159,7 +159,7 @@ func runACP(opts cliOptions, stdin io.Reader, stdout, stderr io.Writer) (runErr 
 		}
 	}()
 
-	writeDangerousPermissionsWarning(stderr, opts.dangerouslySkipPermissions)
+	writePermissionsModeWarning(stderr, opts.auto, opts.dangerouslySkipPermissions)
 
 	agents := make([]server.AgentInfo, 0, len(a.services.Agents))
 	for _, name := range a.services.Agents {
