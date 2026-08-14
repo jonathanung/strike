@@ -133,6 +133,26 @@ func TestFormatAgentPromptEvalContainer(t *testing.T) {
 	}
 }
 
+func TestWithTBEvalExecDefaults(t *testing.T) {
+	got := WithTBEvalExecDefaults(nil)
+	if !containsArg(got, "--sandbox=off") || !containsArg(got, "--dangerously-skip-permissions") {
+		t.Fatalf("%v", got)
+	}
+	keep := WithTBEvalExecDefaults([]string{"--dangerously-skip-permissions", "--sandbox=workspace-write"})
+	if !containsArg(keep, "--dangerously-skip-permissions") {
+		t.Fatal("caller dsp dropped")
+	}
+	n := 0
+	for _, a := range keep {
+		if a == "--dangerously-skip-permissions" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("duplicate dsp: %v", keep)
+	}
+}
+
 func TestWriteEvalExecHelper(t *testing.T) {
 	dir := t.TempDir()
 	if err := WriteEvalExecHelper(dir); err != nil {
@@ -279,6 +299,9 @@ func TestRunnerDryRunAndMock(t *testing.T) {
 	}
 	if !containsArg(agent.opts.ExtraArgs, "--sandbox=off") {
 		t.Fatalf("expected --sandbox=off, got %v", agent.opts.ExtraArgs)
+	}
+	if !containsArg(agent.opts.ExtraArgs, "--dangerously-skip-permissions") {
+		t.Fatalf("expected --dangerously-skip-permissions, got %v", agent.opts.ExtraArgs)
 	}
 	if !containsArg(agent.opts.Env, "STRIKE_EVAL_CONTAINER=cid-live") {
 		t.Fatalf("env missing container: %v", agent.opts.Env)

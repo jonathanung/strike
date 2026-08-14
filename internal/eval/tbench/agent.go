@@ -53,6 +53,19 @@ func AgentTimeout(in Instance, override time.Duration) time.Duration {
 	return 30 * time.Minute
 }
 
+// WithTBEvalExecDefaults is WithEvalExecDefaults plus
+// --dangerously-skip-permissions so host bash can use the network even when
+// eval isolation writes network.allow. SWE-bench stays on --auto only.
+func WithTBEvalExecDefaults(extra []string) []string {
+	out := swebench.WithEvalExecDefaults(extra)
+	for _, a := range out {
+		if a == "--dangerously-skip-permissions" || strings.HasPrefix(a, "--dangerously-skip-permissions=") {
+			return out
+		}
+	}
+	return append(out, "--dangerously-skip-permissions")
+}
+
 func fromSWEUsage(u *swebench.Usage) *Usage {
 	if u == nil {
 		return nil

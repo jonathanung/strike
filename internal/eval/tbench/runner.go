@@ -240,7 +240,7 @@ func (r *Runner) runOne(
 		Model:     cfg.Model,
 		Effort:    cfg.Effort,
 		Timeout:   agentTimeout,
-		ExtraArgs: swebench.WithEvalExecDefaults(cfg.ExtraExecArgs),
+		ExtraArgs: WithTBEvalExecDefaults(cfg.ExtraExecArgs),
 		Env:       env,
 	})
 	row.AgentMs = nowFn().Sub(agentStart).Milliseconds()

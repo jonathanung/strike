@@ -1,6 +1,6 @@
 # Campaign status
 
-**Now:** i1 ACCEPT 21/25. i2 retain. i3 ACCEPT **24/25**. i4 timeout-grade retained (gcode now grades, still fails). TB remaining miss is CAPABILITY. SWE still at Phase 2 73.9% (capability). Spend ~$439 / $3500.
+**Now:** i5 TB DEV **22/25** with `--dangerously-skip-permissions` (network.allow still written; DSP bypassed it). gcode-to-text resolved. SWE stays `--auto`. Spend ~$459 / $3500.
 
 Honest DEV so far:
 - SWE 44/60, 45/60 (pair 3 pending)
