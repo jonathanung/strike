@@ -260,10 +260,12 @@ func (r *Runner) runOne(
 		defer os.RemoveAll(instDir)
 	}
 
-	if len(cfg.ProjectConfig) > 0 {
-		if err := writeProjectConfig(mat.WorkDir, cfg.ProjectConfig); err != nil {
-			return finish(StatusError, "project config: "+err.Error())
-		}
+	isoCfg, isoErr := MergeEvalIsolation(cfg.ProjectConfig)
+	if isoErr != nil {
+		return finish(StatusError, "project config: "+isoErr.Error())
+	}
+	if err := writeProjectConfig(mat.WorkDir, isoCfg); err != nil {
+		return finish(StatusError, "project config: "+err.Error())
 	}
 
 	prompt := FormatAgentPrompt(in, mat.ContainerID)

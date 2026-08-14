@@ -143,16 +143,61 @@ func (r *CLIRuntime) Available(ctx context.Context) error {
 
 // Pull implements Runtime.
 func (r *CLIRuntime) Pull(ctx context.Context, image string) error {
-	args := append([]string{"pull"}, dockerPlatformArgs(image)...)
-	args = append(args, image)
-	_, stderr, code, err := r.run(ctx, r.bin(), args...)
-	if err != nil {
-		return fmt.Errorf("swebench: docker pull %s: %w", image, err)
+	return pullWithRetry(ctx, func(ctx context.Context) error {
+		args := append([]string{"pull"}, dockerPlatformArgs(image)...)
+		args = append(args, image)
+		_, stderr, code, err := r.run(ctx, r.bin(), args...)
+		if err != nil {
+			return fmt.Errorf("swebench: docker pull %s: %w", image, err)
+		}
+		if code != 0 {
+			return fmt.Errorf("swebench: docker pull %s: exit %d: %s", image, code, strings.TrimSpace(stderr))
+		}
+		return nil
+	})
+}
+
+func pullWithRetry(ctx context.Context, pull func(context.Context) error) error {
+	var last error
+	for i := 0; i < 6; i++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		last = pull(ctx)
+		if last == nil {
+			return nil
+		}
+		if !transientPullErr(last) {
+			return last
+		}
+		wait := 15 * time.Second * time.Duration(1<<uint(i))
+		if wait > 3*time.Minute {
+			wait = 3 * time.Minute
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(wait):
+		}
 	}
-	if code != 0 {
-		return fmt.Errorf("swebench: docker pull %s: exit %d: %s", image, code, strings.TrimSpace(stderr))
+	return last
+}
+
+func transientPullErr(err error) bool {
+	if err == nil {
+		return false
 	}
-	return nil
+	s := strings.ToLower(err.Error())
+	for _, k := range []string{
+		"rate limit", "toomanyrequests", "429",
+		"failed to resolve reference", "timeout", "eof",
+		"connection reset", "tls handshake", "temporarily unavailable",
+	} {
+		if strings.Contains(s, k) {
+			return true
+		}
+	}
+	return false
 }
 
 // Create implements Runtime.

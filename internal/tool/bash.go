@@ -74,22 +74,31 @@ func (bashTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 	if fields := strings.Fields(a.Command); len(fields) > 1 {
 		always = []string{fields[0] + " *"}
 	}
-	// Best-effort workspace path guard for known destructive ops — runs before
-	// Ask. Incomplete static parse only; not a security boundary.
-	if err := checkBashWorkspaceBoundary(a.Command, tc.WorkDir); err != nil {
-		return Result{}, err
-	}
-	// Application-layer egress preflight: when network.allow is set, fail-closed
-	// on known clients outside the list, interpreters, shell networking, and
-	// unknown binaries while OS host networking remains on (#1030).
+	// Terminal-Bench live image: both eval env vars route the command into
+	// the bind-mounted task container so /app paths, compilers, and image
+	// Python work. SWE-bench sets only STRIKE_EVAL_CONTAINER and stays on
+	// host bash + eval-test. Routed commands skip host workspace/egress
+	// guards — the process is docker exec, not host shell.
+	routeArgv, routed := evalContainerArgv(a.Command)
+
 	policy := bashSandboxPolicy(tc)
-	allow := networkAllowFrom(tc)
-	if len(allow) == 0 {
-		// Composer ! shell and other callers may only set Sandbox.NetworkAllow.
-		allow = sandbox.CloneNetworkAllow(policy.NetworkAllow)
-	}
-	if err := checkBashNetworkAllowOpts(a.Command, allow, policy.NetworkEnabled()); err != nil {
-		return Result{}, err
+	if !routed {
+		// Best-effort workspace path guard for known destructive ops — runs before
+		// Ask. Incomplete static parse only; not a security boundary.
+		if err := checkBashWorkspaceBoundary(a.Command, tc.WorkDir); err != nil {
+			return Result{}, err
+		}
+		// Application-layer egress preflight: when network.allow is set, fail-closed
+		// on known clients outside the list, interpreters, shell networking, and
+		// unknown binaries while OS host networking remains on (#1030).
+		allow := networkAllowFrom(tc)
+		if len(allow) == 0 {
+			// Composer ! shell and other callers may only set Sandbox.NetworkAllow.
+			allow = sandbox.CloneNetworkAllow(policy.NetworkAllow)
+		}
+		if err := checkBashNetworkAllowOpts(a.Command, allow, policy.NetworkEnabled()); err != nil {
+			return Result{}, err
+		}
 	}
 	if err := tc.Ask(ctx, AskRequest{Permission: "bash", Patterns: []string{a.Command}, Always: always}); err != nil {
 		return Result{}, err
@@ -138,8 +147,12 @@ func (bashTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 	// not off (config/CLI dial + permission-compiled denials/network).
 	// Sandbox wrap stays inside RunProcess; the pool lease wraps the whole run.
 	// Degrade is fail-closed unless policy.AllowDegrade (sandboxAllowDegrade).
+	argv := []string{"bash", "-c", a.Command}
+	if routed {
+		argv = routeArgv
+	}
 	proc, err := RunProcess(ctx, ProcessSpec{
-		Argv:      []string{"bash", "-c", a.Command},
+		Argv:      argv,
 		Dir:       tc.WorkDir,
 		Env:       env,
 		Timeout:   timeout,

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -421,6 +422,15 @@ func TestCLIRuntimeCreateArgs(t *testing.T) {
 	}
 }
 
+func TestTransientPullErr(t *testing.T) {
+	if !transientPullErr(fmt.Errorf("docker pull: You have reached your unauthenticated pull rate limit")) {
+		t.Fatal("rate limit should retry")
+	}
+	if transientPullErr(fmt.Errorf("docker pull: manifest unknown")) {
+		t.Fatal("missing image should not retry")
+	}
+}
+
 func TestCLIRuntimePullUsesAmd64ForSWEBenchImages(t *testing.T) {
 	var saw []string
 	rt := &CLIRuntime{
@@ -765,6 +775,63 @@ func TestExtractPatchExcludesRepro(t *testing.T) {
 	}
 }
 
+func TestExtractPatchDropsSymlinkTypechange(t *testing.T) {
+	dir := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := execCommand(dir, args...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v: %s", err, out)
+		}
+	}
+	run("git", "init")
+	run("git", "config", "user.email", "t@example.com")
+	run("git", "config", "user.name", "t")
+	if err := os.WriteFile(filepath.Join(dir, "target.txt"), []byte("data\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("target.txt", filepath.Join(dir, "link.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "src.py"), []byte("a=1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run("git", "add", ".")
+	run("git", "commit", "-m", "init")
+	// Materialize-style: replace symlink with a regular file (often binary-ish).
+	if err := os.Remove(filepath.Join(dir, "link.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "link.txt"), []byte("not-a-symlink\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "src.py"), []byte("a=2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	patch, err := ExtractPatch(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(patch, "src.py") {
+		t.Fatalf("expected src.py edit: %s", patch)
+	}
+	if strings.Contains(patch, "link.txt") {
+		t.Fatalf("typechange leaked into patch: %s", patch)
+	}
+}
+
+func TestDropBinaryFileDiffs(t *testing.T) {
+	in := "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -1 +1 @@\n-a\n+b\n" +
+		"diff --git a/x.svg b/x.svg\nBinary files /dev/null and b/x.svg differ\n"
+	got := dropBinaryFileDiffs(in)
+	if !strings.Contains(got, "a.py") {
+		t.Fatalf("kept text: %s", got)
+	}
+	if strings.Contains(got, "x.svg") || strings.Contains(got, "Binary files") {
+		t.Fatalf("binary leaked: %s", got)
+	}
+}
+
 func TestWriteProjectConfigHelper(t *testing.T) {
 	dir := t.TempDir()
 	raw := []byte(`{"deferTools":"on","compactionThreshold":0.5}`)
@@ -780,5 +847,40 @@ func TestWriteProjectConfigHelper(t *testing.T) {
 	}
 	if err := writeProjectConfig(dir, []byte(`not-json`)); err == nil {
 		t.Fatal("expected invalid json error")
+	}
+}
+
+func TestMergeEvalIsolationDefault(t *testing.T) {
+	got, err := MergeEvalIsolation(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(got, &m); err != nil {
+		t.Fatal(err)
+	}
+	net, _ := m["network"].(map[string]any)
+	allow, _ := net["allow"].([]any)
+	if len(allow) == 0 {
+		t.Fatalf("expected non-empty network.allow, got %s", got)
+	}
+}
+
+func TestMergeEvalIsolationKeepsCallerAllow(t *testing.T) {
+	got, err := MergeEvalIsolation([]byte(`{"network":{"allow":["example.com"]},"leanCode":"full"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), "example.com") {
+		t.Fatalf("caller allow lost: %s", got)
+	}
+	if !strings.Contains(string(got), "leanCode") {
+		t.Fatalf("other fields lost: %s", got)
+	}
+}
+
+func TestMergeEvalIsolationRejectsBadJSON(t *testing.T) {
+	if _, err := MergeEvalIsolation([]byte(`not-json`)); err == nil {
+		t.Fatal("expected error")
 	}
 }

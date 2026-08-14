@@ -34,7 +34,9 @@ func (r *ContainerRuntime) Available(ctx context.Context) error {
 
 // Pull implements Runtime.
 func (r *ContainerRuntime) Pull(ctx context.Context, image string) error {
-	return r.CLI.Pull(ctx, image)
+	return pullWithRetry(ctx, func(ctx context.Context) error {
+		return r.CLI.Pull(ctx, image)
+	})
 }
 
 // Create implements Runtime.

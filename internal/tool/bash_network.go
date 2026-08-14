@@ -113,6 +113,8 @@ var bashLocalSafeCmds = map[string]struct{}{
 	"tsc": {}, "eslint": {}, "prettier": {}, "black": {}, "ruff": {},
 	"pytest": {}, "mypy": {}, "golangci-lint": {},
 	"docker": {}, "podman": {},
+	// SWE-bench/TB live-eval helper (PATH wrapper → docker exec). Local only.
+	"eval-test": {}, "eval-exec": {},
 	"kubectl":   {},
 	"terraform": {}, "tofu": {},
 	"nix": {}, "nix-build": {}, "nix-shell": {},

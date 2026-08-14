@@ -1,0 +1,29 @@
+{
+  "provider": "xai",
+  "model": "grok-4.6",
+  "effort": "high",
+  "temperature": "unset",
+  "temperatureNote": "strike xAI chat-completions adapter does not send a temperature field; provider default applies",
+  "reasoning_effort_wire": "high",
+  "benchmarks": {
+    "swebench": {
+      "variant": "SWE-bench Verified",
+      "dataset": "SWE-bench/SWE-bench_Verified",
+      "split": "test",
+      "officialSize": 500,
+      "grader": "docker",
+      "agentTimeout": "30m",
+      "gradeTimeout": "15m"
+    },
+    "tbench": {
+      "variant": "Terminal-Bench 2 (Harbor)",
+      "datasetPin": "terminal-bench-2@20251031",
+      "repo": "https://github.com/harbor-framework/terminal-bench-2",
+      "officialSize": 89,
+      "grader": "docker",
+      "agentTimeout": "30m or task.toml agent.timeout_sec",
+      "verifyTimeout": "15m or task.toml verifier.timeout_sec",
+      "note": "NOT Terminal-Bench v3.0. Public grok-4.6 ~26% is TB v3.0 and is not comparable."
+    }
+  }
+}

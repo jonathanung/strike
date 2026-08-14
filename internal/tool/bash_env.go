@@ -47,8 +47,9 @@ var bashMinimalEnvKeys = []string{
 	// SSH agent socket path only (not keys); needed for git+ssh offline auth.
 	"SSH_AUTH_SOCK",
 	"SSH_AGENT_PID",
-	// Eval runner (strike eval swebench) — container id for docker exec tests.
+	// Eval runner — live container id + in-image workdir for docker exec.
 	"STRIKE_EVAL_CONTAINER",
+	"STRIKE_EVAL_WORKDIR",
 }
 
 // bashEnv builds the process environment for a bash tool invocation.

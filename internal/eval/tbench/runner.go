@@ -203,23 +203,45 @@ func (r *Runner) runOne(
 		return finish(StatusError, "materialize: "+err.Error())
 	}
 	row.Image = mat.Image
-
-	if len(cfg.ProjectConfig) > 0 {
-		if err := writeProjectConfig(mat.WorkDir, cfg.ProjectConfig); err != nil {
-			return finish(StatusError, "project config: "+err.Error())
-		}
+	if mat.ContainerID != "" && r.RT != nil {
+		cid := mat.ContainerID
+		defer func() { _ = r.RT.Remove(context.Background(), cid) }()
 	}
 
-	prompt := BuildAgentPrompt(in)
+	isoCfg, isoErr := swebench.MergeEvalIsolation(cfg.ProjectConfig)
+	if isoErr != nil {
+		return finish(StatusError, "project config: "+isoErr.Error())
+	}
+	if err := writeProjectConfig(mat.WorkDir, isoCfg); err != nil {
+		return finish(StatusError, "project config: "+err.Error())
+	}
+
+	prompt := FormatAgentPrompt(in, mat.ContainerID)
 	agentTimeout := AgentTimeout(in, cfg.AgentTimeout)
 	agentStart := nowFn()
+	var env []string
+	if mat.ContainerID != "" {
+		if err := WriteEvalExecHelper(instDir); err != nil {
+			return finish(StatusError, "eval-exec helper: "+err.Error())
+		}
+		env = append(env,
+			"STRIKE_EVAL_CONTAINER="+mat.ContainerID,
+			"STRIKE_EVAL_WORKDIR="+WorkDirInContainer,
+		)
+		if p := os.Getenv("PATH"); p != "" {
+			env = append(env, "PATH="+instDir+string(os.PathListSeparator)+p)
+		} else {
+			env = append(env, "PATH="+instDir)
+		}
+	}
 	execRes, agentErr := agent.Run(ctx, mat.WorkDir, prompt, swebench.AgentOpts{
 		Strike:    cfg.StrikeBin,
 		Provider:  cfg.Provider,
 		Model:     cfg.Model,
 		Effort:    cfg.Effort,
 		Timeout:   agentTimeout,
-		ExtraArgs: cfg.ExtraExecArgs,
+		ExtraArgs: swebench.WithEvalExecDefaults(cfg.ExtraExecArgs),
+		Env:       env,
 	})
 	row.AgentMs = nowFn().Sub(agentStart).Milliseconds()
 	row.SessionID = execRes.SessionID
@@ -239,6 +261,8 @@ func (r *Runner) runOne(
 	if agentErr != nil && execRes.Usage == nil {
 		return finish(StatusError, "agent: "+agentErr.Error())
 	}
+
+	reclaimWorkspaceOwner(ctx, r.RT, mat.ContainerID)
 
 	if grader == nil {
 		return finish(StatusError, "nil grader")

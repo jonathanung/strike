@@ -146,6 +146,22 @@ func TestCheckBashNetworkAllowNonNetworkCommands(t *testing.T) {
 	}
 }
 
+func TestCheckBashNetworkAllowEvalTestHelper(t *testing.T) {
+	allow := []string{"127.0.0.1"}
+	for _, c := range []string{
+		"eval-test python repro.py",
+		"eval-test python -m pytest path/to/test.py -q",
+		"eval-exec bash -lc 'true'",
+	} {
+		if err := checkBashNetworkAllow(c, allow); err != nil {
+			t.Fatalf("check(%q) = %v, want nil", c, err)
+		}
+	}
+	if err := checkBashNetworkAllow("curl https://api.github.com/repos", allow); err == nil {
+		t.Fatal("github curl should be denied under eval isolation allowlist")
+	}
+}
+
 func TestCheckBashNetworkAllowInterpreterFailClosed(t *testing.T) {
 	allow := []string{"api.github.com"}
 	for _, c := range []string{

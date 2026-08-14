@@ -13,8 +13,9 @@ import (
 
 // MaterializeResult is the host workspace path for one task.
 type MaterializeResult struct {
-	WorkDir string
-	Image   string
+	WorkDir     string
+	ContainerID string
+	Image       string
 }
 
 // MaterializeWorkspace pulls (optional) the task image, creates a container,
@@ -77,7 +78,75 @@ func MaterializeWorkspace(ctx context.Context, rt swebench.Runtime, image, hostD
 
 	cleanup = false
 	_ = rt.Remove(context.Background(), id)
-	return MaterializeResult{WorkDir: app, Image: image}, nil
+
+	liveID := startLiveEvalContainer(ctx, rt, image, app)
+	return MaterializeResult{WorkDir: app, Image: image, ContainerID: liveID}, nil
+}
+
+// startLiveEvalContainer bind-mounts the host /app checkout at /app so bash
+// can docker-exec into the official task image. Best-effort: empty id on
+// failure (agent can still edit the host tree).
+func startLiveEvalContainer(ctx context.Context, rt swebench.Runtime, image, app string) string {
+	if rt == nil || app == "" {
+		return ""
+	}
+	abs, err := filepath.Abs(app)
+	if err != nil {
+		abs = app
+	}
+	id, err := rt.Create(ctx, image, swebench.CreateOpts{
+		WorkDir:    WorkDirInContainer,
+		Entrypoint: []string{"sleep", "infinity"},
+		HostBinds:  []string{abs + ":" + WorkDirInContainer},
+	})
+	if err != nil {
+		return ""
+	}
+	if err := rt.Start(ctx, id); err != nil {
+		_ = rt.Remove(context.Background(), id)
+		return ""
+	}
+	return id
+}
+
+const evalExecHelper = `#!/bin/bash
+set -euo pipefail
+cid="${STRIKE_EVAL_CONTAINER:-}"
+if [[ -z "$cid" ]]; then
+  echo "eval-exec: STRIKE_EVAL_CONTAINER is unset" >&2
+  exit 1
+fi
+if [[ $# -eq 0 ]]; then
+  echo "usage: eval-exec <command>..." >&2
+  exit 2
+fi
+cmd=$(printf '%q ' "$@")
+exec docker exec -w /app "$cid" bash -lc "${cmd}"
+`
+
+// reclaimWorkspaceOwner chowns bind-mounted /app back to the host uid so
+// docker cp (grade) can read root-created 0600 files (openssl keys, etc.).
+func reclaimWorkspaceOwner(ctx context.Context, rt swebench.Runtime, containerID string) {
+	if rt == nil || containerID == "" {
+		return
+	}
+	cmd := fmt.Sprintf("chown -R %d:%d %s", os.Getuid(), os.Getgid(), WorkDirInContainer)
+	_, _, _, _ = rt.Exec(ctx, containerID, []string{"bash", "-lc", cmd}, swebench.ExecOpts{
+		Timeout: 2 * time.Minute,
+	})
+}
+
+// WriteEvalExecHelper installs a PATH wrapper that docker-execs into the
+// live task image. Lives next to app/ so it is not part of the workspace copy.
+func WriteEvalExecHelper(instDir string) error {
+	if instDir == "" {
+		return fmt.Errorf("tbench: empty instDir")
+	}
+	if err := os.MkdirAll(instDir, 0o755); err != nil {
+		return err
+	}
+	path := filepath.Join(instDir, "eval-exec")
+	return os.WriteFile(path, []byte(evalExecHelper), 0o755)
 }
 
 func copyDir(src, dst string) error {

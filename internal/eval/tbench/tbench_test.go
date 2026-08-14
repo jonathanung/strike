@@ -3,6 +3,7 @@ package tbench
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -117,6 +118,33 @@ func TestBuildAgentPrompt(t *testing.T) {
 	if !strings.Contains(p, "fixture-task") || !strings.Contains(p, "Do the thing") {
 		t.Fatalf("%s", p)
 	}
+	if strings.Contains(p, "eval-exec") {
+		t.Fatalf("no-container prompt should omit eval-exec: %s", p)
+	}
+}
+
+func TestFormatAgentPromptEvalContainer(t *testing.T) {
+	p := FormatAgentPrompt(Instance{InstanceID: "x", Instruction: "y"}, "abc123")
+	if !strings.Contains(p, "eval-exec") || !strings.Contains(p, "abc123") {
+		t.Fatalf("container prompt: %s", p)
+	}
+	if !strings.Contains(p, "/app") {
+		t.Fatalf("missing /app: %s", p)
+	}
+}
+
+func TestWriteEvalExecHelper(t *testing.T) {
+	dir := t.TempDir()
+	if err := WriteEvalExecHelper(dir); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "eval-exec"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "STRIKE_EVAL_CONTAINER") || !strings.Contains(string(data), "docker exec") {
+		t.Fatalf("helper: %s", data)
+	}
 }
 
 func TestBuildReportAndWrite(t *testing.T) {
@@ -220,7 +248,7 @@ func TestRunnerDryRunAndMock(t *testing.T) {
 			if err := os.MkdirAll(app, 0o755); err != nil {
 				return MaterializeResult{}, err
 			}
-			return MaterializeResult{WorkDir: app, Image: image}, nil
+			return MaterializeResult{WorkDir: app, Image: image, ContainerID: "cid-live"}, nil
 		},
 	}
 	rep2, err := r2.Run(context.Background(), Config{
@@ -249,10 +277,58 @@ func TestRunnerDryRunAndMock(t *testing.T) {
 	if agent.calls != 1 {
 		t.Fatalf("agent calls %d", agent.calls)
 	}
+	if !containsArg(agent.opts.ExtraArgs, "--sandbox=off") {
+		t.Fatalf("expected --sandbox=off, got %v", agent.opts.ExtraArgs)
+	}
+	if !containsArg(agent.opts.Env, "STRIKE_EVAL_CONTAINER=cid-live") {
+		t.Fatalf("env missing container: %v", agent.opts.Env)
+	}
+	if !containsArg(agent.opts.Env, "STRIKE_EVAL_WORKDIR=/app") {
+		t.Fatalf("env missing workdir: %v", agent.opts.Env)
+	}
+	if !strings.Contains(agent.prompt, "eval-exec") {
+		t.Fatalf("prompt missing eval-exec: %s", agent.prompt)
+	}
+	if _, err := os.Stat(filepath.Join(work, "mock1", "fixture-task", "eval-exec")); err != nil {
+		t.Fatalf("eval-exec helper: %v", err)
+	}
 	// report written
 	if _, err := os.Stat(filepath.Join(out, "mock", "report.json")); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestMaterializeWorkspaceStartsLiveContainer(t *testing.T) {
+	rt := &bindRecordingRuntime{}
+	host := t.TempDir()
+	mat, err := MaterializeWorkspace(context.Background(), rt, "img:tag", host, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mat.WorkDir == "" || mat.ContainerID == "" {
+		t.Fatalf("result %+v", mat)
+	}
+	if len(rt.binds) == 0 {
+		t.Fatal("expected live-container HostBinds")
+	}
+	found := false
+	for _, b := range rt.binds {
+		if strings.HasSuffix(b, ":/app") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("binds=%v", rt.binds)
+	}
+}
+
+func containsArg(args []string, want string) bool {
+	for _, a := range args {
+		if a == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestDockerGraderReadsReward(t *testing.T) {
@@ -382,6 +458,24 @@ func (fakeRuntime) Exec(context.Context, string, []string, swebench.ExecOpts) (s
 }
 func (fakeRuntime) Remove(context.Context, string) error { return nil }
 
+func TestReclaimWorkspaceOwner(t *testing.T) {
+	var got []string
+	rt := &recordingRuntime{
+		onExec: func(cmd []string) (string, string, int, error) {
+			got = append(got, strings.Join(cmd, " "))
+			return "", "", 0, nil
+		},
+	}
+	reclaimWorkspaceOwner(context.Background(), rt, "cid-live")
+	if len(got) != 1 || !strings.Contains(got[0], "chown -R") || !strings.Contains(got[0], "/app") {
+		t.Fatalf("exec=%v", got)
+	}
+	reclaimWorkspaceOwner(context.Background(), rt, "")
+	if len(got) != 1 {
+		t.Fatal("empty cid should be a no-op")
+	}
+}
+
 type recordingRuntime struct {
 	onExec   func(cmd []string) (string, string, int, error)
 	onCopyTo func(src, dst string)
@@ -413,15 +507,50 @@ func (r *recordingRuntime) Exec(_ context.Context, _ string, cmd []string, _ swe
 func (r *recordingRuntime) Remove(context.Context, string) error { return nil }
 
 type fakeAgent struct {
-	res   swebench.ExecResult
-	err   error
-	calls int
+	res    swebench.ExecResult
+	err    error
+	calls  int
+	opts   swebench.AgentOpts
+	prompt string
 }
 
-func (f *fakeAgent) Run(context.Context, string, string, swebench.AgentOpts) (swebench.ExecResult, error) {
+func (f *fakeAgent) Run(_ context.Context, _ string, prompt string, opts swebench.AgentOpts) (swebench.ExecResult, error) {
 	f.calls++
+	f.opts = opts
+	f.prompt = prompt
 	return f.res, f.err
 }
+
+type bindRecordingRuntime struct {
+	n     int
+	binds []string
+}
+
+func (r *bindRecordingRuntime) Available(context.Context) error { return nil }
+func (r *bindRecordingRuntime) Pull(context.Context, string) error {
+	return nil
+}
+func (r *bindRecordingRuntime) Create(_ context.Context, _ string, opts swebench.CreateOpts) (string, error) {
+	r.n++
+	if len(opts.HostBinds) > 0 {
+		r.binds = append(r.binds, opts.HostBinds...)
+	}
+	return fmt.Sprintf("c%d", r.n), nil
+}
+func (r *bindRecordingRuntime) Start(context.Context, string) error { return nil }
+func (r *bindRecordingRuntime) CopyFrom(_ context.Context, _ string, _ string, dst string) error {
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dst, "marker.txt"), []byte("ok\n"), 0o644)
+}
+func (r *bindRecordingRuntime) CopyTo(context.Context, string, string, string) error {
+	return nil
+}
+func (r *bindRecordingRuntime) Exec(context.Context, string, []string, swebench.ExecOpts) (string, string, int, error) {
+	return "", "", 0, nil
+}
+func (r *bindRecordingRuntime) Remove(context.Context, string) error { return nil }
 
 type fakeGrader struct {
 	res GradeResult

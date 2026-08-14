@@ -31,6 +31,11 @@ func ExtractPatch(workDir string) (string, error) {
 		":(exclude,glob)**/repro_*.py",
 	}
 	_ = runGit(workDir, append([]string{"add", "-N"}, spec...)...)
+	// docker cp / bind-mount often turns git symlinks into regular files
+	// (matplotlib mpl-data icons). Those typechanges become un-applicable
+	// binary hunks that fail the whole official apply. Restore them so the
+	// model_patch is source-only. Not repo-specific.
+	restoreTypechanges(workDir)
 	out, err := runGitOutput(workDir, append([]string{"diff", "HEAD"}, spec...)...)
 	if err != nil {
 		// Fallback: diff without HEAD (unborn / odd states).
@@ -49,7 +54,43 @@ func ExtractPatch(workDir string) (string, error) {
 			out = append(out, staged...)
 		}
 	}
-	return string(out), nil
+	return dropBinaryFileDiffs(string(out)), nil
+}
+
+// restoreTypechanges checks out files whose git type changed (symlink↔file).
+func restoreTypechanges(workDir string) {
+	names, err := runGitOutput(workDir, "diff", "--name-only", "--diff-filter=T")
+	if err != nil {
+		return
+	}
+	for _, name := range strings.Split(string(names), "\n") {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		_ = runGit(workDir, "checkout", "--", name)
+	}
+}
+
+// dropBinaryFileDiffs removes git binary / "Binary files differ" file hunks.
+func dropBinaryFileDiffs(patch string) string {
+	if patch == "" || (!strings.Contains(patch, "GIT binary patch") && !strings.Contains(patch, "Binary files ")) {
+		return patch
+	}
+	parts := strings.Split(patch, "diff --git ")
+	var b strings.Builder
+	for i, part := range parts {
+		if i == 0 {
+			b.WriteString(part)
+			continue
+		}
+		if strings.Contains(part, "GIT binary patch") || strings.Contains(part, "Binary files ") {
+			continue
+		}
+		b.WriteString("diff --git ")
+		b.WriteString(part)
+	}
+	return b.String()
 }
 
 func extractPatchNoGit(workDir string) (string, error) {
