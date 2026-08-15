@@ -14,9 +14,16 @@ materially affect the shipped product.
 
 ## [Unreleased]
 
+## [v0.5.0] - 2026-08-15
+
+Minor release: Agent Plugins 1.0.0, a leaner default OS sandbox, `--auto`
+vs `--dangerously-skip-permissions`, and web cockpit TUI-parity polish.
+
 ### Added
 
 - **`strike plugin migrate`** — convert a legacy Strike-native bundle to Agent Plugins 1.0.0 (`plugin.json`, portable `skills/` + `mcp.json`, Strike-only files under `com.strike.cli/`). Atomic: stage, validate, then replace. Installed plugins require `--yes`; digest is recomputed and trust is cleared (not auto-granted). `--dry-run` prints the plan. Already-APS packages are refused ([#1145](https://github.com/jonathanung/strike/issues/1145)).
+- **Agent Plugins 1.0.0 load path** — install and run APS packages (`plugin.json`, `skills/`, `mcp.json`) plus Strike-only `com.strike.cli` extensions; CLI, catalog, doctor, TUI, and conformance tests follow the same contract ([#1141](https://github.com/jonathanung/strike/issues/1141)–[#1148](https://github.com/jonathanung/strike/issues/1148)).
+- **Web cockpit TUI parity** — composer autocomplete (arrows + top-down list), plugin panes docked beside Chat, Chat session-group inspector, and inspector/completion chrome aligned with the TUI ([#1140](https://github.com/jonathanung/strike/issues/1140), [#1155](https://github.com/jonathanung/strike/issues/1155), [#1156](https://github.com/jonathanung/strike/issues/1156)).
 
 ### Changed
 
@@ -26,7 +33,6 @@ materially affect the shipped product.
   `file-map-executable`, process-info, local IPC, and tty ioctls; Linux bwrap
   re-binds the host `/dev/tty`. Two `strike` processes (or a nested launch
   from sandboxed bash) can start without turning isolation off.
-
 - **`--auto` vs `--dangerously-skip-permissions`** — they are no longer aliases. Both still skip configured permission asks (agent denies remain). Only `--dangerously-skip-permissions` bypasses `network.allow` (bash preflight, webfetch, websearch). `--auto` keeps the allowlist. OS sandbox is unchanged for both. Eval runners stay on `--auto` so isolation still holds.
 - **Plugin contract** — native on-disk format is [Agent Plugins](https://agent-plugins.org/) 1.0.0 (`plugin.json`, portable `skills/` + `mcp.json`). Strike-only assets use `com.strike.cli`. See [docs/plugins.md](docs/plugins.md) ([#1142](https://github.com/jonathanung/strike/issues/1142)).
 - **Upgrade note:** Agent Plugins is native. Strike-native plugin manifests (`schemaVersion` + `contributions`) are deprecated; removal is planned for a future major. Use `strike plugin migrate`. `strike plugin install` of a Strike-native tree fails unless `--legacy` is passed. Already-installed legacy packages continue to load ([#1147](https://github.com/jonathanung/strike/issues/1147)).
@@ -43,6 +49,8 @@ materially affect the shipped product.
   could not start. The availability probe now uses those primitives and runs
   in its own process group so a nested Seatbelt failure cannot signal the
   parent instance.
+
+**Full changelog:** [v0.4.0...v0.5.0](https://github.com/jonathanung/strike/compare/v0.4.0...v0.5.0)
 
 ## [v0.4.0] - 2026-08-12
 
@@ -803,7 +811,8 @@ Initial public release.
 
 **Full changelog:** [commits through v0.0.1](https://github.com/jonathanung/strike/commits/v0.0.1)
 
-[Unreleased]: https://github.com/jonathanung/strike/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/jonathanung/strike/compare/v0.5.0...HEAD
+[v0.5.0]: https://github.com/jonathanung/strike/compare/v0.4.0...v0.5.0
 [v0.4.0]: https://github.com/jonathanung/strike/compare/v0.3.1...v0.4.0
 [v0.3.1]: https://github.com/jonathanung/strike/compare/v0.3.0...v0.3.1
 [v0.3.0]: https://github.com/jonathanung/strike/compare/v0.2.2...v0.3.0
