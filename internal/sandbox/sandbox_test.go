@@ -2,12 +2,14 @@ package sandbox
 
 import (
 	"bytes"
+	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -226,6 +228,11 @@ func TestWrapLinuxArgvShape(t *testing.T) {
 	if !strings.Contains(joined, "\x00--dev\x00/dev\x00--proc\x00/proc\x00") {
 		t.Fatalf("missing dev/proc: %#v", argv)
 	}
+	if _, err := os.Stat("/dev/tty"); err == nil {
+		if !strings.Contains(joined, "\x00--bind\x00/dev/tty\x00/dev/tty\x00") {
+			t.Fatalf("workspace-write should re-bind host /dev/tty: %#v", argv)
+		}
+	}
 	// Product default: bare Policy keeps host networking (issue #750).
 	if strings.Contains(joined, "\x00--unshare-net\x00") {
 		t.Fatalf("default Policy must omit --unshare-net: %#v", argv)
@@ -348,6 +355,35 @@ func TestSharedWritablePathsAndIsShared(t *testing.T) {
 	if !foundCache {
 		t.Fatalf("expected cache in SharedWritablePaths: %v", paths)
 	}
+	// Lean toolchain + Strike state dirs must be shared-writable when present.
+	for _, rel := range []string{
+		filepath.Join(".local", "share"),
+		filepath.Join(".yarn"),
+		filepath.Join(".strike", "sessions"),
+	} {
+		dir := filepath.Join(home, rel)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if !IsSharedWritablePath(filepath.Join(dir, "x")) {
+			t.Fatalf("%q should be shared writable", dir)
+		}
+	}
+	if IsSharedWritablePath(filepath.Join(home, ".strike", "config")) {
+		t.Fatal("~/.strike/config must stay read-only (not a shared-writable root)")
+	}
+	if IsSharedWritablePath(filepath.Join(home, ".strike")) {
+		t.Fatal("~/.strike itself must not be shared-writable")
+	}
+	if err := os.MkdirAll(filepath.Join(home, ".config", "gh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if !IsSharedWritablePath(filepath.Join(home, ".config", "gh", "hosts.yml")) {
+		t.Fatal("~/.config/gh should be shared writable")
+	}
+	if IsSharedWritablePath(filepath.Join(home, ".config", "other")) {
+		t.Fatal("~/.config itself must not be shared writable")
+	}
 	// Caches omitted when includeCaches=false.
 	temps := SharedWritablePaths(wd, false)
 	for _, p := range temps {
@@ -444,18 +480,26 @@ func TestWrapDarwinArgvShape(t *testing.T) {
 		t.Fatalf("profile missing workspace write:\n%s", text)
 	}
 	for _, rule := range []string{
+		`(allow file-map-executable)`,
+		`(allow process-exec*)`,
+		`(allow process-info*)`,
+		`(allow system-socket)`,
+		`(allow ipc-posix-shm*)`,
 		`(global-name "com.apple.SecurityServer")`,
 		`(global-name "com.apple.securityd.xpc")`,
 		`(global-name "com.apple.trustd.agent")`,
 		`(global-name "com.apple.TrustEvaluationAgent")`,
 		`(global-name "com.apple.ocspd")`,
-		`(ipc-posix-name "com.apple.AppleDatabaseChanged")`,
+		`(global-name "com.apple.sysmond")`,
 		`(preference-domain "com.apple.security")`,
 		`(preference-domain "com.apple.security_common")`,
 	} {
 		if !strings.Contains(text, rule) {
-			t.Errorf("profile missing Keychain rule %q:\n%s", rule, text)
+			t.Errorf("profile missing lean/process rule %q:\n%s", rule, text)
 		}
+	}
+	if !strings.Contains(text, filepath.Join(".strike", "sessions")) {
+		t.Errorf("profile missing ~/.strike/sessions write allow:\n%s", text)
 	}
 	// Workdir (or its real path) must appear.
 	realWD, _ := filepath.EvalSymlinks(wd)
@@ -700,5 +744,104 @@ func TestNetworkEnabledZeroValue(t *testing.T) {
 	}
 	if (Policy{NoNetwork: true}).NetworkEnabled() {
 		t.Fatal("NoNetwork must disable network")
+	}
+}
+
+func TestHostTTYPath(t *testing.T) {
+	got := hostTTYPath()
+	if _, err := os.Stat("/dev/tty"); err != nil {
+		if got != "" {
+			t.Fatalf("missing /dev/tty but hostTTYPath = %q", got)
+		}
+		return
+	}
+	if got != "/dev/tty" {
+		t.Fatalf("hostTTYPath = %q, want /dev/tty", got)
+	}
+}
+
+// TestConcurrentSandboxedBinaries is the dual-launch regression: two helper
+// processes must be able to exec under the default workspace-write profile at
+// the same time (file-map-executable / process-exec on macOS; bwrap on Linux).
+func TestConcurrentSandboxedBinaries(t *testing.T) {
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		t.Skip("OS sandbox backends")
+	}
+	ResetWarnForTest()
+	resetAvailabilityForTest()
+	if !Available() {
+		t.Skipf("sandbox backend unavailable")
+	}
+	wd := t.TempDir()
+	helper := filepath.Join(wd, "helper.sh")
+	if err := os.WriteFile(helper, []byte("#!/bin/sh\necho ok\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const n = 2
+	errs := make(chan error, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			argv := Wrap([]string{"/bin/sh", helper}, Policy{
+				Mode:    ModeWorkspaceWrite,
+				WorkDir: wd,
+			})
+			cmd := exec.Command(argv[0], argv[1:]...)
+			cmd.Dir = wd
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				errs <- fmt.Errorf("helper: %w\n%s", err, out)
+				return
+			}
+			if !strings.Contains(string(out), "ok") {
+				errs <- fmt.Errorf("helper output %q", out)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent sandboxed helper: %v", err)
+		}
+	}
+}
+
+func TestStrikeStateDirsAreSharedWritable(t *testing.T) {
+	realHome, err := os.UserHomeDir()
+	if err != nil || realHome == "" || IsSharedWritablePath(realHome) {
+		t.Skip("need a non-shared-writable real home")
+	}
+	home, err := os.MkdirTemp(realHome, ".strike-sandbox-home-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(home) })
+	t.Setenv("HOME", home)
+	wd := t.TempDir()
+	for _, rel := range strikeStateWritableRels() {
+		dir := filepath.Join(home, ".strike", rel)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if !IsSharedWritablePath(filepath.Join(dir, "session.jsonl")) {
+			t.Fatalf("%s should be shared writable", dir)
+		}
+	}
+	paths := SharedWritablePaths(wd, true)
+	foundSessions := false
+	want := filepath.Join(home, ".strike", "sessions")
+	if real, err := filepath.EvalSymlinks(want); err == nil {
+		want = real
+	}
+	for _, p := range paths {
+		if p == want {
+			foundSessions = true
+		}
+	}
+	if !foundSessions {
+		t.Fatalf("expected ~/.strike/sessions in SharedWritablePaths: %v", paths)
 	}
 }

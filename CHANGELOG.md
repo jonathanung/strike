@@ -20,6 +20,13 @@ materially affect the shipped product.
 
 ### Changed
 
+- **Default OS sandbox is leaner** — `workspace-write` still keeps `$HOME` and
+  `~/.strike/config` read-only, but now allows the toolchain/XDG caches and
+  Strike session dirs coding workflows actually need. macOS Seatbelt grants
+  `file-map-executable`, process-info, local IPC, and tty ioctls; Linux bwrap
+  re-binds the host `/dev/tty`. Two `strike` processes (or a nested launch
+  from sandboxed bash) can start without turning isolation off.
+
 - **`--auto` vs `--dangerously-skip-permissions`** — they are no longer aliases. Both still skip configured permission asks (agent denies remain). Only `--dangerously-skip-permissions` bypasses `network.allow` (bash preflight, webfetch, websearch). `--auto` keeps the allowlist. OS sandbox is unchanged for both. Eval runners stay on `--auto` so isolation still holds.
 - **Plugin contract** — native on-disk format is [Agent Plugins](https://agent-plugins.org/) 1.0.0 (`plugin.json`, portable `skills/` + `mcp.json`). Strike-only assets use `com.strike.cli`. See [docs/plugins.md](docs/plugins.md) ([#1142](https://github.com/jonathanung/strike/issues/1142)).
 - **Upgrade note:** Agent Plugins is native. Strike-native plugin manifests (`schemaVersion` + `contributions`) are deprecated; removal is planned for a future major. Use `strike plugin migrate`. `strike plugin install` of a Strike-native tree fails unless `--legacy` is passed. Already-installed legacy packages continue to load ([#1147](https://github.com/jonathanung/strike/issues/1147)).
@@ -27,6 +34,15 @@ materially affect the shipped product.
 ### Deprecated
 
 - Strike-native plugin authoring (`schemaVersion` + `contributions` + `plugin.jsonc`). Installed legacy bundles still load with a deprecation diagnostic until a future major. New installs require `strike plugin install --legacy` ([#1147](https://github.com/jonathanung/strike/issues/1147)).
+
+### Fixed
+
+- **Second `strike` binary failing to launch** — the default macOS Seatbelt
+  profile allowed `process-exec` but not `file-map-executable` / process-info /
+  host tty, so a second Go binary (or nested `strike` from sandboxed bash)
+  could not start. The availability probe now uses those primitives and runs
+  in its own process group so a nested Seatbelt failure cannot signal the
+  parent instance.
 
 ## [v0.4.0] - 2026-08-12
 

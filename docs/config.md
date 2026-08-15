@@ -354,13 +354,21 @@ compiled from permission rules.
 **Shared writable roots (default usability):** under any non-`off` mode the
 sandbox keeps common scratch dirs writable (`/tmp`, `/var/tmp`, `$TMPDIR`,
 and on Linux `/dev/shm`). In **`workspace-write`** it also binds user/tool
-caches when present (`$XDG_CACHE_HOME` or `~/.cache`, `$GOCACHE` /
-`$GOMODCACHE`, `~/.npm`, `~/.cargo`, `~/.rustup`, …) so `go build`, package
-managers, and `2>/dev/null` redirections work without disabling isolation.
-The bash static path guard allows the same roots (and safe devices like
-`/dev/null`) outside the workspace; critical targets (`/`, `/tmp` as a whole,
-`$HOME`, …) stay blocked. The rest of the host filesystem remains read-only
-aside from the session workdir.
+caches and state when present (`$XDG_CACHE_HOME` or `~/.cache`,
+`$XDG_DATA_HOME` / `~/.local/share`, `$XDG_STATE_HOME` / `~/.local/state`,
+`$GOCACHE` / `$GOMODCACHE`, npm/yarn/bun/pnpm/cargo/rustup/pip/uv/maven/gradle
+homes, `~/.config/gh` and `~/.config/git`, macOS `~/Library/Caches`, and
+Strike operational dirs
+`~/.strike/{sessions,history,cache,runs,checkpoints,audit}`) so `go build`,
+package managers, a second `strike` process, and `2>/dev/null` redirections
+work without disabling isolation. `~/.strike/config` and credentials stay
+read-only. The bash static path guard allows the same roots (and safe devices
+like `/dev/null`) outside the workspace; critical targets (`/`, `/tmp` as a
+whole, `$HOME`, …) stay blocked. The rest of the host filesystem remains
+read-only aside from the session workdir. macOS Seatbelt allows
+`file-map-executable`, process-info, local IPC, and the host tty so compiled
+binaries and interactive CLIs can start; Linux bwrap re-binds `/dev/tty`
+after `--dev /dev` for the same reason.
 
 **Permission → sandbox profile:** hard `write`/`edit` deny rules are compiled
 into OS filesystem denials inside the bash sandbox (globs become seatbelt

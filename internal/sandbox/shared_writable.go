@@ -11,6 +11,10 @@ import (
 // compilers and package managers need scratch + cache dirs outside the
 // session worktree. Temp roots apply in any non-off mode (parity with
 // macOS seatbelt); cache roots apply only when the workspace is writable.
+//
+// The default list is intentionally lean: enough for day-to-day coding
+// (toolchain caches, XDG state, a second strike process writing sessions)
+// without opening $HOME, ~/.strike config/credentials, or other secrets.
 
 // IsSharedWritablePath reports whether abs is a safe device node or lies
 // under a well-known temp/cache root. Used by the bash static path guard
@@ -117,6 +121,16 @@ func sharedWritableRootCandidates(includeCaches bool) []string {
 	if xdg := strings.TrimSpace(os.Getenv("XDG_RUNTIME_DIR")); xdg != "" {
 		add(xdg)
 	}
+	if xdg := strings.TrimSpace(os.Getenv("XDG_DATA_HOME")); xdg != "" {
+		add(xdg)
+	} else if home != "" {
+		add(filepath.Join(home, ".local", "share"))
+	}
+	if xdg := strings.TrimSpace(os.Getenv("XDG_STATE_HOME")); xdg != "" {
+		add(xdg)
+	} else if home != "" {
+		add(filepath.Join(home, ".local", "state"))
+	}
 
 	if g := strings.TrimSpace(os.Getenv("GOCACHE")); g != "" && !strings.EqualFold(g, "off") {
 		add(g)
@@ -128,13 +142,75 @@ func sharedWritableRootCandidates(includeCaches bool) []string {
 	} else if home != "" {
 		add(filepath.Join(home, "go", "pkg", "mod"))
 	}
+	if g := strings.TrimSpace(os.Getenv("CARGO_HOME")); g != "" {
+		add(g)
+	}
+	if g := strings.TrimSpace(os.Getenv("RUSTUP_HOME")); g != "" {
+		add(g)
+	}
+	if g := strings.TrimSpace(os.Getenv("NPM_CONFIG_CACHE")); g != "" {
+		add(g)
+	}
+	if g := strings.TrimSpace(os.Getenv("UV_CACHE_DIR")); g != "" {
+		add(g)
+	}
+	if g := strings.TrimSpace(os.Getenv("PIP_CACHE_DIR")); g != "" {
+		add(g)
+	}
 
 	if home != "" {
-		add(filepath.Join(home, ".npm"))
-		add(filepath.Join(home, ".cargo"))
-		add(filepath.Join(home, ".rustup"))
+		for _, rel := range leanToolchainCacheRels() {
+			add(filepath.Join(home, rel))
+		}
+		if runtime.GOOS == "darwin" {
+			add(filepath.Join(home, "Library", "Caches"))
+			add(filepath.Join(home, "Library", "Logs"))
+		}
+		// Strike process state — enough for a second `strike` (or nested
+		// launch from sandboxed bash) to persist sessions. Config and
+		// credentials stay read-only so the agent cannot disable isolation.
+		for _, rel := range strikeStateWritableRels() {
+			add(filepath.Join(home, ".strike", rel))
+		}
 	}
 	return roots
+}
+
+// leanToolchainCacheRels are well-known user cache/store directories relative
+// to $HOME. Each is a leaf tool root, never $HOME itself.
+func leanToolchainCacheRels() []string {
+	return []string{
+		".npm",
+		".yarn",
+		".bun",
+		".pnpm-store",
+		".cargo",
+		".rustup",
+		".m2",
+		".gradle",
+		".gem",
+		".bundle",
+		".composer",
+		".nuget",
+		".uv",
+		".cache",
+		// CLI state (not ~/.config as a whole — that holds too many secrets).
+		filepath.Join(".config", "gh"),
+		filepath.Join(".config", "git"),
+	}
+}
+
+// strikeStateWritableRels are ~/.strike subdirectories a live process must
+// append to. Intentionally excludes config, credentials, and plugin lockfiles.
+func strikeStateWritableRels() []string {
+	return []string{
+		"sessions",
+		"history",
+		"cache",
+		"runs",
+		"checkpoints",
+		"audit",
+	}
 }
 
 func userHomeDir() string {
@@ -241,6 +317,17 @@ func absWorkDir(workDir string) string {
 		return real
 	}
 	return abs
+}
+
+// hostTTYPath returns the host controlling tty when it exists as a device.
+// Used by Linux bwrap to re-bind /dev/tty after --dev replaces the tree.
+func hostTTYPath() string {
+	const tty = "/dev/tty"
+	st, err := os.Stat(tty)
+	if err != nil || st == nil {
+		return ""
+	}
+	return tty
 }
 
 func pathUnderRoot(root, path string) bool {

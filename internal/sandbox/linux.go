@@ -88,6 +88,11 @@ func wrapPlatform(argv []string, policy Policy) []string {
 		"--dev", "/dev",
 		"--proc", "/proc",
 	)
+	// Overlay the host controlling tty after --dev so interactive children
+	// (a second strike TUI, pagers) can talk to the real terminal.
+	if tty := hostTTYPath(); tty != "" {
+		out = append(out, "--bind", tty, tty)
+	}
 	if policy.NoNetwork {
 		out = append(out, "--unshare-net")
 	}
@@ -124,6 +129,9 @@ func profileText(policy Policy) string {
 	}
 	b.WriteString("  --dev /dev \\\n")
 	b.WriteString("  --proc /proc \\\n")
+	if tty := hostTTYPath(); tty != "" {
+		b.WriteString("  --bind " + tty + " " + tty + " \\\n")
+	}
 	if policy.NoNetwork {
 		b.WriteString("  --unshare-net \\\n")
 	} else {

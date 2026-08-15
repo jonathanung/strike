@@ -56,7 +56,10 @@ prompt injection in file, MCP, or web-fetch **content** —
 ## OS sandbox (in-place, #537)
 
 - **Default:** `workspace-write` — host root read-only, session workdir (and
-  shared scratch: `/tmp`, caches) writable.
+  shared scratch: `/tmp`, toolchain caches, XDG state, Strike session dirs)
+  writable. Process/IPC/tty primitives stay available so a second `strike`
+  (or `go test` helper) can exec; `$HOME` and `~/.strike/config` stay
+  read-only.
 - **read-only:** no writable workspace bind.
 - **off:** argv unchanged (no launcher).
 - Permission hard-denies for `write`/`edit` compile into deny-write paths/globs
