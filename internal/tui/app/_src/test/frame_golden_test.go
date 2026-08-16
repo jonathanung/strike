@@ -20,14 +20,14 @@ import (
 // (Charm v2 + Family soft-rounded bento). Structural layout regressions fail the
 // suite; UPDATE_GOLDEN=1 rewrites the fixtures.
 //
-//	UPDATE_GOLDEN=1 go test ./internal/tui/ -run TestFrameGolden -count=1
+//	UPDATE_GOLDEN=1 go test ./internal/tui/app/ -run TestFrameGolden -count=1
 func TestFrameGolden(t *testing.T) {
 	// Pin tip rotation so day-of-year does not flake empty-composer frames (#664).
 	prevTipDay := tipDayOverride
 	tipDayOverride = 1
 	t.Cleanup(func() { tipDayOverride = prevTipDay })
 
-	dir := filepath.Join(moduleRoot(t), "internal", "tui", "testdata", "frames")
+	dir := filepath.Join(moduleRoot(t), "internal", "tui", "app", "testdata", "frames")
 	cases := []struct {
 		file          string
 		width, height int
@@ -111,7 +111,7 @@ func TestFrameGolden(t *testing.T) {
 			}
 			want, err := os.ReadFile(path)
 			if err != nil {
-				t.Fatalf("read golden %s: %v (run UPDATE_GOLDEN=1 go test ./internal/tui/ -run TestFrameGolden)", path, err)
+				t.Fatalf("read golden %s: %v (run UPDATE_GOLDEN=1 go test ./internal/tui/app/ -run TestFrameGolden)", path, err)
 			}
 			if got != string(want) {
 				t.Fatalf("golden mismatch for %s\n--- got ---\n%s\n--- want ---\n%s", tc.file, got, want)

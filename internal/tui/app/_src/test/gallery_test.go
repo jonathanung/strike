@@ -17,7 +17,7 @@ import (
 // human/orchestrator eyeballing. It is a silent no-op unless STRIKE_GALLERY=1,
 // so it never affects the normal suite:
 //
-//	STRIKE_GALLERY=1 go test ./internal/tui/ -run Gallery -count=1 -v
+//	STRIKE_GALLERY=1 go test ./internal/tui/app/ -run Gallery -count=1 -v
 func TestGallery(t *testing.T) {
 	if os.Getenv("STRIKE_GALLERY") != "1" {
 		t.Skip("set STRIKE_GALLERY=1 to render the view gallery")

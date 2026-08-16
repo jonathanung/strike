@@ -112,7 +112,7 @@ sleep 30
 
 	// Plain snapshot only — color profile can vary; structure must not.
 	got := normalizeFrameGolden(term.Render(sess, 16, 4))
-	goldenDir := filepath.Join(moduleRoot(t), "internal", "tui", "testdata", "pty")
+	goldenDir := filepath.Join(moduleRoot(t), "internal", "tui", "app", "testdata", "pty")
 	goldenPath := filepath.Join(goldenDir, "render-16x4.golden")
 	if os.Getenv("UPDATE_GOLDEN") == "1" {
 		if err := os.MkdirAll(goldenDir, 0o755); err != nil {

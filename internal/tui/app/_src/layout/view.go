@@ -60,7 +60,7 @@ func (m Model) headerView(width int) string {
 	state := m.agentState()
 	stateTone := agentStateTone(state)
 
-	brand := ui.LogoCompact(th)
+	brand := LogoCompact(th)
 
 	// Build ordered chips with drop priorities (lower = drop sooner).
 	var chips []headerChip

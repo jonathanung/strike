@@ -1,10 +1,10 @@
 # TUI source groups
 
-**Edit Go files here only.** `go generate ./internal/tui` (also `make test` /
-`make build` / CI) flattens these into `internal/tui/*.go` because Go allows
+**Edit Go files here only.** `go generate ./internal/tui/app` (also `make test` /
+`make build` / CI) flattens these into `internal/tui/app/*.go` because Go allows
 only one directory per package.
 
-Flattened `internal/tui/*.go` files are **gitignored** and stamped
+Flattened `internal/tui/app/*.go` files are **gitignored** and stamped
 `DO NOT EDIT`. Any change to them is wiped on the next generate. If a Charm v2
 (or any) migration edits flattened copies, the work is silently lost —
 always edit `_src/<group>/` (or the real packages below), then regenerate.

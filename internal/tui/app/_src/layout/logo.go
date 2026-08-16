@@ -1,4 +1,4 @@
-package ui
+package tui
 
 import (
 	"strings"
@@ -8,15 +8,13 @@ import (
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 )
 
-// Logo is the "strike" wordmark: the bolt motif and spaced letters hugged by
+// Logo is the Strike wordmark: the bolt motif and spaced letters hugged by
 // two hairline rules, colored as an accent gradient (accent-alt rule, accent
 // letters, accent rule) with a warm bolt. Three lines, at most ~16 columns.
 // Use LogoCompact when the space is narrower than the wordmark.
-//
-//	card := ui.Card{Title: "strike", Body: ui.Logo(th), Width: 30}
 func Logo(th theme.Theme) string {
 	th = th.Resolve()
-	ic := resolveIcons(th)
+	ic := th.Icons
 	st := th.S()
 	space := strings.Repeat(" ", th.Spacing.XS)
 	// Build mid first so rule width matches the styled wordmark (bold/title
@@ -37,10 +35,9 @@ func Logo(th theme.Theme) string {
 
 // LogoCompact is the one-line fallback wordmark: "⚡ strike", bolt warm and
 // word accented. Use it when the full Logo will not fit.
-//
-//	if width < 18 { header = ui.LogoCompact(th) } else { header = ui.Logo(th) }
 func LogoCompact(th theme.Theme) string {
-	ic := resolveIcons(th)
+	th = th.Resolve()
+	ic := th.Icons
 	st := th.S()
-	return st.Warning.Render(ic.Bolt) + strings.Repeat(" ", th.Resolve().Spacing.XS) + st.Title.Render("strike")
+	return st.Warning.Render(ic.Bolt) + strings.Repeat(" ", th.Spacing.XS) + st.Title.Render("strike")
 }

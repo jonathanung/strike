@@ -124,7 +124,7 @@ func TestVisualizerWindowWidthSafe(t *testing.T) {
 		Objective:    "investigate a very long objective that must not blow the layout at narrow widths",
 		LastAction:   "grep for something-with-an-extremely-long-pattern-name",
 		BlockReason:  "waiting on permission for a long shell command that exceeds the pane",
-		FilesTouched: []string{"internal/tui/_src/window/visualizer_window.go", "pkg/protocol/protocol.go", "a/b/c/d/e/f/g/h/i/j/k/long.go"},
+		FilesTouched: []string{"internal/tui/app/_src/window/visualizer_window.go", "pkg/protocol/protocol.go", "a/b/c/d/e/f/g/h/i/j/k/long.go"},
 		Input:        protocol.KnownTokens(99),
 		Output:       protocol.KnownTokens(1),
 		Activity:     []float64{1, 2, 3, 4, 5, 6, 7, 8},
@@ -875,7 +875,7 @@ func TestVisualizerVerificationAndConflictWidthSafe(t *testing.T) {
 		},
 		PathOverlaps: []visualizerPathOverlap{
 			{
-				Path:    "internal/tui/_src/window/visualizer_window.go",
+				Path:    "internal/tui/app/_src/window/visualizer_window.go",
 				Policy:  "block",
 				Blocked: true,
 				Holders: []string{"agent-one", "agent-two", "agent-three", "agent-four"},

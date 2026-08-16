@@ -60,13 +60,13 @@ a fixed “six tools” list.
 
 ### TUI
 
-Source lives under `internal/tui/_src/` and is flattened into `internal/tui` via
-`go generate ./internal/tui`. Tests may live beside `_src` or as generated/package
-tests under `internal/tui`.
+Source lives under `internal/tui/app/_src/` and is flattened into `internal/tui/app` via
+`go generate ./internal/tui/app`. Tests may live beside `_src` or as generated/package
+tests under `internal/tui/app`.
 
-Reuse helpers from `internal/tui/_src/app/app_test.go` (same package after generate),
+Reuse helpers from `internal/tui/app/_src/app/app_test.go` (same package after generate),
 including: `updateApp`, `runAppCmd`, `runAllAppCmds`, `receiveAppOp`, `assertNoAppOp`.
-Shared support also appears under `internal/tui/_src/test/` (e.g. `testsupport_test.go`).
+Shared support also appears under `internal/tui/app/_src/test/` (e.g. `testsupport_test.go`).
 Load skill `tui-components` before asserting chrome/theme behavior.
 
 ## After writing

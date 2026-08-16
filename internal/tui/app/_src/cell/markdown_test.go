@@ -73,7 +73,7 @@ func TestGlamourRenderGolden(t *testing.T) {
 		{name: "light", dark: false, file: "sample-light.golden", width: 72},
 	}
 
-	dir := filepath.Join(moduleRoot(t), "internal", "tui", "testdata", "glamour")
+	dir := filepath.Join(moduleRoot(t), "internal", "tui", "app", "testdata", "glamour")
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			setGlamourStyle(tc.dark)

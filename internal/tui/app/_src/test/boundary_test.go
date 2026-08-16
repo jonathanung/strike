@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"go/ast"
 	"go/parser"
 	"go/token"
 	"io/fs"
@@ -31,6 +32,8 @@ const modulePath = "github.com/jonathanung/strike-cli"
 //   - pkg/sdk may import only the standard library and pkg/protocol.
 //   - no backend package (internal/* except internal/tui/**) imports
 //     internal/tui/**.
+//   - kit packages (ui, theme, common, term) import only each other, stdlib,
+//     and Charm (term may also use its PTY stack) — never protocol or host.
 //
 // A violation names the offending file and import so the boundary cannot be
 // crossed silently.
@@ -38,7 +41,7 @@ const modulePath = "github.com/jonathanung/strike-cli"
 // Charm stack paths are checked separately by TestCharmImportPaths. When E13
 // rewrites Bubble Tea / Lip Gloss / Bubbles / Glamour to charm.land/…, update
 // charm path helpers (and style_boundary lipglossPath) in the same commit as
-// the import rewrites — edit internal/tui/_src/ only, then go generate.
+// the import rewrites — edit internal/tui/app/_src/ only, then go generate.
 func TestArchitectureBoundaries(t *testing.T) {
 	root := moduleRoot(t)
 	fset := token.NewFileSet()
@@ -136,6 +139,12 @@ func boundaryViolation(pkgDir, imp string) string {
 	tuiPrefix := modulePath + "/internal/tui"
 
 	switch {
+	case isKitDir(pkgDir):
+		if v := kitImportViolation(pkgDir, imp); v != "" {
+			return v
+		}
+		return ""
+
 	case isTUIDir(pkgDir):
 		if !strings.HasPrefix(imp, internal) {
 			return "" // stdlib or third-party is fine (Charm paths: TestCharmImportPaths)
@@ -252,6 +261,82 @@ func isTUIDir(pkgDir string) bool {
 	return pkgDir == "internal/tui" || strings.HasPrefix(pkgDir, "internal/tui/")
 }
 
+func isKitDir(pkgDir string) bool {
+	switch pkgDir {
+	case "internal/tui/ui", "internal/tui/theme", "internal/tui/common", "internal/tui/term":
+		return true
+	}
+	return strings.HasPrefix(pkgDir, "internal/tui/ui/") ||
+		strings.HasPrefix(pkgDir, "internal/tui/theme/") ||
+		strings.HasPrefix(pkgDir, "internal/tui/common/") ||
+		strings.HasPrefix(pkgDir, "internal/tui/term/")
+}
+
+// kitImportViolation enforces that ui/theme/common/term import only each
+// other, the standard library, and Charm — never protocol or host. term may
+// also import its PTY emulator stack.
+func kitImportViolation(pkgDir, imp string) string {
+	if !strings.Contains(imp, ".") {
+		return "" // stdlib
+	}
+	if strings.HasPrefix(imp, "charm.land/") || strings.HasPrefix(imp, "github.com/charmbracelet/") {
+		return ""
+	}
+	for _, p := range []string{
+		modulePath + "/internal/tui/ui",
+		modulePath + "/internal/tui/theme",
+		modulePath + "/internal/tui/common",
+		modulePath + "/internal/tui/term",
+	} {
+		if imp == p || strings.HasPrefix(imp, p+"/") {
+			return ""
+		}
+	}
+	if strings.HasPrefix(pkgDir, "internal/tui/term") {
+		switch imp {
+		case "github.com/creack/pty", "github.com/hinshun/vt10x":
+			return ""
+		}
+	}
+	if strings.Contains(imp, "/internal/protocol") || strings.Contains(imp, "/internal/host") {
+		return "kit packages must not import protocol or host"
+	}
+	if strings.Contains(imp, "/internal/") {
+		return "kit packages may only import sibling kit packages among internal/*"
+	}
+	return "kit packages may only import stdlib, Charm, sibling kit, and term's PTY stack"
+}
+
+func TestKitHasNoLogo(t *testing.T) {
+	root := moduleRoot(t)
+	uiDir := filepath.Join(root, "internal", "tui", "ui")
+	ents, err := os.ReadDir(uiDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fset := token.NewFileSet()
+	for _, e := range ents {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
+			continue
+		}
+		path := filepath.Join(uiDir, e.Name())
+		file, err := parser.ParseFile(fset, path, nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", e.Name(), err)
+		}
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Recv != nil || fn.Name == nil {
+				continue
+			}
+			switch fn.Name.Name {
+			case "Logo", "LogoCompact":
+				t.Errorf("kit package ui still exports %s in %s; wordmark belongs in the app", fn.Name.Name, e.Name())
+			}
+		}
+	}
+}
+
 // moduleRoot walks up from the test's working directory to the directory
 // holding go.mod.
 func moduleRoot(t *testing.T) string {
@@ -269,6 +354,31 @@ func moduleRoot(t *testing.T) string {
 			t.Fatalf("go.mod not found from working directory")
 		}
 		dir = parent
+	}
+}
+
+func TestKitImportViolation(t *testing.T) {
+	cases := []struct {
+		pkg, imp, want string
+	}{
+		{"internal/tui/ui", "fmt", ""},
+		{"internal/tui/ui", "charm.land/lipgloss/v2", ""},
+		{"internal/tui/ui", "github.com/charmbracelet/x/ansi", ""},
+		{"internal/tui/ui", modulePath + "/internal/tui/theme", ""},
+		{"internal/tui/ui", modulePath + "/internal/tui/common", ""},
+		{"internal/tui/term", "github.com/creack/pty", ""},
+		{"internal/tui/term", "github.com/hinshun/vt10x", ""},
+		{"internal/tui/ui", modulePath + "/internal/protocol", "kit packages must not import protocol or host"},
+		{"internal/tui/theme", modulePath + "/internal/host", "kit packages must not import protocol or host"},
+		{"internal/tui/common", modulePath + "/internal/engine", "kit packages may only import sibling kit packages among internal/*"},
+		{"internal/tui/ui", "golang.org/x/sys/unix", "kit packages may only import stdlib, Charm, sibling kit, and term's PTY stack"},
+		{"internal/tui/ui", "github.com/creack/pty", "kit packages may only import stdlib, Charm, sibling kit, and term's PTY stack"},
+	}
+	for _, tc := range cases {
+		got := kitImportViolation(tc.pkg, tc.imp)
+		if got != tc.want {
+			t.Errorf("kitImportViolation(%q, %q) = %q, want %q", tc.pkg, tc.imp, got, tc.want)
+		}
 	}
 }
 

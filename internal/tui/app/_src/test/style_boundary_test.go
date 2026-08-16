@@ -83,7 +83,7 @@ type styleDiagnostic struct {
 func TestStyleBoundary(t *testing.T) {
 	root := moduleRoot(t)
 	for _, scope := range []struct{ name, dir string }{
-		{"root", filepath.Join(root, "internal", "tui")},
+		{"root", filepath.Join(root, "internal", "tui", "app")},
 		{"ui", filepath.Join(root, "internal", "tui", "ui")},
 	} {
 		diagnostics, err := scanStyleDir(scope.dir, scope.name)
@@ -104,7 +104,7 @@ func TestStyleBoundary(t *testing.T) {
 }
 
 func TestStyleBoundaryFixtures(t *testing.T) {
-	root := filepath.Join(moduleRoot(t), "internal", "tui", "testdata", "style_boundary")
+	root := filepath.Join(moduleRoot(t), "internal", "tui", "app", "testdata", "style_boundary")
 	want := map[string]struct {
 		scope string
 		rules []string

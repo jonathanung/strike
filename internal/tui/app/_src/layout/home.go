@@ -161,10 +161,10 @@ func (m Model) homeCenterBand(width, height, promptOuterH int, compact bool, pop
 	logo := ""
 	logoH := 0
 	if height >= 12 && width >= 18 {
-		logo = ui.Logo(th)
+		logo = Logo(th)
 		logoH = 3
 	} else if height >= 8 && width >= 12 {
-		logo = ui.LogoCompact(th)
+		logo = LogoCompact(th)
 		logoH = 1
 	}
 

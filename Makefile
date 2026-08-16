@@ -19,9 +19,9 @@ COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 # break `go build -ldflags`.
 GO_LDFLAGS ?= -X github.com/jonathanung/strike-cli/internal/version.Version=$(VERSION) -X github.com/jonathanung/strike-cli/internal/version.Commit=$(COMMIT)
 
-# Flatten internal/tui/_src/* into package tui (Go one-directory packages).
+# Flatten internal/tui/app/_src/* into package tui (Go one-directory packages).
 tui-gen:
-	go generate ./internal/tui
+	go generate ./internal/tui/app
 
 build: tui-gen
 	go build -ldflags "$(GO_LDFLAGS)" -o strike ./cmd/strike
