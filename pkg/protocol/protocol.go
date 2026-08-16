@@ -664,6 +664,10 @@ type ChildStarted struct {
 	// Included so reproducible-run snapshots (#782) can capture prompt+bundle
 	// without re-deriving from tool args. Omitted when the spawn had no bundle.
 	ContextBundle *ContextBundle `json:"contextBundle,omitempty"`
+	// Provider/Model are the child's resolved selection at spawn (pin or
+	// inherited). Omitted when unknown so older emitters stay valid.
+	Provider string `json:"provider,omitempty"`
+	Model    string `json:"model,omitempty"`
 	// Isolation is "shared" (default) or "worktree" when the child runs in a
 	// distinct filesystem workspace (#1036).
 	Isolation string `json:"isolation,omitempty"`

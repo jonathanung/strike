@@ -22,6 +22,7 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		case protocol.PermissionAsked, protocol.PermissionResolved,
 			protocol.QuestionAsked, protocol.QuestionResolved,
 			protocol.ChildStarted, protocol.ChildCompleted,
+			protocol.ModelSelected,
 			// Parent re-emits child peer mail + nested roster with child
 			// correlation; keep them for team UI (issue #614).
 			protocol.AgentMessage, protocol.AgentContractTimeout, protocol.TeamRoster,
@@ -255,6 +256,12 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 			m.cells = append(m.cells, &infoCell{text: payload})
 		}
 	case protocol.ModelSelected:
+		if ev.ParentSessionID != "" || ev.Depth > 0 {
+			if m.setChildActivityModel(ev.SessionID, ev.Provider, ev.Model) {
+				cmd = m.broadcastAgentsState()
+			}
+			break
+		}
 		if m.noticeCause == noticeNeedsModel {
 			m.clearNotice()
 		}
@@ -386,6 +393,9 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 	case protocol.ChildStarted:
 		m.onChildStarted(ev)
 		cmd = m.broadcastAgentsState()
+		if ev.Provider == "" && ev.Model == "" {
+			cmd = tea.Batch(cmd, m.fetchChildModelCmd(ev.SessionID))
+		}
 	case protocol.ChildCompleted:
 		m.onChildCompleted(ev)
 		cmd = m.broadcastAgentsState()
@@ -535,6 +545,12 @@ func (m *Model) onChildStarted(ev protocol.ChildStarted) {
 			m.children[i].agent = ev.Agent
 			m.children[i].prompt = ev.Prompt
 			m.children[i].name = ev.Name
+			if ev.Provider != "" {
+				m.children[i].provider = ev.Provider
+			}
+			if ev.Model != "" {
+				m.children[i].model = ev.Model
+			}
 			m.children[i].status = "running"
 			if parentID != "" {
 				m.children[i].parentID = parentID
@@ -556,6 +572,8 @@ func (m *Model) onChildStarted(ev protocol.ChildStarted) {
 		prompt:    ev.Prompt,
 		name:      ev.Name,
 		title:     m.lookupSessionTitle(id),
+		provider:  ev.Provider,
+		model:     ev.Model,
 		status:    "running",
 		startedAt: now,
 	})

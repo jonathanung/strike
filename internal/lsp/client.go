@@ -43,6 +43,10 @@ type Client struct {
 	diagnostics  map[string][]Diagnostic
 	onDiagnostic func(uri string, diags []Diagnostic) // optional; set by Manager
 
+	// caps is the initialize result capability set.
+	capsMu sync.Mutex
+	caps   serverCapabilities
+
 	readerDone chan struct{}
 	waitDone   chan struct{}
 
@@ -163,6 +167,14 @@ func (c *Client) initialize(ctx context.Context) error {
 					RelatedInformation: true,
 					VersionSupport:     true,
 				},
+				Definition:        &staticClientCapability{},
+				References:        &staticClientCapability{},
+				DocumentSymbol:    &staticClientCapability{},
+				DocumentHighlight: &staticClientCapability{},
+				Rename: &renameClientCapability{
+					PrepareSupport: true,
+				},
+				CallHierarchy: &staticClientCapability{},
 			},
 			Workspace: workspaceClientCapabilities{
 				WorkspaceFolders: false,
@@ -173,6 +185,9 @@ func (c *Client) initialize(ctx context.Context) error {
 	}, &result); err != nil {
 		return fmt.Errorf("lsp %s: initialize: %w", c.cfg.Name, err)
 	}
+	c.capsMu.Lock()
+	c.caps = result.Capabilities
+	c.capsMu.Unlock()
 	if err := c.notify(ctx, "initialized", map[string]any{}); err != nil {
 		return fmt.Errorf("lsp %s: initialized notify: %w", c.cfg.Name, err)
 	}
