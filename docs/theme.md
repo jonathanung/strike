@@ -24,9 +24,9 @@ hexes and `web/src/styles.css` `:root` pairs must match that file — Go
 
 `theme.Default()` **chrome mode** is still `soft` until [#1234](https://github.com/jonathanung/strike/issues/1234)
 applies bordered chrome across TUI views. Do not treat current Default chrome
-as the visual north star. Web radius consumption is [#1235](https://github.com/jonathanung/strike/issues/1235).
-Bundled named themes (nord, …) keep their own hexes — only stock Default /
-`:root` use this map.
+as the visual north star. Web consumes `radiusWebPx` (2px) and stock hexes from
+this file via `web/src/stockTokens.ts`. Bundled named themes (nord, …) keep
+their own hexes — only stock Default / `:root` use this map.
 
 ### Token → hex (light + dark)
 
@@ -183,8 +183,9 @@ Semantic roles map as `--ink`←Text, `--muted`←TextMuted, `--ground`←Backgr
 `--surface`/`--raised`/`--surface-muted`←Surface*, `--rule`←Border,
 `--acid`←Accent, `--accent-alt`←AccentAlt, `--signal`←Error, `--danger`←Danger,
 `--user`/`--tool`← transcript labels, `--diff-add`/`--diff-del`←diff roles.
-`--radius` is the 2px chrome token; follow-up restyle lands in #1235. Parity
-is guarded by `web/src/theme.test.ts`. The web settings dialog loads the
+`--radius` is the 2px chrome token; stock role hexes are injected from the
+token file (`/* strike-stock:dark|light */`). Parity is guarded by
+`web/src/theme.test.ts`. The web settings dialog loads the
 host theme catalog (`/v1/themes`), supports preview/apply, and maps portable
 semantic roles onto CSS custom properties (`web/src/themeCatalog.ts`, WEBUI.11).
 

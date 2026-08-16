@@ -19,6 +19,37 @@ test.describe("live echo cockpit", () => {
     await expect(page.getByText("Direct the work.")).toBeVisible();
     await expect(page.getByLabel("Instruction")).toBeEnabled();
     await expectNoPageHScroll(page);
+    const readChrome = () =>
+      page.evaluate(() => {
+        const root = getComputedStyle(document.documentElement);
+        const mode = document.querySelector(".mode-switch");
+        const send = document.querySelector(".composer-send");
+        const pulse = document.querySelector(".pulse");
+        return {
+          acid: root.getPropertyValue("--acid").trim().toLowerCase(),
+          radius: root.getPropertyValue("--radius").trim(),
+          ink: root.getPropertyValue("--ink").trim().toLowerCase(),
+          modeRadius: mode ? getComputedStyle(mode).borderRadius : "",
+          sendBg: send ? getComputedStyle(send).backgroundColor : "",
+          pulseShadow: pulse ? getComputedStyle(pulse).boxShadow : "",
+        };
+      });
+
+    await page.evaluate(() => document.documentElement.setAttribute("data-appearance", "dark"));
+    const dark = await readChrome();
+    expect(dark.acid).toBe("#7c3aed");
+    expect(dark.radius).toBe("2px");
+    expect(dark.ink).toBe("#f3f1fa");
+    expect(dark.modeRadius).toMatch(/^2px/);
+    expect(dark.sendBg).not.toBe("rgba(0, 0, 0, 0)");
+    expect(dark.pulseShadow === "none" || dark.pulseShadow === "").toBe(true);
+
+    await page.evaluate(() => document.documentElement.setAttribute("data-appearance", "light"));
+    const light = await readChrome();
+    expect(light.acid).toBe("#5b21b6");
+    expect(light.radius).toBe("2px");
+    expect(light.ink).toBe("#1a1528");
+    await page.evaluate(() => document.documentElement.removeAttribute("data-appearance"));
   });
 
   test("streamed turn echoes user prompt", async ({ page }) => {
