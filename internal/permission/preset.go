@@ -70,6 +70,7 @@ func presetReadOnly() Preset {
 			{Permission: "symbols", Pattern: "*", Action: Allow},
 			{Permission: "diagnostics", Pattern: "*", Action: Allow},
 			{Permission: "git", Pattern: "*", Action: Allow},
+			{Permission: "status", Pattern: "*", Action: Allow},
 			{Permission: "call_hierarchy", Pattern: "*", Action: Allow},
 			{Permission: "rename_preview", Pattern: "*", Action: Allow},
 			{Permission: "impact", Pattern: "*", Action: Allow},

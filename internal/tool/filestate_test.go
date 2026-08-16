@@ -13,6 +13,9 @@ func TestFileStateNilReceiverIsNoop(t *testing.T) {
 	var s *FileState
 	s.Record("/x", nil)
 	s.MarkDirty("/x")
+	if s.Hash("/x") != "" {
+		t.Fatal("nil Hash should be empty")
+	}
 	if err := s.CheckFresh("/x", "x"); err != nil {
 		t.Fatal(err)
 	}

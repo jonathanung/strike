@@ -550,7 +550,7 @@ Details: [agents-skills.md](agents-skills.md#lean-code-ponytail-lite).
 until `toolsearch` discovers them, the model calls them by name, or
 deterministic workflow activation promotes them. Core coding tools stay always
 available: `read`/`glob`/`grep`/`edit`/`write`/`apply_patch`/`move`/`delete`/
-`bash`, progressive `task`, `toolsearch`, and `question`. Deferred surface
+`status`/`bash`, progressive `task`, `toolsearch`, and `question`. Deferred surface
 includes compatibility delegation shims (`delegate`, `task_status`,
 `task_read`, `task_message`, `task_interrupt`, `wait`), team coordination
 (`agent_roster`, `agent_message`, `agent_broadcast`, `agent_thread`,
