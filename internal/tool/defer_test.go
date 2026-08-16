@@ -214,3 +214,36 @@ func schemaNameSet(schemas []provider.ToolSchema) map[string]bool {
 	}
 	return out
 }
+
+func TestDeferredPendingNames(t *testing.T) {
+	reg := NewRegistry(NewRead(), NewWebFetch(), NewSleep())
+	reg.Register(NewToolSearch(reg))
+	if names := reg.DeferredPendingNames(); names != nil {
+		t.Fatalf("defer off: DeferredPendingNames = %v, want nil", names)
+	}
+	if reg.DeferredPendingCount() != 0 {
+		t.Fatalf("defer off: count = %d", reg.DeferredPendingCount())
+	}
+
+	reg.SetDeferLoading(true)
+	got := reg.DeferredPendingNames()
+	if len(got) != 2 || got[0] != "webfetch" || got[1] != "sleep" {
+		t.Fatalf("pending names = %v, want [webfetch sleep]", got)
+	}
+	if reg.DeferredPendingCount() != 2 {
+		t.Fatalf("count = %d, want 2", reg.DeferredPendingCount())
+	}
+
+	reg.Discover("webfetch")
+	got = reg.DeferredPendingNames()
+	if len(got) != 1 || got[0] != "sleep" {
+		t.Fatalf("after discover: %v", got)
+	}
+}
+
+func TestDeferredPendingNamesNilRegistry(t *testing.T) {
+	var reg *Registry
+	if reg.DeferredPendingNames() != nil || reg.DeferredPendingCount() != 0 {
+		t.Fatal("nil registry should report no pending")
+	}
+}

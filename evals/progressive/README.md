@@ -58,7 +58,8 @@ activation. Prefer the unified **`task`** API for new agent behavior.
 |---|---|
 | `task` `{prompt}` / `action=status\|wait\|cancel` | `delegate` create, `task_status`, `wait` |
 | `task` advanced after toolsearch / activation | Parallel use of both surfaces in one turn |
-| `toolsearch` for optional built-ins | Assuming all tools are always in `tools[]` |
+| Call deferred tools by the first-turn name list | A discovery-only `toolsearch` just to learn names |
+| `toolsearch` when you need the InputSchema | Assuming all tools are always in `tools[]` |
 
 See [docs/config.md](../../docs/config.md) (deferred tools, progressive `task`,
 workflow activation) and [docs/usage.md](../../docs/usage.md).

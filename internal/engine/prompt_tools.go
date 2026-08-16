@@ -90,19 +90,26 @@ func (e *Engine) discoverToolsFromHistory() {
 // the live registry after hard permission denies (and defer filtering).
 // Schemas carry names and descriptions; this layer is usage policy /
 // when-to-use only. Empty when no tools remain.
+//
+// When defer loading leaves pending tools, a compact name-only list is
+// appended (hard-denied omitted; truncated). InputSchemas stay off the
+// provider tools[] wire until toolsearch, direct call, history, or workflow
+// activation.
 func (e *Engine) toolGuidanceLayer() (text, source string) {
 	schemas, omitted := e.effectiveToolSchemas()
-	if len(schemas) == 0 {
-		return "", ""
+	if len(schemas) > 0 {
+		entries := make([]tool.GuidanceEntry, 0, len(schemas))
+		for _, s := range schemas {
+			entries = append(entries, tool.GuidanceEntry{Name: s.Name})
+		}
+		text = tool.BuildGuidance(entries)
 	}
-	entries := make([]tool.GuidanceEntry, 0, len(schemas))
-	for _, s := range schemas {
-		entries = append(entries, tool.GuidanceEntry{Name: s.Name})
-	}
-	text = tool.BuildGuidance(entries)
-	if pending := e.opts.Registry.DeferredPendingCount(); pending > 0 {
-		text = strings.TrimRight(text, "\n") + "\n\n" +
-			fmt.Sprintf("%d additional tool(s) are deferred — use `toolsearch` to discover them; matches load full schemas on the next model request.\n", pending)
+	if list := tool.FormatDeferredPendingList(e.deferredPendingVisibleNames()); list != "" {
+		if text != "" {
+			text = strings.TrimRight(text, "\n") + "\n\n" + list
+		} else {
+			text = list
+		}
 	}
 	if strings.TrimSpace(text) == "" {
 		return "", ""
@@ -111,7 +118,7 @@ func (e *Engine) toolGuidanceLayer() (text, source string) {
 	if omitted > 0 {
 		source = fmt.Sprintf("registry:effective+denied:%d", omitted)
 	}
-	if e.opts.Registry.DeferLoading() {
+	if e.opts.Registry != nil && e.opts.Registry.DeferLoading() {
 		if pending := e.opts.Registry.DeferredPendingCount(); pending > 0 {
 			source = fmt.Sprintf("%s+deferred:%d", source, pending)
 		} else {
@@ -122,6 +129,26 @@ func (e *Engine) toolGuidanceLayer() (text, source string) {
 		source += suf
 	}
 	return text, source
+}
+
+// deferredPendingVisibleNames is the pending deferred set minus hard-denied
+// tools. Empty when defer is off.
+func (e *Engine) deferredPendingVisibleNames() []string {
+	if e == nil || e.opts.Registry == nil {
+		return nil
+	}
+	pending := e.opts.Registry.DeferredPendingNames()
+	if len(pending) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(pending))
+	for _, name := range pending {
+		if e.perms != nil && e.perms.Peek(tool.PermissionName(name)) == permission.Deny {
+			continue
+		}
+		out = append(out, name)
+	}
+	return out
 }
 
 // appendToolGuidanceLayer inserts the tools layer after shared when present.

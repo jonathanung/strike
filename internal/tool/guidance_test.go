@@ -302,3 +302,59 @@ func TestBuildGuidanceLayerPresence(t *testing.T) {
 		t.Fatal("missing schemas-vs-guidance split note")
 	}
 }
+
+func TestFormatDeferredPendingList(t *testing.T) {
+	if got := FormatDeferredPendingList(nil); got != "" {
+		t.Fatalf("empty = %q", got)
+	}
+	if got := FormatDeferredPendingList([]string{"", "  "}); got != "" {
+		t.Fatalf("blank = %q", got)
+	}
+
+	got := FormatDeferredPendingList([]string{"sleep", "webfetch", "sleep", " mcp_demo_ping "})
+	if !strings.Contains(got, "3 additional tool(s) are deferred") {
+		t.Fatalf("count missing: %q", got)
+	}
+	if !strings.Contains(got, "call by name") {
+		t.Fatalf("missing call-by-name hint: %q", got)
+	}
+	// Built-ins before mcp_*; alphabetical within each group.
+	sleep := strings.Index(got, "`sleep`")
+	web := strings.Index(got, "`webfetch`")
+	mcp := strings.Index(got, "`mcp_demo_ping`")
+	if sleep < 0 || web < 0 || mcp < 0 || !(sleep < web && web < mcp) {
+		t.Fatalf("sort order wrong: %q", got)
+	}
+	if strings.Contains(got, "+") && strings.Contains(got, "more") {
+		t.Fatalf("small list should not truncate: %q", got)
+	}
+}
+
+func TestFormatDeferredPendingListTruncates(t *testing.T) {
+	names := make([]string, 0, MaxDeferredPendingListed+5)
+	for i := 0; i < MaxDeferredPendingListed+5; i++ {
+		names = append(names, fmt.Sprintf("tool_%02d", i))
+	}
+	got := FormatDeferredPendingList(names)
+	if !strings.Contains(got, fmt.Sprintf("%d additional tool(s) are deferred", MaxDeferredPendingListed+5)) {
+		t.Fatalf("total count missing: %q", got)
+	}
+	if !strings.Contains(got, "(+5 more)") {
+		t.Fatalf("remainder missing: %q", got)
+	}
+	if strings.Contains(got, "`tool_48`") {
+		t.Fatalf("truncated name leaked: %q", got)
+	}
+	if !strings.Contains(got, "`tool_00`") || !strings.Contains(got, "`tool_47`") {
+		t.Fatalf("kept names missing: %q", got)
+	}
+	// Bounded token delta: ~250 tokens worst case at chars/4.
+	const maxChars = 1200
+	if len(got) > maxChars {
+		t.Fatalf("name list too large: %d bytes (budget %d)", len(got), maxChars)
+	}
+	tokens := (len(got) + 3) / 4
+	if tokens > 300 {
+		t.Fatalf("name list tokens %d exceed 300 bound", tokens)
+	}
+}
