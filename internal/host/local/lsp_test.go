@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/lsp"
+	"github.com/jonathanung/strike-cli/internal/integrate/lsp"
 )
 
 func TestNewLSPNil(t *testing.T) {

@@ -98,7 +98,7 @@ make swebench-eval
 ```
 
 Container backend is the Docker CLI today; [#592](https://github.com/jonathanung/strike/issues/592)
-wires the same runner onto `internal/container` later.
+wires the same runner onto `internal/integrate/container` later.
 
 ### Harness evaluation suite (#807)
 

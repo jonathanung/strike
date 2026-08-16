@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/jonathanung/strike-cli/internal/host"
-	"github.com/jonathanung/strike-cli/internal/lsp"
+	"github.com/jonathanung/strike-cli/internal/integrate/lsp"
 )
 
 // NewLSP adapts an lsp.Manager to host.LSP. A nil manager yields a nil host.LSP.

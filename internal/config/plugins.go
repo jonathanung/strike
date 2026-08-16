@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/jonathanung/strike-cli/internal/plugin"
+	"github.com/jonathanung/strike-cli/internal/integrate/plugin"
 )
 
 // pluginCache holds the last Discover result per workDir for a process.

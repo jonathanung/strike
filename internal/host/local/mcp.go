@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/jonathanung/strike-cli/internal/host"
-	"github.com/jonathanung/strike-cli/internal/mcp"
+	"github.com/jonathanung/strike-cli/internal/integrate/mcp"
 )
 
 // NewMCP adapts an mcp.Manager to host.MCP. A nil manager yields a nil host.MCP.

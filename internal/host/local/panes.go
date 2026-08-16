@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/jonathanung/strike-cli/internal/host"
-	"github.com/jonathanung/strike-cli/internal/plugin"
+	"github.com/jonathanung/strike-cli/internal/integrate/plugin"
 	"github.com/jonathanung/strike-cli/internal/trust/secret"
 	"github.com/jonathanung/strike-cli/internal/version"
 )

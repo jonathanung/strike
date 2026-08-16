@@ -9,7 +9,7 @@ import (
 )
 
 // Registry holds the tools visible to the model. It is the primary
-// extension surface: MCP servers (internal/mcp) and plugin tools register here.
+// extension surface: MCP servers (internal/integrate/mcp) and plugin tools register here.
 //
 // When defer loading is enabled (SetDeferLoading), SchemasForProvider omits
 // non-core tools until Discover promotes them (toolsearch or direct call).

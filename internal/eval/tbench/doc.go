@@ -16,7 +16,7 @@
 //     /tests and verifier logs so a leftover reward.txt cannot pass.
 //
 // Container lifecycle uses the Docker CLI via swebench.Runtime so #592 can
-// swap in internal/container later without changing this runner.
+// swap in internal/integrate/container later without changing this runner.
 //
 // Internal regression signal only — do not publish pass rates in the README.
 package tbench

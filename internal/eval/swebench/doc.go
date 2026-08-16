@@ -8,7 +8,7 @@
 // Internal regression signal only — do not publish pass rates in the README
 // (SWE-ABS found ~1 in 5 leaderboard "passes" were semantically wrong).
 //
-// Container lifecycle uses internal/container.CLI via ContainerRuntime (#592)
+// Container lifecycle uses internal/integrate/container.CLI via ContainerRuntime (#592)
 // with optional scheduler.PoolContainer admission on Runner.Sched. CLIRuntime
 // remains for tests and direct docker injection.
 //

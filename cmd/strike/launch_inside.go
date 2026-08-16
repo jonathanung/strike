@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/jonathanung/strike-cli/internal/config"
-	"github.com/jonathanung/strike-cli/internal/container"
+	"github.com/jonathanung/strike-cli/internal/integrate/container"
 	"github.com/jonathanung/strike-cli/internal/project"
 	"github.com/jonathanung/strike-cli/internal/version"
 )

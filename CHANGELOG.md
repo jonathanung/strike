@@ -253,7 +253,7 @@ wave 1030–1043 reliability/security pack. Protocol wire `1.17.0`.
   naming/hash/labels, `/devcontainer` skill contract, offline eject→launch→exec
   round-trip (E12.8 / [#590](https://github.com/jonathanung/strike/issues/590)).
 
-- **Eval container pool** — SWE-bench runner uses `internal/container` CLI
+- **Eval container pool** — SWE-bench runner uses `internal/integrate/container` CLI
   runtime and acquires `scheduler.PoolContainer` for the full instance
   lifecycle (admit before create; always release) ([#592](https://github.com/jonathanung/strike/issues/592)).
 
@@ -352,7 +352,7 @@ wave 1030–1043 reliability/security pack. Protocol wire `1.17.0`.
   optional `container.jsonc`/`container.json` (defaults → global → project →
   managed). Fields cover base image, packages, shell, resources, workspace,
   auth forwarding, network mode/allow shape, execution dial, and engine binary.
-  Maps to `internal/container` via `ToRuntime`
+  Maps to `internal/integrate/container` via `ToRuntime`
   ([#584](https://github.com/jonathanung/strike/issues/584)).
 - **Tool-chain correlation** — content-free multi-step permission correlation
   within a turn: sensitive read → network/bash, write executable → bash
@@ -361,7 +361,7 @@ wave 1030–1043 reliability/security pack. Protocol wire `1.17.0`.
   `permission.decided` and timeline entries. State clears on turn end/interrupt
   and caps pending nodes ([#891](https://github.com/jonathanung/strike/issues/891)).
 
-- **Container runtime foundation (E12.0–E12.1)** — `internal/container` shells
+- **Container runtime foundation (E12.0–E12.1)** — `internal/integrate/container` shells
   out to `docker`/`podman` via an injectable `ExecFunc` (no Moby SDK). Low-level
   `Runtime` plus per-repo `Manager` lifecycle (build/launch/attach/exec/stop/
   restart/destroy/clean), build cache under `.strike/container/`, resource/port/

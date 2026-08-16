@@ -2,7 +2,7 @@
 
 Native containerization (epic
 [#547](https://github.com/jonathanung/strike/issues/547)) lives in
-`internal/container`. This page records the **E12.0** engine decision and the
+`internal/integrate/container`. This page records the **E12.0** engine decision and the
 package boundary. User-facing launch/attach/eject land in later E12 issues.
 
 ## Decision (E12.0 / #582): CLI shell-out
@@ -23,13 +23,13 @@ Zone's `internal/docker` used the SDK; the port (**E12.1 / #583**) rewrites
 those call sites onto this CLI runtime rather than copying the SDK client.
 
 Eval runners already shell out (`internal/eval/swebench.CLIRuntime`). **E12.10
-/#592** should migrate them onto `internal/container` so one backend owns
+/#592** should migrate them onto `internal/integrate/container` so one backend owns
 create/exec/rm and scheduler pool leases.
 
 ## Package surface
 
 ```text
-internal/container
+internal/integrate/container
   ExecFunc / DefaultExecFunc   injectable CLI runner
   Runtime (interface)          Available, Pull, Create, Start, Stop,
                                Remove, InspectID, CopyFrom/To, Exec
@@ -144,7 +144,7 @@ Still later: broader test suite (E12.8).
 
 ## Architecture boundary
 
-- `internal/tui` **must not** import `internal/container` (enforced by
+- `internal/tui` **must not** import `internal/integrate/container` (enforced by
   architecture boundary tests once wired).
 - Status and isolation posture reach the UI through `host.Services` and
   protocol events (E12.7).

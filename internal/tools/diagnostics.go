@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/internal/lsp"
+	"github.com/jonathanung/strike-cli/internal/integrate/lsp"
 )
 
 // DefaultDiagnosticsMaxResults caps model-facing diagnostics tool output.

@@ -26,7 +26,7 @@ import (
 	"github.com/jonathanung/strike-cli/harness/permission"
 	"github.com/jonathanung/strike-cli/harness/sandbox"
 	"github.com/jonathanung/strike-cli/harness/scheduler"
-	"github.com/jonathanung/strike-cli/internal/plugin"
+	"github.com/jonathanung/strike-cli/internal/integrate/plugin"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/trust/secret"
 )

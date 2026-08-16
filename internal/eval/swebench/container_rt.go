@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/jonathanung/strike-cli/internal/container"
+	"github.com/jonathanung/strike-cli/internal/integrate/container"
 )
 
-// ContainerRuntime adapts internal/container.CLI onto the swebench Runtime
+// ContainerRuntime adapts internal/integrate/container.CLI onto the swebench Runtime
 // interface (E12.10 / #592). Eval runners share one CLI backend with Manager
 // lifecycle code; scheduler pool leases stay in Runner.
 type ContainerRuntime struct {

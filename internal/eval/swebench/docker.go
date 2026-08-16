@@ -12,7 +12,7 @@ import (
 
 // Runtime is the container backend used for workspace materialization and
 // grading. The CLI implementation shells out to docker(1). #592 may supply an
-// internal/container-backed Runtime without changing the runner.
+// internal/integrate/container-backed Runtime without changing the runner.
 type Runtime interface {
 	// Available reports whether the backend can run (docker binary + daemon).
 	Available(ctx context.Context) error

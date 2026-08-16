@@ -114,7 +114,7 @@ func ProjectThemesDir(workDir string) string {
 // bad contributions cannot break startup or silently shadow winners.
 //
 // Plugin discovery is duplicated here with stdlib only so the TUI boundary
-// (no internal/plugin import) still surfaces plugin themes in /theme.
+// (no internal/integrate/plugin import) still surfaces plugin themes in /theme.
 // Catalog install/update of theme plugins uses the same lockfile path as other
 // plugins (host.Plugins / strike plugin); this loader only reads contributions.
 func Catalog(workDir string) []Entry {
@@ -409,7 +409,7 @@ func strikeCLISkipFromExtensions(ext map[string]json.RawMessage) bool {
 }
 
 func stripLineComments(data []byte) []byte {
-	// Enough for simple plugin.jsonc fixtures; full JSONC lives in internal/plugin.
+	// Enough for simple plugin.jsonc fixtures; full JSONC lives in internal/integrate/plugin.
 	lines := strings.Split(string(data), "\n")
 	var b strings.Builder
 	for _, line := range lines {

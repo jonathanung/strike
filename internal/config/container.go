@@ -9,11 +9,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/internal/container"
+	"github.com/jonathanung/strike-cli/internal/integrate/container"
 )
 
 // ContainerConfig is the JSON "container" object (and container.jsonc body).
-// Maps onto internal/container.Config for Manager (E12.1+).
+// Maps onto internal/integrate/container.Config for Manager (E12.1+).
 //
 // Merge order: defaults → global config/container.jsonc → project → managed.
 // Nested objects overlay field-by-field; slices replace when the layer sets them
@@ -240,7 +240,7 @@ func mergeContainerNetwork(base, layer ContainerNetwork) ContainerNetwork {
 	return base
 }
 
-// ToRuntime maps layered JSON config onto internal/container.Config.
+// ToRuntime maps layered JSON config onto internal/integrate/container.Config.
 func (c ContainerConfig) ToRuntime(version string) container.Config {
 	out := container.DefaultConfig()
 	if c.BaseImage != "" {

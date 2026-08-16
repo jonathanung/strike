@@ -724,7 +724,7 @@ Probe state is cached under `~/.strike/cache/update-check.json`. Editable under
 
 ## Container (native containerization, E12)
 
-Layered JSON for `internal/container` (epic
+Layered JSON for `internal/integrate/container` (epic
 [#547](https://github.com/jonathanung/strike/issues/547)). Merge order matches
 the rest of config: **defaults → global → project → managed**.
 
