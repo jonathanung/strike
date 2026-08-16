@@ -4,7 +4,7 @@
 // agent_broadcast/agent_thread/team_task/webfetch/websearch/todowrite/todoread/
 // memory_write/memory_read/issue_write/issue_read/plan_write/plan_read/plan_delegate/
 // artifact_write/artifact_read/notebook_edit/sleep/skill/question/enter_plan_mode/
-// exit_plan_mode/phase_done/toolsearch/definition/references/symbols/diagnostics/tui_snapshot).
+// exit_plan_mode/phase_done/toolsearch/definition/references/symbols/diagnostics/call_hierarchy/rename_preview/impact/tui_snapshot).
 // Used by internal/engine (dispatch), internal/permission (AskRequest, for the
 // Context.Ask signature), and cmd/strike (registry construction); internal/tui
 // never imports it — tool calls reach the frontend only as
