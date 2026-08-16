@@ -137,6 +137,16 @@ func TestAnalyzeWebfetchTool(t *testing.T) {
 	}
 }
 
+func TestAnalyzeBrowserTool(t *testing.T) {
+	f := Analyze(Input{Tool: "browser", Argv: []string{"https://app.example.com/ui"}})
+	if !f.Authoritative() {
+		t.Fatalf("status=%s issues=%v", f.Parse.Status, f.Parse.Issues)
+	}
+	if len(f.Network) != 1 || f.Network[0].Host != "app.example.com" {
+		t.Fatalf("network=%+v", f.Network)
+	}
+}
+
 func TestAnalyzeReadTool(t *testing.T) {
 	f := Analyze(Input{Tool: "read", Argv: []string{"internal/foo.go"}})
 	if !f.Authoritative() {

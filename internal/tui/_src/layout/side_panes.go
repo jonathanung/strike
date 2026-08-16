@@ -27,8 +27,7 @@ func (m Model) contextPaneBody(width, height int) string {
 	}
 	rows := make([]row, 0, 6)
 
-	provider := m.providerName
-	model := m.modelName
+	provider, model := m.chromeProviderModel()
 	if provider == "" {
 		rows = append(rows, row{
 			label: "model",

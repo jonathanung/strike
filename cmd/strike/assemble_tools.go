@@ -412,6 +412,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		tool.NewPatchCollab(),
 		tool.NewWebFetch(),
 		tool.NewWebSearch(),
+		tool.NewBrowser(),
 		tool.NewTodoWrite(todoStore),
 		tool.NewTodoRead(todoStore),
 		tool.NewMemoryWrite(memoryStore),
@@ -652,6 +653,9 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	registry.Register(tool.NewReferences(lspMgr))
 	registry.Register(tool.NewSymbols(lspMgr))
 	registry.Register(tool.NewDiagnostics(lspMgr))
+	registry.Register(tool.NewCallHierarchy(lspMgr))
+	registry.Register(tool.NewRenamePreview(lspMgr))
+	registry.Register(tool.NewImpact(lspMgr))
 
 	// openRoot builds one live root engine. resumeID empty creates a fresh
 	// session; non-empty opens that durable root (subagents rejected).

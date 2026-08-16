@@ -14,6 +14,14 @@ import (
 // system prompt.
 const MaxMCPGuidanceListed = 16
 
+// MaxDeferredPendingListed caps the name-only deferred-tool list in the
+// tools guidance layer. 48 covers the built-in deferred surface (~39 names)
+// plus a few MCP tools; overflow is noted as "+N more".
+//
+// Token budget: worst-case list is header + 48 backtick names + remainder
+// (~1KB, ~250 tokens at chars/4). Names only — no InputSchemas.
+const MaxDeferredPendingListed = 48
+
 // shortPurposes is the single source of truth for built-in tool one-liners on
 // the provider Tools wire (CompactSchemaDescription). Tests fail if a built-in
 // name drifts from this map.
@@ -42,6 +50,7 @@ var shortPurposes = map[string]string{
 	"agent_thread":    "read task/delegation-bound peer message thread",
 	"team_task":       "shared team task board (create/list/claim/complete)",
 	"webfetch":        "fetch a URL",
+	"browser":         "inspect a page in an isolated read-only browser profile",
 	"websearch":       "search the web with source citations",
 	"todowrite":       "write the multi-step todo list",
 	"todoread":        "read the current todo list",
@@ -64,6 +73,9 @@ var shortPurposes = map[string]string{
 	"references":      "find references via language server",
 	"symbols":         "list document or workspace symbols via language server",
 	"diagnostics":     "query language-server diagnostics for workspace/path",
+	"call_hierarchy":  "list incoming or outgoing calls via language server",
+	"rename_preview":  "preview a symbol rename without applying it",
+	"impact":          "summarize symbol impact via language server",
 }
 
 // BuiltinShortPurposes returns a copy of the built-in name→purpose map.
@@ -184,6 +196,58 @@ func BuildGuidance(entries []GuidanceEntry) string {
 	return strings.TrimSpace(b.String()) + "\n"
 }
 
+// FormatDeferredPendingList renders a compact name-only list of pending
+// deferred tools (already filtered for hard denies). Empty after cleanup
+// returns "". Names are sorted stably (built-ins first, then mcp_*) and
+// truncated at MaxDeferredPendingListed with a remainder count.
+func FormatDeferredPendingList(names []string) string {
+	cleaned := make([]string, 0, len(names))
+	seen := make(map[string]struct{}, len(names))
+	for _, n := range names {
+		n = strings.TrimSpace(n)
+		if n == "" {
+			continue
+		}
+		if _, ok := seen[n]; ok {
+			continue
+		}
+		seen[n] = struct{}{}
+		cleaned = append(cleaned, n)
+	}
+	if len(cleaned) == 0 {
+		return ""
+	}
+	sort.SliceStable(cleaned, func(i, j int) bool {
+		iMCP := strings.HasPrefix(cleaned[i], "mcp_")
+		jMCP := strings.HasPrefix(cleaned[j], "mcp_")
+		if iMCP != jMCP {
+			return !iMCP
+		}
+		return cleaned[i] < cleaned[j]
+	})
+	shown := cleaned
+	omitted := 0
+	if len(cleaned) > MaxDeferredPendingListed {
+		shown = cleaned[:MaxDeferredPendingListed]
+		omitted = len(cleaned) - MaxDeferredPendingListed
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d additional tool(s) are deferred — call by name to use them, or `toolsearch` to load full schemas on the next request: ", len(cleaned))
+	for i, n := range shown {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		b.WriteByte('`')
+		b.WriteString(n)
+		b.WriteByte('`')
+	}
+	if omitted > 0 {
+		fmt.Fprintf(&b, " (+%d more)", omitted)
+	}
+	b.WriteString(".\n")
+	return b.String()
+}
+
 // formatMCPGuidanceSummary groups a large MCP surface by server so guidance
 // stays small while schemas still list every tool.
 func formatMCPGuidanceSummary(mcp []GuidanceEntry) string {
@@ -276,6 +340,8 @@ func recommendedGuidance(entries []GuidanceEntry) string {
 		"Use `websearch` to discover sources (titles/URLs/snippets); use `webfetch` to retrieve a selected result. Cite source URLs in answers.")
 	add(has("websearch") && !has("webfetch"),
 		"Use `websearch` to discover public web sources; cite result URLs in answers.")
+	add(has("browser"),
+		"Use `browser` for isolated read-only page inspection (DOM/a11y/network). Click, type, upload, and download are denied.")
 	add(has("question"),
 		"Use `question` when a decision genuinely belongs to the user.")
 	add(has("task"),
@@ -329,6 +395,8 @@ func recommendedGuidance(entries []GuidanceEntry) string {
 	case has("phase_done"):
 		add(true, "Use `phase_done` to advance the active workflow phase gate.")
 	}
+	add(has("call_hierarchy") || has("rename_preview") || has("impact"),
+		"Prefer `call_hierarchy` / `impact` over guessing callers from `references`; preview renames with `rename_preview` (never applied). Unsupported LSPs fall back to `references`.")
 	add(has("toolsearch"),
 		"Use `toolsearch` to discover tools by name or description when the list is large.")
 	add(hasMCP(entries),

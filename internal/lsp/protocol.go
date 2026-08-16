@@ -1,9 +1,9 @@
 // Package lsp is a Language Server Protocol client: JSON-RPC 2.0 over stdio
 // (Content-Length framing), initialize handshake, document sync,
-// publishDiagnostics collection, and optional navigation requests
-// (definition / references / symbols). Crash isolation mirrors internal/mcp —
-// a dead language server degrades to empty results and never takes down the
-// session.
+// publishDiagnostics collection, and optional navigation / intel requests
+// (definition / references / symbols / call hierarchy / rename preview /
+// impact). Crash isolation mirrors internal/mcp — a dead language server
+// degrades to empty results and never takes down the session.
 package lsp
 
 import "encoding/json"
@@ -74,6 +74,21 @@ type clientCapabilities struct {
 type textDocumentClientCapabilities struct {
 	Synchronization    *syncCapabilities        `json:"synchronization,omitempty"`
 	PublishDiagnostics *publishDiagCapabilities `json:"publishDiagnostics,omitempty"`
+	Definition         *staticClientCapability  `json:"definition,omitempty"`
+	References         *staticClientCapability  `json:"references,omitempty"`
+	DocumentSymbol     *staticClientCapability  `json:"documentSymbol,omitempty"`
+	DocumentHighlight  *staticClientCapability  `json:"documentHighlight,omitempty"`
+	Rename             *renameClientCapability  `json:"rename,omitempty"`
+	CallHierarchy      *staticClientCapability  `json:"callHierarchy,omitempty"`
+}
+
+type staticClientCapability struct {
+	DynamicRegistration bool `json:"dynamicRegistration"`
+}
+
+type renameClientCapability struct {
+	DynamicRegistration bool `json:"dynamicRegistration"`
+	PrepareSupport      bool `json:"prepareSupport"`
 }
 
 type syncCapabilities struct {
@@ -99,7 +114,14 @@ type initializeResult struct {
 }
 
 type serverCapabilities struct {
-	TextDocumentSync json.RawMessage `json:"textDocumentSync,omitempty"`
+	TextDocumentSync          json.RawMessage `json:"textDocumentSync,omitempty"`
+	DefinitionProvider        json.RawMessage `json:"definitionProvider,omitempty"`
+	ReferencesProvider        json.RawMessage `json:"referencesProvider,omitempty"`
+	DocumentSymbolProvider    json.RawMessage `json:"documentSymbolProvider,omitempty"`
+	WorkspaceSymbolProvider   json.RawMessage `json:"workspaceSymbolProvider,omitempty"`
+	DocumentHighlightProvider json.RawMessage `json:"documentHighlightProvider,omitempty"`
+	RenameProvider            json.RawMessage `json:"renameProvider,omitempty"`
+	CallHierarchyProvider     json.RawMessage `json:"callHierarchyProvider,omitempty"`
 }
 
 // --- textDocument sync ---
@@ -268,3 +290,77 @@ type documentSymbol struct {
 	SelectionRange Range            `json:"selectionRange"`
 	Children       []documentSymbol `json:"children,omitempty"`
 }
+
+// --- call hierarchy / rename / highlights ---
+
+type callHierarchyItem struct {
+	Name           string          `json:"name"`
+	Kind           int             `json:"kind"`
+	Tags           []int           `json:"tags,omitempty"`
+	Detail         string          `json:"detail,omitempty"`
+	URI            string          `json:"uri"`
+	Range          Range           `json:"range"`
+	SelectionRange Range           `json:"selectionRange"`
+	Data           json.RawMessage `json:"data,omitempty"`
+}
+
+type prepareCallHierarchyParams struct {
+	TextDocument textDocumentIdentifier `json:"textDocument"`
+	Position     Position               `json:"position"`
+}
+
+type incomingCallsParams struct {
+	Item callHierarchyItem `json:"item"`
+}
+
+type outgoingCallsParams struct {
+	Item callHierarchyItem `json:"item"`
+}
+
+type incomingCall struct {
+	From       callHierarchyItem `json:"from"`
+	FromRanges []Range           `json:"fromRanges,omitempty"`
+}
+
+type outgoingCall struct {
+	To         callHierarchyItem `json:"to"`
+	FromRanges []Range           `json:"fromRanges,omitempty"`
+}
+
+type renameParams struct {
+	TextDocument textDocumentIdentifier `json:"textDocument"`
+	Position     Position               `json:"position"`
+	NewName      string                 `json:"newName"`
+}
+
+type lspTextEdit struct {
+	Range   Range  `json:"range"`
+	NewText string `json:"newText"`
+}
+
+type workspaceEdit struct {
+	Changes         map[string][]lspTextEdit `json:"changes,omitempty"`
+	DocumentChanges []json.RawMessage        `json:"documentChanges,omitempty"`
+}
+
+type textDocumentEdit struct {
+	TextDocument versionedTextDocumentIdentifier `json:"textDocument"`
+	Edits        []lspTextEdit                   `json:"edits"`
+}
+
+type documentHighlightParams struct {
+	TextDocument textDocumentIdentifier `json:"textDocument"`
+	Position     Position               `json:"position"`
+}
+
+type documentHighlight struct {
+	Range Range `json:"range"`
+	Kind  int   `json:"kind,omitempty"`
+}
+
+// Highlight kinds from textDocument/documentHighlight.
+const (
+	HighlightText  = 1
+	HighlightRead  = 2
+	HighlightWrite = 3
+)

@@ -1159,3 +1159,55 @@ func TestAgentsOrchChipBound(t *testing.T) {
 		t.Fatalf("expected some chips, got %q", plain)
 	}
 }
+
+func TestAgentsWindowShowsModelOnTabs(t *testing.T) {
+	w := newAgentsWindow().resize(64, 12).(agentsWindow)
+	next, _ := w.update(agentsStateMsg{
+		activeID:  "root-a",
+		viewingID: "root-a",
+		roots: []agentsRootSnap{
+			{
+				ID:    "root-a",
+				Title: "lead task",
+				Model: "parent-model",
+				State: theme.AgentStateReady,
+				Children: []childActivity{
+					{sessionID: "child-a", parentID: "root-a", agent: "explore", prompt: "scan", model: "child-model", status: "running"},
+				},
+			},
+		},
+	})
+	w = next.(agentsWindow)
+	plain := ansi.Strip(w.view(theme.Default()))
+	if !strings.Contains(plain, "lead task") || !strings.Contains(plain, "parent-model") {
+		t.Fatalf("root tab missing model: %q", plain)
+	}
+	if !strings.Contains(plain, "child-model") {
+		t.Fatalf("subagent tab missing model: %q", plain)
+	}
+	// Model is a suffix, not a replacement.
+	rootIdx := strings.Index(plain, "lead task")
+	modelIdx := strings.Index(plain, "parent-model")
+	if rootIdx < 0 || modelIdx < rootIdx {
+		t.Fatalf("root model is not after the title: %q", plain)
+	}
+	childIdx := strings.Index(plain, "explore")
+	if childIdx < 0 {
+		childIdx = strings.Index(plain, "scan")
+	}
+	childModelIdx := strings.Index(plain, "child-model")
+	if childIdx < 0 || childModelIdx < childIdx {
+		t.Fatalf("child model is not after the child label: %q", plain)
+	}
+}
+
+func TestAppendModelLabel(t *testing.T) {
+	th := theme.Default().Resolve()
+	got := appendModelLabel(th, "1) lead", "grok-4")
+	if !strings.HasPrefix(got, "1) lead") || !strings.HasSuffix(got, "grok-4") {
+		t.Fatalf("appendModelLabel = %q", got)
+	}
+	if appendModelLabel(th, "lead", "") != "lead" {
+		t.Fatalf("empty model should leave label unchanged")
+	}
+}

@@ -46,7 +46,7 @@ var knownPermissions = map[string]struct{}{
 	"team_task": {}, "patch_collab": {}, "delegate": {},
 	// Human orchestration Ops (WEBUI.18 / docs/human-orchestration-ops.md).
 	"team.spawn": {}, "team.message": {}, "team.interrupt": {}, "team.board": {},
-	"webfetch": {}, "websearch": {}, "todowrite": {}, "todoread": {},
+	"webfetch": {}, "websearch": {}, "browser": {}, "todowrite": {}, "todoread": {},
 	"memory_write": {}, "memory_read": {}, "issue_write": {}, "issue_read": {},
 	"plan_write": {}, "plan_read": {}, "plan_delegate": {},
 	"artifact_write": {}, "artifact_read": {},
@@ -57,6 +57,7 @@ var knownPermissions = map[string]struct{}{
 	"enter_plan_mode": {}, "exit_plan_mode": {}, "phase_done": {},
 	// LSP navigation + diagnostics (read-only; deferred tools when deferTools is on).
 	"definition": {}, "references": {}, "symbols": {}, "diagnostics": {},
+	"call_hierarchy": {}, "rename_preview": {}, "impact": {},
 	"mcp": {},
 }
 
@@ -131,6 +132,7 @@ func Defaults() Ruleset {
 		{Permission: "delegate", Pattern: "*", Action: Allow},
 		{Permission: "webfetch", Pattern: "*", Action: Ask},
 		{Permission: "websearch", Pattern: "*", Action: Ask},
+		{Permission: "browser", Pattern: "*", Action: Ask},
 		{Permission: "todowrite", Pattern: "*", Action: Allow},
 		{Permission: "todoread", Pattern: "*", Action: Allow},
 		{Permission: "memory_write", Pattern: "*", Action: Allow},
@@ -164,6 +166,9 @@ func Defaults() Ruleset {
 		{Permission: "references", Pattern: "*", Action: Allow},
 		{Permission: "symbols", Pattern: "*", Action: Allow},
 		{Permission: "diagnostics", Pattern: "*", Action: Allow},
+		{Permission: "call_hierarchy", Pattern: "*", Action: Allow},
+		{Permission: "rename_preview", Pattern: "*", Action: Allow},
+		{Permission: "impact", Pattern: "*", Action: Allow},
 		// External MCP tools can run arbitrary server-side code — always ask.
 		{Permission: "mcp", Pattern: "*", Action: Ask},
 	}

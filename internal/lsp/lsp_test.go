@@ -148,10 +148,8 @@ func runFakeLSP(mode string) {
 				"jsonrpc": "2.0",
 				"id":      *msg.ID,
 				"result": map[string]any{
-					"capabilities": map[string]any{
-						"textDocumentSync": 1,
-					},
-					"serverInfo": map[string]string{"name": "fake-ls", "version": "0.0.1"},
+					"capabilities": intelCaps(mode),
+					"serverInfo":   map[string]string{"name": "fake-ls", "version": "0.0.1"},
 				},
 			})
 			if mode == "server-request" {
@@ -176,7 +174,7 @@ func runFakeLSP(mode string) {
 				os.Exit(2)
 			}
 		case "textDocument/definition":
-			if mode == "nav" || mode == "" || mode == "no-diagnostics" {
+			if mode == "nav" || mode == "" || mode == "no-diagnostics" || strings.HasPrefix(mode, "intel") {
 				var p textDocumentPositionParams
 				_ = json.Unmarshal(msg.Params, &p)
 				// Point at a synthetic location derived from the request URI.
@@ -273,6 +271,144 @@ func runFakeLSP(mode string) {
 					},
 				},
 			})
+
+		case "textDocument/prepareCallHierarchy":
+			var p prepareCallHierarchyParams
+			_ = json.Unmarshal(msg.Params, &p)
+			write(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      *msg.ID,
+				"result": []callHierarchyItem{{
+					Name: "Foo",
+					Kind: SymbolKindFunction,
+					URI:  p.TextDocument.URI,
+					Range: Range{
+						Start: p.Position,
+						End:   Position{Line: p.Position.Line, Character: p.Position.Character + 3},
+					},
+					SelectionRange: Range{
+						Start: p.Position,
+						End:   Position{Line: p.Position.Line, Character: p.Position.Character + 3},
+					},
+				}},
+			})
+		case "callHierarchy/incomingCalls":
+			var p incomingCallsParams
+			_ = json.Unmarshal(msg.Params, &p)
+			other := strings.Replace(p.Item.URI, "main.go", "other.go", 1)
+			n := 2
+			if mode == "intel-many" {
+				n = 80
+			}
+			rows := make([]incomingCall, 0, n)
+			for i := 0; i < n; i++ {
+				uri := p.Item.URI
+				name := "Caller"
+				if i == 1 || (mode == "intel-many" && i%2 == 1) {
+					uri = other
+					name = "Other"
+				}
+				rows = append(rows, incomingCall{
+					From: callHierarchyItem{
+						Name: name,
+						Kind: SymbolKindFunction,
+						URI:  uri,
+						Range: Range{
+							Start: Position{Line: i, Character: 0},
+							End:   Position{Line: i, Character: 3},
+						},
+						SelectionRange: Range{
+							Start: Position{Line: i, Character: 0},
+							End:   Position{Line: i, Character: 3},
+						},
+					},
+					FromRanges: []Range{{
+						Start: Position{Line: i, Character: 0},
+						End:   Position{Line: i, Character: 3},
+					}},
+				})
+			}
+			write(map[string]any{"jsonrpc": "2.0", "id": *msg.ID, "result": rows})
+		case "callHierarchy/outgoingCalls":
+			var p outgoingCallsParams
+			_ = json.Unmarshal(msg.Params, &p)
+			write(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      *msg.ID,
+				"result": []outgoingCall{{
+					To: callHierarchyItem{
+						Name: "helper",
+						Kind: SymbolKindFunction,
+						URI:  p.Item.URI,
+						Range: Range{
+							Start: Position{Line: 4, Character: 0},
+							End:   Position{Line: 4, Character: 6},
+						},
+						SelectionRange: Range{
+							Start: Position{Line: 4, Character: 0},
+							End:   Position{Line: 4, Character: 6},
+						},
+					},
+				}},
+			})
+		case "textDocument/prepareRename":
+			var p textDocumentPositionParams
+			_ = json.Unmarshal(msg.Params, &p)
+			write(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      *msg.ID,
+				"result": Range{
+					Start: p.Position,
+					End:   Position{Line: p.Position.Line, Character: p.Position.Character + 3},
+				},
+			})
+		case "textDocument/rename":
+			var p renameParams
+			_ = json.Unmarshal(msg.Params, &p)
+			if mode == "intel-bad" {
+				write(map[string]any{"jsonrpc": "2.0", "id": *msg.ID, "result": "not-an-edit"})
+				break
+			}
+			other := strings.Replace(p.TextDocument.URI, "main.go", "other.go", 1)
+			n := 2
+			if mode == "intel-many" {
+				n = 160
+			}
+			edits := make([]lspTextEdit, 0, n)
+			for i := 0; i < n; i++ {
+				edits = append(edits, lspTextEdit{
+					Range: Range{
+						Start: Position{Line: i, Character: 0},
+						End:   Position{Line: i, Character: 3},
+					},
+					NewText: p.NewName,
+				})
+			}
+			half := len(edits) / 2
+			if half == 0 {
+				half = 1
+			}
+			write(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      *msg.ID,
+				"result": workspaceEdit{
+					Changes: map[string][]lspTextEdit{
+						p.TextDocument.URI: edits[:half],
+						other:              edits[half:],
+					},
+				},
+			})
+		case "textDocument/documentHighlight":
+			var p documentHighlightParams
+			_ = json.Unmarshal(msg.Params, &p)
+			write(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      *msg.ID,
+				"result": []documentHighlight{
+					{Range: Range{Start: p.Position, End: Position{Line: p.Position.Line, Character: p.Position.Character + 3}}, Kind: HighlightRead},
+					{Range: Range{Start: Position{Line: p.Position.Line + 1, Character: 0}, End: Position{Line: p.Position.Line + 1, Character: 3}}, Kind: HighlightWrite},
+				},
+			})
 		default:
 			write(map[string]any{
 				"jsonrpc": "2.0",
@@ -288,6 +424,19 @@ func runFakeLSP(mode string) {
 			}()
 		}
 	}
+}
+
+func intelCaps(mode string) map[string]any {
+	caps := map[string]any{"textDocumentSync": 1}
+	if strings.HasPrefix(mode, "intel") {
+		caps["definitionProvider"] = true
+		caps["referencesProvider"] = true
+		caps["documentSymbolProvider"] = true
+		caps["documentHighlightProvider"] = true
+		caps["callHierarchyProvider"] = true
+		caps["renameProvider"] = map[string]any{"prepareProvider": true}
+	}
+	return caps
 }
 
 func helperCommand(t *testing.T, mode string) (command string, args []string, env map[string]string) {

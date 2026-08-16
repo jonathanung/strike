@@ -347,7 +347,7 @@ func classifyStep(permission string) StepClass {
 			return StepClassWrite
 		}
 		return StepClassOther
-	case "webfetch", "websearch":
+	case "webfetch", "websearch", "browser":
 		return StepClassNetwork
 	case "bash":
 		return StepClassBash

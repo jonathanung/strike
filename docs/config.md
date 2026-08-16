@@ -264,7 +264,7 @@ Inspect with `/permission presets`.
 
 | ID | Behavior |
 |---|---|
-| `read-only` | Allow read/search/LSP; **deny** write, edit, bash, webfetch, websearch, mcp, hooks |
+| `read-only` | Allow read/search/LSP; **deny** write, edit, bash, webfetch, websearch, browser, mcp, hooks |
 | `dev` | Allow common local-dev bash (`go *`, `git status/diff/log/show`, `make test*`); deny force-push and `.env` writes; other mutations stay ask |
 | `yolo-with-sandbox` | Rule-level allow-all (`* *` allow). Does **not** turn off OS sandbox — keep `sandbox` at `workspace-write` or `read-only`. Later deny rules still win. Distinct from `permissionMode: yolo` |
 
@@ -400,9 +400,10 @@ container filters. It is **not** a third independent system:
 |---|---|
 | `webfetch` | `network.allow` host/CIDR allowlist + SSRF private blocks |
 | `websearch` | `network.allow` on the search API host + SSRF private blocks; result domain filters are separate tool args |
+| `browser` | `network.allow` + SSRF on navigate/redirects; isolated read-only inspect (no click/type/upload/download) |
 | bash preflight | Fail-closed when allow is non-empty and OS host net is on: known clients (`curl`/`wget`/`ssh`/…) must match allow; interpreters, `/dev/tcp`, package network subcommands, and unknown binaries → `network_denied`. Skipped when OS `NoNetwork`. **Not** a full shell/network proxy. |
 | bash OS profile | host networking on by default (`Policy.NoNetwork` zero value / `NetworkEnabled()`); off only when `webfetch`, `websearch`, and `mcp` are all hard-deny on `*` (all-or-nothing; **no** per-host filter inside bwrap/seatbelt; no Windows host filter) |
-| permission rules | `webfetch` / `websearch` / `bash` ask/allow/deny patterns (prompt posture), independent of the hard allowlist |
+| permission rules | `webfetch` / `websearch` / `browser` / `bash` ask/allow/deny patterns (prompt posture), independent of the hard allowlist |
 | container net | `container.network.mode` (`default`\|`none`); `container.network.allow` reserved (same host/CIDR shape as `network.allow`) |
 
 **Sandbox degrade (`sandboxAllowDegrade`):** default `false`. When `true`, a
@@ -555,8 +556,17 @@ includes compatibility delegation shims (`delegate`, `task_status`,
 (`agent_roster`, `agent_message`, `agent_broadcast`, `agent_thread`,
 `agent_ownership`, `team_task`, `patch_collab`), plan tools (`plan_write`,
 `plan_read`, `plan_delegate`, `enter_plan_mode`, `exit_plan_mode`,
-`phase_done`), optional built-ins (`webfetch`, `websearch`, todo/memory/issue,
-`sleep`, `skill`, `notebook_edit`, …), and all `mcp_*` tools. Discovery lives
+`phase_done`), optional built-ins (`webfetch`, `websearch`, `browser`, todo/memory/issue,
+`sleep`, `skill`, `notebook_edit`, …), and all `mcp_*` tools.
+
+The first-turn tools **guidance** layer still lists pending deferred **names**
+(hard-denied omitted) so the model can call them by name without a discovery
+round. Schemas stay off `tools[]` until promotion. The name list is sorted
+(built-ins first, then `mcp_*`) and capped at 48 entries with a `+N more`
+remainder (~250 tokens worst case at chars/4). `deferTools: "off"` is
+unchanged: no name list, full permitted schemas on the wire.
+
+Discovery lives
 on the process registry: matches from `toolsearch` load full schemas on the
 **next** model request (including the next iteration of the same turn’s tool
 loop). Tools already present as assistant tool calls in history are
@@ -1334,6 +1344,9 @@ the model calls them by name).
 | `references` | `textDocument/references` | same position args; includes declaration |
 | `symbols` | `textDocument/documentSymbol` or `workspace/symbol` | `filePath` and/or `query` |
 | `diagnostics` | cached `publishDiagnostics` from live servers | optional `path` (file or directory; omit = workspace), optional `severity` (`error` default, `warning`, `info`, `hint`), optional `maxResults` (default 100, max 500) |
+| `call_hierarchy` | `textDocument/prepareCallHierarchy` + incoming/outgoing | same position args; `direction` = `incoming` / `outgoing` / `both` (default `both`); optional `maxResults` |
+| `rename_preview` | `textDocument/prepareRename` + `textDocument/rename` | same position args plus `newName`; returns normalized edits and **does not write files** |
+| `impact` | definition + highlights/references + call hierarchy + optional rename preview | same position args; optional `newName`; groups by file/package and usage kind |
 
 `diagnostics` returns a stable JSON payload: `file`, `range` (1-based
 line/character start+end), `severity`, `source`, `code`, `message`, plus

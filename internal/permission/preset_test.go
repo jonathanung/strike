@@ -39,6 +39,12 @@ func TestPresetsShipped(t *testing.T) {
 	if Evaluate("write", ".env", Defaults(), dev.Rules) != Deny {
 		t.Fatal("dev should deny .env write")
 	}
+	if Evaluate("browser", "*", Defaults(), ro.Rules) != Deny {
+		t.Fatal("read-only should deny browser")
+	}
+	if Evaluate("browser", "*", Defaults()) != Ask {
+		t.Fatal("defaults should ask browser")
+	}
 }
 
 func TestPresetYoloSandboxAllows(t *testing.T) {
