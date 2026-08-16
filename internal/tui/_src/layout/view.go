@@ -64,14 +64,14 @@ func (m Model) headerView(width int) string {
 
 	// Build ordered chips with drop priorities (lower = drop sooner).
 	var chips []headerChip
-	if m.providerName == "" {
+	provider, model := m.chromeProviderModel()
+	if provider == "" {
 		chips = append(chips, headerChip{100, ui.Badge(th, ui.ToneMuted, "no model")})
 	} else {
-		model := m.modelName
 		if model == "" {
 			model = "default"
 		}
-		chips = append(chips, headerChip{100, ui.Badge(th, ui.ToneAccent, m.providerName+"/"+model)})
+		chips = append(chips, headerChip{100, ui.Badge(th, ui.ToneAccent, provider+"/"+model)})
 		if tone, ok := providerHealthTone(m); ok {
 			chips = append(chips, headerChip{40, ui.Badge(th, tone, ic.Dot)})
 		}

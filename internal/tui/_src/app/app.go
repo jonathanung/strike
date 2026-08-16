@@ -509,6 +509,8 @@ type childActivity struct {
 	prompt    string
 	name      string // optional stable teammate alias from task spawn
 	title     string // durable display title when known (user rename / create)
+	provider  string // child's resolved provider (not the parent's)
+	model     string // child's resolved model id (not the parent's)
 	status    string // running | completed | failed | canceled
 	// rosterState is a short display chip from team.roster (working, needs you, …).
 	rosterState string
@@ -1368,6 +1370,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case leaderExpiredMsg:
 		if msg.gen == m.leaderGen {
 			m.clearLeader()
+		}
+		return m, nil
+
+	case childModelMsg:
+		if msg.id == "" || (msg.provider == "" && msg.model == "") {
+			return m, nil
+		}
+		if m.setChildActivityModel(msg.id, msg.provider, msg.model) {
+			return m, m.broadcastAgentsState()
 		}
 		return m, nil
 

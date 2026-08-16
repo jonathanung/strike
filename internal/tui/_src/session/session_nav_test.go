@@ -910,3 +910,44 @@ func mustSessionJSONL(t *testing.T, events ...protocol.Event) []byte {
 	}
 	return []byte(b.String())
 }
+
+func TestOpenSessionViewLoadsChildModelFromJSONL(t *testing.T) {
+	fs := newFakeSessions()
+	childLog := mustSessionJSONL(t,
+		protocol.ModelSelected{Provider: "xai", Model: "grok-4"},
+		protocol.UserMessage{Text: "child prompt"},
+		protocol.TextDelta{Text: "child says hi"},
+		protocol.TurnCompleted{StopReason: "end_turn"},
+	)
+	fs.put(host.Session{ID: "child-1", ParentID: "root-sess", Title: "explore child"}, childLog)
+
+	m, _ := newAppTestModel(nil, nil)
+	m.sessionID = "root-sess"
+	m.providerName = "echo"
+	m.modelName = "parent-model"
+	m.services.Sessions = fs
+	m.children = []childActivity{{
+		sessionID: "child-1",
+		agent:     "explore",
+		status:    string(protocol.ChildStatusCompleted),
+	}}
+	cmd := m.openSessionView("child-1")
+	_ = cmd
+	if !m.viewingChild() {
+		t.Fatal("expected viewing child")
+	}
+	ch, ok := m.findChildActivity("child-1")
+	if !ok {
+		t.Fatal("missing child activity")
+	}
+	if ch.provider != "xai" || ch.model != "grok-4" {
+		t.Fatalf("child model from JSONL = %s/%s", ch.provider, ch.model)
+	}
+	plain := ansi.Strip(m.headerView(120))
+	if !strings.Contains(plain, "xai/grok-4") {
+		t.Fatalf("inspect header missing child model: %q", plain)
+	}
+	if strings.Contains(plain, "echo/parent-model") {
+		t.Fatalf("inspect header still shows parent model: %q", plain)
+	}
+}
