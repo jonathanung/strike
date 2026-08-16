@@ -1,10 +1,11 @@
 .PHONY: build run run-echo serve web-build web-test web-check web-e2e test vet cover cover-check clean setup restore tui-gen prompt-reg chaos harness-eval swebench-eval telemetry-check container-smoke
 
-# Multi-module workspace (go.work): ., ./pkg/protocol, ./pkg/redact.
+# Multi-module workspace (go.work): ., ./pkg/protocol, ./pkg/redact,
+# ./provider, ./providers.
 # `go test ./...` from the root does not descend into nested go.mod
 # directories, so leaf modules are tested with `go -C dir test`.
 # -C must be the first go flag. GOWORK=off still builds via replace.
-LEAF_MODS = pkg/protocol pkg/redact
+LEAF_MODS = pkg/protocol pkg/redact provider providers
 
 # Overall statement-coverage floor for `make cover-check` (local / optional CI).
 # Soft baseline ~77%; keep below measured total so the gate does not flake.

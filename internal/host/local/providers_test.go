@@ -13,8 +13,8 @@ import (
 	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/provider"
-	"github.com/jonathanung/strike-cli/internal/provider/anthropic"
-	"github.com/jonathanung/strike-cli/internal/provider/openaicompat"
+	"github.com/jonathanung/strike-cli/providers/anthropic"
+	"github.com/jonathanung/strike-cli/providers/openaicompat"
 )
 
 func TestStatusesHonorsDisableDefaultProviders(t *testing.T) {

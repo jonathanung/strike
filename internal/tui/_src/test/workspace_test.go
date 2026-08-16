@@ -9,13 +9,17 @@ import (
 )
 
 // Leaf workspace modules extracted so a future harness module can import
-// them without a cycle through the root module (#1204).
+// them without a cycle through the root module (#1204, #1216).
 var leafModules = []struct {
 	dir    string
 	module string
+	// stdlib is true when the leaf go.mod must have no require/replace.
+	stdlib bool
 }{
-	{"pkg/protocol", modulePath + "/pkg/protocol"},
-	{"pkg/redact", modulePath + "/pkg/redact"},
+	{"pkg/protocol", modulePath + "/pkg/protocol", true},
+	{"pkg/redact", modulePath + "/pkg/redact", true},
+	{"provider", modulePath + "/provider", true},
+	{"providers", modulePath + "/providers", false},
 }
 
 // Packages that must stay in the root module until a later extract wave.
@@ -31,13 +35,14 @@ func TestWorkspaceModules(t *testing.T) {
 
 	work := readRepoFile(t, filepath.Join(root, "go.work"))
 	uses := parseGoWorkUse(work)
-	for _, want := range []string{".", "./pkg/protocol", "./pkg/redact"} {
+	wantUses := []string{".", "./pkg/protocol", "./pkg/redact", "./provider", "./providers"}
+	for _, want := range wantUses {
 		if !uses[want] {
 			t.Errorf("go.work missing use %q", want)
 		}
 	}
-	if len(uses) != 3 {
-		t.Errorf("go.work use set = %v, want exactly ., ./pkg/protocol, ./pkg/redact", keys(uses))
+	if len(uses) != len(wantUses) {
+		t.Errorf("go.work use set = %v, want exactly %v", keys(uses), wantUses)
 	}
 
 	rootMod := readRepoFile(t, filepath.Join(root, "go.mod"))
@@ -58,11 +63,22 @@ func TestWorkspaceModules(t *testing.T) {
 		if got := parseGoModModule(mod); got != leaf.module {
 			t.Errorf("%s/go.mod module = %q, want %q", leaf.dir, got, leaf.module)
 		}
-		if extra := parseGoModRequires(mod); len(extra) > 0 {
-			t.Errorf("%s/go.mod must stay stdlib-only; unexpected require %v", leaf.dir, keys(extra))
+		if leaf.stdlib {
+			if extra := parseGoModRequires(mod); len(extra) > 0 {
+				t.Errorf("%s/go.mod must stay stdlib-only; unexpected require %v", leaf.dir, keys(extra))
+			}
+			if extra := parseGoModReplaces(mod); len(extra) > 0 {
+				t.Errorf("%s/go.mod must not replace; got %v", leaf.dir, extra)
+			}
+			continue
 		}
-		if extra := parseGoModReplaces(mod); len(extra) > 0 {
-			t.Errorf("%s/go.mod must not replace; got %v", leaf.dir, extra)
+		// providers may require the public provider interface module.
+		reqs := parseGoModRequires(mod)
+		if !reqs[modulePath+"/provider"] {
+			t.Errorf("%s/go.mod missing require %s/provider", leaf.dir, modulePath)
+		}
+		if got := parseGoModReplaces(mod)[modulePath+"/provider"]; got != "../provider" {
+			t.Errorf("%s/go.mod replace provider = %q, want ../provider", leaf.dir, got)
 		}
 	}
 

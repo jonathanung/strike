@@ -1,9 +1,10 @@
-// Package auth manages provider credentials: API keys and OAuth tokens,
-// persisted to a 0600 auth.json, plus the OAuth flows that obtain them.
-// Used by cmd/strike (provider construction, the `strike auth` subcommand)
-// and wrapped as host.Auth by internal/host/local; internal/tui never
-// imports it — credentials never reach the frontend, only OAuthLogin/
-// DeviceLogin handles and outcome strings do.
+// Package auth is the Strike product credential store (0600 ~/.strike/auth.json)
+// plus compatibility forwards for reusable OAuth/PKCE/device flows that now
+// live in github.com/jonathanung/strike-cli/providers/auth.
+//
+// Used by cmd/strike (the `strike auth` subcommand) and wrapped as host.Auth
+// by internal/host/local; internal/tui never imports it — credentials never
+// reach the frontend, only OAuthLogin/DeviceLogin handles and outcome strings do.
 package auth
 
 import (
@@ -15,29 +16,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"time"
 )
-
-type CredentialType string
-
-const (
-	TypeAPIKey CredentialType = "api"
-	TypeOAuth  CredentialType = "oauth"
-)
-
-type Credential struct {
-	Type CredentialType `json:"type"`
-	// APIKey is set for TypeAPIKey, and may also be set on a TypeOAuth
-	// credential when the OAuth flow yielded an exchanged API key
-	// (OpenAI's ChatGPT login does this).
-	APIKey    string    `json:"apiKey,omitempty"`
-	Access    string    `json:"access,omitempty"`
-	Refresh   string    `json:"refresh,omitempty"`
-	IDToken   string    `json:"idToken,omitempty"`
-	ExpiresAt time.Time `json:"expiresAt,omitempty"`
-	// AccountID is the ChatGPT account id (OpenAI subscription mode).
-	AccountID string `json:"accountId,omitempty"`
-}
 
 type Store struct {
 	path  string

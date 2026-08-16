@@ -15,6 +15,8 @@ require (
 	github.com/hinshun/vt10x v0.0.0-20220301184237-5011da428d02
 	github.com/jonathanung/strike-cli/pkg/protocol v0.0.0
 	github.com/jonathanung/strike-cli/pkg/redact v0.0.0
+	github.com/jonathanung/strike-cli/provider v0.0.0
+	github.com/jonathanung/strike-cli/providers v0.0.0
 	golang.org/x/sys v0.47.0
 	golang.org/x/term v0.45.0
 )
@@ -78,3 +80,7 @@ require (
 replace github.com/jonathanung/strike-cli/pkg/protocol => ./pkg/protocol
 
 replace github.com/jonathanung/strike-cli/pkg/redact => ./pkg/redact
+
+replace github.com/jonathanung/strike-cli/provider => ./provider
+
+replace github.com/jonathanung/strike-cli/providers => ./providers
