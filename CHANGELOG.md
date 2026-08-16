@@ -14,11 +14,32 @@ materially affect the shipped product.
 
 ## [Unreleased]
 
+## [v0.5.1] - 2026-08-16
+
+Patch release: new inspect/verify tools, content-addressed attachments, and
+clearer deferred-tool and subagent naming.
+
 ### Added
 
-- **Content-addressed attachments** — user images and typed blobs (PDF, diagram, log, archive, build) persist as `att:sha256:` refs instead of embedding payloads in session JSONL. Provider requests still receive selected image bytes when the model supports them; unsupported formats fail visibly. Includes region redaction for PNG/JPEG, structured visual-compare evidence, and retention ([#1055](https://github.com/jonathanung/strike/issues/1055)). Wire schema `1.18.0`.
-- **`browser` tool (read-only inspect)** — isolated per session/task profile for navigate, DOM/accessibility snapshot, console, and network capture. Domain/`network.allow`/SSRF apply below the model; clicks, typing, uploads, downloads, and script eval are denied. First slice of [#1052](https://github.com/jonathanung/strike/issues/1052).
-- **LSP call hierarchy, rename preview, and impact tools** — `call_hierarchy`, `rename_preview`, and `impact` query incoming/outgoing calls, preview a rename as unapplied file edits, and group symbol usage by file/package. Unsupported language-server capabilities return a non-fatal result and suggest `references` ([#1184](https://github.com/jonathanung/strike/issues/1184)).
+- **Content-addressed attachments** — user images and typed blobs (PDF, diagram, log, archive, build) persist as `att:sha256:` refs instead of embedding payloads in session JSONL. Provider requests still receive selected image bytes when the model supports them; unsupported formats fail visibly. Includes region redaction for PNG/JPEG, structured visual-compare evidence, and retention ([#1055](https://github.com/jonathanung/strike/issues/1055), [#1195](https://github.com/jonathanung/strike/pull/1195)). Wire schema `1.18.0`.
+- **`browser` tool (read-only inspect)** — isolated per session/task profile for navigate, DOM/accessibility snapshot, console, and network capture. Domain/`network.allow`/SSRF apply below the model; clicks, typing, uploads, downloads, and script eval are denied. First slice of [#1052](https://github.com/jonathanung/strike/issues/1052) ([#1187](https://github.com/jonathanung/strike/pull/1187)).
+- **LSP call hierarchy, rename preview, and impact tools** — `call_hierarchy`, `rename_preview`, and `impact` query incoming/outgoing calls, preview a rename as unapplied file edits, and group symbol usage by file/package. Unsupported language-server capabilities return a non-fatal result and suggest `references` ([#1184](https://github.com/jonathanung/strike/issues/1184), [#1191](https://github.com/jonathanung/strike/pull/1191)).
+- **`git` tool** — read-only structured `status` / `diff` / `log` / `blame` / `show` as bounded JSON, not pager dumps. Mutators are refused. Workspace-root git only; distinct from unrestricted `bash` ([#1179](https://github.com/jonathanung/strike/issues/1179), [#1193](https://github.com/jonathanung/strike/pull/1193)).
+- **`verify` tool** — run the project's documented A/B/C gate and return failures only (package, test name, snippet, command). Missing docs fail closed instead of guessing `go test ./...` ([#1180](https://github.com/jonathanung/strike/issues/1180), [#1197](https://github.com/jonathanung/strike/pull/1197)).
+- **`status` tool** — this-turn harness working set: dirty paths, create/update/delete, optional content hashes. Reuses `TurnDiff` / `FileState`; empty when the turn is unchanged ([#1182](https://github.com/jonathanung/strike/issues/1182), [#1198](https://github.com/jonathanung/strike/pull/1198)).
+- **`tui_snapshot` tool** — last painted TUI frame as a redacted, size-bounded text dump (optional `image_ref`, never an embedded payload). Fails with `precondition_failed` when no frame is available ([#1183](https://github.com/jonathanung/strike/issues/1183), [#1192](https://github.com/jonathanung/strike/pull/1192)).
+
+### Changed
+
+- **Deferred tools are named in first-turn guidance** — pending tool names are listed (sorted, capped) without sending their InputSchemas until `toolsearch`, a direct call, history, or workflow activation. `deferTools: "off"` is unchanged ([#1181](https://github.com/jonathanung/strike/issues/1181), [#1188](https://github.com/jonathanung/strike/pull/1188)).
+- **Subagent names come from the assigned task** — omitted `task` / `delegate` `name` is derived from the prompt (or context-bundle goal) as a unique slug (`fix-auth`, `fix-auth-2`). Invalid or duplicate explicit names still fail closed ([#1189](https://github.com/jonathanung/strike/issues/1189), [#1196](https://github.com/jonathanung/strike/pull/1196)).
+- **Ledger assumptions go stale when pinned evidence changes** — optional `evidence_pins` (path+hash, symbol, recorded command) are checked before prompt inject. Stale rows stay active with a reason; `ledger_write` `revalidate` refreshes pins. Decisions and constraints are never auto-staled ([#1185](https://github.com/jonathanung/strike/issues/1185), [#1194](https://github.com/jonathanung/strike/pull/1194)).
+
+### Fixed
+
+- **Agent and subagent tabs show that session's model** — labels append the resolved model; inspecting a child shows the child's provider/model, not the parent's ([#1186](https://github.com/jonathanung/strike/issues/1186), [#1190](https://github.com/jonathanung/strike/pull/1190)).
+
+**Full changelog:** [v0.5.0...v0.5.1](https://github.com/jonathanung/strike/compare/v0.5.0...v0.5.1)
 
 ## [v0.5.0] - 2026-08-15
 
@@ -817,7 +838,8 @@ Initial public release.
 
 **Full changelog:** [commits through v0.0.1](https://github.com/jonathanung/strike/commits/v0.0.1)
 
-[Unreleased]: https://github.com/jonathanung/strike/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/jonathanung/strike/compare/v0.5.1...HEAD
+[v0.5.1]: https://github.com/jonathanung/strike/compare/v0.5.0...v0.5.1
 [v0.5.0]: https://github.com/jonathanung/strike/compare/v0.4.0...v0.5.0
 [v0.4.0]: https://github.com/jonathanung/strike/compare/v0.3.1...v0.4.0
 [v0.3.1]: https://github.com/jonathanung/strike/compare/v0.3.0...v0.3.1
