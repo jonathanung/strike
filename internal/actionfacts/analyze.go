@@ -67,7 +67,7 @@ func analyze(input Input) Facts {
 
 func isStructuredTool(tool string) bool {
 	switch strings.ToLower(strings.TrimSpace(tool)) {
-	case "webfetch", "websearch", "read", "glob", "grep", "edit", "write", "delete", "move":
+	case "webfetch", "websearch", "browser", "read", "glob", "grep", "edit", "write", "delete", "move":
 		return true
 	default:
 		return false
@@ -100,7 +100,7 @@ func analyzeToolPattern(tool string, argv []string, cwd string) Facts {
 	}
 	id := out.nextID()
 	switch strings.ToLower(tool) {
-	case "webfetch", "websearch":
+	case "webfetch", "websearch", "browser":
 		cmd := CommandFact{
 			ID:           id,
 			Effect:       EffectExecute,

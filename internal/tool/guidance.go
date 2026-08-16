@@ -49,6 +49,7 @@ var shortPurposes = map[string]string{
 	"agent_thread":    "read task/delegation-bound peer message thread",
 	"team_task":       "shared team task board (create/list/claim/complete)",
 	"webfetch":        "fetch a URL",
+	"browser":         "inspect a page in an isolated read-only browser profile",
 	"websearch":       "search the web with source citations",
 	"todowrite":       "write the multi-step todo list",
 	"todoread":        "read the current todo list",
@@ -334,6 +335,8 @@ func recommendedGuidance(entries []GuidanceEntry) string {
 		"Use `websearch` to discover sources (titles/URLs/snippets); use `webfetch` to retrieve a selected result. Cite source URLs in answers.")
 	add(has("websearch") && !has("webfetch"),
 		"Use `websearch` to discover public web sources; cite result URLs in answers.")
+	add(has("browser"),
+		"Use `browser` for isolated read-only page inspection (DOM/a11y/network). Click, type, upload, and download are denied.")
 	add(has("question"),
 		"Use `question` when a decision genuinely belongs to the user.")
 	add(has("task"),

@@ -105,7 +105,7 @@ func toolKind(name string) string {
 		return "execute"
 	case n == "glob" || n == "grep" || n == "search" || n == "toolsearch":
 		return "search"
-	case n == "webfetch" || n == "fetch":
+	case n == "webfetch" || n == "fetch" || n == "browser":
 		return "fetch"
 	case n == "websearch" || n == "web_search":
 		return "search"

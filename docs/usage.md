@@ -312,7 +312,7 @@ OS capability blocks (read-only FS, seatbelt deny, …) surface on bash as
 `errorCode=sandbox_denied` with a human reason (timeline + model tool result).
 When `network.allow` is set, bash preflight also blocks known network clients
 (`curl`/`wget`/`ssh`/…) outside the list as `errorCode=network_denied` (shared
-allowlist with webfetch; not an OS per-host filter).
+allowlist with webfetch/browser; not an OS per-host filter). Isolated read-only `browser` inspects DOM/a11y/network under the same allowlist (no click/type/upload/download).
 See the isolation matrix: [isolation.md](isolation.md) (sandbox vs worktrees vs
 planned containers).
 

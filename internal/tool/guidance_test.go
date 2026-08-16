@@ -267,7 +267,7 @@ func TestBuildGuidanceDeterministic(t *testing.T) {
 
 func TestBuiltinShortPurposesCoversCoreTools(t *testing.T) {
 	core := []string{
-		"read", "write", "edit", "move", "delete", "glob", "grep", "bash", "webfetch", "websearch",
+		"read", "write", "edit", "move", "delete", "glob", "grep", "bash", "webfetch", "websearch", "browser",
 		"todowrite", "todoread", "memory_write", "memory_read",
 		"issue_write", "issue_read", "plan_write", "plan_read", "plan_delegate",
 		"notebook_edit", "sleep", "skill",
