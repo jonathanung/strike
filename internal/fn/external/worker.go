@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/harness"
+	"github.com/jonathanung/strike-cli/internal/fn"
 	"github.com/jonathanung/strike-cli/internal/provider"
 )
 
@@ -61,10 +61,10 @@ type pool struct {
 	live     *liveWorker
 }
 
-// NewPersistent returns a harness.Func that reuses one subprocess across
+// NewPersistent returns a fn.Func that reuses one subprocess across
 // invocations (when the worker implements the persistent protocol), plus a
 // Close that shuts the worker down. One-shot New remains the default path.
-func NewPersistent(name string, adapter Adapter, opts WorkerOptions) (harness.Func, func() error, error) {
+func NewPersistent(name string, adapter Adapter, opts WorkerOptions) (fn.Func, func() error, error) {
 	if strings.TrimSpace(name) == "" || adapter == nil {
 		return nil, nil, errors.New("external harness: name and adapter are required")
 	}
@@ -99,7 +99,7 @@ func (p *pool) Close() error {
 	return nil
 }
 
-func (p *pool) run(input harness.Input, prov harness.Provider, emit harness.Emit) (harness.Result, error) {
+func (p *pool) run(input fn.Input, prov fn.Provider, emit fn.Emit) (fn.Result, error) {
 	ctx := input.Context
 	if ctx == nil {
 		ctx = context.Background()
@@ -108,25 +108,25 @@ func (p *pool) run(input harness.Input, prov harness.Provider, emit harness.Emit
 	select {
 	case <-p.slots:
 	case <-ctx.Done():
-		return harness.Result{}, ctx.Err()
+		return fn.Result{}, ctx.Err()
 	}
 	defer func() { p.slots <- struct{}{} }()
 
 	p.mu.Lock()
 	if p.closed {
 		p.mu.Unlock()
-		return harness.Result{}, errors.New("external harness: worker pool closed")
+		return fn.Result{}, errors.New("external harness: worker pool closed")
 	}
 	if p.disabled != nil {
 		err := p.disabled
 		p.mu.Unlock()
-		return harness.Result{}, err
+		return fn.Result{}, err
 	}
 	p.mu.Unlock()
 
 	live, err := p.ensureLive(ctx)
 	if err != nil {
-		return harness.Result{}, err
+		return fn.Result{}, err
 	}
 	return live.invoke(ctx, input, prov, emit)
 }
@@ -220,9 +220,9 @@ type invocation struct {
 	id     string
 	ctx    context.Context
 	cancel context.CancelFunc
-	p      harness.Provider
-	tools  harness.Tools
-	emit   harness.Emit
+	p      fn.Provider
+	tools  fn.Tools
+	emit   fn.Emit
 	ids    map[string]string
 	total  int
 	done   chan terminal
@@ -273,7 +273,7 @@ func (lw *liveWorker) write(v any) error {
 	return err
 }
 
-func (lw *liveWorker) invoke(parent context.Context, input harness.Input, prov harness.Provider, emit harness.Emit) (harness.Result, error) {
+func (lw *liveWorker) invoke(parent context.Context, input fn.Input, prov fn.Provider, emit fn.Emit) (fn.Result, error) {
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	invocationID := rand.Text()
@@ -295,11 +295,11 @@ func (lw *liveWorker) invoke(parent context.Context, input harness.Input, prov h
 		if err == nil {
 			err = errors.New("external harness: worker is dead")
 		}
-		return harness.Result{}, err
+		return fn.Result{}, err
 	}
 	if lw.stopping {
 		lw.mu.Unlock()
-		return harness.Result{}, errors.New("external harness: worker is shutting down")
+		return fn.Result{}, errors.New("external harness: worker is shutting down")
 	}
 	lw.disarmIdleLocked()
 	lw.invocations[invocationID] = inv
@@ -326,7 +326,7 @@ func (lw *liveWorker) invoke(parent context.Context, input harness.Input, prov h
 	}
 	if err := lw.write(start); err != nil {
 		lw.failAll(fmt.Errorf("external harness: write start: %w", err))
-		return harness.Result{}, err
+		return fn.Result{}, err
 	}
 
 	select {
@@ -344,12 +344,12 @@ func (lw *liveWorker) invoke(parent context.Context, input harness.Input, prov h
 		select {
 		case t := <-inv.done:
 			if t.err != nil {
-				return harness.Result{}, ctxErr
+				return fn.Result{}, ctxErr
 			}
 			return t.result, ctxErr
 		case <-time.After(cancelGrace):
 			lw.failAll(fmt.Errorf("external harness: cancel grace exceeded for %s", invocationID))
-			return harness.Result{}, ctxErr
+			return fn.Result{}, ctxErr
 		}
 	}
 }
@@ -466,7 +466,7 @@ func (lw *liveWorker) dispatch(inv *invocation, m envelope) bool {
 		}
 		return true
 	case "harness.complete":
-		result := harness.Result{Text: m.Text, Reasoning: m.Reasoning, StopReason: m.StopReason}
+		result := fn.Result{Text: m.Text, Reasoning: m.Reasoning, StopReason: m.StopReason}
 		for _, c := range m.ToolCalls {
 			result.Calls = append(result.Calls, provider.ToolCall{ID: c.ID, Name: c.Name, Args: c.Args})
 		}

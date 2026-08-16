@@ -1,4 +1,4 @@
-package harness_test
+package fn_test
 
 import (
 	"context"
@@ -6,35 +6,35 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jonathanung/strike-cli/internal/harness"
+	"github.com/jonathanung/strike-cli/internal/fn"
 	"github.com/jonathanung/strike-cli/internal/provider"
 )
 
 func TestRegistryRegisterAndResolveFunc(t *testing.T) {
-	r := harness.NewRegistry()
-	r.Register("choose", func(input harness.Input, p harness.Provider, emit harness.Emit) (harness.Result, error) {
+	r := fn.NewRegistry()
+	r.Register("choose", func(input fn.Input, p fn.Provider, emit fn.Emit) (fn.Result, error) {
 		response, err := p.Call(input.Request)
 		if err != nil {
-			return harness.Result{}, err
+			return fn.Result{}, err
 		}
 		emit(json.RawMessage(`{"status":"complete"}`))
-		return harness.Result{Text: response.Text, StopReason: response.StopReason}, nil
+		return fn.Result{Text: response.Text, StopReason: response.StopReason}, nil
 	})
 
-	fn, err := r.Resolve("choose")
+	run, err := r.Resolve("choose")
 	if err != nil {
 		t.Fatal(err)
 	}
 	progress := 0
-	result, err := fn(harness.Input{
+	result, err := run(fn.Input{
 		Context: context.Background(),
 		Request: provider.Request{Model: "fixture"},
-	}, harness.Provider{
-		Call: func(req provider.Request) (harness.ModelResponse, error) {
+	}, fn.Provider{
+		Call: func(req provider.Request) (fn.ModelResponse, error) {
 			if req.Model != "fixture" {
 				t.Fatalf("provider request = %#v", req)
 			}
-			return harness.ModelResponse{Text: "candidate", StopReason: "end_turn"}, nil
+			return fn.ModelResponse{Text: "candidate", StopReason: "end_turn"}, nil
 		},
 	}, func(json.RawMessage) { progress++ })
 	if err != nil {
@@ -48,10 +48,10 @@ func TestRegistryRegisterAndResolveFunc(t *testing.T) {
 func TestRegistryUnknown(t *testing.T) {
 	tests := []struct {
 		name string
-		reg  *harness.Registry
+		reg  *fn.Registry
 		want string
 	}{
-		{name: "empty registry", reg: harness.NewRegistry(), want: `unknown harness "missing"`},
+		{name: "empty registry", reg: fn.NewRegistry(), want: `unknown harness "missing"`},
 		{name: "nil registry", want: "no registry"},
 	}
 	for _, tt := range tests {
@@ -68,12 +68,12 @@ func TestRegistryUnknown(t *testing.T) {
 }
 
 func TestRegistryZeroValue(t *testing.T) {
-	var r harness.Registry
+	var r fn.Registry
 	if r.Known("custom") || r.Get("custom") != nil {
 		t.Fatal("zero-value registry contains a function")
 	}
-	r.Register("custom", func(harness.Input, harness.Provider, harness.Emit) (harness.Result, error) {
-		return harness.Result{StopReason: "complete"}, nil
+	r.Register("custom", func(fn.Input, fn.Provider, fn.Emit) (fn.Result, error) {
+		return fn.Result{StopReason: "complete"}, nil
 	})
 	if !r.Known("custom") {
 		t.Fatal("registered function is not known")
@@ -84,22 +84,22 @@ func TestRegistryRegisterPanics(t *testing.T) {
 	tests := []struct {
 		name string
 		key  string
-		fn   harness.Func
+		fn   fn.Func
 	}{
-		{name: "empty name", fn: func(harness.Input, harness.Provider, harness.Emit) (harness.Result, error) {
-			return harness.Result{}, nil
+		{name: "empty name", fn: func(fn.Input, fn.Provider, fn.Emit) (fn.Result, error) {
+			return fn.Result{}, nil
 		}},
-		{name: "leading whitespace", key: " custom", fn: func(harness.Input, harness.Provider, harness.Emit) (harness.Result, error) {
-			return harness.Result{}, nil
+		{name: "leading whitespace", key: " custom", fn: func(fn.Input, fn.Provider, fn.Emit) (fn.Result, error) {
+			return fn.Result{}, nil
 		}},
-		{name: "trailing whitespace", key: "custom ", fn: func(harness.Input, harness.Provider, harness.Emit) (harness.Result, error) {
-			return harness.Result{}, nil
+		{name: "trailing whitespace", key: "custom ", fn: func(fn.Input, fn.Provider, fn.Emit) (fn.Result, error) {
+			return fn.Result{}, nil
 		}},
-		{name: "control character", key: "custom\nname", fn: func(harness.Input, harness.Provider, harness.Emit) (harness.Result, error) {
-			return harness.Result{}, nil
+		{name: "control character", key: "custom\nname", fn: func(fn.Input, fn.Provider, fn.Emit) (fn.Result, error) {
+			return fn.Result{}, nil
 		}},
-		{name: "invalid UTF-8", key: string([]byte{0xff}), fn: func(harness.Input, harness.Provider, harness.Emit) (harness.Result, error) {
-			return harness.Result{}, nil
+		{name: "invalid UTF-8", key: string([]byte{0xff}), fn: func(fn.Input, fn.Provider, fn.Emit) (fn.Result, error) {
+			return fn.Result{}, nil
 		}},
 		{name: "nil function", key: "custom"},
 	}
@@ -110,7 +110,7 @@ func TestRegistryRegisterPanics(t *testing.T) {
 					t.Fatal("Register did not panic")
 				}
 			}()
-			harness.NewRegistry().Register(tt.key, tt.fn)
+			fn.NewRegistry().Register(tt.key, tt.fn)
 		})
 	}
 }
