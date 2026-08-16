@@ -39,6 +39,7 @@ func buildCompactionResidue(
 	summary string,
 	pinnedKinds []string,
 	ledgerEntries []ledger.Entry,
+	workDir string,
 ) *protocol.CompactionResidue {
 	r := &protocol.CompactionResidue{
 		SchemaVersion: protocol.CompactionResidueSchemaVersion,
@@ -57,7 +58,7 @@ func buildCompactionResidue(
 		if e.Status != ledger.StatusActive {
 			continue
 		}
-		item := residueFromLedger(e)
+		item := residueFromLedger(e, workDir)
 		appendResidueItem(r, item)
 	}
 
@@ -80,7 +81,7 @@ func residueEmpty(r *protocol.CompactionResidue) bool {
 		strings.TrimSpace(r.Summary) == "" && len(r.PinnedKinds) == 0
 }
 
-func residueFromLedger(e ledger.Entry) protocol.ResidueItem {
+func residueFromLedger(e ledger.Entry, workDir string) protocol.ResidueItem {
 	kind := protocol.ResidueKindDecision
 	switch e.Kind {
 	case ledger.KindAssumption:
@@ -108,11 +109,18 @@ func residueFromLedger(e ledger.Entry) protocol.ResidueItem {
 		Kind:       kind,
 		Text:       truncateResidueText(e.Statement),
 		Confidence: conf,
-		Freshness:  "fresh",
+		Freshness:  residueFreshness(e, workDir),
 		SourceIDs:  sources,
 		FileRefs:   files,
 		LedgerID:   e.ID,
 	}
+}
+
+func residueFreshness(e ledger.Entry, workDir string) string {
+	if ledger.AssessFreshness(e, workDir).State == ledger.FreshStale {
+		return "stale"
+	}
+	return "fresh"
 }
 
 func extractResidueFromMessage(r *protocol.CompactionResidue, m provider.Message, src string) {
