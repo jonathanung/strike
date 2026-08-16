@@ -9,7 +9,6 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/jonathanung/strike-cli/internal/ledger"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
 )
@@ -38,8 +37,7 @@ func buildCompactionResidue(
 	appliedStrategy, reason string,
 	summary string,
 	pinnedKinds []string,
-	ledgerEntries []ledger.Entry,
-	workDir string,
+	ledgerEntries []LedgerEntry,
 ) *protocol.CompactionResidue {
 	r := &protocol.CompactionResidue{
 		SchemaVersion: protocol.CompactionResidueSchemaVersion,
@@ -55,10 +53,10 @@ func buildCompactionResidue(
 
 	// Ledger first so marked multi-agent decisions are never silently dropped.
 	for _, e := range ledgerEntries {
-		if e.Status != ledger.StatusActive {
+		if e.Status != "" && e.Status != LedgerStatusActive {
 			continue
 		}
-		item := residueFromLedger(e, workDir)
+		item := residueFromLedger(e)
 		appendResidueItem(r, item)
 	}
 
@@ -81,19 +79,19 @@ func residueEmpty(r *protocol.CompactionResidue) bool {
 		strings.TrimSpace(r.Summary) == "" && len(r.PinnedKinds) == 0
 }
 
-func residueFromLedger(e ledger.Entry, workDir string) protocol.ResidueItem {
+func residueFromLedger(e LedgerEntry) protocol.ResidueItem {
 	kind := protocol.ResidueKindDecision
 	switch e.Kind {
-	case ledger.KindAssumption:
+	case LedgerKindAssumption:
 		kind = protocol.ResidueKindAssumption
-	case ledger.KindConstraint:
+	case LedgerKindConstraint:
 		kind = protocol.ResidueKindConstraint
-	case ledger.KindDecision:
+	case LedgerKindDecision:
 		kind = protocol.ResidueKindDecision
 	}
 	conf := e.Confidence
 	if conf == "" {
-		conf = ledger.ConfidenceMedium
+		conf = LedgerConfidenceMed
 	}
 	sources := []string{"ledger:" + e.ID}
 	for _, ref := range e.EvidenceRefs {
@@ -109,15 +107,15 @@ func residueFromLedger(e ledger.Entry, workDir string) protocol.ResidueItem {
 		Kind:       kind,
 		Text:       truncateResidueText(e.Statement),
 		Confidence: conf,
-		Freshness:  residueFreshness(e, workDir),
+		Freshness:  residueFreshness(e),
 		SourceIDs:  sources,
 		FileRefs:   files,
 		LedgerID:   e.ID,
 	}
 }
 
-func residueFreshness(e ledger.Entry, workDir string) string {
-	if ledger.AssessFreshness(e, workDir).State == ledger.FreshStale {
+func residueFreshness(e LedgerEntry) string {
+	if strings.EqualFold(strings.TrimSpace(e.Freshness), "stale") {
 		return "stale"
 	}
 	return "fresh"
@@ -526,17 +524,25 @@ func residueCompactMarker(removed int, r *protocol.CompactionResidue) string {
 }
 
 // collectActiveLedgerEntries returns active ledger rows when a source is wired.
-func (e *Engine) collectActiveLedgerEntries() []ledger.Entry {
+func (e *Engine) collectActiveLedgerEntries() []LedgerEntry {
 	if e == nil || e.opts.Ledger == nil {
 		return nil
 	}
-	entries, err := e.opts.Ledger.ActiveSlice("", "")
+	entries, err := e.opts.Ledger.ActiveSlice("", "", e.opts.WorkDir)
 	if err != nil || len(entries) == 0 {
 		return nil
 	}
-	out := make([]ledger.Entry, 0, len(entries))
+	out := make([]LedgerEntry, 0, len(entries))
 	for _, ent := range entries {
-		out = append(out, ledger.Clone(ent))
+		out = append(out, cloneLedgerEntry(ent))
 	}
+	return out
+}
+
+func cloneLedgerEntry(e LedgerEntry) LedgerEntry {
+	out := e
+	out.EvidenceRefs = append([]string(nil), e.EvidenceRefs...)
+	out.ScopePaths = append([]string(nil), e.ScopePaths...)
+	out.ScopeTaskIDs = append([]string(nil), e.ScopeTaskIDs...)
 	return out
 }

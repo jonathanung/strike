@@ -21,7 +21,7 @@ func TestSectionDelegateOutcomeMapping(t *testing.T) {
 			Handoff: h,
 			Summary: "ok",
 		})
-		if out.Status != plan.DelegateApplied || out.Body == nil || *out.Body != "new-body" {
+		if out.Status != DelegateApplied || out.Body == nil || *out.Body != "new-body" {
 			t.Fatalf("out=%+v", out)
 		}
 		if out.Title == nil || *out.Title != "New" {
@@ -34,7 +34,7 @@ func TestSectionDelegateOutcomeMapping(t *testing.T) {
 			Summary: "boom",
 			Handoff: protocol.CompletionHandoff{Summary: "boom"},
 		})
-		if out.Status != plan.DelegateFailed || out.Body != nil {
+		if out.Status != DelegateFailed || out.Body != nil {
 			t.Fatalf("out=%+v", out)
 		}
 	})
@@ -43,7 +43,7 @@ func TestSectionDelegateOutcomeMapping(t *testing.T) {
 			Status:  protocol.ChildStatusCanceled,
 			Handoff: protocol.CompletionHandoff{},
 		})
-		if out.Status != plan.DelegateCanceled {
+		if out.Status != DelegateCanceled {
 			t.Fatalf("out=%+v", out)
 		}
 	})
@@ -55,7 +55,7 @@ func TestSectionDelegateOutcomeMapping(t *testing.T) {
 				Incomplete: true,
 			},
 		})
-		if out.Status != plan.DelegateMalformed {
+		if out.Status != DelegateMalformed {
 			t.Fatalf("out=%+v", out)
 		}
 	})
@@ -67,7 +67,7 @@ func TestSectionDelegateOutcomeMapping(t *testing.T) {
 				Incomplete: false,
 			},
 		})
-		if out.Status != plan.DelegateMalformed {
+		if out.Status != DelegateMalformed {
 			t.Fatalf("out=%+v", out)
 		}
 	})
@@ -84,7 +84,7 @@ func TestSectionDelegateOutcomeMapping(t *testing.T) {
 			Status:  protocol.ChildStatusCompleted,
 			Handoff: h,
 		})
-		if out.Status != plan.DelegateApplied || out.Body == nil || *out.Body != "from-json" {
+		if out.Status != DelegateApplied || out.Body == nil || *out.Body != "from-json" {
 			t.Fatalf("out=%+v", out)
 		}
 	})
@@ -108,7 +108,7 @@ func TestApplyPlanSectionDelegateCAS(t *testing.T) {
 	eng := &Engine{
 		opts: Options{
 			SessionID: "lead-plan",
-			PlanStore: store,
+			PlanStore: adaptPlan(store),
 		},
 	}
 
@@ -189,7 +189,7 @@ func TestApplyPlanSectionDelegateIgnoresUncorrelated(t *testing.T) {
 	if _, err := store.BeginSectionDelegate(p.ID, "lead", "s1", "c1", ""); err != nil {
 		t.Fatal(err)
 	}
-	eng := &Engine{opts: Options{SessionID: "lead", PlanStore: store}}
+	eng := &Engine{opts: Options{SessionID: "lead", PlanStore: adaptPlan(store)}}
 	// Wrong child id — store rejects; section stays in_flight.
 	eng.applyPlanSectionDelegate(&childHandle{
 		id: "other", planID: p.ID, sectionID: "s1",

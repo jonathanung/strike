@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
@@ -256,7 +255,7 @@ func stripMatchingProviderPrefixes(providerName, model string) string {
 	const maxStrip = 8
 	for range maxStrip {
 		prov, bare, ok := splitProviderModel(model)
-		if !ok || config.CanonicalProviderID(prov) != config.CanonicalProviderID(providerName) {
+		if !ok || CanonicalProviderID(prov) != CanonicalProviderID(providerName) {
 			return model
 		}
 		model = bare
@@ -270,7 +269,7 @@ func stripMatchingProviderPrefixes(providerName, model string) string {
 // bare ids pass through.
 func resolveSelectModel(providerName, model, defaultModel string) string {
 	if prov, _, ok := splitProviderModel(model); ok {
-		if config.CanonicalProviderID(prov) == config.CanonicalProviderID(providerName) {
+		if CanonicalProviderID(prov) == CanonicalProviderID(providerName) {
 			// First segment matches: strip all matching prefixes (handles
 			// doubles like openai/openai/gpt-5.6-sol).
 			model = stripMatchingProviderPrefixes(providerName, model)
@@ -299,7 +298,7 @@ func (e *Engine) handleSelect(op protocol.SelectModel) {
 		})
 		return
 	}
-	name := config.CanonicalProviderID(op.Provider)
+	name := CanonicalProviderID(op.Provider)
 	p, defaultModel, err := e.opts.Select(name)
 	if err != nil {
 		e.emit(protocol.EngineError{
@@ -313,7 +312,7 @@ func (e *Engine) handleSelect(op protocol.SelectModel) {
 }
 
 func (e *Engine) setProvider(name string, p provider.Provider, model string) {
-	name = config.CanonicalProviderID(name)
+	name = CanonicalProviderID(name)
 	// Chokepoint: never store a matching provider/ prefix (or doubles) on the
 	// active model string. Callers may still pass already-prefixed ids.
 	model = stripMatchingProviderPrefixes(name, model)

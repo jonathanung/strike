@@ -14,6 +14,7 @@ import (
 
 	"github.com/jonathanung/strike-cli/internal/attachment"
 	"github.com/jonathanung/strike-cli/internal/engine"
+	"github.com/jonathanung/strike-cli/internal/enginebind"
 	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
@@ -1770,7 +1771,7 @@ func TestUserInputImagesPersistAsRefs(t *testing.T) {
 		WorkDir:             t.TempDir(),
 		Rules:               []permission.Ruleset{permission.Defaults()},
 		SandboxAllowDegrade: true,
-		Attachments:         store,
+		Attachments:         enginebind.Attachments(store),
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1843,7 +1844,7 @@ func TestRestoreHydratesAttachmentRefs(t *testing.T) {
 		WorkDir:             t.TempDir(),
 		Rules:               []permission.Ruleset{permission.Defaults()},
 		SandboxAllowDegrade: true,
-		Attachments:         store,
+		Attachments:         enginebind.Attachments(store),
 		InitialMessages:     restored.Messages,
 	})
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1876,7 +1877,7 @@ func TestEchoDropsImagesByCapability(t *testing.T) {
 		WorkDir:             t.TempDir(),
 		Rules:               []permission.Ruleset{permission.Defaults()},
 		SandboxAllowDegrade: true,
-		Attachments:         store,
+		Attachments:         enginebind.Attachments(store),
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

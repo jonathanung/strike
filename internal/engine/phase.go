@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/question"
@@ -38,7 +37,7 @@ func (e *Engine) startWorkflow(name string) error {
 	if !ok {
 		return fmt.Errorf("unknown workflow %q", name)
 	}
-	if err := config.ValidateWorkflow(w); err != nil {
+	if err := ValidateWorkflow(w); err != nil {
 		return fmt.Errorf("workflow %q invalid: %w", name, err)
 	}
 	if len(w.Phases) == 0 {
@@ -83,7 +82,7 @@ func (e *Engine) clearPhase() {
 	if e.phaseIndex < 0 && e.workflow.Name == "" && e.phaseRecovery == "" {
 		return
 	}
-	e.workflow = config.Workflow{}
+	e.workflow = Workflow{}
 	e.phaseIndex = -1
 	e.phaseRecovery = ""
 	e.phaseGrantApproval = PhaseGrantApproval{}
@@ -97,14 +96,14 @@ func (e *Engine) clearPhase() {
 // Validates the target before mutating context, permissions, agent, or events.
 // Permission widenings relative to config/agent layers require approval first;
 // rejection leaves the current phase, permissions, and context unchanged.
-func (e *Engine) enterPhase(w config.Workflow, index int) error {
+func (e *Engine) enterPhase(w Workflow, index int) error {
 	return e.enterPhaseOpts(e.phaseReviewCtx(nil), w, index, true)
 }
 
 // enterPhaseOpts is enterPhase with optional phase.Agent pin. pinAgent false
 // keeps the current persona (used when the user/tool already chose build or
 // orchestrator while leaving plan).
-func (e *Engine) enterPhaseOpts(ctx context.Context, w config.Workflow, index int, pinAgent bool) error {
+func (e *Engine) enterPhaseOpts(ctx context.Context, w Workflow, index int, pinAgent bool) error {
 	if err := e.validatePhaseTarget(w, index); err != nil {
 		return err
 	}
@@ -160,7 +159,7 @@ func (e *Engine) enterPhaseOpts(ctx context.Context, w config.Workflow, index in
 }
 
 // validatePhaseTarget checks workflow/index before any state mutation.
-func (e *Engine) validatePhaseTarget(w config.Workflow, index int) error {
+func (e *Engine) validatePhaseTarget(w Workflow, index int) error {
 	if strings.TrimSpace(w.Name) == "" {
 		return fmt.Errorf("workflow has empty name")
 	}
@@ -168,7 +167,7 @@ func (e *Engine) validatePhaseTarget(w config.Workflow, index int) error {
 		return fmt.Errorf("workflow %q: phase index %d out of range", w.Name, index)
 	}
 	phase := w.Phases[index]
-	if err := config.ValidatePhaseName(phase.Name); err != nil {
+	if err := ValidatePhaseName(phase.Name); err != nil {
 		return fmt.Errorf("workflow %q phase %d: %w", w.Name, index, err)
 	}
 	return nil
@@ -255,7 +254,7 @@ func (e *Engine) phaseReviewCtx(ctx context.Context) context.Context {
 // approvePhaseWidening requires explicit acceptance of delta before phase
 // rules that open earlier denies/asks may apply. --auto accepts without a
 // prompt. Resume restores a matching prior decision without re-prompting.
-func (e *Engine) approvePhaseWidening(ctx context.Context, w config.Workflow, phase config.Phase, index int, delta permission.Ruleset) error {
+func (e *Engine) approvePhaseWidening(ctx context.Context, w Workflow, phase Phase, index int, delta permission.Ruleset) error {
 	ctx = e.phaseReviewCtx(ctx)
 	if e.phaseGrantMatches(w, phase, index, delta) {
 		return nil
@@ -297,7 +296,7 @@ func (e *Engine) approvePhaseWidening(ctx context.Context, w config.Workflow, ph
 	return nil
 }
 
-func (e *Engine) phaseGrantMatches(w config.Workflow, phase config.Phase, index int, delta permission.Ruleset) bool {
+func (e *Engine) phaseGrantMatches(w Workflow, phase Phase, index int, delta permission.Ruleset) bool {
 	candidates := []PhaseGrantApproval{e.phaseGrantApproval, e.opts.InitialPhaseGrantApproval}
 	for _, a := range candidates {
 		if a.Workflow != w.Name || a.Phase != phase.Name || a.Index != index {
@@ -313,7 +312,7 @@ func (e *Engine) phaseGrantMatches(w config.Workflow, phase config.Phase, index 
 	return false
 }
 
-func (e *Engine) emitPhaseGrantApproved(w config.Workflow, phase config.Phase, index int, delta permission.Ruleset, auto bool) {
+func (e *Engine) emitPhaseGrantApproved(w Workflow, phase Phase, index int, delta permission.Ruleset, auto bool) {
 	grants := make([]protocol.PhaseGrantRule, 0, len(delta))
 	for _, r := range delta {
 		grants = append(grants, protocol.PhaseGrantRule{
@@ -385,9 +384,9 @@ func (e *Engine) restoreWorkflowPhase(name string, index int, phaseName, fingerp
 func (e *Engine) enterPhaseRecovery(name, phaseName string, index int, fingerprint, source, status string) {
 	e.perms.SetPhaseRules(nil)
 	e.phaseGrantApproval = PhaseGrantApproval{}
-	e.workflow = config.Workflow{
+	e.workflow = Workflow{
 		Name:        name,
-		Source:      config.WorkflowSource(source),
+		Source:      WorkflowSource(source),
 		Fingerprint: fingerprint,
 	}
 	e.phaseIndex = index
@@ -412,19 +411,19 @@ func (e *Engine) enterPhaseRecovery(name, phaseName string, index int, fingerpri
 func (e *Engine) effectiveGateLabel() string {
 	switch e.autonomy.Normalize() {
 	case protocol.AutonomyAgent:
-		return string(config.GateAgent)
+		return string(GateAgent)
 	case protocol.AutonomyChecks:
-		return string(config.GateCheck)
+		return string(GateCheck)
 	case protocol.AutonomySkipAll:
 		return "skip"
 	default:
-		return string(config.GateUser)
+		return string(GateUser)
 	}
 }
 
 // runExitGate applies the session autonomy policy for one phase exit.
 // Every caller (phase_done, exit_plan_mode) shares this resolver.
-func (e *Engine) runExitGate(ctx context.Context, phase config.Phase) error {
+func (e *Engine) runExitGate(ctx context.Context, phase Phase) error {
 	switch e.autonomy.Normalize() {
 	case protocol.AutonomySkipAll:
 		// Bypass workflow/plan approval only — tool permissions are untouched.
@@ -439,7 +438,7 @@ func (e *Engine) runExitGate(ctx context.Context, phase config.Phase) error {
 	}
 }
 
-func (e *Engine) runUserGate(ctx context.Context, phase config.Phase) error {
+func (e *Engine) runUserGate(ctx context.Context, phase Phase) error {
 	if e.questions == nil {
 		// Fail closed: supervised mode requires a real approval path.
 		return fmt.Errorf("phase %q: supervised autonomy requires a question service", phase.Name)
@@ -469,7 +468,7 @@ func (e *Engine) runUserGate(ctx context.Context, phase config.Phase) error {
 	return nil
 }
 
-func (e *Engine) runCheckGate(ctx context.Context, phase config.Phase) error {
+func (e *Engine) runCheckGate(ctx context.Context, phase Phase) error {
 	cmd := strings.TrimSpace(phase.Exit.Command)
 	if cmd == "" {
 		return fmt.Errorf("phase %q check gate has empty command", phase.Name)
@@ -542,7 +541,7 @@ func isYesGateAnswer(s string) bool {
 	}
 }
 
-func (e *Engine) findWorkflow(name string) (config.Workflow, bool) {
+func (e *Engine) findWorkflow(name string) (Workflow, bool) {
 	for _, w := range e.opts.Workflows {
 		if w.Name == name {
 			return w, true
@@ -550,21 +549,21 @@ func (e *Engine) findWorkflow(name string) (config.Workflow, bool) {
 	}
 	// Always fall back to the built-in when requested by name.
 	if name == "plan-implement" || name == "" {
-		return config.BuiltinPlanImplement(), true
+		return BuiltinPlanImplement(), true
 	}
 	if name == "review-fix" {
-		return config.BuiltinReviewFix(), true
+		return BuiltinReviewFix(), true
 	}
-	return config.Workflow{}, false
+	return Workflow{}, false
 }
 
 // currentPhase returns the active enforced phase, or false when none / recovery.
-func (e *Engine) currentPhase() (config.Phase, bool) {
+func (e *Engine) currentPhase() (Phase, bool) {
 	if e.phaseRecovery != "" {
-		return config.Phase{}, false
+		return Phase{}, false
 	}
 	if e.phaseIndex < 0 || e.phaseIndex >= len(e.workflow.Phases) {
-		return config.Phase{}, false
+		return Phase{}, false
 	}
 	return e.workflow.Phases[e.phaseIndex], true
 }

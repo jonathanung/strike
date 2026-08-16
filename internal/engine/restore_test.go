@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/engine"
 	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -510,7 +509,7 @@ func TestRestoreInitialPhaseAndAlwaysGrantsOnRun(t *testing.T) {
 		InitialAlwaysGrants: permission.Ruleset{
 			{Permission: "bash", Pattern: "git *", Action: permission.Allow},
 		},
-		Workflows: []config.Workflow{config.BuiltinPlanImplement()},
+		Workflows: []engine.Workflow{engine.BuiltinPlanImplement()},
 		Rules:     []permission.Ruleset{permission.Defaults()},
 	})
 	ctx, cancel := context.WithCancel(context.Background())
@@ -589,7 +588,7 @@ func TestRestorePlanPhaseDeniesWriteOnRun(t *testing.T) {
 		InitialAgent:         "build",
 		InitialPhaseWorkflow: "plan-implement",
 		InitialPhaseIndex:    0,
-		Workflows:            []config.Workflow{config.BuiltinPlanImplement()},
+		Workflows:            []engine.Workflow{engine.BuiltinPlanImplement()},
 		Rules:                []permission.Ruleset{permission.Defaults(), baseAllow},
 	})
 	ctx, cancel := context.WithCancel(context.Background())
@@ -833,16 +832,16 @@ func TestRestoreInitialPhaseFingerprintMismatchOnRun(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	w := config.Workflow{
-		SchemaVersion: config.WorkflowSchemaVersion,
+	w := engine.Workflow{
+		SchemaVersion: engine.WorkflowSchemaVersion,
 		Name:          "bound",
-		Source:        config.WorkflowSourceProject,
-		Phases: []config.Phase{{
+		Source:        engine.WorkflowSourceProject,
+		Phases: []engine.Phase{{
 			Name: "only",
-			Exit: config.ExitGate{Type: config.GateAgent},
+			Exit: engine.ExitGate{Type: engine.GateAgent},
 		}},
 	}
-	w.Fingerprint = config.MustWorkflowFingerprint(w)
+	w.Fingerprint = "fp-" + w.Name
 
 	eng := engine.New(engine.Options{
 		SessionID:               "resume-mismatch-run",
@@ -850,7 +849,7 @@ func TestRestoreInitialPhaseFingerprintMismatchOnRun(t *testing.T) {
 		InitialProvider:         "echo",
 		InitialModel:            "echo",
 		Agents:                  []engine.Agent{{Name: "build"}},
-		Workflows:               []config.Workflow{w},
+		Workflows:               []engine.Workflow{w},
 		InitialPhaseWorkflow:    "bound",
 		InitialPhaseIndex:       0,
 		InitialPhaseName:        "only",

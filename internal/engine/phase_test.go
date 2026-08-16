@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/engine"
 	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -28,7 +27,7 @@ func TestSelectPlanAgentEntersPlanPhase(t *testing.T) {
 			{Name: "build"},
 			{Name: "plan"},
 		},
-		Workflows: []config.Workflow{config.BuiltinPlanImplement()},
+		Workflows: []engine.Workflow{engine.BuiltinPlanImplement()},
 		Rules:     []permission.Ruleset{permission.Defaults()},
 	})
 	ctx, cancel := context.WithCancel(context.Background())
@@ -87,7 +86,7 @@ func TestPlanPhaseHardDeniesWrite(t *testing.T) {
 			{Name: "plan"},
 		},
 		InitialAgent: "plan",
-		Workflows:    []config.Workflow{config.BuiltinPlanImplement()},
+		Workflows:    []engine.Workflow{engine.BuiltinPlanImplement()},
 		Rules:        []permission.Ruleset{permission.Defaults(), baseAllow},
 	})
 	ctx, cancel := context.WithCancel(context.Background())
@@ -153,7 +152,7 @@ func TestExitPlanModeAdvancesToImplement(t *testing.T) {
 			{Name: "plan"},
 		},
 		InitialAgent: "plan",
-		Workflows:    []config.Workflow{config.BuiltinPlanImplement()},
+		Workflows:    []engine.Workflow{engine.BuiltinPlanImplement()},
 		Rules:        []permission.Ruleset{permission.Defaults()},
 	})
 	ctx, cancel := context.WithCancel(context.Background())
@@ -216,7 +215,7 @@ func TestExitPlanModeRoutesToOrchestrator(t *testing.T) {
 			{Name: "orchestrator"},
 		},
 		InitialAgent: "plan",
-		Workflows:    []config.Workflow{config.BuiltinPlanImplement()},
+		Workflows:    []engine.Workflow{engine.BuiltinPlanImplement()},
 		Rules:        []permission.Ruleset{permission.Defaults()},
 	})
 	ctx, cancel := context.WithCancel(context.Background())
@@ -283,7 +282,7 @@ func TestPlanRejectInterruptsTurn(t *testing.T) {
 			{Name: "plan"},
 		},
 		InitialAgent: "plan",
-		Workflows:    []config.Workflow{config.BuiltinPlanImplement()},
+		Workflows:    []engine.Workflow{engine.BuiltinPlanImplement()},
 		Rules:        []permission.Ruleset{permission.Defaults()},
 	})
 	ctx, cancel := context.WithCancel(context.Background())
@@ -361,7 +360,7 @@ func TestSelectOrchestratorFromPlanAbandonsWithoutHandoff(t *testing.T) {
 			{Name: "orchestrator"},
 		},
 		InitialAgent: "plan",
-		Workflows:    []config.Workflow{config.BuiltinPlanImplement()},
+		Workflows:    []engine.Workflow{engine.BuiltinPlanImplement()},
 		Rules:        []permission.Ruleset{permission.Defaults()},
 	})
 	ctx, cancel := context.WithCancel(context.Background())
@@ -401,19 +400,19 @@ func TestSelectOrchestratorFromPlanAbandonsWithoutHandoff(t *testing.T) {
 func TestCheckGateCommand(t *testing.T) {
 	dir := t.TempDir()
 	marker := filepath.Join(dir, "ok")
-	wf := config.Workflow{
+	wf := engine.Workflow{
 		Name: "checked",
-		Phases: []config.Phase{
+		Phases: []engine.Phase{
 			{
 				Name:  "prep",
 				Agent: "build",
 				// Authored type is ignored at runtime; autonomy=checks drives the gate.
-				Exit: config.ExitGate{Type: config.GateAgent, Command: "touch ok"},
+				Exit: engine.ExitGate{Type: engine.GateAgent, Command: "touch ok"},
 			},
 			{
 				Name:  "done",
 				Agent: "build",
-				Exit:  config.ExitGate{Type: config.GateAgent},
+				Exit:  engine.ExitGate{Type: engine.GateAgent},
 			},
 		},
 	}
@@ -438,7 +437,7 @@ func TestCheckGateCommand(t *testing.T) {
 		Registry:        tool.NewRegistry(tools.NewPhaseDone(), tools.NewEnterPlanMode()),
 		WorkDir:         dir,
 		Agents:          []engine.Agent{{Name: "build"}, {Name: "plan"}},
-		Workflows:       []config.Workflow{wf, config.BuiltinPlanImplement()},
+		Workflows:       []engine.Workflow{wf, engine.BuiltinPlanImplement()},
 		DefaultWorkflow: "checked",
 		Rules:           []permission.Ruleset{permission.Defaults(), allowCheck},
 	})
@@ -481,11 +480,11 @@ func TestCheckGateCommand(t *testing.T) {
 // TestAutonomyAgentAdvancesWithoutUserPrompt: agent mode self-affirms via
 // phase_done even when the workflow authors a user exit gate.
 func TestAutonomyAgentAdvancesWithoutUserPrompt(t *testing.T) {
-	wf := config.Workflow{
+	wf := engine.Workflow{
 		Name: "user-authored",
-		Phases: []config.Phase{
-			{Name: "a", Agent: "build", Exit: config.ExitGate{Type: config.GateUser}},
-			{Name: "b", Agent: "build", Exit: config.ExitGate{Type: config.GateUser}},
+		Phases: []engine.Phase{
+			{Name: "a", Agent: "build", Exit: engine.ExitGate{Type: engine.GateUser}},
+			{Name: "b", Agent: "build", Exit: engine.ExitGate{Type: engine.GateUser}},
 		},
 	}
 	args, _ := json.Marshal(map[string]any{})
@@ -503,7 +502,7 @@ func TestAutonomyAgentAdvancesWithoutUserPrompt(t *testing.T) {
 		InitialAutonomy: protocol.AutonomyAgent,
 		Registry:        tool.NewRegistry(tools.NewPhaseDone(), tools.NewEnterPlanMode()),
 		Agents:          []engine.Agent{{Name: "build"}, {Name: "plan"}},
-		Workflows:       []config.Workflow{wf, config.BuiltinPlanImplement()},
+		Workflows:       []engine.Workflow{wf, engine.BuiltinPlanImplement()},
 		DefaultWorkflow: "user-authored",
 		Rules:           []permission.Ruleset{permission.Defaults()},
 	})
@@ -561,7 +560,7 @@ func TestAutonomySkipAllAdvancesWithoutApproval(t *testing.T) {
 			{Name: "plan"},
 		},
 		InitialAgent: "plan",
-		Workflows:    []config.Workflow{config.BuiltinPlanImplement()},
+		Workflows:    []engine.Workflow{engine.BuiltinPlanImplement()},
 		Rules:        []permission.Ruleset{permission.Defaults()},
 	})
 	ctx, cancel := context.WithCancel(context.Background())
@@ -602,11 +601,11 @@ func TestAutonomySkipAllAdvancesWithoutApproval(t *testing.T) {
 // TestAutonomyChecksEmptyCommandFailsClosed: checks mode without a command
 // refuses to advance.
 func TestAutonomyChecksEmptyCommandFailsClosed(t *testing.T) {
-	wf := config.Workflow{
+	wf := engine.Workflow{
 		Name: "no-cmd",
-		Phases: []config.Phase{
-			{Name: "a", Agent: "build", Exit: config.ExitGate{Type: config.GateAgent}},
-			{Name: "b", Agent: "build", Exit: config.ExitGate{Type: config.GateAgent}},
+		Phases: []engine.Phase{
+			{Name: "a", Agent: "build", Exit: engine.ExitGate{Type: engine.GateAgent}},
+			{Name: "b", Agent: "build", Exit: engine.ExitGate{Type: engine.GateAgent}},
 		},
 	}
 	args, _ := json.Marshal(map[string]any{})
@@ -624,7 +623,7 @@ func TestAutonomyChecksEmptyCommandFailsClosed(t *testing.T) {
 		InitialAutonomy: protocol.AutonomyChecks,
 		Registry:        tool.NewRegistry(tools.NewPhaseDone(), tools.NewEnterPlanMode()),
 		Agents:          []engine.Agent{{Name: "build"}, {Name: "plan"}},
-		Workflows:       []config.Workflow{wf, config.BuiltinPlanImplement()},
+		Workflows:       []engine.Workflow{wf, engine.BuiltinPlanImplement()},
 		DefaultWorkflow: "no-cmd",
 		Rules:           []permission.Ruleset{permission.Defaults()},
 	})
@@ -676,11 +675,11 @@ func TestAutonomyChecksEmptyCommandFailsClosed(t *testing.T) {
 
 // TestAutonomyChecksFailingCommandReportsFailure.
 func TestAutonomyChecksFailingCommandReportsFailure(t *testing.T) {
-	wf := config.Workflow{
+	wf := engine.Workflow{
 		Name: "fail-cmd",
-		Phases: []config.Phase{
-			{Name: "a", Agent: "build", Exit: config.ExitGate{Command: "echo boom >&2; exit 7"}},
-			{Name: "b", Agent: "build", Exit: config.ExitGate{Type: config.GateAgent}},
+		Phases: []engine.Phase{
+			{Name: "a", Agent: "build", Exit: engine.ExitGate{Command: "echo boom >&2; exit 7"}},
+			{Name: "b", Agent: "build", Exit: engine.ExitGate{Type: engine.GateAgent}},
 		},
 	}
 	args, _ := json.Marshal(map[string]any{})
@@ -701,7 +700,7 @@ func TestAutonomyChecksFailingCommandReportsFailure(t *testing.T) {
 		InitialAutonomy: protocol.AutonomyChecks,
 		Registry:        tool.NewRegistry(tools.NewPhaseDone(), tools.NewEnterPlanMode()),
 		Agents:          []engine.Agent{{Name: "build"}, {Name: "plan"}},
-		Workflows:       []config.Workflow{wf, config.BuiltinPlanImplement()},
+		Workflows:       []engine.Workflow{wf, engine.BuiltinPlanImplement()},
 		DefaultWorkflow: "fail-cmd",
 		Rules:           []permission.Ruleset{permission.Defaults(), allowCheck},
 	})
@@ -752,7 +751,7 @@ func TestPlanSystemPromptIncludesPhaseOverlay(t *testing.T) {
 		WorkDir:      t.TempDir(),
 		Agents:       []engine.Agent{{Name: "plan"}, {Name: "build"}},
 		InitialAgent: "plan",
-		Workflows:    []config.Workflow{config.BuiltinPlanImplement()},
+		Workflows:    []engine.Workflow{engine.BuiltinPlanImplement()},
 	}, "echo", "echo")
 	if !strings.Contains(sys, "Plan mode (read-only)") {
 		t.Fatalf("missing plan overlay:\n%s", sys)
@@ -768,9 +767,9 @@ func TestPhaseAgentTransitionKeepsSessionModel(t *testing.T) {
 	const sessionModel = "session-model"
 	// Custom workflow so phase agents carry pins while startup stays on an
 	// unpinned build (startup SelectAgent would otherwise apply build pins).
-	wf := config.Workflow{
+	wf := engine.Workflow{
 		Name: "sticky-plan-implement",
-		Phases: []config.Phase{
+		Phases: []engine.Phase{
 			{
 				Name:  "plan",
 				Agent: "planner",
@@ -778,12 +777,12 @@ func TestPhaseAgentTransitionKeepsSessionModel(t *testing.T) {
 					{Permission: "write", Pattern: "*", Action: permission.Deny},
 					{Permission: "edit", Pattern: "*", Action: permission.Deny},
 				},
-				Exit: config.ExitGate{Type: config.GateUser},
+				Exit: engine.ExitGate{Type: engine.GateUser},
 			},
 			{
 				Name:  "implement",
 				Agent: "coder",
-				Exit:  config.ExitGate{Type: config.GateAgent},
+				Exit:  engine.ExitGate{Type: engine.GateAgent},
 			},
 		},
 	}
@@ -827,7 +826,7 @@ func TestPhaseAgentTransitionKeepsSessionModel(t *testing.T) {
 			{Name: "coder", Provider: "coderpin", Model: "coder-pinned-model"},
 		},
 		InitialAgent:    "build",
-		Workflows:       []config.Workflow{wf, config.BuiltinPlanImplement()},
+		Workflows:       []engine.Workflow{wf, engine.BuiltinPlanImplement()},
 		DefaultWorkflow: "sticky-plan-implement",
 		Rules:           []permission.Ruleset{permission.Defaults()},
 	})
@@ -920,11 +919,11 @@ func TestPhaseAgentTransitionKeepsSessionModel(t *testing.T) {
 // a different agent pin must not emit a model change.
 func TestPhaseDoneAdvanceKeepsSessionModel(t *testing.T) {
 	const sessionModel = "sticky-session"
-	wf := config.Workflow{
+	wf := engine.Workflow{
 		Name: "two-agent",
-		Phases: []config.Phase{
-			{Name: "first", Agent: "alpha", Exit: config.ExitGate{Type: config.GateAgent}},
-			{Name: "second", Agent: "beta", Exit: config.ExitGate{Type: config.GateAgent}},
+		Phases: []engine.Phase{
+			{Name: "first", Agent: "alpha", Exit: engine.ExitGate{Type: engine.GateAgent}},
+			{Name: "second", Agent: "beta", Exit: engine.ExitGate{Type: engine.GateAgent}},
 		},
 	}
 	args, _ := json.Marshal(map[string]any{})
@@ -963,7 +962,7 @@ func TestPhaseDoneAdvanceKeepsSessionModel(t *testing.T) {
 			{Name: "alpha", Provider: "alpha", Model: "alpha-model"},
 			{Name: "beta", Provider: "beta", Model: "beta-model"},
 		},
-		Workflows:       []config.Workflow{wf, config.BuiltinPlanImplement()},
+		Workflows:       []engine.Workflow{wf, engine.BuiltinPlanImplement()},
 		DefaultWorkflow: "two-agent",
 		Rules:           []permission.Ruleset{permission.Defaults()},
 	})

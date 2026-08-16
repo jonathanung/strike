@@ -13,17 +13,14 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/jonathanung/strike-cli/internal/artifact"
-	"github.com/jonathanung/strike-cli/internal/attachment"
-	"github.com/jonathanung/strike-cli/internal/ledger"
 	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
 	"github.com/jonathanung/strike-cli/internal/question"
 	"github.com/jonathanung/strike-cli/internal/sandbox"
 	"github.com/jonathanung/strike-cli/internal/scheduler"
-	"github.com/jonathanung/strike-cli/internal/secret"
 	"github.com/jonathanung/strike-cli/internal/tool"
+	"github.com/jonathanung/strike-cli/pkg/redact"
 )
 
 func (e *Engine) turnActive() bool {
@@ -118,7 +115,7 @@ func (e *Engine) persistOneImage(img protocol.ImageAttachment) (protocol.ImageAt
 	if err != nil {
 		return protocol.ImageAttachment{}, err
 	}
-	meta, err := e.opts.Attachments.Put(raw, attachment.PutInput{
+	meta, err := e.opts.Attachments.Put(raw, AttachmentPut{
 		MIME:      img.MIME,
 		Name:      img.Name,
 		Kind:      img.Kind,
@@ -128,22 +125,22 @@ func (e *Engine) persistOneImage(img protocol.ImageAttachment) (protocol.ImageAt
 		return protocol.ImageAttachment{}, err
 	}
 	kind := meta.Kind
-	if kind == attachment.KindImage {
+	if kind == attachmentKindImage {
 		kind = protocol.AttachmentKindImage
 	}
 	return protocol.ImageAttachment{
 		MIME:   meta.MIME,
-		Ref:    attachment.RefFor(meta.SHA256),
+		Ref:    attachmentRefFor(meta.SHA256),
 		SHA256: meta.SHA256,
 		Bytes:  meta.Bytes,
 		Kind:   kind,
-		Name:   attachment.RedactName(meta.Name),
+		Name:   attachmentRedactName(meta.Name),
 	}, nil
 }
 
 func decodeAttachmentData(data string) ([]byte, error) {
 	if strings.TrimSpace(data) == "" {
-		return nil, attachment.ErrEmpty
+		return nil, ErrEmptyAttachment
 	}
 	raw, err := base64.StdEncoding.DecodeString(data)
 	if err != nil {
@@ -153,7 +150,7 @@ func decodeAttachmentData(data string) ([]byte, error) {
 		}
 	}
 	if len(raw) == 0 {
-		return nil, attachment.ErrEmpty
+		return nil, ErrEmptyAttachment
 	}
 	return raw, nil
 }
@@ -194,11 +191,11 @@ func (e *Engine) hydrateImages(imgs []provider.Image) []provider.Image {
 
 func (e *Engine) imagesForProvider(images []protocol.ImageAttachment) []provider.Image {
 	resolved := e.hydrateImages(protocolImagesToProvider(images))
-	caps := attachment.Capabilities{Images: e.providerAcceptsImages()}
+	imagesOK := e.providerAcceptsImages()
 	out := make([]provider.Image, 0, len(resolved))
 	for _, img := range resolved {
-		kind := attachment.KindFromMIME(img.MIME)
-		if err := attachment.SelectForProvider(kind, img.MIME, caps); err != nil {
+		kind := attachmentKindFromMIME(img.MIME)
+		if err := selectAttachmentForProvider(kind, img.MIME, imagesOK); err != nil {
 			e.emit(protocol.EngineError{
 				Correlation: e.sessionCorr(),
 				Message:     "attachment: " + err.Error(),
@@ -894,7 +891,7 @@ func (e *Engine) blockedBudgetFinalizationTool(call provider.ToolCall, corr prot
 		Correlation: corr,
 		CallID:      call.ID,
 		Name:        call.Name,
-		Args:        secret.RedactJSON(call.Args),
+		Args:        redact.JSON(call.Args),
 	})
 	return e.settleToolFeedback(toolFeedback{
 		Corr:      corr,
@@ -913,8 +910,8 @@ func (e *Engine) blockedBudgetFinalizationTool(call provider.ToolCall, corr prot
 // settle here so future phase bounces and hook messages share the same shape.
 // Output is scrubbed so secrets never reach the model, TUI, or session tee.
 func (e *Engine) settleToolFeedback(fb toolFeedback) provider.Message {
-	fb.Output = secret.ScrubToolOutput(fb.Output)
-	fb.Title = secret.Redact(fb.Title)
+	fb.Output = redact.ScrubToolOutput(fb.Output)
+	fb.Title = redact.String(fb.Title)
 	if fb.EmitEnd {
 		e.emit(protocol.ToolCallEnd{
 			Correlation: fb.Corr,
@@ -1049,7 +1046,7 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 		Correlation: corr,
 		CallID:      call.ID,
 		Name:        call.Name,
-		Args:        secret.RedactJSON(call.Args),
+		Args:        redact.JSON(call.Args),
 	}
 	// Ask Run to emit begin so Interrupt can be applied while Events is full.
 	result := make(chan beginAck, 1)
@@ -1186,7 +1183,10 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 			SessionID:     e.opts.SessionID,
 			RootSessionID: e.rootSessionID(),
 			NotifyArtifact: func(op string, payload any) {
-				a, ok := payload.(artifact.Artifact)
+				if e.opts.ProjectArtifact == nil {
+					return
+				}
+				a, ok := e.opts.ProjectArtifact(payload)
 				if !ok {
 					return
 				}
@@ -1202,7 +1202,10 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 				})
 			},
 			NotifyLedger: func(op string, payload any) {
-				entry, ok := payload.(ledger.Entry)
+				if e.opts.ProjectLedger == nil {
+					return
+				}
+				entry, ok := e.opts.ProjectLedger(payload)
 				if !ok {
 					return
 				}
@@ -1213,7 +1216,7 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 					Status:        entry.Status,
 					Op:            op,
 					Statement:     entry.Statement,
-					Reason:        entry.InvalidateReason,
+					Reason:        entry.Reason,
 					Supersedes:    entry.Supersedes,
 					SupersededBy:  entry.SupersededBy,
 					AuthorSession: entry.AuthorSession,
@@ -1271,14 +1274,14 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 				e.emit(protocol.ToolCallOutput{
 					Correlation: corr,
 					CallID:      callID,
-					Data:        secret.ScrubToolOutput(data),
+					Data:        redact.ScrubToolOutput(data),
 				})
 			},
 			Process: tool.ProcessObserver{
 				Started: func(id string, argv []string) {
 					safeArgv := make([]string, len(argv))
 					for i, a := range argv {
-						safeArgv[i] = secret.Redact(a)
+						safeArgv[i] = redact.String(a)
 					}
 					e.emit(protocol.ProcessStarted{
 						Correlation: corr,
@@ -1296,7 +1299,7 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 						Correlation: corr,
 						ProcessID:   id,
 						Stream:      stream,
-						Data:        secret.ScrubToolOutput(data),
+						Data:        redact.ScrubToolOutput(data),
 					})
 				},
 				Exited: func(id string, exitCode int, status tool.ProcessStatus) {

@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/engine"
 	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -20,12 +19,12 @@ import (
 
 // widenBashWorkflow is a two-phase workflow whose second phase allows bash
 // (widening a config/agent deny). Fingerprint is set via annotate.
-func widenBashWorkflow() config.Workflow {
-	w := config.Workflow{
-		SchemaVersion: config.WorkflowSchemaVersion,
+func widenBashWorkflow() engine.Workflow {
+	w := engine.Workflow{
+		SchemaVersion: engine.WorkflowSchemaVersion,
 		Name:          "widen-bash",
 		Description:   "test widening",
-		Phases: []config.Phase{
+		Phases: []engine.Phase{
 			{
 				Name:        "locked",
 				Description: "no widen",
@@ -33,7 +32,7 @@ func widenBashWorkflow() config.Workflow {
 				Permissions: permission.Ruleset{
 					{Permission: "write", Pattern: "*", Action: permission.Deny},
 				},
-				Exit: config.ExitGate{Type: config.GateAgent},
+				Exit: engine.ExitGate{Type: engine.GateAgent},
 			},
 			{
 				Name:        "open-bash",
@@ -42,11 +41,11 @@ func widenBashWorkflow() config.Workflow {
 				Permissions: permission.Ruleset{
 					{Permission: "bash", Pattern: "*", Action: permission.Allow},
 				},
-				Exit: config.ExitGate{Type: config.GateAgent},
+				Exit: engine.ExitGate{Type: engine.GateAgent},
 			},
 		},
 	}
-	w.Fingerprint = config.MustWorkflowFingerprint(w)
+	w.Fingerprint = "fp-" + w.Name
 	return w
 }
 
@@ -69,7 +68,7 @@ func TestPhaseWideningRequiresApproval(t *testing.T) {
 		InitialProvider: "scripted",
 		Registry:        tool.NewRegistry(tools.NewPhaseDone()),
 		Agents:          []engine.Agent{{Name: "build"}},
-		Workflows:       []config.Workflow{w},
+		Workflows:       []engine.Workflow{w},
 		Rules:           []permission.Ruleset{permission.Defaults(), denyBash},
 		InitialAutonomy: protocol.AutonomyAgent,
 	})
@@ -94,7 +93,7 @@ func TestPhaseWideningRequiresApproval(t *testing.T) {
 		InitialProvider:      "scripted",
 		Registry:             tool.NewRegistry(tools.NewPhaseDone()),
 		Agents:               []engine.Agent{{Name: "build"}},
-		Workflows:            []config.Workflow{w},
+		Workflows:            []engine.Workflow{w},
 		Rules:                []permission.Ruleset{permission.Defaults(), denyBash},
 		InitialAutonomy:      protocol.AutonomyAgent,
 		InitialPhaseWorkflow: w.Name,
@@ -174,7 +173,7 @@ func TestPhaseWideningRejectionLeavesPhaseUnchanged(t *testing.T) {
 		InitialProvider:      "scripted",
 		Registry:             tool.NewRegistry(tools.NewPhaseDone()),
 		Agents:               []engine.Agent{{Name: "build"}},
-		Workflows:            []config.Workflow{w},
+		Workflows:            []engine.Workflow{w},
 		Rules:                []permission.Ruleset{permission.Defaults(), denyBash},
 		InitialAutonomy:      protocol.AutonomyAgent,
 		InitialPhaseWorkflow: w.Name,
@@ -243,7 +242,7 @@ func TestPhaseWideningAutoAcceptsWithoutPrompt(t *testing.T) {
 		InitialProvider:            "scripted",
 		Registry:                   tool.NewRegistry(tools.NewPhaseDone()),
 		Agents:                     []engine.Agent{{Name: "build"}},
-		Workflows:                  []config.Workflow{w},
+		Workflows:                  []engine.Workflow{w},
 		Rules:                      []permission.Ruleset{permission.Defaults(), denyBash},
 		InitialAutonomy:            protocol.AutonomyAgent,
 		InitialPhaseWorkflow:       w.Name,
@@ -308,7 +307,7 @@ func TestPhaseWideningResumeSkipsReprompt(t *testing.T) {
 		Select:               func(string) (provider.Provider, string, error) { return prov, "model", nil },
 		InitialProvider:      "scripted",
 		Agents:               []engine.Agent{{Name: "build"}},
-		Workflows:            []config.Workflow{w},
+		Workflows:            []engine.Workflow{w},
 		Rules:                []permission.Ruleset{permission.Defaults(), denyBash},
 		InitialPhaseWorkflow: w.Name,
 		InitialPhaseIndex:    1,
@@ -353,7 +352,7 @@ func TestPhaseWideningChangedFingerprintInvalidates(t *testing.T) {
 		Select:               func(string) (provider.Provider, string, error) { return prov, "model", nil },
 		InitialProvider:      "scripted",
 		Agents:               []engine.Agent{{Name: "build"}},
-		Workflows:            []config.Workflow{w},
+		Workflows:            []engine.Workflow{w},
 		Rules:                []permission.Ruleset{permission.Defaults(), denyBash},
 		InitialPhaseWorkflow: w.Name,
 		InitialPhaseIndex:    1,
@@ -393,20 +392,20 @@ func TestPhaseWideningChangedFingerprintInvalidates(t *testing.T) {
 func TestChildInheritsPhaseCeilingCannotWiden(t *testing.T) {
 	dir := t.TempDir()
 	// Parent phase denies write. Child agent tries to allow write — must fail.
-	w := config.Workflow{
-		SchemaVersion: config.WorkflowSchemaVersion,
+	w := engine.Workflow{
+		SchemaVersion: engine.WorkflowSchemaVersion,
 		Name:          "phase-deny-write",
-		Phases: []config.Phase{{
+		Phases: []engine.Phase{{
 			Name:  "readonly",
 			Agent: "build",
 			Permissions: permission.Ruleset{
 				{Permission: "write", Pattern: "*", Action: permission.Deny},
 				{Permission: "edit", Pattern: "*", Action: permission.Deny},
 			},
-			Exit: config.ExitGate{Type: config.GateAgent},
+			Exit: engine.ExitGate{Type: engine.GateAgent},
 		}},
 	}
-	w.Fingerprint = config.MustWorkflowFingerprint(w)
+	w.Fingerprint = "fp-" + w.Name
 
 	const childPrompt = "try write"
 	taskCall := taskToolCallWithAgent("task-phase-ceil", childPrompt, "writer")
@@ -444,7 +443,7 @@ func TestChildInheritsPhaseCeilingCannotWiden(t *testing.T) {
 		Registry:             tool.NewRegistry(tool.NewTask(), tool.NewWrite(), tool.NewEdit()),
 		WorkDir:              dir,
 		Rules:                []permission.Ruleset{permission.Defaults(), baseAllow},
-		Workflows:            []config.Workflow{w},
+		Workflows:            []engine.Workflow{w},
 		InitialPhaseWorkflow: w.Name,
 		InitialPhaseIndex:    0,
 		Agents: []engine.Agent{
@@ -524,19 +523,19 @@ func TestChildPhaseCannotWidenParentDenyEvenWithAuto(t *testing.T) {
 	// Parent config denies bash. Child with --auto enters a phase that allows
 	// bash — filtered ceiling must keep bash denied (no Deny→Allow on children).
 	dir := t.TempDir()
-	childWF := config.Workflow{
-		SchemaVersion: config.WorkflowSchemaVersion,
+	childWF := engine.Workflow{
+		SchemaVersion: engine.WorkflowSchemaVersion,
 		Name:          "child-widen",
-		Phases: []config.Phase{{
+		Phases: []engine.Phase{{
 			Name:  "open",
 			Agent: "build",
 			Permissions: permission.Ruleset{
 				{Permission: "bash", Pattern: "*", Action: permission.Allow},
 			},
-			Exit: config.ExitGate{Type: config.GateAgent},
+			Exit: engine.ExitGate{Type: engine.GateAgent},
 		}},
 	}
-	childWF.Fingerprint = config.MustWorkflowFingerprint(childWF)
+	childWF.Fingerprint = "fp-" + childWF.Name
 
 	const childPrompt = "enter widen phase"
 	// Child calls enter_plan_mode equivalent via phase: we seed InitialPhase on child
@@ -572,7 +571,7 @@ func TestChildPhaseCannotWidenParentDenyEvenWithAuto(t *testing.T) {
 		SandboxMode:                "off",
 		Rules:                      childRules,
 		Agents:                     []engine.Agent{{Name: "build"}},
-		Workflows:                  []config.Workflow{childWF},
+		Workflows:                  []engine.Workflow{childWF},
 		InitialPhaseWorkflow:       childWF.Name,
 		InitialPhaseIndex:          0,
 		DangerouslySkipPermissions: true,

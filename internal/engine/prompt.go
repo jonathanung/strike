@@ -10,25 +10,10 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/jonathanung/strike-cli/internal/ledger"
-	"github.com/jonathanung/strike-cli/internal/memory"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
 	"github.com/jonathanung/strike-cli/pkg/redact"
 )
-
-// MemorySource is the engine-facing surface for auto-loading tagged project
-// memory into the system prompt. *memory.Store satisfies this via List.
-type MemorySource interface {
-	List(tag string) ([]memory.Entry, error)
-}
-
-// LedgerSource is the engine-facing surface for auto-loading active decision
-// ledger entries into the system prompt. *ledger.Store satisfies this via
-// ActiveSlice.
-type LedgerSource interface {
-	ActiveSlice(path, taskID string) ([]ledger.Entry, error)
-}
 
 //go:embed prompt/shared.txt
 var sharedPrompt string
@@ -424,7 +409,7 @@ func (e *Engine) projectMemoryLayer() (text, source string) {
 	if e.opts.Memory == nil {
 		return "", ""
 	}
-	text, omitted, err := memory.AutoLoadLayer(e.opts.Memory)
+	text, omitted, err := e.opts.Memory.AutoLoad()
 	if err != nil || strings.TrimSpace(text) == "" {
 		return "", ""
 	}
@@ -444,7 +429,7 @@ func (e *Engine) decisionLedgerLayer() (text, source string) {
 	}
 	// Empty path/task → all active entries (global + scoped). Callers that need
 	// a scoped slice use ledger_read with path/task_id.
-	text, omitted, err := ledger.AutoLoadLayer(e.opts.Ledger, "", "", e.opts.WorkDir)
+	text, omitted, err := e.opts.Ledger.AutoLoad(e.opts.WorkDir)
 	if err != nil || strings.TrimSpace(text) == "" {
 		return "", ""
 	}

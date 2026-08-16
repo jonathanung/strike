@@ -12,8 +12,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/attachment"
-	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/fn"
 	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -240,7 +238,18 @@ type Options struct {
 	// Attachments, when set, stores inbound user attachments by content hash
 	// and emits UserMessage history with refs (no payload). nil keeps legacy
 	// inline base64 (tests). Shared with child spawns.
-	Attachments *attachment.Store
+	Attachments AttachmentStore
+	// ProjectArtifact maps product artifact payloads onto ArtifactUpdated.
+	// nil skips emission. Shared with child spawns.
+	ProjectArtifact ArtifactProjector
+	// ProjectLedger maps product ledger payloads onto LedgerUpdated.
+	// nil skips emission. Shared with child spawns.
+	ProjectLedger LedgerProjector
+	// Worktrees, when set, binds per-child git worktrees (ChildIsolation).
+	// nil stays on the shared WorkDir (soft-fail). Shared with child spawns.
+	Worktrees WorktreeBinder
+	// Version is the product version string for diagnostic bundles. Empty is "dev".
+	Version string
 	// SystemPrompt, when set (non-whitespace), supplies the user system-prompt
 	// layer. Precedence for the overlay/defaults slot: custom agent persona
 	// body wins over config SystemPrompt, which wins over the built-in
@@ -340,7 +349,7 @@ type Options struct {
 	PersistSessionMeta func(meta protocol.SessionMeta) error
 	// Workflows are named phase sequences (built-in plan-implement plus any
 	// loaded from .strike/workflows). Empty falls back to the built-in only.
-	Workflows []config.Workflow
+	Workflows []Workflow
 	// DefaultWorkflow is entered by enter_plan_mode when set; empty means
 	// "plan-implement".
 	DefaultWorkflow string
@@ -563,7 +572,7 @@ type Engine struct {
 	// workflow/phaseIndex track the active workflow phase (-1 = none).
 	// phaseRecovery is non-empty (missing|mismatch) when resume could not bind
 	// the fingerprinted definition; permissions are not applied until stop/restart.
-	workflow      config.Workflow
+	workflow      Workflow
 	phaseIndex    int
 	phaseRecovery string
 	// phaseGrantApproval is the last accepted widening decision for the
@@ -770,7 +779,7 @@ func New(opts Options) *Engine {
 	}
 	opts.DelegationPolicy = NormalizeDelegationPolicy(opts.DelegationPolicy)
 	if len(opts.Workflows) == 0 {
-		opts.Workflows = []config.Workflow{config.BuiltinPlanImplement()}
+		opts.Workflows = []Workflow{BuiltinPlanImplement()}
 	}
 	// Implicit team: root owns a new Team; nested engines inherit Options.Team.
 	team := opts.Team
@@ -1050,7 +1059,7 @@ func (e *Engine) Run(ctx context.Context) {
 	}
 	e.quietStartup = e.opts.QuietStartup
 	if e.opts.InitialProvider != "" && e.opts.Select != nil {
-		name := config.CanonicalProviderID(e.opts.InitialProvider)
+		name := CanonicalProviderID(e.opts.InitialProvider)
 		if p, defaultModel, err := e.opts.Select(name); err == nil {
 			// Same normalization as SelectModel: matching "provider/id" → bare
 			// id; foreign prefixes → provider default. Bare ids pass through

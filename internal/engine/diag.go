@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
-	"github.com/jonathanung/strike-cli/internal/version"
 	"github.com/jonathanung/strike-cli/pkg/diag"
 	pub "github.com/jonathanung/strike-cli/pkg/protocol"
 )
@@ -29,7 +28,7 @@ func (e *Engine) buildDiagnosticBundleEvent() protocol.DiagnosticBundle {
 		Attribution:     snap.Attribution,
 		Config:          cfg,
 		ProtocolVersion: pub.Version,
-		StrikeVersion:   version.Version,
+		StrikeVersion:   e.strikeVersion(),
 	})
 	ev := diag.ToProtocol(b)
 	ev.Correlation = e.sessionCorr()
@@ -118,4 +117,14 @@ func (e *Engine) diagnosticConfig() diag.Config {
 		cfg.Scheduler.Limits = lim
 	}
 	return cfg
+}
+
+func (e *Engine) strikeVersion() string {
+	if e == nil {
+		return "dev"
+	}
+	if v := strings.TrimSpace(e.opts.Version); v != "" {
+		return v
+	}
+	return "dev"
 }

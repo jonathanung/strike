@@ -15,6 +15,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/auth"
 	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/engine"
+	"github.com/jonathanung/strike-cli/internal/enginebind"
 	"github.com/jonathanung/strike-cli/internal/fn"
 	"github.com/jonathanung/strike-cli/internal/fn/external"
 	"github.com/jonathanung/strike-cli/internal/goal"
@@ -43,6 +44,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/session"
 	"github.com/jonathanung/strike-cli/internal/tool"
 	"github.com/jonathanung/strike-cli/internal/tools"
+	"github.com/jonathanung/strike-cli/internal/version"
 )
 
 // assembled is the composition-root product shared by the TUI and headless
@@ -803,9 +805,13 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			CheckpointDir:    tool.DefaultCheckpointDir(sid),
 			ProjectRoot:      projectIdentity.Root,
 			Instructions:     instructions,
-			Memory:           memoryStore,
-			Ledger:           ledgerStore,
-			Attachments:      attStore,
+			Memory:           enginebind.Memory(memoryStore),
+			Ledger:           enginebind.Ledger(ledgerStore),
+			Attachments:      enginebind.Attachments(attStore),
+			ProjectArtifact:  enginebind.ProjectArtifact,
+			ProjectLedger:    enginebind.ProjectLedger,
+			Worktrees:        enginebind.Worktrees(),
+			Version:          version.Version,
 			SystemPrompt:     cfg.SystemPrompt,
 			SystemPromptMode: cfg.SystemPromptMode,
 			LeanCode:         cfg.LeanCode,
@@ -882,10 +888,10 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			InitialPhaseGrantApproval:  initialPhaseGrant,
 			InitialAlwaysGrants:        initialAlways,
 			InitialPlanHandoff:         initialPlanHandoff,
-			PlanStore:                  planStore,
+			PlanStore:                  enginebind.Plan(planStore),
 			QuietStartup:               quietStartup,
 			DangerouslySkipPermissions: opts.skipPermissionAsks(),
-			Workflows:                  workflows,
+			Workflows:                  enginebind.Workflows(workflows),
 			Rules:                      permissionLayersWithPreset(cfg.Permissions, cfg.PermissionPreset, opts.skipPermissionAsks()),
 			RuleLayerNames:             permissionLayerNames(cfg.PermissionPreset, opts.skipPermissionAsks()),
 			ManagedRules:               append(permission.Ruleset(nil), cfg.Managed.DenyRules...),

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jonathanung/strike-cli/internal/engine"
+	"github.com/jonathanung/strike-cli/internal/enginebind"
 	"github.com/jonathanung/strike-cli/internal/ledger"
 	"github.com/jonathanung/strike-cli/internal/memory"
 	"github.com/jonathanung/strike-cli/internal/permission"
@@ -791,8 +792,8 @@ func TestCompactEmitsResidueWithMarkedDecisionAndPins(t *testing.T) {
 		WorkDir:         t.TempDir(),
 		Rules:           []permission.Ruleset{permission.Defaults()},
 		KeepUserTurns:   1,
-		Ledger:          store,
-		Memory:          mem,
+		Ledger:          enginebind.Ledger(store),
+		Memory:          enginebind.Memory(mem),
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

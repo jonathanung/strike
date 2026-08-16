@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jonathanung/strike-cli/internal/engine"
+	"github.com/jonathanung/strike-cli/internal/enginebind"
 	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
@@ -79,6 +80,7 @@ func TestChildWorktreeIsolationReturnsPatchNotParentMutation(t *testing.T) {
 		},
 		MaxChildDepth:     1,
 		ChildIsolation:    "worktree",
+		Worktrees:         enginebind.Worktrees(),
 		Agents:            []engine.Agent{{Name: "build"}},
 		InitialAgent:      "build",
 		OpenChildSession:  func(_, id, _ string) (string, error) { return id, nil },

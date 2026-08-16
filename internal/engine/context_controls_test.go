@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jonathanung/strike-cli/internal/engine"
+	"github.com/jonathanung/strike-cli/internal/enginebind"
 	"github.com/jonathanung/strike-cli/internal/memory"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
@@ -27,7 +28,7 @@ func TestExcludeDropsMemoryLayer(t *testing.T) {
 	eng := engine.New(engine.Options{
 		SessionID:       "s-exclude",
 		WorkDir:         t.TempDir(),
-		Memory:          store,
+		Memory:          enginebind.Memory(store),
 		Agents:          []engine.Agent{{Name: "build", Prompt: "PERSONA_OK"}},
 		InitialProvider: "scripted",
 		InitialModel:    "m",
@@ -94,7 +95,7 @@ func TestPinRetainsMemoryUnderFitPressure(t *testing.T) {
 	eng := engine.New(engine.Options{
 		SessionID:       "s-pin-fit",
 		WorkDir:         t.TempDir(),
-		Memory:          store,
+		Memory:          enginebind.Memory(store),
 		Instructions:    []string{hugeInst},
 		Agents:          []engine.Agent{{Name: "build", Prompt: "PERSONA_PIN"}},
 		InitialProvider: "scripted",
@@ -199,7 +200,7 @@ func TestInspectAfterExcludeUsesCurrentComposition(t *testing.T) {
 	eng := engine.New(engine.Options{
 		SessionID:       "s-inspect-live",
 		WorkDir:         t.TempDir(),
-		Memory:          store,
+		Memory:          enginebind.Memory(store),
 		Agents:          []engine.Agent{{Name: "build", Prompt: "PERSONA"}},
 		InitialProvider: "scripted",
 		InitialModel:    "m",

@@ -5,20 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/internal/config"
-	"github.com/jonathanung/strike-cli/internal/plan"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/tool"
 )
-
-// PlanStore is the engine-facing surface for plan handoff validation/approval
-// and section-delegate completion apply. *plan.Store satisfies this.
-type PlanStore interface {
-	Get(id string) (plan.Plan, bool, error)
-	SetStatus(id, actorRoot, status string, expectedVersion int) (plan.Plan, error)
-	// FinishSectionDelegate settles plan_delegate correlation on child terminal.
-	FinishSectionDelegate(id, actorRoot, sectionID, childID string, outcome plan.DelegateOutcome) (plan.Plan, error)
-}
 
 // PlanHandoffState is the in-memory record of the last successful plan handoff.
 // Restored from protocol.PlanHandoff on resume.
@@ -53,7 +42,7 @@ func (e *Engine) handoffPlan(ctx context.Context, req tool.PlanHandoffRequest) (
 		if err := e.runExitGate(ctx, phase); err != nil {
 			return tool.PlanHandoffResult{}, err
 		}
-	} else if err := e.runExitGate(ctx, config.Phase{Name: "plan"}); err != nil {
+	} else if err := e.runExitGate(ctx, Phase{Name: "plan"}); err != nil {
 		return tool.PlanHandoffResult{}, err
 	}
 
@@ -64,7 +53,7 @@ func (e *Engine) handoffPlan(ctx context.Context, req tool.PlanHandoffRequest) (
 	title := artifact.title
 	if artifact.planID != "" && e.opts.PlanStore != nil && artifact.needsApprove {
 		root := e.rootSessionID()
-		p, err := e.opts.PlanStore.SetStatus(artifact.planID, root, plan.StatusApproved, artifact.version)
+		p, err := e.opts.PlanStore.SetStatus(artifact.planID, root, PlanStatusApproved, artifact.version)
 		if err != nil {
 			return tool.PlanHandoffResult{}, fmt.Errorf("plan handoff: approve: %w", err)
 		}
@@ -148,26 +137,26 @@ func (e *Engine) resolveHandoffArtifact(req tool.PlanHandoffRequest) (handoffArt
 		}
 		root := e.rootSessionID()
 		if p.OwnerRoot != root {
-			return handoffArtifact{}, fmt.Errorf("plan handoff: %w", plan.ErrNotOwner)
+			return handoffArtifact{}, fmt.Errorf("plan handoff: %w", ErrPlanNotOwner)
 		}
 		if p.Version != req.ExpectedVersion {
-			return handoffArtifact{}, fmt.Errorf("%w: have %d, expected %d", plan.ErrConflict, p.Version, req.ExpectedVersion)
+			return handoffArtifact{}, fmt.Errorf("%w: have %d, expected %d", ErrPlanConflict, p.Version, req.ExpectedVersion)
 		}
 		switch p.Status {
-		case plan.StatusDraft:
+		case PlanStatusDraft:
 			return handoffArtifact{
 				planID:       p.ID,
 				version:      p.Version,
 				title:        p.Title,
 				needsApprove: true,
 			}, nil
-		case plan.StatusApproved:
+		case PlanStatusApproved:
 			return handoffArtifact{
 				planID:  p.ID,
 				version: p.Version,
 				title:   p.Title,
 			}, nil
-		case plan.StatusClosed:
+		case PlanStatusClosed:
 			return handoffArtifact{}, fmt.Errorf("plan handoff: plan %q is closed; reopen before handoff", planID)
 		default:
 			return handoffArtifact{}, fmt.Errorf("plan handoff: plan %q has invalid status %q", planID, p.Status)
