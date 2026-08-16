@@ -14,6 +14,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
 	"github.com/jonathanung/strike-cli/internal/tool"
+	"github.com/jonathanung/strike-cli/internal/tools"
 )
 
 func openTestPlanStore(t *testing.T) *plan.Store {
@@ -48,7 +49,7 @@ func TestHandoffStructuredPlanApprovesAndEmits(t *testing.T) {
 		SessionID:       "root-h1",
 		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
 		InitialProvider: "scripted",
-		Registry:        tool.NewRegistry(tool.NewExitPlanMode()),
+		Registry:        tool.NewRegistry(tools.NewExitPlanMode()),
 		PlanStore:       store,
 		Agents: []engine.Agent{
 			{Name: "build"},
@@ -135,7 +136,7 @@ func TestHandoffRejectLeavesPlanDraft(t *testing.T) {
 		SessionID:       "root-h2",
 		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
 		InitialProvider: "scripted",
-		Registry:        tool.NewRegistry(tool.NewExitPlanMode()),
+		Registry:        tool.NewRegistry(tools.NewExitPlanMode()),
 		PlanStore:       store,
 		Agents:          []engine.Agent{{Name: "build"}, {Name: "plan"}},
 		InitialAgent:    "plan",
@@ -202,7 +203,7 @@ func TestHandoffStaleVersionFails(t *testing.T) {
 		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
 		InitialProvider: "scripted",
 		InitialAutonomy: protocol.AutonomyAgent,
-		Registry:        tool.NewRegistry(tool.NewExitPlanMode()),
+		Registry:        tool.NewRegistry(tools.NewExitPlanMode()),
 		PlanStore:       store,
 		Agents:          []engine.Agent{{Name: "build"}, {Name: "plan"}},
 		InitialAgent:    "plan",
@@ -258,7 +259,7 @@ func TestHandoffMissingPlanFails(t *testing.T) {
 		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
 		InitialProvider: "scripted",
 		InitialAutonomy: protocol.AutonomyAgent,
-		Registry:        tool.NewRegistry(tool.NewExitPlanMode()),
+		Registry:        tool.NewRegistry(tools.NewExitPlanMode()),
 		PlanStore:       store,
 		Agents:          []engine.Agent{{Name: "build"}, {Name: "plan"}},
 		InitialAgent:    "plan",
@@ -312,7 +313,7 @@ func TestHandoffUnauthorizedOwnerFails(t *testing.T) {
 		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
 		InitialProvider: "scripted",
 		InitialAutonomy: protocol.AutonomyAgent,
-		Registry:        tool.NewRegistry(tool.NewExitPlanMode()),
+		Registry:        tool.NewRegistry(tools.NewExitPlanMode()),
 		PlanStore:       store,
 		Agents:          []engine.Agent{{Name: "build"}, {Name: "plan"}},
 		InitialAgent:    "plan",
@@ -358,7 +359,7 @@ func TestPhaseDoneCannotLeavePlanPhase(t *testing.T) {
 		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
 		InitialProvider: "scripted",
 		InitialAutonomy: protocol.AutonomyAgent,
-		Registry:        tool.NewRegistry(tool.NewPhaseDone()),
+		Registry:        tool.NewRegistry(tools.NewPhaseDone()),
 		Agents:          []engine.Agent{{Name: "build"}, {Name: "plan"}},
 		InitialAgent:    "plan",
 		Workflows:       []config.Workflow{config.BuiltinPlanImplement()},
@@ -410,7 +411,7 @@ func TestHandoffSkipAllRecordsBypass(t *testing.T) {
 		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
 		InitialProvider: "scripted",
 		InitialAutonomy: protocol.AutonomySkipAll,
-		Registry:        tool.NewRegistry(tool.NewExitPlanMode()),
+		Registry:        tool.NewRegistry(tools.NewExitPlanMode()),
 		Agents:          []engine.Agent{{Name: "build"}, {Name: "plan"}},
 		InitialAgent:    "plan",
 		Workflows:       []config.Workflow{config.BuiltinPlanImplement()},
@@ -499,7 +500,7 @@ func TestHandoffImplementerSeesPlanInPrompt(t *testing.T) {
 		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
 		InitialProvider: "scripted",
 		InitialAutonomy: protocol.AutonomyAgent,
-		Registry:        tool.NewRegistry(tool.NewExitPlanMode(), tool.NewPlanRead(store)),
+		Registry:        tool.NewRegistry(tools.NewExitPlanMode(), tools.NewPlanRead(store)),
 		PlanStore:       store,
 		Agents:          []engine.Agent{{Name: "build"}, {Name: "plan"}},
 		InitialAgent:    "plan",

@@ -14,6 +14,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
 	"github.com/jonathanung/strike-cli/internal/tool"
+	"github.com/jonathanung/strike-cli/internal/tools"
 )
 
 // TestContextBundleAttachAndChildRead: lead attaches a sealed bundle; child
@@ -100,7 +101,7 @@ func TestContextBundleAttachAndChildRead(t *testing.T) {
 		SessionID:       "lead-bundle",
 		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
 		InitialProvider: "scripted",
-		Registry:        tool.NewRegistry(tool.NewTask(), tool.NewContextBundle()),
+		Registry:        tool.NewRegistry(tool.NewTask(), tools.NewContextBundle()),
 		WorkDir:         t.TempDir(),
 		Rules:           []permission.Ruleset{allowAll},
 	})
@@ -203,7 +204,7 @@ func TestContextBundleMissingContextBlocks(t *testing.T) {
 		SessionID:       "lead-mc",
 		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
 		InitialProvider: "scripted",
-		Registry:        tool.NewRegistry(tool.NewTask(), tool.NewContextBundle()),
+		Registry:        tool.NewRegistry(tool.NewTask(), tools.NewContextBundle()),
 		WorkDir:         t.TempDir(),
 		Rules:           []permission.Ruleset{allowAll},
 	})
@@ -295,7 +296,7 @@ func TestContextBundlePathScopeDeniesOutside(t *testing.T) {
 		SessionID:       "lead-scope",
 		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
 		InitialProvider: "scripted",
-		Registry:        tool.NewRegistry(tool.NewTask(), tool.NewWrite(), tool.NewContextBundle()),
+		Registry:        tool.NewRegistry(tool.NewTask(), tool.NewWrite(), tools.NewContextBundle()),
 		WorkDir:         workDir,
 		Rules:           []permission.Ruleset{allowAll},
 	})

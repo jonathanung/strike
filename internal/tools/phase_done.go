@@ -1,20 +1,21 @@
-package tool
+package tools
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/jonathanung/strike-cli/internal/tool"
 )
 
 type phaseDoneTool struct{}
 
 // NewPhaseDone returns the phase_done tool used by agent exit gates.
-func NewPhaseDone() Tool { return phaseDoneTool{} }
+func NewPhaseDone() tool.Tool { return phaseDoneTool{} }
 
 func (phaseDoneTool) Name() string { return "phase_done" }
 
-func (phaseDoneTool) Contract() Contract {
-	return staticContract(SideEffectNone, IdempotencyConditional)
+func (phaseDoneTool) Contract() tool.Contract {
+	return tool.StaticContract(tool.SideEffectNone, tool.IdempotencyConditional)
 }
 
 func (phaseDoneTool) Description() string {
@@ -31,21 +32,21 @@ func (phaseDoneTool) Schema() json.RawMessage {
 	}`)
 }
 
-func (phaseDoneTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) (Result, error) {
-	if err := tc.Ask(ctx, AskRequest{
+func (phaseDoneTool) Execute(ctx context.Context, args json.RawMessage, tc *tool.Context) (tool.Result, error) {
+	if err := tc.Ask(ctx, tool.AskRequest{
 		Permission: "phase_done",
 		Patterns:   []string{"*"},
 		Always:     []string{"*"},
 	}); err != nil {
-		return Result{}, err
+		return tool.Result{}, err
 	}
 	if tc.AdvancePhase == nil {
-		return Result{}, fmt.Errorf("phase_done: AdvancePhase is not configured")
+		return tool.Result{}, fmt.Errorf("phase_done: AdvancePhase is not configured")
 	}
 	if err := tc.AdvancePhase(ctx); err != nil {
-		return Result{}, err
+		return tool.Result{}, err
 	}
-	return Result{
+	return tool.Result{
 		Title:  "phase advanced",
 		Output: "Phase exit gate cleared. Advanced to the next workflow phase (or ended the workflow).",
 	}, nil

@@ -34,10 +34,7 @@ func TestCompactSchemaDescriptionBuiltins(t *testing.T) {
 }
 
 func TestCompactSchemaDescriptionSkillKeepsCatalog(t *testing.T) {
-	desc := NewSkill([]SkillInfo{
-		{Name: "write-go-tests", Description: "tests"},
-		{Name: "test-and-validate", Description: "validate"},
-	}).Description()
+	desc := "Load a specialized skill when the task matches.\n\nUse this tool to inject instructions.\n\nAvailable skills: write-go-tests, test-and-validate\n\nThe skill name must match one of the available skills."
 	got := CompactSchemaDescription("skill", desc)
 	if !strings.Contains(got, "Available skills:") {
 		t.Fatalf("missing skills catalog: %q", got)
@@ -48,8 +45,7 @@ func TestCompactSchemaDescriptionSkillKeepsCatalog(t *testing.T) {
 	if len(got) >= len(desc) {
 		t.Fatalf("skill compact not smaller: compact=%d full=%d", len(got), len(desc))
 	}
-	// Empty catalog path.
-	empty := CompactSchemaDescription("skill", NewSkill(nil).Description())
+	empty := CompactSchemaDescription("skill", "Load a skill.\n\nAvailable skills: (none loaded)\n")
 	if !strings.Contains(empty, "Available skills:") || !strings.Contains(empty, "(none loaded)") {
 		t.Fatalf("empty skill catalog: %q", empty)
 	}

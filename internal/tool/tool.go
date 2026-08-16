@@ -1,10 +1,8 @@
-// Package tool defines the tool contract and the built-in tool set
-// (read/glob/grep/edit/write/apply_patch/move/delete/status/bash/git/verify/task/task_status/task_read/
-// task_message/task_interrupt/delegate/wait/agent_roster/agent_ownership/agent_message/
-// agent_broadcast/agent_thread/team_task/webfetch/websearch/browser/todowrite/todoread/
-// memory_write/memory_read/issue_write/issue_read/plan_write/plan_read/plan_delegate/
-// artifact_write/artifact_read/notebook_edit/sleep/skill/question/enter_plan_mode/
-// exit_plan_mode/phase_done/toolsearch/definition/references/symbols/diagnostics/call_hierarchy/rename_preview/impact/tui_snapshot).
+// Package tool is the kernel tool contract and generic builtins (read/glob/grep/
+// edit/write/apply_patch/move/delete/status/bash/git/verify/task/delegate/wait/
+// agent_*/team_*/webfetch/websearch/browser/todo/sleep/question/toolsearch).
+// Product builtins (memory/issue/plan/artifact/ledger/skill/lsp/notebook/…) live
+// in internal/tools and register onto the same Registry from cmd/strike.
 // Used by internal/engine (dispatch), internal/permission (AskRequest, for the
 // Context.Ask signature), and cmd/strike (registry construction); internal/tui
 // never imports it — tool calls reach the frontend only as
@@ -713,6 +711,14 @@ type SessionPR struct {
 	State  string
 }
 
+// ArtifactNotify is an optional engine callback after artifact create/update.
+// payload is the persist artifact value (typed in the product tools package).
+type ArtifactNotify func(op string, payload any)
+
+// LedgerNotify is an optional engine callback after ledger mutations.
+// payload is the persist ledger entry (typed in the product tools package).
+type LedgerNotify func(op string, payload any)
+
 // Context carries per-call facilities into a tool. Ask blocks until the
 // permission is granted; it returns an error if rejected or denied.
 // SpawnTask, when non-nil, starts a child session (non-blocking for the parent).
@@ -853,11 +859,13 @@ type Context struct {
 	RootSessionID string
 	// NotifyArtifact, when non-nil, is invoked after a successful artifact
 	// create/update so the engine can emit protocol.ArtifactUpdated.
-	// op is "create" or "update". Nil disables the event.
+	// op is "create" or "update". payload is the persist artifact value
+	// (typed in the product tools package). Nil disables the event.
 	NotifyArtifact ArtifactNotify
 	// NotifyLedger, when non-nil, is invoked after a successful ledger
 	// append/invalidate/supersede so the engine can emit protocol.LedgerUpdated.
-	// op is "append", "invalidate", or "supersede". Nil disables the event.
+	// op is "append", "invalidate", or "supersede". payload is the persist
+	// ledger entry (typed in the product tools package). Nil disables the event.
 	NotifyLedger LedgerNotify
 	// ContextBundle is the sealed spawn context for this agent (children only
 	// when the lead attached one). Read via the context_bundle tool. Nil/empty

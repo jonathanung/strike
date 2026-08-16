@@ -7,6 +7,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/plan"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/tool"
+	"github.com/jonathanung/strike-cli/internal/tools"
 )
 
 func testActReg(t *testing.T) *tool.Registry {
@@ -18,8 +19,8 @@ func testActReg(t *testing.T) *tool.Registry {
 	t.Cleanup(func() { _ = store.Close() })
 	reg := tool.NewRegistry(
 		tool.NewRead(), tool.NewTask(),
-		tool.NewPlanWrite(store), tool.NewPlanRead(store),
-		tool.NewEnterPlanMode(), tool.NewExitPlanMode(), tool.NewPhaseDone(),
+		tools.NewPlanWrite(store), tools.NewPlanRead(store),
+		tools.NewEnterPlanMode(), tools.NewExitPlanMode(), tools.NewPhaseDone(),
 		tool.NewAgentRoster(), tool.NewAgentMessage(), tool.NewAgentBroadcast(),
 		tool.NewTeamTask(), tool.NewWait(), tool.NewWebFetch(),
 	)

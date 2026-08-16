@@ -1,9 +1,10 @@
-package tool
+package tools
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/jonathanung/strike-cli/internal/tool"
 	"path/filepath"
 	"strings"
 
@@ -30,14 +31,14 @@ type callHierarchyTool struct {
 }
 
 // NewCallHierarchy returns the LSP incoming/outgoing calls tool.
-func NewCallHierarchy(intel LSPIntel) Tool {
+func NewCallHierarchy(intel LSPIntel) tool.Tool {
 	return &callHierarchyTool{intel: intel}
 }
 
 func (t *callHierarchyTool) Name() string { return "call_hierarchy" }
 
-func (t *callHierarchyTool) Contract() Contract {
-	return staticContract(SideEffectRead, IdempotencySafeRetry)
+func (t *callHierarchyTool) Contract() tool.Contract {
+	return tool.StaticContract(tool.SideEffectRead, tool.IdempotencySafeRetry)
 }
 
 func (t *callHierarchyTool) Description() string {
@@ -99,14 +100,14 @@ type callRow struct {
 	Col  int    `json:"col"`
 }
 
-func (t *callHierarchyTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) (Result, error) {
+func (t *callHierarchyTool) Execute(ctx context.Context, args json.RawMessage, tc *tool.Context) (tool.Result, error) {
 	var a callHierarchyArgs
 	if err := json.Unmarshal(args, &a); err != nil {
-		return Result{}, fmt.Errorf("invalid arguments: %w", err)
+		return tool.Result{}, fmt.Errorf("invalid arguments: %w", err)
 	}
 	abs, rel, line0, char, err := parseNavPosArgs(mustJSONRaw(a.FilePath, a.Line, a.Character), tc)
 	if err != nil {
-		return Result{}, err
+		return tool.Result{}, err
 	}
 	dir := strings.ToLower(strings.TrimSpace(a.Direction))
 	if dir == "" {
@@ -115,7 +116,7 @@ func (t *callHierarchyTool) Execute(ctx context.Context, args json.RawMessage, t
 	switch dir {
 	case "incoming", "outgoing", "both":
 	default:
-		return Result{}, fmt.Errorf("direction must be incoming, outgoing, or both")
+		return tool.Result{}, fmt.Errorf("direction must be incoming, outgoing, or both")
 	}
 	max := a.MaxResults
 	if max <= 0 {
@@ -124,12 +125,12 @@ func (t *callHierarchyTool) Execute(ctx context.Context, args json.RawMessage, t
 	if max > 200 {
 		max = 200
 	}
-	if err := tc.Ask(ctx, AskRequest{
+	if err := tc.Ask(ctx, tool.AskRequest{
 		Permission: "call_hierarchy",
 		Patterns:   []string{rel},
 		Always:     []string{"*"},
 	}); err != nil {
-		return Result{}, err
+		return tool.Result{}, err
 	}
 	if t.intel == nil {
 		return navUnavailable("call_hierarchy")
@@ -217,14 +218,14 @@ type renamePreviewTool struct {
 }
 
 // NewRenamePreview returns the LSP rename preview tool (never applies).
-func NewRenamePreview(intel LSPIntel) Tool {
+func NewRenamePreview(intel LSPIntel) tool.Tool {
 	return &renamePreviewTool{intel: intel}
 }
 
 func (t *renamePreviewTool) Name() string { return "rename_preview" }
 
-func (t *renamePreviewTool) Contract() Contract {
-	return staticContract(SideEffectRead, IdempotencySafeRetry)
+func (t *renamePreviewTool) Contract() tool.Contract {
+	return tool.StaticContract(tool.SideEffectRead, tool.IdempotencySafeRetry)
 }
 
 func (t *renamePreviewTool) Description() string {
@@ -285,17 +286,17 @@ type renameEdit struct {
 	NewText string `json:"newText,omitempty"`
 }
 
-func (t *renamePreviewTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) (Result, error) {
+func (t *renamePreviewTool) Execute(ctx context.Context, args json.RawMessage, tc *tool.Context) (tool.Result, error) {
 	var a renamePreviewArgs
 	if err := json.Unmarshal(args, &a); err != nil {
-		return Result{}, fmt.Errorf("invalid arguments: %w", err)
+		return tool.Result{}, fmt.Errorf("invalid arguments: %w", err)
 	}
 	if strings.TrimSpace(a.NewName) == "" {
-		return Result{}, fmt.Errorf("newName is required")
+		return tool.Result{}, fmt.Errorf("newName is required")
 	}
 	abs, rel, line0, char, err := parseNavPosArgs(mustJSONRaw(a.FilePath, a.Line, a.Character), tc)
 	if err != nil {
-		return Result{}, err
+		return tool.Result{}, err
 	}
 	max := a.MaxResults
 	if max <= 0 {
@@ -304,12 +305,12 @@ func (t *renamePreviewTool) Execute(ctx context.Context, args json.RawMessage, t
 	if max > 500 {
 		max = 500
 	}
-	if err := tc.Ask(ctx, AskRequest{
+	if err := tc.Ask(ctx, tool.AskRequest{
 		Permission: "rename_preview",
 		Patterns:   []string{rel},
 		Always:     []string{"*"},
 	}); err != nil {
-		return Result{}, err
+		return tool.Result{}, err
 	}
 	if t.intel == nil {
 		return navUnavailable("rename_preview")
@@ -386,14 +387,14 @@ type impactTool struct {
 }
 
 // NewImpact returns the LSP impact-summary tool.
-func NewImpact(intel LSPIntel) Tool {
+func NewImpact(intel LSPIntel) tool.Tool {
 	return &impactTool{intel: intel}
 }
 
 func (t *impactTool) Name() string { return "impact" }
 
-func (t *impactTool) Contract() Contract {
-	return staticContract(SideEffectRead, IdempotencySafeRetry)
+func (t *impactTool) Contract() tool.Contract {
+	return tool.StaticContract(tool.SideEffectRead, tool.IdempotencySafeRetry)
 }
 
 func (t *impactTool) Description() string {
@@ -460,14 +461,14 @@ type impactItemJSON struct {
 	Col  int    `json:"col"`
 }
 
-func (t *impactTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) (Result, error) {
+func (t *impactTool) Execute(ctx context.Context, args json.RawMessage, tc *tool.Context) (tool.Result, error) {
 	var a impactArgs
 	if err := json.Unmarshal(args, &a); err != nil {
-		return Result{}, fmt.Errorf("invalid arguments: %w", err)
+		return tool.Result{}, fmt.Errorf("invalid arguments: %w", err)
 	}
 	abs, rel, line0, char, err := parseNavPosArgs(mustJSONRaw(a.FilePath, a.Line, a.Character), tc)
 	if err != nil {
-		return Result{}, err
+		return tool.Result{}, err
 	}
 	max := a.MaxResults
 	if max <= 0 {
@@ -476,12 +477,12 @@ func (t *impactTool) Execute(ctx context.Context, args json.RawMessage, tc *Cont
 	if max > 500 {
 		max = 500
 	}
-	if err := tc.Ask(ctx, AskRequest{
+	if err := tc.Ask(ctx, tool.AskRequest{
 		Permission: "impact",
 		Patterns:   []string{rel},
 		Always:     []string{"*"},
 	}); err != nil {
-		return Result{}, err
+		return tool.Result{}, err
 	}
 	if t.intel == nil {
 		return navUnavailable("impact")
@@ -576,7 +577,7 @@ func displayRel(workDir, abs string) string {
 	return filepath.ToSlash(rel)
 }
 
-func intelSoftJSON(name string, payload any, err error) (Result, error) {
+func intelSoftJSON(name string, payload any, err error) (tool.Result, error) {
 	if lsp.IsUnsupported(err) {
 		switch p := payload.(type) {
 		case callHierarchyPayload:
@@ -599,11 +600,11 @@ func intelSoftJSON(name string, payload any, err error) (Result, error) {
 	return navSoftError(name, err)
 }
 
-func intelJSONResult(title string, payload any) (Result, error) {
+func intelJSONResult(title string, payload any) (tool.Result, error) {
 	raw, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
-		return Result{}, fmt.Errorf("encode %s: %w", title, err)
+		return tool.Result{}, fmt.Errorf("encode %s: %w", title, err)
 	}
 	meta, _ := json.Marshal(payload)
-	return Result{Title: title, Output: string(raw) + "\n", Metadata: meta}, nil
+	return tool.Result{Title: title, Output: string(raw) + "\n", Metadata: meta}, nil
 }

@@ -1,4 +1,4 @@
-package tool
+package tools
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/jonathanung/strike-cli/internal/tool"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -14,12 +15,12 @@ import (
 
 type notebookEditTool struct{}
 
-func NewNotebookEdit() Tool { return notebookEditTool{} }
+func NewNotebookEdit() tool.Tool { return notebookEditTool{} }
 
 func (notebookEditTool) Name() string { return "notebook_edit" }
 
-func (notebookEditTool) Contract() Contract {
-	return staticContract(SideEffectWorkspaceMutative, IdempotencyConditional)
+func (notebookEditTool) Contract() tool.Contract {
+	return tool.StaticContract(tool.SideEffectWorkspaceMutative, tool.IdempotencyConditional)
 }
 
 func (notebookEditTool) Description() string {
@@ -56,13 +57,13 @@ type notebookEditArgs struct {
 	EditMode     string `json:"edit_mode"`
 }
 
-func (notebookEditTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) (Result, error) {
+func (notebookEditTool) Execute(ctx context.Context, args json.RawMessage, tc *tool.Context) (tool.Result, error) {
 	var a notebookEditArgs
 	if err := json.Unmarshal(args, &a); err != nil {
-		return Result{}, ErrInvalidArgs(fmt.Sprintf("invalid arguments: %v", err))
+		return tool.Result{}, tool.ErrInvalidArgs(fmt.Sprintf("invalid arguments: %v", err))
 	}
 	if strings.TrimSpace(a.NotebookPath) == "" {
-		return Result{}, ErrInvalidArgs("notebook_path is required")
+		return tool.Result{}, tool.ErrInvalidArgs("notebook_path is required")
 	}
 	mode := strings.ToLower(strings.TrimSpace(a.EditMode))
 	if mode == "" {
@@ -71,51 +72,51 @@ func (notebookEditTool) Execute(ctx context.Context, args json.RawMessage, tc *C
 	switch mode {
 	case "replace", "insert", "delete":
 	default:
-		return Result{}, fmt.Errorf("edit_mode must be replace, insert, or delete")
+		return tool.Result{}, fmt.Errorf("edit_mode must be replace, insert, or delete")
 	}
 	cellType := strings.ToLower(strings.TrimSpace(a.CellType))
 	if cellType != "" && cellType != "code" && cellType != "markdown" {
-		return Result{}, fmt.Errorf("cell_type must be code or markdown")
+		return tool.Result{}, fmt.Errorf("cell_type must be code or markdown")
 	}
 	if mode == "insert" && cellType == "" {
-		return Result{}, fmt.Errorf("cell_type is required when edit_mode=insert")
+		return tool.Result{}, fmt.Errorf("cell_type is required when edit_mode=insert")
 	}
 	if mode != "insert" && strings.TrimSpace(a.CellID) == "" {
-		return Result{}, fmt.Errorf("cell_id is required for edit_mode=%s", mode)
+		return tool.Result{}, fmt.Errorf("cell_id is required for edit_mode=%s", mode)
 	}
 
 	tempDir := ""
 	if tc != nil {
 		tempDir = tc.SessionTempDir
 	}
-	path, rel, err := resolveAllowedPath(tc.WorkDir, tempDir, a.NotebookPath)
+	path, rel, err := tool.ResolveAllowedPath(tc.WorkDir, tempDir, a.NotebookPath)
 	if err != nil {
-		return Result{}, err
+		return tool.Result{}, err
 	}
 	if !strings.EqualFold(filepath.Ext(path), ".ipynb") {
-		return Result{}, fmt.Errorf("file must be a Jupyter notebook (.ipynb)")
+		return tool.Result{}, fmt.Errorf("file must be a Jupyter notebook (.ipynb)")
 	}
 
-	data, err := safeReadFile(ctx, path)
+	data, err := tool.SafeReadFile(ctx, path)
 	if err != nil {
-		return Result{}, err
+		return tool.Result{}, err
 	}
 	var nb map[string]any
 	if err := json.Unmarshal(data, &nb); err != nil {
-		return Result{}, fmt.Errorf("notebook is not valid JSON: %w", err)
+		return tool.Result{}, fmt.Errorf("notebook is not valid JSON: %w", err)
 	}
 	cellsRaw, ok := nb["cells"]
 	if !ok {
-		return Result{}, fmt.Errorf("notebook missing cells array")
+		return tool.Result{}, fmt.Errorf("notebook missing cells array")
 	}
 	cells, ok := cellsRaw.([]any)
 	if !ok {
-		return Result{}, fmt.Errorf("notebook cells is not an array")
+		return tool.Result{}, fmt.Errorf("notebook cells is not an array")
 	}
 
 	idx, err := resolveNotebookCellIndex(cells, a.CellID, mode)
 	if err != nil {
-		return Result{}, err
+		return tool.Result{}, err
 	}
 
 	meta, _ := json.Marshal(map[string]any{
@@ -147,7 +148,7 @@ func (notebookEditTool) Execute(ctx context.Context, args json.RawMessage, tc *C
 	default: // replace
 		cellMap, ok := cells[idx].(map[string]any)
 		if !ok {
-			return Result{}, fmt.Errorf("cell at index %d is not an object", idx)
+			return tool.Result{}, fmt.Errorf("cell at index %d is not an object", idx)
 		}
 		cellMap["source"] = a.NewSource
 		if cellType != "" {
@@ -165,41 +166,41 @@ func (notebookEditTool) Execute(ctx context.Context, args json.RawMessage, tc *C
 
 	out, err := json.MarshalIndent(nb, "", " ")
 	if err != nil {
-		return Result{}, err
+		return tool.Result{}, err
 	}
 	out = append(out, '\n')
 	// Guard resulting notebook JSON (and new cell source) before permission/disk.
 	if mode != "delete" {
-		if err := checkContentGuard(ctx, tc, rel, a.NewSource); err != nil {
-			return Result{}, err
+		if err := tool.CheckContentGuard(ctx, tc, rel, a.NewSource); err != nil {
+			return tool.Result{}, err
 		}
-		if err := checkContentGuard(ctx, tc, rel, string(out)); err != nil {
-			return Result{}, err
+		if err := tool.CheckContentGuard(ctx, tc, rel, string(out)); err != nil {
+			return tool.Result{}, err
 		}
 	}
-	if err := tc.Ask(ctx, AskRequest{
+	if err := tc.Ask(ctx, tool.AskRequest{
 		Permission: "edit",
 		Patterns:   []string{rel},
 		Always:     []string{"*"},
 		Metadata:   meta,
 	}); err != nil {
-		return Result{}, err
+		return tool.Result{}, err
 	}
 	// Claim after in-memory mutation validates so failed parses do not claim.
 	overlapWarn, err := tc.ClaimWrite(path, rel)
 	if err != nil {
-		return Result{}, err
+		return tool.Result{}, err
 	}
-	existed := FileExisted(path)
+	existed := tool.FileExisted(path)
 	tc.SnapshotPath(path)
 	// Re-validate + atomic temp/rename at exec time.
-	if err := allowedWriteFile(tc.WorkDir, tempDir, a.NotebookPath, out); err != nil {
-		return Result{}, err
+	if err := tool.AllowedWriteFile(tc.WorkDir, tempDir, a.NotebookPath, out); err != nil {
+		return tool.Result{}, err
 	}
 	tc.NoteTurnChange(path, existed, false)
 	tc.NotifyFileSync(path, string(out), false)
-	outMsg = AppendOverlapWarning(outMsg, overlapWarn)
-	res := Result{
+	outMsg = tool.AppendOverlapWarning(outMsg, overlapWarn)
+	res := tool.Result{
 		Title:    rel,
 		Output:   outMsg,
 		Metadata: meta,

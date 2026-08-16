@@ -15,6 +15,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
 	"github.com/jonathanung/strike-cli/internal/tool"
+	"github.com/jonathanung/strike-cli/internal/tools"
 )
 
 func TestSelectPlanAgentEntersPlanPhase(t *testing.T) {
@@ -146,7 +147,7 @@ func TestExitPlanModeAdvancesToImplement(t *testing.T) {
 		SessionID:       "phase-exit-implement",
 		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
 		InitialProvider: "scripted",
-		Registry:        tool.NewRegistry(tool.NewExitPlanMode()),
+		Registry:        tool.NewRegistry(tools.NewExitPlanMode()),
 		Agents: []engine.Agent{
 			{Name: "build"},
 			{Name: "plan"},
@@ -208,7 +209,7 @@ func TestExitPlanModeRoutesToOrchestrator(t *testing.T) {
 		SessionID:       "phase-exit-orchestrator",
 		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
 		InitialProvider: "scripted",
-		Registry:        tool.NewRegistry(tool.NewExitPlanMode()),
+		Registry:        tool.NewRegistry(tools.NewExitPlanMode()),
 		Agents: []engine.Agent{
 			{Name: "build"},
 			{Name: "plan"},
@@ -276,7 +277,7 @@ func TestPlanRejectInterruptsTurn(t *testing.T) {
 		SessionID:       "phase-exit-reject",
 		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
 		InitialProvider: "scripted",
-		Registry:        tool.NewRegistry(tool.NewExitPlanMode()),
+		Registry:        tool.NewRegistry(tools.NewExitPlanMode()),
 		Agents: []engine.Agent{
 			{Name: "build"},
 			{Name: "plan"},
@@ -434,7 +435,7 @@ func TestCheckGateCommand(t *testing.T) {
 		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
 		InitialProvider: "scripted",
 		InitialAutonomy: protocol.AutonomyChecks,
-		Registry:        tool.NewRegistry(tool.NewPhaseDone(), tool.NewEnterPlanMode()),
+		Registry:        tool.NewRegistry(tools.NewPhaseDone(), tools.NewEnterPlanMode()),
 		WorkDir:         dir,
 		Agents:          []engine.Agent{{Name: "build"}, {Name: "plan"}},
 		Workflows:       []config.Workflow{wf, config.BuiltinPlanImplement()},
@@ -500,7 +501,7 @@ func TestAutonomyAgentAdvancesWithoutUserPrompt(t *testing.T) {
 		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
 		InitialProvider: "scripted",
 		InitialAutonomy: protocol.AutonomyAgent,
-		Registry:        tool.NewRegistry(tool.NewPhaseDone(), tool.NewEnterPlanMode()),
+		Registry:        tool.NewRegistry(tools.NewPhaseDone(), tools.NewEnterPlanMode()),
 		Agents:          []engine.Agent{{Name: "build"}, {Name: "plan"}},
 		Workflows:       []config.Workflow{wf, config.BuiltinPlanImplement()},
 		DefaultWorkflow: "user-authored",
@@ -554,7 +555,7 @@ func TestAutonomySkipAllAdvancesWithoutApproval(t *testing.T) {
 		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
 		InitialProvider: "scripted",
 		InitialAutonomy: protocol.AutonomySkipAll,
-		Registry:        tool.NewRegistry(tool.NewExitPlanMode()),
+		Registry:        tool.NewRegistry(tools.NewExitPlanMode()),
 		Agents: []engine.Agent{
 			{Name: "build"},
 			{Name: "plan"},
@@ -621,7 +622,7 @@ func TestAutonomyChecksEmptyCommandFailsClosed(t *testing.T) {
 		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
 		InitialProvider: "scripted",
 		InitialAutonomy: protocol.AutonomyChecks,
-		Registry:        tool.NewRegistry(tool.NewPhaseDone(), tool.NewEnterPlanMode()),
+		Registry:        tool.NewRegistry(tools.NewPhaseDone(), tools.NewEnterPlanMode()),
 		Agents:          []engine.Agent{{Name: "build"}, {Name: "plan"}},
 		Workflows:       []config.Workflow{wf, config.BuiltinPlanImplement()},
 		DefaultWorkflow: "no-cmd",
@@ -698,7 +699,7 @@ func TestAutonomyChecksFailingCommandReportsFailure(t *testing.T) {
 		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
 		InitialProvider: "scripted",
 		InitialAutonomy: protocol.AutonomyChecks,
-		Registry:        tool.NewRegistry(tool.NewPhaseDone(), tool.NewEnterPlanMode()),
+		Registry:        tool.NewRegistry(tools.NewPhaseDone(), tools.NewEnterPlanMode()),
 		Agents:          []engine.Agent{{Name: "build"}, {Name: "plan"}},
 		Workflows:       []config.Workflow{wf, config.BuiltinPlanImplement()},
 		DefaultWorkflow: "fail-cmd",
@@ -818,7 +819,7 @@ func TestPhaseAgentTransitionKeepsSessionModel(t *testing.T) {
 		Select:          multiProviderSelect(providers, defaults),
 		InitialProvider: "session",
 		InitialModel:    sessionModel,
-		Registry:        tool.NewRegistry(tool.NewEnterPlanMode(), tool.NewExitPlanMode()),
+		Registry:        tool.NewRegistry(tools.NewEnterPlanMode(), tools.NewExitPlanMode()),
 		Agents: []engine.Agent{
 			{Name: "build"},
 			{Name: "plan"},
@@ -955,7 +956,7 @@ func TestPhaseDoneAdvanceKeepsSessionModel(t *testing.T) {
 		InitialModel:    sessionModel,
 		// Agent autonomy: phase_done self-affirms without a user prompt.
 		InitialAutonomy: protocol.AutonomyAgent,
-		Registry:        tool.NewRegistry(tool.NewEnterPlanMode(), tool.NewPhaseDone()),
+		Registry:        tool.NewRegistry(tools.NewEnterPlanMode(), tools.NewPhaseDone()),
 		Agents: []engine.Agent{
 			{Name: "build"},
 			{Name: "plan"},

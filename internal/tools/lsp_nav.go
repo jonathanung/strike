@@ -1,9 +1,10 @@
-package tool
+package tools
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/jonathanung/strike-cli/internal/tool"
 	"path/filepath"
 	"strings"
 
@@ -28,14 +29,14 @@ type definitionTool struct {
 
 // NewDefinition returns the LSP go-to-definition tool. nav may be nil
 // (tool reports unavailable). Deferred when deferTools is on.
-func NewDefinition(nav LSPNavigator) Tool {
+func NewDefinition(nav LSPNavigator) tool.Tool {
 	return &definitionTool{nav: nav}
 }
 
 func (t *definitionTool) Name() string { return "definition" }
 
-func (t *definitionTool) Contract() Contract {
-	return staticContract(SideEffectRead, IdempotencySafeRetry)
+func (t *definitionTool) Contract() tool.Contract {
+	return tool.StaticContract(tool.SideEffectRead, tool.IdempotencySafeRetry)
 }
 
 func (t *definitionTool) Description() string {
@@ -71,17 +72,17 @@ type navPosArgs struct {
 	Character int    `json:"character"`
 }
 
-func (t *definitionTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) (Result, error) {
+func (t *definitionTool) Execute(ctx context.Context, args json.RawMessage, tc *tool.Context) (tool.Result, error) {
 	abs, rel, line0, char, err := parseNavPosArgs(args, tc)
 	if err != nil {
-		return Result{}, err
+		return tool.Result{}, err
 	}
-	if err := tc.Ask(ctx, AskRequest{
+	if err := tc.Ask(ctx, tool.AskRequest{
 		Permission: "definition",
 		Patterns:   []string{rel},
 		Always:     []string{"*"},
 	}); err != nil {
-		return Result{}, err
+		return tool.Result{}, err
 	}
 	if t.nav == nil {
 		return navUnavailable("definition")
@@ -107,7 +108,7 @@ func (t *definitionTool) Execute(ctx context.Context, args json.RawMessage, tc *
 	} else if n > 1 {
 		title = fmt.Sprintf("%d definitions", n)
 	}
-	return Result{Title: title, Output: out, Metadata: meta}, nil
+	return tool.Result{Title: title, Output: out, Metadata: meta}, nil
 }
 
 // --- references ---
@@ -118,14 +119,14 @@ type referencesTool struct {
 
 // NewReferences returns the LSP find-references tool. nav may be nil.
 // Deferred when deferTools is on.
-func NewReferences(nav LSPNavigator) Tool {
+func NewReferences(nav LSPNavigator) tool.Tool {
 	return &referencesTool{nav: nav}
 }
 
 func (t *referencesTool) Name() string { return "references" }
 
-func (t *referencesTool) Contract() Contract {
-	return staticContract(SideEffectRead, IdempotencySafeRetry)
+func (t *referencesTool) Contract() tool.Contract {
+	return tool.StaticContract(tool.SideEffectRead, tool.IdempotencySafeRetry)
 }
 
 func (t *referencesTool) Description() string {
@@ -155,17 +156,17 @@ func (t *referencesTool) Schema() json.RawMessage {
 	}`)
 }
 
-func (t *referencesTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) (Result, error) {
+func (t *referencesTool) Execute(ctx context.Context, args json.RawMessage, tc *tool.Context) (tool.Result, error) {
 	abs, rel, line0, char, err := parseNavPosArgs(args, tc)
 	if err != nil {
-		return Result{}, err
+		return tool.Result{}, err
 	}
-	if err := tc.Ask(ctx, AskRequest{
+	if err := tc.Ask(ctx, tool.AskRequest{
 		Permission: "references",
 		Patterns:   []string{rel},
 		Always:     []string{"*"},
 	}); err != nil {
-		return Result{}, err
+		return tool.Result{}, err
 	}
 	if t.nav == nil {
 		return navUnavailable("references")
@@ -191,7 +192,7 @@ func (t *referencesTool) Execute(ctx context.Context, args json.RawMessage, tc *
 	} else if n > 1 {
 		title = fmt.Sprintf("%d references", n)
 	}
-	return Result{Title: title, Output: out, Metadata: meta}, nil
+	return tool.Result{Title: title, Output: out, Metadata: meta}, nil
 }
 
 // --- symbols ---
@@ -202,14 +203,14 @@ type symbolsTool struct {
 
 // NewSymbols returns the LSP symbols tool (document or workspace).
 // nav may be nil. Deferred when deferTools is on.
-func NewSymbols(nav LSPNavigator) Tool {
+func NewSymbols(nav LSPNavigator) tool.Tool {
 	return &symbolsTool{nav: nav}
 }
 
 func (t *symbolsTool) Name() string { return "symbols" }
 
-func (t *symbolsTool) Contract() Contract {
-	return staticContract(SideEffectRead, IdempotencySafeRetry)
+func (t *symbolsTool) Contract() tool.Contract {
+	return tool.StaticContract(tool.SideEffectRead, tool.IdempotencySafeRetry)
 }
 
 func (t *symbolsTool) Description() string {
@@ -245,15 +246,15 @@ type symbolsArgs struct {
 	Query    string `json:"query"`
 }
 
-func (t *symbolsTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) (Result, error) {
+func (t *symbolsTool) Execute(ctx context.Context, args json.RawMessage, tc *tool.Context) (tool.Result, error) {
 	var a symbolsArgs
 	if err := json.Unmarshal(args, &a); err != nil {
-		return Result{}, fmt.Errorf("invalid arguments: %w", err)
+		return tool.Result{}, fmt.Errorf("invalid arguments: %w", err)
 	}
 	filePath := strings.TrimSpace(a.FilePath)
 	query := strings.TrimSpace(a.Query)
 	if filePath == "" && query == "" {
-		return Result{}, fmt.Errorf("filePath or query is required")
+		return tool.Result{}, fmt.Errorf("filePath or query is required")
 	}
 
 	var (
@@ -264,18 +265,18 @@ func (t *symbolsTool) Execute(ctx context.Context, args json.RawMessage, tc *Con
 		var err error
 		abs, rel, err = resolveNavPath(tc, filePath)
 		if err != nil {
-			return Result{}, err
+			return tool.Result{}, err
 		}
 	} else {
 		rel = "*"
 	}
 
-	if err := tc.Ask(ctx, AskRequest{
+	if err := tc.Ask(ctx, tool.AskRequest{
 		Permission: "symbols",
 		Patterns:   []string{rel},
 		Always:     []string{"*"},
 	}); err != nil {
-		return Result{}, err
+		return tool.Result{}, err
 	}
 	if t.nav == nil {
 		return navUnavailable("symbols")
@@ -316,7 +317,7 @@ func (t *symbolsTool) Execute(ctx context.Context, args json.RawMessage, tc *Con
 	} else if n > 1 {
 		title = fmt.Sprintf("%d symbols", n)
 	}
-	return Result{Title: title, Output: out, Metadata: meta}, nil
+	return tool.Result{Title: title, Output: out, Metadata: meta}, nil
 }
 
 func filterSymbols(syms []lsp.Symbol, query string) []lsp.Symbol {
@@ -334,7 +335,7 @@ func filterSymbols(syms []lsp.Symbol, query string) []lsp.Symbol {
 	return out
 }
 
-func parseNavPosArgs(args json.RawMessage, tc *Context) (abs, rel string, line0, character int, err error) {
+func parseNavPosArgs(args json.RawMessage, tc *tool.Context) (abs, rel string, line0, character int, err error) {
 	var a navPosArgs
 	if err := json.Unmarshal(args, &a); err != nil {
 		return "", "", 0, 0, fmt.Errorf("invalid arguments: %w", err)
@@ -355,7 +356,7 @@ func parseNavPosArgs(args json.RawMessage, tc *Context) (abs, rel string, line0,
 	return abs, rel, a.Line - 1, a.Character, nil
 }
 
-func resolveNavPath(tc *Context, filePath string) (abs, rel string, err error) {
+func resolveNavPath(tc *tool.Context, filePath string) (abs, rel string, err error) {
 	workDir := ""
 	tempDir := ""
 	if tc != nil {
@@ -363,7 +364,7 @@ func resolveNavPath(tc *Context, filePath string) (abs, rel string, err error) {
 		tempDir = tc.SessionTempDir
 	}
 	if workDir != "" || tempDir != "" {
-		resolved, relPath, rerr := resolveAllowedPath(workDir, tempDir, filePath)
+		resolved, relPath, rerr := tool.ResolveAllowedPath(workDir, tempDir, filePath)
 		if rerr != nil {
 			return "", "", rerr
 		}
@@ -378,8 +379,8 @@ func resolveNavPath(tc *Context, filePath string) (abs, rel string, err error) {
 	return abs, filepath.ToSlash(filePath), nil
 }
 
-func navUnavailable(name string) (Result, error) {
-	return Result{
+func navUnavailable(name string) (tool.Result, error) {
+	return tool.Result{
 		Title:  name + " unavailable",
 		Output: "Language server navigation is not configured for this session.",
 	}, nil
@@ -387,12 +388,12 @@ func navUnavailable(name string) (Result, error) {
 
 // navSoftError turns LSP failures into model-facing output (not tool errors)
 // so a missing/dead server does not look like a hard tool failure.
-func navSoftError(name string, err error) (Result, error) {
+func navSoftError(name string, err error) (tool.Result, error) {
 	msg := "language server error"
 	if err != nil {
 		msg = err.Error()
 	}
-	return Result{
+	return tool.Result{
 		Title:  name + " failed",
 		Output: msg,
 	}, nil

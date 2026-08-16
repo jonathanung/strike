@@ -1,9 +1,10 @@
-package tool
+package tools
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/jonathanung/strike-cli/internal/tool"
 	"strings"
 	"testing"
 
@@ -98,9 +99,9 @@ func TestIssueWriteValidation(t *testing.T) {
 func TestIssuePermissionDenied(t *testing.T) {
 	store := openIssue(t)
 	deny := errors.New("denied")
-	tc := &Context{
+	tc := &tool.Context{
 		WorkDir: t.TempDir(),
-		Ask:     func(context.Context, AskRequest) error { return deny },
+		Ask:     func(context.Context, tool.AskRequest) error { return deny },
 	}
 	_, err := NewIssueWrite(store).Execute(context.Background(), mustJSON(t, map[string]any{
 		"title": "x",

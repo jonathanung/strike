@@ -2,8 +2,6 @@ package tool
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"strings"
 	"sync"
 	"unicode/utf8"
@@ -20,7 +18,8 @@ const (
 	MaxTUISnapshotLines = 80
 )
 
-const errNoTUIFrame = "no TUI frame available (headless/non-TUI session)"
+// ErrNoTUIFrame is the precondition message when no TUI frame is available.
+const ErrNoTUIFrame = "no TUI frame available (headless/non-TUI session)"
 
 // TUISnapshotRequest is the model-facing capture request.
 type TUISnapshotRequest struct {
@@ -72,14 +71,14 @@ func (s *TUIFrameStore) Capture(ctx context.Context, req TUISnapshotRequest) (TU
 		return TUISnapshotResult{}, err
 	}
 	if s == nil {
-		return TUISnapshotResult{}, ErrPrecondition(errNoTUIFrame)
+		return TUISnapshotResult{}, ErrPrecondition(ErrNoTUIFrame)
 	}
 	s.mu.RLock()
 	raw, w, h, ok := s.raw, s.width, s.height, s.ok
 	render := s.RenderImage
 	s.mu.RUnlock()
 	if !ok {
-		return TUISnapshotResult{}, ErrPrecondition(errNoTUIFrame)
+		return TUISnapshotResult{}, ErrPrecondition(ErrNoTUIFrame)
 	}
 	out := NormalizeTUIFrame(raw, w, h)
 	if req.IncludeImage {
@@ -136,69 +135,4 @@ func boundTUIFrameText(s string) (string, bool) {
 		s += "... (truncated)"
 	}
 	return s, truncated
-}
-
-type tuiSnapshotTool struct{}
-
-// NewTUISnapshot returns the headless TUI frame capture tool.
-func NewTUISnapshot() Tool { return tuiSnapshotTool{} }
-
-func (tuiSnapshotTool) Name() string { return "tui_snapshot" }
-
-func (tuiSnapshotTool) Contract() Contract {
-	return staticContract(SideEffectNone, IdempotencySafeRetry)
-}
-
-func (tuiSnapshotTool) Description() string {
-	return `Capture the current TUI frame as bounded, redacted text.
-
-- Returns an ANSI-stripped dump of the last painted Bubble Tea frame.
-- Text works without multimodal. Optional include_image asks for an
-  addressable image ref (never embeds the image payload).
-- Fails when no frame is available (headless/non-TUI session).
-- Output is size-bounded and redacted like other session exports.`
-}
-
-func (tuiSnapshotTool) Schema() json.RawMessage {
-	return json.RawMessage(`{
-		"type": "object",
-		"properties": {
-			"include_image": {
-				"type": "boolean",
-				"description": "Request an optional addressable image ref when the host can render one. Text is always returned."
-			}
-		},
-		"additionalProperties": false
-	}`)
-}
-
-func (tuiSnapshotTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) (Result, error) {
-	var req TUISnapshotRequest
-	if len(args) > 0 && string(args) != "null" && string(args) != "{}" {
-		if err := json.Unmarshal(args, &req); err != nil {
-			return Result{}, fmt.Errorf("invalid arguments: %w", err)
-		}
-	}
-	if err := tc.Ask(ctx, AskRequest{Permission: "tui_snapshot", Patterns: []string{"*"}, Always: []string{"*"}}); err != nil {
-		return Result{}, err
-	}
-	if tc.TUISnapshot == nil {
-		return Result{}, ErrPrecondition(errNoTUIFrame)
-	}
-	res, err := tc.TUISnapshot(ctx, req)
-	if err != nil {
-		return Result{}, err
-	}
-	out, err := json.Marshal(res)
-	if err != nil {
-		return Result{}, err
-	}
-	title := "tui_snapshot"
-	if res.Truncated {
-		title += " truncated"
-	}
-	if res.ImageRef != "" {
-		title += " +image"
-	}
-	return Result{Title: title, Output: string(out)}, nil
 }

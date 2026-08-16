@@ -1,10 +1,11 @@
-package tool
+package tools
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/jonathanung/strike-cli/internal/tool"
 	"strings"
 	"time"
 
@@ -19,9 +20,6 @@ type ArtifactStore interface {
 	List(actorSession, actorRoot string, filter artifact.ListFilter) ([]artifact.Meta, error)
 	Update(id, actorSession, actorRoot string, expectedVersion int, in artifact.UpdateInput) (artifact.Artifact, error)
 }
-
-// ArtifactNotify is optional engine callback after create/update (protocol event).
-type ArtifactNotify func(op string, a artifact.Artifact)
 
 // artifactView is the tool/JSON projection (id+version for handoff refs).
 type artifactView struct {
@@ -92,7 +90,7 @@ func toArtifactMetaView(m artifact.Meta) artifactMetaView {
 	}
 }
 
-func artifactActor(tc *Context) (sessionID, rootID string, err error) {
+func artifactActor(tc *tool.Context) (sessionID, rootID string, err error) {
 	if tc == nil {
 		return "", "", errors.New("artifact: tool context is required")
 	}
@@ -107,29 +105,29 @@ func artifactActor(tc *Context) (sessionID, rootID string, err error) {
 	return sessionID, rootID, nil
 }
 
-func artifactResultJSON(v any, title string) (Result, error) {
+func artifactResultJSON(v any, title string) (tool.Result, error) {
 	out, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
-		return Result{}, err
+		return tool.Result{}, err
 	}
 	meta, _ := json.Marshal(v)
-	return Result{Title: title, Output: string(out), Metadata: meta}, nil
+	return tool.Result{Title: title, Output: string(out), Metadata: meta}, nil
 }
 
-func artifactSoftError(title, msg string, extra map[string]any) (Result, error) {
+func artifactSoftError(title, msg string, extra map[string]any) (tool.Result, error) {
 	payload := map[string]any{"error": msg}
 	for k, v := range extra {
 		payload[k] = v
 	}
 	out, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
-		return Result{}, err
+		return tool.Result{}, err
 	}
 	meta, _ := json.Marshal(payload)
-	return Result{Title: title, Output: string(out), Metadata: meta}, nil
+	return tool.Result{Title: title, Output: string(out), Metadata: meta}, nil
 }
 
-func artifactConflictResult(store ArtifactStore, id, session, root string, cause error) (Result, error) {
+func artifactConflictResult(store ArtifactStore, id, session, root string, cause error) (tool.Result, error) {
 	cur, ok, err := store.Get(id, session, root)
 	if err != nil {
 		if errors.Is(err, artifact.ErrDenied) {
@@ -139,7 +137,7 @@ func artifactConflictResult(store ArtifactStore, id, session, root string, cause
 				"denied":   true,
 			})
 		}
-		return Result{}, err
+		return tool.Result{}, err
 	}
 	if !ok {
 		return artifactSoftError("artifact conflict", cause.Error(), map[string]any{
@@ -161,7 +159,7 @@ func shortArtifactID(id string) string {
 	return id[:8]
 }
 
-func notifyArtifact(tc *Context, op string, a artifact.Artifact) {
+func notifyArtifact(tc *tool.Context, op string, a artifact.Artifact) {
 	if tc != nil && tc.NotifyArtifact != nil {
 		tc.NotifyArtifact(op, a)
 	}
@@ -174,14 +172,14 @@ type artifactWriteTool struct {
 }
 
 // NewArtifactWrite builds the artifact_write tool. store must be non-nil.
-func NewArtifactWrite(store ArtifactStore) Tool {
+func NewArtifactWrite(store ArtifactStore) tool.Tool {
 	return &artifactWriteTool{store: store}
 }
 
 func (t *artifactWriteTool) Name() string { return "artifact_write" }
 
-func (t *artifactWriteTool) Contract() Contract {
-	return staticContract(SideEffectExternal, IdempotencyConditional)
+func (t *artifactWriteTool) Contract() tool.Contract {
+	return tool.StaticContract(tool.SideEffectExternal, tool.IdempotencyConditional)
 }
 
 func (t *artifactWriteTool) Description() string {
@@ -246,9 +244,9 @@ func (t *artifactWriteTool) Schema() json.RawMessage {
 	}`)
 }
 
-func (t *artifactWriteTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) (Result, error) {
+func (t *artifactWriteTool) Execute(ctx context.Context, args json.RawMessage, tc *tool.Context) (tool.Result, error) {
 	if t.store == nil {
-		return Result{}, errors.New("artifact store is unavailable")
+		return tool.Result{}, errors.New("artifact store is unavailable")
 	}
 	var in struct {
 		Action          string  `json:"action"`
@@ -262,12 +260,12 @@ func (t *artifactWriteTool) Execute(ctx context.Context, args json.RawMessage, t
 		TTLSeconds      *int    `json:"ttl_seconds"`
 	}
 	if err := json.Unmarshal(args, &in); err != nil {
-		return Result{}, fmt.Errorf("invalid arguments: %w", err)
+		return tool.Result{}, fmt.Errorf("invalid arguments: %w", err)
 	}
 	action := strings.ToLower(strings.TrimSpace(in.Action))
 	sessionID, rootID, err := artifactActor(tc)
 	if err != nil {
-		return Result{}, err
+		return tool.Result{}, err
 	}
 
 	pattern := action
@@ -276,12 +274,12 @@ func (t *artifactWriteTool) Execute(ctx context.Context, args json.RawMessage, t
 	} else if typ := strings.TrimSpace(in.Type); typ != "" {
 		pattern = typ
 	}
-	if err := tc.Ask(ctx, AskRequest{
+	if err := tc.Ask(ctx, tool.AskRequest{
 		Permission: "artifact_write",
 		Patterns:   []string{pattern},
 		Always:     []string{"*"},
 	}); err != nil {
-		return Result{}, err
+		return tool.Result{}, err
 	}
 
 	accessStr := ""
@@ -294,17 +292,17 @@ func (t *artifactWriteTool) Execute(ctx context.Context, args json.RawMessage, t
 	case "update":
 		return t.update(in.ID, in.ExpectedVersion, in.Title, in.Content, in.Access, in.TTLSeconds, sessionID, rootID, tc)
 	default:
-		return Result{}, fmt.Errorf("action must be create or update, got %q", in.Action)
+		return tool.Result{}, fmt.Errorf("action must be create or update, got %q", in.Action)
 	}
 }
 
-func (t *artifactWriteTool) create(typ string, title, content *string, scope, access string, ttlSec *int, sessionID, rootID string, tc *Context) (Result, error) {
+func (t *artifactWriteTool) create(typ string, title, content *string, scope, access string, ttlSec *int, sessionID, rootID string, tc *tool.Context) (tool.Result, error) {
 	typ = strings.TrimSpace(typ)
 	if typ == "" {
-		return Result{}, errors.New("type is required for create")
+		return tool.Result{}, errors.New("type is required for create")
 	}
 	if content == nil {
-		return Result{}, errors.New("content is required for create")
+		return tool.Result{}, errors.New("content is required for create")
 	}
 	var titleStr string
 	if title != nil {
@@ -328,22 +326,22 @@ func (t *artifactWriteTool) create(typ string, title, content *string, scope, ac
 		if errors.Is(err, artifact.ErrDenied) {
 			return artifactSoftError("artifact denied", err.Error(), nil)
 		}
-		return Result{}, err
+		return tool.Result{}, err
 	}
 	notifyArtifact(tc, "create", a)
 	return artifactResultJSON(toArtifactView(a), fmt.Sprintf("artifact %s %s v%d", a.Type, shortArtifactID(a.ID), a.Version))
 }
 
-func (t *artifactWriteTool) update(id string, expected *int, title, content, access *string, ttlSec *int, sessionID, rootID string, tc *Context) (Result, error) {
+func (t *artifactWriteTool) update(id string, expected *int, title, content, access *string, ttlSec *int, sessionID, rootID string, tc *tool.Context) (tool.Result, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
-		return Result{}, errors.New("id is required for update")
+		return tool.Result{}, errors.New("id is required for update")
 	}
 	if expected == nil {
-		return Result{}, errors.New("expected_version is required for update")
+		return tool.Result{}, errors.New("expected_version is required for update")
 	}
 	if title == nil && content == nil && access == nil && ttlSec == nil {
-		return Result{}, errors.New("update requires title, content, access, and/or ttl_seconds")
+		return tool.Result{}, errors.New("update requires title, content, access, and/or ttl_seconds")
 	}
 	up := artifact.UpdateInput{
 		Title:   title,
@@ -362,7 +360,7 @@ func (t *artifactWriteTool) update(id string, expected *int, title, content, acc
 		if errors.Is(err, artifact.ErrDenied) || errors.Is(err, artifact.ErrNotFound) || errors.Is(err, artifact.ErrExpired) {
 			return artifactSoftError("artifact update failed", err.Error(), map[string]any{"id": id})
 		}
-		return Result{}, err
+		return tool.Result{}, err
 	}
 	notifyArtifact(tc, "update", a)
 	return artifactResultJSON(toArtifactView(a), fmt.Sprintf("artifact %s %s v%d", a.Type, shortArtifactID(a.ID), a.Version))
@@ -375,14 +373,14 @@ type artifactReadTool struct {
 }
 
 // NewArtifactRead builds the artifact_read tool. store must be non-nil.
-func NewArtifactRead(store ArtifactStore) Tool {
+func NewArtifactRead(store ArtifactStore) tool.Tool {
 	return &artifactReadTool{store: store}
 }
 
 func (t *artifactReadTool) Name() string { return "artifact_read" }
 
-func (t *artifactReadTool) Contract() Contract {
-	return staticContract(SideEffectRead, IdempotencySafeRetry)
+func (t *artifactReadTool) Contract() tool.Contract {
+	return tool.StaticContract(tool.SideEffectRead, tool.IdempotencySafeRetry)
 }
 
 func (t *artifactReadTool) Description() string {
@@ -422,9 +420,9 @@ func (t *artifactReadTool) Schema() json.RawMessage {
 	}`)
 }
 
-func (t *artifactReadTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) (Result, error) {
+func (t *artifactReadTool) Execute(ctx context.Context, args json.RawMessage, tc *tool.Context) (tool.Result, error) {
 	if t.store == nil {
-		return Result{}, errors.New("artifact store is unavailable")
+		return tool.Result{}, errors.New("artifact store is unavailable")
 	}
 	var in struct {
 		ID        string `json:"id"`
@@ -435,12 +433,12 @@ func (t *artifactReadTool) Execute(ctx context.Context, args json.RawMessage, tc
 	}
 	if len(args) > 0 && string(args) != "null" {
 		if err := json.Unmarshal(args, &in); err != nil {
-			return Result{}, fmt.Errorf("invalid arguments: %w", err)
+			return tool.Result{}, fmt.Errorf("invalid arguments: %w", err)
 		}
 	}
 	sessionID, rootID, err := artifactActor(tc)
 	if err != nil {
-		return Result{}, err
+		return tool.Result{}, err
 	}
 
 	pattern := "*"
@@ -449,12 +447,12 @@ func (t *artifactReadTool) Execute(ctx context.Context, args json.RawMessage, tc
 	} else if typ := strings.TrimSpace(in.Type); typ != "" {
 		pattern = "type:" + typ
 	}
-	if err := tc.Ask(ctx, AskRequest{
+	if err := tc.Ask(ctx, tool.AskRequest{
 		Permission: "artifact_read",
 		Patterns:   []string{pattern},
 		Always:     []string{"*"},
 	}); err != nil {
-		return Result{}, err
+		return tool.Result{}, err
 	}
 
 	id := strings.TrimSpace(in.ID)
@@ -472,14 +470,14 @@ func (t *artifactReadTool) Execute(ctx context.Context, args json.RawMessage, tc
 			if errors.Is(err, artifact.ErrDenied) {
 				return artifactSoftError("artifact denied", err.Error(), map[string]any{"id": id})
 			}
-			return Result{}, err
+			return tool.Result{}, err
 		}
 		if !ok {
 			msg := fmt.Sprintf("no artifact %q", id)
 			if in.Version > 0 {
 				msg = fmt.Sprintf("no artifact %q at version %d", id, in.Version)
 			}
-			return Result{Title: "artifact miss", Output: msg}, nil
+			return tool.Result{Title: "artifact miss", Output: msg}, nil
 		}
 		return artifactResultJSON(toArtifactView(a), fmt.Sprintf("artifact %s %s v%d", a.Type, shortArtifactID(a.ID), a.Version))
 	}
@@ -490,7 +488,7 @@ func (t *artifactReadTool) Execute(ctx context.Context, args json.RawMessage, tc
 		SessionID: strings.TrimSpace(in.SessionID),
 	})
 	if err != nil {
-		return Result{}, err
+		return tool.Result{}, err
 	}
 	views := make([]artifactMetaView, 0, len(list))
 	for _, m := range list {

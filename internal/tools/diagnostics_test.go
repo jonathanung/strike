@@ -1,9 +1,10 @@
-package tool
+package tools
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/jonathanung/strike-cli/internal/tool"
 	"os"
 	"path/filepath"
 	"strings"
@@ -38,7 +39,7 @@ func (f *fakeDiagSrc) Statuses() []lsp.Status {
 	return append([]lsp.Status(nil), f.statuses...)
 }
 
-func parseDiagPayload(t *testing.T, res Result) diagnosticsPayload {
+func parseDiagPayload(t *testing.T, res tool.Result) diagnosticsPayload {
 	t.Helper()
 	var p diagnosticsPayload
 	if err := json.Unmarshal([]byte(res.Output), &p); err != nil {
@@ -347,7 +348,7 @@ func TestDiagnosticsPathValidation(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected workspace escape")
 	}
-	var esc *WorkspaceEscapeError
+	var esc *tool.WorkspaceEscapeError
 	if !errors.As(err, &esc) {
 		t.Fatalf("want WorkspaceEscapeError, got %T %v", err, err)
 	}
@@ -360,9 +361,9 @@ func TestDiagnosticsPathValidation(t *testing.T) {
 
 func TestDiagnosticsPermissionDenied(t *testing.T) {
 	dir := t.TempDir()
-	tc := &Context{
+	tc := &tool.Context{
 		WorkDir: dir,
-		Ask: func(context.Context, AskRequest) error {
+		Ask: func(context.Context, tool.AskRequest) error {
 			return errors.New("denied")
 		},
 	}
@@ -374,26 +375,26 @@ func TestDiagnosticsPermissionDenied(t *testing.T) {
 
 func TestDiagnosticsContractAndDeferred(t *testing.T) {
 	tl := NewDiagnostics(nil)
-	c := LookupContract(tl)
+	c := tool.LookupContract(tl)
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if c.SideEffect != SideEffectRead || c.Idempotency != IdempotencySafeRetry {
+	if c.SideEffect != tool.SideEffectRead || c.Idempotency != tool.IdempotencySafeRetry {
 		t.Fatalf("contract = %+v", c)
 	}
-	if !IsDeferredTool("diagnostics") || IsCoreTool("diagnostics") {
+	if !tool.IsDeferredTool("diagnostics") || tool.IsCoreTool("diagnostics") {
 		t.Fatal("diagnostics should be deferred non-core")
 	}
 
-	reg := NewRegistry(NewRead(), NewDiagnostics(nil), NewDefinition(nil))
-	reg.Register(NewToolSearch(reg))
+	reg := tool.NewRegistry(tool.NewRead(), NewDiagnostics(nil), NewDefinition(nil))
+	reg.Register(tool.NewToolSearch(reg))
 	reg.SetDeferLoading(true)
 	names := schemaNameSet(reg.SchemasForProvider())
 	if names["diagnostics"] {
 		t.Fatal("diagnostics should be deferred from provider schemas")
 	}
 
-	res, err := NewToolSearch(reg).Execute(context.Background(), mustJSON(t, map[string]any{
+	res, err := tool.NewToolSearch(reg).Execute(context.Background(), mustJSON(t, map[string]any{
 		"query": "diagnostics",
 	}), allowAll(t.TempDir()))
 	if err != nil {
