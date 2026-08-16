@@ -53,8 +53,8 @@ TUI rendered from (see `pkg/protocol/codec.go`).
 | `internal/server` | `strike serve` web cockpit (REST/SSE/WS, attach + live mutations, embedded React UI) | `session`, `host`, `engine`, `version`, `protocol`, embedded `static/` |
 | `internal/version` | Build-time Version/Commit stamped via `-ldflags` | stdlib |
 | `internal/update` | GitHub Releases self-update (check, download, sha256, atomic replace, re-exec) | `version`, stdlib, net/http |
-| `pkg/protocol` | **Public** Op/Event wire schema between engine and frontends; JSONL envelopes (`codec.go` / `op_codec.go`) are the session persistence + transport format (includes harness/verification events and `scheduler.queued` / `admitted` / `canceled`). Semver via `Version`; unknown event types decode as `UnknownEvent` (forward-compat). Consumer contract: [protocol.md](protocol.md) | stdlib only |
-| `pkg/redact` | **Public** shared credential-shaped string scrubbing (`String`, `ScrubToolOutput`, `JSON`, `Error`, `Findings`) for exports, inspect, timeline traces, diagnostic bundles, engine tool I/O, and write-time content guards (#890) | stdlib only |
+| `pkg/protocol` | **Public** Op/Event wire schema between engine and frontends; JSONL envelopes (`codec.go` / `op_codec.go`) are the session persistence + transport format (includes harness/verification events and `scheduler.queued` / `admitted` / `canceled`). Semver via `Version`; unknown event types decode as `UnknownEvent` (forward-compat). Consumer contract: [protocol.md](protocol.md). Own `go.mod` (`github.com/jonathanung/strike-cli/pkg/protocol`); listed in root `go.work` | stdlib only |
+| `pkg/redact` | **Public** shared credential-shaped string scrubbing (`String`, `ScrubToolOutput`, `JSON`, `Error`, `Findings`) for exports, inspect, timeline traces, diagnostic bundles, engine tool I/O, and write-time content guards (#890). Own `go.mod` (`github.com/jonathanung/strike-cli/pkg/redact`); listed in root `go.work` | stdlib only |
 | `pkg/timeline` | **Public** structured run timeline builder + versioned redacted JSON/JSONL export derived from protocol events (complements session JSONL and #774 roster/budget; not a second transcript). Storage bounds (#810): preview caps, optional content-addressed blob spill (`blob:sha256:` refs, no fsync), in-memory entry prune, Observe latency metrics, dir retention helpers for traces trees | `pkg/protocol`, `pkg/redact`, stdlib |
 | `pkg/telemetry` | Versioned security/harness telemetry families (registry + redacted export records); drift-checked vs `schemas/telemetry/v1` | stdlib, `pkg/redact` |
 | `pkg/diag` | **Public** prompt/config diagnostic bundle builder + versioned redacted JSON export (layer map, effective dials, digests; complements `/context` and timeline) | `pkg/protocol`, `pkg/redact`, stdlib |
@@ -116,8 +116,8 @@ Verbatim from the refactor spec (`.plan/refactor-agents-ui.md`):
   `tui/...`. (`pkg/protocol`, `pkg/redact` are also allowed — not under
   `internal/`.)
 - No backend package imports `internal/tui/...`.
-- `pkg/protocol`: stdlib only (public wire surface).
-- `pkg/redact`: stdlib only (public scrubbing helper).
+- `pkg/protocol`: stdlib only (public wire surface). Own workspace module.
+- `pkg/redact`: stdlib only (public scrubbing helper). Own workspace module.
 - `pkg/timeline`: stdlib + `pkg/protocol` + `pkg/redact` only.
 - `pkg/diag`: stdlib + `pkg/protocol` + `pkg/redact` only.
 - `pkg/sdk`: stdlib + `pkg/protocol` only (public client over the wire schema).
@@ -127,6 +127,12 @@ These are enforced mechanically, not just by convention: `internal/tui/boundary_
 with `go/parser` and fails, naming the offending file and import, on any
 violation. Run it like any other test (`go test ./internal/tui/...`); there
 is no way to silently cross the boundary.
+
+`pkg/protocol` and `pkg/redact` are separate Go modules (root `go.work` plus
+root `go.mod` `require`/`replace`) so a future harness module can import them
+without a cycle through the root module. They are not git submodules and are
+not published. `pkg/sdk`, `pkg/timeline`, `pkg/diag`, and `pkg/telemetry`
+stay in the root module. `GOWORK=off` still builds via the replace directives.
 
 ## Cancellation, deadlines, and backpressure
 
