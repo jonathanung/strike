@@ -1081,6 +1081,7 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 				}
 			},
 			CollectDiagnostics: e.opts.CollectDiagnostics,
+			TUISnapshot:        e.opts.TUISnapshot,
 			Ask: func(ctx context.Context, req tool.AskRequest) error {
 				return e.perms.AskWithCorrelation(ctx, req, corr)
 			},

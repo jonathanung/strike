@@ -163,6 +163,9 @@ func TestBuildGuidanceTaskStatusPreferred(t *testing.T) {
 	if !strings.Contains(text, "progressive `task`") {
 		t.Fatalf("task guidance should recommend progressive task:\n%s", text)
 	}
+	if !strings.Contains(text, "pass `name`") {
+		t.Fatalf("task guidance should tell models to name from the task:\n%s", text)
+	}
 	if !strings.Contains(text, "compatibility shims") {
 		t.Fatalf("expected compat shim note:\n%s", text)
 	}

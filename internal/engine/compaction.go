@@ -236,6 +236,7 @@ func (e *Engine) applyCompaction(ctx context.Context, reason string, corr protoc
 		summary,
 		sortedKindKeys(e.pinnedKinds),
 		e.collectActiveLedgerEntries(),
+		e.opts.WorkDir,
 	)
 	// Ledger layer still composes after compact unless user-excluded; omit
 	// ledger-sourced rows from the marker to avoid double-injecting them.

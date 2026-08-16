@@ -41,7 +41,7 @@ var taskAdvancedActions = map[string]struct{}{
 
 // taskAdvancedArgKeys are create/control fields only present on the advanced schema.
 var taskAdvancedArgKeys = []string{
-	"name", "agent", "model", "effort", "route", "specialty", "capabilities",
+	"agent", "model", "effort", "route", "specialty", "capabilities",
 	"max_cost_class", "models", "max_concurrent", "criteria", "deps", "subscribe",
 	"assignee", "verify", "budget", "force_delegate", "context_bundle",
 	"offset", "limit", "last", "include_tools", "include_reasoning",

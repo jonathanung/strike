@@ -143,6 +143,10 @@ func (s *Store) Append(in AppendInput) (Entry, error) {
 	if err != nil {
 		return Entry{}, err
 	}
+	pins, err := normalizePins(in.EvidencePins)
+	if err != nil {
+		return Entry{}, err
+	}
 	paths, err := normalizePaths(in.ScopePaths)
 	if err != nil {
 		return Entry{}, err
@@ -185,6 +189,7 @@ func (s *Store) Append(in AppendInput) (Entry, error) {
 		Statement:     statement,
 		Confidence:    conf,
 		EvidenceRefs:  evidence,
+		EvidencePins:  pins,
 		Status:        StatusActive,
 		ScopePaths:    paths,
 		ScopeTaskIDs:  tasks,
@@ -338,6 +343,41 @@ func (s *Store) Supersede(priorID string, in AppendInput) (Entry, error) {
 		return Entry{}, ErrNotFound
 	}
 	return s.Append(in)
+}
+
+// Revalidate replaces evidence pins on an active entry without changing status.
+// Use after the agent re-checks repository evidence. History is preserved.
+func (s *Store) Revalidate(id string, pins []EvidencePin) (Entry, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return Entry{}, ErrNotFound
+	}
+	normalized, err := normalizePins(pins)
+	if err != nil {
+		return Entry{}, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return Entry{}, errClosed
+	}
+	cur, ok := s.entries[id]
+	if !ok {
+		return Entry{}, ErrNotFound
+	}
+	if cur.Status != StatusActive {
+		return Entry{}, errNotActive
+	}
+	old := cur
+	cur.EvidencePins = normalized
+	cur.UpdatedAt = s.clock()
+	s.entries[id] = cur
+	if err := s.persistLocked(); err != nil {
+		s.entries[id] = old
+		return Entry{}, err
+	}
+	return Clone(cur), nil
 }
 
 func (s *Store) clock() time.Time {

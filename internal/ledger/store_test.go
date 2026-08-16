@@ -335,7 +335,7 @@ func TestAutoLoadLayer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	text, omitted, err := AutoLoadLayer(s, "pkg/m/x.go", "")
+	text, omitted, err := AutoLoadLayer(s, "pkg/m/x.go", "", "")
 	if err != nil || omitted != 0 {
 		t.Fatalf("autoload err=%v omitted=%d", err, omitted)
 	}
@@ -348,7 +348,7 @@ func TestAutoLoadLayer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	text2, _, err := AutoLoadLayer(s, "", "")
+	text2, _, err := AutoLoadLayer(s, "", "", "")
 	if err != nil || text2 != "" {
 		t.Fatalf("after invalidate layer=%q err=%v", text2, err)
 	}
