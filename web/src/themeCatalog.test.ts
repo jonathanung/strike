@@ -11,20 +11,11 @@ import {
   themeProvenance,
   type ThemeColors,
 } from "./themeCatalog";
+import { STOCK_TOKENS } from "./stockTokens";
 
-const stockDark: ThemeColors = {
-  text: { light: "#1a1528", dark: "#f3f1fa" },
-  textMuted: { light: "#5c586e", dark: "#9b99b0" },
-  accent: { light: "#5b21b6", dark: "#7c3aed" },
-  background: { light: "#ffffff", dark: "#14131c" },
-  surface: { light: "#f3eef9", dark: "#232230" },
-  border: { light: "#c4bfd4", dark: "#4f4d63" },
-  borderFocus: { light: "#5b21b6", dark: "#7c3aed" },
-  success: { light: "#15803d", dark: "#4ade80" },
-  warning: { light: "#b45309", dark: "#fbbf24" },
-  error: { light: "#e11d48", dark: "#fb7185" },
-  danger: { light: "#ea580c", dark: "#fb923c" },
-};
+const stockDark: ThemeColors = Object.fromEntries(
+  Object.entries(STOCK_TOKENS.roles).map(([role, pair]) => [role, { light: pair.light, dark: pair.dark }]),
+) as ThemeColors;
 
 afterEach(() => {
   clearThemeColors();
