@@ -523,7 +523,7 @@ func labelNondeterministic(events []protocol.Event) []Marker {
 
 func toolNondeterminism(name string) (kind, reason string) {
 	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "webfetch", "web_fetch", "websearch", "web_search":
+	case "webfetch", "web_fetch", "websearch", "web_search", "browser":
 		return MarkerNetwork, "tool:" + name
 	case "sleep":
 		return MarkerClock, "tool:" + name

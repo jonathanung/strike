@@ -88,20 +88,20 @@ treats them as user/system intent (classic indirect prompt injection).
 **What Strike does:** SSRF blocks for private/loopback/link-local/metadata
 addresses (including redirects and DNS rebinding at dial). Optional
 `network.allow` further restricts public hosts. Permission can deny
-`webfetch` / `websearch`. Output is truncated for tokens, not for trust.
+`webfetch` / `websearch` / `browser`. Output is truncated for tokens, not for trust.
 
 **What Strike does not do:** render-strip scripts in a way that removes
 natural-language injection; sandbox the fetch the way bash is sandboxed;
 treat fetched markdown as a trusted system prompt.
 
-Prefer `webfetch` over `curl` in bash so SSRF and allowlist checks apply.
+Prefer `webfetch` or `browser` over `curl` in bash so SSRF and allowlist checks apply.
 Fetched content is still untrusted.
 
 ## Operator posture
 
 - Keep `sandbox` at `workspace-write` (or `read-only`). `yolo` + `sandbox: off`
   requires `--i-know` and removes both prompts and OS isolation.
-- Use deny rules for tools the session must not have (`mcp`, `webfetch`,
+- Use deny rules for tools the session must not have (`mcp`, `webfetch`, `browser`,
   `bash` forms), not as an injection scanner.
 - Review MCP servers and `network.allow` the same way you review shell
   access.

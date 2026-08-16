@@ -15,7 +15,8 @@ var evalIsolationConfig = []byte(`{
   "network": {"allow": ["127.0.0.1"]},
   "permissions": [
     {"permission": "webfetch", "pattern": "*", "action": "deny"},
-    {"permission": "websearch", "pattern": "*", "action": "deny"}
+    {"permission": "websearch", "pattern": "*", "action": "deny"},
+    {"permission": "browser", "pattern": "*", "action": "deny"}
   ]
 }
 `)
