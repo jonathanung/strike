@@ -283,12 +283,13 @@ func (m *Model) openSessionView(id string) tea.Cmd {
 		cells           []cell
 		tools           map[string]*toolCell
 		title, parentID string
+		provider, model string
 		err             error
 	)
 	if live {
-		cells, tools, title, parentID, err = loadSessionTranscriptLive(m.services.Sessions, id)
+		cells, tools, title, parentID, provider, model, err = loadSessionTranscriptLive(m.services.Sessions, id)
 	} else {
-		cells, tools, title, parentID, err = loadSessionTranscript(m.services.Sessions, id)
+		cells, tools, title, parentID, provider, model, err = loadSessionTranscript(m.services.Sessions, id)
 	}
 	if err != nil {
 		m.setNotice("subagent transcript: "+err.Error(), true)
@@ -314,8 +315,8 @@ func (m *Model) openSessionView(id string) tea.Cmd {
 	m.viewTitle = title
 	m.viewCells = cells
 	m.viewToolByID = tools
-	if p, model := sessionModelFromJSONL(m.services.Sessions, id); p != "" || model != "" {
-		m.setChildActivityModel(id, p, model)
+	if provider != "" || model != "" {
+		m.setChildActivityModel(id, provider, model)
 	}
 	m.selectedCell = -1
 	m.selectedFileRef = -1
@@ -370,12 +371,13 @@ func (m *Model) refreshViewingTranscript() tea.Cmd {
 		cells           []cell
 		tools           map[string]*toolCell
 		title, parentID string
+		provider, model string
 		err             error
 	)
 	if live {
-		cells, tools, title, parentID, err = loadSessionTranscriptLive(m.services.Sessions, id)
+		cells, tools, title, parentID, provider, model, err = loadSessionTranscriptLive(m.services.Sessions, id)
 	} else {
-		cells, tools, title, parentID, err = loadSessionTranscript(m.services.Sessions, id)
+		cells, tools, title, parentID, provider, model, err = loadSessionTranscript(m.services.Sessions, id)
 	}
 	if err != nil {
 		// Keep prior cells on transient read/decode errors; keep polling while live.
@@ -395,8 +397,8 @@ func (m *Model) refreshViewingTranscript() tea.Cmd {
 	}
 	m.viewCells = cells
 	m.viewToolByID = tools
-	if p, model := sessionModelFromJSONL(m.services.Sessions, id); p != "" || model != "" {
-		m.setChildActivityModel(id, p, model)
+	if provider != "" || model != "" {
+		m.setChildActivityModel(id, provider, model)
 	}
 	m.refreshViewport()
 	if live {
@@ -466,24 +468,24 @@ func lastModelSelected(events []protocol.Event) (provider, model string) {
 	return provider, model
 }
 
-func loadSessionTranscript(sessions host.Sessions, id string) (cells []cell, tools map[string]*toolCell, title, parentID string, err error) {
+func loadSessionTranscript(sessions host.Sessions, id string) (cells []cell, tools map[string]*toolCell, title, parentID, provider, model string, err error) {
 	return loadSessionTranscriptOpts(sessions, id, false)
 }
 
 // loadSessionTranscriptLive rebuilds a still-running child transcript without
 // force-completing the trailing assistant/explore stream (issue #692).
-func loadSessionTranscriptLive(sessions host.Sessions, id string) (cells []cell, tools map[string]*toolCell, title, parentID string, err error) {
+func loadSessionTranscriptLive(sessions host.Sessions, id string) (cells []cell, tools map[string]*toolCell, title, parentID, provider, model string, err error) {
 	return loadSessionTranscriptOpts(sessions, id, true)
 }
 
-func loadSessionTranscriptOpts(sessions host.Sessions, id string, live bool) (cells []cell, tools map[string]*toolCell, title, parentID string, err error) {
+func loadSessionTranscriptOpts(sessions host.Sessions, id string, live bool) (cells []cell, tools map[string]*toolCell, title, parentID, provider, model string, err error) {
 	data, err := sessions.ReplayJSONL(id)
 	if err != nil {
-		return nil, nil, "", "", err
+		return nil, nil, "", "", "", "", err
 	}
 	events, err := decodeSessionJSONL(data)
 	if err != nil {
-		return nil, nil, "", "", err
+		return nil, nil, "", "", "", "", err
 	}
 	if info, ok, gerr := sessions.Get(id); gerr == nil && ok {
 		parentID = info.ParentID
@@ -514,7 +516,8 @@ func loadSessionTranscriptOpts(sessions host.Sessions, id string, live bool) (ce
 			}
 		}
 	}
-	return cells, tools, title, parentID, nil
+	provider, model = lastModelSelected(events)
+	return cells, tools, title, parentID, provider, model, nil
 }
 
 // sessionLogSchemaVersion is the session JSONL header schema this TUI understands
