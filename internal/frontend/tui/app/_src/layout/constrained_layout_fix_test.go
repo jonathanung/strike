@@ -7,9 +7,9 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// TestConstrainedCompletionAndComposerViewsUseSoftChrome locks Family soft
-// chrome for height ≥ 3 (rounded outline). Replaces the old "no box-drawing"
-// assertion from the solid-default era.
+// TestConstrainedCompletionAndComposerViewsUseSoftChrome locks default
+// bordered chrome for height ≥ 3 (square outline). Replaces the old
+// "no box-drawing" assertion from the solid-default era.
 func TestConstrainedCompletionAndComposerViewsUseSoftChrome(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	m.setComposerValueAt("/", 1)
@@ -34,10 +34,10 @@ func TestConstrainedCompletionAndComposerViewsUseSoftChrome(t *testing.T) {
 				if rows := strings.Count(out, "\n") + 1; rows != tt.height {
 					t.Errorf("%s rows = %d, want allocated %d", name, rows, tt.height)
 				}
-				hasBox := strings.ContainsAny(plain, "╭╰│")
+				hasBox := strings.ContainsAny(plain, "╭╰┌└│")
 				if tt.chrome {
 					if !hasBox {
-						t.Errorf("%s missing soft rounded chrome: %q", name, plain)
+						t.Errorf("%s missing bordered chrome: %q", name, plain)
 					}
 					if name == "composer" && !strings.Contains(plain, "command") && !strings.Contains(plain, "chat") {
 						// Slash draft → command mode title (#678); bare drafts use chat.

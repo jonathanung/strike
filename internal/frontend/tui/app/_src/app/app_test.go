@@ -446,6 +446,8 @@ func TestModalVisuallyUnfocusesComposerAndSuppressesCompletionUntilClosed(t *tes
 
 	th.SurfaceMuted = fixedColor("#778899")
 
+	th.BorderFocus = fixedColor("#ccddee")
+
 	th.OverlayScrim = fixedColor("#99aabb")
 
 	m, ops := newAppTestModelWithOptions(Options{Theme: &th})
@@ -534,17 +536,17 @@ func TestModalVisuallyUnfocusesComposerAndSuppressesCompletionUntilClosed(t *tes
 
 	}
 
-	// Focus chrome is title SurfaceFocus + body Surface (no full-panel wash).
+	// Bordered focus chrome is BorderFocus outline (no title-edge wash).
 
-	if !strings.Contains(afterClose, rgbBGSGR("#445566")) {
+	if !strings.Contains(afterClose, rgbSGR("#ccddee")) {
 
-		t.Errorf("closed modal did not restore focused title SurfaceFocus:\n%s", afterClose)
+		t.Errorf("closed modal did not restore focused BorderFocus outline:\n%s", afterClose)
 
 	}
 
-	if !strings.Contains(afterClose, rgbBGSGR("#112233")) {
+	if strings.Contains(afterClose, rgbBGSGR("#445566")) {
 
-		t.Errorf("closed modal did not restore body Surface:\n%s", afterClose)
+		t.Errorf("closed modal restored SurfaceFocus wash on bordered chrome:\n%s", afterClose)
 
 	}
 
@@ -3052,6 +3054,14 @@ func compactAppPlainText(text string) string {
 		"╰", "",
 
 		"╯", "",
+
+		"┌", "",
+
+		"┐", "",
+
+		"└", "",
+
+		"┘", "",
 
 		"─", "",
 	).Replace(text)

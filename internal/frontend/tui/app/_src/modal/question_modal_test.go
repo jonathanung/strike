@@ -60,7 +60,7 @@ func TestQuestionModalWrapsLongOptionLabels(t *testing.T) {
 		th.BorderStyle.TopLeft, th.BorderStyle.TopRight,
 		th.BorderStyle.BottomLeft, th.BorderStyle.BottomRight,
 		th.BorderStyle.Horizontal, th.BorderStyle.Vertical,
-		"╭", "╮", "╰", "╯", "│", "─",
+		"╭", "╮", "╰", "╯", "┌", "┐", "└", "┘", "│", "─",
 	} {
 		if g != "" {
 			plain = strings.ReplaceAll(plain, g, " ")

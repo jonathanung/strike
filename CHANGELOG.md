@@ -14,6 +14,10 @@ materially affect the shipped product.
 
 ## [Unreleased]
 
+### Changed
+
+- **Default TUI chrome is sharp bordered** — stock panels use square `┌┐└┘` outlines (`ChromeBordered`) instead of Family soft-rounded cards. Royal-purple tokens are unchanged. **Upgrade note:** theme files that omit `chrome` now resolve to bordered; set `"chrome": "soft"` to restore rounded surface-filled tiles ([#1234](https://github.com/jonathanung/strike/issues/1234)).
+
 ## [v0.5.1] - 2026-08-16
 
 Patch release: new inspect/verify tools, content-addressed attachments, and

@@ -173,8 +173,8 @@ func TestDefaultPaletteRolesArePopulatedAndReadable(t *testing.T) {
 			t.Errorf("%s uses the same color for light and dark (%q); adaptive pairs should differ", name, c.Light)
 		}
 	}
-	if th.Chrome != ChromeSoft {
-		t.Errorf("default chrome = %v, want soft", th.Chrome)
+	if th.Chrome != ChromeBordered {
+		t.Errorf("default chrome = %v, want bordered", th.Chrome)
 	}
 }
 
@@ -301,8 +301,8 @@ func TestThemeResolveCompletesZeroAndPartialThemes(t *testing.T) {
 			t.Errorf("zero Theme Resolve left %s incomplete: %+v", name, role)
 		}
 	}
-	if resolved.Chrome != ChromeSoft {
-		t.Errorf("zero Theme Resolve chrome = %v, want soft", resolved.Chrome)
+	if resolved.Chrome != ChromeBordered {
+		t.Errorf("zero Theme Resolve chrome = %v, want bordered", resolved.Chrome)
 	}
 	if resolved.Background == nil {
 		t.Fatal("zero Theme Resolve left Background unset")
@@ -367,8 +367,8 @@ func TestThemeResolveBackgroundPreservesOnlyExplicitTransparency(t *testing.T) {
 }
 
 func TestThemeResolveChromeModes(t *testing.T) {
-	if got := (Theme{}).Resolve().Chrome; got != ChromeSoft {
-		t.Errorf("unset chrome = %v, want soft", got)
+	if got := (Theme{}).Resolve().Chrome; got != ChromeBordered {
+		t.Errorf("unset chrome = %v, want bordered", got)
 	}
 	if got := (Theme{Chrome: ChromeSoft}).Resolve().Chrome; got != ChromeSoft {
 		t.Errorf("soft chrome = %v", got)
@@ -378,6 +378,24 @@ func TestThemeResolveChromeModes(t *testing.T) {
 	}
 	if got := (Theme{Chrome: ChromeBordered}).Resolve().Chrome; got != ChromeBordered {
 		t.Errorf("bordered chrome = %v", got)
+	}
+}
+
+func TestResolveSoftChromeRemapsStockSquareGlyphs(t *testing.T) {
+	th := Default()
+	th.Chrome = ChromeSoft
+	got := th.Resolve()
+	if got.Chrome != ChromeSoft {
+		t.Fatalf("chrome = %v, want soft", got.Chrome)
+	}
+	if got.BorderStyle.TopLeft != "╭" || got.BorderStyle.BottomRight != "╯" {
+		t.Errorf("Default()+Soft corners = %+v, want rounded", got.BorderStyle)
+	}
+	custom := Theme{Chrome: ChromeSoft, BorderStyle: BorderStyle{
+		TopLeft: "+", TopRight: "+", BottomLeft: "+", BottomRight: "+", Horizontal: "=", Vertical: "!",
+	}}.Resolve()
+	if custom.BorderStyle.TopLeft != "+" || custom.BorderStyle.Horizontal != "=" {
+		t.Errorf("custom soft glyphs were remapped: %+v", custom.BorderStyle)
 	}
 }
 

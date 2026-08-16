@@ -1,7 +1,7 @@
 ⚡ strike /tmp/strike-golden   no model   host+sandbox                     ready
-╭─ context ────────────────────────────────────────────────────────────────────╮
+┌─ context ────────────────────────────────────────────────────────────────────┐
 │ supervised · 1 skills · default permissions · host+sandbox · /provider to c… │
-╰──────────────────────────────────────────────────────────────────────────────╯
+└──────────────────────────────────────────────────────────────────────────────┘
 
 
 
@@ -12,10 +12,10 @@
                                  ▔▔▔▔▔▔▔▔▔▔▔▔▔▔
 
                     ◦ / commands · ! shell · @ file mentions
-            ╭─ chat ❯ ─────────────────────────────────────────────╮
+            ┌─ chat ❯ ─────────────────────────────────────────────┐
             │ ❯ Ask anything…  (/ commands, ! shell)               │
             │ ❯                                                    │
-            ╰─ enter send · ctrl+j/shift+enter/alt+enter newline ──╯
+            └─ enter send · ctrl+j/shift+enter/alt+enter newline ──┘
 
 
 

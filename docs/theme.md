@@ -22,11 +22,11 @@ every semantic role has a light+dark hex, plus chrome defaults
 hexes and `web/src/styles.css` `:root` pairs must match that file — Go
 (`tokens_test.go`) and web (`web/src/theme.test.ts`) fail on drift.
 
-`theme.Default()` **chrome mode** is still `soft` until [#1234](https://github.com/jonathanung/strike/issues/1234)
-applies bordered chrome across TUI views. Do not treat current Default chrome
-as the visual north star. Web radius consumption is [#1235](https://github.com/jonathanung/strike/issues/1235).
+`theme.Default()` chrome is **bordered + square corners**, matching this file.
+Web radius consumption is [#1235](https://github.com/jonathanung/strike/issues/1235).
 Bundled named themes (nord, …) keep their own hexes — only stock Default /
-`:root` use this map.
+`:root` use this map. Theme files may set `chrome: "soft"` for Family rounded
+cards.
 
 ### Token → hex (light + dark)
 
@@ -114,9 +114,9 @@ Panels (transcript, composer, side panes, dialogs, bento cards) paint through
 
 | Value | Behavior |
 |---|---|
-| `soft` | Surface-filled body + rounded box outline (`╭╮╰╯`). Focus is `BorderFocus` outline + title-edge `SurfaceFocus` (no FocusBar). Degrades to plain text when width &lt; 6. **Still `theme.Default()` until #1234.** |
+| `soft` | Surface-filled body + rounded box outline (`╭╮╰╯`). Focus is `BorderFocus` outline + title-edge `SurfaceFocus` (no FocusBar). Degrades to plain text when width &lt; 6. Opt-in via `chrome: "soft"`. |
 | `solid` | Filled surfaces with title/footer bars. No box-drawing frame. Focus is title-edge `SurfaceFocus` + thin FocusBar. |
-| `bordered` | Classic light/heavy box-drawing borders (outline, minimal surface wash). **Token-file north star.** |
+| `bordered` | Classic light/heavy box-drawing borders (outline, square `┌┐└┘` light corners, minimal surface wash). **`theme.Default()` / token-file north star.** |
 
 JSON theme files:
 

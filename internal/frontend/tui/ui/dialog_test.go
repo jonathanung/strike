@@ -20,9 +20,9 @@ func TestDialogEmbedsTitleAndPlacesHintAtFoot(t *testing.T) {
 	if top := ansi.Strip(firstLine(out)); !strings.Contains(top, "Select provider") {
 		t.Errorf("title not embedded in top chrome: %q", top)
 	}
-	// Default chrome is soft: rounded corners on the title edge.
-	if top := ansi.Strip(firstLine(out)); !strings.HasPrefix(top, "╭") || !strings.HasSuffix(top, "╮") {
-		t.Errorf("default soft dialog missing rounded top: %q", firstLine(out))
+	// Default chrome is bordered: square corners on the title edge.
+	if top := ansi.Strip(firstLine(out)); !strings.HasPrefix(top, "┌") || !strings.HasSuffix(top, "┐") {
+		t.Errorf("default bordered dialog missing square top: %q", firstLine(out))
 	}
 	if !strings.Contains(out, "choose a provider") {
 		t.Error("dialog body missing")

@@ -17,7 +17,7 @@ import (
 )
 
 // TestFrameGolden captures full-screen plain-text frames as post-E13.8 baselines
-// (Charm v2 + Family soft-rounded bento). Structural layout regressions fail the
+// (Charm v2 + sharp bordered bento). Structural layout regressions fail the
 // suite; UPDATE_GOLDEN=1 rewrites the fixtures.
 //
 //	UPDATE_GOLDEN=1 go test ./internal/frontend/tui/app/ -run TestFrameGolden -count=1

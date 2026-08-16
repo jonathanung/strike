@@ -162,7 +162,7 @@ func TestCompactRightPaneIsBorderlessAndUsesFullBodyDimensionsAtThresholds(t *te
 				}
 			}
 			plain := strings.Join(rows, "\n")
-			if tt.borderless && (strings.ContainsAny(plain, "╭╰") || strings.Contains(plain, "context")) {
+			if tt.borderless && (strings.ContainsAny(plain, "╭╰┌└") || strings.Contains(plain, "context")) {
 				t.Errorf("compact right pane retained panel chrome: %q", plain)
 			}
 			if !tt.borderless && !strings.Contains(plain, "context") {
@@ -779,7 +779,7 @@ func TestStackedRightPaneCollapsesWhenCompact(t *testing.T) {
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 50, Height: 18})
 	// Session group active (context); compact must not paint the pair partner title chrome.
 	plain := ansi.Strip(viewString(m))
-	if strings.Contains(plain, "╭") {
+	if strings.ContainsAny(plain, "╭┌") {
 		t.Errorf("compact view retained panel chrome:\n%s", plain)
 	}
 	// Cycle still walks full focus order one pane at a time (ctrl+p = next, #1009).

@@ -40,10 +40,11 @@ type PanelOpts struct {
 	Tone Tone
 }
 
-// Panel is the framed tile primitive: soft rounded surface (default), solid
-// surface bars, or classic box-drawing border, with its title in the top chrome
-// and an optional hint in the bottom chrome. It is the building block for Dialog
-// and Card and for the app's transcript and composer regions.
+// Panel is the framed tile primitive: bordered square outline (default),
+// solid surface bars, or soft rounded surface-filled cards, with its title
+// in the top chrome and an optional hint in the bottom chrome. It is the
+// building block for Dialog and Card and for the app's transcript and
+// composer regions.
 //
 //	body := "streaming transcript…"
 //	out := ui.Panel(th, ui.PanelOpts{Title: "session", Width: 60, Focused: true}, body)
@@ -52,8 +53,8 @@ type PanelOpts struct {
 // PanelInnerWidth(th, Width) for the nicest result; Panel truncates any line
 // that is still too long.
 //
-// Focus chrome (soft): BorderFocus outline + title edge SurfaceFocus — no
-// FocusBar wash (outline alone carries focus). Solid still uses title edge
+// Focus chrome (bordered/soft): BorderFocus outline. Soft also paints a
+// title-edge SurfaceFocus — no FocusBar wash. Solid still uses title edge
 // SurfaceFocus plus a one-cell thin FocusBar glyph. Selection highlight is a
 // separate theme role (TextSelection).
 func Panel(th theme.Theme, opts PanelOpts, body string) string {

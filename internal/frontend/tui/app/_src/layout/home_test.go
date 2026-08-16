@@ -42,7 +42,8 @@ func TestHomeLayoutRendersCenteredPromptAndContextBar(t *testing.T) {
 		}
 	}
 	// Multi-pane session stack titles should not dominate the home screen.
-	if strings.Contains(plain, "╭─ activity") || strings.Contains(plain, "╭─ system") {
+	if strings.Contains(plain, "╭─ activity") || strings.Contains(plain, "╭─ system") ||
+		strings.Contains(plain, "┌─ activity") || strings.Contains(plain, "┌─ system") {
 		t.Errorf("home layout showed multi-pane stack chrome:\n%s", plain)
 	}
 	// Footer is composer-oriented (#679).
@@ -105,7 +106,8 @@ func TestHomeCtrlLOpensMultiPane(t *testing.T) {
 		t.Errorf("home footerHints missing focus-right: %+v", m.footerHints())
 	}
 	// Lean home has no right-pane stack chrome.
-	if strings.Contains(plainHome, "╭─ activity") || strings.Contains(plainHome, "╭─ system") {
+	if strings.Contains(plainHome, "╭─ activity") || strings.Contains(plainHome, "╭─ system") ||
+		strings.Contains(plainHome, "┌─ activity") || strings.Contains(plainHome, "┌─ system") {
 		t.Errorf("lean home showed multi-pane stack chrome:\n%s", plainHome)
 	}
 
@@ -320,8 +322,8 @@ func TestLeftFocusComposerBorderTokens(t *testing.T) {
 	if !strings.Contains(composer, rgbSGR("#778899")) {
 		t.Fatal("prompt box missing BorderFocus when left-focused")
 	}
-	if !strings.Contains(composer, rgbBGSGR("#445566")) {
-		t.Fatal("prompt box missing SurfaceFocus title edge when left-focused")
+	if strings.Contains(composer, rgbBGSGR("#445566")) {
+		t.Fatal("bordered prompt should not wash title edge with SurfaceFocus")
 	}
 }
 

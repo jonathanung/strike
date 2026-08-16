@@ -168,8 +168,8 @@ func TestLeftFocusHighlightsOnlyPromptNotWelcomeKeys(t *testing.T) {
 	if !strings.Contains(composer, rgbSGR("#778899")) {
 		t.Fatal("prompt box missing BorderFocus when left-focused")
 	}
-	if !strings.Contains(composer, rgbBGSGR("#445566")) {
-		t.Fatal("prompt box missing SurfaceFocus title edge when left-focused")
+	if strings.Contains(composer, rgbBGSGR("#445566")) {
+		t.Fatal("bordered prompt should not wash title edge with SurfaceFocus")
 	}
 }
 
@@ -200,8 +200,8 @@ func TestWelcomeDashboardUsesCustomThemeWithoutChangingContent(t *testing.T) {
 	if !strings.Contains(plainCustom, "A build") || !strings.Contains(plainCustom, "B") {
 		t.Errorf("custom glyph tokens are not observable:\n%s", custom)
 	}
-	if !strings.Contains(custom, rgbSGR("#010203")) || !strings.Contains(custom, rgbBGSGR("#040506")) {
-		t.Errorf("custom color tokens are not observable: %q", custom)
+	if !strings.Contains(custom, rgbSGR("#010203")) {
+		t.Errorf("custom accent token is not observable: %q", custom)
 	}
 	if defaultView == custom || lipgloss.Width(custom) != 100 {
 		t.Errorf("custom theme did not produce a distinct, width-safe welcome view")

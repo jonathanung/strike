@@ -541,7 +541,7 @@ func visualGlyphConstant(e ast.Expr, info *types.Info) bool {
 	// theme.BorderStyle. Exact matching avoids treating ordinary UI prose,
 	// OAuth URLs, and keyboard hints as visual declarations.
 	switch strings.TrimSpace(s) {
-	case "…", "│", "─", "╭", "╮", "╰", "╯", "┏", "┓", "┗", "┛", "━", "┃", "❯", "●", "⚙", "✓", "✗", "◦", "◆", "⚡", "▸", "▏", "—", "▁", "▔", "▂", "▃", "▄", "▅", "▆", "▇", "█", "░", "▾":
+	case "…", "│", "─", "╭", "╮", "╰", "╯", "┌", "┐", "└", "┘", "┏", "┓", "┗", "┛", "━", "┃", "❯", "●", "⚙", "✓", "✗", "◦", "◆", "⚡", "▸", "▏", "—", "▁", "▔", "▂", "▃", "▄", "▅", "▆", "▇", "█", "░", "▾":
 		return true
 	}
 	return false
