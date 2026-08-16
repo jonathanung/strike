@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/internal/security"
+	"github.com/jonathanung/strike-cli/internal/trust/security"
 )
 
 // PluginSubject is one plugin/extension presented for admission at register.

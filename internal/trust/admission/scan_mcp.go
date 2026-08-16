@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/internal/security"
+	"github.com/jonathanung/strike-cli/internal/trust/security"
 	"github.com/jonathanung/strike-cli/pkg/redact"
 )
 

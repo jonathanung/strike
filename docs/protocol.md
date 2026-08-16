@@ -135,7 +135,7 @@ shutdown.
    + entry in this table + `eventType`/`Decode` cases + `TestEventTypeCoverage`.
 3. Do not require old consumers to understand the new type — they will see
    `UnknownEvent` / ignore in web reducers.
-4. Redact secrets on the persist path (`internal/secret.RedactEvent` /
+4. Redact secrets on the persist path (`internal/trust/secret.RedactEvent` /
    `pkg/redact`); unknown payloads are JSON-scrubbed.
 
 ## Session lifecycle contract (1.16+)

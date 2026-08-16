@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/audit"
+	"github.com/jonathanung/strike-cli/internal/trust/audit"
 	"github.com/jonathanung/strike-cli/pkg/protocol"
 	"github.com/jonathanung/strike-cli/pkg/redact"
 )

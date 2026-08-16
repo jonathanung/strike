@@ -32,7 +32,7 @@ import (
 
 	"github.com/jonathanung/strike-cli/harness/fault"
 	"github.com/jonathanung/strike-cli/internal/protocol"
-	"github.com/jonathanung/strike-cli/internal/secret"
+	"github.com/jonathanung/strike-cli/internal/trust/secret"
 )
 
 // LogSchemaVersion is the on-disk session JSONL format version written in the

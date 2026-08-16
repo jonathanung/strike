@@ -70,10 +70,10 @@ service/theme token).
 | `harness/question` | user-question ask service (suspend tool until QuestionReply) |
 | `harness/actionfacts` | semantic bash/tool fact projection for permissions (#888) |
 | `harness/permission` | last-match-wins allow/ask/deny + ask service (+ action facts) |
-| `internal/secret` | secret-ref env indirection + protocol event redaction on top of pkg/redact (see docs/secrets.md) |
+| `internal/trust/secret` | secret-ref env indirection + protocol event redaction on top of pkg/redact (see docs/secrets.md) |
 | `internal/auth` | 0600 ~/.strike/auth.json store; flow helpers re-exported from `providers/auth` |
 | `internal/config` | global/project JSON + agents/skills markdown |
-| `internal/audit` | Durable retention-bounded security audit sink (`~/.strike/audit/`) |
+| `internal/trust/audit` | Durable retention-bounded security audit sink (`~/.strike/audit/`) |
 | `internal/persist/session` | JSONL event log append/replay + concurrent Manager |
 | `internal/persist/history` | project-scoped prompt history |
 | `internal/persist/memory` | project-scoped durable key/value memory |

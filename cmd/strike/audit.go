@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/audit"
 	"github.com/jonathanung/strike-cli/internal/config"
+	"github.com/jonathanung/strike-cli/internal/trust/audit"
 )
 
 func runAuditCLI(args []string, stdout, stderr io.Writer) int {

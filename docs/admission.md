@@ -102,9 +102,9 @@ gate for starting MCP/harness/shell hooks from plugins.
 
 ## Shared finding types
 
-`internal/security.Finding` + `Severity` are shared with write-time content
+`internal/trust/security.Finding` + `Severity` are shared with write-time content
 guards ([#890](https://github.com/jonathanung/strike/issues/890)). Admission
-actions (`allow|warn|block|quarantine`) stay in `internal/admission`; content
+actions (`allow|warn|block|quarantine`) stay in `internal/trust/admission`; content
 guards use `allow|ask|deny`.
 
 ## Related

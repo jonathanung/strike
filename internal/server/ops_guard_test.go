@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/audit"
 	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike-cli/internal/trust/audit"
 )
 
 type memAuditor struct {

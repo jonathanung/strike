@@ -191,10 +191,10 @@ Every current top-level `internal/*` package:
 |---|---|---|
 | `internal/acp` | `internal/frontend/acp` | product |
 | `internal/actionfacts` | `harness/actionfacts` | kernel |
-| `internal/admission` | `internal/trust/admission` | product |
+| `internal/trust/admission` | `internal/trust/admission` | product |
 | `internal/persist/artifact` | `internal/persist/artifact` | product |
 | `internal/persist/attachment` | `internal/persist/attachment` | product |
-| `internal/audit` | `internal/trust/audit` | product |
+| `internal/trust/audit` | `internal/trust/audit` | product |
 | `internal/auth` | split: flows → `providers/auth`; store + `strike auth` → `internal/product/auth` | providers + product |
 | `internal/config` | `internal/product/config` | product |
 | `internal/container` | `internal/integrate/container` | product |
@@ -223,8 +223,8 @@ Every current top-level `internal/*` package:
 | `internal/safefile` | `harness/safefile` | kernel |
 | `internal/sandbox` | `harness/sandbox` | kernel |
 | `internal/scheduler` | `harness/scheduler` | kernel |
-| `internal/secret` | `internal/trust/secret` | product |
-| `internal/security` | `internal/trust/security` | product |
+| `internal/trust/secret` | `internal/trust/secret` | product |
+| `internal/trust/security` | `internal/trust/security` | product |
 | `internal/server` | `internal/frontend/server` | product |
 | `internal/persist/session` | `internal/persist/session` | product |
 | `internal/persist/telemetry` | `internal/persist/telemetry` | product |

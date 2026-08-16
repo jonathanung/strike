@@ -1,5 +1,5 @@
 // Package secretref parses secret://env/NAME refs for process injection.
-// Product code should import internal/secret, which re-exports this package
+// Product code should import internal/trust/secret, which re-exports this package
 // and adds session-event redaction.
 package secretref
 

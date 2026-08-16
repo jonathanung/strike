@@ -323,7 +323,7 @@ wave 1030–1043 reliability/security pack. Protocol wire `1.17.0`.
   `allowPaths` only (bare relative markers rejected — spoof-via-subdirectory
   regression tested), and explicit fail-closed on `strict`. Emits
   `admission.decided` (protocol `1.14.0`) for timeline/audit. Shared
-  `internal/security.Finding` types for future write-time content guards.
+  `internal/trust/security.Finding` types for future write-time content guards.
   Docs: [docs/admission.md](docs/admission.md)
   ([#889](https://github.com/jonathanung/strike/issues/889)).
 - **Hardened path I/O helpers** — `internal/safefile` centralizes FIFO/special

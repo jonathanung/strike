@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/audit"
+	"github.com/jonathanung/strike-cli/internal/trust/audit"
 )
 
 // Default ops rate limits (per client IP). Interactive cockpit use stays under
