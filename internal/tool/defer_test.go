@@ -35,6 +35,7 @@ func TestIsCoreTool(t *testing.T) {
 		"definition", "references", "symbols", "diagnostics",
 		"call_hierarchy", "rename_preview", "impact",
 		"artifact_write", "artifact_read", "ledger_write", "ledger_read", "context_bundle",
+		"tui_snapshot",
 	} {
 		if IsCoreTool(name) {
 			t.Errorf("IsCoreTool(%q) = true, want false", name)

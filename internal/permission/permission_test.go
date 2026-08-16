@@ -106,6 +106,16 @@ func TestDefaultsIncludesLedgerToolsAllow(t *testing.T) {
 	}
 }
 
+func TestDefaultsIncludesTUISnapshotAllow(t *testing.T) {
+	if got := Evaluate("tui_snapshot", "*", Defaults()); got != Allow {
+		t.Errorf("Defaults tui_snapshot = %q, want allow", got)
+	}
+	deny := Ruleset{{Permission: "tui_snapshot", Pattern: "*", Action: Deny}}
+	if got := Evaluate("tui_snapshot", "*", Defaults(), deny); got != Deny {
+		t.Errorf("tui_snapshot with deny = %q, want deny", got)
+	}
+}
+
 func TestDefaultsIncludesPatchCollabAllow(t *testing.T) {
 	if got := Evaluate("patch_collab", "*", Defaults()); got != Allow {
 		t.Errorf("Defaults patch_collab = %q, want allow", got)

@@ -83,6 +83,8 @@ type assembled struct {
 	spawnRoot rootSpawner
 	// firstSlot is the initial live root for multiRootHub (same as eng/store).
 	firstSlot *rootSlot
+	// frameStore holds the last painted TUI frame for tui_snapshot (#1183).
+	frameStore *tool.TUIFrameStore
 }
 
 // assemble resolves project/config/auth, builds the engine and session store,
@@ -426,6 +428,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		tool.NewLedgerWrite(ledgerStore),
 		tool.NewLedgerRead(ledgerStore),
 		tool.NewContextBundle(),
+		tool.NewTUISnapshot(),
 		tool.NewNotebookEdit(),
 		tool.NewSleep(),
 		tool.NewSkill(skillInfos),
@@ -435,6 +438,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		tool.NewPhaseDone(),
 	)
 	registry.Register(tool.NewToolSearch(registry))
+	frameStore := &tool.TUIFrameStore{}
 	if config.DeferToolsEnabled(cfg.DeferTools) {
 		registry.SetDeferLoading(true)
 	}
@@ -795,6 +799,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 				lspMgr.NotifyFile(context.Background(), absPath, content, deleted)
 			},
 			CollectDiagnostics:   makeLSPCollectDiagnostics(lspMgr, toolDir, cfg.LSP),
+			TUISnapshot:          frameStore.Capture,
 			MaxChildDepth:        cfg.MaxChildDepth,
 			TurnTimeout:          resolveRootTurnTimeout(cfg, opts),
 			ChildIsolation:       cfg.Session.ChildIsolation,
@@ -1173,6 +1178,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		schedulerClose: sched.Close,
 		spawnRoot:      spawn,
 		firstSlot:      first,
+		frameStore:     frameStore,
 	}, nil
 }
 

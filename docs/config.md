@@ -557,7 +557,7 @@ includes compatibility delegation shims (`delegate`, `task_status`,
 `agent_ownership`, `team_task`, `patch_collab`), plan tools (`plan_write`,
 `plan_read`, `plan_delegate`, `enter_plan_mode`, `exit_plan_mode`,
 `phase_done`), optional built-ins (`webfetch`, `websearch`, `browser`, todo/memory/issue,
-`sleep`, `skill`, `notebook_edit`, …), and all `mcp_*` tools.
+`sleep`, `skill`, `notebook_edit`, `tui_snapshot`, …), and all `mcp_*` tools.
 
 The first-turn tools **guidance** layer still lists pending deferred **names**
 (hard-denied omitted) so the model can call them by name without a discovery

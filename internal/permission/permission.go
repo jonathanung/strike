@@ -52,6 +52,7 @@ var knownPermissions = map[string]struct{}{
 	"artifact_write": {}, "artifact_read": {},
 	"ledger_write": {}, "ledger_read": {},
 	"context_bundle": {},
+	"tui_snapshot":   {},
 	"sleep":          {}, "skill": {}, "question": {}, "toolsearch": {}, "hook": {},
 	"phase_check":     {},
 	"enter_plan_mode": {}, "exit_plan_mode": {}, "phase_done": {},
@@ -152,6 +153,7 @@ func Defaults() Ruleset {
 		{Permission: "ledger_read", Pattern: "*", Action: Allow},
 		// Sealed spawn context package (children read goal/paths/artifacts).
 		{Permission: "context_bundle", Pattern: "*", Action: Allow},
+		{Permission: "tui_snapshot", Pattern: "*", Action: Allow},
 		{Permission: "sleep", Pattern: "*", Action: Allow},
 		{Permission: "skill", Pattern: "*", Action: Allow},
 		{Permission: "question", Pattern: "*", Action: Allow},
