@@ -1,9 +1,10 @@
-package tool
+package tools
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/jonathanung/strike-cli/internal/tool"
 	"strings"
 	"testing"
 
@@ -20,7 +21,7 @@ func openPlan(t *testing.T) *plan.Store {
 	return s
 }
 
-func rootTC(t *testing.T, rootID string) *Context {
+func rootTC(t *testing.T, rootID string) *tool.Context {
 	t.Helper()
 	tc := allowAll(t.TempDir())
 	tc.SessionID = rootID
@@ -28,7 +29,7 @@ func rootTC(t *testing.T, rootID string) *Context {
 	return tc
 }
 
-func childTC(t *testing.T, rootID, childID string) *Context {
+func childTC(t *testing.T, rootID, childID string) *tool.Context {
 	t.Helper()
 	tc := allowAll(t.TempDir())
 	tc.SessionID = childID
@@ -369,11 +370,11 @@ func TestPlanWriteValidationAndPermission(t *testing.T) {
 	}
 
 	deny := errors.New("denied")
-	denied := &Context{
+	denied := &tool.Context{
 		WorkDir:       t.TempDir(),
 		SessionID:     "root-a",
 		RootSessionID: "root-a",
-		Ask:           func(context.Context, AskRequest) error { return deny },
+		Ask:           func(context.Context, tool.AskRequest) error { return deny },
 	}
 	_, err = tw.Execute(context.Background(), mustJSON(t, map[string]any{
 		"action": "create", "title": "x",
@@ -414,11 +415,11 @@ func TestPlanWriteWorkspaceMutationStillSeparate(t *testing.T) {
 	// revise plans while workspace mutation stays denied at the permission layer.
 	store := openPlan(t)
 	var asked []string
-	tc := &Context{
+	tc := &tool.Context{
 		WorkDir:       t.TempDir(),
 		SessionID:     "root-a",
 		RootSessionID: "root-a",
-		Ask: func(_ context.Context, req AskRequest) error {
+		Ask: func(_ context.Context, req tool.AskRequest) error {
 			asked = append(asked, req.Permission)
 			if req.Permission == "write" || req.Permission == "edit" {
 				return errors.New("workspace denied")
@@ -444,15 +445,15 @@ func TestPlanWriteWorkspaceMutationStillSeparate(t *testing.T) {
 func TestPlanToolsDeferredUntilDiscover(t *testing.T) {
 	// Plan tools are deferred under the minimal core surface (#988); workflow
 	// activation (#991) or toolsearch/direct call promotes them.
-	if IsCoreTool("plan_write") || IsCoreTool("plan_read") || IsCoreTool("plan_delegate") {
+	if tool.IsCoreTool("plan_write") || tool.IsCoreTool("plan_read") || tool.IsCoreTool("plan_delegate") {
 		t.Fatal("plan_write/plan_read/plan_delegate should not be core")
 	}
-	if !IsDeferredTool("plan_write") || !IsDeferredTool("plan_read") || !IsDeferredTool("plan_delegate") {
+	if !tool.IsDeferredTool("plan_write") || !tool.IsDeferredTool("plan_read") || !tool.IsDeferredTool("plan_delegate") {
 		t.Fatal("plan tools must be deferred")
 	}
 	store := openPlan(t)
-	reg := NewRegistry(NewRead(), NewPlanWrite(store), NewPlanRead(store), NewPlanDelegate(store))
-	reg.Register(NewToolSearch(reg))
+	reg := tool.NewRegistry(tool.NewRead(), NewPlanWrite(store), NewPlanRead(store), NewPlanDelegate(store))
+	reg.Register(tool.NewToolSearch(reg))
 	reg.SetDeferLoading(true)
 	names := map[string]bool{}
 	for _, s := range reg.SchemasForProvider() {
@@ -482,15 +483,15 @@ func TestRootActorRequiresRootSession(t *testing.T) {
 	if err == nil {
 		t.Fatal("nil context")
 	}
-	_, err = rootActor(&Context{SessionID: "c", RootSessionID: "r"})
+	_, err = rootActor(&tool.Context{SessionID: "c", RootSessionID: "r"})
 	if !errors.Is(err, plan.ErrNotOwner) {
 		t.Fatalf("child err = %v", err)
 	}
-	id, err := rootActor(&Context{SessionID: "r", RootSessionID: "r"})
+	id, err := rootActor(&tool.Context{SessionID: "r", RootSessionID: "r"})
 	if err != nil || id != "r" {
 		t.Fatalf("root = %q err=%v", id, err)
 	}
-	id, err = rootActor(&Context{SessionID: "solo"})
+	id, err = rootActor(&tool.Context{SessionID: "solo"})
 	if err != nil || id != "solo" {
 		t.Fatalf("fallback = %q err=%v", id, err)
 	}

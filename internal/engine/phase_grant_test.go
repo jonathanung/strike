@@ -15,6 +15,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
 	"github.com/jonathanung/strike-cli/internal/tool"
+	"github.com/jonathanung/strike-cli/internal/tools"
 )
 
 // widenBashWorkflow is a two-phase workflow whose second phase allows bash
@@ -66,7 +67,7 @@ func TestPhaseWideningRequiresApproval(t *testing.T) {
 		SessionID:       "phase-widen-ask",
 		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
 		InitialProvider: "scripted",
-		Registry:        tool.NewRegistry(tool.NewPhaseDone()),
+		Registry:        tool.NewRegistry(tools.NewPhaseDone()),
 		Agents:          []engine.Agent{{Name: "build"}},
 		Workflows:       []config.Workflow{w},
 		Rules:           []permission.Ruleset{permission.Defaults(), denyBash},
@@ -91,7 +92,7 @@ func TestPhaseWideningRequiresApproval(t *testing.T) {
 		SessionID:            "phase-widen-ask-2",
 		Select:               func(string) (provider.Provider, string, error) { return prov, "model", nil },
 		InitialProvider:      "scripted",
-		Registry:             tool.NewRegistry(tool.NewPhaseDone()),
+		Registry:             tool.NewRegistry(tools.NewPhaseDone()),
 		Agents:               []engine.Agent{{Name: "build"}},
 		Workflows:            []config.Workflow{w},
 		Rules:                []permission.Ruleset{permission.Defaults(), denyBash},
@@ -171,7 +172,7 @@ func TestPhaseWideningRejectionLeavesPhaseUnchanged(t *testing.T) {
 		SessionID:            "phase-widen-reject",
 		Select:               func(string) (provider.Provider, string, error) { return prov, "model", nil },
 		InitialProvider:      "scripted",
-		Registry:             tool.NewRegistry(tool.NewPhaseDone()),
+		Registry:             tool.NewRegistry(tools.NewPhaseDone()),
 		Agents:               []engine.Agent{{Name: "build"}},
 		Workflows:            []config.Workflow{w},
 		Rules:                []permission.Ruleset{permission.Defaults(), denyBash},
@@ -240,7 +241,7 @@ func TestPhaseWideningAutoAcceptsWithoutPrompt(t *testing.T) {
 		SessionID:                  "phase-widen-auto",
 		Select:                     func(string) (provider.Provider, string, error) { return prov, "model", nil },
 		InitialProvider:            "scripted",
-		Registry:                   tool.NewRegistry(tool.NewPhaseDone()),
+		Registry:                   tool.NewRegistry(tools.NewPhaseDone()),
 		Agents:                     []engine.Agent{{Name: "build"}},
 		Workflows:                  []config.Workflow{w},
 		Rules:                      []permission.Ruleset{permission.Defaults(), denyBash},

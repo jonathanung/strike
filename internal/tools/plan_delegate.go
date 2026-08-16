@@ -1,10 +1,11 @@
-package tool
+package tools
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/jonathanung/strike-cli/internal/tool"
 	"strings"
 
 	"github.com/jonathanung/strike-cli/internal/plan"
@@ -23,7 +24,7 @@ type planDelegateTool struct {
 }
 
 // NewPlanDelegate builds the plan_delegate tool. store must be non-nil.
-func NewPlanDelegate(store PlanDelegateStore) Tool {
+func NewPlanDelegate(store PlanDelegateStore) tool.Tool {
 	return &planDelegateTool{store: store}
 }
 
@@ -71,9 +72,9 @@ func (t *planDelegateTool) Schema() json.RawMessage {
 	}`)
 }
 
-func (t *planDelegateTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) (Result, error) {
+func (t *planDelegateTool) Execute(ctx context.Context, args json.RawMessage, tc *tool.Context) (tool.Result, error) {
 	if t.store == nil {
-		return Result{}, errors.New("plan store is unavailable")
+		return tool.Result{}, errors.New("plan store is unavailable")
 	}
 	var in struct {
 		Action    string `json:"action"`
@@ -86,24 +87,24 @@ func (t *planDelegateTool) Execute(ctx context.Context, args json.RawMessage, tc
 		Effort    string `json:"effort"`
 	}
 	if err := json.Unmarshal(args, &in); err != nil {
-		return Result{}, fmt.Errorf("invalid arguments: %w", err)
+		return tool.Result{}, fmt.Errorf("invalid arguments: %w", err)
 	}
 	action := strings.ToLower(strings.TrimSpace(in.Action))
 	id := strings.TrimSpace(in.ID)
 	if action == "" {
-		return Result{}, errors.New("action is required")
+		return tool.Result{}, errors.New("action is required")
 	}
 	if id == "" {
-		return Result{}, errors.New("id is required")
+		return tool.Result{}, errors.New("id is required")
 	}
 
 	pattern := action + ":" + id
-	if err := tc.Ask(ctx, AskRequest{
+	if err := tc.Ask(ctx, tool.AskRequest{
 		Permission: "plan_delegate",
 		Patterns:   []string{pattern},
 		Always:     []string{"*"},
 	}); err != nil {
-		return Result{}, err
+		return tool.Result{}, err
 	}
 
 	switch action {
@@ -112,14 +113,14 @@ func (t *planDelegateTool) Execute(ctx context.Context, args json.RawMessage, tc
 	case "dispatch":
 		return t.dispatch(ctx, tc, in)
 	default:
-		return Result{}, fmt.Errorf("action must be dispatch or status")
+		return tool.Result{}, fmt.Errorf("action must be dispatch or status")
 	}
 }
 
-func (t *planDelegateTool) status(id string) (Result, error) {
+func (t *planDelegateTool) status(id string) (tool.Result, error) {
 	p, ok, err := t.store.Get(id)
 	if err != nil {
-		return Result{}, err
+		return tool.Result{}, err
 	}
 	if !ok {
 		return planSoftError("plan miss", fmt.Sprintf("no plan %q", id), map[string]any{"id": id})
@@ -128,7 +129,7 @@ func (t *planDelegateTool) status(id string) (Result, error) {
 	return planResultJSON(view, fmt.Sprintf("plan %s delegate status v%d", shortPlanID(p.ID), p.Version))
 }
 
-func (t *planDelegateTool) dispatch(ctx context.Context, tc *Context, in struct {
+func (t *planDelegateTool) dispatch(ctx context.Context, tc *tool.Context, in struct {
 	Action    string `json:"action"`
 	ID        string `json:"id"`
 	SectionID string `json:"section_id"`
@@ -137,7 +138,7 @@ func (t *planDelegateTool) dispatch(ctx context.Context, tc *Context, in struct 
 	Agent     string `json:"agent"`
 	Model     string `json:"model"`
 	Effort    string `json:"effort"`
-}) (Result, error) {
+}) (tool.Result, error) {
 	ownerRoot, err := rootActor(tc)
 	if err != nil {
 		if errors.Is(err, plan.ErrNotOwner) {
@@ -146,20 +147,20 @@ func (t *planDelegateTool) dispatch(ctx context.Context, tc *Context, in struct 
 				"id":     strings.TrimSpace(in.ID),
 			})
 		}
-		return Result{}, err
+		return tool.Result{}, err
 	}
 	id := strings.TrimSpace(in.ID)
 	secID := strings.TrimSpace(in.SectionID)
 	if secID == "" {
-		return Result{}, errors.New("section_id is required for dispatch")
+		return tool.Result{}, errors.New("section_id is required for dispatch")
 	}
 	if tc.SpawnTask == nil {
-		return Result{}, errors.New("task spawn is not available")
+		return tool.Result{}, errors.New("task spawn is not available")
 	}
 
 	p, ok, err := t.store.Get(id)
 	if err != nil {
-		return Result{}, err
+		return tool.Result{}, err
 	}
 	if !ok {
 		return planSoftError("plan miss", fmt.Sprintf("no plan %q", id), map[string]any{"id": id})
@@ -192,7 +193,7 @@ func (t *planDelegateTool) dispatch(ctx context.Context, tc *Context, in struct 
 			// Race: another finish won — re-read and continue if no longer in_flight.
 			p2, ok2, gerr := t.store.Get(id)
 			if gerr != nil {
-				return Result{}, gerr
+				return tool.Result{}, gerr
 			}
 			if !ok2 {
 				return planSoftError("plan miss", fmt.Sprintf("no plan %q", id), map[string]any{"id": id})
@@ -209,7 +210,7 @@ func (t *planDelegateTool) dispatch(ctx context.Context, tc *Context, in struct 
 			// Refresh section snapshot after reclaim.
 			p2, ok2, gerr := t.store.Get(id)
 			if gerr != nil {
-				return Result{}, gerr
+				return tool.Result{}, gerr
 			}
 			if ok2 {
 				p = p2
@@ -226,7 +227,7 @@ func (t *planDelegateTool) dispatch(ctx context.Context, tc *Context, in struct 
 	}
 	childPrompt := buildSectionDelegatePrompt(p, sec, in.Prompt)
 
-	res, err := tc.SpawnTask(ctx, TaskRequest{
+	res, err := tc.SpawnTask(ctx, tool.TaskRequest{
 		Prompt:    childPrompt,
 		Name:      strings.TrimSpace(in.Name),
 		Agent:     agent,
@@ -236,10 +237,10 @@ func (t *planDelegateTool) dispatch(ctx context.Context, tc *Context, in struct 
 		SectionID: secID,
 	})
 	if err != nil {
-		return Result{}, err
+		return tool.Result{}, err
 	}
 	if res.SessionID == "" {
-		return Result{}, errors.New("plan_delegate: child session id missing after spawn")
+		return tool.Result{}, errors.New("plan_delegate: child session id missing after spawn")
 	}
 
 	// Record correlation after spawn. If another dispatch won the race, interrupt
@@ -247,7 +248,7 @@ func (t *planDelegateTool) dispatch(ctx context.Context, tc *Context, in struct 
 	updated, beginErr := t.store.BeginSectionDelegate(id, ownerRoot, secID, res.SessionID, res.Name)
 	if beginErr != nil {
 		if tc.TaskInterrupt != nil {
-			_, _ = tc.TaskInterrupt(ctx, TaskInterruptRequest{SessionID: res.SessionID})
+			_, _ = tc.TaskInterrupt(ctx, tool.TaskInterruptRequest{SessionID: res.SessionID})
 		}
 		if errors.Is(beginErr, plan.ErrInFlight) {
 			return planSoftError("section in flight", beginErr.Error(), map[string]any{
@@ -262,7 +263,7 @@ func (t *planDelegateTool) dispatch(ctx context.Context, tc *Context, in struct 
 		if errors.Is(beginErr, plan.ErrClosedPlan) {
 			return planSoftError("plan rejected", beginErr.Error(), map[string]any{"id": id})
 		}
-		return Result{}, beginErr
+		return tool.Result{}, beginErr
 	}
 
 	out := map[string]any{
@@ -295,12 +296,12 @@ func findSection(p plan.Plan, sectionID string) (plan.Section, bool) {
 
 // liveSectionDelegate reports whether childID still looks like a running
 // owned child. Unknown/missing TaskStatus or terminal states are not live.
-func liveSectionDelegate(ctx context.Context, tc *Context, childID string) bool {
+func liveSectionDelegate(ctx context.Context, tc *tool.Context, childID string) bool {
 	childID = strings.TrimSpace(childID)
 	if childID == "" || tc == nil || tc.TaskStatus == nil {
 		return false
 	}
-	st, err := tc.TaskStatus(ctx, TaskStatusRequest{SessionID: childID})
+	st, err := tc.TaskStatus(ctx, tool.TaskStatusRequest{SessionID: childID})
 	if err != nil {
 		return false
 	}

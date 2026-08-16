@@ -1,8 +1,9 @@
-package tool
+package tools
 
 import (
 	"context"
 	"errors"
+	"github.com/jonathanung/strike-cli/internal/tool"
 	"os"
 	"path/filepath"
 	"strings"
@@ -108,10 +109,10 @@ func TestSkillPermissionPatternIsName(t *testing.T) {
 	sk := NewSkill([]SkillInfo{
 		{Name: "deploy", Template: "ship it"},
 	})
-	var saw AskRequest
-	tc := &Context{
+	var saw tool.AskRequest
+	tc := &tool.Context{
 		WorkDir: t.TempDir(),
-		Ask: func(_ context.Context, req AskRequest) error {
+		Ask: func(_ context.Context, req tool.AskRequest) error {
 			saw = req
 			return nil
 		},
@@ -135,9 +136,9 @@ func TestSkillPermissionPatternIsName(t *testing.T) {
 
 func TestSkillPermissionDenied(t *testing.T) {
 	sk := NewSkill([]SkillInfo{{Name: "x", Template: "y"}})
-	tc := &Context{
+	tc := &tool.Context{
 		WorkDir: t.TempDir(),
-		Ask:     func(context.Context, AskRequest) error { return errors.New("denied") },
+		Ask:     func(context.Context, tool.AskRequest) error { return errors.New("denied") },
 	}
 	_, err := sk.Execute(context.Background(), mustJSON(t, map[string]any{"name": "x"}), tc)
 	if err == nil {
@@ -163,7 +164,7 @@ func TestSkillAdjacentResource(t *testing.T) {
 	}})
 	res, err := sk.Execute(context.Background(), mustJSON(t, map[string]any{
 		"name": "demo", "resource": "extra.md",
-	}), &Context{Ask: func(context.Context, AskRequest) error { return nil }})
+	}), &tool.Context{Ask: func(context.Context, tool.AskRequest) error { return nil }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +173,7 @@ func TestSkillAdjacentResource(t *testing.T) {
 	}
 	_, err = sk.Execute(context.Background(), mustJSON(t, map[string]any{
 		"name": "demo", "resource": "../nope",
-	}), &Context{Ask: func(context.Context, AskRequest) error { return nil }})
+	}), &tool.Context{Ask: func(context.Context, tool.AskRequest) error { return nil }})
 	if err == nil {
 		t.Fatal("want traversal error")
 	}

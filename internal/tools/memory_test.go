@@ -1,9 +1,10 @@
-package tool
+package tools
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/jonathanung/strike-cli/internal/tool"
 	"strings"
 	"testing"
 
@@ -99,9 +100,9 @@ func TestMemoryWriteValidation(t *testing.T) {
 func TestMemoryPermissionDenied(t *testing.T) {
 	store := openMemory(t)
 	deny := errors.New("denied")
-	tc := &Context{
+	tc := &tool.Context{
 		WorkDir: t.TempDir(),
-		Ask:     func(context.Context, AskRequest) error { return deny },
+		Ask:     func(context.Context, tool.AskRequest) error { return deny },
 	}
 	_, err := NewMemoryWrite(store).Execute(context.Background(), mustJSON(t, map[string]any{
 		"key": "k", "value": "v",

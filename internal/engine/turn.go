@@ -1185,7 +1185,11 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 			Files:         e.files,
 			SessionID:     e.opts.SessionID,
 			RootSessionID: e.rootSessionID(),
-			NotifyArtifact: func(op string, a artifact.Artifact) {
+			NotifyArtifact: func(op string, payload any) {
+				a, ok := payload.(artifact.Artifact)
+				if !ok {
+					return
+				}
 				e.emit(protocol.ArtifactUpdated{
 					Correlation: corr,
 					ID:          a.ID,
@@ -1197,7 +1201,11 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 					SessionID:   a.SessionID,
 				})
 			},
-			NotifyLedger: func(op string, entry ledger.Entry) {
+			NotifyLedger: func(op string, payload any) {
+				entry, ok := payload.(ledger.Entry)
+				if !ok {
+					return
+				}
 				e.emit(protocol.LedgerUpdated{
 					Correlation:   corr,
 					ID:            entry.ID,

@@ -1,9 +1,10 @@
-package tool
+package tools
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/jonathanung/strike-cli/internal/tool"
 	"os"
 	"path/filepath"
 	"strings"
@@ -234,20 +235,20 @@ func TestSymbolsToolRequiresArg(t *testing.T) {
 }
 
 func TestNavToolContracts(t *testing.T) {
-	for _, tl := range []Tool{NewDefinition(nil), NewReferences(nil), NewSymbols(nil)} {
-		c := LookupContract(tl)
+	for _, tl := range []tool.Tool{NewDefinition(nil), NewReferences(nil), NewSymbols(nil)} {
+		c := tool.LookupContract(tl)
 		if err := c.Validate(); err != nil {
 			t.Errorf("%s: %v", tl.Name(), err)
 		}
-		if c.SideEffect != SideEffectRead || c.Idempotency != IdempotencySafeRetry {
+		if c.SideEffect != tool.SideEffectRead || c.Idempotency != tool.IdempotencySafeRetry {
 			t.Errorf("%s contract = %+v, want read/safe-retry", tl.Name(), c)
 		}
 	}
 }
 
 func TestNavToolsDeferred(t *testing.T) {
-	reg := NewRegistry(NewRead(), NewDefinition(nil), NewReferences(nil), NewSymbols(nil))
-	reg.Register(NewToolSearch(reg))
+	reg := tool.NewRegistry(tool.NewRead(), NewDefinition(nil), NewReferences(nil), NewSymbols(nil))
+	reg.Register(tool.NewToolSearch(reg))
 	reg.SetDeferLoading(true)
 
 	names := map[string]bool{}
@@ -262,7 +263,7 @@ func TestNavToolsDeferred(t *testing.T) {
 	}
 
 	// toolsearch promotes them.
-	res, err := NewToolSearch(reg).Execute(context.Background(), mustJSON(t, map[string]any{
+	res, err := tool.NewToolSearch(reg).Execute(context.Background(), mustJSON(t, map[string]any{
 		"query": "definition",
 	}), allowAll(t.TempDir()))
 	if err != nil {
@@ -284,9 +285,9 @@ func TestDefinitionPermissionDenied(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "a.go"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	tc := &Context{
+	tc := &tool.Context{
 		WorkDir: dir,
-		Ask: func(context.Context, AskRequest) error {
+		Ask: func(context.Context, tool.AskRequest) error {
 			return errors.New("denied")
 		},
 	}
@@ -309,7 +310,7 @@ func TestNavToolsWorkspaceEscape(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected workspace escape error")
 	}
-	var esc *WorkspaceEscapeError
+	var esc *tool.WorkspaceEscapeError
 	if !errors.As(err, &esc) {
 		t.Fatalf("want WorkspaceEscapeError, got %T %v", err, err)
 	}

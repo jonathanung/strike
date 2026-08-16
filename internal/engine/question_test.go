@@ -12,6 +12,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
 	"github.com/jonathanung/strike-cli/internal/tool"
+	"github.com/jonathanung/strike-cli/internal/tools"
 )
 
 func questionToolCall(id string, questions ...map[string]any) provider.ToolCall {
@@ -401,7 +402,7 @@ func TestDeferredSwitchAgentAfterEnterPlanMode(t *testing.T) {
 		SessionID:       "sess-plan",
 		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
 		InitialProvider: "scripted",
-		Registry:        tool.NewRegistry(tool.NewEnterPlanMode()),
+		Registry:        tool.NewRegistry(tools.NewEnterPlanMode()),
 		WorkDir:         t.TempDir(),
 		Rules:           []permission.Ruleset{permission.Defaults()},
 		Agents: []engine.Agent{

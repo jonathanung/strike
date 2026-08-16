@@ -97,7 +97,7 @@ func TestSchemasForProviderOmitsOrchestrationUntilDiscover(t *testing.T) {
 	reg := NewRegistry(
 		NewRead(), NewBash(), NewTask(), NewQuestion(),
 		NewDelegate(), NewWait(), NewAgentRoster(), NewAgentMessage(),
-		NewTeamTask(), NewEnterPlanMode(), NewExitPlanMode(), NewPhaseDone(),
+		NewTeamTask(), stubNamed("enter_plan_mode"), stubNamed("exit_plan_mode"), stubNamed("phase_done"),
 	)
 	// plan tools need a store; use stubs via Register of tools that don't need store if possible
 	reg.Register(NewToolSearch(reg))
@@ -208,6 +208,8 @@ func TestDiscoverIgnoresUnknownAndCore(t *testing.T) {
 		t.Fatal("unknown should not be discovered")
 	}
 }
+
+func stubNamed(name string) Tool { return stubTool{name: name} }
 
 func schemaNameSet(schemas []provider.ToolSchema) map[string]bool {
 	out := make(map[string]bool, len(schemas))

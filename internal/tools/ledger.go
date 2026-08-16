@@ -1,10 +1,11 @@
-package tool
+package tools
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/jonathanung/strike-cli/internal/tool"
 	"strings"
 	"time"
 
@@ -21,10 +22,6 @@ type LedgerStore interface {
 	Supersede(priorID string, in ledger.AppendInput) (ledger.Entry, error)
 	Revalidate(id string, pins []ledger.EvidencePin) (ledger.Entry, error)
 }
-
-// LedgerNotify is optional engine callback after append/invalidate/supersede.
-// op is "append" | "invalidate" | "supersede" | "revalidate".
-type LedgerNotify func(op string, e ledger.Entry)
 
 type ledgerView struct {
 	ID                 string               `json:"id"`
@@ -87,7 +84,7 @@ func toLedgerViewFresh(e ledger.Entry, workDir string) ledgerView {
 	return v
 }
 
-func ledgerActor(tc *Context) (sessionID, rootID, agent string, err error) {
+func ledgerActor(tc *tool.Context) (sessionID, rootID, agent string, err error) {
 	if tc == nil {
 		return "", "", "", errors.New("ledger: tool context is required")
 	}
@@ -103,29 +100,29 @@ func ledgerActor(tc *Context) (sessionID, rootID, agent string, err error) {
 	return sessionID, rootID, agent, nil
 }
 
-func ledgerResultJSON(v any, title string) (Result, error) {
+func ledgerResultJSON(v any, title string) (tool.Result, error) {
 	out, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
-		return Result{}, err
+		return tool.Result{}, err
 	}
 	meta, _ := json.Marshal(v)
-	return Result{Title: title, Output: string(out), Metadata: meta}, nil
+	return tool.Result{Title: title, Output: string(out), Metadata: meta}, nil
 }
 
-func ledgerSoftError(title, msg string, extra map[string]any) (Result, error) {
+func ledgerSoftError(title, msg string, extra map[string]any) (tool.Result, error) {
 	payload := map[string]any{"error": msg}
 	for k, v := range extra {
 		payload[k] = v
 	}
 	out, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
-		return Result{}, err
+		return tool.Result{}, err
 	}
 	meta, _ := json.Marshal(payload)
-	return Result{Title: title, Output: string(out), Metadata: meta}, nil
+	return tool.Result{Title: title, Output: string(out), Metadata: meta}, nil
 }
 
-func notifyLedger(tc *Context, op string, e ledger.Entry) {
+func notifyLedger(tc *tool.Context, op string, e ledger.Entry) {
 	if tc != nil && tc.NotifyLedger != nil {
 		tc.NotifyLedger(op, e)
 	}
@@ -146,14 +143,14 @@ type ledgerWriteTool struct {
 }
 
 // NewLedgerWrite builds the ledger_write tool. store must be non-nil.
-func NewLedgerWrite(store LedgerStore) Tool {
+func NewLedgerWrite(store LedgerStore) tool.Tool {
 	return &ledgerWriteTool{store: store}
 }
 
 func (t *ledgerWriteTool) Name() string { return "ledger_write" }
 
-func (t *ledgerWriteTool) Contract() Contract {
-	return staticContract(SideEffectExternal, IdempotencyConditional)
+func (t *ledgerWriteTool) Contract() tool.Contract {
+	return tool.StaticContract(tool.SideEffectExternal, tool.IdempotencyConditional)
 }
 
 func (t *ledgerWriteTool) Description() string {
@@ -247,9 +244,9 @@ func (t *ledgerWriteTool) Schema() json.RawMessage {
 	}`)
 }
 
-func (t *ledgerWriteTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) (Result, error) {
+func (t *ledgerWriteTool) Execute(ctx context.Context, args json.RawMessage, tc *tool.Context) (tool.Result, error) {
 	if t.store == nil {
-		return Result{}, errors.New("ledger store is unavailable")
+		return tool.Result{}, errors.New("ledger store is unavailable")
 	}
 	var in struct {
 		Action       string               `json:"action"`
@@ -266,12 +263,12 @@ func (t *ledgerWriteTool) Execute(ctx context.Context, args json.RawMessage, tc 
 		Evidence     []string             `json:"evidence"`
 	}
 	if err := json.Unmarshal(args, &in); err != nil {
-		return Result{}, fmt.Errorf("invalid arguments: %w", err)
+		return tool.Result{}, fmt.Errorf("invalid arguments: %w", err)
 	}
 	action := strings.ToLower(strings.TrimSpace(in.Action))
 	sessionID, rootID, agent, err := ledgerActor(tc)
 	if err != nil {
-		return Result{}, err
+		return tool.Result{}, err
 	}
 
 	pattern := action
@@ -280,12 +277,12 @@ func (t *ledgerWriteTool) Execute(ctx context.Context, args json.RawMessage, tc 
 	} else if k := strings.TrimSpace(in.Kind); k != "" {
 		pattern = k
 	}
-	if err := tc.Ask(ctx, AskRequest{
+	if err := tc.Ask(ctx, tool.AskRequest{
 		Permission: "ledger_write",
 		Patterns:   []string{pattern},
 		Always:     []string{"*"},
 	}); err != nil {
-		return Result{}, err
+		return tool.Result{}, err
 	}
 
 	switch action {
@@ -298,11 +295,11 @@ func (t *ledgerWriteTool) Execute(ctx context.Context, args json.RawMessage, tc 
 	case "revalidate":
 		return t.revalidate(in.ID, in.EvidencePins, tc)
 	default:
-		return Result{}, fmt.Errorf("action must be append, invalidate, supersede, or revalidate, got %q", in.Action)
+		return tool.Result{}, fmt.Errorf("action must be append, invalidate, supersede, or revalidate, got %q", in.Action)
 	}
 }
 
-func (t *ledgerWriteTool) append(kind, statement, confidence string, evidence []string, pins []ledger.EvidencePin, paths, tasks []string, supersedes, sessionID, rootID, agent string, tc *Context) (Result, error) {
+func (t *ledgerWriteTool) append(kind, statement, confidence string, evidence []string, pins []ledger.EvidencePin, paths, tasks []string, supersedes, sessionID, rootID, agent string, tc *tool.Context) (tool.Result, error) {
 	// Only explicit supersedes on append (id is reserved for invalidate/supersede actions).
 	sup := strings.TrimSpace(supersedes)
 	workDir := toolWorkDir(tc)
@@ -324,7 +321,7 @@ func (t *ledgerWriteTool) append(kind, statement, confidence string, evidence []
 		if errors.Is(err, ledger.ErrNotFound) {
 			return ledgerSoftError("ledger append failed", err.Error(), map[string]any{"supersedes": sup})
 		}
-		return Result{}, err
+		return tool.Result{}, err
 	}
 	op := "append"
 	if e.Supersedes != "" {
@@ -334,10 +331,10 @@ func (t *ledgerWriteTool) append(kind, statement, confidence string, evidence []
 	return ledgerResultJSON(toLedgerViewFresh(e, toolWorkDir(tc)), fmt.Sprintf("ledger %s %s %s", e.Kind, shortLedgerID(e.ID), e.Status))
 }
 
-func (t *ledgerWriteTool) invalidate(id, reason string, evidence []string, tc *Context) (Result, error) {
+func (t *ledgerWriteTool) invalidate(id, reason string, evidence []string, tc *tool.Context) (tool.Result, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
-		return Result{}, errors.New("id is required for invalidate")
+		return tool.Result{}, errors.New("id is required for invalidate")
 	}
 	e, err := t.store.Invalidate(id, ledger.InvalidateInput{
 		Reason:   reason,
@@ -347,16 +344,16 @@ func (t *ledgerWriteTool) invalidate(id, reason string, evidence []string, tc *C
 		if errors.Is(err, ledger.ErrNotFound) {
 			return ledgerSoftError("ledger invalidate failed", err.Error(), map[string]any{"id": id})
 		}
-		return Result{}, err
+		return tool.Result{}, err
 	}
 	notifyLedger(tc, "invalidate", e)
 	return ledgerResultJSON(toLedgerViewFresh(e, toolWorkDir(tc)), fmt.Sprintf("ledger invalidated %s", shortLedgerID(e.ID)))
 }
 
-func (t *ledgerWriteTool) supersede(id, kind, statement, confidence string, evidence []string, pins []ledger.EvidencePin, paths, tasks []string, sessionID, rootID, agent string, tc *Context) (Result, error) {
+func (t *ledgerWriteTool) supersede(id, kind, statement, confidence string, evidence []string, pins []ledger.EvidencePin, paths, tasks []string, sessionID, rootID, agent string, tc *tool.Context) (tool.Result, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
-		return Result{}, errors.New("id is required for supersede")
+		return tool.Result{}, errors.New("id is required for supersede")
 	}
 	workDir := toolWorkDir(tc)
 	pins = fillPinHashes(pins, workDir)
@@ -376,22 +373,22 @@ func (t *ledgerWriteTool) supersede(id, kind, statement, confidence string, evid
 		if errors.Is(err, ledger.ErrNotFound) {
 			return ledgerSoftError("ledger supersede failed", err.Error(), map[string]any{"id": id})
 		}
-		return Result{}, err
+		return tool.Result{}, err
 	}
 	notifyLedger(tc, "supersede", e)
 	return ledgerResultJSON(toLedgerViewFresh(e, toolWorkDir(tc)), fmt.Sprintf("ledger supersede %s → %s", shortLedgerID(id), shortLedgerID(e.ID)))
 }
 
-func (t *ledgerWriteTool) revalidate(id string, pins []ledger.EvidencePin, tc *Context) (Result, error) {
+func (t *ledgerWriteTool) revalidate(id string, pins []ledger.EvidencePin, tc *tool.Context) (tool.Result, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
-		return Result{}, errors.New("id is required for revalidate")
+		return tool.Result{}, errors.New("id is required for revalidate")
 	}
 	workDir := toolWorkDir(tc)
 	if len(pins) == 0 {
 		cur, ok, err := t.store.Get(id)
 		if err != nil {
-			return Result{}, err
+			return tool.Result{}, err
 		}
 		if !ok {
 			return ledgerSoftError("ledger revalidate failed", ledger.ErrNotFound.Error(), map[string]any{"id": id})
@@ -405,13 +402,13 @@ func (t *ledgerWriteTool) revalidate(id string, pins []ledger.EvidencePin, tc *C
 		if errors.Is(err, ledger.ErrNotFound) {
 			return ledgerSoftError("ledger revalidate failed", err.Error(), map[string]any{"id": id})
 		}
-		return Result{}, err
+		return tool.Result{}, err
 	}
 	notifyLedger(tc, "revalidate", e)
 	return ledgerResultJSON(toLedgerViewFresh(e, workDir), fmt.Sprintf("ledger revalidated %s", shortLedgerID(e.ID)))
 }
 
-func toolWorkDir(tc *Context) string {
+func toolWorkDir(tc *tool.Context) string {
 	if tc == nil {
 		return ""
 	}
@@ -464,14 +461,14 @@ type ledgerReadTool struct {
 }
 
 // NewLedgerRead builds the ledger_read tool. store must be non-nil.
-func NewLedgerRead(store LedgerStore) Tool {
+func NewLedgerRead(store LedgerStore) tool.Tool {
 	return &ledgerReadTool{store: store}
 }
 
 func (t *ledgerReadTool) Name() string { return "ledger_read" }
 
-func (t *ledgerReadTool) Contract() Contract {
-	return staticContract(SideEffectRead, IdempotencySafeRetry)
+func (t *ledgerReadTool) Contract() tool.Contract {
+	return tool.StaticContract(tool.SideEffectRead, tool.IdempotencySafeRetry)
 }
 
 func (t *ledgerReadTool) Description() string {
@@ -517,9 +514,9 @@ func (t *ledgerReadTool) Schema() json.RawMessage {
 	}`)
 }
 
-func (t *ledgerReadTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) (Result, error) {
+func (t *ledgerReadTool) Execute(ctx context.Context, args json.RawMessage, tc *tool.Context) (tool.Result, error) {
 	if t.store == nil {
-		return Result{}, errors.New("ledger store is unavailable")
+		return tool.Result{}, errors.New("ledger store is unavailable")
 	}
 	var in struct {
 		ID            string `json:"id"`
@@ -532,11 +529,11 @@ func (t *ledgerReadTool) Execute(ctx context.Context, args json.RawMessage, tc *
 	}
 	if len(args) > 0 && string(args) != "null" {
 		if err := json.Unmarshal(args, &in); err != nil {
-			return Result{}, fmt.Errorf("invalid arguments: %w", err)
+			return tool.Result{}, fmt.Errorf("invalid arguments: %w", err)
 		}
 	}
 	if _, _, _, err := ledgerActor(tc); err != nil {
-		return Result{}, err
+		return tool.Result{}, err
 	}
 
 	pattern := "*"
@@ -545,22 +542,22 @@ func (t *ledgerReadTool) Execute(ctx context.Context, args json.RawMessage, tc *
 	} else if k := strings.TrimSpace(in.Kind); k != "" {
 		pattern = "kind:" + k
 	}
-	if err := tc.Ask(ctx, AskRequest{
+	if err := tc.Ask(ctx, tool.AskRequest{
 		Permission: "ledger_read",
 		Patterns:   []string{pattern},
 		Always:     []string{"*"},
 	}); err != nil {
-		return Result{}, err
+		return tool.Result{}, err
 	}
 
 	id := strings.TrimSpace(in.ID)
 	if id != "" {
 		e, ok, err := t.store.Get(id)
 		if err != nil {
-			return Result{}, err
+			return tool.Result{}, err
 		}
 		if !ok {
-			return Result{Title: "ledger miss", Output: fmt.Sprintf("no ledger entry %q", id)}, nil
+			return tool.Result{Title: "ledger miss", Output: fmt.Sprintf("no ledger entry %q", id)}, nil
 		}
 		return ledgerResultJSON(toLedgerViewFresh(e, toolWorkDir(tc)), fmt.Sprintf("ledger %s %s %s", e.Kind, shortLedgerID(e.ID), e.Status))
 	}
@@ -583,7 +580,7 @@ func (t *ledgerReadTool) Execute(ctx context.Context, args json.RawMessage, tc *
 		AuthorSession: strings.TrimSpace(in.AuthorSession),
 	})
 	if err != nil {
-		return Result{}, err
+		return tool.Result{}, err
 	}
 	views := make([]ledgerView, 0, len(list))
 	for _, e := range list {

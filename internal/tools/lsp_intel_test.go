@@ -1,9 +1,10 @@
-package tool
+package tools
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/jonathanung/strike-cli/internal/tool"
 	"os"
 	"path/filepath"
 	"strings"
@@ -319,17 +320,17 @@ func TestImpactBoundedAndSoftError(t *testing.T) {
 }
 
 func TestIntelToolContractsAndDefer(t *testing.T) {
-	for _, tl := range []Tool{NewCallHierarchy(nil), NewRenamePreview(nil), NewImpact(nil)} {
-		c := LookupContract(tl)
+	for _, tl := range []tool.Tool{NewCallHierarchy(nil), NewRenamePreview(nil), NewImpact(nil)} {
+		c := tool.LookupContract(tl)
 		if err := c.Validate(); err != nil {
 			t.Errorf("%s: %v", tl.Name(), err)
 		}
-		if c.SideEffect != SideEffectRead || c.Idempotency != IdempotencySafeRetry {
+		if c.SideEffect != tool.SideEffectRead || c.Idempotency != tool.IdempotencySafeRetry {
 			t.Errorf("%s contract = %+v", tl.Name(), c)
 		}
 	}
-	reg := NewRegistry(NewRead(), NewCallHierarchy(nil), NewRenamePreview(nil), NewImpact(nil))
-	reg.Register(NewToolSearch(reg))
+	reg := tool.NewRegistry(tool.NewRead(), NewCallHierarchy(nil), NewRenamePreview(nil), NewImpact(nil))
+	reg.Register(tool.NewToolSearch(reg))
 	reg.SetDeferLoading(true)
 	names := map[string]bool{}
 	for _, s := range reg.SchemasForProvider() {
@@ -338,7 +339,7 @@ func TestIntelToolContractsAndDefer(t *testing.T) {
 	if names["call_hierarchy"] || names["rename_preview"] || names["impact"] {
 		t.Fatalf("intel tools should be deferred: %v", names)
 	}
-	res, err := NewToolSearch(reg).Execute(context.Background(), mustJSON(t, map[string]any{
+	res, err := tool.NewToolSearch(reg).Execute(context.Background(), mustJSON(t, map[string]any{
 		"query": "lsp",
 	}), allowAll(t.TempDir()))
 	if err != nil {
@@ -352,7 +353,7 @@ func TestIntelToolContractsAndDefer(t *testing.T) {
 func TestIntelPermissionAndEscape(t *testing.T) {
 	dir := t.TempDir()
 	writeGo(t, dir)
-	tc := &Context{WorkDir: dir, Ask: func(context.Context, AskRequest) error { return errors.New("denied") }}
+	tc := &tool.Context{WorkDir: dir, Ask: func(context.Context, tool.AskRequest) error { return errors.New("denied") }}
 	_, err := NewImpact(&fakeIntel{}).Execute(context.Background(), mustJSON(t, map[string]any{
 		"filePath": "a.go", "line": 1,
 	}), tc)
@@ -362,7 +363,7 @@ func TestIntelPermissionAndEscape(t *testing.T) {
 	_, err = NewCallHierarchy(&fakeIntel{}).Execute(context.Background(), mustJSON(t, map[string]any{
 		"filePath": "../outside.go", "line": 1,
 	}), allowAll(dir))
-	var esc *WorkspaceEscapeError
+	var esc *tool.WorkspaceEscapeError
 	if !errors.As(err, &esc) {
 		t.Fatalf("want WorkspaceEscapeError, got %v", err)
 	}

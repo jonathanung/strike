@@ -1,10 +1,11 @@
-package tool
+package tools
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/jonathanung/strike-cli/internal/tool"
 	"strings"
 
 	"github.com/jonathanung/strike-cli/internal/issue"
@@ -24,14 +25,14 @@ type issueWriteTool struct {
 }
 
 // NewIssueWrite builds the issue_write tool. store must be non-nil.
-func NewIssueWrite(store IssueStore) Tool {
+func NewIssueWrite(store IssueStore) tool.Tool {
 	return &issueWriteTool{store: store}
 }
 
 func (t *issueWriteTool) Name() string { return "issue_write" }
 
-func (t *issueWriteTool) Contract() Contract {
-	return staticContract(SideEffectExternal, IdempotencyConditional)
+func (t *issueWriteTool) Contract() tool.Contract {
+	return tool.StaticContract(tool.SideEffectExternal, tool.IdempotencyConditional)
 }
 
 func (t *issueWriteTool) Description() string {
@@ -59,9 +60,9 @@ func (t *issueWriteTool) Schema() json.RawMessage {
 	}`)
 }
 
-func (t *issueWriteTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) (Result, error) {
+func (t *issueWriteTool) Execute(ctx context.Context, args json.RawMessage, tc *tool.Context) (tool.Result, error) {
 	if t.store == nil {
-		return Result{}, errors.New("issue store is unavailable")
+		return tool.Result{}, errors.New("issue store is unavailable")
 	}
 	var in struct {
 		ID     *int    `json:"id"`
@@ -70,19 +71,19 @@ func (t *issueWriteTool) Execute(ctx context.Context, args json.RawMessage, tc *
 		Status *string `json:"status"`
 	}
 	if err := json.Unmarshal(args, &in); err != nil {
-		return Result{}, fmt.Errorf("invalid arguments: %w", err)
+		return tool.Result{}, fmt.Errorf("invalid arguments: %w", err)
 	}
 
 	pattern := "create"
 	if in.ID != nil {
 		pattern = fmt.Sprintf("%d", *in.ID)
 	}
-	if err := tc.Ask(ctx, AskRequest{
+	if err := tc.Ask(ctx, tool.AskRequest{
 		Permission: "issue_write",
 		Patterns:   []string{pattern},
 		Always:     []string{"*"},
 	}); err != nil {
-		return Result{}, err
+		return tool.Result{}, err
 	}
 
 	var (
@@ -100,40 +101,40 @@ func (t *issueWriteTool) Execute(ctx context.Context, args json.RawMessage, tc *
 		}
 		iss, err = t.store.Create(title, body)
 		if err != nil {
-			return Result{}, err
+			return tool.Result{}, err
 		}
 		if in.Status != nil && strings.TrimSpace(*in.Status) != "" && *in.Status != issue.StatusOpen {
 			iss, err = t.store.Update(iss.ID, nil, nil, in.Status)
 			if err != nil {
-				return Result{}, err
+				return tool.Result{}, err
 			}
 		}
 	} else {
 		if in.Title == nil && in.Body == nil && in.Status == nil {
-			return Result{}, errors.New("provide title, body, and/or status to update")
+			return tool.Result{}, errors.New("provide title, body, and/or status to update")
 		}
 		iss, err = t.store.Update(*in.ID, in.Title, in.Body, in.Status)
 		if err != nil {
 			if errors.Is(err, issue.ErrNotFound) {
-				return Result{
+				return tool.Result{
 					Title:  "issue miss",
 					Output: fmt.Sprintf("no issue #%d", *in.ID),
 				}, nil
 			}
-			return Result{}, err
+			return tool.Result{}, err
 		}
 	}
 
 	out, err := json.MarshalIndent(iss, "", "  ")
 	if err != nil {
-		return Result{}, err
+		return tool.Result{}, err
 	}
 	meta, _ := json.Marshal(map[string]any{
 		"id":     iss.ID,
 		"title":  iss.Title,
 		"status": iss.Status,
 	})
-	return Result{
+	return tool.Result{
 		Title:    fmt.Sprintf("issue #%d %s", iss.ID, iss.Status),
 		Output:   string(out),
 		Metadata: meta,
@@ -145,14 +146,14 @@ type issueReadTool struct {
 }
 
 // NewIssueRead builds the issue_read tool. store must be non-nil.
-func NewIssueRead(store IssueStore) Tool {
+func NewIssueRead(store IssueStore) tool.Tool {
 	return &issueReadTool{store: store}
 }
 
 func (t *issueReadTool) Name() string { return "issue_read" }
 
-func (t *issueReadTool) Contract() Contract {
-	return staticContract(SideEffectRead, IdempotencySafeRetry)
+func (t *issueReadTool) Contract() tool.Contract {
+	return tool.StaticContract(tool.SideEffectRead, tool.IdempotencySafeRetry)
 }
 
 func (t *issueReadTool) Description() string {
@@ -174,9 +175,9 @@ func (t *issueReadTool) Schema() json.RawMessage {
 	}`)
 }
 
-func (t *issueReadTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) (Result, error) {
+func (t *issueReadTool) Execute(ctx context.Context, args json.RawMessage, tc *tool.Context) (tool.Result, error) {
 	if t.store == nil {
-		return Result{}, errors.New("issue store is unavailable")
+		return tool.Result{}, errors.New("issue store is unavailable")
 	}
 	var in struct {
 		ID     *int   `json:"id"`
@@ -184,7 +185,7 @@ func (t *issueReadTool) Execute(ctx context.Context, args json.RawMessage, tc *C
 	}
 	if len(args) > 0 && string(args) != "null" {
 		if err := json.Unmarshal(args, &in); err != nil {
-			return Result{}, fmt.Errorf("invalid arguments: %w", err)
+			return tool.Result{}, fmt.Errorf("invalid arguments: %w", err)
 		}
 	}
 	status := strings.TrimSpace(in.Status)
@@ -195,31 +196,31 @@ func (t *issueReadTool) Execute(ctx context.Context, args json.RawMessage, tc *C
 	} else if status != "" {
 		pattern = "status:" + status
 	}
-	if err := tc.Ask(ctx, AskRequest{
+	if err := tc.Ask(ctx, tool.AskRequest{
 		Permission: "issue_read",
 		Patterns:   []string{pattern},
 		Always:     []string{"*"},
 	}); err != nil {
-		return Result{}, err
+		return tool.Result{}, err
 	}
 
 	if in.ID != nil {
 		iss, ok, err := t.store.Get(*in.ID)
 		if err != nil {
-			return Result{}, err
+			return tool.Result{}, err
 		}
 		if !ok {
-			return Result{
+			return tool.Result{
 				Title:  "issue miss",
 				Output: fmt.Sprintf("no issue #%d", *in.ID),
 			}, nil
 		}
 		out, err := json.MarshalIndent(iss, "", "  ")
 		if err != nil {
-			return Result{}, err
+			return tool.Result{}, err
 		}
 		meta, _ := json.Marshal(map[string]any{"id": iss.ID, "issue": iss})
-		return Result{
+		return tool.Result{
 			Title:    fmt.Sprintf("issue #%d", iss.ID),
 			Output:   string(out),
 			Metadata: meta,
@@ -228,21 +229,21 @@ func (t *issueReadTool) Execute(ctx context.Context, args json.RawMessage, tc *C
 
 	issues, err := t.store.List(status)
 	if err != nil {
-		return Result{}, err
+		return tool.Result{}, err
 	}
 	if issues == nil {
 		issues = []issue.Issue{}
 	}
 	out, err := json.MarshalIndent(issues, "", "  ")
 	if err != nil {
-		return Result{}, err
+		return tool.Result{}, err
 	}
 	meta, _ := json.Marshal(map[string]any{"count": len(issues), "status": status, "issues": issues})
 	title := fmt.Sprintf("%d issues", len(issues))
 	if status != "" {
 		title = fmt.Sprintf("%d issues status:%s", len(issues), status)
 	}
-	return Result{
+	return tool.Result{
 		Title:    title,
 		Output:   string(out),
 		Metadata: meta,

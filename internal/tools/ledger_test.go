@@ -1,8 +1,9 @@
-package tool
+package tools
 
 import (
 	"context"
 	"encoding/json"
+	"github.com/jonathanung/strike-cli/internal/tool"
 	"os"
 	"strings"
 	"testing"
@@ -10,13 +11,13 @@ import (
 	"github.com/jonathanung/strike-cli/internal/ledger"
 )
 
-func ledgerTC(dir, session, root string) *Context {
-	return &Context{
+func ledgerTC(dir, session, root string) *tool.Context {
+	return &tool.Context{
 		WorkDir:       dir,
 		SessionID:     session,
 		RootSessionID: root,
 		MemberName:    "orchestrator",
-		Ask:           func(ctx context.Context, req AskRequest) error { return nil },
+		Ask:           func(ctx context.Context, req tool.AskRequest) error { return nil },
 	}
 }
 
@@ -30,7 +31,8 @@ func TestLedgerWriteAppendReadList(t *testing.T) {
 
 	var notified []string
 	tc := ledgerTC(dir, "sess-1", "root-1")
-	tc.NotifyLedger = func(op string, e ledger.Entry) {
+	tc.NotifyLedger = func(op string, payload any) {
+		e := payload.(ledger.Entry)
 		notified = append(notified, op+":"+e.Kind+":"+e.Status)
 	}
 
@@ -92,7 +94,7 @@ func TestLedgerInvalidateAndSupersede(t *testing.T) {
 	t.Cleanup(func() { _ = store.Close() })
 	tc := ledgerTC(dir, "s", "r")
 	var ops []string
-	tc.NotifyLedger = func(op string, e ledger.Entry) {
+	tc.NotifyLedger = func(op string, payload any) {
 		ops = append(ops, op)
 	}
 
@@ -214,7 +216,7 @@ func TestLedgerEvidencePinsAndRevalidate(t *testing.T) {
 	t.Cleanup(func() { _ = store.Close() })
 	tc := ledgerTC(dir, "s", "r")
 	var ops []string
-	tc.NotifyLedger = func(op string, e ledger.Entry) { ops = append(ops, op) }
+	tc.NotifyLedger = func(op string, payload any) { ops = append(ops, op) }
 	w := NewLedgerWrite(store)
 	res, err := w.Execute(context.Background(), json.RawMessage(`{
 		"action":"append","kind":"assumption","statement":"pinned file is package p",

@@ -1,9 +1,10 @@
-package tool
+package tools
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/jonathanung/strike-cli/internal/tool"
 	"os"
 	"path/filepath"
 	"sort"
@@ -35,14 +36,14 @@ type diagnosticsTool struct {
 
 // NewDiagnostics returns the LSP workspace diagnostics query tool.
 // src may be nil (tool reports unavailable). Deferred when deferTools is on.
-func NewDiagnostics(src DiagnosticsSource) Tool {
+func NewDiagnostics(src DiagnosticsSource) tool.Tool {
 	return &diagnosticsTool{src: src}
 }
 
 func (t *diagnosticsTool) Name() string { return "diagnostics" }
 
-func (t *diagnosticsTool) Contract() Contract {
-	return staticContract(SideEffectRead, IdempotencySafeRetry)
+func (t *diagnosticsTool) Contract() tool.Contract {
+	return tool.StaticContract(tool.SideEffectRead, tool.IdempotencySafeRetry)
 }
 
 func (t *diagnosticsTool) Description() string {
@@ -120,7 +121,7 @@ type diagnosticsPayload struct {
 	Note        string                    `json:"note,omitempty"`
 }
 
-func (t *diagnosticsTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) (res Result, err error) {
+func (t *diagnosticsTool) Execute(ctx context.Context, args json.RawMessage, tc *tool.Context) (res tool.Result, err error) {
 	// Crash isolation: panics from a bad source become structured soft output.
 	defer func() {
 		if rec := recover(); rec != nil {
@@ -137,13 +138,13 @@ func (t *diagnosticsTool) Execute(ctx context.Context, args json.RawMessage, tc 
 	var a diagnosticsArgs
 	if len(args) > 0 && string(args) != "null" {
 		if err := json.Unmarshal(args, &a); err != nil {
-			return Result{}, fmt.Errorf("invalid arguments: %w", err)
+			return tool.Result{}, fmt.Errorf("invalid arguments: %w", err)
 		}
 	}
 
 	minSev, err := lsp.ParseSeverityName(a.Severity)
 	if err != nil {
-		return Result{}, err
+		return tool.Result{}, err
 	}
 	sevName := lsp.SeverityName(minSev)
 
@@ -167,7 +168,7 @@ func (t *diagnosticsTool) Execute(ctx context.Context, args json.RawMessage, tc 
 		var rerr error
 		absPath, relPath, rerr = resolveNavPath(tc, pathArg)
 		if rerr != nil {
-			return Result{}, rerr
+			return tool.Result{}, rerr
 		}
 		if fi, sterr := os.Stat(absPath); sterr == nil && fi.IsDir() {
 			scope = "directory"
@@ -181,12 +182,12 @@ func (t *diagnosticsTool) Execute(ctx context.Context, args json.RawMessage, tc 
 	if pathArg != "" {
 		permPattern = relPath
 	}
-	if err := tc.Ask(ctx, AskRequest{
+	if err := tc.Ask(ctx, tool.AskRequest{
 		Permission: "diagnostics",
 		Patterns:   []string{permPattern},
 		Always:     []string{"*"},
 	}); err != nil {
-		return Result{}, err
+		return tool.Result{}, err
 	}
 
 	payload := diagnosticsPayload{
@@ -378,18 +379,18 @@ func formatDiagCode(code any) string {
 	return s
 }
 
-func diagnosticsResult(payload diagnosticsPayload) (Result, error) {
+func diagnosticsResult(payload diagnosticsPayload) (tool.Result, error) {
 	if payload.Diagnostics == nil {
 		payload.Diagnostics = []diagnosticsItem{}
 	}
 	raw, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
-		return Result{}, fmt.Errorf("encode diagnostics: %w", err)
+		return tool.Result{}, fmt.Errorf("encode diagnostics: %w", err)
 	}
 	meta, _ := json.Marshal(payload)
 
 	title := diagnosticsTitle(payload)
-	return Result{
+	return tool.Result{
 		Title:    title,
 		Output:   string(raw) + "\n",
 		Metadata: meta,

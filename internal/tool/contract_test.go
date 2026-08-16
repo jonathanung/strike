@@ -87,7 +87,6 @@ func TestMutativeToolContracts(t *testing.T) {
 		{NewMove(), SideEffectWorkspaceMutative, IdempotencyConditional},
 		{NewDelete(), SideEffectWorkspaceMutative, IdempotencyConditional},
 		{NewBash(), SideEffectProcess, IdempotencyUnsafe},
-		{NewNotebookEdit(), SideEffectWorkspaceMutative, IdempotencyConditional},
 	}
 	for _, tc := range cases {
 		c := LookupContract(tc.tool)

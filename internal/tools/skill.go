@@ -1,9 +1,10 @@
-package tool
+package tools
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/jonathanung/strike-cli/internal/tool"
 	"os"
 	"path/filepath"
 	"strings"
@@ -39,12 +40,12 @@ type skillTool struct {
 
 // NewSkill returns a tool that loads named skill templates into the conversation.
 // The skills slice is copied so the caller cannot mutate the tool's catalog later.
-func NewSkill(skills []SkillInfo) Tool {
+func NewSkill(skills []SkillInfo) tool.Tool {
 	return NewSkillWithLoader(skills, nil)
 }
 
 // NewSkillWithLoader wires an optional reloadable catalog.
-func NewSkillWithLoader(skills []SkillInfo, loader SkillLoader) Tool {
+func NewSkillWithLoader(skills []SkillInfo, loader SkillLoader) tool.Tool {
 	cp := make([]SkillInfo, len(skills))
 	copy(cp, skills)
 	t := &skillTool{skills: cp, loader: loader}
@@ -96,8 +97,8 @@ The skill name must match one of the available skills. Optional arguments are su
 
 func (t *skillTool) Name() string { return "skill" }
 
-func (t *skillTool) Contract() Contract {
-	return staticContract(SideEffectRead, IdempotencySafeRetry)
+func (t *skillTool) Contract() tool.Contract {
+	return tool.StaticContract(tool.SideEffectRead, tool.IdempotencySafeRetry)
 }
 
 func (t *skillTool) Description() string {
@@ -124,13 +125,13 @@ type skillArgs struct {
 	Resource  string `json:"resource"`
 }
 
-func (t *skillTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) (Result, error) {
+func (t *skillTool) Execute(ctx context.Context, args json.RawMessage, tc *tool.Context) (tool.Result, error) {
 	var a skillArgs
 	if err := json.Unmarshal(args, &a); err != nil {
-		return Result{}, fmt.Errorf("invalid arguments: %w", err)
+		return tool.Result{}, fmt.Errorf("invalid arguments: %w", err)
 	}
 	if strings.TrimSpace(a.Name) == "" {
-		return Result{}, fmt.Errorf("name is required")
+		return tool.Result{}, fmt.Errorf("name is required")
 	}
 
 	skills := t.snapshot()
@@ -144,17 +145,17 @@ func (t *skillTool) Execute(ctx context.Context, args json.RawMessage, tc *Conte
 	}
 	if found == nil {
 		if len(names) == 0 {
-			return Result{}, fmt.Errorf("unknown skill %q (no skills loaded)", a.Name)
+			return tool.Result{}, fmt.Errorf("unknown skill %q (no skills loaded)", a.Name)
 		}
-		return Result{}, fmt.Errorf("unknown skill %q (available: %s)", a.Name, strings.Join(names, ", "))
+		return tool.Result{}, fmt.Errorf("unknown skill %q (available: %s)", a.Name, strings.Join(names, ", "))
 	}
 
-	if err := tc.Ask(ctx, AskRequest{
+	if err := tc.Ask(ctx, tool.AskRequest{
 		Permission: "skill",
 		Patterns:   []string{a.Name},
 		Always:     []string{a.Name},
 	}); err != nil {
-		return Result{}, err
+		return tool.Result{}, err
 	}
 
 	rendered := renderSkillTemplate(found.Template, a.Arguments)
@@ -163,13 +164,13 @@ func (t *skillTool) Execute(ctx context.Context, args json.RawMessage, tc *Conte
 	if res := strings.TrimSpace(a.Resource); res != "" {
 		body, err := readAdjacentSkillResource(*found, res)
 		if err != nil {
-			return Result{}, fmt.Errorf("skill resource: %w", err)
+			return tool.Result{}, fmt.Errorf("skill resource: %w", err)
 		}
 		out += fmt.Sprintf("\n\n## Resource: %s\n\n%s", res, redact.String(string(body)))
 	}
 
 	meta, _ := json.Marshal(map[string]any{"name": found.Name, "resource": a.Resource})
-	return Result{
+	return tool.Result{
 		Title:    fmt.Sprintf("skill %s", found.Name),
 		Output:   out,
 		Metadata: meta,

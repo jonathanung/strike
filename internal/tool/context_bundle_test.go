@@ -75,60 +75,6 @@ func TestNormalizeContextBundleEmpty(t *testing.T) {
 	}
 }
 
-func TestContextBundleToolGetAndItem(t *testing.T) {
-	t.Parallel()
-	bundle, err := NormalizeContextBundle(ContextBundle{
-		Goal: "do work",
-		Items: []ContextBundleItem{
-			{ID: "custom", Kind: "note", Text: "secret-ish"},
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	tc := &Context{
-		ContextBundle: &bundle,
-		Ask:           func(context.Context, AskRequest) error { return nil },
-	}
-	tool := NewContextBundle()
-
-	res, err := tool.Execute(context.Background(), json.RawMessage(`{"action":"get"}`), tc)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(res.Output, `"attached": true`) && !strings.Contains(res.Output, `"attached":true`) {
-		t.Fatalf("output = %s", res.Output)
-	}
-	if !strings.Contains(res.Output, "do work") {
-		t.Fatalf("missing goal: %s", res.Output)
-	}
-
-	res, err = tool.Execute(context.Background(), json.RawMessage(`{"action":"item","id":"custom"}`), tc)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(res.Output, "secret-ish") {
-		t.Fatalf("item = %s", res.Output)
-	}
-
-	_, err = tool.Execute(context.Background(), json.RawMessage(`{"action":"item","id":"nope"}`), tc)
-	if err == nil {
-		t.Fatal("expected missing item error")
-	}
-}
-
-func TestContextBundleToolEmpty(t *testing.T) {
-	t.Parallel()
-	tc := &Context{Ask: func(context.Context, AskRequest) error { return nil }}
-	res, err := NewContextBundle().Execute(context.Background(), nil, tc)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(res.Output, `"attached":false`) && !strings.Contains(res.Output, `"attached": false`) {
-		t.Fatalf("output = %s", res.Output)
-	}
-}
-
 func TestTaskPassesContextBundle(t *testing.T) {
 	t.Parallel()
 	var got TaskRequest

@@ -1,9 +1,10 @@
-package tool
+package tools
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/jonathanung/strike-cli/internal/tool"
 	"os"
 	"path/filepath"
 	"strings"
@@ -69,9 +70,9 @@ func TestNotebookEditReplaceByIDAndIndex(t *testing.T) {
 	dir := t.TempDir()
 	path := writeNotebook(t, dir, "n.ipynb", sampleNotebook())
 	tc := allowAll(dir)
-	tool := NewNotebookEdit()
+	tl := NewNotebookEdit()
 
-	res, err := tool.Execute(context.Background(), mustJSON(t, map[string]any{
+	res, err := tl.Execute(context.Background(), mustJSON(t, map[string]any{
 		"notebook_path": "n.ipynb",
 		"cell_id":       "cell-bbb",
 		"new_source":    "print(2)",
@@ -98,7 +99,7 @@ func TestNotebookEditReplaceByIDAndIndex(t *testing.T) {
 		t.Errorf("execution_count = %#v, want nil", cell["execution_count"])
 	}
 
-	res, err = tool.Execute(context.Background(), mustJSON(t, map[string]any{
+	res, err = tl.Execute(context.Background(), mustJSON(t, map[string]any{
 		"notebook_path": path,
 		"cell_id":       "cell-0",
 		"new_source":    "## New",
@@ -120,10 +121,10 @@ func TestNotebookEditInsertAfterIDAndAtStart(t *testing.T) {
 	dir := t.TempDir()
 	path := writeNotebook(t, dir, "n.ipynb", sampleNotebook())
 	tc := allowAll(dir)
-	tool := NewNotebookEdit()
+	tl := NewNotebookEdit()
 
 	// Insert after first cell by id → index 1.
-	res, err := tool.Execute(context.Background(), mustJSON(t, map[string]any{
+	res, err := tl.Execute(context.Background(), mustJSON(t, map[string]any{
 		"notebook_path": "n.ipynb",
 		"cell_id":       "cell-aaa",
 		"new_source":    "inserted",
@@ -146,7 +147,7 @@ func TestNotebookEditInsertAfterIDAndAtStart(t *testing.T) {
 	}
 
 	// Insert at start when cell_id omitted.
-	res, err = tool.Execute(context.Background(), mustJSON(t, map[string]any{
+	res, err = tl.Execute(context.Background(), mustJSON(t, map[string]any{
 		"notebook_path": "n.ipynb",
 		"new_source":    "first",
 		"cell_type":     "code",
@@ -201,14 +202,14 @@ func TestNotebookEditDelete(t *testing.T) {
 func TestNotebookEditErrors(t *testing.T) {
 	dir := t.TempDir()
 	tc := allowAll(dir)
-	tool := NewNotebookEdit()
+	tl := NewNotebookEdit()
 
 	// Invalid JSON
 	badJSON := filepath.Join(dir, "bad.ipynb")
 	if err := os.WriteFile(badJSON, []byte("{not json"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, err := tool.Execute(context.Background(), mustJSON(t, map[string]any{
+	_, err := tl.Execute(context.Background(), mustJSON(t, map[string]any{
 		"notebook_path": "bad.ipynb",
 		"cell_id":       "0",
 		"new_source":    "x",
@@ -222,7 +223,7 @@ func TestNotebookEditErrors(t *testing.T) {
 	if err := os.WriteFile(txt, []byte(`{"cells":[]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, err = tool.Execute(context.Background(), mustJSON(t, map[string]any{
+	_, err = tl.Execute(context.Background(), mustJSON(t, map[string]any{
 		"notebook_path": "note.txt",
 		"cell_id":       "0",
 		"new_source":    "x",
@@ -233,7 +234,7 @@ func TestNotebookEditErrors(t *testing.T) {
 
 	// Missing cell
 	writeNotebook(t, dir, "ok.ipynb", sampleNotebook())
-	_, err = tool.Execute(context.Background(), mustJSON(t, map[string]any{
+	_, err = tl.Execute(context.Background(), mustJSON(t, map[string]any{
 		"notebook_path": "ok.ipynb",
 		"cell_id":       "no-such-cell",
 		"new_source":    "x",
@@ -243,7 +244,7 @@ func TestNotebookEditErrors(t *testing.T) {
 	}
 
 	// Out of range index
-	_, err = tool.Execute(context.Background(), mustJSON(t, map[string]any{
+	_, err = tl.Execute(context.Background(), mustJSON(t, map[string]any{
 		"notebook_path": "ok.ipynb",
 		"cell_id":       "cell-99",
 		"new_source":    "x",
@@ -256,10 +257,10 @@ func TestNotebookEditErrors(t *testing.T) {
 func TestNotebookEditAskUsesEditPermission(t *testing.T) {
 	dir := t.TempDir()
 	writeNotebook(t, dir, "n.ipynb", sampleNotebook())
-	var saw AskRequest
-	tc := &Context{
+	var saw tool.AskRequest
+	tc := &tool.Context{
 		WorkDir: dir,
-		Ask: func(_ context.Context, req AskRequest) error {
+		Ask: func(_ context.Context, req tool.AskRequest) error {
 			saw = req
 			return nil
 		},
@@ -283,9 +284,9 @@ func TestNotebookEditAskUsesEditPermission(t *testing.T) {
 func TestNotebookEditPermissionDenied(t *testing.T) {
 	dir := t.TempDir()
 	writeNotebook(t, dir, "n.ipynb", sampleNotebook())
-	tc := &Context{
+	tc := &tool.Context{
 		WorkDir: dir,
-		Ask:     func(context.Context, AskRequest) error { return errors.New("denied") },
+		Ask:     func(context.Context, tool.AskRequest) error { return errors.New("denied") },
 	}
 	_, err := NewNotebookEdit().Execute(context.Background(), mustJSON(t, map[string]any{
 		"notebook_path": "n.ipynb",

@@ -1,10 +1,11 @@
-package tool
+package tools
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/jonathanung/strike-cli/internal/tool"
 	"strings"
 	"sync"
 	"testing"
@@ -23,16 +24,16 @@ func TestPlanDelegateDispatchTwoSectionsAndRejectInFlight(t *testing.T) {
 	}
 
 	var mu sync.Mutex
-	var spawns []TaskRequest
+	var spawns []tool.TaskRequest
 	tc := rootTC(t, "root-a")
 	n := 0
-	tc.SpawnTask = func(_ context.Context, req TaskRequest) (TaskResult, error) {
+	tc.SpawnTask = func(_ context.Context, req tool.TaskRequest) (tool.TaskResult, error) {
 		n++
 		id := fmt.Sprintf("child-%c", 'a'+n-1)
 		mu.Lock()
 		spawns = append(spawns, req)
 		mu.Unlock()
-		return TaskResult{Status: "started", SessionID: id, Name: req.Name, Output: "started " + id}, nil
+		return tool.TaskResult{Status: "started", SessionID: id, Name: req.Name, Output: "started " + id}, nil
 	}
 
 	td := NewPlanDelegate(store)
@@ -123,9 +124,9 @@ func TestPlanDelegateChildCannotDispatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	tc := childTC(t, "root-a", "child-1")
-	tc.SpawnTask = func(context.Context, TaskRequest) (TaskResult, error) {
+	tc.SpawnTask = func(context.Context, tool.TaskRequest) (tool.TaskResult, error) {
 		t.Fatal("must not spawn")
-		return TaskResult{}, nil
+		return tool.TaskResult{}, nil
 	}
 	td := NewPlanDelegate(store)
 	res, err := td.Execute(context.Background(), mustJSON(t, map[string]any{
@@ -142,10 +143,10 @@ func TestPlanDelegateChildCannotDispatch(t *testing.T) {
 }
 
 func TestPlanDelegatePermissionAndDeferred(t *testing.T) {
-	if IsCoreTool("plan_delegate") {
+	if tool.IsCoreTool("plan_delegate") {
 		t.Fatal("plan_delegate should not be core (#988)")
 	}
-	if !IsDeferredTool("plan_delegate") {
+	if !tool.IsDeferredTool("plan_delegate") {
 		t.Fatal("plan_delegate must be deferred")
 	}
 
@@ -156,13 +157,13 @@ func TestPlanDelegatePermissionAndDeferred(t *testing.T) {
 	}
 	var asked []string
 	tc := rootTC(t, "root-a")
-	tc.Ask = func(_ context.Context, req AskRequest) error {
+	tc.Ask = func(_ context.Context, req tool.AskRequest) error {
 		asked = append(asked, req.Permission)
 		return errors.New("denied")
 	}
-	tc.SpawnTask = func(context.Context, TaskRequest) (TaskResult, error) {
+	tc.SpawnTask = func(context.Context, tool.TaskRequest) (tool.TaskResult, error) {
 		t.Fatal("spawn after deny")
-		return TaskResult{}, nil
+		return tool.TaskResult{}, nil
 	}
 	_, err = NewPlanDelegate(store).Execute(context.Background(), mustJSON(t, map[string]any{
 		"action":     "dispatch",
@@ -189,13 +190,13 @@ func TestPlanDelegateReclaimsStaleInFlight(t *testing.T) {
 
 	tc := rootTC(t, "root-a")
 	// Child is unknown → not live.
-	tc.TaskStatus = func(context.Context, TaskStatusRequest) (TaskStatusResult, error) {
-		return TaskStatusResult{}, errors.New("unknown child")
+	tc.TaskStatus = func(context.Context, tool.TaskStatusRequest) (tool.TaskStatusResult, error) {
+		return tool.TaskStatusResult{}, errors.New("unknown child")
 	}
 	var spawned string
-	tc.SpawnTask = func(_ context.Context, req TaskRequest) (TaskResult, error) {
+	tc.SpawnTask = func(_ context.Context, req tool.TaskRequest) (tool.TaskResult, error) {
 		spawned = "new-child"
-		return TaskResult{Status: "started", SessionID: spawned, Name: "fresh", Output: "ok"}, nil
+		return tool.TaskResult{Status: "started", SessionID: spawned, Name: "fresh", Output: "ok"}, nil
 	}
 
 	res, err := NewPlanDelegate(store).Execute(context.Background(), mustJSON(t, map[string]any{
@@ -232,12 +233,12 @@ func TestPlanDelegateRejectsLiveInFlight(t *testing.T) {
 		t.Fatal(err)
 	}
 	tc := rootTC(t, "root-a")
-	tc.TaskStatus = func(context.Context, TaskStatusRequest) (TaskStatusResult, error) {
-		return TaskStatusResult{State: "working", SessionID: "live-child"}, nil
+	tc.TaskStatus = func(context.Context, tool.TaskStatusRequest) (tool.TaskStatusResult, error) {
+		return tool.TaskStatusResult{State: "working", SessionID: "live-child"}, nil
 	}
-	tc.SpawnTask = func(context.Context, TaskRequest) (TaskResult, error) {
+	tc.SpawnTask = func(context.Context, tool.TaskRequest) (tool.TaskResult, error) {
 		t.Fatal("must not spawn while live")
-		return TaskResult{}, nil
+		return tool.TaskResult{}, nil
 	}
 	res, err := NewPlanDelegate(store).Execute(context.Background(), mustJSON(t, map[string]any{
 		"action": "dispatch", "id": p.ID, "section_id": "s1",

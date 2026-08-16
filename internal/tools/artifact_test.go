@@ -1,21 +1,22 @@
-package tool
+package tools
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/jonathanung/strike-cli/internal/tool"
 	"strings"
 	"testing"
 
 	"github.com/jonathanung/strike-cli/internal/artifact"
 )
 
-func artifactTC(dir, session, root string) *Context {
-	return &Context{
+func artifactTC(dir, session, root string) *tool.Context {
+	return &tool.Context{
 		WorkDir:       dir,
 		SessionID:     session,
 		RootSessionID: root,
-		Ask:           func(ctx context.Context, req AskRequest) error { return nil },
+		Ask:           func(ctx context.Context, req tool.AskRequest) error { return nil },
 	}
 }
 
@@ -29,7 +30,8 @@ func TestArtifactWriteCreateReadList(t *testing.T) {
 
 	var notified []string
 	tc := artifactTC(dir, "sess-1", "root-1")
-	tc.NotifyArtifact = func(op string, a artifact.Artifact) {
+	tc.NotifyArtifact = func(op string, payload any) {
+		a := payload.(artifact.Artifact)
 		notified = append(notified, op+":"+a.Type)
 	}
 
@@ -167,7 +169,7 @@ func TestArtifactPermissionsAsk(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	tc := artifactTC(dir, "s", "r")
-	tc.Ask = func(ctx context.Context, req AskRequest) error {
+	tc.Ask = func(ctx context.Context, req tool.AskRequest) error {
 		if req.Permission != "artifact_write" {
 			t.Fatalf("perm = %q", req.Permission)
 		}
@@ -182,7 +184,7 @@ func TestArtifactPermissionsAsk(t *testing.T) {
 	}
 
 	// Owner-only: peer under same root denied by store.
-	tc.Ask = func(ctx context.Context, req AskRequest) error { return nil }
+	tc.Ask = func(ctx context.Context, req tool.AskRequest) error { return nil }
 	res, err := w.Execute(context.Background(), json.RawMessage(`{
 		"action":"create","type":"contract","content":"secret","access":"owner"
 	}`), tc)
@@ -259,9 +261,9 @@ func TestArtifactWriteRequiresSession(t *testing.T) {
 	w := NewArtifactWrite(store)
 	_, err = w.Execute(context.Background(), json.RawMessage(`{
 		"action":"create","type":"findings","content":"x"
-	}`), &Context{
+	}`), &tool.Context{
 		WorkDir: dir,
-		Ask:     func(ctx context.Context, req AskRequest) error { return nil },
+		Ask:     func(ctx context.Context, req tool.AskRequest) error { return nil },
 	})
 	if err == nil || !strings.Contains(err.Error(), "session identity") {
 		t.Fatalf("want session identity err, got %v", err)
