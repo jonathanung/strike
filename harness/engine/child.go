@@ -476,6 +476,7 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 		ProjectLedger:              e.opts.ProjectLedger,
 		Worktrees:                  e.opts.Worktrees,
 		Version:                    e.opts.Version,
+		BuildDiagnostic:            e.opts.BuildDiagnostic,
 		SystemPrompt:               e.opts.SystemPrompt,
 		SystemPromptMode:           e.opts.SystemPromptMode,
 		LeanCode:                   e.opts.LeanCode,

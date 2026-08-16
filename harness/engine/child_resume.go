@@ -155,6 +155,7 @@ func (e *Engine) resumeChild(ctx context.Context, req tool.TaskResumeRequest) (t
 		ProjectLedger:              e.opts.ProjectLedger,
 		Worktrees:                  e.opts.Worktrees,
 		Version:                    e.opts.Version,
+		BuildDiagnostic:            e.opts.BuildDiagnostic,
 		SystemPrompt:               e.opts.SystemPrompt,
 		LeanCode:                   e.opts.LeanCode,
 		HarnessRegistry:            e.opts.HarnessRegistry,
