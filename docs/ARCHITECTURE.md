@@ -621,7 +621,7 @@ No cycles. `harness` imports protocol + redact only. `providers` imports the
 harness provider interface only (not `harness/engine`). Root `replace`s both.
 No git submodules and no module-proxy publish in this epic.
 
-`internal/harness` → `harness/fn`. Wire event `harness.progress` and config
+`internal/fn` → `harness/fn`. Wire event `harness.progress` and config
 key `harnesses` stay. `engine/route.go` is persona/capability/load routing,
 not the providers factory (`providers/factory` / today's `selectProvider`).
 
