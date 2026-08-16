@@ -15,9 +15,9 @@ import (
 	"github.com/jonathanung/strike-cli/internal/auth"
 	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/engine"
+	"github.com/jonathanung/strike-cli/internal/fn"
+	"github.com/jonathanung/strike-cli/internal/fn/external"
 	"github.com/jonathanung/strike-cli/internal/goal"
-	"github.com/jonathanung/strike-cli/internal/harness"
-	"github.com/jonathanung/strike-cli/internal/harness/external"
 	"github.com/jonathanung/strike-cli/internal/history"
 	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/host/local"
@@ -472,7 +472,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			{Name: "build", Description: "Default coding agent. Full tools subject to permission rules."},
 		}
 	}
-	harnessRegistry := harness.NewRegistry()
+	harnessRegistry := fn.NewRegistry()
 	// Config only creates external subprocess harnesses. A custom Strike binary
 	// may register embedded Go functions here before validating agent references.
 	var harnessClosers []func() error
@@ -481,7 +481,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		if err != nil {
 			return nil, fmt.Errorf("configuring harness %q: %w", name, err)
 		}
-		var h harness.Func
+		var h fn.Func
 		if config.IsPersistentHarness(hc) {
 			opts := external.WorkerOptions{
 				MaxConcurrent: hc.MaxConcurrent,

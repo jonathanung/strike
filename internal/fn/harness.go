@@ -1,7 +1,7 @@
-// Package harness defines function-based agent control flow. A harness receives
+// Package fn defines function-based agent control flow. A harness receives
 // its input, a model provider capability, a brokered tools capability, and a
 // progress callback, owns the complete run, and returns one final result.
-package harness
+package fn
 
 import (
 	"context"

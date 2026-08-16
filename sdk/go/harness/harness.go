@@ -1,5 +1,5 @@
 // Package harness helps Go subprocesses implement Strike's external harness
-// protocol. It is separate from internal/harness, which is the embedded Go API
+// protocol. It is separate from internal/fn, which is the embedded Go API
 // compiled into Strike itself.
 package harness
 

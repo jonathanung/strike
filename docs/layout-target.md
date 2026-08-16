@@ -91,7 +91,7 @@ harness/                          # module github.com/jonathanung/strike-cli/har
   sandbox/
   scheduler/
   safefile/
-  fn/                             # today's internal/harness
+  fn/                             # today's internal/fn
   fn/external/
   verify/
   fault/
@@ -140,8 +140,8 @@ Go import paths change; wire and config names do not.
 
 | Today | Target | Notes |
 |---|---|---|
-| `internal/harness` | `harness/fn` | Via `internal/fn` in #1207, then #1208 |
-| `internal/harness/external` | `harness/fn/external` | Same |
+| `internal/fn` | `harness/fn` | After #1207; #1208 moves it into the harness module |
+| `internal/fn/external` | `harness/fn/external` | Same |
 | protocol event `harness.progress` | **unchanged** | Tests that encode this type stay |
 | config key `harnesses` | **unchanged** | External-process registry in config JSON |
 | GitHub label `harness` | **unchanged** | |
@@ -202,7 +202,7 @@ Every current top-level `internal/*` package:
 | `internal/eval` | `internal/eval` (cluster; already) | product |
 | `internal/fault` | `harness/fault` | kernel |
 | `internal/goal` | `internal/product/goal` | product |
-| `internal/harness` | `harness/fn` | kernel |
+| `internal/fn` | `harness/fn` | kernel |
 | `internal/history` | `internal/persist/history` | product |
 | `internal/host` | `internal/frontend/host` | product |
 | `internal/issue` | `internal/persist/issue` | product |
@@ -238,7 +238,7 @@ Notable subpackages (not top-level, but they split or move with a parent):
 
 | Current | Destination | Kind |
 |---|---|---|
-| `internal/harness/external` | `harness/fn/external` | kernel |
+| `internal/fn/external` | `harness/fn/external` | kernel |
 | `internal/provider/echo` | `harness/provider` (echo) | kernel |
 | `internal/provider/base` | `providers/base` | providers |
 | `internal/provider/anthropic` | `providers/anthropic` | providers |

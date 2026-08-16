@@ -9,14 +9,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/harness"
+	"github.com/jonathanung/strike-cli/internal/fn"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
 )
 
 // resolveHarness maps a task subagent definition to its implementation. Empty
 // and "default" keep control in the built-in child loop.
-func (e *Engine) resolveHarness(agent Agent) (harness.Func, string, error) {
+func (e *Engine) resolveHarness(agent Agent) (fn.Func, string, error) {
 	name := agent.Harness
 	if name == "" || name == "default" {
 		return nil, "", nil
@@ -33,7 +33,7 @@ func (e *Engine) resolveHarness(agent Agent) (harness.Func, string, error) {
 
 // harnessEnvironment creates the provider object, tools broker, and progress
 // callback passed to one complete harness function call.
-func (e *Engine) harnessEnvironment(ctx context.Context, corr protocol.Correlation, name string) (harness.Input, harness.Provider, harness.Emit) {
+func (e *Engine) harnessEnvironment(ctx context.Context, corr protocol.Correlation, name string) (fn.Input, fn.Provider, fn.Emit) {
 	var callbackMu sync.Mutex
 	// Serialize tool execution: execToolCall shares engine state with the
 	// built-in sequential tool loop and is not safe for overlapping runs.
@@ -45,7 +45,7 @@ func (e *Engine) harnessEnvironment(ctx context.Context, corr protocol.Correlati
 			Payload:     payload,
 		})
 	}
-	providerCall := func(req provider.Request) (harness.ModelResponse, error) {
+	providerCall := func(req provider.Request) (fn.ModelResponse, error) {
 		req.Model = e.model
 		req.Priority = e.priority
 		maxAttempts := e.opts.MaxStreamAttempts
@@ -54,14 +54,14 @@ func (e *Engine) harnessEnvironment(ctx context.Context, corr protocol.Correlati
 		}
 		for attempt := 1; attempt <= maxAttempts; attempt++ {
 			if ctx.Err() != nil {
-				return harness.ModelResponse{}, ctx.Err()
+				return fn.ModelResponse{}, ctx.Err()
 			}
 			requestCorr := corr
 			requestCorr.ProviderRequestID = rand.Text()
 			requestCorr.Attempt = attempt
 			stream, err := e.admitModelStream(ctx, requestCorr, req)
 			if err == nil {
-				response := harness.ModelResponse{}
+				response := fn.ModelResponse{}
 				var text strings.Builder
 				for ev := range stream {
 					switch ev.Type {
@@ -90,7 +90,7 @@ func (e *Engine) harnessEnvironment(ctx context.Context, corr protocol.Correlati
 				}
 			}
 			if attempt == maxAttempts || !provider.IsRetryable(err) {
-				return harness.ModelResponse{}, err
+				return fn.ModelResponse{}, err
 			}
 			delay, _ := e.streamRetryDelayFor(err, attempt+1)
 			if delay > 0 {
@@ -98,12 +98,12 @@ func (e *Engine) harnessEnvironment(ctx context.Context, corr protocol.Correlati
 				select {
 				case <-ctx.Done():
 					timer.Stop()
-					return harness.ModelResponse{}, ctx.Err()
+					return fn.ModelResponse{}, ctx.Err()
 				case <-timer.C:
 				}
 			}
 		}
-		return harness.ModelResponse{}, provider.ErrIncompleteStream
+		return fn.ModelResponse{}, provider.ErrIncompleteStream
 	}
 
 	executeTool := func(call provider.ToolCall) (provider.ToolResult, error) {
@@ -141,7 +141,7 @@ func (e *Engine) harnessEnvironment(ctx context.Context, corr protocol.Correlati
 		return *msg.ToolResult, nil
 	}
 
-	input := harness.Input{
+	input := fn.Input{
 		Context: ctx,
 		Request: provider.Request{
 			Model: e.model, System: joinPromptLayerTexts(e.systemLayers()),
@@ -149,9 +149,9 @@ func (e *Engine) harnessEnvironment(ctx context.Context, corr protocol.Correlati
 			Tools:     func() []provider.ToolSchema { tools, _ := e.effectiveToolSchemas(); return tools }(),
 			MaxTokens: e.opts.MaxTokens, Effort: providerEffort(e.effort), Priority: e.priority,
 		},
-		Tools: harness.Tools{Execute: executeTool},
+		Tools: fn.Tools{Execute: executeTool},
 	}
-	return input, harness.Provider{Call: providerCall}, emit
+	return input, fn.Provider{Call: providerCall}, emit
 }
 
 // validateHarnessToolCall rejects malformed brokered tool requests before they

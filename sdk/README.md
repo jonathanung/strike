@@ -23,5 +23,5 @@ not add language-specific behavior to Strike. Configure the resulting command
 under `harnesses` in Strike config.
 
 An external Go executable uses `go/harness`; an embedded Go harness does not.
-Embedded functions use `internal/harness` and must be imported, compiled, and
+Embedded functions use `internal/fn` and must be imported, compiled, and
 registered in a custom Strike composition root.
