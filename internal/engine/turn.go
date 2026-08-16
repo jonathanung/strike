@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/jonathanung/strike-cli/internal/artifact"
+	"github.com/jonathanung/strike-cli/internal/attachment"
 	"github.com/jonathanung/strike-cli/internal/ledger"
 	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -53,6 +54,7 @@ type pendingSteer struct {
 
 // protocolImagesToProvider decodes base64 session attachments into provider images.
 // Invalid entries are skipped so a corrupt log line does not block restore/send.
+// Ref-only attachments are kept so a store can hydrate bytes after resume.
 func protocolImagesToProvider(images []protocol.ImageAttachment) []provider.Image {
 	if len(images) == 0 {
 		return nil
@@ -60,25 +62,166 @@ func protocolImagesToProvider(images []protocol.ImageAttachment) []provider.Imag
 	out := make([]provider.Image, 0, len(images))
 	for _, img := range images {
 		mime := strings.TrimSpace(img.MIME)
-		if mime == "" || img.Data == "" {
-			continue
-		}
-		raw, err := base64.StdEncoding.DecodeString(img.Data)
-		if err != nil {
-			raw, err = base64.RawStdEncoding.DecodeString(img.Data)
+		ref := strings.TrimSpace(img.Ref)
+		var raw []byte
+		if img.Data != "" {
+			decoded, err := base64.StdEncoding.DecodeString(img.Data)
 			if err != nil {
-				continue
+				decoded, err = base64.RawStdEncoding.DecodeString(img.Data)
+				if err != nil {
+					decoded = nil
+				}
 			}
+			raw = decoded
 		}
-		if len(raw) == 0 {
+		if mime == "" && len(raw) == 0 && ref == "" {
 			continue
 		}
-		out = append(out, provider.Image{MIME: mime, Data: raw})
+		if len(raw) == 0 && ref == "" {
+			continue
+		}
+		out = append(out, provider.Image{MIME: mime, Data: raw, Ref: ref})
 	}
 	if len(out) == 0 {
 		return nil
 	}
 	return out
+}
+
+func (e *Engine) persistImages(images []protocol.ImageAttachment) []protocol.ImageAttachment {
+	if len(images) == 0 {
+		return nil
+	}
+	if e == nil || e.opts.Attachments == nil {
+		return append([]protocol.ImageAttachment(nil), images...)
+	}
+	out := make([]protocol.ImageAttachment, 0, len(images))
+	for _, img := range images {
+		got, err := e.persistOneImage(img)
+		if err != nil {
+			e.emit(protocol.EngineError{
+				Correlation: e.sessionCorr(),
+				Message:     "attachment: " + err.Error(),
+			})
+			continue
+		}
+		out = append(out, got)
+	}
+	return out
+}
+
+func (e *Engine) persistOneImage(img protocol.ImageAttachment) (protocol.ImageAttachment, error) {
+	if strings.TrimSpace(img.Ref) != "" && img.Data == "" {
+		return stripAttachmentData(img), nil
+	}
+	raw, err := decodeAttachmentData(img.Data)
+	if err != nil {
+		return protocol.ImageAttachment{}, err
+	}
+	meta, err := e.opts.Attachments.Put(raw, attachment.PutInput{
+		MIME:      img.MIME,
+		Name:      img.Name,
+		Kind:      img.Kind,
+		SessionID: e.opts.SessionID,
+	})
+	if err != nil {
+		return protocol.ImageAttachment{}, err
+	}
+	kind := meta.Kind
+	if kind == attachment.KindImage {
+		kind = protocol.AttachmentKindImage
+	}
+	return protocol.ImageAttachment{
+		MIME:   meta.MIME,
+		Ref:    attachment.RefFor(meta.SHA256),
+		SHA256: meta.SHA256,
+		Bytes:  meta.Bytes,
+		Kind:   kind,
+		Name:   attachment.RedactName(meta.Name),
+	}, nil
+}
+
+func decodeAttachmentData(data string) ([]byte, error) {
+	if strings.TrimSpace(data) == "" {
+		return nil, attachment.ErrEmpty
+	}
+	raw, err := base64.StdEncoding.DecodeString(data)
+	if err != nil {
+		raw, err = base64.RawStdEncoding.DecodeString(data)
+		if err != nil {
+			return nil, fmt.Errorf("invalid attachment base64")
+		}
+	}
+	if len(raw) == 0 {
+		return nil, attachment.ErrEmpty
+	}
+	return raw, nil
+}
+
+func stripAttachmentData(img protocol.ImageAttachment) protocol.ImageAttachment {
+	img.Data = ""
+	return img
+}
+
+func (e *Engine) hydrateMessageImages() {
+	if e == nil || e.opts.Attachments == nil {
+		return
+	}
+	for i := range e.messages {
+		e.messages[i].Images = e.hydrateImages(e.messages[i].Images)
+	}
+}
+
+func (e *Engine) hydrateImages(imgs []provider.Image) []provider.Image {
+	if e == nil || e.opts.Attachments == nil || len(imgs) == 0 {
+		return imgs
+	}
+	for i, img := range imgs {
+		if len(img.Data) > 0 || strings.TrimSpace(img.Ref) == "" {
+			continue
+		}
+		raw, meta, err := e.opts.Attachments.Get(img.Ref)
+		if err != nil {
+			continue
+		}
+		imgs[i].Data = raw
+		if strings.TrimSpace(imgs[i].MIME) == "" {
+			imgs[i].MIME = meta.MIME
+		}
+	}
+	return imgs
+}
+
+func (e *Engine) imagesForProvider(images []protocol.ImageAttachment) []provider.Image {
+	resolved := e.hydrateImages(protocolImagesToProvider(images))
+	caps := attachment.Capabilities{Images: e.providerAcceptsImages()}
+	out := make([]provider.Image, 0, len(resolved))
+	for _, img := range resolved {
+		kind := attachment.KindFromMIME(img.MIME)
+		if err := attachment.SelectForProvider(kind, img.MIME, caps); err != nil {
+			e.emit(protocol.EngineError{
+				Correlation: e.sessionCorr(),
+				Message:     "attachment: " + err.Error(),
+			})
+			continue
+		}
+		if len(img.Data) == 0 {
+			continue
+		}
+		out = append(out, img)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func (e *Engine) providerAcceptsImages() bool {
+	if e == nil {
+		return false
+	}
+	name := strings.ToLower(strings.TrimSpace(e.provName))
+	return name != "" && name != "echo"
 }
 
 // handleSteer accepts an active-turn redirect. Distinct from UserInput (queue)
@@ -150,11 +293,12 @@ func (e *Engine) applyPendingSteer(turnID, mode string) {
 	corr := e.baseCorr()
 	corr.TurnID = turnID
 	// Durable user.message so resume sees the guidance in the transcript.
-	e.emit(protocol.UserMessage{Correlation: corr, Text: ps.text, Images: ps.images})
+	persisted := e.persistImages(ps.images)
+	e.emit(protocol.UserMessage{Correlation: corr, Text: ps.text, Images: persisted})
 	e.messages = append(e.messages, provider.Message{
 		Role:   provider.RoleUser,
 		Text:   ps.text,
-		Images: protocolImagesToProvider(ps.images),
+		Images: e.imagesForProvider(persisted),
 	})
 	e.emit(protocol.TurnSteered{
 		Correlation:  corr,
@@ -365,14 +509,15 @@ func (e *Engine) runTurn(ctx context.Context, text string, images []protocol.Ima
 	e.sessionBudgetStop = false
 	e.sessionBudgetStopKind = ""
 	e.sessionBudgetStopMsg = ""
-	e.emit(protocol.UserMessage{Correlation: turnCorr, Text: text, Images: images})
+	persisted := e.persistImages(images)
+	e.emit(protocol.UserMessage{Correlation: turnCorr, Text: text, Images: persisted})
 	e.maybeTitleSession(text)
 	e.emit(protocol.TurnStarted{Correlation: turnCorr})
 	e.fireLifecycle(turnCorr, permission.HookEventTurnStart, "", "", "start", "")
 	e.messages = append(e.messages, provider.Message{
 		Role:   provider.RoleUser,
 		Text:   text,
-		Images: protocolImagesToProvider(images),
+		Images: e.imagesForProvider(persisted),
 	})
 
 	// spawnChild attaches a function only when the selected task subagent has a

@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jonathanung/strike-cli/internal/attachment"
 	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/harness"
 	"github.com/jonathanung/strike-cli/internal/permission"
@@ -236,6 +237,10 @@ type Options struct {
 	// to WorkDir). nil disables. Shared with child spawns so specialists see
 	// the same active slice. Refreshed every turn after ledger_write.
 	Ledger LedgerSource
+	// Attachments, when set, stores inbound user attachments by content hash
+	// and emits UserMessage history with refs (no payload). nil keeps legacy
+	// inline base64 (tests). Shared with child spawns.
+	Attachments *attachment.Store
 	// SystemPrompt, when set (non-whitespace), supplies the user system-prompt
 	// layer. Precedence for the overlay/defaults slot: custom agent persona
 	// body wins over config SystemPrompt, which wins over the built-in
@@ -840,6 +845,7 @@ func New(opts Options) *Engine {
 	}
 	if len(opts.InitialMessages) > 0 {
 		e.messages = append([]provider.Message(nil), opts.InitialMessages...)
+		e.hydrateMessageImages()
 	}
 	e.perms = permission.New(e.emitPermission, opts.Rules...)
 	if len(opts.RuleLayerNames) > 0 {
