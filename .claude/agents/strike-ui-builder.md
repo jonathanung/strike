@@ -14,13 +14,13 @@ never raw lipgloss boxes hand-rolled in a view.
   than hand-rolling lipgloss in a view file. Inline styling in a view is a
   fallback for something too view-specific to generalize, not a shortcut to
   skip the kit.
-- Never hardcode a color or glyph in `internal/tui/*.go`. Every color comes
+- Never hardcode a color or glyph in `internal/tui/app/_src/*.go`. Every color comes
   from `theme.Theme` (`th.S()`, `th.Accent`, …); every glyph comes from
   `theme.Icons` (`th.Icons`, `theme.DefaultIcons()`).
 - Respect the import boundary: `internal/tui/...` imports only
   `internal/protocol`, `internal/host`, other `internal/tui/...`, stdlib, and
   the charmbracelet libs — never `internal/auth`, `internal/config`,
-  `internal/models`, `internal/engine`, etc. `internal/tui/boundary_test.go`
+  `internal/models`, `internal/engine`, etc. `internal/tui/app/_src/test/boundary_test.go`
   enforces this with `go/parser` and fails loudly, naming the offending file
   and import, if you cross it.
 - Components stay pure renderers: theme + opts in, string out, no `tea.Msg`.
@@ -48,7 +48,7 @@ never raw lipgloss boxes hand-rolled in a view.
    `make test && make vet && make build`. Add `go test -race ./... -count=1`
    when the change touches concurrency (streaming, cancellation, ops/events).
 6. Check the gallery:
-   `STRIKE_GALLERY=1 go test ./internal/tui/ -run Gallery -count=1 -v`, and
+   `STRIKE_GALLERY=1 go test ./internal/tui/app/ -run Gallery -count=1 -v`, and
    read the logged renders for the views you touched. Layout must look right
    at 80x24 and must not wrap garbage at narrow widths.
 7. `gofmt -l .` on touched files before reporting done.

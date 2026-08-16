@@ -14,12 +14,12 @@ web/test-results/
 web/playwright-report/
 web/.pw-browsers/
 
-# Generated flatten of internal/tui/_src/ (go generate ./internal/tui).
+# Generated flatten of internal/tui/app/_src/ (go generate ./internal/tui/app).
 # Source of truth is _src/<group>/; make build/test and CI run generate first.
-/internal/tui/*.go
-!/internal/tui/doc.go
-!/internal/tui/gen_src.go
-!/internal/tui/gen_sync_test.go
+/internal/tui/app/*.go
+!/internal/tui/app/doc.go
+!/internal/tui/app/gen_src.go
+!/internal/tui/app/gen_sync_test.go
 .direnv/
 .envrc
 .strike/config

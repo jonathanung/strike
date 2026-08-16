@@ -18,7 +18,7 @@ const strikeLikeAgents = `# strike-cli
 | Tier | When | Local gate |
 |---|---|---|
 | **A** | Docs, skills, comments, markdown-only | ` + "`gofmt`" + ` if any ` + "`.go`" + ` touched; full suite not required |
-| **B** | Normal Go / web / TUI (default) | ` + "`gofmt`" + ` → ` + "`go generate ./internal/tui`" + ` if ` + "`internal/tui/_src`" + ` changed → ` + "`make web-check`" + ` if ` + "`web/`" + ` changed → ` + "`make test && make vet && make build`" + ` |
+| **B** | Normal Go / web / TUI (default) | ` + "`gofmt`" + ` → ` + "`go generate ./internal/tui/app`" + ` if ` + "`internal/tui/app/_src`" + ` changed → ` + "`make web-check`" + ` if ` + "`web/`" + ` changed → ` + "`make test && make vet && make build`" + ` |
 | **C** | Trust boundary | Tier B + ` + "`go test -race ./... -count=1`" + ` + focused package tests first |
 
 ` + "```sh" + `
@@ -124,7 +124,7 @@ func TestParseSelectStrikeLikeTiers(t *testing.T) {
 	}
 	wantB := []string{
 		"gofmt -l .",
-		"go generate ./internal/tui",
+		"go generate ./internal/tui/app",
 		"make web-check",
 		"make test",
 		"make vet",

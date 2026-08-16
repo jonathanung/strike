@@ -124,10 +124,10 @@ func welcomeLogoBand(th theme.Theme, width, height, gap int) (string, int) {
 	// Two full desired-height card rows (~10 each) plus gaps — tall viewport.
 	minBelow := 10 + gap + 10
 	if height >= fullLogoH+gap+minBelow && width >= 18 {
-		return welcomePadBlock(ui.Logo(th), width), fullLogoH + gap
+		return welcomePadBlock(Logo(th), width), fullLogoH + gap
 	}
 	if height >= compactLogoH+gap+minBelow && width >= 12 {
-		return welcomePadBlock(ui.LogoCompact(th), width), compactLogoH + gap
+		return welcomePadBlock(LogoCompact(th), width), compactLogoH + gap
 	}
 	return "", 0
 }

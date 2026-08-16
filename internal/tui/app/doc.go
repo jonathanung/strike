@@ -18,11 +18,11 @@
 //
 // Edit files under _src/ only, then run:
 //
-//	go generate ./internal/tui
+//	go generate ./internal/tui/app
 //
 //	make build / make test  # runs generate first
 //
-// Flattened internal/tui/*.go copies are gitignored and regenerated on every
+// Flattened internal/tui/app/*.go copies are gitignored and regenerated on every
 // build/test. Editing them is silently discarded — source of truth is _src/.
 // TestSrcFlattenInSync fails the suite if the flatten is stale.
 //
