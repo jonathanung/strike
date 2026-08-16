@@ -76,6 +76,7 @@ func presetReadOnly() Preset {
 			{Permission: "write", Pattern: "*", Action: Deny},
 			{Permission: "edit", Pattern: "*", Action: Deny},
 			{Permission: "bash", Pattern: "*", Action: Deny},
+			{Permission: "verify", Pattern: "*", Action: Deny},
 			{Permission: "webfetch", Pattern: "*", Action: Deny},
 			{Permission: "websearch", Pattern: "*", Action: Deny},
 			{Permission: "browser", Pattern: "*", Action: Deny},

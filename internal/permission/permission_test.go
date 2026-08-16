@@ -37,6 +37,15 @@ func TestEvaluateLastMatchWins(t *testing.T) {
 	}
 }
 
+func TestDefaultsIncludesVerifyAsk(t *testing.T) {
+	if got := Evaluate("verify", "B", Defaults()); got != Ask {
+		t.Errorf("verify default = %s, want ask", got)
+	}
+	if err := ValidateRuleset(Ruleset{{Permission: "verify", Pattern: "*", Action: Allow}}); err != nil {
+		t.Fatalf("ValidateRuleset verify: %v", err)
+	}
+}
+
 func TestDefaultsIncludesGitAllow(t *testing.T) {
 	if got := Evaluate("git", "status", Defaults()); got != Allow {
 		t.Errorf("git default = %s, want allow", got)
