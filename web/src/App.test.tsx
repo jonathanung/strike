@@ -410,7 +410,7 @@ describe("App", () => {
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
     const box = screen.getByLabelText("Instruction") as HTMLTextAreaElement;
     fireEvent.change(box, { target: { value: "see @src/old.go extra", selectionStart: 8, selectionEnd: 8 } });
-    await screen.findByRole("option", { name: /internal\/tui\/app\.go/ });
+    await screen.findByRole("option", { name: /internal\/frontend\/tui\/app\.go/ });
     fireEvent.keyDown(box, { key: "Enter" });
     expect(box).toHaveValue("see @internal/frontend/tui/app.go extra");
     expect(box.selectionStart).toBe("see @internal/frontend/tui/app.go ".length);
@@ -436,7 +436,7 @@ describe("App", () => {
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
     const box = screen.getByLabelText("Instruction") as HTMLTextAreaElement;
     fireEvent.change(box, { target: { value: "see @src/old.go\nextra", selectionStart: 8, selectionEnd: 8 } });
-    await screen.findByRole("option", { name: /internal\/tui\/app\.go/ });
+    await screen.findByRole("option", { name: /internal\/frontend\/tui\/app\.go/ });
     fireEvent.keyDown(box, { key: "Enter" });
     expect(box).toHaveValue("see @internal/frontend/tui/app.go\nextra");
     expect(screen.queryByRole("listbox", { name: "Composer completions" })).not.toBeInTheDocument();

@@ -76,7 +76,7 @@ describe("web theme parity with TUI Default()", () => {
   const css = loadStyles();
 
   it("documents the TUI token map in the stylesheet header", () => {
-    expect(css).toMatch(/mirrors internal\/tui\/theme\.Default/);
+    expect(css).toMatch(/mirrors internal\/frontend\/tui\/theme\.Default/);
     expect(css).toMatch(/--ink\s+Text/);
     expect(css).toMatch(/--acid\s+Accent/);
     expect(css).toMatch(/--danger\s+Danger/);
