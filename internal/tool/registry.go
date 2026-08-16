@@ -235,24 +235,33 @@ func (r *Registry) Discovered(name string) bool {
 // DeferredPendingCount is how many registered non-core tools are not yet
 // discovered. Zero when defer loading is off.
 func (r *Registry) DeferredPendingCount() int {
+	return len(r.DeferredPendingNames())
+}
+
+// DeferredPendingNames returns registered non-core tools not yet discovered,
+// in registration order. Empty when defer loading is off or r is nil.
+func (r *Registry) DeferredPendingNames() []string {
 	if r == nil {
-		return 0
+		return nil
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if !r.deferLoad {
-		return 0
+		return nil
 	}
-	n := 0
+	out := make([]string, 0)
 	for _, name := range r.order {
 		if IsCoreTool(name) {
 			continue
 		}
 		if _, ok := r.discovered[name]; !ok {
-			n++
+			out = append(out, name)
 		}
 	}
-	return n
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // Schemas returns the full model-facing declarations in registration order.
