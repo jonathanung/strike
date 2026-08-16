@@ -3,55 +3,18 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-// Stock strike palette from internal/frontend/tui/theme.Default() (theme.go) — E13.8.
-// Web CSS variables must stay aligned with these adaptive pairs.
-const TUI_DEFAULT = {
-  text: { light: "#1a1528", dark: "#f3f1fa" },
-  textMuted: { light: "#5c586e", dark: "#9b99b0" },
-  accent: { light: "#6d28d9", dark: "#c4b5fd" },
-  accentAlt: { light: "#0e7490", dark: "#22d3ee" },
-  highlight: { light: "#5b21b6", dark: "#f5f3ff" },
-  success: { light: "#15803d", dark: "#4ade80" },
-  warning: { light: "#b45309", dark: "#fbbf24" },
-  error: { light: "#e11d48", dark: "#fb7185" },
-  danger: { light: "#ea580c", dark: "#fb923c" },
-  background: { light: "#ffffff", dark: "#14131c" },
-  surface: { light: "#f3eef9", dark: "#232230" },
-  surfaceFocus: { light: "#e9e0f7", dark: "#2e2c3e" },
-  surfaceMuted: { light: "#f8f5fc", dark: "#1a1924" },
-  border: { light: "#c4bfd4", dark: "#4f4d63" },
-  borderFocus: { light: "#6d28d9", dark: "#c4b5fd" },
-  borderMuted: { light: "#ddd8ea", dark: "#2c2a3a" },
-  userLabel: { light: "#0e7490", dark: "#22d3ee" },
-  toolLabel: { light: "#2563eb", dark: "#7dd3fc" },
-  diffAdded: { light: "#15803d", dark: "#4ade80" },
-  diffRemoved: { light: "#e11d48", dark: "#fb7185" },
-  overlayScrim: { light: "#a8a3b8", dark: "#7c7a90" },
-} as const;
-
-const CSS_ROLE: Record<keyof typeof TUI_DEFAULT, string> = {
-  text: "--ink",
-  textMuted: "--muted",
-  accent: "--acid",
-  accentAlt: "--accent-alt",
-  highlight: "--highlight",
-  success: "--success",
-  warning: "--warning",
-  error: "--signal",
-  danger: "--danger",
-  background: "--ground",
-  surface: "--surface",
-  surfaceFocus: "--raised",
-  surfaceMuted: "--surface-muted",
-  border: "--rule",
-  borderFocus: "--border-focus",
-  borderMuted: "--border-muted",
-  userLabel: "--user",
-  toolLabel: "--tool",
-  diffAdded: "--diff-add",
-  diffRemoved: "--diff-del",
-  overlayScrim: "--overlay",
+type TokenRole = { light: string; dark: string; cssVar: string };
+type TokenFile = {
+  schemaVersion: string;
+  id: string;
+  chrome: { mode: string; corners: string; radiusWebPx: number };
+  roles: Record<string, TokenRole>;
 };
+
+function loadTokens(): TokenFile {
+  const dir = dirname(fileURLToPath(import.meta.url));
+  return JSON.parse(readFileSync(resolve(dir, "../../schemas/ui-tokens.json"), "utf8")) as TokenFile;
+}
 
 function loadStyles(): string {
   const dir = dirname(fileURLToPath(import.meta.url));
@@ -72,33 +35,46 @@ function varsInBlock(source: string, selector: string): Record<string, string> {
   return out;
 }
 
-describe("web theme parity with TUI Default()", () => {
+describe("web theme parity with schemas/ui-tokens.json", () => {
   const css = loadStyles();
+  const tokens = loadTokens();
 
-  it("documents the TUI token map in the stylesheet header", () => {
-    expect(css).toMatch(/mirrors internal\/frontend\/tui\/theme\.Default/);
+  it("documents the token file and TUI Default map in the stylesheet header", () => {
+    expect(css).toMatch(/schemas\/ui-tokens\.json/);
+    expect(css).toMatch(/theme\.Default/);
     expect(css).toMatch(/--ink\s+Text/);
     expect(css).toMatch(/--acid\s+Accent/);
     expect(css).toMatch(/--danger\s+Danger/);
   });
 
-  it("maps dark-mode CSS variables to TUI Default dark members", () => {
-    const dark = varsInBlock(css, ":root {");
-    for (const [role, cssVar] of Object.entries(CSS_ROLE) as [keyof typeof TUI_DEFAULT, string][]) {
-      expect(dark[cssVar], cssVar).toBe(TUI_DEFAULT[role].dark.toLowerCase());
-    }
-    expect(dark["--code-bg"]).toBe(TUI_DEFAULT.surfaceMuted.dark.toLowerCase());
-    expect(dark["--mark-ink"]).toBe(TUI_DEFAULT.background.dark.toLowerCase());
+  it("keeps the chrome contract (bordered, square, 2px web radius)", () => {
+    expect(tokens.schemaVersion).toBe("1");
+    expect(tokens.chrome.mode).toBe("bordered");
+    expect(tokens.chrome.corners).toBe("square");
+    expect(tokens.chrome.radiusWebPx).toBe(2);
+    expect(css).toMatch(/--radius:\s*2px/);
+    expect(tokens.roles.accent.dark.toLowerCase()).not.toBe("#c4b5fd");
+    expect(tokens.roles.accent.light.toLowerCase()).toBe("#5b21b6");
+    expect(tokens.roles.accent.dark.toLowerCase()).toBe("#7c3aed");
   });
 
-  it("maps light-mode CSS variables to TUI Default light members", () => {
+  it("maps dark-mode CSS variables to token-file dark members", () => {
+    const dark = varsInBlock(css, ":root {");
+    for (const role of Object.values(tokens.roles)) {
+      expect(dark[role.cssVar], role.cssVar).toBe(role.dark.toLowerCase());
+    }
+    expect(dark["--code-bg"]).toBe(tokens.roles.surfaceMuted.dark.toLowerCase());
+    expect(dark["--mark-ink"]).toBe(tokens.roles.background.dark.toLowerCase());
+  });
+
+  it("maps light-mode CSS variables to token-file light members", () => {
     const mediaStart = css.indexOf("@media (prefers-color-scheme: light)");
     expect(mediaStart).toBeGreaterThanOrEqual(0);
     const inner = varsInBlock(css.slice(mediaStart), ":root {");
-    for (const [role, cssVar] of Object.entries(CSS_ROLE) as [keyof typeof TUI_DEFAULT, string][]) {
-      expect(inner[cssVar], cssVar).toBe(TUI_DEFAULT[role].light.toLowerCase());
+    for (const role of Object.values(tokens.roles)) {
+      expect(inner[role.cssVar], role.cssVar).toBe(role.light.toLowerCase());
     }
-    expect(inner["--code-bg"]).toBe(TUI_DEFAULT.surfaceMuted.light.toLowerCase());
+    expect(inner["--code-bg"]).toBe(tokens.roles.surfaceMuted.light.toLowerCase());
     expect(inner["--mark-ink"]).toBe("#ffffff");
   });
 
@@ -111,8 +87,8 @@ describe("web theme parity with TUI Default()", () => {
     expect(css).toMatch(/:root\[data-appearance="light"\]/);
     expect(css).toMatch(/:root\[data-appearance="dark"\]/);
     const lightExplicit = varsInBlock(css, ':root[data-appearance="light"]');
-    expect(lightExplicit["--ink"]).toBe(TUI_DEFAULT.text.light.toLowerCase());
-    expect(lightExplicit["--acid"]).toBe(TUI_DEFAULT.accent.light.toLowerCase());
+    expect(lightExplicit["--ink"]).toBe(tokens.roles.text.light.toLowerCase());
+    expect(lightExplicit["--acid"]).toBe(tokens.roles.accent.light.toLowerCase());
   });
 
   it("aliases leftover token names onto cockpit roles", () => {

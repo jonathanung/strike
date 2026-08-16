@@ -1,0 +1,35 @@
+{
+  "schemaVersion": "1",
+  "id": "strike-default",
+  "description": "Stock Strike UI token contract: sharp operational chrome, royal-purple primary. VeTool lobbies are a look reference, not a clone. Bento is tiling, not rounding.",
+  "reference": "https://vetool.jonathanung.ca/lobbies",
+  "docs": "docs/theme.md",
+  "chrome": {
+    "mode": "bordered",
+    "corners": "square",
+    "radiusWebPx": 2
+  },
+  "roles": {
+    "text": { "light": "#1a1528", "dark": "#f3f1fa", "cssVar": "--ink" },
+    "textMuted": { "light": "#5c586e", "dark": "#9b99b0", "cssVar": "--muted" },
+    "accent": { "light": "#5b21b6", "dark": "#7c3aed", "cssVar": "--acid" },
+    "accentAlt": { "light": "#0e7490", "dark": "#22d3ee", "cssVar": "--accent-alt" },
+    "highlight": { "light": "#4c1d95", "dark": "#ddd6fe", "cssVar": "--highlight" },
+    "success": { "light": "#15803d", "dark": "#4ade80", "cssVar": "--success" },
+    "warning": { "light": "#b45309", "dark": "#fbbf24", "cssVar": "--warning" },
+    "error": { "light": "#e11d48", "dark": "#fb7185", "cssVar": "--signal" },
+    "danger": { "light": "#ea580c", "dark": "#fb923c", "cssVar": "--danger" },
+    "background": { "light": "#ffffff", "dark": "#14131c", "cssVar": "--ground" },
+    "surface": { "light": "#f3eef9", "dark": "#232230", "cssVar": "--surface" },
+    "surfaceFocus": { "light": "#e9e0f7", "dark": "#2e2c3e", "cssVar": "--raised" },
+    "surfaceMuted": { "light": "#f8f5fc", "dark": "#1a1924", "cssVar": "--surface-muted" },
+    "border": { "light": "#c4bfd4", "dark": "#4f4d63", "cssVar": "--rule" },
+    "borderFocus": { "light": "#5b21b6", "dark": "#7c3aed", "cssVar": "--border-focus" },
+    "borderMuted": { "light": "#ddd8ea", "dark": "#2c2a3a", "cssVar": "--border-muted" },
+    "userLabel": { "light": "#0e7490", "dark": "#22d3ee", "cssVar": "--user" },
+    "toolLabel": { "light": "#2563eb", "dark": "#7dd3fc", "cssVar": "--tool" },
+    "diffAdded": { "light": "#15803d", "dark": "#4ade80", "cssVar": "--diff-add" },
+    "diffRemoved": { "light": "#e11d48", "dark": "#fb7185", "cssVar": "--diff-del" },
+    "overlayScrim": { "light": "#a8a3b8", "dark": "#7c7a90", "cssVar": "--overlay" }
+  }
+}

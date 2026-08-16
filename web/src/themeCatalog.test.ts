@@ -15,11 +15,11 @@ import {
 const stockDark: ThemeColors = {
   text: { light: "#1a1528", dark: "#f3f1fa" },
   textMuted: { light: "#5c586e", dark: "#9b99b0" },
-  accent: { light: "#6d28d9", dark: "#c4b5fd" },
+  accent: { light: "#5b21b6", dark: "#7c3aed" },
   background: { light: "#ffffff", dark: "#14131c" },
   surface: { light: "#f3eef9", dark: "#232230" },
   border: { light: "#c4bfd4", dark: "#4f4d63" },
-  borderFocus: { light: "#6d28d9", dark: "#c4b5fd" },
+  borderFocus: { light: "#5b21b6", dark: "#7c3aed" },
   success: { light: "#15803d", dark: "#4ade80" },
   warning: { light: "#b45309", dark: "#fbbf24" },
   error: { light: "#e11d48", dark: "#fb7185" },
@@ -40,7 +40,7 @@ describe("themeCatalog portable mapping", () => {
   });
 
   it("sanitizes hex and rejects injection", () => {
-    expect(sanitizeHex("#c4b5fd")).toBe("#c4b5fd");
+    expect(sanitizeHex("#7c3aed")).toBe("#7c3aed");
     expect(sanitizeHex("#FFF")).toBe("#fff");
     expect(sanitizeHex("red")).toBeUndefined();
     expect(sanitizeHex("url(javascript:alert(1))")).toBeUndefined();
@@ -50,11 +50,11 @@ describe("themeCatalog portable mapping", () => {
   it("colorsToCSSVars uses the requested appearance side", () => {
     const dark = colorsToCSSVars(stockDark, "dark");
     expect(dark["--ink"]).toBe("#f3f1fa");
-    expect(dark["--acid"]).toBe("#c4b5fd");
+    expect(dark["--acid"]).toBe("#7c3aed");
     expect(dark["--ground"]).toBe("#14131c");
     const light = colorsToCSSVars(stockDark, "light");
     expect(light["--ink"]).toBe("#1a1528");
-    expect(light["--acid"]).toBe("#6d28d9");
+    expect(light["--acid"]).toBe("#5b21b6");
   });
 
   it("falls back to the other side when one hex is missing", () => {
@@ -66,11 +66,11 @@ describe("themeCatalog portable mapping", () => {
   it("ignores invalid colors so essentials stay coverable", () => {
     const bad: ThemeColors = {
       text: { dark: "not-a-color" },
-      accent: { dark: "#c4b5fd" },
+      accent: { dark: "#7c3aed" },
     };
     const vars = colorsToCSSVars(bad, "dark");
     expect(vars["--ink"]).toBeUndefined();
-    expect(vars["--acid"]).toBe("#c4b5fd");
+    expect(vars["--acid"]).toBe("#7c3aed");
     expect(essentialCovered(vars, colorsToCSSVars(stockDark, "dark"))).toBe(true);
   });
 
@@ -90,7 +90,7 @@ describe("themeCatalog portable mapping", () => {
     applyThemeColors(stockDark, "dark");
     const el = document.getElementById("strike-theme-override");
     expect(el?.textContent).toContain("--ink: #f3f1fa");
-    expect(el?.textContent).toContain("--acid: #c4b5fd");
+    expect(el?.textContent).toContain("--acid: #7c3aed");
     clearThemeColors();
     expect(document.getElementById("strike-theme-override")?.textContent || "").toBe("");
   });

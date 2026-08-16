@@ -11,16 +11,16 @@ import (
 type ChromeMode uint8
 
 const (
-	// ChromeUnset resolves to ChromeSoft (Family-style default).
+	// ChromeUnset resolves to ChromeSoft (Default() chrome until #1234).
 	ChromeUnset ChromeMode = iota
 	// ChromeSolid paints panels as filled surfaces with title/footer bars
 	// (no box-drawing frame).
 	ChromeSolid
 	// ChromeBordered paints classic box-drawing panel borders (outline only,
-	// minimal surface wash).
+	// minimal surface wash). Token-file north star (schemas/ui-tokens.json).
 	ChromeBordered
 	// ChromeSoft paints surface-filled bodies with a rounded box outline
-	// (╭╮╰╯). Default for the stock theme — Family-inspired calm cards.
+	// (╭╮╰╯). Still Default() until #1234 applies bordered chrome.
 	ChromeSoft
 )
 

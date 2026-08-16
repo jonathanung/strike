@@ -103,7 +103,7 @@ func TestSpinnerStyleUsesWorkingToken(t *testing.T) {
 
 func TestDefaultWarningIsClearAmber(t *testing.T) {
 	// Needs-you (Attention) and other caution chrome share Warning; keep it a
-	// readable amber pair distinct from Error/Danger (E13.8 soft-bento).
+	// readable amber pair distinct from Error/Danger.
 	th := theme.Default()
 	want := theme.AdaptiveColor{Light: "#b45309", Dark: "#fbbf24"}
 	if th.Warning != want {

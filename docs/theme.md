@@ -4,27 +4,29 @@ Strike's TUI look is owned by `internal/frontend/tui/theme`. Views compose
 `theme.Styles` and `internal/frontend/tui/ui` components; they never hardcode colors,
 glyphs, or chrome geometry.
 
-## North star palette (E13.8) + Family chrome
+## North star: sharp + royal purple
 
-Stock `theme.Default()` is a **Family-inspired soft-rounded bento** system:
-dark-first ground, raised soft cards with rounded outlines, generous gutters,
-and semantic accents that stay a bit more colorful than the visual refs while
-remaining legible over SSH + tmux.
+Stock tokens are a **sharp operational chrome** system: royal-purple primary,
+square corners, bordered tiles, and bento as a **tiling** layout (not soft
+rounding). [VeTool lobbies](https://vetool.jonathanung.ca/lobbies) is a look
+reference for operational board chrome — not a clone. Terminal constraints
+apply; strike layout/keymaps stay; no web-only effects (real drop shadows,
+blur) and **no new idle animation**.
 
-[Family.app](https://family.co) is a north-star reference for calm rounded
-cards and quiet hierarchy — not a clone. Terminal constraints apply; strike
-layout/keymaps stay; no web-only effects (real drop shadows, blur) and **no
-new idle animation**.
+Family soft-rounded cards are no longer the documented default. They remain a
+valid `chrome: "soft"` option for named/custom themes.
 
-### Visual refs
+The machine-readable source of truth is [`schemas/ui-tokens.json`](../schemas/ui-tokens.json):
+every semantic role has a light+dark hex, plus chrome defaults
+(`mode: bordered`, `corners: square`, `radiusWebPx: 2`). `theme.Default()`
+hexes and `web/src/styles.css` `:root` pairs must match that file — Go
+(`tokens_test.go`) and web (`web/src/theme.test.ts`) fail on drift.
 
-- https://cdn.dribbble.com/userupload/45035686/file/14b3c8318ecd928a77915bd6a629c11e.png?format=webp&resize=400x300&vertical=center
-- https://miro.medium.com/1*pzGevugpNDXXUOCRtAfhsA.png
-
-Take from refs: dark ground, raised soft cards, multi-accent semantic colors
-(purple / blue / coral / green / yellow family), calm typography, separation by
-surface step more than heavy boxes. Push slightly more colorful accents than
-the refs.
+`theme.Default()` **chrome mode** is still `soft` until [#1234](https://github.com/jonathanung/strike/issues/1234)
+applies bordered chrome across TUI views. Do not treat current Default chrome
+as the visual north star. Web radius consumption is [#1235](https://github.com/jonathanung/strike/issues/1235).
+Bundled named themes (nord, …) keep their own hexes — only stock Default /
+`:root` use this map.
 
 ### Token → hex (light + dark)
 
@@ -32,9 +34,9 @@ the refs.
 |---|---|---|
 | Text | `#1a1528` | `#f3f1fa` |
 | TextMuted | `#5c586e` | `#9b99b0` |
-| Accent | `#6d28d9` | `#c4b5fd` |
+| Accent | `#5b21b6` | `#7c3aed` |
 | AccentAlt | `#0e7490` | `#22d3ee` |
-| Highlight | `#5b21b6` | `#f5f3ff` |
+| Highlight | `#4c1d95` | `#ddd6fe` |
 | Success | `#15803d` | `#4ade80` |
 | Warning | `#b45309` | `#fbbf24` |
 | Error | `#e11d48` | `#fb7185` |
@@ -44,7 +46,7 @@ the refs.
 | SurfaceFocus | `#e9e0f7` | `#2e2c3e` |
 | SurfaceMuted | `#f8f5fc` | `#1a1924` |
 | Border | `#c4bfd4` | `#4f4d63` |
-| BorderFocus | `#6d28d9` | `#c4b5fd` |
+| BorderFocus | `#5b21b6` | `#7c3aed` |
 | BorderMuted | `#ddd8ea` | `#2c2a3a` |
 | UserLabel | `#0e7490` | `#22d3ee` |
 | ToolLabel | `#2563eb` | `#7dd3fc` |
@@ -52,30 +54,29 @@ the refs.
 | DiffRemoved | `#e11d48` | `#fb7185` |
 | OverlayScrim | `#a8a3b8` | `#7c7a90` |
 
-Chrome mode defaults to **`soft`** (surface-filled body + rounded outline).
-Spacing defaults are unchanged (`XS=1`, `SM=2`, …). Left|right pane gutter stays
-`XS` so the canonical 93-col split (`60+gutter+32`) remains intact; Family breathing
-room comes from soft rounded card chrome and bento `SM` gaps between welcome tiles. Stock badges are delimiter-free soft pills on
-`SurfaceMuted`. Bundled named themes (nord, …) keep their own hexes — only
-`Default()` uses this map.
+Accent is royal (`#5b21b6` / `#7c3aed`), not pastel `#c4b5fd`. Spacing defaults
+are unchanged (`XS=1`, `SM=2`, …). Left|right pane gutter stays `XS` so the
+canonical 93-col split (`60+gutter+32`) remains intact; breathing room comes
+from bento `SM` gaps between tiles, not rounded card chrome. Stock badges are
+delimiter-free pills on `SurfaceMuted`.
 
 ### Role semantics
 
 | Role | Intent |
 |---|---|
-| **Accent** | Violet primary emphasis (titles, assistant, focus border) |
+| **Accent** | Royal-purple primary emphasis (titles, assistant, focus border) |
 | **AccentAlt** / **UserLabel** | Cyan secondary / "you" transcript label |
 | **ToolLabel** | Sky blue tool-call label |
 | **Success** / **DiffAdded** | Mint positive / added |
 | **Warning** | Amber caution / needs-you |
 | **Error** / **DiffRemoved** | Coral failure / removed |
 | **Danger** | Orange destructive actions — **distinct from Error** |
+| **Highlight** | Selected / active item foreground (distinct from Accent) |
 
 ### Surface ladder
 
 `background` < `surfaceMuted` < `surface` < `surfaceFocus` — enough step that
-soft panels read as calm tiles under 256-color quantization, not only in
-truecolor.
+tiles remain distinct under 256-color quantization, not only in truecolor.
 
 ### SSH / tmux acceptance
 
@@ -90,21 +91,21 @@ truecolor.
 
 ### Motion budget
 
-Region-scoped animation only (header spinner, focus via soft outline /
-solid title edge + FocusBar, badge/meter updates, short copied-flash on
-transcript cells) — invalidate cached regions, never recompose the full
-transcript every tick. Existing `paint_budget` (~6 FPS soft coalesce) and
-`frame_cache` patterns are the model. Correctness over delight on low-FPS
-remote. **No new animation** for this Family chrome pass.
+Region-scoped animation only (header spinner, focus via outline / title edge
++ FocusBar, badge/meter updates, short copied-flash on transcript cells) —
+invalidate cached regions, never recompose the full transcript every tick.
+Existing `paint_budget` (~6 FPS soft coalesce) and `frame_cache` patterns are
+the model. Correctness over delight on low-FPS remote. **No new animation**
+for this token-contract pass.
 
-### Chrome density (Family soft-bento hierarchy)
+### Chrome density (sharp tiling)
 
-Soft rounded surfaces + multi-accent soft pills/labels carry hierarchy more
-than heavy brackets. Header drops lowest-priority badges under width pressure
+Hierarchy comes from surface step, royal Accent, and bordered outlines — not
+soft rounding. Header drops lowest-priority badges under width pressure
 (think → effort → phase → health-dot first). Composer and right-pane footers
-use `KeyHints`; welcome empty state is a bento of soft `Panel` cards (no outer
-welcome frame). Dialogs stay elevated (`SurfaceFocus`) with optional tone
-chrome for warning/danger.
+use `KeyHints`; welcome empty state is a bento of tiled `Panel` cards (no
+outer welcome frame). Dialogs stay elevated (`SurfaceFocus`) with optional
+tone chrome for warning/danger.
 
 ## Chrome mode
 
@@ -113,16 +114,16 @@ Panels (transcript, composer, side panes, dialogs, bento cards) paint through
 
 | Value | Behavior |
 |---|---|
-| `soft` (**default**) | Surface-filled body + rounded box outline (`╭╮╰╯`). Focus is `BorderFocus` outline + title-edge `SurfaceFocus` (no FocusBar). Degrades to plain text when width &lt; 6. |
+| `soft` | Surface-filled body + rounded box outline (`╭╮╰╯`). Focus is `BorderFocus` outline + title-edge `SurfaceFocus` (no FocusBar). Degrades to plain text when width &lt; 6. **Still `theme.Default()` until #1234.** |
 | `solid` | Filled surfaces with title/footer bars. No box-drawing frame. Focus is title-edge `SurfaceFocus` + thin FocusBar. |
-| `bordered` | Classic light/heavy box-drawing borders (outline, minimal surface wash). |
+| `bordered` | Classic light/heavy box-drawing borders (outline, minimal surface wash). **Token-file north star.** |
 
 JSON theme files:
 
 ```json
 {
   "id": "my-theme",
-  "chrome": "soft",
+  "chrome": "bordered",
   "border": "light",
   "colors": {
     "background": { "light": "#ffffff", "dark": "#14131c" },
@@ -148,8 +149,8 @@ JSON theme files:
 ## Soft pills (badges)
 
 `ui.Badge` paints a tone-colored label on `SurfaceMuted` with XS horizontal
-pad. Stock `Icons.BadgeLeft` / `BadgeRight` are empty so chips read as soft
-pills without heavy `[` `]` weight. Themes may restore bracket delimiters via
+pad. Stock `Icons.BadgeLeft` / `BadgeRight` are empty so chips read as pills
+without heavy `[` `]` weight. Themes may restore bracket delimiters via
 JSON icons.
 
 ## Loading themes
@@ -176,13 +177,14 @@ path as other contributions; there is no separate theme marketplace.
 ## Web cockpit parity
 
 The `strike serve` attach UI (`web/src/styles.css`, embedded under
-`internal/frontend/server/static`) mirrors the stock `theme.Default()` palette via CSS
+`internal/frontend/server/static`) mirrors the stock token file via CSS
 custom properties (dark defaults; light via `prefers-color-scheme: light`).
 Semantic roles map as `--ink`←Text, `--muted`←TextMuted, `--ground`←Background,
 `--surface`/`--raised`/`--surface-muted`←Surface*, `--rule`←Border,
 `--acid`←Accent, `--accent-alt`←AccentAlt, `--signal`←Error, `--danger`←Danger,
 `--user`/`--tool`← transcript labels, `--diff-add`/`--diff-del`←diff roles.
-Parity is guarded by `web/src/theme.test.ts`. The web settings dialog loads the
+`--radius` is the 2px chrome token; follow-up restyle lands in #1235. Parity
+is guarded by `web/src/theme.test.ts`. The web settings dialog loads the
 host theme catalog (`/v1/themes`), supports preview/apply, and maps portable
 semantic roles onto CSS custom properties (`web/src/themeCatalog.ts`, WEBUI.11).
 

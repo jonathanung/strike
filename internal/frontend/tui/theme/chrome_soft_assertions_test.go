@@ -2,7 +2,7 @@ package theme
 
 import "testing"
 
-// Locks Family soft chrome as Default / Unset resolve target (issue #628 follow-up).
+// Locks Default / Unset chrome as soft until #1234 applies the bordered contract.
 func TestDefaultAndUnsetChromeIsSoft(t *testing.T) {
 	if got := Default().Chrome; got != ChromeSoft {
 		t.Errorf("Default().Chrome = %v, want ChromeSoft", got)
