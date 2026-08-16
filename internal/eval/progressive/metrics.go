@@ -7,8 +7,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/jonathanung/strike-cli/internal/provider"
-	"github.com/jonathanung/strike-cli/internal/tool"
+	"github.com/jonathanung/strike-cli/harness/provider"
+	"github.com/jonathanung/strike-cli/harness/tool"
 )
 
 // Schema version for progressive disclosure comparison reports.

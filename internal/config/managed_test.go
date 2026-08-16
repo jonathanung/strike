@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jonathanung/strike-cli/internal/permission"
+	"github.com/jonathanung/strike-cli/harness/permission"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 )
 

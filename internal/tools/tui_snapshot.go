@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/jonathanung/strike-cli/internal/tool"
+	"github.com/jonathanung/strike-cli/harness/tool"
 )
 
 type tuiSnapshotTool struct{}

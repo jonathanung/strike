@@ -5,8 +5,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/jonathanung/strike-cli/harness/permission"
 	"github.com/jonathanung/strike-cli/internal/host"
-	"github.com/jonathanung/strike-cli/internal/permission"
 )
 
 // Permissions adapts permission explain/presets/diff onto host.Permissions.

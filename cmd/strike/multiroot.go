@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/jonathanung/strike-cli/internal/engine"
+	"github.com/jonathanung/strike-cli/harness/engine"
 	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/host/local"
 	"github.com/jonathanung/strike-cli/internal/protocol"

@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/internal/permission"
+	"github.com/jonathanung/strike-cli/harness/permission"
 )
 
 // ErrWorkflowExists is returned when saving a draft would overwrite an

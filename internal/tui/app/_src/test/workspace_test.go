@@ -8,8 +8,8 @@ import (
 	"testing"
 )
 
-// Leaf workspace modules extracted so a future harness module can import
-// them without a cycle through the root module (#1204, #1216).
+// Leaf workspace modules extracted so the harness module can import
+// protocol/redact without a cycle through the root module (#1204, #1208, #1216).
 var leafModules = []struct {
 	dir    string
 	module string
@@ -18,7 +18,7 @@ var leafModules = []struct {
 }{
 	{"pkg/protocol", modulePath + "/pkg/protocol", true},
 	{"pkg/redact", modulePath + "/pkg/redact", true},
-	{"provider", modulePath + "/provider", true},
+	{"harness", modulePath + "/harness", false},
 	{"providers", modulePath + "/providers", false},
 }
 
@@ -35,7 +35,7 @@ func TestWorkspaceModules(t *testing.T) {
 
 	work := readRepoFile(t, filepath.Join(root, "go.work"))
 	uses := parseGoWorkUse(work)
-	wantUses := []string{".", "./pkg/protocol", "./pkg/redact", "./provider", "./providers"}
+	wantUses := []string{".", "./pkg/protocol", "./pkg/redact", "./harness", "./providers"}
 	for _, want := range wantUses {
 		if !uses[want] {
 			t.Errorf("go.work missing use %q", want)
@@ -72,13 +72,25 @@ func TestWorkspaceModules(t *testing.T) {
 			}
 			continue
 		}
-		// providers may require the public provider interface module.
 		reqs := parseGoModRequires(mod)
-		if !reqs[modulePath+"/provider"] {
-			t.Errorf("%s/go.mod missing require %s/provider", leaf.dir, modulePath)
-		}
-		if got := parseGoModReplaces(mod)[modulePath+"/provider"]; got != "../provider" {
-			t.Errorf("%s/go.mod replace provider = %q, want ../provider", leaf.dir, got)
+		repl := parseGoModReplaces(mod)
+		switch leaf.dir {
+		case "harness":
+			for _, want := range []string{modulePath + "/pkg/protocol", modulePath + "/pkg/redact"} {
+				if !reqs[want] {
+					t.Errorf("%s/go.mod missing require %s", leaf.dir, want)
+				}
+			}
+			if strings.Contains(mod, "/internal/") {
+				t.Errorf("%s/go.mod must not mention internal packages", leaf.dir)
+			}
+		case "providers":
+			if !reqs[modulePath+"/harness"] {
+				t.Errorf("%s/go.mod missing require %s/harness", leaf.dir, modulePath)
+			}
+			if got := repl[modulePath+"/harness"]; got != "../harness" {
+				t.Errorf("%s/go.mod replace harness = %q, want ../harness", leaf.dir, got)
+			}
 		}
 	}
 

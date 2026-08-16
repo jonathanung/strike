@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/internal/tool"
+	"github.com/jonathanung/strike-cli/harness/tool"
 )
 
 type contextBundleTool struct{}

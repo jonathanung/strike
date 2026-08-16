@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/scheduler"
+	"github.com/jonathanung/strike-cli/harness/scheduler"
 )
 
 // Config configures a subset run.

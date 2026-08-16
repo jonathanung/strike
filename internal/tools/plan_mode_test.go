@@ -2,7 +2,7 @@ package tools
 
 import (
 	"context"
-	"github.com/jonathanung/strike-cli/internal/tool"
+	"github.com/jonathanung/strike-cli/harness/tool"
 	"strings"
 	"testing"
 )

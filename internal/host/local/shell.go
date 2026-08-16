@@ -7,9 +7,9 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/jonathanung/strike-cli/harness/sandbox"
+	"github.com/jonathanung/strike-cli/harness/tool"
 	"github.com/jonathanung/strike-cli/internal/host"
-	"github.com/jonathanung/strike-cli/internal/sandbox"
-	"github.com/jonathanung/strike-cli/internal/tool"
 )
 
 // shellService runs user-initiated bash (composer !) via the bash tool with

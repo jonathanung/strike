@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jonathanung/strike-cli/harness/sandbox"
 	"github.com/jonathanung/strike-cli/internal/host"
-	"github.com/jonathanung/strike-cli/internal/sandbox"
 )
 
 func testShellPolicy(workDir string) sandbox.Policy {

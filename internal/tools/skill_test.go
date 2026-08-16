@@ -3,7 +3,7 @@ package tools
 import (
 	"context"
 	"errors"
-	"github.com/jonathanung/strike-cli/internal/tool"
+	"github.com/jonathanung/strike-cli/harness/tool"
 	"os"
 	"path/filepath"
 	"strings"

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/tool"
+	"github.com/jonathanung/strike-cli/harness/tool"
 )
 
 func startFake(t *testing.T, mode string) session {

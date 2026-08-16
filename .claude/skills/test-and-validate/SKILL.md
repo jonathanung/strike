@@ -30,7 +30,7 @@ Local convenience: `make test && make vet && make build` after gofmt (+ generate
 |---|---|---|
 | **A** | Docs, skills, comments, markdown-only, no Go/web | `test -z "$(gofmt -l .)"` (skip if no `.go` touched); no full suite required |
 | **B** | Normal Go/web/TUI code (default) | gofmt → generate if TUI `_src` → `make web-check` if `web/` → `make test && make vet && make build` |
-| **C** | Trust boundary: `internal/tool`, `permission`, `auth`, `session`, `engine` concurrency/turn loop, `protocol` wire, sandbox/workspace | Tier B + `go test -race ./... -count=1` + focused package tests first |
+| **C** | Trust boundary: `harness/tool`, `permission`, `auth`, `session`, `engine` concurrency/turn loop, `protocol` wire, sandbox/workspace | Tier B + `go test -race ./... -count=1` + focused package tests first |
 
 CI still runs race on every PR. **Do not** pay full local race on Tier A/B unless reproducing a CI failure.
 
@@ -47,8 +47,8 @@ Optional: `make cover` / `make cover-check` (soft in CI). Offline product smoke:
 | Fresh run | `go test ./... -count=1` |
 | Race | `go test -race ./... -count=1` |
 | Coverage | `make cover` / `make cover-check` |
-| Package focus | `go test ./internal/tool/ -count=1 -v` |
-| Single test | `go test ./internal/permission/ -run TestEvaluate -count=1 -v` |
+| Package focus | `go test ./harness/tool/ -count=1 -v` |
+| Single test | `go test ./harness/permission/ -run TestEvaluate -count=1 -v` |
 | Vet / build | `make vet` / `make build` |
 | Offline boot | `make run-echo` |
 
@@ -82,12 +82,12 @@ A **flake** fails intermittently or only on one OS/env while CI (or 3 local reru
 
 | Area | Higher risk signals |
 |---|---|
-| `internal/tool` | filesystem mutation, shell, sandbox, filestate freshness, workspace roots |
-| `internal/permission` | last-match-wins, always grants, reject cascade |
+| `harness/tool` | filesystem mutation, shell, sandbox, filestate freshness, workspace roots |
+| `harness/permission` | last-match-wins, always grants, reject cascade |
 | `internal/auth` | credentials mode 0600, env precedence, OAuth |
 | `internal/session` + `protocol` | transcript integrity, replay |
-| `internal/provider` | HTTP/SSE, cancellation |
-| `internal/engine` | turn state machine, tool loop, prune/compaction, interrupt |
+| `providers` | HTTP/SSE, cancellation |
+| `harness/engine` | turn state machine, tool loop, prune/compaction, interrupt |
 | `internal/tui` | Bubble Tea update loops (existing harnesses) |
 | `internal/history` | concurrency + path security |
 

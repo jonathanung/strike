@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jonathanung/strike-cli/harness/scheduler"
 	"github.com/jonathanung/strike-cli/internal/container"
-	"github.com/jonathanung/strike-cli/internal/scheduler"
 )
 
 func TestNewContainerRuntimeSetsAmd64Platform(t *testing.T) {

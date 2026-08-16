@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jonathanung/strike-cli/internal/permission"
+	"github.com/jonathanung/strike-cli/harness/permission"
 )
 
 func TestBuiltinAgentsCatalog(t *testing.T) {

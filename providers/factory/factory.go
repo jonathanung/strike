@@ -12,8 +12,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/provider"
-	"github.com/jonathanung/strike-cli/provider/echo"
+	"github.com/jonathanung/strike-cli/harness/provider"
+	"github.com/jonathanung/strike-cli/harness/provider/echo"
 	"github.com/jonathanung/strike-cli/providers/anthropic"
 	"github.com/jonathanung/strike-cli/providers/auth"
 	"github.com/jonathanung/strike-cli/providers/chatgpt"

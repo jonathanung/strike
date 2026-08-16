@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/jonathanung/strike-cli/harness/permission"
 	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/host"
-	"github.com/jonathanung/strike-cli/internal/permission"
 )
 
 // NewWorkflowDrafts builds a host.WorkflowDrafts service bound to workDir for

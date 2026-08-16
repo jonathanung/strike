@@ -18,7 +18,7 @@ Tests only. Never modify production code; if code is untestable or buggy, report
 
 ## Helpers by domain
 
-### Tools (`internal/tool`)
+### Tools (`harness/tool`)
 
 ```go
 func allowAll(dir string) *Context {
@@ -38,7 +38,7 @@ webfetch, todo*, memory_*, issue_*, notebook_edit, sleep, skill, question, plan_
 phase_done, toolsearch, …). Prefer tests next to the module you touch; do not assume
 a fixed “six tools” list.
 
-### Permissions (`internal/permission`)
+### Permissions (`harness/permission`)
 
 - `Evaluate` last-match-wins across layered rulesets.
 - `Service.Ask` + `Reply`: once, always (session grant + sibling resolve), reject cascade, ctx cancel.
@@ -50,8 +50,8 @@ a fixed “six tools” list.
 
 ### Providers
 
-- Prefer `httptest.NewServer` against `internal/provider/base` and concrete adapters.
-- Engine integration: `internal/provider/echo` (prompts starting with `run ` emit bash tool calls).
+- Prefer `httptest.NewServer` against `providers/base` and concrete adapters.
+- Engine integration: `harness/provider/echo` (prompts starting with `run ` emit bash tool calls).
 
 ### Config / auth
 
@@ -78,13 +78,13 @@ go test ./path/to/package/ -count=1 -v
 
 ## Priority gaps (fill these first when expanding coverage)
 
-1. `internal/tool` — sandbox/workspace, filestate freshness, caps, defer/toolsearch  
-2. `internal/engine` — prune/compaction, interrupt, deferred tool re-promote, multi-tool  
-3. `internal/permission` — Evaluate + Service edge cases  
+1. `harness/tool` — sandbox/workspace, filestate freshness, caps, defer/toolsearch  
+2. `harness/engine` — prune/compaction, interrupt, deferred tool re-promote, multi-tool  
+3. `harness/permission` — Evaluate + Service edge cases  
 4. `internal/protocol` + `internal/session` — new event kinds, replay  
 5. `internal/question` — multi-question ask/reply  
 6. `internal/auth` — OAuth/PKCE/device, resolve edge cases  
-7. `internal/provider/*` — SSE cancel, cache headers where applicable  
+7. `providers/*` — SSE cancel, cache headers where applicable  
 8. `internal/tui` — keymap/default binds, modals, interrupt/esc paths  
 
 ## Platform notes

@@ -81,7 +81,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/jonathanung/strike-cli/internal/fn"
+	"github.com/jonathanung/strike-cli/harness/fn"
 )
 
 func chessHarness(input fn.Input, provider fn.Provider, emit fn.Emit) (fn.Result, error) {
@@ -134,7 +134,7 @@ The integration path is deliberately small:
 3. When `task` starts that agent, the child engine resolves the name. With no
    custom name it runs the built-in child model/tool loop; otherwise the
    complete subagent run is one function call. Root turns never invoke harnesses.
-4. `internal/engine/harness.go` constructs the input (including tools broker),
+4. `harness/engine/harness.go` constructs the input (including tools broker),
    provider capability, and progress callback. Only the function's returned
    `fn.Result` is committed as the assistant response. Mid-run tool
    results are returned to the harness only and are not written into history.

@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jonathanung/strike-cli/harness/sandbox"
+	"github.com/jonathanung/strike-cli/harness/tool"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/replay"
-	"github.com/jonathanung/strike-cli/internal/sandbox"
-	"github.com/jonathanung/strike-cli/internal/tool"
 	"github.com/jonathanung/strike-cli/pkg/redact"
 	"github.com/jonathanung/strike-cli/pkg/timeline"
 )

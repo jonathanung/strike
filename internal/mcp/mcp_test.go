@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jonathanung/strike-cli/harness/tool"
 	"github.com/jonathanung/strike-cli/internal/admission"
-	"github.com/jonathanung/strike-cli/internal/tool"
 )
 
 // TestHelperProcess is the fake stdio MCP server used by tests.

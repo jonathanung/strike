@@ -8,16 +8,21 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jonathanung/strike-cli/harness/engine"
+	"github.com/jonathanung/strike-cli/harness/fn"
+	"github.com/jonathanung/strike-cli/harness/fn/external"
+	"github.com/jonathanung/strike-cli/harness/permission"
+	"github.com/jonathanung/strike-cli/harness/provider"
+	"github.com/jonathanung/strike-cli/harness/sandbox"
+	"github.com/jonathanung/strike-cli/harness/scheduler"
+	"github.com/jonathanung/strike-cli/harness/tool"
 	"github.com/jonathanung/strike-cli/internal/admission"
 	"github.com/jonathanung/strike-cli/internal/artifact"
 	"github.com/jonathanung/strike-cli/internal/attachment"
 	"github.com/jonathanung/strike-cli/internal/audit"
 	"github.com/jonathanung/strike-cli/internal/auth"
 	"github.com/jonathanung/strike-cli/internal/config"
-	"github.com/jonathanung/strike-cli/internal/engine"
 	"github.com/jonathanung/strike-cli/internal/enginebind"
-	"github.com/jonathanung/strike-cli/internal/fn"
-	"github.com/jonathanung/strike-cli/internal/fn/external"
 	"github.com/jonathanung/strike-cli/internal/goal"
 	"github.com/jonathanung/strike-cli/internal/history"
 	"github.com/jonathanung/strike-cli/internal/host"
@@ -28,16 +33,11 @@ import (
 	"github.com/jonathanung/strike-cli/internal/mcp"
 	"github.com/jonathanung/strike-cli/internal/memory"
 	"github.com/jonathanung/strike-cli/internal/models"
-	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/plan"
 	"github.com/jonathanung/strike-cli/internal/plugin"
 	"github.com/jonathanung/strike-cli/internal/project"
 	"github.com/jonathanung/strike-cli/internal/protocol"
-	"github.com/jonathanung/strike-cli/internal/provider"
-	"github.com/jonathanung/strike-cli/internal/sandbox"
-	"github.com/jonathanung/strike-cli/internal/scheduler"
 	"github.com/jonathanung/strike-cli/internal/session"
-	"github.com/jonathanung/strike-cli/internal/tool"
 	"github.com/jonathanung/strike-cli/internal/tools"
 	"github.com/jonathanung/strike-cli/internal/version"
 	"github.com/jonathanung/strike-cli/providers"
@@ -736,6 +736,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			ProjectLedger:    enginebind.ProjectLedger,
 			Worktrees:        enginebind.Worktrees(),
 			Version:          version.Version,
+			BuildDiagnostic:  enginebind.Diagnostic(),
 			SystemPrompt:     cfg.SystemPrompt,
 			SystemPromptMode: cfg.SystemPromptMode,
 			LeanCode:         cfg.LeanCode,

@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jonathanung/strike-cli/provider"
+	"github.com/jonathanung/strike-cli/harness/provider"
 )
 
 func TestBearerAuth(t *testing.T) {

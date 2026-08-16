@@ -64,7 +64,7 @@ Source of truth: root `AGENTS.md` *Verification tiers*. Summary:
 
 CI runs `go test -race ./...` on every PR — do **not** always re-run full local race on A/B.
 
-**Smoke:** load skill `smoke` when the diff touches `cmd/`, `internal/engine`, TUI input/keymap/app, `session`, or `auth`.
+**Smoke:** load skill `smoke` when the diff touches `cmd/`, `harness/engine`, TUI input/keymap/app, `session`, or `auth`.
 
 **Contract freeze:** default keybind or config-schema changes must update `docs/keybinds.md` / `docs/config.md` and call out migration in the PR body.
 

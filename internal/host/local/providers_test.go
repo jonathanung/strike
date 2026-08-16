@@ -9,10 +9,10 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/jonathanung/strike-cli/harness/provider"
 	"github.com/jonathanung/strike-cli/internal/auth"
 	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/host"
-	"github.com/jonathanung/strike-cli/internal/provider"
 	"github.com/jonathanung/strike-cli/providers/anthropic"
 	"github.com/jonathanung/strike-cli/providers/openaicompat"
 )

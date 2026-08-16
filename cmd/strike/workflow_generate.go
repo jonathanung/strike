@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jonathanung/strike-cli/harness/permission"
+	"github.com/jonathanung/strike-cli/harness/provider"
 	"github.com/jonathanung/strike-cli/internal/auth"
 	"github.com/jonathanung/strike-cli/internal/config"
-	"github.com/jonathanung/strike-cli/internal/permission"
-	"github.com/jonathanung/strike-cli/internal/provider"
 	"github.com/jonathanung/strike-cli/providers"
 	"github.com/jonathanung/strike-cli/providers/factory"
 )

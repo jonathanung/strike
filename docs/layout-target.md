@@ -48,11 +48,10 @@ github.com/jonathanung/strike-cli/pkg/redact       # stdlib only
         ▲                         ▲
         └────────────┬────────────┘
                      │
-github.com/jonathanung/strike-cli/provider         # interim (#1216): interface + echo
-github.com/jonathanung/strike-cli/harness          # protocol + redact only
-                     ▲                             # #1208 moves provider/ → harness/provider
+github.com/jonathanung/strike-cli/harness          # protocol + redact (+ stdlib kernel deps)
+                     ▲                             # provider interface + echo lives at harness/provider
                      │
-github.com/jonathanung/strike-cli/providers        # provider interface only
+github.com/jonathanung/strike-cli/providers        # harness/provider only (not harness/engine)
                      ▲                             # adapters, HTTP base, auth flows, factory
                      │
 github.com/jonathanung/strike-cli                  # everything else
@@ -65,8 +64,8 @@ Allowed edges only:
 |---|---|
 | `pkg/protocol` | stdlib |
 | `pkg/redact` | stdlib |
-| `harness` | `pkg/protocol`, `pkg/redact`, stdlib |
-| `providers` | `harness` (provider interface / types / echo — **not** `harness/engine`), stdlib |
+| `harness` | `pkg/protocol`, `pkg/redact`, stdlib, doublestar, x/sys, charmbracelet/x/ansi |
+| `providers` | `harness/provider` (interface / types / echo — **not** `harness/engine`), stdlib |
 | `strike-cli` | `harness`, `providers`, its own `pkg/*` and `internal/*` |
 
 Forbidden:
@@ -160,7 +159,7 @@ Go import paths change; wire and config names do not.
 | `internal/auth` store (`~/.strike/auth.json`) | `internal/product/auth` | #1214 after #1216 |
 | `cmd/strike` `selectProvider` | `providers/factory` | #1216; `cmd/strike` becomes a thin call |
 | `internal/tool` contract/registry/retry | `harness/tool` | #1205 then #1208 |
-| `internal/tool` kernel builtins | `harness/tools` | #1205 then #1208 |
+| `internal/tool` kernel builtins | `harness/tool` (same package as contract) | #1205 then #1208 |
 | `internal/tool` product builtins | `internal/tools` | #1205; later stays under `internal/tools` |
 | `internal/permission` | `harness/permission` | #1208 |
 | `internal/actionfacts` | `harness/actionfacts` | #1208 (not trust) |

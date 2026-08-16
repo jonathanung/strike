@@ -4,14 +4,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/engine"
+	"github.com/jonathanung/strike-cli/harness/engine"
+	"github.com/jonathanung/strike-cli/harness/provider"
+	"github.com/jonathanung/strike-cli/harness/provider/echo"
+	"github.com/jonathanung/strike-cli/harness/sandbox"
+	"github.com/jonathanung/strike-cli/harness/tool"
 	"github.com/jonathanung/strike-cli/internal/host/local"
 	"github.com/jonathanung/strike-cli/internal/protocol"
-	"github.com/jonathanung/strike-cli/internal/provider"
-	"github.com/jonathanung/strike-cli/internal/provider/echo"
-	"github.com/jonathanung/strike-cli/internal/sandbox"
 	"github.com/jonathanung/strike-cli/internal/session"
-	"github.com/jonathanung/strike-cli/internal/tool"
 )
 
 func TestMultiRootHubSpawnAndActivate(t *testing.T) {
