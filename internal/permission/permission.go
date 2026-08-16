@@ -46,7 +46,7 @@ var knownPermissions = map[string]struct{}{
 	"team_task": {}, "patch_collab": {}, "delegate": {},
 	// Human orchestration Ops (WEBUI.18 / docs/human-orchestration-ops.md).
 	"team.spawn": {}, "team.message": {}, "team.interrupt": {}, "team.board": {},
-	"webfetch": {}, "websearch": {}, "todowrite": {}, "todoread": {},
+	"webfetch": {}, "websearch": {}, "browser": {}, "todowrite": {}, "todoread": {},
 	"memory_write": {}, "memory_read": {}, "issue_write": {}, "issue_read": {},
 	"plan_write": {}, "plan_read": {}, "plan_delegate": {},
 	"artifact_write": {}, "artifact_read": {},
@@ -130,6 +130,7 @@ func Defaults() Ruleset {
 		{Permission: "delegate", Pattern: "*", Action: Allow},
 		{Permission: "webfetch", Pattern: "*", Action: Ask},
 		{Permission: "websearch", Pattern: "*", Action: Ask},
+		{Permission: "browser", Pattern: "*", Action: Ask},
 		{Permission: "todowrite", Pattern: "*", Action: Allow},
 		{Permission: "todoread", Pattern: "*", Action: Allow},
 		{Permission: "memory_write", Pattern: "*", Action: Allow},

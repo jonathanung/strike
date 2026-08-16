@@ -411,6 +411,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		tool.NewPatchCollab(),
 		tool.NewWebFetch(),
 		tool.NewWebSearch(),
+		tool.NewBrowser(),
 		tool.NewTodoWrite(todoStore),
 		tool.NewTodoRead(todoStore),
 		tool.NewMemoryWrite(memoryStore),
