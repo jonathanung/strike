@@ -22,10 +22,10 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: go.sum
 
-      # TUI sources live under internal/tui/_src/ and are flattened into
-      # internal/tui/*.go (gitignored). CI and make build run generate first.
+      # TUI sources live under internal/tui/app/_src/ and are flattened into
+      # internal/tui/app/*.go (gitignored). CI and make build run generate first.
       - name: Generate TUI flatten
-        run: go generate ./internal/tui
+        run: go generate ./internal/tui/app
 
       - name: Build multi-arch archives
         env:

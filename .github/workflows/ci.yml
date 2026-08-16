@@ -116,7 +116,7 @@ jobs:
 
       - name: Generate TUI flatten
         if: steps.web.outputs.present == 'true'
-        run: go generate ./internal/tui
+        run: go generate ./internal/tui/app
 
       - name: Real-browser web e2e
         if: steps.web.outputs.present == 'true'
