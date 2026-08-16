@@ -78,6 +78,7 @@ service/theme token).
 | `internal/goal` | loop harness: goals, guards, critic, hooks, JSONL state |
 | `internal/plan` | project-scoped root-owned structured plans (sections, lifecycle, CAS) |
 | `internal/artifact` | shared typed multi-agent artifacts (findings/patch/test_report/…; CAS, owner\|team) |
+| `internal/attachment` | content-addressed typed attachments (`att:sha256:` refs; image/pdf/diagram/log/archive/build) |
 | `internal/ledger` | shared decision/assumption/constraint ledger (append/invalidate/supersede; active slice in context) |
 | `internal/host` | frozen stdlib-only contract: what a frontend needs from its host (auth, catalog, settings, history, memory, issues, plans, goals, agents, skills) |
 | `internal/host/local` | real `host.Services` impl, wraps auth/config/models/history/memory/issue/plan/goal |

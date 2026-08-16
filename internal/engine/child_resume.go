@@ -150,6 +150,7 @@ func (e *Engine) resumeChild(ctx context.Context, req tool.TaskResumeRequest) (t
 		Instructions:               e.opts.Instructions,
 		Memory:                     e.opts.Memory,
 		Ledger:                     e.opts.Ledger,
+		Attachments:                e.opts.Attachments,
 		SystemPrompt:               e.opts.SystemPrompt,
 		LeanCode:                   e.opts.LeanCode,
 		HarnessRegistry:            e.opts.HarnessRegistry,

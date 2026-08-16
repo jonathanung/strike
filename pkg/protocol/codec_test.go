@@ -1047,6 +1047,43 @@ func TestUserMessageImagesRoundTrip(t *testing.T) {
 	}
 }
 
+func TestUserMessageAttachmentRefRoundTrip(t *testing.T) {
+	ev := UserMessage{
+		Text: "hi",
+		Images: []ImageAttachment{{
+			MIME:   "image/png",
+			Ref:    "att:sha256:" + strings.Repeat("ab", 32),
+			SHA256: strings.Repeat("ab", 32),
+			Bytes:  12,
+			Kind:   AttachmentKindImage,
+			Name:   "shot.png",
+		}},
+	}
+	env, err := Wrap(ev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), `"images":[{"mime":"image/png","data"`) {
+		t.Fatalf("payload embedded: %s", raw)
+	}
+	got, err := env.Decode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	um, ok := got.(UserMessage)
+	if !ok {
+		t.Fatalf("type %T", got)
+	}
+	img := um.Images[0]
+	if img.Data != "" || img.Ref == "" || img.Kind != AttachmentKindImage || img.Bytes != 12 {
+		t.Fatalf("got %#v", img)
+	}
+}
+
 func TestToolRetryEventsRoundTrip(t *testing.T) {
 	corr := Correlation{SessionID: "s1", TurnID: "t1", ProviderRequestID: "p1", Attempt: 1}
 	cases := []Event{

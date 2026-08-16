@@ -424,6 +424,7 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 		Instructions:               e.opts.Instructions,
 		Memory:                     e.opts.Memory,
 		Ledger:                     e.opts.Ledger,
+		Attachments:                e.opts.Attachments,
 		SystemPrompt:               e.opts.SystemPrompt,
 		SystemPromptMode:           e.opts.SystemPromptMode,
 		LeanCode:                   e.opts.LeanCode,

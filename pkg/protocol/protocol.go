@@ -314,12 +314,28 @@ const (
 // Op is a client -> engine submission.
 type Op interface{ isOp() }
 
-// ImageAttachment is one image attached to a user message (paste/drop).
-// Data is standard base64 (no data: URI prefix). MIME is a full media type
-// such as image/png.
+// Attachment kinds on ImageAttachment.Kind (wire 1.18+). Empty kind means image.
+const (
+	AttachmentKindImage   = "image"
+	AttachmentKindPDF     = "pdf"
+	AttachmentKindDiagram = "diagram"
+	AttachmentKindLog     = "log"
+	AttachmentKindArchive = "archive"
+	AttachmentKindBuild   = "build"
+)
+
+// ImageAttachment is one typed attachment on a user message (paste/drop).
+// Data is standard base64 (no data: URI prefix) and is omitted from persisted
+// history when Ref is set. MIME is a full media type such as image/png.
+// Ref is att:sha256:<hex> for content-addressed storage.
 type ImageAttachment struct {
-	MIME string `json:"mime"`
-	Data string `json:"data"`
+	MIME   string `json:"mime"`
+	Data   string `json:"data,omitempty"`
+	Ref    string `json:"ref,omitempty"`
+	SHA256 string `json:"sha256,omitempty"`
+	Bytes  int64  `json:"bytes,omitempty"`
+	Kind   string `json:"kind,omitempty"`
+	Name   string `json:"name,omitempty"`
 }
 
 // UserInput submits a user message, starting a turn.
