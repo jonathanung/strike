@@ -100,6 +100,35 @@ func TestFirstTurnSchemaReduction(t *testing.T) {
 		progM.FirstTurnToolCount, progM.FirstTurnSchemaTokens, red*100)
 }
 
+func TestFirstTurnDeferredNameListOmitsSchemas(t *testing.T) {
+	reg := fullRegistry(t)
+	reg.SetDeferLoading(true)
+	req := captureFirstStream(t, engine.Options{
+		WorkDir:  t.TempDir(),
+		Registry: reg,
+		Agents:   []engine.Agent{{Name: "build"}},
+		Rules:    []permission.Ruleset{permission.Defaults()},
+	})
+	names := map[string]bool{}
+	for _, s := range req.Tools {
+		names[s.Name] = true
+	}
+	for _, deferred := range []string{"webfetch", "sleep", "delegate", "plan_write"} {
+		if names[deferred] {
+			t.Errorf("%s schema should stay omitted from tools[]", deferred)
+		}
+		if !strings.Contains(req.System, "`"+deferred+"`") {
+			t.Errorf("first-turn system missing deferred name %s", deferred)
+		}
+	}
+	if !strings.Contains(req.System, "call by name") {
+		t.Fatal("missing call-by-name hint")
+	}
+	if !names["read"] || !names["toolsearch"] {
+		t.Fatalf("core tools missing: %v", names)
+	}
+}
+
 func TestLegacyAndAdvancedTaskReplayFixtures(t *testing.T) {
 	// History with legacy task_status + advanced task transition restores both.
 	reg := fullRegistry(t)
