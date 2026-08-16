@@ -33,6 +33,7 @@ func TestIsCoreTool(t *testing.T) {
 		"webfetch", "websearch", "sleep", "skill", "todowrite", "memory_read",
 		"issue_write", "notebook_edit", "mcp_demo_ping",
 		"definition", "references", "symbols", "diagnostics",
+		"call_hierarchy", "rename_preview", "impact",
 		"artifact_write", "artifact_read", "ledger_write", "ledger_read", "context_bundle",
 	} {
 		if IsCoreTool(name) {
