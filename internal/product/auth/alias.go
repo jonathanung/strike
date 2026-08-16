@@ -3,10 +3,10 @@ package auth
 import (
 	"context"
 
-	provauth "github.com/jonathanung/strike-cli/providers/auth"
+	provauth "github.com/jonathanung/strike-cli/harness/providers/auth"
 )
 
-// Credential types live in providers/auth so the providers module can resolve
+// Credential types live in harness/providers/auth so the factory can resolve
 // keys without importing internal/. JSON tags are unchanged.
 
 type Credential = provauth.Credential

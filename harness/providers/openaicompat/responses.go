@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/jonathanung/strike-cli/harness/provider"
-	"github.com/jonathanung/strike-cli/providers/base"
+	"github.com/jonathanung/strike-cli/harness/providers/base"
 )
 
 // ResponsesProvider talks to the OpenAI platform Responses API

@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/jonathanung/strike-cli/harness/provider"
-	"github.com/jonathanung/strike-cli/providers/base"
+	"github.com/jonathanung/strike-cli/harness/providers/base"
 )
 
 // BearerSource resolves the Authorization bearer for each request.

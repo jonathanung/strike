@@ -14,11 +14,11 @@ import (
 
 	"github.com/jonathanung/strike-cli/harness/provider"
 	"github.com/jonathanung/strike-cli/harness/provider/echo"
-	"github.com/jonathanung/strike-cli/providers/anthropic"
-	"github.com/jonathanung/strike-cli/providers/auth"
-	"github.com/jonathanung/strike-cli/providers/chatgpt"
-	"github.com/jonathanung/strike-cli/providers/google"
-	"github.com/jonathanung/strike-cli/providers/openaicompat"
+	"github.com/jonathanung/strike-cli/harness/providers/anthropic"
+	"github.com/jonathanung/strike-cli/harness/providers/auth"
+	"github.com/jonathanung/strike-cli/harness/providers/chatgpt"
+	"github.com/jonathanung/strike-cli/harness/providers/google"
+	"github.com/jonathanung/strike-cli/harness/providers/openaicompat"
 )
 
 // Options is the already-parsed construction input. Store is required for

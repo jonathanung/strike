@@ -8,9 +8,8 @@ cmd/strike/            main.go: flags/usage/auth/exec/rpc/acp/serve subcommands;
 pkg/protocol/          public Op/Event wire schema (own go.mod; docs/protocol.md)
 pkg/redact/            public credential-shaped string scrubbing (own go.mod)
 pkg/sdk/               public Go client over pkg/protocol (see docs/sdk.md)
-harness/               kernel module (engine, provider+echo, tool, permission, …)
-providers/             adapters, auth flows, factory (own go.mod)
-go.work                workspace: ., ./pkg/protocol, ./pkg/redact, ./harness, ./providers
+harness/               kernel module (engine, provider+echo, adapters/factory/auth flows, tool, permission, …)
+go.work                workspace: ., ./pkg/protocol, ./pkg/redact, ./harness
 internal/protocol/     compatibility re-export of pkg/protocol
 internal/frontend/rpc/          stdio JSON-RPC 2.0 transport (strike rpc; ops in, events out)
 internal/frontend/acp/          Agent Client Protocol adapter (strike acp; ACP ↔ Op/Event)

@@ -56,11 +56,11 @@ service/theme token).
 | `pkg/diag` | Prompt/config diagnostic bundle builder + redacted JSON export |
 | `pkg/sdk` | Thin Go client over `pkg/protocol` (channel/JSONL client, RunTurn, session replay) |
 | `internal/protocol` | Compatibility re-export of `pkg/protocol` |
-| `harness` | Kernel module (`github.com/jonathanung/strike-cli/harness`; own go.mod): engine, provider+echo, tool, permission, actionfacts, question, sandbox, scheduler, safefile, fn, verify, fault, secretref |
+| `harness` | Kernel module (`github.com/jonathanung/strike-cli/harness`; own go.mod): engine, provider+echo, adapters/factory/auth flows, tool, permission, actionfacts, question, sandbox, scheduler, safefile, fn, verify, fault, secretref |
 | `harness/engine` | Turn loop, tool dispatch, interrupts |
 | `harness/fn` | Function harness contract, registry, external process adapter |
 | `harness/provider` | Public Provider interface + echo (folded from interim `provider/` module) |
-| `providers` | Adapters (base/anthropic/openaicompat/chatgpt/google), auth flows, factory (own go.mod; imports `harness/provider` only) |
+| `harness/providers` | Adapters (base/anthropic/openaicompat/chatgpt/google), auth flows, factory (same module; engine does not import) |
 | `harness/sandbox` | OS process sandbox (`Wrap` via bwrap / sandbox-exec) for bash |
 | `harness/safefile` | Hardened path I/O (FIFO/special reject, symlink policy, identity, atomic write) for tools |
 | `harness/tool` | kernel contract + generic builtins: read/glob/grep/edit/write/apply_patch/move/delete/status/bash/git/verify/task/task_status/task_read/task_message/task_interrupt/delegate/wait/agent_roster/agent_message/agent_broadcast/agent_thread/team_task/patch_collab/webfetch/websearch/browser/todowrite/todoread/sleep/question/toolsearch |
@@ -71,7 +71,7 @@ service/theme token).
 | `harness/actionfacts` | semantic bash/tool fact projection for permissions (#888) |
 | `harness/permission` | last-match-wins allow/ask/deny + ask service (+ action facts) |
 | `internal/trust/secret` | secret-ref env indirection + protocol event redaction on top of pkg/redact (see docs/secrets.md) |
-| `internal/product/auth` | 0600 ~/.strike/auth.json store; flow helpers re-exported from `providers/auth` |
+| `internal/product/auth` | 0600 ~/.strike/auth.json store; flow helpers re-exported from `harness/providers/auth` |
 | `internal/product/config` | global/project JSON + agents/skills markdown |
 | `internal/trust/audit` | Durable retention-bounded security audit sink (`~/.strike/audit/`) |
 | `internal/persist/session` | JSONL event log append/replay + concurrent Manager |

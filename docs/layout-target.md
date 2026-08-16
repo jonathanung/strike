@@ -17,6 +17,7 @@ Do **not** `mv` packages from this document. Child issues own the moves.
 | 2 | #1207 | Rename `internal/harness` → `fn` |
 | 3 | #1208 | Move kernel into `harness/` + `harness/go.mod` |
 | 3 | #1216 | Sibling `providers/` module (adapters, auth flows, factory) |
+| 1 | #1232 | Fold `providers/` into `harness/providers` (no sibling module) |
 | 4 | #1209 | TUI flatten target → `internal/frontend/tui/app`; isolate kit |
 | 5 | #1210–#1215 | Group remaining `internal/` into persist / trust / integrate / frontend / product / eval |
 
@@ -26,7 +27,7 @@ Do **not** `mv` packages from this document. Child issues own the moves.
 
 - **No git submodules.** Nested Go modules in this repo only (`go.work` +
   root `replace`). No extra GitHub repos.
-- **Do not publish** `harness`, `providers`, `pkg/protocol`, or `pkg/redact`
+- **Do not publish** `harness`, `pkg/protocol`, or `pkg/redact`
   to the module proxy in this epic. `replace` keeps CI and `GOWORK=off`
   builds green.
 - **`cmd/strike` stays the only composition root.**
@@ -36,7 +37,7 @@ Do **not** `mv` packages from this document. Child issues own the moves.
 - **`engine/route.go` is persona routing**, not the providers factory. It
   stays in the engine (capability / load / cost-class / pin fallback).
   OpenAI platform-key vs ChatGPT OAuth construction lives in
-  `providers/factory` (#1216).
+  `harness/providers/factory` (#1216, folded by #1232).
 - Out of scope: rewriting team/multi-agent out of the engine; extracting a
   TUI kit module (`ui`/`theme` stay in-tree).
 
@@ -49,13 +50,10 @@ github.com/jonathanung/strike-cli/pkg/redact       # stdlib only
         └────────────┬────────────┘
                      │
 github.com/jonathanung/strike-cli/harness          # protocol + redact (+ stdlib kernel deps)
-                     ▲                             # provider interface + echo lives at harness/provider
-                     │
-github.com/jonathanung/strike-cli/providers        # harness/provider only (not harness/engine)
-                     ▲                             # adapters, HTTP base, auth flows, factory
-                     │
+                     ▲                             # provider interface + echo at harness/provider
+                     │                             # adapters, HTTP base, auth flows, factory at harness/providers
 github.com/jonathanung/strike-cli                  # everything else
-                                                   # replace → ./harness and ./providers
+                                                   # replace → ./harness
 ```
 
 Allowed edges only:
@@ -64,15 +62,15 @@ Allowed edges only:
 |---|---|
 | `pkg/protocol` | stdlib |
 | `pkg/redact` | stdlib |
-| `harness` | `pkg/protocol`, `pkg/redact`, stdlib, doublestar, x/sys, charmbracelet/x/ansi |
-| `providers` | `harness/provider` (interface / types / echo — **not** `harness/engine`), stdlib |
-| `strike-cli` | `harness`, `providers`, its own `pkg/*` and `internal/*` |
+| `harness` | `pkg/protocol`, `pkg/redact`, stdlib (including `net/http`), doublestar, x/sys, charmbracelet/x/ansi |
+| `strike-cli` | `harness`, its own `pkg/*` and `internal/*` |
 
 Forbidden:
 
-- `harness` → `providers` or any `…/internal/…`
-- `providers` → `harness/engine` or any `…/internal/…`
-- cycles among the five modules
+- `harness` → any `…/internal/…`
+- `harness/engine` → `harness/providers` (SelectFunc injection)
+- `harness/providers` → `harness/engine`
+- cycles among the four modules
 
 `pkg/sdk`, `pkg/timeline`, `pkg/diag`, and `pkg/telemetry` stay in the root
 module this epic (#1204 does not extract them).
@@ -95,12 +93,11 @@ harness/                          # module github.com/jonathanung/strike-cli/har
   fn/external/
   verify/
   fault/
-
-providers/                        # module github.com/jonathanung/strike-cli/providers
-  base/                           # HTTP/SSE + AuthFunc
-  anthropic/ openaicompat/ chatgpt/ google/
-  auth/                           # OAuth/PKCE/device/refresh + BearerSource (not ~/.strike path)
-  factory/                        # selectProvider + OpenAI vs ChatGPT routing
+  providers/                      # adapters + factory + auth flows (same module; not a go.mod)
+    base/                         # HTTP/SSE + AuthFunc
+    anthropic/ openaicompat/ chatgpt/ google/
+    auth/                         # OAuth/PKCE/device/refresh + BearerSource (not ~/.strike path)
+    factory/                      # selectProvider + OpenAI vs ChatGPT routing
 
 pkg/protocol/                     # own go.mod
 pkg/redact/                       # own go.mod
@@ -150,14 +147,14 @@ Go import paths change; wire and config names do not.
 | Today | Target | Issue |
 |---|---|---|
 | `internal/engine` | `harness/engine` | #1208 |
-| `internal/engine/route.go` | `harness/engine` (same file) | Persona/capability/load router — **not** `providers/factory` |
+| `internal/engine/route.go` | `harness/engine` (same file) | Persona/capability/load router — **not** `harness/providers/factory` |
 | `internal/provider` (interface, types, effort, retry, stream) | `harness/provider` | #1208 |
 | `internal/provider/echo` | `harness/provider` (echo) | #1208 |
-| `internal/provider/base` | `providers/base` | #1216 |
-| `internal/provider/{anthropic,openaicompat,chatgpt,google}` | `providers/{…}` | #1216 |
-| `internal/product/auth` login/oauth/device/pkce/openai/xai/resolve | `providers/auth` | #1216 — flows only |
-| `internal/product/auth` store (`~/.strike/auth.json`) | `internal/product/auth` | #1214 after #1216 |
-| `cmd/strike` `selectProvider` | `providers/factory` | #1216; `cmd/strike` becomes a thin call |
+| `internal/provider/base` | `harness/providers/base` | #1216 then #1232 |
+| `internal/provider/{anthropic,openaicompat,chatgpt,google}` | `harness/providers/{…}` | #1216 then #1232 |
+| `internal/product/auth` login/oauth/device/pkce/openai/xai/resolve | `harness/providers/auth` | #1216 then #1232 — flows only |
+| `internal/product/auth` store (`~/.strike/auth.json`) | `internal/product/auth` | #1214 after #1216; stays product |
+| `cmd/strike` `selectProvider` | `harness/providers/factory` | #1216 then #1232; `cmd/strike` becomes a thin call |
 | `internal/tool` contract/registry/retry | `harness/tool` | #1205 then #1208 |
 | `internal/tool` kernel builtins | `harness/tool` (same package as contract) | #1205 then #1208 |
 | `internal/tool` product builtins | `internal/tools` | #1205; later stays under `internal/tools` |
@@ -176,14 +173,14 @@ Go import paths change; wire and config names do not.
 ## Kernel vs product
 
 **Kernel** = shareable agent runtime in the `harness` module. A third-party
-module must be able to import it without reaching `internal/`.
-
-**Providers** = sibling module for vendor adapters and reusable auth/API
-handling. Not the kernel (a harness consumer should not be forced to take
-Anthropic/OpenAI/ChatGPT wire formats).
+module must be able to import it without reaching `internal/`. Adapters,
+construction factory, and reusable auth flows live in this module
+(`harness/providers`) so a consumer gets Anthropic/OpenAI/Google/ChatGPT
+without a second module. Engine still does not import adapters.
 
 **Product** = Strike CLI, TUI, stores, cockpit, evals. Stays in the root
-module under grouped `internal/` clusters.
+module under grouped `internal/` clusters. Product auth store
+(`~/.strike/auth.json`) and `strike auth` stay here.
 
 Every current top-level `internal/*` package:
 
@@ -195,7 +192,7 @@ Every current top-level `internal/*` package:
 | `internal/persist/artifact` | `internal/persist/artifact` | product |
 | `internal/persist/attachment` | `internal/persist/attachment` | product |
 | `internal/trust/audit` | `internal/trust/audit` | product |
-| `internal/product/auth` | split: flows → `providers/auth`; store + `strike auth` → `internal/product/auth` | providers + product |
+| `internal/product/auth` | split: flows → `harness/providers/auth`; store + `strike auth` → `internal/product/auth` | kernel + product |
 | `internal/product/config` | `internal/product/config` | product |
 | `internal/integrate/container` | `internal/integrate/container` | product |
 | `internal/engine` | `harness/engine` | kernel |
@@ -216,7 +213,7 @@ Every current top-level `internal/*` package:
 | `internal/integrate/plugin` | `internal/integrate/plugin` | product |
 | `internal/product/project` | `internal/product/project` | product |
 | `internal/protocol` | `internal/protocol` (compat re-export; prefer `pkg/protocol`) | product |
-| `internal/provider` | split: interface+echo → `harness/provider`; adapters → `providers/` | kernel + providers |
+| `internal/provider` | split: interface+echo → `harness/provider`; adapters → `harness/providers/` | kernel |
 | `internal/question` | `harness/question` | kernel |
 | `internal/eval/replay` | `internal/eval/replay` | product |
 | `internal/frontend/rpc` | `internal/frontend/rpc` | product |
@@ -240,11 +237,11 @@ Notable subpackages (not top-level, but they split or move with a parent):
 |---|---|---|
 | `internal/fn/external` | `harness/fn/external` | kernel |
 | `internal/provider/echo` | `harness/provider` (echo) | kernel |
-| `internal/provider/base` | `providers/base` | providers |
-| `internal/provider/anthropic` | `providers/anthropic` | providers |
-| `internal/provider/openaicompat` | `providers/openaicompat` | providers |
-| `internal/provider/chatgpt` | `providers/chatgpt` | providers |
-| `internal/provider/google` | `providers/google` | providers |
+| `internal/provider/base` | `harness/providers/base` | kernel |
+| `internal/provider/anthropic` | `harness/providers/anthropic` | kernel |
+| `internal/provider/openaicompat` | `harness/providers/openaicompat` | kernel |
+| `internal/provider/chatgpt` | `harness/providers/chatgpt` | kernel |
+| `internal/provider/google` | `harness/providers/google` | kernel |
 | `internal/frontend/host/local` | `internal/frontend/host/local` | product |
 | `internal/frontend/tui/ui` | `internal/frontend/tui/ui` (kit; no Logo) | product |
 | `internal/frontend/tui/theme` | `internal/frontend/tui/theme` | product |
@@ -269,9 +266,9 @@ Product builtins (stay in Strike `internal/tools`): `memory_*`, `issue_*`,
 
 `cmd/strike` registers both sets. Tool names on the wire do not change.
 
-### Auth split (#1216 then #1214)
+### Auth split (#1216 then #1232 then #1214)
 
-`providers/auth` owns reusable flows: API-key env order, `BearerSource`,
+`harness/providers/auth` owns reusable flows: API-key env order, `BearerSource`,
 `ChatGPTSource`, OAuth/PKCE/device, token refresh.
 
 Strike product keeps `auth.Store` (0600 `~/.strike/auth.json`), `strike auth`

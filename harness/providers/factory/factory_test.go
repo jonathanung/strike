@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jonathanung/strike-cli/providers/auth"
-	"github.com/jonathanung/strike-cli/providers/chatgpt"
-	"github.com/jonathanung/strike-cli/providers/openaicompat"
+	"github.com/jonathanung/strike-cli/harness/providers/auth"
+	"github.com/jonathanung/strike-cli/harness/providers/chatgpt"
+	"github.com/jonathanung/strike-cli/harness/providers/openaicompat"
 )
 
 type memStore struct {

@@ -44,13 +44,11 @@ jobs:
           go list -m github.com/jonathanung/strike-cli \
             github.com/jonathanung/strike-cli/pkg/protocol \
             github.com/jonathanung/strike-cli/pkg/redact \
-            github.com/jonathanung/strike-cli/harness \
-            github.com/jonathanung/strike-cli/providers
+            github.com/jonathanung/strike-cli/harness
           GOWORK=off go list -m github.com/jonathanung/strike-cli \
             github.com/jonathanung/strike-cli/pkg/protocol \
             github.com/jonathanung/strike-cli/pkg/redact \
-            github.com/jonathanung/strike-cli/harness \
-            github.com/jonathanung/strike-cli/providers
+            github.com/jonathanung/strike-cli/harness
 
       - name: Generate TUI flatten
         run: go generate ./internal/frontend/tui
@@ -81,7 +79,6 @@ jobs:
           go -C pkg/protocol vet ./...
           go -C pkg/redact vet ./...
           go -C harness vet ./...
-          go -C providers vet ./...
 
       - name: Test
         run: |
@@ -89,7 +86,6 @@ jobs:
           go -C pkg/protocol test -race ./...
           go -C pkg/redact test -race ./...
           go -C harness test -race ./...
-          go -C providers test -race ./...
 
       # E3.2 prompt regression: verbose report of tool/turn/token deltas.
       # Non-blocking for now (test itself soft-fails metric drift unless
