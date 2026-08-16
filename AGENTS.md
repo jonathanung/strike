@@ -34,7 +34,7 @@ Report exact commands and failing output verbatim. Do not claim green without ru
 - Prefer table-driven cases; use `t.TempDir()` and `t.Setenv("HOME", ...)` for isolation.
 - Mock only external boundaries (HTTP via `httptest`, clocks when needed). Never mock the unit under test.
 - Tool tests: allow-all `Ask` helper unless testing permission denial.
-- Provider tests: `httptest.Server` for wire format; use `internal/provider/echo` for offline engine loops.
+- Provider tests: `httptest.Server` for wire format; use `provider/echo` (re-exported as `internal/provider/echo`) for offline engine loops.
 - TUI tests: reuse helpers from `internal/tui/app/_src/app/app_test.go` (`updateApp`, `runAppCmd`, etc.; package tests after `go generate ./internal/tui/app`).
 
 ## Architecture map
@@ -58,7 +58,9 @@ service/theme token).
 | `internal/protocol` | Compatibility re-export of `pkg/protocol` |
 | `internal/engine` | Turn loop, tool dispatch, interrupts |
 | `internal/fn` | Function harness contract, registry, external process adapter |
-| `internal/provider` | LLM adapters (+ `base`, `echo`, anthropic, openai, xai, google, chatgpt) |
+| `provider` | Public Provider interface + echo (own go.mod; until #1208 → harness/provider) |
+| `internal/provider` | Compatibility re-export of `provider` |
+| `providers` | Adapters (base/anthropic/openaicompat/chatgpt/google), auth flows, factory (own go.mod) |
 | `internal/sandbox` | OS process sandbox (`Wrap` via bwrap / sandbox-exec) for bash |
 | `internal/safefile` | Hardened path I/O (FIFO/special reject, symlink policy, identity, atomic write) for tools |
 | `internal/tool` | kernel contract + generic builtins: read/glob/grep/edit/write/apply_patch/move/delete/status/bash/git/verify/task/task_status/task_read/task_message/task_interrupt/delegate/wait/agent_roster/agent_message/agent_broadcast/agent_thread/team_task/patch_collab/webfetch/websearch/browser/todowrite/todoread/sleep/question/toolsearch |
@@ -69,7 +71,7 @@ service/theme token).
 | `internal/actionfacts` | semantic bash/tool fact projection for permissions (#888) |
 | `internal/permission` | last-match-wins allow/ask/deny + ask service (+ action facts) |
 | `internal/secret` | secret-ref env indirection + protocol event redaction on top of pkg/redact (see docs/secrets.md) |
-| `internal/auth` | credentials, OAuth/PKCE/device, env precedence |
+| `internal/auth` | 0600 ~/.strike/auth.json store; flow helpers re-exported from `providers/auth` |
 | `internal/config` | global/project JSON + agents/skills markdown |
 | `internal/audit` | Durable retention-bounded security audit sink (`~/.strike/audit/`) |
 | `internal/session` | JSONL event log append/replay + concurrent Manager |

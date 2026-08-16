@@ -63,9 +63,14 @@ TUI rendered from (see `pkg/protocol/codec.go`).
 | `internal/engine` | Headless agent runtime: built-in turn loop, task-subagent function harnesses, tool dispatch, permission/question integration, deferred agent switch; implicit session-scoped agent **team** (lead + children roster + shared task board + patch collaboration board + delegation lifecycle + path ownership/overlap in `team.go` / `team_board.go` / `team_patch.go` / `delegation.go` / `ownership.go`); model-stream and bash admission via shared `scheduler`; scrubs tool I/O via `pkg/redact`; emits `artifact.updated` on typed artifact mutations and `ledger.updated` on decision-ledger mutations; auto-loads active ledger slice into system prompt; persists user attachments by content hash. Product stores are injected via kernel seams (`MemorySource`, `LedgerSource`, `PlanStore`, `AttachmentStore`, `WorktreeBinder`, artifact/ledger projectors). | `protocol`, `provider`, `fn`, `tool`, `permission`, `question`, `sandbox`, `scheduler`, `verify`, `pkg/redact`, `pkg/protocol`, `pkg/diag` |
 | `internal/fn` | Function-harness contract and named function registry; model calls return completed responses | `provider`, stdlib |
 | `internal/fn/external` | Private JSONL subprocess adapter from configured commands to `fn.Func` | `fn`, `provider`, stdlib, os/exec |
-| `internal/provider` | LLM provider abstraction: `Provider` interface, normalized `StreamEvent`s | stdlib |
-| `internal/provider/base` | Shared HTTP/JSON/SSE/auth client concrete adapters embed | `provider`, stdlib, net/http |
-| `internal/provider/{anthropic,openaicompat,chatgpt,google,echo}` | Concrete adapters (openaicompat covers OpenAI platform API, xAI, Kimi, DeepSeek; chatgpt is the ChatGPT-subscription backend; google is Google AI Studio generateContent; echo is the offline dev provider) | `provider`, `provider/base` (all but echo), stdlib |
+| `provider` | **Public** LLM provider interface + types + echo (`github.com/jonathanung/strike-cli/provider`; own go.mod). Interim home until #1208 moves this into `harness/provider`. | stdlib only |
+| `internal/provider` | Compatibility re-export of `provider` (type aliases + thin forwards). Prefer the public module for new code. | `provider` only |
+| `internal/provider/echo` | Compatibility re-export of `provider/echo` | `provider/echo` |
+| `providers` | **Public** adapter module (`github.com/jonathanung/strike-cli/providers`; own go.mod): factory, auth flows, HTTP base, vendor adapters | `provider`, stdlib, net/http |
+| `providers/base` | Shared HTTP/JSON/SSE/auth client concrete adapters embed | `provider`, stdlib, net/http |
+| `providers/{anthropic,openaicompat,chatgpt,google}` | Concrete adapters (openaicompat covers OpenAI platform API, xAI, Kimi, DeepSeek; chatgpt is the ChatGPT-subscription backend; google is Google AI Studio generateContent) | `provider`, `providers/base`, stdlib |
+| `providers/auth` | Reusable OAuth/PKCE/device/refresh + BearerSource / ChatGPTSource (not the ~/.strike path) | stdlib, net/http |
+| `providers/factory` | `selectProvider` + OpenAI platform vs ChatGPT OAuth routing + custom WireAPI construction | `provider`, adapters, `providers/auth` |
 | `internal/safefile` | Hardened path I/O helpers for tools (special files, symlink leaf policy, identity, atomic write) | stdlib |
 | `internal/sandbox` | OS-primitive process sandbox: `Wrap(argv, Policy)` via Linux `bwrap` / macOS `sandbox-exec`; Policy carries mode, write denials, `NoNetwork` (host net on by default), and optional `NetworkAllow` host/CIDR list (webfetch/websearch/browser + bash preflight; shared shape for future container net); `Explain`/`ProfileText` for `/sandbox explain` (includes egress enforcement level); graceful degrade + startup warning when unavailable | stdlib only |
 
@@ -94,7 +99,7 @@ TUI rendered from (see `pkg/protocol/codec.go`).
 | `internal/replay` | Offline eval harness (E3) + #791 recording + #782 multi-agent run snapshots + **#807 harness regression pack**: golden JSONL echo replay, tool-sequence diffs, prompt-regression metrics (`make prompt-reg`), harness eval themes correctness/safety/recovery/latency-cost (`make harness-eval`; CI report soft/non-blocking first; tests also exercise `sandbox`/`pkg/timeline`/`tool` contracts offline), versioned run recordings (settings digests, nondeterministic markers, handoff/gate/bundle fields), **RunSnapshot** (spawn+completion identity for delegated runs; session-scoped under `~/.strike/runs/`; complements JSONL, does not replace it), structured compare (`CompareRecordings` / `CompareRunSnapshots`), branch-from-event (session.ForkAt, no live side effects), offline `ReplayRunSnapshot` via echo. Composes with epic #459; does not own SWE-bench (#561) or chaos injection (#808) | `engine`, `session`, `protocol`, `provider`/`echo`, `tool`, `permission`, `secret`, `pkg/redact`, stdlib |
 | `internal/eval/swebench` | **E3.3 SWE-bench Verified subset runner (#561)**: fixed 50-instance subset, Docker-per-instance workspace materialization, `strike exec --json` agent driver, patch extraction, docker/harness/none graders, versioned `report.json` + predictions JSONL (`evals/swebench/results/`). Internal regression only (no README leaderboard numbers). Runtime is a package-local `Runtime` (Docker CLI today; #592 → shared `internal/container`) | `models` (cost estimate), stdlib, os/exec |
 | `internal/secret` | Secret-ref env indirection (`ParseRef`/`Resolve`/`MergeEnv`) + `RedactEvent` for session JSONL; string scrubbing delegates to `pkg/redact` | `protocol`, `pkg/redact`, stdlib |
-| `internal/auth` | Credential store (0600 `auth.json`) + OAuth/PKCE/device flows | stdlib, net/http |
+| `internal/auth` | Product credential store (0600 `~/.strike/auth.json`); re-exports flow helpers from `providers/auth` | `providers/auth`, stdlib |
 | `internal/config` | Layered JSON config (defaults → global → project → managed/MDM) + agents/skills markdown loading; merges passive plugin contributions; managed deny ceiling provenance on `Config.Managed` | `permission` (Ruleset is a config field), `protocol`, `plugin`, `sandbox` (sandbox dial parse), `scheduler` (limits + presets + command rules), stdlib |
 | `internal/plugin` | Versioned plugin bundle discovery + manifest validation + path confinement + enablement + trust + catalog install/update; passive contribution file refs (agents/skills/workflows/themes/providers); executable compile when trusted | `version`, `pkg/redact`, stdlib |
 | `internal/models` | models.dev catalog client, 24h cache with stale fallback | stdlib, net/http |
@@ -341,12 +346,12 @@ branch in `internal/tui/app/_src/layout/view.go` for the pattern.
 ### Add a provider
 
 1. Implement `provider.Provider` (`Name() string`; `Stream(ctx, Request) (<-chan StreamEvent, error)`,
-   `internal/provider/provider.go`). For a real HTTP backend, embed
-   `provider/base.Client` for transport/auth/JSON-SSE/error-shaping (see
-   `internal/provider/anthropic/anthropic.go` or `openaicompat/openaicompat.go`);
-   for something synthetic, see `internal/provider/echo/echo.go`.
-2. Wire construction into the `selectProvider` closure in `cmd/strike/assemble_tools.go`
-   (the `switch name { case "anthropic": ... }` block) — it returns the
+   `provider/provider.go`). For a real HTTP backend, embed
+   `providers/base.Client` for transport/auth/JSON-SSE/error-shaping (see
+   `providers/anthropic/anthropic.go` or `providers/openaicompat/openaicompat.go`);
+   for something synthetic, see `provider/echo/echo.go`.
+2. Wire construction into `providers/factory` (`Select` / `BuildCustom`) —
+   `cmd/strike` is a thin call into that factory. It returns the
    `provider.Provider`, its default model, and an error for missing
    credentials or an unknown name.
 3. Add the provider's default model id to `config.DefaultModel` in

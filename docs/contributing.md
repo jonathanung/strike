@@ -8,16 +8,15 @@ cmd/strike/            main.go: flags/usage/auth/exec/rpc/acp/serve subcommands;
 pkg/protocol/          public Op/Event wire schema (own go.mod; docs/protocol.md)
 pkg/redact/            public credential-shaped string scrubbing (own go.mod)
 pkg/sdk/               public Go client over pkg/protocol (see docs/sdk.md)
-go.work                workspace: ., ./pkg/protocol, ./pkg/redact
+provider/              public Provider interface + echo (own go.mod; until #1208)
+providers/             adapters, auth flows, factory (own go.mod)
+go.work                workspace: ., ./pkg/protocol, ./pkg/redact, ./provider, ./providers
 internal/protocol/     compatibility re-export of pkg/protocol
 internal/rpc/          stdio JSON-RPC 2.0 transport (strike rpc; ops in, events out)
 internal/acp/          Agent Client Protocol adapter (strike acp; ACP ↔ Op/Event)
 internal/engine/       turn loop & tool dispatch
-internal/auth/         credential store + OAuth (PKCE, device) flows
-internal/provider/     provider interface; base/ (embeddable client: HTTP,
-                       auth, JSON/SSE, error shaping) embedded by anthropic,
-                       openaicompat (openai platform + xai), chatgpt
-                       (subscription backend), google; echo dev adapter
+internal/auth/         product credential store (0600 auth.json); flow re-exports
+internal/provider/     compatibility re-export of provider (+ echo)
 internal/tool/         tool contract + registry (read/glob/grep/edit/write/
                        apply_patch/move/delete/bash/task/webfetch/websearch/browser/todo*/memory_*/
                        issue_*/notebook_edit/sleep/skill/question/plan_mode/

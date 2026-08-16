@@ -48,10 +48,11 @@ github.com/jonathanung/strike-cli/pkg/redact       # stdlib only
         ▲                         ▲
         └────────────┬────────────┘
                      │
+github.com/jonathanung/strike-cli/provider         # interim (#1216): interface + echo
 github.com/jonathanung/strike-cli/harness          # protocol + redact only
-                     ▲                             # owns provider interface + echo
+                     ▲                             # #1208 moves provider/ → harness/provider
                      │
-github.com/jonathanung/strike-cli/providers        # harness interface only
+github.com/jonathanung/strike-cli/providers        # provider interface only
                      ▲                             # adapters, HTTP base, auth flows, factory
                      │
 github.com/jonathanung/strike-cli                  # everything else
