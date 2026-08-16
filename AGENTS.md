@@ -49,8 +49,8 @@ service/theme token).
 | `internal/rpc` | Stdio JSON-RPC 2.0 Op/Event bridge (`strike rpc`: NDJSON ops in, event envelopes out) |
 | `internal/acp` | Agent Client Protocol adapter (`strike acp`: ACP session/prompt ↔ Op/Event for Zed/Devin) |
 | `internal/server` | `strike serve` web cockpit: REST/SSE/WS, attach + live ops, progressive Chat/Code/Team/Project/Ops UI |
-| `pkg/protocol` | Public Ops/Events wire schema; JSONL envelopes (semver `Version`) |
-| `pkg/redact` | Shared credential-shaped string scrubbing + Findings (exports, inspect, traces, write guards) |
+| `pkg/protocol` | Public Ops/Events wire schema; JSONL envelopes (semver `Version`); own `go.mod` + workspace member |
+| `pkg/redact` | Shared credential-shaped string scrubbing + Findings (exports, inspect, traces, write guards); own `go.mod` + workspace member |
 | `pkg/timeline` | Structured run timeline builder + redacted JSON/JSONL export |
 | `pkg/telemetry` | Versioned security/harness telemetry families + redaction annotations (export schema) |
 | `pkg/diag` | Prompt/config diagnostic bundle builder + redacted JSON export |

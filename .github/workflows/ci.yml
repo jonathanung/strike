@@ -25,7 +25,10 @@ jobs:
         uses: actions/setup-go@0c52d547c9bc32b1aa3301fd7a9cb496313a4491 # v5.0.0
         with:
           go-version-file: go.mod
-          cache-dependency-path: go.sum
+          cache-dependency-path: |
+            go.sum
+            go.work
+            go.work.sum
 
       - name: Setup Node
         if: hashFiles('web/package.json') != ''
@@ -34,6 +37,18 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: web/package-lock.json
+
+      - name: Workspace modules
+        run: |
+          set -euo pipefail
+          go list -m github.com/jonathanung/strike-cli \
+            github.com/jonathanung/strike-cli/pkg/protocol \
+            github.com/jonathanung/strike-cli/pkg/redact
+          GOWORK=off go list -m github.com/jonathanung/strike-cli \
+            github.com/jonathanung/strike-cli/pkg/protocol \
+            github.com/jonathanung/strike-cli/pkg/redact
+          # replace directives must be enough when go.work is ignored
+          GOWORK=off go build -o /dev/null ./cmd/strike
 
       - name: Generate TUI flatten
         run: go generate ./internal/tui
@@ -56,10 +71,16 @@ jobs:
         run: go build ./...
 
       - name: Vet
-        run: go vet ./...
+        run: |
+          go vet ./...
+          go vet -C pkg/protocol ./...
+          go vet -C pkg/redact ./...
 
       - name: Test
-        run: go test -race ./...
+        run: |
+          go test -race ./...
+          go test -race -C pkg/protocol ./...
+          go test -race -C pkg/redact ./...
 
       # E3.2 prompt regression: verbose report of tool/turn/token deltas.
       # Non-blocking for now (test itself soft-fails metric drift unless
@@ -104,7 +125,10 @@ jobs:
         uses: actions/setup-go@0c52d547c9bc32b1aa3301fd7a9cb496313a4491 # v5.0.0
         with:
           go-version-file: go.mod
-          cache-dependency-path: go.sum
+          cache-dependency-path: |
+            go.sum
+            go.work
+            go.work.sum
 
       - name: Setup Node
         if: steps.web.outputs.present == 'true'
@@ -148,7 +172,10 @@ jobs:
         uses: actions/setup-go@0c52d547c9bc32b1aa3301fd7a9cb496313a4491 # v5.0.0
         with:
           go-version-file: go.mod
-          cache-dependency-path: go.sum
+          cache-dependency-path: |
+            go.sum
+            go.work
+            go.work.sum
 
       - name: Test darwin-specific packages
         run: go test -race ./internal/telemetry/... ./internal/sandbox/...
