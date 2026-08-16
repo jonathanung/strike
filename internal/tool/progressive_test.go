@@ -346,7 +346,9 @@ func TestProgressiveDescriptionDocumentsAPI(t *testing.T) {
 	d := NewTask().Description()
 	for _, needle := range []string{
 		"Progressive",
-		"prompt only",
+		"prompt",
+		"name",
+		"derive",
 		"action",
 		"transition",
 		"cancel",

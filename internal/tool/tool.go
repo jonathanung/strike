@@ -78,8 +78,10 @@ type VerifyGate struct {
 type TaskRequest struct {
 	Prompt string
 	Agent  string
-	// Name is an optional stable teammate alias unique within the session team
-	// (e.g. "explorer"). Empty leaves the child addressable by session id only.
+	// Name is a stable teammate alias unique within the session team, taken
+	// from the assigned task (e.g. "fix-auth-tests"). Empty at the tool
+	// boundary is allowed: the engine derives a unique slug from the prompt
+	// first line (or context-bundle goal).
 	Name string
 	// Model is an optional model id for the child (bare id on the parent
 	// provider, or "provider/model"). Empty inherits the parent's model
@@ -216,7 +218,7 @@ type TaskResult struct {
 	Output    string
 	Status    string
 	SessionID string
-	// Name is the stable alias assigned at spawn when requested (may be empty).
+	// Name is the stable alias assigned at spawn (explicit or derived).
 	Name string
 	// DelegationID is the lifecycle object id (d1, d2, …) when tracked.
 	DelegationID string

@@ -651,7 +651,8 @@ type ChildStarted struct {
 	Correlation
 	Agent  string `json:"agent,omitempty"`
 	Prompt string `json:"prompt,omitempty"`
-	// Name is an optional stable teammate alias assigned at spawn.
+	// Name is the stable teammate alias assigned at spawn (explicit or
+	// derived from the assigned task).
 	Name string `json:"name,omitempty"`
 	// RouteReason is the structured capability-routing decision when routing
 	// ran at spawn (#778). Empty when route=off / legacy pin-or-inherit.

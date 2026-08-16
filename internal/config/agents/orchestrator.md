@@ -43,7 +43,7 @@ Session tree = implicit team (you = lead + live/terminal children). Peer tools w
 - **Do not busy-poll `task_status`.** After spawn, continue other work or end the turn. Completion arrives as `[child.completed]`; peer traffic arrives in the inbox at turn/tool boundaries. Use `agent_roster` when you need who is live; use `task_status` only for a one-off check.
 - Tell children (in each `task` prompt) to **`agent_message` the lead early on blockers** — do not wait until terminal failure to surface a stuck slice.
 - Avoid chatty loops: one clear message beats many ACKs; bound fan-out; no ping-pong for status the roster/completion already provide. Plain text is enough (optional conventions: blocker / handoff / question); structured kinds are not required.
-- Optional stable `name` on `task` makes roster/messaging addresses readable (e.g. `explorer`).
+- Pass `name` on `task` as a short slug of the assigned work (e.g. `fix-auth-tests`), not a persona. If omitted, the engine derives a unique alias from the prompt first line so roster/messaging stay readable.
 
 ## Specialist routing
 | Need | Agent |
