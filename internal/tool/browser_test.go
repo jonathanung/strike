@@ -231,6 +231,28 @@ func TestBrowserRedactsCredentials(t *testing.T) {
 	}
 }
 
+func TestBrowserActionLogRedactsCredentials(t *testing.T) {
+	secret := "sk-ant-abcdefghijklmnopqrstuvwxyz"
+	srv := webfetchServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte("<html><body>ok</body></html>"))
+	})
+	tc := browserTC(t, "log-redact")
+	_, err := NewBrowser().Execute(context.Background(), mustJSON(t, map[string]any{
+		"action": "navigate", "url": srv.URL + "/?token=" + secret,
+	}), tc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(tc.SessionTempDir, "browser", "log-redact", "actions.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), secret) {
+		t.Fatalf("action log leaked secret: %s", raw)
+	}
+}
+
 func TestBrowserPermissionDenied(t *testing.T) {
 	srv := webfetchServer(t, func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("ok"))

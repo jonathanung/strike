@@ -642,6 +642,8 @@ func browserPersistAction(p *browserProfile, act browserActionRec) {
 	if p == nil || p.dir == "" {
 		return
 	}
+	act.URL = redact.String(act.URL)
+	act.Action = redact.String(act.Action)
 	line, err := json.Marshal(act)
 	if err != nil {
 		return
