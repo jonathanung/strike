@@ -88,8 +88,8 @@ func TestGallery(t *testing.T) {
 			LastAction:  "grep HandleLogin",
 			BlockReason: "permission: bash",
 			FilesTouched: []string{
-				"internal/auth/store.go",
-				"internal/auth/oauth.go",
+				"internal/product/auth/store.go",
+				"internal/product/auth/oauth.go",
 				"cmd/strike/main.go",
 			},
 		})
@@ -180,9 +180,9 @@ func TestGallery(t *testing.T) {
 		m.applyEvent(protocol.UserMessage{Text: "Refactor the auth store, then run the tests."})
 		m.applyEvent(protocol.TurnStarted{})
 		m.applyEvent(protocol.TextDelta{Text: "On it — reading the store first, then running the suite."})
-		m.applyEvent(protocol.ToolCallBegin{CallID: "1", Name: "read", Args: json.RawMessage(`{"path":"internal/auth/store.go"}`)})
-		m.applyEvent(protocol.ToolCallEnd{CallID: "1", Title: "internal/auth/store.go", Output: "package auth\n\ntype Store struct {\n\tpath string\n}\n"})
+		m.applyEvent(protocol.ToolCallBegin{CallID: "1", Name: "read", Args: json.RawMessage(`{"path":"internal/product/auth/store.go"}`)})
+		m.applyEvent(protocol.ToolCallEnd{CallID: "1", Title: "internal/product/auth/store.go", Output: "package auth\n\ntype Store struct {\n\tpath string\n}\n"})
 		m.applyEvent(protocol.ToolCallBegin{CallID: "2", Name: "bash", Args: json.RawMessage(`{"cmd":"go test ./..."}`)})
-		m.applyEvent(protocol.ToolCallEnd{CallID: "2", Title: "go test ./...", Output: "ok  \tstrike/internal/auth\t0.20s\nok  \tstrike/internal/frontend/tui\t0.31s"})
+		m.applyEvent(protocol.ToolCallEnd{CallID: "2", Title: "go test ./...", Output: "ok  \tstrike/internal/product/auth\t0.20s\nok  \tstrike/internal/frontend/tui\t0.31s"})
 	})
 }

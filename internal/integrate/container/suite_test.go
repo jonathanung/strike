@@ -229,16 +229,10 @@ func TestNamingHashMatcherNetwork(t *testing.T) {
 func TestDevcontainerSkillContract(t *testing.T) {
 	// Skill is embedded via config package; assert file content contract here
 	// so E12.8 does not depend on config package import cycles.
-	data, err := os.ReadFile(filepath.Join("..", "config", "skills", "devcontainer.md"))
+	data, err := os.ReadFile(filepath.Join("..", "..", "product", "config", "skills", "devcontainer.md"))
 	if err != nil {
-		// path from internal/integrate/container → internal/config/skills
-		data, err = os.ReadFile(filepath.Join("..", "..", "internal", "config", "skills", "devcontainer.md"))
-	}
-	if err != nil {
-		// try module-relative from test cwd
-		wd, _ := os.Getwd()
-		cand := filepath.Join(wd, "..", "config", "skills", "devcontainer.md")
-		data, err = os.ReadFile(cand)
+		// module-root relative when cwd is not the package dir
+		data, err = os.ReadFile(filepath.Join("internal", "product", "config", "skills", "devcontainer.md"))
 	}
 	if err != nil {
 		t.Skipf("devcontainer skill not found from %s: %v", mustWD(t), err)

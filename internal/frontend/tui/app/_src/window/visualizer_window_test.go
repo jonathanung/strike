@@ -152,8 +152,8 @@ func TestVisualizerChildDetailFields(t *testing.T) {
 		Objective:   "map auth flow",
 		LastAction:  "read config.go",
 		FilesTouched: []string{
-			"internal/auth/store.go",
-			"internal/auth/oauth.go",
+			"internal/product/auth/store.go",
+			"internal/product/auth/oauth.go",
 			"cmd/strike/main.go",
 			"docs/auth.md",
 			"pkg/protocol/protocol.go",
@@ -164,7 +164,7 @@ func TestVisualizerChildDetailFields(t *testing.T) {
 	for _, want := range []string{
 		"objective", "map auth flow",
 		"action", "read config.go",
-		"files (6)", "internal/auth/store.go", "+1 more",
+		"files (6)", "internal/product/auth/store.go", "+1 more",
 	} {
 		if !strings.Contains(plain, want) {
 			t.Errorf("missing %q:\n%s", want, plain)
@@ -824,7 +824,7 @@ func TestVisualizerPathOverlapConflict(t *testing.T) {
 		State:     theme.AgentStateWorking,
 		PathOverlaps: []visualizerPathOverlap{
 			{
-				Path:    "internal/auth/store.go",
+				Path:    "internal/product/auth/store.go",
 				Policy:  "block",
 				Blocked: true,
 				Holders: []string{"explorer", "reviewer"},
@@ -839,7 +839,7 @@ func TestVisualizerPathOverlapConflict(t *testing.T) {
 	})
 	plain := ansi.Strip(updated.view(theme.Default()))
 	for _, want := range []string{
-		"conflicts", "blocked", "internal/auth/store.go",
+		"conflicts", "blocked", "internal/product/auth/store.go",
 		"holders", "explorer", "reviewer",
 		"warn", "pkg/protocol/protocol.go",
 	} {

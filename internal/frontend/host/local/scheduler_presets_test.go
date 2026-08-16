@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/jonathanung/strike-cli/harness/scheduler"
-	"github.com/jonathanung/strike-cli/internal/config"
+	"github.com/jonathanung/strike-cli/internal/product/config"
 )
 
 func TestSchedulerPresetCatalog(t *testing.T) {

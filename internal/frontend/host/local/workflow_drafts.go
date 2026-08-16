@@ -5,8 +5,8 @@ import (
 	"strings"
 
 	"github.com/jonathanung/strike-cli/harness/permission"
-	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/frontend/host"
+	"github.com/jonathanung/strike-cli/internal/product/config"
 )
 
 // NewWorkflowDrafts builds a host.WorkflowDrafts service bound to workDir for

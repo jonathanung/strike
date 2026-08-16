@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jonathanung/strike-cli/internal/config"
+	"github.com/jonathanung/strike-cli/internal/product/config"
 	"github.com/jonathanung/strike-cli/internal/trust/admission"
 )
 

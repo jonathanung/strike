@@ -239,7 +239,7 @@ func TestRunLeanCodeAffectsPromptChars(t *testing.T) {
 
 // promptRegScenarios are the E3.2 corpus. Re-run (and UPDATE_METRICS=1) after
 // changes to internal/engine/prompt.go, prompt_tools.go (tool guidance),
-// prompt/*.txt, or internal/config/agents definitions.
+// prompt/*.txt, or internal/product/config/agents definitions.
 var promptRegScenarios = []struct {
 	name   string
 	inputs []string
@@ -331,7 +331,7 @@ var promptRegScenarios = []struct {
 //	PROMPT_REGRESSION_STRICT=1  fail the test on any metric delta
 //
 // Re-run after changes to internal/engine/prompt.go, prompt_tools.go,
-// prompt/*.txt, or agent definitions (internal/config/agents).
+// prompt/*.txt, or agent definitions (internal/product/config/agents).
 func TestPromptRegressionReport(t *testing.T) {
 	baselinePath := filepath.Join("testdata", "metrics.json")
 

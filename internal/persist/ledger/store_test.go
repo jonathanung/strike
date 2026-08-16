@@ -24,7 +24,7 @@ func TestOpenAppendGetList(t *testing.T) {
 		Statement:     "API X is the only auth path",
 		Confidence:    ConfidenceHigh,
 		EvidenceRefs:  []string{"artifact:ab12"},
-		ScopePaths:    []string{"internal/auth"},
+		ScopePaths:    []string{"internal/product/auth"},
 		AuthorSession: "sess-1",
 		AuthorAgent:   "orchestrator",
 		AuthorRoot:    "root-1",
@@ -169,7 +169,7 @@ func TestActiveSliceScope(t *testing.T) {
 	}
 	_, err = s.Append(AppendInput{
 		Kind: KindAssumption, Statement: "auth scoped",
-		ScopePaths: []string{"internal/auth"}, AuthorSession: "s",
+		ScopePaths: []string{"internal/product/auth"}, AuthorSession: "s",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -183,7 +183,7 @@ func TestActiveSliceScope(t *testing.T) {
 	}
 
 	// Path filter: global + matching path.
-	byPath, err := s.ActiveSlice("internal/auth/oauth.go", "")
+	byPath, err := s.ActiveSlice("internal/product/auth/oauth.go", "")
 	if err != nil || len(byPath) != 2 {
 		t.Fatalf("by path = %#v err=%v", byPath, err)
 	}

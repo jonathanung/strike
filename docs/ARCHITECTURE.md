@@ -51,8 +51,8 @@ TUI rendered from (see `pkg/protocol/codec.go`).
 | `internal/frontend/rpc` | Stdio JSON-RPC 2.0 bridge for Op/Event (`strike rpc`: NDJSON ops in, event envelopes out) | `protocol`, stdlib |
 | `internal/frontend/acp` | Agent Client Protocol (ACP) agent adapter (`strike acp`: session/prompt/tool-call ↔ Op/Event) | `protocol`, stdlib |
 | `internal/frontend/server` | `strike serve` web cockpit (REST/SSE/WS, attach + live mutations, embedded React UI) | `session`, `host`, `engine`, `version`, `protocol`, embedded `static/` |
-| `internal/version` | Build-time Version/Commit stamped via `-ldflags` | stdlib |
-| `internal/update` | GitHub Releases self-update (check, download, sha256, atomic replace, re-exec) | `version`, stdlib, net/http |
+| `internal/product/version` | Build-time Version/Commit stamped via `-ldflags` | stdlib |
+| `internal/product/update` | GitHub Releases self-update (check, download, sha256, atomic replace, re-exec) | `version`, stdlib, net/http |
 | `pkg/protocol` | **Public** Op/Event wire schema between engine and frontends; JSONL envelopes (`codec.go` / `op_codec.go`) are the session persistence + transport format (includes harness/verification events and `scheduler.queued` / `admitted` / `canceled`). Semver via `Version`; unknown event types decode as `UnknownEvent` (forward-compat). Consumer contract: [protocol.md](protocol.md). Own `go.mod` (`github.com/jonathanung/strike-cli/pkg/protocol`); listed in root `go.work` | stdlib only |
 | `pkg/redact` | **Public** shared credential-shaped string scrubbing (`String`, `ScrubToolOutput`, `JSON`, `Error`, `Findings`) for exports, inspect, timeline traces, diagnostic bundles, engine tool I/O, and write-time content guards (#890). Own `go.mod` (`github.com/jonathanung/strike-cli/pkg/redact`); listed in root `go.work` | stdlib only |
 | `pkg/timeline` | **Public** structured run timeline builder + versioned redacted JSON/JSONL export derived from protocol events (complements session JSONL and #774 roster/budget; not a second transcript). Storage bounds (#810): preview caps, optional content-addressed blob spill (`blob:sha256:` refs, no fsync), in-memory entry prune, Observe latency metrics, dir retention helpers for traces trees | `pkg/protocol`, `pkg/redact`, stdlib |
@@ -83,7 +83,7 @@ TUI rendered from (see `pkg/protocol/codec.go`).
 | `internal/integrate/lsp` | LSP client (JSON-RPC 2.0 over stdio, Content-Length framing) + manager; extension→server registry; didOpen/didChange/didClose from file tools; collect `publishDiagnostics`; inject formatted diagnostics into file-tool Results (`CollectForPaths`); navigation + intel + workspace `diagnostics` query tools (definition/references/symbols/diagnostics/call_hierarchy/rename_preview/impact) for deferred tools; crash isolation | stdlib, os/exec |
 | `internal/persist/memory` | Project-scoped durable key/value memory (JSON under `~/.strike/memory/`) | stdlib |
 | `internal/persist/issue` | Project-scoped durable issues (JSON under `~/.strike/issues/`) | stdlib |
-| `internal/goal` | Loop harness: goals, JSONL iterations/events, guards, critic, hooks | stdlib |
+| `internal/product/goal` | Loop harness: goals, JSONL iterations/events, guards, critic, hooks | stdlib |
 | `internal/persist/plan` | Project-scoped root-session-owned structured plans (sections, lifecycle, CAS versions, section→child delegate correlation; JSON under `~/.strike/plans/`) | stdlib |
 | `internal/persist/artifact` | Shared typed multi-agent artifacts (findings/patch/test_report/contract/plan-blob) with CAS versions, owner|team access, project|session scope; JSON under `~/.strike/artifacts/`. Not memory (untyped KV), issues (tickets), or structured plans (use `internal/persist/plan`) | stdlib |
 | `internal/persist/attachment` | Content-addressed typed attachments (image/pdf/diagram/log/archive/build) under `~/.strike/attachments/`; protocol refs `att:sha256:`; capability select, region redaction, visual compare, retention. Not timeline blob spill or artifact work products | stdlib, `pkg/redact` |
@@ -98,12 +98,12 @@ TUI rendered from (see `pkg/protocol/codec.go`).
 | `internal/eval/swebench` | **E3.3 SWE-bench Verified subset runner (#561)**: fixed 50-instance subset, Docker-per-instance workspace materialization, `strike exec --json` agent driver, patch extraction, docker/harness/none graders, versioned `report.json` + predictions JSONL (`evals/swebench/results/`). Internal regression only (no README leaderboard numbers). Runtime is a package-local `Runtime` (Docker CLI today; #592 → shared `internal/integrate/container`) | `models` (cost estimate), stdlib, os/exec |
 | `harness/secretref` | Stdlib-only secret-ref parser (`ParseRef`/`Resolve`/`MergeEnv`) used by kernel bash injection | stdlib only |
 | `internal/trust/secret` | Product re-export of `harness/secretref` + `RedactEvent` for session JSONL; string scrubbing delegates to `pkg/redact` | `harness/secretref`, `protocol`, `pkg/redact`, stdlib |
-| `internal/auth` | Product credential store (0600 `~/.strike/auth.json`); re-exports flow helpers from `providers/auth` | `providers/auth`, stdlib |
-| `internal/config` | Layered JSON config (defaults → global → project → managed/MDM) + agents/skills markdown loading; merges passive plugin contributions; managed deny ceiling provenance on `Config.Managed` | `permission` (Ruleset is a config field), `protocol`, `plugin`, `sandbox` (sandbox dial parse), `scheduler` (limits + presets + command rules), stdlib |
+| `internal/product/auth` | Product credential store (0600 `~/.strike/auth.json`); re-exports flow helpers from `providers/auth` | `providers/auth`, stdlib |
+| `internal/product/config` | Layered JSON config (defaults → global → project → managed/MDM) + agents/skills markdown loading; merges passive plugin contributions; managed deny ceiling provenance on `Config.Managed` | `permission` (Ruleset is a config field), `protocol`, `plugin`, `sandbox` (sandbox dial parse), `scheduler` (limits + presets + command rules), stdlib |
 | `internal/integrate/plugin` | Versioned plugin bundle discovery + manifest validation + path confinement + enablement + trust + catalog install/update; passive contribution file refs (agents/skills/workflows/themes/providers); executable compile when trusted | `version`, `pkg/redact`, stdlib |
-| `internal/models` | models.dev catalog client, 24h cache with stale fallback | stdlib, net/http |
+| `internal/product/models` | models.dev catalog client, 24h cache with stale fallback | stdlib, net/http |
 | `internal/persist/history` | Project-scoped prompt history | stdlib |
-| `internal/project` | Stable filesystem identity + optional per-session git worktrees under `.strike/worktrees/` | stdlib, os/exec |
+| `internal/product/project` | Stable filesystem identity + optional per-session git worktrees under `.strike/worktrees/` | stdlib, os/exec |
 | `internal/frontend/host` | **Frozen contract**: the services a frontend needs from its host process (includes `SchedulerPresets` catalog + global apply, `Permissions` explain/presets for `/permission`, `Plugins` lifecycle for `/plugin`) | stdlib only — enforced by the boundary test |
 | `internal/frontend/host/local` | Real `host.Services` implementation; wraps auth/config/models/history/memory/issue/plan/goal/files/mcp/plugin/scheduler presets for the frontend | `auth`, `config`, `history`, `host`, `issue`, `plan`, `goal`, `mcp`, `plugin`, `memory`, `models`, `sandbox`, `scheduler`, `tool` (composer `!` shell) |
 | `internal/frontend/tui/app` | Bubble Tea frontend (`package tui`): app model, layout, cells, modals, composer. Sources under `app/_src/<group>/`, flattened by `go generate ./internal/frontend/tui/app` | `protocol`, `host`, `tui/...` only (+ `pkg/redact` / `pkg/protocol`) — enforced by the boundary test |
@@ -319,7 +319,7 @@ update import path constants (including `lipglossPath` in
 that isn't the model turn loop: credentials, the model catalog, saved
 defaults, prompt history, and the agent/skill listings. The TUI talks to
 `host.Auth`, `host.Catalog`, `host.Settings`, and `host.History` — never to
-`internal/auth`, `internal/config`, `internal/models`, or `internal/persist/history`.
+`internal/product/auth`, `internal/product/config`, `internal/product/models`, or `internal/persist/history`.
 
 Two things fall out of that:
 
@@ -356,12 +356,12 @@ branch in `internal/frontend/tui/app/_src/layout/view.go` for the pattern.
    `provider.Provider`, its default model, and an error for missing
    credentials or an unknown name.
 3. Add the provider's default model id to `config.DefaultModel` in
-   `internal/config/config.go`.
+   `internal/product/config/config.go`.
 4. If the frontend should offer login/selection for it, add an entry to
    `credentialProviders` in `internal/frontend/host/local/local.go` with its
    capability flags (`APIKey`/`OAuth`/`Device`), and add `BeginOAuth`/`BeginDevice`
    switch cases if it supports those flows (see `auth.OpenAIFlow`,
-   `auth.XAIFlow`, `auth.XAIDeviceFlow` in `internal/auth` for the pattern
+   `auth.XAIFlow`, `auth.XAIDeviceFlow` in `internal/product/auth` for the pattern
    each wraps). Skip this for an env-var-only or builtin provider (like echo).
 5. No `internal/frontend/tui` change is needed: `/provider`, the provider picker, and
    `/auth` are entirely data-driven from `host.Auth.Statuses()`.
@@ -405,10 +405,10 @@ branch in `internal/frontend/tui/app/_src/layout/view.go` for the pattern.
 Two different mechanisms, depending on whether it needs Go code:
 
 - **Skill (no code).** Built-in shipping skills (`commit`, `push`, `pr`,
-  `ship`) are embedded under `internal/config/skills/` and always load.
+  `ship`) are embedded under `internal/product/config/skills/` and always load.
   Drop a markdown file with frontmatter into `~/.strike/skills/<name>.md`
   or `./.strike/skills/<name>.md` to add or override — see
-  `LoadSkillsWithError` in `internal/config/agents.go` for the frontmatter
+  `LoadSkillsWithError` in `internal/product/config/agents.go` for the frontmatter
   format (`description:`) and `$ARGUMENTS` substitution. It becomes
   `/<name>` on the next launch automatically, through
    `host.Services.Skills`. Reserved names (`provider`, `model`, `effort`,

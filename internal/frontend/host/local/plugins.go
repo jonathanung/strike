@@ -8,7 +8,7 @@ import (
 
 	"github.com/jonathanung/strike-cli/internal/frontend/host"
 	"github.com/jonathanung/strike-cli/internal/integrate/plugin"
-	"github.com/jonathanung/strike-cli/internal/version"
+	"github.com/jonathanung/strike-cli/internal/product/version"
 )
 
 // NewPlugins builds a host.Plugins backed by internal/integrate/plugin lifecycle APIs.

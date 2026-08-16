@@ -22,7 +22,7 @@ func writeWorkFile(t *testing.T, dir, rel, body string) string {
 
 func TestAssessFreshnessTable(t *testing.T) {
 	dir := t.TempDir()
-	rel := writeWorkFile(t, dir, "internal/auth/store.go", "package auth\nfunc Login() {}\n")
+	rel := writeWorkFile(t, dir, "internal/product/auth/store.go", "package auth\nfunc Login() {}\n")
 	pin, err := SnapshotPathPin(dir, rel)
 	if err != nil {
 		t.Fatal(err)

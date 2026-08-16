@@ -155,8 +155,8 @@ Go import paths change; wire and config names do not.
 | `internal/provider/echo` | `harness/provider` (echo) | #1208 |
 | `internal/provider/base` | `providers/base` | #1216 |
 | `internal/provider/{anthropic,openaicompat,chatgpt,google}` | `providers/{…}` | #1216 |
-| `internal/auth` login/oauth/device/pkce/openai/xai/resolve | `providers/auth` | #1216 — flows only |
-| `internal/auth` store (`~/.strike/auth.json`) | `internal/product/auth` | #1214 after #1216 |
+| `internal/product/auth` login/oauth/device/pkce/openai/xai/resolve | `providers/auth` | #1216 — flows only |
+| `internal/product/auth` store (`~/.strike/auth.json`) | `internal/product/auth` | #1214 after #1216 |
 | `cmd/strike` `selectProvider` | `providers/factory` | #1216; `cmd/strike` becomes a thin call |
 | `internal/tool` contract/registry/retry | `harness/tool` | #1205 then #1208 |
 | `internal/tool` kernel builtins | `harness/tool` (same package as contract) | #1205 then #1208 |
@@ -195,13 +195,13 @@ Every current top-level `internal/*` package:
 | `internal/persist/artifact` | `internal/persist/artifact` | product |
 | `internal/persist/attachment` | `internal/persist/attachment` | product |
 | `internal/trust/audit` | `internal/trust/audit` | product |
-| `internal/auth` | split: flows → `providers/auth`; store + `strike auth` → `internal/product/auth` | providers + product |
-| `internal/config` | `internal/product/config` | product |
+| `internal/product/auth` | split: flows → `providers/auth`; store + `strike auth` → `internal/product/auth` | providers + product |
+| `internal/product/config` | `internal/product/config` | product |
 | `internal/integrate/container` | `internal/integrate/container` | product |
 | `internal/engine` | `harness/engine` | kernel |
 | `internal/eval` | `internal/eval` (cluster; already) | product |
 | `internal/fault` | `harness/fault` | kernel |
-| `internal/goal` | `internal/product/goal` | product |
+| `internal/product/goal` | `internal/product/goal` | product |
 | `internal/fn` | `harness/fn` | kernel |
 | `internal/persist/history` | `internal/persist/history` | product |
 | `internal/frontend/host` | `internal/frontend/host` | product |
@@ -210,11 +210,11 @@ Every current top-level `internal/*` package:
 | `internal/integrate/lsp` | `internal/integrate/lsp` | product |
 | `internal/integrate/mcp` | `internal/integrate/mcp` | product |
 | `internal/persist/memory` | `internal/persist/memory` | product |
-| `internal/models` | `internal/product/models` | product |
+| `internal/product/models` | `internal/product/models` | product |
 | `internal/permission` | `harness/permission` | kernel |
 | `internal/persist/plan` | `internal/persist/plan` | product |
 | `internal/integrate/plugin` | `internal/integrate/plugin` | product |
-| `internal/project` | `internal/product/project` | product |
+| `internal/product/project` | `internal/product/project` | product |
 | `internal/protocol` | `internal/protocol` (compat re-export; prefer `pkg/protocol`) | product |
 | `internal/provider` | split: interface+echo → `harness/provider`; adapters → `providers/` | kernel + providers |
 | `internal/question` | `harness/question` | kernel |
@@ -230,9 +230,9 @@ Every current top-level `internal/*` package:
 | `internal/persist/telemetry` | `internal/persist/telemetry` | product |
 | `internal/tool` | split: contract → `harness/tool`; kernel builtins → `harness/tools`; product builtins → `internal/tools` | kernel + product |
 | `internal/frontend/tui` | `internal/frontend/tui` (`app/` + kit) | product |
-| `internal/update` | `internal/product/update` | product |
+| `internal/product/update` | `internal/product/update` | product |
 | `internal/verify` | `harness/verify` | kernel |
-| `internal/version` | `internal/product/version` | product |
+| `internal/product/version` | `internal/product/version` | product |
 
 Notable subpackages (not top-level, but they split or move with a parent):
 
@@ -277,7 +277,7 @@ Product builtins (stay in Strike `internal/tools`): `memory_*`, `issue_*`,
 Strike product keeps `auth.Store` (0600 `~/.strike/auth.json`), `strike auth`
 CLI, `host.Auth`, and TUI `/auth`. Config JSONC *loading* stays in
 `internal/product/config`; the factory consumes already-parsed endpoint
-structs. `internal/models` (models.dev catalog) stays product.
+structs. `internal/product/models` (models.dev catalog) stays product.
 
 ### TUI app vs kit (#1209)
 

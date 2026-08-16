@@ -43,7 +43,7 @@ user-invoked built-ins like `/commit`). Load via the host `skill` tool:
 | `tui-components` | `internal/frontend/tui/ui` + theme catalog |
 
 Built-in **user** skills shipped in the binary are listed under Skills below
-(`internal/config/skills/*.md`).
+(`internal/product/config/skills/*.md`).
 
 ## Agents
 

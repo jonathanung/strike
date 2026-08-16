@@ -11,7 +11,7 @@ import (
 func TestBuildResidueExtractsMarkedDecisionWithSourceIDs(t *testing.T) {
 	dropped := []provider.Message{
 		{Role: provider.RoleUser, Text: "Please fix auth.\nDECISION: use OAuth PKCE for the CLI login flow"},
-		{Role: provider.RoleAssistant, Text: "Understood.\nFACT: token store lives in internal/auth/store.go\nOPEN: should we support device flow too?"},
+		{Role: provider.RoleAssistant, Text: "Understood.\nFACT: token store lives in internal/product/auth/store.go\nOPEN: should we support device flow too?"},
 		{Role: provider.RoleUser, Text: "also note assumption: CI is green on main"},
 	}
 	// Unmarked assumption line should not be extracted without a marker.
@@ -35,7 +35,7 @@ func TestBuildResidueExtractsMarkedDecisionWithSourceIDs(t *testing.T) {
 	if d.Confidence == "" {
 		t.Fatal("decision missing confidence")
 	}
-	if len(r.Facts) != 1 || !strings.Contains(r.Facts[0].Text, "internal/auth/store.go") {
+	if len(r.Facts) != 1 || !strings.Contains(r.Facts[0].Text, "internal/product/auth/store.go") {
 		t.Fatalf("facts = %#v", r.Facts)
 	}
 	if !containsStr(r.Facts[0].SourceIDs, "hist:1") {

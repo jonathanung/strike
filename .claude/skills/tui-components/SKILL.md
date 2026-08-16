@@ -1,6 +1,6 @@
 ---
 name: tui-components
-description: Use when building or restyling strike's TUI — views, panels, modals, pickers, badges, dashboards, status rows, or any layout work in internal/frontend/tui. Covers the internal/frontend/tui/ui component catalog and internal/frontend/tui/theme tokens. Do not use for backend/engine work (internal/engine, internal/provider, internal/tool, internal/permission, internal/persist/session, internal/auth, internal/frontend/host) — those packages have no UI surface.
+description: Use when building or restyling strike's TUI — views, panels, modals, pickers, badges, dashboards, status rows, or any layout work in internal/frontend/tui. Covers the internal/frontend/tui/ui component catalog and internal/frontend/tui/theme tokens. Do not use for backend/engine work (internal/engine, internal/provider, internal/tool, internal/permission, internal/persist/session, internal/product/auth, internal/frontend/host) — those packages have no UI surface.
 ---
 
 # TUI components (strike-cli)

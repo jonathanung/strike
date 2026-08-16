@@ -12,11 +12,11 @@ import (
 	"time"
 
 	"github.com/jonathanung/strike-cli/harness/scheduler"
-	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/eval/swebench"
 	"github.com/jonathanung/strike-cli/internal/eval/sweep"
 	"github.com/jonathanung/strike-cli/internal/eval/tbench"
-	"github.com/jonathanung/strike-cli/internal/version"
+	"github.com/jonathanung/strike-cli/internal/product/config"
+	"github.com/jonathanung/strike-cli/internal/product/version"
 )
 
 const evalUsage = `Run evaluation benchmarks (internal regression signal).

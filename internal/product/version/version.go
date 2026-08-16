@@ -5,8 +5,8 @@ import "fmt"
 
 // Version and Commit are set at link time:
 //
-//	-X github.com/jonathanung/strike-cli/internal/version.Version=v0.1.0
-//	-X github.com/jonathanung/strike-cli/internal/version.Commit=<sha>
+//	-X github.com/jonathanung/strike-cli/internal/product/version.Version=v0.1.0
+//	-X github.com/jonathanung/strike-cli/internal/product/version.Commit=<sha>
 //
 // Defaults suit local `go build` / `go test` without ldflags.
 var (

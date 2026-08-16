@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/internal/version"
+	"github.com/jonathanung/strike-cli/internal/product/version"
 )
 
 // ErrAlreadyAPS is returned when migrate is asked to convert an APS package.

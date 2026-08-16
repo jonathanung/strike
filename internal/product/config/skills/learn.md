@@ -11,7 +11,7 @@ AGENTS.md can live at any directory level. Place each learning as close to the r
 - Package/module → e.g. `internal/foo/AGENTS.md`
 - Feature area → e.g. `cmd/strike/AGENTS.md`
 
-**Process / agent-behavior lessons** (gates agents forget, review policy, worktree recipes, stale commands) → patch the relevant skill under `.claude/skills/*/SKILL.md` or `internal/config/skills/*.md` with **1–3 bullets**, rather than only dumping into AGENTS.md.
+**Process / agent-behavior lessons** (gates agents forget, review policy, worktree recipes, stale commands) → patch the relevant skill under `.claude/skills/*/SKILL.md` or `internal/product/config/skills/*.md` with **1–3 bullets**, rather than only dumping into AGENTS.md.
 
 ## What counts
 

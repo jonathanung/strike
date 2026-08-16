@@ -36,7 +36,7 @@ jobs:
         run: |
           set -euo pipefail
           COMMIT="$(git rev-parse --short HEAD)"
-          LDFLAGS="-X github.com/jonathanung/strike-cli/internal/version.Version=${VERSION} -X github.com/jonathanung/strike-cli/internal/version.Commit=${COMMIT}"
+          LDFLAGS="-X github.com/jonathanung/strike-cli/internal/product/version.Version=${VERSION} -X github.com/jonathanung/strike-cli/internal/product/version.Commit=${COMMIT}"
           mkdir -p dist
           targets=(
             "linux amd64"

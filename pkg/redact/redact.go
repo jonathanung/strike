@@ -61,7 +61,7 @@ type pattern struct {
 	keepPrefix bool
 }
 
-// patterns cover auth env assignment shapes used by internal/auth plus common
+// patterns cover auth env assignment shapes used by internal/product/auth plus common
 // API token forms. Order matters for overlapping prefixes (more specific first).
 var patterns = []pattern{
 	// PEM private keys (multiline).
@@ -83,7 +83,7 @@ var patterns = []pattern{
 	{id: RuleBearerToken, re: regexp.MustCompile(`(?i)\b(Bearer\s+)([a-z0-9._\-+/=]{12,})`), repl: Placeholder, keepPrefix: true},
 	// Labeled assignments: api_key=, password:, etc.
 	{id: RuleLabeledSecret, re: regexp.MustCompile(`(?i)\b((?:api[_-]?key|api[_-]?secret|access[_-]?token|refresh[_-]?token|secret[_-]?key|client[_-]?secret|password|passwd)\s*[=:]\s*["']?)(\S+)`), repl: Placeholder, keepPrefix: true},
-	// Provider env keys used by internal/auth (and common aliases).
+	// Provider env keys used by internal/product/auth (and common aliases).
 	{id: RuleProviderEnvKey, re: regexp.MustCompile(`(?i)\b((?:ANTHROPIC|OPENAI|XAI|OPENROUTER|GEMINI|GOOGLE|KIMI|DEEPSEEK|GITHUB)_(?:API_)?KEY\s*[=:]\s*)(\S+)`), repl: Placeholder, keepPrefix: true},
 	// Generic TOKEN= / SECRET= env-style (high entropy values only via length).
 	{id: RuleGenericToken, re: regexp.MustCompile(`(?i)\b((?:AUTH_)?TOKEN\s*[=:]\s*)([^\s"'\\]{12,})`), repl: Placeholder, keepPrefix: true},

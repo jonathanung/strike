@@ -3,8 +3,8 @@ package local
 import (
 	"errors"
 
-	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/frontend/host"
+	"github.com/jonathanung/strike-cli/internal/product/config"
 )
 
 // NewProjectInit returns a host.ProjectInit that writes AGENTS.md under workDir.

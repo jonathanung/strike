@@ -18,7 +18,7 @@ COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 # GO_LDFLAGS is intentionally not named LDFLAGS: many macOS/Homebrew shells
 # export LDFLAGS for the C toolchain, and Make's "?=" would inherit that and
 # break `go build -ldflags`.
-GO_LDFLAGS ?= -X github.com/jonathanung/strike-cli/internal/version.Version=$(VERSION) -X github.com/jonathanung/strike-cli/internal/version.Commit=$(COMMIT)
+GO_LDFLAGS ?= -X github.com/jonathanung/strike-cli/internal/product/version.Version=$(VERSION) -X github.com/jonathanung/strike-cli/internal/product/version.Commit=$(COMMIT)
 
 # Flatten internal/frontend/tui/app/_src/* into package tui (Go one-directory packages).
 tui-gen:

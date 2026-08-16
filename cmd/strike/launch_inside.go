@@ -12,10 +12,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/integrate/container"
-	"github.com/jonathanung/strike-cli/internal/project"
-	"github.com/jonathanung/strike-cli/internal/version"
+	"github.com/jonathanung/strike-cli/internal/product/config"
+	"github.com/jonathanung/strike-cli/internal/product/project"
+	"github.com/jonathanung/strike-cli/internal/product/version"
 )
 
 // maybeLaunchInsideContainer re-execs strike inside the managed container when

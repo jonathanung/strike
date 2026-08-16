@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/jonathanung/strike-cli/internal/frontend/host"
-	"github.com/jonathanung/strike-cli/internal/goal"
+	"github.com/jonathanung/strike-cli/internal/product/goal"
 )
 
 // NewGoals adapts *goal.Store to host.Goals with a safe evaluate-only loop
