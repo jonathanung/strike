@@ -14,15 +14,15 @@ web/test-results/
 web/playwright-report/
 web/.pw-browsers/
 
-# Generated flatten of internal/tui/app/_src/ (go generate ./internal/tui/app).
+# Generated flatten of internal/frontend/tui/app/_src/ (go generate ./internal/frontend/tui/app).
 # Source of truth is _src/<group>/; make build/test and CI run generate first.
-/internal/tui/app/*.go
-!/internal/tui/app/doc.go
-!/internal/tui/app/gen_src.go
-!/internal/tui/app/gen_sync_test.go
+/internal/frontend/tui/app/*.go
+!/internal/frontend/tui/app/doc.go
+!/internal/frontend/tui/app/gen_src.go
+!/internal/frontend/tui/app/gen_sync_test.go
 # Pre-#1209 flatten target. Generate deletes leftovers; keep them untracked.
-/internal/tui/*.go
-!/internal/tui/generate.go
+/internal/frontend/tui/*.go
+!/internal/frontend/tui/generate.go
 .direnv/
 .envrc
 .strike/config

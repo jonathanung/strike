@@ -49,7 +49,7 @@ import (
 // Effort is the reasoning dial as the user sees it: how much internal
 // reasoning the model spends before answering. It is the frontend-facing
 // vocabulary, deliberately independent of provider.Effort — the engine
-// translates between the two so internal/tui never reaches into the provider
+// translates between the two so internal/frontend/tui never reaches into the provider
 // layer. The zero value means "unset", leaving the provider default in place.
 type Effort string
 

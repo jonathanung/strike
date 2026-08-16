@@ -3,7 +3,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-// Stock strike palette from internal/tui/theme.Default() (theme.go) — E13.8.
+// Stock strike palette from internal/frontend/tui/theme.Default() (theme.go) — E13.8.
 // Web CSS variables must stay aligned with these adaptive pairs.
 const TUI_DEFAULT = {
   text: { light: "#1a1528", dark: "#f3f1fa" },
@@ -76,7 +76,7 @@ describe("web theme parity with TUI Default()", () => {
   const css = loadStyles();
 
   it("documents the TUI token map in the stylesheet header", () => {
-    expect(css).toMatch(/mirrors internal\/tui\/theme\.Default/);
+    expect(css).toMatch(/mirrors internal\/frontend\/tui\/theme\.Default/);
     expect(css).toMatch(/--ink\s+Text/);
     expect(css).toMatch(/--acid\s+Accent/);
     expect(css).toMatch(/--danger\s+Danger/);

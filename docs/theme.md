@@ -1,7 +1,7 @@
 # Theme
 
-Strike's TUI look is owned by `internal/tui/theme`. Views compose
-`theme.Styles` and `internal/tui/ui` components; they never hardcode colors,
+Strike's TUI look is owned by `internal/frontend/tui/theme`. Views compose
+`theme.Styles` and `internal/frontend/tui/ui` components; they never hardcode colors,
 glyphs, or chrome geometry.
 
 ## North star palette (E13.8) + Family chrome
@@ -156,7 +156,7 @@ JSON icons.
 
 Merge order (later wins on the same theme id — [plugins.md](plugins.md) §4.1):
 
-1. Bundled JSON under `internal/tui/theme/themes/` (`builtin`)
+1. Bundled JSON under `internal/frontend/tui/theme/themes/` (`builtin`)
 2. `~/.strike/themes` (`user`)
 3. Global plugin contributions under `~/.strike/plugins/*/…` (`plugin:<id>`)
 4. `./.strike/themes` (`project`)
@@ -176,7 +176,7 @@ path as other contributions; there is no separate theme marketplace.
 ## Web cockpit parity
 
 The `strike serve` attach UI (`web/src/styles.css`, embedded under
-`internal/server/static`) mirrors the stock `theme.Default()` palette via CSS
+`internal/frontend/server/static`) mirrors the stock `theme.Default()` palette via CSS
 custom properties (dark defaults; light via `prefers-color-scheme: light`).
 Semantic roles map as `--ink`←Text, `--muted`←TextMuted, `--ground`←Background,
 `--surface`/`--raised`/`--surface-muted`←Surface*, `--rule`←Border,

@@ -1,5 +1,5 @@
 /*
- * Cockpit palette mirrors internal/tui/theme.Default() adaptive roles.
+ * Cockpit palette mirrors internal/frontend/tui/theme.Default() adaptive roles.
  * Keep hex values in sync with theme.go; see web/src/theme.test.ts.
  *
  * --ink          Text

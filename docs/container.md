@@ -144,7 +144,7 @@ Still later: broader test suite (E12.8).
 
 ## Architecture boundary
 
-- `internal/tui` **must not** import `internal/integrate/container` (enforced by
+- `internal/frontend/tui` **must not** import `internal/integrate/container` (enforced by
   architecture boundary tests once wired).
 - Status and isolation posture reach the UI through `host.Services` and
   protocol events (E12.7).

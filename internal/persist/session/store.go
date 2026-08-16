@@ -2,7 +2,7 @@
 // coordinates concurrent open logs via Manager. The event stream is the
 // transcript, so resume/replay is re-reading the log. cmd/strike is the only
 // importer: it tees engine events through a store (or Manager) on their way to
-// the frontend. internal/tui never imports this package directly.
+// the frontend. internal/frontend/tui never imports this package directly.
 //
 // Durability (#803): each Append writes a complete JSON line then fsyncs so a
 // crash cannot leave a half-record that poisons the log. Replay skips a

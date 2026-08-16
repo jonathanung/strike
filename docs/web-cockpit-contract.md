@@ -15,7 +15,7 @@ residual gaps are explicit non-goals or deferred follow-ups with owners.
 |---|---|
 | [docs/web.md](web.md) | Operator start, endpoints, multi-session UX (#467), settings, security |
 | Multi-session section in `docs/web.md` | Preserved; this contract **extends** it with modes/surfaces/parity |
-| [docs/ARCHITECTURE.md](ARCHITECTURE.md) | Package boundaries; web stays on `pkg/protocol` + `internal/host` + `internal/server` |
+| [docs/ARCHITECTURE.md](ARCHITECTURE.md) | Package boundaries; web stays on `pkg/protocol` + `internal/frontend/host` + `internal/frontend/server` |
 | [docs/theme.md](theme.md) | TUI theme tokens; web CSS must stay aligned (#1076 closes catalog gaps) |
 | [docs/protocol.md](protocol.md) | Op/Event wire schema |
 
@@ -35,7 +35,7 @@ residual gaps are explicit non-goals or deferred follow-ups with owners.
 4. **Extensibility.** Built-ins and bounded declarative `pane/1` contributions
    register through shared surface metadata (#1073, #1079). This is **not** an
    IDE docking framework.
-5. **One data model.** Reuse `pkg/protocol`, `internal/host`, REST/SSE/WebSocket
+5. **One data model.** Reuse `pkg/protocol`, `internal/frontend/host`, REST/SSE/WebSocket
    patterns, and the per-root reducer (`web/src/reducer.ts`). No browser-only
    event bus or duplicated orchestration truth.
 6. **Root isolation.** Every live query, event, and mutation is scoped to one
@@ -276,7 +276,7 @@ break root/session resolution.
 Examples:
 
 ```
-/attach?root=<liveId>&mode=code&surface=files&path=internal/server/api.go
+/attach?root=<liveId>&mode=code&surface=files&path=internal/frontend/server/api.go
 /attach?session=<id>&mode=project&surface=plans&entity=<planId>
 /attach?root=<liveId>&mode=team&surface=roster&agent=<childId>
 /attach?root=<liveId>&mode=ops&surface=settings
@@ -402,7 +402,7 @@ touched; unresolved rows **must** keep the listed tier.
 
 | Feature | TUI entry/file | Web file/API today | Status | Owner | Tier | Attach-only |
 |---|---|---|---|---|---|---|
-| Live transcript stream | `internal/tui/app/_src/app`, cells | `web/src/Transcript.tsx`, WS `/v1/ws`, reducer | shipped | preserve | B | read (SSE history) |
+| Live transcript stream | `internal/frontend/tui/app/_src/app`, cells | `web/src/Transcript.tsx`, WS `/v1/ws`, reducer | shipped | preserve | B | read (SSE history) |
 | Historical JSONL attach | session nav | SSE `/v1/sessions/{id}/events` | shipped | preserve | B | read |
 | Composer + send | input package | `App.tsx` composer, `user.input` op | shipped | preserve | B | mutate-blocked |
 | Image attachments | input | composer images → op | shipped | preserve | B | mutate-blocked |
@@ -560,7 +560,7 @@ explicit deferred follow-up (no unknown/partial without owner):
 |---|---|
 | Child delivery | All #1070–#1089 closed; PRs #1101–#1123 (see GitHub epic #1069) |
 | Unit / component | `cd web && npm test` (includes perf fixture CI subset) |
-| Typecheck + embed | `make web-check` → `tsc` + Vite build into `internal/server/static` |
+| Typecheck + embed | `make web-check` → `tsc` + Vite build into `internal/frontend/server/static` |
 | Go | `make test && make vet && make build` |
 | Real browser | `make web-e2e` — desktop/tablet/320px, keyboard, multi-root, deep links, attach-only |
 | Trust boundaries | attach-only e2e + server tests for auth redaction, path confinement, CAS/idempotency on team/file ops |
@@ -620,11 +620,11 @@ implementing child must meet. #1090 is the final conformance gate for the epic.
 
 When editing the parity table, re-verify against:
 
-- `internal/tui/app/_src/app/commands.go` — slash/command families
-- `internal/tui/app/_src/modal/`, `internal/tui/app/_src/window/` — surfaces
-- `internal/host/` — host services
+- `internal/frontend/tui/app/_src/app/commands.go` — slash/command families
+- `internal/frontend/tui/app/_src/modal/`, `internal/frontend/tui/app/_src/window/` — surfaces
+- `internal/frontend/host/` — host services
 - `pkg/protocol/` — Op/Event wire
-- `internal/server/` — HTTP/SSE/WS + capabilities
+- `internal/frontend/server/` — HTTP/SSE/WS + capabilities
 - `web/src/` — cockpit implementation
 - `docs/web.md` — operator + multi-session contract
 

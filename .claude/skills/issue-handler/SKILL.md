@@ -279,7 +279,7 @@ Do not leave cwd inside deleted worktree. Only delete branch you created.
 | Before claiming done / after impl or CI-fix | `test-and-validate` |
 | User-visible cmd/engine/tui/session/auth | `smoke` |
 | Cutting a version tag | `release` |
-| Any `internal/tui` view/panel/modal/theme | `tui-components` first |
+| Any `internal/frontend/tui` view/panel/modal/theme | `tui-components` first |
 
 ## Hard rules
 1. Own issue end-to-end through merge — including review-agent loop on B/C.

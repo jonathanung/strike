@@ -18,6 +18,6 @@
 // with harness abstraction stripped. Config JSON layering is E12.2; Dockerfile
 // eject is E12.3.
 //
-// Boundary: internal/tui must not import this package. Container status reaches
+// Boundary: internal/frontend/tui must not import this package. Container status reaches
 // the UI via host.Services and protocol events (see epic #547).
 package container

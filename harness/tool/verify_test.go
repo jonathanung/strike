@@ -18,7 +18,7 @@ const strikeLikeAgents = `# strike-cli
 | Tier | When | Local gate |
 |---|---|---|
 | **A** | Docs, skills, comments, markdown-only | ` + "`gofmt`" + ` if any ` + "`.go`" + ` touched; full suite not required |
-| **B** | Normal Go / web / TUI (default) | ` + "`gofmt`" + ` → ` + "`go generate ./internal/tui/app`" + ` if ` + "`internal/tui/app/_src`" + ` changed → ` + "`make web-check`" + ` if ` + "`web/`" + ` changed → ` + "`make test && make vet && make build`" + ` |
+| **B** | Normal Go / web / TUI (default) | ` + "`gofmt`" + ` → ` + "`go generate ./internal/frontend/tui/app`" + ` if ` + "`internal/frontend/tui/app/_src`" + ` changed → ` + "`make web-check`" + ` if ` + "`web/`" + ` changed → ` + "`make test && make vet && make build`" + ` |
 | **C** | Trust boundary | Tier B + ` + "`go test -race ./... -count=1`" + ` + focused package tests first |
 
 ` + "```sh" + `
@@ -124,7 +124,7 @@ func TestParseSelectStrikeLikeTiers(t *testing.T) {
 	}
 	wantB := []string{
 		"gofmt -l .",
-		"go generate ./internal/tui/app",
+		"go generate ./internal/frontend/tui/app",
 		"make web-check",
 		"make test",
 		"make vet",
@@ -145,7 +145,7 @@ func TestParseSelectStrikeLikeTiers(t *testing.T) {
 }
 
 func TestParseSelectDoesNotTreatPathsAsCommands(t *testing.T) {
-	md := `| **A** | docs | ` + "`gofmt`" + ` if ` + "`.go`" + ` and ` + "`web/`" + ` and ` + "`internal/tui/_src`" + ` |`
+	md := `| **A** | docs | ` + "`gofmt`" + ` if ` + "`.go`" + ` and ` + "`web/`" + ` and ` + "`internal/frontend/tui/_src`" + ` |`
 	got := parseVerifyTiers(md)["A"]
 	if len(got) != 1 || got[0] != "gofmt" {
 		t.Fatalf("A = %#v, want [gofmt]", got)

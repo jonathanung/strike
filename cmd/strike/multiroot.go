@@ -7,8 +7,8 @@ import (
 	"sync"
 
 	"github.com/jonathanung/strike-cli/harness/engine"
-	"github.com/jonathanung/strike-cli/internal/host"
-	"github.com/jonathanung/strike-cli/internal/host/local"
+	"github.com/jonathanung/strike-cli/internal/frontend/host"
+	"github.com/jonathanung/strike-cli/internal/frontend/host/local"
 	"github.com/jonathanung/strike-cli/internal/persist/session"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 )

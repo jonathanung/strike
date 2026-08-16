@@ -9,7 +9,7 @@ import (
 
 // TestProviderEffortCoversEveryLevel is the guard that keeps the two effort
 // ladders in lockstep. protocol owns the frontend vocabulary and provider owns
-// the wire mapping; they are separate types so internal/tui never imports the
+// the wire mapping; they are separate types so internal/frontend/tui never imports the
 // provider layer, and this test is what makes that duplication safe. Adding a
 // rung to protocol.Efforts without teaching providerEffort about it would
 // otherwise silently fall through to EffortDefault.

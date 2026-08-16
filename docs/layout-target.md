@@ -17,7 +17,7 @@ Do **not** `mv` packages from this document. Child issues own the moves.
 | 2 | #1207 | Rename `internal/harness` → `fn` |
 | 3 | #1208 | Move kernel into `harness/` + `harness/go.mod` |
 | 3 | #1216 | Sibling `providers/` module (adapters, auth flows, factory) |
-| 4 | #1209 | TUI flatten target → `internal/tui/app`; isolate kit |
+| 4 | #1209 | TUI flatten target → `internal/frontend/tui/app`; isolate kit |
 | 5 | #1210–#1215 | Group remaining `internal/` into persist / trust / integrate / frontend / product / eval |
 
 #1053 (extension/signing) is a separate epic. Do not fold it into this tree.
@@ -122,7 +122,7 @@ internal/
   protocol/   compatibility re-export of pkg/protocol (not a wave-5 cluster move)
 ```
 
-After #1209, `ls internal/tui/` (later `internal/frontend/tui/`) is:
+After #1209, `ls internal/frontend/tui/` (later `internal/frontend/tui/`) is:
 
 ```
 app/          # flatten target for today's _src (package tui or app)
@@ -169,8 +169,8 @@ Go import paths change; wire and config names do not.
 | `internal/safefile` | `harness/safefile` | #1208 |
 | `internal/verify` | `harness/verify` | #1208 |
 | `internal/fault` | `harness/fault` | #1208 |
-| `internal/tui/_src` flatten → `internal/tui/*.go` | flatten → `internal/tui/app/` | #1209 |
-| `internal/tui/{ui,theme,common,term}` | same paths, then `internal/frontend/tui/{…}` | #1209 then #1213 |
+| `internal/frontend/tui/_src` flatten → `internal/frontend/tui/*.go` | flatten → `internal/frontend/tui/app/` | #1209 |
+| `internal/frontend/tui/{ui,theme,common,term}` | same paths, then `internal/frontend/tui/{…}` | #1209 then #1213 |
 | `internal/replay` | `internal/eval/replay` | #1215 |
 
 ## Kernel vs product
@@ -189,7 +189,7 @@ Every current top-level `internal/*` package:
 
 | Current package | Destination | Kind |
 |---|---|---|
-| `internal/acp` | `internal/frontend/acp` | product |
+| `internal/frontend/acp` | `internal/frontend/acp` | product |
 | `internal/actionfacts` | `harness/actionfacts` | kernel |
 | `internal/trust/admission` | `internal/trust/admission` | product |
 | `internal/persist/artifact` | `internal/persist/artifact` | product |
@@ -204,7 +204,7 @@ Every current top-level `internal/*` package:
 | `internal/goal` | `internal/product/goal` | product |
 | `internal/fn` | `harness/fn` | kernel |
 | `internal/persist/history` | `internal/persist/history` | product |
-| `internal/host` | `internal/frontend/host` | product |
+| `internal/frontend/host` | `internal/frontend/host` | product |
 | `internal/persist/issue` | `internal/persist/issue` | product |
 | `internal/persist/ledger` | `internal/persist/ledger` | product |
 | `internal/integrate/lsp` | `internal/integrate/lsp` | product |
@@ -219,17 +219,17 @@ Every current top-level `internal/*` package:
 | `internal/provider` | split: interface+echo → `harness/provider`; adapters → `providers/` | kernel + providers |
 | `internal/question` | `harness/question` | kernel |
 | `internal/replay` | `internal/eval/replay` | product |
-| `internal/rpc` | `internal/frontend/rpc` | product |
+| `internal/frontend/rpc` | `internal/frontend/rpc` | product |
 | `internal/safefile` | `harness/safefile` | kernel |
 | `internal/sandbox` | `harness/sandbox` | kernel |
 | `internal/scheduler` | `harness/scheduler` | kernel |
 | `internal/trust/secret` | `internal/trust/secret` | product |
 | `internal/trust/security` | `internal/trust/security` | product |
-| `internal/server` | `internal/frontend/server` | product |
+| `internal/frontend/server` | `internal/frontend/server` | product |
 | `internal/persist/session` | `internal/persist/session` | product |
 | `internal/persist/telemetry` | `internal/persist/telemetry` | product |
 | `internal/tool` | split: contract → `harness/tool`; kernel builtins → `harness/tools`; product builtins → `internal/tools` | kernel + product |
-| `internal/tui` | `internal/frontend/tui` (`app/` + kit) | product |
+| `internal/frontend/tui` | `internal/frontend/tui` (`app/` + kit) | product |
 | `internal/update` | `internal/product/update` | product |
 | `internal/verify` | `harness/verify` | kernel |
 | `internal/version` | `internal/product/version` | product |
@@ -245,11 +245,11 @@ Notable subpackages (not top-level, but they split or move with a parent):
 | `internal/provider/openaicompat` | `providers/openaicompat` | providers |
 | `internal/provider/chatgpt` | `providers/chatgpt` | providers |
 | `internal/provider/google` | `providers/google` | providers |
-| `internal/host/local` | `internal/frontend/host/local` | product |
-| `internal/tui/ui` | `internal/frontend/tui/ui` (kit; no Logo) | product |
-| `internal/tui/theme` | `internal/frontend/tui/theme` | product |
-| `internal/tui/common` | `internal/frontend/tui/common` | product |
-| `internal/tui/term` | `internal/frontend/tui/term` | product |
+| `internal/frontend/host/local` | `internal/frontend/host/local` | product |
+| `internal/frontend/tui/ui` | `internal/frontend/tui/ui` (kit; no Logo) | product |
+| `internal/frontend/tui/theme` | `internal/frontend/tui/theme` | product |
+| `internal/frontend/tui/common` | `internal/frontend/tui/common` | product |
+| `internal/frontend/tui/term` | `internal/frontend/tui/term` | product |
 | `internal/eval/swebench` | `internal/eval/swebench` | product |
 | `internal/eval/sweep` | `internal/eval/sweep` | product |
 | `internal/eval/tbench` | `internal/eval/tbench` | product |
@@ -281,7 +281,7 @@ structs. `internal/models` (models.dev catalog) stays product.
 
 ### TUI app vs kit (#1209)
 
-- **App** (`internal/tui/app`, later `internal/frontend/tui/app`): Strike
+- **App** (`internal/frontend/tui/app`, later `internal/frontend/tui/app`): Strike
   session UI. Flatten `_src/` here. Owns `Logo` / `LogoCompact`.
 - **Kit** (`ui`, `theme`, `common`, `term`): reusable components and tokens.
   Imports only each other, stdlib, and Charm — never `protocol` or `host`.
@@ -292,6 +292,6 @@ structs. `internal/models` (models.dev catalog) stays product.
 - A third-party module can `import` the harness module without reaching
   `internal/`.
 - `ls internal/` shows a handful of cluster directories, not ~45 siblings.
-- `ls internal/tui/` shows `app/`, `ui/`, `theme/`, `common/`, `term/`.
+- `ls internal/frontend/tui/` shows `app/`, `ui/`, `theme/`, `common/`, `term/`.
 - `go work` + `replace` keep CI and local `make test` green.
 - Protocol event names and config key `harnesses` are unchanged.

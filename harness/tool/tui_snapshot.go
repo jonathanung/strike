@@ -12,7 +12,7 @@ import (
 )
 
 // Headless TUI frame snapshot bounds (#1183). Keep in lockstep with
-// internal/tui SnapshotFrame caps.
+// internal/frontend/tui SnapshotFrame caps.
 const (
 	MaxTUISnapshotBytes = 32 << 10
 	MaxTUISnapshotLines = 80

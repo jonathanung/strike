@@ -3,7 +3,7 @@
 // live in github.com/jonathanung/strike-cli/providers/auth.
 //
 // Used by cmd/strike (the `strike auth` subcommand) and wrapped as host.Auth
-// by internal/host/local; internal/tui never imports it — credentials never
+// by internal/frontend/host/local; internal/frontend/tui never imports it — credentials never
 // reach the frontend, only OAuthLogin/DeviceLogin handles and outcome strings do.
 package auth
 

@@ -53,7 +53,7 @@ jobs:
             github.com/jonathanung/strike-cli/providers
 
       - name: Generate TUI flatten
-        run: go generate ./internal/tui
+        run: go generate ./internal/frontend/tui
 
       - name: GOWORK=off replace build
         run: GOWORK=off go build -o /dev/null ./cmd/strike
@@ -149,7 +149,7 @@ jobs:
 
       - name: Generate TUI flatten
         if: steps.web.outputs.present == 'true'
-        run: go generate ./internal/tui
+        run: go generate ./internal/frontend/tui
 
       - name: Real-browser web e2e
         if: steps.web.outputs.present == 'true'

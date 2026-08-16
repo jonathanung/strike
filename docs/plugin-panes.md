@@ -786,7 +786,7 @@ Compatibility:
 
 | ABI concept | TUI host (#731) | Web host (#732) |
 |---|---|---|
-| View tree | Adapt to `internal/tui/ui` + theme tokens | Adapt to React components + CSS variables from the same role names |
+| View tree | Adapt to `internal/frontend/tui/ui` + theme tokens | Adapt to React components + CSS variables from the same role names |
 | Size `width`/`height` | Terminal cells | Content box in `ch`/`rem`; host still sends integer width/height in **cell-equivalent** units documented as “approximate monospace columns/rows” |
 | Input | Key/pointer → `pane.input` | DOM events normalized to the same `key` names |
 | Chrome | `ui.Panel` | Cockpit card/shell |

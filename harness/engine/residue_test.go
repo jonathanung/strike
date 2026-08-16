@@ -63,7 +63,7 @@ func TestBuildResidueKeepsLedgerDecision(t *testing.T) {
 		EvidenceRefs: []string{
 			"msg:turn-3",
 		},
-		ScopePaths: []string{"internal/tui"},
+		ScopePaths: []string{"internal/frontend/tui"},
 	}}
 	r := buildCompactionResidue(dropped, 0, protocol.CompactionStrategyTrim, protocol.CompactionReasonThreshold, "", nil, entries)
 	if r == nil {

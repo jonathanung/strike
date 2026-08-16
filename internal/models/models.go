@@ -1,8 +1,8 @@
 // Package models queries the models.dev catalog (the provider/model
 // registry opencode uses) for available models per provider. The catalog
 // is cached at ~/.strike/cache/models.json for 24h, with stale-cache
-// fallback when offline — the same logic opencode ships. internal/host/local
-// is the only importer, wrapping it as host.Catalog; internal/tui never
+// fallback when offline — the same logic opencode ships. internal/frontend/host/local
+// is the only importer, wrapping it as host.Catalog; internal/frontend/tui never
 // imports it directly.
 package models
 

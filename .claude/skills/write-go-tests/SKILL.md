@@ -60,13 +60,13 @@ a fixed “six tools” list.
 
 ### TUI
 
-Source lives under `internal/tui/app/_src/` and is flattened into `internal/tui/app` via
-`go generate ./internal/tui/app`. Tests may live beside `_src` or as generated/package
-tests under `internal/tui/app`.
+Source lives under `internal/frontend/tui/app/_src/` and is flattened into `internal/frontend/tui/app` via
+`go generate ./internal/frontend/tui/app`. Tests may live beside `_src` or as generated/package
+tests under `internal/frontend/tui/app`.
 
-Reuse helpers from `internal/tui/app/_src/app/app_test.go` (same package after generate),
+Reuse helpers from `internal/frontend/tui/app/_src/app/app_test.go` (same package after generate),
 including: `updateApp`, `runAppCmd`, `runAllAppCmds`, `receiveAppOp`, `assertNoAppOp`.
-Shared support also appears under `internal/tui/app/_src/test/` (e.g. `testsupport_test.go`).
+Shared support also appears under `internal/frontend/tui/app/_src/test/` (e.g. `testsupport_test.go`).
 Load skill `tui-components` before asserting chrome/theme behavior.
 
 ## After writing
@@ -85,7 +85,7 @@ go test ./path/to/package/ -count=1 -v
 5. `internal/question` — multi-question ask/reply  
 6. `internal/auth` — OAuth/PKCE/device, resolve edge cases  
 7. `providers/*` — SSE cancel, cache headers where applicable  
-8. `internal/tui` — keymap/default binds, modals, interrupt/esc paths  
+8. `internal/frontend/tui` — keymap/default binds, modals, interrupt/esc paths  
 
 ## Platform notes
 

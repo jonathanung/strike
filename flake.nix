@@ -22,7 +22,7 @@
 
           subPackages = [ "cmd/strike" ];
           preBuild = ''
-            go generate ./internal/tui/app
+            go generate ./internal/frontend/tui/app
           '';
           ldflags = [
             "-s"

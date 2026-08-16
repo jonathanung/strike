@@ -12,8 +12,8 @@ harness/               kernel module (engine, provider+echo, tool, permission, �
 providers/             adapters, auth flows, factory (own go.mod)
 go.work                workspace: ., ./pkg/protocol, ./pkg/redact, ./harness, ./providers
 internal/protocol/     compatibility re-export of pkg/protocol
-internal/rpc/          stdio JSON-RPC 2.0 transport (strike rpc; ops in, events out)
-internal/acp/          Agent Client Protocol adapter (strike acp; ACP ↔ Op/Event)
+internal/frontend/rpc/          stdio JSON-RPC 2.0 transport (strike rpc; ops in, events out)
+internal/frontend/acp/          Agent Client Protocol adapter (strike acp; ACP ↔ Op/Event)
 harness/engine/        turn loop & tool dispatch
 internal/auth/         product credential store (0600 auth.json); flow re-exports
 harness/provider/      Provider interface + echo
@@ -23,24 +23,24 @@ harness/tool/          tool contract + kernel builtins (read/glob/grep/edit/writ
 internal/tools/        Strike product builtins (memory_*/issue_*/plan_*/…)
 harness/permission/    rulesets + suspend/resume ask service
 internal/persist/session/      JSONL event-log persistence
-internal/server/       strike serve web cockpit (REST/SSE/WS + embedded UI)
+internal/frontend/server/       strike serve web cockpit (REST/SSE/WS + embedded UI)
 internal/config/       layered config + agents/skills/workflows
-internal/host/         frontend-facing host-service contract (stdlib-only);
+internal/frontend/host/         frontend-facing host-service contract (stdlib-only);
                        local/ wraps auth/config/models/history/memory/issue/files
-internal/tui/          kit packages (ui, theme, common, term) + app/
-internal/tui/app/      BubbleTea app (`package tui`; flattened; edit _src/ only)
-internal/tui/app/_src/ source of truth by concern — go generate flattens here
-internal/tui/theme/    design tokens: adaptive colors, icons, precomputed styles
-internal/tui/ui/       reusable components: Panel, Dialog, Badge, List, Bento, …
+internal/frontend/tui/          kit packages (ui, theme, common, term) + app/
+internal/frontend/tui/app/      BubbleTea app (`package tui`; flattened; edit _src/ only)
+internal/frontend/tui/app/_src/ source of truth by concern — go generate flattens here
+internal/frontend/tui/theme/    design tokens: adaptive colors, icons, precomputed styles
+internal/frontend/tui/ui/       reusable components: Panel, Dialog, Badge, List, Bento, …
 ```
 
 Full dataflow, import rules, and recipes (add a provider/tool/slash
 command/UI component/host service/theme token):
 [ARCHITECTURE.md](ARCHITECTURE.md).
 
-**TUI edit rule:** change files under `internal/tui/app/_src/<group>/` (or the
-real packages `theme`/`ui`/`term`/`common`), then `go generate ./internal/tui/app`.
-Flattened `internal/tui/app/*.go` are gitignored and wiped on generate — never
+**TUI edit rule:** change files under `internal/frontend/tui/app/_src/<group>/` (or the
+real packages `theme`/`ui`/`term`/`common`), then `go generate ./internal/frontend/tui/app`.
+Flattened `internal/frontend/tui/app/*.go` are gitignored and wiped on generate — never
 edit them.
 
 ## Architecture in one paragraph
@@ -54,7 +54,7 @@ over Go channels for now. The event stream *is* the transcript: every
 session is persisted as a JSONL event log (`~/.strike/sessions/`). Everything
 else the TUI needs from its host process — credentials, the model catalog,
 saved defaults, prompt history, agent/skill listings — arrives through a
-second, narrower seam, `internal/host` (implemented by `internal/host/local`);
+second, narrower seam, `internal/frontend/host` (implemented by `internal/frontend/host/local`);
 the TUI never imports `internal/auth`, `config`, `models`, or `history`
 directly, and a boundary test enforces it, so the backend can add a host
 service without touching the UI and the UI can be developed against fakes.
@@ -160,8 +160,8 @@ matching paths (and keep relative links valid):
 
 | Surface | Source of truth | Docs |
 |---|---|---|
-| Slash commands | `internal/tui/app/_src/app/commands.go` (`builtinCommandSpecs`) | [usage.md](usage.md) |
-| Keybinds | `internal/tui/app/_src/app/keymap.go` (`defaultKeyMap`, `keybindCatalog`) | [keybinds.md](keybinds.md) |
+| Slash commands | `internal/frontend/tui/app/_src/app/commands.go` (`builtinCommandSpecs`) | [usage.md](usage.md) |
+| Keybinds | `internal/frontend/tui/app/_src/app/keymap.go` (`defaultKeyMap`, `keybindCatalog`) | [keybinds.md](keybinds.md) |
 | CLI flags / `exec` | `cmd/strike` + `strike --help` | [install.md](install.md), [usage.md](usage.md) |
 | Config / custom providers / `vimMode`/`nanoMode` | `internal/config` | [config.md](config.md) |
 | Agents, skills, workflows | `internal/config` builtins + loaders | [agents-skills.md](agents-skills.md) |

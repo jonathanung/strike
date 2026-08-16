@@ -9,7 +9,7 @@ Go 1.26 agentic coding TUI. Engine emits protocol events; TUI consumes them. Ses
 | Tier | When | Local gate |
 |---|---|---|
 | **A** | Docs, skills, comments, markdown-only | `gofmt` if any `.go` touched; full suite not required |
-| **B** | Normal Go / web / TUI (default) | `gofmt` → `go generate ./internal/tui/app` if `internal/tui/app/_src` changed → `make web-check` if `web/` changed → `make test && make vet && make build` |
+| **B** | Normal Go / web / TUI (default) | `gofmt` → `go generate ./internal/frontend/tui/app` if `internal/frontend/tui/app/_src` changed → `make web-check` if `web/` changed → `make test && make vet && make build` |
 | **C** | Trust boundary: tool, permission, auth, session, engine concurrency/turn, protocol wire, sandbox | Tier B + `go test -race ./... -count=1` + focused package tests first |
 
 CI (`.github/workflows/ci.yml`) always runs gofmt, TUI generate, web-check (when web present), build, vet, and `go test -race ./...`. Local race on every PR is redundant for tier A/B.
@@ -35,7 +35,7 @@ Report exact commands and failing output verbatim. Do not claim green without ru
 - Mock only external boundaries (HTTP via `httptest`, clocks when needed). Never mock the unit under test.
 - Tool tests: allow-all `Ask` helper unless testing permission denial.
 - Provider tests: `httptest.Server` for wire format; use `harness/provider/echo` for offline engine loops.
-- TUI tests: reuse helpers from `internal/tui/app/_src/app/app_test.go` (`updateApp`, `runAppCmd`, etc.; package tests after `go generate ./internal/tui/app`).
+- TUI tests: reuse helpers from `internal/frontend/tui/app/_src/app/app_test.go` (`updateApp`, `runAppCmd`, etc.; package tests after `go generate ./internal/frontend/tui/app`).
 
 ## Architecture map
 
@@ -46,9 +46,9 @@ service/theme token).
 | Package | Role |
 |---|---|
 | `cmd/strike` | CLI flags + auth/exec/rpc/acp/serve subcommands (`main.go`), composition root wiring (`wire.go`) |
-| `internal/rpc` | Stdio JSON-RPC 2.0 Op/Event bridge (`strike rpc`: NDJSON ops in, event envelopes out) |
-| `internal/acp` | Agent Client Protocol adapter (`strike acp`: ACP session/prompt ↔ Op/Event for Zed/Devin) |
-| `internal/server` | `strike serve` web cockpit: REST/SSE/WS, attach + live ops, progressive Chat/Code/Team/Project/Ops UI |
+| `internal/frontend/rpc` | Stdio JSON-RPC 2.0 Op/Event bridge (`strike rpc`: NDJSON ops in, event envelopes out) |
+| `internal/frontend/acp` | Agent Client Protocol adapter (`strike acp`: ACP session/prompt ↔ Op/Event for Zed/Devin) |
+| `internal/frontend/server` | `strike serve` web cockpit: REST/SSE/WS, attach + live ops, progressive Chat/Code/Team/Project/Ops UI |
 | `pkg/protocol` | Public Ops/Events wire schema; JSONL envelopes (semver `Version`); own `go.mod` + workspace member |
 | `pkg/redact` | Shared credential-shaped string scrubbing + Findings (exports, inspect, traces, write guards); own `go.mod` + workspace member |
 | `pkg/timeline` | Structured run timeline builder + redacted JSON/JSONL export |
@@ -83,11 +83,11 @@ service/theme token).
 | `internal/persist/artifact` | shared typed multi-agent artifacts (findings/patch/test_report/…; CAS, owner\|team) |
 | `internal/persist/attachment` | content-addressed typed attachments (`att:sha256:` refs; image/pdf/diagram/log/archive/build) |
 | `internal/persist/ledger` | shared decision/assumption/constraint ledger (append/invalidate/supersede; active slice in context) |
-| `internal/host` | frozen stdlib-only contract: what a frontend needs from its host (auth, catalog, settings, history, memory, issues, plans, goals, agents, skills) |
-| `internal/host/local` | real `host.Services` impl, wraps auth/config/models/history/memory/issue/plan/goal |
-| `internal/tui/app` | Bubble Tea UI: app model, layout, cells, modals (`package tui`) |
-| `internal/tui/theme` | design tokens: adaptive colors, `Icons`, precomputed `Styles` |
-| `internal/tui/ui` | reusable component library (Panel, Dialog, Badge, List, Bento, …) |
+| `internal/frontend/host` | frozen stdlib-only contract: what a frontend needs from its host (auth, catalog, settings, history, memory, issues, plans, goals, agents, skills) |
+| `internal/frontend/host/local` | real `host.Services` impl, wraps auth/config/models/history/memory/issue/plan/goal |
+| `internal/frontend/tui/app` | Bubble Tea UI: app model, layout, cells, modals (`package tui`) |
+| `internal/frontend/tui/theme` | design tokens: adaptive colors, `Icons`, precomputed `Styles` |
+| `internal/frontend/tui/ui` | reusable component library (Panel, Dialog, Badge, List, Bento, …) |
 
 ## Scope
 
@@ -99,17 +99,17 @@ service/theme token).
 - Must implement as many tests as possible for all new chunks of code.
 - No new test frameworks or dependencies without an explicit ask.
 - Do not commit secrets or write real credentials into fixtures.
-- UI work goes through `internal/tui/ui` components and `internal/tui/theme`
+- UI work goes through `internal/frontend/tui/ui` components and `internal/frontend/tui/theme`
   tokens — no raw lipgloss styles or hardcoded glyphs in views; colors and
   icons come from the theme. Load the `tui-components` skill before TUI
   view/panel/modal/picker work (`.claude/skills/tui-components/`).
 - **TUI source trap:** package `tui` sources live under
-  `internal/tui/app/_src/<group>/` and are flattened by `go generate ./internal/tui/app`
-  (make/CI run this first). Flattened `internal/tui/app/*.go` are gitignored —
+  `internal/frontend/tui/app/_src/<group>/` and are flattened by `go generate ./internal/frontend/tui/app`
+  (make/CI run this first). Flattened `internal/frontend/tui/app/*.go` are gitignored —
   edit `_src/` only; editing flattened files is silently reverted.
-- `internal/tui/...` may import only `internal/protocol`, `internal/host`, and
-  `internal/tui/...` among `internal/*` packages — enforced by
-  `internal/tui/app/_src/test/boundary_test.go` (`TestArchitectureBoundaries`).
+- `internal/frontend/tui/...` may import only `internal/protocol`, `internal/frontend/host`, and
+  `internal/frontend/tui/...` among `internal/*` packages — enforced by
+  `internal/frontend/tui/app/_src/test/boundary_test.go` (`TestArchitectureBoundaries`).
   Kit packages (`ui`, `theme`, `common`, `term`) must not import protocol or
   host. Prefer `pkg/protocol` / `pkg/redact` for public wire/scrub helpers
   (also allowed; not under `internal/`). Charm paths: v1

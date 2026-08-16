@@ -837,7 +837,7 @@ Epic [#1069](https://github.com/jonathanung/strike/issues/1069) is complete when
 ## Vite dev / production web toolchain
 
 Production cockpit HTML is **embedded** in the Go binary
-(`internal/server/static/index.html`). Optional `web/` is a Vite workspace for
+(`internal/frontend/server/static/index.html`). Optional `web/` is a Vite workspace for
 local UI iteration and CI asset checks.
 
 ```sh
@@ -856,16 +856,16 @@ cd web && npm install && npm run dev
 | `VITE_PORT` | Dev port (default `5173`) |
 
 ```sh
-make web-build   # npm ci && npm run build → internal/server/static
+make web-build   # npm ci && npm run build → internal/frontend/server/static
 ```
 
 CI runs `make web-build` when `web/package.json` is present. The Go binary does
-not require Node at runtime: generated Vite assets under `internal/server/static`
+not require Node at runtime: generated Vite assets under `internal/frontend/server/static`
 are embedded at compile time. Edit sources under `web/src`, then build.
 
 ### Theme
 
-Cockpit colors track the stock TUI palette in `internal/tui/theme.Default()`
+Cockpit colors track the stock TUI palette in `internal/frontend/tui/theme.Default()`
 (violet accent, solid surfaces, dark/light adaptive pairs). CSS variables live
 in `web/src/styles.css`; keep them aligned when changing `theme.go` (see
 `web/src/theme.test.ts` and [theme.md](theme.md)).
