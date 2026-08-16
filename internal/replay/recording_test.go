@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jonathanung/strike-cli/internal/persist/session"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/replay"
-	"github.com/jonathanung/strike-cli/internal/session"
 )
 
 func sampleEvents() []protocol.Event {

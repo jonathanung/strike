@@ -4,7 +4,7 @@
 // frontend depend only on this package (or the internal/protocol re-export
 // shim), never on engine internals. The event stream is also the persistence
 // format: a session transcript is a JSONL log of Event envelopes (see
-// internal/session).
+// internal/persist/session).
 //
 // # Import path
 //
@@ -696,7 +696,7 @@ type ChildStarted struct {
 
 // ArtifactRef points at a shared typed artifact (id + optional CAS version/type).
 // Used on completion handoffs and task/agent messages so peers can fetch
-// "findings:v3" without inlining prose. See internal/artifact.
+// "findings:v3" without inlining prose. See internal/persist/artifact.
 type ArtifactRef struct {
 	// ID is the artifact store id (required).
 	ID string `json:"id"`

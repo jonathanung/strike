@@ -521,7 +521,7 @@ func loadSessionTranscriptOpts(sessions host.Sessions, id string, live bool) (ce
 }
 
 // sessionLogSchemaVersion is the session JSONL header schema this TUI understands
-// (must stay in sync with internal/session.LogSchemaVersion).
+// (must stay in sync with internal/persist/session.LogSchemaVersion).
 const sessionLogSchemaVersion = 1
 
 func decodeSessionJSONL(data []byte) ([]protocol.Event, error) {

@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/jonathanung/strike-cli/internal/host"
-	"github.com/jonathanung/strike-cli/internal/plan"
+	"github.com/jonathanung/strike-cli/internal/persist/plan"
 )
 
 func TestPlansNilStore(t *testing.T) {

@@ -1,7 +1,7 @@
 // Package issue stores project-scoped tracked issues with open/closed status.
 // cmd/strike opens the store at startup; tools and internal/host/local wrap it
 // so agent tools and the /issues command share one durable project DB.
-// Storage layout matches internal/memory (JSON under ~/.strike/issues/).
+// Storage layout matches internal/persist/memory (JSON under ~/.strike/issues/).
 package issue
 
 import (

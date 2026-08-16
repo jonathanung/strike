@@ -13,8 +13,8 @@ import (
 	"github.com/jonathanung/strike-cli/harness/provider"
 	"github.com/jonathanung/strike-cli/harness/tool"
 	"github.com/jonathanung/strike-cli/internal/enginebind"
-	"github.com/jonathanung/strike-cli/internal/ledger"
-	"github.com/jonathanung/strike-cli/internal/memory"
+	"github.com/jonathanung/strike-cli/internal/persist/ledger"
+	"github.com/jonathanung/strike-cli/internal/persist/memory"
 	"github.com/jonathanung/strike-cli/pkg/protocol"
 )
 

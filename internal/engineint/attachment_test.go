@@ -11,8 +11,8 @@ import (
 	"github.com/jonathanung/strike-cli/harness/provider"
 	"github.com/jonathanung/strike-cli/harness/provider/echo"
 	"github.com/jonathanung/strike-cli/harness/tool"
-	"github.com/jonathanung/strike-cli/internal/attachment"
 	"github.com/jonathanung/strike-cli/internal/enginebind"
+	"github.com/jonathanung/strike-cli/internal/persist/attachment"
 	"github.com/jonathanung/strike-cli/pkg/protocol"
 )
 

@@ -443,7 +443,7 @@ func (e *Engine) maybeTitleSession(text string) {
 }
 
 // sessionTitleFromText collapses whitespace, drops controls, and truncates.
-// Kept local so engine does not import internal/session (cmd/strike only).
+// Kept local so engine does not import internal/persist/session (cmd/strike only).
 // Logic mirrors session.TitleFromText.
 func sessionTitleFromText(text string) string {
 	var b strings.Builder

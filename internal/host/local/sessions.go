@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/jonathanung/strike-cli/internal/host"
-	"github.com/jonathanung/strike-cli/internal/session"
+	"github.com/jonathanung/strike-cli/internal/persist/session"
 )
 
 // NewSessions wraps a session.Manager as host.Sessions. projectKey scopes

@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/jonathanung/strike-cli/internal/host"
-	"github.com/jonathanung/strike-cli/internal/ledger"
+	"github.com/jonathanung/strike-cli/internal/persist/ledger"
 )
 
 func TestLedgerNilStore(t *testing.T) {

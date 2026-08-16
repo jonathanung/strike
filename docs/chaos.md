@@ -27,13 +27,13 @@ them via test doubles and filesystem fixtures.
 Chaos tests are ordinary `go test` cases named `TestChaos*` under:
 
 - `internal/fault` — Arm/Check registry
-- `internal/session` — sync fail, truncate/corrupt
+- `internal/persist/session` — sync fail, truncate/corrupt
 - `harness/tool` — process kill, bash cancel code, cancel×inject races
 - `harness/engine` — stream drop, permission flip, cancel+tool+session
 
 ```sh
 # Focused (fast)
-go test ./internal/session/ \
+go test ./internal/persist/session/ \
 	-run 'Chaos|TestArm|TestCatalog|TestCheck|TestDisarm|TestConcurrent' -count=1
 go -C harness test ./fault/ ./tool/ ./engine/ \
   -run 'Chaos|TestArm|TestCatalog' -count=1

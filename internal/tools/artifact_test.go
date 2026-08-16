@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jonathanung/strike-cli/internal/artifact"
+	"github.com/jonathanung/strike-cli/internal/persist/artifact"
 )
 
 func artifactTC(dir, session, root string) *tool.Context {

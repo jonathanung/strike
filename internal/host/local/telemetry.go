@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/jonathanung/strike-cli/internal/host"
-	"github.com/jonathanung/strike-cli/internal/telemetry"
+	"github.com/jonathanung/strike-cli/internal/persist/telemetry"
 )
 
 // NewTelemetry wraps the platform host collector as host.Telemetry.

@@ -85,11 +85,11 @@ A **flake** fails intermittently or only on one OS/env while CI (or 3 local reru
 | `harness/tool` | filesystem mutation, shell, sandbox, filestate freshness, workspace roots |
 | `harness/permission` | last-match-wins, always grants, reject cascade |
 | `internal/auth` | credentials mode 0600, env precedence, OAuth |
-| `internal/session` + `protocol` | transcript integrity, replay |
+| `internal/persist/session` + `protocol` | transcript integrity, replay |
 | `providers` | HTTP/SSE, cancellation |
 | `harness/engine` | turn state machine, tool loop, prune/compaction, interrupt |
 | `internal/tui` | Bubble Tea update loops (existing harnesses) |
-| `internal/history` | concurrency + path security |
+| `internal/persist/history` | concurrency + path security |
 
 ## Rules
 

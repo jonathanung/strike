@@ -19,8 +19,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/jonathanung/strike-cli/internal/host"
+	"github.com/jonathanung/strike-cli/internal/persist/session"
 	"github.com/jonathanung/strike-cli/internal/protocol"
-	"github.com/jonathanung/strike-cli/internal/session"
 	"github.com/jonathanung/strike-cli/internal/version"
 )
 

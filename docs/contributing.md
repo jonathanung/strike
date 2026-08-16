@@ -22,7 +22,7 @@ harness/tool/          tool contract + kernel builtins (read/glob/grep/edit/writ
                        sleep/question/toolsearch — full list: ARCHITECTURE.md)
 internal/tools/        Strike product builtins (memory_*/issue_*/plan_*/…)
 harness/permission/    rulesets + suspend/resume ask service
-internal/session/      JSONL event-log persistence
+internal/persist/session/      JSONL event-log persistence
 internal/server/       strike serve web cockpit (REST/SSE/WS + embedded UI)
 internal/config/       layered config + agents/skills/workflows
 internal/host/         frontend-facing host-service contract (stdlib-only);

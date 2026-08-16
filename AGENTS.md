@@ -74,15 +74,15 @@ service/theme token).
 | `internal/auth` | 0600 ~/.strike/auth.json store; flow helpers re-exported from `providers/auth` |
 | `internal/config` | global/project JSON + agents/skills markdown |
 | `internal/audit` | Durable retention-bounded security audit sink (`~/.strike/audit/`) |
-| `internal/session` | JSONL event log append/replay + concurrent Manager |
-| `internal/history` | project-scoped prompt history |
-| `internal/memory` | project-scoped durable key/value memory |
-| `internal/issue` | project-scoped durable issue tracker |
+| `internal/persist/session` | JSONL event log append/replay + concurrent Manager |
+| `internal/persist/history` | project-scoped prompt history |
+| `internal/persist/memory` | project-scoped durable key/value memory |
+| `internal/persist/issue` | project-scoped durable issue tracker |
 | `internal/goal` | loop harness: goals, guards, critic, hooks, JSONL state |
-| `internal/plan` | project-scoped root-owned structured plans (sections, lifecycle, CAS) |
-| `internal/artifact` | shared typed multi-agent artifacts (findings/patch/test_report/…; CAS, owner\|team) |
-| `internal/attachment` | content-addressed typed attachments (`att:sha256:` refs; image/pdf/diagram/log/archive/build) |
-| `internal/ledger` | shared decision/assumption/constraint ledger (append/invalidate/supersede; active slice in context) |
+| `internal/persist/plan` | project-scoped root-owned structured plans (sections, lifecycle, CAS) |
+| `internal/persist/artifact` | shared typed multi-agent artifacts (findings/patch/test_report/…; CAS, owner\|team) |
+| `internal/persist/attachment` | content-addressed typed attachments (`att:sha256:` refs; image/pdf/diagram/log/archive/build) |
+| `internal/persist/ledger` | shared decision/assumption/constraint ledger (append/invalidate/supersede; active slice in context) |
 | `internal/host` | frozen stdlib-only contract: what a frontend needs from its host (auth, catalog, settings, history, memory, issues, plans, goals, agents, skills) |
 | `internal/host/local` | real `host.Services` impl, wraps auth/config/models/history/memory/issue/plan/goal |
 | `internal/tui/app` | Bubble Tea UI: app model, layout, cells, modals (`package tui`) |

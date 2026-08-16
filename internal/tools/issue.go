@@ -8,7 +8,7 @@ import (
 	"github.com/jonathanung/strike-cli/harness/tool"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/internal/issue"
+	"github.com/jonathanung/strike-cli/internal/persist/issue"
 )
 
 // IssueStore is the durable project issue surface used by issue tools.

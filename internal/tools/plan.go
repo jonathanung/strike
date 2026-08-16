@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/plan"
+	"github.com/jonathanung/strike-cli/internal/persist/plan"
 )
 
 // PlanStore is the durable project plan surface used by plan tools.

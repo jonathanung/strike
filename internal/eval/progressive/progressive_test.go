@@ -13,7 +13,7 @@ import (
 	"github.com/jonathanung/strike-cli/harness/provider"
 	"github.com/jonathanung/strike-cli/harness/tool"
 	"github.com/jonathanung/strike-cli/internal/eval/progressive"
-	"github.com/jonathanung/strike-cli/internal/plan"
+	"github.com/jonathanung/strike-cli/internal/persist/plan"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/tools"
 )

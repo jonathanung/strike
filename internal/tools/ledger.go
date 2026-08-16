@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/ledger"
+	"github.com/jonathanung/strike-cli/internal/persist/ledger"
 )
 
 // LedgerStore is the durable decision-ledger surface used by ledger tools.

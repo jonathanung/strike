@@ -192,8 +192,8 @@ Every current top-level `internal/*` package:
 | `internal/acp` | `internal/frontend/acp` | product |
 | `internal/actionfacts` | `harness/actionfacts` | kernel |
 | `internal/admission` | `internal/trust/admission` | product |
-| `internal/artifact` | `internal/persist/artifact` | product |
-| `internal/attachment` | `internal/persist/attachment` | product |
+| `internal/persist/artifact` | `internal/persist/artifact` | product |
+| `internal/persist/attachment` | `internal/persist/attachment` | product |
 | `internal/audit` | `internal/trust/audit` | product |
 | `internal/auth` | split: flows → `providers/auth`; store + `strike auth` → `internal/product/auth` | providers + product |
 | `internal/config` | `internal/product/config` | product |
@@ -203,16 +203,16 @@ Every current top-level `internal/*` package:
 | `internal/fault` | `harness/fault` | kernel |
 | `internal/goal` | `internal/product/goal` | product |
 | `internal/fn` | `harness/fn` | kernel |
-| `internal/history` | `internal/persist/history` | product |
+| `internal/persist/history` | `internal/persist/history` | product |
 | `internal/host` | `internal/frontend/host` | product |
-| `internal/issue` | `internal/persist/issue` | product |
-| `internal/ledger` | `internal/persist/ledger` | product |
+| `internal/persist/issue` | `internal/persist/issue` | product |
+| `internal/persist/ledger` | `internal/persist/ledger` | product |
 | `internal/lsp` | `internal/integrate/lsp` | product |
 | `internal/mcp` | `internal/integrate/mcp` | product |
-| `internal/memory` | `internal/persist/memory` | product |
+| `internal/persist/memory` | `internal/persist/memory` | product |
 | `internal/models` | `internal/product/models` | product |
 | `internal/permission` | `harness/permission` | kernel |
-| `internal/plan` | `internal/persist/plan` | product |
+| `internal/persist/plan` | `internal/persist/plan` | product |
 | `internal/plugin` | `internal/integrate/plugin` | product |
 | `internal/project` | `internal/product/project` | product |
 | `internal/protocol` | `internal/protocol` (compat re-export; prefer `pkg/protocol`) | product |
@@ -226,8 +226,8 @@ Every current top-level `internal/*` package:
 | `internal/secret` | `internal/trust/secret` | product |
 | `internal/security` | `internal/trust/security` | product |
 | `internal/server` | `internal/frontend/server` | product |
-| `internal/session` | `internal/persist/session` | product |
-| `internal/telemetry` | `internal/persist/telemetry` | product |
+| `internal/persist/session` | `internal/persist/session` | product |
+| `internal/persist/telemetry` | `internal/persist/telemetry` | product |
 | `internal/tool` | split: contract → `harness/tool`; kernel builtins → `harness/tools`; product builtins → `internal/tools` | kernel + product |
 | `internal/tui` | `internal/frontend/tui` (`app/` + kit) | product |
 | `internal/update` | `internal/product/update` | product |

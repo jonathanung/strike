@@ -9,8 +9,8 @@ import (
 	"github.com/jonathanung/strike-cli/harness/engine"
 	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/host/local"
+	"github.com/jonathanung/strike-cli/internal/persist/session"
 	"github.com/jonathanung/strike-cli/internal/protocol"
-	"github.com/jonathanung/strike-cli/internal/session"
 )
 
 // rootSlot is one live parent session: engine + durable bind + tool CWD.

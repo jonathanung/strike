@@ -2,7 +2,7 @@
 // events and exports a versioned, secret-redacted machine-readable trace.
 //
 // Relationship to other surfaces:
-//   - Session JSONL (internal/session) remains the durable full event log.
+//   - Session JSONL (internal/persist/session) remains the durable full event log.
 //     Timeline is a derived, collapsed view — not a second transcript.
 //   - Agent roster / budget live fields (#774) stay on team.roster and TUI
 //     panes; timeline owns harness-wide turn/tool/provider/child spans.

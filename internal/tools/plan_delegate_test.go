@@ -10,7 +10,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/jonathanung/strike-cli/internal/plan"
+	"github.com/jonathanung/strike-cli/internal/persist/plan"
 )
 
 func TestPlanDelegateDispatchTwoSectionsAndRejectInFlight(t *testing.T) {

@@ -11,11 +11,11 @@ import (
 
 // Product persist / integrate packages the kernel tool package must not import.
 var forbiddenKernelImports = []string{
-	"github.com/jonathanung/strike-cli/internal/memory",
-	"github.com/jonathanung/strike-cli/internal/issue",
-	"github.com/jonathanung/strike-cli/internal/plan",
-	"github.com/jonathanung/strike-cli/internal/artifact",
-	"github.com/jonathanung/strike-cli/internal/ledger",
+	"github.com/jonathanung/strike-cli/internal/persist/memory",
+	"github.com/jonathanung/strike-cli/internal/persist/issue",
+	"github.com/jonathanung/strike-cli/internal/persist/plan",
+	"github.com/jonathanung/strike-cli/internal/persist/artifact",
+	"github.com/jonathanung/strike-cli/internal/persist/ledger",
 	"github.com/jonathanung/strike-cli/internal/lsp",
 	"github.com/jonathanung/strike-cli/internal/tools",
 	"github.com/jonathanung/strike-cli/internal/secret",

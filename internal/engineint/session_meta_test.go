@@ -11,7 +11,7 @@ import (
 	"github.com/jonathanung/strike-cli/harness/permission"
 	"github.com/jonathanung/strike-cli/harness/tool"
 	"github.com/jonathanung/strike-cli/internal/enginebind"
-	"github.com/jonathanung/strike-cli/internal/session"
+	"github.com/jonathanung/strike-cli/internal/persist/session"
 	"github.com/jonathanung/strike-cli/pkg/protocol"
 )
 

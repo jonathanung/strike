@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/artifact"
+	"github.com/jonathanung/strike-cli/internal/persist/artifact"
 )
 
 // ArtifactStore is the durable typed-artifact surface used by artifact tools.

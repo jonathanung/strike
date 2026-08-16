@@ -22,7 +22,7 @@ const telemetryWindowID = "telemetry"
 const telemetrySampleInterval = time.Second
 
 // Pressure thresholds (used/total ratio). Documented constants; match
-// internal/telemetry and ui.Meter bands.
+// internal/persist/telemetry and ui.Meter bands.
 const (
 	telemetryWarnRatio = 0.70
 	telemetryCritRatio = 0.90

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jonathanung/strike-cli/internal/ledger"
+	"github.com/jonathanung/strike-cli/internal/persist/ledger"
 )
 
 func ledgerTC(dir, session, root string) *tool.Context {

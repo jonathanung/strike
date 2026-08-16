@@ -16,11 +16,11 @@ import (
 
 	"github.com/jonathanung/strike-cli/internal/auth"
 	"github.com/jonathanung/strike-cli/internal/config"
-	"github.com/jonathanung/strike-cli/internal/history"
 	"github.com/jonathanung/strike-cli/internal/host"
-	"github.com/jonathanung/strike-cli/internal/issue"
-	"github.com/jonathanung/strike-cli/internal/memory"
 	"github.com/jonathanung/strike-cli/internal/models"
+	"github.com/jonathanung/strike-cli/internal/persist/history"
+	"github.com/jonathanung/strike-cli/internal/persist/issue"
+	"github.com/jonathanung/strike-cli/internal/persist/memory"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 )
 

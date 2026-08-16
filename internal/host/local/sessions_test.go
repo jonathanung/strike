@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/jonathanung/strike-cli/internal/host"
+	"github.com/jonathanung/strike-cli/internal/persist/session"
 	"github.com/jonathanung/strike-cli/internal/protocol"
-	"github.com/jonathanung/strike-cli/internal/session"
 )
 
 func TestSessionsAdapterChildrenAndReplay(t *testing.T) {

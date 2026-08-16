@@ -12,7 +12,7 @@ import (
 	"github.com/jonathanung/strike-cli/pkg/protocol"
 )
 
-// Max line size for JSONL event/op streams. Matches internal/session so
+// Max line size for JSONL event/op streams. Matches internal/persist/session so
 // multimodal user.message lines with multi-MiB base64 images still decode.
 const maxJSONLLine = 32 << 20
 
