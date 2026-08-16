@@ -460,6 +460,10 @@ func applyEventToPane(p *rootPane, ev protocol.Event) {
 			applyToolCallEnd(tc, e.Title, e.Output, e.Metadata, e.IsError, e.ErrorCode)
 		}
 	case protocol.ModelSelected:
+		if e.ParentSessionID != "" || e.Depth > 0 {
+			setChildActivityModel(&p.children, e.SessionID, e.Provider, e.Model)
+			break
+		}
 		p.providerName, p.modelName = e.Provider, e.Model
 	case protocol.AgentSelected:
 		p.agentName = e.Name
@@ -499,6 +503,12 @@ func applyEventToPane(p *rootPane, ev protocol.Event) {
 				p.children[i].agent = e.Agent
 				p.children[i].prompt = e.Prompt
 				p.children[i].name = e.Name
+				if e.Provider != "" {
+					p.children[i].provider = e.Provider
+				}
+				if e.Model != "" {
+					p.children[i].model = e.Model
+				}
 				p.children[i].status = "running"
 				p.children[i].startedAt = time.Now()
 				p.children[i].endedAt = time.Time{}
@@ -518,6 +528,8 @@ func applyEventToPane(p *rootPane, ev protocol.Event) {
 				agent:     e.Agent,
 				prompt:    e.Prompt,
 				name:      e.Name,
+				provider:  e.Provider,
+				model:     e.Model,
 				status:    "running",
 				startedAt: time.Now(),
 			})
@@ -889,4 +901,17 @@ func (m Model) rootTitleLabel(id string) string {
 		return short
 	}
 	return "session"
+}
+
+func (m Model) rootProviderModel(id string) (provider, model string) {
+	id = strings.TrimSpace(id)
+	if id == "" || id == m.sessionID {
+		return m.providerName, m.modelName
+	}
+	if m.roots != nil {
+		if p, ok := m.roots[id]; ok && p != nil {
+			return p.providerName, p.modelName
+		}
+	}
+	return "", ""
 }

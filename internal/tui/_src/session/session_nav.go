@@ -314,6 +314,9 @@ func (m *Model) openSessionView(id string) tea.Cmd {
 	m.viewTitle = title
 	m.viewCells = cells
 	m.viewToolByID = tools
+	if p, model := sessionModelFromJSONL(m.services.Sessions, id); p != "" || model != "" {
+		m.setChildActivityModel(id, p, model)
+	}
 	m.selectedCell = -1
 	m.selectedFileRef = -1
 	m.viewGen++
@@ -392,6 +395,9 @@ func (m *Model) refreshViewingTranscript() tea.Cmd {
 	}
 	m.viewCells = cells
 	m.viewToolByID = tools
+	if p, model := sessionModelFromJSONL(m.services.Sessions, id); p != "" || model != "" {
+		m.setChildActivityModel(id, p, model)
+	}
 	m.refreshViewport()
 	if live {
 		gen := m.viewGen
@@ -427,6 +433,37 @@ func childViewTitle(agent, prompt, sessionID, title, name string) string {
 		}
 		return "subagent"
 	}
+}
+
+func sessionModelFromJSONL(sessions host.Sessions, id string) (provider, model string) {
+	if sessions == nil || strings.TrimSpace(id) == "" {
+		return "", ""
+	}
+	data, err := sessions.ReplayJSONL(id)
+	if err != nil || len(data) == 0 {
+		return "", ""
+	}
+	events, err := decodeSessionJSONL(data)
+	if err != nil {
+		return "", ""
+	}
+	return lastModelSelected(events)
+}
+
+func lastModelSelected(events []protocol.Event) (provider, model string) {
+	for _, ev := range events {
+		ms, ok := ev.(protocol.ModelSelected)
+		if !ok {
+			continue
+		}
+		if ms.Provider != "" {
+			provider = ms.Provider
+		}
+		if ms.Model != "" {
+			model = ms.Model
+		}
+	}
+	return provider, model
 }
 
 func loadSessionTranscript(sessions host.Sessions, id string) (cells []cell, tools map[string]*toolCell, title, parentID string, err error) {
@@ -961,6 +998,12 @@ func childrenFromEvents(events []protocol.Event) []childActivity {
 				out[i].agent = e.Agent
 				out[i].prompt = e.Prompt
 				out[i].name = e.Name
+				if e.Provider != "" {
+					out[i].provider = e.Provider
+				}
+				if e.Model != "" {
+					out[i].model = e.Model
+				}
 				out[i].status = "running"
 				if e.ParentSessionID != "" {
 					out[i].parentID = e.ParentSessionID
@@ -974,6 +1017,8 @@ func childrenFromEvents(events []protocol.Event) []childActivity {
 				agent:     e.Agent,
 				prompt:    e.Prompt,
 				name:      e.Name,
+				provider:  e.Provider,
+				model:     e.Model,
 				status:    "running",
 			})
 		case protocol.ChildCompleted:
@@ -1015,6 +1060,19 @@ func childrenFromEvents(events []protocol.Event) []childActivity {
 			})
 			if e.Verification != nil {
 				_ = applyChildVerification(&out, index, id, e.Verification)
+			}
+		case protocol.ModelSelected:
+			id := e.SessionID
+			if id == "" {
+				continue
+			}
+			if i, ok := index[id]; ok {
+				if e.Provider != "" {
+					out[i].provider = e.Provider
+				}
+				if e.Model != "" {
+					out[i].model = e.Model
+				}
 			}
 		case protocol.ChildEscalated:
 			applyChildEscalatedToChildren(&out, index, e)
