@@ -7,7 +7,7 @@
 //
 // Non-overlap vs sibling stores:
 //   - pkg/timeline blob spill — oversized redacted tool text, not typed attachments
-//   - internal/artifact — versioned multi-agent work products (findings/patches)
+//   - internal/persist/artifact — versioned multi-agent work products (findings/patches)
 package attachment
 
 import (

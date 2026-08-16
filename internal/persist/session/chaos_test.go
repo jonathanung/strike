@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/jonathanung/strike-cli/harness/fault"
+	"github.com/jonathanung/strike-cli/internal/persist/session"
 	"github.com/jonathanung/strike-cli/internal/protocol"
-	"github.com/jonathanung/strike-cli/internal/session"
 )
 
 // Chaos: fsync fail latches the store; Recover rolls back and allows a clean

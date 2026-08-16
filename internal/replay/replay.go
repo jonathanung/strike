@@ -44,8 +44,8 @@ import (
 	"github.com/jonathanung/strike-cli/harness/provider"
 	"github.com/jonathanung/strike-cli/harness/provider/echo"
 	"github.com/jonathanung/strike-cli/harness/tool"
+	"github.com/jonathanung/strike-cli/internal/persist/session"
 	"github.com/jonathanung/strike-cli/internal/protocol"
-	"github.com/jonathanung/strike-cli/internal/session"
 )
 
 // ToolCall is one normalized tool invocation for sequence comparison.

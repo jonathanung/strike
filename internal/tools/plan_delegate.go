@@ -8,7 +8,7 @@ import (
 	"github.com/jonathanung/strike-cli/harness/tool"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/internal/plan"
+	"github.com/jonathanung/strike-cli/internal/persist/plan"
 )
 
 // PlanDelegateStore is the durable plan surface used by plan_delegate.

@@ -22,9 +22,9 @@ import (
 	"github.com/jonathanung/strike-cli/harness/tool"
 	"github.com/jonathanung/strike-cli/internal/auth"
 	"github.com/jonathanung/strike-cli/internal/config"
+	"github.com/jonathanung/strike-cli/internal/persist/session"
 	"github.com/jonathanung/strike-cli/internal/project"
 	"github.com/jonathanung/strike-cli/internal/protocol"
-	"github.com/jonathanung/strike-cli/internal/session"
 )
 
 // eventEqual compares protocol events; TurnCompleted gained a slice field and

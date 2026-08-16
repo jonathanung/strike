@@ -32,7 +32,7 @@ func ReadSession(path string) ([]protocol.Event, error) {
 }
 
 // WriteSession writes events as JSONL envelopes to path (truncate/create).
-// Useful for fixtures and offline tooling; the stock CLI uses internal/session.
+// Useful for fixtures and offline tooling; the stock CLI uses internal/persist/session.
 func WriteSession(path string, events []protocol.Event) error {
 	f, err := os.Create(path)
 	if err != nil {

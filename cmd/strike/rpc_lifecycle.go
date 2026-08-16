@@ -8,9 +8,9 @@ import (
 	"strings"
 
 	"github.com/jonathanung/strike-cli/internal/host"
+	"github.com/jonathanung/strike-cli/internal/persist/session"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/rpc"
-	"github.com/jonathanung/strike-cli/internal/session"
 	pkgproto "github.com/jonathanung/strike-cli/pkg/protocol"
 )
 

@@ -3,10 +3,10 @@
 // without deleting rows so leads can audit the trail.
 //
 // Non-overlap vs sibling stores:
-//   - internal/memory — untyped key/value facts (no decision lifecycle)
-//   - internal/artifact — versioned work products (findings/patches), not choices
-//   - internal/issue — tracked open/closed work items
-//   - internal/plan — structured multi-section plans
+//   - internal/persist/memory — untyped key/value facts (no decision lifecycle)
+//   - internal/persist/artifact — versioned work products (findings/patches), not choices
+//   - internal/persist/issue — tracked open/closed work items
+//   - internal/persist/plan — structured multi-section plans
 //
 // Prefer ledger_write over burying critical assumptions only in chat prose.
 // Active entries can auto-load into the system prompt (context bundle) and are

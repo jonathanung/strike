@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/jonathanung/strike-cli/internal/host"
-	"github.com/jonathanung/strike-cli/internal/plan"
+	"github.com/jonathanung/strike-cli/internal/persist/plan"
 )
 
 // fakePlans is an in-memory host.Plans for API tests.

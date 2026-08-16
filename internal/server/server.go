@@ -23,7 +23,7 @@ import (
 	"time"
 
 	"github.com/jonathanung/strike-cli/internal/host"
-	"github.com/jonathanung/strike-cli/internal/session"
+	"github.com/jonathanung/strike-cli/internal/persist/session"
 	"github.com/jonathanung/strike-cli/internal/version"
 )
 
@@ -697,7 +697,7 @@ func (s *Server) writeEventsRangeFile(ctx context.Context, w http.ResponseWriter
 }
 
 // isSessionLogHeader reports whether payload is the optional first-line
-// session.header schema marker written by internal/session (#803).
+// session.header schema marker written by internal/persist/session (#803).
 func isSessionLogHeader(payload []byte) bool {
 	var probe struct {
 		Type string `json:"type"`

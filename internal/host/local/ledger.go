@@ -2,7 +2,7 @@ package local
 
 import (
 	"github.com/jonathanung/strike-cli/internal/host"
-	"github.com/jonathanung/strike-cli/internal/ledger"
+	"github.com/jonathanung/strike-cli/internal/persist/ledger"
 	"github.com/jonathanung/strike-cli/pkg/redact"
 )
 

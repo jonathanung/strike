@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jonathanung/strike-cli/internal/memory"
+	"github.com/jonathanung/strike-cli/internal/persist/memory"
 )
 
 func openMemory(t *testing.T) *memory.Store {

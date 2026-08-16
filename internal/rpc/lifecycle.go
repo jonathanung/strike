@@ -11,7 +11,7 @@ import (
 )
 
 // Lifecycle is the host-level session lifecycle surface for strike rpc.
-// Implementations typically wrap internal/session.Manager + host.Sessions.
+// Implementations typically wrap internal/persist/session.Manager + host.Sessions.
 // Nil on Options means lifecycle methods return structured unsupported errors.
 type Lifecycle interface {
 	Capabilities() protocol.LifecycleCapabilities

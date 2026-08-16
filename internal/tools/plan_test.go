@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jonathanung/strike-cli/internal/plan"
+	"github.com/jonathanung/strike-cli/internal/persist/plan"
 )
 
 func openPlan(t *testing.T) *plan.Store {

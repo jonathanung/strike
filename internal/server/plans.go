@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/jonathanung/strike-cli/internal/host"
-	"github.com/jonathanung/strike-cli/internal/plan"
+	"github.com/jonathanung/strike-cli/internal/persist/plan"
 )
 
 // plansService returns host.Plans when configured.

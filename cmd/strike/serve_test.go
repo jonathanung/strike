@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jonathanung/strike-cli/internal/persist/session"
 	"github.com/jonathanung/strike-cli/internal/server"
-	"github.com/jonathanung/strike-cli/internal/session"
 )
 
 func TestParseServeArgs(t *testing.T) {

@@ -3,9 +3,9 @@
 // compare-and-swap updates.
 //
 // Non-overlap vs sibling stores:
-//   - internal/memory — untyped key/value facts and preferences (no versions/types)
-//   - internal/issue — tracked open/closed work items for humans/agents
-//   - internal/plan — root-owned structured multi-section plans with lifecycle
+//   - internal/persist/memory — untyped key/value facts and preferences (no versions/types)
+//   - internal/persist/issue — tracked open/closed work items for humans/agents
+//   - internal/persist/plan — root-owned structured multi-section plans with lifecycle
 //     (draft/approved/closed). Prefer plan_write/plan_read for that domain;
 //     artifact type "plan" is a lightweight shared blob/ref, not a second plan DB.
 //

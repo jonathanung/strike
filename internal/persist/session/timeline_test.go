@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jonathanung/strike-cli/internal/persist/session"
 	"github.com/jonathanung/strike-cli/internal/protocol"
-	"github.com/jonathanung/strike-cli/internal/session"
 	"github.com/jonathanung/strike-cli/pkg/timeline"
 )
 

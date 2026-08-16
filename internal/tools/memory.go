@@ -8,7 +8,7 @@ import (
 	"github.com/jonathanung/strike-cli/harness/tool"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/internal/memory"
+	"github.com/jonathanung/strike-cli/internal/persist/memory"
 )
 
 // MemoryStore is the durable project memory surface used by memory tools.

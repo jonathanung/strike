@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jonathanung/strike-cli/internal/issue"
+	"github.com/jonathanung/strike-cli/internal/persist/issue"
 )
 
 func openIssue(t *testing.T) *issue.Store {

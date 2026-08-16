@@ -73,7 +73,7 @@ test: tui-gen
 # Failure-injection / chaos suite (#808). Also covered by `make test`.
 # See docs/chaos.md.
 chaos:
-	go test ./internal/session/ \
+	go test ./internal/persist/session/ \
 		-run 'Chaos|TestArm|TestCatalog|TestCheck|TestDisarm|TestConcurrent' -count=1
 	go -C harness test ./fault/ ./tool/ ./engine/ \
 		-run 'Chaos|TestArm|TestCatalog|TestCheck|TestDisarm|TestConcurrent' -count=1

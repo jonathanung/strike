@@ -81,7 +81,7 @@ go test ./path/to/package/ -count=1 -v
 1. `harness/tool` — sandbox/workspace, filestate freshness, caps, defer/toolsearch  
 2. `harness/engine` — prune/compaction, interrupt, deferred tool re-promote, multi-tool  
 3. `harness/permission` — Evaluate + Service edge cases  
-4. `internal/protocol` + `internal/session` — new event kinds, replay  
+4. `internal/protocol` + `internal/persist/session` — new event kinds, replay  
 5. `internal/question` — multi-question ask/reply  
 6. `internal/auth` — OAuth/PKCE/device, resolve edge cases  
 7. `providers/*` — SSE cancel, cache headers where applicable  
