@@ -50,6 +50,19 @@ func TestSrcFlattenInSync(t *testing.T) {
 	}
 }
 
+func TestParentGenerateRunsFlatten(t *testing.T) {
+	root := moduleRoot(t)
+	cmd := exec.Command("go", "generate", ".")
+	cmd.Dir = filepath.Join(root, "internal", "tui")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("go generate ./internal/tui: %v\n%s", err, out)
+	}
+	if !bytes.Contains(out, []byte("gen_src: flattened")) {
+		t.Fatalf("parent go generate did not flatten:\n%s", out)
+	}
+}
+
 func TestGenerateRemovesLegacyParentFlatten(t *testing.T) {
 	root := moduleRoot(t)
 	parent := filepath.Join(root, "internal", "tui")
