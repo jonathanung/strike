@@ -1097,7 +1097,7 @@ authoring format from this contract forward.
 | Malformed plugin cannot silently shadow | Skip plugin; other sources unchanged |
 | Disabled plugins contribute nothing | `plugins.lock.json` `enabled: false` |
 | No arbitrary provider/auth/streaming code | Provider profiles via `ParseProvidersFile` / shipped `WireAPI` only; secret literals rejected |
-| Tests: precedence, namespacing, disablement, path confinement | `internal/integrate/plugin/*_test.go`, `internal/config/plugins_test.go`, theme catalog tests |
+| Tests: precedence, namespacing, disablement, path confinement | `internal/integrate/plugin/*_test.go`, `internal/product/config/plugins_test.go`, theme catalog tests |
 
 ## 16. Acceptance mapping (#727)
 

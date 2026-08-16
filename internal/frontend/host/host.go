@@ -7,7 +7,7 @@
 // internal/frontend/host/local.
 //
 // The boundary rule is the point of this package. internal/frontend/tui talks to the
-// host through these interfaces alone, never to internal/auth, config,
+// host through these interfaces alone, never to internal/product/auth, config,
 // models, or history directly. The backend can therefore add a service or a
 // protocol event (staging a non-exposed feature) without touching the
 // frontend, and the frontend can be exercised against fakes with no network,

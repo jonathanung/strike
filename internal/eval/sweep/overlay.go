@@ -8,7 +8,7 @@ import (
 )
 
 // Overlay is a partial project config written into an instance workspace
-// before strike exec. Fields map 1:1 onto internal/config.Config JSON keys
+// before strike exec. Fields map 1:1 onto internal/product/config.Config JSON keys
 // for the dials under test in #563.
 type Overlay struct {
 	LeanCode            string  `json:"leanCode,omitempty"`

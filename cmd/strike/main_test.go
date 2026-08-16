@@ -14,7 +14,7 @@ import (
 
 	"github.com/jonathanung/strike-cli/harness/permission"
 	"github.com/jonathanung/strike-cli/harness/tool"
-	"github.com/jonathanung/strike-cli/internal/config"
+	"github.com/jonathanung/strike-cli/internal/product/config"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 )
 

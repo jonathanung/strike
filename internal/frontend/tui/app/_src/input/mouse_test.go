@@ -124,7 +124,7 @@ func TestMouseClickFileTitleOpensEditor(t *testing.T) {
 	m.workDir = base
 	m.vimMode = VimModePane
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 40})
-	rel := "internal/auth/store.go"
+	rel := "internal/product/auth/store.go"
 	m.applyEvent(protocol.ToolCallBegin{CallID: "r1", Name: "read"})
 	m.applyEvent(protocol.ToolCallEnd{CallID: "r1", Title: rel, Output: "package auth\n"})
 	m.refreshViewport()

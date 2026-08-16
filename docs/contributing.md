@@ -15,7 +15,7 @@ internal/protocol/     compatibility re-export of pkg/protocol
 internal/frontend/rpc/          stdio JSON-RPC 2.0 transport (strike rpc; ops in, events out)
 internal/frontend/acp/          Agent Client Protocol adapter (strike acp; ACP ↔ Op/Event)
 harness/engine/        turn loop & tool dispatch
-internal/auth/         product credential store (0600 auth.json); flow re-exports
+internal/product/auth/         product credential store (0600 auth.json); flow re-exports
 harness/provider/      Provider interface + echo
 harness/tool/          tool contract + kernel builtins (read/glob/grep/edit/write/
                        apply_patch/move/delete/bash/task/webfetch/websearch/browser/todo*/
@@ -24,7 +24,7 @@ internal/tools/        Strike product builtins (memory_*/issue_*/plan_*/…)
 harness/permission/    rulesets + suspend/resume ask service
 internal/persist/session/      JSONL event-log persistence
 internal/frontend/server/       strike serve web cockpit (REST/SSE/WS + embedded UI)
-internal/config/       layered config + agents/skills/workflows
+internal/product/config/       layered config + agents/skills/workflows
 internal/frontend/host/         frontend-facing host-service contract (stdlib-only);
                        local/ wraps auth/config/models/history/memory/issue/files
 internal/frontend/tui/          kit packages (ui, theme, common, term) + app/
@@ -55,7 +55,7 @@ session is persisted as a JSONL event log (`~/.strike/sessions/`). Everything
 else the TUI needs from its host process — credentials, the model catalog,
 saved defaults, prompt history, agent/skill listings — arrives through a
 second, narrower seam, `internal/frontend/host` (implemented by `internal/frontend/host/local`);
-the TUI never imports `internal/auth`, `config`, `models`, or `history`
+the TUI never imports `internal/product/auth`, `config`, `models`, or `history`
 directly, and a boundary test enforces it, so the backend can add a host
 service without touching the UI and the UI can be developed against fakes.
 Tools return `{Title, Output, Metadata}` separating model-facing text from UI
@@ -163,8 +163,8 @@ matching paths (and keep relative links valid):
 | Slash commands | `internal/frontend/tui/app/_src/app/commands.go` (`builtinCommandSpecs`) | [usage.md](usage.md) |
 | Keybinds | `internal/frontend/tui/app/_src/app/keymap.go` (`defaultKeyMap`, `keybindCatalog`) | [keybinds.md](keybinds.md) |
 | CLI flags / `exec` | `cmd/strike` + `strike --help` | [install.md](install.md), [usage.md](usage.md) |
-| Config / custom providers / `vimMode`/`nanoMode` | `internal/config` | [config.md](config.md) |
-| Agents, skills, workflows | `internal/config` builtins + loaders | [agents-skills.md](agents-skills.md) |
+| Config / custom providers / `vimMode`/`nanoMode` | `internal/product/config` | [config.md](config.md) |
+| Agents, skills, workflows | `internal/product/config` builtins + loaders | [agents-skills.md](agents-skills.md) |
 | Plugin bundles (contract) | [plugins.md](plugins.md) (Agent Plugins 1.0.0; #1142) | [plugins.md](plugins.md) |
 | Plugin panes (ABI) | docs only until TUI/web hosts (#731/#732) | [plugin-panes.md](plugin-panes.md) |
 | Tool inventory | `internal/tool` + `cmd/strike/wire.go` | [ARCHITECTURE.md](ARCHITECTURE.md) |

@@ -12,8 +12,8 @@ import (
 
 	"github.com/jonathanung/strike-cli/internal/frontend/acp"
 	"github.com/jonathanung/strike-cli/internal/frontend/server"
+	"github.com/jonathanung/strike-cli/internal/product/version"
 	"github.com/jonathanung/strike-cli/internal/protocol"
-	"github.com/jonathanung/strike-cli/internal/version"
 )
 
 const acpUsage = `Speak the Agent Client Protocol (ACP) over stdio as newline-delimited JSON-RPC 2.0.

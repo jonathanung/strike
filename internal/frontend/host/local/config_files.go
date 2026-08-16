@@ -7,8 +7,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/frontend/host"
+	"github.com/jonathanung/strike-cli/internal/product/config"
 )
 
 // defaultGlobalConfigStub matches config.Restore's starter global config.

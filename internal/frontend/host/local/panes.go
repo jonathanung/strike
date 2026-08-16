@@ -8,8 +8,8 @@ import (
 
 	"github.com/jonathanung/strike-cli/internal/frontend/host"
 	"github.com/jonathanung/strike-cli/internal/integrate/plugin"
+	"github.com/jonathanung/strike-cli/internal/product/version"
 	"github.com/jonathanung/strike-cli/internal/trust/secret"
-	"github.com/jonathanung/strike-cli/internal/version"
 )
 
 // NewPanes builds a host.Panes backed by installed plugin contributions.

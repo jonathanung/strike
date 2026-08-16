@@ -10,12 +10,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/auth"
-	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/frontend/host"
 	"github.com/jonathanung/strike-cli/internal/persist/history"
 	"github.com/jonathanung/strike-cli/internal/persist/issue"
 	"github.com/jonathanung/strike-cli/internal/persist/memory"
+	"github.com/jonathanung/strike-cli/internal/product/auth"
+	"github.com/jonathanung/strike-cli/internal/product/config"
 )
 
 // newTestServices returns services backed by an isolated, empty auth store.

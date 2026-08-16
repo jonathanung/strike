@@ -4,7 +4,7 @@ import "errors"
 
 // Workflow source labels for WorkflowSummary.Source. Values match config
 // WorkflowSource strings so frontends can display them without importing
-// internal/config.
+// internal/product/config.
 const (
 	WorkflowSourceBuiltin = "builtin"
 	WorkflowSourceGlobal  = "global"

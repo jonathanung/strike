@@ -71,14 +71,14 @@ service/theme token).
 | `harness/actionfacts` | semantic bash/tool fact projection for permissions (#888) |
 | `harness/permission` | last-match-wins allow/ask/deny + ask service (+ action facts) |
 | `internal/trust/secret` | secret-ref env indirection + protocol event redaction on top of pkg/redact (see docs/secrets.md) |
-| `internal/auth` | 0600 ~/.strike/auth.json store; flow helpers re-exported from `providers/auth` |
-| `internal/config` | global/project JSON + agents/skills markdown |
+| `internal/product/auth` | 0600 ~/.strike/auth.json store; flow helpers re-exported from `providers/auth` |
+| `internal/product/config` | global/project JSON + agents/skills markdown |
 | `internal/trust/audit` | Durable retention-bounded security audit sink (`~/.strike/audit/`) |
 | `internal/persist/session` | JSONL event log append/replay + concurrent Manager |
 | `internal/persist/history` | project-scoped prompt history |
 | `internal/persist/memory` | project-scoped durable key/value memory |
 | `internal/persist/issue` | project-scoped durable issue tracker |
-| `internal/goal` | loop harness: goals, guards, critic, hooks, JSONL state |
+| `internal/product/goal` | loop harness: goals, guards, critic, hooks, JSONL state |
 | `internal/persist/plan` | project-scoped root-owned structured plans (sections, lifecycle, CAS) |
 | `internal/persist/artifact` | shared typed multi-agent artifacts (findings/patch/test_report/…; CAS, owner\|team) |
 | `internal/persist/attachment` | content-addressed typed attachments (`att:sha256:` refs; image/pdf/diagram/log/archive/build) |
@@ -129,5 +129,5 @@ service/theme token).
 | `issue-create-and-handle` | File approved issue then handle |
 | `tui-components` | TUI ui/theme catalog |
 
-Built-in user skills (`/verify`, `/ship`, `/learn`, …) live under `internal/config/skills/`.
+Built-in user skills (`/verify`, `/ship`, `/learn`, …) live under `internal/product/config/skills/`.
 

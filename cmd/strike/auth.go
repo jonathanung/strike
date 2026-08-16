@@ -12,8 +12,8 @@ import (
 
 	"golang.org/x/term"
 
-	"github.com/jonathanung/strike-cli/internal/auth"
-	"github.com/jonathanung/strike-cli/internal/config"
+	"github.com/jonathanung/strike-cli/internal/product/auth"
+	"github.com/jonathanung/strike-cli/internal/product/config"
 )
 
 const authUsage = `Manage provider credentials.
@@ -194,7 +194,7 @@ func runAuthStatus(store *auth.Store, output io.Writer) error {
 }
 
 func envKey(provider string) (string, bool) {
-	// Keep in sync with internal/auth envVars + envAliases (google accepts
+	// Keep in sync with internal/product/auth envVars + envAliases (google accepts
 	// GEMINI_API_KEY primary and GOOGLE_API_KEY as a Google AI Studio alias).
 	provider = config.CanonicalProviderID(provider)
 	names := map[string][]string{

@@ -12,8 +12,8 @@ import (
 
 	"github.com/jonathanung/strike-cli/harness/permission"
 	"github.com/jonathanung/strike-cli/harness/provider"
-	"github.com/jonathanung/strike-cli/internal/auth"
-	"github.com/jonathanung/strike-cli/internal/config"
+	"github.com/jonathanung/strike-cli/internal/product/auth"
+	"github.com/jonathanung/strike-cli/internal/product/config"
 	"github.com/jonathanung/strike-cli/providers"
 	"github.com/jonathanung/strike-cli/providers/factory"
 )

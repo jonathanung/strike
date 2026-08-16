@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/jonathanung/strike/main/schemas/strike-config.schema.json",
   "title": "Strike main config",
-  "description": "JSON Schema for ~/.strike/config and ./.strike/config (and managed-config). Strike loads JSON or JSONC and ignores top-level $schema at runtime (no network fetch). Programmatic saves rewrite pure JSON and drop comments/$schema \u2014 see docs/config.md.\n\nadditionalProperties policy: true at the root and on nested objects. Runtime encoding/json ignores unknown keys; the schema stays permissive so future keys and editor-only fields do not fail validation. Known high-traffic keys are documented for autocomplete; this is best-effort alignment with internal/config.Config, not perfect 1:1 codegen.",
+  "description": "JSON Schema for ~/.strike/config and ./.strike/config (and managed-config). Strike loads JSON or JSONC and ignores top-level $schema at runtime (no network fetch). Programmatic saves rewrite pure JSON and drop comments/$schema \u2014 see docs/config.md.\n\nadditionalProperties policy: true at the root and on nested objects. Runtime encoding/json ignores unknown keys; the schema stays permissive so future keys and editor-only fields do not fail validation. Known high-traffic keys are documented for autocomplete; this is best-effort alignment with internal/product/config.Config, not perfect 1:1 codegen.",
   "type": "object",
   "additionalProperties": true,
   "properties": {

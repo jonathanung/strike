@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/auth"
+	"github.com/jonathanung/strike-cli/internal/product/auth"
 )
 
 func authHome(t *testing.T) string {

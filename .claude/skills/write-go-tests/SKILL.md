@@ -83,7 +83,7 @@ go test ./path/to/package/ -count=1 -v
 3. `harness/permission` — Evaluate + Service edge cases  
 4. `internal/protocol` + `internal/persist/session` — new event kinds, replay  
 5. `internal/question` — multi-question ask/reply  
-6. `internal/auth` — OAuth/PKCE/device, resolve edge cases  
+6. `internal/product/auth` — OAuth/PKCE/device, resolve edge cases  
 7. `providers/*` — SSE cancel, cache headers where applicable  
 8. `internal/frontend/tui` — keymap/default binds, modals, interrupt/esc paths  
 

@@ -20,8 +20,8 @@ import (
 
 	"github.com/jonathanung/strike-cli/internal/frontend/host"
 	"github.com/jonathanung/strike-cli/internal/persist/session"
+	"github.com/jonathanung/strike-cli/internal/product/version"
 	"github.com/jonathanung/strike-cli/internal/protocol"
-	"github.com/jonathanung/strike-cli/internal/version"
 )
 
 type sessionsResponse struct {

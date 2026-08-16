@@ -6,8 +6,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/jonathanung/strike-cli/internal/auth"
-	"github.com/jonathanung/strike-cli/internal/config"
+	"github.com/jonathanung/strike-cli/internal/product/auth"
+	"github.com/jonathanung/strike-cli/internal/product/config"
 )
 
 func TestOnboardingCleanInstallAutoOpens(t *testing.T) {

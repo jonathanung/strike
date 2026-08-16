@@ -15,7 +15,7 @@ func TestParseCompletionHandoffWholeJSON(t *testing.T) {
 	raw := `{
 		"summary": "fixed auth",
 		"files_changed": ["a.go", "b.go"],
-		"verification": "go test ./internal/auth",
+		"verification": "go test ./internal/product/auth",
 		"findings": ["token refresh race"],
 		"blockers": [],
 		"recommended_next_action": "merge after CI"
@@ -30,7 +30,7 @@ func TestParseCompletionHandoffWholeJSON(t *testing.T) {
 	if len(h.FilesChanged) != 2 || h.FilesChanged[0] != "a.go" {
 		t.Fatalf("files = %#v", h.FilesChanged)
 	}
-	if h.Verification != "go test ./internal/auth" {
+	if h.Verification != "go test ./internal/product/auth" {
 		t.Fatalf("verification = %q", h.Verification)
 	}
 	if len(h.Findings) != 1 || h.Findings[0] != "token refresh race" {

@@ -1,7 +1,7 @@
 // Package tui is strike's Bubble Tea frontend. It consumes engine events from
 // a channel and sends ops back on another (the Go analogue of codex's
 // multi-source select loop), and it reaches its host process only through the
-// internal/frontend/host contract — never internal/auth, config, models, or history
+// internal/frontend/host contract — never internal/product/auth, config, models, or history
 // directly. That boundary (enforced by boundary_test.go) lets the backend
 // stage services without touching the UI and lets the UI be exercised against
 // fakes. Views are built from internal/frontend/tui/ui components and internal/frontend/tui/theme
@@ -146,7 +146,7 @@ type Options struct {
 	NotifyMode NotifyMode
 	// CheckUpdate, when non-nil, runs once from Init as a background tea.Cmd
 	// (startup autoupdate probe). Return empty notice to stay silent.
-	// Wired by cmd/strike from config.autoupdate + internal/update.
+	// Wired by cmd/strike from config.autoupdate + internal/product/update.
 	CheckUpdate func(ctx context.Context) (notice string)
 	// SandboxMode is the resolved OS sandbox dial (off|read-only|workspace-write).
 	// Empty means workspace-write. Displayed by /sandbox; not mid-session mutable.

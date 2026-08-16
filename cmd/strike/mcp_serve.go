@@ -14,7 +14,7 @@ import (
 	"syscall"
 
 	"github.com/jonathanung/strike-cli/internal/integrate/mcp"
-	"github.com/jonathanung/strike-cli/internal/version"
+	"github.com/jonathanung/strike-cli/internal/product/version"
 )
 
 const mcpServeUsage = `Expose strike as an MCP server (stdio JSON-RPC) for hosts like Claude Code or Codex.

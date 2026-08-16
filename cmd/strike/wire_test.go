@@ -20,10 +20,10 @@ import (
 	"github.com/jonathanung/strike-cli/harness/provider"
 	"github.com/jonathanung/strike-cli/harness/provider/echo"
 	"github.com/jonathanung/strike-cli/harness/tool"
-	"github.com/jonathanung/strike-cli/internal/auth"
-	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/persist/session"
-	"github.com/jonathanung/strike-cli/internal/project"
+	"github.com/jonathanung/strike-cli/internal/product/auth"
+	"github.com/jonathanung/strike-cli/internal/product/config"
+	"github.com/jonathanung/strike-cli/internal/product/project"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 )
 

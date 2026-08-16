@@ -18,8 +18,8 @@ func schemaPath(t *testing.T) string {
 	if !ok {
 		t.Fatal("runtime.Caller failed")
 	}
-	// internal/config → repo root
-	root := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+	// internal/product/config → repo root
+	root := filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", ".."))
 	p := filepath.Join(root, "schemas", "strike-config.schema.json")
 	if _, err := os.Stat(p); err != nil {
 		t.Fatalf("schema file missing at %s: %v", p, err)

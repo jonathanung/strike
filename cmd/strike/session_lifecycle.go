@@ -12,13 +12,13 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/jonathanung/strike-cli/harness/sandbox"
-	"github.com/jonathanung/strike-cli/internal/config"
 	tui "github.com/jonathanung/strike-cli/internal/frontend/tui/app"
 	"github.com/jonathanung/strike-cli/internal/frontend/tui/theme"
 	"github.com/jonathanung/strike-cli/internal/persist/session"
-	"github.com/jonathanung/strike-cli/internal/project"
+	"github.com/jonathanung/strike-cli/internal/product/config"
+	"github.com/jonathanung/strike-cli/internal/product/project"
+	"github.com/jonathanung/strike-cli/internal/product/update"
 	"github.com/jonathanung/strike-cli/internal/protocol"
-	"github.com/jonathanung/strike-cli/internal/update"
 	"github.com/jonathanung/strike-cli/pkg/timeline"
 )
 

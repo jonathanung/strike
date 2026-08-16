@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/internal/version"
+	"github.com/jonathanung/strike-cli/internal/product/version"
 )
 
 // ErrLegacyManifest is returned when installing a Strike-native tree without AllowLegacy.

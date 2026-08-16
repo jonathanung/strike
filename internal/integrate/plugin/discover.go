@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/internal/version"
+	"github.com/jonathanung/strike-cli/internal/product/version"
 )
 
 // Options controls discovery roots and the running Strike version.

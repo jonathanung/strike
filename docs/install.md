@@ -190,8 +190,8 @@ re-run `strike auth login …`.
 `make build` stamps:
 
 ```text
--X …/internal/version.Version=$(git describe --tags …)
--X …/internal/version.Commit=$(git rev-parse --short HEAD)
+-X …/internal/product/version.Version=$(git describe --tags …)
+-X …/internal/product/version.Commit=$(git rev-parse --short HEAD)
 ```
 
 Release CI (`.github/workflows/release.yml`) builds linux/darwin amd64+arm64

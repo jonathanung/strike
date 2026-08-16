@@ -16,8 +16,8 @@ import (
 
 	"github.com/jonathanung/strike-cli/harness/permission"
 	"github.com/jonathanung/strike-cli/harness/sandbox"
-	"github.com/jonathanung/strike-cli/internal/update"
-	"github.com/jonathanung/strike-cli/internal/version"
+	"github.com/jonathanung/strike-cli/internal/product/update"
+	"github.com/jonathanung/strike-cli/internal/product/version"
 )
 
 type cliOptions struct {

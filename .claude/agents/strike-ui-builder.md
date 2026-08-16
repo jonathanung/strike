@@ -19,8 +19,8 @@ never raw lipgloss boxes hand-rolled in a view.
   `theme.Icons` (`th.Icons`, `theme.DefaultIcons()`).
 - Respect the import boundary: `internal/frontend/tui/...` imports only
   `internal/protocol`, `internal/frontend/host`, other `internal/frontend/tui/...`, stdlib, and
-  the charmbracelet libs — never `internal/auth`, `internal/config`,
-  `internal/models`, `internal/engine`, etc. `internal/frontend/tui/app/_src/test/boundary_test.go`
+  the charmbracelet libs — never `internal/product/auth`, `internal/product/config`,
+  `internal/product/models`, `internal/engine`, etc. `internal/frontend/tui/app/_src/test/boundary_test.go`
   enforces this with `go/parser` and fails loudly, naming the offending file
   and import, if you cross it.
 - Components stay pure renderers: theme + opts in, string out, no `tea.Msg`.

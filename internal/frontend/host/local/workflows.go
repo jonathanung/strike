@@ -8,8 +8,8 @@ import (
 	"sync"
 
 	"github.com/jonathanung/strike-cli/harness/permission"
-	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/frontend/host"
+	"github.com/jonathanung/strike-cli/internal/product/config"
 )
 
 // WorkflowsOpts configures a mutable workflow catalog with authoring support.

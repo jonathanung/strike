@@ -76,7 +76,7 @@ func TestReadToolCellHidesFileBody(t *testing.T) {
 	th := theme.Default()
 	cell := &toolCell{
 		name:   "read",
-		title:  "internal/auth/store.go",
+		title:  "internal/product/auth/store.go",
 		output: "package auth\n\nfunc Load() {}\n",
 		done:   true,
 	}
@@ -84,7 +84,7 @@ func TestReadToolCellHidesFileBody(t *testing.T) {
 	if !strings.Contains(plain, "read") {
 		t.Fatalf("missing read label:\n%s", plain)
 	}
-	if !strings.Contains(plain, "internal/auth/store.go") {
+	if !strings.Contains(plain, "internal/product/auth/store.go") {
 		t.Fatalf("missing path title:\n%s", plain)
 	}
 	if strings.Contains(plain, "package auth") || strings.Contains(plain, "func Load") {

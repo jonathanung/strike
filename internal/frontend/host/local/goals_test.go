@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/jonathanung/strike-cli/internal/frontend/host"
-	"github.com/jonathanung/strike-cli/internal/goal"
+	"github.com/jonathanung/strike-cli/internal/product/goal"
 )
 
 func TestGoalsWiredThrough(t *testing.T) {
