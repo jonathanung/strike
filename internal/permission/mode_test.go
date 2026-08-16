@@ -25,6 +25,7 @@ func TestModeEvaluateMatrix(t *testing.T) {
 		{protocol.PermissionModeDefault, "bash", Ask},
 		{protocol.PermissionModeDefault, "webfetch", Ask},
 		{protocol.PermissionModeDefault, "websearch", Ask},
+		{protocol.PermissionModeDefault, "browser", Ask},
 
 		{protocol.PermissionModePlan, "read", Allow},
 		{protocol.PermissionModePlan, "edit", Deny},
@@ -32,6 +33,7 @@ func TestModeEvaluateMatrix(t *testing.T) {
 		{protocol.PermissionModePlan, "bash", Ask},
 		{protocol.PermissionModePlan, "webfetch", Ask},
 		{protocol.PermissionModePlan, "websearch", Ask},
+		{protocol.PermissionModePlan, "browser", Ask},
 
 		// soft-approve is TUI countdown only — engine matches default.
 		{protocol.PermissionModeSoftApprove, "read", Allow},
@@ -40,6 +42,7 @@ func TestModeEvaluateMatrix(t *testing.T) {
 		{protocol.PermissionModeSoftApprove, "bash", Ask},
 		{protocol.PermissionModeSoftApprove, "webfetch", Ask},
 		{protocol.PermissionModeSoftApprove, "websearch", Ask},
+		{protocol.PermissionModeSoftApprove, "browser", Ask},
 
 		{protocol.PermissionModeAcceptEdits, "read", Allow},
 		{protocol.PermissionModeAcceptEdits, "edit", Allow},
@@ -47,6 +50,7 @@ func TestModeEvaluateMatrix(t *testing.T) {
 		{protocol.PermissionModeAcceptEdits, "bash", Ask},
 		{protocol.PermissionModeAcceptEdits, "webfetch", Ask},
 		{protocol.PermissionModeAcceptEdits, "websearch", Ask},
+		{protocol.PermissionModeAcceptEdits, "browser", Ask},
 
 		{protocol.PermissionModeYolo, "read", Allow},
 		{protocol.PermissionModeYolo, "edit", Allow},
@@ -54,6 +58,7 @@ func TestModeEvaluateMatrix(t *testing.T) {
 		{protocol.PermissionModeYolo, "bash", Allow},
 		{protocol.PermissionModeYolo, "webfetch", Allow},
 		{protocol.PermissionModeYolo, "websearch", Allow},
+		{protocol.PermissionModeYolo, "browser", Allow},
 	}
 	for _, tc := range cases {
 		late := ModeLateRules(tc.mode)

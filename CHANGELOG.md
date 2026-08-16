@@ -14,6 +14,11 @@ materially affect the shipped product.
 
 ## [Unreleased]
 
+### Added
+
+- **`browser` tool (read-only inspect)** — isolated per session/task profile for navigate, DOM/accessibility snapshot, console, and network capture. Domain/`network.allow`/SSRF apply below the model; clicks, typing, uploads, downloads, and script eval are denied. First slice of [#1052](https://github.com/jonathanung/strike/issues/1052).
+
+
 ## [v0.5.0] - 2026-08-15
 
 Minor release: Agent Plugins 1.0.0, a leaner default OS sandbox, `--auto`

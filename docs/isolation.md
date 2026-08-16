@@ -87,7 +87,7 @@ for application-layer egress:
 
 | Surface | Enforcement |
 |---|---|
-| `webfetch` / `websearch` | Dial/redirect checks via `sandbox.CheckNetworkAllow` |
+| `webfetch` / `websearch` / `browser` | Dial/redirect checks via `sandbox.CheckNetworkAllow` |
 | bash | **Fail-closed preflight** when allow is non-empty and OS host networking is on: known clients (`curl`/`wget`/`ssh`/`scp`/`sftp`/`nc` + wrappers) must match allow; interpreters, shell `/dev/tcp`/`/dev/udp`, package-manager network subcommands, and unknown binaries are denied (`network_denied`). When OS network is off (`NoNetwork`), preflight is skipped (stronger isolation). |
 | OS sandbox profile | **Not** per-host: host net on by default; off only when webfetch+websearch+mcp are hard-deny on `*`. No bwrap/seatbelt/Windows host allowlist in v1. |
 | Containers (#547) | Planned stronger plane; reuse the same allowlist shape |
@@ -136,7 +136,7 @@ Until launch UX ships:
 
 - Prefer OS sandbox + worktrees for day-to-day coding.
 - `network.allow` is the shared **shape** for application egress and future
-  container filters. Today: `webfetch`/`websearch` + bash **preflight** for
+  container filters. Today: `webfetch`/`websearch`/`browser` + bash **preflight** for
   curl/wget/ssh/scp/sftp/nc (deny `network_denied` when outside the list).
   OS bash networking remains all-or-nothing (`NoNetwork`); there is **no**
   per-host bwrap/seatbelt/Windows filter — `/sandbox explain` labels this as
@@ -179,7 +179,7 @@ rolling correlator on the permission service for the active turn:
 
 | Rule id | Trigger | Default action |
 |---|---|---|
-| `sensitive_read_egress` | `read` of a sensitive-class path, then `webfetch` / `websearch` / `bash` within the lookback window | **ask** (even under `yolo`) |
+| `sensitive_read_egress` | `read` of a sensitive-class path, then `webfetch` / `websearch` / `browser` / `bash` within the lookback window | **ask** (even under `yolo`) |
 | `write_exec_bash` | `write`/`edit` of an executable/script path, then `bash` that executes/sources that path | **ask** |
 | `retry_storm` | ≥ N identical permission denials in-turn (same permission + pattern) | **deny** |
 

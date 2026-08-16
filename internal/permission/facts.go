@@ -70,7 +70,7 @@ func analyzeForPermission(permission, pattern string) actionfacts.Facts {
 			Tool:    permission,
 			Command: pattern,
 		})
-	case "webfetch", "websearch", "read", "write", "edit", "glob", "grep", "delete", "move":
+	case "webfetch", "websearch", "browser", "read", "write", "edit", "glob", "grep", "delete", "move":
 		return actionfacts.Analyze(actionfacts.Input{
 			Tool: permission,
 			Argv: []string{pattern},

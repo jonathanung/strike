@@ -124,7 +124,7 @@ type Options struct {
 	// unavailable. Default false is fail-closed (#1030).
 	SandboxAllowDegrade bool
 	// NetworkAllow is the config network.allow host/CIDR list for
-	// webfetch/websearch. Empty means unrestricted public hosts. Copied onto
+	// webfetch/websearch/browser. Empty means unrestricted public hosts. Copied onto
 	// tool.Context and sandbox.Policy.NetworkAllow for /sandbox explain.
 	NetworkAllow []string
 	// BashSecrets maps env names → secret refs for bash process injection.
