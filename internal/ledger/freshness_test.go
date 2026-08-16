@@ -368,3 +368,20 @@ func TestSymbolPin(t *testing.T) {
 		t.Fatalf("symbol gone = %#v", fr)
 	}
 }
+
+func TestNonRegularPin(t *testing.T) {
+	dir := t.TempDir()
+	e := Entry{
+		Kind:   KindAssumption,
+		Status: StatusActive,
+		EvidencePins: []EvidencePin{{
+			Kind: PinKindPath,
+			Path: ".",
+			Hash: "sha256:" + strings.Repeat("ab", 32),
+		}},
+	}
+	fr := AssessFreshness(e, dir)
+	if fr.State != FreshStale || !strings.Contains(strings.Join(fr.ChangedEvidence, " "), "unreadable") {
+		t.Fatalf("dir pin = %#v", fr)
+	}
+}

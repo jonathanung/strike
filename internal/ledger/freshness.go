@@ -30,6 +30,7 @@ const (
 	maxPinHashLen    = 80
 	maxPinSymbolLen  = 256
 	maxPinCommandLen = 512
+	maxPinFileBytes  = 1 << 20
 )
 
 var (
@@ -114,7 +115,7 @@ func SnapshotPathPin(workDir, rel string) (EvidencePin, error) {
 	if err != nil {
 		return EvidencePin{}, err
 	}
-	data, err := os.ReadFile(abs)
+	data, err := readPinFile(abs)
 	if err != nil {
 		return EvidencePin{}, err
 	}
@@ -143,7 +144,7 @@ func checkPin(pin EvidencePin, workDir string) (ok, missing bool, desc string) {
 		}
 		return false, true, label + " missing"
 	}
-	data, err := os.ReadFile(abs)
+	data, err := readPinFile(abs)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return false, true, label + " missing"
@@ -191,6 +192,20 @@ func hashesEqual(a, b string) bool {
 
 func bytesContainIdent(data []byte, ident string) bool {
 	return ident != "" && strings.Contains(string(data), ident)
+}
+
+func readPinFile(abs string) ([]byte, error) {
+	fi, err := os.Lstat(abs)
+	if err != nil {
+		return nil, err
+	}
+	if !fi.Mode().IsRegular() {
+		return nil, fmt.Errorf("ledger: pin path is not a regular file")
+	}
+	if fi.Size() > maxPinFileBytes {
+		return nil, fmt.Errorf("ledger: pin file exceeds %d bytes", maxPinFileBytes)
+	}
+	return os.ReadFile(abs)
 }
 
 func resolvePinPath(workDir, rel string) (string, error) {
