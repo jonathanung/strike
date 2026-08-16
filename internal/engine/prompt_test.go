@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jonathanung/strike-cli/internal/engine"
+	"github.com/jonathanung/strike-cli/internal/enginebind"
 	"github.com/jonathanung/strike-cli/internal/ledger"
 	"github.com/jonathanung/strike-cli/internal/memory"
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -498,7 +499,7 @@ func TestSystemPromptAutoLoadsTaggedMemory(t *testing.T) {
 
 	sys := captureSystemPrompt(t, engine.Options{
 		WorkDir: t.TempDir(),
-		Memory:  store,
+		Memory:  enginebind.Memory(store),
 		Agents:  []engine.Agent{{Name: "build"}},
 	}, "scripted", "model-a")
 
@@ -549,7 +550,7 @@ func TestSystemPromptMemoryWriteVisibleSameSession(t *testing.T) {
 	eng := engine.New(engine.Options{
 		SessionID: "s-mem-refresh",
 		WorkDir:   t.TempDir(),
-		Memory:    store,
+		Memory:    enginebind.Memory(store),
 		Agents:    []engine.Agent{{Name: "build"}},
 		Registry:  tool.NewRegistry(),
 		Select: func(string) (provider.Provider, string, error) {
@@ -587,7 +588,7 @@ func TestSystemPromptNoMemoryLayerWhenEmpty(t *testing.T) {
 	}
 	sys := captureSystemPrompt(t, engine.Options{
 		WorkDir: t.TempDir(),
-		Memory:  store,
+		Memory:  enginebind.Memory(store),
 		Agents:  []engine.Agent{{Name: "build"}},
 	}, "scripted", "model-a")
 	if strings.Contains(sys, "# Project memory (untrusted)") {
@@ -611,7 +612,7 @@ func TestSystemPromptLedgerAutoload(t *testing.T) {
 	}
 	sys := captureSystemPrompt(t, engine.Options{
 		WorkDir: dir,
-		Ledger:  store,
+		Ledger:  enginebind.Ledger(store),
 		Agents:  []engine.Agent{{Name: "build"}},
 	}, "scripted", "model-a")
 	for _, want := range []string{

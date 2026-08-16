@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jonathanung/strike-cli/internal/engine"
+	"github.com/jonathanung/strike-cli/internal/enginebind"
 	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
@@ -79,6 +80,7 @@ func TestChildWorktreeIsolationReturnsPatchNotParentMutation(t *testing.T) {
 		},
 		MaxChildDepth:     1,
 		ChildIsolation:    "worktree",
+		Worktrees:         enginebind.Worktrees(),
 		Agents:            []engine.Agent{{Name: "build"}},
 		InitialAgent:      "build",
 		OpenChildSession:  func(_, id, _ string) (string, error) { return id, nil },
@@ -142,6 +144,65 @@ func TestChildWorktreeIsolationReturnsPatchNotParentMutation(t *testing.T) {
 			t.Fatalf("worktree not cleaned: %v path=%s", err, started.WorktreePath)
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestChildWorktreeIsolationFailsClosedWithoutBinder(t *testing.T) {
+	dir := t.TempDir()
+	taskCall := provider.ToolCall{
+		ID:   "t1",
+		Name: "task",
+		Args: json.RawMessage(`{"prompt":"edit in isolation","isolation":"worktree","force_delegate":true}`),
+	}
+	prov := newScriptedProvider(
+		toolCallStep(taskCall),
+		completedStep("parent done"),
+	)
+	eng := engine.New(engine.Options{
+		SessionID:       "root-iso-nobind",
+		Select:          func(string) (provider.Provider, string, error) { return prov, "m", nil },
+		InitialProvider: "scripted",
+		Registry:        tool.NewRegistry(tool.NewTask()),
+		WorkDir:         dir,
+		SandboxMode:     "off",
+		Rules:           []permission.Ruleset{permission.Defaults()},
+		MaxChildDepth:   1,
+		ChildIsolation:  "worktree",
+		Agents:          []engine.Agent{{Name: "build"}},
+		InitialAgent:    "build",
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+	eng.Ops() <- protocol.UserInput{Text: "spawn isolated"}
+	_ = receiveRequest(t, prov.requests)
+
+	deadline := time.After(5 * time.Second)
+	var end protocol.ToolCallEnd
+	var sawStart bool
+	for end.CallID == "" {
+		select {
+		case ev, ok := <-eng.Events():
+			if !ok {
+				t.Fatal("events closed")
+			}
+			switch e := ev.(type) {
+			case protocol.ChildStarted:
+				sawStart = true
+			case protocol.ToolCallEnd:
+				if e.CallID == "t1" {
+					end = e
+				}
+			}
+		case <-deadline:
+			t.Fatal("timeout waiting for task end")
+		}
+	}
+	if sawStart {
+		t.Fatal("child must not start when worktree binder is unset")
+	}
+	if !end.IsError || !strings.Contains(end.Output, "worktree binder is unset") {
+		t.Fatalf("end=%#v", end)
 	}
 }
 

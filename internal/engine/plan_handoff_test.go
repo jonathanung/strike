@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/engine"
+	"github.com/jonathanung/strike-cli/internal/enginebind"
 	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/plan"
 	"github.com/jonathanung/strike-cli/internal/protocol"
@@ -50,13 +50,13 @@ func TestHandoffStructuredPlanApprovesAndEmits(t *testing.T) {
 		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
 		InitialProvider: "scripted",
 		Registry:        tool.NewRegistry(tools.NewExitPlanMode()),
-		PlanStore:       store,
+		PlanStore:       enginebind.Plan(store),
 		Agents: []engine.Agent{
 			{Name: "build"},
 			{Name: "plan"},
 		},
 		InitialAgent: "plan",
-		Workflows:    []config.Workflow{config.BuiltinPlanImplement()},
+		Workflows:    []engine.Workflow{engine.BuiltinPlanImplement()},
 		Rules:        []permission.Ruleset{permission.Defaults()},
 	})
 	ctx, cancel := context.WithCancel(context.Background())
@@ -137,10 +137,10 @@ func TestHandoffRejectLeavesPlanDraft(t *testing.T) {
 		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
 		InitialProvider: "scripted",
 		Registry:        tool.NewRegistry(tools.NewExitPlanMode()),
-		PlanStore:       store,
+		PlanStore:       enginebind.Plan(store),
 		Agents:          []engine.Agent{{Name: "build"}, {Name: "plan"}},
 		InitialAgent:    "plan",
-		Workflows:       []config.Workflow{config.BuiltinPlanImplement()},
+		Workflows:       []engine.Workflow{engine.BuiltinPlanImplement()},
 		Rules:           []permission.Ruleset{permission.Defaults()},
 	})
 	ctx, cancel := context.WithCancel(context.Background())
@@ -204,10 +204,10 @@ func TestHandoffStaleVersionFails(t *testing.T) {
 		InitialProvider: "scripted",
 		InitialAutonomy: protocol.AutonomyAgent,
 		Registry:        tool.NewRegistry(tools.NewExitPlanMode()),
-		PlanStore:       store,
+		PlanStore:       enginebind.Plan(store),
 		Agents:          []engine.Agent{{Name: "build"}, {Name: "plan"}},
 		InitialAgent:    "plan",
-		Workflows:       []config.Workflow{config.BuiltinPlanImplement()},
+		Workflows:       []engine.Workflow{engine.BuiltinPlanImplement()},
 		Rules:           []permission.Ruleset{permission.Defaults()},
 	})
 	ctx, cancel := context.WithCancel(context.Background())
@@ -260,10 +260,10 @@ func TestHandoffMissingPlanFails(t *testing.T) {
 		InitialProvider: "scripted",
 		InitialAutonomy: protocol.AutonomyAgent,
 		Registry:        tool.NewRegistry(tools.NewExitPlanMode()),
-		PlanStore:       store,
+		PlanStore:       enginebind.Plan(store),
 		Agents:          []engine.Agent{{Name: "build"}, {Name: "plan"}},
 		InitialAgent:    "plan",
-		Workflows:       []config.Workflow{config.BuiltinPlanImplement()},
+		Workflows:       []engine.Workflow{engine.BuiltinPlanImplement()},
 		Rules:           []permission.Ruleset{permission.Defaults()},
 	})
 	ctx, cancel := context.WithCancel(context.Background())
@@ -314,10 +314,10 @@ func TestHandoffUnauthorizedOwnerFails(t *testing.T) {
 		InitialProvider: "scripted",
 		InitialAutonomy: protocol.AutonomyAgent,
 		Registry:        tool.NewRegistry(tools.NewExitPlanMode()),
-		PlanStore:       store,
+		PlanStore:       enginebind.Plan(store),
 		Agents:          []engine.Agent{{Name: "build"}, {Name: "plan"}},
 		InitialAgent:    "plan",
-		Workflows:       []config.Workflow{config.BuiltinPlanImplement()},
+		Workflows:       []engine.Workflow{engine.BuiltinPlanImplement()},
 		Rules:           []permission.Ruleset{permission.Defaults()},
 	})
 	ctx, cancel := context.WithCancel(context.Background())
@@ -362,7 +362,7 @@ func TestPhaseDoneCannotLeavePlanPhase(t *testing.T) {
 		Registry:        tool.NewRegistry(tools.NewPhaseDone()),
 		Agents:          []engine.Agent{{Name: "build"}, {Name: "plan"}},
 		InitialAgent:    "plan",
-		Workflows:       []config.Workflow{config.BuiltinPlanImplement()},
+		Workflows:       []engine.Workflow{engine.BuiltinPlanImplement()},
 		Rules:           []permission.Ruleset{permission.Defaults()},
 	})
 	ctx, cancel := context.WithCancel(context.Background())
@@ -414,7 +414,7 @@ func TestHandoffSkipAllRecordsBypass(t *testing.T) {
 		Registry:        tool.NewRegistry(tools.NewExitPlanMode()),
 		Agents:          []engine.Agent{{Name: "build"}, {Name: "plan"}},
 		InitialAgent:    "plan",
-		Workflows:       []config.Workflow{config.BuiltinPlanImplement()},
+		Workflows:       []engine.Workflow{engine.BuiltinPlanImplement()},
 		Rules:           []permission.Ruleset{permission.Defaults()},
 	})
 	ctx, cancel := context.WithCancel(context.Background())
@@ -501,10 +501,10 @@ func TestHandoffImplementerSeesPlanInPrompt(t *testing.T) {
 		InitialProvider: "scripted",
 		InitialAutonomy: protocol.AutonomyAgent,
 		Registry:        tool.NewRegistry(tools.NewExitPlanMode(), tools.NewPlanRead(store)),
-		PlanStore:       store,
+		PlanStore:       enginebind.Plan(store),
 		Agents:          []engine.Agent{{Name: "build"}, {Name: "plan"}},
 		InitialAgent:    "plan",
-		Workflows:       []config.Workflow{config.BuiltinPlanImplement()},
+		Workflows:       []engine.Workflow{engine.BuiltinPlanImplement()},
 		Rules:           []permission.Ruleset{permission.Defaults()},
 	})
 	ctx, cancel := context.WithCancel(context.Background())

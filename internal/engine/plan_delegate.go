@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/internal/plan"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 )
 
@@ -30,7 +29,7 @@ func (e *Engine) applyPlanSectionDelegate(h *childHandle, completed protocol.Chi
 
 // sectionDelegateOutcome maps child terminal status + handoff into a plan
 // DelegateOutcome. Failed/canceled/malformed preserve section content.
-func sectionDelegateOutcome(completed protocol.ChildCompleted) plan.DelegateOutcome {
+func sectionDelegateOutcome(completed protocol.ChildCompleted) DelegateOutcome {
 	status := completed.Status
 	handoff := completed.Handoff
 	title, body, hasSection := sectionFieldsFromHandoff(handoff)
@@ -41,13 +40,13 @@ func sectionDelegateOutcome(completed protocol.ChildCompleted) plan.DelegateOutc
 		if s := strings.TrimSpace(handoff.Summary); s != "" && s != defaultHandoffSummary(status) {
 			detail = s
 		}
-		return plan.DelegateOutcome{Status: plan.DelegateCanceled, Detail: detail}
+		return DelegateOutcome{Status: DelegateCanceled, Detail: detail}
 	case protocol.ChildStatusFailed:
 		detail := "child failed; section content preserved"
 		if s := strings.TrimSpace(handoff.Summary); s != "" {
 			detail = s
 		}
-		return plan.DelegateOutcome{Status: plan.DelegateFailed, Detail: detail}
+		return DelegateOutcome{Status: DelegateFailed, Detail: detail}
 	case protocol.ChildStatusBlocked:
 		detail := "child blocked (verification failed); section content preserved"
 		if s := strings.TrimSpace(completed.Summary); s != "" {
@@ -55,18 +54,18 @@ func sectionDelegateOutcome(completed protocol.ChildCompleted) plan.DelegateOutc
 		} else if s := strings.TrimSpace(handoff.Summary); s != "" {
 			detail = s
 		}
-		return plan.DelegateOutcome{Status: plan.DelegateFailed, Detail: detail}
+		return DelegateOutcome{Status: DelegateFailed, Detail: detail}
 	default:
 		// completed (or unknown treated as completed attempt)
 		if handoff.Incomplete && !hasSection {
-			return plan.DelegateOutcome{
-				Status: plan.DelegateMalformed,
+			return DelegateOutcome{
+				Status: DelegateMalformed,
 				Detail: "malformed child handoff (no structured section payload); section content preserved",
 			}
 		}
 		if !hasSection || body == nil {
-			return plan.DelegateOutcome{
-				Status: plan.DelegateMalformed,
+			return DelegateOutcome{
+				Status: DelegateMalformed,
 				Detail: "child completed without section_body; section content preserved",
 			}
 		}
@@ -74,8 +73,8 @@ func sectionDelegateOutcome(completed protocol.ChildCompleted) plan.DelegateOutc
 		if detail == "" {
 			detail = "section updated from child handoff"
 		}
-		return plan.DelegateOutcome{
-			Status: plan.DelegateApplied,
+		return DelegateOutcome{
+			Status: DelegateApplied,
 			Title:  title,
 			Body:   body,
 			Detail: detail,

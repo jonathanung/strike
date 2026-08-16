@@ -10,9 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/permission"
-	"github.com/jonathanung/strike-cli/internal/project"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
 	"github.com/jonathanung/strike-cli/internal/tool"
@@ -431,12 +429,17 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 	var (
 		wtPath, wtBranch, wtRepo, baseRev string
 	)
-	if config.WantChildWorktree(e.opts.ChildIsolation, req.Isolation) {
+	if WantChildWorktree(e.opts.ChildIsolation, req.Isolation) {
+		if e.opts.Worktrees == nil {
+			e.failDelegationSpawn(delegID, "child worktree: worktree binder is unset")
+			e.closeChildSession(childID)
+			return tool.TaskResult{}, fmt.Errorf("child worktree: worktree binder is unset")
+		}
 		base := e.opts.WorkDir
 		if base == "" {
 			base = e.opts.ProjectRoot
 		}
-		wt, wtErr := project.Add(ctx, base, childID)
+		wt, wtErr := e.opts.Worktrees.Add(ctx, base, childID)
 		if wtErr != nil {
 			// Soft-fail outside git: stay shared and note in policy reason.
 			if !errorsIsNotGit(wtErr) {
@@ -448,7 +451,7 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 			childWorkDir = wt.Path
 			isolationMode = "worktree"
 			wtPath, wtBranch, wtRepo = wt.Path, wt.Branch, wt.RepoRoot
-			baseRev = project.HeadRev(ctx, wt.Path)
+			baseRev = e.opts.Worktrees.HeadRev(ctx, wt.Path)
 		}
 	}
 
@@ -469,6 +472,10 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 		Memory:                     e.opts.Memory,
 		Ledger:                     e.opts.Ledger,
 		Attachments:                e.opts.Attachments,
+		ProjectArtifact:            e.opts.ProjectArtifact,
+		ProjectLedger:              e.opts.ProjectLedger,
+		Worktrees:                  e.opts.Worktrees,
+		Version:                    e.opts.Version,
 		SystemPrompt:               e.opts.SystemPrompt,
 		SystemPromptMode:           e.opts.SystemPromptMode,
 		LeanCode:                   e.opts.LeanCode,
@@ -1043,7 +1050,14 @@ func (e *Engine) attachChildIsolationHandoff(h *childHandle, completed *protocol
 	}
 	completed.Handoff.WorktreePath = h.worktreePath
 	completed.Handoff.BaseRevision = h.baseRevision
-	patch, err := project.DiffUnified(context.Background(), h.worktreePath)
+	if e.opts.Worktrees == nil {
+		if completed.Handoff.Findings == nil {
+			completed.Handoff.Findings = []string{}
+		}
+		completed.Handoff.Findings = append(completed.Handoff.Findings, "isolation patch export failed: worktree binder is unset")
+		return
+	}
+	patch, err := e.opts.Worktrees.DiffUnified(context.Background(), h.worktreePath)
 	if err != nil {
 		if completed.Handoff.Findings == nil {
 			completed.Handoff.Findings = []string{}
@@ -1087,12 +1101,14 @@ func (e *Engine) cleanupChildWorktree(h *childHandle) {
 		!strings.Contains(path, "/worktrees/") && !strings.Contains(path, `\worktrees\`) {
 		return
 	}
-	_ = project.Remove(context.Background(), h.worktreeRepo, path, h.worktreeBranch)
+	if e != nil && e.opts.Worktrees != nil {
+		_ = e.opts.Worktrees.Remove(context.Background(), h.worktreeRepo, path, h.worktreeBranch)
+	}
 	h.worktreePath = ""
 }
 
 func errorsIsNotGit(err error) bool {
-	return errors.Is(err, project.ErrNotGitRepository)
+	return errors.Is(err, ErrNotGitRepository)
 }
 
 func shortChildID(id string) string {
@@ -2278,7 +2294,7 @@ func (e *Engine) resolveTaskModelPin(ctx context.Context, pin string) (taskModel
 		}
 		providerName, model = e.provName, pin
 	}
-	providerName = config.CanonicalProviderID(providerName)
+	providerName = CanonicalProviderID(providerName)
 	model = stripMatchingProviderPrefixes(providerName, model)
 	if model == "" {
 		return taskModelPin{}, fmt.Errorf("model is empty")
@@ -2333,7 +2349,7 @@ func (e *Engine) applyChildProviderModel(child *Engine, pin taskModelPin) {
 	if pin.lock {
 		if pin.prov != nil {
 			child.prov = pin.prov
-			child.provName = config.CanonicalProviderID(pin.provider)
+			child.provName = CanonicalProviderID(pin.provider)
 			child.model = pin.model
 		} else {
 			child.prov = e.prov

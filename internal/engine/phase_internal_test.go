@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 )
@@ -26,14 +25,14 @@ func TestClearPhaseDropsWorkflowAndEmits(t *testing.T) {
 		SessionID: "clear-active",
 		Rules:     []permission.Ruleset{permission.Defaults()},
 	})
-	w := config.Workflow{
+	w := Workflow{
 		Name: "solo",
-		Phases: []config.Phase{{
+		Phases: []Phase{{
 			Name: "only",
 			Permissions: permission.Ruleset{
 				{Permission: "write", Pattern: "*", Action: permission.Deny},
 			},
-			Exit: config.ExitGate{Type: config.GateAgent},
+			Exit: ExitGate{Type: GateAgent},
 		}},
 	}
 	if err := e.enterPhase(w, 0); err != nil {
@@ -94,7 +93,7 @@ func TestSupervisedFailsClosedWithoutQuestionService(t *testing.T) {
 	})
 	e.autonomy = protocol.AutonomySupervised
 	e.questions = nil
-	err := e.runExitGate(context.Background(), config.Phase{Name: "plan"})
+	err := e.runExitGate(context.Background(), Phase{Name: "plan"})
 	if err == nil {
 		t.Fatal("supervised without questions should fail closed")
 	}
@@ -115,9 +114,9 @@ func TestCheckGateCanceledContext(t *testing.T) {
 	e.autonomy = protocol.AutonomyChecks
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	err := e.runCheckGate(ctx, config.Phase{
+	err := e.runCheckGate(ctx, Phase{
 		Name: "a",
-		Exit: config.ExitGate{Command: "true"},
+		Exit: ExitGate{Command: "true"},
 	})
 	if err == nil || !strings.Contains(err.Error(), "canceled") {
 		t.Fatalf("error = %v, want canceled", err)
@@ -138,9 +137,9 @@ func TestCheckGateTimeout(t *testing.T) {
 	// waiting the full phaseCheckTimeout.
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
-	err := e.runCheckGate(ctx, config.Phase{
+	err := e.runCheckGate(ctx, Phase{
 		Name: "slow",
-		Exit: config.ExitGate{Command: "sleep 5"},
+		Exit: ExitGate{Command: "sleep 5"},
 	})
 	if err == nil {
 		t.Fatal("expected timeout or cancel error")
@@ -160,9 +159,9 @@ func TestCheckGateTrustDenied(t *testing.T) {
 		},
 	})
 	e.autonomy = protocol.AutonomyChecks
-	err := e.runCheckGate(context.Background(), config.Phase{
+	err := e.runCheckGate(context.Background(), Phase{
 		Name: "a",
-		Exit: config.ExitGate{Command: "touch pwned"},
+		Exit: ExitGate{Command: "touch pwned"},
 	})
 	if err == nil || !strings.Contains(err.Error(), "trust denied") {
 		t.Fatalf("error = %v, want trust denied", err)
@@ -175,7 +174,7 @@ func TestSetAutonomyReemitsPhaseGate(t *testing.T) {
 		Rules:     []permission.Ruleset{permission.Defaults()},
 	})
 	// Default autonomy is empty until setAutonomy; treat as supervised label.
-	w := config.BuiltinPlanImplement()
+	w := BuiltinPlanImplement()
 	if err := e.enterPhase(w, 0); err != nil {
 		t.Fatal(err)
 	}
@@ -207,14 +206,14 @@ func TestSetAutonomyReemitsPhaseGate(t *testing.T) {
 	}
 }
 
-func testWorkflow(name string, phases ...config.Phase) config.Workflow {
-	w := config.Workflow{
-		SchemaVersion: config.WorkflowSchemaVersion,
+func testWorkflow(name string, phases ...Phase) Workflow {
+	w := Workflow{
+		SchemaVersion: WorkflowSchemaVersion,
 		Name:          name,
 		Phases:        phases,
-		Source:        config.WorkflowSourceProject,
+		Source:        WorkflowSourceProject,
 	}
-	w.Fingerprint = config.MustWorkflowFingerprint(w)
+	w.Fingerprint = "fp-" + w.Name
 	return w
 }
 
@@ -230,23 +229,23 @@ func drainPhaseEvents(e *Engine) {
 
 func TestStartWorkflowGenericAndExactlyOne(t *testing.T) {
 	review := testWorkflow("review-fix",
-		config.Phase{Name: "review", Agent: "build", Exit: config.ExitGate{Type: config.GateAgent}},
-		config.Phase{Name: "fix", Agent: "build", Exit: config.ExitGate{Type: config.GateAgent}},
+		Phase{Name: "review", Agent: "build", Exit: ExitGate{Type: GateAgent}},
+		Phase{Name: "fix", Agent: "build", Exit: ExitGate{Type: GateAgent}},
 	)
 	custom := testWorkflow("custom-flow",
-		config.Phase{
+		Phase{
 			Name: "step-a",
 			Permissions: permission.Ruleset{
 				{Permission: "write", Pattern: "*", Action: permission.Deny},
 			},
-			Exit: config.ExitGate{Type: config.GateAgent},
+			Exit: ExitGate{Type: GateAgent},
 		},
-		config.Phase{Name: "step-b", Exit: config.ExitGate{Type: config.GateAgent}},
+		Phase{Name: "step-b", Exit: ExitGate{Type: GateAgent}},
 	)
 	e := New(Options{
 		SessionID: "start-one",
 		Rules:     []permission.Ruleset{permission.Defaults()},
-		Workflows: []config.Workflow{review, custom},
+		Workflows: []Workflow{review, custom},
 		Agents:    []Agent{{Name: "build"}},
 	})
 
@@ -258,7 +257,7 @@ func TestStartWorkflowGenericAndExactlyOne(t *testing.T) {
 	if !ok || pc.Workflow != "custom-flow" || pc.Phase != "step-a" || pc.Index != 0 {
 		t.Fatalf("start = %#v", ev)
 	}
-	if pc.Fingerprint == "" || pc.Source != string(config.WorkflowSourceProject) {
+	if pc.Fingerprint == "" || pc.Source != string(WorkflowSourceProject) {
 		t.Fatalf("identity missing: %#v", pc)
 	}
 	if pc.Status != "" || pc.Gate == "" {
@@ -301,7 +300,7 @@ func TestStartWorkflowUnknownAndInvalidIndex(t *testing.T) {
 	e := New(Options{
 		SessionID: "start-bad",
 		Rules:     []permission.Ruleset{permission.Defaults()},
-		Workflows: []config.Workflow{testWorkflow("ok", config.Phase{Name: "a", Exit: config.ExitGate{Type: config.GateAgent}})},
+		Workflows: []Workflow{testWorkflow("ok", Phase{Name: "a", Exit: ExitGate{Type: GateAgent}})},
 	})
 	if err := e.startWorkflow("nope"); err == nil || !strings.Contains(err.Error(), "unknown") {
 		t.Fatalf("unknown = %v", err)
@@ -321,13 +320,13 @@ func TestStartWorkflowUnknownAndInvalidIndex(t *testing.T) {
 
 func TestAdvanceAndStopLifecycle(t *testing.T) {
 	w := testWorkflow("two-step",
-		config.Phase{Name: "a", Exit: config.ExitGate{Type: config.GateAgent}},
-		config.Phase{Name: "b", Exit: config.ExitGate{Type: config.GateAgent}},
+		Phase{Name: "a", Exit: ExitGate{Type: GateAgent}},
+		Phase{Name: "b", Exit: ExitGate{Type: GateAgent}},
 	)
 	e := New(Options{
 		SessionID: "adv-stop",
 		Rules:     []permission.Ruleset{permission.Defaults()},
-		Workflows: []config.Workflow{w},
+		Workflows: []Workflow{w},
 	})
 	e.autonomy = protocol.AutonomyAgent
 	if err := e.startWorkflow("two-step"); err != nil {
@@ -375,18 +374,18 @@ func TestAdvanceAndStopLifecycle(t *testing.T) {
 
 func TestResumeFingerprintMatchAndMismatch(t *testing.T) {
 	w := testWorkflow("bound",
-		config.Phase{
+		Phase{
 			Name: "only",
 			Permissions: permission.Ruleset{
 				{Permission: "write", Pattern: "*", Action: permission.Deny},
 			},
-			Exit: config.ExitGate{Type: config.GateAgent},
+			Exit: ExitGate{Type: GateAgent},
 		},
 	)
 	e := New(Options{
 		SessionID: "resume-fp",
 		Rules:     []permission.Ruleset{permission.Defaults()},
-		Workflows: []config.Workflow{w},
+		Workflows: []Workflow{w},
 	})
 
 	// Match: healthy restore applies phase denies.
@@ -457,12 +456,12 @@ func TestResumeMissingWorkflow(t *testing.T) {
 
 func TestResumeLegacyEmptyFingerprintBinds(t *testing.T) {
 	w := testWorkflow("legacy",
-		config.Phase{Name: "a", Exit: config.ExitGate{Type: config.GateAgent}},
+		Phase{Name: "a", Exit: ExitGate{Type: GateAgent}},
 	)
 	e := New(Options{
 		SessionID: "resume-legacy",
 		Rules:     []permission.Ruleset{permission.Defaults()},
-		Workflows: []config.Workflow{w},
+		Workflows: []Workflow{w},
 	})
 	e.restoreWorkflowPhase("legacy", 0, "a", "")
 	if !e.activeWorkflowHealthy() {
@@ -492,12 +491,12 @@ func TestResumeQuietStartupStillEmitsRecovery(t *testing.T) {
 
 func TestGenericAgentSwitchStopsPinnedWorkflow(t *testing.T) {
 	w := testWorkflow("pinned",
-		config.Phase{Name: "review", Agent: "reviewer", Exit: config.ExitGate{Type: config.GateAgent}},
+		Phase{Name: "review", Agent: "reviewer", Exit: ExitGate{Type: GateAgent}},
 	)
 	e := New(Options{
 		SessionID: "agent-sync",
 		Rules:     []permission.Ruleset{permission.Defaults()},
-		Workflows: []config.Workflow{w},
+		Workflows: []Workflow{w},
 		Agents:    []Agent{{Name: "reviewer"}, {Name: "build"}},
 	})
 	e.agent = Agent{Name: "reviewer"}
@@ -534,7 +533,7 @@ func TestPlanConvenienceAgentSyncAbandonsWithoutHandoff(t *testing.T) {
 	e := New(Options{
 		SessionID: "plan-sync",
 		Rules:     []permission.Ruleset{permission.Defaults()},
-		Workflows: []config.Workflow{config.BuiltinPlanImplement()},
+		Workflows: []Workflow{BuiltinPlanImplement()},
 		Agents:    []Agent{{Name: "plan"}, {Name: "build"}, {Name: "orchestrator"}},
 	})
 	e.agent = Agent{Name: "build"}
@@ -555,7 +554,7 @@ func TestPlanConvenienceAgentSyncImplementAfterHandoff(t *testing.T) {
 	e := New(Options{
 		SessionID: "plan-sync-handoff",
 		Rules:     []permission.Ruleset{permission.Defaults()},
-		Workflows: []config.Workflow{config.BuiltinPlanImplement()},
+		Workflows: []Workflow{BuiltinPlanImplement()},
 		Agents:    []Agent{{Name: "plan"}, {Name: "build"}, {Name: "orchestrator"}},
 	})
 	e.agent = Agent{Name: "build"}
@@ -572,12 +571,12 @@ func TestPlanConvenienceAgentSyncImplementAfterHandoff(t *testing.T) {
 
 func TestStartWorkflowOpAndStopOp(t *testing.T) {
 	w := testWorkflow("via-op",
-		config.Phase{Name: "a", Exit: config.ExitGate{Type: config.GateAgent}},
+		Phase{Name: "a", Exit: ExitGate{Type: GateAgent}},
 	)
 	e := New(Options{
 		SessionID: "ops-wf",
 		Rules:     []permission.Ruleset{permission.Defaults()},
-		Workflows: []config.Workflow{w},
+		Workflows: []Workflow{w},
 	})
 	e.handleOp(context.Background(), protocol.StartWorkflow{Name: "via-op"})
 	ev := <-e.Events()
@@ -602,7 +601,7 @@ func TestEnterPhaseRejectsBeforeMutate(t *testing.T) {
 		SessionID: "validate-first",
 		Rules:     []permission.Ruleset{permission.Defaults()},
 	})
-	bad := config.Workflow{Name: "x"} // no phases
+	bad := Workflow{Name: "x"} // no phases
 	if err := e.enterPhase(bad, 0); err == nil {
 		t.Fatal("want error")
 	}
