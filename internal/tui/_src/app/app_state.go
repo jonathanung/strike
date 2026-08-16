@@ -291,6 +291,87 @@ func (m Model) findChildActivity(id string) (childActivity, bool) {
 	return childActivity{}, false
 }
 
+// chromeProviderModel is the provider/model shown in header and context
+// chrome. While inspecting a subagent, this is the child's selection —
+// never the lead/root's — even when the child model is still unknown.
+func (m Model) chromeProviderModel() (provider, model string) {
+	if m.viewingChild() {
+		if ch, ok := m.findChildActivity(m.viewingID); ok {
+			return ch.provider, ch.model
+		}
+		return "", ""
+	}
+	return m.providerName, m.modelName
+}
+
+// setChildActivityModel records a child's resolved provider/model on the
+// matching activity row (active root or a stashed pane).
+func (m *Model) setChildActivityModel(id, provider, model string) bool {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return false
+	}
+	if setChildActivityModel(&m.children, id, provider, model) {
+		return true
+	}
+	if m.roots == nil {
+		return false
+	}
+	for _, p := range m.roots {
+		if p == nil {
+			continue
+		}
+		if setChildActivityModel(&p.children, id, provider, model) {
+			return true
+		}
+	}
+	return false
+}
+
+func setChildActivityModel(children *[]childActivity, id, provider, model string) bool {
+	if children == nil {
+		return false
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return false
+	}
+	for i := range *children {
+		if (*children)[i].sessionID != id {
+			continue
+		}
+		if provider != "" {
+			(*children)[i].provider = provider
+		}
+		if model != "" {
+			(*children)[i].model = model
+		}
+		return true
+	}
+	return false
+}
+
+type childModelMsg struct {
+	id       string
+	provider string
+	model    string
+}
+
+func (m Model) fetchChildModelCmd(id string) tea.Cmd {
+	id = strings.TrimSpace(id)
+	if id == "" || m.services.Sessions == nil {
+		return nil
+	}
+	sessions := m.services.Sessions
+	return func() tea.Msg {
+		provider, model := sessionModelFromJSONL(sessions, id)
+		if provider == "" && model == "" {
+			return nil
+		}
+		return childModelMsg{id: id, provider: provider, model: model}
+	}
+}
+
 // usageActivitySamples extracts known turn magnitudes for the sparkline.
 // Turns with no known token parts are skipped — never plotted as zero.
 func usageActivitySamples(t usageTotals) []float64 {
@@ -372,11 +453,14 @@ func (m Model) agentsStateSnapshot() agentsStateMsg {
 			}
 		}
 		kids = m.filterHiddenChildren(kids)
+		provider, model := m.rootProviderModel(id)
 		snaps = append(snaps, agentsRootSnap{
 			ID:         id,
 			Title:      m.rootTitleLabel(id),
 			State:      m.rootAgentState(id),
 			Children:   kids,
+			Provider:   provider,
+			Model:      model,
 			QueueLabel: m.rootQueueLabel(id),
 		})
 	}

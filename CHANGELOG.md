@@ -17,7 +17,7 @@ materially affect the shipped product.
 ### Added
 
 - **`browser` tool (read-only inspect)** — isolated per session/task profile for navigate, DOM/accessibility snapshot, console, and network capture. Domain/`network.allow`/SSRF apply below the model; clicks, typing, uploads, downloads, and script eval are denied. First slice of [#1052](https://github.com/jonathanung/strike/issues/1052).
-
+- **LSP call hierarchy, rename preview, and impact tools** — `call_hierarchy`, `rename_preview`, and `impact` query incoming/outgoing calls, preview a rename as unapplied file edits, and group symbol usage by file/package. Unsupported language-server capabilities return a non-fatal result and suggest `references` ([#1184](https://github.com/jonathanung/strike/issues/1184)).
 
 ## [v0.5.0] - 2026-08-15
 

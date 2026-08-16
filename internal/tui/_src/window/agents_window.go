@@ -52,6 +52,9 @@ type agentsRootSnap struct {
 	Title    string
 	State    theme.AgentState
 	Children []childActivity
+	// Provider/Model are this root's current selection for tab labels.
+	Provider string
+	Model    string
 	// QueueLabel identifies a constrained pool while waiting (empty when not queued).
 	QueueLabel string
 }
@@ -681,6 +684,7 @@ func (w agentsWindow) buildNodes(th theme.Theme) []ui.TreeNode {
 		if rootNum < 9 {
 			label = itoa(rootNum+1) + ") " + label
 		}
+		label = appendModelLabel(th, label, root.Model)
 		rootNum++
 		detail := agentsRootDetail(root.State)
 		if q := strings.TrimSpace(root.QueueLabel); q != "" {
@@ -765,6 +769,7 @@ func (w agentsWindow) filterChildTree(th theme.Theme, kids []childActivity, q st
 		if label == "" {
 			label = shortSessionID(ch.sessionID)
 		}
+		label = appendModelLabel(th, label, ch.model)
 		state := childAgentState(ch.status)
 		if ch.rosterState == "needs you" {
 			state = theme.AgentStateAttention
@@ -1089,6 +1094,26 @@ func childStatusTone(status string) ui.Tone {
 	}
 }
 
+// appendModelLabel puts the model id at the end of an agents-tab label.
+func appendModelLabel(th theme.Theme, label, model string) string {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return label
+	}
+	th = th.Resolve()
+	sep := strings.TrimSpace(th.Icons.DetailSeparator)
+	if sep == "" {
+		if label == "" {
+			return model
+		}
+		return label + " " + model
+	}
+	if label == "" {
+		return model
+	}
+	return label + " " + sep + " " + model
+}
+
 func agentsRootDetail(state theme.AgentState) string {
 	switch state {
 	case theme.AgentStateWorking:
@@ -1125,6 +1150,7 @@ func agentsListItem(th theme.Theme, ch childActivity, current bool) ui.ListItem 
 	if label == "" {
 		label = "subagent"
 	}
+	label = appendModelLabel(th, label, ch.model)
 
 	statusLabel, glyph, statusStyle := agentsStatusParts(th, ch.status)
 	detail := statusLabel

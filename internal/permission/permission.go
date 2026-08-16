@@ -57,6 +57,7 @@ var knownPermissions = map[string]struct{}{
 	"enter_plan_mode": {}, "exit_plan_mode": {}, "phase_done": {},
 	// LSP navigation + diagnostics (read-only; deferred tools when deferTools is on).
 	"definition": {}, "references": {}, "symbols": {}, "diagnostics": {},
+	"call_hierarchy": {}, "rename_preview": {}, "impact": {},
 	"mcp": {},
 }
 
@@ -163,6 +164,9 @@ func Defaults() Ruleset {
 		{Permission: "references", Pattern: "*", Action: Allow},
 		{Permission: "symbols", Pattern: "*", Action: Allow},
 		{Permission: "diagnostics", Pattern: "*", Action: Allow},
+		{Permission: "call_hierarchy", Pattern: "*", Action: Allow},
+		{Permission: "rename_preview", Pattern: "*", Action: Allow},
+		{Permission: "impact", Pattern: "*", Action: Allow},
 		// External MCP tools can run arbitrary server-side code — always ask.
 		{Permission: "mcp", Pattern: "*", Action: Ask},
 	}
