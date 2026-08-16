@@ -24,6 +24,9 @@ func TestPresetsShipped(t *testing.T) {
 	if Evaluate("git", "status", Defaults(), ro.Rules) != Allow {
 		t.Fatal("read-only should allow git")
 	}
+	if Evaluate("verify", "B", Defaults(), ro.Rules) != Deny {
+		t.Fatal("read-only should deny verify")
+	}
 	if Evaluate("bash", "go test ./...", Defaults(), dev.Rules) != Allow {
 		t.Fatal("dev should allow go test ./...")
 	}

@@ -36,6 +36,7 @@ var shortPurposes = map[string]string{
 	"delete":          "delete a file or directory within allowed roots",
 	"bash":            "run a shell command",
 	"git":             "read-only git status, diff, log, blame, and show",
+	"verify":          "run documented project verify tier; return failures only",
 	"task":            "progressive delegation: basic create/status/wait/cancel; advanced via toolsearch",
 	"task_status":     "compat: check child status (prefer task action=status)",
 	"task_read":       "compat: read child transcript slice (prefer task action=read)",
@@ -332,6 +333,10 @@ func recommendedGuidance(entries []GuidanceEntry) string {
 		"Prefer `git` over bash `git status`/`diff`/`log`/`blame`/`show` for bounded structured history.")
 	add(has("git") && !has("bash"),
 		"Use `git` for read-only status, diff, log, blame, and show.")
+	add(has("verify") && has("bash"),
+		"Prefer `verify` over bash `make test`/`go test` for documented tier gates (failures only).")
+	add(has("verify") && !has("bash"),
+		"Use `verify` to run documented project verification tiers A/B/C (failures only).")
 	add(has("webfetch") && has("bash"),
 		"Prefer `webfetch` over curl/wget in bash for ordinary page fetches (network.allow preflight also covers curl/wget/ssh when set).")
 	add(has("webfetch") && !has("bash"),
