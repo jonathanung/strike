@@ -64,6 +64,21 @@ func TestRedactEventUserMessage(t *testing.T) {
 	}
 }
 
+func TestRedactEventUserMessageAttachmentName(t *testing.T) {
+	ev := secret.RedactEvent(protocol.UserMessage{
+		Text: "look",
+		Images: []protocol.ImageAttachment{{
+			MIME: "image/png",
+			Name: "Authorization: Bearer [REDACTED]",
+			Ref:  "att:sha256:" + strings.Repeat("ab", 32),
+		}},
+	})
+	um := ev.(protocol.UserMessage)
+	if strings.Contains(um.Images[0].Name, "tok_abc1234567890") {
+		t.Fatalf("attachment name leaked: %q", um.Images[0].Name)
+	}
+}
+
 func TestRedactEventBypassNestedToolOutput(t *testing.T) {
 	// Tier C: nested / echoed tool output must not bypass scrubbing.
 	inner := "Authorization: Bearer tok_abc1234567890xyz"

@@ -25,6 +25,9 @@ const (
 type Image struct {
 	MIME string // e.g. image/png
 	Data []byte // raw bytes (adapters base64-encode for the wire)
+	// Ref is an optional content-addressed attachment id (att:sha256:<hex>).
+	// Adapters ignore it; the engine uses it to hydrate Data after restore.
+	Ref string
 }
 
 // Message is one entry in the conversation history sent to the model.

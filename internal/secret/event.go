@@ -18,6 +18,14 @@ func RedactEvent(ev protocol.Event) protocol.Event {
 	switch e := ev.(type) {
 	case protocol.UserMessage:
 		e.Text = redact.String(e.Text)
+		if len(e.Images) > 0 {
+			imgs := make([]protocol.ImageAttachment, len(e.Images))
+			copy(imgs, e.Images)
+			for i := range imgs {
+				imgs[i].Name = redact.String(imgs[i].Name)
+			}
+			e.Images = imgs
+		}
 		return e
 	case protocol.TurnSteered:
 		e.Text = redact.String(e.Text)

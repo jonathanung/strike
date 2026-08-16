@@ -157,6 +157,19 @@ Structured error codes on lifecycle failures: `session_not_found`,
 `session.load` on single-process rpc/acp only succeeds for the live session id;
 switching requires restart with `--session`.
 
+## Attachments (1.18+)
+
+`ImageAttachment` on `user.input`, `steer`, and `user.message` is the shared TUI/web/RPC/SDK contract.
+
+| Field | Role |
+|---|---|
+| `mime` | Media type (`image/png`, `application/pdf`, …) |
+| `data` | Inbound base64 payload. Omitted from persisted `user.message` when `ref` is set |
+| `ref` | Content-addressed id `att:sha256:<hex>` |
+| `sha256` / `bytes` / `kind` / `name` | Addressable metadata (`kind`: `image` \| `pdf` \| `diagram` \| `log` \| `archive` \| `build`) |
+
+Older readers ignore the new optional fields and still decode inline `data` on legacy logs.
+
 ## Related docs
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — package map and dataflow

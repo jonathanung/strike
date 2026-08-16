@@ -87,6 +87,15 @@ const (
 	DecisionReject  = pub.DecisionReject
 )
 
+const (
+	AttachmentKindImage   = pub.AttachmentKindImage
+	AttachmentKindPDF     = pub.AttachmentKindPDF
+	AttachmentKindDiagram = pub.AttachmentKindDiagram
+	AttachmentKindLog     = pub.AttachmentKindLog
+	AttachmentKindArchive = pub.AttachmentKindArchive
+	AttachmentKindBuild   = pub.AttachmentKindBuild
+)
+
 // Op / Event interfaces and shared structs.
 type (
 	Op                      = pub.Op

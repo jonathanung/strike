@@ -10,6 +10,7 @@ import (
 
 	"github.com/jonathanung/strike-cli/internal/admission"
 	"github.com/jonathanung/strike-cli/internal/artifact"
+	"github.com/jonathanung/strike-cli/internal/attachment"
 	"github.com/jonathanung/strike-cli/internal/audit"
 	"github.com/jonathanung/strike-cli/internal/auth"
 	"github.com/jonathanung/strike-cli/internal/config"
@@ -779,6 +780,18 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		} else {
 			auditSink = s
 		}
+		attStore, attErr := attachment.Open(globalRoot)
+		if attErr != nil {
+			if !resuming {
+				_ = sessions.Destroy(sessionID)
+			} else {
+				_ = bound.Close()
+			}
+			if wtClose != nil {
+				_ = wtClose()
+			}
+			return nil, nil, fmt.Errorf("opening attachments: %w", attErr)
+		}
 		eng := engine.New(engine.Options{
 			SessionID:        sid,
 			Select:           selectProvider,
@@ -790,6 +803,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			Instructions:     instructions,
 			Memory:           memoryStore,
 			Ledger:           ledgerStore,
+			Attachments:      attStore,
 			SystemPrompt:     cfg.SystemPrompt,
 			SystemPromptMode: cfg.SystemPromptMode,
 			LeanCode:         cfg.LeanCode,
