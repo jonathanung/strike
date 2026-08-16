@@ -50,6 +50,25 @@ func TestSrcFlattenInSync(t *testing.T) {
 	}
 }
 
+func TestGenerateRemovesLegacyParentFlatten(t *testing.T) {
+	root := moduleRoot(t)
+	parent := filepath.Join(root, "internal", "tui")
+	leftover := filepath.Join(parent, "legacy_flatten.go")
+	if err := os.WriteFile(leftover, []byte("package tui\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(leftover) })
+	cmd := exec.Command("go", "run", "gen_src.go", ".")
+	cmd.Dir = filepath.Join(parent, "app")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("go run gen_src.go: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(leftover); !os.IsNotExist(err) {
+		t.Fatalf("legacy parent flatten still present: %v", err)
+	}
+}
+
 // TestTUIParentListsAppAndKit locks the #1209 layout: parent internal/tui
 // lists only the app package and kit packages, not flattened app sources.
 func TestTUIParentListsAppAndKit(t *testing.T) {

@@ -31,6 +31,9 @@ func main() {
 		}
 		_ = os.Remove(filepath.Join(root, e.Name()))
 	}
+	// Pre-#1209 flatten landed in parent internal/tui/*.go. Leftover copies
+	// still compile as package tui and break go test ./... after upgrade.
+	removeLegacyParentFlatten(root)
 	n := 0
 	for _, ent := range ents {
 		if !ent.IsDir() {
@@ -99,6 +102,27 @@ func withDoNotEdit(b []byte) []byte {
 		buf.WriteByte('\n')
 	}
 	return buf.Bytes()
+}
+
+func removeLegacyParentFlatten(appRoot string) {
+	abs, err := filepath.Abs(appRoot)
+	if err != nil {
+		return
+	}
+	parent := filepath.Dir(abs)
+	if filepath.Base(parent) != "tui" {
+		return
+	}
+	ents, err := os.ReadDir(parent)
+	if err != nil {
+		return
+	}
+	for _, e := range ents {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") {
+			continue
+		}
+		_ = os.Remove(filepath.Join(parent, e.Name()))
+	}
 }
 
 func fail(err error) {
