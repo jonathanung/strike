@@ -27,6 +27,7 @@ var shortPurposes = map[string]string{
 	"move":            "rename or move a file within allowed roots",
 	"delete":          "delete a file or directory within allowed roots",
 	"bash":            "run a shell command",
+	"git":             "read-only git status, diff, log, blame, and show",
 	"task":            "progressive delegation: basic create/status/wait/cancel; advanced via toolsearch",
 	"task_status":     "compat: check child status (prefer task action=status)",
 	"task_read":       "compat: read child transcript slice (prefer task action=read)",
@@ -263,6 +264,10 @@ func recommendedGuidance(entries []GuidanceEntry) string {
 		"Use `write` only when creating or fully replacing a file.")
 	add(has("move") || has("delete"),
 		"Prefer `move`/`delete` over bash `mv`/`rm` for ordinary renames and deletions (workspace-scoped, freshness, TurnDiff).")
+	add(has("git") && has("bash"),
+		"Prefer `git` over bash `git status`/`diff`/`log`/`blame`/`show` for bounded structured history.")
+	add(has("git") && !has("bash"),
+		"Use `git` for read-only status, diff, log, blame, and show.")
 	add(has("webfetch") && has("bash"),
 		"Prefer `webfetch` over curl/wget in bash for ordinary page fetches (network.allow preflight also covers curl/wget/ssh when set).")
 	add(has("webfetch") && !has("bash"),

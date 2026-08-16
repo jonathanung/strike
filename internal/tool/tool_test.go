@@ -377,6 +377,7 @@ func TestToolNames(t *testing.T) {
 		"glob":            NewGlob(),
 		"grep":            NewGrep(),
 		"bash":            NewBash(),
+		"git":             NewGit(),
 		"webfetch":        NewWebFetch(),
 		"websearch":       NewWebSearch(),
 		"todowrite":       NewTodoWrite(store),
@@ -411,8 +412,8 @@ func TestToolNames(t *testing.T) {
 		"delegate":        NewDelegate(),
 		"wait":            NewWait(),
 	}
-	if len(want) != 41 {
-		t.Fatalf("expected 41 tools, got %d", len(want))
+	if len(want) != 42 {
+		t.Fatalf("expected 42 tools, got %d", len(want))
 	}
 	for name, tool := range want {
 		if tool.Name() != name {

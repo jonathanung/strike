@@ -40,7 +40,7 @@ type Ruleset []Rule
 // even before tools land so config deny rules and Defaults stay valid.
 var knownPermissions = map[string]struct{}{
 	"*": {}, "read": {}, "glob": {}, "grep": {}, "edit": {}, "write": {},
-	"bash": {}, "task": {}, "task_status": {}, "task_read": {}, "task_message": {},
+	"bash": {}, "git": {}, "task": {}, "task_status": {}, "task_read": {}, "task_message": {},
 	"task_interrupt": {}, "wait": {}, "agent_roster": {}, "agent_ownership": {},
 	"agent_message": {}, "agent_broadcast": {}, "agent_thread": {},
 	"team_task": {}, "patch_collab": {}, "delegate": {},
@@ -102,6 +102,8 @@ func Defaults() Ruleset {
 		{Permission: "edit", Pattern: "*", Action: Ask},
 		{Permission: "write", Pattern: "*", Action: Ask},
 		{Permission: "bash", Pattern: "*", Action: Ask},
+		// Read-only structured git (distinct from unrestricted bash).
+		{Permission: "git", Pattern: "*", Action: Allow},
 		// Project-local shell hooks execute arbitrary code — gate first run.
 		{Permission: "hook", Pattern: "*", Action: Ask},
 		// Workflow phase check commands (autonomy=checks) — source-aware trust.

@@ -30,7 +30,7 @@ func TestIsCoreTool(t *testing.T) {
 		"team_task", "patch_collab",
 		"plan_write", "plan_read", "plan_delegate",
 		"enter_plan_mode", "exit_plan_mode", "phase_done",
-		"webfetch", "websearch", "sleep", "skill", "todowrite", "memory_read",
+		"webfetch", "websearch", "git", "sleep", "skill", "todowrite", "memory_read",
 		"issue_write", "notebook_edit", "mcp_demo_ping",
 		"definition", "references", "symbols", "diagnostics",
 		"artifact_write", "artifact_read", "ledger_write", "ledger_read", "context_bundle",
