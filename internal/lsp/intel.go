@@ -614,7 +614,8 @@ func decodeWorkspaceEdit(raw json.RawMessage) ([]TextEdit, error) {
 		return nil, fmt.Errorf("decode workspace edit: %w", err)
 	}
 	var out []TextEdit
-	if len(edit.Changes) > 0 {
+	// LSP: if documentChanges is present, clients must prefer it over changes.
+	if len(edit.DocumentChanges) == 0 && len(edit.Changes) > 0 {
 		uris := make([]string, 0, len(edit.Changes))
 		for uri := range edit.Changes {
 			uris = append(uris, uri)
@@ -626,6 +627,7 @@ func decodeWorkspaceEdit(raw json.RawMessage) ([]TextEdit, error) {
 				out = append(out, TextEdit{Path: path, Range: te.Range, NewText: te.NewText, Kind: "edit"})
 			}
 		}
+		return out, nil
 	}
 	for _, rawChange := range edit.DocumentChanges {
 		rawChange = json.RawMessage(strings.TrimSpace(string(rawChange)))

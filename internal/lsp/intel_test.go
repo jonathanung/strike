@@ -184,6 +184,11 @@ func TestDecodeWorkspaceEditAndCalls(t *testing.T) {
 	if err != nil || len(edits) != 1 || !strings.Contains(edits[0].Path, "b.go") {
 		t.Fatalf("documentChanges: %v %#v", err, edits)
 	}
+	// Prefer documentChanges when both are set (do not double-count).
+	edits, err = decodeWorkspaceEdit([]byte(`{"changes":{"file:///a.go":[{"range":{"start":{"line":1,"character":0},"end":{"line":1,"character":1}},"newText":"dup"}]},"documentChanges":[{"textDocument":{"uri":"file:///a.go","version":1},"edits":[{"range":{"start":{"line":1,"character":0},"end":{"line":1,"character":1}},"newText":"keep"}]}]}`))
+	if err != nil || len(edits) != 1 || edits[0].NewText != "keep" {
+		t.Fatalf("prefer documentChanges: %v %#v", err, edits)
+	}
 	_, err = decodeWorkspaceEdit([]byte(`{"documentChanges":[{"nope":true}]}`))
 	if err == nil {
 		t.Fatal("want malformed documentChange error")
