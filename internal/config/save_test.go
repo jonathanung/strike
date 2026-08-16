@@ -8,9 +8,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/jonathanung/strike-cli/internal/permission"
+	"github.com/jonathanung/strike-cli/harness/permission"
+	"github.com/jonathanung/strike-cli/harness/scheduler"
 	"github.com/jonathanung/strike-cli/internal/protocol"
-	"github.com/jonathanung/strike-cli/internal/scheduler"
 )
 
 func TestConcurrentSetGlobalDefaults(t *testing.T) {

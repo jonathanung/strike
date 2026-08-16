@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jonathanung/strike-cli/harness/permission"
 	"github.com/jonathanung/strike-cli/internal/host/local"
-	"github.com/jonathanung/strike-cli/internal/permission"
 )
 
 func TestPermissionsExplainBaseLayers(t *testing.T) {

@@ -1,11 +1,11 @@
 .PHONY: build run run-echo serve web-build web-test web-check web-e2e test vet cover cover-check clean setup restore tui-gen prompt-reg chaos harness-eval swebench-eval telemetry-check container-smoke
 
 # Multi-module workspace (go.work): ., ./pkg/protocol, ./pkg/redact,
-# ./provider, ./providers.
+# ./harness, ./providers.
 # `go test ./...` from the root does not descend into nested go.mod
 # directories, so leaf modules are tested with `go -C dir test`.
 # -C must be the first go flag. GOWORK=off still builds via replace.
-LEAF_MODS = pkg/protocol pkg/redact provider providers
+LEAF_MODS = pkg/protocol pkg/redact harness providers
 
 # Overall statement-coverage floor for `make cover-check` (local / optional CI).
 # Soft baseline ~77%; keep below measured total so the gate does not flake.
@@ -73,7 +73,9 @@ test: tui-gen
 # Failure-injection / chaos suite (#808). Also covered by `make test`.
 # See docs/chaos.md.
 chaos:
-	go test ./internal/fault/ ./internal/session/ ./internal/tool/ ./internal/engine/ \
+	go test ./internal/session/ \
+		-run 'Chaos|TestArm|TestCatalog|TestCheck|TestDisarm|TestConcurrent' -count=1
+	go -C harness test ./fault/ ./tool/ ./engine/ \
 		-run 'Chaos|TestArm|TestCatalog|TestCheck|TestDisarm|TestConcurrent' -count=1
 
 # E3.2 prompt regression report (also runs under `make test` via go test).

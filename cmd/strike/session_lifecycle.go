@@ -11,10 +11,10 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/jonathanung/strike-cli/harness/sandbox"
 	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/project"
 	"github.com/jonathanung/strike-cli/internal/protocol"
-	"github.com/jonathanung/strike-cli/internal/sandbox"
 	"github.com/jonathanung/strike-cli/internal/session"
 	tui "github.com/jonathanung/strike-cli/internal/tui/app"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"

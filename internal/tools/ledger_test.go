@@ -3,7 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
-	"github.com/jonathanung/strike-cli/internal/tool"
+	"github.com/jonathanung/strike-cli/harness/tool"
 	"os"
 	"strings"
 	"testing"

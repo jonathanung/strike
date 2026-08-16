@@ -8,14 +8,13 @@ require (
 	charm.land/glamour/v2 v2.0.1
 	charm.land/lipgloss/v2 v2.0.5
 	github.com/AlexanderGrooff/mermaid-ascii v0.0.0-20260723221450-c94ea9a25643
-	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/charmbracelet/colorprofile v0.4.3
 	github.com/charmbracelet/x/ansi v0.11.7
 	github.com/creack/pty v1.1.24
 	github.com/hinshun/vt10x v0.0.0-20220301184237-5011da428d02
+	github.com/jonathanung/strike-cli/harness v0.0.0
 	github.com/jonathanung/strike-cli/pkg/protocol v0.0.0
 	github.com/jonathanung/strike-cli/pkg/redact v0.0.0
-	github.com/jonathanung/strike-cli/provider v0.0.0
 	github.com/jonathanung/strike-cli/providers v0.0.0
 	golang.org/x/sys v0.47.0
 	golang.org/x/term v0.45.0
@@ -25,6 +24,7 @@ require (
 	github.com/alecthomas/chroma/v2 v2.20.0 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
+	github.com/bmatcuk/doublestar/v4 v4.10.0 // indirect
 	github.com/bytedance/sonic v1.11.6 // indirect
 	github.com/bytedance/sonic/loader v0.1.1 // indirect
 	github.com/charmbracelet/ultraviolet v0.0.0-20260703014108-f5a850f9c2b7 // indirect
@@ -77,10 +77,10 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
+replace github.com/jonathanung/strike-cli/harness => ./harness
+
 replace github.com/jonathanung/strike-cli/pkg/protocol => ./pkg/protocol
 
 replace github.com/jonathanung/strike-cli/pkg/redact => ./pkg/redact
-
-replace github.com/jonathanung/strike-cli/provider => ./provider
 
 replace github.com/jonathanung/strike-cli/providers => ./providers

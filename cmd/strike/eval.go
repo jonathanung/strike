@@ -11,11 +11,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jonathanung/strike-cli/harness/scheduler"
 	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/eval/swebench"
 	"github.com/jonathanung/strike-cli/internal/eval/sweep"
 	"github.com/jonathanung/strike-cli/internal/eval/tbench"
-	"github.com/jonathanung/strike-cli/internal/scheduler"
 	"github.com/jonathanung/strike-cli/internal/version"
 )
 

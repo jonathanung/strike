@@ -32,6 +32,8 @@ const modulePath = "github.com/jonathanung/strike-cli"
 //   - pkg/sdk may import only the standard library and pkg/protocol.
 //   - no backend package (internal/* except internal/tui/**) imports
 //     internal/tui/**.
+//   - harness/** may not import strike-cli/internal/* (#1208).
+//   - internal/tui/** may not import harness/* (stays on protocol + host).
 //   - kit packages (ui, theme, common, term) import only each other, stdlib,
 //     and Charm (term may also use its PTY stack) — never protocol or host.
 //
@@ -146,6 +148,9 @@ func boundaryViolation(pkgDir, imp string) string {
 		return ""
 
 	case isTUIDir(pkgDir):
+		if strings.HasPrefix(imp, modulePath+"/harness") {
+			return "internal/tui may not import harness (stays on protocol + host)"
+		}
 		if !strings.HasPrefix(imp, internal) {
 			return "" // stdlib or third-party is fine (Charm paths: TestCharmImportPaths)
 		}
@@ -196,6 +201,12 @@ func boundaryViolation(pkgDir, imp string) string {
 			return ""
 		}
 		return "pkg/diag may only import stdlib, pkg/protocol, and pkg/redact"
+
+	case pkgDir == "harness" || strings.HasPrefix(pkgDir, "harness/"):
+		if strings.Contains(imp, "/internal/") {
+			return "harness may not import strike-cli/internal/*"
+		}
+		return ""
 
 	case pkgDir == "pkg/sdk" || strings.HasPrefix(pkgDir, "pkg/sdk/"):
 		if !strings.Contains(imp, ".") {
@@ -370,6 +381,7 @@ func TestKitImportViolation(t *testing.T) {
 		{"internal/tui/term", "github.com/hinshun/vt10x", ""},
 		{"internal/tui/ui", modulePath + "/internal/protocol", "kit packages must not import protocol or host"},
 		{"internal/tui/theme", modulePath + "/internal/host", "kit packages must not import protocol or host"},
+		{"internal/tui/common", modulePath + "/harness/engine", "kit packages may only import stdlib, Charm, sibling kit, and term's PTY stack"},
 		{"internal/tui/common", modulePath + "/internal/engine", "kit packages may only import sibling kit packages among internal/*"},
 		{"internal/tui/ui", "golang.org/x/sys/unix", "kit packages may only import stdlib, Charm, sibling kit, and term's PTY stack"},
 		{"internal/tui/ui", "github.com/creack/pty", "kit packages may only import stdlib, Charm, sibling kit, and term's PTY stack"},

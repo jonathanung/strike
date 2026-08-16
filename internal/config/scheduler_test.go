@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jonathanung/strike-cli/internal/scheduler"
+	"github.com/jonathanung/strike-cli/harness/scheduler"
 )
 
 func TestLoadSchedulerLayering(t *testing.T) {

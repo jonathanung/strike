@@ -8,20 +8,20 @@ cmd/strike/            main.go: flags/usage/auth/exec/rpc/acp/serve subcommands;
 pkg/protocol/          public Op/Event wire schema (own go.mod; docs/protocol.md)
 pkg/redact/            public credential-shaped string scrubbing (own go.mod)
 pkg/sdk/               public Go client over pkg/protocol (see docs/sdk.md)
-provider/              public Provider interface + echo (own go.mod; until #1208)
+harness/               kernel module (engine, provider+echo, tool, permission, …)
 providers/             adapters, auth flows, factory (own go.mod)
-go.work                workspace: ., ./pkg/protocol, ./pkg/redact, ./provider, ./providers
+go.work                workspace: ., ./pkg/protocol, ./pkg/redact, ./harness, ./providers
 internal/protocol/     compatibility re-export of pkg/protocol
 internal/rpc/          stdio JSON-RPC 2.0 transport (strike rpc; ops in, events out)
 internal/acp/          Agent Client Protocol adapter (strike acp; ACP ↔ Op/Event)
-internal/engine/       turn loop & tool dispatch
+harness/engine/        turn loop & tool dispatch
 internal/auth/         product credential store (0600 auth.json); flow re-exports
-internal/provider/     compatibility re-export of provider (+ echo)
-internal/tool/         tool contract + registry (read/glob/grep/edit/write/
-                       apply_patch/move/delete/bash/task/webfetch/websearch/browser/todo*/memory_*/
-                       issue_*/notebook_edit/sleep/skill/question/plan_mode/
-                       phase_done/toolsearch — full list: ARCHITECTURE.md)
-internal/permission/   rulesets + suspend/resume ask service
+harness/provider/      Provider interface + echo
+harness/tool/          tool contract + kernel builtins (read/glob/grep/edit/write/
+                       apply_patch/move/delete/bash/task/webfetch/websearch/browser/todo*/
+                       sleep/question/toolsearch — full list: ARCHITECTURE.md)
+internal/tools/        Strike product builtins (memory_*/issue_*/plan_*/…)
+harness/permission/    rulesets + suspend/resume ask service
 internal/session/      JSONL event-log persistence
 internal/server/       strike serve web cockpit (REST/SSE/WS + embedded UI)
 internal/config/       layered config + agents/skills/workflows

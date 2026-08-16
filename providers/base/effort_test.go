@@ -3,7 +3,7 @@ package base_test
 import (
 	"testing"
 
-	"github.com/jonathanung/strike-cli/provider"
+	"github.com/jonathanung/strike-cli/harness/provider"
 	"github.com/jonathanung/strike-cli/providers/base"
 )
 

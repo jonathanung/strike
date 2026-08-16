@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jonathanung/strike-cli/internal/fn"
-	"github.com/jonathanung/strike-cli/internal/provider"
+	"github.com/jonathanung/strike-cli/harness/fn"
+	"github.com/jonathanung/strike-cli/harness/provider"
 )
 
 func TestChooseBest(t *testing.T) {

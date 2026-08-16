@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/internal/permission"
+	"github.com/jonathanung/strike-cli/harness/permission"
 )
 
 // Managed env overrides (tests / custom deploy roots). When set, system

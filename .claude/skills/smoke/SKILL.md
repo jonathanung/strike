@@ -11,7 +11,7 @@ No API keys required for the default path (`echo` provider).
 
 ## When to run
 
-- Changes under `cmd/strike`, `internal/engine`, `internal/tui` (input/keymap/app), `internal/session`, `internal/auth`, `internal/host`
+- Changes under `cmd/strike`, `harness/engine`, `internal/tui` (input/keymap/app), `internal/session`, `internal/auth`, `internal/host`
 - Before cutting a release (with skill `release`)
 - After CI green when the PR is user-visible
 

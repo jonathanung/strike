@@ -16,10 +16,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jonathanung/strike-cli/harness/sandbox"
 	"github.com/jonathanung/strike-cli/internal/audit"
 	"github.com/jonathanung/strike-cli/internal/host"
 	"github.com/jonathanung/strike-cli/internal/protocol"
-	"github.com/jonathanung/strike-cli/internal/sandbox"
 	"github.com/jonathanung/strike-cli/internal/server"
 	"github.com/jonathanung/strike-cli/internal/session"
 )

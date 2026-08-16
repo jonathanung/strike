@@ -1,0 +1,1371 @@
+// Package engine is the headless agent runtime: it consumes protocol.Ops,
+// runs the model turn loop with tool dispatch, and emits protocol.Events.
+// Frontends never call into this package beyond New/Run/Ops/Events.
+package engine
+
+import (
+	"context"
+	"crypto/rand"
+	"errors"
+	"os"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/jonathanung/strike-cli/harness/fn"
+	"github.com/jonathanung/strike-cli/harness/permission"
+	"github.com/jonathanung/strike-cli/harness/provider"
+	"github.com/jonathanung/strike-cli/harness/question"
+	"github.com/jonathanung/strike-cli/harness/scheduler"
+	"github.com/jonathanung/strike-cli/harness/tool"
+	"github.com/jonathanung/strike-cli/pkg/protocol"
+)
+
+// AuditRecorder is the narrow surface engine needs for durable security audit
+// beyond protocol Observe (secret_ref_use at inject). Implemented by *audit.Sink.
+type AuditRecorder interface {
+	RecordSecretRefUse(sessionID, turnID, toolCallID, refClass, refHash, action, toolName string) error
+}
+
+// sessionTemp holds the absolute private scratch dir for this engine session
+// (os.TempDir()/strike/<session-id>/). Lazily allocated on first use. Cleaned
+// up when Run returns.
+type sessionTempState struct {
+	dir string
+	// owned is true when this engine created/ensured the dir and should remove it.
+	owned bool
+	// failed is true after a permanent allocation failure (do not retry).
+	failed bool
+	// lastTouch is the last mtime refresh (keeps long-lived sessions off the
+	// peer stale-cleanup list).
+	lastTouch time.Time
+}
+
+// defaultMaxStreamAttempts is how many times one logical model request may
+// call Provider.Stream on retryable failure before the turn fails.
+const (
+	defaultMaxStreamAttempts = 3
+	// absoluteMaxChildDepth is a hard ceiling against runaway nested task swarms.
+	absoluteMaxChildDepth = 8
+)
+
+// errToolLoopDetected ends the turn after the loop detector trips.
+var errToolLoopDetected = errors.New("tool loop detected")
+
+// Model-facing interrupt texts (aliases of protocol.ToolFeedback* helpers).
+var (
+	canceledToolOutput  = protocol.ToolFeedbackCanceled()
+	unstartedToolOutput = protocol.ToolFeedbackUnstarted()
+)
+
+// SelectFunc constructs a provider by name, returning the provider, its
+// default model, and an error when the name is unknown or credentials are
+// missing. The engine starts with no provider; selection happens via the
+// SelectModel op (or InitialProvider at startup).
+type SelectFunc func(name string) (provider.Provider, string, error)
+
+// Agent is a named persona: a system prompt plus optional provider/model/
+// effort pins and a permission profile applied when the agent is selected.
+type Agent struct {
+	Name        string
+	Description string
+	// Capabilities are optional specialty tags for capability-aware routing
+	// (#778). The agent name is always an implicit capability.
+	Capabilities []string
+	Provider     string
+	Model        string
+	Effort       protocol.Effort
+	Prompt       string
+	// Harness selects the function used when this agent runs as a task subagent.
+	// Empty and "default" use the built-in child model/tool loop.
+	// An unknown name falls back to default with a startup error.
+	Harness     string
+	Permissions permission.Ruleset
+}
+
+type Options struct {
+	// SessionID is stamped on every emitted event. Empty falls back to a
+	// random ID so standalone engine use still has a stable session key.
+	SessionID string
+	Select    SelectFunc
+	Registry  *tool.Registry
+	WorkDir   string
+	// CheckpointDir is the durable per-session checkpoint stack directory
+	// (#573). Empty disables disk persistence (tests). cmd/strike sets
+	// tool.DefaultCheckpointDir(sessionID). Set to "-" for an explicit off.
+	// Shadow-git for bash coverage still works from WorkDir alone.
+	CheckpointDir string
+	// Verify declares independent completion gates for solo/root turns (and
+	// custom harness paths that use the built-in turn loop). When non-empty, a
+	// successful claim (stopReason end_turn) runs gates via internal/verify,
+	// emits verification.started/completed, and attaches the report on
+	// TurnCompleted. Distinct from task/delegate child gates (#780). Model
+	// self-report cannot pass a configured gate (#806).
+	Verify []tool.VerifyGate
+	// InitialProvider/InitialModel are tried once at startup; failure is
+	// silent (the user selects interactively later).
+	InitialProvider string
+	InitialModel    string
+	// InitialEffort is the reasoning dial at startup; the zero value leaves
+	// each provider's own default in place.
+	InitialEffort protocol.Effort
+	// InitialAutonomy is the exit-gate policy at startup. Empty becomes
+	// AutonomySupervised so the dial is always explicit.
+	InitialAutonomy protocol.Autonomy
+	// InitialPermissionMode is the tool-permission posture at startup. Empty
+	// becomes PermissionModeDefault so the dial is always explicit.
+	InitialPermissionMode protocol.PermissionMode
+	// SandboxMode is the OS process sandbox dial for bash
+	// (off|read-only|workspace-write). Empty means workspace-write.
+	// Distinct from InitialPermissionMode (when the agent is asked).
+	SandboxMode string
+	// SandboxAllowDegrade permits unsandboxed bash when the OS backend is
+	// unavailable. Default false is fail-closed (#1030).
+	SandboxAllowDegrade bool
+	// NetworkAllow is the config network.allow host/CIDR list for
+	// webfetch/websearch/browser. Empty means unrestricted public hosts. Copied onto
+	// tool.Context and sandbox.Policy.NetworkAllow for /sandbox explain.
+	NetworkAllow []string
+	// BashSecrets maps env names → secret refs for bash process injection.
+	BashSecrets map[string]string
+	// Audit, when non-nil, receives durable security audit records beyond
+	// protocol Observe (e.g. secret_ref_use at inject time) (#1032).
+	Audit AuditRecorder
+	// ContentGuard is config contentGuard (+ managed ForcedDeny) for write-time
+	// content scanning on edit/write/apply_patch. Zero enables default posture.
+	ContentGuard tool.ContentGuardSettings
+	// WebSearch is config webSearch (provider, API key env, optional base URL)
+	// for the websearch tool. Empty means auto-detect from the environment.
+	WebSearch tool.WebSearchSettings
+	// AllowYoloWithoutSandbox permits permissionMode yolo when SandboxMode is
+	// off. Set only from CLI --i-know after an explicit operator override.
+	AllowYoloWithoutSandbox bool
+	// Agents are the selectable personas; the first is the default unless
+	// InitialAgent names another.
+	Agents       []Agent
+	InitialAgent string
+	MaxTokens    int
+	// MaxStreamAttempts bounds provider Stream retries on transient failure
+	// for one logical model request (tool-loop iteration). Zero defaults to
+	// 3; set to 1 to disable retries. Retries mint a new attempt identity and
+	// never re-run tools already completed for a prior successful stream.
+	MaxStreamAttempts int
+	// TurnTimeout bounds each turn independently of the Run parent context.
+	// Zero means no per-turn deadline (cancel only via Interrupt / parent ctx).
+	// On expiry the turn ends with stopReason "timeout" and tool results use
+	// error code timeout when applicable. The CLI composition root applies a
+	// product default (session.turnTimeoutS / --turn-timeout; 30m) for root
+	// engines; embedders and tests keep zero-off unless set. Each startTurn
+	// mints a fresh deadline — resume does not inherit an expired wall clock.
+	TurnTimeout time.Duration
+	// StreamRetryBackoff returns the wait before starting nextAttempt
+	// (1-based, >=2). nil uses a small exponential default. Tests may return
+	// 0 for instant retries.
+	StreamRetryBackoff func(nextAttempt int) time.Duration
+	// MaxToolRetryAttempts bounds auto-retries for one tool Execute under the
+	// error-code × idempotency policy (includes the first attempt). Zero
+	// defaults to 3; set to 1 to disable tool auto-retry. Only safe-retry
+	// tools retry on transient/timeout — mutative/unsafe never auto-retry.
+	MaxToolRetryAttempts int
+	// ToolRetryBackoff returns the wait before tool nextAttempt (1-based, >=2).
+	// nil uses exponential backoff with full jitter. Tests may return 0.
+	ToolRetryBackoff func(nextAttempt int) time.Duration
+	// ToolLoopThreshold is how many identical consecutive failing tool+args
+	// trip the loop detector (default 3). Values <1 use the default.
+	ToolLoopThreshold int
+	// ContextWindow is the selected model's context limit in tokens. Zero
+	// means unknown; threshold compaction stays off until LookupContextWindow
+	// or a later assignment provides a positive value. Overflow recovery does
+	// not require a known window.
+	ContextWindow int
+	// LookupContextWindow resolves context limits when the provider/model
+	// changes. nil skips catalog lookups.
+	LookupContextWindow func(provider, model string) int
+	// ListModels returns catalog model ids for a provider (same merge as the
+	// TUI /model picker: models.dev + providers.jsonc overlays). Used to
+	// validate task-tool model pins. nil skips validation (tests).
+	ListModels func(ctx context.Context, provider string) ([]string, error)
+	// LockModel prevents agent profiles from changing provider/model. Set
+	// when the task tool pins a model for a child session.
+	LockModel bool
+	// LockEffort prevents agent profiles from changing the reasoning dial.
+	// Set when the task tool pins effort for a child session.
+	LockEffort bool
+	// CompactionThreshold is the occupancy fraction (0–1) that triggers
+	// automatic compaction before a Stream. Zero defaults to 0.70; >=1
+	// disables threshold compaction.
+	CompactionThreshold float64
+	// CompactionBuffer is extra token headroom reserved with MaxTokens when
+	// computing the threshold budget. Zero defaults to 4096.
+	CompactionBuffer int
+	// KeepUserTurns is how many trailing real user turns to preserve when
+	// compacting. Zero defaults to 2.
+	KeepUserTurns int
+	// PruneProtectTokens is how many recent tool-output tokens to keep intact
+	// during continuous tool-result prune. Zero defaults to 40000.
+	PruneProtectTokens int
+	// PruneMinimumTokens is the minimum estimated tokens freed before prune
+	// mutates history. Zero defaults to 20000.
+	PruneMinimumTokens int
+	// PruneKeepUserTurns skips tool results inside the most recent N real user
+	// turns during prune. Zero defaults to 2.
+	PruneKeepUserTurns int
+	// PruneProtectTools names additional tools whose results stay available
+	// after prune (merged with the built-in "skill" protect). Empty adds none.
+	PruneProtectTools []string
+	// CompactionStrategy is "trim" (default) or "summarize". Unknown values
+	// fall back to trim.
+	CompactionStrategy string
+	// CompactionModel optionally pins the model id for summarize compaction.
+	// Empty uses the session model (same provider).
+	CompactionModel string
+	// ProjectRoot is the workspace root (often the git toplevel). Shown in
+	// the environment system-prompt layer; empty falls back to WorkDir.
+	ProjectRoot string
+	// Instructions are preloaded AGENTS.md/CLAUDE.md blocks appended after
+	// the environment layer (see config.LoadInstructions).
+	Instructions []string
+	// Memory, when set, supplies project memory for the auto-loaded
+	// project_memory system layer each composition (tagged entries only).
+	// nil disables auto-load. Refreshed every turn so memory_write is visible
+	// without restart.
+	Memory MemorySource
+	// Ledger, when set, supplies the decision/assumption ledger for the
+	// auto-loaded decision_ledger system layer (active entries, path-scoped
+	// to WorkDir). nil disables. Shared with child spawns so specialists see
+	// the same active slice. Refreshed every turn after ledger_write.
+	Ledger LedgerSource
+	// Attachments, when set, stores inbound user attachments by content hash
+	// and emits UserMessage history with refs (no payload). nil keeps legacy
+	// inline base64 (tests). Shared with child spawns.
+	Attachments AttachmentStore
+	// ProjectArtifact maps product artifact payloads onto ArtifactUpdated.
+	// nil skips emission. Shared with child spawns.
+	ProjectArtifact ArtifactProjector
+	// ProjectLedger maps product ledger payloads onto LedgerUpdated.
+	// nil skips emission. Shared with child spawns.
+	ProjectLedger LedgerProjector
+	// Worktrees, when set, binds per-child git worktrees (ChildIsolation).
+	// nil stays on the shared WorkDir (soft-fail). Shared with child spawns.
+	Worktrees WorktreeBinder
+	// Version is the product version string for diagnostic bundles. Empty is "dev".
+	Version string
+	// BuildDiagnostic, when set, assembles a redacted DiagnosticBundle via the
+	// product pkg/diag builder. Nil emits a minimal unredacted session stub
+	// (tests / embedders that do not inspect /diag).
+	BuildDiagnostic DiagnosticBuilder
+	// SystemPrompt, when set (non-whitespace), supplies the user system-prompt
+	// layer. Precedence for the overlay/defaults slot: custom agent persona
+	// body wins over config SystemPrompt, which wins over the built-in
+	// provider overlay. From config systemPrompt.
+	SystemPrompt string
+	// SystemPromptMode is overlay (default) or defaults. overlay replaces only
+	// the provider/persona slot (shared baseline stays). defaults replaces
+	// shared + provider/persona with SystemPrompt while keeping tools,
+	// environment, instructions, memory, and ledger. From config systemPromptMode.
+	SystemPromptMode string
+	// LeanCode controls agent-scoped lean-code guidance: off|lite|full.
+	// Empty defaults to lite. From config leanCode.
+	LeanCode string
+	// Rules are permission ruleset layers, earliest first (later wins).
+	Rules []permission.Ruleset
+	// RuleLayerNames are optional stable names parallel to Rules (explain/audit).
+	RuleLayerNames []string
+	// ManagedRules is the enterprise/MDM deny ceiling installed after phase
+	// (config.Managed.DenyRules). Empty disables. Propagated to child engines.
+	ManagedRules permission.Ruleset
+	// LockPermissionMode rejects SetPermissionMode when the dial is fixed by
+	// managed config (config.Managed.PermissionMode). Startup still applies
+	// InitialPermissionMode.
+	LockPermissionMode bool
+	// Hooks are shell-command lifecycle hooks (pre/post tool use). Empty disables.
+	Hooks []tool.HookDef
+	// HookRules are declarative config rules (event matcher → log/block/notify).
+	// Evaluated before shell hooks on pre_tool_use; block skips Execute.
+	HookRules permission.HookRuleset
+	// PersistProjectRule, when set, is invoked after a DecisionProject grant
+	// so the rule can be written to project config. Optional.
+	PersistProjectRule func(permission.Rule) error
+	// MaxChildDepth bounds foreground task nesting. Zero defaults to 1 in New
+	// (root depth 0 may spawn one child; that child may not spawn further).
+	// Values above absoluteMaxChildDepth are clamped.
+	MaxChildDepth int
+	// TaskOneShot marks engines spawned by the task tool: Run exits once the
+	// first turn finishes, nested children complete, and idle nudges drain.
+	// Root engines leave this false.
+	TaskOneShot bool
+	// Depth is this engine's lineage depth (0 = root).
+	Depth int
+	// ParentSessionID is the spawning session's ID; empty on root engines.
+	ParentSessionID string
+	// RootSessionID is the top-level session id for this lineage. Empty on
+	// construction is filled in New (self when ParentSessionID is empty;
+	// otherwise ParentSessionID as a depth-1 fallback). spawnChild always
+	// passes the resolved root so nested children keep a stable owner id for
+	// plan tools and similar root-owned artifacts.
+	RootSessionID string
+	// ContextBundle is the sealed context package attached at spawn for this
+	// engine (children only). Exposed on tool.Context and via context_bundle;
+	// empty means no bundle. Root engines leave this zero.
+	ContextBundle tool.ContextBundle
+	// Team is the implicit session-scoped agent team (lead + children).
+	// Root engines create one in New when nil. Child engines receive the
+	// lead's shared pointer from spawnChild so nested descendants enroll on
+	// the same roster. See team.go for nested membership policy.
+	Team *Team
+	// OverlapPolicy is off|warn|block for multi-agent path conflicts
+	// (session.overlapPolicy). Empty defaults to warn. Applied to Team
+	// ownership when the root team is created or inherited.
+	OverlapPolicy string
+	// DefaultChildBudget is the session default for per-child limits (#774).
+	// Spawn-time task budget fields overlay non-zero values. Zero fields mean
+	// unlimited (soft stall/loop signals still apply). Nested under any future
+	// session maxSessionCostUSD (#577) outer envelope.
+	DefaultChildBudget tool.AgentBudgetLimits
+	// ChildIsolation is the default filesystem mode for task children (#1036):
+	// off|shared (same WorkDir) or worktree (per-child git worktree). Spawn-time
+	// task.isolation overlays. Empty means shared.
+	ChildIsolation string
+	// MaxSessionCostUSD is the outer session cost envelope in USD (#577).
+	// Zero means unlimited. Shared across root + children via SessionBudget.
+	MaxSessionCostUSD float64
+	// MaxTurnTokens caps accumulated stream tokens (used) within one engine
+	// turn (#577). Zero means unlimited. Per-engine (not shared with children).
+	MaxTurnTokens int
+	// EstimateUsageCost prices a provider.Usage report in USD. nil disables
+	// cost accumulation (limits accepted but not enforced until pricing lands).
+	EstimateUsageCost EstimateUsageCostFunc
+	// SessionBudget is the shared cost tracker for this root lineage. Root New
+	// creates one when MaxSessionCostUSD > 0 or EstimateUsageCost is set;
+	// children inherit the pointer. Tests may inject a prebuilt tracker.
+	SessionBudget *sessionBudget
+	// DelegationPolicy is the pre-spawn worthiness gate (#876). Empty mode
+	// stays off (legacy always-spawn for tests/embedders); the CLI sets
+	// enforce when config omits the block. Soft "local" refuses bare
+	// tiny/overlap spawns unless force_delegate; hard ceilings never override.
+	DelegationPolicy DelegationPolicyConfig
+	// SessionBudgetExhausted, when set, is consulted by the delegation policy
+	// hard ceiling (budget_exhausted). When nil and SessionBudget is set, New
+	// wires it to SessionBudget.Exhausted automatically (#577).
+	SessionBudgetExhausted func() bool
+	// PersistSessionMeta, when set, writes durable session metadata (sidecar).
+	// The engine emits protocol.SessionMeta after a successful persist.
+	PersistSessionMeta func(meta protocol.SessionMeta) error
+	// Workflows are named phase sequences (built-in plan-implement plus any
+	// loaded from .strike/workflows). Empty falls back to the built-in only.
+	Workflows []Workflow
+	// DefaultWorkflow is entered by enter_plan_mode when set; empty means
+	// "plan-implement".
+	DefaultWorkflow string
+	// PlanStore backs unified plan-mode handoff (validate id/version, approve).
+	// nil rejects structured plan_id handoffs; legacy_text and skip-all still work.
+	PlanStore PlanStore
+	// InitialPlanHandoff restores a prior plan.handoff after session resume.
+	InitialPlanHandoff PlanHandoffState
+	// OpenChildSession, when set, opens a durable log for a spawned child.
+	// parentID and a suggested childID/title are provided; the returned id is
+	// used as the child SessionID when non-empty.
+	OpenChildSession func(parentID, childID, title string) (id string, err error)
+	// AppendChildEvent, when set, persists one event to a child session log.
+	AppendChildEvent func(childID string, ev protocol.Event) error
+	// CloseChildSession, when set, closes a child session log after completion.
+	CloseChildSession func(childID string) error
+	// LoadChildSession, when set, loads a persisted child log for resume (#1035).
+	// Returns events plus ownership meta (parent/lead). Missing sessions should
+	// return a not-found error the resume path surfaces safely.
+	LoadChildSession func(childID string) (ChildSessionSnapshot, error)
+	// ReopenChildSession, when set, reopens a closed child log for append on
+	// resume. No-op when the session is already open.
+	ReopenChildSession func(childID string) error
+	// InitialMessages seeds model-facing history (durable resume / --continue).
+	// Copied at New; not emitted as transcript events.
+	InitialMessages []provider.Message
+	// InitialPriority sets the sticky priority tier before Run without
+	// emitting FastSelected (TUI seeds fast from resume snapshot).
+	InitialPriority bool
+	// InitialTitled skips auto SessionTitled when the session was already titled.
+	InitialTitled bool
+	// InitialPhaseWorkflow / InitialPhaseIndex / InitialPhaseName /
+	// InitialPhaseFingerprint restore an active workflow phase after agent
+	// selection at startup. Empty workflow skips restore. When Fingerprint is
+	// set, resume fail-closes (recovery status) if the loaded definition is
+	// missing or changed; empty Fingerprint is legacy name-only bind.
+	InitialPhaseWorkflow    string
+	InitialPhaseIndex       int
+	InitialPhaseName        string
+	InitialPhaseFingerprint string
+	// InitialPhaseGrantApproval restores a prior phase-widening decision so
+	// resume does not re-prompt when workflow content is unchanged.
+	InitialPhaseGrantApproval PhaseGrantApproval
+	// InitialAlwaysGrants restores session DecisionAlways rules after the
+	// initial agent profile is applied (SetAgentRules clears grants).
+	InitialAlwaysGrants permission.Ruleset
+	// DangerouslySkipPermissions mirrors --auto / --dangerously-skip-permissions:
+	// workflow phase permission widening is accepted without a review prompt.
+	// Hard sandbox and path protections are unchanged. Agent denies still apply
+	// via normal evaluation order.
+	DangerouslySkipPermissions bool
+	// QuietStartup applies Initial* provider/model/effort/autonomy/
+	// permission-mode/agent/phase without emitting *Selected or PhaseChanged.
+	// Durable resume sets this: the JSONL already has those events and the TUI
+	// seeds from Replay. Cleared before the op loop so user-driven changes
+	// still emit.
+	QuietStartup bool
+	// HarnessRegistry maps task-subagent Agent.Harness names to complete agent-run
+	// functions. nil means every child uses the built-in loop.
+	HarnessRegistry *fn.Registry
+	// Scheduler is the process-local admission controller shared across
+	// concurrent roots and children. Model streams acquire the model pool;
+	// agent bash acquires process (+ build/test when classified). nil disables
+	// admission (unlimited; preserves pre-scheduler behavior).
+	Scheduler *scheduler.Scheduler
+	// SchedulerPolicy is the compiled classification policy for bash commands.
+	// nil treats all commands as general (process only). Used only when
+	// Scheduler is non-nil.
+	SchedulerPolicy *scheduler.Effective
+	// FileSync, when set, is invoked after successful file tool mutations
+	// (write/edit/apply_patch/notebook_edit) so the host can drive LSP
+	// document sync. absPath is absolute; deleted marks removals.
+	// Nil disables. Must not panic the tool path (callers recover).
+	FileSync func(absPath string, content string, deleted bool)
+	// CollectDiagnostics, when set, returns model-facing diagnostic text for
+	// touched absolute paths after file mutations (one call per tool result).
+	// Empty disables injection. Must not panic the tool path (callers recover).
+	CollectDiagnostics func(ctx context.Context, absPaths []string) string
+	// TUISnapshot, when set, captures the last painted TUI frame for the
+	// tui_snapshot tool. Nil (headless/exec) fails the tool visibly.
+	TUISnapshot func(ctx context.Context, req tool.TUISnapshotRequest) (tool.TUISnapshotResult, error)
+}
+
+// beginAck reports whether ToolCallBegin was actually written to Events.
+// emitted=false means the call never started (no begin/end boundary).
+type beginAck struct {
+	emitted bool
+}
+
+// beginReq asks Run to emit ToolCallBegin while still servicing ops (so
+// Interrupt can cancel a turn blocked on a full Events buffer). Turn
+// cancellation is not carried on the request: once Run accepts it, begin
+// emission proceeds unless the Run parent context ends or Ops closes.
+type beginReq struct {
+	begin  protocol.ToolCallBegin
+	result chan beginAck
+}
+
+type Engine struct {
+	opts   Options
+	ops    chan protocol.Op
+	events chan protocol.Event
+	// emitMu serializes emit against Events close so child drain can still
+	// publish terminal snapshots (ChildCompleted, team.roster) without racing
+	// Run's deferred close.
+	emitMu       sync.Mutex
+	eventsClosed bool
+	perms        *permission.Service
+	questions    *question.Service
+
+	// beginReqs is served only by Run so Interrupt stays responsive while a
+	// worker needs ToolCallBegin emitted into a full Events buffer.
+	beginReqs chan beginReq
+
+	prov     provider.Provider
+	provName string
+	model    string
+	effort   protocol.Effort
+	// autonomy is the session exit-gate policy (supervised|agent|checks|skip-all).
+	autonomy protocol.Autonomy
+	// permMode is the session tool-permission posture dial.
+	permMode protocol.PermissionMode
+	agent    Agent
+	// taskHarness is attached only by spawnChild for the selected child agent.
+	taskHarness     fn.Func
+	taskHarnessName string
+	// priority requests OpenAI service_tier=priority on subsequent turns.
+	// Sticky across model switches; adapters that do not support it no-op.
+	priority bool
+	messages []provider.Message
+
+	// turnCancel/turnDone/turnFinishing are owned exclusively by Run (reap,
+	// start, interrupt, shutdown). The worker only closes the done and
+	// finishing channels captured at start.
+	turnCancel    context.CancelFunc
+	turnDone      chan struct{}
+	turnFinishing chan struct{} // closed just before terminal TurnCompleted
+
+	// runCtx is Run's parent context, set for the duration of Run. serveBeginReq
+	// uses it so parent cancellation can drop an accepted begin without
+	// treating turn Interrupt as a failed emission.
+	runCtx context.Context
+
+	// policyMetrics counts delegation-worthiness decisions (#876) for
+	// elapsed/cost comparison with policy on vs off.
+	policyMetrics DelegationPolicyMetrics
+
+	// children tracks non-blocking child engines. Permission/question replies
+	// fan out to every child plus the parent; request IDs are session-scoped
+	// so only one service matches.
+	childMu  sync.Mutex
+	children map[string]*childHandle
+	// childHistory retains terminal snapshots for owned children after they
+	// finish so task_status/task_read can return completed state without a
+	// new spawn. Only sessions this engine started are present.
+	childHistory map[string]*childRecord
+	// lastToolActivation is the family token list from the most recent
+	// applyWorkflowToolActivation call (diagnostics / guidance source).
+	lastToolActivation []string
+	// team is the implicit lead+children roster. Shared with descendant
+	// engines; only the lead dissolves it on Run exit.
+	team *Team
+
+	// teamIdem is the process-local human orchestration Op idempotency cache
+	// (WEBUI.18). Lazy-init under teamIdemMu.
+	teamIdemMu sync.Mutex
+	teamIdem   *teamIdempotencyCache
+
+	// childDone delivers ChildCompleted from drain goroutines to Run so the
+	// parent can inject a model-visible summary and auto-nudge when idle.
+	// Buffered; non-blocking send on the drain side if Run is shutting down.
+	childDone chan protocol.ChildCompleted
+	// noticeMu guards pendingChildNotices and childWake. Notices are queued
+	// from Run and consumed either mid-turn (before the next Stream) or via
+	// an idle auto-nudge turn.
+	noticeMu            sync.Mutex
+	pendingChildNotices []string
+	// childWake is closed (and replaced) whenever a child completes so an
+	// in-flight sleep can return early instead of poll-looping.
+	childWake chan struct{}
+
+	// waitMu guards waitSubs — in-flight wait-tool subscriptions notified on
+	// child terminal / needs_attention transitions.
+	waitMu   sync.Mutex
+	waitSubs map[string]*waitSub
+
+	// pendingUserInputs holds UserInput accepted while a turn was active.
+	// Drained FIFO one-at-a-time after each turn ends. Survives Interrupt so
+	// follow-up prompts typed mid-turn are not lost.
+	pendingUserInputs []pendingUserInput
+
+	// activeTurnID is the immutable id of the in-flight root turn (empty when
+	// idle). Used to validate protocol.Steer targeting.
+	activeTurnID string
+	// pendingSteer holds at most one active-turn redirect. Applied at the next
+	// safe Provider.Stream boundary (never mid-tool-call). Replaces prior
+	// pending steer text rather than queueing. Guarded by pendingSteerMu
+	// (Run handleOp vs turn worker).
+	pendingSteerMu sync.Mutex
+	pendingSteer   *pendingSteer
+	// steerQueueFallback is set by the turn worker when a steer must become
+	// the next UserInput; Run drains it into pendingUserInputs.
+	steerQueueFallback *pendingUserInput
+
+	// mailbox holds unread peer/team messages for this session. Delivery is
+	// at tool-round / turn boundaries (injectPendingMailbox /
+	// flushPendingMailbox), never mid-tool-call.
+	mailbox *Mailbox
+	// mailboxMu guards mailboxWake. Wake is signaled when a peer message is
+	// enqueued so idle Run can auto-nudge.
+	mailboxMu   sync.Mutex
+	mailboxWake chan struct{}
+
+	// pendingAgent is set by tools via SwitchAgent and applied after each tool
+	// batch (so the next Stream sees the new agent/prompt) and again in
+	// completeTurn if anything remains when the turn ends.
+	pendingAgentMu sync.Mutex
+	pendingAgent   string
+
+	// workflow/phaseIndex track the active workflow phase (-1 = none).
+	// phaseRecovery is non-empty (missing|mismatch) when resume could not bind
+	// the fingerprinted definition; permissions are not applied until stop/restart.
+	workflow      Workflow
+	phaseIndex    int
+	phaseRecovery string
+	// phaseGrantApproval is the last accepted widening decision for the
+	// active phase (empty when no widening was needed or phase cleared).
+	phaseGrantApproval PhaseGrantApproval
+
+	// planHandoff is the last successful unified plan approval + handoff.
+	// Active after exit_plan_mode succeeds; restored from protocol.PlanHandoff.
+	planHandoff PlanHandoffState
+
+	// files tracks tool read snapshots so external edits (FilesChanged / /vim)
+	// force the model to re-read before edit/write.
+	files *tool.FileState
+
+	// checkpoints snapshot pre-mutation file bytes per turn for /undo restore
+	// (#540). Composes with turnDiff (per-turn create/update/delete summary)
+	// and PathOwnership (#772 overlap leases) — one file-state stack, not forks.
+	checkpoints *tool.CheckpointStore
+
+	// turnDiff records harness file change kinds for the active turn
+	// (emitted on TurnCompleted.Files for timeline/UI).
+	turnDiff *tool.TurnDiff
+
+	// toolLoop tracks repeated failing tool+args within the active turn.
+	toolLoop *toolLoopDetector
+	// toolLoopStop is set when the detector trips; runTurn ends the turn.
+	toolLoopStop string
+
+	// mutatedFiles tracks workspace-relative paths touched by mutating tools
+	// this session (for structured child completion handoffs).
+	mutatedMu    sync.Mutex
+	mutatedFiles map[string]struct{}
+
+	// titled is set after the first SessionTitled emit so auto-titling runs once.
+	titled bool
+
+	// lastUsed/lastUsedKnown track the latest provider-reported context
+	// occupancy for threshold compaction.
+	lastUsed      int
+	lastUsedKnown bool
+	// contextWindowTokens is the live model limit (from opts or lookup).
+	contextWindowTokens int
+
+	// quietStartup suppresses selection/phase confirms during Run's initial
+	// apply (see Options.QuietStartup). Owned by Run only.
+	quietStartup bool
+
+	// lastEffective is the redacted layer snapshot from the most recent
+	// Stream composition. Written by the turn worker; read by inspect on Run.
+	effectiveMu   sync.Mutex
+	lastEffective effectiveSnapshot
+
+	// excludedKinds / pinnedKinds are session context source controls
+	// (SetContextControls). Exclude omits layers; pin retains optional layers
+	// under fit-pressure auto-shed. Keys are PromptLayer* kind strings.
+	excludedKinds map[string]struct{}
+	pinnedKinds   map[string]struct{}
+
+	// fitWarnedTurnID/Level debounce ContextFitWarning to once per turn
+	// (allow escalate warn→critical only).
+	fitWarnedTurnID string
+	fitWarnedLevel  string
+
+	// budgetFinalMu guards soft-budget finalization state on child engines (#879).
+	// armed: waiting for the next turn to become the handoff turn (current
+	// interrupted turn must not count). active: handoff turn in progress
+	// (tools blocked). turnDone: handoff turn finished for parent watchdog.
+	budgetFinalMu       sync.Mutex
+	budgetFinalArmed    bool
+	budgetFinalActive   bool
+	budgetFinalKind     string
+	budgetFinalTurnDone bool
+
+	// sessionBudget is the shared outer cost envelope (#577); may be nil.
+	sessionBudget *sessionBudget
+	// turnTokens tracks per-turn token ceiling (#577); nil when unlimited.
+	turnTokens *turnTokenTracker
+	// sessionBudgetStop is set when a hard session/turn envelope trip should
+	// end the active turn after the current stream (not a silent halt).
+	sessionBudgetStop     bool
+	sessionBudgetStopKind string // cost_usd | turn_tokens
+	sessionBudgetStopMsg  string
+
+	// sessionTemp is the private OS temp scratch dir for path tools.
+	sessionTempMu sync.Mutex
+	sessionTemp   sessionTempState
+}
+
+// enterBudgetFinalization arms a tools-disabled handoff turn after soft budget trip.
+// The in-flight interrupted turn is not the finalization turn.
+func (e *Engine) enterBudgetFinalization(kind, reason string) {
+	if e == nil {
+		return
+	}
+	e.budgetFinalMu.Lock()
+	defer e.budgetFinalMu.Unlock()
+	e.budgetFinalArmed = true
+	e.budgetFinalActive = false
+	e.budgetFinalKind = strings.TrimSpace(kind)
+	e.budgetFinalTurnDone = false
+	_ = reason
+}
+
+// leaveBudgetFinalization clears finalization mode (hard stop / timeout).
+func (e *Engine) leaveBudgetFinalization() {
+	if e == nil {
+		return
+	}
+	e.budgetFinalMu.Lock()
+	defer e.budgetFinalMu.Unlock()
+	e.budgetFinalArmed = false
+	e.budgetFinalActive = false
+	e.budgetFinalKind = ""
+}
+
+// isBudgetFinalizing reports whether the active turn is the handoff-only turn.
+func (e *Engine) isBudgetFinalizing() bool {
+	if e == nil {
+		return false
+	}
+	e.budgetFinalMu.Lock()
+	defer e.budgetFinalMu.Unlock()
+	return e.budgetFinalActive
+}
+
+// noteBudgetFinalizationTurnStart promotes armed → active when a new turn begins.
+func (e *Engine) noteBudgetFinalizationTurnStart() {
+	if e == nil {
+		return
+	}
+	e.budgetFinalMu.Lock()
+	defer e.budgetFinalMu.Unlock()
+	if e.budgetFinalArmed {
+		e.budgetFinalArmed = false
+		e.budgetFinalActive = true
+	}
+}
+
+// noteBudgetFinalizationTurnDone marks the reserved handoff turn finished.
+// No-op when the completed turn was not the finalization turn.
+func (e *Engine) noteBudgetFinalizationTurnDone() {
+	if e == nil {
+		return
+	}
+	e.budgetFinalMu.Lock()
+	defer e.budgetFinalMu.Unlock()
+	if e.budgetFinalActive {
+		e.budgetFinalActive = false
+		e.budgetFinalTurnDone = true
+	}
+}
+
+// budgetFinalizationTurnDone reports whether the reserved handoff turn completed.
+func (e *Engine) budgetFinalizationTurnDone() bool {
+	if e == nil {
+		return false
+	}
+	e.budgetFinalMu.Lock()
+	defer e.budgetFinalMu.Unlock()
+	return e.budgetFinalTurnDone
+}
+
+// budgetFinalizationPending reports armed or active finalization (oneshot must wait).
+func (e *Engine) budgetFinalizationPending() bool {
+	if e == nil {
+		return false
+	}
+	e.budgetFinalMu.Lock()
+	defer e.budgetFinalMu.Unlock()
+	return e.budgetFinalArmed || e.budgetFinalActive
+}
+
+func New(opts Options) *Engine {
+	if opts.SessionID == "" {
+		opts.SessionID = rand.Text()
+	}
+	if opts.RootSessionID == "" {
+		if opts.ParentSessionID == "" {
+			opts.RootSessionID = opts.SessionID
+		} else {
+			// Depth-1 fallback when spawn forgot to set RootSessionID.
+			opts.RootSessionID = opts.ParentSessionID
+		}
+	}
+	if len(opts.Agents) == 0 {
+		opts.Agents = []Agent{{Name: "build", Description: "general coding agent"}}
+	}
+	if opts.MaxTokens == 0 {
+		opts.MaxTokens = 8192
+	}
+	if opts.MaxStreamAttempts == 0 {
+		opts.MaxStreamAttempts = defaultMaxStreamAttempts
+	}
+	if opts.MaxToolRetryAttempts == 0 {
+		opts.MaxToolRetryAttempts = tool.DefaultToolRetryMaxAttempts
+	}
+	if opts.ToolLoopThreshold < 1 {
+		opts.ToolLoopThreshold = tool.DefaultToolLoopThreshold
+	}
+	if opts.MaxChildDepth == 0 {
+		opts.MaxChildDepth = 1
+	} else if opts.MaxChildDepth > absoluteMaxChildDepth {
+		opts.MaxChildDepth = absoluteMaxChildDepth
+	}
+	opts.DelegationPolicy = NormalizeDelegationPolicy(opts.DelegationPolicy)
+	if len(opts.Workflows) == 0 {
+		opts.Workflows = []Workflow{BuiltinPlanImplement()}
+	}
+	// Implicit team: root owns a new Team; nested engines inherit Options.Team.
+	team := opts.Team
+	if team == nil && opts.Depth == 0 {
+		persona := ""
+		if opts.InitialAgent != "" {
+			persona = opts.InitialAgent
+		} else if len(opts.Agents) > 0 {
+			persona = opts.Agents[0].Name
+		}
+		team = NewTeam(opts.SessionID, persona)
+	}
+	if team != nil && opts.OverlapPolicy != "" {
+		team.SetOverlapPolicy(opts.OverlapPolicy)
+	}
+	opts.Team = team
+
+	// Session cost envelope (#577): share one tracker across root + children.
+	sb := opts.SessionBudget
+	if sb == nil && (opts.MaxSessionCostUSD > 0 || opts.EstimateUsageCost != nil) {
+		sb = newSessionBudget(opts.MaxSessionCostUSD, opts.EstimateUsageCost)
+	}
+	if sb != nil && opts.MaxSessionCostUSD > 0 && sb.maxCostUSD <= 0 {
+		// Prefer explicit Options ceiling when injecting a bare tracker in tests.
+		sb.mu.Lock()
+		sb.maxCostUSD = opts.MaxSessionCostUSD
+		sb.mu.Unlock()
+	}
+	if sb != nil && opts.EstimateUsageCost != nil && sb.estimate == nil {
+		sb.estimate = opts.EstimateUsageCost
+	}
+	opts.SessionBudget = sb
+	if opts.SessionBudgetExhausted == nil && sb != nil {
+		opts.SessionBudgetExhausted = sb.Exhausted
+	}
+
+	ckpt := tool.NewCheckpointStore()
+	persistDir := strings.TrimSpace(opts.CheckpointDir)
+	if persistDir == "-" {
+		persistDir = "" // explicit disable
+	}
+	// Shadow-git (bash coverage) needs WorkDir; durable stack needs CheckpointDir
+	// from the composition root (cmd/strike sets DefaultCheckpointDir).
+	if strings.TrimSpace(opts.WorkDir) != "" || persistDir != "" {
+		ckpt.Configure(opts.WorkDir, persistDir)
+		// Best-effort load so --continue can restore files (#573).
+		_ = ckpt.Load()
+	}
+
+	e := &Engine{
+		opts:                opts,
+		ops:                 make(chan protocol.Op, 16),
+		events:              make(chan protocol.Event, 256),
+		beginReqs:           make(chan beginReq),
+		files:               &tool.FileState{},
+		checkpoints:         ckpt,
+		turnDiff:            &tool.TurnDiff{},
+		toolLoop:            newToolLoopDetector(opts.ToolLoopThreshold, 0),
+		children:            make(map[string]*childHandle),
+		childHistory:        make(map[string]*childRecord),
+		team:                team,
+		childDone:           make(chan protocol.ChildCompleted, 32),
+		childWake:           make(chan struct{}),
+		contextWindowTokens: opts.ContextWindow,
+		priority:            opts.InitialPriority,
+		titled:              opts.InitialTitled,
+		phaseIndex:          -1,
+		sessionBudget:       sb,
+	}
+	if opts.MaxTurnTokens > 0 {
+		e.turnTokens = newTurnTokenTracker(opts.MaxTurnTokens)
+	}
+	if len(opts.InitialMessages) > 0 {
+		e.messages = append([]provider.Message(nil), opts.InitialMessages...)
+		e.hydrateMessageImages()
+	}
+	e.perms = permission.New(e.emitPermission, opts.Rules...)
+	if len(opts.RuleLayerNames) > 0 {
+		e.perms.SetBaseLayerNames(opts.RuleLayerNames...)
+	}
+	if len(opts.ManagedRules) > 0 {
+		e.perms.SetManagedRules(opts.ManagedRules)
+	}
+	if opts.PersistProjectRule != nil {
+		e.perms.SetProjectPersister(opts.PersistProjectRule)
+	}
+	e.questions = question.New(e.emit)
+	return e
+}
+
+// SessionTempDir returns the absolute session scratch directory, allocating it
+// on first use. Empty when allocation fails or session id is unset. Failure is
+// non-fatal: path tools keep the workspace-only boundary.
+func (e *Engine) SessionTempDir() string {
+	if e == nil {
+		return ""
+	}
+	return e.ensureSessionTemp()
+}
+
+// ensureSessionTemp lazily creates os.TempDir()/strike/<session-id>/ once.
+// Safe for concurrent first-use from tool dispatch and prompt composition.
+// Refreshes directory mtime periodically so peer stale-cleanup cannot reap a
+// still-running session after defaultStaleSessionTempAge.
+func (e *Engine) ensureSessionTemp() string {
+	if e == nil {
+		return ""
+	}
+	e.sessionTempMu.Lock()
+	defer e.sessionTempMu.Unlock()
+	if e.sessionTemp.failed {
+		return ""
+	}
+	if e.sessionTemp.dir != "" {
+		e.touchSessionTempLocked()
+		return e.sessionTemp.dir
+	}
+	dir, err := tool.EnsureSessionTemp(e.opts.SessionID)
+	if err != nil || dir == "" {
+		e.sessionTemp.failed = true
+		return ""
+	}
+	e.sessionTemp = sessionTempState{dir: dir, owned: true, lastTouch: time.Now()}
+	return dir
+}
+
+// touchSessionTempLocked refreshes the scratch dir mtime at most once per hour.
+// Caller must hold sessionTempMu.
+func (e *Engine) touchSessionTempLocked() {
+	const touchEvery = time.Hour
+	dir := e.sessionTemp.dir
+	if dir == "" {
+		return
+	}
+	now := time.Now()
+	if !e.sessionTemp.lastTouch.IsZero() && now.Sub(e.sessionTemp.lastTouch) < touchEvery {
+		return
+	}
+	_ = os.Chtimes(dir, now, now)
+	e.sessionTemp.lastTouch = now
+}
+
+func (e *Engine) cleanupSessionTemp() {
+	if e == nil {
+		return
+	}
+	e.sessionTempMu.Lock()
+	owned := e.sessionTemp.owned
+	sid := e.opts.SessionID
+	e.sessionTemp = sessionTempState{}
+	e.sessionTempMu.Unlock()
+	if !owned {
+		return
+	}
+	_ = tool.CleanupSessionTemp(sid)
+}
+
+// ExplainPermission returns last-match-wins detail for a sample tool call
+// against the live permission service (agent/phase/session grants included),
+// including action-fact diagnostics when applicable (#888).
+func (e *Engine) ExplainPermission(permissionName, pattern string) permission.DetailedExplanation {
+	if e == nil || e.perms == nil {
+		return permission.ExplainDetailed(permissionName, pattern, nil)
+	}
+	return e.perms.ExplainDetailed(permissionName, pattern)
+}
+
+// PermissionService exposes the live ask service for host adapters (explain,
+// scoped grants). Callers must not replace the service.
+func (e *Engine) PermissionService() *permission.Service {
+	if e == nil {
+		return nil
+	}
+	return e.perms
+}
+
+// Team returns the implicit session-scoped agent team (may be nil on
+// non-lead engines that were constructed without Options.Team).
+func (e *Engine) Team() *Team {
+	if e == nil {
+		return nil
+	}
+	return e.team
+}
+
+// Messages returns a copy of the model-facing conversation history.
+func (e *Engine) Messages() []provider.Message {
+	if len(e.messages) == 0 {
+		return nil
+	}
+	out := make([]provider.Message, len(e.messages))
+	copy(out, e.messages)
+	return out
+}
+
+func (e *Engine) Ops() chan<- protocol.Op       { return e.ops }
+func (e *Engine) Events() <-chan protocol.Event { return e.events }
+
+func (e *Engine) emit(ev protocol.Event) {
+	e.emitMu.Lock()
+	defer e.emitMu.Unlock()
+	if e.eventsClosed {
+		return
+	}
+	e.events <- ev
+}
+
+func (e *Engine) closeEvents() {
+	e.emitMu.Lock()
+	defer e.emitMu.Unlock()
+	if e.eventsClosed {
+		return
+	}
+	e.eventsClosed = true
+	close(e.events)
+}
+
+// emitSelected emits selection/phase confirms unless quietStartup is set
+// (resume re-applies state without re-appending the JSONL).
+func (e *Engine) emitSelected(ev protocol.Event) {
+	if e.quietStartup {
+		return
+	}
+	e.emit(ev)
+}
+
+// baseCorr is the immutable session lineage stamped on every event.
+func (e *Engine) baseCorr() protocol.Correlation {
+	return protocol.Correlation{
+		SessionID:       e.opts.SessionID,
+		ParentSessionID: e.opts.ParentSessionID,
+		Depth:           e.opts.Depth,
+	}
+}
+
+// rootSessionID returns the lineage root session id for root-owned artifacts
+// (plans). Prefer Options.RootSessionID, then team lead, then self when this
+// engine is a root.
+func (e *Engine) rootSessionID() string {
+	if id := strings.TrimSpace(e.opts.RootSessionID); id != "" {
+		return id
+	}
+	if e.team != nil {
+		if id := strings.TrimSpace(e.team.LeadID()); id != "" {
+			return id
+		}
+	}
+	if strings.TrimSpace(e.opts.ParentSessionID) == "" {
+		return e.opts.SessionID
+	}
+	return strings.TrimSpace(e.opts.ParentSessionID)
+}
+
+// sessionCorr is session-only correlation for selection events and
+// rejected ops that never enter a turn.
+func (e *Engine) sessionCorr() protocol.Correlation {
+	return e.baseCorr()
+}
+
+// Run processes ops until ctx is canceled or Ops is closed. Turns run in
+// their own goroutine so PermissionReply and Interrupt ops stay responsive
+// mid-turn. On shutdown, Run cancels any active turn and joins it before
+// closing Events.
+func (e *Engine) Run(ctx context.Context) {
+	e.runCtx = ctx
+	// Keep Events open until children finish so ChildCompleted can emit.
+	// Dissolve the team after children shut down so terminal members stay
+	// listable for the lead's lifetime, then clear on lead exit.
+	defer e.closeEvents()
+	defer e.fireSessionEnd()
+	defer e.dissolveTeamIfLead()
+	defer e.detachMailbox()
+	defer e.shutdownChildren()
+	defer e.cleanupSessionTemp()
+	if e.team != nil {
+		e.team.AttachMailbox(e)
+	}
+	e.quietStartup = e.opts.QuietStartup
+	if e.opts.InitialProvider != "" && e.opts.Select != nil {
+		name := CanonicalProviderID(e.opts.InitialProvider)
+		if p, defaultModel, err := e.opts.Select(name); err == nil {
+			// Same normalization as SelectModel: matching "provider/id" → bare
+			// id; foreign prefixes → provider default. Bare ids pass through
+			// unchanged (without a catalog we cannot tell a bare foreign id
+			// from a valid model name on this provider).
+			model := resolveSelectModel(name, e.opts.InitialModel, defaultModel)
+			e.setProvider(name, p, model)
+		}
+	}
+	// The configured effort is applied before the agent so an agent's own
+	// effort pin, if it has one, wins. An unset dial stays silent: there is
+	// nothing to confirm, and emitting it would announce "provider default"
+	// on every launch.
+	if e.opts.InitialEffort != protocol.EffortDefault {
+		e.setEffort(e.opts.InitialEffort)
+	}
+	// Autonomy is always applied so the exit gate matches config/restore.
+	// Fresh sessions announce it; QuietStartup (resume) skips the emit.
+	e.setAutonomy(e.opts.InitialAutonomy)
+	// Permission mode rules + emit before AgentSelected so unbuffered event
+	// consumers that wait on AgentSelected as "startup ready" do not deadlock.
+	// Plan workflow alignment runs after agent select (see below).
+	e.applyPermissionMode(e.opts.InitialPermissionMode, false)
+	initialAgent := e.opts.Agents[0].Name
+	if e.opts.InitialAgent != "" {
+		if _, ok := e.findAgent(e.opts.InitialAgent); ok {
+			initialAgent = e.opts.InitialAgent
+		}
+	}
+	e.handleSelectAgent(protocol.SelectAgent{Name: initialAgent})
+	// Plan posture enters the plan workflow after the default agent is applied
+	// so agent select cannot clobber it; resume phase restore may still override.
+	if e.permMode == protocol.PermissionModePlan {
+		_ = e.enterPlanPhase()
+	}
+	// Resume: re-enter the recorded workflow phase after mode so a restored
+	// implement/custom phase is not clobbered by plan-mode enterPlanPhase.
+	// Fingerprint bind fail-closes into recovery when the def is missing/changed.
+	// Then re-seed session always-grants (SetAgentRules cleared them).
+	if wf := e.opts.InitialPhaseWorkflow; wf != "" {
+		e.restoreWorkflowPhase(wf, e.opts.InitialPhaseIndex, e.opts.InitialPhaseName, e.opts.InitialPhaseFingerprint)
+	}
+	if e.opts.InitialPlanHandoff.Active || e.opts.InitialPlanHandoff.PlanID != "" ||
+		e.opts.InitialPlanHandoff.LegacyText != "" || e.opts.InitialPlanHandoff.ApprovalSource != "" {
+		e.restorePlanHandoff(e.opts.InitialPlanHandoff)
+	}
+	if len(e.opts.InitialAlwaysGrants) > 0 {
+		e.perms.SeedAlwaysGrants(e.opts.InitialAlwaysGrants)
+	}
+	// Session lifecycle hooks observe start vs resume before quietStartup clears.
+	e.fireSessionLifecycle()
+	e.quietStartup = false
+	oneshotTurnSeen := false
+	for {
+		e.reapTurn()
+		e.drainIdleFollowups(ctx)
+		if e.taskOneShotIdle(oneshotTurnSeen) {
+			return
+		}
+		var turnDone <-chan struct{}
+		if e.turnDone != nil {
+			turnDone = e.turnDone
+		}
+		mailboxWake := e.mailboxWakeCh()
+		select {
+		case <-ctx.Done():
+			e.cancelAndJoinTurn()
+			return
+		case op, ok := <-e.ops:
+			if !ok {
+				e.cancelAndJoinTurn()
+				return
+			}
+			e.handleOp(ctx, op)
+		case req := <-e.beginReqs:
+			if !e.serveBeginReq(req) {
+				e.cancelAndJoinTurn()
+				return
+			}
+		case completed := <-e.childDone:
+			e.queueChildCompleted(completed)
+			e.drainIdleFollowups(ctx)
+			if e.taskOneShotIdle(oneshotTurnSeen) {
+				return
+			}
+		case <-mailboxWake:
+			e.drainIdleFollowups(ctx)
+			if e.taskOneShotIdle(oneshotTurnSeen) {
+				return
+			}
+		case <-turnDone:
+			oneshotTurnSeen = true
+			// Soft-budget finalization turn finished — signal parent watchdog (#879).
+			e.noteBudgetFinalizationTurnDone()
+			e.reapTurn()
+			e.drainIdleFollowups(ctx)
+			if e.taskOneShotIdle(oneshotTurnSeen) {
+				return
+			}
+		}
+	}
+}
+
+func (e *Engine) detachMailbox() {
+	if e == nil || e.team == nil {
+		return
+	}
+	e.team.DetachMailbox(e.opts.SessionID)
+}
+
+// taskOneShotIdle reports whether a task-spawned engine should exit Run:
+// at least one turn finished, no nested children, no active turn, and no
+// queued follow-ups (child notices or pending user inputs).
+func (e *Engine) taskOneShotIdle(turnSeen bool) bool {
+	if !e.opts.TaskOneShot || !turnSeen {
+		return false
+	}
+	// Soft-budget finalization still needs its reserved handoff turn (#879).
+	if e.budgetFinalizationPending() {
+		return false
+	}
+	if e.turnActive() || e.hasPendingChildNotices() || e.hasPendingMailbox() || len(e.pendingUserInputs) > 0 {
+		return false
+	}
+	e.childMu.Lock()
+	n := len(e.children)
+	e.childMu.Unlock()
+	return n == 0
+}
+
+// serveBeginReq emits ToolCallBegin from Run so ops (Interrupt) stay
+// serviceable while the Events buffer is full. The ack reports whether begin
+// was actually emitted. Returns false when the Run parent context is done or
+// Ops has been closed (Run should cancel, join, and exit). Those paths
+// acknowledge emitted=false and write no begin.
+//
+// After Run accepts a begin request, turn cancellation (normal Interrupt)
+// does not suppress emission: Interrupt is applied while blocked, begin is
+// still written when Events has capacity, and the worker's post-ack ctx check
+// skips Execute and emits the matched canceled ToolCallEnd.
+//
+// Queued ops are drained before each non-blocking emission attempt. After a
+// successful write, any ops that raced with the send are drained before the
+// worker is released. Parent cancellation is observed via e.runCtx (set by Run).
+func (e *Engine) serveBeginReq(req beginReq) (opsOpen bool) {
+	runDone := e.runDone()
+	for {
+		if e.runCtx != nil && e.runCtx.Err() != nil {
+			if e.turnCancel != nil {
+				e.turnCancel()
+			}
+			req.result <- beginAck{emitted: false}
+			return false
+		}
+		// Service queued ops before attempting emission.
+		select {
+		case op, ok := <-e.ops:
+			if !ok {
+				if e.turnCancel != nil {
+					e.turnCancel()
+				}
+				req.result <- beginAck{emitted: false}
+				return false
+			}
+			e.handleOp(context.Background(), op)
+			continue
+		default:
+		}
+		// Try begin without racing Ops in the same select.
+		select {
+		case e.events <- req.begin:
+			return e.ackBeginEmitted(req)
+		default:
+		}
+		// Buffer full: wait for ops, parent cancel, or Events capacity.
+		select {
+		case op, ok := <-e.ops:
+			if !ok {
+				if e.turnCancel != nil {
+					e.turnCancel()
+				}
+				req.result <- beginAck{emitted: false}
+				return false
+			}
+			e.handleOp(context.Background(), op)
+		case <-runDone:
+			if e.turnCancel != nil {
+				e.turnCancel()
+			}
+			req.result <- beginAck{emitted: false}
+			return false
+		case e.events <- req.begin:
+			return e.ackBeginEmitted(req)
+		}
+	}
+}
+
+// runDone returns a channel closed when Run's parent context is canceled.
+// When Run is not active (unit tests calling serveBeginReq directly), it
+// returns nil so the select case is never ready.
+func (e *Engine) runDone() <-chan struct{} {
+	if e.runCtx == nil {
+		return nil
+	}
+	return e.runCtx.Done()
+}
+
+// ackBeginEmitted acknowledges a successful ToolCallBegin write. Ops that
+// became ready in a race with the emit are drained before the worker proceeds
+// so Interrupt cancels the turn before Execute.
+func (e *Engine) ackBeginEmitted(req beginReq) (opsOpen bool) {
+	opsOpen = e.drainOps()
+	req.result <- beginAck{emitted: true}
+	return opsOpen
+}
+
+// drainOps applies all currently queued ops without blocking. Returns false
+// when Ops has been closed; the active turn is canceled immediately so the
+// worker observes shutdown before Execute.
+func (e *Engine) drainOps() (opsOpen bool) {
+	for {
+		select {
+		case op, ok := <-e.ops:
+			if !ok {
+				if e.turnCancel != nil {
+					e.turnCancel()
+				}
+				return false
+			}
+			e.handleOp(context.Background(), op)
+		default:
+			return true
+		}
+	}
+}
+
+// reapTurn clears finished turn lifecycle fields. Nonblocking; only Run writes
+// turnCancel/turnDone/turnFinishing.
+func (e *Engine) reapTurn() {
+	if e.turnDone == nil {
+		return
+	}
+	select {
+	case <-e.turnDone:
+		e.clearTurn()
+	default:
+	}
+}
+
+// joinFinishingTurn blocks when the active turn has already closed its
+// finishing channel (terminal TurnCompleted is emitted or about to be) until
+// the worker exits, then clears lifecycle fields. No-op while the turn is
+// still running or when no turn is active.
+func (e *Engine) joinFinishingTurn() {
+	if e.turnFinishing == nil {
+		return
+	}
+	select {
+	case <-e.turnFinishing:
+	default:
+		return
+	}
+	if e.turnDone != nil {
+		<-e.turnDone
+	}
+	e.clearTurn()
+}
+
+// clearTurn nils Run-owned turn lifecycle fields. Caller must only invoke
+// after the worker is known to have exited (turnDone received) or when no
+// turn was started.
+func (e *Engine) clearTurn() {
+	e.turnDone = nil
+	e.turnCancel = nil
+	e.turnFinishing = nil
+	e.activeTurnID = ""
+	// Drop unapplied steer on turn clear only when already fallback-queued;
+	// otherwise leave pendingSteer for failTurn path to convert to queue.
+}
+
+// cancelAndJoinTurn cancels any active turn, waits for its worker to finish,
+// then clears lifecycle fields. Used on Run shutdown only. Pending beginReqs
+// are acknowledged as emitted=false (no best-effort partial begin).
+func (e *Engine) cancelAndJoinTurn() {
+	if e.turnCancel != nil {
+		e.turnCancel()
+	}
+	if e.turnDone == nil {
+		return
+	}
+	for {
+		select {
+		case <-e.turnDone:
+			e.clearTurn()
+			return
+		case req := <-e.beginReqs:
+			req.result <- beginAck{emitted: false}
+		}
+	}
+}
+
+// maxPendingUserInputs caps mid-turn UserInput buffering so a runaway sender
+// cannot grow memory without bound. Overflow emits EngineError and drops the
+// new item (callers such as the TUI keep the draft on failure).
+const maxPendingUserInputs = 32

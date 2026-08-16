@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jonathanung/strike-cli/provider"
+	"github.com/jonathanung/strike-cli/harness/provider"
 )
 
 func TestNewOpenAI(t *testing.T) {

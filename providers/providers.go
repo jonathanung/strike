@@ -8,7 +8,7 @@ package providers
 import (
 	"context"
 
-	"github.com/jonathanung/strike-cli/provider"
+	"github.com/jonathanung/strike-cli/harness/provider"
 	"github.com/jonathanung/strike-cli/providers/anthropic"
 	"github.com/jonathanung/strike-cli/providers/chatgpt"
 	"github.com/jonathanung/strike-cli/providers/factory"
