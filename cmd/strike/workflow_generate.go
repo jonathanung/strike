@@ -12,10 +12,10 @@ import (
 
 	"github.com/jonathanung/strike-cli/harness/permission"
 	"github.com/jonathanung/strike-cli/harness/provider"
+	"github.com/jonathanung/strike-cli/harness/providers"
+	"github.com/jonathanung/strike-cli/harness/providers/factory"
 	"github.com/jonathanung/strike-cli/internal/product/auth"
 	"github.com/jonathanung/strike-cli/internal/product/config"
-	"github.com/jonathanung/strike-cli/providers"
-	"github.com/jonathanung/strike-cli/providers/factory"
 )
 
 // workflowTestCompleter, when non-nil, overrides provider-backed completion in

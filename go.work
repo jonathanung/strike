@@ -2,8 +2,9 @@
 // without a cycle through the root module. Not published; root go.mod
 // require+replace keeps GOWORK=off working. Do not add git submodules.
 //
-// provider/ (interface + echo) moved into harness/provider (#1208).
-// providers/ owns adapters, auth flows, and the construction factory.
+// provider/ (interface + echo) lives in harness/provider (#1208).
+// adapters, auth flows, and the construction factory live in
+// harness/providers (#1232) — not a sibling module.
 go 1.26.2
 
 use (
@@ -11,5 +12,4 @@ use (
 	./harness
 	./pkg/protocol
 	./pkg/redact
-	./providers
 )

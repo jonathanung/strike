@@ -37,6 +37,11 @@ func TestProductionImportsHaveNoInternal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("go list: %v", err)
 	}
+	var sawNetHTTP bool
+	const (
+		enginePkg    = "github.com/jonathanung/strike-cli/harness/engine"
+		providersPkg = "github.com/jonathanung/strike-cli/harness/providers"
+	)
 	for _, line := range strings.Split(string(out), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -47,10 +52,20 @@ func TestProductionImportsHaveNoInternal(t *testing.T) {
 			continue
 		}
 		for _, imp := range strings.Fields(imports) {
+			if imp == "net/http" {
+				sawNetHTTP = true
+			}
 			if strings.Contains(imp, "/internal/") {
 				t.Errorf("%s imports %s", pkg, imp)
 			}
+			if (pkg == enginePkg || strings.HasPrefix(pkg, enginePkg+"/")) &&
+				(imp == providersPkg || strings.HasPrefix(imp, providersPkg+"/")) {
+				t.Errorf("%s imports %s (engine must not import adapters)", pkg, imp)
+			}
 		}
+	}
+	if !sawNetHTTP {
+		t.Fatal("harness go list must include net/http (adapters + factory)")
 	}
 }
 

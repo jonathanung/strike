@@ -13,6 +13,8 @@ import (
 	"github.com/jonathanung/strike-cli/harness/fn/external"
 	"github.com/jonathanung/strike-cli/harness/permission"
 	"github.com/jonathanung/strike-cli/harness/provider"
+	"github.com/jonathanung/strike-cli/harness/providers"
+	"github.com/jonathanung/strike-cli/harness/providers/factory"
 	"github.com/jonathanung/strike-cli/harness/sandbox"
 	"github.com/jonathanung/strike-cli/harness/scheduler"
 	"github.com/jonathanung/strike-cli/harness/tool"
@@ -40,8 +42,6 @@ import (
 	"github.com/jonathanung/strike-cli/internal/tools"
 	"github.com/jonathanung/strike-cli/internal/trust/admission"
 	"github.com/jonathanung/strike-cli/internal/trust/audit"
-	"github.com/jonathanung/strike-cli/providers"
-	"github.com/jonathanung/strike-cli/providers/factory"
 )
 
 // assembled is the composition-root product shared by the TUI and headless
@@ -240,7 +240,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	customStore := config.NewCustomStoreWithOverlays(cfg.Providers, cfg.ModelOverlays, cfg.EndpointOverlays, workDir)
 	customStore.SetDisableDefault(cfg.DisableDefaultProviders, cfg.DisableDefaultPer)
 
-	// selectProvider is a thin call into the providers factory. Custom
+	// selectProvider is a thin call into the harness/providers factory. Custom
 	// names and builtin endpoint overlays are resolved from already-parsed
 	// config (live; includes mid-session /settings adds).
 	selectProvider := func(name string) (provider.Provider, string, error) {

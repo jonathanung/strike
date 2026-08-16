@@ -18,7 +18,7 @@ import (
 	"strings"
 
 	"github.com/jonathanung/strike-cli/harness/provider"
-	"github.com/jonathanung/strike-cli/providers/base"
+	"github.com/jonathanung/strike-cli/harness/providers/base"
 )
 
 const defaultEndpoint = "https://chatgpt.com/backend-api/codex/responses"

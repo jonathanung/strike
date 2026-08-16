@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jonathanung/strike-cli/providers"
-	"github.com/jonathanung/strike-cli/providers/auth"
-	"github.com/jonathanung/strike-cli/providers/factory"
+	"github.com/jonathanung/strike-cli/harness/providers"
+	"github.com/jonathanung/strike-cli/harness/providers/auth"
+	"github.com/jonathanung/strike-cli/harness/providers/factory"
 )
 
 func TestImportConstructsAdapterWithoutInternal(t *testing.T) {

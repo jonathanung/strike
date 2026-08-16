@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/jonathanung/strike-cli/harness/provider"
-	"github.com/jonathanung/strike-cli/providers/base"
+	"github.com/jonathanung/strike-cli/harness/providers/base"
 )
 
 // baseClientForTest is the transport New would build, minus credentials.

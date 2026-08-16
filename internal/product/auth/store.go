@@ -1,6 +1,6 @@
 // Package auth is the Strike product credential store (0600 ~/.strike/auth.json)
 // plus compatibility forwards for reusable OAuth/PKCE/device flows that now
-// live in github.com/jonathanung/strike-cli/providers/auth.
+// live in github.com/jonathanung/strike-cli/harness/providers/auth.
 //
 // Used by cmd/strike (the `strike auth` subcommand) and wrapped as host.Auth
 // by internal/frontend/host/local; internal/frontend/tui never imports it — credentials never

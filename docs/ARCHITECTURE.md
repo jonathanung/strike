@@ -64,11 +64,11 @@ TUI rendered from (see `pkg/protocol/codec.go`).
 | `harness/fn` | Function-harness contract and named function registry; model calls return completed responses | `harness/provider`, stdlib |
 | `harness/fn/external` | Private JSONL subprocess adapter from configured commands to `fn.Func` | `fn`, `harness/provider`, stdlib, os/exec |
 | `harness/provider` | **Public** LLM provider interface + types + echo (`github.com/jonathanung/strike-cli/harness/provider`; part of the harness module). | stdlib only |
-| `providers` | **Public** adapter module (`github.com/jonathanung/strike-cli/providers`; own go.mod): factory, auth flows, HTTP base, vendor adapters | `harness/provider`, stdlib, net/http |
-| `providers/base` | Shared HTTP/JSON/SSE/auth client concrete adapters embed | `provider`, stdlib, net/http |
-| `providers/{anthropic,openaicompat,chatgpt,google}` | Concrete adapters (openaicompat covers OpenAI platform API, xAI, Kimi, DeepSeek; chatgpt is the ChatGPT-subscription backend; google is Google AI Studio generateContent) | `provider`, `providers/base`, stdlib |
-| `providers/auth` | Reusable OAuth/PKCE/device/refresh + BearerSource / ChatGPTSource (not the ~/.strike path) | stdlib, net/http |
-| `providers/factory` | `selectProvider` + OpenAI platform vs ChatGPT OAuth routing + custom WireAPI construction | `provider`, adapters, `providers/auth` |
+| `harness/providers` | Vendor adapters + factory + reusable auth flows (`github.com/jonathanung/strike-cli/harness/providers`; same harness module, not a sibling go.mod). Engine does not import this package. | `harness/provider`, stdlib, net/http |
+| `harness/providers/base` | Shared HTTP/JSON/SSE/auth client concrete adapters embed | `provider`, stdlib, net/http |
+| `harness/providers/{anthropic,openaicompat,chatgpt,google}` | Concrete adapters (openaicompat covers OpenAI platform API, xAI, Kimi, DeepSeek; chatgpt is the ChatGPT-subscription backend; google is Google AI Studio generateContent) | `provider`, `harness/providers/base`, stdlib |
+| `harness/providers/auth` | Reusable OAuth/PKCE/device/refresh + BearerSource / ChatGPTSource (not the ~/.strike path) | stdlib, net/http |
+| `harness/providers/factory` | `selectProvider` + OpenAI platform vs ChatGPT OAuth routing + custom WireAPI construction | `provider`, adapters, `harness/providers/auth` |
 | `harness/safefile` | Hardened path I/O helpers for tools (special files, symlink leaf policy, identity, atomic write) | stdlib |
 | `harness/sandbox` | OS-primitive process sandbox: `Wrap(argv, Policy)` via Linux `bwrap` / macOS `sandbox-exec`; Policy carries mode, write denials, `NoNetwork` (host net on by default), and optional `NetworkAllow` host/CIDR list (webfetch/websearch/browser + bash preflight; shared shape for future container net); `Explain`/`ProfileText` for `/sandbox explain` (includes egress enforcement level); graceful degrade + startup warning when unavailable | stdlib only |
 
@@ -98,7 +98,7 @@ TUI rendered from (see `pkg/protocol/codec.go`).
 | `internal/eval/swebench` | **E3.3 SWE-bench Verified subset runner (#561)**: fixed 50-instance subset, Docker-per-instance workspace materialization, `strike exec --json` agent driver, patch extraction, docker/harness/none graders, versioned `report.json` + predictions JSONL (`evals/swebench/results/`). Internal regression only (no README leaderboard numbers). Runtime is a package-local `Runtime` (Docker CLI today; #592 → shared `internal/integrate/container`) | `models` (cost estimate), stdlib, os/exec |
 | `harness/secretref` | Stdlib-only secret-ref parser (`ParseRef`/`Resolve`/`MergeEnv`) used by kernel bash injection | stdlib only |
 | `internal/trust/secret` | Product re-export of `harness/secretref` + `RedactEvent` for session JSONL; string scrubbing delegates to `pkg/redact` | `harness/secretref`, `protocol`, `pkg/redact`, stdlib |
-| `internal/product/auth` | Product credential store (0600 `~/.strike/auth.json`); re-exports flow helpers from `providers/auth` | `providers/auth`, stdlib |
+| `internal/product/auth` | Product credential store (0600 `~/.strike/auth.json`); re-exports flow helpers from `harness/providers/auth` | `harness/providers/auth`, stdlib |
 | `internal/product/config` | Layered JSON config (defaults → global → project → managed/MDM) + agents/skills markdown loading; merges passive plugin contributions; managed deny ceiling provenance on `Config.Managed` | `permission` (Ruleset is a config field), `protocol`, `plugin`, `sandbox` (sandbox dial parse), `scheduler` (limits + presets + command rules), stdlib |
 | `internal/integrate/plugin` | Versioned plugin bundle discovery + manifest validation + path confinement + enablement + trust + catalog install/update; passive contribution file refs (agents/skills/workflows/themes/providers); executable compile when trusted | `version`, `pkg/redact`, stdlib |
 | `internal/product/models` | models.dev catalog client, 24h cache with stale fallback | stdlib, net/http |
@@ -135,13 +135,15 @@ not import `protocol` or `host`. Run it like any other test
 (`go test ./internal/frontend/tui/...`); there is no way to silently cross the
 boundary.
 
-`pkg/protocol`, `pkg/redact`, `harness`, and `providers` are separate Go
-modules (root `go.work` plus root `go.mod` `require`/`replace`). The harness
-module imports protocol/redact without a cycle through the root. They are
-not git submodules and are not published. `pkg/sdk`, `pkg/timeline`,
-`pkg/diag`, and `pkg/telemetry` stay in the root module. `GOWORK=off` still
-builds via the replace directives. `harness` must not import
-`strike-cli/internal/*`; `providers` may import `harness/provider` only.
+`pkg/protocol`, `pkg/redact`, and `harness` are separate Go modules (root
+`go.work` plus root `go.mod` `require`/`replace`). The harness module
+imports protocol/redact without a cycle through the root. They are not git
+submodules and are not published. `pkg/sdk`, `pkg/timeline`, `pkg/diag`,
+and `pkg/telemetry` stay in the root module. `GOWORK=off` still builds via
+the replace directives. `harness` must not import `strike-cli/internal/*`.
+`harness/engine` must not import `harness/providers` (SelectFunc injection).
+Adapters may import `harness/provider` and sibling `harness/providers/*`
+only. `go list` for harness may include `net/http`.
 
 ## Cancellation, deadlines, and backpressure
 
@@ -348,10 +350,10 @@ branch in `internal/frontend/tui/app/_src/layout/view.go` for the pattern.
 
 1. Implement `provider.Provider` (`Name() string`; `Stream(ctx, Request) (<-chan StreamEvent, error)`,
    `provider/provider.go`). For a real HTTP backend, embed
-   `providers/base.Client` for transport/auth/JSON-SSE/error-shaping (see
-   `providers/anthropic/anthropic.go` or `providers/openaicompat/openaicompat.go`);
+   `harness/providers/base.Client` for transport/auth/JSON-SSE/error-shaping (see
+   `harness/providers/anthropic/anthropic.go` or `harness/providers/openaicompat/openaicompat.go`);
    for something synthetic, see `provider/echo/echo.go`.
-2. Wire construction into `providers/factory` (`Select` / `BuildCustom`) —
+2. Wire construction into `harness/providers/factory` (`Select` / `BuildCustom`) —
    `cmd/strike` is a thin call into that factory. It returns the
    `provider.Provider`, its default model, and an error for missing
    credentials or an unknown name.
@@ -629,22 +631,20 @@ Packages above remain where they are until the child issues land. Full spec
 pkg/protocol  ──┐
 pkg/redact    ──┤
                 ▼
-             harness          # interface + echo; engine, tool contract, fn, …
-                ▲
-                │
-             providers        # adapters, HTTP base, auth flows, factory
-                ▲
+             harness          # interface + echo + adapters/factory/auth flows;
+                ▲             # engine, tool contract, fn, …
                 │
              strike-cli       # cmd/strike + grouped internal/*
 ```
 
-No cycles. `harness` imports protocol + redact only. `providers` imports the
-harness provider interface only (not `harness/engine`). Root `replace`s both.
-No git submodules and no module-proxy publish in this epic.
+No cycles. `harness` imports protocol + redact only (plus stdlib kernel
+deps and `net/http` for adapters). Engine does not import adapters.
+Root `replace`s harness. No git submodules and no module-proxy publish
+in this epic.
 
 `internal/fn` → `harness/fn`. Wire event `harness.progress` and config
 key `harnesses` stay. `engine/route.go` is persona/capability/load routing,
-not the providers factory (`providers/factory` / today's `selectProvider`).
+not the providers factory (`harness/providers/factory` / today's `selectProvider`).
 
 After grouping, `internal/` is persist / trust / integrate / frontend /
 product / eval (+ `tools` for product builtins, `protocol` compat re-export).

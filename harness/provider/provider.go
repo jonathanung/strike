@@ -1,10 +1,9 @@
 // Package provider defines the LLM provider abstraction: the engine and the
-// providers/* adapters (base, anthropic, openaicompat, chatgpt, google) plus
-// echo share one normalized stream-event vocabulary regardless of vendor.
+// harness/providers adapters (base, anthropic, openaicompat, chatgpt, google)
+// plus echo share one normalized stream-event vocabulary regardless of vendor.
 //
-// This is a tiny public module so the sibling providers module can import
-// the interface without reaching internal/. #1208 will move it into
-// harness/provider. internal/provider is a compatibility re-export.
+// Adapters live in the same harness module under harness/providers; the
+// engine imports this interface only and never the adapters.
 package provider
 
 import (

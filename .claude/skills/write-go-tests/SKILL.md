@@ -50,7 +50,7 @@ a fixed “six tools” list.
 
 ### Providers
 
-- Prefer `httptest.NewServer` against `providers/base` and concrete adapters.
+- Prefer `httptest.NewServer` against `harness/providers/base` and concrete adapters.
 - Engine integration: `harness/provider/echo` (prompts starting with `run ` emit bash tool calls).
 
 ### Config / auth
@@ -84,7 +84,7 @@ go test ./path/to/package/ -count=1 -v
 4. `internal/protocol` + `internal/persist/session` — new event kinds, replay  
 5. `internal/question` — multi-question ask/reply  
 6. `internal/product/auth` — OAuth/PKCE/device, resolve edge cases  
-7. `providers/*` — SSE cancel, cache headers where applicable  
+7. `harness/providers/*` — SSE cancel, cache headers where applicable  
 8. `internal/frontend/tui` — keymap/default binds, modals, interrupt/esc paths  
 
 ## Platform notes

@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/jonathanung/strike-cli/harness/provider"
-	"github.com/jonathanung/strike-cli/providers/base"
+	"github.com/jonathanung/strike-cli/harness/providers/base"
 )
 
 // TestOpenAIEffortClampsAtBothEnds documents the deliberate lossiness: the

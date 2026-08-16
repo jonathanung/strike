@@ -9,7 +9,7 @@ import (
 )
 
 // Leaf workspace modules extracted so the harness module can import
-// protocol/redact without a cycle through the root module (#1204, #1208, #1216).
+// protocol/redact without a cycle through the root module (#1204, #1208, #1232).
 var leafModules = []struct {
 	dir    string
 	module string
@@ -19,7 +19,6 @@ var leafModules = []struct {
 	{"pkg/protocol", modulePath + "/pkg/protocol", true},
 	{"pkg/redact", modulePath + "/pkg/redact", true},
 	{"harness", modulePath + "/harness", false},
-	{"providers", modulePath + "/providers", false},
 }
 
 // Packages that must stay in the root module until a later extract wave.
@@ -35,7 +34,7 @@ func TestWorkspaceModules(t *testing.T) {
 
 	work := readRepoFile(t, filepath.Join(root, "go.work"))
 	uses := parseGoWorkUse(work)
-	wantUses := []string{".", "./pkg/protocol", "./pkg/redact", "./harness", "./providers"}
+	wantUses := []string{".", "./pkg/protocol", "./pkg/redact", "./harness"}
 	for _, want := range wantUses {
 		if !uses[want] {
 			t.Errorf("go.work missing use %q", want)
@@ -73,7 +72,6 @@ func TestWorkspaceModules(t *testing.T) {
 			continue
 		}
 		reqs := parseGoModRequires(mod)
-		repl := parseGoModReplaces(mod)
 		switch leaf.dir {
 		case "harness":
 			for _, want := range []string{modulePath + "/pkg/protocol", modulePath + "/pkg/redact"} {
@@ -83,13 +81,6 @@ func TestWorkspaceModules(t *testing.T) {
 			}
 			if strings.Contains(mod, "/internal/") {
 				t.Errorf("%s/go.mod must not mention internal packages", leaf.dir)
-			}
-		case "providers":
-			if !reqs[modulePath+"/harness"] {
-				t.Errorf("%s/go.mod missing require %s/harness", leaf.dir, modulePath)
-			}
-			if got := repl[modulePath+"/harness"]; got != "../harness" {
-				t.Errorf("%s/go.mod replace harness = %q, want ../harness", leaf.dir, got)
 			}
 		}
 	}
@@ -103,6 +94,17 @@ func TestWorkspaceModules(t *testing.T) {
 		}
 	}
 
+	if _, err := os.Stat(filepath.Join(root, "providers", "go.mod")); err == nil {
+		t.Error("providers/go.mod exists; adapters live in the harness module")
+	} else if !os.IsNotExist(err) {
+		t.Errorf("stat providers/go.mod: %v", err)
+	}
+	if requires[modulePath+"/providers"] {
+		t.Error("root go.mod still requires github.com/jonathanung/strike-cli/providers")
+	}
+	if _, ok := replaces[modulePath+"/providers"]; ok {
+		t.Error("root go.mod still replaces github.com/jonathanung/strike-cli/providers")
+	}
 }
 
 func readRepoFile(t *testing.T, path string) string {
