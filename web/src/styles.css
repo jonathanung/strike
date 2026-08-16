@@ -1,6 +1,6 @@
 /*
- * Cockpit palette mirrors internal/frontend/tui/theme.Default() adaptive roles.
- * Keep hex values in sync with theme.go; see web/src/theme.test.ts.
+ * Cockpit palette hexes must match schemas/ui-tokens.json (and theme.Default()).
+ * Keep hex values in sync with the token file; see web/src/theme.test.ts.
  *
  * --ink          Text
  * --muted        TextMuted
@@ -11,7 +11,7 @@
  * --rule         Border
  * --border-focus BorderFocus
  * --border-muted BorderMuted
- * --acid         Accent (primary emphasis)
+ * --acid         Accent (royal-purple primary)
  * --accent-alt   AccentAlt
  * --highlight    Highlight
  * --success      Success
@@ -25,6 +25,7 @@
  * --code-bg      inset code / tool surfaces (SurfaceMuted step)
  * --overlay      OverlayScrim (dialog backdrop tint)
  * --mark-ink     wordmark glyph on Accent fill
+ * --radius       token chrome.radiusWebPx (2px; full sharpness is #1235)
  * --text/--bg/--border/--panel/--accent  aliases of --ink/--ground/--rule/--surface/--acid
  */
 :root {
@@ -36,11 +37,11 @@
   --raised: #2e2c3e;
   --surface-muted: #1a1924;
   --rule: #4f4d63;
-  --border-focus: #c4b5fd;
+  --border-focus: #7c3aed;
   --border-muted: #2c2a3a;
-  --acid: #c4b5fd;
+  --acid: #7c3aed;
   --accent-alt: #22d3ee;
-  --highlight: #f5f3ff;
+  --highlight: #ddd6fe;
   --success: #4ade80;
   --warning: #fbbf24;
   --signal: #fb7185;
@@ -55,7 +56,7 @@
   --overlay: #7c7a90;
   --mark-ink: #14131c;
   --header-bg: #14131ce8;
-  --glow: #c4b5fd66;
+  --glow: #7c3aed66;
   --idle: #4f4d63;
   --shadow: #00000088;
   --cap-border: #4f4d63;
@@ -81,11 +82,11 @@
   --raised: #e9e0f7;
   --surface-muted: #f8f5fc;
   --rule: #c4bfd4;
-  --border-focus: #6d28d9;
+  --border-focus: #5b21b6;
   --border-muted: #ddd8ea;
-  --acid: #6d28d9;
+  --acid: #5b21b6;
   --accent-alt: #0e7490;
-  --highlight: #5b21b6;
+  --highlight: #4c1d95;
   --success: #15803d;
   --warning: #b45309;
   --signal: #e11d48;
@@ -100,7 +101,7 @@
   --overlay: #a8a3b8;
   --mark-ink: #ffffff;
   --header-bg: #fffffff0;
-  --glow: #6d28d966;
+  --glow: #5b21b666;
   --idle: #c4bfd4;
   --shadow: #1a152833;
   --cap-border: #c4bfd4;
@@ -115,11 +116,11 @@
     --raised: #e9e0f7;
     --surface-muted: #f8f5fc;
     --rule: #c4bfd4;
-    --border-focus: #6d28d9;
+    --border-focus: #5b21b6;
     --border-muted: #ddd8ea;
-    --acid: #6d28d9;
+    --acid: #5b21b6;
     --accent-alt: #0e7490;
-    --highlight: #5b21b6;
+    --highlight: #4c1d95;
     --success: #15803d;
     --warning: #b45309;
     --signal: #e11d48;
@@ -134,7 +135,7 @@
     --overlay: #a8a3b8;
     --mark-ink: #ffffff;
     --header-bg: #fffffff0;
-    --glow: #6d28d966;
+    --glow: #5b21b666;
     --idle: #c4bfd4;
     --shadow: #1a152833;
     --cap-border: #c4bfd4;
@@ -150,11 +151,11 @@
     --raised: #2e2c3e;
     --surface-muted: #1a1924;
     --rule: #4f4d63;
-    --border-focus: #c4b5fd;
+    --border-focus: #7c3aed;
     --border-muted: #2c2a3a;
-    --acid: #c4b5fd;
+    --acid: #7c3aed;
     --accent-alt: #22d3ee;
-    --highlight: #f5f3ff;
+    --highlight: #ddd6fe;
     --success: #4ade80;
     --warning: #fbbf24;
     --signal: #fb7185;
@@ -169,7 +170,7 @@
     --overlay: #7c7a90;
     --mark-ink: #14131c;
     --header-bg: #14131ce8;
-    --glow: #c4b5fd66;
+    --glow: #7c3aed66;
     --idle: #4f4d63;
     --shadow: #00000088;
     --cap-border: #4f4d63;
@@ -185,6 +186,7 @@
   --touch-min: 44px;
   --focus-ring: 2px solid var(--acid);
   --focus-offset: 2px;
+  --radius: 2px;
 }
 
 * { box-sizing: border-box; }

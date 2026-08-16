@@ -272,8 +272,11 @@ and `config.theme` / ctrl+d persists the choice. Session-local appearance
 (`/theme dark|light|auto`) is model state that feeds theme resolution; terminal
 background comes from Bubble Tea `BackgroundColorMsg` (not a pre-program OSC 11
 query). Forced dark/light override detection; auto uses the last detected bg.
-Default chrome is **soft** (surface-filled rounded cards, Family-style);
-themes may opt into `chrome: "solid"` or `chrome: "bordered"`. See [theme.md](theme.md).
+Stock hexes live in [`schemas/ui-tokens.json`](../schemas/ui-tokens.json)
+(royal-purple Accent, sharp bordered chrome as the documented north star).
+`theme.Default()` still resolves unset chrome to **soft** until #1234 applies
+bordered tiles; themes may opt into `chrome: "solid"` or `chrome: "bordered"`.
+See [theme.md](theme.md).
 
 
 ## TUI file map
@@ -515,6 +518,8 @@ Same package `internal/frontend/tui/app` (`package tui`); split for reviewabilit
    `lipgloss.AdaptiveColor` for a color role, a `lipgloss.TerminalColor` for
    the application background, a glyph on `theme.Icons`, or an appropriate
    border/spacing token — and give `Default()`/`DefaultIcons()` a value.
+   Stock color roles also belong in `schemas/ui-tokens.json` (tests fail if
+   `Default()` or `web/src/styles.css` hexes drift).
 2. If most views will read it, add a precomputed field to `theme.Styles` and
    set it in `(Theme).S()` (`internal/frontend/tui/theme/styles.go`), so call sites
    write `th.S().YourField` instead of repeating

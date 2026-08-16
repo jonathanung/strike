@@ -865,10 +865,10 @@ are embedded at compile time. Edit sources under `web/src`, then build.
 
 ### Theme
 
-Cockpit colors track the stock TUI palette in `internal/frontend/tui/theme.Default()`
-(violet accent, solid surfaces, dark/light adaptive pairs). CSS variables live
-in `web/src/styles.css`; keep them aligned when changing `theme.go` (see
-`web/src/theme.test.ts` and [theme.md](theme.md)).
+Cockpit colors track the stock token file (`schemas/ui-tokens.json`) and
+`internal/frontend/tui/theme.Default()` (royal-purple accent, dark/light
+adaptive pairs). CSS variables live in `web/src/styles.css`; keep them aligned
+with the token file (see `web/src/theme.test.ts` and [theme.md](theme.md)).
 
 **Catalog (WEBUI.11):** `GET /v1/themes` lists bundled/user/project/plugin themes
 with portable semantic color roles and provenance. `GET /v1/themes/{id}` returns
