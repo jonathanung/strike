@@ -2,7 +2,9 @@
 
 Reference for agents modifying strike-cli. States what exists in the code;
 verify against source before relying on a detail here, since this file can
-drift.
+drift. The destination tree for the harness extract (#1202) is
+[layout-target.md](layout-target.md) — do not treat that file as current
+layout and do not move packages from it.
 
 ## Dataflow
 
@@ -599,8 +601,43 @@ Review visual changes with this checklist:
 - Unknown or interprocedural modifier origins are reviewed manually.
 - New colors, glyphs, borders, spacing, and emphasis live in `theme`.
 
+## Target layout (extract epic)
+
+Destination tree for [epic #1202](https://github.com/jonathanung/strike/issues/1202)
+(*Extractable harness module and parseable repo layout*). **Not current.**
+Packages above remain where they are until the child issues land. Full spec
+(tree, module graph, rename map, kernel vs product table for every
+`internal/*` package, no-submodule / no-publish rule):
+[layout-target.md](layout-target.md).
+
+```
+pkg/protocol  ──┐
+pkg/redact    ──┤
+                ▼
+             harness          # interface + echo; engine, tool contract, fn, …
+                ▲
+                │
+             providers        # adapters, HTTP base, auth flows, factory
+                ▲
+                │
+             strike-cli       # cmd/strike + grouped internal/*
+```
+
+No cycles. `harness` imports protocol + redact only. `providers` imports the
+harness provider interface only (not `harness/engine`). Root `replace`s both.
+No git submodules and no module-proxy publish in this epic.
+
+`internal/harness` → `harness/fn`. Wire event `harness.progress` and config
+key `harnesses` stay. `engine/route.go` is persona/capability/load routing,
+not the providers factory (`providers/factory` / today's `selectProvider`).
+
+After grouping, `internal/` is persist / trust / integrate / frontend /
+product / eval (+ `tools` for product builtins, `protocol` compat re-export).
+TUI flatten target moves to `internal/tui/app`; kit is `ui`/`theme`/`common`/`term`.
+
 ## Related docs
 
+- [layout-target.md](layout-target.md) — locked destination tree for #1202 (docs only; no moves yet)
 - [config.md](config.md) — permissions, sandbox, caching, retry, checkpoints
 - [isolation.md](isolation.md) — sandbox × permission matrix
 - [threat-model.md](threat-model.md) — prompt injection via files, MCP, webfetch
