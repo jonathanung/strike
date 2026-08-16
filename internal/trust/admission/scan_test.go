@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jonathanung/strike-cli/internal/admission"
-	"github.com/jonathanung/strike-cli/internal/security"
+	"github.com/jonathanung/strike-cli/internal/trust/admission"
+	"github.com/jonathanung/strike-cli/internal/trust/security"
 )
 
 func TestAdmitMCPBlocksShellUnderStrict(t *testing.T) {

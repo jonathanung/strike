@@ -91,7 +91,7 @@ extending an existing family when the event is a variant of one above.
 | `pkg/protocol` | Live Op/Event wire (sessions, TUI, RPC) |
 | `pkg/timeline` | Derived run trace from protocol events |
 | `pkg/telemetry` | Versioned family catalog + redacted export records |
-| `internal/audit` | Durable retention-bounded security audit sink (#893) |
+| `internal/trust/audit` | Durable retention-bounded security audit sink (#893) |
 | `pkg/diag` | Prompt/config diagnostic bundle (not turn spans) |
 
 ## CI

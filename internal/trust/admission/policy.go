@@ -3,7 +3,7 @@
 //
 // It does not replace OS sandbox or permission rules — it gates whether
 // capability surfaces bind into the tool registry / skill catalog at all.
-// Finding types live in internal/security for reuse by write-time content
+// Finding types live in internal/trust/security for reuse by write-time content
 // guards (#890).
 package admission
 
@@ -11,7 +11,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/internal/security"
+	"github.com/jonathanung/strike-cli/internal/trust/security"
 )
 
 // Action is the admission verdict for a subject after scanning.

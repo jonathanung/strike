@@ -6,7 +6,7 @@ export (run spans) — it does **not** store conversational payloads by default.
 
 | | |
 |---|---|
-| Package | `internal/audit` |
+| Package | `internal/trust/audit` |
 | Schema | `1.0.0` |
 | CLI | `strike audit export`, `strike audit prune` |
 | Config | `session.auditRetentionMaxEvents`, `session.auditRetentionMaxAgeDays` |

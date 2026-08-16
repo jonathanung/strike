@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
-	"github.com/jonathanung/strike-cli/internal/secret"
+	"github.com/jonathanung/strike-cli/internal/trust/secret"
 	"github.com/jonathanung/strike-cli/pkg/redact"
 )
 
@@ -200,7 +200,7 @@ func BuildRecording(events []protocol.Event, opts RecordingOptions) Recording {
 		EventCount:          len(redacted),
 		UserInputs:          ExtractUserInputs(redacted),
 		ToolCalls:           ExtractToolCalls(redacted),
-		Note:                "Derived run recording for echo replay/compare. Complements session JSONL; schema shared with #782 snapshots. Secrets scrubbed via internal/secret + pkg/redact.",
+		Note:                "Derived run recording for echo replay/compare. Complements session JSONL; schema shared with #782 snapshots. Secrets scrubbed via internal/trust/secret + pkg/redact.",
 		ParentSessionID:     opts.ParentSessionID,
 		DelegationID:        opts.DelegationID,
 		Repo:                opts.Repo,

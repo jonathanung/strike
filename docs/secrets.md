@@ -6,7 +6,7 @@ results, and diagnostic bundles.
 | Package | Role |
 |---|---|
 | **`pkg/redact`** | Shared string scrubbing (`String`, `ScrubToolOutput`, `JSON`, `Error`, `Bytes`) — used by timeline export (#790), diagnostic bundles (#792), TUI `/export`, engine inspect previews |
-| **`internal/secret`** | Secret-ref env indirection + `RedactEvent` for session JSONL; thin wrappers over `pkg/redact` |
+| **`internal/trust/secret`** | Secret-ref env indirection + `RedactEvent` for session JSONL; thin wrappers over `pkg/redact` |
 
 Auth material itself stays in `~/.strike/auth.json` (0600) and process env;
 see [auth.md](auth.md).
@@ -60,7 +60,7 @@ secret://env/VAR_NAME
 {secret:env:VAR_NAME}
 ```
 
-Go API (`internal/secret`):
+Go API (`internal/trust/secret`):
 
 ```go
 ref, ok := secret.ParseRef("secret://env/OPENAI_API_KEY")

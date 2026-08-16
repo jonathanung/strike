@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
-	"github.com/jonathanung/strike-cli/internal/secret"
+	"github.com/jonathanung/strike-cli/internal/trust/secret"
 )
 
 const (

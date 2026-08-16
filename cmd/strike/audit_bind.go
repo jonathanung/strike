@@ -5,9 +5,9 @@ import (
 	"os"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/audit"
 	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike-cli/internal/trust/audit"
 )
 
 // auditBoundStore wraps a session store and fans security events into an audit sink.

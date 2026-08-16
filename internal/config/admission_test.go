@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jonathanung/strike-cli/internal/admission"
 	"github.com/jonathanung/strike-cli/internal/config"
+	"github.com/jonathanung/strike-cli/internal/trust/admission"
 )
 
 func TestLoadAdmissionPresetAndAllowPaths(t *testing.T) {

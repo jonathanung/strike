@@ -58,6 +58,6 @@ only clears credentials. Details: [config.md](config.md#custom-providers).
 ## Egress redaction and secret refs
 
 Session JSONL, `/export`, tool results, and diagnostic paths scrub
-credential-shaped spans via `internal/secret`. Tools may hold
+credential-shaped spans via `internal/trust/secret`. Tools may hold
 `secret://env/NAME` refs resolved only at exec time. Full policy (what is
 redacted vs preserved, bash env injection): [secrets.md](secrets.md).

@@ -3,7 +3,7 @@
 // traces, timeline export (#790), and UI dumps. Detection is best-effort
 // pattern matching (prefer false negatives over mangling ordinary prose).
 //
-// Secret refs and protocol event walking live in internal/secret (#796), which
+// Secret refs and protocol event walking live in internal/trust/secret (#796), which
 // calls String/ScrubToolOutput here. Extend patterns in this package rather
 // than forking per caller. This package does not resolve secret refs or touch
 // the credential store — only string scrubbing.

@@ -28,7 +28,7 @@ import (
 	"github.com/jonathanung/strike-cli/harness/scheduler"
 	"github.com/jonathanung/strike-cli/internal/plugin"
 	"github.com/jonathanung/strike-cli/internal/protocol"
-	"github.com/jonathanung/strike-cli/internal/secret"
+	"github.com/jonathanung/strike-cli/internal/trust/secret"
 )
 
 type Config struct {
@@ -1806,7 +1806,7 @@ func normalizeAdmissionLayer(ac *AdmissionConfig, path string) error {
 }
 
 // admissionValidPreset mirrors admission.ValidPresetID without importing
-// internal/admission from config parse hot path helpers used in tests.
+// internal/trust/admission from config parse hot path helpers used in tests.
 func admissionValidPreset(id string) bool {
 	switch strings.ToLower(strings.TrimSpace(id)) {
 	case "", "permissive", "default", "strict":

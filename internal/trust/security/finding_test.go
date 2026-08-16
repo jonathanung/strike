@@ -3,7 +3,7 @@ package security_test
 import (
 	"testing"
 
-	"github.com/jonathanung/strike-cli/internal/security"
+	"github.com/jonathanung/strike-cli/internal/trust/security"
 )
 
 func TestParseSeverity(t *testing.T) {

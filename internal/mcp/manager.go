@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/jonathanung/strike-cli/harness/tool"
-	"github.com/jonathanung/strike-cli/internal/admission"
-	"github.com/jonathanung/strike-cli/internal/secret"
+	"github.com/jonathanung/strike-cli/internal/trust/admission"
+	"github.com/jonathanung/strike-cli/internal/trust/secret"
 )
 
 // Status is one configured server's runtime state for /mcp and diagnostics.

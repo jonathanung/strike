@@ -18,7 +18,7 @@ var forbiddenKernelImports = []string{
 	"github.com/jonathanung/strike-cli/internal/persist/ledger",
 	"github.com/jonathanung/strike-cli/internal/lsp",
 	"github.com/jonathanung/strike-cli/internal/tools",
-	"github.com/jonathanung/strike-cli/internal/secret",
+	"github.com/jonathanung/strike-cli/internal/trust/secret",
 }
 
 func TestKernelToolImportBoundary(t *testing.T) {
