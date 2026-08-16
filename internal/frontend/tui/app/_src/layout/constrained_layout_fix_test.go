@@ -7,10 +7,10 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// TestConstrainedCompletionAndComposerViewsUseSoftChrome locks default
+// TestConstrainedCompletionAndComposerViewsUseBorderedChrome locks default
 // bordered chrome for height ≥ 3 (square outline). Replaces the old
 // "no box-drawing" assertion from the solid-default era.
-func TestConstrainedCompletionAndComposerViewsUseSoftChrome(t *testing.T) {
+func TestConstrainedCompletionAndComposerViewsUseBorderedChrome(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
 	m.setComposerValueAt("/", 1)
 	m.recomputeCompletion()

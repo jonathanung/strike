@@ -383,6 +383,28 @@ func TestPanelFocusStateChangesRenderedChrome(t *testing.T) {
 	}
 }
 
+func TestPanelBorderedToneDialogPaintsSurfaceFocusBody(t *testing.T) {
+	th := theme.Default()
+	th.SurfaceFocus = theme.AdaptiveColor{Light: "#222222", Dark: "#222222"}
+	th.Surface = theme.AdaptiveColor{Light: "#111111", Dark: "#111111"}
+	toned := Panel(th, PanelOpts{Title: "Permission required", Width: 40, Tone: ToneWarning}, "rm -rf")
+	plain := Panel(th, PanelOpts{Title: "Permission required", Width: 40}, "rm -rf")
+	if toned == plain {
+		t.Fatal("tone dialog rendered identically to a default bordered panel")
+	}
+	body := strings.Split(toned, "\n")[1]
+	if !strings.Contains(body, "48;2;34;34;34") {
+		t.Errorf("tone dialog body missing SurfaceFocus wash: %q", body)
+	}
+	if !strings.Contains(ansi.Strip(body), "rm -rf") {
+		t.Errorf("tone dialog body missing content: %q", body)
+	}
+	plainBody := strings.Split(plain, "\n")[1]
+	if strings.Contains(plainBody, "48;2;34;34;34") {
+		t.Errorf("default bordered body painted SurfaceFocus: %q", plainBody)
+	}
+}
+
 func TestPanelSoftFocusUsesOutlineNotFocusBar(t *testing.T) {
 	th := softTheme()
 	th.BorderFocus = theme.AdaptiveColor{Light: "#333333", Dark: "#333333"}

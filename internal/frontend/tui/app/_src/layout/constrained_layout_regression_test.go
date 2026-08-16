@@ -207,7 +207,7 @@ func composerRenderState(m Model) composerState {
 }
 
 // TestConstrainedCompletionAndComposerViewsUseExactlyAllocatedRows is covered by
-// TestConstrainedCompletionAndComposerViewsUseSoftChrome (bordered default).
+// TestConstrainedCompletionAndComposerViewsUseBorderedChrome (bordered default).
 
 func TestConstrainedRightPaneAndModalCanvasAreExact(t *testing.T) {
 	for _, height := range []int{0, 1, 2, 3, 4, 19} {

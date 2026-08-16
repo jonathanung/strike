@@ -203,22 +203,39 @@ func renderBorderedPanel(th theme.Theme, opts PanelOpts, width, padX int, rows [
 	bs := lipgloss.NewStyle().Foreground(color)
 	border := th.BorderStyle
 	horiz := width - 2
+	// Tone dialogs keep an elevated SurfaceFocus wash so permission/danger
+	// frames still pop over a scrim. Default bordered tiles stay outline-only.
+	toneFill := opts.Tone != ToneDefault
+	edgeBg := panelEdgeSurface(th, opts)
+	bodyBg := panelBodySurface(th, opts)
+	titleStyle := panelTitleStyle(th, opts)
 
 	var b strings.Builder
 	b.WriteString(bs.Render(border.TopLeft))
-	b.WriteString(edgeBorder(th, opts.Title, horiz, color, th.S().Title))
+	top := edgeBorder(th, opts.Title, horiz, color, titleStyle)
+	if toneFill {
+		top = paintSurface(top, horiz, edgeBg)
+	}
+	b.WriteString(top)
 	b.WriteString(bs.Render(border.TopRight))
+	pad := strings.Repeat(" ", padX)
 	for _, row := range rows {
 		b.WriteByte('\n')
 		b.WriteString(bs.Render(border.Vertical))
-		b.WriteString(strings.Repeat(" ", padX))
-		b.WriteString(row)
-		b.WriteString(strings.Repeat(" ", padX))
+		inner := pad + row + pad
+		if toneFill {
+			inner = paintSurface(inner, width-2, bodyBg)
+		}
+		b.WriteString(inner)
 		b.WriteString(bs.Render(border.Vertical))
 	}
 	b.WriteByte('\n')
 	b.WriteString(bs.Render(border.BottomLeft))
-	b.WriteString(edgeBorder(th, opts.Footer, horiz, color, th.S().Muted))
+	bot := edgeBorder(th, opts.Footer, horiz, color, th.S().Muted)
+	if toneFill {
+		bot = paintSurface(bot, horiz, bodyBg)
+	}
+	b.WriteString(bot)
 	b.WriteString(bs.Render(border.BottomRight))
 	return b.String()
 }
