@@ -1,5 +1,5 @@
 // Package external adapts any subprocess implementing the version 1 JSONL
-// transport into a harness.Func. JavaScript and Lean harnesses use this same
+// transport into a fn.Func. JavaScript and Lean harnesses use this same
 // language-neutral path and are not linked into the Strike binary.
 package external
 
@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/harness"
+	"github.com/jonathanung/strike-cli/internal/fn"
 	"github.com/jonathanung/strike-cli/internal/provider"
 )
 
@@ -30,7 +30,7 @@ type runner struct {
 }
 
 // New runs the language-neutral harness protocol over an adapter's pipe.
-func New(name string, adapter Adapter) (harness.Func, error) {
+func New(name string, adapter Adapter) (fn.Func, error) {
 	if strings.TrimSpace(name) == "" || adapter == nil {
 		return nil, errors.New("external harness: name and adapter are required")
 	}
@@ -122,11 +122,11 @@ func (w wireRequest) providerRequest() provider.Request {
 
 // terminal is one finished invocation outcome (oneshot or persistent).
 type terminal struct {
-	result harness.Result
+	result fn.Result
 	err    error
 }
 
-func (e *runner) run(input harness.Input, p harness.Provider, emit harness.Emit) (harness.Result, error) {
+func (e *runner) run(input fn.Input, p fn.Provider, emit fn.Emit) (fn.Result, error) {
 	ctx := input.Context
 	if ctx == nil {
 		ctx = context.Background()
@@ -136,7 +136,7 @@ func (e *runner) run(input harness.Input, p harness.Provider, emit harness.Emit)
 	invocationID := rand.Text()
 	pipe, err := e.adapter.Start(ctx)
 	if err != nil {
-		return harness.Result{}, fmt.Errorf("start external harness %q: %w", e.name, err)
+		return fn.Result{}, fmt.Errorf("start external harness %q: %w", e.name, err)
 	}
 	processDone := make(chan error, 1)
 	go func() { processDone <- pipe.Wait() }()
@@ -165,7 +165,7 @@ func (e *runner) run(input harness.Input, p harness.Provider, emit harness.Emit)
 	if err := write(start); err != nil {
 		_ = pipe.Kill()
 		<-processDone
-		return harness.Result{}, err
+		return fn.Result{}, err
 	}
 
 	done := make(chan terminal, 1)
@@ -236,7 +236,7 @@ func (e *runner) run(input harness.Input, p harness.Provider, emit harness.Emit)
 					emit(p)
 				}
 			case "harness.complete":
-				result := harness.Result{Text: m.Text, Reasoning: m.Reasoning, StopReason: m.StopReason}
+				result := fn.Result{Text: m.Text, Reasoning: m.Reasoning, StopReason: m.StopReason}
 				for _, c := range m.ToolCalls {
 					result.Calls = append(result.Calls, provider.ToolCall{ID: c.ID, Name: c.Name, Args: c.Args})
 				}
@@ -311,11 +311,11 @@ func (e *runner) run(input harness.Input, p harness.Provider, emit harness.Emit)
 			_ = pipe.Kill()
 			<-processDone
 		}
-		return harness.Result{}, ctxErr
+		return fn.Result{}, ctxErr
 	}
 }
 
-func relayProvider(ctx context.Context, call func(provider.Request) (harness.ModelResponse, error), invocationID, callID string, r provider.Request, write func(any) error) {
+func relayProvider(ctx context.Context, call func(provider.Request) (fn.ModelResponse, error), invocationID, callID string, r provider.Request, write func(any) error) {
 	out := struct {
 		Version      int               `json:"version"`
 		Type         string            `json:"type"`

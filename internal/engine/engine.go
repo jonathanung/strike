@@ -14,7 +14,7 @@ import (
 
 	"github.com/jonathanung/strike-cli/internal/attachment"
 	"github.com/jonathanung/strike-cli/internal/config"
-	"github.com/jonathanung/strike-cli/internal/harness"
+	"github.com/jonathanung/strike-cli/internal/fn"
 	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
@@ -400,7 +400,7 @@ type Options struct {
 	QuietStartup bool
 	// HarnessRegistry maps task-subagent Agent.Harness names to complete agent-run
 	// functions. nil means every child uses the built-in loop.
-	HarnessRegistry *harness.Registry
+	HarnessRegistry *fn.Registry
 	// Scheduler is the process-local admission controller shared across
 	// concurrent roots and children. Model streams acquire the model pool;
 	// agent bash acquires process (+ build/test when classified). nil disables
@@ -465,7 +465,7 @@ type Engine struct {
 	permMode protocol.PermissionMode
 	agent    Agent
 	// taskHarness is attached only by spawnChild for the selected child agent.
-	taskHarness     harness.Func
+	taskHarness     fn.Func
 	taskHarnessName string
 	// priority requests OpenAI service_tier=priority on subsequent turns.
 	// Sticky across model switches; adapters that do not support it no-op.

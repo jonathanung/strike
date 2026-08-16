@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/harness"
-	"github.com/jonathanung/strike-cli/internal/harness/external"
+	"github.com/jonathanung/strike-cli/internal/fn"
+	"github.com/jonathanung/strike-cli/internal/fn/external"
 	"github.com/jonathanung/strike-cli/internal/provider"
 	gosdk "github.com/jonathanung/strike-cli/sdk/go/harness"
 )
@@ -31,15 +31,15 @@ func TestExternalHappyConcurrentProviderCalls(t *testing.T) {
 		t.Fatal(err)
 	}
 	progress := make(chan json.RawMessage, 1)
-	result, err := h(harness.Input{
+	result, err := h(fn.Input{
 		Context: context.Background(),
 		Request: provider.Request{Model: "selected"},
-	}, harness.Provider{
-		Call: func(req provider.Request) (harness.ModelResponse, error) {
+	}, fn.Provider{
+		Call: func(req provider.Request) (fn.ModelResponse, error) {
 			if req.Model != "candidate" {
 				t.Errorf("callback model = %q, want fixture request", req.Model)
 			}
-			return harness.ModelResponse{Text: "candidate", StopReason: "stop", Usage: &provider.Usage{OutputTokens: 1}}, nil
+			return fn.ModelResponse{Text: "candidate", StopReason: "stop", Usage: &provider.Usage{OutputTokens: 1}}, nil
 		},
 	}, func(raw json.RawMessage) { progress <- raw })
 	if err != nil {
@@ -64,16 +64,16 @@ func TestExternalToolExecute(t *testing.T) {
 		t.Fatal(err)
 	}
 	var sawCall provider.ToolCall
-	result, err := h(harness.Input{
+	result, err := h(fn.Input{
 		Context: context.Background(),
 		Request: provider.Request{Model: "selected"},
-		Tools: harness.Tools{
+		Tools: fn.Tools{
 			Execute: func(call provider.ToolCall) (provider.ToolResult, error) {
 				sawCall = call
 				return provider.ToolResult{CallID: call.ID, Output: "tool-body"}, nil
 			},
 		},
-	}, harness.Provider{}, nil)
+	}, fn.Provider{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,9 +95,9 @@ func TestExternalToolExecuteStructuredError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := h(harness.Input{
+	result, err := h(fn.Input{
 		Context: context.Background(),
-		Tools: harness.Tools{
+		Tools: fn.Tools{
 			Execute: func(call provider.ToolCall) (provider.ToolResult, error) {
 				return provider.ToolResult{
 					CallID:    call.ID,
@@ -107,7 +107,7 @@ func TestExternalToolExecuteStructuredError(t *testing.T) {
 				}, nil
 			},
 		},
-	}, harness.Provider{}, nil)
+	}, fn.Provider{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,11 +117,11 @@ func TestExternalToolExecuteStructuredError(t *testing.T) {
 }
 
 func TestGoSDKToolExecute(t *testing.T) {
-	fn := newFixture(t, "go-sdk-tool")
-	result, err := fn(harness.Input{
+	run := newFixture(t, "go-sdk-tool")
+	result, err := run(fn.Input{
 		Context: context.Background(),
 		Request: provider.Request{Model: "fixture"},
-		Tools: harness.Tools{
+		Tools: fn.Tools{
 			Execute: func(call provider.ToolCall) (provider.ToolResult, error) {
 				if call.Name != "read" {
 					t.Fatalf("name = %q", call.Name)
@@ -129,7 +129,7 @@ func TestGoSDKToolExecute(t *testing.T) {
 				return provider.ToolResult{CallID: call.ID, Output: "sdk-tool-ok"}, nil
 			},
 		},
-	}, harness.Provider{}, nil)
+	}, fn.Provider{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +151,7 @@ func TestSDKExampleChooseBest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fn, err := external.New("choose-best", adapter)
+	run, err := external.New("choose-best", adapter)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,18 +159,18 @@ func TestSDKExampleChooseBest(t *testing.T) {
 	candidates := []string{"first", "the longest candidate", "third choice"}
 	providerCalls := 0
 	progress := make(chan json.RawMessage, len(candidates))
-	result, err := fn(harness.Input{
+	result, err := run(fn.Input{
 		Context: context.Background(),
 		Request: provider.Request{
 			Model:    "fixture-model",
 			Messages: []provider.Message{{Role: provider.RoleUser, Text: "solve"}},
 		},
-	}, harness.Provider{
-		Call: func(req provider.Request) (harness.ModelResponse, error) {
+	}, fn.Provider{
+		Call: func(req provider.Request) (fn.ModelResponse, error) {
 			if len(req.Messages) != 2 {
 				t.Errorf("provider messages = %#v", req.Messages)
 			}
-			response := harness.ModelResponse{Text: candidates[providerCalls], StopReason: "end_turn"}
+			response := fn.ModelResponse{Text: candidates[providerCalls], StopReason: "end_turn"}
 			providerCalls++
 			return response, nil
 		},
@@ -187,17 +187,17 @@ func TestSDKExampleChooseBest(t *testing.T) {
 }
 
 func TestGoSDKEndToEnd(t *testing.T) {
-	fn := newFixture(t, "go-sdk")
+	run := newFixture(t, "go-sdk")
 	progress := make(chan json.RawMessage, 1)
-	result, err := fn(harness.Input{
+	result, err := run(fn.Input{
 		Context: context.Background(),
 		Request: provider.Request{Model: "fixture", Messages: []provider.Message{{Role: provider.RoleUser, Text: "solve"}}},
-	}, harness.Provider{
-		Call: func(req provider.Request) (harness.ModelResponse, error) {
+	}, fn.Provider{
+		Call: func(req provider.Request) (fn.ModelResponse, error) {
 			if req.Model != "fixture" || len(req.Messages) != 1 {
 				t.Fatalf("provider request = %#v", req)
 			}
-			return harness.ModelResponse{Text: "go sdk result", StopReason: "end_turn"}, nil
+			return fn.ModelResponse{Text: "go sdk result", StopReason: "end_turn"}, nil
 		},
 	}, func(payload json.RawMessage) { progress <- payload })
 	if err != nil {
@@ -228,7 +228,7 @@ func TestExternalRejectsMalformedJSON(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.mode, func(t *testing.T) {
 			h := newFixture(t, tt.mode)
-			_, err := h(harness.Input{Context: context.Background()}, harness.Provider{}, nil)
+			_, err := h(fn.Input{Context: context.Background()}, fn.Provider{}, nil)
 			if err == nil {
 				t.Fatal("expected error")
 			}
@@ -246,7 +246,7 @@ func TestExternalRejectsMalformedJSON(t *testing.T) {
 func TestExternalCompleteDoesNotWaitForLiveHarness(t *testing.T) {
 	h := newFixture(t, "stays-alive")
 	started := time.Now()
-	result, err := h(harness.Input{Context: context.Background()}, harness.Provider{}, nil)
+	result, err := h(fn.Input{Context: context.Background()}, fn.Provider{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,10 +262,10 @@ func TestExternalCompleteDoesNotWaitForOutstandingProviderCall(t *testing.T) {
 	h := newFixture(t, "complete-with-call")
 	release := make(chan struct{})
 	defer close(release)
-	result, err := h(harness.Input{Context: context.Background()}, harness.Provider{
-		Call: func(provider.Request) (harness.ModelResponse, error) {
+	result, err := h(fn.Input{Context: context.Background()}, fn.Provider{
+		Call: func(provider.Request) (fn.ModelResponse, error) {
 			<-release
-			return harness.ModelResponse{}, nil
+			return fn.ModelResponse{}, nil
 		},
 	}, nil)
 	if err != nil {
@@ -281,7 +281,7 @@ func TestExternalCancellationStopsLiveHarness(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 	started := time.Now()
-	_, err := h(harness.Input{Context: ctx}, harness.Provider{}, nil)
+	_, err := h(fn.Input{Context: ctx}, fn.Provider{}, nil)
 	if err == nil || !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("err = %v, want deadline exceeded", err)
 	}
@@ -290,7 +290,7 @@ func TestExternalCancellationStopsLiveHarness(t *testing.T) {
 	}
 }
 
-func newFixture(t *testing.T, mode string) harness.Func {
+func newFixture(t *testing.T, mode string) fn.Func {
 	t.Helper()
 	t.Setenv("GO_WANT_HARNESS_HELPER", mode)
 	adapter, err := external.Command(external.Config{Command: os.Args[0], Args: []string{"-test.run=TestHarnessHelperProcess"}})

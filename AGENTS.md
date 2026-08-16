@@ -57,7 +57,7 @@ service/theme token).
 | `pkg/sdk` | Thin Go client over `pkg/protocol` (channel/JSONL client, RunTurn, session replay) |
 | `internal/protocol` | Compatibility re-export of `pkg/protocol` |
 | `internal/engine` | Turn loop, tool dispatch, interrupts |
-| `internal/harness` | Function harness contract, registry, external process adapter |
+| `internal/fn` | Function harness contract, registry, external process adapter |
 | `internal/provider` | LLM adapters (+ `base`, `echo`, anthropic, openai, xai, google, chatgpt) |
 | `internal/sandbox` | OS process sandbox (`Wrap` via bwrap / sandbox-exec) for bash |
 | `internal/safefile` | Hardened path I/O (FIFO/special reject, symlink policy, identity, atomic write) for tools |

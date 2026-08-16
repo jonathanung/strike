@@ -7,17 +7,17 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/jonathanung/strike-cli/internal/harness"
+	"github.com/jonathanung/strike-cli/internal/fn"
 	"github.com/jonathanung/strike-cli/internal/provider"
 )
 
 // ChooseBest requests three candidates and returns the longest response.
-func ChooseBest(input harness.Input, p harness.Provider, emit harness.Emit) (harness.Result, error) {
+func ChooseBest(input fn.Input, p fn.Provider, emit fn.Emit) (fn.Result, error) {
 	best := ""
 	for i := 0; i < 3; i++ {
 		if input.Context != nil {
 			if err := input.Context.Err(); err != nil {
-				return harness.Result{}, err
+				return fn.Result{}, err
 			}
 		}
 		req := input.Request
@@ -27,7 +27,7 @@ func ChooseBest(input harness.Input, p harness.Provider, emit harness.Emit) (har
 		})
 		response, err := p.Call(req)
 		if err != nil {
-			return harness.Result{}, err
+			return fn.Result{}, err
 		}
 		if len(response.Text) > len(best) {
 			best = response.Text
@@ -41,7 +41,7 @@ func ChooseBest(input harness.Input, p harness.Provider, emit harness.Emit) (har
 			emit(progress)
 		}
 	}
-	return harness.Result{Text: best, StopReason: "end_turn"}, nil
+	return fn.Result{Text: best, StopReason: "end_turn"}, nil
 }
 
-var _ harness.Func = ChooseBest
+var _ fn.Func = ChooseBest
