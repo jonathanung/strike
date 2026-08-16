@@ -171,7 +171,7 @@ Go import paths change; wire and config names do not.
 | `internal/fault` | `harness/fault` | #1208 |
 | `internal/frontend/tui/_src` flatten → `internal/frontend/tui/*.go` | flatten → `internal/frontend/tui/app/` | #1209 |
 | `internal/frontend/tui/{ui,theme,common,term}` | same paths, then `internal/frontend/tui/{…}` | #1209 then #1213 |
-| `internal/replay` | `internal/eval/replay` | #1215 |
+| `internal/eval/replay` | `internal/eval/replay` | #1215 |
 
 ## Kernel vs product
 
@@ -218,7 +218,7 @@ Every current top-level `internal/*` package:
 | `internal/protocol` | `internal/protocol` (compat re-export; prefer `pkg/protocol`) | product |
 | `internal/provider` | split: interface+echo → `harness/provider`; adapters → `providers/` | kernel + providers |
 | `internal/question` | `harness/question` | kernel |
-| `internal/replay` | `internal/eval/replay` | product |
+| `internal/eval/replay` | `internal/eval/replay` | product |
 | `internal/frontend/rpc` | `internal/frontend/rpc` | product |
 | `internal/safefile` | `harness/safefile` | kernel |
 | `internal/sandbox` | `harness/sandbox` | kernel |

@@ -22,7 +22,7 @@ import (
 // DefaultTracesDir is ~/.strike/traces (delegates to pkg/timeline).
 func DefaultTracesDir() string { return timeline.DefaultTracesDir() }
 
-// DefaultRunsDir is ~/.strike/runs — same layout as internal/replay.DefaultRunsDir
+// DefaultRunsDir is ~/.strike/runs — same layout as internal/eval/replay.DefaultRunsDir
 // without importing replay (session must stay free of engine/replay deps).
 func DefaultRunsDir() string {
 	home, err := os.UserHomeDir()

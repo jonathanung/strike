@@ -102,7 +102,7 @@ wires the same runner onto `internal/integrate/container` later.
 
 ### Harness evaluation suite (#807)
 
-Offline regression pack under `internal/replay` (`TestHarnessEvalSuite`) covering
+Offline regression pack under `internal/eval/replay` (`TestHarnessEvalSuite`) covering
 **correctness** (tool contracts, precondition fail-closed, golden echo replay),
 **safety** (secret redaction, permission deny, sandbox capability report),
 **recovery** (cancel error codes, no mutative double-retry), and
