@@ -10,13 +10,13 @@ function owns the complete subagent run and returns its final response.
 
 ## Integration modes
 
-Every implementation becomes a `harness.Func`, but there are two distinct ways
+Every implementation becomes a `fn.Func`, but there are two distinct ways
 to construct one:
 
 | Mode | Loading | Configuration | Stock binary |
 |---|---|---|---|
 | Embedded Go | Imported, compiled, and registered by a Go composition root | Not configurable | No custom Go harnesses registered |
-| External process | Command started at runtime and adapted to `harness.Func` over JSONL | `harnesses` entries in Strike config | Supported for any executable |
+| External process | Command started at runtime and adapted to `fn.Func` over JSONL | `harnesses` entries in Strike config | Supported for any executable |
 
 Go, JavaScript, and Lean can all use the external-process mode through
 `sdk/go/harness`, `sdk/typescript`, and `sdk/lean`. These SDKs only help build a
@@ -35,7 +35,7 @@ The repository keeps the complete choose-best integration fixture in
 [`examples/harnesses`](../examples/harnesses):
 
 - [`examples/harnesses/choose_best.go`](../examples/harnesses/choose_best.go)
-  implements `harness.Func` directly in Go.
+  implements `fn.Func` directly in Go.
 - [`examples/harnesses/go-subprocess`](../examples/harnesses/go-subprocess)
   uses the public Go subprocess SDK.
 - [`examples/harnesses/choose-best.mjs`](../examples/harnesses/choose-best.mjs)
@@ -69,7 +69,7 @@ assertion confirms that it implements the same function contract used by the
 engine:
 
 ```go
-var _ harness.Func = ChooseBest
+var _ fn.Func = ChooseBest
 ```
 
 A minimal custom function looks like this:
@@ -81,14 +81,14 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/jonathanung/strike-cli/internal/harness"
+	"github.com/jonathanung/strike-cli/internal/fn"
 )
 
-func chessHarness(input harness.Input, provider harness.Provider, emit harness.Emit) (harness.Result, error) {
+func chessHarness(input fn.Input, provider fn.Provider, emit fn.Emit) (fn.Result, error) {
 	position := decodePosition(input.Request)
 	for depth := 1; ; depth++ {
 		if err := input.Context.Err(); err != nil {
-			return harness.Result{}, err
+			return fn.Result{}, err
 		}
 		move := search(position, depth)
 		emit(json.RawMessage(fmt.Sprintf(
@@ -96,17 +96,17 @@ func chessHarness(input harness.Input, provider harness.Provider, emit harness.E
 			depth, move,
 		)))
 		if solved(move) {
-			return harness.Result{Text: move, StopReason: "complete"}, nil
+			return fn.Result{Text: move, StopReason: "complete"}, nil
 		}
 	}
 }
 ```
 
-Second, register it after `harness.NewRegistry()` in
+Second, register it after `fn.NewRegistry()` in
 `cmd/strike/assemble_tools.go`:
 
 ```go
-harnessRegistry := harness.NewRegistry()
+harnessRegistry := fn.NewRegistry()
 harnessRegistry.Register("chess", chessHarness)
 ```
 
@@ -128,7 +128,7 @@ input, provider capability, and progress callback.
 
 The integration path is deliberately small:
 
-1. `cmd/strike` converts configured commands into `harness.Func` values and
+1. `cmd/strike` converts configured commands into `fn.Func` values and
    registers them by name.
 2. Agent frontmatter stores the selected name in `engine.Agent.Harness`.
 3. When `task` starts that agent, the child engine resolves the name. With no
@@ -136,7 +136,7 @@ The integration path is deliberately small:
    complete subagent run is one function call. Root turns never invoke harnesses.
 4. `internal/engine/harness.go` constructs the input (including tools broker),
    provider capability, and progress callback. Only the function's returned
-   `harness.Result` is committed as the assistant response. Mid-run tool
+   `fn.Result` is committed as the assistant response. Mid-run tool
    results are returned to the harness only and are not written into history.
 
 `sdk/typescript` and `sdk/lean` hide the subprocess JSONL protocol. Harness code

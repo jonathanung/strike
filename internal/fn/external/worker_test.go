@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/harness"
-	"github.com/jonathanung/strike-cli/internal/harness/external"
+	"github.com/jonathanung/strike-cli/internal/fn"
+	"github.com/jonathanung/strike-cli/internal/fn/external"
 	"github.com/jonathanung/strike-cli/internal/provider"
 )
 
@@ -27,10 +27,10 @@ func TestPersistentSequentialReuse(t *testing.T) {
 
 	for i := 0; i < 3; i++ {
 		text := fmt.Sprintf("run-%d", i)
-		result, err := h(harness.Input{
+		result, err := h(fn.Input{
 			Context: context.Background(),
 			Request: provider.Request{Model: text},
-		}, harness.Provider{}, nil)
+		}, fn.Provider{}, nil)
 		if err != nil {
 			t.Fatalf("invoke %d: %v", i, err)
 		}
@@ -59,14 +59,14 @@ func TestPersistentConcurrentInvocations(t *testing.T) {
 			defer wg.Done()
 			text := fmt.Sprintf("c-%d", i)
 			// Hold the worker briefly so invocations overlap.
-			result, err := h(harness.Input{
+			result, err := h(fn.Input{
 				Context: context.Background(),
 				Request: provider.Request{
 					Model:    text,
 					System:   "slow",
 					Messages: []provider.Message{{Role: provider.RoleUser, Text: "x"}},
 				},
-			}, harness.Provider{}, nil)
+			}, fn.Provider{}, nil)
 			if err != nil {
 				errs <- err
 				return
@@ -96,10 +96,10 @@ func TestPersistentCancelIsolatesInvocation(t *testing.T) {
 	ctxA, cancelA := context.WithCancel(context.Background())
 	errA := make(chan error, 1)
 	go func() {
-		_, err := h(harness.Input{
+		_, err := h(fn.Input{
 			Context: ctxA,
 			Request: provider.Request{Model: "block-a"},
-		}, harness.Provider{}, nil)
+		}, fn.Provider{}, nil)
 		errA <- err
 	}()
 
@@ -117,10 +117,10 @@ func TestPersistentCancelIsolatesInvocation(t *testing.T) {
 	}
 
 	// B should still succeed on the same or restarted worker.
-	result, err := h(harness.Input{
+	result, err := h(fn.Input{
 		Context: context.Background(),
 		Request: provider.Request{Model: "ok-b", System: "quick"},
-	}, harness.Provider{}, nil)
+	}, fn.Provider{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,28 +139,28 @@ func TestPersistentCrashRecoveryAndDisable(t *testing.T) {
 	defer func() { _ = closeFn() }()
 
 	// First invoke crashes the worker immediately.
-	_, err := h(harness.Input{
+	_, err := h(fn.Input{
 		Context: context.Background(),
 		Request: provider.Request{Model: "boom"},
-	}, harness.Provider{}, nil)
+	}, fn.Provider{}, nil)
 	if err == nil {
 		t.Fatal("expected crash error")
 	}
 
 	// Second invoke may start a new process (restart budget).
-	_, err = h(harness.Input{
+	_, err = h(fn.Input{
 		Context: context.Background(),
 		Request: provider.Request{Model: "boom"},
-	}, harness.Provider{}, nil)
+	}, fn.Provider{}, nil)
 	if err == nil {
 		t.Fatal("expected second crash error")
 	}
 
 	// Exhausted restarts → disabled.
-	_, err = h(harness.Input{
+	_, err = h(fn.Input{
 		Context: context.Background(),
 		Request: provider.Request{Model: "boom"},
-	}, harness.Provider{}, nil)
+	}, fn.Provider{}, nil)
 	if err == nil || !strings.Contains(err.Error(), "disabled") {
 		t.Fatalf("err = %v, want disabled", err)
 	}
@@ -175,10 +175,10 @@ func TestPersistentIdleShutdown(t *testing.T) {
 	})
 	defer func() { _ = closeFn() }()
 
-	result, err := h(harness.Input{
+	result, err := h(fn.Input{
 		Context: context.Background(),
 		Request: provider.Request{Model: "first"},
-	}, harness.Provider{}, nil)
+	}, fn.Provider{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,10 +189,10 @@ func TestPersistentIdleShutdown(t *testing.T) {
 
 	time.Sleep(200 * time.Millisecond)
 
-	result, err = h(harness.Input{
+	result, err = h(fn.Input{
 		Context: context.Background(),
 		Request: provider.Request{Model: "second"},
-	}, harness.Provider{}, nil)
+	}, fn.Provider{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,20 +211,20 @@ func TestPersistentClose(t *testing.T) {
 		IdleTimeout:   -1,
 		MaxRestarts:   3,
 	})
-	_, err := h(harness.Input{
+	_, err := h(fn.Input{
 		Context: context.Background(),
 		Request: provider.Request{Model: "x"},
-	}, harness.Provider{}, nil)
+	}, fn.Provider{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := closeFn(); err != nil {
 		t.Fatal(err)
 	}
-	_, err = h(harness.Input{
+	_, err = h(fn.Input{
 		Context: context.Background(),
 		Request: provider.Request{Model: "y"},
-	}, harness.Provider{}, nil)
+	}, fn.Provider{}, nil)
 	if err == nil || !strings.Contains(err.Error(), "closed") {
 		t.Fatalf("err = %v, want closed", err)
 	}
@@ -255,12 +255,12 @@ func TestPersistentGoSDKWorker(t *testing.T) {
 	defer func() { _ = closeFn() }()
 
 	for i := 0; i < 2; i++ {
-		result, err := h(harness.Input{
+		result, err := h(fn.Input{
 			Context: context.Background(),
 			Request: provider.Request{Model: fmt.Sprintf("m-%d", i)},
-		}, harness.Provider{
-			Call: func(req provider.Request) (harness.ModelResponse, error) {
-				return harness.ModelResponse{Text: "sdk:" + req.Model, StopReason: "end_turn"}, nil
+		}, fn.Provider{
+			Call: func(req provider.Request) (fn.ModelResponse, error) {
+				return fn.ModelResponse{Text: "sdk:" + req.Model, StopReason: "end_turn"}, nil
 			},
 		}, nil)
 		if err != nil {
@@ -294,10 +294,10 @@ func TestOneshotUnchangedDefault(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		result, err := h(harness.Input{
+		result, err := h(fn.Input{
 			Context: context.Background(),
 			Request: provider.Request{Model: "o"},
-		}, harness.Provider{}, nil)
+		}, fn.Provider{}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -310,7 +310,7 @@ func TestOneshotUnchangedDefault(t *testing.T) {
 	requireStarts(t, path, 2)
 }
 
-func newPersistentFixture(t *testing.T, mode string, starts *atomic.Int32, opts external.WorkerOptions) (harness.Func, func() error, string) {
+func newPersistentFixture(t *testing.T, mode string, starts *atomic.Int32, opts external.WorkerOptions) (fn.Func, func() error, string) {
 	t.Helper()
 	path := startCountFile(t, starts)
 	adapter, err := external.Command(external.Config{

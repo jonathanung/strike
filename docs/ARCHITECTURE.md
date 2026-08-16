@@ -60,9 +60,9 @@ TUI rendered from (see `pkg/protocol/codec.go`).
 | `pkg/diag` | **Public** prompt/config diagnostic bundle builder + versioned redacted JSON export (layer map, effective dials, digests; complements `/context` and timeline) | `pkg/protocol`, `pkg/redact`, stdlib |
 | `pkg/sdk` | **Public** thin Go client over `pkg/protocol`: in-process channel client, JSONL encode/decode, `RunTurn`, session JSONL replay. Does not embed the engine (engine stays `internal/`). Consumer docs: [sdk.md](sdk.md) | `pkg/protocol`, stdlib only |
 | `internal/protocol` | Compatibility re-export of `pkg/protocol` (type aliases + thin forwards). Prefer `pkg/protocol` for new code | `pkg/protocol` only |
-| `internal/engine` | Headless agent runtime: built-in turn loop, task-subagent function harnesses, tool dispatch, permission/question integration, deferred agent switch; implicit session-scoped agent **team** (lead + children roster + shared task board + patch collaboration board + delegation lifecycle + path ownership/overlap in `team.go` / `team_board.go` / `team_patch.go` / `delegation.go` / `ownership.go`); model-stream and bash admission via shared `scheduler`; scrubs tool I/O via `secret`/`pkg/redact`; emits `artifact.updated` on typed artifact mutations and `ledger.updated` on decision-ledger mutations; auto-loads active ledger slice into system prompt; persists user attachments by content hash | `protocol`, `provider`, `harness`, `tool`, `permission`, `question`, `memory`, `artifact`, `attachment`, `ledger`, `config`, `sandbox`, `scheduler`, `secret`, `pkg/redact` |
-| `internal/harness` | Function-harness contract and named function registry; model calls return completed responses | `provider`, stdlib |
-| `internal/harness/external` | Private JSONL subprocess adapter from configured commands to `harness.Func` | `harness`, `provider`, stdlib, os/exec |
+| `internal/engine` | Headless agent runtime: built-in turn loop, task-subagent function harnesses, tool dispatch, permission/question integration, deferred agent switch; implicit session-scoped agent **team** (lead + children roster + shared task board + patch collaboration board + delegation lifecycle + path ownership/overlap in `team.go` / `team_board.go` / `team_patch.go` / `delegation.go` / `ownership.go`); model-stream and bash admission via shared `scheduler`; scrubs tool I/O via `secret`/`pkg/redact`; emits `artifact.updated` on typed artifact mutations and `ledger.updated` on decision-ledger mutations; auto-loads active ledger slice into system prompt; persists user attachments by content hash | `protocol`, `provider`, `fn`, `tool`, `permission`, `question`, `memory`, `artifact`, `attachment`, `ledger`, `config`, `sandbox`, `scheduler`, `secret`, `pkg/redact` |
+| `internal/fn` | Function-harness contract and named function registry; model calls return completed responses | `provider`, stdlib |
+| `internal/fn/external` | Private JSONL subprocess adapter from configured commands to `fn.Func` | `fn`, `provider`, stdlib, os/exec |
 | `internal/provider` | LLM provider abstraction: `Provider` interface, normalized `StreamEvent`s | stdlib |
 | `internal/provider/base` | Shared HTTP/JSON/SSE/auth client concrete adapters embed | `provider`, stdlib, net/http |
 | `internal/provider/{anthropic,openaicompat,chatgpt,google,echo}` | Concrete adapters (openaicompat covers OpenAI platform API, xAI, Kimi, DeepSeek; chatgpt is the ChatGPT-subscription backend; google is Google AI Studio generateContent; echo is the offline dev provider) | `provider`, `provider/base` (all but echo), stdlib |
@@ -627,7 +627,7 @@ No cycles. `harness` imports protocol + redact only. `providers` imports the
 harness provider interface only (not `harness/engine`). Root `replace`s both.
 No git submodules and no module-proxy publish in this epic.
 
-`internal/harness` → `harness/fn`. Wire event `harness.progress` and config
+`internal/fn` → `harness/fn`. Wire event `harness.progress` and config
 key `harnesses` stay. `engine/route.go` is persona/capability/load routing,
 not the providers factory (`providers/factory` / today's `selectProvider`).
 
