@@ -43,10 +43,14 @@ jobs:
           set -euo pipefail
           go list -m github.com/jonathanung/strike-cli \
             github.com/jonathanung/strike-cli/pkg/protocol \
-            github.com/jonathanung/strike-cli/pkg/redact
+            github.com/jonathanung/strike-cli/pkg/redact \
+            github.com/jonathanung/strike-cli/provider \
+            github.com/jonathanung/strike-cli/providers
           GOWORK=off go list -m github.com/jonathanung/strike-cli \
             github.com/jonathanung/strike-cli/pkg/protocol \
-            github.com/jonathanung/strike-cli/pkg/redact
+            github.com/jonathanung/strike-cli/pkg/redact \
+            github.com/jonathanung/strike-cli/provider \
+            github.com/jonathanung/strike-cli/providers
 
       - name: Generate TUI flatten
         run: go generate ./internal/tui
@@ -76,12 +80,16 @@ jobs:
           go vet ./...
           go -C pkg/protocol vet ./...
           go -C pkg/redact vet ./...
+          go -C provider vet ./...
+          go -C providers vet ./...
 
       - name: Test
         run: |
           go test -race ./...
           go -C pkg/protocol test -race ./...
           go -C pkg/redact test -race ./...
+          go -C provider test -race ./...
+          go -C providers test -race ./...
 
       # E3.2 prompt regression: verbose report of tool/turn/token deltas.
       # Non-blocking for now (test itself soft-fails metric drift unless

@@ -651,7 +651,7 @@ emit `tool.retrying` (timeline) before each backoff sleep.
 
 Transient **model HTTP / transport** failures retry with a fresh attempt
 identity **before any tools from that stream run**, so a retry cannot
-double-apply tool side effects (`internal/provider/retry.go`,
+double-apply tool side effects (`provider/retry.go`,
 `internal/engine/turn.go` `streamModel`). Default `MaxStreamAttempts` is **3**.
 Set the engine option to `1` to disable (not a config JSON key today).
 
@@ -1993,7 +1993,7 @@ what the adapter supports. Investigation notes:
 
 ### Anthropic — three breakpoints
 
-`internal/provider/anthropic` `applyPromptCache` places
+`providers/anthropic` `applyPromptCache` places
 `cache_control: { "type": "ephemeral" }` on up to **3** of Anthropic’s 4
 allowed breakpoints (OpenCode / Claude Code pattern):
 

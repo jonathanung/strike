@@ -33,16 +33,13 @@ import (
 	"github.com/jonathanung/strike-cli/internal/project"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
-	"github.com/jonathanung/strike-cli/internal/provider/anthropic"
-	"github.com/jonathanung/strike-cli/internal/provider/chatgpt"
-	"github.com/jonathanung/strike-cli/internal/provider/echo"
-	"github.com/jonathanung/strike-cli/internal/provider/google"
-	"github.com/jonathanung/strike-cli/internal/provider/openaicompat"
 	"github.com/jonathanung/strike-cli/internal/sandbox"
 	"github.com/jonathanung/strike-cli/internal/scheduler"
 	"github.com/jonathanung/strike-cli/internal/session"
 	"github.com/jonathanung/strike-cli/internal/tool"
 	"github.com/jonathanung/strike-cli/internal/tools"
+	"github.com/jonathanung/strike-cli/providers"
+	"github.com/jonathanung/strike-cli/providers/factory"
 )
 
 // assembled is the composition-root product shared by the TUI and headless
@@ -241,84 +238,11 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	customStore := config.NewCustomStoreWithOverlays(cfg.Providers, cfg.ModelOverlays, cfg.EndpointOverlays, workDir)
 	customStore.SetDisableDefault(cfg.DisableDefaultProviders, cfg.DisableDefaultPer)
 
-	// selectProvider constructs a provider by name, probing credentials so
-	// a bad /provider selection fails at select time with a clear message
-	// instead of on the first prompt. Custom names resolve through
-	// customStore (live; includes mid-session /settings adds). Builtin
-	// endpoint overlays from providers.jsonc (baseURL/apiKey) apply here.
+	// selectProvider is a thin call into the providers factory. Custom
+	// names and builtin endpoint overlays are resolved from already-parsed
+	// config (live; includes mid-session /settings adds).
 	selectProvider := func(name string) (provider.Provider, string, error) {
-		name = config.CanonicalProviderID(name)
-		if customStore.IsBuiltinDisabled(name) {
-			return nil, "", fmt.Errorf("provider %q is disabled (set disable-default-%s to false, or disable-default-providers to false)", name, name)
-		}
-		if name != "echo" {
-			if ep, ok := customStore.Endpoint(name); ok {
-				if p, model, err, handled := buildBuiltinWithEndpoint(name, ep, authStore); handled {
-					return p, model, err
-				}
-			}
-		}
-		switch name {
-		case "echo":
-			return echo.New(), "echo", nil
-		case "anthropic":
-			key, _ := auth.APIKey("anthropic", authStore)
-			p, err := anthropic.New(key)
-			if err != nil {
-				return nil, "", err
-			}
-			return p, config.DefaultModel(name), nil
-		case "openai":
-			// Routing decides who gets billed: an explicit API key (env or
-			// pasted) targets the platform API; a ChatGPT OAuth login
-			// targets the subscription-billed ChatGPT backend.
-			if os.Getenv("OPENAI_API_KEY") != "" {
-				return openaicompat.NewOpenAI(auth.BearerSource(name, authStore)), config.DefaultModel(name), nil
-			}
-			cred, ok := authStore.Get("openai")
-			switch {
-			case ok && cred.Type == auth.TypeOAuth:
-				source := auth.ChatGPTSource(authStore)
-				if _, _, err := source(context.Background()); err != nil {
-					return nil, "", err
-				}
-				return chatgpt.New(source), config.DefaultModel(name), nil
-			case ok && cred.APIKey != "":
-				return openaicompat.NewOpenAI(auth.BearerSource(name, authStore)), config.DefaultModel(name), nil
-			default:
-				return nil, "", fmt.Errorf("no OpenAI credentials: set OPENAI_API_KEY or run `strike auth login openai` (or /auth openai)")
-			}
-		case "xai":
-			source := auth.BearerSource(name, authStore)
-			if _, err := source(context.Background()); err != nil {
-				return nil, "", err
-			}
-			return openaicompat.NewXAI(source), config.DefaultModel(name), nil
-		case "google":
-			source := auth.BearerSource(name, authStore)
-			if _, err := source(context.Background()); err != nil {
-				return nil, "", err
-			}
-			return google.New(source), config.DefaultModel(name), nil
-		case "kimi":
-			source := auth.BearerSource(name, authStore)
-			if _, err := source(context.Background()); err != nil {
-				return nil, "", err
-			}
-			return openaicompat.New("kimi", "https://api.moonshot.cn/v1", source), config.DefaultModel(name), nil
-		case "deepseek":
-			source := auth.BearerSource(name, authStore)
-			if _, err := source(context.Background()); err != nil {
-				return nil, "", err
-			}
-			return openaicompat.NewTextOnly("deepseek", "https://api.deepseek.com/v1", source), config.DefaultModel(name), nil
-		default:
-			cp, ok := customStore.Get(name)
-			if !ok {
-				return nil, "", fmt.Errorf("unknown provider %q (want anthropic, openai, xai, google, kimi, deepseek, echo, or a custom name from /settings; gemini is accepted as an alias of google)", name)
-			}
-			return buildCustomProvider(cp, authStore)
-		}
+		return providers.Select(name, factoryOptions(authStore, customStore))
 	}
 
 	// An explicit --provider must work or fail loudly; the config default is
@@ -1223,174 +1147,56 @@ func makeLSPCollectDiagnostics(mgr *lsp.Manager, workDir string, cfg config.LSPC
 	}
 }
 
-// buildCustomProvider maps a config custom provider onto the openaicompat or
-// anthropic adapter with the declared base URL and auth-store credentials.
-// Env placeholders in baseURL/headers/apiKeyEnv are expanded from the process env.
-// When apiKeyEnv is set, a missing key fails clearly at select time.
-func buildCustomProvider(cp config.CustomProvider, store *auth.Store) (provider.Provider, string, error) {
+func factoryOptions(store *auth.Store, customStore *config.CustomStore) factory.Options {
+	return factory.Options{
+		Store:        store,
+		Disabled:     customStore.IsBuiltinDisabled,
+		DefaultModel: config.DefaultModel,
+		LookupEndpoint: func(name string) (factory.Endpoint, bool) {
+			ep, ok := customStore.Endpoint(name)
+			if !ok {
+				return factory.Endpoint{}, false
+			}
+			ep = config.ResolveEndpoint(ep)
+			return factory.Endpoint{BaseURL: ep.BaseURL, APIKeyEnv: ep.APIKeyEnv, Headers: ep.Headers}, true
+		},
+		LookupCustom: func(name string) (factory.Custom, bool) {
+			cp, ok := customStore.Get(name)
+			if !ok {
+				return factory.Custom{}, false
+			}
+			return toFactoryCustom(cp), true
+		},
+	}
+}
+
+func toFactoryCustom(cp config.CustomProvider) factory.Custom {
 	cp = config.ResolveCustom(cp)
-	if err := config.ValidateBaseURL(cp.BaseURL); err != nil {
-		return nil, "", fmt.Errorf("custom provider %s: %w", cp.Name, err)
-	}
-	defaultModel := config.DefaultModelCustom(cp)
-	switch cp.API {
-	case config.WireOpenAI:
-		if cp.APIKeyEnv != "" {
-			if _, ok := auth.APIKeyEnv(cp.Name, store, cp.APIKeyEnv); !ok {
-				return nil, "", fmt.Errorf("custom provider %s: set %s (or paste a key via /auth %s)", cp.Name, cp.APIKeyEnv, cp.Name)
-			}
-		}
-		// Empty key is allowed when no apiKeyEnv (local gateways like ollama).
-		source := optionalBearer(cp.Name, store, cp.APIKeyEnv)
-		return openaicompat.NewWithHeaders(cp.Name, cp.BaseURL, source, cp.Headers), defaultModel, nil
-	case config.WireResponses:
-		// OpenCode @ai-sdk/openai default: platform Responses API (/v1/responses).
-		if cp.APIKeyEnv != "" {
-			if _, ok := auth.APIKeyEnv(cp.Name, store, cp.APIKeyEnv); !ok {
-				return nil, "", fmt.Errorf("custom provider %s: set %s (or paste a key via /auth %s)", cp.Name, cp.APIKeyEnv, cp.Name)
-			}
-		}
-		source := optionalBearer(cp.Name, store, cp.APIKeyEnv)
-		return openaicompat.NewResponses(cp.Name, cp.BaseURL, source, cp.Headers), defaultModel, nil
-	case config.WireAnthropic:
-		key, ok := auth.APIKeyEnv(cp.Name, store, cp.APIKeyEnv)
-		if cp.APIKeyEnv != "" && !ok {
-			return nil, "", fmt.Errorf("custom provider %s: set %s (or paste a key via /auth %s)", cp.Name, cp.APIKeyEnv, cp.Name)
-		}
-		p, err := anthropic.NewCustom(cp.Name, cp.BaseURL, key, cp.Headers)
-		if err != nil {
-			return nil, "", err
-		}
-		return p, defaultModel, nil
-	default:
-		return nil, "", fmt.Errorf("custom provider %s: unknown api %q", cp.Name, cp.API)
+	return factory.Custom{
+		Name:         cp.Name,
+		BaseURL:      cp.BaseURL,
+		API:          string(cp.API),
+		Headers:      cp.Headers,
+		APIKeyEnv:    cp.APIKeyEnv,
+		DefaultModel: config.DefaultModelCustom(cp),
 	}
 }
 
-// builtinDefaultBaseURL is the stock origin for chat-completions builtins.
-func builtinDefaultBaseURL(name string) string {
-	switch name {
-	case "anthropic":
-		return "https://api.anthropic.com"
-	case "openai":
-		return "https://api.openai.com/v1"
-	case "xai":
-		return "https://api.x.ai/v1"
-	case "kimi":
-		return "https://api.moonshot.cn/v1"
-	case "deepseek":
-		return "https://api.deepseek.com/v1"
-	default:
-		return ""
-	}
+// buildCustomProvider adapts a config custom provider for existing cmd tests.
+func buildCustomProvider(cp config.CustomProvider, store *auth.Store) (provider.Provider, string, error) {
+	return factory.BuildCustom(toFactoryCustom(cp), store)
 }
 
-func builtinKeyHint(name, envName string) string {
-	if envName != "" {
-		return envName
-	}
-	switch name {
-	case "anthropic":
-		return "ANTHROPIC_API_KEY"
-	case "openai":
-		return "OPENAI_API_KEY"
-	case "xai":
-		return "XAI_API_KEY"
-	case "google":
-		return "GEMINI_API_KEY"
-	case "kimi":
-		return "KIMI_API_KEY"
-	case "deepseek":
-		return "DEEPSEEK_API_KEY"
-	default:
-		return "API key"
-	}
-}
-
-// buildBuiltinWithEndpoint applies a providers.jsonc endpoint overlay onto a
-// built-in provider. handled is false when the overlay has nothing actionable
-// for this builtin (caller falls through to default wiring).
+// buildBuiltinWithEndpoint adapts a config endpoint overlay for existing cmd tests.
 func buildBuiltinWithEndpoint(name string, ep config.ProviderEndpoint, store *auth.Store) (provider.Provider, string, error, bool) {
 	ep = config.ResolveEndpoint(ep)
-	if !ep.Active() {
-		return nil, "", nil, false
-	}
-	defaultModel := config.DefaultModel(name)
-	envName := ep.APIKeyEnv
-	hint := builtinKeyHint(name, envName)
-
-	switch name {
-	case "anthropic":
-		baseURL := ep.BaseURL
-		if baseURL == "" {
-			baseURL = builtinDefaultBaseURL(name)
-		} else if err := config.ValidateBaseURL(baseURL); err != nil {
-			return nil, "", fmt.Errorf("anthropic endpoint: %w", err), true
-		}
-		var (
-			key string
-			ok  bool
-		)
-		if envName != "" {
-			key, ok = auth.APIKeyEnv(name, store, envName)
-		} else {
-			key, ok = auth.APIKey(name, store)
-		}
-		if !ok || key == "" {
-			return nil, "", fmt.Errorf("no Anthropic credentials: set %s or run `strike auth login anthropic`", hint), true
-		}
-		p, err := anthropic.NewCustom("anthropic", baseURL, key, ep.Headers)
-		if err != nil {
-			return nil, "", err, true
-		}
-		return p, defaultModel, nil, true
-
-	case "openai", "xai", "kimi", "deepseek":
-		baseURL := ep.BaseURL
-		if baseURL == "" {
-			baseURL = builtinDefaultBaseURL(name)
-		} else if err := config.ValidateBaseURL(baseURL); err != nil {
-			return nil, "", fmt.Errorf("%s endpoint: %w", name, err), true
-		}
-		// Overlay forces chat-completions (not ChatGPT OAuth backend).
-		var source openaicompat.BearerSource
-		if envName != "" {
-			if _, ok := auth.APIKeyEnv(name, store, envName); !ok {
-				return nil, "", fmt.Errorf("no %s credentials: set %s or paste a key via /auth %s", name, envName, name), true
-			}
-			source = optionalBearer(name, store, envName)
-		} else {
-			source = auth.BearerSource(name, store)
-			if _, err := source(context.Background()); err != nil {
-				return nil, "", fmt.Errorf("no %s credentials: set %s or run `strike auth login %s`", name, hint, name), true
-			}
-		}
-		return openaicompat.NewWithHeaders(name, baseURL, source, ep.Headers), defaultModel, nil, true
-
-	case "google":
-		if ep.BaseURL != "" {
-			return nil, "", fmt.Errorf("google endpoint baseURL overlay is not supported yet"), true
-		}
-		if envName == "" {
-			return nil, "", nil, false
-		}
-		if _, ok := auth.APIKeyEnv(name, store, envName); !ok {
-			return nil, "", fmt.Errorf("no google credentials: set %s", envName), true
-		}
-		return google.New(optionalBearer(name, store, envName)), defaultModel, nil, true
-
-	default:
-		return nil, "", nil, false
-	}
+	return factory.BuiltinEndpoint(name, factory.Endpoint{
+		BaseURL: ep.BaseURL, APIKeyEnv: ep.APIKeyEnv, Headers: ep.Headers,
+	}, factory.Options{Store: store, DefaultModel: config.DefaultModel})
 }
 
-func optionalBearer(name string, store *auth.Store, envName string) openaicompat.BearerSource {
-	return func(ctx context.Context) (string, error) {
-		if key, ok := auth.APIKeyEnv(name, store, envName); ok {
-			return key, nil
-		}
-		return "", nil
-	}
+func optionalBearer(name string, store *auth.Store, envName string) func(context.Context) (string, error) {
+	return factory.OptionalBearer(name, store, envName)
 }
 
 // toolRetryBackoffFromConfig builds the engine backoff func from config delays.

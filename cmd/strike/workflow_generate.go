@@ -14,11 +14,8 @@ import (
 	"github.com/jonathanung/strike-cli/internal/config"
 	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/provider"
-	"github.com/jonathanung/strike-cli/internal/provider/anthropic"
-	"github.com/jonathanung/strike-cli/internal/provider/chatgpt"
-	"github.com/jonathanung/strike-cli/internal/provider/echo"
-	"github.com/jonathanung/strike-cli/internal/provider/google"
-	"github.com/jonathanung/strike-cli/internal/provider/openaicompat"
+	"github.com/jonathanung/strike-cli/providers"
+	"github.com/jonathanung/strike-cli/providers/factory"
 )
 
 // workflowTestCompleter, when non-nil, overrides provider-backed completion in
@@ -275,42 +272,17 @@ func selectWorkflowProvider(name string) (provider.Provider, error) {
 	name = config.CanonicalProviderID(name)
 	store, err := auth.OpenStore(auth.DefaultPath())
 	if err != nil {
-		// echo still works without a store
 		if name == "echo" {
-			return echo.New(), nil
+			p, _, selErr := providers.Select(name, factory.Options{})
+			return p, selErr
 		}
 		return nil, fmt.Errorf("opening auth store: %w", err)
 	}
-	switch name {
-	case "echo":
-		return echo.New(), nil
-	case "anthropic":
-		key, _ := auth.APIKey("anthropic", store)
-		return anthropic.New(key)
-	case "openai":
-		if os.Getenv("OPENAI_API_KEY") != "" {
-			return openaicompat.NewOpenAI(auth.BearerSource(name, store)), nil
-		}
-		cred, ok := store.Get("openai")
-		switch {
-		case ok && cred.Type == auth.TypeOAuth:
-			return chatgpt.New(auth.ChatGPTSource(store)), nil
-		case ok && cred.APIKey != "":
-			return openaicompat.NewOpenAI(auth.BearerSource(name, store)), nil
-		default:
-			return nil, fmt.Errorf("no OpenAI credentials: set OPENAI_API_KEY or run `strike auth login openai`")
-		}
-	case "xai":
-		return openaicompat.NewXAI(auth.BearerSource(name, store)), nil
-	case "google":
-		return google.New(auth.BearerSource(name, store)), nil
-	case "kimi":
-		return openaicompat.New("kimi", "https://api.moonshot.cn/v1", auth.BearerSource(name, store)), nil
-	case "deepseek":
-		return openaicompat.NewTextOnly("deepseek", "https://api.deepseek.com/v1", auth.BearerSource(name, store)), nil
-	default:
-		return nil, fmt.Errorf("unknown provider %q (want anthropic, openai, xai, google, kimi, deepseek, echo)", name)
-	}
+	p, _, err := providers.Select(name, factory.Options{
+		Store:        store,
+		DefaultModel: config.DefaultModel,
+	})
+	return p, err
 }
 
 func providerTextCompleter(p provider.Provider, model string) config.TextCompleter {
