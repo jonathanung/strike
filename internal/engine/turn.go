@@ -199,6 +199,10 @@ func (e *Engine) imagesForProvider(images []protocol.ImageAttachment) []provider
 	for _, img := range resolved {
 		kind := attachment.KindFromMIME(img.MIME)
 		if err := attachment.SelectForProvider(kind, img.MIME, caps); err != nil {
+			e.emit(protocol.EngineError{
+				Correlation: e.sessionCorr(),
+				Message:     "attachment: " + err.Error(),
+			})
 			continue
 		}
 		if len(img.Data) == 0 {

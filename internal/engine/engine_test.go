@@ -1885,5 +1885,19 @@ func TestEchoDropsImagesByCapability(t *testing.T) {
 		Text:   "look",
 		Images: []protocol.ImageAttachment{{MIME: "image/png", Data: "iVBORw0KGgo="}},
 	}
-	_ = waitForTurnCompleted(t, eng.Events())
+	var sawVisible bool
+	deadline := time.After(2 * time.Second)
+	for !sawVisible {
+		select {
+		case ev := <-eng.Events():
+			if err, ok := ev.(protocol.EngineError); ok && strings.Contains(err.Message, "does not support") {
+				sawVisible = true
+			}
+			if _, ok := ev.(protocol.TurnCompleted); ok && !sawVisible {
+				t.Fatal("turn completed without visible capability error")
+			}
+		case <-deadline:
+			t.Fatal("timeout waiting for capability error")
+		}
+	}
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"image"
+	"image/color"
 	"image/jpeg"
 	"image/png"
 )
@@ -51,7 +52,7 @@ func Compare(a, b []byte) CompareResult {
 	diff := 0
 	for y := ra.Min.Y; y < ra.Max.Y; y++ {
 		for x := ra.Min.X; x < ra.Max.X; x++ {
-			if ia.At(x, y) != ib.At(x, y) {
+			if !sameRGBA(ia.At(x, y), ib.At(x, y)) {
 				diff++
 			}
 		}
@@ -63,6 +64,12 @@ func Compare(a, b []byte) CompareResult {
 		out.Detail = fmt.Sprintf("%d differing pixels", diff)
 	}
 	return out
+}
+
+func sameRGBA(a, b color.Color) bool {
+	ar, ag, ab, aa := a.RGBA()
+	br, bg, bb, ba := b.RGBA()
+	return ar == br && ag == bg && ab == bb && aa == ba
 }
 
 func decodeAnyRaster(raw []byte) (image.Image, error) {
