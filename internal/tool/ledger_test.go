@@ -3,6 +3,7 @@ package tool
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 
@@ -197,5 +198,64 @@ func TestLedgerReadActiveOnlyDefault(t *testing.T) {
 	}
 	if !strings.Contains(list.Title, "0 ledger") {
 		t.Fatalf("default active list = %q", list.Title)
+	}
+}
+
+func TestLedgerEvidencePinsAndRevalidate(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/pinned.go"
+	if err := os.WriteFile(path, []byte("package p\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store, err := ledger.Open(dir, "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	tc := ledgerTC(dir, "s", "r")
+	var ops []string
+	tc.NotifyLedger = func(op string, e ledger.Entry) { ops = append(ops, op) }
+	w := NewLedgerWrite(store)
+	res, err := w.Execute(context.Background(), json.RawMessage(`{
+		"action":"append","kind":"assumption","statement":"pinned file is package p",
+		"evidence_pins":[{"kind":"path","path":"pinned.go"}]
+	}`), tc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var created struct {
+		ID           string `json:"id"`
+		Freshness    string `json:"freshness"`
+		EvidencePins []struct {
+			Hash string `json:"hash"`
+			Path string `json:"path"`
+		} `json:"evidence_pins"`
+	}
+	if err := json.Unmarshal([]byte(res.Output), &created); err != nil {
+		t.Fatal(err)
+	}
+	if created.Freshness != "validated" || len(created.EvidencePins) != 1 || created.EvidencePins[0].Hash == "" {
+		t.Fatalf("created = %s", res.Output)
+	}
+	if err := os.WriteFile(path, []byte("package q\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := NewLedgerRead(store)
+	got, err := r.Execute(context.Background(), json.RawMessage(`{"id":"`+created.ID+`"}`), tc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got.Output, `"freshness": "stale"`) {
+		t.Fatalf("read after change = %s", got.Output)
+	}
+	res2, err := w.Execute(context.Background(), json.RawMessage(`{"action":"revalidate","id":"`+created.ID+`"}`), tc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res2.Output, `"freshness": "validated"`) {
+		t.Fatalf("revalidate = %s", res2.Output)
+	}
+	if len(ops) != 2 || ops[0] != "append" || ops[1] != "revalidate" {
+		t.Fatalf("ops = %#v", ops)
 	}
 }

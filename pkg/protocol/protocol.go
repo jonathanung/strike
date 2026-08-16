@@ -866,7 +866,7 @@ type LedgerUpdated struct {
 	ID            string `json:"id"`
 	Kind          string `json:"kind"`   // decision | assumption | constraint
 	Status        string `json:"status"` // active | invalidated | superseded
-	Op            string `json:"op"`     // append | invalidate | supersede
+	Op            string `json:"op"`     // append | invalidate | supersede | revalidate
 	Statement     string `json:"statement,omitempty"`
 	Reason        string `json:"reason,omitempty"` // invalidate reason when op=invalidate
 	Supersedes    string `json:"supersedes,omitempty"`

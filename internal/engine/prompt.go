@@ -444,7 +444,7 @@ func (e *Engine) decisionLedgerLayer() (text, source string) {
 	}
 	// Empty path/task → all active entries (global + scoped). Callers that need
 	// a scoped slice use ledger_read with path/task_id.
-	text, omitted, err := ledger.AutoLoadLayer(e.opts.Ledger, "", "")
+	text, omitted, err := ledger.AutoLoadLayer(e.opts.Ledger, "", "", e.opts.WorkDir)
 	if err != nil || strings.TrimSpace(text) == "" {
 		return "", ""
 	}

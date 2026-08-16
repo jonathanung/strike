@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -17,7 +18,7 @@ func TestBuildResidueExtractsMarkedDecisionWithSourceIDs(t *testing.T) {
 		{Role: provider.RoleUser, Text: "also note assumption: CI is green on main"},
 	}
 	// Unmarked assumption line should not be extracted without a marker.
-	r := buildCompactionResidue(dropped, 0, protocol.CompactionStrategyTrim, protocol.CompactionReasonManual, "", nil, nil)
+	r := buildCompactionResidue(dropped, 0, protocol.CompactionStrategyTrim, protocol.CompactionReasonManual, "", nil, nil, "")
 	if r == nil {
 		t.Fatal("expected residue")
 	}
@@ -69,7 +70,7 @@ func TestBuildResidueKeepsLedgerDecision(t *testing.T) {
 		CreatedAt:  time.Now(),
 		UpdatedAt:  time.Now(),
 	}}
-	r := buildCompactionResidue(dropped, 0, protocol.CompactionStrategyTrim, protocol.CompactionReasonThreshold, "", nil, entries)
+	r := buildCompactionResidue(dropped, 0, protocol.CompactionStrategyTrim, protocol.CompactionReasonThreshold, "", nil, entries, "")
 	if r == nil {
 		t.Fatal("expected residue from ledger")
 	}
@@ -95,7 +96,7 @@ func TestBuildResidueKeepsLedgerDecision(t *testing.T) {
 
 func TestBuildResidueRecordsPinsAndSummary(t *testing.T) {
 	r := buildCompactionResidue(nil, 0, protocol.CompactionStrategySummarize, protocol.CompactionReasonManual,
-		"did the thing", []string{protocol.PromptLayerMemory, protocol.PromptLayerLedger}, nil)
+		"did the thing", []string{protocol.PromptLayerMemory, protocol.PromptLayerLedger}, nil, "")
 	if r == nil {
 		t.Fatal("expected residue for pins+summary")
 	}
@@ -118,7 +119,7 @@ func TestResidueCompactMarkerAndRebuildRoundTrip(t *testing.T) {
 	dropped := []provider.Message{
 		{Role: provider.RoleAssistant, Text: "[decision] ship residue schema v1"},
 	}
-	r := buildCompactionResidue(dropped, 0, protocol.CompactionStrategyTrim, protocol.CompactionReasonManual, "", nil, nil)
+	r := buildCompactionResidue(dropped, 0, protocol.CompactionStrategyTrim, protocol.CompactionReasonManual, "", nil, nil, "")
 	marker := residueCompactMarker(3, r)
 	if !strings.HasPrefix(marker, compactMarkerPrefix) {
 		t.Fatalf("marker prefix: %q", marker)
@@ -178,7 +179,7 @@ func TestBuildResidueEmptyWithoutContent(t *testing.T) {
 	r := buildCompactionResidue([]provider.Message{
 		{Role: provider.RoleUser, Text: "hello"},
 		{Role: provider.RoleAssistant, Text: "hi there"},
-	}, 0, protocol.CompactionStrategyTrim, protocol.CompactionReasonManual, "", nil, nil)
+	}, 0, protocol.CompactionStrategyTrim, protocol.CompactionReasonManual, "", nil, nil, "")
 	if r != nil {
 		t.Fatalf("expected nil residue, got %#v", r)
 	}
@@ -206,4 +207,33 @@ func containsStr(ss []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func TestBuildResidueStaleAssumption(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/pin.go"
+	if err := os.WriteFile(path, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pin, err := ledger.SnapshotPathPin(dir, "pin.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("new"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	entries := []ledger.Entry{{
+		ID:           "led-stale",
+		Kind:         ledger.KindAssumption,
+		Statement:    "file still says old",
+		Status:       ledger.StatusActive,
+		EvidencePins: []ledger.EvidencePin{pin},
+	}}
+	r := buildCompactionResidue(nil, 0, protocol.CompactionStrategyTrim, protocol.CompactionReasonManual, "", nil, entries, dir)
+	if r == nil || len(r.Decisions) != 1 {
+		t.Fatalf("residue = %#v", r)
+	}
+	if r.Decisions[0].Freshness != "stale" {
+		t.Fatalf("freshness = %q", r.Decisions[0].Freshness)
+	}
 }

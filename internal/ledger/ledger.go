@@ -44,19 +44,20 @@ const (
 
 // Entry is one durable ledger record.
 type Entry struct {
-	ID            string    `json:"id"`
-	Kind          string    `json:"kind"` // decision | assumption | constraint
-	Statement     string    `json:"statement"`
-	Confidence    string    `json:"confidence,omitempty"` // low | medium | high
-	EvidenceRefs  []string  `json:"evidence_refs,omitempty"`
-	Status        string    `json:"status"` // active | invalidated | superseded
-	ScopePaths    []string  `json:"scope_paths,omitempty"`
-	ScopeTaskIDs  []string  `json:"scope_task_ids,omitempty"`
-	AuthorSession string    `json:"author_session"`
-	AuthorAgent   string    `json:"author_agent,omitempty"`
-	AuthorRoot    string    `json:"author_root,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	ID            string        `json:"id"`
+	Kind          string        `json:"kind"` // decision | assumption | constraint
+	Statement     string        `json:"statement"`
+	Confidence    string        `json:"confidence,omitempty"` // low | medium | high
+	EvidenceRefs  []string      `json:"evidence_refs,omitempty"`
+	EvidencePins  []EvidencePin `json:"evidence_pins,omitempty"`
+	Status        string        `json:"status"` // active | invalidated | superseded
+	ScopePaths    []string      `json:"scope_paths,omitempty"`
+	ScopeTaskIDs  []string      `json:"scope_task_ids,omitempty"`
+	AuthorSession string        `json:"author_session"`
+	AuthorAgent   string        `json:"author_agent,omitempty"`
+	AuthorRoot    string        `json:"author_root,omitempty"`
+	CreatedAt     time.Time     `json:"created_at"`
+	UpdatedAt     time.Time     `json:"updated_at"`
 	// Invalidation / supersede metadata (empty while active).
 	InvalidateReason   string     `json:"invalidate_reason,omitempty"`
 	InvalidateEvidence []string   `json:"invalidate_evidence,omitempty"`
@@ -71,6 +72,7 @@ type AppendInput struct {
 	Statement     string
 	Confidence    string // empty → medium
 	EvidenceRefs  []string
+	EvidencePins  []EvidencePin
 	ScopePaths    []string
 	ScopeTaskIDs  []string
 	AuthorSession string
@@ -102,6 +104,7 @@ type ListFilter struct {
 func Clone(e Entry) Entry {
 	out := e
 	out.EvidenceRefs = append([]string(nil), e.EvidenceRefs...)
+	out.EvidencePins = clonePins(e.EvidencePins)
 	out.ScopePaths = append([]string(nil), e.ScopePaths...)
 	out.ScopeTaskIDs = append([]string(nil), e.ScopeTaskIDs...)
 	out.InvalidateEvidence = append([]string(nil), e.InvalidateEvidence...)
