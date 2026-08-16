@@ -16,8 +16,8 @@ import (
 
 	exampleharnesses "github.com/jonathanung/strike-cli/examples/harnesses"
 	"github.com/jonathanung/strike-cli/internal/engine"
-	"github.com/jonathanung/strike-cli/internal/harness"
-	"github.com/jonathanung/strike-cli/internal/harness/external"
+	"github.com/jonathanung/strike-cli/internal/fn"
+	"github.com/jonathanung/strike-cli/internal/fn/external"
 	"github.com/jonathanung/strike-cli/internal/permission"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
@@ -26,10 +26,10 @@ import (
 
 func TestRootAgentHarnessIsNotInvoked(t *testing.T) {
 	invoked := false
-	registry := harness.NewRegistry()
-	registry.Register("child-only", func(harness.Input, harness.Provider, harness.Emit) (harness.Result, error) {
+	registry := fn.NewRegistry()
+	registry.Register("child-only", func(fn.Input, fn.Provider, fn.Emit) (fn.Result, error) {
 		invoked = true
-		return harness.Result{Text: "wrong"}, nil
+		return fn.Result{Text: "wrong"}, nil
 	})
 	eng := engine.New(engine.Options{
 		Select: func(string) (provider.Provider, string, error) {
@@ -58,19 +58,19 @@ func TestRootAgentHarnessIsNotInvoked(t *testing.T) {
 
 func TestTaskChildInvokesAgentHarness(t *testing.T) {
 	const prompt = "search independently"
-	called := make(chan harness.Input, 1)
-	registry := harness.NewRegistry()
-	registry.Register("search-fn", func(input harness.Input, p harness.Provider, emit harness.Emit) (harness.Result, error) {
+	called := make(chan fn.Input, 1)
+	registry := fn.NewRegistry()
+	registry.Register("search-fn", func(input fn.Input, p fn.Provider, emit fn.Emit) (fn.Result, error) {
 		called <- input
 		response, err := p.Call(input.Request)
 		if err != nil {
-			return harness.Result{}, err
+			return fn.Result{}, err
 		}
 		if response.Text != "complete response" || response.StopReason != "end_turn" {
-			return harness.Result{}, errors.New("harness received an incomplete provider response")
+			return fn.Result{}, errors.New("harness received an incomplete provider response")
 		}
 		emit(json.RawMessage(`{"kind":"searching"}`))
-		return harness.Result{Text: "function result", StopReason: "complete"}, nil
+		return fn.Result{Text: "function result", StopReason: "complete"}, nil
 	})
 	taskCall := taskToolCallWithAgent("task-harness", prompt, "search")
 	prov := newScriptedProvider(
@@ -127,9 +127,9 @@ func TestTaskChildInvokesAgentHarness(t *testing.T) {
 }
 
 func TestTaskChildHarnessRejectsToolCalls(t *testing.T) {
-	registry := harness.NewRegistry()
-	registry.Register("invalid", func(harness.Input, harness.Provider, harness.Emit) (harness.Result, error) {
-		return harness.Result{
+	registry := fn.NewRegistry()
+	registry.Register("invalid", func(fn.Input, fn.Provider, fn.Emit) (fn.Result, error) {
+		return fn.Result{
 			Calls:      []provider.ToolCall{{ID: "call-1", Name: "read"}},
 			StopReason: "tool_use",
 		}, nil
@@ -176,12 +176,12 @@ func TestTaskChildHarnessRejectsToolCalls(t *testing.T) {
 func TestTaskChildHarnessEndToEnd(t *testing.T) {
 	tests := []struct {
 		name string
-		fn   func(*testing.T) harness.Func
+		fn   func(*testing.T) fn.Func
 	}{
-		{name: "go", fn: func(*testing.T) harness.Func { return exampleharnesses.ChooseBest }},
-		{name: "go-subprocess", fn: func(t *testing.T) harness.Func { return exampleExternalHarness(t, "choose-best-go-process") }},
-		{name: "javascript", fn: func(t *testing.T) harness.Func { return exampleExternalHarness(t, "choose-best-js") }},
-		{name: "lean", fn: func(t *testing.T) harness.Func { return exampleExternalHarness(t, "choose-best-lean") }},
+		{name: "go", fn: func(*testing.T) fn.Func { return exampleharnesses.ChooseBest }},
+		{name: "go-subprocess", fn: func(t *testing.T) fn.Func { return exampleExternalHarness(t, "choose-best-go-process") }},
+		{name: "javascript", fn: func(t *testing.T) fn.Func { return exampleExternalHarness(t, "choose-best-js") }},
+		{name: "lean", fn: func(t *testing.T) fn.Func { return exampleExternalHarness(t, "choose-best-lean") }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -190,10 +190,10 @@ func TestTaskChildHarnessEndToEnd(t *testing.T) {
 	}
 }
 
-func testTaskChildHarnessEndToEnd(t *testing.T, fn harness.Func) {
+func testTaskChildHarnessEndToEnd(t *testing.T, run fn.Func) {
 	t.Helper()
-	registry := harness.NewRegistry()
-	registry.Register("choose-best", fn)
+	registry := fn.NewRegistry()
+	registry.Register("choose-best", run)
 
 	const prompt = "compare candidate answers"
 	taskCall := taskToolCallWithAgent("task-external", prompt, "search")
@@ -264,7 +264,7 @@ func testTaskChildHarnessEndToEnd(t *testing.T, fn harness.Func) {
 	}
 }
 
-func exampleExternalHarness(t *testing.T, name string) harness.Func {
+func exampleExternalHarness(t *testing.T, name string) fn.Func {
 	t.Helper()
 	dir, err := filepath.Abs(filepath.Join("..", "..", "examples", "harnesses"))
 	if err != nil {
@@ -333,10 +333,10 @@ func TestTaskChildHarnessExecutesTool(t *testing.T) {
 	if err := os.WriteFile(target, []byte("hello-from-disk"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	registry := harness.NewRegistry()
-	registry.Register("reader", func(input harness.Input, _ harness.Provider, _ harness.Emit) (harness.Result, error) {
+	registry := fn.NewRegistry()
+	registry.Register("reader", func(input fn.Input, _ fn.Provider, _ fn.Emit) (fn.Result, error) {
 		if input.Tools.Execute == nil {
-			return harness.Result{}, errors.New("tools.execute unavailable")
+			return fn.Result{}, errors.New("tools.execute unavailable")
 		}
 		res, err := input.Tools.Execute(provider.ToolCall{
 			ID:   "read-1",
@@ -344,15 +344,15 @@ func TestTaskChildHarnessExecutesTool(t *testing.T) {
 			Args: json.RawMessage(`{"filePath":"note.txt"}`),
 		})
 		if err != nil {
-			return harness.Result{}, err
+			return fn.Result{}, err
 		}
 		if res.IsError {
-			return harness.Result{}, fmt.Errorf("tool error: %s (%s)", res.Output, res.ErrorCode)
+			return fn.Result{}, fmt.Errorf("tool error: %s (%s)", res.Output, res.ErrorCode)
 		}
 		if !strings.Contains(res.Output, "hello-from-disk") {
-			return harness.Result{}, fmt.Errorf("unexpected tool output %q", res.Output)
+			return fn.Result{}, fmt.Errorf("unexpected tool output %q", res.Output)
 		}
-		return harness.Result{Text: "read ok", StopReason: "end_turn"}, nil
+		return fn.Result{Text: "read ok", StopReason: "end_turn"}, nil
 	})
 	prov := newScriptedProvider(
 		toolCallStep(taskToolCallWithAgent("task-read", "read file", "worker")),
@@ -425,20 +425,20 @@ func TestTaskChildHarnessExecutesTool(t *testing.T) {
 }
 
 func TestTaskChildHarnessToolDenial(t *testing.T) {
-	registry := harness.NewRegistry()
-	registry.Register("denied", func(input harness.Input, _ harness.Provider, _ harness.Emit) (harness.Result, error) {
+	registry := fn.NewRegistry()
+	registry.Register("denied", func(input fn.Input, _ fn.Provider, _ fn.Emit) (fn.Result, error) {
 		res, err := input.Tools.Execute(provider.ToolCall{
 			ID:   "bash-1",
 			Name: "bash",
 			Args: json.RawMessage(`{"command":"echo hi"}`),
 		})
 		if err != nil {
-			return harness.Result{}, err
+			return fn.Result{}, err
 		}
 		if !res.IsError || res.ErrorCode != protocol.ErrorCodePermissionDenied {
-			return harness.Result{}, fmt.Errorf("want permission_denied, got %#v", res)
+			return fn.Result{}, fmt.Errorf("want permission_denied, got %#v", res)
 		}
-		return harness.Result{Text: "denied-ok", StopReason: "end_turn"}, nil
+		return fn.Result{Text: "denied-ok", StopReason: "end_turn"}, nil
 	})
 	denyBash := permission.Ruleset{
 		{Permission: "bash", Pattern: "*", Action: permission.Deny},
@@ -484,30 +484,30 @@ func TestTaskChildHarnessToolDenial(t *testing.T) {
 }
 
 func TestTaskChildHarnessUnknownAndMalformedTool(t *testing.T) {
-	registry := harness.NewRegistry()
-	registry.Register("bad-tools", func(input harness.Input, _ harness.Provider, _ harness.Emit) (harness.Result, error) {
+	registry := fn.NewRegistry()
+	registry.Register("bad-tools", func(input fn.Input, _ fn.Provider, _ fn.Emit) (fn.Result, error) {
 		unknown, err := input.Tools.Execute(provider.ToolCall{ID: "u1", Name: "no_such_tool", Args: json.RawMessage(`{}`)})
 		if err != nil {
-			return harness.Result{}, err
+			return fn.Result{}, err
 		}
 		if !unknown.IsError {
-			return harness.Result{}, fmt.Errorf("unknown tool should error: %#v", unknown)
+			return fn.Result{}, fmt.Errorf("unknown tool should error: %#v", unknown)
 		}
 		malformed, err := input.Tools.Execute(provider.ToolCall{ID: "m1", Name: "", Args: json.RawMessage(`{}`)})
 		if err != nil {
-			return harness.Result{}, err
+			return fn.Result{}, err
 		}
 		if !malformed.IsError || malformed.ErrorCode != protocol.ErrorCodeInvalidArgs {
-			return harness.Result{}, fmt.Errorf("malformed want invalid_args, got %#v", malformed)
+			return fn.Result{}, fmt.Errorf("malformed want invalid_args, got %#v", malformed)
 		}
 		badJSON, err := input.Tools.Execute(provider.ToolCall{ID: "j1", Name: "read", Args: json.RawMessage(`not-json`)})
 		if err != nil {
-			return harness.Result{}, err
+			return fn.Result{}, err
 		}
 		if !badJSON.IsError || badJSON.ErrorCode != protocol.ErrorCodeInvalidArgs {
-			return harness.Result{}, fmt.Errorf("bad json want invalid_args, got %#v", badJSON)
+			return fn.Result{}, fmt.Errorf("bad json want invalid_args, got %#v", badJSON)
 		}
-		return harness.Result{Text: "validated", StopReason: "end_turn"}, nil
+		return fn.Result{Text: "validated", StopReason: "end_turn"}, nil
 	})
 	prov := newScriptedProvider(
 		toolCallStep(taskToolCallWithAgent("task-bad", "validate", "worker")),
@@ -549,23 +549,23 @@ func TestTaskChildHarnessUnknownAndMalformedTool(t *testing.T) {
 }
 
 func TestTaskChildHarnessToolCancellation(t *testing.T) {
-	registry := harness.NewRegistry()
-	registry.Register("sleeper", func(input harness.Input, _ harness.Provider, _ harness.Emit) (harness.Result, error) {
+	registry := fn.NewRegistry()
+	registry.Register("sleeper", func(input fn.Input, _ fn.Provider, _ fn.Emit) (fn.Result, error) {
 		res, err := input.Tools.Execute(provider.ToolCall{
 			ID:   "sleep-1",
 			Name: "sleep",
 			Args: json.RawMessage(`{"seconds":60}`),
 		})
 		if err != nil {
-			return harness.Result{}, err
+			return fn.Result{}, err
 		}
 		if res.IsError && res.ErrorCode == protocol.ErrorCodeCanceled {
-			return harness.Result{}, context.Canceled
+			return fn.Result{}, context.Canceled
 		}
 		if input.Context.Err() != nil {
-			return harness.Result{}, input.Context.Err()
+			return fn.Result{}, input.Context.Err()
 		}
-		return harness.Result{Text: "should-not-complete", StopReason: "end_turn"}, nil
+		return fn.Result{Text: "should-not-complete", StopReason: "end_turn"}, nil
 	})
 
 	var childMu sync.Mutex
@@ -717,8 +717,8 @@ func TestTaskChildHarnessConcurrentToolsSerialized(t *testing.T) {
 		entered: make(chan struct{}, 2),
 		release: make(chan struct{}),
 	}
-	registry := harness.NewRegistry()
-	registry.Register("parallel", func(input harness.Input, _ harness.Provider, _ harness.Emit) (harness.Result, error) {
+	registry := fn.NewRegistry()
+	registry.Register("parallel", func(input fn.Input, _ fn.Provider, _ fn.Emit) (fn.Result, error) {
 		type outcome struct {
 			err error
 		}
@@ -738,7 +738,7 @@ func TestTaskChildHarnessConcurrentToolsSerialized(t *testing.T) {
 		select {
 		case <-hold.entered:
 		case <-time.After(3 * time.Second):
-			return harness.Result{}, errors.New("first hold did not start")
+			return fn.Result{}, errors.New("first hold did not start")
 		}
 		time.Sleep(50 * time.Millisecond)
 		hold.mu.Lock()
@@ -747,13 +747,13 @@ func TestTaskChildHarnessConcurrentToolsSerialized(t *testing.T) {
 		close(hold.release)
 		for range 2 {
 			if o := <-done; o.err != nil {
-				return harness.Result{}, o.err
+				return fn.Result{}, o.err
 			}
 		}
 		if peakDuringHold != 1 {
-			return harness.Result{}, fmt.Errorf("overlapping Execute peak = %d, want 1", peakDuringHold)
+			return fn.Result{}, fmt.Errorf("overlapping Execute peak = %d, want 1", peakDuringHold)
 		}
-		return harness.Result{Text: "serialized", StopReason: "end_turn"}, nil
+		return fn.Result{Text: "serialized", StopReason: "end_turn"}, nil
 	})
 	prov := newScriptedProvider(
 		toolCallStep(taskToolCallWithAgent("task-par", "parallel tools", "worker")),
@@ -801,20 +801,20 @@ func TestTaskChildHarnessExternalToolExecute(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Embedded harness using Tools.Execute (external JSONL path covered in
-	// internal/harness/external).
-	registry := harness.NewRegistry()
-	registry.Register("ext-like", func(input harness.Input, _ harness.Provider, _ harness.Emit) (harness.Result, error) {
+	// internal/fn/external).
+	registry := fn.NewRegistry()
+	registry.Register("ext-like", func(input fn.Input, _ fn.Provider, _ fn.Emit) (fn.Result, error) {
 		res, err := input.Tools.Execute(provider.ToolCall{
 			Name: "read",
 			Args: json.RawMessage(`{"filePath":"data.txt"}`),
 		})
 		if err != nil {
-			return harness.Result{}, err
+			return fn.Result{}, err
 		}
 		if res.IsError || !strings.Contains(res.Output, "external-tool-body") {
-			return harness.Result{}, fmt.Errorf("tool result = %#v", res)
+			return fn.Result{}, fmt.Errorf("tool result = %#v", res)
 		}
-		return harness.Result{Text: res.Output, StopReason: "end_turn"}, nil
+		return fn.Result{Text: res.Output, StopReason: "end_turn"}, nil
 	})
 	prov := newScriptedProvider(
 		toolCallStep(taskToolCallWithAgent("task-ext-tool", "read", "worker")),
