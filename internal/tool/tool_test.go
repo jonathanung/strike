@@ -366,8 +366,6 @@ func TestToolNames(t *testing.T) {
 	reg := NewRegistry()
 	ts := NewToolSearch(reg)
 	store := NewTodoStore()
-	mem := openMemory(t)
-	iss := openIssue(t)
 	want := map[string]Tool{
 		"read":            NewRead(),
 		"write":           NewWrite(),
@@ -385,22 +383,10 @@ func TestToolNames(t *testing.T) {
 		"browser":         NewBrowser(),
 		"todowrite":       NewTodoWrite(store),
 		"todoread":        NewTodoRead(store),
-		"memory_write":    NewMemoryWrite(mem),
-		"memory_read":     NewMemoryRead(mem),
-		"issue_write":     NewIssueWrite(iss),
-		"issue_read":      NewIssueRead(iss),
-		"plan_write":      NewPlanWrite(openPlan(t)),
-		"plan_read":       NewPlanRead(openPlan(t)),
-		"plan_delegate":   NewPlanDelegate(openPlan(t)),
-		"notebook_edit":   NewNotebookEdit(),
 		"sleep":           NewSleep(),
-		"skill":           NewSkill(nil),
 		"toolsearch":      ts,
 		"question":        NewQuestion(),
 		"apply_patch":     NewApplyPatch(),
-		"enter_plan_mode": NewEnterPlanMode(),
-		"exit_plan_mode":  NewExitPlanMode(),
-		"phase_done":      NewPhaseDone(),
 		"task_status":     NewTaskStatus(),
 		"task_read":       NewTaskRead(),
 		"task_message":    NewTaskMessage(),
@@ -414,10 +400,9 @@ func TestToolNames(t *testing.T) {
 		"patch_collab":    NewPatchCollab(),
 		"delegate":        NewDelegate(),
 		"wait":            NewWait(),
-		"tui_snapshot":    NewTUISnapshot(),
 	}
-	if len(want) != 46 {
-		t.Fatalf("expected 46 tools, got %d", len(want))
+	if len(want) != 33 {
+		t.Fatalf("expected 33 kernel tools, got %d", len(want))
 	}
 	for name, tool := range want {
 		if tool.Name() != name {

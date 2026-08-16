@@ -16,7 +16,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/sandbox"
 	"github.com/jonathanung/strike-cli/internal/session"
-	"github.com/jonathanung/strike-cli/internal/tui"
+	tui "github.com/jonathanung/strike-cli/internal/tui/app"
 	"github.com/jonathanung/strike-cli/internal/tui/theme"
 	"github.com/jonathanung/strike-cli/internal/update"
 	"github.com/jonathanung/strike-cli/pkg/timeline"

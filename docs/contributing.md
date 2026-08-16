@@ -27,8 +27,9 @@ internal/server/       strike serve web cockpit (REST/SSE/WS + embedded UI)
 internal/config/       layered config + agents/skills/workflows
 internal/host/         frontend-facing host-service contract (stdlib-only);
                        local/ wraps auth/config/models/history/memory/issue/files
-internal/tui/          BubbleTea app (flattened package; edit _src/ only)
-internal/tui/_src/     source of truth by concern — go generate flattens here
+internal/tui/          kit packages (ui, theme, common, term) + app/
+internal/tui/app/      BubbleTea app (`package tui`; flattened; edit _src/ only)
+internal/tui/app/_src/ source of truth by concern — go generate flattens here
 internal/tui/theme/    design tokens: adaptive colors, icons, precomputed styles
 internal/tui/ui/       reusable components: Panel, Dialog, Badge, List, Bento, …
 ```
@@ -37,9 +38,9 @@ Full dataflow, import rules, and recipes (add a provider/tool/slash
 command/UI component/host service/theme token):
 [ARCHITECTURE.md](ARCHITECTURE.md).
 
-**TUI edit rule:** change files under `internal/tui/_src/<group>/` (or the
-real packages `theme`/`ui`/`term`/`common`), then `go generate ./internal/tui`.
-Flattened `internal/tui/*.go` are gitignored and wiped on generate — never
+**TUI edit rule:** change files under `internal/tui/app/_src/<group>/` (or the
+real packages `theme`/`ui`/`term`/`common`), then `go generate ./internal/tui/app`.
+Flattened `internal/tui/app/*.go` are gitignored and wiped on generate — never
 edit them.
 
 ## Architecture in one paragraph
@@ -159,8 +160,8 @@ matching paths (and keep relative links valid):
 
 | Surface | Source of truth | Docs |
 |---|---|---|
-| Slash commands | `internal/tui/commands.go` (`builtinCommandSpecs`) | [usage.md](usage.md) |
-| Keybinds | `internal/tui/keymap.go` (`defaultKeyMap`, `keybindCatalog`) | [keybinds.md](keybinds.md) |
+| Slash commands | `internal/tui/app/_src/app/commands.go` (`builtinCommandSpecs`) | [usage.md](usage.md) |
+| Keybinds | `internal/tui/app/_src/app/keymap.go` (`defaultKeyMap`, `keybindCatalog`) | [keybinds.md](keybinds.md) |
 | CLI flags / `exec` | `cmd/strike` + `strike --help` | [install.md](install.md), [usage.md](usage.md) |
 | Config / custom providers / `vimMode`/`nanoMode` | `internal/config` | [config.md](config.md) |
 | Agents, skills, workflows | `internal/config` builtins + loaders | [agents-skills.md](agents-skills.md) |

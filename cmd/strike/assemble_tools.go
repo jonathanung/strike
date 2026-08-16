@@ -37,6 +37,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/scheduler"
 	"github.com/jonathanung/strike-cli/internal/session"
 	"github.com/jonathanung/strike-cli/internal/tool"
+	"github.com/jonathanung/strike-cli/internal/tools"
 	"github.com/jonathanung/strike-cli/providers"
 	"github.com/jonathanung/strike-cli/providers/factory"
 )
@@ -306,9 +307,9 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	// Plugin path/capability admission (trust remains a separate gate).
 	pluginVerdicts := config.AdmitPlugins(admitPol, config.DiscoverPlugins(workDir), workDir)
 	admissionVerdicts = append(admissionVerdicts, pluginVerdicts...)
-	skillInfos := make([]tool.SkillInfo, len(skills))
+	skillInfos := make([]tools.SkillInfo, len(skills))
 	for i, s := range skills {
-		skillInfos[i] = tool.SkillInfo{Name: s.Name, Description: s.Description, Template: s.Template, Path: s.Path}
+		skillInfos[i] = tools.SkillInfo{Name: s.Name, Description: s.Description, Template: s.Template, Path: s.Path}
 	}
 
 	todoStore := tool.NewTodoStore()
@@ -344,26 +345,26 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		tool.NewBrowser(),
 		tool.NewTodoWrite(todoStore),
 		tool.NewTodoRead(todoStore),
-		tool.NewMemoryWrite(memoryStore),
-		tool.NewMemoryRead(memoryStore),
-		tool.NewIssueWrite(issueStore),
-		tool.NewIssueRead(issueStore),
-		tool.NewPlanWrite(planStore),
-		tool.NewPlanRead(planStore),
-		tool.NewPlanDelegate(planStore),
-		tool.NewArtifactWrite(artifactStore),
-		tool.NewArtifactRead(artifactStore),
-		tool.NewLedgerWrite(ledgerStore),
-		tool.NewLedgerRead(ledgerStore),
-		tool.NewContextBundle(),
-		tool.NewTUISnapshot(),
-		tool.NewNotebookEdit(),
+		tools.NewMemoryWrite(memoryStore),
+		tools.NewMemoryRead(memoryStore),
+		tools.NewIssueWrite(issueStore),
+		tools.NewIssueRead(issueStore),
+		tools.NewPlanWrite(planStore),
+		tools.NewPlanRead(planStore),
+		tools.NewPlanDelegate(planStore),
+		tools.NewArtifactWrite(artifactStore),
+		tools.NewArtifactRead(artifactStore),
+		tools.NewLedgerWrite(ledgerStore),
+		tools.NewLedgerRead(ledgerStore),
+		tools.NewContextBundle(),
+		tools.NewTUISnapshot(),
+		tools.NewNotebookEdit(),
 		tool.NewSleep(),
-		tool.NewSkill(skillInfos),
+		tools.NewSkill(skillInfos),
 		tool.NewQuestion(),
-		tool.NewEnterPlanMode(),
-		tool.NewExitPlanMode(),
-		tool.NewPhaseDone(),
+		tools.NewEnterPlanMode(),
+		tools.NewExitPlanMode(),
+		tools.NewPhaseDone(),
 	)
 	registry.Register(tool.NewToolSearch(registry))
 	frameStore := &tool.TUIFrameStore{}
@@ -580,13 +581,13 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	lspMgr := lsp.NewManager(launchDir)
 	// Optional LSP tools (definition/references/symbols/diagnostics). Not core —
 	// omitted from provider Tools when deferTools is on until toolsearch/direct call.
-	registry.Register(tool.NewDefinition(lspMgr))
-	registry.Register(tool.NewReferences(lspMgr))
-	registry.Register(tool.NewSymbols(lspMgr))
-	registry.Register(tool.NewDiagnostics(lspMgr))
-	registry.Register(tool.NewCallHierarchy(lspMgr))
-	registry.Register(tool.NewRenamePreview(lspMgr))
-	registry.Register(tool.NewImpact(lspMgr))
+	registry.Register(tools.NewDefinition(lspMgr))
+	registry.Register(tools.NewReferences(lspMgr))
+	registry.Register(tools.NewSymbols(lspMgr))
+	registry.Register(tools.NewDiagnostics(lspMgr))
+	registry.Register(tools.NewCallHierarchy(lspMgr))
+	registry.Register(tools.NewRenamePreview(lspMgr))
+	registry.Register(tools.NewImpact(lspMgr))
 
 	// openRoot builds one live root engine. resumeID empty creates a fresh
 	// session; non-empty opens that durable root (subagents rejected).

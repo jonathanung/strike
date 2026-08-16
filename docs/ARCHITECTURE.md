@@ -77,7 +77,8 @@ TUI rendered from (see `pkg/protocol/codec.go`).
 | `internal/container` | **E12 container engine (#547 / #582–#583):** CLI shell-out to `docker`/`podman` (no Moby SDK). Injectable `ExecFunc`; `Runtime` + `CLI` (build/network/inspect); per-repo `Manager` lifecycle (build/launch/attach/exec/stop/restart/destroy/clean) with cache under `.strike/container/`, resource/port/env/SSH forwarding, harness stripped. Config JSON = E12.2; eject = E12.3. `internal/tui` must not import this package | stdlib only (`os/exec`) |
 
 | `internal/scheduler` | Fair cancellable named-pool admission (process/build/test/model/container): context-aware acquire, atomic multi-pool leases, observer snapshots; layered limits + ordered command classification (`Compile` / `CompileWithPresets` → `Effective`); versioned build-system presets (`Catalog`, expand into ordinary limits/rules) | stdlib only |
-| `internal/tool` | Tool contract (`Tool`, `Context`, `Result`, `CodedError`) + built-ins: read/glob/grep/edit/write/apply_patch/move/delete/status/bash/git/verify/task/task_status/task_read/task_message/task_interrupt/delegate/wait/agent_roster/agent_ownership/agent_message/agent_broadcast/agent_thread/team_task/patch_collab/webfetch/websearch/browser/todowrite/todoread/memory_write/memory_read/issue_write/issue_read/plan_write/plan_read/plan_delegate/artifact_write/artifact_read/ledger_write/ledger_read/context_bundle/notebook_edit/sleep/skill/question/enter_plan_mode/exit_plan_mode/phase_done/toolsearch/definition/references/symbols/diagnostics/call_hierarchy/rename_preview/impact/tui_snapshot; FS tx safety (`FileState` freshness + optional `baseHash`, atomic temp+rename writes, atomic rename move + safe delete, `TurnDiff` create/update/delete); `PathOwnership` multi-agent path claims; `patch_collab` reuses apply_patch envelopes for submit/preview/reject/apply with path-overlap conflict detection; bash acquires scheduler pools after Ask; file tools call `FileSync` + `CollectDiagnostics` after mutations; plan tools use `RootSessionID` for ownership; `plan_delegate` correlates sections to task children with content CAS apply; artifact tools use session+root for owner/team access; ledger tools append/invalidate/supersede shared decisions; `context_bundle` reads sealed spawn context (goal/paths/artifacts/constraints); progressive `task` (create + get/status/message/wait/transition/cancel; compat shims: delegate/task_*/wait) accepts `context_bundle`; `RunProcess` checks `fault.ProcessAfterStart` for chaos tests | `provider` (for `ToolSchema`), `memory`, `issue`, `plan`, `artifact`, `ledger`, `sandbox`, `scheduler`, `fault`, stdlib |
+| `internal/tool` | Kernel tool contract (`Tool`, `Context`, `Result`, `CodedError`, registry, retry, FileState, checkpoint, TurnDiff) + generic builtins: read/glob/grep/edit/write/apply_patch/move/delete/status/bash/git/verify/task/task_status/task_read/task_message/task_interrupt/delegate/wait/agent_roster/agent_ownership/agent_message/agent_broadcast/agent_thread/team_task/patch_collab/webfetch/websearch/browser/todowrite/todoread/sleep/question/toolsearch; FS tx safety (`FileState` freshness + optional `baseHash`, atomic temp+rename writes, atomic rename move + safe delete, `TurnDiff` create/update/delete); `PathOwnership` multi-agent path claims; `patch_collab` reuses apply_patch envelopes for submit/preview/reject/apply with path-overlap conflict detection; bash acquires scheduler pools after Ask; file tools call `FileSync` + `CollectDiagnostics` after mutations; progressive `task` (create + get/status/message/wait/transition/cancel; compat shims: delegate/task_*/wait) accepts `context_bundle`; `RunProcess` checks `fault.ProcessAfterStart` for chaos tests | `provider` (for `ToolSchema`), `sandbox`, `scheduler`, `fault`, stdlib |
+| `internal/tools` | Strike product builtins: memory_write/read, issue_write/read, plan_write/read/delegate, artifact_write/read, ledger_write/read, skill, context_bundle, notebook_edit, LSP intel/nav (definition/references/symbols/diagnostics/call_hierarchy/rename_preview/impact), tui_snapshot, enter/exit_plan_mode, phase_done. Same `tool.Tool` contract and wire names; registered by `cmd/strike/assemble_tools.go` | `tool`, persist stores (`memory`, `issue`, `plan`, `artifact`, `ledger`), `lsp`, stdlib |
 | `internal/security` | Shared `Finding` + `Severity` for trust-boundary scanners (admission #889, content guards #890) | stdlib only |
 | `internal/admission` | Register/load-time admission policy (permissive/default/strict severity→allow\|warn\|block\|quarantine), MCP/skill/plugin scanners, home-anchored allow-paths | `security`, `pkg/redact`, stdlib |
 | `internal/mcp` | MCP client (stdio + streamable HTTP) + session manager; admission before tool bind; bridges tools onto `tool.Registry` as `mcp_<server>_<tool>`; retry/disable/quarantine; tools-only stdio **server** (`Server`) for `strike mcp-serve` | `tool`, `admission`, `secret`, stdlib, net/http |
@@ -106,11 +107,11 @@ TUI rendered from (see `pkg/protocol/codec.go`).
 | `internal/project` | Stable filesystem identity + optional per-session git worktrees under `.strike/worktrees/` | stdlib, os/exec |
 | `internal/host` | **Frozen contract**: the services a frontend needs from its host process (includes `SchedulerPresets` catalog + global apply, `Permissions` explain/presets for `/permission`, `Plugins` lifecycle for `/plugin`) | stdlib only — enforced by the boundary test |
 | `internal/host/local` | Real `host.Services` implementation; wraps auth/config/models/history/memory/issue/plan/goal/files/mcp/plugin/scheduler presets for the frontend | `auth`, `config`, `history`, `host`, `issue`, `plan`, `goal`, `mcp`, `plugin`, `memory`, `models`, `sandbox`, `scheduler`, `tool` (composer `!` shell) |
-| `internal/tui` | Bubble Tea frontend: app model, layout, cells, modals, composer. Sources under `_src/<group>/`, flattened by `go generate` | `protocol`, `host`, `tui/...` only (+ `pkg/redact` / `pkg/protocol`) — enforced by the boundary test |
+| `internal/tui/app` | Bubble Tea frontend (`package tui`): app model, layout, cells, modals, composer. Sources under `app/_src/<group>/`, flattened by `go generate ./internal/tui/app` | `protocol`, `host`, `tui/...` only (+ `pkg/redact` / `pkg/protocol`) — enforced by the boundary test |
 | `internal/tui/theme` | Resolved design tokens: adaptive color roles, surfaces, chrome mode (soft\|solid\|bordered), terminal background, glyphs, border/spacing tokens, and precomputed styles | lipgloss, stdlib |
 | `internal/tui/common` | Pure formatting helpers (ThemedSpace, DotJoin, compact durations) | `tui/theme`, stdlib |
 | `internal/tui/term` | PTY + vt10x for embedded editors | stdlib + pty/vt10x |
-| `internal/tui/ui` | Reusable component library (Panel, Dialog, Badge, KeyHints, StatusBar, List, Notice, Card/Bento, OverlayCenter/Scrim, Canvas, Logo) | stdlib, lipgloss, bubbles, charmbracelet/x/ansi, `tui/theme` |
+| `internal/tui/ui` | Reusable component library (Panel, Dialog, Badge, KeyHints, StatusBar, List, Notice, Card/Bento, OverlayCenter/Scrim, Canvas) | stdlib, lipgloss, bubbles, charmbracelet/x/ansi, `tui/theme` |
 
 ## Dependency rules
 
@@ -127,11 +128,13 @@ Verbatim from the refactor spec (`.plan/refactor-agents-ui.md`):
 - `pkg/diag`: stdlib + `pkg/protocol` + `pkg/redact` only.
 - `pkg/sdk`: stdlib + `pkg/protocol` only (public client over the wire schema).
 
-These are enforced mechanically, not just by convention: `internal/tui/boundary_test.go`
+These are enforced mechanically, not just by convention: `internal/tui/app/_src/test/boundary_test.go`
 (`TestArchitectureBoundaries`) walks every non-test `.go` file in the module
 with `go/parser` and fails, naming the offending file and import, on any
-violation. Run it like any other test (`go test ./internal/tui/...`); there
-is no way to silently cross the boundary.
+violation. Kit packages (`ui`, `theme`, `common`, `term`) additionally may
+not import `protocol` or `host`. Run it like any other test
+(`go test ./internal/tui/...`); there is no way to silently cross the
+boundary.
 
 `pkg/protocol` and `pkg/redact` are separate Go modules (root `go.work` plus
 root `go.mod` `require`/`replace`) so a future harness module can import them
@@ -274,15 +277,18 @@ themes may opt into `chrome: "solid"` or `chrome: "bordered"`. See [theme.md](th
 
 ## TUI file map
 
-`internal/tui` is one Go package (shared unexported `Model` / `modal` / `window` /
-`cell`). Go cannot split a package across directories, so sources are grouped
-under `_src/<group>/` for traversability and flattened into `internal/tui/*.go`
-by `go generate ./internal/tui` (`make test` / `make build` run this first).
+`internal/tui/app` is one Go package (`package tui`; shared unexported
+`Model` / `modal` / `window` / `cell`). Parent `internal/tui/` lists only that
+app package plus kit packages (`ui`, `theme`, `common`, `term`). Go cannot
+split a package across directories, so sources are grouped under
+`internal/tui/app/_src/<group>/` for traversability and flattened into
+`internal/tui/app/*.go` by `go generate ./internal/tui/app`
+(`make test` / `make build` run this first).
 
 | `_src` group | Concern |
 |---|---|
 | `app/` | Model, event apply, key routing, slash commands |
-| `layout/` | View composition, splits, welcome, chrome |
+| `layout/` | View composition, splits, welcome, chrome, brand wordmark |
 | `modal/` | Overlay dialogs and pickers |
 | `window/` | Right-pane windows and registry |
 | `cell/` | Transcript cells and export |
@@ -292,13 +298,14 @@ by `go generate ./internal/tui` (`make test` / `make build` run this first).
 | `util/` | Shims to `common/` |
 | `test/` | Cross-cutting tests |
 
-**Edit `_src/` only**, then `go generate ./internal/tui`. Flattened
-`internal/tui/*.go` copies are gitignored and regenerated by make/CI; editing
-them is silently discarded (`TestSrcFlattenInSync`). Independent real
-packages: `theme/`, `ui/`, `term/`, `common/`.
+**Edit `_src/` only**, then `go generate ./internal/tui/app`. Flattened
+`internal/tui/app/*.go` copies are gitignored and regenerated by make/CI;
+editing them is silently discarded (`TestSrcFlattenInSync`). Independent
+real packages: `theme/`, `ui/`, `term/`, `common/`. The Strike wordmark
+(`Logo` / `LogoCompact`) lives in the app, not the kit.
 
 Charm module paths (enforced by `TestCharmImportPaths` in
-`_src/test/boundary_test.go`): v1 uses `github.com/charmbracelet/…`; v2 uses
+`app/_src/test/boundary_test.go`): v1 uses `github.com/charmbracelet/…`; v2 uses
 the vanity domain `charm.land/…` (e.g. `charm.land/bubbletea/v2`). The path
 `github.com/charmbracelet/…/v2` is rejected. When migrating to Charm v2,
 update import path constants (including `lipglossPath` in
@@ -321,7 +328,7 @@ Two things fall out of that:
    isn't called from any view yet. A later phase wires it up when it's ready
    to be user-facing. This is how "add a service without touching the
    frontend" works in practice, not just in principle.
-2. **The frontend develops and tests against fakes.** `internal/tui/testsupport_test.go`
+2. **The frontend develops and tests against fakes.** `internal/tui/app/_src/test/testsupport_test.go`
    defines scriptable fakes for every `host.Services` capability
    (`fakeAuth`, `fakeCatalog`, `fakeSettings`, `fakeHistory`) plus the
    `New(...)`-wrapping helpers the test suite builds models with. No TUI test
@@ -331,8 +338,8 @@ Two things fall out of that:
 `host.Services` fields may be nil or empty (a fake in a narrow test, a future
 frontend that doesn't support one capability); every frontend call site
 degrades gracefully instead of panicking — see `services.History != nil`
-checks in `internal/tui/app.go` and `saveDefaultsThroughCmd`'s nil-`Settings`
-branch in `internal/tui/view.go` for the pattern.
+checks in `internal/tui/app/_src/app/app.go` and `saveDefaultsThroughCmd`'s nil-`Settings`
+branch in `internal/tui/app/_src/layout/view.go` for the pattern.
 
 ## Recipes
 
@@ -361,8 +368,9 @@ branch in `internal/tui/view.go` for the pattern.
 ### Add a tool
 
 1. Implement `tool.Tool` (`Name`, `Description`, `Schema`, `Execute`) in a new
-   file under `internal/tool/` — `internal/tool/glob.go` is a minimal
-   example; `edit.go`/`write.go`/`bash.go` show the permission-ask pattern.
+   file under `internal/tool/` (kernel/generic) or `internal/tools/` (Strike
+   persist/LSP/product) — `internal/tool/glob.go` is a minimal example;
+   `edit.go`/`write.go`/`bash.go` show the permission-ask pattern.
    Prefer also implementing `Contract() tool.Contract` (side-effect class +
    idempotency; see `internal/tool/contract.go`). Registry helpers
    `Contract`/`Contracts` document these fields; tools without `Contract`
@@ -383,7 +391,7 @@ branch in `internal/tui/view.go` for the pattern.
      `provider.ToolResult.ErrorCode`.
   4. No `internal/tui` change is needed for a generic tool: tool calls render
     from `protocol.ToolCallBegin`/`ToolCallEnd` via `toolCell` in
-    `internal/tui/cells.go` (name, title, output preview, ok/err glyph).
+    `internal/tui/app/_src/cell/cells.go` (name, title, output preview, ok/err glyph).
     Edit-shaped `Metadata` (`oldString`/`newString`) is consumed by the TUI
     via `ui.DiffPreview` in the permission modal and completed tool cells;
     from a selected tool cell, `a` confirms and re-applies the shown edit
@@ -412,7 +420,7 @@ Two different mechanisms, depending on whether it needs Go code:
    keybind-backed action mirrors such as `focus-left`, `palette`,
    `interrupt`, `agent-next`, `tool-copy`, `subagent`, `root-new`, …) are
    rejected by `config.ValidateSkillName` before they ever reach the frontend.
-   See `keybindSlashPrimary` in `internal/tui/keybind_slash.go` for the full
+   See `keybindSlashPrimary` in `internal/tui/app/_src/app/keybind_slash.go` for the full
    keybind→slash map. `/init` is a builtin that writes project
    `AGENTS.md` via `host.ProjectInit` (confirm before overwrite). `/ftue` opens
    the setup wizard (provider → model → optional init → feature tour →
@@ -432,13 +440,14 @@ Two different mechanisms, depending on whether it needs Go code:
    (`embedded` default, or `modal`). `/vim` editor resolution: `$VISUAL` →
    `$EDITOR` → nvim/vim/vi/nano on PATH. GUI `$EDITOR` values always take over.
 - **Builtin command (code).** Add a `commandSpec` to `builtinCommandSpecs`
-  in `internal/tui/commands.go`, a `case "/yourcmd":` arm in
-  `Model.handleCommand` (`internal/tui/command_dispatch.go`), and — if it's a primary
-  action — a hint in `hintsView` (`internal/tui/view.go`).
+  in `internal/tui/app/_src/app/commands.go`, a `case "/yourcmd":` arm in
+  `Model.handleCommand` (`internal/tui/app/_src/app/command_dispatch.go`), and — if it's a primary
+  action — a hint in `hintsView` (`internal/tui/app/_src/layout/view.go`).
 
 ## TUI source map (selected)
 
-Same package `internal/tui`; split for reviewability only (no subpackages).
+Same package `internal/tui/app` (`package tui`); split for reviewability only
+(no extra subpackages). Edit `_src/` only.
 
 | File | Responsibility |
 |---|---|
@@ -474,7 +483,7 @@ Same package `internal/tui`; split for reviewability only (no subpackages).
    `internal/tui/ui/yourname_test.go` — assert structure (`lipgloss.Width`,
    substrings, line counts), not literal ANSI bytes; `panel_test.go` and
    `list_test.go` show the pattern.
-4. Consume it from a view in `internal/tui/*.go`. Views never build a raw
+4. Consume it from a view in `internal/tui/app/_src/`. Views never build a raw
    lipgloss box or list — that is what this package is for.
 
 ### Add a host service

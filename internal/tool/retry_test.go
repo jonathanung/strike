@@ -51,7 +51,7 @@ func TestDecideRetryPolicyTable(t *testing.T) {
 func TestDecideRetryMutativeToolsNeverAutoRetryTransient(t *testing.T) {
 	t.Parallel()
 	// Acceptance: mutative tools do not auto-retry on generic/transient failure.
-	for _, tool := range []Tool{NewEdit(), NewWrite(), NewApplyPatch(), NewMove(), NewDelete(), NewBash(), NewNotebookEdit()} {
+	for _, tool := range []Tool{NewEdit(), NewWrite(), NewApplyPatch(), NewMove(), NewDelete(), NewBash()} {
 		c := LookupContract(tool)
 		for _, code := range []ErrorCode{CodeTransient, CodeTimeout, CodeInternal, ""} {
 			if d := DecideRetry(code, c.Idempotency); d == DecisionRetry {

@@ -402,7 +402,7 @@ touched; unresolved rows **must** keep the listed tier.
 
 | Feature | TUI entry/file | Web file/API today | Status | Owner | Tier | Attach-only |
 |---|---|---|---|---|---|---|
-| Live transcript stream | `internal/tui/_src/app`, cells | `web/src/Transcript.tsx`, WS `/v1/ws`, reducer | shipped | preserve | B | read (SSE history) |
+| Live transcript stream | `internal/tui/app/_src/app`, cells | `web/src/Transcript.tsx`, WS `/v1/ws`, reducer | shipped | preserve | B | read (SSE history) |
 | Historical JSONL attach | session nav | SSE `/v1/sessions/{id}/events` | shipped | preserve | B | read |
 | Composer + send | input package | `App.tsx` composer, `user.input` op | shipped | preserve | B | mutate-blocked |
 | Image attachments | input | composer images → op | shipped | preserve | B | mutate-blocked |
@@ -620,8 +620,8 @@ implementing child must meet. #1090 is the final conformance gate for the epic.
 
 When editing the parity table, re-verify against:
 
-- `internal/tui/_src/app/commands.go` — slash/command families
-- `internal/tui/_src/modal/`, `internal/tui/_src/window/` — surfaces
+- `internal/tui/app/_src/app/commands.go` — slash/command families
+- `internal/tui/app/_src/modal/`, `internal/tui/app/_src/window/` — surfaces
 - `internal/host/` — host services
 - `pkg/protocol/` — Op/Event wire
 - `internal/server/` — HTTP/SSE/WS + capabilities

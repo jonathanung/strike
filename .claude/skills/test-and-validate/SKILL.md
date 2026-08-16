@@ -16,7 +16,7 @@ This skill runs those tiers; do not invent softer or harder local suites.
 Match `.github/workflows/ci.yml`:
 
 1. `gofmt -l .` must be empty
-2. `go generate ./internal/tui` (TUI flatten; required before build/test if `_src` changed or generate is stale)
+2. `go generate ./internal/tui/app` (TUI flatten; required before build/test if `_src` changed or generate is stale)
 3. `make web-check` when `web/` is touched or `web/package.json` exists and UI may be affected
 4. `go build ./...` or `make build`
 5. `make vet`
@@ -41,7 +41,7 @@ Optional: `make cover` / `make cover-check` (soft in CI). Offline product smoke:
 | Check | Command |
 |---|---|
 | Format | `test -z "$(gofmt -l .)"` |
-| TUI generate | `go generate ./internal/tui` |
+| TUI generate | `go generate ./internal/tui/app` |
 | Web | `make web-check` |
 | Unit suite | `make test` or `go test ./...` |
 | Fresh run | `go test ./... -count=1` |

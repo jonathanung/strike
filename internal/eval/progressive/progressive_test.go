@@ -15,6 +15,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
 	"github.com/jonathanung/strike-cli/internal/tool"
+	"github.com/jonathanung/strike-cli/internal/tools"
 )
 
 func fullRegistry(t *testing.T) *tool.Registry {
@@ -33,8 +34,8 @@ func fullRegistry(t *testing.T) *tool.Registry {
 		tool.NewDelegate(), tool.NewWait(),
 		tool.NewAgentRoster(), tool.NewAgentOwnership(), tool.NewAgentMessage(),
 		tool.NewAgentBroadcast(), tool.NewAgentThread(), tool.NewTeamTask(),
-		tool.NewPlanWrite(store), tool.NewPlanRead(store), tool.NewPlanDelegate(store),
-		tool.NewEnterPlanMode(), tool.NewExitPlanMode(), tool.NewPhaseDone(),
+		tools.NewPlanWrite(store), tools.NewPlanRead(store), tools.NewPlanDelegate(store),
+		tools.NewEnterPlanMode(), tools.NewExitPlanMode(), tools.NewPhaseDone(),
 		tool.NewQuestion(), tool.NewWebFetch(), tool.NewSleep(),
 	)
 	reg.Register(tool.NewToolSearch(reg))

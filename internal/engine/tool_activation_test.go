@@ -12,6 +12,7 @@ import (
 	"github.com/jonathanung/strike-cli/internal/protocol"
 	"github.com/jonathanung/strike-cli/internal/provider"
 	"github.com/jonathanung/strike-cli/internal/tool"
+	"github.com/jonathanung/strike-cli/internal/tools"
 )
 
 func activationRegistry(t *testing.T) *tool.Registry {
@@ -26,12 +27,12 @@ func activationRegistry(t *testing.T) *tool.Registry {
 		tool.NewBash(),
 		tool.NewTask(),
 		tool.NewQuestion(),
-		tool.NewPlanWrite(store),
-		tool.NewPlanRead(store),
-		tool.NewPlanDelegate(store),
-		tool.NewEnterPlanMode(),
-		tool.NewExitPlanMode(),
-		tool.NewPhaseDone(),
+		tools.NewPlanWrite(store),
+		tools.NewPlanRead(store),
+		tools.NewPlanDelegate(store),
+		tools.NewEnterPlanMode(),
+		tools.NewExitPlanMode(),
+		tools.NewPhaseDone(),
 		tool.NewAgentRoster(),
 		tool.NewAgentOwnership(),
 		tool.NewAgentMessage(),

@@ -9,7 +9,7 @@ Go 1.26 agentic coding TUI. Engine emits protocol events; TUI consumes them. Ses
 | Tier | When | Local gate |
 |---|---|---|
 | **A** | Docs, skills, comments, markdown-only | `gofmt` if any `.go` touched; full suite not required |
-| **B** | Normal Go / web / TUI (default) | `gofmt` → `go generate ./internal/tui` if `internal/tui/_src` changed → `make web-check` if `web/` changed → `make test && make vet && make build` |
+| **B** | Normal Go / web / TUI (default) | `gofmt` → `go generate ./internal/tui/app` if `internal/tui/app/_src` changed → `make web-check` if `web/` changed → `make test && make vet && make build` |
 | **C** | Trust boundary: tool, permission, auth, session, engine concurrency/turn, protocol wire, sandbox | Tier B + `go test -race ./... -count=1` + focused package tests first |
 
 CI (`.github/workflows/ci.yml`) always runs gofmt, TUI generate, web-check (when web present), build, vet, and `go test -race ./...`. Local race on every PR is redundant for tier A/B.
@@ -35,7 +35,7 @@ Report exact commands and failing output verbatim. Do not claim green without ru
 - Mock only external boundaries (HTTP via `httptest`, clocks when needed). Never mock the unit under test.
 - Tool tests: allow-all `Ask` helper unless testing permission denial.
 - Provider tests: `httptest.Server` for wire format; use `provider/echo` (re-exported as `internal/provider/echo`) for offline engine loops.
-- TUI tests: reuse helpers from `internal/tui/_src/app/app_test.go` (`updateApp`, `runAppCmd`, etc.; package tests after `go generate ./internal/tui`).
+- TUI tests: reuse helpers from `internal/tui/app/_src/app/app_test.go` (`updateApp`, `runAppCmd`, etc.; package tests after `go generate ./internal/tui/app`).
 
 ## Architecture map
 
@@ -63,7 +63,8 @@ service/theme token).
 | `providers` | Adapters (base/anthropic/openaicompat/chatgpt/google), auth flows, factory (own go.mod) |
 | `internal/sandbox` | OS process sandbox (`Wrap` via bwrap / sandbox-exec) for bash |
 | `internal/safefile` | Hardened path I/O (FIFO/special reject, symlink policy, identity, atomic write) for tools |
-| `internal/tool` | read/glob/grep/edit/write/apply_patch/move/delete/status/bash/git/verify/task/task_status/task_read/task_message/task_interrupt/delegate/wait/agent_roster/agent_message/agent_broadcast/agent_thread/team_task/patch_collab/webfetch/websearch/browser/todowrite/todoread/memory_write/memory_read/issue_write/issue_read/plan_write/plan_read/plan_delegate/artifact_write/artifact_read/ledger_write/ledger_read/context_bundle/notebook_edit/sleep/skill/question/enter_plan_mode/exit_plan_mode/toolsearch/definition/references/symbols/diagnostics/call_hierarchy/rename_preview/impact/tui_snapshot |
+| `internal/tool` | kernel contract + generic builtins: read/glob/grep/edit/write/apply_patch/move/delete/status/bash/git/verify/task/task_status/task_read/task_message/task_interrupt/delegate/wait/agent_roster/agent_message/agent_broadcast/agent_thread/team_task/patch_collab/webfetch/websearch/browser/todowrite/todoread/sleep/question/toolsearch |
+| `internal/tools` | Strike product builtins: memory_write/read, issue_write/read, plan_write/read/delegate, artifact_write/read, ledger_write/read, context_bundle, notebook_edit, skill, enter/exit_plan_mode, phase_done, definition/references/symbols/diagnostics/call_hierarchy/rename_preview/impact, tui_snapshot |
 | `internal/mcp` | MCP client (stdio + streamable HTTP); bridges external tools onto the registry |
 | `internal/lsp` | LSP client (JSON-RPC over stdio); extension registry; diagnostics collection |
 | `internal/question` | user-question ask service (suspend tool until QuestionReply) |
@@ -84,7 +85,7 @@ service/theme token).
 | `internal/ledger` | shared decision/assumption/constraint ledger (append/invalidate/supersede; active slice in context) |
 | `internal/host` | frozen stdlib-only contract: what a frontend needs from its host (auth, catalog, settings, history, memory, issues, plans, goals, agents, skills) |
 | `internal/host/local` | real `host.Services` impl, wraps auth/config/models/history/memory/issue/plan/goal |
-| `internal/tui` | Bubble Tea UI: app model, layout, cells, modals |
+| `internal/tui/app` | Bubble Tea UI: app model, layout, cells, modals (`package tui`) |
 | `internal/tui/theme` | design tokens: adaptive colors, `Icons`, precomputed `Styles` |
 | `internal/tui/ui` | reusable component library (Panel, Dialog, Badge, List, Bento, …) |
 
@@ -102,17 +103,18 @@ service/theme token).
   tokens — no raw lipgloss styles or hardcoded glyphs in views; colors and
   icons come from the theme. Load the `tui-components` skill before TUI
   view/panel/modal/picker work (`.claude/skills/tui-components/`).
-- **TUI source trap:** package `internal/tui` sources live under
-  `internal/tui/_src/<group>/` and are flattened by `go generate ./internal/tui`
-  (make/CI run this first). Flattened `internal/tui/*.go` are gitignored —
+- **TUI source trap:** package `tui` sources live under
+  `internal/tui/app/_src/<group>/` and are flattened by `go generate ./internal/tui/app`
+  (make/CI run this first). Flattened `internal/tui/app/*.go` are gitignored —
   edit `_src/` only; editing flattened files is silently reverted.
-- `internal/tui` may import only `internal/protocol`, `internal/host`, and
+- `internal/tui/...` may import only `internal/protocol`, `internal/host`, and
   `internal/tui/...` among `internal/*` packages — enforced by
-  `internal/tui/boundary_test.go` (`TestArchitectureBoundaries`). Prefer
-  `pkg/protocol` / `pkg/redact` for public wire/scrub helpers (also allowed;
-  not under `internal/`). Charm paths: v1 `github.com/charmbracelet/…` or v2
-  `charm.land/…`; never `github.com/charmbracelet/…/v2`
-  (`TestCharmImportPaths`).
+  `internal/tui/app/_src/test/boundary_test.go` (`TestArchitectureBoundaries`).
+  Kit packages (`ui`, `theme`, `common`, `term`) must not import protocol or
+  host. Prefer `pkg/protocol` / `pkg/redact` for public wire/scrub helpers
+  (also allowed; not under `internal/`). Charm paths: v1
+  `github.com/charmbracelet/…` or v2 `charm.land/…`; never
+  `github.com/charmbracelet/…/v2` (`TestCharmImportPaths`).
 
 ## Agent process skills (`.claude/skills`)
 
