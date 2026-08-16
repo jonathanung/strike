@@ -594,11 +594,11 @@ func TestDeferToolsOmitThenDiscoverThenInclude(t *testing.T) {
 	if names1["webfetch"] || names1["sleep"] {
 		t.Fatalf("first stream should omit deferred tools: %v", names1)
 	}
-	if !strings.Contains(req1.System, "deferred") && !strings.Contains(req1.System, "toolsearch") {
-		// Guidance should mention deferred pending or toolsearch.
-		if !strings.Contains(req1.System, "additional tool") {
-			t.Fatalf("first-turn system missing defer/toolsearch guidance:\n%s", req1.System)
-		}
+	if !strings.Contains(req1.System, "`webfetch`") || !strings.Contains(req1.System, "`sleep`") {
+		t.Fatalf("first-turn system missing deferred name list:\n%s", req1.System)
+	}
+	if !strings.Contains(req1.System, "call by name") {
+		t.Fatalf("first-turn system missing call-by-name hint:\n%s", req1.System)
 	}
 
 	req2 := waitStreamRequest(t, eng, prov)
@@ -719,6 +719,75 @@ func TestDeferToolsOffSendsFullSet(t *testing.T) {
 	names := toolNameSet(req.Tools)
 	if !names["read"] || !names["webfetch"] || !names["sleep"] {
 		t.Fatalf("defer off should send all tools: %v", names)
+	}
+	if strings.Contains(req.System, "additional tool(s) are deferred") {
+		t.Fatalf("defer off should not list deferred names:\n%s", req.System)
+	}
+}
+
+func TestDeferToolsNameListOmitsHardDenied(t *testing.T) {
+	reg := tool.NewRegistry(tool.NewRead(), tool.NewWebFetch(), tool.NewSleep())
+	reg.Register(tool.NewToolSearch(reg))
+	reg.SetDeferLoading(true)
+
+	req := captureStreamRequest(t, engine.Options{
+		WorkDir:  t.TempDir(),
+		Registry: reg,
+		Agents: []engine.Agent{{
+			Name: "build",
+			Permissions: permission.Ruleset{
+				{Permission: "webfetch", Pattern: "*", Action: permission.Deny},
+			},
+		}},
+		Rules: []permission.Ruleset{permission.Defaults()},
+	}, "echo", "echo")
+
+	if toolNameSet(req.Tools)["webfetch"] || toolNameSet(req.Tools)["sleep"] {
+		t.Fatalf("deferred schemas leaked: %v", toolNameSet(req.Tools))
+	}
+	if strings.Contains(req.System, "`webfetch`") {
+		t.Fatalf("hard-denied webfetch listed in deferred names:\n%s", req.System)
+	}
+	if !strings.Contains(req.System, "`sleep`") {
+		t.Fatalf("visible deferred sleep missing from name list:\n%s", req.System)
+	}
+}
+
+func TestDeferToolsNameListTruncatesMCPHeavy(t *testing.T) {
+	reg := tool.NewRegistry(tool.NewRead(), tool.NewSleep())
+	for i := 0; i < tool.MaxDeferredPendingListed+3; i++ {
+		reg.Register(stubMCPTool{
+			name: fmt.Sprintf("mcp_bulk_n%02d", i),
+			desc: "bulk deferred mcp",
+		})
+	}
+	reg.Register(tool.NewToolSearch(reg))
+	reg.SetDeferLoading(true)
+
+	req := captureStreamRequest(t, engine.Options{
+		WorkDir:  t.TempDir(),
+		Registry: reg,
+		Agents:   []engine.Agent{{Name: "build"}},
+		Rules: []permission.Ruleset{
+			permission.Defaults(),
+			{{Permission: "mcp", Pattern: "*", Action: permission.Allow}},
+		},
+	}, "echo", "echo")
+
+	if toolNameSet(req.Tools)["sleep"] {
+		t.Fatal("sleep schema should stay omitted")
+	}
+	for name := range toolNameSet(req.Tools) {
+		if strings.HasPrefix(name, "mcp_") {
+			t.Fatalf("mcp schema leaked on first turn: %s", name)
+		}
+	}
+	if !strings.Contains(req.System, "`sleep`") {
+		t.Fatalf("sleep missing from name list:\n%s", req.System)
+	}
+	// sleep + MaxDeferredPendingListed+3 mcp names = cap+4 pending → +4 more.
+	if !strings.Contains(req.System, "(+4 more)") {
+		t.Fatalf("remainder missing from truncated list:\n%s", req.System)
 	}
 }
 

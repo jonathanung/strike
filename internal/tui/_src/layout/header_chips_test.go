@@ -77,3 +77,43 @@ func TestHeaderIsolationBadge(t *testing.T) {
 		t.Fatalf("header missing isolation badge:\n%s", plain)
 	}
 }
+
+func TestHeaderShowsInspectedChildModel(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m.providerName = "echo"
+	m.modelName = "parent-model"
+	m.sessionID = "root"
+	m.viewingID = "child-1"
+	m.children = []childActivity{{
+		sessionID: "child-1",
+		provider:  "xai",
+		model:     "grok-4",
+		status:    "running",
+	}}
+	plain := ansi.Strip(m.headerView(120))
+	if !strings.Contains(plain, "xai/grok-4") {
+		t.Fatalf("header missing child model: %q", plain)
+	}
+	if strings.Contains(plain, "echo/parent-model") {
+		t.Fatalf("header still shows parent model while inspecting child: %q", plain)
+	}
+}
+
+func TestHeaderDoesNotInheritParentModelWhenChildUnknown(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m.providerName = "echo"
+	m.modelName = "parent-model"
+	m.sessionID = "root"
+	m.viewingID = "child-1"
+	m.children = []childActivity{{
+		sessionID: "child-1",
+		status:    "running",
+	}}
+	plain := ansi.Strip(m.headerView(120))
+	if strings.Contains(plain, "parent-model") {
+		t.Fatalf("unknown child model must not inherit parent: %q", plain)
+	}
+	if !strings.Contains(plain, "no model") {
+		t.Fatalf("unknown child model should show no model: %q", plain)
+	}
+}

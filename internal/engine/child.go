@@ -591,6 +591,8 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 		Agent:         agentName,
 		Prompt:        req.Prompt,
 		Name:          memberName,
+		Provider:      child.provName,
+		Model:         child.model,
 		RouteReason:   routeDec.Reason,
 		PolicyReason:  policyDec.Reason,
 		ContextBundle: protocolContextBundle(childBundle),

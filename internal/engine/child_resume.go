@@ -315,6 +315,8 @@ func (e *Engine) resumeChild(ctx context.Context, req tool.TaskResumeRequest) (t
 		Agent:         agentName,
 		Prompt:        prompt,
 		Name:          memberName,
+		Provider:      child.provName,
+		Model:         child.model,
 		PolicyReason:  "resumed",
 		ContextBundle: protocolContextBundle(bundle),
 	}

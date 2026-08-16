@@ -556,7 +556,16 @@ includes compatibility delegation shims (`delegate`, `task_status`,
 `agent_ownership`, `team_task`, `patch_collab`), plan tools (`plan_write`,
 `plan_read`, `plan_delegate`, `enter_plan_mode`, `exit_plan_mode`,
 `phase_done`), optional built-ins (`webfetch`, `websearch`, todo/memory/issue,
-`sleep`, `skill`, `notebook_edit`, `tui_snapshot`, …), and all `mcp_*` tools. Discovery lives
+`sleep`, `skill`, `notebook_edit`, `tui_snapshot`, …), and all `mcp_*` tools.
+
+The first-turn tools **guidance** layer still lists pending deferred **names**
+(hard-denied omitted) so the model can call them by name without a discovery
+round. Schemas stay off `tools[]` until promotion. The name list is sorted
+(built-ins first, then `mcp_*`) and capped at 48 entries with a `+N more`
+remainder (~250 tokens worst case at chars/4). `deferTools: "off"` is
+unchanged: no name list, full permitted schemas on the wire.
+
+Discovery lives
 on the process registry: matches from `toolsearch` load full schemas on the
 **next** model request (including the next iteration of the same turn’s tool
 loop). Tools already present as assistant tool calls in history are
