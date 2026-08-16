@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jonathanung/strike-cli/internal/eval/replay"
 	"github.com/jonathanung/strike-cli/internal/protocol"
-	"github.com/jonathanung/strike-cli/internal/replay"
 )
 
 func TestExtractUserInputsSkipsChildLineage(t *testing.T) {
@@ -245,7 +245,7 @@ func TestGoldenCorpus(t *testing.T) {
 
 	entries, err := os.ReadDir(testdata)
 	if err != nil {
-		t.Fatalf("read testdata: %v (run UPDATE_GOLDEN=1 go test ./internal/replay/)", err)
+		t.Fatalf("read testdata: %v (run UPDATE_GOLDEN=1 go test ./internal/eval/replay/)", err)
 	}
 	var found int
 	for _, e := range entries {
@@ -287,6 +287,6 @@ func TestGoldenCorpus(t *testing.T) {
 		})
 	}
 	if found == 0 {
-		t.Fatal("no golden JSONL files in testdata/ (run UPDATE_GOLDEN=1 go test ./internal/replay/)")
+		t.Fatal("no golden JSONL files in testdata/ (run UPDATE_GOLDEN=1 go test ./internal/eval/replay/)")
 	}
 }

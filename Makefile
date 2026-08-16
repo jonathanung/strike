@@ -84,7 +84,7 @@ chaos:
 #   UPDATE_METRICS=1 make prompt-reg   # refresh testdata/metrics.json
 #   PROMPT_REGRESSION_STRICT=1 make prompt-reg  # fail on deltas (future gate)
 prompt-reg:
-	go test ./internal/replay/ -run TestPromptRegressionReport -v -count=1
+	go test ./internal/eval/replay/ -run TestPromptRegressionReport -v -count=1
 
 # Harness regression pack (#807): correctness/safety/recovery/latency-cost
 # scenarios plus #791/#782 recording consumption. Offline (echo/fixtures).
@@ -95,7 +95,7 @@ prompt-reg:
 #   HARNESS_EVAL_REPORT=path make harness-eval   # write JSON artifact
 #   UPDATE_HARNESS_EVAL=1 make harness-eval      # refresh testdata sample
 harness-eval:
-	go test ./internal/replay/ -run 'TestHarnessEvalSuite|TestBuildEvalReport' -v -count=1
+	go test ./internal/eval/replay/ -run 'TestHarnessEvalSuite|TestBuildEvalReport' -v -count=1
 
 # Security/harness telemetry schema drift gate (#894).
 # Fails when schemas/telemetry/v1/registry.json diverges from Go export

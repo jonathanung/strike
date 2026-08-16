@@ -12,8 +12,8 @@ import (
 
 	"github.com/jonathanung/strike-cli/harness/sandbox"
 	"github.com/jonathanung/strike-cli/harness/tool"
+	"github.com/jonathanung/strike-cli/internal/eval/replay"
 	"github.com/jonathanung/strike-cli/internal/protocol"
-	"github.com/jonathanung/strike-cli/internal/replay"
 	"github.com/jonathanung/strike-cli/pkg/redact"
 	"github.com/jonathanung/strike-cli/pkg/timeline"
 )
@@ -30,7 +30,7 @@ type harnessEvalScenario struct {
 // consumption from #791/#782. Offline (echo/fixtures); no network.
 //
 //	make harness-eval
-//	HARNESS_EVAL_REPORT=path go test ./internal/replay/ -run TestHarnessEvalSuite -v
+//	HARNESS_EVAL_REPORT=path go test ./internal/eval/replay/ -run TestHarnessEvalSuite -v
 //
 // Scenario failures are hard errors (regression gate under `make test`).
 // The verbose report step in CI is non-blocking (continue-on-error); set

@@ -9,8 +9,8 @@ import (
 	"testing"
 
 	"github.com/jonathanung/strike-cli/harness/engine"
+	"github.com/jonathanung/strike-cli/internal/eval/replay"
 	"github.com/jonathanung/strike-cli/internal/protocol"
-	"github.com/jonathanung/strike-cli/internal/replay"
 )
 
 func TestCollectMetricsFromEvents(t *testing.T) {
@@ -372,7 +372,7 @@ func TestPromptRegressionReport(t *testing.T) {
 	baseline, err := replay.LoadMetricsBaseline(baselinePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			t.Fatalf("missing %s — run UPDATE_METRICS=1 go test ./internal/replay/ -run TestPromptRegressionReport", baselinePath)
+			t.Fatalf("missing %s — run UPDATE_METRICS=1 go test ./internal/eval/replay/ -run TestPromptRegressionReport", baselinePath)
 		}
 		t.Fatal(err)
 	}

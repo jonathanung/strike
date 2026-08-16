@@ -97,7 +97,7 @@ Derived views (not separate session event types):
   trace document (`schemaVersion` independent of wire `Version`).
 - **Telemetry families** — `pkg/telemetry` + `schemas/telemetry/v1` define
   versioned security/harness export records (redaction annotations; not wire).
-- **Run recordings / snapshots** — `internal/replay` (eval / multi-agent).
+- **Run recordings / snapshots** — `internal/eval/replay` (eval / multi-agent).
 
 Golden forward-compat coverage lives in `pkg/protocol` tests
 (`TestGoldenAdditiveFieldsHarnessEvents`,
