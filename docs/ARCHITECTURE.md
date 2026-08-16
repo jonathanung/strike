@@ -12,10 +12,10 @@ layout and do not move packages from it.
 cmd/strike session_lifecycle.go (`run`) — composition root
 │
 ├── builds harness/engine, then reads/writes it on two channels:
-│     Ops()    chan<- protocol.Op     ◄── internal/tui submits UserInput,
+│     Ops()    chan<- protocol.Op     ◄── internal/frontend/tui submits UserInput,
 │                                          PermissionReply, Interrupt,
 │                                          SelectModel, SelectAgent, SetEffort
-│     Events() <-chan protocol.Event  ──► internal/tui renders TextDelta,
+│     Events() <-chan protocol.Event  ──► internal/frontend/tui renders TextDelta,
 │                                          ToolCallBegin/End, PermissionAsked,
 │                                          TurnCompleted, ModelSelected, EffortSelected, …
 │
@@ -23,7 +23,7 @@ cmd/strike session_lifecycle.go (`run`) — composition root
 │     for ev := range eng.Events() { _ = store.Append(ev); events <- ev }
 │     store.Append persists one JSONL line per event (~/.strike/sessions/…)
 │
-├── builds host.Services via internal/host/local.New(authStore, historyStore,
+├── builds host.Services via internal/frontend/host/local.New(authStore, historyStore,
 │     memoryStore, issueStore, agentNames, skills) — wraps internal/{auth,config,
 │     models} and persist/{history,memory,issue} into host.Services{Auth, Catalog, Settings,
 │     Onboarding, History, Memory, Issues, Agents, Skills}, then attaches
@@ -31,14 +31,14 @@ cmd/strike session_lifecycle.go (`run`) — composition root
 │     diff-viewer apply writes (ApplyEdit / ApplyPatch)
 │
 └── tui.New(eng.Ops(), events, services, tui.Options{...})
-      internal/tui's entire view of the world: two protocol channels plus
+      internal/frontend/tui's entire view of the world: two protocol channels plus
       one host.Services bundle. Nothing else crosses the boundary.
 ```
 
 The engine never touches a terminal and the TUI never touches a model API,
 tool, or credential directly — `pkg/protocol` (re-exported as
 `internal/protocol` for in-tree compatibility) is the only channel between
-them, and `internal/host` is the only channel from the TUI to anything
+them, and `internal/frontend/host` is the only channel from the TUI to anything
 host-side. A session transcript is fully reconstructable by re-reading its
 JSONL log, since the log is a serialized copy of the exact event stream the
 TUI rendered from (see `pkg/protocol/codec.go`).
@@ -48,9 +48,9 @@ TUI rendered from (see `pkg/protocol/codec.go`).
 | Package | Role | May import |
 |---|---|---|
 | `cmd/strike` | CLI entry (`main.go`) + composition root (`wire.go` stub; `assemble_tools.go`, `session_lifecycle.go`, `exec.go`, `rpc.go`, `acp.go`, `serve.go`, `multiroot.go`) | anything — the only package that wires the whole tree |
-| `internal/rpc` | Stdio JSON-RPC 2.0 bridge for Op/Event (`strike rpc`: NDJSON ops in, event envelopes out) | `protocol`, stdlib |
-| `internal/acp` | Agent Client Protocol (ACP) agent adapter (`strike acp`: session/prompt/tool-call ↔ Op/Event) | `protocol`, stdlib |
-| `internal/server` | `strike serve` web cockpit (REST/SSE/WS, attach + live mutations, embedded React UI) | `session`, `host`, `engine`, `version`, `protocol`, embedded `static/` |
+| `internal/frontend/rpc` | Stdio JSON-RPC 2.0 bridge for Op/Event (`strike rpc`: NDJSON ops in, event envelopes out) | `protocol`, stdlib |
+| `internal/frontend/acp` | Agent Client Protocol (ACP) agent adapter (`strike acp`: session/prompt/tool-call ↔ Op/Event) | `protocol`, stdlib |
+| `internal/frontend/server` | `strike serve` web cockpit (REST/SSE/WS, attach + live mutations, embedded React UI) | `session`, `host`, `engine`, `version`, `protocol`, embedded `static/` |
 | `internal/version` | Build-time Version/Commit stamped via `-ldflags` | stdlib |
 | `internal/update` | GitHub Releases self-update (check, download, sha256, atomic replace, re-exec) | `version`, stdlib, net/http |
 | `pkg/protocol` | **Public** Op/Event wire schema between engine and frontends; JSONL envelopes (`codec.go` / `op_codec.go`) are the session persistence + transport format (includes harness/verification events and `scheduler.queued` / `admitted` / `canceled`). Semver via `Version`; unknown event types decode as `UnknownEvent` (forward-compat). Consumer contract: [protocol.md](protocol.md). Own `go.mod` (`github.com/jonathanung/strike-cli/pkg/protocol`); listed in root `go.work` | stdlib only |
@@ -72,7 +72,7 @@ TUI rendered from (see `pkg/protocol/codec.go`).
 | `harness/safefile` | Hardened path I/O helpers for tools (special files, symlink leaf policy, identity, atomic write) | stdlib |
 | `harness/sandbox` | OS-primitive process sandbox: `Wrap(argv, Policy)` via Linux `bwrap` / macOS `sandbox-exec`; Policy carries mode, write denials, `NoNetwork` (host net on by default), and optional `NetworkAllow` host/CIDR list (webfetch/websearch/browser + bash preflight; shared shape for future container net); `Explain`/`ProfileText` for `/sandbox explain` (includes egress enforcement level); graceful degrade + startup warning when unavailable | stdlib only |
 
-| `internal/integrate/container` | **E12 container engine (#547 / #582–#583):** CLI shell-out to `docker`/`podman` (no Moby SDK). Injectable `ExecFunc`; `Runtime` + `CLI` (build/network/inspect); per-repo `Manager` lifecycle (build/launch/attach/exec/stop/restart/destroy/clean) with cache under `.strike/container/`, resource/port/env/SSH forwarding, harness stripped. Config JSON = E12.2; eject = E12.3. `internal/tui` must not import this package | stdlib only (`os/exec`) |
+| `internal/integrate/container` | **E12 container engine (#547 / #582–#583):** CLI shell-out to `docker`/`podman` (no Moby SDK). Injectable `ExecFunc`; `Runtime` + `CLI` (build/network/inspect); per-repo `Manager` lifecycle (build/launch/attach/exec/stop/restart/destroy/clean) with cache under `.strike/container/`, resource/port/env/SSH forwarding, harness stripped. Config JSON = E12.2; eject = E12.3. `internal/frontend/tui` must not import this package | stdlib only (`os/exec`) |
 
 | `harness/scheduler` | Fair cancellable named-pool admission (process/build/test/model/container): context-aware acquire, atomic multi-pool leases, observer snapshots; layered limits + ordered command classification (`Compile` / `CompileWithPresets` → `Effective`); versioned build-system presets (`Catalog`, expand into ordinary limits/rules) | stdlib only |
 | `harness/tool` | Kernel tool contract (`Tool`, `Context`, `Result`, `CodedError`, registry, retry, FileState, checkpoint, TurnDiff) + generic builtins: read/glob/grep/edit/write/apply_patch/move/delete/status/bash/git/verify/task/task_status/task_read/task_message/task_interrupt/delegate/wait/agent_roster/agent_ownership/agent_message/agent_broadcast/agent_thread/team_task/patch_collab/webfetch/websearch/browser/todowrite/todoread/sleep/question/toolsearch; FS tx safety (`FileState` freshness + optional `baseHash`, atomic temp+rename writes, atomic rename move + safe delete, `TurnDiff` create/update/delete); `PathOwnership` multi-agent path claims; `patch_collab` reuses apply_patch envelopes for submit/preview/reject/apply with path-overlap conflict detection; bash acquires scheduler pools after Ask; file tools call `FileSync` + `CollectDiagnostics` after mutations; progressive `task` (create + get/status/message/wait/transition/cancel; compat shims: delegate/task_*/wait) accepts `context_bundle`; `RunProcess` checks `fault.ProcessAfterStart` for chaos tests | `provider` (for `ToolSchema`), `sandbox`, `scheduler`, `fault`, stdlib |
@@ -104,35 +104,35 @@ TUI rendered from (see `pkg/protocol/codec.go`).
 | `internal/models` | models.dev catalog client, 24h cache with stale fallback | stdlib, net/http |
 | `internal/persist/history` | Project-scoped prompt history | stdlib |
 | `internal/project` | Stable filesystem identity + optional per-session git worktrees under `.strike/worktrees/` | stdlib, os/exec |
-| `internal/host` | **Frozen contract**: the services a frontend needs from its host process (includes `SchedulerPresets` catalog + global apply, `Permissions` explain/presets for `/permission`, `Plugins` lifecycle for `/plugin`) | stdlib only — enforced by the boundary test |
-| `internal/host/local` | Real `host.Services` implementation; wraps auth/config/models/history/memory/issue/plan/goal/files/mcp/plugin/scheduler presets for the frontend | `auth`, `config`, `history`, `host`, `issue`, `plan`, `goal`, `mcp`, `plugin`, `memory`, `models`, `sandbox`, `scheduler`, `tool` (composer `!` shell) |
-| `internal/tui/app` | Bubble Tea frontend (`package tui`): app model, layout, cells, modals, composer. Sources under `app/_src/<group>/`, flattened by `go generate ./internal/tui/app` | `protocol`, `host`, `tui/...` only (+ `pkg/redact` / `pkg/protocol`) — enforced by the boundary test |
-| `internal/tui/theme` | Resolved design tokens: adaptive color roles, surfaces, chrome mode (soft\|solid\|bordered), terminal background, glyphs, border/spacing tokens, and precomputed styles | lipgloss, stdlib |
-| `internal/tui/common` | Pure formatting helpers (ThemedSpace, DotJoin, compact durations) | `tui/theme`, stdlib |
-| `internal/tui/term` | PTY + vt10x for embedded editors | stdlib + pty/vt10x |
-| `internal/tui/ui` | Reusable component library (Panel, Dialog, Badge, KeyHints, StatusBar, List, Notice, Card/Bento, OverlayCenter/Scrim, Canvas) | stdlib, lipgloss, bubbles, charmbracelet/x/ansi, `tui/theme` |
+| `internal/frontend/host` | **Frozen contract**: the services a frontend needs from its host process (includes `SchedulerPresets` catalog + global apply, `Permissions` explain/presets for `/permission`, `Plugins` lifecycle for `/plugin`) | stdlib only — enforced by the boundary test |
+| `internal/frontend/host/local` | Real `host.Services` implementation; wraps auth/config/models/history/memory/issue/plan/goal/files/mcp/plugin/scheduler presets for the frontend | `auth`, `config`, `history`, `host`, `issue`, `plan`, `goal`, `mcp`, `plugin`, `memory`, `models`, `sandbox`, `scheduler`, `tool` (composer `!` shell) |
+| `internal/frontend/tui/app` | Bubble Tea frontend (`package tui`): app model, layout, cells, modals, composer. Sources under `app/_src/<group>/`, flattened by `go generate ./internal/frontend/tui/app` | `protocol`, `host`, `tui/...` only (+ `pkg/redact` / `pkg/protocol`) — enforced by the boundary test |
+| `internal/frontend/tui/theme` | Resolved design tokens: adaptive color roles, surfaces, chrome mode (soft\|solid\|bordered), terminal background, glyphs, border/spacing tokens, and precomputed styles | lipgloss, stdlib |
+| `internal/frontend/tui/common` | Pure formatting helpers (ThemedSpace, DotJoin, compact durations) | `tui/theme`, stdlib |
+| `internal/frontend/tui/term` | PTY + vt10x for embedded editors | stdlib + pty/vt10x |
+| `internal/frontend/tui/ui` | Reusable component library (Panel, Dialog, Badge, KeyHints, StatusBar, List, Notice, Card/Bento, OverlayCenter/Scrim, Canvas) | stdlib, lipgloss, bubbles, charmbracelet/x/ansi, `tui/theme` |
 
 ## Dependency rules
 
 Verbatim from the refactor spec (`.plan/refactor-agents-ui.md`):
 
-- `internal/host` (contract pkg only, not local/): stdlib imports only.
-- `internal/tui/...`: no `internal/*` imports except `protocol`, `host`,
+- `internal/frontend/host` (contract pkg only, not local/): stdlib imports only.
+- `internal/frontend/tui/...`: no `internal/*` imports except `protocol`, `host`,
   `tui/...`. (`pkg/protocol`, `pkg/redact` are also allowed — not under
   `internal/`.)
-- No backend package imports `internal/tui/...`.
+- No backend package imports `internal/frontend/tui/...`.
 - `pkg/protocol`: stdlib only (public wire surface). Own workspace module.
 - `pkg/redact`: stdlib only (public scrubbing helper). Own workspace module.
 - `pkg/timeline`: stdlib + `pkg/protocol` + `pkg/redact` only.
 - `pkg/diag`: stdlib + `pkg/protocol` + `pkg/redact` only.
 - `pkg/sdk`: stdlib + `pkg/protocol` only (public client over the wire schema).
 
-These are enforced mechanically, not just by convention: `internal/tui/app/_src/test/boundary_test.go`
+These are enforced mechanically, not just by convention: `internal/frontend/tui/app/_src/test/boundary_test.go`
 (`TestArchitectureBoundaries`) walks every non-test `.go` file in the module
 with `go/parser` and fails, naming the offending file and import, on any
 violation. Kit packages (`ui`, `theme`, `common`, `term`) additionally may
 not import `protocol` or `host`. Run it like any other test
-(`go test ./internal/tui/...`); there is no way to silently cross the
+(`go test ./internal/frontend/tui/...`); there is no way to silently cross the
 boundary.
 
 `pkg/protocol`, `pkg/redact`, `harness`, and `providers` are separate Go
@@ -230,7 +230,7 @@ trees and optional supervised JSONL processes — they must not expose this
 private `window` interface or load in-process Go plugins (host work: #731 /
 #732). File bytes and directory listings reach the markdown and files windows
 through `host.Files`, not direct disk I/O from the TUI. Built-in window input
-and resize updates stay inside `internal/tui`: no protocol Op or Event was
+and resize updates stay inside `internal/frontend/tui`: no protocol Op or Event was
 added for built-in pane infrastructure.
 Composer input treats Enter as send and `ctrl+j` / Shift+Enter / Alt+Enter
 as newline (Shift+Enter CSI normalizes to Alt+Enter; enhanced ctrl+j to
@@ -278,12 +278,12 @@ themes may opt into `chrome: "solid"` or `chrome: "bordered"`. See [theme.md](th
 
 ## TUI file map
 
-`internal/tui/app` is one Go package (`package tui`; shared unexported
-`Model` / `modal` / `window` / `cell`). Parent `internal/tui/` lists only that
+`internal/frontend/tui/app` is one Go package (`package tui`; shared unexported
+`Model` / `modal` / `window` / `cell`). Parent `internal/frontend/tui/` lists only that
 app package plus kit packages (`ui`, `theme`, `common`, `term`). Go cannot
 split a package across directories, so sources are grouped under
-`internal/tui/app/_src/<group>/` for traversability and flattened into
-`internal/tui/app/*.go` by `go generate ./internal/tui/app`
+`internal/frontend/tui/app/_src/<group>/` for traversability and flattened into
+`internal/frontend/tui/app/*.go` by `go generate ./internal/frontend/tui/app`
 (`make test` / `make build` run this first).
 
 | `_src` group | Concern |
@@ -299,8 +299,8 @@ split a package across directories, so sources are grouped under
 | `util/` | Shims to `common/` |
 | `test/` | Cross-cutting tests |
 
-**Edit `_src/` only**, then `go generate ./internal/tui/app`. Flattened
-`internal/tui/app/*.go` copies are gitignored and regenerated by make/CI;
+**Edit `_src/` only**, then `go generate ./internal/frontend/tui/app`. Flattened
+`internal/frontend/tui/app/*.go` copies are gitignored and regenerated by make/CI;
 editing them is silently discarded (`TestSrcFlattenInSync`). Independent
 real packages: `theme/`, `ui/`, `term/`, `common/`. The Strike wordmark
 (`Logo` / `LogoCompact`) lives in the app, not the kit.
@@ -315,7 +315,7 @@ update import path constants (including `lipglossPath` in
 
 ## Why a host-services seam
 
-`internal/host` exists so `internal/tui` has exactly one door to everything
+`internal/frontend/host` exists so `internal/frontend/tui` has exactly one door to everything
 that isn't the model turn loop: credentials, the model catalog, saved
 defaults, prompt history, and the agent/skill listings. The TUI talks to
 `host.Auth`, `host.Catalog`, `host.Settings`, and `host.History` — never to
@@ -324,12 +324,12 @@ defaults, prompt history, and the agent/skill listings. The TUI talks to
 Two things fall out of that:
 
 1. **Backend work can stage invisibly.** Adding a new host service (or a new
-   `internal/protocol` event) and its `internal/host/local` implementation
+   `internal/protocol` event) and its `internal/frontend/host/local` implementation
    needs no TUI change to build, vet, or pass tests — the feature simply
    isn't called from any view yet. A later phase wires it up when it's ready
    to be user-facing. This is how "add a service without touching the
    frontend" works in practice, not just in principle.
-2. **The frontend develops and tests against fakes.** `internal/tui/app/_src/test/testsupport_test.go`
+2. **The frontend develops and tests against fakes.** `internal/frontend/tui/app/_src/test/testsupport_test.go`
    defines scriptable fakes for every `host.Services` capability
    (`fakeAuth`, `fakeCatalog`, `fakeSettings`, `fakeHistory`) plus the
    `New(...)`-wrapping helpers the test suite builds models with. No TUI test
@@ -339,8 +339,8 @@ Two things fall out of that:
 `host.Services` fields may be nil or empty (a fake in a narrow test, a future
 frontend that doesn't support one capability); every frontend call site
 degrades gracefully instead of panicking — see `services.History != nil`
-checks in `internal/tui/app/_src/app/app.go` and `saveDefaultsThroughCmd`'s nil-`Settings`
-branch in `internal/tui/app/_src/layout/view.go` for the pattern.
+checks in `internal/frontend/tui/app/_src/app/app.go` and `saveDefaultsThroughCmd`'s nil-`Settings`
+branch in `internal/frontend/tui/app/_src/layout/view.go` for the pattern.
 
 ## Recipes
 
@@ -358,12 +358,12 @@ branch in `internal/tui/app/_src/layout/view.go` for the pattern.
 3. Add the provider's default model id to `config.DefaultModel` in
    `internal/config/config.go`.
 4. If the frontend should offer login/selection for it, add an entry to
-   `credentialProviders` in `internal/host/local/local.go` with its
+   `credentialProviders` in `internal/frontend/host/local/local.go` with its
    capability flags (`APIKey`/`OAuth`/`Device`), and add `BeginOAuth`/`BeginDevice`
    switch cases if it supports those flows (see `auth.OpenAIFlow`,
    `auth.XAIFlow`, `auth.XAIDeviceFlow` in `internal/auth` for the pattern
    each wraps). Skip this for an env-var-only or builtin provider (like echo).
-5. No `internal/tui` change is needed: `/provider`, the provider picker, and
+5. No `internal/frontend/tui` change is needed: `/provider`, the provider picker, and
    `/auth` are entirely data-driven from `host.Auth.Statuses()`.
 
 ### Add a tool
@@ -390,9 +390,9 @@ branch in `internal/tui/app/_src/layout/view.go` for the pattern.
      `tool.ErrPrecondition` / … so the engine can settle stable
      `protocol.ToolResultError` codes on `ToolCallEnd` and
      `provider.ToolResult.ErrorCode`.
-  4. No `internal/tui` change is needed for a generic tool: tool calls render
+  4. No `internal/frontend/tui` change is needed for a generic tool: tool calls render
     from `protocol.ToolCallBegin`/`ToolCallEnd` via `toolCell` in
-    `internal/tui/app/_src/cell/cells.go` (name, title, output preview, ok/err glyph).
+    `internal/frontend/tui/app/_src/cell/cells.go` (name, title, output preview, ok/err glyph).
     Edit-shaped `Metadata` (`oldString`/`newString`) is consumed by the TUI
     via `ui.DiffPreview` in the permission modal and completed tool cells;
     from a selected tool cell, `a` confirms and re-applies the shown edit
@@ -421,7 +421,7 @@ Two different mechanisms, depending on whether it needs Go code:
    keybind-backed action mirrors such as `focus-left`, `palette`,
    `interrupt`, `agent-next`, `tool-copy`, `subagent`, `root-new`, …) are
    rejected by `config.ValidateSkillName` before they ever reach the frontend.
-   See `keybindSlashPrimary` in `internal/tui/app/_src/app/keybind_slash.go` for the full
+   See `keybindSlashPrimary` in `internal/frontend/tui/app/_src/app/keybind_slash.go` for the full
    keybind→slash map. `/init` is a builtin that writes project
    `AGENTS.md` via `host.ProjectInit` (confirm before overwrite). `/ftue` opens
    the setup wizard (provider → model → optional init → feature tour →
@@ -433,7 +433,7 @@ Two different mechanisms, depending on whether it needs Go code:
    TUI auto-opens once for clean installs. PR URLs from successful `gh pr` bash
    output are stored via `protocol.SessionMeta` and `session` sidecar
    metadata. `/vim` embeds nvim/vim/nano in the right-pane `editor` window by
-   default (PTY + vt10x via `internal/tui/term`). Config key `vimMode`
+   default (PTY + vt10x via `internal/frontend/tui/term`). Config key `vimMode`
    selects `pane`/`embedded` (default), `overlay`/`modal` (large scrim
    popout), or `takeover` (full-screen `tea.ExecProcess`). `/nano` is the
    first-class nano command (same presentation via `nanoMode`; nano on PATH
@@ -441,13 +441,13 @@ Two different mechanisms, depending on whether it needs Go code:
    (`embedded` default, or `modal`). `/vim` editor resolution: `$VISUAL` →
    `$EDITOR` → nvim/vim/vi/nano on PATH. GUI `$EDITOR` values always take over.
 - **Builtin command (code).** Add a `commandSpec` to `builtinCommandSpecs`
-  in `internal/tui/app/_src/app/commands.go`, a `case "/yourcmd":` arm in
-  `Model.handleCommand` (`internal/tui/app/_src/app/command_dispatch.go`), and — if it's a primary
-  action — a hint in `hintsView` (`internal/tui/app/_src/layout/view.go`).
+  in `internal/frontend/tui/app/_src/app/commands.go`, a `case "/yourcmd":` arm in
+  `Model.handleCommand` (`internal/frontend/tui/app/_src/app/command_dispatch.go`), and — if it's a primary
+  action — a hint in `hintsView` (`internal/frontend/tui/app/_src/layout/view.go`).
 
 ## TUI source map (selected)
 
-Same package `internal/tui/app` (`package tui`); split for reviewability only
+Same package `internal/frontend/tui/app` (`package tui`); split for reviewability only
 (no extra subpackages). Edit `_src/` only.
 
 | File | Responsibility |
@@ -471,39 +471,39 @@ Same package `internal/tui/app` (`package tui`); split for reviewability only
 
 ### Add a UI component
 
-1. Add `internal/tui/ui/yourname.go`. Imports are limited to stdlib,
-   lipgloss, bubbles, `charmbracelet/x/ansi`, and `internal/tui/theme` (see
-   the package doc in `internal/tui/ui/doc.go`). Meet its three guarantees:
+1. Add `internal/frontend/tui/ui/yourname.go`. Imports are limited to stdlib,
+   lipgloss, bubbles, `charmbracelet/x/ansi`, and `internal/frontend/tui/theme` (see
+   the package doc in `internal/frontend/tui/ui/doc.go`). Meet its three guarantees:
    width-safe (never render wider than asked — check with `lipgloss.Width`),
    graceful at tiny widths (drop borders/truncate rather than panic), and
    zero-value tolerant (use `resolveIcons(th)` so a bare `theme.Theme{}`
    still renders, matching every existing component).
 2. Give the exported function a doc comment with a short usage snippet (see
-   `internal/tui/ui/badge.go` or `panel.go` for the format).
+   `internal/frontend/tui/ui/badge.go` or `panel.go` for the format).
 3. Add a rendered-string test at a few fixed widths in
-   `internal/tui/ui/yourname_test.go` — assert structure (`lipgloss.Width`,
+   `internal/frontend/tui/ui/yourname_test.go` — assert structure (`lipgloss.Width`,
    substrings, line counts), not literal ANSI bytes; `panel_test.go` and
    `list_test.go` show the pattern.
-4. Consume it from a view in `internal/tui/app/_src/`. Views never build a raw
+4. Consume it from a view in `internal/frontend/tui/app/_src/`. Views never build a raw
    lipgloss box or list — that is what this package is for.
 
 ### Add a host service
 
 1. Add the method/interface/field to `host.Services` in
-   `internal/host/host.go`. This package is a stdlib-only contract — no
+   `internal/frontend/host/host.go`. This package is a stdlib-only contract — no
    importing `auth`, `config`, `models`, or `history` here, even for a type
    reference (the boundary test fails the build otherwise). Look at
     `Auth`/`Catalog`/`Settings`/`History`/`Memory`/`Issues`/`Plans`/`Goals`/`Workflows`/`Files` for the shape: small,
   frontend-facing, `context`-aware when it may block.
-2. Implement it in `internal/host/local/` (e.g. `local.go`, `files.go`),
+2. Implement it in `internal/frontend/host/local/` (e.g. `local.go`, `files.go`),
   wrapping the real backend package. This package is the seam that is allowed
-  to import both `internal/host` and the backend packages; keep new
+  to import both `internal/frontend/host` and the backend packages; keep new
   implementations here unless there's a reason to add another implementation
   package.
-3. Consume it from `internal/tui` through `Model.services` (or pass the
+3. Consume it from `internal/frontend/tui` through `Model.services` (or pass the
    specific sub-interface into a modal constructor, as `providerModal` and
    `modelModal` do) — never import the backend package directly from
-   `internal/tui`.
+   `internal/frontend/tui`.
 4. This is also the staging mechanism from the "why a host-services seam"
    section above: steps 1–2 alone (add the service, implement it, no TUI call
    site) leave `go build`/`go vet`/`go test ./...` green with zero visible
@@ -511,12 +511,12 @@ Same package `internal/tui/app` (`package tui`); split for reviewability only
 
 ### Add a theme token
 
-1. Add the field to `theme.Theme` in `internal/tui/theme/theme.go` — an
+1. Add the field to `theme.Theme` in `internal/frontend/tui/theme/theme.go` — an
    `lipgloss.AdaptiveColor` for a color role, a `lipgloss.TerminalColor` for
    the application background, a glyph on `theme.Icons`, or an appropriate
    border/spacing token — and give `Default()`/`DefaultIcons()` a value.
 2. If most views will read it, add a precomputed field to `theme.Styles` and
-   set it in `(Theme).S()` (`internal/tui/theme/styles.go`), so call sites
+   set it in `(Theme).S()` (`internal/frontend/tui/theme/styles.go`), so call sites
    write `th.S().YourField` instead of repeating
    `lipgloss.NewStyle().Foreground(th.YourField)`.
 3. Resolve a supplied theme with `th = th.Resolve()` before consuming its
@@ -531,7 +531,7 @@ Same package `internal/tui/app` (`package tui`); split for reviewability only
 ### Dynamic agent-state coloring
 
 Live session/agent status chrome uses `theme.AgentState` and the token map in
-`internal/tui/theme/agent_state.go` (`Ready`→`Success`, `Working`→`AccentAlt`,
+`internal/frontend/tui/theme/agent_state.go` (`Ready`→`Success`, `Working`→`AccentAlt`,
 `Attention`→`Warning`, `Error`→`Error`, reserved `Dead`→`TextMuted`). The TUI
 reduces protocol events into that state in `applyAgentStateEvent` /
 `agentState` — views must not invent status from modal types. Multi-agent
@@ -648,7 +648,7 @@ not the providers factory (`providers/factory` / today's `selectProvider`).
 
 After grouping, `internal/` is persist / trust / integrate / frontend /
 product / eval (+ `tools` for product builtins, `protocol` compat re-export).
-TUI flatten target moves to `internal/tui/app`; kit is `ui`/`theme`/`common`/`term`.
+TUI flatten target moves to `internal/frontend/tui/app`; kit is `ui`/`theme`/`common`/`term`.
 
 ## Related docs
 

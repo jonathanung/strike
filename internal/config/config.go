@@ -7,7 +7,7 @@
 // a deny ceiling the permission service enforces after session grants.
 // The same two .strike roots also hold agents/ and skills/ folders (see
 // agents.go). Loaded by cmd/strike at startup and wrapped by
-// internal/host/local (Settings, and the agent/skill listings); internal/tui
+// internal/frontend/host/local (Settings, and the agent/skill listings); internal/frontend/tui
 // never imports it directly. Programmatic saves (SetGlobal*,
 // AppendProjectPermission) rewrite pure JSON and drop comments / $schema —
 // see docs/config.md.

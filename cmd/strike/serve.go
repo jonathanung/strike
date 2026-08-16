@@ -17,10 +17,10 @@ import (
 	"time"
 
 	"github.com/jonathanung/strike-cli/harness/sandbox"
-	"github.com/jonathanung/strike-cli/internal/host"
+	"github.com/jonathanung/strike-cli/internal/frontend/host"
+	"github.com/jonathanung/strike-cli/internal/frontend/server"
 	"github.com/jonathanung/strike-cli/internal/persist/session"
 	"github.com/jonathanung/strike-cli/internal/protocol"
-	"github.com/jonathanung/strike-cli/internal/server"
 	"github.com/jonathanung/strike-cli/internal/trust/audit"
 )
 

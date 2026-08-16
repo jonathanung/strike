@@ -40,7 +40,7 @@ user-invoked built-ins like `/commit`). Load via the host `skill` tool:
 | `smoke` | Offline product happy-path |
 | `release` | Annotated tag + GitHub release |
 | `issue-handler` / `issue-orchestrator` / `issue-create-and-handle` | Issue → merge farm |
-| `tui-components` | `internal/tui/ui` + theme catalog |
+| `tui-components` | `internal/frontend/tui/ui` + theme catalog |
 
 Built-in **user** skills shipped in the binary are listed under Skills below
 (`internal/config/skills/*.md`).

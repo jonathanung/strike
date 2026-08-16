@@ -76,10 +76,10 @@ describe("deepLink", () => {
   });
 
   it("path implies code mode when mode omitted", () => {
-    const r = resolveDeepLink("?root=r1&path=internal/server/api.go", caps);
+    const r = resolveDeepLink("?root=r1&path=internal/frontend/server/api.go", caps);
     expect(r.mode).toBe("code");
     expect(r.surface).toBe("files");
-    expect(r.path).toBe("internal/server/api.go");
+    expect(r.path).toBe("internal/frontend/server/api.go");
   });
 
   it("agent implies team mode", () => {

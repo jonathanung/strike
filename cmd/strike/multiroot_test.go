@@ -9,7 +9,7 @@ import (
 	"github.com/jonathanung/strike-cli/harness/provider/echo"
 	"github.com/jonathanung/strike-cli/harness/sandbox"
 	"github.com/jonathanung/strike-cli/harness/tool"
-	"github.com/jonathanung/strike-cli/internal/host/local"
+	"github.com/jonathanung/strike-cli/internal/frontend/host/local"
 	"github.com/jonathanung/strike-cli/internal/persist/session"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 )

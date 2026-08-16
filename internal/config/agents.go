@@ -109,7 +109,7 @@ var reservedSkillNames = map[string]struct{}{
 	"diagnostics":      {},
 	"exit":             {},
 	"quit":             {},
-	// Keybind-backed action mirrors (internal/tui keybind_slash.go).
+	// Keybind-backed action mirrors (internal/frontend/tui keybind_slash.go).
 	"focus-left":     {},
 	"focus-right":    {},
 	"window-next":    {},

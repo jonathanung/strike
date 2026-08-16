@@ -10,9 +10,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/acp"
+	"github.com/jonathanung/strike-cli/internal/frontend/acp"
+	"github.com/jonathanung/strike-cli/internal/frontend/server"
 	"github.com/jonathanung/strike-cli/internal/protocol"
-	"github.com/jonathanung/strike-cli/internal/server"
 	"github.com/jonathanung/strike-cli/internal/version"
 )
 

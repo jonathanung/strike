@@ -1,5 +1,5 @@
 // Package question implements the ask service that suspends a tool call until
-// the user answers one or more prompts. Used by internal/engine; internal/tui
+// the user answers one or more prompts. Used by internal/engine; internal/frontend/tui
 // never imports it — a pending ask reaches the frontend only as a
 // protocol.QuestionAsked event.
 package question

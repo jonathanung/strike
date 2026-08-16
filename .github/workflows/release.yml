@@ -25,10 +25,10 @@ jobs:
             go.work
             go.work.sum
 
-      # TUI sources live under internal/tui/_src/ and are flattened into
-      # internal/tui/*.go (gitignored). CI and make build run generate first.
+      # TUI sources live under internal/frontend/tui/_src/ and are flattened into
+      # internal/frontend/tui/*.go (gitignored). CI and make build run generate first.
       - name: Generate TUI flatten
-        run: go generate ./internal/tui
+        run: go generate ./internal/frontend/tui
 
       - name: Build multi-arch archives
         env:

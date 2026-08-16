@@ -1,6 +1,6 @@
 // Package history stores project-scoped submitted prompts. cmd/strike opens
-// the store at startup; internal/host/local wraps it as host.History so
-// internal/tui only ever sees it through that interface.
+// the store at startup; internal/frontend/host/local wraps it as host.History so
+// internal/frontend/tui only ever sees it through that interface.
 package history
 
 import (

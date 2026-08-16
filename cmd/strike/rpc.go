@@ -10,9 +10,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jonathanung/strike-cli/internal/frontend/rpc"
+	"github.com/jonathanung/strike-cli/internal/frontend/server"
 	"github.com/jonathanung/strike-cli/internal/protocol"
-	"github.com/jonathanung/strike-cli/internal/rpc"
-	"github.com/jonathanung/strike-cli/internal/server"
 )
 
 const rpcUsage = `Speak the Op/Event protocol over stdio as newline-delimited JSON-RPC 2.0.

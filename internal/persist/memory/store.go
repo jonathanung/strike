@@ -1,5 +1,5 @@
 // Package memory stores project-scoped key/value entries with optional tags.
-// cmd/strike opens the store at startup; tools and internal/host/local wrap it
+// cmd/strike opens the store at startup; tools and internal/frontend/host/local wrap it
 // so agent tools and the /memory command share one durable project DB.
 package memory
 

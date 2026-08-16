@@ -3,7 +3,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-// Stock strike palette from internal/tui/theme.Default() (theme.go) — E13.8.
+// Stock strike palette from internal/frontend/tui/theme.Default() (theme.go) — E13.8.
 // Web CSS variables must stay aligned with these adaptive pairs.
 const TUI_DEFAULT = {
   text: { light: "#1a1528", dark: "#f3f1fa" },

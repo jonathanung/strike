@@ -403,7 +403,7 @@ describe("App", () => {
         });
       }
       if (url.includes("sessions")) return response({ sessions: [{ id: "live", title: "Current" }], liveId: "live" });
-      if (url.includes("/v1/files/search")) return response({ paths: ["internal/tui/app.go"] });
+      if (url.includes("/v1/files/search")) return response({ paths: ["internal/frontend/tui/app.go"] });
       return response({ ok: true });
     }));
     render(<App />);
@@ -412,8 +412,8 @@ describe("App", () => {
     fireEvent.change(box, { target: { value: "see @src/old.go extra", selectionStart: 8, selectionEnd: 8 } });
     await screen.findByRole("option", { name: /internal\/tui\/app\.go/ });
     fireEvent.keyDown(box, { key: "Enter" });
-    expect(box).toHaveValue("see @internal/tui/app.go extra");
-    expect(box.selectionStart).toBe("see @internal/tui/app.go ".length);
+    expect(box).toHaveValue("see @internal/frontend/tui/app.go extra");
+    expect(box.selectionStart).toBe("see @internal/frontend/tui/app.go ".length);
     expect(screen.queryByRole("listbox", { name: "Composer completions" })).not.toBeInTheDocument();
   });
 
@@ -429,7 +429,7 @@ describe("App", () => {
         });
       }
       if (url.includes("sessions")) return response({ sessions: [{ id: "live", title: "Current" }], liveId: "live" });
-      if (url.includes("/v1/files/search")) return response({ paths: ["internal/tui/app.go"] });
+      if (url.includes("/v1/files/search")) return response({ paths: ["internal/frontend/tui/app.go"] });
       return response({ ok: true });
     }));
     render(<App />);
@@ -438,7 +438,7 @@ describe("App", () => {
     fireEvent.change(box, { target: { value: "see @src/old.go\nextra", selectionStart: 8, selectionEnd: 8 } });
     await screen.findByRole("option", { name: /internal\/tui\/app\.go/ });
     fireEvent.keyDown(box, { key: "Enter" });
-    expect(box).toHaveValue("see @internal/tui/app.go\nextra");
+    expect(box).toHaveValue("see @internal/frontend/tui/app.go\nextra");
     expect(screen.queryByRole("listbox", { name: "Composer completions" })).not.toBeInTheDocument();
   });
 

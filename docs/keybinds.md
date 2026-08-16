@@ -13,7 +13,7 @@ Command actions (focus, panes, modals, interrupt, tool cells, roots, …) are
 also invocable as slash commands for discoverability and scriptability. Pure
 input editing (readline kill/yank, completion, enter/send) stays key-only.
 Registry: `keybindSlashPrimary` / `keybindNoSlashReason` in
-`internal/tui/app/_src/app/keybind_slash.go`.
+`internal/frontend/tui/app/_src/app/keybind_slash.go`.
 
 ## Global
 
@@ -182,5 +182,5 @@ Child sessions spawned by tools (not concurrent roots):
 | `ctrl+d` | save highlighted default |
 
 UI layout and slash commands: [usage.md](usage.md). Source of truth in code:
-`keybindCatalog` / `defaultKeyMap` in `internal/tui/app/_src/app/keymap.go`; slash mapping
-in `internal/tui/app/_src/app/keybind_slash.go`.
+`keybindCatalog` / `defaultKeyMap` in `internal/frontend/tui/app/_src/app/keymap.go`; slash mapping
+in `internal/frontend/tui/app/_src/app/keybind_slash.go`.

@@ -7,10 +7,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/internal/host"
+	"github.com/jonathanung/strike-cli/internal/frontend/host"
+	"github.com/jonathanung/strike-cli/internal/frontend/rpc"
 	"github.com/jonathanung/strike-cli/internal/persist/session"
 	"github.com/jonathanung/strike-cli/internal/protocol"
-	"github.com/jonathanung/strike-cli/internal/rpc"
 	pkgproto "github.com/jonathanung/strike-cli/pkg/protocol"
 )
 

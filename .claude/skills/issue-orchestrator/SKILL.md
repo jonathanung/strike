@@ -51,7 +51,7 @@ Closed `depends` count as satisfied.
 
 Serialize (or mark mutual `conflicts`) when multiple issues touch:
 
-- `internal/tui/app/_src/app/keymap*.go`, default keybinds, `internal/config/keybinds.go`
+- `internal/frontend/tui/app/_src/app/keymap*.go`, default keybinds, `internal/config/keybinds.go`
 - `internal/engine/turn.go` / core turn loop
 - `internal/tool/registry.go` + defer/toolsearch wiring
 - `internal/protocol` event kind additions shared across frontends

@@ -4,7 +4,7 @@
 // Product builtins (memory/issue/plan/artifact/ledger/skill/lsp/notebook/…) live
 // in internal/tools and register onto the same Registry from cmd/strike.
 // Used by internal/engine (dispatch), internal/permission (AskRequest, for the
-// Context.Ask signature), and cmd/strike (registry construction); internal/tui
+// Context.Ask signature), and cmd/strike (registry construction); internal/frontend/tui
 // never imports it — tool calls reach the frontend only as
 // protocol.ToolCallBegin/Output/End events.
 package tool

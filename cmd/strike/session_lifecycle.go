@@ -13,11 +13,11 @@ import (
 
 	"github.com/jonathanung/strike-cli/harness/sandbox"
 	"github.com/jonathanung/strike-cli/internal/config"
+	tui "github.com/jonathanung/strike-cli/internal/frontend/tui/app"
+	"github.com/jonathanung/strike-cli/internal/frontend/tui/theme"
 	"github.com/jonathanung/strike-cli/internal/persist/session"
 	"github.com/jonathanung/strike-cli/internal/project"
 	"github.com/jonathanung/strike-cli/internal/protocol"
-	tui "github.com/jonathanung/strike-cli/internal/tui/app"
-	"github.com/jonathanung/strike-cli/internal/tui/theme"
 	"github.com/jonathanung/strike-cli/internal/update"
 	"github.com/jonathanung/strike-cli/pkg/timeline"
 )

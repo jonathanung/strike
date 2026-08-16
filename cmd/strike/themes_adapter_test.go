@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jonathanung/strike-cli/internal/host"
-	"github.com/jonathanung/strike-cli/internal/tui/theme"
+	"github.com/jonathanung/strike-cli/internal/frontend/host"
+	"github.com/jonathanung/strike-cli/internal/frontend/tui/theme"
 )
 
 func TestThemesAdapterListsBuiltinsWithPortableColors(t *testing.T) {

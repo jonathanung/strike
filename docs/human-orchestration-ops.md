@@ -430,7 +430,7 @@ existing envelope `time` + engine correlation fields where present.
 1. Add Op structs + codec cases in `pkg/protocol`.
 2. Engine methods: thin wrappers around existing spawn/message/board paths with
    `actorKind=human` and idempotency hooks.
-3. `internal/server` ops guard: allowlist types when `teamControl` wired;
+3. `internal/frontend/server` ops guard: allowlist types when `teamControl` wired;
    attach-only/read-only short-circuit.
 4. Permission registration in default layers.
 5. SDK/RPC/ACP advertisement.
@@ -443,8 +443,8 @@ Authors implementing WEBUI.18 must re-verify against:
 - `pkg/protocol` — Op/Event envelopes, `AgentMessage`, child/delegation events
 - `internal/engine` — `agentMessage`, `agentBroadcast`, child spawn/cancel, delegation
 - `internal/tool` — `task`, `delegate`, `team_task`, `task_interrupt`, `agent_message`
-- `internal/server` — ops guard, attach-only, rate limit, audit
-- `internal/rpc`, `internal/acp`, `pkg/sdk` — capability hello / codec
+- `internal/frontend/server` — ops guard, attach-only, rate limit, audit
+- `internal/frontend/rpc`, `internal/frontend/acp`, `pkg/sdk` — capability hello / codec
 - `docs/web-cockpit-contract.md` — attach matrix and Team IA
 - `docs/audit.md`, `docs/web.md` — serve_op family and operator docs
 

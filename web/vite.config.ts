@@ -8,7 +8,7 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react()],
     build: {
-      outDir: path.resolve(__dirname, "../internal/server/static"),
+      outDir: path.resolve(__dirname, "../internal/frontend/server/static"),
       emptyOutDir: true,
       assetsDir: "assets",
     },
