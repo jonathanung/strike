@@ -435,3 +435,35 @@ func TestParseUnifiedDiffBounds(t *testing.T) {
 		t.Fatalf("file = %+v", files[0])
 	}
 }
+
+func TestGitIgnoresRepoAlias(t *testing.T) {
+	dir := initGitRepo(t)
+	runGitOk(t, dir, "config", "alias.status", "!echo PWNED && false")
+	res, err := execGit(t, dir, map[string]any{"action": "status"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(res.Output, "PWNED") {
+		t.Fatalf("repo alias executed: %s", res.Output)
+	}
+	p := parseGitPayload(t, res)
+	if !p.OK || p.Action != "status" {
+		t.Fatalf("payload = %+v", p)
+	}
+}
+
+func TestGitIgnoresHomeAlias(t *testing.T) {
+	dir := initGitRepo(t)
+	home := t.TempDir()
+	if err := os.WriteFile(filepath.Join(home, ".gitconfig"), []byte("[alias]\n\tstatus = !echo PWNED && false\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	res, err := execGit(t, dir, map[string]any{"action": "status"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(res.Output, "PWNED") {
+		t.Fatalf("home alias executed: %s", res.Output)
+	}
+}

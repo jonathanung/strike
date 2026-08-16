@@ -242,8 +242,9 @@ func normalizeGitRef(raw, action string) (string, error) {
 }
 
 func gitProcessEnv() []string {
+	// Do not copy HOME: user ~/.gitconfig aliases must not apply.
 	keys := []string{
-		"PATH", "HOME", "USER", "LOGNAME",
+		"PATH", "USER", "LOGNAME",
 		"LANG", "LC_ALL", "LC_CTYPE",
 		"TMPDIR", "TMP", "TEMP",
 	}
@@ -253,11 +254,24 @@ func gitProcessEnv() []string {
 		"GIT_PAGER=cat",
 		"GIT_TERMINAL_PROMPT=0",
 		"GIT_OPTIONAL_LOCKS=0",
+		"GIT_CONFIG_NOSYSTEM=1",
+		"GIT_CONFIG_SYSTEM=/dev/null",
+		"GIT_CONFIG_GLOBAL=/dev/null",
 	)
 }
 
 func runGit(ctx context.Context, tc *Context, args []string) (ProcessResult, error) {
-	argv := append([]string{"git", "--no-pager", "-c", "core.quotepath=false"}, args...)
+	if len(args) == 0 || args[0] == "" {
+		return ProcessResult{}, ErrInternal("git argv missing subcommand")
+	}
+	cmd := args[0]
+	// alias.<cmd>=<cmd> forces the builtin (aliases do not recurse).
+	argv := append([]string{
+		"git", "--no-pager",
+		"-c", "core.quotepath=false",
+		"-c", "log.showSignature=false",
+		"-c", "alias." + cmd + "=" + cmd,
+	}, args...)
 	proc, err := RunProcess(ctx, ProcessSpec{
 		Argv:      argv,
 		Dir:       tc.WorkDir,
