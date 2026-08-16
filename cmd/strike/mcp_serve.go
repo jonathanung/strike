@@ -13,7 +13,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/jonathanung/strike-cli/internal/mcp"
+	"github.com/jonathanung/strike-cli/internal/integrate/mcp"
 	"github.com/jonathanung/strike-cli/internal/version"
 )
 

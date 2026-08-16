@@ -197,7 +197,7 @@ Every current top-level `internal/*` package:
 | `internal/trust/audit` | `internal/trust/audit` | product |
 | `internal/auth` | split: flows → `providers/auth`; store + `strike auth` → `internal/product/auth` | providers + product |
 | `internal/config` | `internal/product/config` | product |
-| `internal/container` | `internal/integrate/container` | product |
+| `internal/integrate/container` | `internal/integrate/container` | product |
 | `internal/engine` | `harness/engine` | kernel |
 | `internal/eval` | `internal/eval` (cluster; already) | product |
 | `internal/fault` | `harness/fault` | kernel |
@@ -207,13 +207,13 @@ Every current top-level `internal/*` package:
 | `internal/host` | `internal/frontend/host` | product |
 | `internal/persist/issue` | `internal/persist/issue` | product |
 | `internal/persist/ledger` | `internal/persist/ledger` | product |
-| `internal/lsp` | `internal/integrate/lsp` | product |
-| `internal/mcp` | `internal/integrate/mcp` | product |
+| `internal/integrate/lsp` | `internal/integrate/lsp` | product |
+| `internal/integrate/mcp` | `internal/integrate/mcp` | product |
 | `internal/persist/memory` | `internal/persist/memory` | product |
 | `internal/models` | `internal/product/models` | product |
 | `internal/permission` | `harness/permission` | kernel |
 | `internal/persist/plan` | `internal/persist/plan` | product |
-| `internal/plugin` | `internal/integrate/plugin` | product |
+| `internal/integrate/plugin` | `internal/integrate/plugin` | product |
 | `internal/project` | `internal/product/project` | product |
 | `internal/protocol` | `internal/protocol` (compat re-export; prefer `pkg/protocol`) | product |
 | `internal/provider` | split: interface+echo → `harness/provider`; adapters → `providers/` | kernel + providers |

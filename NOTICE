@@ -12,7 +12,7 @@ Zone (https://github.com/peasant-community/zone)
   Zone provided Dockerized agent workspace ideas and substantial reference
   implementations (container lifecycle, naming/hashing, network helpers,
   Dockerfile scaffolding patterns) that were ported or rewritten into strike's
-  native containerization (internal/container, epic
+  native containerization (internal/integrate/container, epic
   https://github.com/jonathanung/strike/issues/547).
 
   Disposition: Zone is archived and no longer maintained as a separate binary.

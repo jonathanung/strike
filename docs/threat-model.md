@@ -52,7 +52,7 @@ generated files as untrusted input.
 
 ## MCP servers
 
-Configured MCP servers register as `mcp_<server>_<tool>` (`internal/mcp`).
+Configured MCP servers register as `mcp_<server>_<tool>` (`internal/integrate/mcp`).
 Each call asks permission `mcp` with pattern `server/tool`. Tool results are
 model-facing text. Prompt and resource payloads are redacted and truncated
 (`BoundText`, 1 MiB per field); `tools/call` text is secret-scrubbed on settle

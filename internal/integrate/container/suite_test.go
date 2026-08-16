@@ -231,7 +231,7 @@ func TestDevcontainerSkillContract(t *testing.T) {
 	// so E12.8 does not depend on config package import cycles.
 	data, err := os.ReadFile(filepath.Join("..", "config", "skills", "devcontainer.md"))
 	if err != nil {
-		// path from internal/container → internal/config/skills
+		// path from internal/integrate/container → internal/config/skills
 		data, err = os.ReadFile(filepath.Join("..", "..", "internal", "config", "skills", "devcontainer.md"))
 	}
 	if err != nil {

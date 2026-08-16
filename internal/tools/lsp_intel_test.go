@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jonathanung/strike-cli/internal/lsp"
+	"github.com/jonathanung/strike-cli/internal/integrate/lsp"
 )
 
 type fakeIntel struct {

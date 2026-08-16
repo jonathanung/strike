@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/plugin"
+	"github.com/jonathanung/strike-cli/internal/integrate/plugin"
 	"github.com/jonathanung/strike-cli/internal/version"
 )
 

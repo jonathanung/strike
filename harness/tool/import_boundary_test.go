@@ -16,7 +16,7 @@ var forbiddenKernelImports = []string{
 	"github.com/jonathanung/strike-cli/internal/persist/plan",
 	"github.com/jonathanung/strike-cli/internal/persist/artifact",
 	"github.com/jonathanung/strike-cli/internal/persist/ledger",
-	"github.com/jonathanung/strike-cli/internal/lsp",
+	"github.com/jonathanung/strike-cli/internal/integrate/lsp",
 	"github.com/jonathanung/strike-cli/internal/tools",
 	"github.com/jonathanung/strike-cli/internal/trust/secret",
 }

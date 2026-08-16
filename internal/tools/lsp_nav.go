@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/internal/lsp"
+	"github.com/jonathanung/strike-cli/internal/integrate/lsp"
 )
 
 // LSPNavigator backs the optional definition / references / symbols tools.

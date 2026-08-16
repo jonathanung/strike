@@ -64,7 +64,7 @@ Keep the sample fixture for schema reference.
    read `/logs/verifier/reward.txt` (or `reward.json`)
 
 Container backend is the Docker CLI (`swebench.Runtime`). #592 may swap in
-`internal/container` without changing this runner.
+`internal/integrate/container` without changing this runner.
 
 ## Config overlays (E3.5)
 

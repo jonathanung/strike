@@ -2,7 +2,7 @@
 // (Content-Length framing), initialize handshake, document sync,
 // publishDiagnostics collection, and optional navigation / intel requests
 // (definition / references / symbols / call hierarchy / rename preview /
-// impact). Crash isolation mirrors internal/mcp — a dead language server
+// impact). Crash isolation mirrors internal/integrate/mcp — a dead language server
 // degrades to empty results and never takes down the session.
 package lsp
 

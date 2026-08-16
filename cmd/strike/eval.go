@@ -232,7 +232,7 @@ func runEvalSWEBench(args []string, stdout, stderr io.Writer) int {
 		cfg.Grader = swebench.GraderDocker
 	}
 
-	// E12.10: shared internal/container CLI + in-process container pool lease.
+	// E12.10: shared internal/integrate/container CLI + in-process container pool lease.
 	rt := swebench.NewContainerRuntime("")
 	runner := &swebench.Runner{
 		RT:    rt,

@@ -815,7 +815,7 @@ rejects absolute paths, `..`, symlinks, and oversized payloads (zip-slip / tar
 traversal fail closed).
 
 CLI: `strike plugin search`, `install catalog:pkg[@ver] --registry`, `outdated`,
-`update --yes` (`internal/plugin` catalog client).
+`update --yes` (`internal/integrate/plugin` catalog client).
 
 ### 6.4 Update capability review
 
@@ -1039,10 +1039,10 @@ authoring format from this contract forward.
 |---|---|---|
 | Strike-native contract | #725 | Historical authoring; now §3.10 legacy load |
 | APS contract | #1142 (this doc) | Native APS + `com.strike.cli` + legacy deprecation |
-| Passive load | #726 (`internal/plugin` + config/theme wiring) | §3–4, §7.1–7.5, §8–10 |
+| Passive load | #726 (`internal/integrate/plugin` + config/theme wiring) | §3–4, §7.1–7.5, §8–10 |
 | Local/Git CLI | #727 | §2, §6.1–6.2, enablement, doctor |
 | Executable activation | #728 (`trust`/`untrust`, `CompileExecutables`, assemble wiring) | §5, §7.6–7.8 |
-| Catalog / updates | #729 (`internal/plugin` catalog/archive + CLI) | §6.3–6.4, digest verify |
+| Catalog / updates | #729 (`internal/integrate/plugin` catalog/archive + CLI) | §6.3–6.4, digest verify |
 | TUI manager | #730 (`/plugin` modal + `host.Plugins`) | UX over enablement + trust |
 | Themes packaging | #511 (`theme.Catalog` + `/theme` preview) | §7.4 |
 | Pane ABI | #522 | §7.9 + [plugin-panes.md](plugin-panes.md) |
@@ -1092,12 +1092,12 @@ authoring format from this contract forward.
 
 | AC | Implementation |
 |---|---|
-| Valid fixtures appear on agent/skill/workflow/theme/provider surfaces | `internal/plugin.Discover` + `config` loaders + `theme.Catalog` |
+| Valid fixtures appear on agent/skill/workflow/theme/provider surfaces | `internal/integrate/plugin.Discover` + `config` loaders + `theme.Catalog` |
 | Unsupported versions, duplicates, traversal, malformed, collisions → diagnostics | `Diagnostic` codes: `schema_version`, `strike_version`, `duplicate_id`, `path`, `malformed`, `collision`, `digest` (APS loaders add `aps_schema` / `legacy_deprecated`) |
 | Malformed plugin cannot silently shadow | Skip plugin; other sources unchanged |
 | Disabled plugins contribute nothing | `plugins.lock.json` `enabled: false` |
 | No arbitrary provider/auth/streaming code | Provider profiles via `ParseProvidersFile` / shipped `WireAPI` only; secret literals rejected |
-| Tests: precedence, namespacing, disablement, path confinement | `internal/plugin/*_test.go`, `internal/config/plugins_test.go`, theme catalog tests |
+| Tests: precedence, namespacing, disablement, path confinement | `internal/integrate/plugin/*_test.go`, `internal/config/plugins_test.go`, theme catalog tests |
 
 ## 16. Acceptance mapping (#727)
 

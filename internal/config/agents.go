@@ -11,7 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/jonathanung/strike-cli/harness/permission"
-	"github.com/jonathanung/strike-cli/internal/plugin"
+	"github.com/jonathanung/strike-cli/internal/integrate/plugin"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 )
 

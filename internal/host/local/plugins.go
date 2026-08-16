@@ -7,11 +7,11 @@ import (
 	"time"
 
 	"github.com/jonathanung/strike-cli/internal/host"
-	"github.com/jonathanung/strike-cli/internal/plugin"
+	"github.com/jonathanung/strike-cli/internal/integrate/plugin"
 	"github.com/jonathanung/strike-cli/internal/version"
 )
 
-// NewPlugins builds a host.Plugins backed by internal/plugin lifecycle APIs.
+// NewPlugins builds a host.Plugins backed by internal/integrate/plugin lifecycle APIs.
 // workDir scopes project installs; empty still allows global operations.
 func NewPlugins(workDir string) host.Plugins {
 	return pluginsAdapter{workDir: strings.TrimSpace(workDir)}

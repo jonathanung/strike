@@ -65,8 +65,8 @@ service/theme token).
 | `harness/safefile` | Hardened path I/O (FIFO/special reject, symlink policy, identity, atomic write) for tools |
 | `harness/tool` | kernel contract + generic builtins: read/glob/grep/edit/write/apply_patch/move/delete/status/bash/git/verify/task/task_status/task_read/task_message/task_interrupt/delegate/wait/agent_roster/agent_message/agent_broadcast/agent_thread/team_task/patch_collab/webfetch/websearch/browser/todowrite/todoread/sleep/question/toolsearch |
 | `internal/tools` | Strike product builtins: memory_write/read, issue_write/read, plan_write/read/delegate, artifact_write/read, ledger_write/read, context_bundle, notebook_edit, skill, enter/exit_plan_mode, phase_done, definition/references/symbols/diagnostics/call_hierarchy/rename_preview/impact, tui_snapshot |
-| `internal/mcp` | MCP client (stdio + streamable HTTP); bridges external tools onto the registry |
-| `internal/lsp` | LSP client (JSON-RPC over stdio); extension registry; diagnostics collection |
+| `internal/integrate/mcp` | MCP client (stdio + streamable HTTP); bridges external tools onto the registry |
+| `internal/integrate/lsp` | LSP client (JSON-RPC over stdio); extension registry; diagnostics collection |
 | `harness/question` | user-question ask service (suspend tool until QuestionReply) |
 | `harness/actionfacts` | semantic bash/tool fact projection for permissions (#888) |
 | `harness/permission` | last-match-wins allow/ask/deny + ask service (+ action facts) |

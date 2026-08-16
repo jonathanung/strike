@@ -159,7 +159,7 @@ does not skip asks. `yolo` + `sandbox: off` requires `--i-know`.
 | Instructions globs | OC `instructions` | AGENTS.md + discovery roots | shipped (different model) |
 | Autoupdate | OC `autoupdate` | `autoupdate` (`off`\|`notify`\|`auto`) + `strike upgrade` | shipped (+ `/settings`) |
 | Formatters | OC `formatter` | `hooks[]` post-edit recipe ([config.md](config.md#post-edit-formatters-recipe)); editor/`$EDITOR` | wont (hooks recipe) |
-| LSP servers | OC `lsp` | shipped (`internal/lsp`, `/lsp`, diagnostics pane) | gap / out of this epic |
+| LSP servers | OC `lsp` | shipped (`internal/integrate/lsp`, `/lsp`, diagnostics pane) | gap / out of this epic |
 | Network allowlist | OC network / CC | gap — tracked #527 | gap / coordinate |
 | Managed / MDM settings | CC/OC enterprise | shipped (`managed-config` + deny ceiling; #764) | shipped |
 | JSON schema `$schema` | both | shipped (main config; `schemas/strike-config.schema.json`, runtime ignores/`no fetch`) | shipped (main); sidecars later |

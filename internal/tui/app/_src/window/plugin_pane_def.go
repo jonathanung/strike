@@ -8,7 +8,7 @@ import (
 )
 
 // Local pane/1 definition types (docs/plugin-panes.md). Duplicated from the
-// plugin package so the TUI boundary stays free of internal/plugin imports.
+// plugin package so the TUI boundary stays free of internal/integrate/plugin imports.
 
 const (
 	paneABI           = "pane/1"
