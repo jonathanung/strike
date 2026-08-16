@@ -62,7 +62,7 @@ func (t *planDelegateTool) Schema() json.RawMessage {
 			"id": {"type": "string", "description": "Plan id"},
 			"section_id": {"type": "string", "description": "Stable section id (dispatch), e.g. s1"},
 			"prompt": {"type": "string", "description": "Optional extra instructions for the child"},
-			"name": {"type": "string", "description": "Optional stable teammate alias unique on this session team"},
+			"name": {"type": "string", "description": "Short unique teammate alias from the assigned task. If omitted, derived from the prompt first line"},
 			"agent": {"type": "string", "description": "Optional agent persona (default: plan)"},
 			"model": {"type": "string", "description": "Optional model id for the child"},
 			"effort": {"type": "string", "description": "Optional reasoning effort for the child"}

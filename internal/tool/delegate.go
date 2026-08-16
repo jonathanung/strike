@@ -46,7 +46,7 @@ func (delegateTool) Schema() json.RawMessage {
 			},
 			"id": {"type": "string", "description": "Delegation id, session id, or name (get/transition)"},
 			"prompt": {"type": "string", "description": "Subtask instructions (create)"},
-			"name": {"type": "string", "description": "Optional stable teammate alias (create)"},
+			"name": {"type": "string", "description": "Short unique teammate alias from the assigned task (create). If omitted, derived from the prompt first line"},
 			"agent": {"type": "string", "description": "Optional agent persona (create)"},
 			"model": {"type": "string", "description": "Optional model pin (create)"},
 			"effort": {"type": "string", "description": "Optional effort pin (create)"},

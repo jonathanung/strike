@@ -20,11 +20,13 @@ func (taskTool) Contract() Contract {
 func (taskTool) Description() string {
 	return `Progressive delegation API: spawn a child agent and manage its lifecycle.
 
-Simple path (prompt only):
-  task({prompt: "…"})
-  Returns immediately after the child starts. A later [child.completed] carries
-  structured handoff JSON (summary, files_changed, verification, findings,
-  blockers, recommended_next_action). Mid-flight coordination uses peer messages.
+Simple path:
+  task({prompt: "…", name: "fix-auth-tests"})
+  Pass name as a short slug of the assigned work (not a persona). If omitted,
+  the engine derives a unique alias from the prompt first line. Returns immediately
+  after the child starts. A later [child.completed] carries structured handoff JSON
+  (summary, files_changed, verification, findings, blockers,
+  recommended_next_action). Mid-flight coordination uses peer messages.
 
 Advanced create fields (all optional): name, agent, model, effort, route/specialty/
 capabilities, criteria[], deps[], subscribe[], assignee, verify[], budget,
@@ -65,8 +67,10 @@ func (taskTool) BasicDescription() string {
 	return `Progressive delegation API (basic schema): spawn a child with prompt-only create, and bounded status/wait/cancel control.
 
 Simple path:
-  task({prompt: "…"})
-  Returns after the child starts. Prefer wait or [child.completed] over busy-polling.
+  task({prompt: "…", name: "fix-auth-tests"})
+  Pass name as a short slug of the assigned work. If omitted, derived from the
+  prompt first line. Returns after the child starts. Prefer wait or [child.completed]
+  over busy-polling.
 
 Basic actions (optional action=; omit + prompt ⇒ create):
   create  — spawn (default). Nested depth bounded by MaxChildDepth.
@@ -90,6 +94,7 @@ func (taskTool) BasicSchema() json.RawMessage {
 				"description": "Operation; omit with prompt for create (progressive default)"
 			},
 			"prompt": {"type": "string", "description": "Subtask instructions (create; required when action omitted)"},
+			"name": {"type": "string", "description": "Short unique teammate alias from the assigned task (slug: letters, digits, '_' and '-'; ≤64). Prefer this over leaving empty. If omitted, derived from the prompt first line"},
 			"id": {"type": "string", "description": "Delegation id, session id, or name (status/wait/cancel)"},
 			"session_id": {"type": "string", "description": "Alias for id (compat with task_* tools)"},
 			"include_recent": {"type": "boolean", "description": "status: include latest_activity lines"},
@@ -116,7 +121,7 @@ func (taskTool) Schema() json.RawMessage {
 			"id": {"type": "string", "description": "Delegation id, session id, or name (get/status/read/message/transition/cancel/wait/resume)"},
 			"session_id": {"type": "string", "description": "Alias for id (compat with task_* tools)"},
 			"continue": {"type": "boolean", "description": "resume: allow explicit continuation of a terminal completed/failed/canceled child"},
-			"name": {"type": "string", "description": "Optional stable teammate alias unique on this session team (e.g. explorer)"},
+			"name": {"type": "string", "description": "Short unique teammate alias from the assigned task (slug: letters, digits, '_' and '-'; ≤64). Prefer this over leaving empty. If omitted, derived from the prompt first line. Do not use persona names unless that is the task"},
 			"agent": {"type": "string", "description": "Optional agent persona pin: explore, general, commit, reviewer, tester, debugger, build, plan, or user-defined. Wins over auto-route"},
 			"model": {"type": "string", "description": "Optional model id pin (bare id or provider/model). Wins over auto-route; omit to inherit"},
 			"effort": {"type": "string", "description": "Optional reasoning effort: off, low, medium, high, xhigh, or max"},

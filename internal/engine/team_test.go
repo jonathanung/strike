@@ -459,3 +459,81 @@ func TestTeamResolveSessionIDPrefix(t *testing.T) {
 		t.Fatalf("exact id = %q ok=%v", id, ok)
 	}
 }
+
+func TestDeriveMemberName(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"", "task"},
+		{"   ", "task"},
+		{"!!!", "task"},
+		{"Fix the auth bug", "fix-the-auth-bug"},
+		{"fix auth\nsecond line ignored", "fix-auth"},
+		{"  Fix   the\tauth  ", "fix-the-auth"},
+		{"path/to/file.go: parse error", "path-to-file-go-parse-error"},
+		{"already_ok-name", "already_ok-name"},
+		{"explorer", "explorer"},
+		{strings.Repeat("A", maxTeamMemberNameLen+8), strings.Repeat("a", maxTeamMemberNameLen)},
+	}
+	for _, tc := range cases {
+		got := DeriveMemberName(tc.in)
+		if got != tc.want {
+			t.Errorf("DeriveMemberName(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+		if _, err := ValidateMemberName(got); err != nil {
+			t.Errorf("DeriveMemberName(%q) invalid: %v", tc.in, err)
+		}
+	}
+}
+
+func TestNextUniqueMemberNameSuffix(t *testing.T) {
+	tm := NewTeam("L", "build")
+	if !tm.Enroll(TeamMember{SessionID: "A", ParentSessionID: "L", Name: "fix-auth", Depth: 1}) {
+		t.Fatal("enroll A")
+	}
+	got := tm.NextUniqueMemberName("Fix auth", "")
+	if got != "fix-auth-2" {
+		t.Fatalf("NextUniqueMemberName = %q, want fix-auth-2", got)
+	}
+	if !tm.Enroll(TeamMember{SessionID: "B", ParentSessionID: "L", Name: got, Depth: 1}) {
+		t.Fatal("enroll B")
+	}
+	got = tm.NextUniqueMemberName("Fix auth", "")
+	if got != "fix-auth-3" {
+		t.Fatalf("third = %q, want fix-auth-3", got)
+	}
+}
+
+func TestNextUniqueMemberNameIgnoresOwnDelegation(t *testing.T) {
+	tm := NewTeam("L", "build")
+	d, err := tm.CreateDelegation(CreateDelegationSpec{
+		Prompt: "Fix auth", OwnerSessionID: "L", Name: "fix-auth",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := tm.NextUniqueMemberName("fix-auth", d.ID)
+	if got != "fix-auth" {
+		t.Fatalf("own delegation name = %q, want fix-auth", got)
+	}
+	got = tm.NextUniqueMemberName("fix-auth", "")
+	if got != "fix-auth-2" {
+		t.Fatalf("other claim = %q, want fix-auth-2", got)
+	}
+}
+
+func TestMemberNameSourcePrefersPromptLine(t *testing.T) {
+	got := memberNameSource(tool.TaskRequest{
+		Prompt:        "Fix auth\nmore",
+		ContextBundle: tool.ContextBundle{Goal: "other goal"},
+	})
+	if got != "Fix auth" {
+		t.Fatalf("source = %q, want Fix auth", got)
+	}
+	got = memberNameSource(tool.TaskRequest{
+		ContextBundle: tool.ContextBundle{Goal: "bundle goal"},
+	})
+	if got != "bundle goal" {
+		t.Fatalf("goal fallback = %q", got)
+	}
+}

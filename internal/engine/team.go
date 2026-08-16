@@ -104,6 +104,129 @@ func ValidateMemberName(name string) (string, error) {
 	return name, nil
 }
 
+// defaultDerivedMemberName is the fallback slug when the assigned task has no
+// usable letters/digits. Not a persona name.
+const defaultDerivedMemberName = "task"
+
+// memberNameSource picks text to slugify into a teammate alias: prompt first
+// line, else sealed context-bundle goal.
+func memberNameSource(req tool.TaskRequest) string {
+	if line := firstLine(req.Prompt); line != "" {
+		return line
+	}
+	return firstLine(req.ContextBundle.Goal)
+}
+
+func firstLine(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	if i := strings.IndexAny(s, "\r\n"); i >= 0 {
+		s = strings.TrimSpace(s[:i])
+	}
+	return s
+}
+
+// DeriveMemberName slugifies assigned-task text into a ValidateMemberName
+// alias. Empty or punctuation-only input becomes "task". Does not invent
+// persona names.
+func DeriveMemberName(src string) string {
+	src = firstLine(src)
+	var b strings.Builder
+	b.Grow(len(src))
+	lastSep := false
+	for _, r := range src {
+		switch {
+		case unicode.IsLetter(r) || unicode.IsDigit(r):
+			b.WriteRune(unicode.ToLower(r))
+			lastSep = false
+		case r == '_':
+			if !lastSep && b.Len() > 0 {
+				b.WriteRune('_')
+				lastSep = true
+			}
+		default:
+			if !lastSep && b.Len() > 0 {
+				b.WriteRune('-')
+				lastSep = true
+			}
+		}
+	}
+	out := strings.Trim(b.String(), "-_")
+	if out == "" {
+		out = defaultDerivedMemberName
+	}
+	out = cutMemberNameRunes(out, maxTeamMemberNameLen)
+	name, err := ValidateMemberName(out)
+	if err != nil || name == "" {
+		return defaultDerivedMemberName
+	}
+	return name
+}
+
+func cutMemberNameRunes(s string, n int) string {
+	if n <= 0 || s == "" {
+		return ""
+	}
+	if utf8.RuneCountInString(s) <= n {
+		return s
+	}
+	r := []rune(s)
+	return string(r[:n])
+}
+
+// NextUniqueMemberName returns base, or base-2 / base-3 / … when that alias is
+// already claimed by a roster member or another delegation. ignoreDelegID is
+// skipped so a queued delegation can keep its own stored name.
+func (t *Team) NextUniqueMemberName(base, ignoreDelegID string) string {
+	base = DeriveMemberName(base)
+	if t == nil || !t.nameClaimed(base, ignoreDelegID) {
+		return base
+	}
+	for n := 2; n < 10000; n++ {
+		suffix := fmt.Sprintf("-%d", n)
+		keep := maxTeamMemberNameLen - utf8.RuneCountInString(suffix)
+		candidate := strings.Trim(cutMemberNameRunes(base, keep), "-_")
+		if candidate == "" {
+			candidate = defaultDerivedMemberName
+		}
+		candidate += suffix
+		if name, err := ValidateMemberName(candidate); err == nil && name != "" && !t.nameClaimed(name, ignoreDelegID) {
+			return name
+		}
+	}
+	return base
+}
+
+// nameClaimed reports whether name is held by a roster member or a delegation
+// other than ignoreDelegID.
+func (t *Team) nameClaimed(name, ignoreDelegID string) bool {
+	if t == nil {
+		return false
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return false
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for _, m := range t.members {
+		if m.Name == name {
+			return true
+		}
+	}
+	for id, d := range t.delegations {
+		if ignoreDelegID != "" && id == ignoreDelegID {
+			continue
+		}
+		if strings.TrimSpace(d.Name) == name {
+			return true
+		}
+	}
+	return false
+}
+
 // NewTeam creates a team whose identity is leadID. The lead is enrolled as a
 // running member. persona is the lead's agent name (may be empty at New).
 func NewTeam(leadID, persona string) *Team {
