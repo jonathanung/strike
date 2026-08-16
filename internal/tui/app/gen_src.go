@@ -118,7 +118,7 @@ func removeLegacyParentFlatten(appRoot string) {
 		return
 	}
 	for _, e := range ents {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") || e.Name() == "generate.go" {
 			continue
 		}
 		_ = os.Remove(filepath.Join(parent, e.Name()))

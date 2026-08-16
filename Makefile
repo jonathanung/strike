@@ -1,5 +1,11 @@
 .PHONY: build run run-echo serve web-build web-test web-check web-e2e test vet cover cover-check clean setup restore tui-gen prompt-reg chaos harness-eval swebench-eval telemetry-check container-smoke
 
+# Multi-module workspace (go.work): ., ./pkg/protocol, ./pkg/redact.
+# `go test ./...` from the root does not descend into nested go.mod
+# directories, so leaf modules are tested with `go -C dir test`.
+# -C must be the first go flag. GOWORK=off still builds via replace.
+LEAF_MODS = pkg/protocol pkg/redact
+
 # Overall statement-coverage floor for `make cover-check` (local / optional CI).
 # Soft baseline ~77%; keep below measured total so the gate does not flake.
 # Raise as package coverage PRs land. Not a hard CI fail yet.
@@ -61,6 +67,7 @@ web-e2e:
 
 test: tui-gen
 	go test ./...
+	@for m in $(LEAF_MODS); do go -C $$m test ./... || exit 1; done
 
 # Failure-injection / chaos suite (#808). Also covered by `make test`.
 # See docs/chaos.md.
@@ -103,6 +110,7 @@ swebench-eval:
 
 vet: tui-gen
 	go vet ./...
+	@for m in $(LEAF_MODS); do go -C $$m vet ./... || exit 1; done
 
 # Per-package + total statement coverage. Writes $(COVER_PROFILE).
 cover: tui-gen

@@ -25,7 +25,10 @@ jobs:
         uses: actions/setup-go@0c52d547c9bc32b1aa3301fd7a9cb496313a4491 # v5.0.0
         with:
           go-version-file: go.mod
-          cache-dependency-path: go.sum
+          cache-dependency-path: |
+            go.sum
+            go.work
+            go.work.sum
 
       - name: Setup Node
         if: hashFiles('web/package.json') != ''
@@ -35,8 +38,21 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
+      - name: Workspace modules
+        run: |
+          set -euo pipefail
+          go list -m github.com/jonathanung/strike-cli \
+            github.com/jonathanung/strike-cli/pkg/protocol \
+            github.com/jonathanung/strike-cli/pkg/redact
+          GOWORK=off go list -m github.com/jonathanung/strike-cli \
+            github.com/jonathanung/strike-cli/pkg/protocol \
+            github.com/jonathanung/strike-cli/pkg/redact
+
       - name: Generate TUI flatten
-        run: go generate ./internal/tui/app
+        run: go generate ./internal/tui
+
+      - name: GOWORK=off replace build
+        run: GOWORK=off go build -o /dev/null ./cmd/strike
 
       - name: Format
         run: |
@@ -56,10 +72,16 @@ jobs:
         run: go build ./...
 
       - name: Vet
-        run: go vet ./...
+        run: |
+          go vet ./...
+          go -C pkg/protocol vet ./...
+          go -C pkg/redact vet ./...
 
       - name: Test
-        run: go test -race ./...
+        run: |
+          go test -race ./...
+          go -C pkg/protocol test -race ./...
+          go -C pkg/redact test -race ./...
 
       # E3.2 prompt regression: verbose report of tool/turn/token deltas.
       # Non-blocking for now (test itself soft-fails metric drift unless
@@ -104,7 +126,10 @@ jobs:
         uses: actions/setup-go@0c52d547c9bc32b1aa3301fd7a9cb496313a4491 # v5.0.0
         with:
           go-version-file: go.mod
-          cache-dependency-path: go.sum
+          cache-dependency-path: |
+            go.sum
+            go.work
+            go.work.sum
 
       - name: Setup Node
         if: steps.web.outputs.present == 'true'
@@ -116,7 +141,7 @@ jobs:
 
       - name: Generate TUI flatten
         if: steps.web.outputs.present == 'true'
-        run: go generate ./internal/tui/app
+        run: go generate ./internal/tui
 
       - name: Real-browser web e2e
         if: steps.web.outputs.present == 'true'
@@ -148,7 +173,10 @@ jobs:
         uses: actions/setup-go@0c52d547c9bc32b1aa3301fd7a9cb496313a4491 # v5.0.0
         with:
           go-version-file: go.mod
-          cache-dependency-path: go.sum
+          cache-dependency-path: |
+            go.sum
+            go.work
+            go.work.sum
 
       - name: Test darwin-specific packages
         run: go test -race ./internal/telemetry/... ./internal/sandbox/...

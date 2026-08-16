@@ -67,6 +67,9 @@ func TestGenerateRemovesLegacyParentFlatten(t *testing.T) {
 	if _, err := os.Stat(leftover); !os.IsNotExist(err) {
 		t.Fatalf("legacy parent flatten still present: %v", err)
 	}
+	if _, err := os.Stat(filepath.Join(parent, "generate.go")); err != nil {
+		t.Fatalf("parent generate shim missing after cleanup: %v", err)
+	}
 }
 
 // TestTUIParentListsAppAndKit locks the #1209 layout: parent internal/tui
@@ -81,6 +84,9 @@ func TestTUIParentListsAppAndKit(t *testing.T) {
 	want := map[string]bool{"app": true, "common": true, "term": true, "theme": true, "ui": true}
 	for _, e := range ents {
 		if !e.IsDir() {
+			if e.Name() == "generate.go" {
+				continue
+			}
 			if strings.HasSuffix(e.Name(), ".go") {
 				t.Errorf("parent internal/tui has Go file %s; flatten target is internal/tui/app", e.Name())
 			}

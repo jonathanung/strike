@@ -22,6 +22,7 @@ web/.pw-browsers/
 !/internal/tui/app/gen_sync_test.go
 # Pre-#1209 flatten target. Generate deletes leftovers; keep them untracked.
 /internal/tui/*.go
+!/internal/tui/generate.go
 .direnv/
 .envrc
 .strike/config
