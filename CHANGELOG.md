@@ -17,6 +17,7 @@ materially affect the shipped product.
 ### Added
 
 - **Content-addressed attachments** — user images and typed blobs (PDF, diagram, log, archive, build) persist as `att:sha256:` refs instead of embedding payloads in session JSONL. Provider requests still receive selected image bytes when the model supports them; unsupported formats fail visibly. Includes region redaction for PNG/JPEG, structured visual-compare evidence, and retention ([#1055](https://github.com/jonathanung/strike/issues/1055)). Wire schema `1.18.0`.
+- **LSP call hierarchy, rename preview, and impact tools** — `call_hierarchy`, `rename_preview`, and `impact` query incoming/outgoing calls, preview a rename as unapplied file edits, and group symbol usage by file/package. Unsupported language-server capabilities return a non-fatal result and suggest `references` ([#1184](https://github.com/jonathanung/strike/issues/1184)).
 
 ## [v0.5.0] - 2026-08-15
 

@@ -1343,6 +1343,9 @@ the model calls them by name).
 | `references` | `textDocument/references` | same position args; includes declaration |
 | `symbols` | `textDocument/documentSymbol` or `workspace/symbol` | `filePath` and/or `query` |
 | `diagnostics` | cached `publishDiagnostics` from live servers | optional `path` (file or directory; omit = workspace), optional `severity` (`error` default, `warning`, `info`, `hint`), optional `maxResults` (default 100, max 500) |
+| `call_hierarchy` | `textDocument/prepareCallHierarchy` + incoming/outgoing | same position args; `direction` = `incoming` / `outgoing` / `both` (default `both`); optional `maxResults` |
+| `rename_preview` | `textDocument/prepareRename` + `textDocument/rename` | same position args plus `newName`; returns normalized edits and **does not write files** |
+| `impact` | definition + highlights/references + call hierarchy + optional rename preview | same position args; optional `newName`; groups by file/package and usage kind |
 
 `diagnostics` returns a stable JSON payload: `file`, `range` (1-based
 line/character start+end), `severity`, `source`, `code`, `message`, plus

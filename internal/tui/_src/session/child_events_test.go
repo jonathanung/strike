@@ -112,3 +112,29 @@ func TestChildPermissionAskedStillOpensModal(t *testing.T) {
 	}
 	_ = ops
 }
+
+func TestChildModelSelectedDoesNotOverwriteParent(t *testing.T) {
+	m, _ := newAppTestModel(nil, nil)
+	m.sessionID = "parent"
+	m.providerName = "echo"
+	m.modelName = "parent-model"
+	corr := protocol.Correlation{
+		SessionID:       "child-1",
+		ParentSessionID: "parent",
+		Depth:           1,
+	}
+	m.applyEvent(protocol.ChildStarted{Correlation: corr, Agent: "explore", Prompt: "scan", Provider: "xai", Model: "grok-4"})
+	if m.providerName != "echo" || m.modelName != "parent-model" {
+		t.Fatalf("ChildStarted overwrote parent model: %s/%s", m.providerName, m.modelName)
+	}
+	if len(m.children) != 1 || m.children[0].model != "grok-4" || m.children[0].provider != "xai" {
+		t.Fatalf("child model not stored: %+v", m.children)
+	}
+	m.applyEvent(protocol.ModelSelected{Correlation: corr, Provider: "openai", Model: "gpt-5"})
+	if m.providerName != "echo" || m.modelName != "parent-model" {
+		t.Fatalf("child ModelSelected overwrote parent: %s/%s", m.providerName, m.modelName)
+	}
+	if m.children[0].provider != "openai" || m.children[0].model != "gpt-5" {
+		t.Fatalf("child ModelSelected not applied: %+v", m.children[0])
+	}
+}

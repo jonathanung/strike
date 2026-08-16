@@ -71,6 +71,9 @@ var shortPurposes = map[string]string{
 	"references":      "find references via language server",
 	"symbols":         "list document or workspace symbols via language server",
 	"diagnostics":     "query language-server diagnostics for workspace/path",
+	"call_hierarchy":  "list incoming or outgoing calls via language server",
+	"rename_preview":  "preview a symbol rename without applying it",
+	"impact":          "summarize symbol impact via language server",
 }
 
 // BuiltinShortPurposes returns a copy of the built-in name→purpose map.
@@ -384,6 +387,8 @@ func recommendedGuidance(entries []GuidanceEntry) string {
 	case has("phase_done"):
 		add(true, "Use `phase_done` to advance the active workflow phase gate.")
 	}
+	add(has("call_hierarchy") || has("rename_preview") || has("impact"),
+		"Prefer `call_hierarchy` / `impact` over guessing callers from `references`; preview renames with `rename_preview` (never applied). Unsupported LSPs fall back to `references`.")
 	add(has("toolsearch"),
 		"Use `toolsearch` to discover tools by name or description when the list is large.")
 	add(hasMCP(entries),

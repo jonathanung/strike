@@ -2281,6 +2281,15 @@ func TestTaskSpawnAgentAndModel(t *testing.T) {
 	if n := countEvents[protocol.ChildStarted](events); n != 1 {
 		t.Fatalf("ChildStarted = %d, want 1; events=%v", n, summarizeEvents(events))
 	}
+	var started protocol.ChildStarted
+	for _, ev := range events {
+		if s, ok := ev.(protocol.ChildStarted); ok {
+			started = s
+		}
+	}
+	if started.Model != wantModel {
+		t.Errorf("ChildStarted.Model = %q, want %q", started.Model, wantModel)
+	}
 	_ = sawAgent // optional signal; model pin is the acceptance gate
 	if childModel != wantModel {
 		t.Errorf("child Stream model = %q, want %q (task model must win over agent pin)", childModel, wantModel)
