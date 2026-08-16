@@ -63,7 +63,7 @@ type childHandle struct {
 	startedAt time.Time
 	agent     string
 	prompt    string
-	name      string // optional stable teammate alias
+	name      string // stable teammate alias (explicit or derived from the task)
 	// gates are independent completion conditions declared at spawn.
 	gates []tool.VerifyGate
 	// parent is the spawning engine (for budget escalation emit/notify).
@@ -156,6 +156,48 @@ func (e *Engine) spawnChildForDelegation(ctx context.Context, d Delegation) (too
 		ContextBundle: d.ContextBundle.Clone(),
 	}
 	return e.spawnChildInner(ctx, req, d.ID)
+}
+
+// resolveSpawnMemberName validates an explicit alias or derives a unique one
+// from the assigned task. Explicit names fail closed on invalid input or
+// collision. Omitted names are slugified from the prompt (or bundle goal)
+// and uniquified on the team (#1189).
+func (e *Engine) resolveSpawnMemberName(req *tool.TaskRequest, existingDelegationID string) (string, error) {
+	if req == nil {
+		return "", nil
+	}
+	explicit := strings.TrimSpace(req.Name)
+	name, err := ValidateMemberName(req.Name)
+	if err != nil {
+		return "", err
+	}
+	if explicit != "" {
+		if e != nil && e.team != nil {
+			if owner, taken := e.team.NameOwner(name); taken {
+				return "", fmt.Errorf("name %q is already used by session %s", name, owner)
+			}
+		}
+		req.Name = name
+		return name, nil
+	}
+	src := memberNameSource(*req)
+	ignoreDeleg := strings.TrimSpace(existingDelegationID)
+	if src == "" && ignoreDeleg != "" && e != nil && e.team != nil {
+		if d, ok := e.team.GetDelegation(ignoreDeleg); ok {
+			if n := strings.TrimSpace(d.Name); n != "" {
+				name = e.team.NextUniqueMemberName(n, ignoreDeleg)
+				req.Name = name
+				return name, nil
+			}
+			src = memberNameSource(tool.TaskRequest{Prompt: d.Prompt, ContextBundle: d.ContextBundle})
+		}
+	}
+	name = DeriveMemberName(src)
+	if e != nil && e.team != nil {
+		name = e.team.NextUniqueMemberName(name, ignoreDeleg)
+	}
+	req.Name = name
+	return name, nil
 }
 
 func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, existingDelegationID string) (tool.TaskResult, error) {
@@ -252,15 +294,12 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 		return tool.TaskResult{}, err
 	}
 
-	// Optional stable teammate alias: validate + uniqueness before side effects.
-	memberName, err := ValidateMemberName(req.Name)
+	// Teammate alias: explicit names fail closed; omitted names are derived
+	// from the assigned task and uniquified on the session team (#1189).
+	explicitName := strings.TrimSpace(req.Name) != ""
+	memberName, err := e.resolveSpawnMemberName(&req, existingDelegationID)
 	if err != nil {
 		return tool.TaskResult{}, err
-	}
-	if memberName != "" && e.team != nil {
-		if owner, taken := e.team.NameOwner(memberName); taken {
-			return tool.TaskResult{}, fmt.Errorf("name %q is already used by session %s", memberName, owner)
-		}
 	}
 
 	// Delegation lifecycle: create (or reuse) before side effects so unmet deps
@@ -333,7 +372,10 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 	}
 
 	childID := rand.Text()
-	title := briefAgentSessionTitle(agentName, childID)
+	title := strings.TrimSpace(memberName)
+	if title == "" {
+		title = briefAgentSessionTitle(agentName, childID)
+	}
 	if e.opts.OpenChildSession != nil {
 		id, err := e.opts.OpenChildSession(e.opts.SessionID, childID, title)
 		if err != nil {
@@ -343,7 +385,9 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 		if strings.TrimSpace(id) != "" {
 			childID = id
 			// Re-derive after the host may have rewritten the id.
-			title = briefAgentSessionTitle(agentName, childID)
+			if strings.TrimSpace(memberName) == "" {
+				title = briefAgentSessionTitle(agentName, childID)
+			}
 		}
 	}
 
@@ -433,6 +477,7 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 		SchedulerPolicy:            e.opts.SchedulerPolicy,    // bash classification rules
 		FileSync:                   e.opts.FileSync,           // share LSP document sync
 		CollectDiagnostics:         e.opts.CollectDiagnostics, // share LSP result injection
+		TUISnapshot:                e.opts.TUISnapshot,        // share last TUI frame
 		Agents:                     e.opts.Agents,
 		InitialAgent:               agentName,
 		InitialProvider:            e.provName,
@@ -558,18 +603,37 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 			Depth:           childDepth,
 			StartedAt:       h.startedAt,
 		}) {
-			// Race: another spawn claimed the name between NameOwner and Enroll.
-			e.childMu.Lock()
-			delete(e.children, childID)
-			e.childMu.Unlock()
-			cancel()
-			e.cleanupChildWorktree(h)
-			e.closeChildSession(childID)
-			e.failDelegationSpawn(delegID, "failed to enroll child on team")
-			if memberName != "" {
-				return tool.TaskResult{}, fmt.Errorf("name %q is already used on this team", memberName)
+			// Race: another spawn claimed the name between resolve and Enroll.
+			enrolled := false
+			if !explicitName {
+				for i := 0; i < 3 && !enrolled; i++ {
+					memberName = e.team.NextUniqueMemberName(memberName, delegID)
+					req.Name = memberName
+					h.name = memberName
+					enrolled = e.team.Enroll(TeamMember{
+						SessionID:       childID,
+						Name:            memberName,
+						Persona:         agentName,
+						State:           protocol.TeamMemberRunning,
+						ParentSessionID: e.opts.SessionID,
+						Depth:           childDepth,
+						StartedAt:       h.startedAt,
+					})
+				}
 			}
-			return tool.TaskResult{}, fmt.Errorf("failed to enroll child on team")
+			if !enrolled {
+				e.childMu.Lock()
+				delete(e.children, childID)
+				e.childMu.Unlock()
+				cancel()
+				e.cleanupChildWorktree(h)
+				e.closeChildSession(childID)
+				e.failDelegationSpawn(delegID, "failed to enroll child on team")
+				if memberName != "" {
+					return tool.TaskResult{}, fmt.Errorf("name %q is already used on this team", memberName)
+				}
+				return tool.TaskResult{}, fmt.Errorf("failed to enroll child on team")
+			}
 		}
 	}
 

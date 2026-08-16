@@ -1,10 +1,10 @@
 // Package tool defines the tool contract and the built-in tool set
-// (read/glob/grep/edit/write/apply_patch/move/delete/bash/task/task_status/task_read/
+// (read/glob/grep/edit/write/apply_patch/move/delete/bash/git/task/task_status/task_read/
 // task_message/task_interrupt/delegate/wait/agent_roster/agent_ownership/agent_message/
 // agent_broadcast/agent_thread/team_task/webfetch/websearch/browser/todowrite/todoread/
 // memory_write/memory_read/issue_write/issue_read/plan_write/plan_read/plan_delegate/
 // artifact_write/artifact_read/notebook_edit/sleep/skill/question/enter_plan_mode/
-// exit_plan_mode/phase_done/toolsearch/definition/references/symbols/diagnostics/call_hierarchy/rename_preview/impact).
+// exit_plan_mode/phase_done/toolsearch/definition/references/symbols/diagnostics/call_hierarchy/rename_preview/impact/tui_snapshot).
 // Used by internal/engine (dispatch), internal/permission (AskRequest, for the
 // Context.Ask signature), and cmd/strike (registry construction); internal/tui
 // never imports it — tool calls reach the frontend only as
@@ -78,8 +78,10 @@ type VerifyGate struct {
 type TaskRequest struct {
 	Prompt string
 	Agent  string
-	// Name is an optional stable teammate alias unique within the session team
-	// (e.g. "explorer"). Empty leaves the child addressable by session id only.
+	// Name is a stable teammate alias unique within the session team, taken
+	// from the assigned task (e.g. "fix-auth-tests"). Empty at the tool
+	// boundary is allowed: the engine derives a unique slug from the prompt
+	// first line (or context-bundle goal).
 	Name string
 	// Model is an optional model id for the child (bare id on the parent
 	// provider, or "provider/model"). Empty inherits the parent's model
@@ -216,7 +218,7 @@ type TaskResult struct {
 	Output    string
 	Status    string
 	SessionID string
-	// Name is the stable alias assigned at spawn when requested (may be empty).
+	// Name is the stable alias assigned at spawn (explicit or derived).
 	Name string
 	// DelegationID is the lifecycle object id (d1, d2, …) when tracked.
 	DelegationID string
@@ -796,6 +798,8 @@ type Context struct {
 	Wait func(ctx context.Context, req WaitRequest) (WaitResult, error)
 	// AgentRoster lists lead + teammates on the implicit session team.
 	AgentRoster func(ctx context.Context, req AgentRosterRequest) (AgentRosterResult, error)
+	// TUISnapshot captures the last painted TUI frame. Nil when headless.
+	TUISnapshot func(ctx context.Context, req TUISnapshotRequest) (TUISnapshotResult, error)
 	// AgentMessage sends a peer mailbox message to one teammate.
 	AgentMessage func(ctx context.Context, req AgentMessageRequest) (AgentMessageResult, error)
 	// AgentBroadcast sends a peer mailbox message to all other teammates.

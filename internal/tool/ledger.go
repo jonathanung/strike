@@ -19,41 +19,52 @@ type LedgerStore interface {
 	ActiveSlice(path, taskID string) ([]ledger.Entry, error)
 	Invalidate(id string, in ledger.InvalidateInput) (ledger.Entry, error)
 	Supersede(priorID string, in ledger.AppendInput) (ledger.Entry, error)
+	Revalidate(id string, pins []ledger.EvidencePin) (ledger.Entry, error)
 }
 
 // LedgerNotify is optional engine callback after append/invalidate/supersede.
-// op is "append" | "invalidate" | "supersede".
+// op is "append" | "invalidate" | "supersede" | "revalidate".
 type LedgerNotify func(op string, e ledger.Entry)
 
 type ledgerView struct {
-	ID                 string     `json:"id"`
-	Kind               string     `json:"kind"`
-	Statement          string     `json:"statement"`
-	Confidence         string     `json:"confidence,omitempty"`
-	EvidenceRefs       []string   `json:"evidence_refs,omitempty"`
-	Status             string     `json:"status"`
-	ScopePaths         []string   `json:"scope_paths,omitempty"`
-	ScopeTaskIDs       []string   `json:"scope_task_ids,omitempty"`
-	AuthorSession      string     `json:"author_session"`
-	AuthorAgent        string     `json:"author_agent,omitempty"`
-	AuthorRoot         string     `json:"author_root,omitempty"`
-	CreatedAt          time.Time  `json:"created_at"`
-	UpdatedAt          time.Time  `json:"updated_at"`
-	InvalidateReason   string     `json:"invalidate_reason,omitempty"`
-	InvalidateEvidence []string   `json:"invalidate_evidence,omitempty"`
-	InvalidatedAt      *time.Time `json:"invalidated_at,omitempty"`
-	SupersededBy       string     `json:"superseded_by,omitempty"`
-	Supersedes         string     `json:"supersedes,omitempty"`
-	Error              string     `json:"error,omitempty"`
+	ID                 string               `json:"id"`
+	Kind               string               `json:"kind"`
+	Statement          string               `json:"statement"`
+	Confidence         string               `json:"confidence,omitempty"`
+	EvidenceRefs       []string             `json:"evidence_refs,omitempty"`
+	EvidencePins       []ledger.EvidencePin `json:"evidence_pins,omitempty"`
+	Freshness          string               `json:"freshness,omitempty"`
+	StaleReason        string               `json:"stale_reason,omitempty"`
+	ChangedEvidence    []string             `json:"changed_evidence,omitempty"`
+	Status             string               `json:"status"`
+	ScopePaths         []string             `json:"scope_paths,omitempty"`
+	ScopeTaskIDs       []string             `json:"scope_task_ids,omitempty"`
+	AuthorSession      string               `json:"author_session"`
+	AuthorAgent        string               `json:"author_agent,omitempty"`
+	AuthorRoot         string               `json:"author_root,omitempty"`
+	CreatedAt          time.Time            `json:"created_at"`
+	UpdatedAt          time.Time            `json:"updated_at"`
+	InvalidateReason   string               `json:"invalidate_reason,omitempty"`
+	InvalidateEvidence []string             `json:"invalidate_evidence,omitempty"`
+	InvalidatedAt      *time.Time           `json:"invalidated_at,omitempty"`
+	SupersededBy       string               `json:"superseded_by,omitempty"`
+	Supersedes         string               `json:"supersedes,omitempty"`
+	Error              string               `json:"error,omitempty"`
 }
 
 func toLedgerView(e ledger.Entry) ledgerView {
-	return ledgerView{
+	return toLedgerViewFresh(e, "")
+}
+
+func toLedgerViewFresh(e ledger.Entry, workDir string) ledgerView {
+	fr := ledger.AssessFreshness(e, workDir)
+	v := ledgerView{
 		ID:                 e.ID,
 		Kind:               e.Kind,
 		Statement:          e.Statement,
 		Confidence:         e.Confidence,
 		EvidenceRefs:       e.EvidenceRefs,
+		EvidencePins:       e.EvidencePins,
 		Status:             e.Status,
 		ScopePaths:         e.ScopePaths,
 		ScopeTaskIDs:       e.ScopeTaskIDs,
@@ -68,6 +79,12 @@ func toLedgerView(e ledger.Entry) ledgerView {
 		SupersededBy:       e.SupersededBy,
 		Supersedes:         e.Supersedes,
 	}
+	if fr.State != "" && fr.State != ledger.FreshNotApplicable {
+		v.Freshness = fr.State
+		v.StaleReason = fr.Reason
+		v.ChangedEvidence = fr.ChangedEvidence
+	}
+	return v
 }
 
 func ledgerActor(tc *Context) (sessionID, rootID, agent string, err error) {
@@ -152,12 +169,17 @@ Status lifecycle: active → invalidated | superseded (history preserved; never 
 
 Actions:
   - append: kind + statement required; optional confidence, evidence_refs,
-    scope_paths, scope_task_ids, supersedes (id of prior active entry to replace)
+    evidence_pins, scope_paths, scope_task_ids, supersedes
   - invalidate: id + reason required; optional evidence (contradicting refs)
   - supersede: id (prior) + kind + statement — marks prior superseded and appends
     the replacement in one step
+  - revalidate: id required; optional evidence_pins (default: re-hash existing
+    path pins). Status stays active. Use for stale assumptions.
 
-Emits ledger.updated on the session event stream (op=append|invalidate|supersede)
+Assumptions with evidence_pins go stale at inject time when path/symbol
+evidence changed or is missing. Decisions and constraints are never auto-staled.
+
+Emits ledger.updated on the session event stream (op=append|invalidate|supersede|revalidate)
 so wait/subscribe consumers can observe invalidation.
 
 Not a replacement for memory (untyped KV), artifacts (work products), issues, or plans.`
@@ -169,8 +191,8 @@ func (t *ledgerWriteTool) Schema() json.RawMessage {
 		"properties": {
 			"action": {
 				"type": "string",
-				"description": "append | invalidate | supersede",
-				"enum": ["append", "invalidate", "supersede"]
+				"description": "append | invalidate | supersede | revalidate",
+				"enum": ["append", "invalidate", "supersede", "revalidate"]
 			},
 			"kind": {
 				"type": "string",
@@ -187,6 +209,20 @@ func (t *ledgerWriteTool) Schema() json.RawMessage {
 				"type": "array",
 				"items": {"type": "string"},
 				"description": "Artifact ids, file revs, message ids, URLs, …"
+			},
+			"evidence_pins": {
+				"type": "array",
+				"description": "Optional repo pins: path+hash, symbol, or recorded command",
+				"items": {
+					"type": "object",
+					"properties": {
+						"kind": {"type": "string", "enum": ["path", "symbol", "command"]},
+						"path": {"type": "string"},
+						"hash": {"type": "string", "description": "sha256:<hex>; auto-filled for path pins when omitted"},
+						"symbol": {"type": "string"},
+						"command": {"type": "string"}
+					}
+				}
 			},
 			"scope_paths": {
 				"type": "array",
@@ -216,17 +252,18 @@ func (t *ledgerWriteTool) Execute(ctx context.Context, args json.RawMessage, tc 
 		return Result{}, errors.New("ledger store is unavailable")
 	}
 	var in struct {
-		Action       string   `json:"action"`
-		Kind         string   `json:"kind"`
-		Statement    string   `json:"statement"`
-		Confidence   string   `json:"confidence"`
-		EvidenceRefs []string `json:"evidence_refs"`
-		ScopePaths   []string `json:"scope_paths"`
-		ScopeTaskIDs []string `json:"scope_task_ids"`
-		ID           string   `json:"id"`
-		Supersedes   string   `json:"supersedes"`
-		Reason       string   `json:"reason"`
-		Evidence     []string `json:"evidence"`
+		Action       string               `json:"action"`
+		Kind         string               `json:"kind"`
+		Statement    string               `json:"statement"`
+		Confidence   string               `json:"confidence"`
+		EvidenceRefs []string             `json:"evidence_refs"`
+		EvidencePins []ledger.EvidencePin `json:"evidence_pins"`
+		ScopePaths   []string             `json:"scope_paths"`
+		ScopeTaskIDs []string             `json:"scope_task_ids"`
+		ID           string               `json:"id"`
+		Supersedes   string               `json:"supersedes"`
+		Reason       string               `json:"reason"`
+		Evidence     []string             `json:"evidence"`
 	}
 	if err := json.Unmarshal(args, &in); err != nil {
 		return Result{}, fmt.Errorf("invalid arguments: %w", err)
@@ -253,24 +290,29 @@ func (t *ledgerWriteTool) Execute(ctx context.Context, args json.RawMessage, tc 
 
 	switch action {
 	case "append":
-		return t.append(in.Kind, in.Statement, in.Confidence, in.EvidenceRefs, in.ScopePaths, in.ScopeTaskIDs, in.Supersedes, sessionID, rootID, agent, tc)
+		return t.append(in.Kind, in.Statement, in.Confidence, in.EvidenceRefs, in.EvidencePins, in.ScopePaths, in.ScopeTaskIDs, in.Supersedes, sessionID, rootID, agent, tc)
 	case "invalidate":
 		return t.invalidate(in.ID, in.Reason, in.Evidence, tc)
 	case "supersede":
-		return t.supersede(in.ID, in.Kind, in.Statement, in.Confidence, in.EvidenceRefs, in.ScopePaths, in.ScopeTaskIDs, sessionID, rootID, agent, tc)
+		return t.supersede(in.ID, in.Kind, in.Statement, in.Confidence, in.EvidenceRefs, in.EvidencePins, in.ScopePaths, in.ScopeTaskIDs, sessionID, rootID, agent, tc)
+	case "revalidate":
+		return t.revalidate(in.ID, in.EvidencePins, tc)
 	default:
-		return Result{}, fmt.Errorf("action must be append, invalidate, or supersede, got %q", in.Action)
+		return Result{}, fmt.Errorf("action must be append, invalidate, supersede, or revalidate, got %q", in.Action)
 	}
 }
 
-func (t *ledgerWriteTool) append(kind, statement, confidence string, evidence, paths, tasks []string, supersedes, sessionID, rootID, agent string, tc *Context) (Result, error) {
+func (t *ledgerWriteTool) append(kind, statement, confidence string, evidence []string, pins []ledger.EvidencePin, paths, tasks []string, supersedes, sessionID, rootID, agent string, tc *Context) (Result, error) {
 	// Only explicit supersedes on append (id is reserved for invalidate/supersede actions).
 	sup := strings.TrimSpace(supersedes)
+	workDir := toolWorkDir(tc)
+	pins = fillPinHashes(pins, workDir)
 	e, err := t.store.Append(ledger.AppendInput{
 		Kind:          kind,
 		Statement:     statement,
 		Confidence:    confidence,
 		EvidenceRefs:  evidence,
+		EvidencePins:  pins,
 		ScopePaths:    paths,
 		ScopeTaskIDs:  tasks,
 		AuthorSession: sessionID,
@@ -289,7 +331,7 @@ func (t *ledgerWriteTool) append(kind, statement, confidence string, evidence, p
 		op = "supersede"
 	}
 	notifyLedger(tc, op, e)
-	return ledgerResultJSON(toLedgerView(e), fmt.Sprintf("ledger %s %s %s", e.Kind, shortLedgerID(e.ID), e.Status))
+	return ledgerResultJSON(toLedgerViewFresh(e, toolWorkDir(tc)), fmt.Sprintf("ledger %s %s %s", e.Kind, shortLedgerID(e.ID), e.Status))
 }
 
 func (t *ledgerWriteTool) invalidate(id, reason string, evidence []string, tc *Context) (Result, error) {
@@ -308,19 +350,22 @@ func (t *ledgerWriteTool) invalidate(id, reason string, evidence []string, tc *C
 		return Result{}, err
 	}
 	notifyLedger(tc, "invalidate", e)
-	return ledgerResultJSON(toLedgerView(e), fmt.Sprintf("ledger invalidated %s", shortLedgerID(e.ID)))
+	return ledgerResultJSON(toLedgerViewFresh(e, toolWorkDir(tc)), fmt.Sprintf("ledger invalidated %s", shortLedgerID(e.ID)))
 }
 
-func (t *ledgerWriteTool) supersede(id, kind, statement, confidence string, evidence, paths, tasks []string, sessionID, rootID, agent string, tc *Context) (Result, error) {
+func (t *ledgerWriteTool) supersede(id, kind, statement, confidence string, evidence []string, pins []ledger.EvidencePin, paths, tasks []string, sessionID, rootID, agent string, tc *Context) (Result, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return Result{}, errors.New("id is required for supersede")
 	}
+	workDir := toolWorkDir(tc)
+	pins = fillPinHashes(pins, workDir)
 	e, err := t.store.Supersede(id, ledger.AppendInput{
 		Kind:          kind,
 		Statement:     statement,
 		Confidence:    confidence,
 		EvidenceRefs:  evidence,
+		EvidencePins:  pins,
 		ScopePaths:    paths,
 		ScopeTaskIDs:  tasks,
 		AuthorSession: sessionID,
@@ -334,7 +379,82 @@ func (t *ledgerWriteTool) supersede(id, kind, statement, confidence string, evid
 		return Result{}, err
 	}
 	notifyLedger(tc, "supersede", e)
-	return ledgerResultJSON(toLedgerView(e), fmt.Sprintf("ledger supersede %s → %s", shortLedgerID(id), shortLedgerID(e.ID)))
+	return ledgerResultJSON(toLedgerViewFresh(e, toolWorkDir(tc)), fmt.Sprintf("ledger supersede %s → %s", shortLedgerID(id), shortLedgerID(e.ID)))
+}
+
+func (t *ledgerWriteTool) revalidate(id string, pins []ledger.EvidencePin, tc *Context) (Result, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return Result{}, errors.New("id is required for revalidate")
+	}
+	workDir := toolWorkDir(tc)
+	if len(pins) == 0 {
+		cur, ok, err := t.store.Get(id)
+		if err != nil {
+			return Result{}, err
+		}
+		if !ok {
+			return ledgerSoftError("ledger revalidate failed", ledger.ErrNotFound.Error(), map[string]any{"id": id})
+		}
+		pins = refreshPinHashes(cur.EvidencePins, workDir)
+	} else {
+		pins = fillPinHashes(pins, workDir)
+	}
+	e, err := t.store.Revalidate(id, pins)
+	if err != nil {
+		if errors.Is(err, ledger.ErrNotFound) {
+			return ledgerSoftError("ledger revalidate failed", err.Error(), map[string]any{"id": id})
+		}
+		return Result{}, err
+	}
+	notifyLedger(tc, "revalidate", e)
+	return ledgerResultJSON(toLedgerViewFresh(e, workDir), fmt.Sprintf("ledger revalidated %s", shortLedgerID(e.ID)))
+}
+
+func toolWorkDir(tc *Context) string {
+	if tc == nil {
+		return ""
+	}
+	return tc.WorkDir
+}
+
+func fillPinHashes(pins []ledger.EvidencePin, workDir string) []ledger.EvidencePin {
+	return applyPinHashes(pins, workDir, false)
+}
+
+func refreshPinHashes(pins []ledger.EvidencePin, workDir string) []ledger.EvidencePin {
+	return applyPinHashes(pins, workDir, true)
+}
+
+func applyPinHashes(pins []ledger.EvidencePin, workDir string, overwrite bool) []ledger.EvidencePin {
+	if len(pins) == 0 || strings.TrimSpace(workDir) == "" {
+		return pins
+	}
+	out := append([]ledger.EvidencePin(nil), pins...)
+	for i, p := range out {
+		kind := strings.ToLower(strings.TrimSpace(p.Kind))
+		if kind == "" {
+			kind = ledger.PinKindPath
+		}
+		if kind != ledger.PinKindPath && kind != ledger.PinKindSymbol {
+			continue
+		}
+		if strings.TrimSpace(p.Path) == "" {
+			continue
+		}
+		if !overwrite && strings.TrimSpace(p.Hash) != "" {
+			continue
+		}
+		snap, err := ledger.SnapshotPathPin(workDir, p.Path)
+		if err != nil {
+			continue
+		}
+		out[i].Hash = snap.Hash
+		if strings.TrimSpace(out[i].Kind) == "" {
+			out[i].Kind = kind
+		}
+	}
+	return out
 }
 
 // --- ledger_read ---
@@ -363,8 +483,12 @@ Usage:
   - active_only=true (default when listing without status): only active entries
   - path / task_id: scope filter for context bundles (global entries always match)
 
-Returns JSON. Prefer ledger_write for durable choices; use this to audit or
-pull the active slice for a path/task before acting on assumptions.`
+Returns JSON including computed freshness for assumptions with evidence_pins
+(validated | stale | unpinned). Stale means pinned repo evidence changed or is
+missing — revalidate, invalidate, or supersede; do not treat as current fact.
+
+Prefer ledger_write for durable choices; use this to audit or pull the active
+slice for a path/task before acting on assumptions.`
 }
 
 func (t *ledgerReadTool) Schema() json.RawMessage {
@@ -438,7 +562,7 @@ func (t *ledgerReadTool) Execute(ctx context.Context, args json.RawMessage, tc *
 		if !ok {
 			return Result{Title: "ledger miss", Output: fmt.Sprintf("no ledger entry %q", id)}, nil
 		}
-		return ledgerResultJSON(toLedgerView(e), fmt.Sprintf("ledger %s %s %s", e.Kind, shortLedgerID(e.ID), e.Status))
+		return ledgerResultJSON(toLedgerViewFresh(e, toolWorkDir(tc)), fmt.Sprintf("ledger %s %s %s", e.Kind, shortLedgerID(e.ID), e.Status))
 	}
 
 	status := strings.TrimSpace(in.Status)
@@ -463,7 +587,7 @@ func (t *ledgerReadTool) Execute(ctx context.Context, args json.RawMessage, tc *
 	}
 	views := make([]ledgerView, 0, len(list))
 	for _, e := range list {
-		views = append(views, toLedgerView(e))
+		views = append(views, toLedgerViewFresh(e, toolWorkDir(tc)))
 	}
 	title := fmt.Sprintf("%d ledger entries", len(views))
 	if status != "" {

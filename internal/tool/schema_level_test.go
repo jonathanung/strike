@@ -205,6 +205,7 @@ func TestArgsNeedAdvancedSchema(t *testing.T) {
 		{"budget", map[string]any{"prompt": "x", "budget": map[string]any{"max_tokens": 100}}, true},
 		{"force false ignored", map[string]any{"prompt": "x", "force_delegate": false}, false},
 		{"force true", map[string]any{"prompt": "x", "force_delegate": true}, true},
+		{"name only stays basic", map[string]any{"prompt": "x", "name": "fix-auth"}, false},
 	}
 	for _, tc := range cases {
 		var raw json.RawMessage

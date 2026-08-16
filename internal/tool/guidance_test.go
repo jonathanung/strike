@@ -163,6 +163,9 @@ func TestBuildGuidanceTaskStatusPreferred(t *testing.T) {
 	if !strings.Contains(text, "progressive `task`") {
 		t.Fatalf("task guidance should recommend progressive task:\n%s", text)
 	}
+	if !strings.Contains(text, "pass `name`") {
+		t.Fatalf("task guidance should tell models to name from the task:\n%s", text)
+	}
 	if !strings.Contains(text, "compatibility shims") {
 		t.Fatalf("expected compat shim note:\n%s", text)
 	}
@@ -267,7 +270,7 @@ func TestBuildGuidanceDeterministic(t *testing.T) {
 
 func TestBuiltinShortPurposesCoversCoreTools(t *testing.T) {
 	core := []string{
-		"read", "write", "edit", "move", "delete", "glob", "grep", "bash", "webfetch", "websearch", "browser",
+		"read", "write", "edit", "move", "delete", "glob", "grep", "bash", "git", "webfetch", "websearch", "browser",
 		"todowrite", "todoread", "memory_write", "memory_read",
 		"issue_write", "issue_read", "plan_write", "plan_read", "plan_delegate",
 		"notebook_edit", "sleep", "skill",

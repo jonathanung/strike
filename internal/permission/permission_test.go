@@ -37,6 +37,15 @@ func TestEvaluateLastMatchWins(t *testing.T) {
 	}
 }
 
+func TestDefaultsIncludesGitAllow(t *testing.T) {
+	if got := Evaluate("git", "status", Defaults()); got != Allow {
+		t.Errorf("git default = %s, want allow", got)
+	}
+	if err := ValidateRuleset(Ruleset{{Permission: "git", Pattern: "*", Action: Deny}}); err != nil {
+		t.Fatalf("ValidateRuleset git: %v", err)
+	}
+}
+
 func TestDefaultsIncludesTaskAllow(t *testing.T) {
 	if got := Evaluate("task", "*", Defaults()); got != Allow {
 		t.Errorf("task default = %s, want allow", got)
@@ -103,6 +112,16 @@ func TestDefaultsIncludesLedgerToolsAllow(t *testing.T) {
 	deny := Ruleset{{Permission: "ledger_write", Pattern: "*", Action: Deny}}
 	if got := Evaluate("ledger_write", "*", Defaults(), deny); got != Deny {
 		t.Errorf("ledger_write with deny = %q, want deny", got)
+	}
+}
+
+func TestDefaultsIncludesTUISnapshotAllow(t *testing.T) {
+	if got := Evaluate("tui_snapshot", "*", Defaults()); got != Allow {
+		t.Errorf("Defaults tui_snapshot = %q, want allow", got)
+	}
+	deny := Ruleset{{Permission: "tui_snapshot", Pattern: "*", Action: Deny}}
+	if got := Evaluate("tui_snapshot", "*", Defaults(), deny); got != Deny {
+		t.Errorf("tui_snapshot with deny = %q, want deny", got)
 	}
 }
 

@@ -667,7 +667,8 @@ type ChildStarted struct {
 	Correlation
 	Agent  string `json:"agent,omitempty"`
 	Prompt string `json:"prompt,omitempty"`
-	// Name is an optional stable teammate alias assigned at spawn.
+	// Name is the stable teammate alias assigned at spawn (explicit or
+	// derived from the assigned task).
 	Name string `json:"name,omitempty"`
 	// RouteReason is the structured capability-routing decision when routing
 	// ran at spawn (#778). Empty when route=off / legacy pin-or-inherit.
@@ -881,7 +882,7 @@ type LedgerUpdated struct {
 	ID            string `json:"id"`
 	Kind          string `json:"kind"`   // decision | assumption | constraint
 	Status        string `json:"status"` // active | invalidated | superseded
-	Op            string `json:"op"`     // append | invalidate | supersede
+	Op            string `json:"op"`     // append | invalidate | supersede | revalidate
 	Statement     string `json:"statement,omitempty"`
 	Reason        string `json:"reason,omitempty"` // invalidate reason when op=invalidate
 	Supersedes    string `json:"supersedes,omitempty"`

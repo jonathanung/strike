@@ -419,6 +419,9 @@ type Options struct {
 	// touched absolute paths after file mutations (one call per tool result).
 	// Empty disables injection. Must not panic the tool path (callers recover).
 	CollectDiagnostics func(ctx context.Context, absPaths []string) string
+	// TUISnapshot, when set, captures the last painted TUI frame for the
+	// tui_snapshot tool. Nil (headless/exec) fails the tool visibly.
+	TUISnapshot func(ctx context.Context, req tool.TUISnapshotRequest) (tool.TUISnapshotResult, error)
 }
 
 // beginAck reports whether ToolCallBegin was actually written to Events.

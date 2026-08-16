@@ -40,7 +40,7 @@ type Ruleset []Rule
 // even before tools land so config deny rules and Defaults stay valid.
 var knownPermissions = map[string]struct{}{
 	"*": {}, "read": {}, "glob": {}, "grep": {}, "edit": {}, "write": {},
-	"bash": {}, "task": {}, "task_status": {}, "task_read": {}, "task_message": {},
+	"bash": {}, "git": {}, "task": {}, "task_status": {}, "task_read": {}, "task_message": {},
 	"task_interrupt": {}, "wait": {}, "agent_roster": {}, "agent_ownership": {},
 	"agent_message": {}, "agent_broadcast": {}, "agent_thread": {},
 	"team_task": {}, "patch_collab": {}, "delegate": {},
@@ -52,6 +52,7 @@ var knownPermissions = map[string]struct{}{
 	"artifact_write": {}, "artifact_read": {},
 	"ledger_write": {}, "ledger_read": {},
 	"context_bundle": {},
+	"tui_snapshot":   {},
 	"sleep":          {}, "skill": {}, "question": {}, "toolsearch": {}, "hook": {},
 	"phase_check":     {},
 	"enter_plan_mode": {}, "exit_plan_mode": {}, "phase_done": {},
@@ -103,6 +104,8 @@ func Defaults() Ruleset {
 		{Permission: "edit", Pattern: "*", Action: Ask},
 		{Permission: "write", Pattern: "*", Action: Ask},
 		{Permission: "bash", Pattern: "*", Action: Ask},
+		// Read-only structured git (distinct from unrestricted bash).
+		{Permission: "git", Pattern: "*", Action: Allow},
 		// Project-local shell hooks execute arbitrary code — gate first run.
 		{Permission: "hook", Pattern: "*", Action: Ask},
 		// Workflow phase check commands (autonomy=checks) — source-aware trust.
@@ -152,6 +155,7 @@ func Defaults() Ruleset {
 		{Permission: "ledger_read", Pattern: "*", Action: Allow},
 		// Sealed spawn context package (children read goal/paths/artifacts).
 		{Permission: "context_bundle", Pattern: "*", Action: Allow},
+		{Permission: "tui_snapshot", Pattern: "*", Action: Allow},
 		{Permission: "sleep", Pattern: "*", Action: Allow},
 		{Permission: "skill", Pattern: "*", Action: Allow},
 		{Permission: "question", Pattern: "*", Action: Allow},

@@ -173,6 +173,9 @@ type Options struct {
 	// Telemetry keeps the local system metrics pane (CPU/RAM/disk) and its
 	// ~1 Hz sampler on at launch. On by default; toggled via /telemetry on|off.
 	Telemetry bool
+	// OnFrame, when set, receives each painted frame as ANSI-stripped text
+	// plus terminal size. Used by tui_snapshot (#1183). Nil disables publish.
+	OnFrame func(frame string, width, height int)
 }
 
 // firstRunSetupMsg opens the /ftue setup wizard once when onboarding is due.
@@ -234,6 +237,8 @@ type Model struct {
 	// state for soft TextDelta/spinner paints (#496). Pointer so value-receiver
 	// View can mutate. Never nil after New.
 	paint *paintBudget
+	// onFrame publishes stripped frames for tui_snapshot (#1183).
+	onFrame func(frame string, width, height int)
 	// textSel is app-owned mouse highlight (transcript + prompt only).
 	textSel textSel
 	// copyFlashGen invalidates in-flight clearCellCopiedFlashMsg timers.
@@ -666,6 +671,9 @@ func New(ops chan<- protocol.Op, events <-chan protocol.Event, services host.Ser
 		}
 		if len(option.Keybinds) > 0 {
 			m.keyOverrides = cloneKeybindMap(option.Keybinds)
+		}
+		if option.OnFrame != nil {
+			m.onFrame = option.OnFrame
 		}
 	}
 	m.keyMap = buildKeyMap(m.keyOverrides, m.splitOrientation)

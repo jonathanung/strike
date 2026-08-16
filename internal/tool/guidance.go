@@ -35,6 +35,7 @@ var shortPurposes = map[string]string{
 	"move":            "rename or move a file within allowed roots",
 	"delete":          "delete a file or directory within allowed roots",
 	"bash":            "run a shell command",
+	"git":             "read-only git status, diff, log, blame, and show",
 	"task":            "progressive delegation: basic create/status/wait/cancel; advanced via toolsearch",
 	"task_status":     "compat: check child status (prefer task action=status)",
 	"task_read":       "compat: read child transcript slice (prefer task action=read)",
@@ -327,6 +328,10 @@ func recommendedGuidance(entries []GuidanceEntry) string {
 		"Use `write` only when creating or fully replacing a file.")
 	add(has("move") || has("delete"),
 		"Prefer `move`/`delete` over bash `mv`/`rm` for ordinary renames and deletions (workspace-scoped, freshness, TurnDiff).")
+	add(has("git") && has("bash"),
+		"Prefer `git` over bash `git status`/`diff`/`log`/`blame`/`show` for bounded structured history.")
+	add(has("git") && !has("bash"),
+		"Use `git` for read-only status, diff, log, blame, and show.")
 	add(has("webfetch") && has("bash"),
 		"Prefer `webfetch` over curl/wget in bash for ordinary page fetches (network.allow preflight also covers curl/wget/ssh when set).")
 	add(has("webfetch") && !has("bash"),
@@ -340,7 +345,9 @@ func recommendedGuidance(entries []GuidanceEntry) string {
 	add(has("question"),
 		"Use `question` when a decision genuinely belongs to the user.")
 	add(has("task"),
-		"Use progressive `task` for all delegation after a worthiness check (tiny/overlap stays local; status `local` + `policyReason`; `force_delegate` overrides soft local): simple `task({prompt})`, advanced create fields (`criteria`/`deps`/`subscribe`/`route`/`budget`/`verify`/`context_bundle`/…), and actions get|list|status|read|message|transition|cancel|wait. Same lifecycle runtime and handoff semantics on every entry path. Do not busy-poll status — prefer `task` action=wait or `[child.completed]` structured handoff JSON. Peer mid-flight: `agent_message`. Bound fan-out (MaxChildDepth).")
+		"Use progressive `task` for all delegation after a worthiness check (tiny/overlap stays local; status `local` + `policyReason`; `force_delegate` overrides soft local): simple `task({prompt, name})`, advanced create fields (`criteria`/`deps`/`subscribe`/`route`/`budget`/`verify`/`context_bundle`/…), and actions get|list|status|read|message|transition|cancel|wait. Same lifecycle runtime and handoff semantics on every entry path. Do not busy-poll status — prefer `task` action=wait or `[child.completed]` structured handoff JSON. Peer mid-flight: `agent_message`. Bound fan-out (MaxChildDepth).")
+	add(has("task"),
+		"When spawning with `task`, pass `name` as a short slug of the assigned work (not a persona). If omitted, the engine derives a unique alias from the prompt first line.")
 	add(has("task") && has("delegate", "task_status", "task_read", "task_message", "task_interrupt", "wait"),
 		"`delegate`, `task_status`, `task_read`, `task_message`, `task_interrupt`, and `wait` are compatibility shims over progressive `task` (telemetry-counted). Prefer `task` on the parent; at depth ceiling leaves may still use `delegate` get/list/transition for self-report.")
 	add(has("delegate") && !has("task"),

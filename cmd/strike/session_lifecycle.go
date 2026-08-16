@@ -404,6 +404,7 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 			Telemetry:                    opts.telemetry,
 			Timeline:                     timelineOptionsFromConfig(a.cfg, a.sessionID),
 			TimelineSet:                  true,
+			OnFrame:                      a.publishFrame,
 		}), tea.WithOutput(stdout), tea.WithInput(tui.WrapInput(os.Stdin)))
 		final, runProgErr := program.Run()
 		restore()
@@ -596,4 +597,12 @@ func resolveIsolationPosture(opts cliOptions, a *assembled) string {
 		sb = a.sandboxMode
 	}
 	return protocol.ComputeIsolation(false, false, perm, sb)
+}
+
+// publishFrame records the last painted TUI frame for tui_snapshot.
+func (a *assembled) publishFrame(frame string, width, height int) {
+	if a == nil || a.frameStore == nil {
+		return
+	}
+	a.frameStore.Put(frame, width, height)
 }

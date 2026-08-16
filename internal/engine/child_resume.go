@@ -158,6 +158,7 @@ func (e *Engine) resumeChild(ctx context.Context, req tool.TaskResumeRequest) (t
 		SchedulerPolicy:            e.opts.SchedulerPolicy,
 		FileSync:                   e.opts.FileSync,
 		CollectDiagnostics:         e.opts.CollectDiagnostics,
+		TUISnapshot:                e.opts.TUISnapshot,
 		Agents:                     e.opts.Agents,
 		InitialAgent:               agentName,
 		InitialProvider:            initialProvider,
