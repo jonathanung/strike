@@ -410,9 +410,10 @@ func TestToolNames(t *testing.T) {
 		"patch_collab":    NewPatchCollab(),
 		"delegate":        NewDelegate(),
 		"wait":            NewWait(),
+		"tui_snapshot":    NewTUISnapshot(),
 	}
-	if len(want) != 41 {
-		t.Fatalf("expected 41 tools, got %d", len(want))
+	if len(want) != 42 {
+		t.Fatalf("expected 42 tools, got %d", len(want))
 	}
 	for name, tool := range want {
 		if tool.Name() != name {

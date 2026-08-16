@@ -432,6 +432,7 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 		SchedulerPolicy:            e.opts.SchedulerPolicy,    // bash classification rules
 		FileSync:                   e.opts.FileSync,           // share LSP document sync
 		CollectDiagnostics:         e.opts.CollectDiagnostics, // share LSP result injection
+		TUISnapshot:                e.opts.TUISnapshot,        // share last TUI frame
 		Agents:                     e.opts.Agents,
 		InitialAgent:               agentName,
 		InitialProvider:            e.provName,

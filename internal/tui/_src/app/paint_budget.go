@@ -5,6 +5,7 @@ import (
 
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/protocol"
 )
@@ -132,10 +133,13 @@ func (m *Model) applyPaintFlush() {
 	p.lastAt = p.now()
 }
 
-// noteCachedFrame stores the non-OSC frame for suppressed Views.
+// noteCachedFrame stores the non-OSC frame for suppressed Views and
+// publishes an ANSI-stripped copy to OnFrame when wired (#1183).
 func (m Model) noteCachedFrame(frame string) {
-	if m.paint == nil {
-		return
+	if m.paint != nil {
+		m.paint.lastFrame = frame
 	}
-	m.paint.lastFrame = frame
+	if m.onFrame != nil && frame != "" {
+		m.onFrame(ansi.Strip(frame), m.width, m.height)
+	}
 }

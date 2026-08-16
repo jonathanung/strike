@@ -556,7 +556,7 @@ includes compatibility delegation shims (`delegate`, `task_status`,
 `agent_ownership`, `team_task`, `patch_collab`), plan tools (`plan_write`,
 `plan_read`, `plan_delegate`, `enter_plan_mode`, `exit_plan_mode`,
 `phase_done`), optional built-ins (`webfetch`, `websearch`, todo/memory/issue,
-`sleep`, `skill`, `notebook_edit`, …), and all `mcp_*` tools. Discovery lives
+`sleep`, `skill`, `notebook_edit`, `tui_snapshot`, …), and all `mcp_*` tools. Discovery lives
 on the process registry: matches from `toolsearch` load full schemas on the
 **next** model request (including the next iteration of the same turn’s tool
 loop). Tools already present as assistant tool calls in history are
