@@ -2,19 +2,12 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-
-type TokenRole = { light: string; dark: string; cssVar: string };
-type TokenFile = {
-  schemaVersion: string;
-  id: string;
-  chrome: { mode: string; corners: string; radiusWebPx: number };
-  roles: Record<string, TokenRole>;
-};
-
-function loadTokens(): TokenFile {
-  const dir = dirname(fileURLToPath(import.meta.url));
-  return JSON.parse(readFileSync(resolve(dir, "../../schemas/ui-tokens.json"), "utf8")) as TokenFile;
-}
+import {
+  injectStockTokens,
+  stockRoleVars,
+  stockVars,
+  STOCK_TOKENS,
+} from "./stockTokens";
 
 function loadStyles(): string {
   const dir = dirname(fileURLToPath(import.meta.url));
@@ -37,7 +30,7 @@ function varsInBlock(source: string, selector: string): Record<string, string> {
 
 describe("web theme parity with schemas/ui-tokens.json", () => {
   const css = loadStyles();
-  const tokens = loadTokens();
+  const tokens = STOCK_TOKENS;
 
   it("documents the token file and TUI Default map in the stylesheet header", () => {
     expect(css).toMatch(/schemas\/ui-tokens\.json/);
@@ -58,24 +51,39 @@ describe("web theme parity with schemas/ui-tokens.json", () => {
     expect(tokens.roles.accent.dark.toLowerCase()).toBe("#7c3aed");
   });
 
-  it("maps dark-mode CSS variables to token-file dark members", () => {
-    const dark = varsInBlock(css, ":root {");
+  it("does not hand-copy role hexes into source :root (aliases only)", () => {
+    expect(css).toMatch(/\/\*\s*strike-stock:dark\s*\*\//);
+    expect(css).toMatch(/\/\*\s*strike-stock:light\s*\*\//);
+    const root = css.slice(css.indexOf(":root {"), css.indexOf("}", css.indexOf(":root {")));
+    expect(root).not.toMatch(/--ink\s*:\s*#/);
+    expect(root).not.toMatch(/--acid\s*:\s*#/);
+    expect(root).toMatch(/--text:\s*var\(--ink\)/);
+    expect(root).toMatch(/--accent:\s*var\(--acid\)/);
+    expect(root).toMatch(/--warn:\s*var\(--warning\)/);
+  });
+
+  it("injects token-file dark members at strike-stock:dark", () => {
+    const injected = injectStockTokens(css);
+    const dark = varsInBlock(injected, ":root {");
     for (const role of Object.values(tokens.roles)) {
       expect(dark[role.cssVar], role.cssVar).toBe(role.dark.toLowerCase());
     }
     expect(dark["--code-bg"]).toBe(tokens.roles.surfaceMuted.dark.toLowerCase());
     expect(dark["--mark-ink"]).toBe(tokens.roles.background.dark.toLowerCase());
+    expect(stockRoleVars("dark")["--acid"]).toBe("#7c3aed");
   });
 
-  it("maps light-mode CSS variables to token-file light members", () => {
-    const mediaStart = css.indexOf("@media (prefers-color-scheme: light)");
+  it("injects token-file light members at strike-stock:light", () => {
+    const injected = injectStockTokens(css);
+    const mediaStart = injected.indexOf("@media (prefers-color-scheme: light)");
     expect(mediaStart).toBeGreaterThanOrEqual(0);
-    const inner = varsInBlock(css.slice(mediaStart), ":root {");
+    const inner = varsInBlock(injected.slice(mediaStart), ":root {");
     for (const role of Object.values(tokens.roles)) {
       expect(inner[role.cssVar], role.cssVar).toBe(role.light.toLowerCase());
     }
     expect(inner["--code-bg"]).toBe(tokens.roles.surfaceMuted.light.toLowerCase());
     expect(inner["--mark-ink"]).toBe("#ffffff");
+    expect(stockVars("light")["--acid"]).toBe("#5b21b6");
   });
 
   it("uses prefers-color-scheme for light and keeps color-scheme adaptive", () => {
@@ -86,7 +94,8 @@ describe("web theme parity with schemas/ui-tokens.json", () => {
   it("supports explicit data-appearance light/dark overrides", () => {
     expect(css).toMatch(/:root\[data-appearance="light"\]/);
     expect(css).toMatch(/:root\[data-appearance="dark"\]/);
-    const lightExplicit = varsInBlock(css, ':root[data-appearance="light"]');
+    const injected = injectStockTokens(css);
+    const lightExplicit = varsInBlock(injected, ':root[data-appearance="light"]');
     expect(lightExplicit["--ink"]).toBe(tokens.roles.text.light.toLowerCase());
     expect(lightExplicit["--acid"]).toBe(tokens.roles.accent.light.toLowerCase());
   });
