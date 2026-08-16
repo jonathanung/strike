@@ -12,7 +12,7 @@ import (
 func TestIsCoreTool(t *testing.T) {
 	// Minimal always-visible coding surface (#988).
 	for _, name := range []string{
-		"read", "glob", "grep", "edit", "write", "apply_patch", "move", "delete", "bash",
+		"read", "glob", "grep", "edit", "write", "apply_patch", "move", "delete", "status", "bash",
 		"task", "toolsearch", "question",
 	} {
 		if !IsCoreTool(name) {

@@ -55,6 +55,15 @@ func TestDefaultsIncludesGitAllow(t *testing.T) {
 	}
 }
 
+func TestDefaultsIncludesStatusAllow(t *testing.T) {
+	if got := Evaluate("status", "*", Defaults()); got != Allow {
+		t.Errorf("status default = %s, want allow", got)
+	}
+	if err := ValidateRuleset(Ruleset{{Permission: "status", Pattern: "*", Action: Deny}}); err != nil {
+		t.Fatalf("ValidateRuleset status: %v", err)
+	}
+}
+
 func TestDefaultsIncludesTaskAllow(t *testing.T) {
 	if got := Evaluate("task", "*", Defaults()); got != Allow {
 		t.Errorf("task default = %s, want allow", got)

@@ -13,6 +13,7 @@ var coreToolNames = map[string]struct{}{
 	"read": {}, "glob": {}, "grep": {},
 	"edit": {}, "write": {}, "apply_patch": {},
 	"move": {}, "delete": {},
+	"status":     {},
 	"bash":       {},
 	"task":       {},
 	"toolsearch": {},

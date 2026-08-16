@@ -397,6 +397,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		tool.NewApplyPatch(),
 		tool.NewMove(),
 		tool.NewDelete(),
+		tool.NewStatus(),
 		tool.NewBash(),
 		tool.NewGit(),
 		tool.NewVerify(),

@@ -77,6 +77,17 @@ func (s *FileState) RecordBytes(path string, info os.FileInfo, data []byte) {
 	delete(s.dirty, path)
 }
 
+// Hash returns the recorded content hash for path, or empty when unknown.
+// Nil-safe. path should be the same absolute path used by RecordBytes.
+func (s *FileState) Hash(path string) string {
+	if s == nil || path == "" {
+		return ""
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.reads[path].hash
+}
+
 // Forget drops any snapshot and dirty flag for path (e.g. after delete/move
 // of the source). No-op when s is nil or path is empty.
 func (s *FileState) Forget(path string) {

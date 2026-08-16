@@ -34,6 +34,7 @@ var shortPurposes = map[string]string{
 	"apply_patch":     "coordinated multi-file patch",
 	"move":            "rename or move a file within allowed roots",
 	"delete":          "delete a file or directory within allowed roots",
+	"status":          "this-turn harness working set (TurnDiff + hashes)",
 	"bash":            "run a shell command",
 	"git":             "read-only git status, diff, log, blame, and show",
 	"verify":          "run documented project verify tier; return failures only",
@@ -329,6 +330,10 @@ func recommendedGuidance(entries []GuidanceEntry) string {
 		"Use `write` only when creating or fully replacing a file.")
 	add(has("move") || has("delete"),
 		"Prefer `move`/`delete` over bash `mv`/`rm` for ordinary renames and deletions (workspace-scoped, freshness, TurnDiff).")
+	add(has("status") && has("git"),
+		"Use `status` for this-turn harness working set (create/update/delete + recorded hashes). Use `git` for repository status.")
+	add(has("status") && !has("git"),
+		"Use `status` for this-turn harness working set (create/update/delete + recorded hashes). Do not shell out to git.")
 	add(has("git") && has("bash"),
 		"Prefer `git` over bash `git status`/`diff`/`log`/`blame`/`show` for bounded structured history.")
 	add(has("git") && !has("bash"),

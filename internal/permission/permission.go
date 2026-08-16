@@ -40,7 +40,7 @@ type Ruleset []Rule
 // even before tools land so config deny rules and Defaults stay valid.
 var knownPermissions = map[string]struct{}{
 	"*": {}, "read": {}, "glob": {}, "grep": {}, "edit": {}, "write": {},
-	"bash": {}, "git": {}, "verify": {}, "task": {}, "task_status": {}, "task_read": {}, "task_message": {},
+	"bash": {}, "git": {}, "status": {}, "verify": {}, "task": {}, "task_status": {}, "task_read": {}, "task_message": {},
 	"task_interrupt": {}, "wait": {}, "agent_roster": {}, "agent_ownership": {},
 	"agent_message": {}, "agent_broadcast": {}, "agent_thread": {},
 	"team_task": {}, "patch_collab": {}, "delegate": {},
@@ -101,6 +101,7 @@ func Defaults() Ruleset {
 		{Permission: "read", Pattern: "*", Action: Allow},
 		{Permission: "glob", Pattern: "*", Action: Allow},
 		{Permission: "grep", Pattern: "*", Action: Allow},
+		{Permission: "status", Pattern: "*", Action: Allow},
 		{Permission: "edit", Pattern: "*", Action: Ask},
 		{Permission: "write", Pattern: "*", Action: Ask},
 		{Permission: "bash", Pattern: "*", Action: Ask},
