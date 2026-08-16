@@ -429,7 +429,12 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 	var (
 		wtPath, wtBranch, wtRepo, baseRev string
 	)
-	if WantChildWorktree(e.opts.ChildIsolation, req.Isolation) && e.opts.Worktrees != nil {
+	if WantChildWorktree(e.opts.ChildIsolation, req.Isolation) {
+		if e.opts.Worktrees == nil {
+			e.failDelegationSpawn(delegID, "child worktree: worktree binder is unset")
+			e.closeChildSession(childID)
+			return tool.TaskResult{}, fmt.Errorf("child worktree: worktree binder is unset")
+		}
 		base := e.opts.WorkDir
 		if base == "" {
 			base = e.opts.ProjectRoot
