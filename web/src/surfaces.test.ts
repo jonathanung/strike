@@ -4,6 +4,7 @@ import {
   clearDynamicSurfaces,
   defaultSurfaceForMode,
   getSurface,
+  groupInspectorSurfaces,
   inspectorSurfaces,
   inspectorSurfacesForShell,
   listSurfaces,
@@ -14,6 +15,7 @@ import {
   registerDynamicSurface,
   resolveModeSurface,
   surfaceCapabilityAllowed,
+  surfaceNavGroup,
   unregisterDynamicSurface,
   WORKSPACE_MODES,
 } from "./surfaces";
@@ -46,7 +48,7 @@ describe("surface registry", () => {
   it("registers shipped inspector surfaces with stable ids", () => {
     const ids = BUILTIN_SURFACES.map((s) => s.id);
     for (const id of [
-      "context", "files", "memory", "issues", "plans", "goals", "workflows",
+      "context", "activity", "queue", "files", "memory", "issues", "plans", "goals", "workflows",
       "mcp", "plugins", "panes", "timeline", "diagnostics", "roster", "settings",
       "providers", "auth", "permissions", "sandbox", "theme", "project-export", "diag-export",
       "transcript", "composer",
@@ -83,6 +85,8 @@ describe("surface registry", () => {
   it("chat shell lists progressive union; project mode is strict", () => {
     const chat = inspectorSurfacesForShell("chat", fullCaps).map((s) => s.id);
     expect(chat).toContain("context");
+    expect(chat).toContain("activity");
+    expect(chat).toContain("queue");
     expect(chat).toContain("files");
     expect(chat).toContain("plans");
     expect(chat).toContain("mcp");
@@ -119,6 +123,30 @@ describe("surface registry", () => {
     expect(defaultSurfaceForMode("ops", { settings: true, mcp: true })).toBe("settings");
     expect(defaultSurfaceForMode("ops", { mcp: true })).toBe("mcp");
     expect(defaultSurfaceForMode("chat", fullCaps)).toBe("context");
+    expect(MODE_PRESETS.chat.defaultSurface).toBeUndefined();
+    expect(MODE_PRESETS.code.defaultSurface).toBe("files");
+    expect(MODE_PRESETS.team.defaultSurface).toBe("roster");
+    expect(MODE_PRESETS.project.defaultSurface).toBe("plans");
+    expect(MODE_PRESETS.ops.defaultSurface).toBe("settings");
+  });
+
+  it("groups session surfaces separately from plugin panes", () => {
+    expect(surfaceNavGroup(getSurface("context")!)).toBe("session");
+    expect(surfaceNavGroup(getSurface("activity")!)).toBe("session");
+    expect(surfaceNavGroup(getSurface("queue")!)).toBe("session");
+    expect(surfaceNavGroup(getSurface("files")!)).toBe("code");
+    expect(surfaceNavGroup(getSurface("plans")!)).toBe("project");
+    expect(surfaceNavGroup(getSurface("mcp")!)).toBe("ops");
+    const pane = paneSurfaceFromInfo({ id: "weather", title: "Weather" })!;
+    expect(surfaceNavGroup(pane)).toBe("ops");
+    const grouped = groupInspectorSurfaces([
+      getSurface("context")!,
+      getSurface("files")!,
+      getSurface("plans")!,
+      pane,
+    ]);
+    expect(grouped.map((g) => g.id)).toEqual(["session", "code", "project", "ops"]);
+    expect(grouped.find((g) => g.id === "ops")?.surfaces.map((s) => s.id)).toEqual(["pane:weather"]);
   });
 
   it("resolveModeSurface falls back to chat on invalid mode/surface", () => {

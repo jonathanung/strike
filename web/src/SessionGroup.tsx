@@ -1,7 +1,6 @@
 import { type Dispatch, type RefObject, type SetStateAction } from "react";
 import { ChildAgentsPanel, type ChildEntry } from "./ChildAgents";
 import { clearQueue, editQueuedText, moveQueuedAt, removeQueuedAt, type QueuedPrompt } from "./queueOps";
-import type { FitWarning } from "./types";
 
 export type QueueEdit = { index: number; text: string };
 
@@ -86,87 +85,47 @@ export function PromptQueue({
   );
 }
 
-export type ChatSessionGroupProps = {
-  contextLabel: string;
-  provider?: string;
-  model?: string;
-  phase?: string;
-  fitWarning?: FitWarning;
+export type SessionActivityProps = {
   childrenEntries: ChildEntry[];
   selectedChildId?: string;
   onSelectChild: (id: string | undefined) => void;
   onOpenChildTranscript?: (id: string) => void;
-  queue: QueuedPrompt[];
-  queueEdit: QueueEdit | null;
-  setQueueEdit: Dispatch<SetStateAction<QueueEdit | null>>;
-  queueEditCancel: { current: boolean };
-  queueRef?: RefObject<HTMLOListElement | null>;
-  setQueue: Dispatch<SetStateAction<QueuedPrompt[]>>;
 };
 
-/**
- * TUI session-group analogue: context summary + activity + queue stacked in the
- * Chat inspector. Not exclusive tabs; does not include TUI telemetry.
- */
-export function ChatSessionGroup({
-  contextLabel,
-  provider,
-  model,
-  phase,
-  fitWarning,
+/** Exclusive Chat inspector surface for child-agent activity. */
+export function SessionActivity({
   childrenEntries,
   selectedChildId,
   onSelectChild,
   onOpenChildTranscript,
-  queue,
-  queueEdit,
-  setQueueEdit,
-  queueEditCancel,
-  queueRef,
-  setQueue,
-}: ChatSessionGroupProps) {
+}: SessionActivityProps) {
   return (
-    <div className="session-group" aria-label="Session group">
-      <section className="session-group-pane" aria-label="Context summary">
-        <div className="aside-heading">CONTEXT</div>
-        <dl className="session-group-facts">
-          <dt>Context</dt><dd>{contextLabel}</dd>
-          <dt>Provider</dt><dd>{provider || "unknown"}</dd>
-          <dt>Model</dt><dd>{model || "unknown"}</dd>
-          <dt>Phase</dt><dd>{phase || "idle"}</dd>
-        </dl>
-        {fitWarning && (
-          <p className={`session-group-fit ${fitWarning.level === "critical" ? "critical" : "warn"}`} role="status">
-            {fitWarning.message}
-          </p>
-        )}
-      </section>
-      <section className="session-group-pane" aria-label="Activity">
-        <div className="aside-heading">ACTIVITY</div>
-        {childrenEntries.length ? (
-          <ChildAgentsPanel
-            children={childrenEntries}
-            selectedId={selectedChildId}
-            onSelect={onSelectChild}
-            onOpenTranscript={onOpenChildTranscript}
-          />
-        ) : (
-          <p className="muted">No child agents</p>
-        )}
-      </section>
-      <section className="session-group-pane" aria-label="Queue">
-        <div className="aside-heading">QUEUE</div>
-        <PromptQueue
-          queue={queue}
-          queueEdit={queueEdit}
-          setQueueEdit={setQueueEdit}
-          queueEditCancel={queueEditCancel}
-          queueRef={queueRef}
-          setQueue={setQueue}
-          empty
-          className="session-group-queue"
+    <section className="session-surface" aria-label="Activity">
+      <div className="aside-heading">ACTIVITY</div>
+      {childrenEntries.length ? (
+        <ChildAgentsPanel
+          children={childrenEntries}
+          selectedId={selectedChildId}
+          onSelect={onSelectChild}
+          onOpenTranscript={onOpenChildTranscript}
         />
-      </section>
-    </div>
+      ) : (
+        <p className="muted">No child agents</p>
+      )}
+    </section>
+  );
+}
+
+/** Exclusive Chat inspector surface for the prompt queue. */
+export function SessionQueue(props: PromptQueueProps) {
+  return (
+    <section className="session-surface" aria-label="Queue">
+      <div className="aside-heading">QUEUE</div>
+      <PromptQueue
+        {...props}
+        empty
+        className={props.className || "session-group-queue"}
+      />
+    </section>
   );
 }

@@ -574,7 +574,8 @@ describe("App", () => {
     expect(screen.queryByRole("tab", { name: "plans" })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "workflows" })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "mcp" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: "activity" })).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "activity" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "queue" })).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "project" })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "capabilities" })).not.toBeInTheDocument();
     expect(screen.queryByText("No inspector panels available for this host.")).not.toBeInTheDocument();
@@ -1012,19 +1013,25 @@ describe("App", () => {
     expect(meta).not.toHaveAttribute("open");
   });
 
-  it("stacks context, activity, and queue in the Chat inspector without exclusive tabs", async () => {
+  it("opens the Chat inspector as a short nav plus one exclusive body", async () => {
     render(<App />);
     await screen.findByText("Current");
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
     expect(screen.getByRole("button", { name: "Toggle inspector" })).toHaveAttribute("aria-pressed", "false");
     fireEvent.click(screen.getByRole("button", { name: "Toggle inspector" }));
-    const group = screen.getByLabelText("Session group");
-    expect(group).toContainElement(screen.getByLabelText("Context summary"));
-    expect(group).toContainElement(screen.getByLabelText("Activity"));
-    expect(group).toContainElement(screen.getByLabelText("Queue"));
-    expect(screen.getByLabelText("Activity")).toHaveTextContent("No child agents");
-    expect(screen.getByLabelText("Queue")).toHaveTextContent(/Queue is empty/);
+    expect(screen.queryByLabelText("Session group")).not.toBeInTheDocument();
+    expect(screen.getByRole("tablist", { name: /Chat surfaces/i })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "context" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("heading", { name: "Context doctor" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Activity")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Queue")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "activity" }));
+    expect(screen.getByLabelText("Activity")).toHaveTextContent("No child agents");
+    expect(screen.queryByRole("heading", { name: "Context doctor" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Queue")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "queue" }));
+    expect(screen.getByLabelText("Queue")).toHaveTextContent(/Queue is empty/);
+    expect(screen.queryByLabelText("Activity")).not.toBeInTheDocument();
     FakeWebSocket.instances[0].onmessage?.({
       data: JSON.stringify({ type: "turn.started", data: { turnId: "t" } }),
     } as MessageEvent);
@@ -1032,15 +1039,15 @@ describe("App", () => {
     fireEvent.submit(screen.getByLabelText(/Instruction/).closest("form")!);
     const list = screen.getByRole("list", { name: "Queued prompts" });
     expect(list).toHaveTextContent("queued while open");
-    expect(group).toContainElement(list);
+    expect(screen.getByLabelText("Queue")).toContainElement(list);
     fireEvent.click(screen.getByRole("button", { name: "Clear queue" }));
     expect(screen.queryByRole("list", { name: "Queued prompts" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Toggle inspector" }));
-    expect(screen.queryByLabelText("Session group")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Toggle inspector" })).toHaveAttribute("aria-pressed", "false");
     expect(document.querySelector(".app-shell")).toHaveStyle({ "--inspector-width": "0px" });
   });
 
-  it("keeps the session group visible when switching Chat inspector tabs", async () => {
+  it("hides session surfaces when switching to another Chat inspector tab", async () => {
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("bootstrap")) return response({ version: "test", authRequired: false, attachOnly: false, capabilities: { live: true, files: true, issues: true }, protocolOps: ["user.input"], status: { sessionId: "live", provider: "echo", busy: false }, agents: [{ name: "build" }], skills: [] });
@@ -1052,16 +1059,17 @@ describe("App", () => {
     render(<App />);
     await screen.findByText("Current");
     fireEvent.click(screen.getByRole("button", { name: "Toggle inspector" }));
-    expect(screen.getByLabelText("Session group")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: "files" }));
     expect(await screen.findByText("No changed files reported.")).toBeInTheDocument();
-    expect(screen.getByLabelText("Session group")).toBeInTheDocument();
-    expect(screen.getByLabelText("Context summary")).toBeInTheDocument();
-    expect(screen.getByLabelText("Activity")).toBeInTheDocument();
-    expect(screen.getByLabelText("Queue")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Session group")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Activity")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Queue")).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "context" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "activity" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "queue" })).toBeInTheDocument();
   });
 
-  it("shows child activity in the session group instead of duplicating the rail", async () => {
+  it("shows child activity on the activity surface instead of duplicating the rail", async () => {
     render(<App />);
     await screen.findByText("Current");
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
@@ -1072,13 +1080,19 @@ describe("App", () => {
     expect(screen.getByLabelText("Child agents")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Toggle inspector" }));
     expect(screen.getAllByLabelText("Child scout")).toHaveLength(1);
-    expect(screen.getByLabelText("Session group")).toContainElement(screen.getByLabelText("Child scout"));
+    expect(screen.getByLabelText("Child agents")).toContainElement(screen.getByLabelText("Child scout"));
+    fireEvent.click(screen.getByRole("tab", { name: "activity" }));
+    expect(screen.getAllByLabelText("Child scout")).toHaveLength(1);
+    expect(screen.getByLabelText("Activity")).toContainElement(screen.getByLabelText("Child scout"));
+    expect(screen.getByLabelText("Activity")).toContainElement(screen.getByLabelText("Child agents"));
     fireEvent.click(screen.getByRole("button", { name: "Toggle inspector" }));
-    expect(screen.getByLabelText("Child scout")).toBeInTheDocument();
-    expect(screen.queryByLabelText("Session group")).not.toBeInTheDocument();
+    expect(screen.getAllByLabelText("Child scout")).toHaveLength(1);
+    expect(screen.getByLabelText("Child agents")).toContainElement(screen.getByLabelText("Child scout"));
+    expect(screen.queryByLabelText("Activity")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Toggle inspector" })).toHaveAttribute("aria-pressed", "false");
   });
 
-  it("hides the Chat session group when leaving Chat mode", async () => {
+  it("hides Chat session surfaces when leaving Chat mode", async () => {
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("bootstrap")) return response({
@@ -1093,9 +1107,13 @@ describe("App", () => {
     render(<App />);
     await screen.findByText("Current");
     fireEvent.click(screen.getByRole("button", { name: "Toggle inspector" }));
-    expect(screen.getByLabelText("Session group")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "activity" }));
+    expect(screen.getByLabelText("Activity")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Ops:/ }));
-    expect(screen.queryByLabelText("Session group")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Activity")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Queue")).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "activity" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "queue" })).not.toBeInTheDocument();
   });
 
   it("keeps fork/rename/delete behind a Session menu when sessions capability is on", async () => {
@@ -1512,6 +1530,10 @@ describe("App", () => {
     expect(screen.getByRole("navigation", { name: "Workspace mode" }).className).toContain("mode-bottom-bar");
     // Header should not duplicate the mode switch on phone.
     expect(document.querySelector(".header-mode-switch")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Toggle inspector" }));
+    expect(screen.getByRole("combobox", { name: /Chat surfaces/i })).toBeTruthy();
+    expect(screen.queryByRole("tablist", { name: /Chat surfaces/i })).toBeNull();
+    expect(document.querySelector(".inspector-body")).toHaveAttribute("role", "region");
     Object.defineProperty(window, "innerWidth", { configurable: true, value: prev || 1280 });
     window.dispatchEvent(new Event("resize"));
   });

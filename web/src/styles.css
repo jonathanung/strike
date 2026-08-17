@@ -211,18 +211,16 @@ button:disabled, select:disabled, input:disabled, textarea:disabled {
 }
 .ui-tab:disabled { opacity: .35; }
 .ui-tabpanel { min-width: 0; }
-/* Inspector tabs wrap instead of clipping into a horizontal scroller.
-   overflow-x:hidden (not visible) so overflow-y:auto cannot compute x back to auto. */
+/* Inspector tabs stay a single scrollable row — never wrap into a 40vh pile (#1247). */
 .inspector-tabs {
   display: flex;
-  flex-wrap: wrap;
-  align-content: flex-start;
+  flex-wrap: nowrap;
+  align-content: center;
   flex: 0 0 auto;
   width: 100%;
   min-width: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-  max-height: 40vh;
+  overflow-x: auto;
+  overflow-y: hidden;
   border-bottom: 1px solid var(--rule);
   scrollbar-width: thin;
 }
@@ -958,17 +956,7 @@ main {
   display: flex;
   flex-direction: column;
 }
-.session-group {
-  flex: 0 1 auto;
-  max-height: 55%;
-  overflow: auto;
-  padding: 12px 16px 8px;
-  border-bottom: 1px solid var(--rule);
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  min-height: 0;
-}
+.session-surface { min-height: 0; }
 .session-group-pane { min-height: 0; }
 .session-group-facts {
   display: grid;
@@ -1461,50 +1449,35 @@ dialog input { padding: 12px; color: var(--ink); }
   z-index: 9;
 }
 
-/* Phone surface subnav: accessible list/sheet (WEBUI.12) — not a compressed tab strip. */
-.surface-nav-sheet {
+/* Phone inspector nav: one-line grouped select — not a 40vh wrapping list (#1247). */
+.surface-nav {
   flex: 0 0 auto;
-  border-bottom: 1px solid var(--rule);
-  max-height: 40vh;
-  overflow: auto;
-  background: var(--surface-muted);
-  min-width: 0;
-}
-.surface-nav-list {
-  list-style: none;
-  margin: 0;
-  padding: 0.35rem 0.5rem;
   display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-.surface-nav-item {
-  display: flex;
-  width: 100%;
-  min-height: 44px;
   align-items: center;
-  justify-content: flex-start;
-  text-align: left;
-  padding: 0.5rem 0.75rem;
-  border: 1px solid transparent;
-  border-radius: var(--radius);
-  background: transparent;
-  color: var(--ink);
-  font: inherit;
-  cursor: pointer;
+  min-width: 0;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--surface-muted);
 }
-.surface-nav-item:hover,
-.surface-nav-item:focus-visible {
-  border-color: var(--border-focus);
-  outline: none;
-  background: var(--raised);
+.surface-nav-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
 }
-.surface-nav-item.active {
-  background: var(--surface);
-  border-color: var(--rule);
-  font-weight: 600;
+.surface-nav-caption {
+  flex: 0 0 auto;
+  font-size: 10px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--muted);
 }
-.surface-nav-label { text-transform: lowercase; }
+.surface-nav-field select {
+  flex: 1;
+  min-width: 0;
+  min-height: var(--control-min-h);
+}
 
 .app-shell[data-shell="phone"] main { min-width: 0; }
 
