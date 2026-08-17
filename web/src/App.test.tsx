@@ -1447,6 +1447,35 @@ describe("App", () => {
     window.dispatchEvent(new Event("resize"));
   });
 
+  it("keeps primary chrome reachable at desktop 1280 and narrow 360", async () => {
+    const prev = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1280 });
+    window.dispatchEvent(new Event("resize"));
+    const { unmount } = render(<App />);
+    await screen.findByText("Current");
+    expect(document.querySelector(".app-shell")).toHaveAttribute("data-shell", "desktop");
+    expect(document.querySelector(".header-mode-switch")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Open settings" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Toggle inspector" })).toBeTruthy();
+    expect(screen.getByLabelText("Instruction")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Send" })).toBeTruthy();
+    unmount();
+
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 360 });
+    window.dispatchEvent(new Event("resize"));
+    render(<App />);
+    await screen.findByText("Current");
+    expect(document.querySelector(".app-shell")).toHaveAttribute("data-shell", "phone");
+    expect(document.querySelector(".header-mode-switch")).toBeNull();
+    expect(screen.getByRole("button", { name: "Open settings" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Toggle inspector" })).toBeTruthy();
+    expect(screen.getByLabelText("Instruction")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Send" })).toBeTruthy();
+    expect(screen.getByRole("navigation", { name: "Workspace mode" }).className).toContain("mode-bottom-bar");
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: prev || 1280 });
+    window.dispatchEvent(new Event("resize"));
+  });
+
   it("restores mode and surface from deep link after bootstrap", async () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 1280 });
     window.dispatchEvent(new Event("resize"));

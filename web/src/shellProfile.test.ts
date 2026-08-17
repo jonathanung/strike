@@ -10,12 +10,14 @@ import {
 describe("shellProfile", () => {
   it("classifies desktop / tablet / phone by width", () => {
     expect(shellProfileFromWidth(1440)).toBe("desktop");
+    expect(shellProfileFromWidth(1280)).toBe("desktop");
     expect(shellProfileFromWidth(1024)).toBe("desktop");
     expect(shellProfileFromWidth(SHELL_BREAKPOINTS.tabletMax)).toBe("tablet");
     expect(shellProfileFromWidth(900)).toBe("tablet");
     expect(shellProfileFromWidth(600)).toBe("tablet");
     expect(shellProfileFromWidth(SHELL_BREAKPOINTS.phoneMax)).toBe("phone");
     expect(shellProfileFromWidth(390)).toBe("phone");
+    expect(shellProfileFromWidth(360)).toBe("phone");
     expect(shellProfileFromWidth(320)).toBe("phone");
   });
 
