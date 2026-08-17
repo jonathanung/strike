@@ -104,4 +104,20 @@ describe("shell flex layout tokens (#1236)", () => {
     expect(1280).toBeGreaterThan(SHELL_BREAKPOINTS.tabletMax);
     expect(360).toBeLessThanOrEqual(SHELL_BREAKPOINTS.phoneMax);
   });
+
+  it("scrolls the expanded runtime bar instead of growing the shell (#1246)", () => {
+    const stack = rule(".runtime-stack");
+    expect(stack).toMatch(/min-width:\s*0/);
+    expect(stack).toMatch(/max-width:\s*100%/);
+    const bar = rule(".runtime");
+    expect(bar).toMatch(/overflow-x:\s*auto/);
+    expect(bar).toMatch(/min-width:\s*0/);
+    expect(bar).toMatch(/max-width:\s*100%/);
+    expect(rule(".runtime-more")).toMatch(/min-width:\s*min-content/);
+    expect(rule(".runtime-more")).toMatch(/flex:\s*1\s+0\s+auto/);
+    expect(rule(".runtime-secondary")).toMatch(/min-width:\s*min-content/);
+    expect(rule(".runtime-secondary")).toMatch(/flex:\s*1\s+0\s+auto/);
+    expect(rule(".runtime-field")).toMatch(/flex:\s*0\s+0\s+auto/);
+    expect(rule(".runtime-field")).toMatch(/min-width:\s*130px/);
+  });
 });

@@ -1,12 +1,44 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App, { formatCostLabel, formatContextLabel } from "./App";
 import { clearDynamicSurfaces } from "./surfaces";
 
+const cockpitCss = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "styles.css"), "utf8");
+
+function cockpitRule(selector: string): string {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = cockpitCss.match(new RegExp(`(?:^|\\n)${escaped}\\s*\\{([^}]*)\\}`));
+  expect(match, `missing rule ${selector}`).toBeTruthy();
+  return match![1];
+}
+
 class FakeEventSource { static instances: FakeEventSource[] = []; onmessage?: (event: MessageEvent) => void; onerror?: () => void; close = vi.fn(); constructor(public url: string) { FakeEventSource.instances.push(this); } }
 class FakeWebSocket { static OPEN = 1; static instances: FakeWebSocket[] = []; readyState = 1; onopen?: () => void; onmessage?: (event: MessageEvent) => void; onerror?: () => void; onclose?: () => void; send = vi.fn(); close = vi.fn(); constructor(public url: string) { FakeWebSocket.instances.push(this); queueMicrotask(() => this.onopen?.()); } }
 
 const response = (body: unknown, status = 200) => Promise.resolve(new Response(status === 204 ? null : JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } }));
+
+/** jsdom does not layout; model scrollWidth from CSS containment + field min-widths. */
+function runtimeShellMetrics(bar: HTMLElement, width: number) {
+  const stack = cockpitRule(".runtime-stack");
+  const runtime = cockpitRule(".runtime");
+  const field = cockpitRule(".runtime-field");
+  const disclosure = cockpitRule(".runtime-disclosure");
+  const fieldMin = Number((field.match(/min-width:\s*(\d+)px/) || [])[1] || 0);
+  const disclosureMin = Number((disclosure.match(/min-width:\s*(\d+)px/) || [])[1] || 0);
+  const fields = bar.querySelectorAll(".runtime-field").length;
+  const content = Math.max(width, fields * fieldMin + disclosureMin);
+  const barScrolls = /overflow-x:\s*auto/.test(runtime);
+  const stackPinned = /min-width:\s*0/.test(stack);
+  const contained = barScrolls && stackPinned ? width : content;
+  return {
+    shell: { clientWidth: width, scrollWidth: contained },
+    main: { clientWidth: width, scrollWidth: contained },
+    bar: { clientWidth: width, scrollWidth: content },
+  };
+}
 
 describe("App", () => {
   beforeEach(() => {
@@ -819,6 +851,38 @@ describe("App", () => {
     await waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/v1/ops"), expect.objectContaining({ body: expect.stringContaining('"level":"low"') })));
     fireEvent.click(screen.getByLabelText(/FAST/i));
     await waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/v1/ops"), expect.objectContaining({ body: expect.stringContaining('"type":"set.fast"') })));
+  });
+
+  it("scrolls the expanded runtime bar instead of widening the shell at 900px and 360px", async () => {
+    const prev = window.innerWidth;
+    for (const width of [900, 360]) {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: width });
+      window.dispatchEvent(new Event("resize"));
+      const { unmount } = render(<App />);
+      await screen.findByText("Current");
+      fireEvent.click(screen.getByRole("button", { name: /Runtime/ }));
+      const bar = screen.getByLabelText("Runtime controls");
+      const secondary = screen.getByLabelText("Secondary runtime controls");
+      const shell = document.querySelector(".app-shell") as HTMLElement;
+      const mainEl = document.querySelector("main") as HTMLElement;
+      const stack = document.querySelector(".runtime-stack") as HTMLElement;
+      expect(shell.contains(mainEl)).toBe(true);
+      expect(mainEl.contains(stack)).toBe(true);
+      expect(stack.contains(bar)).toBe(true);
+      expect(bar.contains(secondary)).toBe(true);
+      expect(screen.getByLabelText("Effort")).toBeInTheDocument();
+      expect(secondary.querySelectorAll(".runtime-field").length).toBeGreaterThanOrEqual(3);
+
+      const metrics = runtimeShellMetrics(bar, width);
+      expect(metrics.shell.scrollWidth, `${width}px .app-shell`).toBeLessThanOrEqual(metrics.shell.clientWidth);
+      expect(metrics.main.scrollWidth, `${width}px main`).toBeLessThanOrEqual(metrics.main.clientWidth);
+      if (width <= 360) {
+        expect(metrics.bar.scrollWidth, `${width}px .runtime`).toBeGreaterThan(metrics.bar.clientWidth);
+      }
+      unmount();
+    }
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: prev || 1280 });
+    window.dispatchEvent(new Event("resize"));
   });
 
   it("keeps question options blocking and associated with their request", async () => {
