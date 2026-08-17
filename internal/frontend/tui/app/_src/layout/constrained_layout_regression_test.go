@@ -142,7 +142,7 @@ func TestPopulatedReviewerSessionKeepsOneTranscriptRowWithoutTwoBorderRows(t *te
 		t.Errorf("header was cropped:\n%s", plain)
 	}
 	transcriptRow := strings.Split(plain, "\n")[l.header]
-	if strings.ContainsAny(transcriptRow, "╭╰") {
+	if strings.ContainsAny(transcriptRow, "╭╰┌└") {
 		t.Errorf("one-row transcript retained two panel border rows: %q", transcriptRow)
 	}
 }
@@ -207,7 +207,7 @@ func composerRenderState(m Model) composerState {
 }
 
 // TestConstrainedCompletionAndComposerViewsUseExactlyAllocatedRows is covered by
-// TestConstrainedCompletionAndComposerViewsUseSoftChrome (Family soft default).
+// TestConstrainedCompletionAndComposerViewsUseBorderedChrome (bordered default).
 
 func TestConstrainedRightPaneAndModalCanvasAreExact(t *testing.T) {
 	for _, height := range []int{0, 1, 2, 3, 4, 19} {

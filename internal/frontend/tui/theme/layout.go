@@ -11,16 +11,16 @@ import (
 type ChromeMode uint8
 
 const (
-	// ChromeUnset resolves to ChromeSoft (Default() chrome until #1234).
+	// ChromeUnset resolves to ChromeBordered (stock Default() chrome).
 	ChromeUnset ChromeMode = iota
 	// ChromeSolid paints panels as filled surfaces with title/footer bars
 	// (no box-drawing frame).
 	ChromeSolid
 	// ChromeBordered paints classic box-drawing panel borders (outline only,
-	// minimal surface wash). Token-file north star (schemas/ui-tokens.json).
+	// square ┌┐└┘ light corners). Token-file / Default() north star.
 	ChromeBordered
 	// ChromeSoft paints surface-filled bodies with a rounded box outline
-	// (╭╮╰╯). Still Default() until #1234 applies bordered chrome.
+	// (╭╮╰╯). Opt-in via theme file chrome: "soft".
 	ChromeSoft
 )
 
@@ -49,11 +49,16 @@ func resolveChrome(c ChromeMode) ChromeMode {
 	case ChromeSoft:
 		return ChromeSoft
 	default:
-		return ChromeSoft
+		return ChromeBordered
 	}
 }
 
 func lightBorderStyle() BorderStyle {
+	return BorderStyle{Weight: BorderWeightLight, TopLeft: "┌", TopRight: "┐", BottomLeft: "└", BottomRight: "┘", Horizontal: "─", Vertical: "│"}
+}
+
+// softLightBorderStyle is the Family rounded light preset for chrome: soft.
+func softLightBorderStyle() BorderStyle {
 	return BorderStyle{Weight: BorderWeightLight, TopLeft: "╭", TopRight: "╮", BottomLeft: "╰", BottomRight: "╯", Horizontal: "─", Vertical: "│"}
 }
 
@@ -61,13 +66,21 @@ func heavyBorderStyle() BorderStyle {
 	return BorderStyle{Weight: BorderWeightHeavy, TopLeft: "┏", TopRight: "┓", BottomLeft: "┗", BottomRight: "┛", Horizontal: "━", Vertical: "┃"}
 }
 
-func resolveBorderStyle(b BorderStyle) BorderStyle {
+func resolveBorderStyle(b BorderStyle, chrome ChromeMode) BorderStyle {
 	if b.Weight != BorderWeightHeavy {
 		b.Weight = BorderWeightLight
 	}
 	preset := lightBorderStyle()
-	if b.Weight == BorderWeightHeavy {
+	switch {
+	case b.Weight == BorderWeightHeavy:
 		preset = heavyBorderStyle()
+	case chrome == ChromeSoft:
+		preset = softLightBorderStyle()
+		// Default() ships square light glyphs. Treat those as unset so
+		// chrome: soft (and Default()+Chrome=Soft) keeps rounded corners.
+		if glyphsMatchStock(b, lightBorderStyle()) {
+			b = BorderStyle{Weight: BorderWeightLight}
+		}
 	}
 	if !oneCell(b.TopLeft) {
 		b.TopLeft = preset.TopLeft
@@ -88,6 +101,27 @@ func resolveBorderStyle(b BorderStyle) BorderStyle {
 		b.Vertical = preset.Vertical
 	}
 	return b
+}
+
+// glyphsMatchStock reports whether every set glyph equals the stock preset.
+// Empty fields match; all-empty is false so Resolve can still fill from the
+// chrome-aware preset.
+func glyphsMatchStock(b, stock BorderStyle) bool {
+	any := false
+	match := func(got, want string) bool {
+		if got == "" {
+			return true
+		}
+		any = true
+		return got == want
+	}
+	ok := match(b.TopLeft, stock.TopLeft) &&
+		match(b.TopRight, stock.TopRight) &&
+		match(b.BottomLeft, stock.BottomLeft) &&
+		match(b.BottomRight, stock.BottomRight) &&
+		match(b.Horizontal, stock.Horizontal) &&
+		match(b.Vertical, stock.Vertical)
+	return ok && any
 }
 
 func oneCell(s string) bool {

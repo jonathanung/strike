@@ -231,24 +231,24 @@ func TestC3WelcomeCapacityAndFocusTokens(t *testing.T) {
 
 	setTUITrueColor(t)
 	th := theme.Default()
-	th.SurfaceFocus = fixedColor("#010203")
-	th.SurfaceMuted = fixedColor("#040506")
+	th.BorderFocus = fixedColor("#010203")
+	th.BorderMuted = fixedColor("#040506")
 	th.OverlayScrim = fixedColor("#070809")
 	m, _ := newAppTestModelWithOptions(Options{Theme: &th})
 	m.firstRun = true // full view renders welcome dashboard
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
-	if !strings.Contains(viewString(m), rgbBGSGR("#010203")) || !strings.Contains(viewString(m), rgbBGSGR("#040506")) {
-		t.Fatal("focused and dim dashboard surfaces are not tokenized")
+	if !strings.Contains(viewString(m), rgbSGR("#010203")) || !strings.Contains(viewString(m), rgbSGR("#040506")) {
+		t.Fatal("focused and dim dashboard outlines are not tokenized")
 	}
 	m.focus = focusRight
 	m.reflow()
-	if !strings.Contains(viewString(m), rgbBGSGR("#010203")) || !strings.Contains(viewString(m), rgbBGSGR("#040506")) {
-		t.Fatal("right focus did not preserve focused/dim surface tokens")
+	if !strings.Contains(viewString(m), rgbSGR("#010203")) || !strings.Contains(viewString(m), rgbSGR("#040506")) {
+		t.Fatal("right focus did not preserve focused/dim outline tokens")
 	}
 	m.modal = &appProbeModal{}
 	m.reflow()
 	view := viewString(m)
-	if strings.Contains(view, rgbBGSGR("#010203")) || !strings.Contains(view, rgbSGR("#070809")) {
+	if strings.Contains(view, rgbSGR("#010203")) || !strings.Contains(view, rgbSGR("#070809")) {
 		t.Fatal("modal did not scrim dashboard background")
 	}
 }

@@ -73,9 +73,9 @@ type Theme struct {
 // Default returns strike's stock theme: royal-purple primary, cyan secondary,
 // mint success, amber warning, coral error, and distinct orange danger.
 // Hex pairs must match schemas/ui-tokens.json (enforced by tokens_test.go).
-// Chrome stays ChromeSoft until #1234 consumes the bordered contract; named
-// bundled themes keep their own hexes. Lipgloss degrades pairs for 256-color
-// terminals (tmux-256color); both members stay role-distinct after
+// Chrome is ChromeBordered with square light corners (token-file north star).
+// Named bundled themes keep their own hexes. Lipgloss degrades pairs for
+// 256-color terminals (tmux-256color); both members stay role-distinct after
 // quantization. See docs/theme.md.
 func Default() Theme {
 	return Theme{
@@ -103,7 +103,7 @@ func Default() Theme {
 		DiffAdded:    AdaptiveColor{Light: "#15803d", Dark: "#4ade80"},
 		DiffRemoved:  AdaptiveColor{Light: "#e11d48", Dark: "#fb7185"},
 		OverlayScrim: AdaptiveColor{Light: "#a8a3b8", Dark: "#7c7a90"},
-		Chrome:       ChromeSoft,
+		Chrome:       ChromeBordered,
 		BorderStyle:  lightBorderStyle(),
 		Spacing:      NewSpacing(1, 2, 3, 4).WithLabel(1),
 		Icons:        DefaultIcons(),
@@ -164,7 +164,7 @@ func (t Theme) Resolve() Theme {
 	t.OverlayScrim = resolveAdaptive(t.OverlayScrim, d.OverlayScrim)
 	t.Background = resolveBackground(t.Background, d.Background)
 	t.Chrome = resolveChrome(t.Chrome)
-	t.BorderStyle = resolveBorderStyle(t.BorderStyle)
+	t.BorderStyle = resolveBorderStyle(t.BorderStyle, t.Chrome)
 	t.Spacing = resolveSpacing(t.Spacing, d.Spacing)
 	t.Icons = resolveIcons(t.Icons, d.Icons)
 	return t

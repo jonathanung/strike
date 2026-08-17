@@ -12,7 +12,7 @@ import (
 )
 
 // TestThemeChromeModesFrames asserts soft/solid/bordered chrome is observable
-// on a full app frame (Family soft default has rounded box outline).
+// on a full app frame (stock bordered default has square box outline).
 func TestThemeChromeModesFrames(t *testing.T) {
 	savedDark := compat.HasDarkBackground
 	t.Cleanup(func() { compat.HasDarkBackground = savedDark })

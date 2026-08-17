@@ -41,8 +41,8 @@ selection, and layout). Keep this catalog synchronized with `internal/frontend/t
 
 | Component | Exact signature | Use |
 |---|---|---|
-| Panel | `Panel(th theme.Theme, opts PanelOpts, body string) string` | Width-safe framed tile. `PanelOpts` has `Title`, `Footer`, mandatory `Width`, optional `Height`, `Focused`, `Dim`, `Tone`, and `Borderless`. Default chrome is **soft** (surface-filled body + rounded `╭╮╰╯` outline). Focused soft panes: body stays `Surface`, title edge uses `SurfaceFocus`, outline uses `BorderFocus` — no FocusBar. Solid chrome keeps title-edge `SurfaceFocus` + thin FocusBar. Never a full-panel wash. `TextSelection` is a separate role. Tone dialogs keep elevated `SurfaceFocus` body. `chrome: bordered` uses outline only. Soft degrades below width 6. `Borderless` omits chrome. |
-| Panel geometry | `InnerWidth(width int) int`; `PanelInnerWidth(th theme.Theme, width int) int`; `PanelInnerHeight(width, height int) int`; `PanelInnerHeightFor(th, width, height int) int`; `PanelContentOrigin(th theme.Theme, width int) (x, y int)` | Body dimensions and content-cell origin under chrome. Themed callers must use `PanelInnerWidth`; `InnerWidth` is default-theme compatibility only. `PanelInnerHeight` uses default soft chrome; use `PanelInnerHeightFor` for non-default themes. |
+| Panel | `Panel(th theme.Theme, opts PanelOpts, body string) string` | Width-safe framed tile. `PanelOpts` has `Title`, `Footer`, mandatory `Width`, optional `Height`, `Focused`, `Dim`, `Tone`, and `Borderless`. Default chrome is **bordered** (outline only, square `┌┐└┘`). Focused bordered panes: `BorderFocus` outline, no title-edge wash, no FocusBar. Soft (`chrome: soft`) keeps surface-filled body + rounded `╭╮╰╯`; focused soft panes: body stays `Surface`, title edge uses `SurfaceFocus`, outline uses `BorderFocus`. Solid chrome keeps title-edge `SurfaceFocus` + thin FocusBar. Never a full-panel wash. `TextSelection` is a separate role. Tone dialogs keep elevated `SurfaceFocus` body. Soft degrades below width 6. `Borderless` omits chrome. |
+| Panel geometry | `InnerWidth(width int) int`; `PanelInnerWidth(th theme.Theme, width int) int`; `PanelInnerHeight(width, height int) int`; `PanelInnerHeightFor(th, width, height int) int`; `PanelContentOrigin(th theme.Theme, width int) (x, y int)` | Body dimensions and content-cell origin under chrome. Themed callers must use `PanelInnerWidth`; `InnerWidth` is default-theme compatibility only. `PanelInnerHeight` uses default bordered chrome; use `PanelInnerHeightFor` for non-default themes. |
 | Dialog | `Dialog(th theme.Theme, opts DialogOpts, body string) string` | Focused Panel with a muted final hint. `DialogOpts`: `Title`, `Hint`, `Width`, `Height`, `Tone`. Body lines longer than inner width are word-wrapped (idempotent if already wrapped). |
 | Badge | `Badge(th theme.Theme, tone Tone, text string) string` | Soft pill: tone label on `SurfaceMuted` with XS pad. Stock delimiters empty; themes may set `Icons.BadgeLeft`/`BadgeRight`. |
 | KeyHints | `KeyHints(th theme.Theme, width int, hints []KeyHint) string` | Width-safe footer hints. `KeyHint` has `Key`, `Label`. |
@@ -81,7 +81,7 @@ otherwise `Background` resolves to a solid `lipgloss.TerminalColor`.
 | `Surface`, `SurfaceFocus`, `SurfaceMuted` | panel fills: body default / title-edge focus (and tone dialogs) / dim |
 | `Border`, `BorderFocus`, `BorderMuted` | soft/bordered frame colors |
 | `UserLabel`, `ToolLabel`, `DiffAdded`, `DiffRemoved` | transcript and diff roles |
-| `Chrome` | `ChromeSoft` (default), `ChromeSolid`, or `ChromeBordered` |
+| `Chrome` | `ChromeBordered` (default, square `┌┐└┘`), `ChromeSolid`, or `ChromeSoft` (opt-in rounded) |
 | `BorderStyle` | soft/bordered panel border weight and six glyphs |
 | `Spacing` | `None`, `XS`, `SM`, `MD`, `LG` layout gaps; left\|right pane gutter uses `XS` (keeps 93-col split); bento/welcome card gaps use `SM`; `Label` is the gap between a numbered permission-choice shortcut (for example, `1)`) and its label, defaulting to `1` when resolved |
 | `Icons` | glyph set below |
@@ -141,7 +141,7 @@ return ui.Dialog(th, ui.DialogOpts{Title: "Select provider", Width: width}, body
 
 The empty-transcript dashboard is app composition, not a component API. Its
 header owns the compact brand; the dashboard directly allocates fixed-height
-`Panel` cards (soft chrome by default), with one or two columns according to
+`Panel` cards (bordered chrome by default), with one or two columns according to
 available width. It has no outer welcome panel or logo card. The `keys` card is
 always present; `get started` is present only when no provider is selected or
 the selected provider is unauthenticated; `agents & skills` requires at least

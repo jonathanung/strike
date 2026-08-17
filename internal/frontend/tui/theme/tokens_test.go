@@ -154,9 +154,8 @@ func TestDefaultPaletteMatchesTokenFile(t *testing.T) {
 	if bg != (AdaptiveColor{Light: wantBG.Light, Dark: wantBG.Dark}) {
 		t.Errorf("Default().Background = %#v, want token %#v", bg, wantBG)
 	}
-	// Token chrome is the north star; Default() stays soft until #1234.
-	if th.Chrome != ChromeSoft {
-		t.Errorf("Default().Chrome = %v, want ChromeSoft (bordered chrome lands in #1234)", th.Chrome)
+	if th.Chrome != ChromeBordered {
+		t.Errorf("Default().Chrome = %v, want ChromeBordered", th.Chrome)
 	}
 }
 

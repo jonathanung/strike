@@ -276,8 +276,8 @@ background comes from Bubble Tea `BackgroundColorMsg` (not a pre-program OSC 11
 query). Forced dark/light override detection; auto uses the last detected bg.
 Stock hexes live in [`schemas/ui-tokens.json`](../schemas/ui-tokens.json)
 (royal-purple Accent, sharp bordered chrome as the documented north star).
-`theme.Default()` still resolves unset chrome to **soft** until #1234 applies
-bordered tiles; themes may opt into `chrome: "solid"` or `chrome: "bordered"`.
+`theme.Default()` resolves unset chrome to **bordered** square tiles; themes
+may opt into `chrome: "soft"` (Family rounded) or `chrome: "solid"`.
 See [theme.md](theme.md).
 
 

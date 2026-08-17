@@ -147,7 +147,7 @@ func TestC2ViewGeometryAndActivePanes(t *testing.T) {
 				if titleIdx < 0 {
 					t.Errorf("right panel top chrome missing title on body start row: %q", topPlain)
 				} else if titleCol := ansi.StringWidth(topPlain[:titleIdx]); titleCol < rightStart-1 || titleCol > rightStart+4 {
-					// Soft chrome prefixes title with ╭─ (+2–3 cells); solid is near rightStart.
+					// Bordered/soft chrome prefixes title with ┌─ or ╭─ (+2–3 cells); solid is near rightStart.
 					t.Errorf("right panel title at col %d, want near rightStart %d: %q", titleCol, rightStart, topPlain)
 				}
 				if bottomCh := displayColRune(bottomPlain, rightStart); bottomCh == 0 {
@@ -272,25 +272,25 @@ func displayColRune(s string, col int) rune {
 func TestC2PaneFocusAndModalUseFocusAndMutedThemeTokens(t *testing.T) {
 	setTUITrueColor(t)
 	th := theme.Default()
-	th.SurfaceFocus = fixedColor("#010203")
-	th.SurfaceMuted = fixedColor("#040506")
+	th.BorderFocus = fixedColor("#010203")
+	th.BorderMuted = fixedColor("#040506")
 	th.OverlayScrim = fixedColor("#070809")
 	m, _ := newAppTestModelWithOptions(Options{Theme: &th})
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 120, Height: 80})
 	// Left focus highlights the prompt box (mode title "chat") — not right panes.
 	leftRows, rightRows := rowsContaining(viewString(m), "chat"), rowsContaining(viewString(m), "context")
-	if !strings.Contains(strings.Join(leftRows, "\n"), rgbBGSGR("#010203")) || !strings.Contains(strings.Join(rightRows, "\n"), rgbBGSGR("#040506")) {
-		t.Fatal("left focus/right dim surface tokens are not visible on their respective panes")
+	if !strings.Contains(strings.Join(leftRows, "\n"), rgbSGR("#010203")) || !strings.Contains(strings.Join(rightRows, "\n"), rgbSGR("#040506")) {
+		t.Fatal("left focus/right dim border tokens are not visible on their respective panes")
 	}
 	m = updateApp(t, m, tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl})
 	leftRows, rightRows = rowsContaining(viewString(m), "chat"), rowsContaining(viewString(m), "context")
-	if !strings.Contains(strings.Join(leftRows, "\n"), rgbBGSGR("#040506")) || !strings.Contains(strings.Join(rightRows, "\n"), rgbBGSGR("#010203")) {
-		t.Fatal("focus toggle did not swap pane focus/dim surface tokens")
+	if !strings.Contains(strings.Join(leftRows, "\n"), rgbSGR("#040506")) || !strings.Contains(strings.Join(rightRows, "\n"), rgbSGR("#010203")) {
+		t.Fatal("focus toggle did not swap pane focus/dim border tokens")
 	}
 	m.modal = &appProbeModal{}
 	m.reflow()
 	view := viewString(m)
-	if strings.Contains(view, rgbBGSGR("#010203")) || strings.Contains(view, rgbBGSGR("#040506")) || !strings.Contains(view, rgbSGR("#070809")) {
+	if strings.Contains(view, rgbSGR("#010203")) || strings.Contains(view, rgbSGR("#040506")) || !strings.Contains(view, rgbSGR("#070809")) {
 		t.Error("modal did not scrim both panes with OverlayScrim")
 	}
 	if rows := strings.Split(view, "\n"); len(rows) != 80 {

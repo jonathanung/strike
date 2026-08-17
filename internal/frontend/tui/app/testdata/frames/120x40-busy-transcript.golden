@@ -1,14 +1,14 @@
 ⚡ strike /tmp/strike-golden   echo/echo-1   ·   ◆ build   host+sandbox                                            ready
-╭─ Refactor the auth store. ───────────────────────────────────────────────────╮ ╭─ context ───────────────────────────╮
+┌─ Refactor the auth store. ───────────────────────────────────────────────────┐ ┌─ context ───────────────────────────┐
 │ ❯ you                                                                        │ │ model  echo/echo-1                  │
 │   Refactor the auth store.                                                   │ │ agent  build                        │
 │                                                                              │ │ autonomy  supervised                │
 │ ● strike                                                                     │ │ isolation  host+sandbox             │
 │   Reading the store, then running tests.                                     │ │ auth  offline dev provider          │
 │                                                                              │ │ skills  1                           │
-│ ⚙ read · internal/auth/store.go ✓                                            │ ╰─────────────────────────────────────╯
+│ ⚙ read · internal/auth/store.go ✓                                            │ └─────────────────────────────────────┘
 │                                                                              │
-│                                                                              │ ╭─ activity ──────────────────────────╮
+│                                                                              │ ┌─ activity ──────────────────────────┐
 │                                                                              │ │   internal/auth/store.go — done  ✓  │
 │                                                                              │ │                                     │
 │                                                                              │ │                                     │
@@ -22,19 +22,19 @@
 │                                                                              │ │                                     │
 │                                                                              │ │                                     │
 │                                                                              │ │                                     │
-│                                                                              │ ╰─────────────────────────────────────╯
+│                                                                              │ └─────────────────────────────────────┘
 │                                                                              │
-│                                                                              │ ╭─ queue ─────────────────────────────╮
+│                                                                              │ ┌─ queue ─────────────────────────────┐
 │                                                                              │ │ nothing queued or scheduled         │
 │                                                                              │ │                                     │
 │                                                                              │ │                                     │
 │                                                                              │ │                                     │
-│                                                                              │ ╰─ ↑↓ move · ⇧↑↓ reorder · enter ed… ─╯
-╰──────────────────────────────────────────────────────────────────────────────╯
-                                                                                 ╭─ system ────────────────────────────╮
+│                                                                              │ └─ ↑↓ move · ⇧↑↓ reorder · enter ed… ─┘
+└──────────────────────────────────────────────────────────────────────────────┘
+                                                                                 ┌─ system ────────────────────────────┐
 ◦ / commands · ! shell · @ file mentions                                         │ sampling…                           │
-╭─ chat ❯ ─────────────────────────────────────────────────────────────────────╮ │                                     │
+┌─ chat ❯ ─────────────────────────────────────────────────────────────────────┐ │                                     │
 │ ❯ Ask anything…  (/ commands, ! shell)                                       │ │                                     │
 │ ❯                                                                            │ │                                     │
-╰─ enter send · ctrl+j/shift+enter/alt+enter newline ──────────────────────────╯ ╰─────────────────────────────────────╯
+└─ enter send · ctrl+j/shift+enter/alt+enter newline ──────────────────────────┘ └─────────────────────────────────────┘
 enter send · ctrl+j/shift+enter/alt+enter newline · ctrl+e external editor · esc cancel · ctrl+k palette · f1 keybinds

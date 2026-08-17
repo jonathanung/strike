@@ -42,8 +42,8 @@ func TestParseFullTheme(t *testing.T) {
 	if e.Theme.BorderStyle.Weight != BorderWeightHeavy {
 		t.Errorf("border weight = %v", e.Theme.BorderStyle.Weight)
 	}
-	if e.Theme.Chrome != ChromeSoft {
-		t.Errorf("default chrome = %v, want soft", e.Theme.Chrome)
+	if e.Theme.Chrome != ChromeBordered {
+		t.Errorf("default chrome = %v, want bordered", e.Theme.Chrome)
 	}
 	// Unset roles inherit Default via Resolve inside Parse.
 	if e.Theme.Success.Dark == "" {

@@ -272,31 +272,23 @@ func TestFocusedPaneHasChromeNotBodyWash(t *testing.T) {
 	m, _ := newAppTestModelWithOptions(Options{Theme: &th})
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
 	view := viewString(m)
-	// Title edge focus token present; body uses Surface not a full SurfaceFocus flood.
-	if !strings.Contains(view, rgbBGSGR("#445566")) {
-		t.Fatal("focused title edge missing SurfaceFocus")
+	// Bordered focus: BorderFocus outline, no title-edge wash, no body flood.
+	if strings.Contains(view, rgbBGSGR("#445566")) {
+		t.Fatal("bordered focus should not wash title edge with SurfaceFocus")
 	}
-	// Thin edge rule: BorderFocus as foreground, not a solid fill column.
 	if !strings.Contains(view, rgbSGR("#778899")) {
-		t.Fatal("focused leading thin bar missing BorderFocus fg")
+		t.Fatal("focused outline missing BorderFocus fg")
 	}
 	if strings.Contains(view, rgbBGSGR("#778899")) {
-		t.Fatal("focused leading bar still uses solid BorderFocus fill")
+		t.Fatal("focused chrome still uses solid BorderFocus fill")
 	}
-	if !strings.Contains(view, rgbBGSGR("#112233")) {
-		t.Fatal("focused body missing normal Surface")
-	}
-	// Dim right pane still tokenized.
-	if !strings.Contains(view, rgbBGSGR("#aabbcc")) {
-		t.Fatal("dim pane missing SurfaceMuted")
-	}
-	// Focus switch moves the thin rule to the right pane only.
+	// Focus switch moves the outline to the right pane.
 	m = updateApp(t, m, tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl})
 	rightView := viewString(m)
 	if !strings.Contains(rightView, rgbSGR("#778899")) {
-		t.Fatal("right-focused view missing BorderFocus thin rule")
+		t.Fatal("right-focused view missing BorderFocus outline")
 	}
-	if !strings.Contains(rightView, rgbBGSGR("#445566")) {
-		t.Fatal("right-focused title edge missing SurfaceFocus")
+	if strings.Contains(rightView, rgbBGSGR("#445566")) {
+		t.Fatal("right-focused bordered chrome washed title with SurfaceFocus")
 	}
 }

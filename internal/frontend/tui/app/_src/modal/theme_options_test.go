@@ -210,29 +210,27 @@ func TestModelViewCanvasCoversModalGuttersAndFooter(t *testing.T) {
 			t.Errorf("modal view row %d width = %d, want 80", i, got)
 		}
 	}
-	// Canvas owns gutters/scrim; solid dialog surfaces may paint nested fills.
-	// Every printable cell must still have some explicit background.
+	// Canvas owns gutters/scrim. Bordered dialogs are outline-only (no nested
+	// surface wash); every printable cell must still have an explicit background.
 	cells := tuiBackgroundCells(out)
 	if len(cells) == 0 {
 		t.Fatal("modal view emitted no printable cells")
 	}
 	canvasBG := "48;2;17;34;51"
-	hasCanvas, hasOther := false, false
+	hasCanvas := false
 	for _, background := range cells {
 		if background == "" {
 			t.Fatal("modal view cell missing background fill")
 		}
 		if background == canvasBG {
 			hasCanvas = true
-		} else {
-			hasOther = true
 		}
 	}
 	if !hasCanvas {
 		t.Fatal("modal view missing canvas background on gutters/scrim")
 	}
-	if !hasOther {
-		t.Fatal("modal dialog missing nested surface background")
+	if !strings.Contains(ansi.Strip(out), "Select provider") && !strings.Contains(ansi.Strip(out), "provider") {
+		t.Fatal("modal dialog missing title chrome")
 	}
 }
 

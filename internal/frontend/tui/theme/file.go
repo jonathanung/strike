@@ -61,7 +61,7 @@ func Parse(data []byte, idHint string) (Entry, error) {
 	}
 	switch strings.ToLower(strings.TrimSpace(doc.Chrome)) {
 	case "":
-		// Unset → Resolve supplies ChromeSoft.
+		// Unset → Resolve supplies ChromeBordered.
 	case "soft":
 		th.Chrome = ChromeSoft
 	case "solid":
@@ -73,9 +73,9 @@ func Parse(data []byte, idHint string) (Entry, error) {
 	}
 	switch strings.ToLower(strings.TrimSpace(doc.Border)) {
 	case "", "light":
-		// default / light left unset so Resolve supplies the light preset
+		// Weight-only so Resolve picks square (bordered) or rounded (soft).
 		if doc.Border != "" {
-			th.BorderStyle = lightBorderStyle()
+			th.BorderStyle = BorderStyle{Weight: BorderWeightLight}
 		}
 	case "heavy":
 		th.BorderStyle = heavyBorderStyle()
