@@ -2,7 +2,6 @@ package tui
 
 import (
 	"github.com/jonathanung/strike-cli/internal/frontend/tui/theme"
-	"github.com/jonathanung/strike-cli/internal/frontend/tui/ui"
 )
 
 // layout is the explicit height budget for the stacked screen regions. Every
@@ -216,23 +215,21 @@ func (l layout) withBodyHeight(bodyHeight int) layout {
 }
 
 // transcriptInnerHeight is the viewport height inside the transcript region:
-// the outer height less its border rows in bordered mode.
+// the outer height less the uppercase kicker row in non-compact mode.
 func (l layout) transcriptInnerHeight() int {
 	if l.compact {
 		return l.transcript
 	}
-	return max(0, l.transcript-2)
+	return max(0, l.transcript-1)
 }
 
-// transcriptInnerWidth is the viewport width inside the transcript region: the
-// full width in compact mode, else the panel's inner content width.
+// transcriptInnerWidth is the viewport width inside the transcript region.
+// Left-accent messages use the full pane width (no boxed inset).
 func (l layout) transcriptInnerWidth(width int) int {
 	return l.transcriptInnerWidthFor(theme.Default(), width)
 }
 
 func (l layout) transcriptInnerWidthFor(th theme.Theme, width int) int {
-	if l.compact {
-		return max(1, width)
-	}
-	return max(1, ui.PanelInnerWidth(th, width))
+	_ = th
+	return max(1, width)
 }

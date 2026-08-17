@@ -1,7 +1,5 @@
-⚡ strike /tmp/strike-golden   no model   host+sandbox                                 ready
-┌─ context ────────────────────────────────────────────────────────────────────────────────┐
-│ supervised · 1 skills · default permissions · host+sandbox · /provider to connect        │
-└──────────────────────────────────────────────────────────────────────────────────────────┘
+S STRIKE /tmp/strike-golden  NO MODEL host+sandbox                                     READY
+CONTEXT  supervised · 1 skills · default permissions · host+sandbox · /provider to connect
 
 
 
@@ -25,15 +23,17 @@
 
 
 
-                                       ▁▁▁▁▁▁▁▁▁▁▁▁▁▁
-                                       ⚡ S T R I K E
-                                       ▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+
+              01 / READY
+              Direct the work.
+              Describe an outcome. Type below.
 
                           ◦ / commands · ! shell · @ file mentions
-                  ┌─ chat ❯ ─────────────────────────────────────────────┐
+                  ┌─ INSTRUCTION ────────────────────────────────────────┐
                   │ ❯ Ask anything…  (/ commands, ! shell)               │
                   │ ❯                                                    │
                   └─ enter send · ctrl+j/shift+enter/alt+enter newline ──┘
+
 
 
 

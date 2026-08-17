@@ -55,18 +55,10 @@ func (m Model) homeContextBar(width int) string {
 	th := m.th.Resolve()
 	st := th.S()
 	parts := m.homeContextParts(th)
-	inner := ui.PanelInnerWidth(th, width)
-	body := st.Muted.Render(welcomeTruncate(dotJoin(th, parts...), inner, th.Icons.Ellipsis))
-	// Prefer a one-body-row panel; fall back to bare text when chrome won't fit.
-	if width < ui.ChromeMinOuter(th) || m.height < compactHeight {
-		return padHomeLine(th, body, width)
-	}
-	return ui.Panel(th, ui.PanelOpts{
-		Title:  "context",
-		Width:  width,
-		Height: 3,
-		Dim:    true,
-	}, body)
+	label := kicker(st.Muted, "context")
+	body := st.Muted.Render(welcomeTruncate(dotJoin(th, parts...), max(1, width-ansi.StringWidth(ansi.Strip(label))-th.Spacing.SM), th.Icons.Ellipsis))
+	line := label + themedSpace(th.Spacing.SM) + body
+	return padHomeLine(th, line, width)
 }
 
 // homeContextParts builds the muted summary segments for the home context bar.
@@ -157,15 +149,20 @@ func (m Model) homeCenterBand(width, height, promptOuterH int, compact bool, pop
 	th := m.th.Resolve()
 	promptW := homePromptWidth(width)
 
-	// Logo: full wordmark when space allows, else compact.
+	// Web empty-state: kicker + title + muted line when space allows.
+	kickerText, title, muted := "01 / ready", "Direct the work.", "Describe an outcome. Type below."
+	if m.firstRun {
+		kickerText = "01 / first run"
+		title = "Set up the workspace."
+	}
 	logo := ""
 	logoH := 0
 	if height >= 12 && width >= 18 {
-		logo = Logo(th)
-		logoH = 3
+		logo = emptyStateBlock(th, min(width, homePromptMaxWidth+8), kickerText, title, muted)
+		logoH = emptyStateHeight(kickerText, title, muted)
 	} else if height >= 8 && width >= 12 {
-		logo = LogoCompact(th)
-		logoH = 1
+		logo = emptyStateBlock(th, min(width, homePromptMaxWidth+8), kickerText, title, "")
+		logoH = emptyStateHeight(kickerText, title, "")
 	}
 
 	recent := m.homeRecentLine(min(width, promptW+8))
@@ -353,13 +350,9 @@ func computeHomeLayout(width, height, composerRows, popupHeight int, danger bool
 	if danger {
 		h.danger = 1
 	}
-	// Context bar: 3-row panel when chrome fits, else 1 bare row.
+	// Context bar: one kicker row (web runtime strip).
 	if hasContext {
-		if h.compact || width < 6 {
-			h.context = 1
-		} else {
-			h.context = 3
-		}
+		h.context = 1
 	}
 	composerBorder := 0
 	if !h.compact {

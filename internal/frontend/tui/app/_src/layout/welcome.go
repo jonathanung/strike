@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"charm.land/bubbles/v2/key"
-	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/frontend/host"
@@ -14,16 +13,15 @@ import (
 
 const welcomeCardMinWidth = 26
 
-// welcomeView renders the empty-transcript dashboard directly into its allotted
-// rectangle. Its cards are fixed-height so their borders survive short views.
-// When space allows, a Logo/LogoCompact band sits above the card grid.
+// welcomeView renders the empty-transcript dashboard as the web empty-state
+// (kicker + title + muted line) plus unboxed section kickers. No bento tiles.
 func (m Model) welcomeView(width, height int) string {
 	th := m.th.Resolve()
 	if width <= 0 || height <= 0 {
 		return ""
 	}
 	if height < 3 {
-		return ui.Panel(th, ui.PanelOpts{Width: width, Height: height, Borderless: true}, m.welcomeKeys(width, height))
+		return welcomePadBlock(m.welcomeKeys(width, height), width)
 	}
 
 	gap := th.Spacing.SM
@@ -32,104 +30,125 @@ func (m Model) welcomeView(width, height int) string {
 		statuses = m.services.Auth.Statuses()
 	}
 	cards := m.welcomeCards(statuses)
-	columns := 1
-	if width >= 2*welcomeCardMinWidth+gap {
-		columns = 2
+
+	kickerText, title, muted := "01 / ready", "Direct the work.", "Describe an outcome. Type below."
+	if m.firstRun {
+		kickerText, title = "01 / first run", "Set up the workspace."
+	}
+	heroH := emptyStateHeight(kickerText, title, muted)
+	if height < heroH+3 {
+		heroH = 0
 	}
 
-	// Logo band only when it does not force dropping cards the no-logo layout
-	// would keep (content hierarchy wins over chrome). Use XS under the band so
-	// large SM themes still keep card body rows.
-	logoGap := th.Spacing.XS
-	logoBand, logoRows := "", 0
-	if cand, rows := welcomeLogoBand(th, width, height, logoGap); rows > 0 {
-		withLogo := append([]welcomeCard(nil), cards...)
-		for len(withLogo) > 1 && !welcomeFits(height-rows, len(withLogo), columns, gap) {
-			withLogo = welcomeDropCard(withLogo)
+	sectionAvail := func(hero int) int {
+		avail := height - hero
+		if hero > 0 && gap > 0 {
+			avail -= gap
 		}
-		without := append([]welcomeCard(nil), cards...)
-		for len(without) > 1 && !welcomeFits(height, len(without), columns, gap) {
-			without = welcomeDropCard(without)
-		}
-		if len(withLogo) >= len(without) && welcomeFits(height-rows, len(withLogo), columns, gap) {
-			logoBand, logoRows = cand, rows
-			cards = withLogo
-		}
+		return avail
 	}
-	cardHeight := height - logoRows
-	for len(cards) > 1 && !welcomeFits(cardHeight, len(cards), columns, gap) {
+	// Prefer keeping eligible sections over the empty-state hero.
+	if heroH > 0 && !welcomeSectionFits(sectionAvail(heroH), cards, gap) {
+		heroH = 0
+	}
+	for len(cards) > 1 && !welcomeSectionFits(sectionAvail(heroH), cards, gap) {
 		cards = welcomeDropCard(cards)
 	}
-	rows := (len(cards) + columns - 1) / columns
-	if !welcomeFits(cardHeight, len(cards), columns, gap) {
-		return ui.Panel(th, ui.PanelOpts{Width: width, Height: height, Borderless: true}, m.welcomeKeys(width, height))
+	if len(cards) == 0 {
+		if heroH > 0 {
+			return welcomePadBlock(emptyStateBlock(th, width, kickerText, title, muted), width)
+		}
+		return welcomePadBlock(m.welcomeKeys(width, height), width)
 	}
 
-	rowHeights := welcomeRowHeights(cards, rows, columns, cardHeight-gap*(rows-1))
-	rowWidth := width
-	cardWidth := width
-	if columns == 2 {
-		cardWidth = (width - gap) / 2
-	}
-	blocks := make([]string, 0, rows)
-	for row := 0; row < rows; row++ {
-		start := row * columns
-		end := min(start+columns, len(cards))
-		parts := make([]string, 0, 2*(end-start)-1)
-		for _, card := range cards[start:end] {
-			if len(parts) > 0 {
-				parts = append(parts, themedSpace(gap))
-			}
-			outerWidth := cardWidth
-			if columns == 2 && end-start == 1 {
-				outerWidth = width
-			}
-			inner := ui.PanelInnerWidth(th, outerWidth)
-			bodyRows := max(0, rowHeights[row]-2)
-			// Left-pane focus highlights only the composer (prompt box). Welcome
-			// cards stay unfocused; primary still avoids Dim for calm hierarchy.
-			parts = append(parts, ui.Panel(th, ui.PanelOpts{
-				Title:  welcomeCardTitle(th, card.title, card.tone),
-				Width:  outerWidth,
-				Height: rowHeights[row],
-				Dim:    !card.primary || m.focus == focusRight || m.modal != nil,
-				Tone:   ui.ToneDefault,
-			}, card.body(inner, bodyRows)))
+	parts := make([]string, 0, height)
+	used := 0
+	if heroH > 0 {
+		parts = append(parts, emptyStateBlock(th, width, kickerText, title, muted))
+		used += heroH
+		for i := 0; i < gap && used < height; i++ {
+			parts = append(parts, themedSpace(width))
+			used++
 		}
-		block := lipgloss.JoinHorizontal(lipgloss.Top, parts...)
-		blocks = append(blocks, welcomePadBlock(block, rowWidth))
 	}
-	grid := welcomePadBlock(lipgloss.JoinVertical(lipgloss.Left, joinWelcomeRows(blocks, gap)...), width)
-	if logoBand == "" {
-		return grid
+
+	remain := height - used
+	sectionGapTotal := gap * max(0, len(cards)-1)
+	bodyBudget := max(0, remain-len(cards)-sectionGapTotal)
+	// Each section: 1 kicker row + at least 1 body row when space allows.
+	bodyEach := make([]int, len(cards))
+	sumBody := 0
+	for i := range cards {
+		bodyEach[i] = 1
+		if cards[i].title == "recent prompts" {
+			bodyEach[i] = 3
+		}
+		sumBody += bodyEach[i]
 	}
-	// Join logo, gap rows, and grid as separate vertical parts so each line is
-	// padded to width (embedded trailing newlines on the band broke split gutters).
-	parts := []string{logoBand}
-	if logoGap > 0 {
-		parts = append(parts, make([]string, logoGap)...)
+	extra := bodyBudget - sumBody
+	for extra > 0 {
+		grew := false
+		for i := range cards {
+			if extra == 0 {
+				break
+			}
+			want := max(1, cards[i].desired-1)
+			if bodyEach[i] < want {
+				bodyEach[i]++
+				extra--
+				grew = true
+			}
+		}
+		if !grew {
+			break
+		}
 	}
-	parts = append(parts, grid)
-	return welcomePadBlock(lipgloss.JoinVertical(lipgloss.Left, parts...), width)
+
+	for i, card := range cards {
+		if used >= height {
+			break
+		}
+		if i > 0 && gap > 0 && used < height {
+			for g := 0; g < gap && used < height; g++ {
+				parts = append(parts, themedSpace(width))
+				used++
+			}
+		}
+		if used >= height {
+			break
+		}
+		parts = append(parts, padInspectorLine(th, welcomeCardTitle(th, card.title, card.tone), width))
+		used++
+		bodyRows := bodyEach[i]
+		if used+bodyRows > height {
+			bodyRows = max(0, height-used)
+		}
+		if bodyRows > 0 {
+			parts = append(parts, card.body(width, bodyRows))
+			used += bodyRows
+		}
+	}
+	out := welcomePadBlock(strings.Join(parts, "\n"), width)
+	rows := strings.Split(out, "\n")
+	if len(rows) > height {
+		rows = rows[:height]
+	}
+	for len(rows) < height {
+		rows = append(rows, themedSpace(width))
+	}
+	for i := range rows {
+		rows[i] = padInspectorLine(th, rows[i], width)
+	}
+	return strings.Join(rows, "\n")
 }
 
-// welcomeLogoBand returns a themed wordmark and the rows it consumes (including
-// following gap). Reserved for tall empty sessions so normal 80×24 / 100×30
-// dashboards keep full card bodies; callers also skip the band when it would
-// force dropping cards. The returned string is a single block without trailing
-// gap newlines — callers insert gap rows when composing.
-func welcomeLogoBand(th theme.Theme, width, height, gap int) (string, int) {
-	const fullLogoH = 3
-	const compactLogoH = 1
-	// Two full desired-height card rows (~10 each) plus gaps — tall viewport.
-	minBelow := 10 + gap + 10
-	if height >= fullLogoH+gap+minBelow && width >= 18 {
-		return welcomePadBlock(Logo(th), width), fullLogoH + gap
+func welcomeSectionFits(height int, cards []welcomeCard, gap int) bool {
+	if len(cards) == 0 {
+		return true
 	}
-	if height >= compactLogoH+gap+minBelow && width >= 12 {
-		return welcomePadBlock(LogoCompact(th), width), compactLogoH + gap
-	}
-	return "", 0
+	// 1 kicker + 1 body per section, plus inter-section gaps.
+	need := 2*len(cards) + gap*max(0, len(cards)-1)
+	return height >= need
 }
 
 type welcomeCard struct {
@@ -140,8 +159,7 @@ type welcomeCard struct {
 	body    func(width, rows int) string
 }
 
-// welcomeCardTitle paints the card title in its soft-bento accent tone.
-// Pre-styled SGR is preserved by ui.Panel solidEdge (no body Tone elevation).
+// welcomeCardTitle paints the section kicker in its accent tone.
 func welcomeCardTitle(th theme.Theme, title string, tone ui.Tone) string {
 	th = th.Resolve()
 	if title == "" {
@@ -149,13 +167,13 @@ func welcomeCardTitle(th theme.Theme, title string, tone ui.Tone) string {
 	}
 	switch tone {
 	case ui.ToneAccentAlt:
-		return th.S().AccentAltStrong.Render(title)
+		return kicker(th.S().AccentAltStrong, title)
 	case ui.ToneSuccess:
-		return th.S().SuccessStrong.Render(title)
+		return kicker(th.S().SuccessStrong, title)
 	case ui.ToneMuted:
-		return th.S().MutedStrong.Render(title)
+		return kicker(th.S().MutedStrong, title)
 	default:
-		return th.S().Title.Render(title)
+		return kicker(th.S().Title, title)
 	}
 }
 

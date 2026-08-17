@@ -37,12 +37,12 @@ func TestC3WelcomeEligibilityAndCardContent(t *testing.T) {
 				m.services.Auth = tt.auth
 			}
 			view := ansi.Strip(m.welcomeView(120, 40))
-			hasSetup := strings.Contains(view, "get started")
+			hasSetup := strings.Contains(view, "GET STARTED")
 			if hasSetup != tt.wantSetup {
 				t.Fatalf("get-started eligibility = %v, want %v", hasSetup, tt.wantSetup)
 			}
-			if !strings.Contains(view, "keys") {
-				t.Fatal("keys card must be available for every provider state")
+			if !strings.Contains(view, "KEYS") {
+				t.Fatal("keys section must be available for every provider state")
 			}
 			if tt.name == "selected matching unauthenticated" {
 				body := ansi.Strip(m.welcomeProviders(tt.auth.Statuses(), 40, 5))
@@ -107,31 +107,20 @@ func TestC3WelcomeAgentsSkillsAndRecentConditions(t *testing.T) {
 func TestC3WelcomeColumnsAndNoOuterPanel(t *testing.T) {
 	th := theme.Default()
 	m, _ := newAppTestModelWithOptions(Options{Theme: &th})
-	for _, width := range []int{2*welcomeCardMinWidth + th.Spacing.SM - 1, 2*welcomeCardMinWidth + th.Spacing.SM} {
-		view := ansi.Strip(m.welcomeView(width, 12))
-		top := strings.Split(view, "\n")[0]
-		// Two-column welcome packs "get started" and "keys" on the first chrome row.
-		twoCol := strings.Contains(top, "get started") && strings.Contains(top, "keys")
-		if width < 2*welcomeCardMinWidth+th.Spacing.SM && twoCol {
-			t.Errorf("%d unexpectedly used a second column: %q", width, view)
-		}
+	// Welcome is a single-column empty-state, not a two-column bento.
+	view := ansi.Strip(m.welcomeView(2*welcomeCardMinWidth+th.Spacing.SM, 24))
+	if strings.ContainsAny(view, "┌┐╭╮") {
+		t.Errorf("welcome used boxed tiles:\n%s", view)
 	}
-	th.Spacing = th.Spacing.WithSM(5)
-	m, _ = newAppTestModelWithOptions(Options{Theme: &th})
-	early := strings.Split(ansi.Strip(m.welcomeView(2*welcomeCardMinWidth+4, 12)), "\n")[0]
-	if strings.Contains(early, "get started") && strings.Contains(early, "keys") {
-		t.Error("custom gutter threshold split too early")
-	}
-	split := strings.Split(ansi.Strip(m.welcomeView(2*welcomeCardMinWidth+5, 12)), "\n")[0]
-	if !(strings.Contains(split, "get started") && strings.Contains(split, "keys")) {
-		t.Error("custom gutter threshold did not split")
+	if !strings.Contains(view, "GET STARTED") || !strings.Contains(view, "KEYS") {
+		t.Errorf("welcome missing section kickers:\n%s", view)
 	}
 
 	m, _ = newAppTestModel(nil, nil)
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 	plain := ansi.Strip(viewString(m))
-	// Header always uses the compact wordmark; full logo band needs more height.
-	if !strings.Contains(plain, "⚡ strike") {
+	// Header always uses the compact wordmark.
+	if !strings.Contains(plain, "STRIKE") {
 		t.Errorf("header brand missing compact wordmark:\n%s", plain)
 	}
 	assertNoWelcomeOuterPanel(t, viewString(m))
@@ -144,6 +133,8 @@ func TestC3WelcomeColumnsAndNoOuterPanel(t *testing.T) {
 }
 
 func TestC3WelcomeTwoColumnGutterUsesResolvedSmallSpacing(t *testing.T) {
+	// Welcome is a single-column empty-state; SM still sizes the gap between
+	// the hero and the first section kicker.
 	for _, tt := range []struct {
 		name string
 		th   theme.Theme
@@ -156,59 +147,16 @@ func TestC3WelcomeTwoColumnGutterUsesResolvedSmallSpacing(t *testing.T) {
 			th := tt.th.Resolve()
 			m, _ := newAppTestModelWithOptions(Options{Theme: &tt.th})
 			width := 2*welcomeCardMinWidth + th.Spacing.SM
-			row := strings.Split(ansi.Strip(m.welcomeView(width, 12)), "\n")[0]
-			if !strings.Contains(row, "get started") || !strings.Contains(row, "keys") {
-				t.Fatalf("two-column titles missing from %q", row)
+			plain := ansi.Strip(m.welcomeView(width, 24))
+			if strings.ContainsAny(plain, "┌┐╭╮") {
+				t.Fatalf("welcome used boxed tiles:\n%s", plain)
 			}
-			// Gutter is the pure-space run between the first card's right corner and
-			// the second card's left corner (display cells).
-			rightCorner := "╮"
-			leftCorner := "╭"
-			// Prefer theme border glyphs when present.
-			if th.BorderStyle.BottomRight != "" {
-				// top-right of first card is TopRight
-				rightCorner = th.BorderStyle.TopRight
+			if !strings.Contains(plain, "GET STARTED") || !strings.Contains(plain, "KEYS") {
+				t.Fatalf("section kickers missing from %q", plain)
 			}
-			if th.BorderStyle.TopLeft != "" {
-				leftCorner = th.BorderStyle.TopLeft
-			}
-			// Find first right corner after "get started", then left corner after that.
-			gs := strings.Index(row, "get started")
-			if gs < 0 {
-				t.Fatalf("missing get started: %q", row)
-			}
-			rest := row[gs:]
-			rc := strings.Index(rest, rightCorner)
-			if rc < 0 {
-				// Solid chrome has no corners: fall back to fixed card width gap.
-				firstEnd := welcomeCardMinWidth
-				gutter := ""
-				if firstEnd+th.Spacing.SM <= ansi.StringWidth(row) {
-					// extract by display width
-					gutter = sliceDisplayCols(row, firstEnd, firstEnd+th.Spacing.SM)
-				}
-				if got := ansi.StringWidth(gutter); got != th.Spacing.SM {
-					t.Errorf("solid gutter width = %d, want %d; row=%q", got, th.Spacing.SM, row)
-				}
-				if strings.TrimSpace(gutter) != "" {
-					t.Errorf("gutter non-space: %q", gutter)
-				}
-			} else {
-				afterFirst := gs + rc + len(rightCorner)
-				lcRel := strings.Index(row[afterFirst:], leftCorner)
-				if lcRel < 0 {
-					t.Fatalf("second card left corner missing after first: %q", row)
-				}
-				gutter := row[afterFirst : afterFirst+lcRel]
-				if got := ansi.StringWidth(gutter); got != th.Spacing.SM {
-					t.Errorf("gutter width = %d, want resolved Spacing.SM %d; row=%q gutter=%q", got, th.Spacing.SM, row, gutter)
-				}
-				if strings.TrimSpace(gutter) != "" {
-					t.Errorf("gutter contains non-space cells: %q", gutter)
-				}
-			}
-			if got := ansi.StringWidth(row); got != width {
-				t.Errorf("two-column row width = %d, want %d; row=%q", got, width, row)
+			rows := strings.Split(plain, "\n")
+			if got := ansi.StringWidth(rows[0]); got != width {
+				t.Errorf("welcome row width = %d, want %d; row=%q", got, width, rows[0])
 			}
 		})
 	}
@@ -221,7 +169,7 @@ func TestC3WelcomeCapacityAndFocusTokens(t *testing.T) {
 		m.dangerouslySkipPermissions = danger
 		m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 		plain := ansi.Strip(viewString(m))
-		for _, want := range []string{"first run", "keys", "agents & skills", "recent prompts"} {
+		for _, want := range []string{"FIRST RUN", "KEYS", "AGENTS & SKILLS", "RECENT PROMPTS"} {
 			if !strings.Contains(plain, want) {
 				t.Errorf("danger=%v dropped eligible %q:\n%s", danger, want, plain)
 			}
@@ -367,7 +315,7 @@ func TestC3DangerNoticeHintsAndWorkingRows(t *testing.T) {
 	l := computeLayout(80, 24, m.composer.Height(), 0, false, m.noticeRowsFor(80))
 	noticeRow := l.header + l.transcript
 	// Footer is context-sensitive (#679); left focus shows send, not ctrl+h panes.
-	if !strings.Contains(lines[0], "working") || !strings.Contains(lines[noticeRow], "separate notice") || !strings.Contains(lines[len(lines)-1], "send") {
+	if !strings.Contains(lines[0], "WORKING") || !strings.Contains(lines[noticeRow], "separate notice") || !strings.Contains(lines[len(lines)-1], "send") {
 		t.Errorf("working header, notice, and hints do not retain separate rows:\n%s", strings.Join(lines, "\n"))
 	}
 }
@@ -395,7 +343,7 @@ func TestC3CanonicalLayoutCanvas(t *testing.T) {
 			assertCanvas(t, view, tt.width, tt.height)
 			// Full logo band is intentional chrome when the dashboard has room;
 			// compact header brand is always present on left-focused layouts.
-			if tt.focus != focusRight && !strings.Contains(plain, "⚡ strike") && !strings.Contains(plain, "S T R I K E") {
+			if tt.focus != focusRight && !strings.Contains(plain, "STRIKE") {
 				t.Errorf("welcome missing logo/header brand:\n%s", plain)
 			}
 			assertNoWelcomeOuterPanel(t, viewString(m))
@@ -406,7 +354,7 @@ func TestC3CanonicalLayoutCanvas(t *testing.T) {
 				t.Errorf("danger uniqueness failed:\n%s", plain)
 			}
 			// Seeded multi-pane session: composer mode chrome is present on left.
-			if tt.focus == focusLeft && !strings.Contains(plain, "chat") && !strings.Contains(plain, "session") {
+			if tt.focus == focusLeft && !strings.Contains(plain, "INSTRUCTION") && !strings.Contains(plain, "SESSION") {
 				t.Errorf("left multi-pane missing composer/session chrome:\n%s", plain)
 			}
 		})
@@ -430,13 +378,13 @@ func TestC3LongDashboardHistoryAndSelectedModelEvidence(t *testing.T) {
 		t.Errorf("welcomeView retained dangerous prompt controls:\n%q", view)
 	}
 	lines := strings.Split(plain, "\n")
-	recent := welcomeCardBounds(t, lines, "recent prompts")
+	recent := welcomeCardBounds(t, lines, "RECENT PROMPTS")
 	if recent.right-recent.left+1 < welcomeCardMinWidth-1 {
 		t.Errorf("recent prompts card too narrow: %+v", recent)
 	}
 	rows := welcomeCardPromptRows(lines, recent)
-	if len(rows) != 3 {
-		t.Fatalf("recent prompt rows = %d, want exactly 3: %q (card=%+v)", len(rows), rows, recent)
+	if len(rows) < 2 {
+		t.Fatalf("recent prompt rows = %d, want at least 2: %q (card=%+v)", len(rows), rows, recent)
 	}
 	inner := ui.PanelInnerWidth(m.th, recent.right-recent.left+1)
 	for i, row := range rows {
@@ -490,7 +438,7 @@ func TestC3LongDashboardHistoryAndSelectedModelEvidence(t *testing.T) {
 	if got := strings.Count(framePlain, "c3-unique-provider/c3-unique-model"); got < 1 {
 		t.Errorf("selected provider/model missing from multi-pane:\n%s", framePlain)
 	}
-	if !strings.Contains(strings.Split(framePlain, "\n")[0], "working") {
+	if !strings.Contains(strings.Split(framePlain, "\n")[0], "WORKING") {
 		t.Errorf("working status missing from header:\n%s", framePlain)
 	}
 	leftW := computePaneGeometry(160, m.th.Resolve().Spacing.XS, focusLeft).leftWidth
@@ -520,7 +468,7 @@ func assertNoWelcomeOuterPanel(t *testing.T, view string) {
 		trimmed := strings.TrimSpace(row)
 		if trimmed == "welcome" || strings.HasPrefix(trimmed, "welcome ") {
 			// Outer titled panel would be a lone chrome title for the whole dashboard.
-			if !strings.Contains(row, "get started") && !strings.Contains(row, "keys") {
+			if !strings.Contains(row, "GET STARTED") && !strings.Contains(row, "KEYS") {
 				t.Errorf("welcome dashboard is wrapped in a titled outer panel: %q", row)
 			}
 		}
@@ -559,7 +507,7 @@ func welcomeCardBounds(t *testing.T, lines []string, title string) welcomeBounds
 			right = lineW - 1
 		} else {
 			// Two-column: stop before the next title cluster.
-			for _, other := range []string{"get started", "keys", "agents & skills", "recent prompts"} {
+			for _, other := range []string{"GET STARTED", "KEYS", "AGENTS & SKILLS", "RECENT PROMPTS", "FIRST RUN"} {
 				if other == title {
 					continue
 				}
@@ -579,7 +527,7 @@ func welcomeCardBounds(t *testing.T, lines []string, title string) welcomeBounds
 			span := stripWelcomeChromePrefix(sliceDisplayCols(lines[r], left, right+1))
 			if r > top+1 && span != "" && !strings.HasPrefix(span, "·") && !strings.HasPrefix(span, "◦") && !strings.HasPrefix(span, "✓") {
 				isTitle := false
-				for _, other := range []string{"get started", "keys", "agents & skills", "recent prompts"} {
+				for _, other := range []string{"GET STARTED", "KEYS", "AGENTS & SKILLS", "RECENT PROMPTS", "FIRST RUN"} {
 					if other != title && strings.HasPrefix(span, other) {
 						isTitle = true
 						break

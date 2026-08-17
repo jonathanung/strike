@@ -97,15 +97,15 @@ func TestReasoningDeltaHiddenByDefaultAndShownWhenToggled(t *testing.T) {
 	if !strings.Contains(shown, "secret-cot-chain") {
 		t.Errorf("reasoning missing with toggle on:\n%s", shown)
 	}
-	if !strings.Contains(shown, "thinking") {
+	if !strings.Contains(shown, "THINKING") {
 		t.Errorf("thinking label missing with toggle on:\n%s", shown)
 	}
 	if !strings.Contains(shown, "final-answer-body") {
 		t.Errorf("answer missing with toggle on:\n%s", shown)
 	}
 	header := ansi.Strip(m.headerView(100))
-	if !strings.Contains(header, ansi.Strip(ui.Badge(m.th, ui.ToneMuted, "think"))) {
-		t.Errorf("header does not render think as muted badge:\n%s", header)
+	if !strings.Contains(header, ansi.Strip(headerKicker(m.th, ui.ToneMuted, "think"))) {
+		t.Errorf("header does not render THINK as muted kicker:\n%s", header)
 	}
 }
 
@@ -142,7 +142,7 @@ func TestReasoningCellDistinctFromAssistant(t *testing.T) {
 		t.Fatalf("cell[1] = %T, want *assistantCell", m.cells[1])
 	}
 	out := (&reasoningCell{text: "cot-only"}).render(60, m.th)
-	if !strings.Contains(ansi.Strip(out), "thinking") {
+	if !strings.Contains(ansi.Strip(out), "THINKING") {
 		t.Errorf("reasoning cell missing thinking label:\n%s", out)
 	}
 	if strings.Contains(ansi.Strip(out), "strike") {
@@ -159,11 +159,11 @@ func TestThinkingPlaceholderWhileTurnRunningWithNoText(t *testing.T) {
 	m.refreshViewport()
 
 	body := ansi.Strip(m.viewport.View())
-	if !strings.Contains(body, "thinking") {
+	if !strings.Contains(body, "THINKING") {
 		t.Errorf("live thinking chrome missing while turn runs with no text:\n%s", body)
 	}
 	header := ansi.Strip(m.headerView(100))
-	if !strings.Contains(header, "working") {
+	if !strings.Contains(header, "WORKING") {
 		t.Errorf("header working status missing:\n%s", header)
 	}
 

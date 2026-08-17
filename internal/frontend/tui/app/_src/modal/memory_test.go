@@ -238,7 +238,7 @@ func TestMemoryCommandManyEntriesOpensPaneNotNotice(t *testing.T) {
 		t.Fatalf("opened modal %T", m.modal)
 	}
 	view := ansi.Strip(viewString(m))
-	if !strings.Contains(view, "memory") {
+	if !strings.Contains(view, "MEMORY") {
 		t.Fatalf("view missing memory pane title:\n%s", view)
 	}
 	// More than 5 rows of content available in the right pane body.

@@ -66,20 +66,21 @@ func (m Model) headerView(width int) string {
 	var chips []headerChip
 	provider, model := m.chromeProviderModel()
 	if provider == "" {
-		chips = append(chips, headerChip{100, ui.Badge(th, ui.ToneMuted, "no model")})
+		chips = append(chips, headerChip{100, headerKicker(th, ui.ToneMuted, "no model")})
 	} else {
 		if model == "" {
 			model = "default"
 		}
-		chips = append(chips, headerChip{100, ui.Badge(th, ui.ToneAccent, provider+"/"+model)})
+		// Values stay mixed-case; kickers (no model, FAST, YOLO) are uppercase.
+		chips = append(chips, headerChip{100, toneStyle(th, ui.ToneAccent).Render(provider + "/" + model)})
 		if tone, ok := providerHealthTone(m); ok {
-			chips = append(chips, headerChip{40, ui.Badge(th, tone, ic.Dot)})
+			chips = append(chips, headerChip{40, toneStyle(th, tone).Render(ic.Dot)})
 		}
 	}
 	// Same display-safety gate as the palette and welcome card: agents are
 	// not host-filtered, so every render site guards the name itself.
 	if m.agentName != "" && validAgentName(m.agentName) {
-		chips = append(chips, headerChip{90, ui.Badge(th, stateTone, ic.Agent+inlineGap+sanitizeDisplayData(m.agentName))})
+		chips = append(chips, headerChip{90, toneStyle(th, stateTone).Render(ic.Agent + inlineGap + sanitizeDisplayData(m.agentName))})
 	}
 	if m.phaseName != "" || m.phaseWorkflow != "" {
 		label := "phase" + inlineGap
@@ -99,34 +100,34 @@ func (m Model) headerView(width int) string {
 			tone = ui.ToneWarning
 			label += inlineGap + sanitizeDisplayData(m.phaseStatus)
 		}
-		chips = append(chips, headerChip{30, ui.Badge(th, tone, label)})
+		chips = append(chips, headerChip{30, toneStyle(th, tone).Render(label)})
 	}
 	if m.effort != protocol.EffortDefault {
-		chips = append(chips, headerChip{20, ui.Badge(th, ui.ToneMuted, "effort"+inlineGap+string(m.effort))})
+		chips = append(chips, headerChip{20, headerKicker(th, ui.ToneMuted, "effort"+inlineGap+string(m.effort))})
 	}
 	// Normal posture stays out of the header; exceptional autonomy and permission
 	// modes remain prominent because they change how the agent may act.
 	if m.autonomy.Normalize() != protocol.AutonomySupervised {
-		chips = append(chips, headerChip{85, ui.Badge(th, ui.ToneAccentAlt, "auto"+inlineGap+m.autonomy.Short())})
+		chips = append(chips, headerChip{85, headerKicker(th, ui.ToneAccentAlt, "auto"+inlineGap+m.autonomy.Short())})
 	}
 	if m.permMode.Normalize() != protocol.PermissionModeDefault {
-		chips = append(chips, headerChip{85, ui.Badge(th, permissionModeBadgeTone(m.permMode), m.permMode.Short())})
+		chips = append(chips, headerChip{85, headerKicker(th, permissionModeBadgeTone(m.permMode), m.permMode.Short())})
 	}
 	// Isolation ladder badge (E12.7): state the posture; do not grade it.
 	if iso := m.isolationLabel(); iso != "" {
-		chips = append(chips, headerChip{84, ui.Badge(th, ui.ToneMuted, iso)})
+		chips = append(chips, headerChip{84, toneStyle(th, ui.ToneMuted).Render(iso)})
 	}
 	if secs := m.effectivePermissionAutoApproveSeconds(); secs > 0 {
-		chips = append(chips, headerChip{80, ui.Badge(th, ui.ToneWarning, "auto-allow"+inlineGap+itoa(secs)+"s")})
+		chips = append(chips, headerChip{80, headerKicker(th, ui.ToneWarning, "auto-allow"+inlineGap+itoa(secs)+"s")})
 	}
 	if label := m.pendingBlockingLabel(); label != "" {
-		chips = append(chips, headerChip{80, ui.Badge(th, ui.ToneWarning, label)})
+		chips = append(chips, headerChip{80, headerKicker(th, ui.ToneWarning, label)})
 	}
 	if m.fastEnabled {
-		chips = append(chips, headerChip{80, ui.Badge(th, ui.ToneWarning, "fast")})
+		chips = append(chips, headerChip{80, headerKicker(th, ui.ToneWarning, "fast")})
 	}
 	if m.showThinking {
-		chips = append(chips, headerChip{10, ui.Badge(th, ui.ToneMuted, "think")})
+		chips = append(chips, headerChip{10, headerKicker(th, ui.ToneMuted, "think")})
 	}
 	// Session cost envelope chip at 50/80/100% (#577).
 	if chip, ok := sessionBudgetHeaderChip(th, m); ok {
@@ -142,20 +143,20 @@ func (m Model) headerView(width int) string {
 	switch state {
 	case theme.AgentStateWorking:
 		if m.verifying && !m.turnRunning {
-			right = m.spin.View() + inlineGap + statusStyle.Render(detailJoin(th, "verifying", "gates"))
+			right = m.spin.View() + inlineGap + statusStyle.Render(detailJoin(th, strings.ToUpper("verifying"), "gates"))
 		} else {
 			right = m.spin.View() + inlineGap + statusStyle.Render(m.workingStatusLabel(th))
 		}
 	case theme.AgentStateAttention:
-		right = statusStyle.Render(detailJoin(th, state.Label(), "respond to prompt"))
+		right = statusStyle.Render(detailJoin(th, strings.ToUpper(state.Label()), "respond to prompt"))
 	case theme.AgentStateError:
-		right = statusStyle.Render(state.Label())
+		right = statusStyle.Render(strings.ToUpper(state.Label()))
 	default:
 		// Sticky canceled chrome after interrupt until the next turn (#809).
 		if m.lastStopReason == "interrupted" {
-			right = th.S().Warning.Render("canceled")
+			right = th.S().Warning.Render("CANCELED")
 		} else {
-			right = statusStyle.Render(state.Label())
+			right = statusStyle.Render(strings.ToUpper(state.Label()))
 		}
 	}
 
@@ -285,11 +286,11 @@ func (m Model) workingStatusLabel(th theme.Theme) string {
 		parts = append(parts, fmt.Sprintf("%d tool calls", m.toolCallsThisTurn))
 	}
 	inner := dotJoin(th, parts...)
-	return detailJoin(th, theme.AgentStateWorking.Label()+" ("+inner+")", "esc")
+	return detailJoin(th, strings.ToUpper(theme.AgentStateWorking.Label())+" ("+inner+")", "esc")
 }
 
 // transcriptView renders the empty dashboard directly; populated transcripts
-// retain their session panel.
+// use a kicker row plus left-accent messages (no boxed session tile).
 func (m Model) transcriptView(compact bool, width, height int) string {
 	if height <= 0 {
 		return ""
@@ -300,17 +301,10 @@ func (m Model) transcriptView(compact bool, width, height int) string {
 			if compact {
 				return body
 			}
-			return ui.Panel(m.th, ui.PanelOpts{
-				Title:   m.sessionPanelTitle(),
-				Footer:  m.transcriptFooter(),
-				Width:   width,
-				Height:  height,
-				Focused: m.focus == focusLeft && m.modal == nil,
-				Dim:     m.focus == focusRight || m.modal != nil,
-			}, body)
+			return m.transcriptChrome(width, height, body)
 		}
 		if m.viewingChild() {
-			// Empty subagent log still shows a panel (not the root welcome card).
+			// Empty subagent log still shows a kicker (not the root welcome card).
 			// Distinguish live children so a brief empty poll is not alarming.
 			msg := "subagent transcript empty"
 			if m.childIsRunning(m.viewingID) {
@@ -320,14 +314,7 @@ func (m Model) transcriptView(compact bool, width, height int) string {
 			if compact {
 				return body
 			}
-			return ui.Panel(m.th, ui.PanelOpts{
-				Title:   m.sessionPanelTitle(),
-				Footer:  m.transcriptFooter(),
-				Width:   width,
-				Height:  height,
-				Focused: m.focus == focusLeft && m.modal == nil,
-				Dim:     m.focus == focusRight || m.modal != nil,
-			}, body)
+			return m.transcriptChrome(width, height, body)
 		}
 		// Past-onboarding (spawned root or multi-pane): show a simple
 		// placeholder instead of the full welcome dashboard. The welcome
@@ -341,14 +328,7 @@ func (m Model) transcriptView(compact bool, width, height int) string {
 			if compact {
 				return body
 			}
-			return ui.Panel(m.th, ui.PanelOpts{
-				Title:   m.sessionPanelTitle(),
-				Footer:  m.transcriptFooter(),
-				Width:   width,
-				Height:  height,
-				Focused: m.focus == focusLeft && m.modal == nil,
-				Dim:     m.focus == focusRight || m.modal != nil,
-			}, body)
+			return m.transcriptChrome(width, height, body)
 		}
 		return m.welcomeView(width, height)
 	}
@@ -356,14 +336,42 @@ func (m Model) transcriptView(compact bool, width, height int) string {
 	if compact {
 		return body
 	}
-	return ui.Panel(m.th, ui.PanelOpts{
-		Title:   m.sessionPanelTitle(),
-		Footer:  m.transcriptFooter(),
-		Width:   width,
-		Height:  height,
-		Focused: m.focus == focusLeft && m.modal == nil,
-		Dim:     m.focus == focusRight || m.modal != nil,
-	}, body)
+	return m.transcriptChrome(width, height, body)
+}
+
+// transcriptChrome is the session kicker plus body — web .message hierarchy,
+// not a ┌┐ panel.
+func (m Model) transcriptChrome(width, height int, body string) string {
+	if height <= 0 {
+		return ""
+	}
+	th := m.th.Resolve()
+	titleText := m.sessionPanelTitle()
+	title := th.S().Muted.Render(titleText)
+	switch strings.ToLower(strings.TrimSpace(titleText)) {
+	case "session", "subagent":
+		title = kicker(th.S().Muted, titleText)
+	}
+	footer := m.transcriptFooter()
+	head := ui.StatusBar(th, max(1, width), title, footer)
+	if height == 1 {
+		return head
+	}
+	bodyRows := strings.Split(body, "\n")
+	if body == "" {
+		bodyRows = nil
+	}
+	need := height - 1
+	if len(bodyRows) > need {
+		bodyRows = bodyRows[:need]
+	}
+	for len(bodyRows) < need {
+		bodyRows = append(bodyRows, themedSpace(width))
+	}
+	for i := range bodyRows {
+		bodyRows[i] = padInspectorLine(th, bodyRows[i], width)
+	}
+	return head + "\n" + strings.Join(bodyRows, "\n")
 }
 
 // sessionPanelTitle is the transcript chrome label: auto-title when set.
@@ -489,36 +497,35 @@ func (m Model) composerView(compact bool, width, height int) string {
 	}, composer.View())
 }
 
-// composerTitle builds mode + glyph + status chips for the prompt panel edge.
+// composerTitle is the web .composer label: muted uppercase INSTRUCTION
+// kicker, with mode/status chips after it.
 func (m Model) composerTitle(th theme.Theme, focused bool) string {
 	th = th.Resolve()
 	st := th.S()
-	mode := m.composerInputMode()
-	modeStyled := st.Muted.Render(mode)
+	labelStyle := st.Muted
 	if focused {
-		modeStyled = st.AccentStrong.Render(mode)
+		labelStyle = st.Accent
 	}
-	glyph := st.Accent.Render(th.Icons.Prompt)
-	if focused {
-		glyph = st.AccentStrong.Render(th.Icons.Prompt)
+	title := kicker(labelStyle, "instruction")
+	if mode := m.composerInputMode(); mode != "chat" {
+		title += themedSpace(th.Spacing.SM) + kicker(st.Muted, mode)
 	}
-	title := modeStyled + themedSpace(th.Spacing.XS) + glyph
 	// Send-state chip when draft is non-empty and left-focused.
 	if focused && strings.TrimSpace(m.composer.Value()) != "" && m.modal == nil {
 		label := "ready"
 		if m.turnRunning {
 			label = "queue"
 		}
-		title += themedSpace(th.Spacing.SM) + ui.Badge(th, ui.ToneSuccess, label)
+		title += themedSpace(th.Spacing.SM) + headerKicker(th, ui.ToneSuccess, label)
 	}
 	if n := len(m.pendingImages); n > 0 {
-		title += themedSpace(th.Spacing.SM) + ui.Badge(th, ui.ToneAccentAlt, itoa(n)+" img")
+		title += themedSpace(th.Spacing.SM) + headerKicker(th, ui.ToneAccentAlt, itoa(n)+" img")
 	}
 	if badge := m.inputQueueBadge(); badge != "" {
 		title += themedSpace(th.Spacing.SM) + badge
 	}
 	if label := m.pendingBlockingLabel(); label != "" {
-		title += themedSpace(th.Spacing.SM) + ui.Badge(th, ui.ToneWarning, label)
+		title += themedSpace(th.Spacing.SM) + headerKicker(th, ui.ToneWarning, label)
 	}
 	return title
 }
@@ -597,26 +604,27 @@ func (m Model) rightPaneSingle(width, height int, compact bool, active window, f
 		// Always paint the footer (focused or dim) so pane keybinds stay visible
 		// out of focus; KeyHints keeps the chrome row single-line.
 		if !compact && active.id() == agentsWindowID {
-			footer = agentsPaneFooter(m.th, ui.PanelInnerWidth(m.th, width))
+			footer = agentsPaneFooter(m.th, inspectorInnerWidth(m.th, width))
 		}
 		if !compact && active.id() == queueWindowID {
-			footer = queuePaneFooter(m.th, ui.PanelInnerWidth(m.th, width))
+			footer = queuePaneFooter(m.th, inspectorInnerWidth(m.th, width))
 		}
 		innerW, innerH := width, height
+		hasFooter := footer != ""
 		if nw, ok := active.(namedWindow); ok {
 			if nw.width > 0 {
 				innerW = nw.width
 			} else {
-				innerW = ui.PanelInnerWidth(m.th, width)
+				innerW = inspectorInnerWidth(m.th, width)
 			}
 			if nw.height > 0 {
 				innerH = nw.height
 			} else {
-				innerH = ui.PanelInnerHeightFor(m.th, width, height)
+				innerH = inspectorInnerHeight(height, hasFooter)
 			}
 		} else {
-			innerW = ui.PanelInnerWidth(m.th, width)
-			innerH = ui.PanelInnerHeightFor(m.th, width, height)
+			innerW = inspectorInnerWidth(m.th, width)
+			innerH = inspectorInnerHeight(height, hasFooter)
 		}
 		if compact {
 			innerW, innerH = width, height
@@ -633,15 +641,18 @@ func (m Model) rightPaneSingle(width, height int, compact bool, active window, f
 			body = active.view(m.th)
 		}
 	}
-	return ui.Panel(m.th, ui.PanelOpts{
-		Title:      title,
-		Footer:     footer,
-		Width:      max(0, width),
-		Height:     max(0, height),
-		Borderless: compact,
-		Focused:    focused,
-		Dim:        dim,
-	}, body)
+	if compact {
+		return ui.Panel(m.th, ui.PanelOpts{
+			Title:      title,
+			Footer:     footer,
+			Width:      max(0, width),
+			Height:     max(0, height),
+			Borderless: true,
+			Focused:    focused,
+			Dim:        dim,
+		}, body)
+	}
+	return inspectorFrame(m.th, title, footer, body, max(0, width), max(0, height), focused, dim)
 }
 
 func paneGutter(th theme.Theme, width, height int) string {
@@ -874,5 +885,5 @@ func sessionBudgetHeaderChip(th theme.Theme, m Model) (headerChip, bool) {
 			tone = ui.ToneDanger
 		}
 	}
-	return headerChip{75, ui.Badge(th, tone, label)}, true
+	return headerChip{75, headerKicker(th, tone, label)}, true
 }

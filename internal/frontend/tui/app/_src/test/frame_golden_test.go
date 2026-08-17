@@ -201,7 +201,7 @@ func TestBuiltinThemesRenderSmoke(t *testing.T) {
 				}
 			}
 			// Theme modal listing uses Name; frame should still show chrome titles.
-			if !strings.Contains(plain, "context") && !strings.Contains(plain, "get started") {
+			if !strings.Contains(plain, "CONTEXT") && !strings.Contains(plain, "GET STARTED") {
 				t.Fatalf("theme %s frame missing expected chrome:\n%s", entry.ID, plain)
 			}
 		})

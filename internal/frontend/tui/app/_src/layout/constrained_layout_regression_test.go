@@ -112,11 +112,15 @@ func TestConstrainedCanvasKeepsHeaderTranscriptDraftAndCompletionWithin20Rows(t 
 	view := viewString(m)
 	assertCanvas(t, view, 80, 20)
 	plain := ansi.Strip(view)
-	if !strings.Contains(strings.Split(plain, "\n")[0], "strike") {
+	if !strings.Contains(strings.Split(plain, "\n")[0], "STRIKE") {
 		t.Errorf("header was cropped despite a 20-row canvas:\n%s", plain)
 	}
-	if strings.Contains(plain, "session") {
-		t.Errorf("compact constrained transcript rendered a phantom session panel:\n%s", plain)
+	l := computeLayout(80, 20, m.composer.Height(), m.completionPopupHeight(), false)
+	if l.header < len(strings.Split(plain, "\n")) {
+		transcriptRow := strings.Split(plain, "\n")[l.header]
+		if strings.ContainsAny(transcriptRow, "╭╰┌└") {
+			t.Errorf("constrained transcript rendered boxed session chrome: %q", transcriptRow)
+		}
 	}
 	if m.composer.Height() > composerMaxHeight || m.completionPopupHeight() > completionMaxRows+2 {
 		t.Errorf("unbounded constrained input allocation: composer=%d popup=%d", m.composer.Height(), m.completionPopupHeight())
@@ -138,7 +142,7 @@ func TestPopulatedReviewerSessionKeepsOneTranscriptRowWithoutTwoBorderRows(t *te
 	view := viewString(m)
 	assertCanvas(t, view, 80, 20)
 	plain := ansi.Strip(view)
-	if !strings.Contains(strings.Split(plain, "\n")[0], "strike") {
+	if !strings.Contains(strings.Split(plain, "\n")[0], "STRIKE") {
 		t.Errorf("header was cropped:\n%s", plain)
 	}
 	transcriptRow := strings.Split(plain, "\n")[l.header]

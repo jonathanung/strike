@@ -37,16 +37,18 @@ func (c *userCell) copyText() string {
 
 func (c *userCell) render(width int, th theme.Theme) string {
 	th = th.Resolve()
-	ic := iconsFor(th)
 	st := th.S()
-	space := themedSpace(th.Spacing.XS)
-	indentation := themedSpace(th.Spacing.SM)
-	label := st.UserLabel.Render(ic.Prompt + space + "you")
+	style := st.UserLabel
+	prefix := messagePrefix(th, style)
+	head := messageHead(th, style, "you")
 	if c.copiedFlash {
-		label += space + st.Success.Render("copied")
+		head += themedSpace(th.Spacing.XS) + st.Success.Render("copied")
 	}
-	body := renderCellText(st.Text, c.text, max(1, width-lipgloss.Width(indentation)))
-	return label + "\n" + indent(body, indentation)
+	if width > 0 && ansi.StringWidth(head) > width {
+		head = ansi.Truncate(head, width, th.Icons.Ellipsis)
+	}
+	body := renderCellText(st.Text, c.text, max(1, width-lipgloss.Width(prefix)))
+	return head + "\n" + indent(body, prefix)
 }
 
 type assistantCell struct {
@@ -74,15 +76,17 @@ func (c *assistantCell) copyText() string {
 
 func (c *assistantCell) render(width int, th theme.Theme) string {
 	th = th.Resolve()
-	ic := iconsFor(th)
 	st := th.S()
-	space := themedSpace(th.Spacing.XS)
-	indentation := themedSpace(th.Spacing.SM)
-	label := st.AssistantLabel.Render(ic.Assistant + space + "strike")
+	style := st.AssistantLabel
+	prefix := messagePrefix(th, style)
+	head := messageHead(th, style, "strike")
 	if c.copiedFlash {
-		label += space + st.Success.Render("copied")
+		head += themedSpace(th.Spacing.XS) + st.Success.Render("copied")
 	}
-	bodyWidth := max(1, width-lipgloss.Width(indentation))
+	if width > 0 && ansi.StringWidth(head) > width {
+		head = ansi.Truncate(head, width, th.Icons.Ellipsis)
+	}
+	bodyWidth := max(1, width-lipgloss.Width(prefix))
 	src := strings.TrimSpace(c.text)
 	var body string
 	switch {
@@ -107,7 +111,7 @@ func (c *assistantCell) render(width int, th theme.Theme) string {
 		c.mdCacheStyle = glamourStyle()
 		c.mdCacheOK = true
 	}
-	return label + "\n" + indent(body, indentation)
+	return head + "\n" + indent(body, prefix)
 }
 
 type toolCell struct {
@@ -224,6 +228,9 @@ func (c *toolCell) renderLinked(width int, th theme.Theme, linkBase string) stri
 	if c.selected {
 		labelStyle = st.Selected
 	}
+	if c.isError {
+		labelStyle = st.Error
+	}
 	status := st.Muted.Render(ic.Ellipsis)
 	if c.done {
 		if c.isError {
@@ -243,9 +250,9 @@ func (c *toolCell) renderLinked(width int, th theme.Theme, linkBase string) stri
 		}
 		marker = labelStyle.Render(glyph) + space
 	}
-	// Build the head so path/URL titles can carry OSC 8 without wrapping the
-	// whole tool name (keeps clicks on the title span only).
-	toolPart := labelStyle.Render(ic.Tool + space + c.name)
+	// Left-accent kicker + path/URL title (OSC 8 stays on the title span).
+	prefix := messagePrefix(th, labelStyle)
+	toolPart := labelStyle.Render(strings.ToUpper(c.name))
 	var head string
 	switch {
 	case c.title != "":
@@ -253,18 +260,17 @@ func (c *toolCell) renderLinked(width int, th theme.Theme, linkBase string) stri
 		titleStyled = withHyperlink(displayURI(c.title, linkBase), titleStyled)
 		head = toolPart + space + titleStyled
 	case len(c.args) > 0:
-		head = labelStyle.Render(ic.Tool + space + c.name + space + compactJSON(c.args, 60, ic.Ellipsis))
+		head = labelStyle.Render(strings.ToUpper(c.name) + space + compactJSON(c.args, 60, ic.Ellipsis))
 	default:
 		head = toolPart
 	}
-	out := marker + head + space + status
+	out := prefix + marker + head + space + status
 	// Clamp the head row so OSC 8 path titles cannot overflow the viewport
 	// and get mid-sequence truncated by Panel (terminal corruption, #692).
 	if width > 0 && ansi.StringWidth(out) > width {
 		out = ansi.Truncate(out, width, ic.Ellipsis)
 	}
 	if c.done {
-		prefix := themedSpace(th.Spacing.SM) + st.BorderMuted.Render(ic.ToolGuide) + space
 		bodyWidth := max(1, width-lipgloss.Width(prefix))
 		if meta, ok := parseEditMetadata(c.metadata); ok {
 			maxLines := diffPreviewMaxLinesCell
@@ -302,7 +308,6 @@ func (c *toolCell) renderLinked(width int, th theme.Theme, linkBase string) stri
 	} else if c.output != "" && !(hideToolOutputBody(c.name) && !c.isError) {
 		// Live bash (and other streaming tools): bounded tail while running.
 		// Successful read stays header-only even if output streams early.
-		prefix := themedSpace(th.Spacing.SM) + st.BorderMuted.Render(ic.ToolGuide) + space
 		bodyWidth := max(1, width-lipgloss.Width(prefix))
 		body := renderCellText(st.Muted, tailLines(c.output, toolLiveTailLines), bodyWidth)
 		out += "\n" + indent(body, prefix)
@@ -396,9 +401,9 @@ func (c *exploreCell) renderLinked(width int, th theme.Theme, linkBase string) s
 	if c.allDone() {
 		label = "explored"
 	}
-	head := label
+	head := strings.ToUpper(label)
 	if n > 0 {
-		head = displayJoin(th, ic.Dot, label, itoa(n)+space+"tools")
+		head = displayJoin(th, ic.Dot, strings.ToUpper(label), itoa(n)+space+"tools")
 	}
 	status := st.Muted.Render(ic.Ellipsis)
 	if c.allDone() {
@@ -415,14 +420,14 @@ func (c *exploreCell) renderLinked(width int, th theme.Theme, linkBase string) s
 	if c.expanded {
 		glyph = ic.TreeExpanded
 	}
-	out := labelStyle.Render(glyph) + space + labelStyle.Render(ic.Tool+space+head) + space + status
+	prefix := messagePrefix(th, labelStyle)
+	out := prefix + labelStyle.Render(glyph) + space + labelStyle.Render(head) + space + status
 	if width > 0 && ansi.StringWidth(out) > width {
 		out = ansi.Truncate(out, width, ic.Ellipsis)
 	}
 	if !c.expanded {
 		return out
 	}
-	prefix := themedSpace(th.Spacing.SM) + st.BorderMuted.Render(ic.ToolGuide) + space
 	bodyWidth := max(1, width-lipgloss.Width(prefix))
 	var lines []string
 	for _, tc := range c.calls {
@@ -548,14 +553,16 @@ func thinkingPlaceholderVisible(cells []cell, showThinking bool) bool {
 // produced answer text yet. Complements the header working spinner.
 func renderThinkingPlaceholder(width int, th theme.Theme, started time.Time) string {
 	th = th.Resolve()
-	ic := iconsFor(th)
 	st := th.S()
-	space := themedSpace(th.Spacing.XS)
 	label := "thinking"
 	if !started.IsZero() {
 		label = detailJoin(th, "thinking", formatCompactDuration(time.Since(started)))
 	}
-	return st.Muted.Width(max(1, width)).Render(ic.Info + space + label)
+	head := messageHead(th, st.Muted, label)
+	if width > 0 && ansi.StringWidth(head) > width {
+		return ansi.Truncate(head, width, th.Icons.Ellipsis)
+	}
+	return head
 }
 
 func (c *reasoningCell) copyText() string {
@@ -567,17 +574,16 @@ func (c *reasoningCell) copyText() string {
 
 func (c *reasoningCell) render(width int, th theme.Theme) string {
 	th = th.Resolve()
-	ic := iconsFor(th)
 	st := th.S()
-	space := themedSpace(th.Spacing.XS)
-	indentation := themedSpace(th.Spacing.SM)
-	label := st.Muted.Render(ic.Info + space + "thinking")
+	style := st.Muted
+	prefix := messagePrefix(th, style)
+	head := messageHead(th, style, "thinking")
 	src := strings.TrimSpace(c.text)
 	if src == "" {
-		return label
+		return head
 	}
-	body := renderCellText(st.Muted, src, max(1, width-lipgloss.Width(indentation)))
-	return label + "\n" + indent(body, indentation)
+	body := renderCellText(st.Muted, src, max(1, width-lipgloss.Width(prefix)))
+	return head + "\n" + indent(body, prefix)
 }
 
 // infoCell is host feedback in the transcript (login URLs, device codes) —
@@ -588,9 +594,12 @@ type infoCell struct {
 
 func (c *infoCell) render(width int, th theme.Theme) string {
 	th = th.Resolve()
-	ic := iconsFor(th)
+	st := th.S()
+	prefix := messagePrefix(th, st.Warning)
+	head := messageHead(th, st.Warning, "info")
 	text := common.PadWideGlyphs(c.text)
-	return th.S().Warning.Width(max(1, width)).Render(ic.Info + themedSpace(th.Spacing.XS) + text)
+	body := renderCellText(st.Warning, text, max(1, width-lipgloss.Width(prefix)))
+	return head + "\n" + indent(body, prefix)
 }
 
 type errorCell struct {
@@ -599,9 +608,12 @@ type errorCell struct {
 
 func (c *errorCell) render(width int, th theme.Theme) string {
 	th = th.Resolve()
-	ic := iconsFor(th)
+	st := th.S()
+	prefix := messagePrefix(th, st.Error)
+	head := messageHead(th, st.Error, "error")
 	text := common.PadWideGlyphs(c.text)
-	return th.S().Error.Width(max(1, width)).Render(ic.Err + themedSpace(th.Spacing.XS) + text)
+	body := renderCellText(st.Error, text, max(1, width-lipgloss.Width(prefix)))
+	return head + "\n" + indent(body, prefix)
 }
 
 func indent(s, prefix string) string {

@@ -167,5 +167,5 @@ func verificationHeaderChip(th theme.Theme, rep *protocol.VerificationReport) (h
 		return headerChip{}, false
 	}
 	th = th.Resolve()
-	return headerChip{70, ui.Badge(th, tone, label)}, true
+	return headerChip{70, headerKicker(th, tone, label)}, true
 }

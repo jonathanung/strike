@@ -218,7 +218,7 @@ func TestIssuesCommandManyItemsOpensPaneNotNotice(t *testing.T) {
 		t.Fatalf("opened modal %T", m.modal)
 	}
 	view := ansi.Strip(viewString(m))
-	if !strings.Contains(view, "issues") {
+	if !strings.Contains(view, "ISSUES") {
 		t.Fatalf("view missing issues pane title:\n%s", view)
 	}
 	body := ansi.Strip(iw.resize(36, 20).view(theme.Default().Resolve()))

@@ -596,7 +596,7 @@ func TestPermissionAutoApproveArmsFromOptions(t *testing.T) {
 		PermissionAutoApproveExclude: []string{"bash"},
 	})
 	header := ansi.Strip(m.headerView(120))
-	if !strings.Contains(header, "auto-allow") || !strings.Contains(header, "4s") {
+	if !strings.Contains(header, "AUTO-ALLOW") || !strings.Contains(header, "4S") {
 		t.Fatalf("header missing armed badge:\n%s", header)
 	}
 
@@ -645,10 +645,10 @@ func TestSoftApproveModeArmsFifteenSecondCountdown(t *testing.T) {
 	m, ops := newAppTestModel(nil, nil)
 	m.permMode = protocol.PermissionModeSoftApprove
 	header := ansi.Strip(m.headerView(120))
-	if !strings.Contains(header, "soft") {
+	if !strings.Contains(header, "SOFT") {
 		t.Fatalf("header missing soft mode badge:\n%s", header)
 	}
-	if !strings.Contains(header, "auto-allow") || !strings.Contains(header, "15s") {
+	if !strings.Contains(header, "AUTO-ALLOW") || !strings.Contains(header, "15S") {
 		t.Fatalf("header missing soft-approve armed badge:\n%s", header)
 	}
 

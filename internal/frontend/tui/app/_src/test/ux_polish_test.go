@@ -26,7 +26,7 @@ func TestWorkingHeaderElapsedAndTools(t *testing.T) {
 	m.applyEvent(protocol.ToolCallBegin{CallID: "c1", Name: "bash"})
 
 	header := ansi.Strip(m.headerView(100))
-	for _, want := range []string{"working", "tool call", "s"} {
+	for _, want := range []string{"WORKING", "tool call", "s"} {
 		if !strings.Contains(header, want) {
 			t.Errorf("working header missing %q:\n%s", want, header)
 		}
@@ -44,7 +44,7 @@ func TestWorkingHeaderElapsedAndTools(t *testing.T) {
 	if strings.Contains(header, "tool call") {
 		t.Errorf("working tool-call chrome persisted after TurnCompleted:\n%s", header)
 	}
-	if strings.Contains(header, "working (") {
+	if strings.Contains(header, "WORKING (") {
 		t.Errorf("working elapsed chrome persisted after TurnCompleted:\n%s", header)
 	}
 	if m.agentState() != theme.AgentStateReady {
@@ -74,7 +74,7 @@ func TestHeaderKeepsWorkingWithMeterAtNarrowWidth(t *testing.T) {
 	// Autonomy + permission-mode badges need a few more columns than the
 	// pre-dial floor; meter still shrinks first so working stays on the right.
 	header := ansi.Strip(m.headerView(64))
-	if !strings.Contains(header, "working") {
+	if !strings.Contains(header, "WORKING") {
 		t.Errorf("narrow header dropped working status despite budget-aware meter:\n%s", header)
 	}
 }
@@ -120,7 +120,7 @@ func TestHeaderHidesNormalPostureAndShowsExceptionalPosture(t *testing.T) {
 	m.autonomy = protocol.AutonomyAgent
 	m.permMode = protocol.PermissionModeYolo
 	plain = ansi.Strip(m.headerView(100))
-	for _, want := range []string{"auto agent", "yolo"} {
+	for _, want := range []string{"AUTO AGENT", "YOLO"} {
 		if !strings.Contains(plain, want) {
 			t.Errorf("exceptional posture missing %q:\n%s", want, plain)
 		}
@@ -203,23 +203,23 @@ func TestFirstRunWelcomeCard(t *testing.T) {
 	first.firstRun = true
 	first.providerName = ""
 	plain := ansi.Strip(first.welcomeView(100, 30))
-	for _, want := range []string{"first run", "/auth", "/model"} {
+	for _, want := range []string{"FIRST RUN", "/auth", "/model"} {
 		if !strings.Contains(plain, want) {
 			t.Errorf("first-run welcome missing %q:\n%s", want, plain)
 		}
 	}
-	if strings.Contains(plain, "get started") {
+	if strings.Contains(plain, "GET STARTED") {
 		t.Errorf("first-run welcome still showed get started:\n%s", plain)
 	}
 
-	// Default FirstRun false keeps existing unauthed "get started" card.
+	// Default FirstRun false keeps existing unauthed "get started" section.
 	normal, _ := newAppTestModelHome(nil, nil)
 	normal.providerName = ""
 	plain = ansi.Strip(normal.welcomeView(100, 30))
-	if !strings.Contains(plain, "get started") {
+	if !strings.Contains(plain, "GET STARTED") {
 		t.Errorf("default welcome missing get started:\n%s", plain)
 	}
-	if strings.Contains(plain, "first run") {
+	if strings.Contains(plain, "FIRST RUN") {
 		t.Errorf("default welcome showed first run:\n%s", plain)
 	}
 

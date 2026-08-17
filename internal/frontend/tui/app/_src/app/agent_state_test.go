@@ -186,7 +186,7 @@ func TestHeaderRecolorsForEachLiveAgentState(t *testing.T) {
 			setup: func(*Model) {},
 			state: theme.AgentStateReady,
 			color: "#111111",
-			label: "ready",
+			label: "READY",
 		},
 		{
 			name: "working",
@@ -195,7 +195,7 @@ func TestHeaderRecolorsForEachLiveAgentState(t *testing.T) {
 			},
 			state: theme.AgentStateWorking,
 			color: "#222222",
-			label: "working",
+			label: "WORKING",
 		},
 		{
 			name: "attention",
@@ -205,7 +205,7 @@ func TestHeaderRecolorsForEachLiveAgentState(t *testing.T) {
 			},
 			state: theme.AgentStateAttention,
 			color: "#333333",
-			label: "needs you",
+			label: "NEEDS YOU",
 		},
 		{
 			name: "error",
@@ -215,7 +215,7 @@ func TestHeaderRecolorsForEachLiveAgentState(t *testing.T) {
 			},
 			state: theme.AgentStateError,
 			color: "#444444",
-			label: "error",
+			label: "ERROR",
 		},
 	}
 
