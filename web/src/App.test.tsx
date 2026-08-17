@@ -1530,6 +1530,10 @@ describe("App", () => {
     expect(screen.getByRole("navigation", { name: "Workspace mode" }).className).toContain("mode-bottom-bar");
     // Header should not duplicate the mode switch on phone.
     expect(document.querySelector(".header-mode-switch")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Toggle inspector" }));
+    expect(screen.getByRole("combobox", { name: /Chat surfaces/i })).toBeTruthy();
+    expect(screen.queryByRole("tablist", { name: /Chat surfaces/i })).toBeNull();
+    expect(document.querySelector(".inspector-body")).toHaveAttribute("role", "region");
     Object.defineProperty(window, "innerWidth", { configurable: true, value: prev || 1280 });
     window.dispatchEvent(new Event("resize"));
   });

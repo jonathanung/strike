@@ -1259,7 +1259,7 @@ export default function App() {
           void inspectProject(id);
         }}
       />
-      <div className="inspector-body" id={activeInspector ? `inspector-panel-${activeInspector}` : undefined} role="tabpanel">
+      <div className="inspector-body" id={activeInspector ? `inspector-panel-${activeInspector}` : undefined} role={shellProfile === "phone" ? "region" : "tabpanel"} aria-label={shellProfile === "phone" ? (getSurface(activeInspector)?.label || "Inspector") : undefined}>
         {inspectorTabs.length ? (
           <Suspense fallback={<SurfaceFallback label={activeInspector || "surface"} />}>
             <InspectorBody
