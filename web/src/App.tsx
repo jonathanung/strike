@@ -43,6 +43,7 @@ import {
   formatUndoPreviewLines,
   type UndoPreview,
 } from "./undoPreview";
+import { liveStatusKind } from "./ui";
 import { SurfaceNav } from "./SurfaceNav";
 import {
   deepLinkWorkspaceID,
@@ -1077,6 +1078,16 @@ export default function App() {
   const headerAttention = attentionCount > 0
     ? `${attentionCount} need${attentionCount === 1 ? "s" : ""} you`
     : "";
+  const selectedNeedsYou = Boolean(state.permission || state.question);
+  const headerLiveKind = liveStatusKind({
+    busy: Boolean(state.status.busy),
+    needsYou: selectedNeedsYou,
+  });
+  const headerLiveLabel = headerLiveKind === "needs-you"
+    ? "needs you"
+    : headerLiveKind === "busy"
+      ? "agent working"
+      : transport;
 
   const renderModeButtons = (className: string) => (
     <nav className={className} aria-label="Workspace mode">
@@ -1129,9 +1140,9 @@ export default function App() {
         Commands <kbd>⌘K</kbd>
       </button>
       {!phoneModes && renderModeButtons("mode-switch header-mode-switch")}
-      <div className="session-line" aria-live="polite">
-        <span className={state.status.busy ? "pulse busy" : "pulse"} />
-        {!phoneModes && (state.status.busy ? "agent working" : transport)}
+      <div className={`session-line session-line-${headerLiveKind}`} aria-live="polite">
+        <span className={`pulse ${headerLiveKind}`} data-status={headerLiveKind} />
+        {!phoneModes && headerLiveLabel}
         {headerAttention && (
           <button
             type="button"
@@ -1178,7 +1189,7 @@ export default function App() {
                   return <button key={root.id} type="button" className={root.id === selectedID && selectedIsLive ? "session active" : "session"} onClick={() => void selectWorkspace(root.id, true)} title={root.id} aria-label={`${label}${needsYou ? ", needs attention" : ""}`}>
                     <span className={needsYou ? "root-attention" : root.busy ? "root-busy" : "root-idle"} aria-hidden />
                     <span className="session-main"><span className="session-title">{label}</span><span className="session-meta">{root.agent || "—"}{activity ? ` · ${activity}` : ""}{root.hasRecentEvent && !root.busy && !needsYou ? " · recent" : ""}</span></span>
-                    <span className="session-flags">{root.id === activeRootID && <small>ACTIVE</small>}{needsYou ? <small className="needs-you">NEEDS YOU</small> : <small>{root.busy ? "BUSY" : "IDLE"}</small>}</span>
+                    <span className="session-flags">{root.id === activeRootID && <small>ACTIVE</small>}{needsYou ? <small className="needs-you">NEEDS YOU</small> : <small className={root.busy ? "session-busy" : "session-idle"}>{root.busy ? "BUSY" : "IDLE"}</small>}</span>
                   </button>;
                 })}</nav>{!boot?.attachOnly && <div className="session-actions"><button type="button" onClick={() => void handleCreateWorkspace()}>+ New workspace</button><button type="button" disabled={!selectedIsLive || !selectedID} onClick={() => void handleCloseWorkspace()}>Close workspace</button></div>}</>}{navTab === "history" && <HistoryNav sessions={sessions} activeRoots={activeRoots} selectedID={selectedID} selectedIsLive={selectedIsLive} historySearch={historySearch} setHistorySearch={setHistorySearch} selectWorkspace={selectWorkspace} handleResume={handleResume} boot={boot} sessionAction={sessionAction} />}</> : <><div className="aside-heading"><span>SESSIONS</span></div><nav>{sessions.map((session) => {
                   const live = session.id === liveID && !boot?.attachOnly;

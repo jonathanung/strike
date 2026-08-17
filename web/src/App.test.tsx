@@ -103,6 +103,11 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: "Allow session" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Allow once" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Why is this asked/ })).not.toBeInTheDocument();
+    const pulse = document.querySelector(".session-line .pulse");
+    expect(pulse?.getAttribute("data-status")).toBe("needs-you");
+    expect(pulse).toHaveClass("needs-you");
+    expect(document.querySelector(".session-line")).toHaveClass("session-line-needs-you");
+    expect(screen.getByText("needs you")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Allow once" }));
     await waitFor(() => expect(fetch).toHaveBeenLastCalledWith(expect.stringContaining("/v1/ops"), expect.objectContaining({ body: expect.stringContaining('"decision":"once"') })));
   });
