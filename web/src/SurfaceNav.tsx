@@ -1,8 +1,9 @@
 /**
- * Mode secondary navigation: wrapping tab list on desktop/tablet, accessible
- * list/sheet on phone (WEBUI.12). Desktop must not clip into a horizontal scroller.
+ * Compact inspector navigator: single-line scroll tabs on desktop/tablet,
+ * grouped native select on phone (WEBUI.12 / #1247). Never wrap into a 40vh pile.
  */
 import type { SurfaceDef } from "./surfaces";
+import { groupInspectorSurfaces } from "./surfaces";
 import type { ShellProfile } from "./shellProfile";
 import { Tabs } from "./ui";
 
@@ -16,8 +17,8 @@ export type SurfaceNavProps = {
 };
 
 /**
- * Phone: vertical list (sheet-friendly, not a compressed tab strip).
- * Desktop/tablet: Tabs that wrap to a readable list instead of overflow-x clip.
+ * Phone: one-line grouped select (Session / Code / Team / Project / Ops).
+ * Desktop/tablet: labelled tablist that scrolls horizontally instead of wrapping.
  */
 export function SurfaceNav({
   modeLabel,
@@ -30,25 +31,25 @@ export function SurfaceNav({
   if (!surfaces.length) return null;
 
   if (profile === "phone") {
+    const groups = groupInspectorSurfaces(surfaces);
     return (
-      <nav className="surface-nav-sheet" aria-label={`${modeLabel} surfaces`}>
-        <ul className="surface-nav-list" role="listbox" aria-label={`${modeLabel} surfaces`}>
-          {surfaces.map((s) => {
-            const selected = s.id === activeId;
-            return (
-              <li key={s.id} role="option" aria-selected={selected}>
-                <button
-                  type="button"
-                  className={selected ? "surface-nav-item active" : "surface-nav-item"}
-                  aria-current={selected ? "page" : undefined}
-                  onClick={() => onChange(s.id)}
-                >
-                  <span className="surface-nav-label">{s.label}</span>
-                </button>
-              </li>
-            );
-          })}
-        </ul>
+      <nav className="surface-nav" aria-label={`${modeLabel} surfaces`}>
+        <label className="surface-nav-field">
+          <span className="surface-nav-caption">Surface</span>
+          <select
+            aria-label={`${modeLabel} surfaces`}
+            value={activeId}
+            onChange={(event) => onChange(event.target.value)}
+          >
+            {groups.map((group) => (
+              <optgroup key={group.id} label={group.label}>
+                {group.surfaces.map((s) => (
+                  <option key={s.id} value={s.id}>{s.label}</option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+        </label>
       </nav>
     );
   }

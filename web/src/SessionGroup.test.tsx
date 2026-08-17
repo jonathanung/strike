@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { ChatSessionGroup, PromptQueue, type QueueEdit } from "./SessionGroup";
+import { PromptQueue, SessionActivity, SessionQueue, type QueueEdit } from "./SessionGroup";
 import type { QueuedPrompt } from "./queueOps";
 
 afterEach(() => cleanup());
@@ -46,17 +46,25 @@ describe("PromptQueue", () => {
   });
 });
 
-describe("ChatSessionGroup", () => {
-  it("stacks context summary, activity, and queue without exclusive tabs", () => {
-    const queueEditCancel = { current: false };
-    render(
-      <ChatSessionGroup
-        contextLabel="1,200 / 8,000"
-        provider="echo"
-        model="echo-1"
-        phase="act"
+describe("SessionActivity", () => {
+  it("lists child agents or an empty state", () => {
+    const { rerender } = render(
+      <SessionActivity
         childrenEntries={[["c1", { agent: "explore", name: "scout", status: "running" }]]}
         onSelectChild={() => {}}
+      />,
+    );
+    expect(screen.getByLabelText("Activity")).toContainElement(screen.getByLabelText("Child scout"));
+    rerender(<SessionActivity childrenEntries={[]} onSelectChild={() => {}} />);
+    expect(screen.getByLabelText("Activity")).toHaveTextContent("No child agents");
+  });
+});
+
+describe("SessionQueue", () => {
+  it("renders the queue as its own surface including empty state", () => {
+    const queueEditCancel = { current: false };
+    const { rerender } = render(
+      <SessionQueue
         queue={[{ text: "next task", images: [] }]}
         queueEdit={null}
         setQueueEdit={() => {}}
@@ -64,23 +72,10 @@ describe("ChatSessionGroup", () => {
         setQueue={() => {}}
       />,
     );
-    const group = screen.getByLabelText("Session group");
-    expect(group).toContainElement(screen.getByLabelText("Context summary"));
-    expect(group).toContainElement(screen.getByLabelText("Activity"));
-    expect(group).toContainElement(screen.getByLabelText("Queue"));
-    expect(screen.getByLabelText("Context summary")).toHaveTextContent("1,200 / 8,000");
-    expect(screen.getByLabelText("Child scout")).toBeInTheDocument();
+    expect(screen.getByLabelText("Queue")).toContainElement(screen.getByRole("list", { name: "Queued prompts" }));
     expect(screen.getByRole("list", { name: "Queued prompts" })).toHaveTextContent("next task");
-    expect(screen.queryByRole("tab")).not.toBeInTheDocument();
-  });
-
-  it("shows empty activity and queue slots together", () => {
-    const queueEditCancel = { current: false };
-    render(
-      <ChatSessionGroup
-        contextLabel="not reported"
-        childrenEntries={[]}
-        onSelectChild={() => {}}
+    rerender(
+      <SessionQueue
         queue={[]}
         queueEdit={null}
         setQueueEdit={() => {}}
@@ -88,8 +83,6 @@ describe("ChatSessionGroup", () => {
         setQueue={() => {}}
       />,
     );
-    expect(screen.getByLabelText("Context summary")).toHaveTextContent("not reported");
-    expect(screen.getByLabelText("Activity")).toHaveTextContent("No child agents");
     expect(screen.getByLabelText("Queue")).toHaveTextContent(/Queue is empty/);
   });
 });

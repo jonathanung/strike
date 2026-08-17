@@ -53,6 +53,8 @@ export function buildCommandCatalog(opts: {
     { mode: "ops", surface: "settings", label: "Settings surface" },
     { mode: "ops", surface: "timeline", label: "Timeline" },
     { mode: "chat", surface: "context", label: "Context doctor" },
+    { mode: "chat", surface: "activity", label: "Activity" },
+    { mode: "chat", surface: "queue", label: "Queue" },
   ];
   for (const s of surfaces) {
     out.push({

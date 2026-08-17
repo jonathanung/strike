@@ -1,8 +1,9 @@
-import { FormEvent, lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
+import { type Dispatch, FormEvent, lazy, type RefObject, type SetStateAction, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { activateRoot, bootstrap, closeRoot, createRoot, fetchTeam, historicalConnection, liveConnection, request, resumeRoot, roots as loadRoots, sendOp, sessions as loadSessions, sessionChildren, getSandbox, patchSandbox, downloadDiagnostics, closeIssue, createIssue, deleteMemory, exportIssues, exportMemory, putMemory } from "./api";
 import { ChildAgentsPanel } from "./ChildAgents";
 import { buildExportMarkdown, defaultExportFilename, downloadTextFile } from "./exportMarkdown";
-import { ChatSessionGroup, PromptQueue } from "./SessionGroup";
+import { PromptQueue, SessionActivity, SessionQueue, type QueueEdit } from "./SessionGroup";
+import type { QueuedPrompt } from "./queueOps";
 import { initialClientState, reduceClient, selectedSlice, setAdd, setRemove } from "./reducer";
 import { buildCommandCatalog, fileMentionEmptyHint, insertMention, isFileMentionTrigger, mentionInsertCaret, type CatalogCommand } from "./commands";
 import { CommandPalette } from "./CommandPalette";
@@ -473,7 +474,8 @@ export default function App() {
   } as React.CSSProperties;
   const phoneModes = modesInBottomBar(shellProfile);
   const overlayOpen = shellProfile !== "desktop" && (navOpen || inspectorOpen);
-  const chatSessionGroupOpen = inspectorOpen && workspaceMode === "chat";
+  const activitySurfaceOpen = inspectorOpen && activeInspector === "activity";
+  const queueSurfaceOpen = inspectorOpen && activeInspector === "queue";
   useLayoutEffect(() => {
     const pos = restoreCaret.current;
     if (pos == null) return;
@@ -1198,7 +1200,7 @@ export default function App() {
                     <span className="session-main"><span className="session-title">{session.title || shortID(session.id)}</span><span className="session-meta">{[shortID(session.id), age].filter(Boolean).join(" · ")}</span></span>
                     <span className="session-flags">{live && <small className="live-badge">LIVE</small>}</span>
                   </button>;
-                })}</nav>{boot?.capabilities.sessions && selectedID && <div className="session-actions" aria-label="Session actions"><SessionMenu onAction={(action) => void sessionAction(action)} /></div>}</>}{!chatSessionGroupOpen && <ChildAgentsPanel children={children} selectedId={selectedChildId} onSelect={setSelectedChildId} onOpenTranscript={openChildTranscript} />}<details className="workspace-meta"><summary>Workspace</summary><span>ROOT</span><code>{state.status.cwd || "unavailable"}</code><span>BUILD</span><code>{boot?.version || "…"}</code></details></aside>
+                })}</nav>{boot?.capabilities.sessions && selectedID && <div className="session-actions" aria-label="Session actions"><SessionMenu onAction={(action) => void sessionAction(action)} /></div>}</>}{!activitySurfaceOpen && <ChildAgentsPanel children={children} selectedId={selectedChildId} onSelect={setSelectedChildId} onOpenTranscript={openChildTranscript} />}<details className="workspace-meta"><summary>Workspace</summary><span>ROOT</span><code>{state.status.cwd || "unavailable"}</code><span>BUILD</span><code>{boot?.version || "…"}</code></details></aside>
     <main>
       <div className="runtime-stack">
       <section className="runtime" aria-label="Runtime controls">
@@ -1230,7 +1232,7 @@ export default function App() {
           <button type="button" onClick={() => { try { localStorage.setItem("strike.web.onboard.v1", "1"); } catch { /* */ } setOnboardingHint(false); }}>Dismiss</button>
         </div>
       )}
-      <form className="composer" onSubmit={submit}><label htmlFor="prompt">Instruction {state.status.busy && "— send to queue"}</label><div className="composer-field">{(shownCompletions.length > 0 || showFileEmptyHint) && <div ref={completionListRef} className="completion" role="listbox" aria-label="Composer completions">{shownCompletions.length === 0 ? <div>{fileSearchHint}</div> : shownCompletions.map((item, i) => <button type="button" role="option" key={item.label} aria-selected={i === activeCompletion} className={i === activeCompletion ? "active" : ""} onMouseEnter={() => setCompletionIndex(i)} onClick={() => selectCompletion(item)}><strong>{item.label}</strong><span>{item.detail}</span></button>)}</div>}<textarea ref={promptRef} aria-label="Instruction" id="prompt" value={draft} disabled={!isLive} placeholder={isLive ? "Describe the next outcome…  / command · @file" : "Historical session — read only"} onPaste={(event) => void attach(event.clipboardData.files)} onDrop={(event) => { event.preventDefault(); void attach(event.dataTransfer.files); }} onDragOver={(event) => event.preventDefault()} onChange={(event) => onComposerChange(event.currentTarget.value, event.currentTarget.selectionStart ?? event.currentTarget.value.length)} onSelect={(event) => syncComposerCursor(event.currentTarget)} onKeyUp={(event) => syncComposerCursor(event.currentTarget)} onClick={(event) => syncComposerCursor(event.currentTarget)} onKeyDown={onComposerKeyDown} /></div>{images.length > 0 && <div className="attachments">{images.map((image, index) => <button type="button" key={`${image.name}-${index}`} onClick={() => setImages((list) => list.filter((_, i) => i !== index))}>{image.name} ×</button>)}</div>}{!chatSessionGroupOpen && <PromptQueue queue={queue} queueEdit={queueEdit} setQueueEdit={setQueueEdit} queueEditCancel={queueEditCancel} queueRef={queueRef} setQueue={setQueue} />}<div className="composer-bar"><span><kbd>↵</kbd> send · <kbd>⇧↵</kbd> newline · <kbd>↑</kbd> history</span><span><input ref={fileRef} hidden type="file" accept="image/*" multiple onChange={(event) => void attach(event.target.files)} /><button type="button" className="composer-secondary" onClick={() => fileRef.current?.click()}>Attach</button>{history.length > 0 && <button type="button" className="composer-secondary" onClick={() => setDraft(history.at(-1) || "")}>History</button>}<button type="button" className="composer-secondary" onClick={() => exportSession()} disabled={!state.items.length}>Export</button>{state.status.busy && <button type="button" className="stop" onClick={() => void op("interrupt")}>Interrupt</button>}<button type="submit" className="composer-send" disabled={!draft.trim() || !isLive}>{state.status.busy ? "Queue" : "Send"}</button></span></div></form>
+      <form className="composer" onSubmit={submit}><label htmlFor="prompt">Instruction {state.status.busy && "— send to queue"}</label><div className="composer-field">{(shownCompletions.length > 0 || showFileEmptyHint) && <div ref={completionListRef} className="completion" role="listbox" aria-label="Composer completions">{shownCompletions.length === 0 ? <div>{fileSearchHint}</div> : shownCompletions.map((item, i) => <button type="button" role="option" key={item.label} aria-selected={i === activeCompletion} className={i === activeCompletion ? "active" : ""} onMouseEnter={() => setCompletionIndex(i)} onClick={() => selectCompletion(item)}><strong>{item.label}</strong><span>{item.detail}</span></button>)}</div>}<textarea ref={promptRef} aria-label="Instruction" id="prompt" value={draft} disabled={!isLive} placeholder={isLive ? "Describe the next outcome…  / command · @file" : "Historical session — read only"} onPaste={(event) => void attach(event.clipboardData.files)} onDrop={(event) => { event.preventDefault(); void attach(event.dataTransfer.files); }} onDragOver={(event) => event.preventDefault()} onChange={(event) => onComposerChange(event.currentTarget.value, event.currentTarget.selectionStart ?? event.currentTarget.value.length)} onSelect={(event) => syncComposerCursor(event.currentTarget)} onKeyUp={(event) => syncComposerCursor(event.currentTarget)} onClick={(event) => syncComposerCursor(event.currentTarget)} onKeyDown={onComposerKeyDown} /></div>{images.length > 0 && <div className="attachments">{images.map((image, index) => <button type="button" key={`${image.name}-${index}`} onClick={() => setImages((list) => list.filter((_, i) => i !== index))}>{image.name} ×</button>)}</div>}{!queueSurfaceOpen && <PromptQueue queue={queue} queueEdit={queueEdit} setQueueEdit={setQueueEdit} queueEditCancel={queueEditCancel} queueRef={queueRef} setQueue={setQueue} />}<div className="composer-bar"><span><kbd>↵</kbd> send · <kbd>⇧↵</kbd> newline · <kbd>↑</kbd> history</span><span><input ref={fileRef} hidden type="file" accept="image/*" multiple onChange={(event) => void attach(event.target.files)} /><button type="button" className="composer-secondary" onClick={() => fileRef.current?.click()}>Attach</button>{history.length > 0 && <button type="button" className="composer-secondary" onClick={() => setDraft(history.at(-1) || "")}>History</button>}<button type="button" className="composer-secondary" onClick={() => exportSession()} disabled={!state.items.length}>Export</button>{state.status.busy && <button type="button" className="stop" onClick={() => void op("interrupt")}>Interrupt</button>}<button type="submit" className="composer-send" disabled={!draft.trim() || !isLive}>{state.status.busy ? "Queue" : "Send"}</button></span></div></form>
       <CommandPalette
         open={paletteOpen}
         commands={catalog}
@@ -1246,25 +1248,6 @@ export default function App() {
     </main>
     <aside className={`inspector ${inspectorOpen ? "open" : "collapsed"}`} aria-label="Inspector">
       <PanelResize label="Resize inspector panel" value={inspectorWidth} min={240} max={520} onChange={setInspectorWidth} side="inspector" />
-      {chatSessionGroupOpen && (
-        <ChatSessionGroup
-          contextLabel={formatContextLabel(state.status)}
-          provider={state.status.provider}
-          model={state.status.model}
-          phase={state.status.phase}
-          fitWarning={state.fitWarning}
-          childrenEntries={children}
-          selectedChildId={selectedChildId}
-          onSelectChild={setSelectedChildId}
-          onOpenChildTranscript={openChildTranscript}
-          queue={queue}
-          queueEdit={queueEdit}
-          setQueueEdit={setQueueEdit}
-          queueEditCancel={queueEditCancel}
-          queueRef={queueRef}
-          setQueue={setQueue}
-        />
-      )}
       <SurfaceNav
         modeLabel={MODE_PRESETS[workspaceMode].label}
         surfaces={inspectorTabDefs}
@@ -1297,8 +1280,15 @@ export default function App() {
               selectedChildId={selectedChildId}
               onSelectChild={setSelectedChildId}
               onOpenChildTranscript={openChildTranscript}
+              queue={queue}
+              queueEdit={queueEdit}
+              setQueueEdit={setQueueEdit}
+              queueEditCancel={queueEditCancel}
+              queueRef={queueRef}
+              setQueue={setQueue}
               entity={surfaceEntity}
               onOpenSettings={() => setSettingsOpen(true)}
+              inspectorOpen={inspectorOpen}
             />
           </Suspense>
         ) : (
@@ -1638,7 +1628,7 @@ function AttributionTable({ attribution }: { attribution?: RequestAttribution })
   </section>;
 }
 
-function InspectorBody({ tab, boot, workspace, data, loading, expandedDiffs, toggleDiff, isLive, selectedID, onRefresh, sandbox, onExplainSandbox, unavailable, childrenEntries, selectedChildId, onSelectChild, onOpenChildTranscript, entity, onOpenSettings }: {
+function InspectorBody({ tab, boot, workspace, data, loading, expandedDiffs, toggleDiff, isLive, selectedID, onRefresh, sandbox, onExplainSandbox, unavailable, childrenEntries, selectedChildId, onSelectChild, onOpenChildTranscript, queue, queueEdit, setQueueEdit, queueEditCancel, queueRef, setQueue, entity, onOpenSettings, inspectorOpen }: {
   tab: string;
   boot?: Bootstrap;
   workspace: WorkspaceState;
@@ -1656,8 +1646,15 @@ function InspectorBody({ tab, boot, workspace, data, loading, expandedDiffs, tog
   selectedChildId?: string;
   onSelectChild?: (id: string | undefined) => void;
   onOpenChildTranscript?: (id: string) => void;
+  queue?: QueuedPrompt[];
+  queueEdit?: QueueEdit | null;
+  setQueueEdit?: Dispatch<SetStateAction<QueueEdit | null>>;
+  queueEditCancel?: { current: boolean };
+  queueRef?: RefObject<HTMLOListElement | null>;
+  setQueue?: Dispatch<SetStateAction<QueuedPrompt[]>>;
   entity?: string;
   onOpenSettings?: () => void;
+  inspectorOpen?: boolean;
 }) {
   const status = workspace.status;
   if (unavailable) {
@@ -1709,6 +1706,30 @@ function InspectorBody({ tab, boot, workspace, data, loading, expandedDiffs, tog
         onOpenFile={(path) => {
           writeDeepLinkToLocation({ mode: "code", surface: "files", entity: path, root: selectedID || undefined });
         }}
+      />
+    );
+  }
+  if (tab === "activity") {
+    if (!inspectorOpen) return null;
+    return (
+      <SessionActivity
+        childrenEntries={childrenEntries || []}
+        selectedChildId={selectedChildId}
+        onSelectChild={onSelectChild || (() => {})}
+        onOpenChildTranscript={onOpenChildTranscript}
+      />
+    );
+  }
+  if (tab === "queue") {
+    if (!inspectorOpen) return null;
+    return (
+      <SessionQueue
+        queue={queue || []}
+        queueEdit={queueEdit ?? null}
+        setQueueEdit={setQueueEdit || (() => {})}
+        queueEditCancel={queueEditCancel || { current: false }}
+        queueRef={queueRef}
+        setQueue={setQueue || (() => {})}
       />
     );
   }

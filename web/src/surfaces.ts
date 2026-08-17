@@ -177,6 +177,30 @@ export const BUILTIN_SURFACES: readonly SurfaceDef[] = [
     modeOrder: { ops: 280 },
   },
   {
+    id: "activity",
+    label: "activity",
+    modes: ["chat"],
+    capability: "always",
+    attention: "badge",
+    lazyMount: true,
+    attach: "read",
+    placement: { desktop: "drawer", tablet: "drawer", phone: "sheet" },
+    inspector: true,
+    order: 12,
+  },
+  {
+    id: "queue",
+    label: "queue",
+    modes: ["chat"],
+    capability: "live",
+    attention: "badge",
+    lazyMount: true,
+    attach: "mutate-blocked",
+    placement: { desktop: "drawer", tablet: "drawer", phone: "sheet" },
+    inspector: true,
+    order: 14,
+  },
+  {
     id: "files",
     label: "files",
     modes: ["code"],
@@ -594,6 +618,48 @@ function surfaceOrder(s: SurfaceDef, mode?: WorkspaceMode): number {
     return s.modeOrder[mode] as number;
   }
   return s.order ?? 500;
+}
+
+/** Compact navigator groups (Session / Code / Team / Project / Ops). */
+export const SURFACE_NAV_GROUPS = [
+  { id: "session", label: "Session" },
+  { id: "code", label: "Code" },
+  { id: "team", label: "Team" },
+  { id: "project", label: "Project" },
+  { id: "ops", label: "Ops" },
+] as const;
+
+export type SurfaceNavGroupId = (typeof SURFACE_NAV_GROUPS)[number]["id"];
+
+/** Home group for a surface. Plugin panes stay under Ops so they do not dominate. */
+export function surfaceNavGroup(surface: SurfaceDef): SurfaceNavGroupId {
+  if (surface.id.startsWith("pane:")) return "ops";
+  const home = surface.modes === "any" ? "chat" : surface.modes[0];
+  switch (home) {
+    case "code":
+      return "code";
+    case "team":
+      return "team";
+    case "project":
+      return "project";
+    case "ops":
+      return "ops";
+    default:
+      return "session";
+  }
+}
+
+export function groupInspectorSurfaces(surfaces: SurfaceDef[]): {
+  id: SurfaceNavGroupId;
+  label: string;
+  surfaces: SurfaceDef[];
+}[] {
+  return SURFACE_NAV_GROUPS
+    .map((g) => ({
+      ...g,
+      surfaces: surfaces.filter((s) => surfaceNavGroup(s) === g.id),
+    }))
+    .filter((g) => g.surfaces.length > 0);
 }
 
 /** Inspector tabs for a mode (capability-gated). */
