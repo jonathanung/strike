@@ -169,7 +169,7 @@ func (m Model) contextPaneBody(width, height int) string {
 
 	lines := make([]string, 0, len(rows))
 	for _, r := range rows {
-		label := st.Muted.Render(welcomeTruncate(r.label, width, ellipsis))
+		label := kicker(st.Muted, welcomeTruncate(r.label, width, ellipsis))
 		labelW := ansi.StringWidth(ansi.Strip(label))
 		gap := themedSpace(th.Spacing.SM)
 		budget := max(0, width-labelW-ansi.StringWidth(gap))

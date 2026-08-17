@@ -1,40 +1,40 @@
-⚡ strike /tmp/strike-golden   echo/echo-1   ·   ◆ build   host+sandbox                                            ready
-┌─ Refactor the auth store. ───────────────────────────────────────────────────┐ ┌─ context ───────────────────────────┐
-│ ❯ you                                                                        │ │ model  echo/echo-1                  │
-│   Refactor the auth store.                                                   │ │ agent  build                        │
-│                                                                              │ │ autonomy  supervised                │
-│ ● strike                                                                     │ │ isolation  host+sandbox             │
-│   Reading the store, then running tests.                                     │ │ auth  offline dev provider          │
-│                                                                              │ │ skills  1                           │
-│ ⚙ read · internal/auth/store.go ✓                                            │ └─────────────────────────────────────┘
-│                                                                              │
-│                                                                              │ ┌─ activity ──────────────────────────┐
-│                                                                              │ │   internal/auth/store.go — done  ✓  │
-│                                                                              │ │                                     │
-│                                                                              │ │                                     │
-│                                                                              │ │                                     │
-│                                                                              │ │                                     │
-│                                                                              │ │                                     │
-│                                                                              │ │                                     │
-│                                                                              │ │                                     │
-│                                                                              │ │                                     │
-│                                                                              │ │                                     │
-│                                                                              │ │                                     │
-│                                                                              │ │                                     │
-│                                                                              │ │                                     │
-│                                                                              │ └─────────────────────────────────────┘
-│                                                                              │
-│                                                                              │ ┌─ queue ─────────────────────────────┐
-│                                                                              │ │ nothing queued or scheduled         │
-│                                                                              │ │                                     │
-│                                                                              │ │                                     │
-│                                                                              │ │                                     │
-│                                                                              │ └─ ↑↓ move · ⇧↑↓ reorder · enter ed… ─┘
-└──────────────────────────────────────────────────────────────────────────────┘
-                                                                                 ┌─ system ────────────────────────────┐
-◦ / commands · ! shell · @ file mentions                                         │ sampling…                           │
-┌─ chat ❯ ─────────────────────────────────────────────────────────────────────┐ │                                     │
-│ ❯ Ask anything…  (/ commands, ! shell)                                       │ │                                     │
-│ ❯                                                                            │ │                                     │
-└─ enter send · ctrl+j/shift+enter/alt+enter newline ──────────────────────────┘ └─────────────────────────────────────┘
+S STRIKE /tmp/strike-golden  echo/echo-1 · ◆ build host+sandbox                                                    READY
+Refactor the auth store.                                                         │ CONTEXT
+▏ YOU                                                                            │ MODEL  echo/echo-1
+▏ Refactor the auth store.                                                       │ AGENT  build
+                                                                                 │ AUTONOMY  supervised
+▏ STRIKE                                                                         │ ISOLATION  host+sandbox
+▏ Reading the store, then running tests.                                         │ AUTH  offline dev provider
+                                                                                 │ SKILLS  1
+▏ READ · internal/auth/store.go ✓                                                │
+
+                                                                                 │ ACTIVITY
+                                                                                 │   internal/auth/store.go — done  ✓
+                                                                                 │
+                                                                                 │
+                                                                                 │
+                                                                                 │
+                                                                                 │
+                                                                                 │
+                                                                                 │
+                                                                                 │
+                                                                                 │
+                                                                                 │
+                                                                                 │
+                                                                                 │
+                                                                                 │
+
+                                                                                 │ QUEUE
+                                                                                 │ nothing queued or scheduled
+                                                                                 │
+                                                                                 │
+                                                                                 │
+                                                                                 │ ↑↓ move · ⇧↑↓ reorder · enter edit
+
+                                                                                 │ SYSTEM
+◦ / commands · ! shell · @ file mentions                                         │ sampling…
+┌─ INSTRUCTION ────────────────────────────────────────────────────────────────┐ │
+│ ❯ Ask anything…  (/ commands, ! shell)                                       │ │
+│ ❯                                                                            │ │
+└─ enter send · ctrl+j/shift+enter/alt+enter newline ──────────────────────────┘ │
 enter send · ctrl+j/shift+enter/alt+enter newline · ctrl+e external editor · esc cancel · ctrl+k palette · f1 keybinds

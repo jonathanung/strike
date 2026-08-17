@@ -79,7 +79,7 @@ func TestTurnCompletedInterruptedShowsCanceledState(t *testing.T) {
 	// Header right side shows canceled while idle after interrupt.
 	m.width, m.height, m.ready = 120, 40, true
 	view := ansi.Strip(m.headerView(120))
-	if !strings.Contains(view, "canceled") {
+	if !strings.Contains(view, "CANCELED") {
 		t.Errorf("header missing canceled:\n%s", view)
 	}
 	// Next turn clears sticky canceled chrome.
@@ -155,7 +155,7 @@ func TestVerificationCompletedSurfacesClaimVsVerified(t *testing.T) {
 	// Header badge.
 	m2.width, m2.height, m2.ready = 120, 40, true
 	view := ansi.Strip(m2.headerView(120))
-	if !strings.Contains(view, "claimed") {
+	if !strings.Contains(view, "CLAIMED") {
 		t.Errorf("header missing claimed badge:\n%s", view)
 	}
 }

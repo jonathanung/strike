@@ -107,13 +107,14 @@ func (c *subagentResultCell) render(width int, th theme.Theme) string {
 		head += sep + st.Muted.Render(snippet)
 	}
 
+	prefix := messagePrefix(th, labelStyle)
 	// Width-safe: strip, truncate plain, fall back to plain styled cut.
-	prefixW := lipgloss.Width(marker)
+	prefixW := lipgloss.Width(prefix + marker)
 	budget := max(1, width-prefixW)
 	if plain := ansi.Strip(head); ansi.StringWidth(plain) > budget {
 		head = labelStyle.Render(welcomeTruncate(plain, budget, ic.Ellipsis))
 	}
-	out := marker + head
+	out := prefix + marker + head
 
 	if !c.expanded {
 		return out
@@ -123,7 +124,7 @@ func (c *subagentResultCell) render(width int, th theme.Theme) string {
 	if body == "" {
 		body = statusLabel
 	}
-	indentPrefix := themedSpace(th.Spacing.SM) + st.BorderMuted.Render(ic.ToolGuide) + space
+	indentPrefix := prefix
 	bodyWidth := max(1, width-lipgloss.Width(indentPrefix))
 	bodyStyle := st.Muted
 	switch c.status {

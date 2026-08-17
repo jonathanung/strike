@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/frontend/host"
 	"github.com/jonathanung/strike-cli/internal/frontend/tui/ui"
@@ -89,13 +90,14 @@ func TestFastSelectedUpdatesNoticeAndRendersAlongsideEffort(t *testing.T) {
 		t.Errorf("notice = %q, want fast confirmation", m.notice)
 	}
 	header := m.headerView(100)
-	for _, want := range []string{"effort high", "fast"} {
-		if !strings.Contains(header, want) {
-			t.Errorf("header omits %q:\n%s", want, header)
+	plain := ansi.Strip(header)
+	for _, want := range []string{"EFFORT HIGH", "FAST"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("header omits %q:\n%s", want, plain)
 		}
 	}
-	if !strings.Contains(header, ui.Badge(m.th, ui.ToneWarning, "fast")) {
-		t.Errorf("header does not render fast as a warning badge:\n%s", header)
+	if !strings.Contains(header, headerKicker(m.th, ui.ToneWarning, "fast")) {
+		t.Errorf("header does not render FAST as a warning kicker:\n%s", header)
 	}
 }
 

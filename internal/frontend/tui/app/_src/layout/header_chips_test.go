@@ -113,7 +113,7 @@ func TestHeaderDoesNotInheritParentModelWhenChildUnknown(t *testing.T) {
 	if strings.Contains(plain, "parent-model") {
 		t.Fatalf("unknown child model must not inherit parent: %q", plain)
 	}
-	if !strings.Contains(plain, "no model") {
+	if !strings.Contains(plain, "NO MODEL") {
 		t.Fatalf("unknown child model should show no model: %q", plain)
 	}
 }

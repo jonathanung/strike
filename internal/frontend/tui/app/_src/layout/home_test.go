@@ -32,10 +32,10 @@ func TestHomeLayoutRendersCenteredPromptAndContextBar(t *testing.T) {
 
 	plain := ansi.Strip(viewString(m))
 	for _, want := range []string{
-		"context",     // thin context bar
-		"build",       // agent in context / header
-		"chat",        // composer mode title
-		"S T R I K E", // wordmark (spaced)
+		"CONTEXT",          // thin context kicker
+		"build",            // agent in context / header
+		"INSTRUCTION",      // composer kicker
+		"Direct the work.", // empty-state title
 	} {
 		if !strings.Contains(plain, want) {
 			t.Errorf("home layout missing %q:\n%s", want, plain)
@@ -71,8 +71,8 @@ func TestHomeLayoutSurfacesRecentFromHistory(t *testing.T) {
 func TestHomeLayoutSwitchesToMultiPaneAfterFirstPrompt(t *testing.T) {
 	m, _ := newAppTestModelHome(nil, nil)
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
-	if plain := ansi.Strip(viewString(m)); !strings.Contains(plain, "chat") {
-		t.Fatalf("expected home composer mode:\n%s", plain)
+	if plain := ansi.Strip(viewString(m)); !strings.Contains(plain, "INSTRUCTION") {
+		t.Fatalf("expected home composer kicker:\n%s", plain)
 	}
 
 	m.applyEvent(protocol.UserMessage{Text: "hello strike"})
@@ -83,7 +83,7 @@ func TestHomeLayoutSwitchesToMultiPaneAfterFirstPrompt(t *testing.T) {
 		t.Errorf("transcript missing user message:\n%s", plain)
 	}
 	// Right pane stack becomes available in multi-pane layout.
-	if !strings.Contains(plain, "context") {
+	if !strings.Contains(plain, "CONTEXT") {
 		t.Errorf("multi-pane missing context after first prompt:\n%s", plain)
 	}
 }
@@ -97,8 +97,8 @@ func TestHomeCtrlLOpensMultiPane(t *testing.T) {
 		t.Fatal("expected lean home before ctrl+l")
 	}
 	plainHome := ansi.Strip(viewString(m))
-	if !strings.Contains(plainHome, "S T R I K E") {
-		t.Fatalf("home missing wordmark:\n%s", plainHome)
+	if !strings.Contains(plainHome, "Direct the work.") {
+		t.Fatalf("home missing empty-state title:\n%s", plainHome)
 	}
 	// Discoverability: lean home footerHints include focus-right (may truncate
 	// in a narrow KeyHints row, so assert the hint set directly).
@@ -126,11 +126,11 @@ func TestHomeCtrlLOpensMultiPane(t *testing.T) {
 	}
 	plain := ansi.Strip(viewString(m))
 	// Right column panels visible (session stack titles).
-	if !strings.Contains(plain, "activity") && !strings.Contains(plain, "system") {
+	if !strings.Contains(plain, "ACTIVITY") && !strings.Contains(plain, "SYSTEM") {
 		t.Errorf("multi-pane missing right panels after ctrl+l:\n%s", plain)
 	}
-	// Left launch stack still has the composer (mode title).
-	if !strings.Contains(plain, "chat") {
+	// Left launch stack still has the composer (instruction kicker).
+	if !strings.Contains(plain, "INSTRUCTION") {
 		t.Errorf("left launch stack missing composer after ctrl+l:\n%s", plain)
 	}
 	// Split geometry: right pane column is present (not full-screen lean home).
@@ -155,7 +155,7 @@ func TestHomeCtrlLOpensMultiPane(t *testing.T) {
 		t.Fatal("homePanesOpen should remain sticky on focus-left")
 	}
 	plainLeft := ansi.Strip(viewString(m))
-	if !strings.Contains(plainLeft, "activity") && !strings.Contains(plainLeft, "system") {
+	if !strings.Contains(plainLeft, "ACTIVITY") && !strings.Contains(plainLeft, "SYSTEM") {
 		t.Errorf("right panels should stay after focus-left:\n%s", plainLeft)
 	}
 	if !m.composer.Focused() {
@@ -236,15 +236,15 @@ func TestComposerTitleShowsModeAndQueue(t *testing.T) {
 	m.focus = focusLeft
 	m.composer.SetValue("hello")
 	title := ansi.Strip(m.composerTitle(m.th.Resolve(), true))
-	if !strings.Contains(title, "chat") {
-		t.Errorf("title missing mode: %q", title)
+	if !strings.Contains(title, "INSTRUCTION") {
+		t.Errorf("title missing instruction kicker: %q", title)
 	}
-	if !strings.Contains(title, "ready") {
+	if !strings.Contains(title, "READY") {
 		t.Errorf("title missing send-state: %q", title)
 	}
 	m.composer.SetValue("!echo hi")
 	title = ansi.Strip(m.composerTitle(m.th.Resolve(), true))
-	if !strings.Contains(title, "shell") {
+	if !strings.Contains(title, "SHELL") {
 		t.Errorf("title missing shell mode: %q", title)
 	}
 }
@@ -316,8 +316,8 @@ func TestLeftFocusComposerBorderTokens(t *testing.T) {
 	m, _ := newAppTestModelWithOptions(Options{Theme: &th})
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
 	composer := m.composerView(false, 60, 6)
-	if plain := ansi.Strip(composer); !strings.Contains(plain, "chat") {
-		t.Fatalf("composer missing mode title:\n%s", plain)
+	if plain := ansi.Strip(composer); !strings.Contains(plain, "INSTRUCTION") {
+		t.Fatalf("composer missing instruction kicker:\n%s", plain)
 	}
 	if !strings.Contains(composer, rgbSGR("#778899")) {
 		t.Fatal("prompt box missing BorderFocus when left-focused")
@@ -341,7 +341,7 @@ func TestHomeCompletionStaysAttachedToPrompt(t *testing.T) {
 		if popupRow < 0 && strings.Contains(line, "select a provider") {
 			popupRow = i
 		}
-		if promptRow < 0 && strings.Contains(line, "command ❯") {
+		if promptRow < 0 && strings.Contains(line, "COMMAND") {
 			promptRow = i
 		}
 	}

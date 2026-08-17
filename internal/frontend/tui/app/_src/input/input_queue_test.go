@@ -158,7 +158,7 @@ func TestInputQueueBadgeRendersInComposerTitle(t *testing.T) {
 	m.inputQueue = []queuedInput{{modelText: "hello", displayPrompt: "hello"}}
 	m.reflow()
 	plain := ansi.Strip(viewString(m))
-	if !strings.Contains(plain, "queued 1") {
+	if !strings.Contains(plain, "QUEUED 1") {
 		t.Fatalf("view missing queue badge:\n%s", plain)
 	}
 }

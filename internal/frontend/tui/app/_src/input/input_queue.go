@@ -221,5 +221,5 @@ func (m Model) inputQueueBadge() string {
 	if n == 0 {
 		return ""
 	}
-	return ui.Badge(m.th, ui.ToneAccentAlt, fmt.Sprintf("queued %d", n))
+	return headerKicker(m.th, ui.ToneAccentAlt, fmt.Sprintf("queued %d", n))
 }

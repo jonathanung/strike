@@ -94,7 +94,7 @@ func TestC2ViewGeometryAndActivePanes(t *testing.T) {
 				}
 			}
 			plain := ansi.Strip(view)
-			if tt.right > 0 && !strings.Contains(plain, "context") {
+			if tt.right > 0 && !strings.Contains(plain, "CONTEXT") {
 				t.Error("split/right-active view omitted right-pane title")
 			}
 			if tt.right == 0 && (strings.Contains(plain, "No active todos") || strings.Contains(plain, "directory")) {
@@ -109,7 +109,7 @@ func TestC2ViewGeometryAndActivePanes(t *testing.T) {
 				panelRowIdx := -1
 				for i, row := range rows {
 					plain := ansi.Strip(row)
-					if strings.Contains(plain, "first run") && strings.Contains(plain, "context") {
+					if strings.Contains(plain, "FIRST RUN") && strings.Contains(plain, "CONTEXT") {
 						panelRowIdx = i
 						break
 					}
@@ -120,10 +120,10 @@ func TestC2ViewGeometryAndActivePanes(t *testing.T) {
 					hasLeft, hasRight := false, false
 					for _, row := range rows {
 						plain := ansi.Strip(row)
-						if strings.Contains(plain, "first run") {
+						if strings.Contains(plain, "FIRST RUN") || strings.Contains(plain, "Direct the work") {
 							hasLeft = true
 						}
-						if strings.Contains(plain, "context") {
+						if strings.Contains(plain, "CONTEXT") {
 							hasRight = true
 						}
 					}
@@ -143,7 +143,7 @@ func TestC2ViewGeometryAndActivePanes(t *testing.T) {
 				rightStart := tt.left + tt.gutter
 				topPlain := ansi.Strip(rows[1])
 				bottomPlain := ansi.Strip(rows[bodyHeight])
-				titleIdx := strings.Index(topPlain, "context")
+				titleIdx := strings.Index(topPlain, "CONTEXT")
 				if titleIdx < 0 {
 					t.Errorf("right panel top chrome missing title on body start row: %q", topPlain)
 				} else if titleCol := ansi.StringWidth(topPlain[:titleIdx]); titleCol < rightStart-1 || titleCol > rightStart+4 {
@@ -187,8 +187,8 @@ func TestC2RegistryReceivesRightPanelInnerBodyDimensionsAndRetainsStateAcrossRes
 		if rightOuter == 0 {
 			rightOuter = size.Width
 		}
-		wantWidth := ui.PanelInnerWidth(m.th, rightOuter)
-		wantHeight := l.transcript + l.notice + l.popup + l.composer - 2
+		wantWidth := inspectorInnerWidth(m.th, rightOuter)
+		wantHeight := inspectorInnerHeight(l.transcript+l.notice+l.popup+l.composer, true)
 		for _, w := range m.windows.windows {
 			got := testWindow(t, w)
 			if got.width != wantWidth || got.height != wantHeight {
@@ -278,12 +278,12 @@ func TestC2PaneFocusAndModalUseFocusAndMutedThemeTokens(t *testing.T) {
 	m, _ := newAppTestModelWithOptions(Options{Theme: &th})
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 120, Height: 80})
 	// Left focus highlights the prompt box (mode title "chat") — not right panes.
-	leftRows, rightRows := rowsContaining(viewString(m), "chat"), rowsContaining(viewString(m), "context")
+	leftRows, rightRows := rowsContaining(viewString(m), "INSTRUCTION"), rowsContaining(viewString(m), "CONTEXT")
 	if !strings.Contains(strings.Join(leftRows, "\n"), rgbSGR("#010203")) || !strings.Contains(strings.Join(rightRows, "\n"), rgbSGR("#040506")) {
 		t.Fatal("left focus/right dim border tokens are not visible on their respective panes")
 	}
 	m = updateApp(t, m, tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl})
-	leftRows, rightRows = rowsContaining(viewString(m), "chat"), rowsContaining(viewString(m), "context")
+	leftRows, rightRows = rowsContaining(viewString(m), "INSTRUCTION"), rowsContaining(viewString(m), "CONTEXT")
 	if !strings.Contains(strings.Join(leftRows, "\n"), rgbSGR("#040506")) || !strings.Contains(strings.Join(rightRows, "\n"), rgbSGR("#010203")) {
 		t.Fatal("focus toggle did not swap pane focus/dim border tokens")
 	}

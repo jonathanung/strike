@@ -24,8 +24,6 @@ import (
 	"github.com/jonathanung/strike-cli/internal/protocol"
 
 	"github.com/jonathanung/strike-cli/internal/frontend/tui/theme"
-
-	"github.com/jonathanung/strike-cli/internal/frontend/tui/ui"
 )
 
 const appCmdTimeout = 2 * time.Second
@@ -897,7 +895,7 @@ func TestLayoutReflowHandlesTinyWindowsPopupPasteResizeAndReset(t *testing.T) {
 
 	m = updateApp(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 
-	if m.viewport.Width() != ui.InnerWidth(80) || m.viewport.Height() < 0 {
+	if m.viewport.Width() != 80 || m.viewport.Height() < 0 {
 
 		t.Errorf("resize did not restore effective viewport dimensions: %dx%d", m.viewport.Width(), m.viewport.Height())
 
@@ -919,7 +917,7 @@ func TestDangerousPermissionsIndicatorPersistsAcrossStateAndNoticeChanges(t *tes
 
 	plain := ansi.Strip(viewString(m))
 
-	if !strings.Contains(plain, indicator) || !strings.Contains(plain, "working") {
+	if !strings.Contains(plain, indicator) || !strings.Contains(plain, "WORKING") {
 
 		t.Errorf("running view does not retain danger indicator and running status:\n%s", plain)
 
@@ -1211,7 +1209,7 @@ func TestDangerousPermissionsIndicatorAndModalPersistAcrossRunningStateAndNotice
 
 		"Command palette",
 
-		"working",
+		"WORKING",
 
 		"unrelated notice",
 	} {

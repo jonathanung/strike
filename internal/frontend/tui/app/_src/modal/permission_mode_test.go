@@ -163,10 +163,10 @@ func TestSoftApproveModeSelectedShowsArmedChrome(t *testing.T) {
 		t.Fatalf("effective seconds = %d, want %d", got, protocol.SoftApproveSeconds)
 	}
 	plain := ansi.Strip(viewString(m))
-	if !strings.Contains(plain, "soft") {
+	if !strings.Contains(plain, "SOFT") {
 		t.Fatalf("missing soft badge:\n%s", plain)
 	}
-	if !strings.Contains(plain, "auto-allow") || !strings.Contains(plain, "15s") {
+	if !strings.Contains(plain, "AUTO-ALLOW") || !strings.Contains(plain, "15S") {
 		t.Fatalf("missing auto-allow 15s badge:\n%s", plain)
 	}
 }

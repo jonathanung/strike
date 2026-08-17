@@ -219,7 +219,7 @@ func TestEffortSelectedEventUpdatesModelAndHeaderBadge(t *testing.T) {
 	if m.effort != protocol.EffortXHigh {
 		t.Errorf("model effort = %q, want xhigh", m.effort)
 	}
-	if !strings.Contains(m.headerView(100), "effort xhigh") {
+	if !strings.Contains(m.headerView(100), "EFFORT XHIGH") {
 		t.Errorf("header omits the effort badge:\n%s", m.headerView(100))
 	}
 }

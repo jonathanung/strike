@@ -89,7 +89,7 @@ func TestImmediateFlushBypassesFPSCap(t *testing.T) {
 	if m.paint.suppress {
 		t.Fatal("ToolCallBegin left paint suppressed")
 	}
-	if plain := ansi.Strip(m.viewport.View()); !strings.Contains(plain, "bash") {
+	if plain := ansi.Strip(m.viewport.View()); !strings.Contains(plain, "BASH") {
 		t.Fatalf("immediate tool paint missing bash cell: %q", plain)
 	}
 

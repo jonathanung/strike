@@ -114,7 +114,7 @@ func (m Model) transcriptContentRect() (contentRect, bool) {
 	if !ok || !showLeft || l.transcript <= 0 || m.viewport.Height() <= 0 {
 		return contentRect{}, false
 	}
-	x, y := m.panelContentOrigin(leftWidth, l.header, l.compact)
+	x, y := m.transcriptBodyOrigin(leftWidth, l.header, l.compact)
 	w := m.viewport.Width()
 	if w <= 0 {
 		w = l.transcriptInnerWidthFor(m.th.Resolve(), leftWidth)
@@ -195,6 +195,15 @@ func (m Model) panelContentOrigin(leftWidth, outerY int, compact bool) (x, y int
 	}
 	dx, dy := ui.PanelContentOrigin(m.th.Resolve(), leftWidth)
 	return dx, outerY + dy
+}
+
+// transcriptBodyOrigin is the top-left cell of the transcript viewport under
+// the uppercase kicker row (no boxed panel inset).
+func (m Model) transcriptBodyOrigin(leftWidth, outerY int, compact bool) (x, y int) {
+	if compact || leftWidth < 1 {
+		return 0, outerY
+	}
+	return 0, outerY + 1
 }
 
 // applyTextSelection paints the linear selection range onto a full frame.

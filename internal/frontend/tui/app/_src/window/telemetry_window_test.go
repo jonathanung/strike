@@ -357,7 +357,7 @@ func TestTelemetryInSessionStack(t *testing.T) {
 	m.windows, _ = m.windows.activate("context")
 	m.reflow()
 	plain := ansi.Strip(viewString(m))
-	for _, want := range []string{"context", "activity", "system", "RAM", "CPU", "Disk"} {
+	for _, want := range []string{"CONTEXT", "ACTIVITY", "SYSTEM", "RAM", "CPU", "Disk"} {
 		if !strings.Contains(plain, want) {
 			t.Errorf("stack missing %q:\n%s", want, plain)
 		}
