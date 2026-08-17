@@ -35,6 +35,18 @@ export function statusKindFrom(raw?: string): StatusKind {
   return "unknown";
 }
 
+/** Live session chrome: needs-you wins over busy (same order as TUI agentState). */
+export function liveStatusKind(flags: {
+  busy?: boolean;
+  needsYou?: boolean;
+  failed?: boolean;
+}): StatusKind {
+  if (flags.needsYou) return "needs-you";
+  if (flags.failed) return "failed";
+  if (flags.busy) return "busy";
+  return "idle";
+}
+
 export function StatusBadge({
   kind,
   label,

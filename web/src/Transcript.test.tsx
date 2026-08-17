@@ -14,6 +14,21 @@ describe("Transcript", () => {
     expect(screen.getByText('fmt.Println("ok")')).toBeInTheDocument();
   });
 
+  it("paints running and failed tool rows with working/error roles", () => {
+    const { rerender, container } = render(
+      <Transcript item={{ id: "t", kind: "tool", title: "bash", text: "", data: { status: "running" } }} />,
+    );
+    expect(container.querySelector(".tool-state-running")).toHaveTextContent("running");
+    rerender(
+      <Transcript item={{ id: "t", kind: "tool", title: "bash", text: "boom", data: { status: "error" } }} />,
+    );
+    expect(container.querySelector(".tool-state-error")).toHaveTextContent("error");
+    rerender(
+      <Transcript item={{ id: "t", kind: "tool", title: "bash", text: "ok", data: { status: "done" } }} />,
+    );
+    expect(container.querySelector(".tool-state-done")).toHaveTextContent("done");
+  });
+
   it("renders structured tool output and diffs", () => {
     const { rerender, container } = render(<Transcript item={{ id: "t", kind: "tool", title: "read", text: '{"path":"a.go"}' }} />);
     expect(screen.getByText("structured")).toBeInTheDocument();

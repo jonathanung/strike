@@ -3,6 +3,7 @@ export { Tabs, TabPanel, type TabItem, type TabsProps } from "./Tabs";
 export {
   StatusBadge,
   StatusDot,
+  liveStatusKind,
   statusKindFrom,
   type StatusKind,
 } from "./Status";

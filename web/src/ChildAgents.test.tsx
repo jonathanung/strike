@@ -31,7 +31,11 @@ describe("ChildAgentsPanel", () => {
     );
     expect(screen.getByLabelText("Child scout")).toHaveTextContent("completed");
     expect(screen.getByLabelText("Child scout")).toHaveTextContent("complete");
+    expect(screen.getByLabelText("Child scout").querySelector(".child-state")).toHaveClass("completed");
+    expect(screen.getByLabelText("Child scout").querySelector(".child-state")).toHaveAttribute("data-status", "complete");
     expect(screen.getByLabelText("Child build")).toHaveTextContent("running");
+    expect(screen.getByLabelText("Child build").querySelector(".child-state")).toHaveClass("running");
+    expect(screen.getByLabelText("Child build").querySelector(".child-state")).toHaveAttribute("data-status", "busy");
     expect(screen.getByLabelText("Child build").textContent).not.toMatch(/partial|unavailable|complete/);
   });
 

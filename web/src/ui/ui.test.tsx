@@ -5,7 +5,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Dialog } from "./Dialog";
 import { Tabs } from "./Tabs";
-import { StatusBadge, statusKindFrom } from "./Status";
+import { StatusBadge, liveStatusKind, statusKindFrom } from "./Status";
 import { CapabilityUnavailable, Notice } from "./Notice";
 import { Button } from "./Button";
 import { ListRow } from "./ListRow";
@@ -16,10 +16,22 @@ afterEach(() => cleanup());
 describe("statusKindFrom", () => {
   it("maps engine states without relying on color alone", () => {
     expect(statusKindFrom("running")).toBe("busy");
+    expect(statusKindFrom("working")).toBe("busy");
+    expect(statusKindFrom("ready")).toBe("idle");
     expect(statusKindFrom("completed")).toBe("complete");
     expect(statusKindFrom("failed")).toBe("failed");
     expect(statusKindFrom("blocked")).toBe("blocked");
     expect(statusKindFrom("needs-you")).toBe("needs-you");
+    expect(statusKindFrom("permission")).toBe("needs-you");
+  });
+});
+
+describe("liveStatusKind", () => {
+  it("lets permission/question win over busy, matching TUI agentState", () => {
+    expect(liveStatusKind({ busy: true, needsYou: true })).toBe("needs-you");
+    expect(liveStatusKind({ busy: true })).toBe("busy");
+    expect(liveStatusKind({ failed: true })).toBe("failed");
+    expect(liveStatusKind({})).toBe("idle");
   });
 });
 
@@ -184,6 +196,17 @@ describe("token CSS foundation", () => {
     expect(css).toMatch(/\.ui-dialog\b/);
     expect(css).toMatch(/\.ui-tab\b/);
     expect(css).toMatch(/\.ui-status-needs-you/);
+    expect(css).toMatch(/\.ui-status-idle\s*\{[^}]*--success/);
+    expect(css).toMatch(/\.ui-status-busy\s*\{[^}]*--accent-alt/);
+    expect(css).toMatch(/\.ui-status-failed\s*\{[^}]*--signal/);
+    expect(css).toMatch(/\.tool-state-running\s*\{[^}]*--accent-alt/);
+    expect(css).toMatch(/\.tool-state-error\s*\{[^}]*--signal/);
+    expect(css).toMatch(/\.tool-state-done\s*\{[^}]*--success/);
+    expect(css).toMatch(/\.child-state\.running\s*\{[^}]*--accent-alt/);
+    expect(css).toMatch(/\.child-state\.completed\s*\{[^}]*--success/);
+    expect(css).toMatch(/\.pane-meter-fill\.tone-danger\s*\{[^}]*--danger/);
+    expect(css).not.toMatch(/\.child-state\.completed,\s*\.child-state\.running/);
+    expect(css).not.toMatch(/\.tool-state-error\s*\{[^}]*--diff-del/);
     expect(css).toMatch(/data-appearance="light"/);
     expect(css).toMatch(/data-appearance="dark"/);
     // Duplicated workflow-dialog blocks removed (one definition remains).
@@ -215,6 +238,8 @@ describe("token CSS foundation", () => {
     );
     expect(selected?.[0]).toMatch(/background:\s*var\(--raised\)/);
     expect(selected?.[0]).toMatch(/box-shadow:\s*inset 2px 0 0 var\(--acid\)/);
+    expect(selected?.[0]).toMatch(/color:\s*var\(--highlight\)/);
+    expect(selected?.[0]).not.toMatch(/--glow/);
     expect(css).toMatch(/\.ui-list-row-main\s*\{[^}]*flex-direction:\s*row/);
     const title = css.match(/\.ui-list-row-title,\s*\.completion button strong\s*\{[\s\S]*?\n\}/);
     expect(title?.[0]).toMatch(/font-weight:\s*inherit/);

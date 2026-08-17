@@ -73,6 +73,27 @@ delimiter-free pills on `SurfaceMuted`.
 | **Danger** | Orange destructive actions — **distinct from Error** |
 | **Highlight** | Selected / active item foreground (distinct from Accent) |
 
+### Information colors (TUI + web)
+
+Same *role* on both surfaces — never one purple for working, needs-you, and
+error. Hexes stay in the token file; this table is the meaning contract.
+
+| Role | Meaning | TUI | Web CSS |
+|---|---|---|---|
+| Ready / idle | Awaiting input | `AgentStateReady` → `Success` | `.ui-status-idle`, `.pulse.idle`, `.root-idle`, `.session-idle` → `--success` |
+| Working | Turn or tool in flight | `AgentStateWorking` → `AccentAlt` | `.ui-status-busy`, `.pulse.busy`, `.root-busy`, `.tool-state-running`, `.child-state.running`, `.session-busy` → `--accent-alt` |
+| Needs you | Permission, question, or gate | `AgentStateAttention` → `Warning` | `.ui-status-needs-you`, `.pulse.needs-you`, `.root-attention`, `.needs-you`, `.tool-state-denied` → `--warning` |
+| Error | Failed turn, tool, or provider | `AgentStateError` → `Error` | `.ui-status-failed`, `.pulse.failed`, `.tool-state-error` → `--signal` |
+| Success | Complete / ok | `Success` | `.ui-status-complete`, `.tool-state-done`, `.child-state.completed` → `--success` |
+| Danger | Destructive action | `Danger` | `.ui-btn-danger`, `.pane-meter-fill.tone-danger` → `--danger` (never `--signal`) |
+| User | "You" transcript label | `UserLabel` | `.message.user` / `.message-label` → `--user` |
+| Tool | Tool-call transcript label | `ToolLabel` | `.message.tool`, `.tool-card summary` → `--tool` |
+| Selected | Cursor / active item | `Highlight` foreground | `--raised` fill + inset 2px `--acid` rule + `--highlight` text (no glow) |
+| Focus | Focused pane / control | `BorderFocus` + title-edge `SurfaceFocus` | `--focus-ring` / `--border-focus` |
+
+Permission/question wins over busy (TUI `agentState`, web `liveStatusKind`).
+Canceled / unknown stay muted (`TextMuted` / `--muted`).
+
 ### Surface ladder
 
 `background` < `surfaceMuted` < `surface` < `surfaceFocus` — enough step that
@@ -183,6 +204,8 @@ Semantic roles map as `--ink`←Text, `--muted`←TextMuted, `--ground`←Backgr
 `--surface`/`--raised`/`--surface-muted`←Surface*, `--rule`←Border,
 `--acid`←Accent, `--accent-alt`←AccentAlt, `--signal`←Error, `--danger`←Danger,
 `--user`/`--tool`← transcript labels, `--diff-add`/`--diff-del`←diff roles.
+Information-color usage (working / needs-you / error / selected) is the table
+in [Information colors](#information-colors-tui--web).
 `--radius` is the 2px chrome token; stock role hexes are injected from the
 token file (`/* strike-stock:dark|light */`). Parity is guarded by
 `web/src/theme.test.ts`. The web settings dialog loads the

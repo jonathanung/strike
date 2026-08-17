@@ -25,6 +25,47 @@ func TestAgentStateLabel(t *testing.T) {
 	}
 }
 
+func TestInformationColorContract(t *testing.T) {
+	// Locks the TUI side of docs/theme.md "Information colors" so working /
+	// needs-you / error / success / danger / user / tool / selected stay on
+	// distinct roles (web Status CSS is the matching column).
+	th := theme.Default()
+	st := th.S()
+	if th.AgentStateColor(theme.AgentStateWorking) != th.AccentAlt {
+		t.Errorf("working = %#v, want AccentAlt", th.AgentStateColor(theme.AgentStateWorking))
+	}
+	if th.AgentStateColor(theme.AgentStateAttention) != th.Warning {
+		t.Errorf("needs-you = %#v, want Warning", th.AgentStateColor(theme.AgentStateAttention))
+	}
+	if th.AgentStateColor(theme.AgentStateError) != th.Error {
+		t.Errorf("error = %#v, want Error", th.AgentStateColor(theme.AgentStateError))
+	}
+	if th.AgentStateColor(theme.AgentStateReady) != th.Success {
+		t.Errorf("ready = %#v, want Success", th.AgentStateColor(theme.AgentStateReady))
+	}
+	if got := st.Danger.GetForeground(); got != color.Color(th.Danger) {
+		t.Errorf("Danger style = %v, want Danger token", got)
+	}
+	if th.Danger == th.Error {
+		t.Error("Danger collapsed onto Error")
+	}
+	if got := st.UserLabel.GetForeground(); got != color.Color(th.UserLabel) {
+		t.Errorf("UserLabel style = %v, want UserLabel token", got)
+	}
+	if got := st.ToolLabel.GetForeground(); got != color.Color(th.ToolLabel) {
+		t.Errorf("ToolLabel style = %v, want ToolLabel token", got)
+	}
+	if th.UserLabel == th.ToolLabel {
+		t.Error("UserLabel collapsed onto ToolLabel")
+	}
+	if got := st.Selected.GetForeground(); got != color.Color(th.Highlight) {
+		t.Errorf("Selected = %v, want Highlight", got)
+	}
+	if th.Highlight == th.Accent {
+		t.Error("Highlight collapsed onto Accent")
+	}
+}
+
 func TestAgentStateColorTokens(t *testing.T) {
 	th := theme.Default()
 	cases := []struct {

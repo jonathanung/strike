@@ -66,6 +66,8 @@ describe("sharp royal-purple cockpit chrome (#1235)", () => {
 
   it("does not use glow as primary hierarchy on busy/status indicators", () => {
     expect(rule(".pulse.busy")).not.toMatch(/--glow|box-shadow/);
+    expect(rule(".pulse.needs-you")).not.toMatch(/--glow|box-shadow/);
+    expect(rule(".pulse.needs-you")).toMatch(/background:\s*var\(--warning\)/);
     expect(rule(".root-busy")).not.toMatch(/--glow|box-shadow/);
     expect(css).not.toMatch(/\.ui-status-busy[^{]*\{[^}]*--glow/);
     expect(css).not.toMatch(/box-shadow:\s*0\s+0\s+\d+px\s+var\(--glow\)/);

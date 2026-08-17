@@ -32,6 +32,17 @@ describe("web theme parity with schemas/ui-tokens.json", () => {
   const css = loadStyles();
   const tokens = STOCK_TOKENS;
 
+  it("documents the information-color table in docs/theme.md", () => {
+    const dir = dirname(fileURLToPath(import.meta.url));
+    const themeDoc = readFileSync(resolve(dir, "../../docs/theme.md"), "utf8");
+    expect(themeDoc).toMatch(/### Information colors \(TUI \+ web\)/);
+    expect(themeDoc).toMatch(/AgentStateWorking.*AccentAlt/);
+    expect(themeDoc).toMatch(/AgentStateAttention.*Warning/);
+    expect(themeDoc).toMatch(/AgentStateError.*Error/);
+    expect(themeDoc).toMatch(/--accent-alt/);
+    expect(themeDoc).toMatch(/--raised.*--acid.*--highlight/);
+  });
+
   it("documents the token file and TUI Default map in the stylesheet header", () => {
     expect(css).toMatch(/schemas\/ui-tokens\.json/);
     expect(css).toMatch(/theme\.Default/);
@@ -117,7 +128,9 @@ describe("web theme parity with schemas/ui-tokens.json", () => {
     expect(css).toMatch(
       /\.review-tabs button\.active\s*\{\s*background:\s*var\(--acid\);\s*color:\s*var\(--mark-ink\);\s*border-color:\s*var\(--ink\)/,
     );
-    expect(css).toMatch(/\.child-row:hover,\s*\.child-row\.active\s*\{\s*border-color:\s*var\(--rule\);\s*background:\s*color-mix\(in srgb,\s*var\(--surface\)/);
+    expect(css).toMatch(
+      /\.child-row:hover,\s*\.child-row\.active\s*\{[\s\S]*?background:\s*var\(--raised\);[\s\S]*?box-shadow:\s*inset 2px 0 0 var\(--acid\);[\s\S]*?color:\s*var\(--highlight\)/,
+    );
     expect(css).toMatch(/\.child-detail\s*\{[^}]*border:\s*1px solid var\(--rule\)/);
   });
 });
