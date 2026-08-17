@@ -177,7 +177,7 @@ func TestAutonomySelectedEventUpdatesModelAndHeaderBadge(t *testing.T) {
 		t.Errorf("model autonomy = %q, want agent", m.autonomy)
 	}
 	header := ansi.Strip(m.headerView(100))
-	if !strings.Contains(header, "auto agent") {
+	if !strings.Contains(header, "AUTO AGENT") {
 		t.Errorf("header omits the autonomy badge:\n%s", header)
 	}
 }

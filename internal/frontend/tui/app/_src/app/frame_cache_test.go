@@ -116,7 +116,7 @@ func TestDirtyMaskSpinnerPreservesRightPixels(t *testing.T) {
 	if len(view) < 10 {
 		t.Fatalf("view too short after spinner: %q", view)
 	}
-	if !strings.Contains(view, "strike") && !strings.Contains(view, "ready") && !strings.Contains(view, "working") {
+	if !strings.Contains(view, "STRIKE") && !strings.Contains(view, "READY") && !strings.Contains(view, "WORKING") {
 		// Brand or agent status should still appear; avoid glyph overfitting.
 		t.Fatalf("view missing expected chrome after spinner:\n%s", view)
 	}

@@ -81,7 +81,7 @@ func TestReadToolCellHidesFileBody(t *testing.T) {
 		done:   true,
 	}
 	plain := ansi.Strip(cell.render(80, th))
-	if !strings.Contains(plain, "read") {
+	if !strings.Contains(plain, "READ") {
 		t.Fatalf("missing read label:\n%s", plain)
 	}
 	if !strings.Contains(plain, "internal/product/auth/store.go") {
@@ -120,11 +120,11 @@ func TestToolCellUsesToolGuideIconRatherThanBorderVertical(t *testing.T) {
 
 	out := (&toolCell{name: "x", output: "result", done: true}).render(8, th)
 	plain := ansi.Strip(out)
-	if !strings.Contains(plain, "  > ") {
-		t.Errorf("tool output guide = %q, want custom ToolGuide", plain)
+	if !strings.Contains(plain, th.Icons.FocusBar) {
+		t.Errorf("tool output accent = %q, want FocusBar", plain)
 	}
 	if strings.Contains(plain, "|") {
-		t.Errorf("tool output used BorderStyle.Vertical instead of ToolGuide: %q", plain)
+		t.Errorf("tool output used BorderStyle.Vertical instead of FocusBar: %q", plain)
 	}
 	for i, line := range strings.Split(out, "\n") {
 		if got := ansi.StringWidth(line); got > 8 {
@@ -138,10 +138,10 @@ func TestToolCellUsesCustomDotForStructuredTitleSeparator(t *testing.T) {
 	th.Icons.Dot = "|"
 
 	plain := ansi.Strip((&toolCell{name: "bash", title: "run tests", done: true}).render(80, th))
-	if !strings.Contains(plain, "bash | run tests") {
+	if !strings.Contains(plain, "BASH | run tests") {
 		t.Errorf("tool title omitted custom structured separator: %q", plain)
 	}
-	if strings.Contains(plain, "bash · run tests") {
+	if strings.Contains(plain, "BASH · run tests") {
 		t.Errorf("tool title retained default dot separator: %q", plain)
 	}
 }
@@ -541,7 +541,7 @@ func TestExploreCellGroupsConsecutiveReadGlobGrep(t *testing.T) {
 	}
 	th := theme.Default().Resolve()
 	plain := ansi.Strip(exp.render(80, th))
-	if !strings.Contains(plain, "explored") {
+	if !strings.Contains(plain, "EXPLORED") {
 		t.Errorf("explore header missing explored:\n%s", plain)
 	}
 	if !strings.Contains(plain, "3") || !strings.Contains(plain, "tools") {
@@ -1240,7 +1240,7 @@ func TestAssistantCellRendersHeadingMarkdown(t *testing.T) {
 	if !strings.Contains(plain, "Title") {
 		t.Errorf("heading body missing Title:\n%s", plain)
 	}
-	if !strings.Contains(plain, "strike") {
+	if !strings.Contains(plain, "STRIKE") {
 		t.Errorf("assistant label missing:\n%s", plain)
 	}
 	// Pin the glamour path: body matches markdownRender (not a divergent plain dump).
@@ -1266,7 +1266,7 @@ func TestAssistantCellRendersFencedCodeBlock(t *testing.T) {
 	if strings.Contains(plain, "```") {
 		t.Errorf("fenced code still contains triple backticks:\n%s", plain)
 	}
-	if !strings.Contains(plain, "strike") {
+	if !strings.Contains(plain, "STRIKE") {
 		t.Errorf("assistant label missing:\n%s", plain)
 	}
 }
@@ -1282,7 +1282,7 @@ func TestAssistantCellMarkdownWidthSafe(t *testing.T) {
 				t.Errorf("width %d line %d: StringWidth=%d > %d: %q", width, i, got, width, ansi.Strip(line))
 			}
 		}
-		plain := collapsedWS(ansi.Strip(out))
+		plain := collapsedWS(stripMessagePrefixLines(ansi.Strip(out)))
 		if !strings.Contains(plain, "prose paragraph") {
 			t.Errorf("width %d missing prose:\n%s", width, ansi.Strip(out))
 		}
@@ -1435,7 +1435,7 @@ func TestAssistantCellEmptyAndWhitespace(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			out := (&assistantCell{text: tc.text, complete: tc.complete}).render(80, th)
 			plain := ansi.Strip(out)
-			if !strings.Contains(plain, "strike") {
+			if !strings.Contains(plain, "STRIKE") {
 				t.Errorf("label missing for %q:\n%s", tc.text, plain)
 			}
 			body := strings.TrimSpace(assistantBodyPlain(plain))
@@ -1454,7 +1454,7 @@ func TestAssistantCellPlainProse(t *testing.T) {
 	if !strings.Contains(collapsedWS(plain), msg) {
 		t.Errorf("plain prose missing:\n%s", plain)
 	}
-	if !strings.Contains(plain, "strike") {
+	if !strings.Contains(plain, "STRIKE") {
 		t.Errorf("assistant label missing:\n%s", plain)
 	}
 }
@@ -1473,10 +1473,10 @@ func TestAssistantCellMarkdownErrorFallback(t *testing.T) {
 	out := cell.render(width, th)
 	plain := ansi.Strip(out)
 	// Word-wrap may move spaces to line breaks; compare with whitespace removed.
-	if !strings.Contains(stripAllWS(plain), stripAllWS(src)) {
+	if !strings.Contains(stripAllWS(stripMessagePrefixLines(plain)), stripAllWS(src)) {
 		t.Errorf("error fallback omitted source text:\n%s", plain)
 	}
-	if !strings.Contains(plain, "strike") {
+	if !strings.Contains(plain, "STRIKE") {
 		t.Errorf("assistant label missing on error path:\n%s", plain)
 	}
 	for i, line := range strings.Split(out, "\n") {
@@ -1547,7 +1547,7 @@ func TestUserCellUnchangedByMarkdown(t *testing.T) {
 	if !strings.Contains(plain, "# Title") {
 		t.Errorf("user cell should keep raw markdown:\n%s", plain)
 	}
-	if !strings.Contains(plain, "you") {
+	if !strings.Contains(plain, "YOU") {
 		t.Errorf("user label missing:\n%s", plain)
 	}
 }
@@ -1614,7 +1614,7 @@ func TestAssistantCellMarkdownErrorFallbackWordWrap(t *testing.T) {
 			t.Errorf("fallback missing intact token %q:\n%s", tok, body)
 		}
 	}
-	if !strings.Contains(stripAllWS(plain), stripAllWS(src)) {
+	if !strings.Contains(stripAllWS(stripMessagePrefixLines(plain)), stripAllWS(src)) {
 		t.Errorf("fallback omitted source text:\n%s", plain)
 	}
 }
@@ -1628,7 +1628,19 @@ func assistantBodyPlain(plain string) string {
 	if len(parts) < 2 {
 		return ""
 	}
-	return parts[1]
+	return stripMessagePrefixLines(parts[1])
+}
+
+func stripMessagePrefixLines(s string) string {
+	th := theme.Default()
+	prefix := th.Icons.FocusBar
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		line = strings.TrimPrefix(line, prefix)
+		line = strings.TrimPrefix(line, " ")
+		lines[i] = line
+	}
+	return strings.Join(lines, "\n")
 }
 
 func collapsedWS(s string) string {
@@ -1646,6 +1658,6 @@ func stripAllWS(s string) string {
 
 func assistantBodyWidth(width int, th theme.Theme) int {
 	th = th.Resolve()
-	indentation := themedSpace(th.Spacing.SM)
-	return max(1, width-lipgloss.Width(indentation))
+	prefix := messagePrefix(th, th.S().AssistantLabel)
+	return max(1, width-lipgloss.Width(prefix))
 }

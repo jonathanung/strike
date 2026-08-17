@@ -33,11 +33,12 @@ func TestThemeChromeModesFrames(t *testing.T) {
 			m, _ := newAppTestModelWithOptions(Options{Theme: &th})
 			m = updateApp(t, m, tea.WindowSizeMsg{Width: 93, Height: 40})
 			plain := ansi.Strip(viewString(m))
-			hasBox := strings.ContainsAny(plain, "╭╮╰╯┌┐└┘│─")
+			// Composer stays boxed; inspector/transcript use rules, not tiles.
+			hasBox := strings.ContainsAny(plain, "╭╮╰╯┌┐└┘")
 			if hasBox != tc.wantBox {
 				t.Fatalf("box-drawing present=%v, want %v\n%s", hasBox, tc.wantBox, plain)
 			}
-			if !strings.Contains(plain, "context") {
+			if !strings.Contains(plain, "CONTEXT") {
 				t.Fatalf("split frame missing context pane:\n%s", plain)
 			}
 		})

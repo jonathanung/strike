@@ -77,9 +77,9 @@ func TestCustomThemeSpacingControlsRootTranscriptHeaderAndPermissionLayout(t *te
 		toolOutputLead string
 		choiceGap      string
 	}{
-		{"default", theme.Default().Spacing, "  ", "  ", "bash · build ✓", "  │ ", "  "},
-		{"explicit zero", theme.NewSpacing(0, 0, 0, 0), "", "", "bash·build✓", "│", ""},
-		{"custom", theme.NewSpacing(2, 4, 3, 5), "    ", "    ", "bash  ·  build  ✓", "    │  ", "    "},
+		{"default", theme.Default().Spacing, "▏ ", "  ", "BASH · build ✓", "▏ ", "  "},
+		{"explicit zero", theme.NewSpacing(0, 0, 0, 0), "▏", "", "BASH·build✓", "▏", ""},
+		{"custom", theme.NewSpacing(2, 4, 3, 5), "▏  ", "    ", "BASH  ·  build  ✓", "▏  ", "    "},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			th := theme.Default()
@@ -91,8 +91,9 @@ func TestCustomThemeSpacingControlsRootTranscriptHeaderAndPermissionLayout(t *te
 			}
 			tool := ansi.Strip((&toolCell{name: "bash", title: "build", output: "output", done: true}).render(40, th))
 			toolLines := strings.Split(tool, "\n")
-			if toolLines[0] != th.Icons.Tool+strings.Repeat(" ", th.Spacing.XS)+tt.toolDetail {
-				t.Errorf("tool detail spacing = %q, want %q", toolLines[0], th.Icons.Tool+strings.Repeat(" ", th.Spacing.XS)+tt.toolDetail)
+			wantHead := th.Icons.FocusBar + strings.Repeat(" ", th.Spacing.XS) + tt.toolDetail
+			if toolLines[0] != wantHead {
+				t.Errorf("tool detail spacing = %q, want %q", toolLines[0], wantHead)
 			}
 			if !strings.HasPrefix(toolLines[1], tt.toolOutputLead+"output") {
 				t.Errorf("tool output indentation = %q, want prefix %q", toolLines[1], tt.toolOutputLead+"output")
@@ -101,14 +102,8 @@ func TestCustomThemeSpacingControlsRootTranscriptHeaderAndPermissionLayout(t *te
 			m, _ := newAppTestModelWithOptions(Options{Theme: &th})
 			m = updateApp(t, m, tea.WindowSizeMsg{Width: 60, Height: 18})
 			header := ansi.Strip(m.headerView(60))
-			badgeSpace := strings.Repeat(" ", th.Spacing.XS)
-			// Soft pills: stock BadgeLeft/Right empty; XS pad around label.
-			pill := badgeSpace + "no model" + badgeSpace
-			if th.Icons.BadgeLeft != "" {
-				pill = th.Icons.BadgeLeft + pill + th.Icons.BadgeRight
-			}
-			if !strings.Contains(header, "strike"+tt.headGap+pill) {
-				t.Errorf("header badge spacing = %q, want %q", header, "strike"+tt.headGap+pill)
+			if !strings.Contains(header, "STRIKE"+tt.headGap+"NO MODEL") {
+				t.Errorf("header kicker spacing = %q, want %q", header, "STRIKE"+tt.headGap+"NO MODEL")
 			}
 			for i, row := range strings.Split(viewString(m), "\n") {
 				if got := ansi.StringWidth(row); got != 60 {

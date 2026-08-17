@@ -41,7 +41,7 @@ func TestContextPaneBodyShowsConfiguredSessionValues(t *testing.T) {
 		"high",
 		"supervised", // default autonomy
 		"on",         // fast
-		"skills",
+		"SKILLS",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("context body missing %q:\n%s", want, body)

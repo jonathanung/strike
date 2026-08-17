@@ -9,7 +9,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jonathanung/strike-cli/internal/frontend/tui/theme"
-	"github.com/jonathanung/strike-cli/internal/frontend/tui/ui"
 	"github.com/jonathanung/strike-cli/internal/protocol"
 )
 
@@ -101,7 +100,7 @@ func TestRightWindowResizeUsesActualPanelInnerHeight(t *testing.T) {
 		wantHeight    int
 	}{
 		{"one-column unbordered pane", 1, 40, 38},
-		{"canonical bordered pane", 80, 40, 36},
+		{"canonical inspector pane", 80, 40, 37},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			m, _ := newAppTestModel(nil, nil)
@@ -110,8 +109,9 @@ func TestRightWindowResizeUsesActualPanelInnerHeight(t *testing.T) {
 			m = updateApp(t, m, tea.WindowSizeMsg{Width: tt.width, Height: tt.height})
 
 			got := testWindow(t, m.windows.active())
-			if got.width != ui.PanelInnerWidth(m.th, tt.width) || got.height != tt.wantHeight {
-				t.Errorf("%dx%d right window dimensions = %dx%d, want %dx%d", tt.width, tt.height, got.width, got.height, ui.PanelInnerWidth(m.th, tt.width), tt.wantHeight)
+			wantW := inspectorInnerWidth(m.th, tt.width)
+			if got.width != wantW || got.height != tt.wantHeight {
+				t.Errorf("%dx%d right window dimensions = %dx%d, want %dx%d", tt.width, tt.height, got.width, got.height, wantW, tt.wantHeight)
 			}
 		})
 	}
@@ -127,8 +127,8 @@ func TestCompactRightPaneIsBorderlessAndUsesFullBodyDimensionsAtThresholds(t *te
 	}{
 		{"59x30 compact width", 59, 30, 28, true, false},
 		{"80x19 compact height", 80, 19, 17, true, false},
-		{"60x20 soft threshold", 60, 20, 16, false, false},
-		{"93x60 canonical split", 93, 60, 56, false, true},
+		{"60x20 inspector threshold", 60, 20, 17, false, false},
+		{"93x60 canonical split", 93, 60, 57, false, true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			m, _ := newAppTestModel(nil, nil)
@@ -146,7 +146,7 @@ func TestCompactRightPaneIsBorderlessAndUsesFullBodyDimensionsAtThresholds(t *te
 			}
 			wantW := tt.width
 			if !tt.borderless {
-				wantW = ui.PanelInnerWidth(m.th, rightOuter)
+				wantW = inspectorInnerWidth(m.th, rightOuter)
 			}
 			if got.width != wantW || got.height != tt.wantH {
 				t.Errorf("registry dimensions = %dx%d, want %dx%d", got.width, got.height, wantW, tt.wantH)
@@ -165,8 +165,8 @@ func TestCompactRightPaneIsBorderlessAndUsesFullBodyDimensionsAtThresholds(t *te
 			if tt.borderless && (strings.ContainsAny(plain, "╭╰┌└") || strings.Contains(plain, "context")) {
 				t.Errorf("compact right pane retained panel chrome: %q", plain)
 			}
-			if !tt.borderless && !strings.Contains(plain, "context") {
-				t.Errorf("soft right pane omitted its title: %q", plain)
+			if !tt.borderless && !strings.Contains(plain, "CONTEXT") {
+				t.Errorf("inspector right pane omitted its title: %q", plain)
 			}
 		})
 	}
@@ -378,7 +378,7 @@ func TestDefaultWindowRegistryHasUniqueWidthSafeWindows(t *testing.T) {
 	if !strings.Contains(plain, "none") && !strings.Contains(plain, "/provider") {
 		t.Errorf("split view missing real context content (none or /provider):\n%s", plain)
 	}
-	if !strings.Contains(plain, "context") {
+	if !strings.Contains(plain, "CONTEXT") {
 		t.Errorf("split view missing context window title:\n%s", plain)
 	}
 }
@@ -759,13 +759,14 @@ func TestStackedRightPaneShowsPairedGroupTitles(t *testing.T) {
 			}
 			m.reflow()
 			plain := ansi.Strip(viewString(m))
+			upper := strings.ToUpper(plain)
 			for _, title := range tt.want {
-				if !strings.Contains(plain, title) {
+				if !strings.Contains(upper, strings.ToUpper(title)) {
 					t.Errorf("split view missing %q title:\n%s", title, plain)
 				}
 			}
 			for _, title := range tt.wantAbsent {
-				if strings.Contains(plain, title) {
+				if strings.Contains(upper, strings.ToUpper(title)) {
 					t.Errorf("split view unexpectedly has %q:\n%s", title, plain)
 				}
 			}

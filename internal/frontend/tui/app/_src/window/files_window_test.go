@@ -146,7 +146,7 @@ func TestConfigureFilesWindowOnModelNew(t *testing.T) {
 	if !strings.Contains(plain, "src") || !strings.Contains(plain, "go.mod") {
 		t.Errorf("split view missing files tree:\n%s", plain)
 	}
-	if !strings.Contains(plain, "files") {
+	if !strings.Contains(plain, "FILES") {
 		t.Errorf("split view missing files title:\n%s", plain)
 	}
 }

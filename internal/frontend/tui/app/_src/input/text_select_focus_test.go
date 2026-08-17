@@ -43,8 +43,9 @@ func TestFocusedPaneHasSoftChromeNotBodyWash(t *testing.T) {
 	if !strings.Contains(rightView, rgbSGR("#778899")) {
 		t.Fatal("right-focused view missing BorderFocus outline")
 	}
-	if !strings.Contains(rightView, rgbBGSGR("#445566")) {
-		t.Fatal("right-focused title edge missing SurfaceFocus")
+	// Inspector focus is a BorderFocus left rule, not a SurfaceFocus title wash.
+	if !strings.Contains(rightView, rgbSGR("#778899")) {
+		t.Fatal("right-focused inspector missing BorderFocus rule")
 	}
 }
 

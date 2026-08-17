@@ -125,8 +125,8 @@ func (m Model) resizeRightWindows(rightWidth, rightHeight int, compact bool) win
 	r := m.windows
 	fullInnerW, fullInnerH := rightWidth, rightHeight
 	if !compact {
-		fullInnerW = max(0, ui.PanelInnerWidth(m.th, rightWidth))
-		fullInnerH = ui.PanelInnerHeightFor(m.th, rightWidth, rightHeight)
+		fullInnerW = max(0, inspectorInnerWidth(m.th, rightWidth))
+		fullInnerH = inspectorInnerHeight(rightHeight, false)
 	}
 	r = r.resize(fullInnerW, fullInnerH)
 
@@ -143,8 +143,8 @@ func (m Model) resizeRightWindows(rightWidth, rightHeight int, compact bool) win
 		outer := slots[i]
 		innerW, innerH := outer.width, outer.height
 		if !compact {
-			innerW = max(0, ui.PanelInnerWidth(m.th, outer.width))
-			innerH = ui.PanelInnerHeightFor(m.th, outer.width, outer.height)
+			innerW = max(0, inspectorInnerWidth(m.th, outer.width))
+			innerH = inspectorInnerHeight(outer.height, false)
 		}
 		dims[wi] = memberSlot{width: innerW, height: innerH}
 	}

@@ -37,7 +37,7 @@ func TestPermissionAskedDoesNotReplaceUserModal(t *testing.T) {
 		t.Fatalf("label = %q", got)
 	}
 	header := ansi.Strip(m.headerView(160))
-	if !strings.Contains(header, "1 permission waiting") {
+	if !strings.Contains(header, "1 PERMISSION WAITING") {
 		t.Fatalf("header missing pending badge:\n%s", header)
 	}
 	// Queued ask must not arm countdown.

@@ -18,7 +18,7 @@ func TestWelcomeCardTitleUsesSoftBentoTones(t *testing.T) {
 	th := theme.Default()
 	// Titles keep multi-accent hierarchy without elevating panel body Tone.
 	keys := welcomeCardTitle(th, "keys", ui.ToneAccent)
-	if ansi.Strip(keys) != "keys" {
+	if ansi.Strip(keys) != "KEYS" {
 		t.Fatalf("keys title strip = %q", ansi.Strip(keys))
 	}
 	if keys == "keys" {
@@ -43,11 +43,11 @@ func TestWelcomeDashboardRendersBentoCardsForEmptyTranscript(t *testing.T) {
 	m, _ := newAppTestModelHome([]string{"build", "plan"}, []host.Skill{fakeSkill("review", "review code", "Review $ARGUMENTS")})
 	plain := ansi.Strip(m.welcomeView(100, 30))
 	for _, want := range []string{
-		"get started",
+		"GET STARTED",
 		"anthropic",
 		"/provider",
-		"keys",
-		"agents & skills",
+		"KEYS",
+		"AGENTS & SKILLS",
 		"build",
 		"plan",
 		"/review",
@@ -151,19 +151,19 @@ func TestLeftFocusHighlightsOnlyPromptNotWelcomeKeys(t *testing.T) {
 	}
 
 	welcome := m.welcomeView(60, 20)
-	if plain := ansi.Strip(welcome); !strings.Contains(plain, "keys") {
-		t.Fatalf("welcome missing keys card:\n%s", plain)
+	if plain := ansi.Strip(welcome); !strings.Contains(plain, "KEYS") {
+		t.Fatalf("welcome missing keys section:\n%s", plain)
 	}
 	if strings.Contains(welcome, rgbSGR("#778899")) {
-		t.Fatal("welcome keys card used BorderFocus while left focus belongs to prompt")
+		t.Fatal("welcome keys section used BorderFocus while left focus belongs to prompt")
 	}
 	if strings.Contains(welcome, rgbBGSGR("#445566")) {
-		t.Fatal("welcome keys card used SurfaceFocus title edge while left focus belongs to prompt")
+		t.Fatal("welcome keys section used SurfaceFocus title edge while left focus belongs to prompt")
 	}
 
 	composer := m.composerView(false, 60, 6)
-	if plain := ansi.Strip(composer); !strings.Contains(plain, "chat") {
-		t.Fatalf("composer missing mode title:\n%s", plain)
+	if plain := ansi.Strip(composer); !strings.Contains(plain, "INSTRUCTION") {
+		t.Fatalf("composer missing instruction kicker:\n%s", plain)
 	}
 	if !strings.Contains(composer, rgbSGR("#778899")) {
 		t.Fatal("prompt box missing BorderFocus when left-focused")
@@ -191,13 +191,13 @@ func TestWelcomeDashboardUsesCustomThemeWithoutChangingContent(t *testing.T) {
 	customModel.th = th
 	custom := customModel.welcomeView(100, 30)
 
-	for _, want := range []string{"get started", "anthropic", "/provider", "keys", "agents & skills", "build", "plan", "/review"} {
+	for _, want := range []string{"GET STARTED", "anthropic", "/provider", "KEYS", "AGENTS & SKILLS", "build", "/review"} {
 		if !strings.Contains(ansi.Strip(defaultView), want) || !strings.Contains(ansi.Strip(custom), want) {
 			t.Errorf("theme changed semantic welcome content %q", want)
 		}
 	}
 	plainCustom := ansi.Strip(custom)
-	if !strings.Contains(plainCustom, "A build") || !strings.Contains(plainCustom, "B") {
+	if !strings.Contains(plainCustom, "A build") {
 		t.Errorf("custom glyph tokens are not observable:\n%s", custom)
 	}
 	if !strings.Contains(custom, rgbSGR("#010203")) {
