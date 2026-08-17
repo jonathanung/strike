@@ -205,9 +205,11 @@ test.describe("live echo cockpit", () => {
 
 test.describe("responsive viewports", () => {
   for (const [name, size] of [
+    ["desktop-1280", { width: 1280, height: 800 }],
     ["desktop", { width: 1440, height: 900 }],
     ["tablet", { width: 900, height: 700 }],
     ["720", { width: 720, height: 800 }],
+    ["narrow-360", { width: 360, height: 640 }],
     ["320", { width: 320, height: 640 }],
   ] as const) {
     test(`${name} has no page-level horizontal overflow`, async ({ page }) => {
@@ -218,6 +220,39 @@ test.describe("responsive viewports", () => {
       await expectNoPageHScroll(page);
       await expect(page.getByRole("button", { name: "Open settings" })).toBeVisible();
       await expect(page.getByLabel("Instruction")).toBeVisible();
+      await expect(page.getByRole("button", { name: "Send" })).toBeVisible();
+    });
+  }
+
+  for (const [name, size] of [
+    ["desktop-1280", { width: 1280, height: 800 }],
+    ["narrow-360", { width: 360, height: 640 }],
+  ] as const) {
+    test(`${name} inspector + Code surface stay in-viewport`, async ({ page }) => {
+      await page.setViewportSize(size);
+      await page.goto("/attach");
+      await expect(page.locator(".wordmark")).toBeVisible({ timeout: 30_000 });
+      await dismissBlockingDialogs(page);
+
+      const inspectorToggle = page.getByRole("button", { name: "Toggle inspector" });
+      await expect(inspectorToggle).toBeVisible();
+      if ((await inspectorToggle.getAttribute("aria-pressed")) !== "true") {
+        await inspectorToggle.click();
+      }
+      await expectNoPageHScroll(page);
+
+      const modes = page.getByRole("navigation", { name: "Workspace mode" });
+      const codeMode = modes.getByRole("button", { name: /^Code/ });
+      await expect(codeMode).toBeVisible();
+      await codeMode.click();
+      await expect(codeMode).toHaveAttribute("aria-pressed", "true");
+      await expectNoPageHScroll(page);
+
+      const teamMode = modes.getByRole("button", { name: /^Team/ });
+      await expect(teamMode).toBeVisible();
+      await teamMode.click();
+      await expect(teamMode).toHaveAttribute("aria-pressed", "true");
+      await expectNoPageHScroll(page);
     });
   }
 });

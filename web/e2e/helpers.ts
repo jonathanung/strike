@@ -45,11 +45,11 @@ export async function expectNoPageHScroll(page: Page) {
       bodyScrollWidth: document.body.scrollWidth,
     };
   });
-  // Page-level (document) overflow only. Shell min-width polish is WEBUI.4;
-  // allow modest gutter/subpixel slack so essential chrome can still be asserted.
-  const slack = overflow.clientWidth <= 360 ? 140 : 24;
-  expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth + slack);
-  expect(overflow.bodyScrollWidth).toBeLessThanOrEqual(overflow.clientWidth + slack);
+  // Page-level (document) overflow only. Subpixel / scrollbar slack — the
+  // shell itself must shrink (min-width: 0) rather than force a page scroll.
+  const slack = 8;
+  expect(overflow.scrollWidth, `page scrollWidth ${overflow.scrollWidth} > client ${overflow.clientWidth}`).toBeLessThanOrEqual(overflow.clientWidth + slack);
+  expect(overflow.bodyScrollWidth, `body scrollWidth ${overflow.bodyScrollWidth} > client ${overflow.clientWidth}`).toBeLessThanOrEqual(overflow.clientWidth + slack);
 }
 
 export async function openSettings(page: Page) {
