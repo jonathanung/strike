@@ -188,7 +188,7 @@ func TestC2RegistryReceivesRightPanelInnerBodyDimensionsAndRetainsStateAcrossRes
 			rightOuter = size.Width
 		}
 		wantWidth := inspectorInnerWidth(m.th, rightOuter)
-		wantHeight := inspectorInnerHeight(l.transcript+l.notice+l.popup+l.composer, false)
+		wantHeight := inspectorInnerHeight(l.transcript+l.notice+l.popup+l.composer, true)
 		for _, w := range m.windows.windows {
 			got := testWindow(t, w)
 			if got.width != wantWidth || got.height != wantHeight {

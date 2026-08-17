@@ -126,7 +126,9 @@ func (m Model) resizeRightWindows(rightWidth, rightHeight int, compact bool) win
 	fullInnerW, fullInnerH := rightWidth, rightHeight
 	if !compact {
 		fullInnerW = max(0, inspectorInnerWidth(m.th, rightWidth))
-		fullInnerH = inspectorInnerHeight(rightHeight, false)
+		// Always reserve the footer row so windows with chrome hints
+		// (queue/agents) are not sized one line taller than the frame.
+		fullInnerH = inspectorInnerHeight(rightHeight, true)
 	}
 	r = r.resize(fullInnerW, fullInnerH)
 
@@ -144,7 +146,7 @@ func (m Model) resizeRightWindows(rightWidth, rightHeight int, compact bool) win
 		innerW, innerH := outer.width, outer.height
 		if !compact {
 			innerW = max(0, inspectorInnerWidth(m.th, outer.width))
-			innerH = inspectorInnerHeight(outer.height, false)
+			innerH = inspectorInnerHeight(outer.height, true)
 		}
 		dims[wi] = memberSlot{width: innerW, height: innerH}
 	}

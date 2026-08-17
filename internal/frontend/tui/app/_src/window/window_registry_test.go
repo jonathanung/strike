@@ -100,7 +100,7 @@ func TestRightWindowResizeUsesActualPanelInnerHeight(t *testing.T) {
 		wantHeight    int
 	}{
 		{"one-column unbordered pane", 1, 40, 38},
-		{"canonical inspector pane", 80, 40, 37},
+		{"canonical inspector pane", 80, 40, 36},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			m, _ := newAppTestModel(nil, nil)
@@ -127,8 +127,8 @@ func TestCompactRightPaneIsBorderlessAndUsesFullBodyDimensionsAtThresholds(t *te
 	}{
 		{"59x30 compact width", 59, 30, 28, true, false},
 		{"80x19 compact height", 80, 19, 17, true, false},
-		{"60x20 inspector threshold", 60, 20, 17, false, false},
-		{"93x60 canonical split", 93, 60, 57, false, true},
+		{"60x20 inspector threshold", 60, 20, 16, false, false},
+		{"93x60 canonical split", 93, 60, 56, false, true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			m, _ := newAppTestModel(nil, nil)
