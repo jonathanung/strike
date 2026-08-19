@@ -14,9 +14,25 @@ materially affect the shipped product.
 
 ## [Unreleased]
 
+## [v0.5.2] - 2026-08-19
+
+Patch release: TUI and web cockpit share a sharp royal-purple look, and the
+web inspector and runtime bar no longer overflow or stack into an unusable pane.
+
 ### Changed
 
-- **Default TUI chrome is sharp bordered** — stock panels use square `┌┐└┘` outlines (`ChromeBordered`) instead of Family soft-rounded cards. Royal-purple tokens are unchanged. **Upgrade note:** theme files that omit `chrome` now resolve to bordered; set `"chrome": "soft"` to restore rounded surface-filled tiles ([#1234](https://github.com/jonathanung/strike/issues/1234)).
+- **TUI matches the web cockpit** — header chips (`S STRIKE` + status), left-accent transcript rows (`YOU` / `STRIKE` / tools), a single outlined instruction composer, and a thin right inspector. Pane modes, keybinds, and slash commands are unchanged; there is still no left session rail ([#1231](https://github.com/jonathanung/strike/issues/1231), [#1245](https://github.com/jonathanung/strike/issues/1245), [#1250](https://github.com/jonathanung/strike/pull/1250)).
+- **Shared royal-purple tokens** — `schemas/ui-tokens.json` is the source of truth for TUI `Default()` and web CSS. Accent is royal `#5b21b6` / `#7c3aed` (not pastel lavender). Status colors (ready / working / needs-you / error) match across surfaces ([#1233](https://github.com/jonathanung/strike/issues/1233), [#1237](https://github.com/jonathanung/strike/issues/1237), [#1239](https://github.com/jonathanung/strike/pull/1239), [#1244](https://github.com/jonathanung/strike/pull/1244)).
+- **Default TUI chrome is sharp bordered** — stock panels use square `┌┐└┘` outlines (`ChromeBordered`) instead of Family soft-rounded cards. **Upgrade note:** theme files that omit `chrome` now resolve to bordered; set `"chrome": "soft"` to restore rounded surface-filled tiles ([#1234](https://github.com/jonathanung/strike/issues/1234), [#1242](https://github.com/jonathanung/strike/pull/1242)).
+- **Web cockpit chrome** — 0–2px rules, token-driven CSS, segmented Chat / Code / Team / Project / Ops ([#1235](https://github.com/jonathanung/strike/issues/1235), [#1241](https://github.com/jonathanung/strike/pull/1241)).
+- **Web inspector is one column** — compact scrollable tabs (grouped Surface select on phone) and one body. Context, activity, and queue are exclusive Chat surfaces, not a stack on top of every panel ([#1247](https://github.com/jonathanung/strike/issues/1247), [#1249](https://github.com/jonathanung/strike/pull/1249)).
+
+### Fixed
+
+- **Runtime… no longer spills the page** — expanding the top config bar scrolls that strip instead of widening the shell ([#1246](https://github.com/jonathanung/strike/issues/1246), [#1248](https://github.com/jonathanung/strike/pull/1248)).
+- **Web shell flex** — Chat, inspector, and rails stay inside the viewport at desktop (~1280) and narrow (~360) widths ([#1236](https://github.com/jonathanung/strike/issues/1236), [#1243](https://github.com/jonathanung/strike/pull/1243)).
+
+**Full changelog:** [v0.5.1...v0.5.2](https://github.com/jonathanung/strike/compare/v0.5.1...v0.5.2)
 
 ## [v0.5.1] - 2026-08-16
 
@@ -842,7 +858,8 @@ Initial public release.
 
 **Full changelog:** [commits through v0.0.1](https://github.com/jonathanung/strike/commits/v0.0.1)
 
-[Unreleased]: https://github.com/jonathanung/strike/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/jonathanung/strike/compare/v0.5.2...HEAD
+[v0.5.2]: https://github.com/jonathanung/strike/compare/v0.5.1...v0.5.2
 [v0.5.1]: https://github.com/jonathanung/strike/compare/v0.5.0...v0.5.1
 [v0.5.0]: https://github.com/jonathanung/strike/compare/v0.4.0...v0.5.0
 [v0.4.0]: https://github.com/jonathanung/strike/compare/v0.3.1...v0.4.0
