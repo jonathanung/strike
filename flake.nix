@@ -18,11 +18,15 @@
 
           src = self;
           proxyVendor = true;
-          vendorHash = "sha256-ax5mSaryrwb+vSoqm6+Brl6RnA/2WZm+z+eEdxubhtQ=";
+          vendorHash = "sha256-kEJmV3MQt8k5KuXBjYoUy7+ZZrD3aTljpBziaRndJcU=";
 
           subPackages = [ "cmd/strike" ];
           preBuild = ''
             go generate ./internal/frontend/tui/app
+          '';
+          # eval tests write under $HOME; the sandbox HOME (/homeless-shelter) is unwritable
+          preCheck = ''
+            export HOME="$(mktemp -d)"
           '';
           ldflags = [
             "-s"
