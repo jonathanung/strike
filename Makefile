@@ -139,3 +139,8 @@ container-smoke: build
 clean:
 	rm -f strike $(COVER_PROFILE)
 	rm -rf web/dist web/node_modules
+
+# Recompute flake.nix vendorHash after go.mod/go.sum changes (CI also does this).
+.PHONY: nix-vendor-hash
+nix-vendor-hash:
+	./scripts/update-nix-vendor-hash.sh

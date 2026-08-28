@@ -1,0 +1,54 @@
+name: Nix Vendor Hash
+
+# Keep flake.nix's buildGoModule vendorHash in sync after dependency-bearing
+# changes land on main. Only the go-modules fixed-output derivation is built
+# (no compile), so this is cheap. Pushes a fixup commit on drift.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "go.mod"
+      - "go.sum"
+      - "go.work"
+      - "go.work.sum"
+      - "flake.nix"
+      - "flake.lock"
+      - "Makefile"
+      - "scripts/update-nix-vendor-hash.sh"
+      - ".github/workflows/nix-vendor-hash.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: nix-vendor-hash-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    name: update vendorHash
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@33c9ab3ef95cd57c164d9d6eb1f9a46338538d41 # main
+
+      - name: Update vendorHash
+        run: make nix-vendor-hash
+
+      - name: Commit updated vendorHash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- flake.nix; then
+            echo "vendorHash already current"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add flake.nix
+          git commit -m "chore(nix): update vendorHash"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
