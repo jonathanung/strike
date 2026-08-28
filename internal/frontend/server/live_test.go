@@ -625,7 +625,7 @@ func (w *testWS) readText(timeout time.Duration) (string, error) {
 
 // wsFrameCompletionBound is the maximum time to wait for the remainder of a
 // frame after its header has been buffered. It is a bound, not a delay.
-const wsFrameCompletionBound = 5 * time.Second
+const wsFrameCompletionBound = 2 * time.Second
 
 // waitForWSType reads frames until one has the given envelope type. The bound
 // is the maximum wait; the call returns as soon as the frame arrives. Frames
