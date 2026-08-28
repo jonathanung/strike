@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -393,7 +394,14 @@ func TestWebSocketOpsAndEvents(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	srv := mustServer(t, Options{Auth: true, Token: "secret", SessionDir: dir, Live: live})
+	srv := mustServer(t, Options{
+		Auth:       true,
+		Token:      "secret",
+		SessionDir: dir,
+		Live:       live,
+		// Fast tail so delivery does not depend on the 200ms default tick.
+		PollInterval: 20 * time.Millisecond,
+	})
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 
@@ -404,25 +412,8 @@ func TestWebSocketOpsAndEvents(t *testing.T) {
 	}
 	defer conn.Close()
 
-	// Drain hello/status (and any early frames) until we can send ops.
-	deadline := time.Now().Add(2 * time.Second)
-	sawStatus := false
-	for time.Now().Before(deadline) && !sawStatus {
-		msg, err := conn.readText(200 * time.Millisecond)
-		if err != nil {
-			continue
-		}
-		var env map[string]any
-		if err := json.Unmarshal([]byte(msg), &env); err != nil {
-			continue
-		}
-		if env["type"] == "status" {
-			sawStatus = true
-		}
-	}
-	if !sawStatus {
-		t.Fatal("did not receive status hello")
-	}
+	// Hello: the server sends status first. Any earlier frames are skipped.
+	waitForWSType(t, conn, "status", wsEventBound)
 
 	// Send user.input over WS (primary acceptance path).
 	if err := conn.writeText(`{"type":"user.input","data":{"text":"ping"}}`); err != nil {
@@ -451,27 +442,17 @@ func TestWebSocketOpsAndEvents(t *testing.T) {
 		t.Fatal("no perm op")
 	}
 
-	// Event fan-out: publish after client is connected; read until text.delta.
+	// Event delivery: the WS handler tails the session log on PollInterval.
+	// It does not subscribe to Live, so only store.Append matters here.
 	if err := store.Append(protocol.TextDelta{Text: "stream"}); err != nil {
 		t.Fatal(err)
 	}
-	live.Publish(protocol.TextDelta{Text: "stream"})
-	deadline = time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		msg, err := conn.readText(200 * time.Millisecond)
-		if err != nil {
-			continue
-		}
-		var env map[string]any
-		if err := json.Unmarshal([]byte(msg), &env); err != nil {
-			continue
-		}
-		if env["type"] == "text.delta" {
-			return
-		}
-	}
-	t.Fatal("timeout waiting for text.delta")
+	waitForWSType(t, conn, "text.delta", wsEventBound)
 }
+
+// wsEventBound is the maximum wait for an expected frame. The test returns as
+// soon as the frame arrives, so a large bound does not slow the happy path.
+const wsEventBound = 10 * time.Second
 
 func TestOpsUnavailableWithoutLive(t *testing.T) {
 	srv := testServer(t, t.TempDir(), "secret")
@@ -603,25 +584,74 @@ func (w *testWS) writeText(s string) error {
 	return err
 }
 
+// readText returns the next text frame. The timeout bounds only the wait for
+// the frame header. Once a header is buffered the rest of the frame is read
+// under a separate, generous bound. The server writes the header and the
+// payload with two conn.Write calls, so a single short deadline could expire
+// between them; consuming the header and abandoning the payload would leave
+// the stream permanently out of sync. Peek does not consume on timeout.
 func (w *testWS) readText(timeout time.Duration) (string, error) {
 	_ = w.c.SetReadDeadline(time.Now().Add(timeout))
-	h := make([]byte, 2)
-	if _, err := io.ReadFull(w.bufr, h); err != nil {
+	h, err := w.bufr.Peek(2)
+	if err != nil {
+		return "", err
+	}
+	_ = w.c.SetReadDeadline(time.Now().Add(wsFrameCompletionBound))
+	defer func() { _ = w.c.SetReadDeadline(time.Time{}) }()
+	if _, err := w.bufr.Discard(2); err != nil {
 		return "", err
 	}
 	n := int(h[1] & 0x7f)
-	if n == 126 {
+	switch n {
+	case 126:
 		var ext [2]byte
 		if _, err := io.ReadFull(w.bufr, ext[:]); err != nil {
 			return "", err
 		}
 		n = int(binary.BigEndian.Uint16(ext[:]))
+	case 127:
+		var ext [8]byte
+		if _, err := io.ReadFull(w.bufr, ext[:]); err != nil {
+			return "", err
+		}
+		n = int(binary.BigEndian.Uint64(ext[:]))
 	}
 	payload := make([]byte, n)
 	if _, err := io.ReadFull(w.bufr, payload); err != nil {
 		return "", err
 	}
 	return string(payload), nil
+}
+
+// wsFrameCompletionBound is the maximum time to wait for the remainder of a
+// frame after its header has been buffered. It is a bound, not a delay.
+const wsFrameCompletionBound = 5 * time.Second
+
+// waitForWSType reads frames until one has the given envelope type. The bound
+// is the maximum wait; the call returns as soon as the frame arrives. Frames
+// of other types are skipped. Read timeouts are retried until the bound.
+func waitForWSType(t *testing.T, conn *testWS, typ string, bound time.Duration) map[string]any {
+	t.Helper()
+	deadline := time.Now().Add(bound)
+	for time.Now().Before(deadline) {
+		msg, err := conn.readText(200 * time.Millisecond)
+		if err != nil {
+			var ne net.Error
+			if errors.As(err, &ne) && ne.Timeout() {
+				continue
+			}
+			t.Fatalf("read ws frame: %v", err)
+		}
+		var env map[string]any
+		if err := json.Unmarshal([]byte(msg), &env); err != nil {
+			t.Fatalf("ws frame is not JSON: %q", msg)
+		}
+		if env["type"] == typ {
+			return env
+		}
+	}
+	t.Fatalf("no %q frame within %s", typ, bound)
+	return nil
 }
 
 func TestLiveHubAddAndActive(t *testing.T) {
