@@ -8,9 +8,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/jonathanung/strike-cli/internal/frontend/host"
-	"github.com/jonathanung/strike-cli/internal/frontend/tui/theme"
-	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike/internal/frontend/host"
+	"github.com/jonathanung/strike/internal/frontend/tui/theme"
+	"github.com/jonathanung/strike/internal/protocol"
 )
 
 // TestGallery renders representative full-screen views to the test log for

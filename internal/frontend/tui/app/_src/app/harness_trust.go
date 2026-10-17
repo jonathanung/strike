@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/internal/frontend/tui/theme"
-	"github.com/jonathanung/strike-cli/internal/frontend/tui/ui"
-	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike/internal/frontend/tui/theme"
+	"github.com/jonathanung/strike/internal/frontend/tui/ui"
+	"github.com/jonathanung/strike/internal/protocol"
 )
 
 // lastDenialInfo remembers the most recent hard deny / user reject so the

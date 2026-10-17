@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/protocol"
-	"github.com/jonathanung/strike-cli/pkg/diag"
+	"github.com/jonathanung/strike/internal/protocol"
+	"github.com/jonathanung/strike/pkg/diag"
 )
 
 func TestDiagUnavailableWithoutLive(t *testing.T) {

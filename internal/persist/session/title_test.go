@@ -5,7 +5,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike/internal/protocol"
 )
 
 func TestTitleFromText(t *testing.T) {

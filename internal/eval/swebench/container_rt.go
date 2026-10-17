@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/jonathanung/strike-cli/internal/integrate/container"
+	"github.com/jonathanung/strike/internal/integrate/container"
 )
 
 // ContainerRuntime adapts internal/integrate/container.CLI onto the swebench Runtime

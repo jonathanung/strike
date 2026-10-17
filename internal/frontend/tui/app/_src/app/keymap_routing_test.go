@@ -11,7 +11,7 @@ import (
 	"charm.land/lipgloss/v2/compat"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike/internal/protocol"
 )
 
 // keyMsgFromWrapInput feeds terminal wire bytes through WrapInput and maps the

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jonathanung/strike-cli/internal/frontend/host"
+	"github.com/jonathanung/strike/internal/frontend/host"
 )
 
 type fakeLSP struct {

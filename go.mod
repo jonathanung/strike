@@ -1,4 +1,4 @@
-module github.com/jonathanung/strike-cli
+module github.com/jonathanung/strike
 
 go 1.26.2
 
@@ -12,9 +12,9 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.7
 	github.com/creack/pty v1.1.24
 	github.com/hinshun/vt10x v0.0.0-20220301184237-5011da428d02
-	github.com/jonathanung/strike-cli/harness v0.0.0
-	github.com/jonathanung/strike-cli/pkg/protocol v0.0.0
-	github.com/jonathanung/strike-cli/pkg/redact v0.0.0
+	github.com/jonathanung/strike/harness v0.0.0
+	github.com/jonathanung/strike/pkg/protocol v0.0.0
+	github.com/jonathanung/strike/pkg/redact v0.0.0
 	golang.org/x/sys v0.47.0
 	golang.org/x/term v0.45.0
 )
@@ -76,8 +76,8 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace github.com/jonathanung/strike-cli/harness => ./harness
+replace github.com/jonathanung/strike/harness => ./harness
 
-replace github.com/jonathanung/strike-cli/pkg/protocol => ./pkg/protocol
+replace github.com/jonathanung/strike/pkg/protocol => ./pkg/protocol
 
-replace github.com/jonathanung/strike-cli/pkg/redact => ./pkg/redact
+replace github.com/jonathanung/strike/pkg/redact => ./pkg/redact

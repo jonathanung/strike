@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/internal/frontend/server"
-	"github.com/jonathanung/strike-cli/internal/persist/workspace"
+	"github.com/jonathanung/strike/internal/frontend/server"
+	"github.com/jonathanung/strike/internal/persist/workspace"
 )
 
 const daemonUsage = `Run strike as a per-user background daemon (systemd user service).

@@ -6,8 +6,8 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/harness/actionfacts"
-	"github.com/jonathanung/strike-cli/harness/sandbox"
+	"github.com/jonathanung/strike/harness/actionfacts"
+	"github.com/jonathanung/strike/harness/sandbox"
 )
 
 // checkBashNetworkAllow rejects commands that could bypass a non-empty

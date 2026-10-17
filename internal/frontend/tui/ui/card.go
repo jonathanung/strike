@@ -5,7 +5,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"github.com/jonathanung/strike-cli/internal/frontend/tui/theme"
+	"github.com/jonathanung/strike/internal/frontend/tui/theme"
 )
 
 // Card is one bento tile: a Panel with a preferred width. Bodies are wrapped

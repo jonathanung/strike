@@ -10,7 +10,7 @@ import (
 	"image/png"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/pkg/redact"
+	"github.com/jonathanung/strike/pkg/redact"
 )
 
 // RedactName scrubs credential-shaped spans from an attachment display name.

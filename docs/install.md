@@ -19,11 +19,11 @@ curl -fsSL https://strike.jonathanung.ca/install | bash
 **redirect** (301/302) to the raw install script on GitHub, for example:
 
 ```
-https://raw.githubusercontent.com/jonathanung/strike-cli/main/scripts/install.sh
+https://raw.githubusercontent.com/jonathanung/strike/main/scripts/install.sh
 ```
 
 Binaries are **not** hosted on the VPS long-term. The script resolves the
-latest [GitHub Release](https://github.com/jonathanung/strike-cli/releases),
+latest [GitHub Release](https://github.com/jonathanung/strike/releases),
 downloads the matching `strike_<tag>_<os>_<arch>.tar.gz`, verifies
 `checksums.txt` (sha256), and installs to `~/.strike/bin/strike` (no root).
 

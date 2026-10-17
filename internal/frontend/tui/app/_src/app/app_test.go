@@ -19,11 +19,11 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/jonathanung/strike-cli/internal/frontend/host"
+	"github.com/jonathanung/strike/internal/frontend/host"
 
-	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike/internal/protocol"
 
-	"github.com/jonathanung/strike-cli/internal/frontend/tui/theme"
+	"github.com/jonathanung/strike/internal/frontend/tui/theme"
 )
 
 const appCmdTimeout = 2 * time.Second

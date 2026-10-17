@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jonathanung/strike-cli/harness/tool"
+	"github.com/jonathanung/strike/harness/tool"
 )
 
 // fakeHTTPServer implements a minimal streamable-HTTP MCP endpoint.

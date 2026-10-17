@@ -4,7 +4,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jonathanung/strike-cli/pkg/protocol"
+	"github.com/jonathanung/strike/pkg/protocol"
 )
 
 // DiagnosticBuilder assembles a redacted DiagnosticBundle from kernel-collected

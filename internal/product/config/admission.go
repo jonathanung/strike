@@ -5,8 +5,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/internal/integrate/plugin"
-	"github.com/jonathanung/strike-cli/internal/trust/admission"
+	"github.com/jonathanung/strike/internal/integrate/plugin"
+	"github.com/jonathanung/strike/internal/trust/admission"
 )
 
 // ResolveAdmission builds an admission.Policy from cfg.Admission.

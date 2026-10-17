@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/jonathanung/strike-cli/harness/fault"
+	"github.com/jonathanung/strike/harness/fault"
 )
 
 func TestArmCheckOneShot(t *testing.T) {

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/eval/swebench"
+	"github.com/jonathanung/strike/internal/eval/swebench"
 )
 
 func TestDefaultSubsetIDs(t *testing.T) {

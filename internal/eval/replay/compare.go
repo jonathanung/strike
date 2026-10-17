@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike/internal/protocol"
 )
 
 // CompareOptions control how nondeterministic markers affect equality.

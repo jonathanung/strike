@@ -4,8 +4,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/jonathanung/strike-cli/internal/protocol"
-	pub "github.com/jonathanung/strike-cli/pkg/protocol"
+	"github.com/jonathanung/strike/internal/protocol"
+	pub "github.com/jonathanung/strike/pkg/protocol"
 )
 
 func TestShimSharesIdentityWithPublicPackage(t *testing.T) {

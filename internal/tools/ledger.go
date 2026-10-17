@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/jonathanung/strike-cli/harness/tool"
+	"github.com/jonathanung/strike/harness/tool"
 	"strings"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/persist/ledger"
+	"github.com/jonathanung/strike/internal/persist/ledger"
 )
 
 // LedgerStore is the durable decision-ledger surface used by ledger tools.

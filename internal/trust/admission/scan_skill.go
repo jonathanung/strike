@@ -5,8 +5,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/internal/trust/security"
-	"github.com/jonathanung/strike-cli/pkg/redact"
+	"github.com/jonathanung/strike/internal/trust/security"
+	"github.com/jonathanung/strike/pkg/redact"
 )
 
 // SkillSubject is one skill presented for admission at load time.

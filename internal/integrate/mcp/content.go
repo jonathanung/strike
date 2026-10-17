@@ -6,7 +6,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/jonathanung/strike-cli/pkg/redact"
+	"github.com/jonathanung/strike/pkg/redact"
 )
 
 // BoundText redacts secrets and truncates to MaxContentBytes.

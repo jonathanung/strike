@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/internal/product/config"
+	"github.com/jonathanung/strike/internal/product/config"
 )
 
 const workflowUsage = `Manage workflow definitions (schema, scaffold, format, validate, generate).

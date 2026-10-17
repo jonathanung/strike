@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/frontend/host"
-	"github.com/jonathanung/strike-cli/pkg/redact"
+	"github.com/jonathanung/strike/internal/frontend/host"
+	"github.com/jonathanung/strike/pkg/redact"
 )
 
 // pendingAuth holds in-flight device/OAuth logins for the web cockpit (WEBUI.10).

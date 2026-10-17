@@ -7,9 +7,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/jonathanung/strike-cli/internal/frontend/tui/theme"
-	"github.com/jonathanung/strike-cli/internal/frontend/tui/ui"
-	"github.com/jonathanung/strike-cli/pkg/timeline"
+	"github.com/jonathanung/strike/internal/frontend/tui/theme"
+	"github.com/jonathanung/strike/internal/frontend/tui/ui"
+	"github.com/jonathanung/strike/pkg/timeline"
 )
 
 // timelineModal shows a collapsed structured run timeline (turns/tools/…).

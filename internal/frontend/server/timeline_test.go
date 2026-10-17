@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/persist/session"
-	"github.com/jonathanung/strike-cli/internal/protocol"
-	"github.com/jonathanung/strike-cli/pkg/timeline"
+	"github.com/jonathanung/strike/internal/persist/session"
+	"github.com/jonathanung/strike/internal/protocol"
+	"github.com/jonathanung/strike/pkg/timeline"
 )
 
 func writeTimelineSession(t *testing.T, dir, id, secret string) {

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jonathanung/strike-cli/harness/provider"
+	"github.com/jonathanung/strike/harness/provider"
 )
 
 // bigOutput returns a string whose ~4-chars/token estimate is at least n tokens.

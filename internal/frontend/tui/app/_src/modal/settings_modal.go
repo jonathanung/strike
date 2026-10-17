@@ -9,10 +9,10 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/jonathanung/strike-cli/internal/frontend/host"
-	"github.com/jonathanung/strike-cli/internal/frontend/tui/theme"
-	"github.com/jonathanung/strike-cli/internal/frontend/tui/ui"
-	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike/internal/frontend/host"
+	"github.com/jonathanung/strike/internal/frontend/tui/theme"
+	"github.com/jonathanung/strike/internal/frontend/tui/ui"
+	"github.com/jonathanung/strike/internal/protocol"
 )
 
 var errNoProviders = errors.New("custom providers are unavailable")

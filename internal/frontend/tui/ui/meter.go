@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/internal/frontend/tui/theme"
+	"github.com/jonathanung/strike/internal/frontend/tui/theme"
 )
 
 // FormatTokens renders a non-negative token count compactly for status chrome

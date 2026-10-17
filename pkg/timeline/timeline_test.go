@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jonathanung/strike-cli/pkg/protocol"
-	"github.com/jonathanung/strike-cli/pkg/timeline"
+	"github.com/jonathanung/strike/pkg/protocol"
+	"github.com/jonathanung/strike/pkg/timeline"
 )
 
 func TestBuildTurnToolProvider(t *testing.T) {

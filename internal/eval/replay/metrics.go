@@ -10,7 +10,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike/internal/protocol"
 )
 
 // Metrics is the per-scenario prompt-regression report row (E3.2).

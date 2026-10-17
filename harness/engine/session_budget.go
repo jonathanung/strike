@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/jonathanung/strike-cli/harness/provider"
-	"github.com/jonathanung/strike-cli/pkg/protocol"
+	"github.com/jonathanung/strike/harness/provider"
+	"github.com/jonathanung/strike/pkg/protocol"
 )
 
 // EstimateUsageCostFunc estimates USD for one provider usage report.

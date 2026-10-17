@@ -6,9 +6,9 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/jonathanung/strike-cli/harness/provider"
-	"github.com/jonathanung/strike-cli/harness/scheduler"
-	"github.com/jonathanung/strike-cli/pkg/protocol"
+	"github.com/jonathanung/strike/harness/provider"
+	"github.com/jonathanung/strike/harness/scheduler"
+	"github.com/jonathanung/strike/pkg/protocol"
 )
 
 // admitModelStream is the sole production admission path for provider model

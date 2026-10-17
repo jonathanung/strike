@@ -5,12 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/jonathanung/strike-cli/harness/tool"
+	"github.com/jonathanung/strike/harness/tool"
 	"strings"
 	"sync"
 	"testing"
 
-	"github.com/jonathanung/strike-cli/internal/persist/plan"
+	"github.com/jonathanung/strike/internal/persist/plan"
 )
 
 func TestPlanDelegateDispatchTwoSectionsAndRejectInFlight(t *testing.T) {

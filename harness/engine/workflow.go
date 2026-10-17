@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/harness/permission"
+	"github.com/jonathanung/strike/harness/permission"
 )
 
 // WorkflowSchemaVersion is the kernel workflow document version.

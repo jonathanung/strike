@@ -4,13 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/jonathanung/strike-cli/harness/tool"
+	"github.com/jonathanung/strike/harness/tool"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 
-	"github.com/jonathanung/strike-cli/pkg/redact"
+	"github.com/jonathanung/strike/pkg/redact"
 )
 
 // SkillInfo is the tool-facing skill payload.

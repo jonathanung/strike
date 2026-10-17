@@ -11,9 +11,9 @@ import (
 	"charm.land/lipgloss/v2/compat"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/jonathanung/strike-cli/internal/frontend/host"
-	"github.com/jonathanung/strike-cli/internal/frontend/tui/theme"
-	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike/internal/frontend/host"
+	"github.com/jonathanung/strike/internal/frontend/tui/theme"
+	"github.com/jonathanung/strike/internal/protocol"
 )
 
 // TestFrameGolden captures full-screen plain-text frames as post-E13.8 baselines

@@ -6,7 +6,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/jonathanung/strike-cli/internal/frontend/tui/ui"
+	"github.com/jonathanung/strike/internal/frontend/tui/ui"
 )
 
 func (m Model) View() tea.View {

@@ -1,6 +1,6 @@
 package secret
 
-import "github.com/jonathanung/strike-cli/harness/secretref"
+import "github.com/jonathanung/strike/harness/secretref"
 
 // KindEnv is the only v1 secret-ref kind: resolve from the process environment
 // at exec / provider-call time. Implementation lives in harness/secretref so

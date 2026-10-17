@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jonathanung/strike-cli/harness/fault"
-	"github.com/jonathanung/strike-cli/harness/sandbox"
+	"github.com/jonathanung/strike/harness/fault"
+	"github.com/jonathanung/strike/harness/sandbox"
 )
 
 // Process stream labels (match protocol.ProcessStream*).

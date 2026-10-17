@@ -1,9 +1,9 @@
 package local
 
 import (
-	"github.com/jonathanung/strike-cli/internal/frontend/host"
-	"github.com/jonathanung/strike-cli/internal/persist/ledger"
-	"github.com/jonathanung/strike-cli/pkg/redact"
+	"github.com/jonathanung/strike/internal/frontend/host"
+	"github.com/jonathanung/strike/internal/persist/ledger"
+	"github.com/jonathanung/strike/pkg/redact"
 )
 
 const (

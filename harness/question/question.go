@@ -10,7 +10,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/jonathanung/strike-cli/pkg/protocol"
+	"github.com/jonathanung/strike/pkg/protocol"
 )
 
 // RejectedError is returned from Ask when the user dismisses the prompts

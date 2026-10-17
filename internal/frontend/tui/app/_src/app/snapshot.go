@@ -7,7 +7,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/jonathanung/strike-cli/pkg/redact"
+	"github.com/jonathanung/strike/pkg/redact"
 )
 
 // Headless frame snapshot bounds (#1183). Keep in lockstep with

@@ -14,10 +14,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jonathanung/strike-cli/harness/fn"
-	"github.com/jonathanung/strike-cli/harness/fn/external"
-	"github.com/jonathanung/strike-cli/harness/provider"
-	gosdk "github.com/jonathanung/strike-cli/sdk/go/harness"
+	"github.com/jonathanung/strike/harness/fn"
+	"github.com/jonathanung/strike/harness/fn/external"
+	"github.com/jonathanung/strike/harness/provider"
+	gosdk "github.com/jonathanung/strike/sdk/go/harness"
 )
 
 func TestExternalHappyConcurrentProviderCalls(t *testing.T) {

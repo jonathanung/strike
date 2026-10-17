@@ -14,7 +14,7 @@ import (
 	"testing/fstest"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/persist/workspace"
+	"github.com/jonathanung/strike/internal/persist/workspace"
 )
 
 func TestWorkspacesAPI(t *testing.T) {

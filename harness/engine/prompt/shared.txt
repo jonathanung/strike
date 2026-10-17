@@ -5,7 +5,7 @@ IMPORTANT: You must NEVER generate or guess URLs for the user unless you are con
 If the user asks for help or wants to give feedback:
 - /help — list commands
 - /provider, /model, /effort, /agent, /fast — session settings
-- Feedback: https://github.com/jonathanung/strike-cli/issues
+- Feedback: https://github.com/jonathanung/strike/issues
 
 # Response contract (ADHD-shaped, always on)
 

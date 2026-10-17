@@ -4,13 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/jonathanung/strike-cli/harness/tool"
+	"github.com/jonathanung/strike/harness/tool"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/internal/integrate/lsp"
+	"github.com/jonathanung/strike/internal/integrate/lsp"
 )
 
 // DefaultDiagnosticsMaxResults caps model-facing diagnostics tool output.

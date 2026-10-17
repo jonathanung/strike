@@ -7,11 +7,11 @@ import (
 	"os"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/internal/frontend/host"
-	"github.com/jonathanung/strike-cli/internal/frontend/rpc"
-	"github.com/jonathanung/strike-cli/internal/persist/session"
-	"github.com/jonathanung/strike-cli/internal/protocol"
-	pkgproto "github.com/jonathanung/strike-cli/pkg/protocol"
+	"github.com/jonathanung/strike/internal/frontend/host"
+	"github.com/jonathanung/strike/internal/frontend/rpc"
+	"github.com/jonathanung/strike/internal/persist/session"
+	"github.com/jonathanung/strike/internal/protocol"
+	pkgproto "github.com/jonathanung/strike/pkg/protocol"
 )
 
 // rpcLifecycle adapts session.Manager / host.Sessions to rpc.Lifecycle.

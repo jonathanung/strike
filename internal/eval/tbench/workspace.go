@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/eval/swebench"
+	"github.com/jonathanung/strike/internal/eval/swebench"
 )
 
 // MaterializeResult is the host workspace path for one task.

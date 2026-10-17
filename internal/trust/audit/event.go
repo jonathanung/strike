@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/jonathanung/strike-cli/pkg/telemetry"
+	"github.com/jonathanung/strike/pkg/telemetry"
 )
 
 // SchemaVersion is the on-disk audit record schema (independent of protocol wire).

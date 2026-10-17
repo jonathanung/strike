@@ -5,8 +5,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/internal/persist/session"
-	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike/internal/persist/session"
+	"github.com/jonathanung/strike/internal/protocol"
 )
 
 // BranchSelector identifies where to fork a session event log.

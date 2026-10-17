@@ -10,12 +10,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jonathanung/strike-cli/harness/sandbox"
-	"github.com/jonathanung/strike-cli/harness/tool"
-	"github.com/jonathanung/strike-cli/internal/eval/replay"
-	"github.com/jonathanung/strike-cli/internal/protocol"
-	"github.com/jonathanung/strike-cli/pkg/redact"
-	"github.com/jonathanung/strike-cli/pkg/timeline"
+	"github.com/jonathanung/strike/harness/sandbox"
+	"github.com/jonathanung/strike/harness/tool"
+	"github.com/jonathanung/strike/internal/eval/replay"
+	"github.com/jonathanung/strike/internal/protocol"
+	"github.com/jonathanung/strike/pkg/redact"
+	"github.com/jonathanung/strike/pkg/timeline"
 )
 
 // harnessEvalScenario is one offline regression check for #807 themes.

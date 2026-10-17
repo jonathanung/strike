@@ -2,14 +2,14 @@
 # Install strike from the latest GitHub Release into ~/.strike/bin.
 # Usage:
 #   curl -fsSL https://strike.jonathanung.ca/install | bash
-#   curl -fsSL https://raw.githubusercontent.com/jonathanung/strike-cli/main/scripts/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/jonathanung/strike/main/scripts/install.sh | bash
 # Flags (env or args):
 #   --no-modify-path   do not append PATH export to shell rc
 #   STRIKE_VERSION=vX  install a specific tag instead of latest
 set -euo pipefail
 
 REPO_OWNER="${STRIKE_REPO_OWNER:-jonathanung}"
-REPO_NAME="${STRIKE_REPO_NAME:-strike-cli}"
+REPO_NAME="${STRIKE_REPO_NAME:-strike}"
 INSTALL_DIR="${STRIKE_INSTALL_DIR:-${HOME}/.strike/bin}"
 MODIFY_PATH=1
 VERSION="${STRIKE_VERSION:-}"

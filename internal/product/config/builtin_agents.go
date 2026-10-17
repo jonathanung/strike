@@ -6,7 +6,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike/internal/protocol"
 )
 
 //go:embed agents/*.md

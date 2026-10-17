@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/internal/persist/workspace"
+	"github.com/jonathanung/strike/internal/persist/workspace"
 )
 
 type workspacesResponse struct {

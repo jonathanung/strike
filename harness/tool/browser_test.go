@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jonathanung/strike-cli/harness/sandbox"
+	"github.com/jonathanung/strike/harness/sandbox"
 )
 
 func browserTC(t *testing.T, session string) *Context {

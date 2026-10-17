@@ -14,7 +14,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/jonathanung/strike-cli/pkg/redact"
+	"github.com/jonathanung/strike/pkg/redact"
 )
 
 const (

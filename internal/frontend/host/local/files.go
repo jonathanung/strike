@@ -16,8 +16,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/jonathanung/strike-cli/harness/tool"
-	"github.com/jonathanung/strike-cli/internal/frontend/host"
+	"github.com/jonathanung/strike/harness/tool"
+	"github.com/jonathanung/strike/internal/frontend/host"
 )
 
 const (

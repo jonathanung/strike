@@ -7,7 +7,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/jonathanung/strike-cli/harness/sandbox"
+	"github.com/jonathanung/strike/harness/sandbox"
 )
 
 // Destructive shell builtins/commands whose path operands are checked against

@@ -43,8 +43,8 @@
           ldflags = [
             "-s"
             "-w"
-            "-X github.com/jonathanung/strike-cli/internal/product/version.Version=${version}"
-            "-X github.com/jonathanung/strike-cli/internal/product/version.Commit=${commit}"
+            "-X github.com/jonathanung/strike/internal/product/version.Version=${version}"
+            "-X github.com/jonathanung/strike/internal/product/version.Commit=${commit}"
           ];
 
           meta = {

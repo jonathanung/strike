@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/frontend/host"
+	"github.com/jonathanung/strike/internal/frontend/host"
 )
 
 // Wire DTOs — no internal store paths or Go types leak to the browser.

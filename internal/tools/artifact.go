@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/jonathanung/strike-cli/harness/tool"
+	"github.com/jonathanung/strike/harness/tool"
 	"strings"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/persist/artifact"
+	"github.com/jonathanung/strike/internal/persist/artifact"
 )
 
 // ArtifactStore is the durable typed-artifact surface used by artifact tools.

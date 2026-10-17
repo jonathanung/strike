@@ -3,7 +3,7 @@ package ui
 import (
 	"strings"
 
-	"github.com/jonathanung/strike-cli/internal/frontend/tui/theme"
+	"github.com/jonathanung/strike/internal/frontend/tui/theme"
 )
 
 // Sparkline renders a fixed-width activity chart from non-negative samples.

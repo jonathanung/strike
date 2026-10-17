@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/jonathanung/strike-cli/harness/tool"
+	"github.com/jonathanung/strike/harness/tool"
 	"strings"
 	"testing"
 
-	"github.com/jonathanung/strike-cli/internal/persist/issue"
+	"github.com/jonathanung/strike/internal/persist/issue"
 )
 
 func openIssue(t *testing.T) *issue.Store {

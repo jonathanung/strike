@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-const modulePath = "github.com/jonathanung/strike-cli"
+const modulePath = "github.com/jonathanung/strike"
 
 // TestArchitectureBoundaries enforces the frontend/backend dependency rules
 // from the refactor spec by walking every production (.go, non-_test) file in

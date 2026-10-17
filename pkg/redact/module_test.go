@@ -12,7 +12,7 @@ func TestStandaloneModule(t *testing.T) {
 		t.Fatalf("read go.mod: %v", err)
 	}
 	src := string(data)
-	if !strings.Contains(src, "module github.com/jonathanung/strike-cli/pkg/redact\n") {
+	if !strings.Contains(src, "module github.com/jonathanung/strike/pkg/redact\n") {
 		t.Fatalf("go.mod missing module path:\n%s", src)
 	}
 	if strings.Contains(src, "require ") {

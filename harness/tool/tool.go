@@ -13,8 +13,8 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/jonathanung/strike-cli/harness/sandbox"
-	"github.com/jonathanung/strike-cli/harness/scheduler"
+	"github.com/jonathanung/strike/harness/sandbox"
+	"github.com/jonathanung/strike/harness/scheduler"
 )
 
 // Result separates what the model sees (Output) from what the UI renders

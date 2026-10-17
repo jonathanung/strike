@@ -16,13 +16,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jonathanung/strike-cli/harness/sandbox"
-	"github.com/jonathanung/strike-cli/internal/frontend/host"
-	"github.com/jonathanung/strike-cli/internal/frontend/server"
-	"github.com/jonathanung/strike-cli/internal/persist/session"
-	"github.com/jonathanung/strike-cli/internal/persist/workspace"
-	"github.com/jonathanung/strike-cli/internal/protocol"
-	"github.com/jonathanung/strike-cli/internal/trust/audit"
+	"github.com/jonathanung/strike/harness/sandbox"
+	"github.com/jonathanung/strike/internal/frontend/host"
+	"github.com/jonathanung/strike/internal/frontend/server"
+	"github.com/jonathanung/strike/internal/persist/session"
+	"github.com/jonathanung/strike/internal/persist/workspace"
+	"github.com/jonathanung/strike/internal/protocol"
+	"github.com/jonathanung/strike/internal/trust/audit"
 )
 
 const serveUsage = `Web agent workspace (live engine + durable session attach).

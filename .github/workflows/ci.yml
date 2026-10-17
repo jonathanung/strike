@@ -41,14 +41,14 @@ jobs:
       - name: Workspace modules
         run: |
           set -euo pipefail
-          go list -m github.com/jonathanung/strike-cli \
-            github.com/jonathanung/strike-cli/pkg/protocol \
-            github.com/jonathanung/strike-cli/pkg/redact \
-            github.com/jonathanung/strike-cli/harness
-          GOWORK=off go list -m github.com/jonathanung/strike-cli \
-            github.com/jonathanung/strike-cli/pkg/protocol \
-            github.com/jonathanung/strike-cli/pkg/redact \
-            github.com/jonathanung/strike-cli/harness
+          go list -m github.com/jonathanung/strike \
+            github.com/jonathanung/strike/pkg/protocol \
+            github.com/jonathanung/strike/pkg/redact \
+            github.com/jonathanung/strike/harness
+          GOWORK=off go list -m github.com/jonathanung/strike \
+            github.com/jonathanung/strike/pkg/protocol \
+            github.com/jonathanung/strike/pkg/redact \
+            github.com/jonathanung/strike/harness
 
       - name: Generate TUI flatten
         run: go generate ./internal/frontend/tui

@@ -8,7 +8,7 @@ import (
 	"charm.land/lipgloss/v2/compat"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/jonathanung/strike-cli/internal/frontend/tui/theme"
+	"github.com/jonathanung/strike/internal/frontend/tui/theme"
 )
 
 // TestThemeChromeModesFrames asserts soft/solid/bordered chrome is observable

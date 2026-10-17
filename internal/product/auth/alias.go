@@ -3,7 +3,7 @@ package auth
 import (
 	"context"
 
-	provauth "github.com/jonathanung/strike-cli/harness/providers/auth"
+	provauth "github.com/jonathanung/strike/harness/providers/auth"
 )
 
 // Credential types live in harness/providers/auth so the factory can resolve

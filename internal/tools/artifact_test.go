@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/jonathanung/strike-cli/harness/tool"
+	"github.com/jonathanung/strike/harness/tool"
 	"strings"
 	"testing"
 
-	"github.com/jonathanung/strike-cli/internal/persist/artifact"
+	"github.com/jonathanung/strike/internal/persist/artifact"
 )
 
 func artifactTC(dir, session, root string) *tool.Context {

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jonathanung/strike-cli/harness/fault"
+	"github.com/jonathanung/strike/harness/fault"
 )
 
 // Chaos: process.after_start kill — RunProcess returns canceled, does not hang.

@@ -3,7 +3,7 @@ package engine
 import (
 	"strings"
 
-	"github.com/jonathanung/strike-cli/pkg/protocol"
+	"github.com/jonathanung/strike/pkg/protocol"
 )
 
 // Tool family names activated from deterministic workflow state (#991).

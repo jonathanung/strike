@@ -4,7 +4,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike/internal/protocol"
 )
 
 // maxTeamMessages caps the recent peer-message ring shown in the activity

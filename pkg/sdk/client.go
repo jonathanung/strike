@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/jonathanung/strike-cli/pkg/protocol"
+	"github.com/jonathanung/strike/pkg/protocol"
 )
 
 // ErrClosed is returned when the event stream ends before the requested work

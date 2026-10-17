@@ -9,7 +9,7 @@ import (
 	"charm.land/lipgloss/v2/compat"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/jonathanung/strike-cli/internal/frontend/tui/common"
+	"github.com/jonathanung/strike/internal/frontend/tui/common"
 )
 
 // markdownRender is the assistant-cell markdown path; overridable in tests.

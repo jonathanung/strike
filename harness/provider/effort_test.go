@@ -3,7 +3,7 @@ package provider_test
 import (
 	"testing"
 
-	"github.com/jonathanung/strike-cli/harness/provider"
+	"github.com/jonathanung/strike/harness/provider"
 )
 
 func TestParseEffortAcceptsEveryLevelCaseInsensitively(t *testing.T) {

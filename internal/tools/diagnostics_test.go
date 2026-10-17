@@ -4,13 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/jonathanung/strike-cli/harness/tool"
+	"github.com/jonathanung/strike/harness/tool"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/jonathanung/strike-cli/internal/integrate/lsp"
+	"github.com/jonathanung/strike/internal/integrate/lsp"
 )
 
 type fakeDiagSrc struct {

@@ -4,7 +4,7 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/jonathanung/strike-cli/internal/frontend/tui/theme"
+	"github.com/jonathanung/strike/internal/frontend/tui/theme"
 )
 
 func TestAgentStateLabel(t *testing.T) {

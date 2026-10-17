@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/harness/secretref"
+	"github.com/jonathanung/strike/harness/secretref"
 )
 
 // bashMinimalEnvKeys is the documented default environment inherited by bash

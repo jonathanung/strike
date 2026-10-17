@@ -7,8 +7,8 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/jonathanung/strike-cli/internal/frontend/tui/common"
-	"github.com/jonathanung/strike-cli/internal/frontend/tui/theme"
+	"github.com/jonathanung/strike/internal/frontend/tui/common"
+	"github.com/jonathanung/strike/internal/frontend/tui/theme"
 )
 
 // Canvas fits body to the terminal rectangle. A solid theme background is

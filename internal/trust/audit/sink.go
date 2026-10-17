@@ -11,9 +11,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jonathanung/strike-cli/pkg/protocol"
-	"github.com/jonathanung/strike-cli/pkg/redact"
-	"github.com/jonathanung/strike-cli/pkg/telemetry"
+	"github.com/jonathanung/strike/pkg/protocol"
+	"github.com/jonathanung/strike/pkg/redact"
+	"github.com/jonathanung/strike/pkg/telemetry"
 )
 
 // Retention bounds durable audit storage. Zero fields are unlimited.

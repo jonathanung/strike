@@ -3,7 +3,7 @@ package common
 import (
 	"strings"
 
-	"github.com/jonathanung/strike-cli/internal/frontend/tui/theme"
+	"github.com/jonathanung/strike/internal/frontend/tui/theme"
 )
 
 // DisplayJoin joins structured display fields with a themed separator.

@@ -14,9 +14,9 @@ import (
 	"testing/fstest"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/persist/session"
-	"github.com/jonathanung/strike-cli/internal/product/version"
-	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike/internal/persist/session"
+	"github.com/jonathanung/strike/internal/product/version"
+	"github.com/jonathanung/strike/internal/protocol"
 )
 
 func TestNewAuthValidation(t *testing.T) {

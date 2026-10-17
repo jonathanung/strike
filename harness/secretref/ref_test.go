@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	secret "github.com/jonathanung/strike-cli/harness/secretref"
+	secret "github.com/jonathanung/strike/harness/secretref"
 )
 
 func TestParseRef(t *testing.T) {

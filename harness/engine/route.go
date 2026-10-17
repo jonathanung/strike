@@ -5,9 +5,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/harness/scheduler"
-	"github.com/jonathanung/strike-cli/harness/tool"
-	"github.com/jonathanung/strike-cli/pkg/protocol"
+	"github.com/jonathanung/strike/harness/scheduler"
+	"github.com/jonathanung/strike/harness/tool"
+	"github.com/jonathanung/strike/pkg/protocol"
 )
 
 // Route mode values accepted on task/delegate spawn.

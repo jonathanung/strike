@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/protocol"
-	"github.com/jonathanung/strike-cli/pkg/redact"
+	"github.com/jonathanung/strike/internal/protocol"
+	"github.com/jonathanung/strike/pkg/redact"
 )
 
 // RunSnapshotSchemaVersion is the multi-agent run snapshot document schema (#782).

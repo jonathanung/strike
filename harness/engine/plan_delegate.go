@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/pkg/protocol"
+	"github.com/jonathanung/strike/pkg/protocol"
 )
 
 // applyPlanSectionDelegate settles plan section correlation after a child

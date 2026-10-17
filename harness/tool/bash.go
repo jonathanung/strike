@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jonathanung/strike-cli/harness/sandbox"
-	"github.com/jonathanung/strike-cli/harness/scheduler"
+	"github.com/jonathanung/strike/harness/sandbox"
+	"github.com/jonathanung/strike/harness/scheduler"
 )
 
 const (

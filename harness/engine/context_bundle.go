@@ -5,9 +5,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/harness/permission"
-	"github.com/jonathanung/strike-cli/harness/tool"
-	"github.com/jonathanung/strike-cli/pkg/protocol"
+	"github.com/jonathanung/strike/harness/permission"
+	"github.com/jonathanung/strike/harness/tool"
+	"github.com/jonathanung/strike/pkg/protocol"
 )
 
 // protocolContextBundle converts a tool bundle to the wire (camelCase) form.
