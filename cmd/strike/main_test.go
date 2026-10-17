@@ -24,6 +24,8 @@ const expectedUsage = `Usage:
   strike rpc [options]
   strike acp [options]
   strike serve [options]
+  strike daemon <install|uninstall|status|token>
+  strike tui [options] (deprecated)
   strike mcp-serve [options]
   strike auth <command> [arguments]
   strike plugin <command> [arguments]
@@ -560,7 +562,7 @@ func TestWarningTextAndPreflightFailuresDoNotWarn(t *testing.T) {
 	}
 	t.Setenv("HOME", homeFile)
 	for _, args := range [][]string{
-		nil,
+		{"tui"}, // bare `strike` now prints a hint; TUI preflight runs via `tui`
 		{"--dangerously-skip-permissions"},
 		{"--dangerously-skip-permissions=false"},
 		{"--auto"},

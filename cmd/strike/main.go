@@ -214,6 +214,15 @@ func (o cliOptions) skipNetworkAllow() bool {
 	return o.dangerouslySkipPermissions
 }
 
+const tuiDeprecationNotice = "notice: the strike TUI is deprecated; the web UI is now primary (strike daemon install, then open the daemon URL). The TUI remains available via `strike tui`."
+
+const bareStrikeHint = `Strike now runs as a daemon with a web UI.
+
+  strike daemon install   install the per-user systemd service
+  strike serve            run the daemon in the foreground
+  strike tui              open the deprecated terminal UI
+  strike --help           all commands and options`
+
 func main() {
 	os.Exit(runCLI(os.Args[1:], os.Stdout, os.Stderr))
 }
@@ -237,6 +246,20 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 	}
 	if len(args) > 0 && args[0] == "serve" {
 		return runServeCLI(args[1:], stdout, stderr)
+	}
+	if len(args) > 0 && args[0] == "daemon" {
+		return runDaemonCLI(args[1:], stdout, stderr)
+	}
+	if len(args) == 0 {
+		fmt.Fprintln(stdout, bareStrikeHint)
+		return 0
+	}
+	if args[0] == "tui" {
+		args = args[1:]
+		fmt.Fprintln(stderr, tuiDeprecationNotice)
+	} else if strings.HasPrefix(args[0], "-") && args[0] != "--version" && args[0] != "-version" && args[0] != "-h" && args[0] != "--help" {
+		// Flag form still launches the TUI (e.g. --provider echo).
+		fmt.Fprintln(stderr, tuiDeprecationNotice)
 	}
 	if len(args) > 0 && args[0] == "mcp-serve" {
 		return runMCPServeCLI(args[1:], os.Stdin, stdout, stderr)
@@ -461,6 +484,8 @@ func writeUsage(w io.Writer) {
 	fmt.Fprintln(w, "  strike rpc [options]")
 	fmt.Fprintln(w, "  strike acp [options]")
 	fmt.Fprintln(w, "  strike serve [options]")
+	fmt.Fprintln(w, "  strike daemon <install|uninstall|status|token>")
+	fmt.Fprintln(w, "  strike tui [options] (deprecated)")
 	fmt.Fprintln(w, "  strike mcp-serve [options]")
 	fmt.Fprintln(w, "  strike auth <command> [arguments]")
 	fmt.Fprintln(w, "  strike plugin <command> [arguments]")

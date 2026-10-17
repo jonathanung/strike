@@ -20,6 +20,7 @@ import (
 	"github.com/jonathanung/strike/internal/frontend/host"
 	"github.com/jonathanung/strike/internal/frontend/server"
 	"github.com/jonathanung/strike/internal/persist/session"
+	"github.com/jonathanung/strike/internal/persist/workspace"
 	"github.com/jonathanung/strike/internal/protocol"
 	"github.com/jonathanung/strike/internal/trust/audit"
 )
@@ -77,6 +78,8 @@ type serveOptions struct {
 	addr                       string
 	auth                       bool
 	token                      string
+	tokenFile                  string
+	allowPrivateBind           bool
 	sessionDir                 string
 	sessionDirSet              bool
 	provider                   string
@@ -128,6 +131,8 @@ func parseServeArgs(args []string) (serveOptions, error) {
 		return nil
 	})
 	fs.StringVar(&opts.token, "token", "", "")
+	fs.StringVar(&opts.tokenFile, "token-file", "", "")
+	fs.BoolVar(&opts.allowPrivateBind, "allow-private-bind", false, "")
 	fs.StringVar(&opts.sessionDir, "session-dir", "", "")
 	fs.StringVar(&opts.provider, "provider", "echo", "")
 	fs.StringVar(&opts.model, "model", "", "")
@@ -163,8 +168,18 @@ func parseServeArgs(args []string) (serveOptions, error) {
 	if opts.provider == "" {
 		opts.provider = "echo"
 	}
+	opts.tokenFile = strings.TrimSpace(opts.tokenFile)
 	if opts.token != "" && !opts.auth {
 		return serveOptions{}, fmt.Errorf("--token requires --auth")
+	}
+	if opts.tokenFile != "" && !opts.auth {
+		return serveOptions{}, fmt.Errorf("--token-file requires --auth")
+	}
+	if opts.token != "" && opts.tokenFile != "" {
+		return serveOptions{}, fmt.Errorf("--token and --token-file are mutually exclusive")
+	}
+	if opts.allowPrivateBind && !opts.auth {
+		return serveOptions{}, fmt.Errorf("--allow-private-bind requires --auth")
 	}
 	if opts.sessionDirSet && !opts.attachOnly {
 		return serveOptions{}, fmt.Errorf("--session-dir requires --attach-only; live sessions use %s", session.DefaultDir())
@@ -173,7 +188,7 @@ func parseServeArgs(args []string) (serveOptions, error) {
 }
 
 func runServe(opts serveOptions, stdout, stderr io.Writer) error {
-	bindAddr, err := server.ResolveBindAddr(opts.addr)
+	bindAddr, err := server.ResolveDaemonBindAddr(opts.addr, opts.allowPrivateBind)
 	if err != nil {
 		return err
 	}
@@ -181,6 +196,13 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 
 	token := opts.token
 	minted := false
+	if opts.auth && token == "" && opts.tokenFile != "" {
+		t, created, err := loadOrMintTokenFile(opts.tokenFile)
+		if err != nil {
+			return err
+		}
+		token, minted = t, created
+	}
 	if opts.auth && token == "" {
 		t, err := server.MintToken()
 		if err != nil {
@@ -448,11 +470,17 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 	}
 	defer func() { _ = auditSink.Close() }()
 
+	wsStore, err := workspace.Open("")
+	if err != nil {
+		return err
+	}
+
 	srv, err := server.New(server.Options{
 		Addr:       opts.addr,
 		Auth:       opts.auth,
 		Token:      token,
 		SessionDir: sessionDir,
+		Workspaces: wsStore,
 		LiveHub:    liveHub,
 		Services:   services,
 		Sandbox:    sandboxSnap,

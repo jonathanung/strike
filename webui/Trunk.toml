@@ -1,0 +1,11 @@
+[build]
+target = "index.html"
+public_url = "/assets/"
+dist = "dist"
+
+[serve]
+port = 8788
+# Dev only: proxy API calls to a locally running daemon.
+[[proxy]]
+backend = "http://127.0.0.1:8787/v1/"
+rewrite = "/v1/"

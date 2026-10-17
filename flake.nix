@@ -4,12 +4,24 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     flake-utils.url = "github:numtide/flake-utils";
+    # Pinned Rust toolchain (incl. wasm32 std) for the webui — pure Nix,
+    # no rustup downloads inside the dev shell.
+    fenix = {
+      url = "github:nix-community/fenix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
-  outputs = { self, nixpkgs, flake-utils }:
+  outputs = { self, nixpkgs, flake-utils, fenix }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs { inherit system; };
+        rustToolchain = fenix.packages.${system}.combine (with fenix.packages.${system}; [
+          stable.cargo
+          stable.rustc
+          stable.rustfmt
+          targets.wasm32-unknown-unknown.stable.rust-std
+        ]);
         version = "0-unstable-${builtins.substring 0 8 (self.lastModifiedDate or "19700101")}";
         commit = self.shortRev or self.dirtyShortRev or "unknown";
         strike = pkgs.buildGoModule {
@@ -62,6 +74,11 @@
             pkgs.gnumake
             pkgs.git
             pkgs.gopls
+            # Rust web UI (webui/): everything needed to check/build/serve it.
+            rustToolchain
+            pkgs.trunk
+            pkgs.wasm-bindgen-cli
+            pkgs.binaryen # wasm-opt for trunk release builds
           ];
 
           shellHook = ''
@@ -72,7 +89,10 @@
             export GOTOOLCHAIN=local
             export PATH="$GOPATH/bin:$PATH"
             mkdir -p "$GOPATH" "$GOCACHE"
-            echo "strike-cli dev shell: $(go version)"
+            export CARGO_HOME="$PWD/.nix-rust/cargo"
+            export CARGO_TARGET_DIR="$PWD/.nix-rust/target"
+            mkdir -p "$CARGO_HOME"
+            echo "strike-cli dev shell: $(go version) · $(rustc --version)"
           '';
         };
       });
