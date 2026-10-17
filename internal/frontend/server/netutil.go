@@ -24,6 +24,54 @@ func ResolveBindAddr(addr string) (string, error) {
 	return net.JoinHostPort(host, port), nil
 }
 
+// IsPrivateBind reports whether addr's host is loopback or a private /
+// CGNAT (100.64.0.0/10, e.g. Tailscale) address. Public addresses and the
+// unspecified address are not private binds.
+func IsPrivateBind(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		host = addr
+	}
+	host = strings.TrimSpace(host)
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || ip.IsUnspecified() {
+		return false
+	}
+	if ip.IsLoopback() || ip.IsPrivate() {
+		return true
+	}
+	if v4 := ip.To4(); v4 != nil {
+		_, cgnat, _ := net.ParseCIDR("100.64.0.0/10")
+		return cgnat.Contains(v4)
+	}
+	return false
+}
+
+// ResolveDaemonBindAddr validates a daemon bind address. Loopback always
+// passes; private/tailnet binds require allowPrivate (the caller must also
+// require token auth). Public binds are always rejected: strike serves
+// cleartext HTTP for owner-only private networks.
+func ResolveDaemonBindAddr(addr string, allowPrivate bool) (string, error) {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		addr = "127.0.0.1:8787"
+	}
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return "", fmt.Errorf("invalid --addr %q: %w", addr, err)
+	}
+	if IsLocalhostBind(addr) {
+		return net.JoinHostPort(host, port), nil
+	}
+	if allowPrivate && IsPrivateBind(addr) {
+		return net.JoinHostPort(host, port), nil
+	}
+	return "", fmt.Errorf("non-loopback --addr %s rejected: bind loopback, or a private/tailscale address with --allow-private-bind and --auth", addr)
+}
+
 // ParseCIDRs parses comma-separated or repeated CIDR/IP allowlist entries.
 // Bare IPs become /32 or /128.
 func ParseCIDRs(specs []string) ([]*net.IPNet, error) {

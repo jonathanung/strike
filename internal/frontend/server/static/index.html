@@ -1,14 +1,29 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="color-scheme" content="dark light" />
-    <title>Strike Workspace</title>
-    <script type="module" crossorigin src="/assets/index-6rmd2u_c.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-DBVqz_vI.css">
-  </head>
-  <body>
-    <div id="root"></div>
-  </body>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#101216">
+<title>Strike</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="stylesheet" href="/assets/style-b49773a4c96b9e50.css" integrity="sha384-4uDLhKn78ohrnqTIUx7ooXTOymcMQSB9+hLzAMatnnZPB3PVW9krmexJCWnd9WU4"/>
+
+
+
+
+<script type="module">
+import init, * as bindings from '/assets/strike-webui-350cc10846532886.js';
+const wasm = await init({ module_or_path: '/assets/strike-webui-350cc10846532886_bg.wasm' });
+
+
+window.wasmBindings = bindings;
+
+
+dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
+
+</script>
+<script src="/assets/register.js" defer></script>
+
+<link rel="modulepreload" href="/assets/strike-webui-350cc10846532886.js" crossorigin="anonymous" integrity="sha384-tL4VcctKyXxhiherORle2EiwcMZf3d96606Y78JYOT4kzgahSGnOQy08m3cT7l7G"><link rel="preload" href="/assets/strike-webui-350cc10846532886_bg.wasm" crossorigin="anonymous" integrity="sha384-WHAxvm+f8NFOHa2Yyf7jvZRcluDxEFQoC+tpjvwsgXyg5xATv8UQbeuJ/6shtER7" as="fetch" type="application/wasm"></head>
+<body></body>
 </html>

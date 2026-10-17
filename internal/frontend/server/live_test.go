@@ -470,16 +470,18 @@ func TestOpsUnavailableWithoutLive(t *testing.T) {
 	}
 }
 
-func TestAttachPageLoadsViteAssets(t *testing.T) {
+func TestAttachPageServesShell(t *testing.T) {
 	srv := testServer(t, t.TempDir(), "secret")
 	res := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	srv.Handler().ServeHTTP(res, req)
-	body := res.Body.String()
-	for _, want := range []string{"id=\"root\"", "type=\"module\"", "/assets/"} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("page missing %q", want)
-		}
+	if res.Code != http.StatusOK {
+		t.Fatalf("status = %d", res.Code)
+	}
+	// Built bundle (make webui-build) references /assets/; a fresh checkout
+	// serves the placeholder shell. Both carry the Strike title.
+	if body := res.Body.String(); !strings.Contains(body, "<title>Strike</title>") {
+		t.Fatalf("page missing shell title: %.120q", body)
 	}
 }
 
