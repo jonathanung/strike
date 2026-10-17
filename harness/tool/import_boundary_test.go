@@ -11,14 +11,14 @@ import (
 
 // Product persist / integrate packages the kernel tool package must not import.
 var forbiddenKernelImports = []string{
-	"github.com/jonathanung/strike-cli/internal/persist/memory",
-	"github.com/jonathanung/strike-cli/internal/persist/issue",
-	"github.com/jonathanung/strike-cli/internal/persist/plan",
-	"github.com/jonathanung/strike-cli/internal/persist/artifact",
-	"github.com/jonathanung/strike-cli/internal/persist/ledger",
-	"github.com/jonathanung/strike-cli/internal/integrate/lsp",
-	"github.com/jonathanung/strike-cli/internal/tools",
-	"github.com/jonathanung/strike-cli/internal/trust/secret",
+	"github.com/jonathanung/strike/internal/persist/memory",
+	"github.com/jonathanung/strike/internal/persist/issue",
+	"github.com/jonathanung/strike/internal/persist/plan",
+	"github.com/jonathanung/strike/internal/persist/artifact",
+	"github.com/jonathanung/strike/internal/persist/ledger",
+	"github.com/jonathanung/strike/internal/integrate/lsp",
+	"github.com/jonathanung/strike/internal/tools",
+	"github.com/jonathanung/strike/internal/trust/secret",
 }
 
 func TestKernelToolImportBoundary(t *testing.T) {

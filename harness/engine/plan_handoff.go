@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/harness/tool"
-	"github.com/jonathanung/strike-cli/pkg/protocol"
+	"github.com/jonathanung/strike/harness/tool"
+	"github.com/jonathanung/strike/pkg/protocol"
 )
 
 // PlanHandoffState is the in-memory record of the last successful plan handoff.

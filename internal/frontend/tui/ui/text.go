@@ -6,8 +6,8 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/jonathanung/strike-cli/internal/frontend/tui/common"
-	"github.com/jonathanung/strike-cli/internal/frontend/tui/theme"
+	"github.com/jonathanung/strike/internal/frontend/tui/common"
+	"github.com/jonathanung/strike/internal/frontend/tui/theme"
 )
 
 // truncate shortens s to at most width display cells, appending an ellipsis

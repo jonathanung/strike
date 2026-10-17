@@ -1,7 +1,7 @@
 package protocol
 
 import (
-	pub "github.com/jonathanung/strike-cli/pkg/protocol"
+	pub "github.com/jonathanung/strike/pkg/protocol"
 )
 
 // Wire schema version (see pkg/protocol).

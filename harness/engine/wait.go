@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jonathanung/strike-cli/harness/tool"
-	"github.com/jonathanung/strike-cli/pkg/protocol"
+	"github.com/jonathanung/strike/harness/tool"
+	"github.com/jonathanung/strike/pkg/protocol"
 )
 
 // waitSignal is one discrete orchestration event for wait matching.

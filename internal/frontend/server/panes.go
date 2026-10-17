@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/frontend/host"
+	"github.com/jonathanung/strike/internal/frontend/host"
 )
 
 // Web-safe pane DTOs. No TUI types, no PluginRoot, no env secret values.

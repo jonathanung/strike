@@ -7,8 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/jonathanung/strike-cli/harness/fn"
-	"github.com/jonathanung/strike-cli/harness/provider"
+	"github.com/jonathanung/strike/harness/fn"
+	"github.com/jonathanung/strike/harness/provider"
 )
 
 // ChooseBest requests three candidates and returns the longest response.

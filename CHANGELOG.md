@@ -14,6 +14,19 @@ materially affect the shipped product.
 
 ## [Unreleased]
 
+### Changed
+
+- **Repository and Go module path renamed** — the GitHub repo is now
+  `jonathanung/strike` (was `jonathanung/strike-cli`), and all Go module
+  paths follow: `github.com/jonathanung/strike`,
+  `github.com/jonathanung/strike/harness`,
+  `github.com/jonathanung/strike/pkg/protocol`, and
+  `github.com/jonathanung/strike/pkg/redact`. **Upgrade note:** Go
+  consumers must update imports from `github.com/jonathanung/strike-cli/...`
+  to `github.com/jonathanung/strike/...`; the old import path no longer
+  resolves for new versions. Built binaries, config, and session formats
+  are unchanged.
+
 ## [v0.5.2] - 2026-08-19
 
 Patch release: TUI and web cockpit share a sharp royal-purple look, and the

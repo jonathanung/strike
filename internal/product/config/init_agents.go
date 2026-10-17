@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/internal/trust/secret"
+	"github.com/jonathanung/strike/internal/trust/secret"
 )
 
 // ErrAgentsExists is returned by WriteAgentsMD when AGENTS.md already exists

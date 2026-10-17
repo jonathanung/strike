@@ -20,7 +20,7 @@ curl -fsSL https://strike.jonathanung.ca/install | bash
 ```
 
 That URL redirects to the install script on GitHub; binaries come from
-[GitHub Releases](https://github.com/jonathanung/strike-cli/releases). Details,
+[GitHub Releases](https://github.com/jonathanung/strike/releases). Details,
 PATH, upgrade, and uninstall: [docs/install.md](docs/install.md).
 
 ```sh

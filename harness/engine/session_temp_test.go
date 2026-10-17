@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jonathanung/strike-cli/harness/engine"
-	"github.com/jonathanung/strike-cli/harness/provider"
-	"github.com/jonathanung/strike-cli/harness/provider/echo"
-	"github.com/jonathanung/strike-cli/harness/tool"
+	"github.com/jonathanung/strike/harness/engine"
+	"github.com/jonathanung/strike/harness/provider"
+	"github.com/jonathanung/strike/harness/provider/echo"
+	"github.com/jonathanung/strike/harness/tool"
 )
 
 func TestEngineSessionTempAllocatedAndCleaned(t *testing.T) {

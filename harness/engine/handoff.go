@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/pkg/protocol"
+	"github.com/jonathanung/strike/pkg/protocol"
 )
 
 // noteMutatedPath records a workspace-relative path for completion handoffs.

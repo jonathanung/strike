@@ -9,7 +9,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/jonathanung/strike-cli/internal/frontend/host"
+	"github.com/jonathanung/strike/internal/frontend/host"
 )
 
 // fakeMCP is a host.MCP for API tests.

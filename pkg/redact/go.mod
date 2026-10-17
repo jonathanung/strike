@@ -1,3 +1,3 @@
-module github.com/jonathanung/strike-cli/pkg/redact
+module github.com/jonathanung/strike/pkg/redact
 
 go 1.26.2

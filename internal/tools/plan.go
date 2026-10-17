@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/jonathanung/strike-cli/harness/tool"
+	"github.com/jonathanung/strike/harness/tool"
 	"strings"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/persist/plan"
+	"github.com/jonathanung/strike/internal/persist/plan"
 )
 
 // PlanStore is the durable project plan surface used by plan tools.

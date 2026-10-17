@@ -3,8 +3,8 @@ package engine
 import (
 	"testing"
 
-	"github.com/jonathanung/strike-cli/harness/provider"
-	"github.com/jonathanung/strike-cli/pkg/protocol"
+	"github.com/jonathanung/strike/harness/provider"
+	"github.com/jonathanung/strike/pkg/protocol"
 )
 
 // TestProviderEffortCoversEveryLevel is the guard that keeps the two effort

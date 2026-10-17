@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jonathanung/strike-cli/internal/frontend/host"
-	"github.com/jonathanung/strike-cli/internal/frontend/host/local"
-	"github.com/jonathanung/strike-cli/pkg/protocol"
+	"github.com/jonathanung/strike/internal/frontend/host"
+	"github.com/jonathanung/strike/internal/frontend/host/local"
+	"github.com/jonathanung/strike/pkg/protocol"
 )
 
 func TestFilesApplyEditAndPatch(t *testing.T) {

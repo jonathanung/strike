@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/frontend/host"
-	"github.com/jonathanung/strike-cli/internal/integrate/plugin"
-	"github.com/jonathanung/strike-cli/internal/product/version"
+	"github.com/jonathanung/strike/internal/frontend/host"
+	"github.com/jonathanung/strike/internal/integrate/plugin"
+	"github.com/jonathanung/strike/internal/product/version"
 )
 
 // NewPlugins builds a host.Plugins backed by internal/integrate/plugin lifecycle APIs.

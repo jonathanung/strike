@@ -56,7 +56,7 @@ service/theme token).
 | `pkg/diag` | Prompt/config diagnostic bundle builder + redacted JSON export |
 | `pkg/sdk` | Thin Go client over `pkg/protocol` (channel/JSONL client, RunTurn, session replay) |
 | `internal/protocol` | Compatibility re-export of `pkg/protocol` |
-| `harness` | Kernel module (`github.com/jonathanung/strike-cli/harness`; own go.mod): engine, provider+echo, adapters/factory/auth flows, tool, permission, actionfacts, question, sandbox, scheduler, safefile, fn, verify, fault, secretref |
+| `harness` | Kernel module (`github.com/jonathanung/strike/harness`; own go.mod): engine, provider+echo, adapters/factory/auth flows, tool, permission, actionfacts, question, sandbox, scheduler, safefile, fn, verify, fault, secretref |
 | `harness/engine` | Turn loop, tool dispatch, interrupts |
 | `harness/fn` | Function harness contract, registry, external process adapter |
 | `harness/provider` | Public Provider interface + echo (folded from interim `provider/` module) |

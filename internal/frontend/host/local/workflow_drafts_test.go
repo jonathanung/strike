@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jonathanung/strike-cli/internal/product/config"
+	"github.com/jonathanung/strike/internal/product/config"
 )
 
 func TestWorkflowDraftsReviewAndSave(t *testing.T) {

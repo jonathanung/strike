@@ -10,11 +10,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jonathanung/strike-cli/harness/permission"
-	"github.com/jonathanung/strike-cli/harness/provider"
-	"github.com/jonathanung/strike-cli/harness/tool"
-	"github.com/jonathanung/strike-cli/harness/verify"
-	"github.com/jonathanung/strike-cli/pkg/protocol"
+	"github.com/jonathanung/strike/harness/permission"
+	"github.com/jonathanung/strike/harness/provider"
+	"github.com/jonathanung/strike/harness/tool"
+	"github.com/jonathanung/strike/harness/verify"
+	"github.com/jonathanung/strike/pkg/protocol"
 )
 
 // childEventCap bounds in-memory transcript rows retained per child for task_read.

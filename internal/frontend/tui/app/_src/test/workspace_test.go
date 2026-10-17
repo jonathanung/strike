@@ -100,10 +100,10 @@ func TestWorkspaceModules(t *testing.T) {
 		t.Errorf("stat providers/go.mod: %v", err)
 	}
 	if requires[modulePath+"/providers"] {
-		t.Error("root go.mod still requires github.com/jonathanung/strike-cli/providers")
+		t.Error("root go.mod still requires github.com/jonathanung/strike/providers")
 	}
 	if _, ok := replaces[modulePath+"/providers"]; ok {
-		t.Error("root go.mod still replaces github.com/jonathanung/strike-cli/providers")
+		t.Error("root go.mod still replaces github.com/jonathanung/strike/providers")
 	}
 }
 
@@ -249,10 +249,10 @@ use (
 }
 
 func TestParseGoModModuleAndRequires(t *testing.T) {
-	src := `module github.com/jonathanung/strike-cli
+	src := `module github.com/jonathanung/strike
 
 require (
-	github.com/jonathanung/strike-cli/pkg/protocol v0.0.0
+	github.com/jonathanung/strike/pkg/protocol v0.0.0
 	github.com/other/dep v1.2.3 // indirect
 )
 
@@ -275,9 +275,9 @@ require github.com/single/line v0.1.0
 
 func TestParseGoModReplaces(t *testing.T) {
 	src := `
-replace github.com/jonathanung/strike-cli/pkg/protocol => ./pkg/protocol
+replace github.com/jonathanung/strike/pkg/protocol => ./pkg/protocol
 
-replace github.com/jonathanung/strike-cli/pkg/redact => ./pkg/redact
+replace github.com/jonathanung/strike/pkg/redact => ./pkg/redact
 `
 	got := parseGoModReplaces(src)
 	if got[modulePath+"/pkg/protocol"] != "./pkg/protocol" {

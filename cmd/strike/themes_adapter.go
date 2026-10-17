@@ -4,8 +4,8 @@ import (
 	"image/color"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/internal/frontend/host"
-	"github.com/jonathanung/strike-cli/internal/frontend/tui/theme"
+	"github.com/jonathanung/strike/internal/frontend/host"
+	"github.com/jonathanung/strike/internal/frontend/tui/theme"
 )
 
 // themesAdapter exposes the TUI theme catalog as host.Themes without leaking

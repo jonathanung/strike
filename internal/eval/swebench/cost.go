@@ -3,7 +3,7 @@ package swebench
 import (
 	"context"
 
-	"github.com/jonathanung/strike-cli/internal/product/models"
+	"github.com/jonathanung/strike/internal/product/models"
 )
 
 // CostEstimator estimates USD cost from token usage.

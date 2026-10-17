@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jonathanung/strike-cli/internal/integrate/container"
+	"github.com/jonathanung/strike/internal/integrate/container"
 )
 
 func TestPrintLaunchResult(t *testing.T) {

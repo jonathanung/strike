@@ -13,9 +13,9 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/integrate/container"
-	"github.com/jonathanung/strike-cli/internal/product/config"
-	"github.com/jonathanung/strike-cli/internal/product/version"
+	"github.com/jonathanung/strike/internal/integrate/container"
+	"github.com/jonathanung/strike/internal/product/config"
+	"github.com/jonathanung/strike/internal/product/version"
 )
 
 const containerUsage = `Manage native containerization (Dockerfile eject, detect, ls, status).

@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jonathanung/strike-cli/pkg/redact"
-	"github.com/jonathanung/strike-cli/pkg/telemetry"
+	"github.com/jonathanung/strike/pkg/redact"
+	"github.com/jonathanung/strike/pkg/telemetry"
 )
 
 func TestEmbeddedRegistryValid(t *testing.T) {

@@ -8,7 +8,7 @@ package secret
 import (
 	"encoding/json"
 
-	"github.com/jonathanung/strike-cli/pkg/redact"
+	"github.com/jonathanung/strike/pkg/redact"
 )
 
 // Placeholder mirrors pkg/redact for callers that import only this package.

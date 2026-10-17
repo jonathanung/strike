@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/internal/integrate/container"
+	"github.com/jonathanung/strike/internal/integrate/container"
 )
 
 // ContainerConfig is the JSON "container" object (and container.jsonc body).

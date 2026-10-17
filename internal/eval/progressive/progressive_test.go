@@ -8,14 +8,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jonathanung/strike-cli/harness/engine"
-	"github.com/jonathanung/strike-cli/harness/permission"
-	"github.com/jonathanung/strike-cli/harness/provider"
-	"github.com/jonathanung/strike-cli/harness/tool"
-	"github.com/jonathanung/strike-cli/internal/eval/progressive"
-	"github.com/jonathanung/strike-cli/internal/persist/plan"
-	"github.com/jonathanung/strike-cli/internal/protocol"
-	"github.com/jonathanung/strike-cli/internal/tools"
+	"github.com/jonathanung/strike/harness/engine"
+	"github.com/jonathanung/strike/harness/permission"
+	"github.com/jonathanung/strike/harness/provider"
+	"github.com/jonathanung/strike/harness/tool"
+	"github.com/jonathanung/strike/internal/eval/progressive"
+	"github.com/jonathanung/strike/internal/persist/plan"
+	"github.com/jonathanung/strike/internal/protocol"
+	"github.com/jonathanung/strike/internal/tools"
 )
 
 func fullRegistry(t *testing.T) *tool.Registry {

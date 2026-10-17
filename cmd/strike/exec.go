@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike/internal/protocol"
 )
 
 const execUsage = `Run one prompt headlessly and stream the assistant reply to stdout.

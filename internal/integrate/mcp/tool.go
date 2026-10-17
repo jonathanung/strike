@@ -8,7 +8,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/jonathanung/strike-cli/harness/tool"
+	"github.com/jonathanung/strike/harness/tool"
 )
 
 // Permission is the permission.Ruleset name for all MCP-backed tools.

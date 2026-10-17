@@ -9,13 +9,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jonathanung/strike-cli/harness/engine"
-	"github.com/jonathanung/strike-cli/harness/provider"
-	"github.com/jonathanung/strike-cli/harness/tool"
-	"github.com/jonathanung/strike-cli/internal/enginebind"
-	"github.com/jonathanung/strike-cli/internal/persist/ledger"
-	"github.com/jonathanung/strike-cli/internal/persist/memory"
-	"github.com/jonathanung/strike-cli/pkg/protocol"
+	"github.com/jonathanung/strike/harness/engine"
+	"github.com/jonathanung/strike/harness/provider"
+	"github.com/jonathanung/strike/harness/tool"
+	"github.com/jonathanung/strike/internal/enginebind"
+	"github.com/jonathanung/strike/internal/persist/ledger"
+	"github.com/jonathanung/strike/internal/persist/memory"
+	"github.com/jonathanung/strike/pkg/protocol"
 )
 
 func TestSharedBaselineHasADHDAndTools(t *testing.T) {

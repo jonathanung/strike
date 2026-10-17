@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jonathanung/strike-cli/harness/scheduler"
+	"github.com/jonathanung/strike/harness/scheduler"
 )
 
 func TestBashPoolsForCommand(t *testing.T) {

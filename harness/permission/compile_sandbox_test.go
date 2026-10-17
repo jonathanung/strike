@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jonathanung/strike-cli/harness/sandbox"
-	"github.com/jonathanung/strike-cli/pkg/protocol"
+	"github.com/jonathanung/strike/harness/sandbox"
+	"github.com/jonathanung/strike/pkg/protocol"
 )
 
 func TestCompileSandboxOff(t *testing.T) {

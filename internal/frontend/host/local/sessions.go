@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/frontend/host"
-	"github.com/jonathanung/strike-cli/internal/persist/session"
+	"github.com/jonathanung/strike/internal/frontend/host"
+	"github.com/jonathanung/strike/internal/persist/session"
 )
 
 // NewSessions wraps a session.Manager as host.Sessions. projectKey scopes

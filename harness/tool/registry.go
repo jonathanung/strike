@@ -5,7 +5,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/jonathanung/strike-cli/harness/provider"
+	"github.com/jonathanung/strike/harness/provider"
 )
 
 // Registry holds the tools visible to the model. It is the primary

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jonathanung/strike-cli/harness/tool"
+	"github.com/jonathanung/strike/harness/tool"
 )
 
 // patchCollab handles patch_collab tool actions against the team patch board

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jonathanung/strike-cli/harness/sandbox"
+	"github.com/jonathanung/strike/harness/sandbox"
 )
 
 func TestRunHooksAllowInject(t *testing.T) {

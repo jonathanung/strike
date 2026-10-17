@@ -3,7 +3,7 @@ package tui
 import (
 	"strings"
 
-	"github.com/jonathanung/strike-cli/internal/frontend/tui/theme"
+	"github.com/jonathanung/strike/internal/frontend/tui/theme"
 )
 
 // Logo is the Strike wordmark in the web cockpit voice: letter-spaced STRIKE

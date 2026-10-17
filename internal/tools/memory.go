@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/jonathanung/strike-cli/harness/tool"
+	"github.com/jonathanung/strike/harness/tool"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/internal/persist/memory"
+	"github.com/jonathanung/strike/internal/persist/memory"
 )
 
 // MemoryStore is the durable project memory surface used by memory tools.

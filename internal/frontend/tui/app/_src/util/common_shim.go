@@ -3,8 +3,8 @@ package tui
 import (
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/frontend/tui/common"
-	"github.com/jonathanung/strike-cli/internal/frontend/tui/theme"
+	"github.com/jonathanung/strike/internal/frontend/tui/common"
+	"github.com/jonathanung/strike/internal/frontend/tui/theme"
 )
 
 func themedSpace(width int) string { return common.ThemedSpace(width) }

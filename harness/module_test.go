@@ -14,15 +14,15 @@ func TestStandaloneModule(t *testing.T) {
 		t.Fatalf("read go.mod: %v", err)
 	}
 	src := string(data)
-	if !strings.Contains(src, "module github.com/jonathanung/strike-cli/harness\n") {
+	if !strings.Contains(src, "module github.com/jonathanung/strike/harness\n") {
 		t.Fatalf("go.mod missing module path:\n%s", src)
 	}
 	if strings.Contains(src, "/internal/") {
 		t.Fatalf("harness must not require internal packages:\n%s", src)
 	}
 	for _, want := range []string{
-		"github.com/jonathanung/strike-cli/pkg/protocol",
-		"github.com/jonathanung/strike-cli/pkg/redact",
+		"github.com/jonathanung/strike/pkg/protocol",
+		"github.com/jonathanung/strike/pkg/redact",
 	} {
 		if !strings.Contains(src, want) {
 			t.Fatalf("harness must require %s:\n%s", want, src)
@@ -39,8 +39,8 @@ func TestProductionImportsHaveNoInternal(t *testing.T) {
 	}
 	var sawNetHTTP bool
 	const (
-		enginePkg    = "github.com/jonathanung/strike-cli/harness/engine"
-		providersPkg = "github.com/jonathanung/strike-cli/harness/providers"
+		enginePkg    = "github.com/jonathanung/strike/harness/engine"
+		providersPkg = "github.com/jonathanung/strike/harness/providers"
 	)
 	for _, line := range strings.Split(string(out), "\n") {
 		line = strings.TrimSpace(line)

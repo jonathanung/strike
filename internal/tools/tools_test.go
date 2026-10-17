@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jonathanung/strike-cli/harness/provider"
-	"github.com/jonathanung/strike-cli/harness/tool"
+	"github.com/jonathanung/strike/harness/provider"
+	"github.com/jonathanung/strike/harness/tool"
 )
 
 func allowAll(workDir string) *tool.Context {

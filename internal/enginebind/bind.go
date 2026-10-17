@@ -6,14 +6,14 @@ import (
 	"context"
 	"errors"
 
-	"github.com/jonathanung/strike-cli/harness/engine"
-	"github.com/jonathanung/strike-cli/internal/persist/artifact"
-	"github.com/jonathanung/strike-cli/internal/persist/attachment"
-	"github.com/jonathanung/strike-cli/internal/persist/ledger"
-	"github.com/jonathanung/strike-cli/internal/persist/memory"
-	"github.com/jonathanung/strike-cli/internal/persist/plan"
-	"github.com/jonathanung/strike-cli/internal/product/config"
-	"github.com/jonathanung/strike-cli/internal/product/project"
+	"github.com/jonathanung/strike/harness/engine"
+	"github.com/jonathanung/strike/internal/persist/artifact"
+	"github.com/jonathanung/strike/internal/persist/attachment"
+	"github.com/jonathanung/strike/internal/persist/ledger"
+	"github.com/jonathanung/strike/internal/persist/memory"
+	"github.com/jonathanung/strike/internal/persist/plan"
+	"github.com/jonathanung/strike/internal/product/config"
+	"github.com/jonathanung/strike/internal/product/project"
 )
 
 // Memory adapts *memory.Store to engine.MemorySource.

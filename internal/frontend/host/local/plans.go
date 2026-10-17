@@ -1,8 +1,8 @@
 package local
 
 import (
-	"github.com/jonathanung/strike-cli/internal/frontend/host"
-	"github.com/jonathanung/strike-cli/internal/persist/plan"
+	"github.com/jonathanung/strike/internal/frontend/host"
+	"github.com/jonathanung/strike/internal/persist/plan"
 )
 
 // NewPlans adapts *plan.Store to host.Plans. A nil store yields nil.

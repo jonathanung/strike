@@ -21,13 +21,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/product/version"
+	"github.com/jonathanung/strike/internal/product/version"
 )
 
 const (
 	// DefaultOwner/DefaultRepo identify the canonical release source.
 	DefaultOwner = "jonathanung"
-	DefaultRepo  = "strike-cli"
+	DefaultRepo  = "strike"
 
 	defaultAPIBase = "https://api.github.com"
 	userAgent      = "strike-cli-update"

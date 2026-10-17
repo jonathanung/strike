@@ -3,7 +3,7 @@ package engine
 import (
 	"strings"
 
-	"github.com/jonathanung/strike-cli/harness/provider"
+	"github.com/jonathanung/strike/harness/provider"
 )
 
 const (

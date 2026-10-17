@@ -6,14 +6,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jonathanung/strike-cli/harness/engine"
-	"github.com/jonathanung/strike-cli/harness/permission"
-	"github.com/jonathanung/strike-cli/harness/provider"
-	"github.com/jonathanung/strike-cli/harness/tool"
-	"github.com/jonathanung/strike-cli/internal/enginebind"
-	"github.com/jonathanung/strike-cli/internal/persist/plan"
-	"github.com/jonathanung/strike-cli/internal/tools"
-	"github.com/jonathanung/strike-cli/pkg/protocol"
+	"github.com/jonathanung/strike/harness/engine"
+	"github.com/jonathanung/strike/harness/permission"
+	"github.com/jonathanung/strike/harness/provider"
+	"github.com/jonathanung/strike/harness/tool"
+	"github.com/jonathanung/strike/internal/enginebind"
+	"github.com/jonathanung/strike/internal/persist/plan"
+	"github.com/jonathanung/strike/internal/tools"
+	"github.com/jonathanung/strike/pkg/protocol"
 )
 
 func activationRegistry(t *testing.T) *tool.Registry {

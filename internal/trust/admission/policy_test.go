@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jonathanung/strike-cli/internal/trust/admission"
-	"github.com/jonathanung/strike-cli/internal/trust/security"
+	"github.com/jonathanung/strike/internal/trust/admission"
+	"github.com/jonathanung/strike/internal/trust/security"
 )
 
 func TestResolvePresets(t *testing.T) {

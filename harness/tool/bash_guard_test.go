@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jonathanung/strike-cli/harness/sandbox"
+	"github.com/jonathanung/strike/harness/sandbox"
 )
 
 // guardOutsideDir creates a real directory outside the workspace that is not

@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/eval/swebench"
+	"github.com/jonathanung/strike/internal/eval/swebench"
 )
 
 // Config configures a Terminal-Bench subset run.

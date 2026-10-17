@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jonathanung/strike-cli/harness/tool"
+	"github.com/jonathanung/strike/harness/tool"
 )
 
 // teamTask handles team_task tool actions against the shared lead-scoped board.

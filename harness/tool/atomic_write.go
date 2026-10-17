@@ -3,7 +3,7 @@ package tool
 import (
 	"os"
 
-	"github.com/jonathanung/strike-cli/harness/safefile"
+	"github.com/jonathanung/strike/harness/safefile"
 )
 
 // atomicWriteFile writes data to path via temp file + rename so readers never

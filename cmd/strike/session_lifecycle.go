@@ -11,15 +11,15 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/jonathanung/strike-cli/harness/sandbox"
-	tui "github.com/jonathanung/strike-cli/internal/frontend/tui/app"
-	"github.com/jonathanung/strike-cli/internal/frontend/tui/theme"
-	"github.com/jonathanung/strike-cli/internal/persist/session"
-	"github.com/jonathanung/strike-cli/internal/product/config"
-	"github.com/jonathanung/strike-cli/internal/product/project"
-	"github.com/jonathanung/strike-cli/internal/product/update"
-	"github.com/jonathanung/strike-cli/internal/protocol"
-	"github.com/jonathanung/strike-cli/pkg/timeline"
+	"github.com/jonathanung/strike/harness/sandbox"
+	tui "github.com/jonathanung/strike/internal/frontend/tui/app"
+	"github.com/jonathanung/strike/internal/frontend/tui/theme"
+	"github.com/jonathanung/strike/internal/persist/session"
+	"github.com/jonathanung/strike/internal/product/config"
+	"github.com/jonathanung/strike/internal/product/project"
+	"github.com/jonathanung/strike/internal/product/update"
+	"github.com/jonathanung/strike/internal/protocol"
+	"github.com/jonathanung/strike/pkg/timeline"
 )
 
 // sessionStore is the narrow persistence surface runSession needs from a

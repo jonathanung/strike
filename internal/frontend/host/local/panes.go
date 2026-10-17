@@ -6,10 +6,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/internal/frontend/host"
-	"github.com/jonathanung/strike-cli/internal/integrate/plugin"
-	"github.com/jonathanung/strike-cli/internal/product/version"
-	"github.com/jonathanung/strike-cli/internal/trust/secret"
+	"github.com/jonathanung/strike/internal/frontend/host"
+	"github.com/jonathanung/strike/internal/integrate/plugin"
+	"github.com/jonathanung/strike/internal/product/version"
+	"github.com/jonathanung/strike/internal/trust/secret"
 )
 
 // NewPanes builds a host.Panes backed by installed plugin contributions.

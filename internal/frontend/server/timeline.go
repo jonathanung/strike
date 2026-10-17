@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/persist/session"
-	"github.com/jonathanung/strike-cli/pkg/timeline"
+	"github.com/jonathanung/strike/internal/persist/session"
+	"github.com/jonathanung/strike/pkg/timeline"
 )
 
 // handleSessionTimeline returns a redacted structured run timeline for a session.

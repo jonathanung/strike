@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/jonathanung/strike-cli/harness/safefile"
+	"github.com/jonathanung/strike/harness/safefile"
 )
 
 // mapSafefileErr converts safefile classified errors into tool CodedError values.

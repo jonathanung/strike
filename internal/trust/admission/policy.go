@@ -11,7 +11,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/internal/trust/security"
+	"github.com/jonathanung/strike/internal/trust/security"
 )
 
 // Action is the admission verdict for a subject after scanning.

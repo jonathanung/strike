@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jonathanung/strike-cli/pkg/diag"
-	"github.com/jonathanung/strike-cli/pkg/protocol"
+	"github.com/jonathanung/strike/pkg/diag"
+	"github.com/jonathanung/strike/pkg/protocol"
 )
 
 func TestBuildIncludesPrecedenceLayersAndDigests(t *testing.T) {

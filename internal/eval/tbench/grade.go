@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/eval/swebench"
+	"github.com/jonathanung/strike/internal/eval/swebench"
 )
 
 // GraderName selects how tasks are verified.

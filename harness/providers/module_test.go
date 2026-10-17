@@ -23,9 +23,9 @@ func TestImportsAreProviderSeamOnly(t *testing.T) {
 	}
 	var sawNetHTTP bool
 	const (
-		providerPkg  = "github.com/jonathanung/strike-cli/harness/provider"
-		providersPkg = "github.com/jonathanung/strike-cli/harness/providers"
-		enginePkg    = "github.com/jonathanung/strike-cli/harness/engine"
+		providerPkg  = "github.com/jonathanung/strike/harness/provider"
+		providersPkg = "github.com/jonathanung/strike/harness/providers"
+		enginePkg    = "github.com/jonathanung/strike/harness/engine"
 	)
 	for _, line := range strings.Split(string(out), "\n") {
 		line = strings.TrimSpace(line)
@@ -43,7 +43,7 @@ func TestImportsAreProviderSeamOnly(t *testing.T) {
 			if imp == enginePkg || strings.HasPrefix(imp, enginePkg+"/") {
 				t.Errorf("%s imports %s (adapters must not import harness/engine)", pkg, imp)
 			}
-			if strings.HasPrefix(imp, "github.com/jonathanung/strike-cli/harness/") &&
+			if strings.HasPrefix(imp, "github.com/jonathanung/strike/harness/") &&
 				imp != providerPkg &&
 				!strings.HasPrefix(imp, providerPkg+"/") &&
 				imp != providersPkg &&
