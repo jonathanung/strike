@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/eval/swebench"
+	"github.com/jonathanung/strike/internal/eval/swebench"
 )
 
 // BuildAgentPrompt formats a Terminal-Bench instruction for strike exec.

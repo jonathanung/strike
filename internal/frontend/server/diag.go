@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jonathanung/strike-cli/pkg/diag"
+	"github.com/jonathanung/strike/pkg/diag"
 )
 
 // handleDiag exports a redacted prompt/config diagnostic bundle for the live

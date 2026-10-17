@@ -13,16 +13,16 @@ import (
 // not import Strike product packages.
 func TestProductionImportsAreKernelOnly(t *testing.T) {
 	allowed := map[string]bool{
-		"github.com/jonathanung/strike-cli/harness/fn":         true,
-		"github.com/jonathanung/strike-cli/harness/permission": true,
-		"github.com/jonathanung/strike-cli/harness/provider":   true,
-		"github.com/jonathanung/strike-cli/harness/question":   true,
-		"github.com/jonathanung/strike-cli/harness/sandbox":    true,
-		"github.com/jonathanung/strike-cli/harness/scheduler":  true,
-		"github.com/jonathanung/strike-cli/harness/tool":       true,
-		"github.com/jonathanung/strike-cli/harness/verify":     true,
-		"github.com/jonathanung/strike-cli/pkg/redact":         true,
-		"github.com/jonathanung/strike-cli/pkg/protocol":       true,
+		"github.com/jonathanung/strike/harness/fn":         true,
+		"github.com/jonathanung/strike/harness/permission": true,
+		"github.com/jonathanung/strike/harness/provider":   true,
+		"github.com/jonathanung/strike/harness/question":   true,
+		"github.com/jonathanung/strike/harness/sandbox":    true,
+		"github.com/jonathanung/strike/harness/scheduler":  true,
+		"github.com/jonathanung/strike/harness/tool":       true,
+		"github.com/jonathanung/strike/harness/verify":     true,
+		"github.com/jonathanung/strike/pkg/redact":         true,
+		"github.com/jonathanung/strike/pkg/protocol":       true,
 	}
 	fset := token.NewFileSet()
 	err := filepath.WalkDir(".", func(path string, d fs.DirEntry, err error) error {
@@ -44,7 +44,7 @@ func TestProductionImportsAreKernelOnly(t *testing.T) {
 		}
 		for _, spec := range file.Imports {
 			imp := strings.Trim(spec.Path.Value, `"`)
-			if !strings.HasPrefix(imp, "github.com/jonathanung/strike-cli/") {
+			if !strings.HasPrefix(imp, "github.com/jonathanung/strike/") {
 				continue
 			}
 			if allowed[imp] {

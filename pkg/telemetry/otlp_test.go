@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jonathanung/strike-cli/pkg/telemetry"
+	"github.com/jonathanung/strike/pkg/telemetry"
 )
 
 func TestOTLPExportRedacted(t *testing.T) {

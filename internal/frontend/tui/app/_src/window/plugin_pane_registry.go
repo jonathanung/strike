@@ -5,7 +5,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/jonathanung/strike-cli/internal/frontend/host"
+	"github.com/jonathanung/strike/internal/frontend/host"
 )
 
 // pluginWindowGroupID is the stack group for all plugin panes (§9.3).

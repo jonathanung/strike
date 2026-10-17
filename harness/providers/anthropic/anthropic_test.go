@@ -9,8 +9,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/jonathanung/strike-cli/harness/provider"
-	"github.com/jonathanung/strike-cli/harness/providers/base"
+	"github.com/jonathanung/strike/harness/provider"
+	"github.com/jonathanung/strike/harness/providers/base"
 )
 
 // baseClientForTest is the transport New would build, minus credentials.

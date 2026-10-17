@@ -14,8 +14,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jonathanung/strike-cli/harness/fn"
-	"github.com/jonathanung/strike-cli/harness/provider"
+	"github.com/jonathanung/strike/harness/fn"
+	"github.com/jonathanung/strike/harness/provider"
 )
 
 const (

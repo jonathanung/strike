@@ -9,12 +9,12 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jonathanung/strike-cli/harness/provider"
-	"github.com/jonathanung/strike-cli/harness/providers/anthropic"
-	"github.com/jonathanung/strike-cli/harness/providers/openaicompat"
-	"github.com/jonathanung/strike-cli/internal/frontend/host"
-	"github.com/jonathanung/strike-cli/internal/product/auth"
-	"github.com/jonathanung/strike-cli/internal/product/config"
+	"github.com/jonathanung/strike/harness/provider"
+	"github.com/jonathanung/strike/harness/providers/anthropic"
+	"github.com/jonathanung/strike/harness/providers/openaicompat"
+	"github.com/jonathanung/strike/internal/frontend/host"
+	"github.com/jonathanung/strike/internal/product/auth"
+	"github.com/jonathanung/strike/internal/product/config"
 )
 
 func TestStatusesHonorsDisableDefaultProviders(t *testing.T) {

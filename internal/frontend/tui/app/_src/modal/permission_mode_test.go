@@ -7,8 +7,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/jonathanung/strike-cli/internal/frontend/tui/ui"
-	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike/internal/frontend/tui/ui"
+	"github.com/jonathanung/strike/internal/protocol"
 )
 
 func TestPermissionModeBadgeInHeader(t *testing.T) {

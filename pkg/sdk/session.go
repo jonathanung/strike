@@ -5,7 +5,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/jonathanung/strike-cli/pkg/protocol"
+	"github.com/jonathanung/strike/pkg/protocol"
 )
 
 // ReadSession loads every event from a durable session JSONL log (the same

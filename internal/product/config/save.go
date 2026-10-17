@@ -11,10 +11,10 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/jonathanung/strike-cli/harness/permission"
-	"github.com/jonathanung/strike-cli/harness/sandbox"
-	"github.com/jonathanung/strike-cli/harness/scheduler"
-	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike/harness/permission"
+	"github.com/jonathanung/strike/harness/sandbox"
+	"github.com/jonathanung/strike/harness/scheduler"
+	"github.com/jonathanung/strike/internal/protocol"
 )
 
 var globalMu sync.Mutex

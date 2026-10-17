@@ -9,7 +9,7 @@ import (
 	"io"
 	"sync"
 
-	"github.com/jonathanung/strike-cli/pkg/protocol"
+	"github.com/jonathanung/strike/pkg/protocol"
 )
 
 // Max line size for JSONL event/op streams. Matches internal/persist/session so

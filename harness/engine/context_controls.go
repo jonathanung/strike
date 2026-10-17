@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/pkg/protocol"
+	"github.com/jonathanung/strike/pkg/protocol"
 )
 
 // Fit-pressure thresholds as fractions of the known context window.

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jonathanung/strike-cli/internal/trust/secret"
+	"github.com/jonathanung/strike/internal/trust/secret"
 )
 
 func TestRedact(t *testing.T) {

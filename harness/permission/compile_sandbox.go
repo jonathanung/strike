@@ -8,7 +8,7 @@ import (
 
 	"github.com/bmatcuk/doublestar/v4"
 
-	"github.com/jonathanung/strike-cli/harness/sandbox"
+	"github.com/jonathanung/strike/harness/sandbox"
 )
 
 // CompileSandbox builds an OS sandbox Policy from the dial mode, workspace

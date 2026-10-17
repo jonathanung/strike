@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jonathanung/strike-cli/pkg/protocol"
+	"github.com/jonathanung/strike/pkg/protocol"
 )
 
 func TestBootstrapAdvertisesTeamControl(t *testing.T) {

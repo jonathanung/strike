@@ -8,7 +8,7 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/jonathanung/strike-cli/internal/frontend/host"
+	"github.com/jonathanung/strike/internal/frontend/host"
 )
 
 func mustSymlink(t *testing.T, oldname, newname string) {

@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jonathanung/strike-cli/harness/provider"
+	"github.com/jonathanung/strike/harness/provider"
 )
 
 // AuthFunc applies credentials to an outgoing request. Resolved per request

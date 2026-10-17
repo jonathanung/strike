@@ -3,8 +3,8 @@ package local
 import (
 	"context"
 
-	"github.com/jonathanung/strike-cli/internal/frontend/host"
-	"github.com/jonathanung/strike-cli/internal/persist/telemetry"
+	"github.com/jonathanung/strike/internal/frontend/host"
+	"github.com/jonathanung/strike/internal/persist/telemetry"
 )
 
 // NewTelemetry wraps the platform host collector as host.Telemetry.

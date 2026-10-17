@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jonathanung/strike-cli/harness/safefile"
+	"github.com/jonathanung/strike/harness/safefile"
 )
 
 func TestReadWriteRegular(t *testing.T) {

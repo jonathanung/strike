@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/jonathanung/strike-cli/harness/tool"
+	"github.com/jonathanung/strike/harness/tool"
 	"path/filepath"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/internal/integrate/lsp"
+	"github.com/jonathanung/strike/internal/integrate/lsp"
 )
 
 // LSPNavigator backs the optional definition / references / symbols tools.

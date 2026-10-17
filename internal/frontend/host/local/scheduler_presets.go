@@ -1,9 +1,9 @@
 package local
 
 import (
-	"github.com/jonathanung/strike-cli/harness/scheduler"
-	"github.com/jonathanung/strike-cli/internal/frontend/host"
-	"github.com/jonathanung/strike-cli/internal/product/config"
+	"github.com/jonathanung/strike/harness/scheduler"
+	"github.com/jonathanung/strike/internal/frontend/host"
+	"github.com/jonathanung/strike/internal/product/config"
 )
 
 // schedulerPresetCatalog adapts scheduler.Catalog + global config to

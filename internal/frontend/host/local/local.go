@@ -14,14 +14,14 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/jonathanung/strike-cli/internal/frontend/host"
-	"github.com/jonathanung/strike-cli/internal/persist/history"
-	"github.com/jonathanung/strike-cli/internal/persist/issue"
-	"github.com/jonathanung/strike-cli/internal/persist/memory"
-	"github.com/jonathanung/strike-cli/internal/product/auth"
-	"github.com/jonathanung/strike-cli/internal/product/config"
-	"github.com/jonathanung/strike-cli/internal/product/models"
-	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike/internal/frontend/host"
+	"github.com/jonathanung/strike/internal/persist/history"
+	"github.com/jonathanung/strike/internal/persist/issue"
+	"github.com/jonathanung/strike/internal/persist/memory"
+	"github.com/jonathanung/strike/internal/product/auth"
+	"github.com/jonathanung/strike/internal/product/config"
+	"github.com/jonathanung/strike/internal/product/models"
+	"github.com/jonathanung/strike/internal/protocol"
 )
 
 // New builds the local host services backed by the real auth store, prompt

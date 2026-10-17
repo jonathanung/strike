@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jonathanung/strike-cli/harness/permission"
-	"github.com/jonathanung/strike-cli/harness/tool"
-	"github.com/jonathanung/strike-cli/internal/product/config"
-	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike/harness/permission"
+	"github.com/jonathanung/strike/harness/tool"
+	"github.com/jonathanung/strike/internal/product/config"
+	"github.com/jonathanung/strike/internal/protocol"
 )
 
 const expectedUsage = `Usage:

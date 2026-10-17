@@ -10,7 +10,7 @@ package main
 import (
 	"log"
 
-	strikeharness "github.com/jonathanung/strike-cli/sdk/go/harness"
+	strikeharness "github.com/jonathanung/strike/sdk/go/harness"
 )
 
 func chooseBest(

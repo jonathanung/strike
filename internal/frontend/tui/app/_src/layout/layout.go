@@ -1,7 +1,7 @@
 package tui
 
 import (
-	"github.com/jonathanung/strike-cli/internal/frontend/tui/theme"
+	"github.com/jonathanung/strike/internal/frontend/tui/theme"
 )
 
 // layout is the explicit height budget for the stacked screen regions. Every

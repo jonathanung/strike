@@ -10,8 +10,8 @@ import (
 
 	"github.com/bmatcuk/doublestar/v4"
 
-	"github.com/jonathanung/strike-cli/harness/sandbox"
-	"github.com/jonathanung/strike-cli/pkg/redact"
+	"github.com/jonathanung/strike/harness/sandbox"
+	"github.com/jonathanung/strike/pkg/redact"
 )
 
 // LifecycleVocabularyVersion is the versioned lifecycle hook event set.

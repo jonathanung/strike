@@ -4,7 +4,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/pkg/protocol"
+	"github.com/jonathanung/strike/pkg/protocol"
 )
 
 // IsolationEnvValue returns the STRIKE_ISOLATION value for a managed container

@@ -5,7 +5,7 @@ Public Op/Event wire schema between the engine and frontends (TUI, web cockpit,
 logs of **event envelopes**.
 
 ```go
-import "github.com/jonathanung/strike-cli/pkg/protocol"
+import "github.com/jonathanung/strike/pkg/protocol"
 ```
 
 Wire schema version: `protocol.Version` (semver on every envelope as `"v"`).

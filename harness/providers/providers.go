@@ -9,12 +9,12 @@ package providers
 import (
 	"context"
 
-	"github.com/jonathanung/strike-cli/harness/provider"
-	"github.com/jonathanung/strike-cli/harness/providers/anthropic"
-	"github.com/jonathanung/strike-cli/harness/providers/chatgpt"
-	"github.com/jonathanung/strike-cli/harness/providers/factory"
-	"github.com/jonathanung/strike-cli/harness/providers/google"
-	"github.com/jonathanung/strike-cli/harness/providers/openaicompat"
+	"github.com/jonathanung/strike/harness/provider"
+	"github.com/jonathanung/strike/harness/providers/anthropic"
+	"github.com/jonathanung/strike/harness/providers/chatgpt"
+	"github.com/jonathanung/strike/harness/providers/factory"
+	"github.com/jonathanung/strike/harness/providers/google"
+	"github.com/jonathanung/strike/harness/providers/openaicompat"
 )
 
 // Select constructs a named adapter (builtin, endpoint overlay, or custom).

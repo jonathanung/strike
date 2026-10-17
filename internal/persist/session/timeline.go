@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/pkg/timeline"
+	"github.com/jonathanung/strike/pkg/timeline"
 )
 
 // ExportTrace builds a redacted structured run timeline from a session JSONL

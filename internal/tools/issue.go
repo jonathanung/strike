@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/jonathanung/strike-cli/harness/tool"
+	"github.com/jonathanung/strike/harness/tool"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/internal/persist/issue"
+	"github.com/jonathanung/strike/internal/persist/issue"
 )
 
 // IssueStore is the durable project issue surface used by issue tools.

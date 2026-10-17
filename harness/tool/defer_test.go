@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jonathanung/strike-cli/harness/provider"
+	"github.com/jonathanung/strike/harness/provider"
 )
 
 func TestIsCoreTool(t *testing.T) {

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jonathanung/strike-cli/pkg/protocol"
+	"github.com/jonathanung/strike/pkg/protocol"
 )
 
 func TestAskReplyResolvedOrder(t *testing.T) {

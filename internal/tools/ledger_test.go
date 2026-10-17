@@ -3,12 +3,12 @@ package tools
 import (
 	"context"
 	"encoding/json"
-	"github.com/jonathanung/strike-cli/harness/tool"
+	"github.com/jonathanung/strike/harness/tool"
 	"os"
 	"strings"
 	"testing"
 
-	"github.com/jonathanung/strike-cli/internal/persist/ledger"
+	"github.com/jonathanung/strike/internal/persist/ledger"
 )
 
 func ledgerTC(dir, session, root string) *tool.Context {

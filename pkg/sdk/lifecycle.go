@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jonathanung/strike-cli/pkg/protocol"
+	"github.com/jonathanung/strike/pkg/protocol"
 )
 
 // DefaultSessionsDir returns ~/.strike/sessions (or $STRIKE_HOME/sessions).

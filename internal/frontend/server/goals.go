@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/frontend/host"
+	"github.com/jonathanung/strike/internal/frontend/host"
 )
 
 // --- web-safe DTOs (camelCase JSON; no TUI types) ---

@@ -21,8 +21,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/jonathanung/strike-cli/pkg/protocol"
-	"github.com/jonathanung/strike-cli/pkg/redact"
+	"github.com/jonathanung/strike/pkg/protocol"
+	"github.com/jonathanung/strike/pkg/redact"
 )
 
 // SchemaVersion is the versioned export document schema (not the Op/Event wire).

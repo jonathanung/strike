@@ -3,7 +3,7 @@ package tui
 import (
 	"testing"
 
-	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike/internal/protocol"
 )
 
 func assistantCellsOf(cells []cell) []*assistantCell {

@@ -3,9 +3,9 @@ package engine
 import (
 	"strings"
 
-	"github.com/jonathanung/strike-cli/harness/permission"
-	"github.com/jonathanung/strike-cli/harness/provider"
-	"github.com/jonathanung/strike-cli/pkg/protocol"
+	"github.com/jonathanung/strike/harness/permission"
+	"github.com/jonathanung/strike/harness/provider"
+	"github.com/jonathanung/strike/pkg/protocol"
 )
 
 // Restored is model-usable runtime state reduced from a session event log.

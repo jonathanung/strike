@@ -10,9 +10,9 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/jonathanung/strike-cli/harness/permission"
-	"github.com/jonathanung/strike-cli/internal/integrate/plugin"
-	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike/harness/permission"
+	"github.com/jonathanung/strike/internal/integrate/plugin"
+	"github.com/jonathanung/strike/internal/protocol"
 )
 
 // Agent is a named persona: a system prompt with optional provider/model/

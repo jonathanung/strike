@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jonathanung/strike-cli/harness/provider"
-	"github.com/jonathanung/strike-cli/harness/providers/base"
+	"github.com/jonathanung/strike/harness/provider"
+	"github.com/jonathanung/strike/harness/providers/base"
 )
 
 const (

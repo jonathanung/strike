@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/frontend/host"
-	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike/internal/frontend/host"
+	"github.com/jonathanung/strike/internal/protocol"
 )
 
 // This file holds the shared test doubles for the frontend: scriptable fakes

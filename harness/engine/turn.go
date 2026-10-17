@@ -13,14 +13,14 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/jonathanung/strike-cli/harness/permission"
-	"github.com/jonathanung/strike-cli/harness/provider"
-	"github.com/jonathanung/strike-cli/harness/question"
-	"github.com/jonathanung/strike-cli/harness/sandbox"
-	"github.com/jonathanung/strike-cli/harness/scheduler"
-	"github.com/jonathanung/strike-cli/harness/tool"
-	"github.com/jonathanung/strike-cli/pkg/protocol"
-	"github.com/jonathanung/strike-cli/pkg/redact"
+	"github.com/jonathanung/strike/harness/permission"
+	"github.com/jonathanung/strike/harness/provider"
+	"github.com/jonathanung/strike/harness/question"
+	"github.com/jonathanung/strike/harness/sandbox"
+	"github.com/jonathanung/strike/harness/scheduler"
+	"github.com/jonathanung/strike/harness/tool"
+	"github.com/jonathanung/strike/pkg/protocol"
+	"github.com/jonathanung/strike/pkg/redact"
 )
 
 func (e *Engine) turnActive() bool {

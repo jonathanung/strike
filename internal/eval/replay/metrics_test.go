@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jonathanung/strike-cli/harness/engine"
-	"github.com/jonathanung/strike-cli/internal/eval/replay"
-	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike/harness/engine"
+	"github.com/jonathanung/strike/internal/eval/replay"
+	"github.com/jonathanung/strike/internal/protocol"
 )
 
 func TestCollectMetricsFromEvents(t *testing.T) {

@@ -1,9 +1,9 @@
 package enginebind
 
 import (
-	"github.com/jonathanung/strike-cli/harness/engine"
-	"github.com/jonathanung/strike-cli/pkg/diag"
-	"github.com/jonathanung/strike-cli/pkg/protocol"
+	"github.com/jonathanung/strike/harness/engine"
+	"github.com/jonathanung/strike/pkg/diag"
+	"github.com/jonathanung/strike/pkg/protocol"
 )
 
 // Diagnostic returns the product diagnostic-bundle builder (pkg/diag).

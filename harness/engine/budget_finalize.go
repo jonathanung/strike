@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jonathanung/strike-cli/pkg/protocol"
+	"github.com/jonathanung/strike/pkg/protocol"
 )
 
 // budgetFinalizationReserve is the wall-clock ceiling for one soft-budget

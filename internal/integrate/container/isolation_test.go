@@ -3,7 +3,7 @@ package container
 import (
 	"testing"
 
-	"github.com/jonathanung/strike-cli/pkg/protocol"
+	"github.com/jonathanung/strike/pkg/protocol"
 )
 
 func TestIsolationEnvValue(t *testing.T) {

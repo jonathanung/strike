@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/protocol"
-	"github.com/jonathanung/strike-cli/internal/trust/secret"
-	"github.com/jonathanung/strike-cli/pkg/redact"
+	"github.com/jonathanung/strike/internal/protocol"
+	"github.com/jonathanung/strike/internal/trust/secret"
+	"github.com/jonathanung/strike/pkg/redact"
 )
 
 // RecordingSchemaVersion is the versioned recording document schema shared

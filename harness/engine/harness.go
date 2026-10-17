@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jonathanung/strike-cli/harness/fn"
-	"github.com/jonathanung/strike-cli/harness/provider"
-	"github.com/jonathanung/strike-cli/pkg/protocol"
+	"github.com/jonathanung/strike/harness/fn"
+	"github.com/jonathanung/strike/harness/provider"
+	"github.com/jonathanung/strike/pkg/protocol"
 )
 
 // resolveHarness maps a task subagent definition to its implementation. Empty

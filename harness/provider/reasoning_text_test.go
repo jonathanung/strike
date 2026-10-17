@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jonathanung/strike-cli/harness/provider"
+	"github.com/jonathanung/strike/harness/provider"
 )
 
 func TestReasoningTextExtractsVendorShapes(t *testing.T) {

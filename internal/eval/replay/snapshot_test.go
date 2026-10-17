@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/eval/replay"
-	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike/internal/eval/replay"
+	"github.com/jonathanung/strike/internal/protocol"
 )
 
 func fixedClock(t time.Time) func() time.Time {

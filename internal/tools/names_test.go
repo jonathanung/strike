@@ -3,9 +3,9 @@ package tools
 import (
 	"testing"
 
-	"github.com/jonathanung/strike-cli/harness/tool"
-	"github.com/jonathanung/strike-cli/internal/persist/artifact"
-	"github.com/jonathanung/strike-cli/internal/persist/ledger"
+	"github.com/jonathanung/strike/harness/tool"
+	"github.com/jonathanung/strike/internal/persist/artifact"
+	"github.com/jonathanung/strike/internal/persist/ledger"
 )
 
 func TestProductToolWireNames(t *testing.T) {

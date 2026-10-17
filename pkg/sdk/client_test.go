@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jonathanung/strike-cli/pkg/protocol"
-	"github.com/jonathanung/strike-cli/pkg/sdk"
+	"github.com/jonathanung/strike/pkg/protocol"
+	"github.com/jonathanung/strike/pkg/sdk"
 )
 
 func TestNewPanicsOnNilOps(t *testing.T) {

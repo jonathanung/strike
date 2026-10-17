@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/harness/tool"
-	"github.com/jonathanung/strike-cli/pkg/protocol"
+	"github.com/jonathanung/strike/harness/tool"
+	"github.com/jonathanung/strike/pkg/protocol"
 )
 
 func (e *Engine) emitPathOverlap(res tool.TouchResult) {

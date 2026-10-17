@@ -81,7 +81,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/jonathanung/strike-cli/harness/fn"
+	"github.com/jonathanung/strike/harness/fn"
 )
 
 func chessHarness(input fn.Input, provider fn.Provider, emit fn.Emit) (fn.Result, error) {

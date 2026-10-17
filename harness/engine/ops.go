@@ -6,10 +6,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/harness/permission"
-	"github.com/jonathanung/strike-cli/harness/provider"
-	"github.com/jonathanung/strike-cli/harness/sandbox"
-	"github.com/jonathanung/strike-cli/pkg/protocol"
+	"github.com/jonathanung/strike/harness/permission"
+	"github.com/jonathanung/strike/harness/provider"
+	"github.com/jonathanung/strike/harness/sandbox"
+	"github.com/jonathanung/strike/pkg/protocol"
 )
 
 func (e *Engine) handleOp(ctx context.Context, op protocol.Op) {

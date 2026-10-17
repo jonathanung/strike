@@ -14,10 +14,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jonathanung/strike-cli/harness/permission"
-	"github.com/jonathanung/strike-cli/harness/sandbox"
-	"github.com/jonathanung/strike-cli/internal/product/update"
-	"github.com/jonathanung/strike-cli/internal/product/version"
+	"github.com/jonathanung/strike/harness/permission"
+	"github.com/jonathanung/strike/harness/sandbox"
+	"github.com/jonathanung/strike/internal/product/update"
+	"github.com/jonathanung/strike/internal/product/version"
 )
 
 type cliOptions struct {

@@ -12,8 +12,8 @@ import (
 
 	"golang.org/x/term"
 
-	"github.com/jonathanung/strike-cli/internal/product/auth"
-	"github.com/jonathanung/strike-cli/internal/product/config"
+	"github.com/jonathanung/strike/internal/product/auth"
+	"github.com/jonathanung/strike/internal/product/config"
 )
 
 const authUsage = `Manage provider credentials.

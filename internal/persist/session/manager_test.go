@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike/internal/protocol"
 )
 
 func TestManagerCreateAppendReplayList(t *testing.T) {

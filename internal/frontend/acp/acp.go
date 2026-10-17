@@ -24,8 +24,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/protocol"
-	pkgproto "github.com/jonathanung/strike-cli/pkg/protocol"
+	"github.com/jonathanung/strike/internal/protocol"
+	pkgproto "github.com/jonathanung/strike/pkg/protocol"
 )
 
 // Lifecycle is the optional host-level session surface (list/fork/load).

@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/jonathanung/strike-cli/harness/provider"
+	"github.com/jonathanung/strike/harness/provider"
 )
 
 type aliasTestProvider struct{}

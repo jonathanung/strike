@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/internal/product/config"
+	"github.com/jonathanung/strike/internal/product/config"
 )
 
 const restoreUsage = `Restore .strike directory structure and repair corrupted metadata.

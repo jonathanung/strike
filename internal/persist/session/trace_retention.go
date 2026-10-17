@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/pkg/timeline"
+	"github.com/jonathanung/strike/pkg/timeline"
 )
 
 // Trace retention coordinates observability sidecars with session retention

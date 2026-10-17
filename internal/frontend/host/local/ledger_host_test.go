@@ -5,8 +5,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/jonathanung/strike-cli/internal/frontend/host"
-	"github.com/jonathanung/strike-cli/internal/persist/ledger"
+	"github.com/jonathanung/strike/internal/frontend/host"
+	"github.com/jonathanung/strike/internal/persist/ledger"
 )
 
 func TestLedgerNilStore(t *testing.T) {

@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jonathanung/strike-cli/internal/trust/audit"
-	"github.com/jonathanung/strike-cli/pkg/protocol"
-	"github.com/jonathanung/strike-cli/pkg/redact"
+	"github.com/jonathanung/strike/internal/trust/audit"
+	"github.com/jonathanung/strike/pkg/protocol"
+	"github.com/jonathanung/strike/pkg/redact"
 )
 
 func TestRecordPermissionRedacted(t *testing.T) {

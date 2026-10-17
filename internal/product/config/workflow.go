@@ -11,8 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/harness/permission"
-	"github.com/jonathanung/strike-cli/internal/integrate/plugin"
+	"github.com/jonathanung/strike/harness/permission"
+	"github.com/jonathanung/strike/internal/integrate/plugin"
 )
 
 // WorkflowSchemaVersion is the current on-disk workflow document version.

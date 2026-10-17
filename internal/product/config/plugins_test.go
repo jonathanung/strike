@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jonathanung/strike-cli/internal/integrate/plugin"
+	"github.com/jonathanung/strike/internal/integrate/plugin"
 )
 
 func TestPluginPassiveLoad_Surfaces(t *testing.T) {

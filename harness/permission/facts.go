@@ -6,7 +6,7 @@ import (
 
 	"github.com/bmatcuk/doublestar/v4"
 
-	"github.com/jonathanung/strike-cli/harness/actionfacts"
+	"github.com/jonathanung/strike/harness/actionfacts"
 )
 
 // EvalPath identifies which matching path produced the decisive rule match.

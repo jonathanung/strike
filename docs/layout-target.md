@@ -44,15 +44,15 @@ Do **not** `mv` packages from this document. Child issues own the moves.
 ## Module graph (no cycle)
 
 ```
-github.com/jonathanung/strike-cli/pkg/protocol     # stdlib only
-github.com/jonathanung/strike-cli/pkg/redact       # stdlib only
+github.com/jonathanung/strike/pkg/protocol     # stdlib only
+github.com/jonathanung/strike/pkg/redact       # stdlib only
         ▲                         ▲
         └────────────┬────────────┘
                      │
-github.com/jonathanung/strike-cli/harness          # protocol + redact (+ stdlib kernel deps)
+github.com/jonathanung/strike/harness          # protocol + redact (+ stdlib kernel deps)
                      ▲                             # provider interface + echo at harness/provider
                      │                             # adapters, HTTP base, auth flows, factory at harness/providers
-github.com/jonathanung/strike-cli                  # everything else
+github.com/jonathanung/strike                  # everything else
                                                    # replace → ./harness
 ```
 
@@ -78,7 +78,7 @@ module this epic (#1204 does not extract them).
 ## Target tree
 
 ```
-harness/                          # module github.com/jonathanung/strike-cli/harness
+harness/                          # module github.com/jonathanung/strike/harness
   engine/                         # turn loop; route.go stays (persona routing)
   provider/                       # interface, types, echo only
   tool/                           # contract, registry, retry — not product tools

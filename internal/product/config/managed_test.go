@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jonathanung/strike-cli/harness/permission"
-	"github.com/jonathanung/strike-cli/internal/protocol"
+	"github.com/jonathanung/strike/harness/permission"
+	"github.com/jonathanung/strike/internal/protocol"
 )
 
 func TestDefaultManagedRootByOS(t *testing.T) {

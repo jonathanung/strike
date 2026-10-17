@@ -1,8 +1,8 @@
 package secret
 
 import (
-	"github.com/jonathanung/strike-cli/internal/protocol"
-	"github.com/jonathanung/strike-cli/pkg/redact"
+	"github.com/jonathanung/strike/internal/protocol"
+	"github.com/jonathanung/strike/pkg/redact"
 )
 
 // RedactEvent returns a copy of ev with credential-shaped spans scrubbed from

@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"unicode/utf8"
 
-	"github.com/jonathanung/strike-cli/harness/tool"
+	"github.com/jonathanung/strike/harness/tool"
 )
 
 // Delegation policy modes (session.delegationPolicy.mode).

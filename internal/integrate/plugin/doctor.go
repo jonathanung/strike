@@ -7,8 +7,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jonathanung/strike-cli/internal/product/version"
-	"github.com/jonathanung/strike-cli/pkg/redact"
+	"github.com/jonathanung/strike/internal/product/version"
+	"github.com/jonathanung/strike/pkg/redact"
 )
 
 // DoctorOptions controls Doctor.
