@@ -140,7 +140,7 @@ boundary.
 imports protocol/redact without a cycle through the root. They are not git
 submodules and are not published. `pkg/sdk`, `pkg/timeline`, `pkg/diag`,
 and `pkg/telemetry` stay in the root module. `GOWORK=off` still builds via
-the replace directives. `harness` must not import `strike-cli/internal/*`.
+the replace directives. `harness` must not import `github.com/jonathanung/strike/internal/*`.
 `harness/engine` must not import `harness/providers` (SelectFunc injection).
 Adapters may import `harness/provider` and sibling `harness/providers/*`
 only. `go list` for harness may include `net/http`.
@@ -374,21 +374,21 @@ branch in `internal/frontend/tui/app/_src/layout/view.go` for the pattern.
 ### Add a tool
 
 1. Implement `tool.Tool` (`Name`, `Description`, `Schema`, `Execute`) in a new
-   file under `internal/tool/` (kernel/generic) or `internal/tools/` (Strike
-   persist/LSP/product) — `internal/tool/glob.go` is a minimal example;
+   file under `harness/tool/` (kernel/generic) or `internal/tools/` (Strike
+   persist/LSP/product) — `harness/tool/glob.go` is a minimal example;
    `edit.go`/`write.go`/`bash.go` show the permission-ask pattern.
    Prefer also implementing `Contract() tool.Contract` (side-effect class +
-   idempotency; see `internal/tool/contract.go`). Registry helpers
+   idempotency; see `harness/tool/contract.go`). Registry helpers
    `Contract`/`Contracts` document these fields; tools without `Contract`
    default to `external` + `conditional`. The engine applies
    `tool.DecideRetry` (error code × idempotency) so only `safe-retry` tools
    auto-retry on `transient`/`timeout`; mutative tools never double-apply
-   (`internal/tool/retry.go`, config `toolRetry`).
+   (`harness/tool/retry.go`, config `toolRetry`).
 2. Register it in the `tool.NewRegistry(...)` call in `cmd/strike/assemble_tools.go`.
   3. If it mutates state or has side effects, call
      `tc.Ask(ctx, tool.AskRequest{Permission: "yourperm", Patterns: []string{...}})`
      inside `Execute`, and add a default rule for `"yourperm"` to
-     `permission.Defaults()` in `internal/permission/permission.go` (Allow for
+     `permission.Defaults()` in `harness/permission/permission.go` (Allow for
      read-only, Ask for anything mutating — see the existing defaults; reuse
      `edit`/`write`/`bash` when the new tool is the same class of action).
      Prefer structured failures via `tool.ErrInvalidArgs` /
@@ -521,7 +521,7 @@ Same package `internal/frontend/tui/app` (`package tui`); split for reviewabilit
    the application background, a glyph on `theme.Icons`, or an appropriate
    border/spacing token — and give `Default()`/`DefaultIcons()` a value.
    Stock color roles also belong in `schemas/ui-tokens.json` (tests fail if
-   `Default()` or `web/src/styles.css` hexes drift).
+   `Default()` hexes drift from `schemas/ui-tokens.json`).
 2. If most views will read it, add a precomputed field to `theme.Styles` and
    set it in `(Theme).S()` (`internal/frontend/tui/theme/styles.go`), so call sites
    write `th.S().YourField` instead of repeating
@@ -574,7 +574,7 @@ write-up: [config.md](config.md#checkpoints-undo-file-restore).
 
 ## Engine source map (selected)
 
-Same package `internal/engine`; split for reviewability only.
+Same package `harness/engine`; split for reviewability only.
 
 | File | Responsibility |
 |---|---|
@@ -639,7 +639,7 @@ pkg/redact    ──┤
              harness          # interface + echo + adapters/factory/auth flows;
                 ▲             # engine, tool contract, fn, …
                 │
-             strike-cli       # cmd/strike + grouped internal/*
+             strike           # cmd/strike + grouped internal/*
 ```
 
 No cycles. `harness` imports protocol + redact only (plus stdlib kernel

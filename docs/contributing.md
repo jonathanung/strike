@@ -166,7 +166,7 @@ matching paths (and keep relative links valid):
 | Agents, skills, workflows | `internal/product/config` builtins + loaders | [agents-skills.md](agents-skills.md) |
 | Plugin bundles (contract) | [plugins.md](plugins.md) (Agent Plugins 1.0.0; #1142) | [plugins.md](plugins.md) |
 | Plugin panes (ABI) | docs only until TUI/web hosts (#731/#732) | [plugin-panes.md](plugin-panes.md) |
-| Tool inventory | `internal/tool` + `cmd/strike/wire.go` | [ARCHITECTURE.md](ARCHITECTURE.md) |
+| Tool inventory | `harness/tool` + `cmd/strike/wire.go` | [ARCHITECTURE.md](ARCHITECTURE.md) |
 | Index | — | [README.md](../README.md) |
 
 No heavy doc framework — a PR that changes the surface should touch the table

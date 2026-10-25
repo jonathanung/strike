@@ -1,9 +1,10 @@
-# strike-cli
+# strike
 
 Website: https://strike.jonathanung.ca/
 
-An agentic coding TUI in Go/Bubble Tea. The engine emits protocol events; the
-TUI consumes them. Sessions are JSONL event logs.
+An agentic coding harness in Go. The engine emits protocol events; the web UI
+is the primary client and the terminal UI is deprecated (`strike tui`).
+Sessions are JSONL event logs.
 
 Architecture is informed by deep-dives into
 [opencode](https://github.com/sst/opencode) and
@@ -71,32 +72,19 @@ it once until finish or dismiss. Enter sends; Shift+Enter newline; `esc` interru
 `ctrl+t` jumps to latest output; `ctrl+c` quits. `@path` attaches project
 files. See [docs/keybinds.md](docs/keybinds.md) and [docs/usage.md](docs/usage.md).
 
-## Experimental web cockpit (`strike serve`)
+## Web UI (`strike serve`)
 
-Opt-in browser cockpit: live composer/ops over WebSocket, permissions and
-questions, status chrome, plus read-only SSE attach to any session JSONL.
-Defaults to the offline `echo` provider. The TUI remains primary.
+The primary client is the Rust/Leptos bundle served by the Go daemon.
+`strike serve` is API-first (`/health`, `/v1/*`, `/v1/ws`) and embeds that
+bundle. The old JavaScript `web/` app is gone. Bind stays loopback unless
+`--allow-private-bind` is set with `--auth`. Details:
+[docs/webui-daemon.md](docs/webui-daemon.md).
 
 ```sh
 make serve
-# or: ./strike serve --addr 127.0.0.1:8787 --auth --token <secret> --provider echo
+# or: ./strike daemon install
 curl -s http://127.0.0.1:8787/health
-# open http://127.0.0.1:8787/attach?token=<secret>
-
-# remote access (encrypted tunnel — no cleartext LAN bind):
-ssh -L 8787:127.0.0.1:8787 user@strike-host
 ```
-
-- `GET /health` — JSON `{ok, version, commit}` (no auth)
-- `GET /attach` — cockpit page (composer, transcript, permission modal)
-- `GET /v1/ws` — WebSocket ops in / events out (cookie or Bearer; no query token)
-- `POST /v1/ops` — submit one op envelope
-- `GET /v1/live/events`, `/v1/status`, `/v1/agents`, `/v1/sessions`
-- `GET /v1/sessions/{id}/events` — SSE JSONL tail
-
-Bind is loopback-only. Open `/attach?token=…` once for cookie handoff; `/v1/*`
-rejects query tokens. Optional Vite dev proxy lives in `web/`. Details:
-[docs/web.md](docs/web.md).
 
 ## Docs
 
@@ -112,7 +100,7 @@ rejects query tokens. Optional Vite dev proxy lives in `web/`. Details:
 | [Config](docs/config.md) | JSON, permissions, custom providers, `vimMode`/`nanoMode` |
 | [Agents & skills](docs/agents-skills.md) | personas, skills, workflows / autonomy |
 | [Plugins](docs/plugins.md) | Agent Plugins 1.0.0 contract (skills, MCP, `com.strike.cli`, trust) |
-| [Web cockpit](docs/web.md) | experimental `strike serve` (live + RO) |
+| [Web UI](docs/webui-daemon.md) | Rust client + `strike serve` daemon |
 | [Web cockpit contract](docs/web-cockpit-contract.md) | progressive modes, parity matrix, attach-only (#1069) |
 | [Go SDK](docs/sdk.md) | `pkg/sdk` client over `pkg/protocol` |
 | [Architecture](docs/ARCHITECTURE.md) | packages, seams, recipes |

@@ -441,8 +441,8 @@ existing envelope `time` + engine correlation fields where present.
 Authors implementing WEBUI.18 must re-verify against:
 
 - `pkg/protocol` — Op/Event envelopes, `AgentMessage`, child/delegation events
-- `internal/engine` — `agentMessage`, `agentBroadcast`, child spawn/cancel, delegation
-- `internal/tool` — `task`, `delegate`, `team_task`, `task_interrupt`, `agent_message`
+- `harness/engine` — `agentMessage`, `agentBroadcast`, child spawn/cancel, delegation
+- `harness/tool` — `task`, `delegate`, `team_task`, `task_interrupt`, `agent_message`
 - `internal/frontend/server` — ops guard, attach-only, rate limit, audit
 - `internal/frontend/rpc`, `internal/frontend/acp`, `pkg/sdk` — capability hello / codec
 - `docs/web-cockpit-contract.md` — attach matrix and Team IA

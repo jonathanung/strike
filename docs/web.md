@@ -1,5 +1,10 @@
 # Web workspace
 
+The JavaScript cockpit this page describes has been removed. The current
+client is the Rust bundle in `webui/`, served by `strike serve`. Start there:
+[webui-daemon.md](webui-daemon.md). The endpoint notes below still describe
+the daemon API where they have not been rewritten.
+
 `strike serve` hosts a cohesive React **cockpit** for solo and multi-agent work
 on desktop, tablet, and phone. It can drive a **live** engine session (mutations
 via REST/WebSocket ops) and **attach-only** read historical session JSONL logs.

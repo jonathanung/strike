@@ -63,7 +63,7 @@ Allowed edges only:
 | `pkg/protocol` | stdlib |
 | `pkg/redact` | stdlib |
 | `harness` | `pkg/protocol`, `pkg/redact`, stdlib (including `net/http`), doublestar, x/sys, charmbracelet/x/ansi |
-| `strike-cli` | `harness`, its own `pkg/*` and `internal/*` |
+| `strike` | `harness`, its own `pkg/*` and `internal/*` |
 
 Forbidden:
 

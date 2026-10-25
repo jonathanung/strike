@@ -19,13 +19,12 @@ valid `chrome: "soft"` option for named/custom themes.
 The machine-readable source of truth is [`schemas/ui-tokens.json`](../schemas/ui-tokens.json):
 every semantic role has a light+dark hex, plus chrome defaults
 (`mode: bordered`, `corners: square`, `radiusWebPx: 2`). `theme.Default()`
-hexes and `web/src/styles.css` `:root` pairs must match that file — Go
-(`tokens_test.go`) and web (`web/src/theme.test.ts`) fail on drift.
+hexes must match that file — `tokens_test.go` fails on drift. The old
+`web/src/styles.css` parity check left with the JavaScript UI. The Rust
+client stylesheet is `webui/style.css`.
 
 `theme.Default()` chrome is **bordered + square corners**, matching this file.
-Web consumes `radiusWebPx` (2px) and stock hexes from this file via
-`web/src/stockTokens.ts`. Bundled named themes (nord, …) keep their own hexes
-— only stock Default / `:root` use this map. Theme files may set
+Bundled named themes (nord, …) keep their own hexes. Theme files may set
 `chrome: "soft"` for Family rounded cards.
 
 ### Token → hex (light + dark)
@@ -195,22 +194,12 @@ picker opened. Install/update theme *plugins* through the generic plugin
 lifecycle (`/plugin` or `strike plugin`) — same catalog integrity and lockfile
 path as other contributions; there is no separate theme marketplace.
 
-## Web cockpit parity
+## Web client
 
-The `strike serve` attach UI (`web/src/styles.css`, embedded under
-`internal/frontend/server/static`) mirrors the stock token file via CSS
-custom properties (dark defaults; light via `prefers-color-scheme: light`).
-Semantic roles map as `--ink`←Text, `--muted`←TextMuted, `--ground`←Background,
-`--surface`/`--raised`/`--surface-muted`←Surface*, `--rule`←Border,
-`--acid`←Accent, `--accent-alt`←AccentAlt, `--signal`←Error, `--danger`←Danger,
-`--user`/`--tool`← transcript labels, `--diff-add`/`--diff-del`←diff roles.
-Information-color usage (working / needs-you / error / selected) is the table
-in [Information colors](#information-colors-tui--web).
-`--radius` is the 2px chrome token; stock role hexes are injected from the
-token file (`/* strike-stock:dark|light */`). Parity is guarded by
-`web/src/theme.test.ts`. The web settings dialog loads the
-host theme catalog (`/v1/themes`), supports preview/apply, and maps portable
-semantic roles onto CSS custom properties (`web/src/themeCatalog.ts`, WEBUI.11).
+The JavaScript cockpit (`web/src/styles.css`, `web/src/theme.test.ts`,
+`web/src/themeCatalog.ts`) is gone. The Rust client stylesheet is
+`webui/style.css`. It does not yet mirror `schemas/ui-tokens.json`, and there
+is no CSS parity test. TUI tokens stay in `internal/frontend/tui/theme`.
 
-See also [ARCHITECTURE.md](ARCHITECTURE.md) (theme tokens recipe),
-[web.md](web.md), and the `tui-components` skill catalog.
+See also [ARCHITECTURE.md](ARCHITECTURE.md) (theme tokens recipe) and
+[webui-daemon.md](webui-daemon.md).
