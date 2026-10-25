@@ -8,6 +8,8 @@ import (
 )
 
 func TestCollectForwardedEnv(t *testing.T) {
+	// Ambient AWS_* (for example AWS_PAGER) must not change the exact match (#1238).
+	unsetEnvPrefix(t, "AWS_")
 	t.Setenv("AWS_ACCESS_KEY_ID", "AKID")
 	t.Setenv("AWS_SECRET_ACCESS_KEY", "SEC")
 	t.Setenv("OTHER", "x")
@@ -38,6 +40,22 @@ func TestCollectForwardedEnv(t *testing.T) {
 	vars, _ = CollectForwardedEnv([]string{"SHARED_VAR", "SHARED_*"})
 	if len(vars) != 1 {
 		t.Fatalf("dedupe: %v", vars)
+	}
+}
+
+// unsetEnvPrefix drops every currently set variable with the given prefix for
+// the rest of this test. t.Setenv records the original value so cleanup restores it.
+func unsetEnvPrefix(t *testing.T, prefix string) {
+	t.Helper()
+	for _, kv := range os.Environ() {
+		name, _, ok := strings.Cut(kv, "=")
+		if !ok || !strings.HasPrefix(name, prefix) {
+			continue
+		}
+		t.Setenv(name, "")
+		if err := os.Unsetenv(name); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 
