@@ -32,9 +32,13 @@ Status: walking skeleton on branch `worktree-rust-webui-daemon`. Not merged.
 - `strike daemon install|uninstall|status|token` + systemd user unit.
 - `strike serve --token-file` (stable 0600 token, minted once) and
   `--allow-private-bind`.
-- `webui/`: minimal Leptos app — daemon connect (base URL + token in local
-  storage), health check, saved remotes, workspace list/add/activate — plus
-  PWA manifest, service worker (app shell only; API never cached), and icon.
+- `webui/`: Leptos client. Daemon connect, workspaces, and saved remotes stay
+  on the Daemon view. Chat is tabbed live roots (`/v1/roots`) with a
+  transcript from `/v1/live/events` and a composer (`user.input`). Activity
+  lists delegated children from `GET /v1/team` (status, elapsed, stop, retry,
+  expand), including `blocked` handoffs. Schedule, memory, knowledge,
+  artifacts, and the task runner are documented in
+  [webui-planned.md](webui-planned.md), not drawn as empty panels.
 - Server serves `/sw.js` and `/manifest.webmanifest` at the origin root and
   the bundle under `/assets/` (WASM-aware CSP and content types).
 
@@ -57,8 +61,10 @@ Foreground instead of systemd: `./strike serve --auth --token-file ~/.strike/dae
    active; spawning/attaching a live engine rooted at that directory (today
    roots spawn in the daemon's cwd) is the next engine-plumbing slice.
 2. Chat/session UI on `/v1/ws` + `/v1/ops` (transcript, composer, tool
-   calls, permission asks) — the Cursor/kirocrew-shaped surface.
-3. Session list/resume per workspace, file explorer, diffs.
+   calls, permission asks) — tabbed roots and Activity shipped in the Rust
+   client; permission asks are still only the protocol event.
+3. Session list/resume per workspace, file explorer, diffs. The session
+   list resumes a root; it does not yet follow the active workspace.
 4. Per-remote tokens in the UI (today one token field for the selected
    daemon), daemon discovery on the tailnet.
 5. Tauri shell (optional), TUI removal decision, `docs/web.md` rewrite.

@@ -14,6 +14,14 @@ materially affect the shipped product.
 
 ## [Unreleased]
 
+### Added
+
+- **Web client sessions and activity** — the Rust UI opens tabbed live
+  sessions and an Activity list of delegated children (status, elapsed time,
+  stop, retry, expand), including blocked handoffs. Schedule, memory,
+  knowledge, artifacts, and the task runner stay out of the UI until the
+  daemon can drive them ([docs/webui-planned.md](docs/webui-planned.md)).
+
 ### Changed
 
 - **Delegated children require a structured handoff** — `task` and `delegate`
