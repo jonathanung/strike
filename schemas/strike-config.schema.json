@@ -591,6 +591,10 @@
           "description": "Default filesystem mode for task children. Empty/off/shared = parent workdir. worktree = per-child git worktree with inspectable patch on complete.",
           "enum": ["off", "shared", "worktree"]
         },
+        "childHandoffRequired": {
+          "type": "boolean",
+          "description": "When true or omitted, task and delegate children must finish with structured handoff JSON (schema:handoff). False accepts prose-only completion. Agent frontmatter and spawn handoff_required override this."
+        },
         "auditRetentionMaxEvents": {
           "type": "integer",
           "minimum": 0,

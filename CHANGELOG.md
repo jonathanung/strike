@@ -16,6 +16,13 @@ materially affect the shipped product.
 
 ### Changed
 
+- **Delegated children require a structured handoff** — `task` and `delegate`
+  children run a `schema:handoff` gate by default. A prose-only child finishes
+  `blocked` with a verification report on the task record. Root turns are
+  unchanged. Opt out with `session.childHandoffRequired: false`, agent
+  frontmatter `childHandoffRequired: false`, or spawn argument
+  `handoff_required: false`. An explicit `verify[]` list still runs; the
+  default gate is added beside it ([#1201](https://github.com/jonathanung/strike/issues/1201)).
 - **Repository and Go module path renamed** — the GitHub repo is now
   `jonathanung/strike` (was `jonathanung/strike-cli`), and all Go module
   paths follow: `github.com/jonathanung/strike`,

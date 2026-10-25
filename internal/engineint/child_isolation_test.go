@@ -39,13 +39,6 @@ func initGitRepo(t *testing.T, dir string) {
 }
 
 func TestChildWorktreeIsolationReturnsPatchNotParentMutation(t *testing.T) {
-	// Shared scripted provider step ordering is sensitive to extra Stream calls
-	// (lifecycle hooks, retries). Under CI load the child can receive end_turn
-	// before write; skip rather than flake the security PR gate (#1031).
-	// Covered when isolation is exercised with a dedicated child provider.
-	if os.Getenv("CI") != "" {
-		t.Skip("flaky under CI shared-provider step ordering; see #1036 follow-up")
-	}
 	root := t.TempDir()
 	initGitRepo(t, root)
 
@@ -54,17 +47,23 @@ func TestChildWorktreeIsolationReturnsPatchNotParentMutation(t *testing.T) {
 		Name: "write",
 		Args: mustJSONISO(t, map[string]any{"filePath": "child-only.txt", "content": "from-child\n"}),
 	}
-	// Shared provider step order: parent task tool → parent end_turn → child write → child end_turn.
-	prov := newScriptedProvider(
-		toolCallStep(provider.ToolCall{
-			ID:   "t1",
-			Name: "task",
-			Args: json.RawMessage(`{"prompt":"edit in isolation","isolation":"worktree","force_delegate":true}`),
-		}),
-		completedStep("parent done"),
-		toolCallStep(writeCall),
-		completedStep(`{"summary":"wrote child-only","files_changed":["child-only.txt"]}`),
-	)
+	// Parent and child share one scripted provider and stream concurrently.
+	// Match each step to the request that should consume it so a child
+	// end_turn cannot steal the parent's prose step (and then fail the
+	// default schema:handoff gate).
+	parentTask := toolCallStep(provider.ToolCall{
+		ID:   "t1",
+		Name: "task",
+		Args: json.RawMessage(`{"prompt":"edit in isolation","isolation":"worktree","force_delegate":true}`),
+	})
+	parentTask.match = matchUserText("spawn isolated")
+	parentDone := completedStep("parent done")
+	parentDone.match = matchToolResult("t1")
+	childWrite := toolCallStep(writeCall)
+	childWrite.match = matchUserText("edit in isolation")
+	childDone := completedStep(`{"summary":"wrote child-only","files_changed":["child-only.txt"]}`)
+	childDone.match = matchToolResult("w1")
+	prov := newScriptedProvider(parentTask, parentDone, childWrite, childDone)
 
 	eng := engine.New(engine.Options{
 		BuildDiagnostic: enginebind.Diagnostic(),

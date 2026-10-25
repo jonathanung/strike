@@ -494,6 +494,13 @@ type SessionConfig struct {
 	// Applied per turn at start — resume does not inherit an expired deadline.
 	// Child engines do not inherit this dial (they use session.agentBudget).
 	TurnTimeoutS int `json:"turnTimeoutS,omitempty"`
+	// ChildHandoffRequired controls the default schema:handoff gate on
+	// task/delegate children (#1201). Nil (omitted) means required: a child
+	// that stops with prose and no parseable handoff is blocked. Set false
+	// to accept prose-only completion. Agent frontmatter
+	// childHandoffRequired and spawn-time handoff_required override this.
+	// Root turns are unaffected.
+	ChildHandoffRequired *bool `json:"childHandoffRequired,omitempty"`
 	// ChildIsolation is the default filesystem mode for task children (#1036):
 	// off|shared (default, same workdir as parent) or worktree (per-child git
 	// worktree under .strike/worktrees/). Spawn-time task.isolation overlays.
@@ -1708,6 +1715,10 @@ func merge(base, layer Config) Config {
 	}
 	if layer.Session.ChildIsolation != "" {
 		base.Session.ChildIsolation = layer.Session.ChildIsolation
+	}
+	if layer.Session.ChildHandoffRequired != nil {
+		v := *layer.Session.ChildHandoffRequired
+		base.Session.ChildHandoffRequired = &v
 	}
 	base.Permissions = append(base.Permissions, layer.Permissions...)
 	base.Hooks = append(base.Hooks, layer.Hooks...)

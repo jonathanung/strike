@@ -88,14 +88,15 @@ func TestTeamTaskTwoChildrenShareBoardAndClaim(t *testing.T) {
 		tool.NewTeamTask(),
 	)
 	eng := engine.New(engine.Options{
-		SessionID:       leadID,
-		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
-		InitialProvider: "scripted",
-		InitialAgent:    "build",
-		Agents:          []engine.Agent{{Name: "build"}, {Name: "explore"}},
-		Registry:        reg,
-		WorkDir:         t.TempDir(),
-		Rules:           []permission.Ruleset{permission.Defaults()},
+		ChildHandoffRequired: handoffOff(),
+		SessionID:            leadID,
+		Select:               func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider:      "scripted",
+		InitialAgent:         "build",
+		Agents:               []engine.Agent{{Name: "build"}, {Name: "explore"}},
+		Registry:             reg,
+		WorkDir:              t.TempDir(),
+		Rules:                []permission.Ruleset{permission.Defaults()},
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())

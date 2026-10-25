@@ -37,12 +37,13 @@ func TestDelegationLifecycleCriteriaToReview(t *testing.T) {
 	)
 	reg := tool.NewRegistry(tool.NewTask(), tool.NewTaskStatus(), tool.NewDelegate())
 	eng := engine.New(engine.Options{
-		SessionID:       parentSession,
-		Select:          func(string) (provider.Provider, string, error) { return prov, "m", nil },
-		InitialProvider: "scripted",
-		Registry:        reg,
-		WorkDir:         t.TempDir(),
-		Rules:           []permission.Ruleset{permission.Defaults()},
+		ChildHandoffRequired: handoffOff(),
+		SessionID:            parentSession,
+		Select:               func(string) (provider.Provider, string, error) { return prov, "m", nil },
+		InitialProvider:      "scripted",
+		Registry:             reg,
+		WorkDir:              t.TempDir(),
+		Rules:                []permission.Ruleset{permission.Defaults()},
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -152,12 +153,13 @@ func TestDelegationPlainTaskCreatesWorkingLifecycle(t *testing.T) {
 		childCompletedNudgeStep("ack"),
 	)
 	eng := engine.New(engine.Options{
-		SessionID:       parentSession,
-		Select:          func(string) (provider.Provider, string, error) { return prov, "m", nil },
-		InitialProvider: "scripted",
-		Registry:        tool.NewRegistry(tool.NewTask()),
-		WorkDir:         t.TempDir(),
-		Rules:           []permission.Ruleset{permission.Defaults()},
+		ChildHandoffRequired: handoffOff(),
+		SessionID:            parentSession,
+		Select:               func(string) (provider.Provider, string, error) { return prov, "m", nil },
+		InitialProvider:      "scripted",
+		Registry:             tool.NewRegistry(tool.NewTask()),
+		WorkDir:              t.TempDir(),
+		Rules:                []permission.Ruleset{permission.Defaults()},
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

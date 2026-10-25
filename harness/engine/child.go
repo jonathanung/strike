@@ -300,6 +300,17 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 		return tool.TaskResult{}, err
 	}
 
+	// Default schema:handoff is applied once, before the delegation record is
+	// stored, so queued spawns keep the same gates (#1201). Deferred spawns
+	// reuse the stored list and must not append a second gate.
+	if existingDelegationID == "" {
+		gates, err := withDefaultHandoffGate(req.Verify, childHandoffRequired(e.opts.ChildHandoffRequired, childAgent.ChildHandoffRequired, req.HandoffRequired))
+		if err != nil {
+			return tool.TaskResult{}, err
+		}
+		req.Verify = gates
+	}
+
 	// Delegation lifecycle: create (or reuse) before side effects so unmet deps
 	// never open a child session.
 	var (
@@ -535,6 +546,7 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 		SessionBudget:              e.sessionBudget,
 		DelegationPolicy:           e.opts.DelegationPolicy,
 		SessionBudgetExhausted:     e.opts.SessionBudgetExhausted,
+		ChildHandoffRequired:       e.opts.ChildHandoffRequired,
 	})
 	child.taskHarness = childHarness
 	child.taskHarnessName = childHarnessName

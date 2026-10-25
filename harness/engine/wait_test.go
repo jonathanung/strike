@@ -79,12 +79,13 @@ func TestWaitTaskDoneRace(t *testing.T) {
 		}(),
 	)
 	eng := engine.New(engine.Options{
-		SessionID:       "parent-wait-done",
-		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
-		InitialProvider: "scripted",
-		Registry:        waitRegistry(ct),
-		WorkDir:         t.TempDir(),
-		Rules:           []permission.Ruleset{permission.Defaults()},
+		ChildHandoffRequired: handoffOff(),
+		SessionID:            "parent-wait-done",
+		Select:               func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider:      "scripted",
+		Registry:             waitRegistry(ct),
+		WorkDir:              t.TempDir(),
+		Rules:                []permission.Ruleset{permission.Defaults()},
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -257,12 +258,13 @@ func TestWaitAlreadyTerminal(t *testing.T) {
 		}(),
 	)
 	eng := engine.New(engine.Options{
-		SessionID:       "parent-wait-terminal",
-		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
-		InitialProvider: "scripted",
-		Registry:        waitRegistry(ct),
-		WorkDir:         t.TempDir(),
-		Rules:           []permission.Ruleset{permission.Defaults()},
+		ChildHandoffRequired: handoffOff(),
+		SessionID:            "parent-wait-terminal",
+		Select:               func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider:      "scripted",
+		Registry:             waitRegistry(ct),
+		WorkDir:              t.TempDir(),
+		Rules:                []permission.Ruleset{permission.Defaults()},
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

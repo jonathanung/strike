@@ -51,8 +51,13 @@ Actions (optional action=; omit + prompt ⇒ create):
   wait       — block on task.done/failed/canceled/blocked/stale with timeout
 
 States: queued → working → blocked → review → done (+ failed / canceled).
-When criteria or verify gates are set, implementer-done is not final completed
-until gates pass (else blocked/review). Do not busy-poll status — prefer wait
+Delegated children must end with parseable completion handoff JSON. The
+engine applies schema:handoff by default; prose-only completion is blocked.
+Opt out with handoff_required=false, session.childHandoffRequired false, or
+agent frontmatter childHandoffRequired: false. Explicit verify[] gates are
+appended to that default (they do not replace it). When criteria or verify
+gates are set, implementer-done is not final completed until gates pass
+(else blocked/review). Do not busy-poll status — prefer wait
 or [child.completed]. Soft-stale children set budget.stall + needs_attention
 (idle_s / last_progress_at on status); wait on task.stale or task.blocked.
 Prefer agent_message for mid-flight blockers.
@@ -70,7 +75,8 @@ Simple path:
   task({prompt: "…", name: "fix-auth-tests"})
   Pass name as a short slug of the assigned work. If omitted, derived from the
   prompt first line. Returns after the child starts. Prefer wait or [child.completed]
-  over busy-polling.
+  over busy-polling. Completion requires handoff JSON (schema:handoff) unless
+  the session or this spawn opts out.
 
 Basic actions (optional action=; omit + prompt ⇒ create):
   create  — spawn (default). Nested depth bounded by MaxChildDepth.
@@ -155,9 +161,13 @@ func (taskTool) Schema() json.RawMessage {
 				"description": "Lifecycle states to notify on: blocked|review|done|failed|canceled|working|queued"
 			},
 			"assignee": {"type": "string", "description": "Optional assignee label"},
+			"handoff_required": {
+				"type": "boolean",
+				"description": "Override the default schema:handoff gate. False accepts prose-only completion. Omit to inherit session.childHandoffRequired and the agent frontmatter (default required)."
+			},
 			"verify": {
 				"type": "array",
-				"description": "Independent completion gates (cmd|schema|path). Failures yield blocked + verification report",
+				"description": "Independent completion gates (cmd|schema|path), appended to the default schema:handoff gate. Failures yield blocked + verification report",
 				"items": {
 					"type": "object",
 					"properties": {

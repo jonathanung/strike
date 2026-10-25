@@ -80,9 +80,13 @@ func (delegateTool) Schema() json.RawMessage {
 				"items": {"type": "string"},
 				"description": "Notify owner on these states: blocked|review|done|failed|canceled|working|queued"
 			},
+			"handoff_required": {
+				"type": "boolean",
+				"description": "Override the default schema:handoff gate. False accepts prose-only completion. Omit to inherit the session/agent default (required)."
+			},
 			"verify": {
 				"type": "array",
-				"description": "Optional independent completion gates (cmd|schema|path)",
+				"description": "Independent completion gates (cmd|schema|path), appended to the default schema:handoff gate",
 				"items": {
 					"type": "object",
 					"properties": {

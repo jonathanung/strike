@@ -243,13 +243,14 @@ func TestChildQuestionReplyRouting(t *testing.T) {
 		childCompletedNudgeStep("parent ack question child"),
 	)
 	eng := engine.New(engine.Options{
-		BuildDiagnostic: enginebind.Diagnostic(),
-		SessionID:       "parent-q-route",
-		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
-		InitialProvider: "scripted",
-		Registry:        tool.NewRegistry(tool.NewTask(), tool.NewQuestion()),
-		WorkDir:         t.TempDir(),
-		Rules:           []permission.Ruleset{permission.Defaults()},
+		ChildHandoffRequired: handoffOff(),
+		BuildDiagnostic:      enginebind.Diagnostic(),
+		SessionID:            "parent-q-route",
+		Select:               func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider:      "scripted",
+		Registry:             tool.NewRegistry(tool.NewTask(), tool.NewQuestion()),
+		WorkDir:              t.TempDir(),
+		Rules:                []permission.Ruleset{permission.Defaults()},
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

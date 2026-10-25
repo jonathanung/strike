@@ -119,10 +119,13 @@ type TaskRequest struct {
 	Subscribe []string
 	// Assignee is an optional display label for the intended worker.
 	Assignee string
-	// Verify declares independent completion gates. When non-empty, implementer
-	// completion alone does not yield final completed status — the harness runs
-	// these gates and only promotes to completed on pass (else blocked).
+	// Verify declares independent completion gates. Explicit gates are unioned
+	// with the default schema:handoff gate unless this spawn, the agent, or
+	// the session opts out (#1201). Failures yield blocked, not completed.
 	Verify []VerifyGate
+	// HandoffRequired overrides the session/agent schema:handoff default for
+	// this spawn. Nil inherits. False accepts prose-only completion.
+	HandoffRequired *bool
 	// Budget is an optional per-child limit set at spawn. Zero fields inherit
 	// session defaults (engine Options.DefaultChildBudget / config session.agentBudget).
 	// Hard exceed interrupts the child and notifies the owner (#774).
@@ -613,6 +616,7 @@ type DelegateRequest struct {
 	Deps            []string
 	Subscribe       []string
 	Verify          []VerifyGate
+	HandoffRequired *bool
 	Budget          AgentBudgetLimits
 	ContextBundle   ContextBundle
 	ForceDelegate   bool
