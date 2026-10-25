@@ -311,12 +311,22 @@ func TestSteerRejectsWrongTurnID(t *testing.T) {
 
 // TestSteerDoesNotDuplicateToolHistory ensures tool results stay paired.
 func TestSteerDoesNotDuplicateToolHistory(t *testing.T) {
+	gate := make(chan struct{})
 	prov := newScriptedProvider(
-		streamStep{events: []provider.StreamEvent{
-			{Type: provider.EventToolCall, ToolCall: &provider.ToolCall{
-				ID: "t1", Name: "noop", Args: []byte(`{}`),
-			}},
-			{Type: provider.EventDone, StopReason: "tool_use"},
+		streamStep{stream: func(ctx context.Context) <-chan provider.StreamEvent {
+			ch := make(chan provider.StreamEvent, 4)
+			go func() {
+				defer close(ch)
+				ch <- provider.StreamEvent{Type: provider.EventToolCall, ToolCall: &provider.ToolCall{
+					ID: "t1", Name: "noop", Args: []byte(`{}`),
+				}}
+				ch <- provider.StreamEvent{Type: provider.EventDone, StopReason: "tool_use"}
+				select {
+				case <-ctx.Done():
+				case <-gate:
+				}
+			}()
+			return ch
 		}},
 		streamStep{match: func(req provider.Request) bool {
 			// Count tool results and ensure single result before steer user msg.
@@ -350,9 +360,10 @@ func TestSteerDoesNotDuplicateToolHistory(t *testing.T) {
 	go eng.Run(ctx)
 
 	eng.Ops() <- protocol.UserInput{Text: "use tool"}
-	// Wait until first stream claimed.
+	// Wait until first stream claimed, then steer before the tool boundary.
 	_ = receiveRequest(t, prov.requests)
 	eng.Ops() <- protocol.Steer{Text: "after-tool"}
+	close(gate)
 
 	completed := waitForTurnCompleted(t, eng.Events())
 	if completed.StopReason == "error" {
@@ -367,12 +378,22 @@ func TestSteerDoesNotDuplicateToolHistory(t *testing.T) {
 // TestUserInputStillQueuesAlongsideSteer keeps queue vs steer distinct:
 // steer applies inside the active turn; UserInput remains a later turn.
 func TestUserInputStillQueuesAlongsideSteer(t *testing.T) {
+	gate := make(chan struct{})
 	prov := newScriptedProvider(
-		streamStep{events: []provider.StreamEvent{
-			{Type: provider.EventToolCall, ToolCall: &provider.ToolCall{
-				ID: "c1", Name: "noop", Args: []byte(`{}`),
-			}},
-			{Type: provider.EventDone, StopReason: "tool_use"},
+		streamStep{stream: func(ctx context.Context) <-chan provider.StreamEvent {
+			ch := make(chan provider.StreamEvent, 4)
+			go func() {
+				defer close(ch)
+				ch <- provider.StreamEvent{Type: provider.EventToolCall, ToolCall: &provider.ToolCall{
+					ID: "c1", Name: "noop", Args: []byte(`{}`),
+				}}
+				ch <- provider.StreamEvent{Type: provider.EventDone, StopReason: "tool_use"}
+				select {
+				case <-ctx.Done():
+				case <-gate:
+				}
+			}()
+			return ch
 		}},
 		// Post-tool boundary applies steer then streams again.
 		streamStep{match: func(req provider.Request) bool {
@@ -406,6 +427,7 @@ func TestUserInputStillQueuesAlongsideSteer(t *testing.T) {
 	_ = receiveRequest(t, prov.requests)
 	eng.Ops() <- protocol.Steer{Text: "steer-text"}
 	eng.Ops() <- protocol.UserInput{Text: "queued-later"}
+	close(gate)
 
 	var sawSteer, sawQueued, sawSteerEvent bool
 	turns := 0
