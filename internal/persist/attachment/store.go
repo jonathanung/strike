@@ -225,13 +225,24 @@ func (s *Store) ApplyRetention(p RetentionPolicy) (RetentionResult, error) {
 		if len(name) != 64 {
 			return nil
 		}
-		items = append(items, item{hex: name, path: path, size: info.Size(), mod: info.ModTime()})
+		mod := info.ModTime()
+		if meta, merr := s.loadMetaLocked(name); merr == nil && !meta.CreatedAt.IsZero() {
+			// CreatedAt is the store clock. Blob mtime can tie within one
+			// filesystem tick and drop the newer object.
+			mod = meta.CreatedAt
+		}
+		items = append(items, item{hex: name, path: path, size: info.Size(), mod: mod})
 		return nil
 	})
 	if err != nil {
 		return out, fmt.Errorf("attachment: walk: %w", err)
 	}
-	sort.Slice(items, func(i, j int) bool { return items[i].mod.Before(items[j].mod) })
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].mod.Equal(items[j].mod) {
+			return items[i].hex < items[j].hex
+		}
+		return items[i].mod.Before(items[j].mod)
+	})
 	now := s.now()
 	keep := make([]bool, len(items))
 	for i := range keep {
