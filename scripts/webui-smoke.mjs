@@ -171,7 +171,10 @@ try {
 
   await send("Page.enable");
   await send("Runtime.enable");
-  await send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
+  // ?token= is the attach handoff: the daemon sets the cookie and redirects
+  // without the secret. The transcript's empty cards only render once
+  // /v1 answers, so the browser has to be authenticated.
+  await send("Page.navigate", { url: `http://127.0.0.1:${port}/?token=${token}` });
 
   let text = "";
   let acid = "";
@@ -194,10 +197,27 @@ try {
     text = parsed.body || "";
     acid = parsed.acid || "";
     ground = parsed.ground || "";
-    if (text.includes("Run a command") && text.includes("Activity") && acid === "#7c3aed") break;
+    if (
+      text.includes("Run a command") &&
+      text.includes("Activity") &&
+      text.includes("See what is here") &&
+      text.includes("Rename") &&
+      acid === "#7c3aed"
+    ) break;
     await delay(250);
   }
-  const want = ["Run a command", "Strike", "Activity", "Files", "Changes", "Approval"];
+  const want = [
+    "Run a command",
+    "Strike",
+    "Activity",
+    "Files",
+    "Changes",
+    "Approval",
+    "See what is here",
+    "Summarize the working directory. Do not change files.",
+    "Rename",
+    "Export",
+  ];
   const missingText = want.filter((s) => !text.includes(s));
   if (missingText.length || acid !== "#7c3aed" || ground !== "#14131c") {
     throw new Error(

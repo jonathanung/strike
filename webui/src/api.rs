@@ -61,6 +61,25 @@ pub async fn post_json(base: &str, token: &str, path: &str, body: Value) -> Resu
     post_json_value(base, token, path, body).await.map(|_| ())
 }
 
+pub async fn get_text(base: &str, token: &str, path: &str) -> Result<String, String> {
+    let resp = Request::get(&api(base, path))
+        .header("Authorization", &auth_header(token))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let status = resp.status();
+    let text = resp.text().await.unwrap_or_default();
+    if !(200..300).contains(&status) {
+        let detail = if text.trim().is_empty() {
+            String::new()
+        } else {
+            format!(" {text}")
+        };
+        return Err(format!("HTTP {status}{detail}"));
+    }
+    Ok(text)
+}
+
 pub async fn patch_json(base: &str, token: &str, path: &str, body: Value) -> Result<(), String> {
     let resp = Request::patch(&api(base, path))
         .header("Authorization", &auth_header(token))

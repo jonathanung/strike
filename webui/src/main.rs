@@ -5,28 +5,33 @@
 
 mod api;
 mod model;
+mod status_shim;
+mod transcript;
+mod transcript_view;
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use leptos::callback::{Callable, Callback};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use model::{
-    activity_panel, child_card_from_parts, child_card_from_text, child_keys_match, display_state,
-    filter_sessions, fmt_ago, fmt_elapsed, is_running, merge_sessions, mode_label, task_headline,
-    permission_modes, prefer_summary, protocol_dump, session_label, status_kind, strip_echo_tip,
-    visible_sessions, ActivityRow, Bootstrap, ChangedFilesResponse, ChatLine, ChildCard,
-    ChildrenResponse, FilesResponse, Health, ModelInfo, ModelList, Remote, RootSummary,
-    SessionItem, SessionsResponse, TeamSnapshot, Workspace, WorkspacesResponse,
+    activity_panel, display_state, filter_sessions, fmt_ago, fmt_elapsed, is_running,
+    merge_sessions, mode_label, permission_modes, session_label, task_headline, visible_sessions,
+    ActivityRow, Bootstrap, ChangedFilesResponse, ChildrenResponse, FilesResponse, Health,
+    ModelInfo, ModelList, Remote, RootSummary, SessionItem, SessionsResponse, TeamSnapshot,
+    Workspace, WorkspacesResponse,
 };
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 
 use crate::api::{
-    get_json, idempotency_key, now_ms, patch_json, post_json, post_json_value, post_op,
+    get_json, get_text, idempotency_key, now_ms, patch_json, post_json, post_json_value, post_op,
 };
 use crate::model::{budget_elapsed, can_retry, RootsResponse};
+use crate::transcript::Transcript;
+use crate::transcript_view::{save_download, TranscriptHandlers, TranscriptPane};
 
 fn storage() -> Option<web_sys::Storage> {
     web_sys::window()?.local_storage().ok().flatten()
@@ -145,204 +150,6 @@ fn Skeleton() -> impl IntoView {
     }
 }
 
-fn push_line(
-    lines: RwSignal<Vec<ChatLine>>,
-    seq: &Rc<Cell<u32>>,
-    role: &str,
-    title: &str,
-    body: &str,
-    badge: &str,
-) {
-    let id = seq.get() + 1;
-    seq.set(id);
-    lines.update(|list| {
-        list.push(ChatLine {
-            id,
-            role: role.into(),
-            title: title.into(),
-            body: body.into(),
-            badge: badge.into(),
-            detail: String::new(),
-            key: String::new(),
-        });
-    });
-}
-
-fn upsert_child(lines: RwSignal<Vec<ChatLine>>, seq: &Rc<Cell<u32>>, card: ChildCard) {
-    if card.key.is_empty() {
-        return;
-    }
-    let kind = status_kind(&card.status);
-    let updated = lines
-        .try_update(|list| {
-            let Some(existing) = list
-                .iter_mut()
-                .rev()
-                .find(|line| line.role == "child" && child_keys_match(&line.key, &card.key))
-            else {
-                return false;
-            };
-            if !card.name.is_empty() {
-                existing.title = card.name.clone();
-            }
-            existing.body = prefer_summary(&existing.body, &card.summary);
-            if card.details.len() >= existing.detail.len() && !card.details.is_empty() {
-                existing.detail = card.details.clone();
-            }
-            if !kind.is_empty() {
-                existing.badge = kind.clone();
-            }
-            true
-        })
-        .unwrap_or(false);
-    if updated {
-        return;
-    }
-    let id = seq.get() + 1;
-    seq.set(id);
-    let title = if card.name.is_empty() {
-        "Child".into()
-    } else {
-        card.name
-    };
-    lines.update(|list| {
-        list.push(ChatLine {
-            id,
-            role: "child".into(),
-            title,
-            body: card.summary,
-            badge: kind,
-            detail: card.details,
-            key: card.key,
-        });
-    });
-}
-
-fn absorb_noise(lines: RwSignal<Vec<ChatLine>>, seq: &Rc<Cell<u32>>) {
-    let mut cards = Vec::new();
-    lines.update(|list| {
-        for line in list.iter_mut() {
-            if line.role != "you" && line.role != "strike" {
-                continue;
-            }
-            line.body = strip_echo_tip(&line.body);
-            if let Some(card) = child_card_from_text(&line.body) {
-                cards.push(card);
-                line.body.clear();
-            } else if let Some((summary, details)) = protocol_dump(&line.body) {
-                cards.push(ChildCard {
-                    key: format!("dump-{}", line.id),
-                    name: "Details".into(),
-                    status: String::new(),
-                    summary,
-                    details,
-                });
-                line.body.clear();
-            }
-        }
-        list.retain(|line| line.role == "child" || !line.body.trim().is_empty());
-    });
-    for card in cards {
-        upsert_child(lines, seq, card);
-    }
-}
-
-fn apply_envelope(
-    lines: RwSignal<Vec<ChatLine>>,
-    seq: &Rc<Cell<u32>>,
-    open: &Rc<Cell<bool>>,
-    raw: &str,
-) {
-    let v: serde_json::Value = match serde_json::from_str(raw) {
-        Ok(v) => v,
-        Err(_) => return,
-    };
-    let typ = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
-    let data = v.get("data").cloned().unwrap_or(serde_json::Value::Null);
-    let text = |key: &str| match data.get(key) {
-        Some(serde_json::Value::String(s)) => s.clone(),
-        Some(other) if !other.is_null() => other.to_string(),
-        _ => String::new(),
-    };
-    match typ {
-        "user.message" => {
-            open.set(false);
-            push_line(lines, seq, "you", "You", &text("text"), "");
-            absorb_noise(lines, seq);
-        }
-        "turn.started" => open.set(false),
-        "text.delta" => {
-            let chunk = text("text");
-            if chunk.is_empty() {
-                return;
-            }
-            if open.get() {
-                lines.update(|list| {
-                    if let Some(last) = list.last_mut() {
-                        if last.role == "strike" {
-                            last.body.push_str(&chunk);
-                            return;
-                        }
-                    }
-                });
-                // If the last row was not the assistant, fall through by checking.
-                let appended =
-                    lines.with(|list| list.last().map(|l| l.role == "strike").unwrap_or(false));
-                if appended {
-                    return;
-                }
-            }
-            open.set(true);
-            push_line(lines, seq, "strike", "Strike", &chunk, "");
-        }
-        "turn.completed" => {
-            open.set(false);
-            absorb_noise(lines, seq);
-        }
-        "tool.begin" => {
-            open.set(false);
-            let name = text("name");
-            push_line(lines, seq, "tool", &name, &text("args"), "tool");
-        }
-        "tool.end" => {
-            let title = text("title");
-            let output = text("output");
-            let err = data
-                .get("isError")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-            let badge = if err { "failed" } else { "done" };
-            let heading = if title.is_empty() {
-                text("name")
-            } else {
-                title
-            };
-            push_line(lines, seq, "tool", &heading, &output, badge);
-        }
-        "child.completed" => {
-            let status = text("status");
-            let name = text("name");
-            let session = text("sessionId");
-            let mut summary = text("summary");
-            if summary.is_empty() {
-                summary = data
-                    .get("handoff")
-                    .and_then(|h| h.get("summary"))
-                    .and_then(|s| s.as_str())
-                    .unwrap_or("")
-                    .to_string();
-            }
-            let details = serde_json::to_string_pretty(&data).unwrap_or_default();
-            upsert_child(
-                lines,
-                seq,
-                child_card_from_parts(&name, &session, &status, &summary, &details),
-            );
-        }
-        _ => {}
-    }
-}
-
 fn join_path(dir: &str, name: &str) -> String {
     if dir.is_empty() {
         name.to_string()
@@ -357,23 +164,6 @@ fn parent_path(dir: &str) -> String {
         None => String::new(),
     }
 }
-
-fn empty_headline(tick: u32) -> &'static str {
-    match (tick / 4) % 3 {
-        0 => "What should this session do?",
-        1 => "This session is idle.",
-        _ => "Delegated results land in the transcript.",
-    }
-}
-
-const SUGGESTIONS: [&str; 6] = [
-    "What can you do in this session?",
-    "Summarize the working directory",
-    "Explain how the approval modes differ",
-    "Draft a short plan before changing files",
-    "Review what this session has done",
-    "What should I look at next?",
-];
 
 #[derive(Clone, Copy)]
 struct PaletteCmd {
@@ -552,6 +342,19 @@ fn icon(name: &str) -> &'static str {
     }
 }
 
+fn file_stem(id: &str) -> String {
+    id.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .take(48)
+        .collect()
+}
+
 fn short_id(id: &str) -> String {
     let tail = id.rsplit('-').next().unwrap_or(id);
     let count = tail.chars().count();
@@ -641,7 +444,8 @@ fn App() -> impl IntoView {
     let roots = RwSignal::new(Vec::<RootSummary>::new());
     let sessions = RwSignal::new(Vec::<SessionItem>::new());
     let active_root = RwSignal::new(String::new());
-    let lines = RwSignal::new(Vec::<ChatLine>::new());
+    let transcript = RwSignal::new(Transcript::new());
+    let ux_note = RwSignal::new(String::new());
     let activity = RwSignal::new(Vec::<ActivityRow>::new());
     let team_note = RwSignal::new(String::new());
     let draft = RwSignal::new(String::new());
@@ -706,12 +510,8 @@ fn App() -> impl IntoView {
                     let prev = activity.get_untracked();
                     let rows = rows_from_team(&prev, &team, now);
                     let rows = if rows.is_empty() {
-                        activity_panel(
-                            &[],
-                            &children.get_untracked(),
-                            &lines.get_untracked(),
-                            &root,
-                        )
+                        let cards = transcript.with_untracked(|t| t.child_lines());
+                        activity_panel(&[], &children.get_untracked(), &cards, &root)
                     } else {
                         rows
                     };
@@ -822,20 +622,15 @@ fn App() -> impl IntoView {
     };
 
     let tail: Rc<RefCell<Option<web_sys::EventSource>>> = Rc::new(RefCell::new(None));
-    let seq = Rc::new(Cell::new(0u32));
-    let open = Rc::new(Cell::new(false));
     let tail_fx = tail.clone();
-    let seq_fx = seq.clone();
-    let open_fx = open.clone();
     Effect::new(move |_| {
         let root = active_root.get();
         let b = base.get();
         if let Some(es) = tail_fx.borrow_mut().take() {
             es.close();
         }
-        seq_fx.set(0);
-        open_fx.set(false);
-        lines.set(Vec::new());
+        transcript.set(Transcript::new());
+        ux_note.set(String::new());
         children.set(Vec::new());
         if root.is_empty() {
             stream_note.set(String::new());
@@ -863,13 +658,11 @@ fn App() -> impl IntoView {
                 return;
             }
         };
-        let lines_cb = lines;
-        let seq_cb = seq_fx.clone();
-        let open_cb = open_fx.clone();
+        let lines_cb = transcript;
         let on_msg =
             Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |ev: web_sys::MessageEvent| {
                 if let Some(data) = ev.data().as_string() {
-                    apply_envelope(lines_cb, &seq_cb, &open_cb, &data);
+                    lines_cb.update(|t| t.apply_envelope(&data));
                 }
             });
         es.set_onmessage(Some(on_msg.as_ref().unchecked_ref()));
@@ -881,6 +674,67 @@ fn App() -> impl IntoView {
         es.set_onerror(Some(on_err.as_ref().unchecked_ref()));
         on_err.forget();
         *tail_fx.borrow_mut() = Some(es);
+    });
+
+    Effect::new(move |_| {
+        let id = active_root.get();
+        if id.is_empty() {
+            return;
+        }
+        let from_session = sessions.with(|list| {
+            list.iter()
+                .find(|s| s.id == id)
+                .map(|s| s.title.clone())
+                .unwrap_or_default()
+        });
+        let from_root = roots.with(|list| {
+            list.iter()
+                .find(|r| r.id == id)
+                .map(|r| r.title.clone())
+                .unwrap_or_default()
+        });
+        let listed = if !from_session.is_empty() {
+            from_session
+        } else {
+            from_root
+        };
+        if !listed.is_empty() {
+            transcript.update(|t| t.set_listed_title(&listed));
+        }
+    });
+
+    Effect::new(move |_| {
+        let title = transcript.with(|t| t.title.clone());
+        let id = active_root.get();
+        if title.is_empty() || id.is_empty() {
+            return;
+        }
+        let session_stale = sessions.with_untracked(|list| {
+            list.iter()
+                .find(|s| s.id == id)
+                .map(|s| s.title != title)
+                .unwrap_or(false)
+        });
+        if session_stale {
+            sessions.update(|list| {
+                if let Some(s) = list.iter_mut().find(|s| s.id == id) {
+                    s.title = title.clone();
+                }
+            });
+        }
+        let root_stale = roots.with_untracked(|list| {
+            list.iter()
+                .find(|r| r.id == id)
+                .map(|r| r.title.is_empty() || (r.title != title && session_stale))
+                .unwrap_or(false)
+        });
+        if root_stale {
+            roots.update(|list| {
+                if let Some(r) = list.iter_mut().find(|r| r.id == id && r.title.is_empty()) {
+                    r.title = title;
+                }
+            });
+        }
     });
 
     let poll_tick = tick;
@@ -1302,6 +1156,128 @@ fn App() -> impl IntoView {
             .count()
     };
 
+    let apply_title: Callback<(String,)> = (move |title: String| {
+        let id = active_root.get_untracked();
+        if id.is_empty() {
+            ux_note.set("No session to rename.".into());
+            return;
+        }
+        let title = title.trim().to_string();
+        if title.is_empty() {
+            ux_note.set("A title needs at least one character.".into());
+            return;
+        }
+        transcript.update(|t| t.pin_title(title.clone()));
+        sessions.update(|list| {
+            if let Some(s) = list.iter_mut().find(|s| s.id == id) {
+                s.title = title.clone();
+            }
+        });
+        roots.update(|list| {
+            if let Some(r) = list.iter_mut().find(|r| r.id == id) {
+                r.title = title.clone();
+            }
+        });
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            let path = format!("/v1/sessions/{}", api::js_encode(&id));
+            match patch_json(&b, &t, &path, serde_json::json!({"title": title})).await {
+                Ok(()) => ux_note.set(String::new()),
+                Err(e) => ux_note.set(format!("Rename failed: {e}")),
+            }
+        });
+    })
+    .into();
+    let handlers = TranscriptHandlers {
+        send: (move |text: String| send_text(text)).into(),
+        rename: apply_title,
+        regenerate: (move || {
+            let title = transcript.with_untracked(|t| t.regenerated_title());
+            if title.is_empty() {
+                ux_note.set("No message to title from yet.".into());
+                return;
+            }
+            apply_title.run((title,));
+        })
+        .into(),
+        export_timeline: (move || {
+            let id = active_root.get_untracked();
+            if id.is_empty() {
+                ux_note.set("No session to export.".into());
+                return;
+            }
+            let (b, t) = (base.get_untracked(), token.get_untracked());
+            spawn_local(async move {
+                let path = format!(
+                    "/v1/sessions/{}/timeline/export?format=json",
+                    api::js_encode(&id)
+                );
+                match get_text(&b, &t, &path).await {
+                    Ok(text) => {
+                        save_download(
+                            &format!("strike-timeline-{}.json", file_stem(&id)),
+                            "application/json",
+                            &text,
+                        );
+                        ux_note.set("Exported the redacted timeline.".into());
+                    }
+                    Err(e) => ux_note.set(format!("Export failed: {e}")),
+                }
+            });
+        })
+        .into(),
+        export_markdown: (move || {
+            let md = transcript.with_untracked(|t| t.to_markdown());
+            let id = active_root.get_untracked();
+            let name = if id.is_empty() {
+                "strike-session.md".into()
+            } else {
+                format!("strike-session-{}.md", file_stem(&id))
+            };
+            save_download(&name, "text/markdown;charset=utf-8", &md);
+            ux_note.set("Downloaded the visible transcript.".into());
+        })
+        .into(),
+        retry: (move |text: String| send_text(text)).into(),
+        fork: (move |keep: i32| {
+            let root = active_root.get_untracked();
+            if root.is_empty() {
+                ux_note.set("No session to fork.".into());
+                return;
+            }
+            let (b, t) = (base.get_untracked(), token.get_untracked());
+            spawn_local(async move {
+                let path = format!("/v1/sessions/{}/fork_at", api::js_encode(&root));
+                match post_json_value(&b, &t, &path, serde_json::json!({"keepEvents": keep})).await
+                {
+                    Ok(created) => {
+                        let id = created
+                            .get("id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        if id.is_empty() {
+                            ux_note.set("Fork did not return a session.".into());
+                            return;
+                        }
+                        ux_note.set("Forked this turn into a new session.".into());
+                        resume_session(id);
+                    }
+                    Err(e) => ux_note.set(format!("Fork failed: {e}")),
+                }
+            });
+        })
+        .into(),
+        open_file: (move |path: String, line: u32| {
+            if line > 0 {
+                ux_note.set(format!("File link {path}:{line}"));
+            } else {
+                ux_note.set(format!("File link {path}"));
+            }
+        })
+        .into(),
+    };
+
     view! {
         <header class="page-header">
             <div class="brand" title=move || status.get()>
@@ -1530,76 +1506,14 @@ fn App() -> impl IntoView {
                     <Show when=move || !stream_note.get().is_empty()>
                         <p class="hint banner">{move || stream_note.get()}</p>
                     </Show>
-                    <div class="transcript" aria-live="polite">
-                        <Show when=move || loading.get()>
-                            <Skeleton />
-                        </Show>
-                        <Show when=move || !loading.get() && lines.get().is_empty() && load_error.get().is_empty()>
-                            <div class="empty-hero">
-                                <strong>{move || empty_headline(tick.get())}</strong>
-                                <p>"Send a message, or start from a suggestion."</p>
-                                <div class="suggestions">
-                                    {SUGGESTIONS.into_iter().map(|text| {
-                                        let label = text.to_string();
-                                        let send_label = label.clone();
-                                        let send = send_text;
-                                        view! {
-                                            <button type="button" class="suggestion" on:click=move |_| send(send_label.clone())>{label}</button>
-                                        }
-                                    }).collect_view()}
-                                </div>
-                            </div>
-                        </Show>
-                        {move || lines.get().into_iter().map(|line| {
-                            let badge = line.badge.clone();
-                            let badge_kind = badge.clone();
-                            let role = line.role.clone();
-                            let title = line.title.clone();
-                            let body = line.body.clone();
-                            let detail = line.detail.clone();
-                            let has_badge = !badge.is_empty();
-                            let has_detail = !detail.is_empty();
-                            let card = role == "child";
-                            let prose = role == "you" || role == "strike";
-                            let tool_dump = !card && !prose && (body.trim_start().starts_with('{') || body.trim_start().starts_with('[') || body.chars().count() > 240);
-                            let body_view = if card {
-                                let summary = body;
-                                view! {
-                                    <div>
-                                        <p class="summary">{summary}</p>
-                                        {has_detail.then(|| view! {
-                                            <details>
-                                                <summary>"Details"</summary>
-                                                <pre>{detail}</pre>
-                                            </details>
-                                        })}
-                                    </div>
-                                }.into_any()
-                            } else if prose {
-                                view! { <p class="prose">{body}</p> }.into_any()
-                            } else if tool_dump {
-                                view! {
-                                    <details>
-                                        <summary>"Details"</summary>
-                                        <pre>{body}</pre>
-                                    </details>
-                                }.into_any()
-                            } else {
-                                view! { <pre>{body}</pre> }.into_any()
-                            };
-                            view! {
-                                <article class=format!("bubble card role-{role}")>
-                                    <header>
-                                        <span class="who">{title}</span>
-                                        <Show when=move || has_badge>
-                                            <Badge kind=badge_kind.clone() label=badge.clone() />
-                                        </Show>
-                                    </header>
-                                    {body_view}
-                                </article>
-                            }
-                        }).collect_view()}
-                    </div>
+                    <TranscriptPane
+                        transcript=transcript
+                        loading=loading
+                        load_error=load_error
+                        tick=tick
+                        note=ux_note
+                        handlers=handlers
+                    />
                     <div class="composer"
                         on:dragover=move |ev: web_sys::DragEvent| ev.prevent_default()
                         on:drop=move |ev: web_sys::DragEvent| {

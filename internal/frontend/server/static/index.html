@@ -9,14 +9,14 @@
 (function(){try{var ok={strike:1,nord:1,dracula:1,gruvbox:1,monokai:1,"tokyo-night":1,catppuccin:1};var t=localStorage.getItem("strike.theme")||"strike";var s=localStorage.getItem("strike.scheme")||"dark";if(!ok[t])t="strike";if(s!=="light")s="dark";var el=document.documentElement;el.setAttribute("data-theme",t);el.setAttribute("data-scheme",s);}catch(e){}})();
 </script>
 <link rel="manifest" href="/manifest.webmanifest">
-<link rel="stylesheet" href="/assets/style-b675a6499c95b448.css" integrity="sha384-TzmCXhs4XZOIBJVTWsltYCqu3aIrajPO3IqX2vad7TJjohexRdJvdRFjmxs68fTu"/>
+<link rel="stylesheet" href="/assets/style-c884bba85e64bcca.css" integrity="sha384-pGc6Xxg+fFF3YP2Xpgf1XSYA4wSMgk7Bc/Efhn57hXbTMb7ngzAYMjmPG/yIiyf+"/>
 
 
 
 
 <script type="module">
-import init, * as bindings from '/assets/strike-webui-4147883ebbe8ac8f.js';
-const wasm = await init({ module_or_path: '/assets/strike-webui-4147883ebbe8ac8f_bg.wasm' });
+import init, * as bindings from '/assets/strike-webui-a0b54fc5edcd27cc.js';
+const wasm = await init({ module_or_path: '/assets/strike-webui-a0b54fc5edcd27cc_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -27,6 +27,6 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 </script>
 <script src="/assets/register.js" defer></script>
 
-<link rel="modulepreload" href="/assets/strike-webui-4147883ebbe8ac8f.js" crossorigin="anonymous" integrity="sha384-gC8eO6SqqNzLKb57v3Y/nzRQoAJh7LmYNEF2GHxAj2nWiq/oAGXW1IX2NQR+ihc5"><link rel="preload" href="/assets/strike-webui-4147883ebbe8ac8f_bg.wasm" crossorigin="anonymous" integrity="sha384-3mdhftnZiwsKhrfFYJbhLjRRcFyQZaXlO9tCgt3zvUQoIpV8oB5k69GE+wt5Jpdi" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/assets/strike-webui-a0b54fc5edcd27cc.js" crossorigin="anonymous" integrity="sha384-WBSa9Bcsp3Y8Ry+kGufrqQLQxEcxX2Y2t/ekmLAuDt7OfDvzi+FWtavf3Upid+ns"><link rel="preload" href="/assets/strike-webui-a0b54fc5edcd27cc_bg.wasm" crossorigin="anonymous" integrity="sha384-TmL0B0iAPbBxlWwcgCb5SU813vo/VHtFa+17N51CGn7kOQhGStnrNcHVEcTYcqQE" as="fetch" type="application/wasm"></head>
 <body></body>
 </html>
