@@ -57,9 +57,9 @@ and for side-by-side stills. `--no-video` skips ffmpeg.
     `Could not reach the daemon`, with Retry. Starts the same binary on the
     same port and clicks Retry. The chip must read Connected.
 
-Named shots are taken at 1024×594 and 1440×900. The empty shell, the
-composer, and the reconnect error also get a 390×844 shot where the layout
-breaks to one column (`shell-empty-mobile.png`, `shell-composer-mobile.png`).
+Named shots are taken at 1024×594 and 1440×900. The empty shell and the
+composer also get a 390×844 shot where the layout breaks to one column
+(`shell-empty-mobile.png`, `shell-composer-mobile.png`).
 
 ## CI
 
