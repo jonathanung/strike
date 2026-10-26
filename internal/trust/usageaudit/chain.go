@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -238,10 +239,12 @@ func (l *Log) Append(in Input) (Entry, error) {
 		Seq:           prevSeq + 1,
 		Time:          when,
 		Action:        action,
-		SessionID:     strings.TrimSpace(in.SessionID),
-		Summary:       summary,
-		Detail:        detail,
-		Prev:          prevHash,
+		// Mirror summary: redact and truncate SessionID before it is
+		// stored or hashed, so a secret-shaped session id cannot persist.
+		SessionID: truncate(redact.String(strings.TrimSpace(in.SessionID)), 500),
+		Summary:   summary,
+		Detail:    detail,
+		Prev:      prevHash,
 	}
 	sum, err := hashEntry(entry)
 	if err != nil {
@@ -539,10 +542,22 @@ func redactValue(v any) any {
 	case string:
 		return truncate(redact.String(t), 500)
 	case map[string]any:
-		for k, val := range t {
-			t[k] = redactValue(val)
+		// Scrub keys with the same redaction+truncation as values: a
+		// secret-shaped key must not persist raw either. Keys are
+		// visited in sorted (original-key) order so behaviour is
+		// deterministic. If two distinct keys redact to the same
+		// string, they collide in the output map and the later key
+		// in sorted order wins (last-wins via map assignment).
+		keys := make([]string, 0, len(t))
+		for k := range t {
+			keys = append(keys, k)
 		}
-		return t
+		sort.Strings(keys)
+		out := make(map[string]any, len(t))
+		for _, k := range keys {
+			out[truncate(redact.String(k), 500)] = redactValue(t[k])
+		}
+		return out
 	case []any:
 		for i := range t {
 			t[i] = redactValue(t[i])

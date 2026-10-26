@@ -166,6 +166,81 @@ func TestChainRedactsBeforeHash(t *testing.T) {
 	}
 }
 
+func TestChainRedactsDetailKeysAndSessionID(t *testing.T) {
+	dir := t.TempDir()
+	log, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = log.Close() })
+	secret := "sk-abcdefghijklmnopqrstuvwxyz"
+	entry, err := log.Append(Input{
+		Action:    ActionShell,
+		SessionID: secret,
+		Summary:   "session check",
+		Detail: map[string]any{
+			secret:   "v",
+			"plain":  "echo " + secret,
+			"nested": map[string]any{secret: "w", "clean": "ok", "val": "echo " + secret},
+			"list":   []any{map[string]any{secret: "x"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(entry.SessionID, secret) {
+		t.Fatalf("stored SessionID kept the secret: %q", entry.SessionID)
+	}
+	if !strings.Contains(entry.SessionID, "REDACTED") {
+		t.Fatalf("SessionID = %q, want a redaction marker", entry.SessionID)
+	}
+	if strings.Contains(string(entry.Detail), secret) {
+		t.Fatalf("stored detail kept the secret: %s", entry.Detail)
+	}
+	if !strings.Contains(string(entry.Detail), `"clean":"ok"`) {
+		t.Fatalf("detail lost a clean nested entry: %s", entry.Detail)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "chain.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), secret) {
+		t.Fatal("chain file contains the raw secret (detail key, value, or sessionId)")
+	}
+	// Verify recomputes each hash from the stored fields, so passing
+	// here proves the hashed payload was the redacted form above.
+	if err := log.Verify(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Collision after redaction: both keys become [REDACTED_API_KEY].
+	// Sorted original-key order makes the winner deterministic:
+	// the sk-bbb… key sorts after sk-aaa…, so its value wins.
+	secretA := "sk-aaaaaaaaaaaaaaaaaaaaaaaa"
+	secretB := "sk-bbbbbbbbbbbbbbbbbbbbbbbb"
+	collided, err := log.Append(Input{
+		Action:  ActionShell,
+		Summary: "collision check",
+		Detail:  map[string]any{secretA: "first", secretB: "second"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(collided.Detail), `{"[REDACTED_API_KEY]":"second"}`; got != want {
+		t.Fatalf("collided detail = %s, want %s", got, want)
+	}
+	raw, err = os.ReadFile(filepath.Join(dir, "chain.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), secretA) || strings.Contains(string(raw), secretB) {
+		t.Fatal("chain file contains a raw colliding secret key")
+	}
+	if err := log.Verify(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestChainConcurrentAppendVerifies(t *testing.T) {
 	dir := t.TempDir()
 	log, err := Open(dir)
