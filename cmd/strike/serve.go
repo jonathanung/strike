@@ -304,23 +304,26 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		}
 
 		// Build LiveHub with spawn and resume callbacks.
+		registerLive := func(ctx context.Context, slot *rootSlot) (string, error) {
+			live := server.NewLive(slot.id, slot.workDir, agents, slot.eng.Ops())
+			seedLiveSandbox(live)
+			sr := startServeRoot(ctx, slot, live)
+			mu.Lock()
+			roots[slot.id] = sr
+			mu.Unlock()
+			liveHub.Add(slot.id, live)
+			if info, err := a.sessions.Get(slot.id); err == nil && info.Title != "" {
+				liveHub.SetTitle(slot.id, info.Title)
+			}
+			return slot.id, nil
+		}
 		liveHub = server.NewLiveHub(
 			func(ctx context.Context) (string, error) {
 				slot, err := a.spawnRoot("")
 				if err != nil {
 					return "", err
 				}
-				live := server.NewLive(slot.id, slot.workDir, agents, slot.eng.Ops())
-				seedLiveSandbox(live)
-				sr := startServeRoot(ctx, slot, live)
-				mu.Lock()
-				roots[slot.id] = sr
-				mu.Unlock()
-				liveHub.Add(slot.id, live)
-				if info, err := a.sessions.Get(slot.id); err == nil && info.Title != "" {
-					liveHub.SetTitle(slot.id, info.Title)
-				}
-				return slot.id, nil
+				return registerLive(ctx, slot)
 			},
 			func(ctx context.Context, sessionID string) (string, bool, error) {
 				// Validate: session must exist and be a root.
@@ -363,6 +366,13 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 				return slot.id, false, nil
 			},
 		)
+		liveHub.SetUnattendedSpawn(func(ctx context.Context) (string, error) {
+			slot, err := a.spawnUnattended("")
+			if err != nil {
+				return "", err
+			}
+			return registerLive(ctx, slot)
+		})
 
 		// Add initial root from the first assembly slot.
 		initialSlot := a.firstSlot

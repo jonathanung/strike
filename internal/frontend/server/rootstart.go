@@ -25,7 +25,7 @@ func NewHubStarter(hub *LiveHub) rootstart.Starter {
 }
 
 func (h hubStarter) StartRoot(ctx context.Context, req rootstart.Request) (rootstart.Result, error) {
-	created, err := h.hub.Spawn(ctx)
+	created, err := h.hub.SpawnUnattended(ctx)
 	if err != nil {
 		return rootstart.Result{}, err
 	}

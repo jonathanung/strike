@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -19,11 +20,16 @@ func TestHubStarterSetsPlanBeforePromptAndDoesNotStealActive(t *testing.T) {
 	existing := NewLive("root-existing", t.TempDir(), nil, opsExisting)
 	opsNew := make(chan protocol.Op, 4)
 	var hub *LiveHub
+	interactive := 0
 	hub = NewLiveHub(func(ctx context.Context) (string, error) {
+		interactive++
+		return "", fmt.Errorf("interactive spawn")
+	}, nil)
+	hub.SetUnattendedSpawn(func(ctx context.Context) (string, error) {
 		live := NewLive("root-new", t.TempDir(), nil, opsNew)
 		hub.Add("root-new", live)
 		return "root-new", nil
-	}, nil)
+	})
 	hub.Add("root-existing", existing)
 	if err := hub.Activate("root-existing"); err != nil {
 		t.Fatal(err)
@@ -45,6 +51,9 @@ func TestHubStarterSetsPlanBeforePromptAndDoesNotStealActive(t *testing.T) {
 	}
 	if hub.ActiveID() != "root-existing" {
 		t.Fatalf("active root became %s", hub.ActiveID())
+	}
+	if interactive != 0 {
+		t.Fatalf("unattended start used the interactive spawn %d times", interactive)
 	}
 	if hub.LiveFor("root-new").Status().SessionID != "root-new" {
 		t.Fatal("new root missing")

@@ -149,8 +149,15 @@ func (s *Service) SetEnabled(id string, enabled bool) (Schedule, error) {
 			return nil
 		}
 		sch.Enabled = true
-		if sch.Kind == KindOnce && !sch.At.IsZero() && sch.At.After(now) {
-			sch.NextFire = sch.At
+		if sch.Kind == KindOnce {
+			if !sch.At.IsZero() && sch.At.After(now) {
+				sch.NextFire = sch.At
+				return nil
+			}
+			// A one-shot whose time has passed stays disarmed. Resume does
+			// not start a second session, and it does not invent a fire at now.
+			sch.Enabled = false
+			sch.NextFire = time.Time{}
 			return nil
 		}
 		if sch.NextFire.IsZero() || !sch.NextFire.After(now) {
@@ -187,8 +194,10 @@ func (s *Service) RunNow(ctx context.Context, id string) (Run, error) {
 	}
 	defer s.end(id)
 	res := planRunNow(sch, in)
+	var startErr error
 	if res.Action == "start" && res.Req != nil {
 		out, err := s.hooks.Starter.StartRoot(ctx, *res.Req)
+		startErr = err
 		if res.Run != nil {
 			res.Run.SessionID = out.SessionID
 		}
@@ -210,13 +219,19 @@ func (s *Service) RunNow(ctx context.Context, id string) (Run, error) {
 		return Run{}, err
 	}
 	if len(saved.Runs) == 0 {
+		if startErr != nil {
+			return Run{}, startErr
+		}
 		if res.LastError != "" {
-			return Run{}, fmt.Errorf("%s", res.LastError)
+			return Run{}, fmt.Errorf("%w: %s", ErrInvalid, res.LastError)
 		}
 		return Run{}, ErrInvalid
 	}
 	if saved.Runs[0].Status == StatusError && saved.Runs[0].Error != "" {
-		return saved.Runs[0], fmt.Errorf("%s", saved.Runs[0].Error)
+		if startErr != nil {
+			return saved.Runs[0], startErr
+		}
+		return saved.Runs[0], fmt.Errorf("%w: %s", ErrInvalid, saved.Runs[0].Error)
 	}
 	return saved.Runs[0], nil
 }
@@ -267,7 +282,7 @@ func (s *Service) tickOne(ctx context.Context, id string, startup bool) {
 	}
 	in := s.observe(sch)
 	in.Startup = startup
-	idle := sch.LastStatus == StatusStarted && !in.Busy
+	idle := !in.Busy && startedRun(sch)
 	res := planTick(sch, in)
 	if res.Action == "none" && !idle {
 		return
@@ -401,15 +416,25 @@ func (s *Service) end(id string) {
 	s.mu.Unlock()
 }
 
-func noteIdle(sch *Schedule) {
-	if sch.LastStatus != StatusStarted {
-		return
+func startedRun(sch Schedule) bool {
+	if sch.LastStatus == StatusStarted {
+		return true
 	}
-	sch.LastStatus = StatusFinished
+	for _, run := range sch.Runs {
+		if run.Status == StatusStarted {
+			return true
+		}
+	}
+	return false
+}
+
+func noteIdle(sch *Schedule) {
+	if sch.LastStatus == StatusStarted {
+		sch.LastStatus = StatusFinished
+	}
 	for i := range sch.Runs {
 		if sch.Runs[i].Status == StatusStarted {
 			sch.Runs[i].Status = StatusFinished
-			break
 		}
 	}
 }

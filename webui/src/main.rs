@@ -31,6 +31,19 @@ use crate::api::{
 use crate::editor::{DocumentPane, LinkedBody};
 use crate::model::{budget_elapsed, can_retry, RootsResponse};
 
+fn editable_key_target(ev: &web_sys::KeyboardEvent) -> bool {
+    let Some(target) = ev.target() else {
+        return false;
+    };
+    let Some(el) = target.dyn_ref::<web_sys::HtmlElement>() else {
+        return false;
+    };
+    if el.is_content_editable() {
+        return true;
+    }
+    matches!(el.tag_name().to_ascii_lowercase().as_str(), "input" | "textarea" | "select")
+}
+
 fn storage() -> Option<web_sys::Storage> {
     web_sys::window()?.local_storage().ok().flatten()
 }
@@ -1259,6 +1272,11 @@ fn App() -> impl IntoView {
                 ev.prevent_default();
                 focus.update(|v| *v = !*v);
             } else if ev.alt_key() && !ev.meta_key() && !ev.ctrl_key() && ev.key().eq_ignore_ascii_case("s") {
+                // Schedule unmounts the document pane. An edit in progress,
+                // or typing in a field, must keep the key.
+                if doc_editing.get_untracked() || editable_key_target(&ev) {
+                    return;
+                }
                 ev.prevent_default();
                 mode.set("schedule".into());
             } else if ev.key() == "Escape" {

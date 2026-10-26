@@ -63,8 +63,9 @@ type LiveHub struct {
 	entries map[string]*rootEntry
 	closeCh chan struct{}
 
-	spawn  RootSpawnFunc
-	resume RootResumeFunc
+	spawn      RootSpawnFunc
+	resume     RootResumeFunc
+	unattended RootSpawnFunc
 }
 
 // NewLiveHub creates an empty hub. Callers wire lifecycle functions.
@@ -192,14 +193,43 @@ func (h *LiveHub) Create(ctx context.Context) (RootCreateResult, error) {
 	return res, nil
 }
 
+// SetUnattendedSpawn installs the spawn used by clocks and triggers.
+// That callback must not carry the process --auto allow-all layer.
+// When unset, SpawnUnattended uses Spawn.
+func (h *LiveHub) SetUnattendedSpawn(fn RootSpawnFunc) {
+	if h == nil {
+		return
+	}
+	h.mu.Lock()
+	h.unattended = fn
+	h.mu.Unlock()
+}
+
 // Spawn registers a new root without changing the cockpit's active session.
-// Unattended callers (schedules, triggers) use this so a clock fire does not
-// steal the transcript the user is looking at.
 func (h *LiveHub) Spawn(ctx context.Context) (RootCreateResult, error) {
-	if h == nil || h.spawn == nil {
+	return h.spawnWith(ctx, false)
+}
+
+// SpawnUnattended registers a background root. Serve wires this to a spawn
+// that starts in plan and omits the process permission bypass.
+func (h *LiveHub) SpawnUnattended(ctx context.Context) (RootCreateResult, error) {
+	return h.spawnWith(ctx, true)
+}
+
+func (h *LiveHub) spawnWith(ctx context.Context, unattended bool) (RootCreateResult, error) {
+	if h == nil {
 		return RootCreateResult{}, errors.New("root creation unavailable")
 	}
-	rootID, err := h.spawn(ctx)
+	h.mu.RLock()
+	fn := h.spawn
+	if unattended && h.unattended != nil {
+		fn = h.unattended
+	}
+	h.mu.RUnlock()
+	if fn == nil {
+		return RootCreateResult{}, errors.New("root creation unavailable")
+	}
+	rootID, err := fn(ctx)
 	if err != nil {
 		return RootCreateResult{}, err
 	}

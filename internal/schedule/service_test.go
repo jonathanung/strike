@@ -243,6 +243,59 @@ func TestOverlapPolicies(t *testing.T) {
 	}
 }
 
+func TestQueuedHoldSurvivesMissedSkip(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Date(2026, 10, 26, 12, 0, 0, 0, time.UTC)
+	busy := true
+	start := &recordingStarter{}
+	svc, err := Open(dir, Hooks{
+		Now:     func() time.Time { return now },
+		Starter: start,
+		Busy:    func(string) bool { return busy },
+	}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := promptSpec("held", "1h")
+	spec.Overlap = OverlapQueue
+	spec.Missed = MissedSkip
+	sch, err := svc.Create(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = svc.store.Mutate(sch.ID, func(s *Schedule) error {
+		s.NextFire = now
+		s.LastStatus = StatusStarted
+		s.LastSessionID = "live"
+		s.Runs = []Run{{ID: "run_old", ScheduleID: s.ID, Status: StatusStarted, SessionID: "live"}}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.Tick(context.Background(), false)
+	held, _ := svc.Get(sch.ID)
+	if held.LastStatus != StatusQueued || !held.NextFire.Equal(now) {
+		t.Fatalf("hold %+v", held)
+	}
+	if held.Runs[0].Status != StatusStarted {
+		t.Fatalf("in-flight run closed while busy: %s", held.Runs[0].Status)
+	}
+	now = now.Add(3 * time.Hour)
+	busy = false
+	svc.Tick(context.Background(), false)
+	if start.count() != 1 {
+		t.Fatalf("held fire starts %d", start.count())
+	}
+	got, _ := svc.Get(sch.ID)
+	if got.LastStatus != StatusStarted || !got.NextFire.After(now) {
+		t.Fatalf("after hold %+v", got)
+	}
+	if len(got.Runs) != 2 || got.Runs[1].Status != StatusFinished {
+		t.Fatalf("previous run not closed: %+v", got.Runs)
+	}
+}
+
 func TestHeartbeatQuietUntilChange(t *testing.T) {
 	dir := t.TempDir()
 	work := t.TempDir()
@@ -410,6 +463,17 @@ func TestOneShotCompletesAndBadCronRejected(t *testing.T) {
 	got, _ := svc.Get(sch.ID)
 	if got.Enabled || !got.NextFire.IsZero() {
 		t.Fatalf("one-shot still armed: enabled %v next %s", got.Enabled, got.NextFire)
+	}
+	resumed, err := svc.SetEnabled(sch.ID, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resumed.Enabled || !resumed.NextFire.IsZero() {
+		t.Fatalf("resume rearmed a finished one-shot: enabled %v next %s", resumed.Enabled, resumed.NextFire)
+	}
+	svc.Tick(context.Background(), false)
+	if start.count() != 1 {
+		t.Fatalf("resume started again: %d", start.count())
 	}
 }
 

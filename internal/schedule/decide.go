@@ -48,6 +48,12 @@ func planTick(sch Schedule, in tickInput) tickResult {
 		return res
 	}
 
+	// A queued hold is a promise to run once when the previous session goes
+	// idle. It is not a missed slot: skip must not drop it after the interval
+	// has passed, and the calendar jumps forward only after that one fire.
+	if sch.LastStatus == StatusQueued && !in.Busy {
+		return fire(sch, in, res, true, false)
+	}
 	if in.Busy && sch.Overlap == OverlapQueue {
 		res.Action = "queue"
 		res.LastStatus = StatusQueued

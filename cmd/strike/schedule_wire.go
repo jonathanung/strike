@@ -9,6 +9,14 @@ import (
 	"github.com/jonathanung/strike/internal/schedule"
 )
 
+// processBypassEnabled reports whether a root may carry the process
+// --auto / --dangerously-skip-permissions allow-all layer. Unattended
+// roots (schedules, triggers) never may: that layer is not removed by
+// SetPermissionMode, so plan would still allow bash.
+func processBypassEnabled(processSkip, unattended bool) bool {
+	return processSkip && !unattended
+}
+
 // openScheduleService loads the clock next to the workspace registry.
 // A nil hub leaves fires unavailable (attach-only) but the registry still
 // edits. The starter is the same rootstart.Starter triggers should call.
