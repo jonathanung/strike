@@ -1102,6 +1102,58 @@
       ]
     },
     {
+      "type": "input.queued",
+      "go": "InputQueued",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "items",
+          "type": "array",
+          "elem": "object",
+          "fields": [
+            {
+              "name": "id",
+              "type": "string"
+            },
+            {
+              "name": "text",
+              "type": "string",
+              "omitEmpty": true
+            }
+          ]
+        }
+      ]
+    },
+    {
       "type": "turn.completed",
       "go": "TurnCompleted",
       "fields": [

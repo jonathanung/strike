@@ -91,6 +91,7 @@ additive fields on all of them.
 | `hook.matched` | `HookMatched` | Lifecycle hook fired (event/action/matcher/tool) |
 | `diagnostic.bundle` | `DiagnosticBundle` | Prompt/config diagnostic export payload |
 | `context.fit_warning` | `ContextFitWarning` | Context budget warn/critical |
+| `input.queued` | `InputQueued` | Pending `user.input` FIFO snapshot (`items` empty when clear). Wire 1.20+. Ops `input.queue_edit`, `input.queue_cancel`, `input.queue_reorder` mutate that FIFO |
 | `context.controls` | `ContextControlsSelected` | Exclude/pin context kinds |
 | `scheduler.queued` / `admitted` / `canceled` | `Scheduler*` | Admission pool wait/admit/cancel |
 | `tool.loop_detected` / `tool.retrying` | `ToolLoopDetected` / `ToolRetrying` | Tool reliability signals |
@@ -177,9 +178,9 @@ Older readers ignore the new optional fields and still decode inline `data` on l
 
 ## Session status vocabulary (1.19+)
 
-Not a transcript event. `protocol.Version` is `1.19.0` because live status
-JSON gained optional fields and the daemon publishes a status board. Old
-session logs still decode. Unknown event types are unchanged.
+Not a transcript event. Live status JSON gained optional fields in `1.19.0`
+and the daemon publishes a status board. `input.queued` is the `1.20.0`
+transcript event. Old session logs still decode. Unknown event types are unchanged.
 
 Ids: `idle`, `running`, `waiting`, `blocked`, `failed`, `done`, `stopped`,
 `disconnected`. Aliases and tones live in

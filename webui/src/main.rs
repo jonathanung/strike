@@ -25,6 +25,7 @@ mod schedule;
 mod model;
 mod notify;
 mod onboarding;
+mod steer_queue;
 mod model_menu;
 mod model_menu_view;
 mod session_list;
@@ -569,6 +570,33 @@ fn transcript_matches(
     transcript_find::matches_for_lines(&rows, query)
 }
 
+fn note_steer(
+    transcript: RwSignal<Transcript>,
+    raw: &str,
+    notes: &impl Fn(steer_queue::LiveNote),
+) {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(raw) else {
+        return;
+    };
+    let typ = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
+    let data = v.get("data").cloned().unwrap_or(serde_json::Value::Null);
+    for note in steer_queue::notes_from(typ, &data) {
+        if let steer_queue::LiveNote::Steered { text, mode } = &note {
+            if mode != "queued_fallback" && !text.is_empty() {
+                let text = text.clone();
+                transcript.update(|t| {
+                    if let Some(msg) = t.messages.iter_mut().rev().find(|m| {
+                        m.role == crate::transcript::Role::You && (m.body == text || m.retry_text == text)
+                    }) {
+                        msg.badge = "steered".into();
+                    }
+                });
+            }
+        }
+        notes(note);
+    }
+}
+
 fn join_path(dir: &str, name: &str) -> String {
     if dir.is_empty() {
         name.to_string()
@@ -848,6 +876,13 @@ fn App() -> impl IntoView {
     let font_id = RwSignal::new(appearance::normalize_font(&load("strike.font")));
     let density_id = RwSignal::new(appearance::normalize_density(&load("strike.density")));
     let onboarded = RwSignal::new(load("strike.onboarded") == "1");
+    let queue_items = RwSignal::new(Vec::<steer_queue::QueueItem>::new());
+    let editing_id = RwSignal::new(String::new());
+    let edit_draft = RwSignal::new(String::new());
+    let steer_note = RwSignal::new(String::new());
+    let steer_mode = RwSignal::new(String::new());
+    let queue_note = RwSignal::new(String::new());
+    let hold_bypass = RwSignal::new(false);
     let live_busy = RwSignal::new(false);
     let live_busy_root = RwSignal::new(String::new());
     let side_tab = RwSignal::new("activity".to_string());
@@ -1195,6 +1230,13 @@ fn App() -> impl IntoView {
             tf_open.set(false);
             tf_query.set(String::new());
             tf_idx.set(0);
+            queue_items.set(Vec::new());
+            editing_id.set(String::new());
+            edit_draft.set(String::new());
+            steer_note.set(String::new());
+            steer_mode.set(String::new());
+            queue_note.set(String::new());
+            hold_bypass.set(false);
         } else if mobile::resume_after(cursor_fx.get(), false).is_some() {
             // Same session, known SSE cursor: keep the column and ask
             // the daemon for events after that offset.
@@ -1258,6 +1300,48 @@ fn App() -> impl IntoView {
                 if let Some(data) = ev.data().as_string() {
                     note_live_title(sessions_cb, roots_cb, &titled_root, &data);
                     transcript_cb.update(|t| t.apply_envelope(&data));
+                    let on_note = |note: steer_queue::LiveNote| match note {
+                        steer_queue::LiveNote::Queue(items) => {
+                            let editing = editing_id.get_untracked();
+                            if !steer_queue::editing_still_valid(&items, &editing) {
+                                editing_id.set(String::new());
+                            }
+                            queue_items.set(items);
+                            queue_note.set(String::new());
+                        }
+                        steer_queue::LiveNote::Steered { mode, .. } => {
+                            steer_mode.set(mode.clone());
+                            steer_note.set(steer_queue::steer_banner(&mode).to_string());
+                            queue_note.set(String::new());
+                        }
+                        steer_queue::LiveNote::TurnStarted => {
+                            live_busy.set(true);
+                            live_busy_root.set(active_root.get_untracked());
+                            if steer_mode.get_untracked() == "queued_fallback" {
+                                steer_note.set(String::new());
+                                steer_mode.set(String::new());
+                            }
+                        }
+                        steer_queue::LiveNote::TurnFinished => {
+                            live_busy.set(false);
+                            if context_fit.get_untracked() == "critical" {
+                                context_fit.set(String::new());
+                            }
+                            if steer_mode.get_untracked() != "queued_fallback" {
+                                steer_note.set(String::new());
+                                steer_mode.set(String::new());
+                            }
+                        }
+                        steer_queue::LiveNote::Usage { .. } | steer_queue::LiveNote::Fit { .. } => {}
+                        steer_queue::LiveNote::EngineError { message, .. } => {
+                            queue_note.set(message.clone());
+                            if message.contains("no active turn") {
+                                steer_note.set(String::new());
+                                steer_mode.set(String::new());
+                            }
+                        }
+                    };
+                    note_steer(transcript_cb, &data, &on_note);
                     apply_perm_notes(&data, asks_cb, perm_mode, audit_cb);
                     // Mirror into the ChatLine shape the side chat and the
                     // activity panel still consume.
@@ -1560,30 +1644,40 @@ fn App() -> impl IntoView {
                 &context_fit.get_untracked(),
             )
         };
-        if held.held {
+        if held.held && !hold_bypass.get_untracked() {
             model_note.set(held.hold_message);
             return false;
         }
+        hold_bypass.set(false);
         let root = active_root.get_untracked();
         if root.is_empty() {
             status.set("no live session yet".into());
             return false;
         }
-        let op = if session_busy(&root) && enter_mode.get_untracked() == "steer" {
-            "steer"
-        } else {
-            "user.input"
-        };
+        let op = steer_queue::send_op(
+            session_busy(&root),
+            &enter_mode.get_untracked(),
+            steer_queue::SendWhich::Primary,
+        );
+        queue_note.set(String::new());
+        if op == "steer" {
+            steer_note.set(steer_queue::STEER_WAITING.into());
+            steer_mode.set(String::new());
+        }
         let (b, t) = (base.get_untracked(), token.get_untracked());
         spawn_local(async move {
             if let Err(e) = post_op(&b, &t, &root, op, serde_json::json!({"text": text})).await {
+                if op == "steer" && steer_note.get_untracked() == steer_queue::STEER_WAITING {
+                    steer_note.set(String::new());
+                }
+                queue_note.set(format!("Send failed: {e}"));
                 status.set(format!("send failed: {e}"));
             }
         });
         true
     };
 
-    let send = move || {
+    let send = move |which: steer_queue::SendWhich| {
         // Context-hold gate (mirrors send_text): when the context fit is
         // critical/full, do not dispatch and do not clear the draft or
         // pending files, so a held submit never loses typed text. This
@@ -1602,10 +1696,11 @@ fn App() -> impl IntoView {
                 &context_fit.get_untracked(),
             )
         };
-        if held.held {
+        if held.held && !hold_bypass.get_untracked() {
             model_note.set(held.hold_message);
             return;
         }
+        hold_bypass.set(false);
         ac_open.set(false);
         plus_open.set(false);
         ac_force.set(String::new());
@@ -1627,11 +1722,12 @@ fn App() -> impl IntoView {
             status.set("no live session yet".into());
             return;
         }
-        let op = if session_busy(&root) && enter_mode.get_untracked() == "steer" {
-            "steer"
-        } else {
-            "user.input"
-        };
+        let op = steer_queue::send_op(session_busy(&root), &enter_mode.get_untracked(), which);
+        queue_note.set(String::new());
+        if op == "steer" {
+            steer_note.set(steer_queue::STEER_WAITING.into());
+            steer_mode.set(String::new());
+        }
         // Take the composer before the first await so a repeated Enter or a
         // second click cannot post the same attachments again.
         sending.set(true);
@@ -1704,12 +1800,51 @@ fn App() -> impl IntoView {
                     sending.set(false);
                 }
                 Err(err) => {
+                    if op == "steer" && steer_note.get_untracked() == steer_queue::STEER_WAITING {
+                        steer_note.set(String::new());
+                    }
+                    queue_note.set(format!("Send failed: {err}"));
                     status.set(format!("send failed: {err}"));
                     restore(updated, text);
                 }
             }
         });
     };
+
+    let stop_turn = move || {
+        let root = active_root.get_untracked();
+        if root.is_empty() || !session_busy(&root) {
+            return;
+        }
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            if let Err(e) = post_op(&b, &t, &root, "interrupt", serde_json::json!({})).await {
+                queue_note.set(format!("Stop failed: {e}"));
+            }
+        });
+    };
+
+    let post_queue = move |typ: &'static str, data: serde_json::Value| {
+        let root = active_root.get_untracked();
+        if root.is_empty() {
+            return;
+        }
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            if let Err(e) = post_op(&b, &t, &root, typ, data).await {
+                queue_note.set(format!("Queue update failed: {e}"));
+            }
+        });
+    };
+
+    let stop_for_palette = stop_turn.clone();
+    shell::bind(
+        "stop-turn",
+        Rc::new(move |_args: &str| {
+            stop_for_palette();
+            Ok(())
+        }),
+    );
 
     let insert_mention = move |path: String| {
         draft.update(|d| {
@@ -3470,10 +3605,16 @@ fn App() -> impl IntoView {
                             let ctx = active_context(&catalog.get(), &provider_name.get(), &model_name.get());
                             context_view(context_used.get(), context_limit.get(), ctx, &context_fit.get()).held
                         }>
-                            <p class="model-hold" role="status" data-context-hold="true">{move || {
-                                let ctx = active_context(&catalog.get(), &provider_name.get(), &model_name.get());
-                                context_view(context_used.get(), context_limit.get(), ctx, &context_fit.get()).hold_message
-                            }}</p>
+                            <div class="steer-hold" role="status" data-context-hold="true">
+                                <p class="model-hold">{move || {
+                                    let ctx = active_context(&catalog.get(), &provider_name.get(), &model_name.get());
+                                    context_view(context_used.get(), context_limit.get(), ctx, &context_fit.get()).hold_message
+                                }}</p>
+                                <button type="button" class="secondary" on:click=move |_| {
+                                    hold_bypass.set(true);
+                                    send(steer_queue::SendWhich::Primary);
+                                }>"Send anyway"</button>
+                            </div>
                         </Show>
                         <Show when=move || memory_menu.get()>
                             <div class="menu" role="menu" aria-label="Memory mode">
@@ -3538,7 +3679,78 @@ fn App() -> impl IntoView {
                                 }}
                             </div>
                         </Show>
-                        <form on:submit=move |ev| { ev.prevent_default(); send(); }>
+                        <div class="steer-queue" id="steer-queue">
+                            <Show when=move || !steer_note.get().is_empty()>
+                                <p class="steer-note" role="status">{move || steer_note.get()}</p>
+                            </Show>
+                            <Show when=move || !queue_note.get().is_empty()>
+                                <p class="steer-error" role="alert">{move || queue_note.get()}</p>
+                            </Show>
+                            <Show when=move || !queue_items.get().is_empty()>
+                                <ol class="queue-list" aria-label="Queued messages">
+                                    {move || queue_items.get().into_iter().enumerate().map(|(i, item)| {
+                                        let id = item.id.clone();
+                                        let id_for_when = id.clone();
+                                        let id_for_fallback = id.clone();
+                                        let id_cancel = id.clone();
+                                        let id_up = id.clone();
+                                        let id_down = id.clone();
+                                        let text_for_edit = item.text.clone();
+                                        let can_up = steer_queue::moved_ids(&queue_items.get(), &id, -1).is_some();
+                                        let can_down = steer_queue::moved_ids(&queue_items.get(), &id, 1).is_some();
+                                        let preview = steer_queue::preview(&text_for_edit);
+                                        view! {
+                                            <li>
+                                                <span class="queue-index">{(i + 1).to_string()}</span>
+                                                <Show when=move || editing_id.get() == id.clone() fallback=move || view! { <span class="queue-text">{preview.clone()}</span> }>
+                                                    <input class="queue-edit" prop:value=move || edit_draft.get() on:input=move |ev| edit_draft.set(event_target_value(&ev)) on:keydown=move |ev: web_sys::KeyboardEvent| {
+                                                        if ev.key() == "Enter" {
+                                                            ev.prevent_default();
+                                                            let id = editing_id.get_untracked();
+                                                            let text = edit_draft.get_untracked();
+                                                            editing_id.set(String::new());
+                                                            post_queue("input.queue_edit", serde_json::json!({"id": id, "text": text}));
+                                                        } else if ev.key() == "Escape" {
+                                                            ev.prevent_default();
+                                                            ev.stop_propagation();
+                                                            editing_id.set(String::new());
+                                                        }
+                                                    } />
+                                                </Show>
+                                                <span class="queue-actions">
+                                                    <Show when=move || editing_id.get() == id_for_when.clone() fallback=move || {
+                                                        let id_edit = id_for_fallback.clone();
+                                                        let text = text_for_edit.clone();
+                                                        view! { <button type="button" class="secondary" on:click=move |_| { editing_id.set(id_edit.clone()); edit_draft.set(text.clone()); }>"Edit"</button> }
+                                                    }>
+                                                        <button type="button" class="secondary" on:click=move |_| {
+                                                            let id = editing_id.get_untracked();
+                                                            let text = edit_draft.get_untracked();
+                                                            editing_id.set(String::new());
+                                                            post_queue("input.queue_edit", serde_json::json!({"id": id, "text": text}));
+                                                        }>"Save"</button>
+                                                    </Show>
+                                                    <button type="button" class="secondary" disabled=move || !can_up on:click=move |_| {
+                                                        if let Some(ids) = steer_queue::moved_ids(&queue_items.get_untracked(), &id_up, -1) {
+                                                            post_queue("input.queue_reorder", serde_json::json!({"ids": ids}));
+                                                        }
+                                                    }>"Up"</button>
+                                                    <button type="button" class="secondary" disabled=move || !can_down on:click=move |_| {
+                                                        if let Some(ids) = steer_queue::moved_ids(&queue_items.get_untracked(), &id_down, 1) {
+                                                            post_queue("input.queue_reorder", serde_json::json!({"ids": ids}));
+                                                        }
+                                                    }>"Down"</button>
+                                                    <button type="button" class="secondary" on:click=move |_| {
+                                                        post_queue("input.queue_cancel", serde_json::json!({"id": id_cancel.clone()}));
+                                                    }>"Cancel"</button>
+                                                </span>
+                                            </li>
+                                        }
+                                    }).collect_view()}
+                                </ol>
+                            </Show>
+                        </div>
+                        <form on:submit=move |ev| { ev.prevent_default(); send(steer_queue::SendWhich::Primary); }>
                             <Show when=move || !pending_files.get().is_empty()>
                                 <div class="attach-row">
                                     {move || pending_files.get().into_iter().map(|file| {
@@ -3584,6 +3796,7 @@ fn App() -> impl IntoView {
                                 }
                             />
                             <textarea
+                                id="composer-input"
                                 placeholder="Message this session"
                                 prop:value=move || draft.get()
                                 on:input=move |ev| {
@@ -3644,7 +3857,34 @@ fn App() -> impl IntoView {
                                         // Phone keyboards use Enter for a newline. Send is the button.
                                         if !mobile::is_phone() {
                                             ev.prevent_default();
-                                            send();
+                                            if ev.alt_key() && !ev.ctrl_key() && !ev.meta_key() {
+                                                hold_bypass.set(true);
+                                                send(steer_queue::SendWhich::Primary);
+                                            } else if ev.ctrl_key() || ev.meta_key() {
+                                                send(steer_queue::SendWhich::Alternate);
+                                            } else {
+                                                send(steer_queue::SendWhich::Primary);
+                                            }
+                                        }
+                                    } else if ev.key() == "Escape"
+                                        && draft.get_untracked().trim().is_empty()
+                                        && editing_id.get_untracked().is_empty()
+                                    {
+                                        let root = active_root.get_untracked();
+                                        if session_busy(&root)
+                                            && !mode_menu.get_untracked()
+                                            && !model_menu.get_untracked()
+                                            && !memory_menu.get_untracked()
+                                        {
+                                            ev.prevent_default();
+                                            ev.stop_propagation();
+                                            stop_turn();
+                                        }
+                                    } else if ev.key() == "Backspace" && draft.get_untracked().is_empty() {
+                                        if let Some(item) = queue_items.get_untracked().last().cloned() {
+                                            ev.prevent_default();
+                                            draft.set(item.text);
+                                            post_queue("input.queue_cancel", serde_json::json!({"id": item.id}));
                                         }
                                     }
                                 }
@@ -3658,7 +3898,7 @@ fn App() -> impl IntoView {
                                         }
                                     }
                                 }
-></textarea>
+                            ></textarea>
                             <div class="composer-bar">
                                 <div class="composer-chips">
                                 <button type="button" class="chip plus" aria-label="Composer actions" data-composer-triggers="plus-button" on:click=move |_| {
@@ -3740,13 +3980,23 @@ fn App() -> impl IntoView {
                                     memory_menu.update(|v| *v = !*v);
                                 }>{move || format!("Memory · {}", memory_mode_label(&memory_mode.get()))}</button>
                                 <button type="button" class=move || if side_open.get() { "chip on side-chat-open-composer" } else { "chip side-chat-open-composer" } on:click=move |_| open_side(String::new(), String::new())>"Side chat"</button>
-                                </div>
-                                <button type="button" class=move || if enter_mode.get() == "steer" { "chip on" } else { "chip" } on:click=move |_| set_enter("steer".into())>"Steer"</button>
-                                <button type="button" class=move || if enter_mode.get() == "queue" { "chip on" } else { "chip" } on:click=move |_| set_enter("queue".into())>"Queue"</button>
-                                <button class="primary send" type="submit" disabled=move || {
+                                <span class="context-meter">{move || {
                                     let ctx = active_context(&catalog.get(), &provider_name.get(), &model_name.get());
-                                    context_view(context_used.get(), context_limit.get(), ctx, &context_fit.get()).held
-                                }>"Send"</button>
+                                    let view = context_view(context_used.get(), context_limit.get(), ctx, &context_fit.get());
+                                    if view.limit <= 0 { String::new() } else { view.summary }
+                                }}</span>
+                                </div>
+                                <div class="steer-actions">
+                                    <button type="button" title="While a turn is running, the send button steers that turn" aria-pressed=move || if enter_mode.get() == "steer" { "true" } else { "false" } class=move || if enter_mode.get() == "steer" { "chip on" } else { "chip" } on:click=move |_| set_enter("steer".into())>"Steer"</button>
+                                    <button type="button" title="While a turn is running, the send button waits until the turn finishes" aria-pressed=move || if enter_mode.get() == "queue" { "true" } else { "false" } class=move || if enter_mode.get() == "queue" { "chip on" } else { "chip" } on:click=move |_| set_enter("queue".into())>"Queue"</button>
+                                    <Show when=move || session_busy_now.get()>
+                                        <button type="button" id="stop-turn" class="secondary" title="Stop the running turn (Escape when the draft is empty)" on:click=move |_| stop_turn()>"Stop"</button>
+                                    </Show>
+                                    <button id="send-primary" class="primary send" type="submit" disabled=move || {
+                                        let ctx = active_context(&catalog.get(), &provider_name.get(), &model_name.get());
+                                        context_view(context_used.get(), context_limit.get(), ctx, &context_fit.get()).held
+                                    }>{move || steer_queue::primary_label(session_busy_now.get(), &enter_mode.get())}</button>
+                                </div>
                             </div>
                         </form>
                         <Show when=move || !model_note.get().is_empty() && !model_menu.get()>
@@ -3757,7 +4007,7 @@ fn App() -> impl IntoView {
                             let pending = transcript.with(|t| t.asks.len());
                             let custom = trigger_status(&note, pending);
                             if custom.is_empty() {
-                                "Queue waits out the turn. Steer joins a running turn. ! runs a shell after approval. @file, /command, and $skill expand on send.".into()
+                                "Enter follows Steer or Queue while a turn runs. Ctrl+Enter does the other one. Escape stops the turn when the draft is empty. On a phone, Enter inserts a line and the button sends. ! runs a shell after approval. @file, /command, and $skill expand on send.".into()
                             } else {
                                 custom
                             }

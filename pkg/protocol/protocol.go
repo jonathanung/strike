@@ -382,6 +382,25 @@ type Steer struct {
 	TurnID    string            `json:"turnId,omitempty"`
 }
 
+// InputQueueEdit replaces the text of one pending user-input item. The id
+// comes from InputQueued. Empty text is rejected when the item has no images;
+// cancel the item to remove it. Images already on the item are kept.
+type InputQueueEdit struct {
+	ID   string `json:"id"`
+	Text string `json:"text"`
+}
+
+// InputQueueCancel removes one pending user-input item.
+type InputQueueCancel struct {
+	ID string `json:"id"`
+}
+
+// InputQueueReorder sets the pending FIFO. IDs must list every current item
+// once. The engine does not fill in a position the client omitted.
+type InputQueueReorder struct {
+	IDs []string `json:"ids"`
+}
+
 // SelectModel switches the active provider (and optionally model). An empty
 // Model selects the provider's default. Rejected while a turn is running.
 type SelectModel struct {
@@ -491,6 +510,9 @@ func (PermissionReply) isOp()         {}
 func (QuestionReply) isOp()           {}
 func (Interrupt) isOp()               {}
 func (Steer) isOp()                   {}
+func (InputQueueEdit) isOp()          {}
+func (InputQueueCancel) isOp()        {}
+func (InputQueueReorder) isOp()       {}
 func (SelectModel) isOp()             {}
 func (SelectAgent) isOp()             {}
 func (SetEffort) isOp()               {}
@@ -1360,6 +1382,20 @@ type TurnSteered struct {
 	TargetTurnID string `json:"targetTurnId,omitempty"`
 }
 
+// InputQueueItem is one user.input waiting for the active turn to finish.
+type InputQueueItem struct {
+	ID   string `json:"id"`
+	Text string `json:"text,omitempty"`
+}
+
+// InputQueued is the full pending user-input FIFO after a change: enqueue,
+// drain, edit, cancel, reorder, steer queued-fallback, or a budget drop.
+// Items is empty when the queue is clear. Replay uses the latest snapshot.
+type InputQueued struct {
+	Correlation
+	Items []InputQueueItem `json:"items"`
+}
+
 type TurnCompleted struct {
 	Correlation
 	StopReason string `json:"stopReason,omitempty"`
@@ -2068,6 +2104,7 @@ func (AdmissionDecided) isEvent()        {}
 func (QuestionAsked) isEvent()           {}
 func (QuestionResolved) isEvent()        {}
 func (TurnSteered) isEvent()             {}
+func (InputQueued) isEvent()             {}
 func (TurnCompleted) isEvent()           {}
 func (VerificationStarted) isEvent()     {}
 func (VerificationCompleted) isEvent()   {}

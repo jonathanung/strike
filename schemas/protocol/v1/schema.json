@@ -1780,6 +1780,102 @@
       ],
       "type": "object"
     },
+    "InputQueueCancel": {
+      "additionalProperties": true,
+      "description": "InputQueueCancel removes one pending user-input item.",
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "InputQueueEdit": {
+      "additionalProperties": true,
+      "description": "InputQueueEdit replaces the text of one pending user-input item. The id comes from InputQueued. Empty text is rejected when the item has no images; cancel the item to remove it. Images already on the item are kept.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "text"
+      ],
+      "type": "object"
+    },
+    "InputQueueItem": {
+      "additionalProperties": true,
+      "description": "InputQueueItem is one user.input waiting for the active turn to finish.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "InputQueueReorder": {
+      "additionalProperties": true,
+      "description": "InputQueueReorder sets the pending FIFO. IDs must list every current item once. The engine does not fill in a position the client omitted.",
+      "properties": {
+        "ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "ids"
+      ],
+      "type": "object"
+    },
+    "InputQueued": {
+      "additionalProperties": true,
+      "description": "InputQueued is the full pending user-input FIFO after a change: enqueue, drain, edit, cancel, reorder, steer queued-fallback, or a budget drop. Items is empty when the queue is clear. Replay uses the latest snapshot.",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/InputQueueItem"
+          },
+          "type": "array"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "type": "object"
+    },
     "InspectDiagnosticBundle": {
       "additionalProperties": true,
       "description": "InspectDiagnosticBundle requests a versioned prompt/config diagnostic bundle (layer map + effective dials + digests). Prefer the last Stream composition when one exists; otherwise the current composition. Never carries raw API keys — previews and paths are redacted by the engine. See pkg/diag for the export document schema.",
@@ -2293,6 +2389,30 @@
             },
             "type": {
               "const": "hook.matched"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/InputQueued"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "input.queued"
             },
             "v": {
               "type": "string"
@@ -3338,6 +3458,60 @@
             },
             "type": {
               "const": "files.changed"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/InputQueueCancel"
+            },
+            "type": {
+              "const": "input.queue_cancel"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/InputQueueEdit"
+            },
+            "type": {
+              "const": "input.queue_edit"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/InputQueueReorder"
+            },
+            "type": {
+              "const": "input.queue_reorder"
             },
             "v": {
               "type": "string"
@@ -6722,10 +6896,10 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "Forward-compatible Op/Event wire schema generated from pkg/protocol. The root schema is one event envelope: unknown type strings and unknown fields are valid. $defs/KnownEvent lists types this version writes. $defs/KnownOp is fail-closed: unknown op type strings are not valid. required is the writer contract; readers treat missing fields as zero values. See schemas/protocol/v1/COMPAT.md.",
   "title": "Strike event envelope",
-  "x-strike-event-count": 62,
+  "x-strike-event-count": 63,
   "x-strike-legacy-version": "1.0.0",
-  "x-strike-op-count": 27,
-  "x-strike-protocol-version": "1.19.0",
+  "x-strike-op-count": 30,
+  "x-strike-protocol-version": "1.20.0",
   "x-strike-unknown-event": "valid",
   "x-strike-unknown-field": "ignore",
   "x-strike-unknown-op": "reject"

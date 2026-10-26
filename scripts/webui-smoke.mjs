@@ -24,6 +24,11 @@ const home = await mkdtemp(join(tmpdir(), "strike-webui-smoke-"));
 const chromeData = await mkdtemp(join(tmpdir(), "strike-webui-chrome-"));
 const chromePort = 9222 + (process.pid % 200);
 
+// Bash is Ask by default. This VM and CI have no bwrap, so a `run sleep`
+// ends immediately unless degrade is on before the daemon reads config.
+await mkdir(join(home, ".strike"), { recursive: true });
+await writeFile(join(home, ".strike", "config"), '{"sandboxAllowDegrade":true}\n');
+
 // Render/boot waits get a deadline sized for shared CI runners; shorter
 // interactive steps get a smaller one. Both are overridable for local runs.
 const WAIT_MS = Number(process.env.STRIKE_SMOKE_WAIT_MS || 30000);
@@ -2269,6 +2274,212 @@ try {
     textProbe((body) => body.includes("GitHub triage")),
     { timeout: WAIT_MS, interval: 250 },
   );
+
+  // Steer / queue. Cookie handoff authenticates EventSource; the bearer in
+  // localStorage authenticates JSON ops. A `run sleep` holds the turn so
+  // Enter queues, the other send steers, and Escape interrupts.
+  await evaluate(`localStorage.setItem("strike.token", ${JSON.stringify(token)})`);
+  await send("Page.navigate", {
+    url: `http://127.0.0.1:${port}/?token=${encodeURIComponent(token)}`,
+  });
+
+  const setDraft = (value) =>
+    evaluate(`(() => {
+      const el = document.querySelector("#composer-input");
+      if (!el) return JSON.stringify({ ok: false });
+      const proto = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value");
+      proto.set.call(el, ${JSON.stringify(value)});
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      return JSON.stringify({ ok: true });
+    })()`);
+  const press = (key, extra) =>
+    evaluate(`(() => {
+      const el = document.querySelector("#composer-input");
+      if (!el) return JSON.stringify({ ok: false });
+      el.dispatchEvent(new KeyboardEvent("keydown", Object.assign({ key: ${JSON.stringify(key)}, bubbles: true, cancelable: true }, ${JSON.stringify(extra || {})})));
+      return JSON.stringify({ ok: true, draft: el.value });
+    })()`);
+
+  await waitFor(
+    "authenticated composer",
+    async () => {
+      const raw = await evaluate(`(() => JSON.stringify({
+        ok: !!document.querySelector("#composer-input") && !!document.querySelector("#send-primary") && (document.body.innerText || "").includes("strike "),
+        text: (document.body.innerText || "").slice(0, 240)
+      }))()`);
+      return JSON.parse(raw || "{}");
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await evaluate(`(() => {
+    const chip = [...document.querySelectorAll(".composer-bar .chip")].find((b) => (b.innerText || "").includes("Approval"));
+    if (chip) chip.click();
+    return "ok";
+  })()`);
+  await delay(200);
+  await evaluate(`(() => {
+    const btn = [...document.querySelectorAll("button")].find((b) => (b.innerText || "").trim().startsWith("Yolo"));
+    if (btn) btn.click();
+    return "ok";
+  })()`);
+  await delay(200);
+  await evaluate(`(() => {
+    const btn = [...document.querySelectorAll(".approvals-dialog button")].find((b) => (b.innerText || "").trim() === "Use Yolo");
+    if (btn) btn.click();
+    return "ok";
+  })()`);
+  await waitFor(
+    "yolo approval",
+    async () => {
+      const body = (await evaluate(`document.body ? document.body.innerText : ""`)) || "";
+      return { ok: body.includes("Approval · Yolo"), body: body.slice(0, 240) };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+
+  await setDraft("run sleep 30");
+  await press("Enter");
+  await waitFor(
+    "running turn",
+    async () => {
+      const raw = await evaluate(`(() => JSON.stringify({
+        ok: !!document.querySelector("#stop-turn") && document.querySelector("#send-primary")?.innerText === "Queue"
+      }))()`);
+      return JSON.parse(raw || "{}");
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+
+  await setDraft("alpha later");
+  await press("Enter");
+  await setDraft("beta later");
+  await press("Enter");
+  await waitFor(
+    "queued messages",
+    async () => {
+      const raw = await evaluate(`(() => {
+        const texts = [...document.querySelectorAll(".queue-text")].map((n) => n.textContent);
+        return JSON.stringify({ ok: texts[0] === "alpha later" && texts[1] === "beta later", texts });
+      })()`);
+      return JSON.parse(raw || "{}");
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await evaluate(`(() => {
+    const row = [...document.querySelectorAll(".queue-list li")].find((r) => r.innerText.includes("beta later"));
+    const up = row && [...row.querySelectorAll("button")].find((b) => b.textContent === "Up");
+    if (up) up.click();
+    return "ok";
+  })()`);
+  await waitFor(
+    "reordered queue",
+    async () => {
+      const raw = await evaluate(`(() => {
+        const texts = [...document.querySelectorAll(".queue-text")].map((n) => n.textContent);
+        return JSON.stringify({ ok: texts[0] === "beta later" && texts[1] === "alpha later", texts });
+      })()`);
+      return JSON.parse(raw || "{}");
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await evaluate(`(() => {
+    const row = document.querySelector(".queue-list li");
+    const edit = row && [...row.querySelectorAll("button")].find((b) => b.textContent === "Edit");
+    if (edit) edit.click();
+    return "ok";
+  })()`);
+  await waitFor(
+    "queue edit field",
+    async () => ({ ok: !!(await evaluate(`!!document.querySelector(".queue-edit")`)) }),
+    { timeout: STEP_MS, interval: 150 },
+  );
+  await evaluate(`(() => {
+    const el = document.querySelector(".queue-edit");
+    const proto = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value");
+    proto.set.call(el, "beta edited");
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    const save = [...document.querySelectorAll(".queue-actions button")].find((b) => b.textContent === "Save");
+    if (save) save.click();
+    return "ok";
+  })()`);
+  await waitFor(
+    "edited queue",
+    async () => {
+      const raw = await evaluate(`(() => {
+        const texts = [...document.querySelectorAll(".queue-text")].map((n) => n.textContent);
+        return JSON.stringify({ ok: texts.includes("beta edited"), texts });
+      })()`);
+      return JSON.parse(raw || "{}");
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await evaluate(`(() => {
+    const row = [...document.querySelectorAll(".queue-list li")].find((r) => r.innerText.includes("alpha later"));
+    const cancel = row && [...row.querySelectorAll("button")].find((b) => b.textContent === "Cancel");
+    if (cancel) cancel.click();
+    return "ok";
+  })()`);
+  await waitFor(
+    "cancelled queue item",
+    async () => {
+      const raw = await evaluate(`(() => {
+        const texts = [...document.querySelectorAll(".queue-text")].map((n) => n.textContent);
+        return JSON.stringify({ ok: texts.includes("beta edited") && !texts.includes("alpha later"), texts });
+      })()`);
+      return JSON.parse(raw || "{}");
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+
+  await setDraft("steer left");
+  await evaluate(`(() => {
+    const mode = [...document.querySelectorAll(".steer-actions .chip")].find((b) => (b.textContent || "").trim() === "Steer");
+    if (mode) mode.click();
+    const send = document.querySelector("#send-primary");
+    if (send) send.click();
+    return !!(mode && send);
+  })()`);
+  await waitFor(
+    "steer indicator",
+    async () => {
+      const raw = await evaluate(`(() => {
+        const note = document.querySelector(".steer-note");
+        const text = note ? note.textContent : "";
+        return JSON.stringify({ ok: /steer|queued/i.test(text), text });
+      })()`);
+      return JSON.parse(raw || "{}");
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+
+  await press("Escape");
+  const idleProbe = async () => {
+    const raw = await evaluate(`(() => {
+      const stop = document.querySelector("#stop-turn");
+      const queued = document.querySelector(".queue-list");
+      return JSON.stringify({ ok: !stop && !queued, busy: !!stop, queued: !!queued });
+    })()`);
+    return JSON.parse(raw || "{}");
+  };
+  await waitFor("turn stopped", idleProbe, { timeout: STEP_MS, interval: 200 });
+  await delay(700);
+  await waitFor("still idle", idleProbe, { timeout: STEP_MS, interval: 200 });
+
+  await setDraft("too soon");
+  await press("Enter", { ctrlKey: true });
+  await waitFor(
+    "steer while idle",
+    async () => {
+      const raw = await evaluate(`(() => {
+        const err = document.querySelector(".steer-error");
+        const text = err ? err.textContent : "";
+        return JSON.stringify({ ok: text.includes("no active turn"), text });
+      })()`);
+      return JSON.parse(raw || "{}");
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+
   console.log("webui-smoke ok");
 } catch (err) {
   console.error(String(err));

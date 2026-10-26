@@ -1,0 +1,104 @@
+/* feature:steer-queue begin */
+.steer-queue {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.steer-hold,
+.steer-note,
+.steer-error {
+  margin: 0;
+  padding: 8px 10px;
+  border: var(--border-width) solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--ground);
+  color: var(--ink);
+  font-size: var(--type-sm);
+  line-height: 1.4;
+  box-shadow: var(--shadow);
+}
+.steer-hold {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  border-color: var(--sharp);
+}
+.steer-hold p { margin: 0; }
+.steer-error { border-color: var(--signal); color: var(--signal); }
+.steer-note { border-color: var(--sharp); }
+.context-meter {
+  color: var(--muted);
+  font-size: var(--type-sm);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.queue-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.queue-list li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 36px;
+  padding: 4px 8px;
+  border: var(--border-width) solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  box-shadow: 3px 3px 0 var(--ink);
+}
+.queue-index {
+  color: var(--muted);
+  font-size: var(--type-sm);
+  font-variant-numeric: tabular-nums;
+  width: 1.2em;
+  flex: 0 0 auto;
+}
+.queue-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--type-sm);
+}
+.queue-actions { display: flex; gap: 4px; flex: 0 0 auto; }
+.queue-actions button { height: 28px; padding: 0 8px; font-size: var(--type-sm); }
+.queue-edit {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  background: var(--ground);
+  color: var(--ink);
+  border: var(--border-width) solid var(--ink);
+  border-radius: var(--radius-sm);
+  padding: 0 8px;
+}
+.steer-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+  padding: 0 4px 4px 0;
+}
+.steer-actions .send { margin-left: 0; }
+@media (max-width: 720px) {
+  .steer-hold { flex-wrap: wrap; }
+  .queue-list li { flex-wrap: wrap; align-items: stretch; }
+  .queue-text { flex-basis: calc(100% - 2em); }
+  .queue-actions { flex-basis: 100%; }
+  .queue-actions button { flex: 1 1 0; min-height: 44px; height: 44px; }
+  .steer-actions { gap: 4px; }
+  .steer-actions .chip,
+  .steer-actions .send,
+  .steer-actions #stop-turn {
+    min-height: 44px;
+  }
+}
+/* feature:steer-queue end */

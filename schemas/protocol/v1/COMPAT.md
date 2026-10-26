@@ -2,7 +2,7 @@
 
 Generated from `pkg/protocol`. Do not edit by hand. Regenerate with `make protocol-schema`.
 
-- Protocol version: `1.19.0`
+- Protocol version: `1.20.0`
 - Legacy version when an envelope omits `v`: `1.0.0`
 - JSON Schema: [`schema.json`](schema.json) (`https://raw.githubusercontent.com/jonathanung/strike/main/schemas/protocol/v1/schema.json`)
 - Rust types: `webui/protocol-schema` (crate `protocol-schema`)
@@ -17,7 +17,7 @@ Generated from `pkg/protocol`. Do not edit by hand. Regenerate with `make protoc
 - **Minor** `protocol.Version` bumps add types or optional fields. **Major** bumps rename, remove, or change meaning. **Patch** bumps do not change encoded JSON.
 - Nil Go slices and maps encode as JSON `null`. Readers treat `null` like an empty list or map.
 
-## Event types (62)
+## Event types (63)
 
 - `admission.decided` → `AdmissionDecided`
 - `agent.contract.timeout` → `AgentContractTimeout`
@@ -40,6 +40,7 @@ Generated from `pkg/protocol`. Do not edit by hand. Regenerate with `make protoc
 - `files.invalidated` → `FilesInvalidated`
 - `harness.progress` → `HarnessProgress`
 - `hook.matched` → `HookMatched`
+- `input.queued` → `InputQueued`
 - `ledger.updated` → `LedgerUpdated`
 - `model.selected` → `ModelSelected`
 - `path.overlap` → `PathOverlap`
@@ -82,11 +83,14 @@ Generated from `pkg/protocol`. Do not edit by hand. Regenerate with `make protoc
 - `wait.resolved` → `WaitResolved`
 - `wait.started` → `WaitStarted`
 
-## Op types (27)
+## Op types (30)
 
 - `compact` → `Compact`
 - `context.controls` → `SetContextControls`
 - `files.changed` → `FilesChanged`
+- `input.queue_cancel` → `InputQueueCancel`
+- `input.queue_edit` → `InputQueueEdit`
+- `input.queue_reorder` → `InputQueueReorder`
 - `inspect.diagnostic` → `InspectDiagnosticBundle`
 - `inspect.prompt` → `InspectEffectivePrompt`
 - `interrupt` → `Interrupt`

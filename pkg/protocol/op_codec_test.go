@@ -2,12 +2,17 @@ package protocol
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 )
 
 func TestWrapOpDecodeRoundTrip(t *testing.T) {
 	cases := []Op{
 		UserInput{Text: "hi"},
+		Steer{Text: "redirect", SessionID: "s1"},
+		InputQueueEdit{ID: "q1", Text: "rewritten"},
+		InputQueueCancel{ID: "q1"},
+		InputQueueReorder{IDs: []string{"q2", "q1"}},
 		PermissionReply{RequestID: "p1", Decision: DecisionOnce},
 		QuestionReply{RequestID: "q1", Answers: []string{"a"}},
 		Interrupt{},
@@ -57,6 +62,9 @@ func TestWrapOpDecodeRoundTrip(t *testing.T) {
 		}
 		if opType(got) != opType(op) {
 			t.Fatalf("type %T -> %T", op, got)
+		}
+		if !reflect.DeepEqual(got, op) {
+			t.Fatalf("Decode %q = %#v, want %#v", env.Type, got, op)
 		}
 	}
 }
