@@ -64,6 +64,7 @@ try {
     video: opt.video,
     goldens: opt.goldens,
     updateGoldens: opt.updateGoldens,
+    suite: opt.suite,
     controls: {
       stop: async () => {
         await stopStrike(strike);

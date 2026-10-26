@@ -332,6 +332,76 @@ try {
     token,
     repoDir: process.cwd(),
   });
+  await send("Runtime.evaluate", {
+    expression: `localStorage.setItem("strike.token", ${JSON.stringify(token)})`,
+  });
+  await send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
+  const goalCheck = async (expression, ready) => {
+    let body = "";
+    for (let i = 0; i < 40; i++) {
+      const ev = await send("Runtime.evaluate", { expression, returnByValue: true });
+      body = ev.result?.result?.value || "";
+      if (ready(body)) return body;
+      await delay(250);
+    }
+    throw new Error(`goals check timed out: ${body.slice(0, 400)}`);
+  };
+  await goalCheck(
+    `document.body ? document.body.innerText : ""`,
+    (body) => body.includes("Run a command") && body.includes("Goals"),
+  );
+  await send("Runtime.evaluate", {
+    expression: `document.querySelector('[data-view="goals"]').click()`,
+  });
+  await goalCheck(
+    `document.body ? document.body.innerText : ""`,
+    (body) => body.includes("Verification command") && body.includes("Autopilot"),
+  );
+  await send("Runtime.evaluate", {
+    expression: `(() => {
+      const set = (id, value) => {
+        const el = document.getElementById(id);
+        el.value = value;
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+      };
+      set("goals-desc", "smoke pass");
+      set("goals-verify", "true");
+      set("goals-turns", "8");
+      set("goals-fails", "3");
+      document.getElementById("goals-run").click();
+      return "sent";
+    })()`,
+  });
+  await goalCheck(
+    `document.body ? document.body.innerText : ""`,
+    (body) => body.includes("smoke pass") && body.includes("Done"),
+  );
+  await send("Runtime.evaluate", {
+    expression: `document.querySelector(".goals-list .secondary").click()`,
+  });
+  await goalCheck(
+    `document.getElementById("goals-desc") ? "form" : ""`,
+    (body) => body === "form",
+  );
+  await send("Runtime.evaluate", {
+    expression: `(() => {
+      const set = (id, value) => {
+        const el = document.getElementById(id);
+        el.value = value;
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+      };
+      set("goals-desc", "smoke fail");
+      set("goals-verify", "false");
+      set("goals-turns", "20");
+      set("goals-fails", "2");
+      document.getElementById("goals-run").click();
+      return "sent";
+    })()`,
+  });
+  await goalCheck(
+    `document.body ? document.body.innerText : ""`,
+    (body) => body.includes("Needs you") && body.includes("verification failed"),
+  );
 
   await send("Runtime.evaluate", {
     expression: `localStorage.setItem("strike.token", ${JSON.stringify(token)})`,

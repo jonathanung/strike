@@ -11,8 +11,10 @@ import (
 type GuardResult struct {
 	Tripped bool
 	Reason  string
-	// NextStatus is applied when Tripped (done|failed|aborted).
+	// NextStatus is applied when Tripped (done|failed|aborted|blocked).
 	NextStatus Status
+	// Escalation is "human" when the stop should be resumed by a person.
+	Escalation string
 }
 
 // GuardContext is snapshot input for ordered termination guards.
@@ -26,8 +28,12 @@ type GuardContext struct {
 }
 
 // CheckGuards runs termination guards in order; first trip wins.
-// Order: success, human_abort, budget, no_progress, irrecoverable.
+// Order: success, human_abort, budget, repeated verification failure,
+// no_progress (stall), irrecoverable.
+// Stall and verification streaks ignore iterations at or before GuardFloor
+// so a person can continue without instantly re-tripping the same window.
 func CheckGuards(ctx GuardContext) GuardResult {
+	ctx.History = historyAfterFloor(ctx.History, ctx.Goal.GuardFloor)
 	if r := guardSuccess(ctx); r.Tripped {
 		return r
 	}
@@ -37,6 +43,9 @@ func CheckGuards(ctx GuardContext) GuardResult {
 	if r := guardBudget(ctx); r.Tripped {
 		return r
 	}
+	if r := guardVerifyFailure(ctx); r.Tripped {
+		return r
+	}
 	if r := guardNoProgress(ctx); r.Tripped {
 		return r
 	}
@@ -44,6 +53,19 @@ func CheckGuards(ctx GuardContext) GuardResult {
 		return r
 	}
 	return GuardResult{}
+}
+
+func historyAfterFloor(history []IterationRecord, floor int) []IterationRecord {
+	if floor <= 0 || len(history) == 0 {
+		return history
+	}
+	out := make([]IterationRecord, 0, len(history))
+	for _, h := range history {
+		if h.N > floor {
+			out = append(out, h)
+		}
+	}
+	return out
 }
 
 func guardSuccess(ctx GuardContext) GuardResult {
@@ -81,14 +103,58 @@ func guardBudget(ctx GuardContext) GuardResult {
 			NextStatus: StatusFailed,
 		}
 	}
-	if !ctx.Goal.ActiveStartedAt.IsZero() && c.MaxWallClockS > 0 {
-		elapsed := ctx.Now.Sub(ctx.Goal.ActiveStartedAt)
+	if c.MaxWallClockS > 0 {
+		elapsed := ctx.Goal.WallElapsed(ctx.Now)
 		if elapsed >= time.Duration(c.MaxWallClockS)*time.Second {
 			return GuardResult{
 				Tripped:    true,
 				Reason:     fmt.Sprintf("wall-clock budget exhausted (%s >= %ds)", elapsed.Round(time.Second), c.MaxWallClockS),
 				NextStatus: StatusFailed,
 			}
+		}
+	}
+	if c.MaxTokens > 0 && ctx.Goal.TokensUsed >= c.MaxTokens {
+		return GuardResult{
+			Tripped:    true,
+			Reason:     fmt.Sprintf("token budget exhausted (%d/%d)", ctx.Goal.TokensUsed, c.MaxTokens),
+			NextStatus: StatusFailed,
+		}
+	}
+	return GuardResult{}
+}
+
+// guardVerifyFailure stops the loop when the critic keeps failing, even if
+// each pass produces a new state hash. The safe default is to stop, not to
+// keep looping until the iteration cap.
+func guardVerifyFailure(ctx GuardContext) GuardResult {
+	n := ctx.Goal.Constraints.MaxVerifyFailures
+	if n < 1 {
+		return GuardResult{}
+	}
+	streak := 0
+	for i := len(ctx.History) - 1; i >= 0; i-- {
+		h := ctx.History[i]
+		if len(h.Evaluation.Criteria) == 0 {
+			break
+		}
+		failed := false
+		for _, c := range h.Evaluation.Criteria {
+			if !c.Satisfied {
+				failed = true
+				break
+			}
+		}
+		if !failed {
+			break
+		}
+		streak++
+	}
+	if streak >= n {
+		return GuardResult{
+			Tripped:    true,
+			Reason:     fmt.Sprintf("verification failed %d times; stopped instead of looping", streak),
+			NextStatus: StatusBlocked,
+			Escalation: "human",
 		}
 	}
 	return GuardResult{}
@@ -130,16 +196,18 @@ func guardNoProgress(ctx GuardContext) GuardResult {
 	if streak >= n {
 		return GuardResult{
 			Tripped:    true,
-			Reason:     fmt.Sprintf("no progress: state_hash unchanged for %d iterations", streak),
-			NextStatus: StatusFailed,
+			Reason:     fmt.Sprintf("stalled: state_hash unchanged for %d iterations", streak),
+			NextStatus: StatusBlocked,
+			Escalation: "human",
 		}
 	}
 	// Action-sequence similarity: identical tool sequences across last n iters.
 	if actionSequenceStuck(ctx.History, n) {
 		return GuardResult{
 			Tripped:    true,
-			Reason:     fmt.Sprintf("no progress: identical action sequence for %d iterations", n),
-			NextStatus: StatusFailed,
+			Reason:     fmt.Sprintf("stalled: identical action sequence for %d iterations", n),
+			NextStatus: StatusBlocked,
+			Escalation: "human",
 		}
 	}
 	return GuardResult{}
@@ -196,12 +264,15 @@ func guardIrrecoverable(ctx GuardContext) GuardResult {
 		cls  string
 	}
 	var recent []fail
-	for i := len(ctx.History) - 1; i >= 0 && len(recent) < need; i-- {
+	broken := false
+	for i := len(ctx.History) - 1; i >= 0 && len(recent) < need && !broken; i-- {
 		acts := ctx.History[i].Actions
 		for j := len(acts) - 1; j >= 0 && len(recent) < need; j-- {
 			a := acts[j]
 			if a.OK || a.Blocked {
-				continue
+				// A success or a deny ends the consecutive-failure streak.
+				broken = true
+				break
 			}
 			cls := a.Error
 			if cls == "" {
@@ -226,6 +297,7 @@ func guardIrrecoverable(ctx GuardContext) GuardResult {
 	return GuardResult{
 		Tripped:    true,
 		Reason:     fmt.Sprintf("irrecoverable: tool %q failed %d× with %q", first.tool, need, first.cls),
-		NextStatus: StatusFailed,
+		NextStatus: StatusBlocked,
+		Escalation: "human",
 	}
 }

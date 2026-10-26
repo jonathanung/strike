@@ -1,10 +1,12 @@
 //! Strike web client. The session list is live roots plus saved sessions.
 //! Activity, Files, and Changes are the side panel. Side chat is a separate
-//! read-only drawer. Schedule, memory, knowledge, artifacts, and the task
-//! runner are not drawn here; see docs/webui-planned.md.
+//! read-only drawer. Goals and Autopilot live in `goals`. Schedule, memory,
+//! knowledge, artifacts, and the task runner are not drawn here; see
+//! docs/webui-planned.md.
 
 mod api;
 mod editor;
+mod goals;
 mod model;
 mod shell;
 mod side_chat;
@@ -1511,6 +1513,37 @@ fn App() -> impl IntoView {
         refresh: Rc::new(move || refresh_meta()),
     });
 
+    // Alt+G opens Goals. The shell owns the other chords; this one stays
+    // here because only the page can set `mode`. The shortcut is listed in
+    // the overlay via src/shell/contrib/goals.rs.
+    let on_goals_key =
+        Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |ev: web_sys::KeyboardEvent| {
+            if ev.alt_key()
+                && !ev.meta_key()
+                && !ev.ctrl_key()
+                && ev.key().eq_ignore_ascii_case("g")
+            {
+                let typing = ev
+                    .target()
+                    .map(|t| {
+                        t.dyn_ref::<web_sys::Element>()
+                            .map(|el| {
+                                matches!(el.tag_name().as_str(), "INPUT" | "TEXTAREA" | "SELECT")
+                            })
+                            .unwrap_or(false)
+                    })
+                    .unwrap_or(false);
+                if !typing {
+                    ev.prevent_default();
+                    mode.set("goals".into());
+                }
+            }
+        });
+    if let Some(w) = web_sys::window() {
+        let _ = w.add_event_listener_with_callback("keydown", on_goals_key.as_ref().unchecked_ref());
+    }
+    on_goals_key.forget();
+
     view! {
         <shell::Chrome />
         <Show when=move || mode.get() == "daemon" fallback=move || ()>
@@ -1526,6 +1559,9 @@ fn App() -> impl IntoView {
                 remote_url=remote_url
                 refresh=refresh_meta
             />
+        </Show>
+        <Show when=move || mode.get() == "goals" fallback=move || ()>
+            <goals::GoalsPane base=base token=token />
         </Show>
         <Show when=move || mode.get() == "chat">
             <div class=move || if focus.get() { "shell focus" } else { "shell" }>
