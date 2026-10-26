@@ -9,15 +9,15 @@
 (function(){try{var ok={strike:1,nord:1,dracula:1,gruvbox:1,monokai:1,"tokyo-night":1,catppuccin:1};var t=localStorage.getItem("strike.theme")||"strike";var s=localStorage.getItem("strike.scheme")||"dark";if(!ok[t])t="strike";if(s!=="light")s="dark";var el=document.documentElement;el.setAttribute("data-theme",t);el.setAttribute("data-scheme",s);}catch(e){}})();
 </script>
 <link rel="manifest" href="/manifest.webmanifest">
-<link rel="stylesheet" href="/assets/style-b675a6499c95b448.css" integrity="sha384-TzmCXhs4XZOIBJVTWsltYCqu3aIrajPO3IqX2vad7TJjohexRdJvdRFjmxs68fTu"/>
-<link rel="stylesheet" href="/assets/editor-c775cc9b18a5458.css" integrity="sha384-AyOjM22LfkyGATt0RiB3O7FWiJR+tjHaI+BUHE+UrMDR7Ykaa5aNRaKgR7as4OR+"/>
+<link rel="stylesheet" href="/assets/style-16b79f22153df2e6.css" integrity="sha384-YAObhdwvYLLc6EPKVwSXRT+z4dNwEh0Zqb5yvv7KbTyWMpEwrrQ28WfH1wH2a1DE"/>
+<link rel="stylesheet" href="/assets/editor-0c775cc9b18a5458.css" integrity="sha384-AyOjM22LfkyGATt0RiB3O7FWiJR+tjHaI+BUHE+UrMDR7Ykaa5aNRaKgR7as4OR+"/>
 
 
 
 
 <script type="module">
-import init, * as bindings from '/assets/strike-webui-9b8f6ccf00662a42.js';
-const wasm = await init({ module_or_path: '/assets/strike-webui-9b8f6ccf00662a42_bg.wasm' });
+import init, * as bindings from '/assets/strike-webui-660a04987c7faca1.js';
+const wasm = await init({ module_or_path: '/assets/strike-webui-22b1a8801a83e394_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -28,6 +28,6 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 </script>
 <script src="/assets/register.js" defer></script>
 
-<link rel="modulepreload" href="/assets/strike-webui-9b8f6ccf00662a42.js" crossorigin="anonymous" integrity="sha384-FSJHKIQmc6jBxBz8T7FHDd07KgI95kfkIo7psvkfbdIfaeMv5hl8Y+Tba24iroMG"><link rel="preload" href="/assets/strike-webui-9b8f6ccf00662a42_bg.wasm" crossorigin="anonymous" integrity="sha384-3xQkI/EZr3HQiV5r1cyqekDY0zlwnAgcCTlUprut3y/UQzHtMQfQqzr/DC6kulhA" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/assets/strike-webui-660a04987c7faca1.js" crossorigin="anonymous" integrity="sha384-EzzSedXCAYyRsf7L7EL3+gA3vil+qFUuA0/9LI5y991F7zClHZGDNhi+F/BI5N5Q"><link rel="preload" href="/assets/strike-webui-22b1a8801a83e394_bg.wasm" crossorigin="anonymous" integrity="sha384-jLkKv5AKZUEHhdM2c/QE57PKW9BgN07hz9q5TwEWNU0bXZUozmGph0301FNdoVjT" as="fetch" type="application/wasm"></head>
 <body></body>
 </html>

@@ -20,6 +20,7 @@ import (
 	"github.com/jonathanung/strike/internal/frontend/host"
 	"github.com/jonathanung/strike/internal/frontend/server"
 	"github.com/jonathanung/strike/internal/persist/session"
+	"github.com/jonathanung/strike/internal/persist/taskrun"
 	"github.com/jonathanung/strike/internal/persist/workspace"
 	"github.com/jonathanung/strike/internal/protocol"
 	"github.com/jonathanung/strike/internal/trust/audit"
@@ -218,6 +219,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 	var liveHub *server.LiveHub
 	var services *host.Services
 	var sandboxSnap *server.SandboxSnapshot
+	var taskRuns *taskrun.Store
 	var cleanup func() error
 	sessionDir := opts.sessionDir
 
@@ -302,7 +304,9 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 
 		// Build LiveHub with spawn and resume callbacks.
 		liveHub = server.NewLiveHub(
-			func(ctx context.Context) (string, error) {
+			// The hub passes the HTTP request context. The engine has to live
+			// as long as the daemon, same as the initial root below.
+			func(context.Context) (string, error) {
 				slot, err := a.spawnRoot("")
 				if err != nil {
 					return "", err
@@ -319,7 +323,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 				}
 				return slot.id, nil
 			},
-			func(ctx context.Context, sessionID string) (string, bool, error) {
+			func(_ context.Context, sessionID string) (string, bool, error) {
 				// Validate: session must exist and be a root.
 				sessionID = strings.TrimSpace(sessionID)
 				if sessionID == "" {
@@ -373,6 +377,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		roots[initialSlot.id] = initialSR
 
 		services = &a.services
+		taskRuns = a.taskRuns
 
 		cleanup = func() error {
 			if liveHub != nil {
@@ -484,6 +489,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		Workspaces: wsStore,
 		LiveHub:    liveHub,
 		Services:   services,
+		TaskRuns:   taskRuns,
 		Sandbox:    sandboxSnap,
 		ReadOnly:   opts.readOnly,
 		Audit:      auditSink,

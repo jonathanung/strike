@@ -92,9 +92,12 @@ Status: walking skeleton on branch `worktree-rust-webui-daemon`. Not merged.
     can preview. Find-in-file is local. Agent diff reuses
     `GET /v1/changed-files` for the open path. Transcript `path:line` and
     `strike-file:path#Lline` open the same pane.
-  - Schedule, memory, knowledge, artifacts, the task runner, onboarding,
-    and a multi-gateway hub are documented in
-    [webui-planned.md](webui-planned.md), not drawn as empty panels.
+  - The Tasks view is the task runner: a plan checklist, one child per
+    ready section, and a checkpoint from that child's handoff and
+    verification report. See [webui-planned.md](webui-planned.md).
+  - Schedule, memory, knowledge, artifacts, onboarding, and a multi-gateway
+    hub are documented in [webui-planned.md](webui-planned.md), not drawn
+    as empty panels.
 - Server serves `/sw.js` and `/manifest.webmanifest` at the origin root and
   the bundle under `/assets/` (WASM-aware CSP and content types).
 

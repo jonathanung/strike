@@ -1,11 +1,12 @@
 //! Strike web client. The session list is live roots plus saved sessions.
-//! Activity, Files, and Changes are the side panel. Schedule, memory,
-//! knowledge, artifacts, and the task runner are not drawn here; see
-//! docs/webui-planned.md.
+//! Activity, Files, and Changes are the side panel. The task runner is the
+//! Tasks view. Schedule, memory, knowledge, and artifacts are not drawn
+//! here; see docs/webui-planned.md.
 
 mod api;
 mod editor;
 mod model;
+mod task_runner;
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -410,6 +411,12 @@ fn palette_cmds() -> &'static [PaletteCmd] {
             id: "daemon",
             label: "Daemon",
             detail: "This gateway, its token, and workspaces",
+        },
+        PaletteCmd {
+            section: "Apps",
+            id: "tasks",
+            label: "Task runner",
+            detail: "Open a checklist, run each section, review the checkpoint",
         },
         PaletteCmd {
             section: "Settings",
@@ -1158,6 +1165,7 @@ fn App() -> impl IntoView {
             "stop-all" => stop_all(),
             "chat" => mode.set("chat".into()),
             "daemon" => mode.set("daemon".into()),
+            "tasks" => mode.set("tasks".into()),
             "steer" => set_enter("steer".into()),
             "queue" => set_enter("queue".into()),
             "mode-default" => set_perm("default".into()),
@@ -1346,6 +1354,7 @@ fn App() -> impl IntoView {
                 }}</span>
                 <div class="segmented" role="tablist" aria-label="View">
                     <button class=move || if mode.get() == "chat" { "seg on" } else { "seg" } on:click=move |_| mode.set("chat".into())>"Chat"</button>
+                    <button class=move || if mode.get() == "tasks" { "seg on" } else { "seg" } on:click=move |_| mode.set("tasks".into())>"Tasks"</button>
                     <button class=move || if mode.get() == "daemon" { "seg on" } else { "seg" } on:click=move |_| mode.set("daemon".into())>"Daemon"</button>
                 </div>
             </div>
@@ -1408,6 +1417,14 @@ fn App() -> impl IntoView {
                 remote_name=remote_name
                 remote_url=remote_url
                 refresh=refresh_meta
+            />
+        </Show>
+        <Show when=move || mode.get() == "tasks">
+            <task_runner::TaskRunner
+                base=base
+                token=token
+                active_root=active_root
+                status=status
             />
         </Show>
         <Show when=move || mode.get() == "chat">

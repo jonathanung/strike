@@ -26,6 +26,7 @@ import (
 
 	"github.com/jonathanung/strike/internal/frontend/host"
 	"github.com/jonathanung/strike/internal/persist/session"
+	"github.com/jonathanung/strike/internal/persist/taskrun"
 	"github.com/jonathanung/strike/internal/persist/workspace"
 	"github.com/jonathanung/strike/internal/product/version"
 )
@@ -68,6 +69,12 @@ type Options struct {
 	Workspaces *workspace.Store
 	// Services exposes optional frontend host capabilities.
 	Services *host.Services
+	// TaskRuns is the durable plan-run board (GET/POST /v1/plans/{id}/run).
+	// Nil makes those routes report the taskRuns capability unavailable.
+	TaskRuns *taskrun.Store
+	// TaskSpawn, when set, replaces team.spawn while starting a plan run.
+	// Production leaves it nil and spawns through the live engine.
+	TaskSpawn func(ctx context.Context, ownerRoot, name, objective string) (childID string, err error)
 	// Sandbox enables the sandbox capability and seeds live roots that do not
 	// call Live.SetSandbox themselves. Nil keeps capabilities.sandbox false.
 	Sandbox *SandboxSnapshot
@@ -264,6 +271,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("PATCH /v1/plans/{id}/sections/{sectionID}", s.handlePlanUpdateSection)
 	s.mux.HandleFunc("POST /v1/plans/{id}/status", s.handlePlanSetStatus)
 	s.mux.HandleFunc("POST /v1/plans/{id}/reopen", s.handlePlanReopen)
+	s.mux.HandleFunc("GET /v1/plans/{id}/run", s.handleTaskRunGet)
+	s.mux.HandleFunc("POST /v1/plans/{id}/run", s.handleTaskRunPost)
 	s.mux.HandleFunc("GET /v1/goals", s.handleGoalsList)
 	s.mux.HandleFunc("POST /v1/goals", s.handleGoalsSet)
 	s.mux.HandleFunc("GET /v1/goals/{id}", s.handleGoalGet)

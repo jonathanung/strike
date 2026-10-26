@@ -37,27 +37,55 @@ async function status(path, headers) {
   return res.status;
 }
 
-const strike = spawn(
-  process.env.STRIKE_BIN || "./strike",
-  [
-    "serve",
-    "--addr",
-    `127.0.0.1:${port}`,
-    "--provider",
-    "echo",
-    "--auth",
-    "--token",
-    token,
-  ],
-  { env: { ...process.env, HOME: home }, stdio: ["ignore", "pipe", "pipe"] },
-);
 let strikeLog = "";
-strike.stdout.on("data", (b) => {
-  strikeLog += b.toString();
-});
-strike.stderr.on("data", (b) => {
-  strikeLog += b.toString();
-});
+function startStrike() {
+  const child = spawn(
+    process.env.STRIKE_BIN || "./strike",
+    [
+      "serve",
+      "--addr",
+      `127.0.0.1:${port}`,
+      "--provider",
+      "echo",
+      "--auth",
+      "--token",
+      token,
+    ],
+    { env: { ...process.env, HOME: home }, stdio: ["ignore", "pipe", "pipe"] },
+  );
+  const keep = (b) => {
+    strikeLog += b.toString();
+    if (strikeLog.length > 12000) strikeLog = strikeLog.slice(-12000);
+  };
+  child.stdout.on("data", keep);
+  child.stderr.on("data", keep);
+  return child;
+}
+let strike = startStrike();
+
+const authHeaders = {
+  Authorization: `Bearer ${token}`,
+  "Content-Type": "application/json",
+};
+
+async function api(method, path, body) {
+  const res = await fetch(`http://127.0.0.1:${port}${path}`, {
+    method,
+    headers: authHeaders,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const text = await res.text();
+  let json = null;
+  try {
+    json = text ? JSON.parse(text) : null;
+  } catch {
+    json = null;
+  }
+  if (!res.ok) {
+    throw new Error(`${method} ${path} -> ${res.status} ${text.slice(0, 400)}`);
+  }
+  return json;
+}
 
 let chrome;
 try {
@@ -211,6 +239,92 @@ try {
     token,
     repoDir: process.cwd(),
   });
+
+  // Task runner: a plain echo section fails schema:handoff and blocks the
+  // next section. Restart the daemon so the board is read back from disk.
+  const created = await api("POST", "/v1/roots", {});
+  const owner = created.sessionId || created.id;
+  if (!owner) throw new Error(`root create returned no id: ${JSON.stringify(created)}`);
+  const plan = await api("POST", "/v1/plans", {
+    ownerRoot: owner,
+    title: "Smoke checklist",
+    sections: [
+      { title: "First step", body: "plain echo body, no handoff" },
+      { title: "Second step", body: "depends on the first" },
+    ],
+  });
+  const planId = plan.ID || plan.id;
+  if (!planId) throw new Error(`plan create returned no id: ${JSON.stringify(plan).slice(0, 300)}`);
+  const opened = await api("POST", `/v1/plans/${planId}/run`, { action: "open", ownerRoot: owner });
+  const version = opened.run && opened.run.version;
+  if (!version) throw new Error(`open run returned no version: ${JSON.stringify(opened).slice(0, 300)}`);
+  await api("POST", `/v1/plans/${planId}/run`, {
+    action: "start",
+    ownerRoot: owner,
+    expectedVersion: version,
+  });
+  let board = null;
+  for (let i = 0; i < 40; i++) {
+    board = await api("GET", `/v1/plans/${planId}/run`);
+    const sections = (board.run && board.run.sections) || [];
+    const failed = sections[0] && sections[0].status === "failed";
+    const blocked = sections[1] && sections[1].status === "blocked";
+    if (failed && blocked) break;
+    await delay(500);
+  }
+  const sections = (board.run && board.run.sections) || [];
+  if (!sections[0] || sections[0].status !== "failed" || !sections[1] || sections[1].status !== "blocked") {
+    throw new Error(`task run did not block dependants: ${JSON.stringify(sections).slice(0, 500)}`);
+  }
+
+  strike.kill("SIGTERM");
+  const exited = new Promise((resolve) => strike.once("exit", resolve));
+  await Promise.race([exited, delay(4000)]);
+  if (strike.exitCode == null && !strike.signalCode) strike.kill("SIGKILL");
+  await Promise.race([exited, delay(2000)]);
+  strike = startStrike();
+  await waitHealth(`http://127.0.0.1:${port}/health`);
+  const after = await api("GET", `/v1/plans/${planId}/run`);
+  const again = (after.run && after.run.sections) || [];
+  if (!again[0] || again[0].status !== "failed" || !again[1] || again[1].status !== "blocked") {
+    throw new Error(`task run did not survive restart: ${JSON.stringify(again).slice(0, 500)}`);
+  }
+
+  await send("Runtime.evaluate", {
+    expression: `localStorage.setItem("strike.token", ${JSON.stringify(token)})`,
+    returnByValue: true,
+  });
+  await send("Page.reload", { ignoreCache: true });
+  let taskText = "";
+  for (let i = 0; i < 40; i++) {
+    const ev = await send("Runtime.evaluate", {
+      expression: `(() => {
+        const btn = [...document.querySelectorAll("button")].find((b) => (b.textContent || "").trim() === "Tasks");
+        if (btn) btn.click();
+        const board = document.querySelector("#task-runner");
+        return board ? board.innerText : "";
+      })()`,
+      returnByValue: true,
+    });
+    taskText = ev.result?.result?.value || "";
+    if (
+      taskText.includes("First step") &&
+      taskText.includes("Second step") &&
+      taskText.includes("Failed") &&
+      taskText.includes("Blocked")
+    ) {
+      break;
+    }
+    await delay(250);
+  }
+  if (
+    !taskText.includes("First step") ||
+    !taskText.includes("Second step") ||
+    !taskText.includes("Failed") ||
+    !taskText.includes("Blocked")
+  ) {
+    throw new Error(`task runner board missing failed/blocked rows: ${taskText.slice(0, 500)}`);
+  }
   console.log("webui-smoke ok");
 } catch (err) {
   console.error(String(err));

@@ -14,6 +14,7 @@ import {
   tokenMismatch,
 } from "./lib.mjs";
 import { compareGolden, encodeVideo, writeBytes } from "./media.mjs";
+import { runTaskRunnerPass } from "./task-runner.mjs";
 
 const MARKER = "uat-marker-alpha";
 const CHILD_OBJECTIVE = "Summarize the working directory";
@@ -417,6 +418,8 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
     );
   }
   await press("Escape");
+
+  await runTaskRunnerPass({ page, baseURL, check, shoot, click, waitUntil, log });
 
   if (controls) {
     await controls.stop();

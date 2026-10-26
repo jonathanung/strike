@@ -32,6 +32,7 @@ import (
 	"github.com/jonathanung/strike/internal/persist/memory"
 	"github.com/jonathanung/strike/internal/persist/plan"
 	"github.com/jonathanung/strike/internal/persist/session"
+	"github.com/jonathanung/strike/internal/persist/taskrun"
 	"github.com/jonathanung/strike/internal/product/auth"
 	"github.com/jonathanung/strike/internal/product/config"
 	"github.com/jonathanung/strike/internal/product/goal"
@@ -65,6 +66,9 @@ type assembled struct {
 	issuesClose    func() error
 	goalsClose     func() error
 	plansClose     func() error
+	// taskRuns is the plan-run board opened for strike serve. plansClose
+	// closes it so every frontend that already closes plans releases the file.
+	taskRuns       *taskrun.Store
 	artifactsClose func() error
 	ledgerClose    func() error
 	// worktreeClose removes a strike-managed worktree when cleanup=delete.
@@ -1071,6 +1075,28 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	services.WorkflowDrafts = local.NewWorkflowDrafts(workDir)
 	services.Themes = themesAdapter{}
 
+	taskStore, err := taskrun.Open(globalRoot, projectIdentity.Key)
+	if err != nil {
+		sched.Close()
+		_ = ledgerStore.Close()
+		_ = artifactStore.Close()
+		_ = planStore.Close()
+		_ = goalStore.Close()
+		_ = issueStore.Close()
+		_ = memoryStore.Close()
+		_ = historyStore.Close()
+		if mcpMgr != nil {
+			_ = mcpMgr.Close()
+		}
+		if lspMgr != nil {
+			_ = lspMgr.Close()
+		}
+		if first != nil && first.wtClose != nil {
+			_ = first.wtClose()
+		}
+		return nil, fmt.Errorf("opening task runs: %w", err)
+	}
+
 	spawn := rootSpawner(func(id string) (*rootSlot, error) {
 		slot, _, err := openRoot(id, false)
 		return slot, err
@@ -1100,8 +1126,16 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			return goalStore.Close()
 		},
 		plansClose: func() error {
-			return planStore.Close()
+			var err error
+			if taskStore != nil {
+				err = taskStore.Close()
+			}
+			if err2 := planStore.Close(); err == nil {
+				err = err2
+			}
+			return err
 		},
+		taskRuns: taskStore,
 		artifactsClose: func() error {
 			return artifactStore.Close()
 		},
