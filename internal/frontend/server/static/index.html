@@ -6,14 +6,14 @@
 <meta name="theme-color" content="#101216">
 <title>Strike</title>
 <link rel="manifest" href="/manifest.webmanifest">
-<link rel="stylesheet" href="/assets/style-91a87a5fd8264e3f.css" integrity="sha384-+EUEz7BsBpiiKXIa0jGrgegTlErCNulh3RxYoqZgWn+ejr841N5Jpw0dOVQ2Ufy/"/>
+<link rel="stylesheet" href="/assets/style-9fd9ae782f009830.css" integrity="sha384-TCksUXYEAck8tlAHU8khgru/Qh9yk7Wa32R82pCPZmcdtaColVHo7nNmNBWdNcQ8"/>
 
 
 
 
 <script type="module">
-import init, * as bindings from '/assets/strike-webui-e98d5b03699f8dee.js';
-const wasm = await init({ module_or_path: '/assets/strike-webui-e98d5b03699f8dee_bg.wasm' });
+import init, * as bindings from '/assets/strike-webui-47b01c48b724bbf8.js';
+const wasm = await init({ module_or_path: '/assets/strike-webui-47b01c48b724bbf8_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -24,6 +24,6 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 </script>
 <script src="/assets/register.js" defer></script>
 
-<link rel="modulepreload" href="/assets/strike-webui-e98d5b03699f8dee.js" crossorigin="anonymous" integrity="sha384-HoLTAhtdakLX4yoKiFO/PkZFdWD+QKP0XGtp+cQ6pOt6Lw7gAbq+fj95cGku5QBF"><link rel="preload" href="/assets/strike-webui-e98d5b03699f8dee_bg.wasm" crossorigin="anonymous" integrity="sha384-Xa1VbAX6i201EH7Hl0TeRra3PoMpBNBupgDvDipRJ2n8Wprm5vAgqh47aqOI06rf" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/assets/strike-webui-47b01c48b724bbf8.js" crossorigin="anonymous" integrity="sha384-VCa8BlZetbSvgDnyrEWlxO75SBSAlqIoc4mkDkYxpN2eGEttAOmEhMC74WsCxNIn"><link rel="preload" href="/assets/strike-webui-47b01c48b724bbf8_bg.wasm" crossorigin="anonymous" integrity="sha384-m8XDuP+B3Aslnk46j4hS9KaZDciwUk9mfb3R9rNuWT6R13pTVRhDJLCumXpfmfCb" as="fetch" type="application/wasm"></head>
 <body></body>
 </html>

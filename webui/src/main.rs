@@ -1220,7 +1220,11 @@ fn App() -> impl IntoView {
                             let label = if row.title.is_empty() { short_id(&id) } else { row.title.clone() };
                             let gutter = if busy { "gutter gutter-running" } else if unread { "gutter gutter-unread" } else { "gutter" };
                             let klass = if id == active { "session-row card on" } else { "session-row card" };
-                            let row_kids: Vec<_> = if id == active { kids.clone() } else { Vec::new() };
+                            let row_kids: Vec<_> = if id == active {
+                                kids.iter().filter(|c| c.parent_id.is_empty() || c.parent_id == id).cloned().collect()
+                            } else {
+                                Vec::new()
+                            };
                             let acts = acts.clone();
                             let pin_label = if pinned { "Unpin" } else { "Pin" };
                             view! {
