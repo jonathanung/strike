@@ -16,6 +16,7 @@ materially affect the shipped product.
 
 ### Added
 
+- **Session log contract for external ingesters** — `docs/session-format.md` specifies the JSONL envelope, `session.header`, every event type, and the sidecar. New sidecars repeat `sessionId` (the filename) and record the last selected `model`. Older sidecars still load. A golden fixture fails if a field or event type is renamed or removed ([#1274](https://github.com/jonathanung/strike/issues/1274)).
 - **Web client shell** — session list with status, unread, in-progress,
   and pinned filters; command field (Ctrl+K); gateway chip; approval mode,
   model, and Steer/Queue on the composer; Activity, Files, and Changes.

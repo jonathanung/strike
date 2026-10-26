@@ -1,6 +1,7 @@
 package session
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -30,7 +31,7 @@ func TestManagerCreateAppendReplayList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if meta.Title != "root work" || meta.CreatedAt == "" {
+	if meta.Title != "root work" || meta.CreatedAt == "" || meta.SessionID != root.ID {
 		t.Fatalf("meta = %+v", meta)
 	}
 
@@ -1205,5 +1206,99 @@ func TestListCacheConcurrentAccess(t *testing.T) {
 	close(errs)
 	for err := range errs {
 		t.Error(err)
+	}
+}
+
+func TestAppendPersistsLastModel(t *testing.T) {
+	dir := t.TempDir()
+	m := NewManager(dir)
+	info, err := m.Create(CreateOptions{Title: "synthetic"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Append(info.ID, protocol.ModelSelected{
+		Correlation: protocol.Correlation{SessionID: info.ID},
+		Provider:    "echo",
+		Model:       "echo-1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	meta, err := ReadMeta(dir, info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.SessionID != info.ID || meta.Model != "echo-1" || meta.Title != "synthetic" {
+		t.Fatalf("meta = %+v", meta)
+	}
+	raw, err := os.ReadFile(MetaPath(dir, info.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(raw, []byte(`"provider"`)) {
+		t.Fatalf("sidecar stored provider:\n%s", raw)
+	}
+
+	// Same model does not rewrite the sidecar.
+	if err := m.Append(info.ID, protocol.ModelSelected{
+		Provider: "echo",
+		Model:    "echo-1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	again, err := os.ReadFile(MetaPath(dir, info.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(raw, again) {
+		t.Fatalf("sidecar rewritten for unchanged model:\n%s", again)
+	}
+
+	// Another session's selection does not replace this sidecar's model.
+	if err := m.Append(info.ID, protocol.ModelSelected{
+		Correlation: protocol.Correlation{SessionID: "sess-other"},
+		Provider:    "echo",
+		Model:       "echo-2",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	meta, err = ReadMeta(dir, info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.Model != "echo-1" {
+		t.Fatalf("model = %q, want echo-1", meta.Model)
+	}
+
+	// Empty model does not clear a previous selection.
+	if err := m.Append(info.ID, protocol.ModelSelected{
+		Correlation: protocol.Correlation{SessionID: info.ID},
+		Provider:    "echo",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	meta, err = ReadMeta(dir, info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.Model != "echo-1" {
+		t.Fatalf("empty selection cleared model: %+v", meta)
+	}
+
+	if err := m.Append(info.ID, protocol.ModelSelected{
+		Correlation: protocol.Correlation{SessionID: info.ID},
+		Provider:    "echo",
+		Model:       "echo-3",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Close(info.ID); err != nil {
+		t.Fatal(err)
+	}
+	got, err := m.Get(info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Model != "echo-3" {
+		t.Fatalf("Get model = %q", got.Model)
 	}
 }

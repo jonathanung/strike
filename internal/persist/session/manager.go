@@ -20,6 +20,7 @@ type Info struct {
 	ParentSessionID string
 	LeadSessionID   string // team lead; empty on roots (self is lead)
 	Title           string
+	Model           string // last model.selected model; empty until persisted
 	ForkedFrom      string // source id when created via Fork; empty otherwise
 	ProjectKey      string // launch project identity; empty on legacy sessions
 	WorktreePath    string // strike-managed git worktree; empty = launch cwd
@@ -106,6 +107,7 @@ func (m *Manager) Create(opts CreateOptions) (Info, error) {
 		now = t
 	}
 	meta := Meta{
+		SessionID:       id,
 		Title:           strings.TrimSpace(opts.Title),
 		ParentSessionID: strings.TrimSpace(opts.ParentSessionID),
 		LeadSessionID:   strings.TrimSpace(opts.LeadSessionID),
@@ -308,7 +310,9 @@ func (m *Manager) Open(id string) (Info, error) {
 	return info, nil
 }
 
-// Append writes an event to an open session. SessionTitled updates durable title.
+// Append writes an event to an open session. SessionTitled updates the durable
+// title. A model.selected event whose model is non-empty, and whose
+// correlation session id is empty or this session, updates the sidecar model.
 // On append/fsync failure it attempts one Recover onto a verified durable
 // prefix and retries the event once. If recovery is impossible, it returns a
 // fatal PersistenceError so the runtime can cancel side effects.
@@ -351,6 +355,13 @@ func (m *Manager) Append(id string, ev protocol.Event) error {
 	if t, ok := ev.(protocol.SessionTitled); ok {
 		title = strings.TrimSpace(t.Title)
 	}
+	var model string
+	if ms, ok := ev.(protocol.ModelSelected); ok {
+		model = strings.TrimSpace(ms.Model)
+		if sid := strings.TrimSpace(ms.SessionID); sid != "" && sid != id {
+			model = ""
+		}
+	}
 	var prMeta *protocol.SessionMeta
 	if sm, ok := ev.(protocol.SessionMeta); ok {
 		prMeta = &sm
@@ -367,6 +378,12 @@ func (m *Manager) Append(id string, ev protocol.Event) error {
 		e.info.Title = title
 		_, _ = UpdateMeta(m.dir, id, func(meta *Meta) {
 			meta.Title = title
+		})
+	}
+	if model != "" && e.info.Model != model {
+		e.info.Model = model
+		_, _ = UpdateMeta(m.dir, id, func(meta *Meta) {
+			meta.Model = model
 		})
 	}
 	if prMeta != nil {
@@ -990,6 +1007,7 @@ func (m *Manager) infoFromDiskLocked(id string, st os.FileInfo) (Info, error) {
 		ParentSessionID: meta.ParentSessionID,
 		LeadSessionID:   meta.LeadSessionID,
 		Title:           title,
+		Model:           meta.Model,
 		ForkedFrom:      meta.ForkedFrom,
 		ProjectKey:      meta.ProjectKey,
 		WorktreePath:    meta.WorktreePath,
