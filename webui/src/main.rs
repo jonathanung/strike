@@ -215,6 +215,7 @@ struct TriggerSignals {
 }
 
 fn sync_composer_trigger(text: String, utf16: u32, ui: &TriggerSignals) {
+    ui.plus_open.set(false);
     let force = ui.ac_force.get_untracked();
     if force == "skills" || force == "commands" {
         let mut items = if force == "skills" {
@@ -1704,6 +1705,23 @@ fn App() -> impl IntoView {
         mode_menu,
         model_menu,
     };
+
+    // Bootstrap can land after the first keystroke. Recompute from the
+    // catalog the daemon just sent, without tracking the draft itself.
+    Effect::new(move |_| {
+        commands.get();
+        skills.get();
+        let draft_now = draft.get_untracked();
+        let trimmed = draft_now.trim_start();
+        if trimmed.starts_with('/')
+            || trimmed.starts_with('$')
+            || trimmed.starts_with('!')
+            || draft_now.contains('@')
+        {
+            let cursor = draft_now.encode_utf16().count() as u32;
+            sync_composer_trigger(draft_now, cursor, &ui);
+        }
+    });
 
     view! {
         <header class="page-header">

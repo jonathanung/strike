@@ -231,7 +231,7 @@ try {
     throw new Error(`composer plus failed: ${triggers.result?.result?.value || JSON.stringify(triggers)}`);
   }
   let suggest = "";
-  for (let i = 0; i < 20; i++) {
+  for (let i = 0; i < 40; i++) {
     const ev = await send("Runtime.evaluate", {
       expression: `document.body.innerText`,
       returnByValue: true,
