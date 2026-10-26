@@ -4,8 +4,10 @@
 // for the same reason composer "!" is allowed: the person is present, so
 // the bash permission prompt is skipped. Plan mode still refuses a new
 // shell. The process starts only in a registered workspace directory
-// (see ResolveCWD). On Linux, if that process or a descendant later has a
-// cwd outside the workspace, the shell is killed.
+// (see ResolveCWD). On Linux the watch reads the foreground process group
+// (the shell behind bwrap, or a child that is currently foreground). A cwd
+// outside the workspace kills the shell. An unreadable cwd kills it only
+// when no OS sandbox was applied. Background helpers are not walked.
 //
 // The OS sandbox dial is applied with sandbox.Wrap, the same launcher the
 // bash tool uses. Keystrokes are not logged.
@@ -100,6 +102,9 @@ type CreateSpec struct {
 	Cols          int
 	Rows          int
 	OnSessionEnd  string
+	// Sandbox, when non-nil, is the OS policy for this shell. WorkDir is
+	// overwritten with the canonical workspace root. Nil uses the manager dial.
+	Sandbox *sandbox.Policy
 }
 
 // Manager owns PTY sessions for one daemon process.
@@ -324,6 +329,9 @@ func (m *Manager) Create(spec CreateSpec) (Info, error) {
 		return Info{}, fmt.Errorf("terminal limit reached (%d)", m.cfg.MaxSessions)
 	}
 	sandboxPolicy := m.cfg.Sandbox
+	if spec.Sandbox != nil {
+		sandboxPolicy = *spec.Sandbox
+	}
 	envFn := m.cfg.Env
 	look := m.cfg.LookPath
 	m.seq++
@@ -452,8 +460,11 @@ func (s *session) watchLoop(interval time.Duration) {
 			if !alive || pid <= 0 {
 				return
 			}
-			insideRoot, seen := leaderInsideWorkspace(root, pid)
-			if !seen || insideRoot {
+			insideRoot, seen := foregroundInside(root, pid)
+			s.mu.Lock()
+			sandboxed := s.info.SandboxApplied
+			s.mu.Unlock()
+			if !shouldKillForCWD(seen, insideRoot, sandboxed, cwdUnseenIsEscape()) {
 				continue
 			}
 			s.finish(ReasonCWDEscaped)
@@ -462,16 +473,14 @@ func (s *session) watchLoop(interval time.Duration) {
 	}
 }
 
-func leaderInsideWorkspace(root string, pid int) (bool, bool) {
-	cwd, ok := processCWD(pid)
-	if !ok {
-		return false, false
+// shouldKillForCWD reports whether the watch should stop the shell.
+// An unreadable cwd is an escape only when the caller says so and no OS
+// sandbox was applied. A visible cwd outside the workspace always is.
+func shouldKillForCWD(seen, inside, sandboxed, unseenEscapes bool) bool {
+	if !seen {
+		return unseenEscapes && !sandboxed
 	}
-	resolved := cwd
-	if real, err := canonicalDir(cwd); err == nil {
-		resolved = real
-	}
-	return inside(root, resolved), true
+	return !inside
 }
 
 func (s *session) finish(reason string) {

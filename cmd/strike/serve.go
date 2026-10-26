@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jonathanung/strike/harness/engine"
 	"github.com/jonathanung/strike/harness/sandbox"
 	"github.com/jonathanung/strike/internal/frontend/host"
 	"github.com/jonathanung/strike/internal/frontend/host/local"
@@ -244,6 +245,8 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 	var sandboxSnap *server.SandboxSnapshot
 	var sideChat server.SideChatModel
 	var terminalSandbox sandbox.Policy
+	var terminalSandboxFor func(sessionID, workDir string) (sandbox.Policy, bool)
+	terminalSandboxLoaded := false
 	var cleanup func() error
 	var sharedAttachments *attachment.Store
 	sessionDir := opts.sessionDir
@@ -308,6 +311,15 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		}
 		var mu sync.Mutex
 		roots := make(map[string]*serveRoot)
+		engines := make(map[string]*engine.Engine)
+		noteEngine := func(id string, eng *engine.Engine) {
+			if id == "" || eng == nil {
+				return
+			}
+			mu.Lock()
+			engines[id] = eng
+			mu.Unlock()
+		}
 
 		// startServeRoot runs the engine and tees events to its Live bridge.
 		startServeRoot := func(ctx context.Context, slot *rootSlot, live *server.Live) *serveRoot {
@@ -356,6 +368,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 				a.attachMemoryMode(live, slot.id, slot.eng)
 				seedLiveSandbox(live)
 				sr := startServeRoot(ctx, slot, live)
+				noteEngine(slot.id, slot.eng)
 				mu.Lock()
 				roots[slot.id] = sr
 				mu.Unlock()
@@ -397,6 +410,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 				a.attachMemoryMode(live, slot.id, slot.eng)
 				seedLiveSandbox(live)
 				sr := startServeRoot(ctx, slot, live)
+				noteEngine(slot.id, slot.eng)
 				mu.Lock()
 				roots[slot.id] = sr
 				mu.Unlock()
@@ -413,6 +427,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		initialLive := server.NewLive(initialSlot.id, initialSlot.workDir, agents, initialSlot.eng.Ops())
 		a.attachMemoryMode(initialLive, initialSlot.id, initialSlot.eng)
 		seedLiveSandbox(initialLive)
+		noteEngine(initialSlot.id, initialSlot.eng)
 		liveHub.Add(initialSlot.id, initialLive)
 		if info, err := a.sessions.Get(initialSlot.id); err == nil && info.Title != "" {
 			liveHub.SetTitle(initialSlot.id, info.Title)
@@ -422,6 +437,20 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 
 		services = &a.services
 		terminalSandbox = a.sandboxPolicy
+		terminalSandboxLoaded = true
+		terminalSandboxFor = func(sessionID, workDir string) (sandbox.Policy, bool) {
+			id := strings.TrimSpace(sessionID)
+			if id == "" && liveHub != nil {
+				id = liveHub.ActiveID()
+			}
+			mu.Lock()
+			eng := engines[id]
+			mu.Unlock()
+			if eng == nil {
+				return sandbox.Policy{}, false
+			}
+			return eng.BashSandboxPolicy(workDir), true
+		}
 
 		cleanup = func() error {
 			if liveHub != nil {
@@ -542,14 +571,16 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 				local.SetFilesWorkDir(services.Files, dir)
 			}
 		},
-		Sandbox:         sandboxSnap,
-		ReadOnly:        opts.readOnly,
-		Audit:           auditSink,
-		Attachments:     sharedAttachments,
-		UsageAuditDir:   usageDir,
-		SideChat:        sideChat,
-		TerminalRemote:  opts.terminalRemote,
-		TerminalSandbox: terminalSandbox,
+		Sandbox:               sandboxSnap,
+		ReadOnly:              opts.readOnly,
+		Audit:                 auditSink,
+		Attachments:           sharedAttachments,
+		UsageAuditDir:         usageDir,
+		SideChat:              sideChat,
+		TerminalRemote:        opts.terminalRemote,
+		TerminalSandbox:       terminalSandbox,
+		TerminalSandboxLoaded: terminalSandboxLoaded,
+		TerminalSandboxFor:    terminalSandboxFor,
 	})
 	if err != nil {
 		return err

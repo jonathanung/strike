@@ -3,10 +3,12 @@ package server
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/jonathanung/strike/harness/sandbox"
 	"github.com/jonathanung/strike/internal/frontend/server/terminal"
 )
 
@@ -52,6 +54,18 @@ func terminalStreamID(path string) (string, bool) {
 		return "", false
 	}
 	return id, true
+}
+
+// terminalAuthorized allows a normal bearer or cookie, and also a terminal
+// stream that presents a ticket subprotocol. A presented ticket is consumed
+// even when the cookie already matched, so a logged handshake cannot be
+// replayed. A mismatch or replay is unauthorized. Query-string tokens are
+// not accepted.
+func (s *Server) terminalAuthorized(r *http.Request) bool {
+	if terminalTicketHeader(r) != "" {
+		return s.terminalTicketOK(r)
+	}
+	return s.authorized(r)
 }
 
 // terminalTicketOK is the only /v1 bypass of the bearer check, and only for
@@ -105,7 +119,7 @@ func (s *Server) handleTerminalCreate(w http.ResponseWriter, r *http.Request) {
 	if s.rejectTerminal(w) {
 		return
 	}
-	if s.opts.ReadOnly {
+	if s.terminalShellDenied() {
 		writeJSON(w, http.StatusForbidden, opErrorResponse{Error: "read-only attach does not allow a shell", Code: "read_only"})
 		return
 	}
@@ -124,12 +138,21 @@ func (s *Server) handleTerminalCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sessionID := strings.TrimSpace(body.SessionID)
-	mode := strings.TrimSpace(ws.PermissionMode)
-	if liveMode := s.terminalPermissionMode(sessionID); liveMode != "" {
-		mode = liveMode
-	}
-	if mode == "plan" {
+	// Workspace plan and the resolved live session are both locks. A
+	// non-plan live mode must not clear a workspace plan lock, and an
+	// omitted id resolves to the active root.
+	if strings.TrimSpace(ws.PermissionMode) == "plan" || s.terminalPermissionMode(sessionID) == "plan" {
 		writeJSON(w, http.StatusForbidden, opErrorResponse{Error: "plan mode does not allow a shell", Code: "plan_mode"})
+		return
+	}
+	root, err := terminal.ResolveCWD(ws.Path, "")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	policy, err := s.sandboxForTerminal(sessionID, root)
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, opErrorResponse{Error: err.Error()})
 		return
 	}
 	info, err := s.terms.Create(terminal.CreateSpec{
@@ -140,6 +163,7 @@ func (s *Server) handleTerminalCreate(w http.ResponseWriter, r *http.Request) {
 		Cols:          body.Cols,
 		Rows:          body.Rows,
 		OnSessionEnd:  body.OnSessionEnd,
+		Sandbox:       &policy,
 	})
 	if err != nil {
 		status := http.StatusBadRequest
@@ -185,17 +209,48 @@ func (s *Server) terminalPermissionMode(sessionID string) string {
 
 func (s *Server) liveForTerminal(sessionID string) *Live {
 	if s.opts.LiveHub != nil {
-		if sessionID != "" {
-			if live := s.opts.LiveHub.LiveFor(sessionID); live != nil {
-				return live
-			}
-		}
+		return s.opts.LiveHub.LiveFor(sessionID)
+	}
+	if s.opts.Live == nil {
 		return nil
 	}
-	if sessionID == "" || (s.opts.Live != nil && s.opts.Live.SessionID() == sessionID) {
+	if sessionID == "" || s.opts.Live.SessionID() == sessionID {
 		return s.opts.Live
 	}
 	return nil
+}
+
+// terminalShellDenied refuses a new shell on --read-only and on attach-only,
+// which never loads a sandbox dial. A zero policy is not treated as sandbox off
+// unless TerminalSandboxLoaded says a live serve produced it.
+func (s *Server) terminalShellDenied() bool {
+	if s == nil {
+		return true
+	}
+	if s.opts.ReadOnly {
+		return true
+	}
+	return s.opts.TerminalSandboxFor == nil && !s.opts.TerminalSandboxLoaded
+}
+
+// sandboxForTerminal compiles the OS policy for this workspace. A missing
+// live engine with a non-off dial fails closed instead of starting an
+// unsandboxed shell from the startup copy.
+func (s *Server) sandboxForTerminal(sessionID, workDir string) (sandbox.Policy, error) {
+	if s.opts.TerminalSandboxFor != nil {
+		p, ok := s.opts.TerminalSandboxFor(sessionID, workDir)
+		if !ok {
+			if !s.opts.TerminalSandboxLoaded || s.opts.TerminalSandbox.Mode != sandbox.ModeOff {
+				return sandbox.Policy{}, errors.New("OS sandbox is required for this shell and is unavailable")
+			}
+			p = s.opts.TerminalSandbox
+		}
+		p.WorkDir = workDir
+		return p, nil
+	}
+	p := s.opts.TerminalSandbox
+	p.WorkDir = workDir
+	return p, nil
 }
 
 func (s *Server) handleTerminalDelete(w http.ResponseWriter, r *http.Request) {
@@ -220,7 +275,7 @@ func (s *Server) handleTerminalResize(w http.ResponseWriter, r *http.Request) {
 	if s.rejectTerminal(w) {
 		return
 	}
-	if s.opts.ReadOnly {
+	if s.terminalShellDenied() {
 		writeJSON(w, http.StatusForbidden, opErrorResponse{Error: "read-only attach does not allow a shell", Code: "read_only"})
 		return
 	}
@@ -277,7 +332,7 @@ func (s *Server) handleTerminalStream(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	if s.opts.ReadOnly {
+	if s.terminalShellDenied() {
 		writeJSON(w, http.StatusForbidden, opErrorResponse{Error: "read-only attach does not allow a shell", Code: "read_only"})
 		return
 	}

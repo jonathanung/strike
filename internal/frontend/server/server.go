@@ -104,9 +104,20 @@ type Options struct {
 	// TerminalRemote allows the terminal websocket on a non-loopback bind.
 	// It requires Auth. Loopback serves a terminal without this flag.
 	TerminalRemote bool
-	// TerminalSandbox is the OS sandbox dial applied to interactive shells.
-	// Zero value is off; the cwd watch still confines the process to the workspace.
+	// TerminalSandbox is the startup OS sandbox dial for interactive shells.
+	// A live serve replaces it at create time with TerminalSandboxFor so plan
+	// and phase rules are current and deny paths expand under the workspace.
+	// Zero value is off. That is a real shell only when TerminalSandboxLoaded
+	// is set; attach-only leaves the flag false and the terminal routes refuse
+	// a shell.
 	TerminalSandbox sandbox.Policy
+	// TerminalSandboxLoaded reports that TerminalSandbox came from a live
+	// serve, including an explicit sandbox off. Attach-only leaves it false.
+	TerminalSandboxLoaded bool
+	// TerminalSandboxFor compiles the policy for one new shell. sessionID
+	// empty means the active root. The bool is false when no live engine can
+	// compile it. Nil means no compiler was installed.
+	TerminalSandboxFor func(sessionID, workDir string) (sandbox.Policy, bool)
 }
 
 // Server is an HTTP server for session attach and optional live cockpit.
@@ -497,7 +508,7 @@ func (s *Server) withMiddleware(next http.Handler) http.Handler {
 			}
 		}
 		// Public: health + attach shell. Session event streams require a token.
-		if s.opts.Auth && requiresToken(r.URL.Path) && !s.authorized(r) && !s.terminalTicketOK(r) {
+		if s.opts.Auth && requiresToken(r.URL.Path) && !s.terminalAuthorized(r) {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}

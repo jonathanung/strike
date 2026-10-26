@@ -9,11 +9,14 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/jonathanung/strike/harness/sandbox"
 	"github.com/jonathanung/strike/internal/persist/workspace"
+	"github.com/jonathanung/strike/internal/protocol"
 )
 
 func newTerminalServer(t *testing.T, mutate func(*Options)) (*Server, *workspace.Store, workspace.Workspace) {
@@ -28,11 +31,12 @@ func newTerminalServer(t *testing.T, mutate func(*Options)) (*Server, *workspace
 		t.Fatal(err)
 	}
 	opts := Options{
-		Auth:       true,
-		Token:      "secret",
-		Addr:       "127.0.0.1:8787",
-		SessionDir: t.TempDir(),
-		Workspaces: store,
+		Auth:                  true,
+		Token:                 "secret",
+		Addr:                  "127.0.0.1:8787",
+		SessionDir:            t.TempDir(),
+		Workspaces:            store,
+		TerminalSandboxLoaded: true,
 	}
 	if mutate != nil {
 		mutate(&opts)
@@ -252,6 +256,153 @@ func TestTerminalTicketAuthenticatesStream(t *testing.T) {
 	srv.Handler().ServeHTTP(bad, req)
 	if bad.Code != http.StatusUnauthorized {
 		t.Fatalf("reused ticket status = %d body %s", bad.Code, bad.Body.String())
+	}
+}
+
+func TestTerminalPlanModeLiveHub(t *testing.T) {
+	var live *Live
+	srv, store, ws := newTerminalServer(t, func(o *Options) {
+		hub := NewLiveHub(nil, nil)
+		live = NewLive("root-1", "", nil, make(chan protocol.Op, 1))
+		live.Publish(protocol.PermissionModeSelected{Mode: protocol.PermissionModeDefault})
+		hub.Add("root-1", live)
+		o.LiveHub = hub
+	})
+	mode := "plan"
+	if _, err := store.SetPolicy(ws.ID, nil, &mode); err != nil {
+		t.Fatal(err)
+	}
+	for _, body := range []string{`{"sessionId":"root-1"}`, `{}`} {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1/terminals", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer secret")
+		srv.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "plan mode") {
+			t.Fatalf("body %s status = %d %s", body, rec.Code, rec.Body.String())
+		}
+	}
+	if len(srv.terminalManager().List()) != 0 {
+		t.Fatalf("plan lock started a shell: %+v", srv.terminalManager().List())
+	}
+
+	def := "default"
+	if _, err := store.SetPolicy(ws.ID, nil, &def); err != nil {
+		t.Fatal(err)
+	}
+	live.Publish(protocol.PermissionModeSelected{Mode: protocol.PermissionModePlan})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/terminals", strings.NewReader(`{}`))
+	req.Header.Set("Authorization", "Bearer secret")
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "plan mode") {
+		t.Fatalf("omitted id status = %d %s", rec.Code, rec.Body.String())
+	}
+
+	live.Publish(protocol.PermissionModeSelected{Mode: protocol.PermissionModeDefault})
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/v1/terminals", strings.NewReader(`{}`))
+	req.Header.Set("Authorization", "Bearer secret")
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("default mode status = %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestTerminalTicketConsumedWithBearer(t *testing.T) {
+	srv, _, ws := newTerminalServer(t, nil)
+	res := authedJSONRequest(t, srv, http.MethodPost, "/v1/terminals", `{"workspaceId":"`+ws.ID+`"}`)
+	if res.Code != http.StatusCreated {
+		t.Fatalf("create = %d %s", res.Code, res.Body.String())
+	}
+	var info struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &info); err != nil {
+		t.Fatal(err)
+	}
+	res = authedJSONRequest(t, srv, http.MethodPost, "/v1/terminals/"+info.ID+"/ticket", `{}`)
+	if res.Code != http.StatusOK {
+		t.Fatalf("ticket = %d %s", res.Code, res.Body.String())
+	}
+	var ticket struct {
+		Ticket string `json:"ticket"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &ticket); err != nil {
+		t.Fatal(err)
+	}
+
+	upgrade := func(auth, protocols string) int {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/v1/terminals/"+info.ID+"/stream", nil)
+		if auth != "" {
+			req.Header.Set("Authorization", auth)
+		}
+		if protocols != "" {
+			req.Header.Set("Sec-WebSocket-Protocol", protocols)
+		}
+		req.Header.Set("Upgrade", "websocket")
+		req.Header.Set("Connection", "Upgrade")
+		req.Header.Set("Sec-WebSocket-Version", "13")
+		req.Header.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
+		srv.Handler().ServeHTTP(rec, req)
+		return rec.Code
+	}
+	if got := upgrade("Bearer secret", "strike.terminal, ticket.not-the-ticket"); got != http.StatusUnauthorized {
+		t.Fatalf("mismatched ticket with bearer = %d", got)
+	}
+	if got := upgrade("Bearer secret", "strike.terminal, ticket."+ticket.Ticket); got == http.StatusUnauthorized {
+		t.Fatal("valid ticket presented with bearer was rejected")
+	}
+	if got := upgrade("", "strike.terminal, ticket."+ticket.Ticket); got != http.StatusUnauthorized {
+		t.Fatalf("replayed ticket = %d", got)
+	}
+}
+
+func TestTerminalAttachOnlyAndSandboxCompile(t *testing.T) {
+	denied, _, ws := newTerminalServer(t, func(o *Options) {
+		o.TerminalSandboxLoaded = false
+	})
+	rec := authedJSONRequest(t, denied, http.MethodPost, "/v1/terminals", `{"workspaceId":"`+ws.ID+`"}`)
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "read-only") {
+		t.Fatalf("attach-only create = %d %s", rec.Code, rec.Body.String())
+	}
+	stream := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/terminals/any/stream", nil)
+	req.Header.Set("Authorization", "Bearer secret")
+	denied.Handler().ServeHTTP(stream, req)
+	if stream.Code != http.StatusForbidden {
+		t.Fatalf("attach-only stream = %d %s", stream.Code, stream.Body.String())
+	}
+
+	var gotWD string
+	compiled, _, cws := newTerminalServer(t, func(o *Options) {
+		o.TerminalSandbox = sandbox.Policy{Mode: sandbox.ModeWorkspaceWrite}
+		o.TerminalSandboxFor = func(sessionID, workDir string) (sandbox.Policy, bool) {
+			gotWD = workDir
+			if sessionID == "missing" {
+				return sandbox.Policy{}, false
+			}
+			return sandbox.Policy{Mode: sandbox.ModeOff}, true
+		}
+	})
+	rec = authedJSONRequest(t, compiled, http.MethodPost, "/v1/terminals", `{"sessionId":"missing","workspaceId":"`+cws.ID+`"}`)
+	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), "unavailable") {
+		t.Fatalf("missing engine = %d %s", rec.Code, rec.Body.String())
+	}
+	if len(compiled.terminalManager().List()) != 0 {
+		t.Fatal("fail-closed create left a shell")
+	}
+	rec = authedJSONRequest(t, compiled, http.MethodPost, "/v1/terminals", `{"workspaceId":"`+cws.ID+`"}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("compiled off policy = %d %s", rec.Code, rec.Body.String())
+	}
+	want := cws.Path
+	if real, err := filepath.EvalSymlinks(cws.Path); err == nil && real != "" {
+		want = real
+	}
+	if gotWD != want {
+		t.Fatalf("compiler workdir = %q, want %q", gotWD, want)
 	}
 }
 

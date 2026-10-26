@@ -194,8 +194,10 @@ The client mints that ticket with `POST /v1/terminals/{id}/ticket` (bearer
 or cookie) and presents it as the WebSocket subprotocol `ticket.<hex>`
 next to `strike.terminal`. The server echoes only `strike.terminal`. The
 ticket lasts 30 seconds, is bound to that terminal id, and is consumed on
-the upgrade. A query-string `token` or `ticket` on a terminal route is
-rejected. The ticket is not a bypass for any other `/v1` path.
+every upgrade that presents it, including when the cookie or bearer already
+matched. A mismatch or a replay is 401. A query-string `token` or `ticket`
+on a terminal route is rejected. The ticket is not a bypass for any other
+`/v1` path.
 
 Loopback listeners allow the terminal. Any other bind requires
 `--terminal-remote`, and that flag requires `--auth`. A tailnet or private
@@ -203,18 +205,27 @@ bind has no shell until the operator passes the flag.
 
 The client does not pick an arbitrary working directory. Create resolves
 the path inside the active workspace and rejects `..`, a sibling prefix,
-and a symlink that leaves the workspace. On Linux the daemon reads the PTY
-leader's `/proc/<pid>/cwd` and kills the shell when that directory is
-outside the workspace. The watch does not walk child processes. When the
-sandbox dial is not `off`, the shell is started through the same
-`sandbox.Wrap` path as bash. If that helper is missing and degrade is not
-allowed, create fails closed. A bwrap leader stays in the workspace, so
-the watch is not the write boundary in that case; the sandbox is.
+and a symlink that leaves the workspace. On Linux the daemon watches the
+foreground process group: the shell behind `bwrap`, and a child that is
+currently foreground (`bash -c 'cd /tmp'`). A cwd outside the workspace
+kills the shell. An unreadable cwd kills it when no OS sandbox was applied.
+Background helpers are not walked. A command that exits before the next
+sample can still finish; the sandbox is the write boundary when wrap applies.
 
-Plan mode on the workspace or the live session refuses a new shell. Other
-permission modes allow it: the user is at the keyboard, which is why `!`
-skips the bash prompt too. Keystrokes are not written to the audit log.
-`terminal.create` and `terminal.kill` are.
+The policy is compiled at create from the live engine for that workspace,
+the same helper bash uses, so plan and phase hard-denies and deny paths
+match the current session. `--attach-only` does not load a dial, and the
+terminal routes refuse a shell there. A missing engine with a non-off dial
+fails closed. When the dial is not `off`, the shell is started through
+`sandbox.Wrap`. If that helper is missing and degrade is not allowed,
+create fails closed.
+
+Plan mode on the workspace or the resolved live session refuses a new
+shell. An omitted session id uses the active root. A non-plan live mode
+does not clear a workspace plan lock. Other permission modes allow the
+shell: the user is at the keyboard, which is why `!` skips the bash prompt
+too. Keystrokes are not written to the audit log. `terminal.create` and
+`terminal.kill` are.
 
 The shell belongs to the user. The agent does not write to the PTY. The
 panel says when the bound session is busy in the same directory.
@@ -246,8 +257,10 @@ What an attacker gets:
   stdout on purpose; do not redirect that stream into a shared log.
 - The terminal is a shell as the serve user. It is authenticated, loopback
   unless `--terminal-remote` is combined with `--auth`, and confined to the
-  workspace at create. See Terminal above. Keystrokes are not logged. The
-  websocket ticket is single-use and does not authorize any other route.
+  workspace at create and by the foreground cwd watch. See Terminal above.
+  Keystrokes are not logged. A presented websocket ticket is consumed even
+  when the cookie already authorized the upgrade, and it does not authorize
+  any other route. `--attach-only` does not start a shell.
 - `strike daemon logout` rotates the file and drops grants on the next
   `/v1` read. A cookie already stored in a browser fails on its next
   request. Close those tabs after logout. Browser "Log out" only clears

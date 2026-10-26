@@ -5,8 +5,11 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/jonathanung/strike/harness/sandbox"
 )
 
 func testManager(t *testing.T, root string) *Manager {
@@ -152,6 +155,54 @@ func TestTerminalKillsWhenCWDLeavesWorkspace(t *testing.T) {
 	t.Fatalf("shell still alive or wrong reason: %+v\noutput:\n%s", got, chunk)
 }
 
+func TestShouldKillForCWD(t *testing.T) {
+	cases := []struct {
+		name                    string
+		seen, inside, sandboxed bool
+		unseenEscapes, want     bool
+	}{
+		{name: "inside", seen: true, inside: true, unseenEscapes: true, want: false},
+		{name: "outside", seen: true, inside: false, unseenEscapes: true, want: true},
+		{name: "outside sandboxed", seen: true, inside: false, sandboxed: true, unseenEscapes: true, want: true},
+		{name: "unseen unsandboxed", seen: false, sandboxed: false, unseenEscapes: true, want: true},
+		{name: "unseen sandboxed", seen: false, sandboxed: true, unseenEscapes: true, want: false},
+		{name: "unseen not strict", seen: false, sandboxed: false, unseenEscapes: false, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := shouldKillForCWD(tc.seen, tc.inside, tc.sandboxed, tc.unseenEscapes); got != tc.want {
+				t.Fatalf("got %v", got)
+			}
+		})
+	}
+}
+
+func TestTerminalKillsForegroundChildOutsideWorkspace(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("cwd watch reads /proc")
+	}
+	root := t.TempDir()
+	m := testManager(t, root)
+	info, err := m.Create(CreateSpec{WorkspacePath: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Write(info.ID, []byte("bash -c 'cd /tmp && sleep 30'\n")); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(4 * time.Second)
+	for time.Now().Before(deadline) {
+		got, ok := m.Get(info.ID)
+		if ok && !got.Alive && got.ExitReason == ReasonCWDEscaped {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	got, _ := m.Get(info.ID)
+	chunk, _, _, _ := m.Read(info.ID, 0)
+	t.Fatalf("child cwd still inside or wrong reason: %+v\noutput:\n%s", got, chunk)
+}
+
 func TestTerminalSessionEndPolicy(t *testing.T) {
 	root := t.TempDir()
 	m := testManager(t, root)
@@ -229,6 +280,58 @@ func TestTerminalTicketSingleUse(t *testing.T) {
 	if m.ConsumeTicket(info.ID, "nope") {
 		t.Fatal("accepted an unknown ticket")
 	}
+}
+
+func TestTerminalSandboxedShellCWDWatch(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("cwd watch reads /proc")
+	}
+	root := t.TempDir()
+	home := t.TempDir()
+	m := NewManager(ManagerConfig{
+		Scrollback:    64 * 1024,
+		MaxSessions:   4,
+		WatchInterval: 20 * time.Millisecond,
+		Sandbox: sandbox.Policy{
+			Mode:    sandbox.ModeWorkspaceWrite,
+			WorkDir: root,
+		},
+		Env: func(cwd string) []string {
+			return []string{
+				"PATH=" + os.Getenv("PATH"),
+				"HOME=" + home,
+				"TERM=xterm-256color",
+				"HISTFILE=/dev/null",
+				"PWD=" + cwd,
+				"PS1=$ ",
+			}
+		},
+	})
+	t.Cleanup(m.Close)
+	info, err := m.Create(CreateSpec{WorkspacePath: root})
+	if err != nil {
+		if strings.Contains(err.Error(), "unavailable") {
+			t.Skip(err.Error())
+		}
+		t.Fatal(err)
+	}
+	if !info.SandboxApplied {
+		t.Skip("OS sandbox was not applied")
+	}
+	if err := m.Write(info.ID, []byte("cd /tmp\n")); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(4 * time.Second)
+	for time.Now().Before(deadline) {
+		got, ok := m.Get(info.ID)
+		if ok && !got.Alive && got.ExitReason == ReasonCWDEscaped {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	got, _ := m.Get(info.ID)
+	chunk, _, _, _ := m.Read(info.ID, 0)
+	t.Fatalf("sandboxed shell still alive or wrong reason: %+v\noutput:\n%s", got, chunk)
 }
 
 func TestRingDropsFront(t *testing.T) {
