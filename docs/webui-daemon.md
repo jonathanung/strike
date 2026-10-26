@@ -53,13 +53,14 @@ Status: walking skeleton on branch `worktree-rust-webui-daemon`. Not merged.
   a side panel. Daemon connect, workspace policy, and saved remotes stay on
   the Daemon view.
   - Session list merges live roots (`/v1/roots`) with saved sessions.
-    A gutter marks in progress or unread. Chips filter Unread, In progress,
+    A gutter marks the canonical status (running, waiting, blocked, failed,
+    done, stopped, idle) and an unread pip. Chips filter Unread, In progress,
     and Pinned. Search matches title, id, or a delegated child's title.
     Older rows fold after six, keeping pinned, busy, and the open session.
     Delegated children (`GET /v1/sessions/{id}/children`, team state when
-    the roster has them) nest under the open session. Unread and pinned
-    live in browser storage (`strike.seen`, `strike.pins`); the server does
-    not store them.
+    the roster has them) nest under the open session. Unread is stored on
+    the daemon (`POST /v1/sessions/{id}/seen`, `docs/webui-status.md`).
+    Pins stay in browser storage (`strike.pins`).
   - The top bar has a command field (Ctrl+K or Cmd+K) for a new session,
     stop-all, the Chat and Daemon views, Steer/Queue, and the five approval
     modes. A gateway chip follows `/health`. Back and Forward walk the

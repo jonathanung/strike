@@ -1,12 +1,12 @@
 # Web UI planned panels
 
 The Rust client (`webui/`) ships the surfaces the daemon can drive today:
-a session list (live roots, saved sessions, client-side unread and pins,
+a session list (live roots, saved sessions, daemon unread, browser pins,
 delegated children nested under the open session), a transcript over
 `/v1/live/events`, a composer that can steer or queue and set the real
 permission mode, and a side panel with Activity, Files, and Changes.
-Blocked children (`schema:handoff`, #1201) show as `blocked`. Unread and
-pinned are browser storage, not server fields.
+Blocked children (`schema:handoff`, #1201) show as `blocked`. Unread is a
+daemon field (`docs/webui-status.md`). Pins stay in browser storage.
 
 These panels are not in the client. Drawing empty versions of them would
 pretend the daemon already has the Kiro-shaped workflow. Each one below is
