@@ -193,6 +193,14 @@ pub fn remember_paired_gateway(origin: &str, session: &str) {
     }
 }
 
+/// Drops bearer tokens kept for this tab. Settings clear calls this.
+/// Profiles live in localStorage and are removed with the other `strike.*` keys.
+pub fn clear_session_tokens() {
+    if let Some(s) = session_store() {
+        let _ = s.remove_item(TOKEN_KEY);
+    }
+}
+
 pub fn load_profiles() -> Vec<Profile> {
     let raw = local_get("strike.gateways");
     if !raw.is_empty() {

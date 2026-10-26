@@ -1014,7 +1014,72 @@ try {
   }
   const crumbs = await navbar(`(document.querySelector('[data-nav="crumbs"]') || {}).innerText || ""`);
   if (!String(crumbs).includes("Strike") || !String(crumbs).includes(">")) {
-    throw new Error(`breadcrumb missing text=${crumbs}`);  }
+    throw new Error(`breadcrumb missing text=${crumbs}`);
+  }
+  const waitUntil = async (expression, label) => {
+    let last = "";
+    for (let i = 0; i < 40; i++) {
+      last = await evaluate(expression);
+      if (last === true) return;
+      await delay(250);
+    }
+    throw new Error(`${label}\nlast=${String(last).slice(0, 500)}`);
+  };
+
+  await waitUntil(
+    `document.body.innerText.includes("No telemetry") && document.body.innerText.includes(".strike") && document.querySelector('[data-action="onboarding-continue"]') && !document.querySelector('[data-action="onboarding-continue"]').disabled`,
+    "onboarding file list",
+  );
+  await evaluate(`document.querySelector('[data-action="onboarding-continue"]').click()`);
+  await waitUntil(
+    `document.querySelector('[data-action="telemetry-note"]') == null`,
+    "onboarding did not dismiss",
+  );
+  await evaluate(`document.querySelector('[data-action="open-settings"]').click()`);
+  await waitUntil(
+    `document.body.innerText.includes("Keyboard") && document.body.innerText.includes(".strike") && document.body.innerText.includes("Open model menu")`,
+    "settings page",
+  );
+  await evaluate(`document.querySelector('input[data-choice="lg"]').click()`);
+  await evaluate(`document.querySelector('input[data-choice="compact"]').click()`);
+  await waitUntil(
+    `document.documentElement.getAttribute("data-font") === "lg" && document.documentElement.getAttribute("data-density") === "compact" && localStorage.getItem("strike.font") === "lg"`,
+    "font and density",
+  );
+
+  await evaluate(`[...document.querySelectorAll("button")].find((b) => b.textContent === "Daemon").click()`);
+  await evaluate(`(() => {
+    const input = document.querySelector(".daemon input");
+    const set = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    set.call(input, "http://127.0.0.1:1");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    [...document.querySelectorAll(".daemon button")].find((b) => b.textContent === "Connect").click();
+    return true;
+  })()`);
+  await evaluate(`document.querySelector('[data-action="open-settings"]').click()`);
+  await waitUntil(
+    `document.body.innerText.includes("Could not read the file list") && document.querySelector('[data-action="reload-files"]') != null`,
+    "settings error path",
+  );
+  await evaluate(`document.querySelector('[data-action="reload-files"]').click()`);
+  await waitUntil(
+    `document.body.innerText.includes("Could not read the file list")`,
+    "retry while the daemon URL is still wrong",
+  );
+  await evaluate(`[...document.querySelectorAll("button")].find((b) => b.textContent === "Daemon").click()`);
+  await evaluate(`(() => {
+    const input = document.querySelector(".daemon input");
+    const set = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    set.call(input, "");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    [...document.querySelectorAll(".daemon button")].find((b) => b.textContent === "Connect").click();
+    return true;
+  })()`);
+  await evaluate(`document.querySelector('[data-action="open-settings"]').click()`);
+  await waitUntil(
+    `document.body.innerText.includes(".strike") && !document.body.innerText.includes("Could not read the file list")`,
+    "settings recovered",
+  );
   await editorBrowserCheck({
     send,
     port,

@@ -352,6 +352,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/scheduler/presets", s.handleSchedulerPresets)
 	s.mux.HandleFunc("POST /v1/scheduler/presets", s.handleSchedulerPresetsApply)
 	s.mux.HandleFunc("GET /v1/config-sources", s.handleConfigSources)
+	s.mux.HandleFunc("GET /v1/local-files", s.handleLocalFiles)
 	s.mux.HandleFunc("GET /v1/models", s.handleModels)
 	s.mux.HandleFunc("GET /v1/history", s.handleHistory)
 	s.mux.HandleFunc("POST /v1/history", s.handleHistory)

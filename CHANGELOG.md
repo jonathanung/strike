@@ -16,6 +16,7 @@ materially affect the shipped product.
 
 ### Added
 
+- **Web first-run and Settings** — the cockpit states that telemetry is off and lists the paths `strike serve` reads (`GET /v1/local-files`). Settings picks a bundled theme, type size, and density, and links to the model, approval, notification, and gateway controls. Theme id is the daemon config; scheme, type size, and density stay in the browser.
 - **Phone cockpit** — at phone width the web client shows one pane at a
   time (sessions, chat, activity, files, daemon) with a bottom nav, 44px
   targets, and safe-area padding. The composer stays in the visual
