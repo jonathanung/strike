@@ -17,7 +17,9 @@ import (
 	"github.com/jonathanung/strike/internal/persist/plan"
 	"github.com/jonathanung/strike/internal/persist/workspace"
 	"github.com/jonathanung/strike/internal/product/auth"
+	"github.com/jonathanung/strike/internal/product/config"
 	"github.com/jonathanung/strike/internal/product/goal"
+	"github.com/jonathanung/strike/internal/product/project"
 	"github.com/jonathanung/strike/internal/trust/audit"
 )
 
@@ -185,12 +187,14 @@ func TestLocalFilesHandler(t *testing.T) {
 		sessionDir: false,
 		aud.Dir():  false,
 		ws.Path():  false,
-		authPath:   false,
 		tokenPath:  false,
 	}
 	for _, f := range doc.Files {
 		if strings.HasSuffix(f.Path, "onboarding.json") {
 			t.Fatalf("listed onboarding.json %s", f.Path)
+		}
+		if f.Path == authPath || strings.Contains(f.Path, "attachments") || strings.Contains(f.Path, "/history/") {
+			t.Fatalf("attach-only server listed an assemble path %s", f.Path)
 		}
 		if _, ok := need[f.Path]; ok {
 			need[f.Path] = true
@@ -214,6 +218,62 @@ func TestLocalFilesHandler(t *testing.T) {
 	if doc.WorkDir != cwd {
 		t.Fatalf("workDir %q want %q", doc.WorkDir, cwd)
 	}
+}
+
+func TestLocalFilesAssembledListsStores(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	srv, err := New(Options{SessionDir: t.TempDir(), Assembled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/local-files", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d %s", rec.Code, rec.Body.String())
+	}
+	var doc localFilesResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
+		t.Fatal(err)
+	}
+	root := config.GlobalRoot()
+	abs := func(p string) string {
+		if a, err := filepath.Abs(p); err == nil {
+			return a
+		}
+		return p
+	}
+	want := map[string]bool{
+		abs(auth.DefaultPath()):                 false,
+		abs(filepath.Join(root, "attachments")): false,
+	}
+	if id, err := project.Resolve(t.Context(), mustGetwd(t)); err == nil && id.Key != "" {
+		for _, st := range projectStateFiles(root, id.Key) {
+			want[abs(st.path)] = false
+		}
+	}
+	for _, f := range doc.Files {
+		if _, ok := want[f.Path]; ok {
+			want[f.Path] = true
+		}
+		if strings.HasSuffix(f.Path, "onboarding.json") {
+			t.Fatalf("listed onboarding.json %s", f.Path)
+		}
+	}
+	for path, ok := range want {
+		if !ok {
+			t.Errorf("missing %s", path)
+		}
+	}
+}
+
+func mustGetwd(t *testing.T) string {
+	t.Helper()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return wd
 }
 
 func TestLocalFilesAuthOff(t *testing.T) {

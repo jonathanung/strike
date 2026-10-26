@@ -24,6 +24,9 @@ pub fn OnboardingCard(
     let loading = RwSignal::new(true);
     let theme_ready = RwSignal::new(false);
     let user_picked = RwSignal::new(false);
+    let dismissed = RwSignal::new(false);
+    let settings_ok = RwSignal::new(false);
+    let daemon_theme = RwSignal::new(String::new());
     let revert_to = theme.get_untracked();
 
     let load = move || {
@@ -46,19 +49,28 @@ pub fn OnboardingCard(
             loading.set(false);
         });
         spawn_local(async move {
-            let saved = match get_json::<Value>(&b_settings, &t_settings, "/v1/settings").await {
-                Ok(v) => v
-                    .get("theme")
-                    .and_then(|x| x.as_str())
-                    .unwrap_or("")
-                    .to_string(),
-                Err(_) => String::new(),
+            let (ok, saved) = match get_json::<Value>(&b_settings, &t_settings, "/v1/settings").await {
+                Ok(v) => (
+                    true,
+                    v.get("theme")
+                        .and_then(|x| x.as_str())
+                        .unwrap_or("")
+                        .trim()
+                        .to_string(),
+                ),
+                Err(_) => (false, String::new()),
             };
-            if !user_picked.get_untracked()
-                && crate::appearance::known_theme(&saved)
-                && saved != theme.get_untracked()
-            {
-                on_theme(saved);
+            // Click handling is synchronous. A dismiss that already ran wins.
+            if !dismissed.get_untracked() {
+                settings_ok.set(ok);
+                daemon_theme.set(saved.clone());
+                if ok
+                    && !user_picked.get_untracked()
+                    && crate::appearance::known_theme(&saved)
+                    && saved != theme.get_untracked()
+                {
+                    on_theme(saved);
+                }
             }
             theme_ready.set(true);
         });
@@ -71,13 +83,24 @@ pub fn OnboardingCard(
     };
     let reload = move |_| load();
     let dismiss = move |_| {
+        dismissed.set(true);
         on_theme(revert_to.clone());
         on_done();
     };
     let continue_on = move |_| {
         let chosen = theme.get_untracked();
+        let picked = user_picked.get_untracked();
+        let saved = daemon_theme.get_untracked();
+        let ok = settings_ok.get_untracked();
         let (b, t) = (base.get_untracked(), token.get_untracked());
         on_done();
+        // A custom theme id (not one of the bundled accents) stays until the
+        // user picks a swatch. A failed settings read does not invent "empty".
+        let write = picked || (ok && (saved.is_empty() || saved == chosen));
+        if !write {
+            status.set("Kept the theme already in daemon config.".into());
+            return;
+        }
         spawn_local(async move {
             match patch_json(&b, &t, "/v1/settings", serde_json::json!({"theme": chosen})).await {
                 Ok(()) => status.set("Saved the theme id to ~/.strike/config.".into()),
@@ -127,12 +150,18 @@ pub fn OnboardingCard(
                     <providers::ProvidersPage base=base token=token />
                     <Show when=move || theme_ready.get() fallback=move || view! { <p class="hint">"Checking the theme saved in daemon config…"</p> }>
                         <ThemeChoices group="onboarding-accent" current=theme on_pick=pick />
+                        <Show when=move || {
+                            let saved = daemon_theme.get();
+                            !saved.is_empty() && !crate::appearance::known_theme(&saved)
+                        }>
+                            <p class="hint">{move || format!("Daemon config theme: {}. It is not a bundled accent. Continue leaves it in place until you pick one.", daemon_theme.get())}</p>
+                        </Show>
                     </Show>
                     <div class="onboarding-actions">
                         <button type="button" class="secondary" data-action="onboarding-dismiss" on:click=dismiss>"Not now"</button>
-                        <button type="button" class="primary" data-action="onboarding-continue" disabled=move || !theme_ready.get() on:click=continue_on>"Continue"</button>
+                        <button type="button" class="primary" data-action="onboarding-continue" disabled=move || !theme_ready.get() || (loading.get() && files_error.get().is_empty()) on:click=continue_on>"Continue"</button>
                     </div>
-                    <p class="hint">"Not now keeps the theme this browser already had and does not write daemon config. Continue stores the accent here and writes the theme id to ~/.strike/config when the daemon accepts it. Light or dark, type size, and density stay in this browser."</p>
+                    <p class="hint">"Not now keeps the theme this browser already had and does not write daemon config. Continue writes a bundled theme id only when you pick one, or when daemon config has no theme id. A theme id this card does not offer is left as it is. Light or dark, type size, and density stay in this browser."</p>
                 </div>
             </div>
         </div>

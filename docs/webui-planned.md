@@ -190,10 +190,13 @@ paths from `GET /v1/local-files`, states that telemetry is off, and offers
 the bundled themes as the accent. Strike is the default. Light or dark,
 type size, and density stay in the browser (`strike.scheme`, `strike.font`,
 `strike.density`). Continue writes the theme id with `PATCH /v1/settings`
-`{"theme": ...}` into `~/.strike/config` when that route accepts it.
+`{"theme": ...}` into `~/.strike/config` when the user picked a swatch, or
+when the settings read succeeded and the stored id is empty or already that
+accent. A custom theme id is left in place. A failed settings read does not
+overwrite it.
 
-Settings is a page in the shell (the header button, `?` outside a field,
-Ctrl/Cmd+comma, or the command palette). It shows the saved model,
+Settings is a page in the shell (the header gear, Ctrl/Cmd+comma, or the
+command palette). `?` lists shortcuts. It shows the saved model,
 permission mode, and notify dial from `GET /v1/settings` and does not edit
 them. Those links set the location hash for the streams that own the pages:
 

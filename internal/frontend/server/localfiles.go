@@ -55,23 +55,30 @@ func (s *Server) handleLocalFiles(w http.ResponseWriter, r *http.Request) {
 	}
 
 	files := make([]localFileJSON, 0, 48)
-	for _, rd := range config.ServeReads(workDir, instructionRoot) {
-		files = append(files, stampLocalFile(rd.Path, rd.Group, rd.Access, rd.Detail))
-	}
-	files = append(files, stampLocalFile(s.opts.SessionDir, "state", "created-at-startup", "Session JSONL logs for this process."))
-	if root := config.GlobalRoot(); root != "" && projectKey != "" {
-		for _, st := range projectStateFiles(root, projectKey) {
-			files = append(files, stampLocalFile(st.path, "state", "created-at-startup", st.detail))
+	// Config, project stores, auth.json, and attachments are opened by
+	// assemble. Attach-only serve does not run it, so those paths stay off
+	// the list.
+	if s.opts.Assembled {
+		for _, rd := range config.ServeReads(workDir, instructionRoot) {
+			files = append(files, stampLocalFile(rd.Path, rd.Group, rd.Access, rd.Detail))
+		}
+		if root := config.GlobalRoot(); root != "" {
+			files = append(files, stampLocalFile(filepath.Join(root, "attachments"), "state", "created-at-startup", "Content-addressed attachments. Created when the process starts a live engine."))
+			if projectKey != "" {
+				for _, st := range projectStateFiles(root, projectKey) {
+					files = append(files, stampLocalFile(st.path, "state", "created-at-startup", st.detail))
+				}
+			}
+			files = append(files, stampLocalFile(auth.DefaultPath(), "credentials", "read-if-present", "Provider credentials. Read at startup. Contents are not returned."))
 		}
 	}
+	files = append(files, stampLocalFile(s.opts.SessionDir, "state", "created-at-startup", "Session JSONL logs for this process."))
 	if s.opts.Workspaces != nil {
 		files = append(files, stampLocalFile(s.opts.Workspaces.Path(), "state", "read-if-present", "Workspace registry. The file is created on the first write."))
 	}
 	if dir := auditDir(s.opts.Audit); dir != "" {
 		files = append(files, stampLocalFile(dir, "state", "created-at-startup", "Append-only audit segments. A serve op record stores the op type and source IP, not the op body."))
 	}
-	files = append(files, stampLocalFile(auth.DefaultPath(), "credentials", "read-if-present", "Provider credentials. Read at startup. Contents are not returned."))
-
 	authMode := "off"
 	switch {
 	case s.opts.Auth && strings.TrimSpace(s.opts.TokenFile) != "":
@@ -87,7 +94,7 @@ func (s *Server) handleLocalFiles(w http.ResponseWriter, r *http.Request) {
 		WorkDir:    workDir,
 		GlobalRoot: config.GlobalRoot(),
 		ProjectKey: projectKey,
-		Note:       "No telemetry is sent. This list is the files this process reads or creates. Optional files that are missing are skipped. File contents are not included. ~/.strike/onboarding.json is the TUI first-run record and is not read by strike serve.",
+		Note:       "No telemetry is sent. Each path is one this process reads or creates. Optional files that are missing are skipped. File contents are not included. ~/.strike/onboarding.json is the TUI first-run record and is not read by strike serve.",
 		Files:      dedupeLocalFiles(files),
 	})
 }

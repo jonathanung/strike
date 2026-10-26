@@ -270,6 +270,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 	var cleanup func() error
 	var sharedAttachments *attachment.Store
 	sessionDir := opts.sessionDir
+	assembled := false
 
 	wsStore, err := workspace.Open("")
 	if err != nil {
@@ -287,6 +288,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 	}
 
 	if !opts.attachOnly {
+		assembled = true
 		cliOpts := cliOptions{
 			provider:                   opts.provider,
 			providerSet:                true,
@@ -656,6 +658,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 				local.SetFilesWorkDir(services.Files, dir)
 			}
 		},
+<<<<<<< HEAD
 		Sandbox:               sandboxSnap,
 		ReadOnly:              opts.readOnly,
 		Audit:                 auditSink,
@@ -669,6 +672,15 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		TerminalSandbox:       terminalSandbox,
 		TerminalSandboxLoaded: terminalSandboxLoaded,
 		TerminalSandboxFor:    terminalSandboxFor,
+=======
+		Sandbox:       sandboxSnap,
+		ReadOnly:      opts.readOnly,
+		Audit:         auditSink,
+		Attachments:   sharedAttachments,
+		UsageAuditDir: usageDir,
+		SideChat:      sideChat,
+		Assembled:     assembled,
+>>>>>>> 402aa379 (fix(webui): keep custom themes and list only opened files)
 	})
 	if err != nil {
 		return err

@@ -110,10 +110,16 @@ type Options struct {
 	UsageAuditDir string
 	// UsagePricer overrides models.dev pricing for /v1/usage. Nil loads the catalog.
 	UsagePricer func(provider, model string) (usageaudit.Rates, bool)
+<<<<<<< HEAD
 	// Triggers is the inbound trigger registry (webhooks, GitHub, channels).
 	// Nil makes /v1/triggers and POST /hooks 503. The launcher inside the
 	// service is NewRootLauncher (authored for #1282).
 	Triggers *trigger.Service
+=======
+	// Assembled is true when this process ran assemble (config load, project
+	// stores, auth.json, attachments). Attach-only serve leaves it false.
+	Assembled bool
+>>>>>>> 402aa379 (fix(webui): keep custom themes and list only opened files)
 	// OpsRate is tokens/sec per client IP for ops (default 10). <=0 uses default.
 	OpsRate float64
 	// OpsBurst is the per-IP burst (default 20). <=0 uses default.
