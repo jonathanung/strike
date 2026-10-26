@@ -224,6 +224,7 @@ const bareStrikeHint = `Strike now runs as a daemon with a web UI.
 
   strike daemon install   install the per-user systemd service
   strike serve            run the daemon in the foreground
+  strike gateway url --qr one-time phone pairing QR (not the daemon token)
   strike tui              open the deprecated terminal UI
   strike --help           all commands and options`
 
@@ -256,6 +257,9 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 	}
 	if len(args) > 0 && args[0] == "connect" {
 		return runConnectCLI(args[1:], stdout, stderr)
+	}
+	if len(args) > 0 && args[0] == "gateway" {
+		return runGatewayCLI(args[1:], stdout, stderr)
 	}
 	if len(args) == 0 {
 		fmt.Fprintln(stdout, bareStrikeHint)
@@ -493,6 +497,7 @@ func writeUsage(w io.Writer) {
 	fmt.Fprintln(w, "  strike serve [options]")
 	fmt.Fprintln(w, "  strike daemon <install|uninstall|status|token|grant|revoke|logout>")
 	fmt.Fprintln(w, "  strike connect [options] <user@host|profile>")
+	fmt.Fprintln(w, "  strike gateway <url|devices|revoke>")
 	fmt.Fprintln(w, "  strike tui [options] (deprecated)")
 	fmt.Fprintln(w, "  strike mcp-serve [options]")
 	fmt.Fprintln(w, "  strike auth <command> [arguments]")
