@@ -974,6 +974,125 @@ select.mode, .daemon select {
   .side { max-height: 280px; }
 }
 
+/* feature:status begin */
+.status-mark { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.status-gutter {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  align-self: stretch;
+  width: 8px;
+}
+.status-gutter-bar {
+  width: 3px;
+  flex: 1;
+  min-height: 18px;
+  border-radius: 99px;
+  background: var(--border-muted);
+}
+.status-gutter[data-status="running"] .status-gutter-bar { background: var(--accent-alt); }
+.status-gutter[data-status="waiting"] .status-gutter-bar,
+.status-gutter[data-status="blocked"] .status-gutter-bar { background: var(--warning); }
+.status-gutter[data-status="failed"] .status-gutter-bar,
+.status-gutter[data-status="disconnected"] .status-gutter-bar { background: var(--signal); }
+.status-gutter[data-status="done"] .status-gutter-bar { background: var(--success); }
+.status-gutter[data-status="stopped"] .status-gutter-bar,
+.status-gutter[data-status="idle"] .status-gutter-bar { background: var(--muted); }
+.status-unread-pip {
+  width: 6px;
+  height: 6px;
+  border-radius: 99px;
+  background: var(--acid);
+  flex: 0 0 auto;
+}
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 99px;
+  background: var(--muted);
+  flex: 0 0 auto;
+}
+.status-dot[data-status="running"] { background: var(--accent-alt); }
+.status-dot[data-status="waiting"],
+.status-dot[data-status="blocked"] { background: var(--warning); }
+.status-dot[data-status="failed"],
+.status-dot[data-status="disconnected"] { background: var(--signal); }
+.status-dot[data-status="done"] { background: var(--success); }
+.status-badge,
+.status-row .status-badge,
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid var(--border-muted);
+  color: var(--muted);
+  background: transparent;
+}
+.status-badge[data-status="running"],
+.status-row[data-status="running"] .status-badge,
+.status-chip[data-status="running"] { color: var(--accent-alt); border-color: color-mix(in srgb, var(--accent-alt) 45%, var(--rule)); }
+.status-badge[data-status="waiting"],
+.status-badge[data-status="blocked"],
+.status-row[data-status="waiting"] .status-badge,
+.status-row[data-status="blocked"] .status-badge,
+.status-chip[data-status="waiting"],
+.status-chip[data-status="blocked"] { color: var(--warning); border-color: color-mix(in srgb, var(--warning) 45%, var(--rule)); }
+.status-badge[data-status="failed"],
+.status-badge[data-status="disconnected"],
+.status-row[data-status="failed"] .status-badge,
+.status-row[data-status="disconnected"] .status-badge,
+.status-chip[data-status="failed"],
+.status-chip[data-status="disconnected"] { color: var(--signal); border-color: color-mix(in srgb, var(--signal) 45%, var(--rule)); }
+.status-badge[data-status="done"],
+.status-row[data-status="done"] .status-badge,
+.status-chip[data-status="done"],
+.status-chip[data-status="idle"] { color: var(--success); border-color: color-mix(in srgb, var(--success) 45%, var(--rule)); }
+.status-clock { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; }
+.status-chip-hit {
+  height: 28px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  border-radius: 999px;
+}
+.status-chip-hit:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 2px; }
+.status-tabs {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  padding: 0 0 8px;
+  min-height: 0;
+}
+.status-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border-muted);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  flex: 0 0 auto;
+  max-width: 220px;
+}
+.status-tab.on { color: var(--ink); border-color: var(--border-focus); background: var(--raised); }
+.status-tab:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 2px; }
+.status-tab-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--type-sm);
+}
+.session-row { grid-template-columns: auto minmax(0, 1fr) auto; }
+.session-row .session-main { grid-template-columns: minmax(0, 1fr); }
+/* feature:status end */
 /* feature:message-timestamps begin (#1349) */
 .bubble header .stamp {
   margin-left: auto;
