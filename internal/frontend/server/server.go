@@ -100,6 +100,10 @@ type Server struct {
 	// scriptCSPHashes allowlists inline <script> bodies from the embedded
 	// index.html (Trunk emits an inline WASM loader) without unsafe-inline.
 	scriptCSPHashes []string
+
+	// notifyOnce lazily opens the redacted notification log under SessionDir.
+	notifyOnce sync.Once
+	notifyLog  *notifyLog
 }
 
 // New validates options and builds a Server. Does not listen.
@@ -334,6 +338,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/diag", s.handleDiag)
 	s.mux.HandleFunc("POST /v1/ops", s.handleOps)
 	s.mux.HandleFunc("GET /v1/live/events", s.handleLiveEvents)
+	s.mux.HandleFunc("GET /v1/notifications", s.handleNotifications)
+	s.mux.HandleFunc("GET /v1/notifications/stream", s.handleNotificationStream)
+	s.mux.HandleFunc("PUT /v1/notifications/prefs", s.handleNotificationPrefs)
 	s.mux.HandleFunc("GET /v1/ws", s.handleWS)
 	s.mux.HandleFunc("GET /{$}", s.handleAttach)
 	s.mux.HandleFunc("GET /attach", s.handleAttach)

@@ -211,6 +211,62 @@ try {
     token,
     repoDir: process.cwd(),
   });
+
+  const clicked = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const btn = document.querySelector('[data-feature="notifications"]');
+      if (!btn) return "missing-bell";
+      btn.click();
+      return "clicked";
+    })()`,
+    returnByValue: true,
+  });
+  if (clicked.result?.result?.value !== "clicked") {
+    throw new Error(`notification bell missing: ${clicked.result?.result?.value}`);
+  }
+  let centre = "";
+  for (let i = 0; i < 20; i++) {
+    const opened = await send("Runtime.evaluate", {
+      expression: "document.body ? document.body.innerText : ''",
+      returnByValue: true,
+    });
+    centre = opened.result?.result?.value || "";
+    if (
+      centre.includes("Mark all read") &&
+      (centre.includes("Nothing yet") || centre.includes("Could not load notifications"))
+    ) {
+      break;
+    }
+    await delay(100);
+  }
+  if (
+    !centre.includes("Mark all read") ||
+    (!centre.includes("Nothing yet") && !centre.includes("Could not load notifications"))
+  ) {
+    throw new Error(`notification centre did not open: ${String(centre).slice(0, 500)}`);
+  }
+  await send("Runtime.evaluate", {
+    expression: `document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));`,
+    returnByValue: true,
+  });
+  await delay(100);
+  await send("Runtime.evaluate", {
+    expression: `document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "n", altKey: true, bubbles: true }));`,
+    returnByValue: true,
+  });
+  let keyed = "closed";
+  for (let i = 0; i < 20; i++) {
+    const again = await send("Runtime.evaluate", {
+      expression: "document.body && document.body.innerText.includes('Mark all read') ? 'open' : 'closed'",
+      returnByValue: true,
+    });
+    keyed = again.result?.result?.value || "closed";
+    if (keyed === "open") break;
+    await delay(100);
+  }
+  if (keyed !== "open") {
+    throw new Error(`Alt+N did not reopen notifications: ${keyed}`);
+  }
   console.log("webui-smoke ok");
 } catch (err) {
   console.error(String(err));

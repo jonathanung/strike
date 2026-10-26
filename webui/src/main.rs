@@ -6,19 +6,21 @@
 mod api;
 mod editor;
 mod model;
+mod notify;
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use leptos::callback::Callback;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use model::{
     activity_panel, child_card_from_parts, child_card_from_text, child_keys_match, display_state,
-    filter_sessions, fmt_ago, fmt_elapsed, is_running, merge_sessions, mode_label, task_headline,
+    filter_sessions, fmt_ago, fmt_elapsed, is_running, merge_sessions, mode_label,
     permission_modes, prefer_summary, protocol_dump, session_label, status_kind, strip_echo_tip,
-    visible_sessions, ActivityRow, Bootstrap, ChangedFilesResponse, ChatLine, ChildCard,
-    ChildrenResponse, FilesResponse, Health, ModelInfo, ModelList, Remote, RootSummary,
+    task_headline, visible_sessions, ActivityRow, Bootstrap, ChangedFilesResponse, ChatLine,
+    ChildCard, ChildrenResponse, FilesResponse, Health, ModelInfo, ModelList, Remote, RootSummary,
     SessionItem, SessionsResponse, TeamSnapshot, Workspace, WorkspacesResponse,
 };
 use wasm_bindgen::closure::Closure;
@@ -410,6 +412,12 @@ fn palette_cmds() -> &'static [PaletteCmd] {
             id: "daemon",
             label: "Daemon",
             detail: "This gateway, its token, and workspaces",
+        },
+        PaletteCmd {
+            section: "Apps",
+            id: "notifications",
+            label: "Notifications",
+            detail: "Approvals, finished work, and the gateway",
         },
         PaletteCmd {
             section: "Settings",
@@ -1158,6 +1166,7 @@ fn App() -> impl IntoView {
             "stop-all" => stop_all(),
             "chat" => mode.set("chat".into()),
             "daemon" => mode.set("daemon".into()),
+            "notifications" => notify::request_open(),
             "steer" => set_enter("steer".into()),
             "queue" => set_enter("queue".into()),
             "mode-default" => set_perm("default".into()),
@@ -1303,6 +1312,20 @@ fn App() -> impl IntoView {
         });
     };
 
+    // #1267 navbar hosts this bell. The component owns its panel and settings.
+    let on_notify = Callback::new(move |target: notify::FocusTarget| {
+        mode.set("chat".into());
+        focus.set(false);
+        if target.session_id.is_empty() {
+            return;
+        }
+        let live = roots
+            .get_untracked()
+            .iter()
+            .any(|r| r.id == target.session_id);
+        open_session(target.session_id, live);
+    });
+
     let running_count = move || {
         activity
             .get()
@@ -1335,6 +1358,12 @@ fn App() -> impl IntoView {
                 <kbd>"Ctrl+K"</kbd>
             </button>
             <div class="header-actions">
+                <notify::NotificationBell
+                    base=base
+                    token=token
+                    gateway=gateway
+                    on_focus=on_notify
+                />
                 <span class=move || match gateway.get().as_str() {
                     "connected" => "chip ok",
                     "unreachable" => "chip bad",
