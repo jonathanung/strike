@@ -432,6 +432,13 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
     );
     check(Boolean(down), "stopping the daemon did not show Unreachable and Retry");
     await shoot("shell-reconnect-error", ["desk1024", "desk1440"]);
+    // The cockpit polls refresh_meta every 2s. Once the daemon is back that
+    // poll clears the notice, so Retry can disappear before the click.
+    // Freeze intervals, then click Retry ourselves.
+    await page.evaluate(`(() => {
+      const top = window.setInterval(() => {}, 1e9);
+      for (let i = 1; i <= top; i++) window.clearInterval(i);
+    })()`);
     await controls.start();
     const retried = await page.evaluate(`(() => {
       const btn = [...document.querySelectorAll(".notice button")].find((b) => (b.innerText || "").includes("Retry"));
@@ -442,7 +449,10 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
     check(retried, "Retry was not clicked");
     if (retried) {
       const backOnline = await waitUntil(
-        `document.body && document.body.innerText.includes("Connected") && !document.body.innerText.includes("Unreachable")`,
+        `(() => {
+          const text = document.body ? document.body.innerText : "";
+          return text.includes("Connected") && !text.includes("Unreachable") && !text.includes("Could not reach the daemon");
+        })()`,
         10000,
         "daemon reconnected",
       );

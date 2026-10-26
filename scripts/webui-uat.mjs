@@ -72,7 +72,6 @@ try {
       start: async () => {
         strike = startStrike({ bin, port, home, cwd: process.cwd() });
         await waitHealth(`${baseURL}/health`);
-        await delay(300);
       },
     },
   });
