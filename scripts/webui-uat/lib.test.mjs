@@ -6,10 +6,12 @@ import {
   DARK_TOKENS,
   GOLDEN_MEAN_ABS_MAX,
   LIGHT_TOKENS,
+  PHONE,
   missingLabels,
   meanAbsDiff,
   parseArgs,
   parseViewport,
+  phoneShotName,
   sideBySideFilter,
   tokenMismatch,
 } from "./lib.mjs";
@@ -42,9 +44,19 @@ test("sideBySideFilter scales both halves to one height", () => {
   assert.throws(() => sideBySideFilter(0));
 });
 
+test("phone shot name is the 390-wide slug", () => {
+  assert.deepEqual(PHONE, { width: 390, height: 844, tag: "mobile" });
+  assert.equal(phoneShotName("approvals-empty"), "approvals-empty-mobile");
+  assert.throws(() => phoneShotName("Approvals"), /slug/);
+  assert.throws(() => phoneShotName("../x"), /slug/);
+});
+
 test("parseArgs defaults and compare-only", () => {
   assert.equal(parseArgs([]).video, true);
+  assert.equal(parseArgs([]).suite, "full");
   assert.equal(parseArgs(["--suite", "smoke", "--no-video"]).video, false);
+  assert.equal(parseArgs(["--suite", "approvals"]).suite, "approvals");
+  assert.throws(() => parseArgs(["--suite", "../etc"]), /suite/);
   const cmp = parseArgs([
     "--compare-only",
     "--left",
