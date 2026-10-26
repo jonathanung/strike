@@ -211,6 +211,79 @@ try {
     token,
     repoDir: process.cwd(),
   });
+
+  const before = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const shell = document.querySelector(".shell");
+      return JSON.stringify({
+        layout: document.documentElement.getAttribute("data-layout") || "",
+        cls: shell ? shell.className : "",
+        attach: !!document.querySelector("[data-chat-attach]"),
+      });
+    })()`,
+    returnByValue: true,
+  });
+  const beforeState = JSON.parse(before.result?.result?.value || "{}");
+  if (beforeState.layout === "conversation" || String(beforeState.cls).includes("layout-conversation")) {
+    throw new Error(`cockpit is not the default layout: ${JSON.stringify(beforeState)}`);
+  }
+  if (!beforeState.attach) throw new Error("attach control missing in cockpit");
+
+  await send("Runtime.evaluate", {
+    expression: `document.querySelector('[data-layout="conversation"]')?.click()`,
+  });
+  let chat = {};
+  for (let i = 0; i < 20; i++) {
+    const ev = await send("Runtime.evaluate", {
+      expression: `(() => {
+        const shell = document.querySelector(".shell");
+        const bar = document.querySelector(".chat-mode-bar");
+        const shown = bar ? getComputedStyle(bar).display : "";
+        return JSON.stringify({
+          cls: shell ? shell.className : "",
+          bar: shown,
+          sessions: !!document.querySelector("[data-chat-sessions]"),
+          panel: !!document.querySelector("[data-chat-panel]"),
+        });
+      })()`,
+      returnByValue: true,
+    });
+    chat = JSON.parse(ev.result?.result?.value || "{}");
+    if (String(chat.cls).includes("layout-conversation") && chat.bar === "flex") break;
+    await delay(100);
+  }
+  if (!String(chat.cls).includes("layout-conversation") || chat.bar !== "flex" || !chat.sessions || !chat.panel) {
+    throw new Error(`conversation layout failed: ${JSON.stringify(chat)}`);
+  }
+  await send("Runtime.evaluate", {
+    expression: `document.querySelector('[data-layout="cockpit"]')?.click()`,
+  });
+
+  const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+  const secret = "notes-sk-abcdefghijklmnopqrstuvwxyz.png";
+  const uploaded = await fetch(`http://127.0.0.1:${port}/v1/attachments`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ name: secret, mime: "image/png", data: png }),
+  });
+  const uploadedBody = await uploaded.text();
+  if (uploaded.status !== 200 || uploadedBody.includes("sk-abcdefghijklmnopqrstuvwxyz") || !uploadedBody.includes("[REDACTED_API_KEY]")) {
+    throw new Error(`attachment ingest failed ${uploaded.status} ${uploadedBody.slice(0, 300)}`);
+  }
+  const rejected = await fetch(`http://127.0.0.1:${port}/v1/attachments`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ data: "" }),
+  });
+  if (rejected.status !== 400) {
+    throw new Error(`empty attachment status ${rejected.status}`);
+  }
   console.log("webui-smoke ok");
 } catch (err) {
   console.error(String(err));

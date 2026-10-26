@@ -4,20 +4,26 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#14131c">
+<meta name="description" content="Conversation and cockpit for a Strike daemon.">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="icon" href="/assets/icon.svg">
 <title>Strike</title>
 <script>
-(function(){try{var ok={strike:1,nord:1,dracula:1,gruvbox:1,monokai:1,"tokyo-night":1,catppuccin:1};var t=localStorage.getItem("strike.theme")||"strike";var s=localStorage.getItem("strike.scheme")||"dark";if(!ok[t])t="strike";if(s!=="light")s="dark";var el=document.documentElement;el.setAttribute("data-theme",t);el.setAttribute("data-scheme",s);}catch(e){}})();
+(function(){try{var ok={strike:1,nord:1,dracula:1,gruvbox:1,monokai:1,"tokyo-night":1,catppuccin:1};var t=localStorage.getItem("strike.theme")||"strike";var s=localStorage.getItem("strike.scheme")||"dark";if(!ok[t])t="strike";if(s!=="light")s="dark";var lay=localStorage.getItem("strike.layout")||"cockpit";if(lay!=="conversation")lay="cockpit";var el=document.documentElement;el.setAttribute("data-theme",t);el.setAttribute("data-scheme",s);el.setAttribute("data-layout",lay);}catch(e){}})();
 </script>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="/assets/style-b675a6499c95b448.css" integrity="sha384-TzmCXhs4XZOIBJVTWsltYCqu3aIrajPO3IqX2vad7TJjohexRdJvdRFjmxs68fTu"/>
-<link rel="stylesheet" href="/assets/editor-c775cc9b18a5458.css" integrity="sha384-AyOjM22LfkyGATt0RiB3O7FWiJR+tjHaI+BUHE+UrMDR7Ykaa5aNRaKgR7as4OR+"/>
+<link rel="stylesheet" href="/assets/editor-0c775cc9b18a5458.css" integrity="sha384-AyOjM22LfkyGATt0RiB3O7FWiJR+tjHaI+BUHE+UrMDR7Ykaa5aNRaKgR7as4OR+"/>
+<link rel="stylesheet" href="/assets/chat-mode-fe35cd416ae9052d.css" integrity="sha384-bxptQDWOLBO5uENqejP2yio6RIDct4UNKywkjIhTBvtwmoYAyeABSiC48kZHHw4j"/>
 
 
 
 
 <script type="module">
-import init, * as bindings from '/assets/strike-webui-9b8f6ccf00662a42.js';
-const wasm = await init({ module_or_path: '/assets/strike-webui-9b8f6ccf00662a42_bg.wasm' });
+import init, * as bindings from '/assets/strike-webui-4bfb949f023e3401.js';
+const wasm = await init({ module_or_path: '/assets/strike-webui-41a1e7a557f6dc_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -28,6 +34,6 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 </script>
 <script src="/assets/register.js" defer></script>
 
-<link rel="modulepreload" href="/assets/strike-webui-9b8f6ccf00662a42.js" crossorigin="anonymous" integrity="sha384-FSJHKIQmc6jBxBz8T7FHDd07KgI95kfkIo7psvkfbdIfaeMv5hl8Y+Tba24iroMG"><link rel="preload" href="/assets/strike-webui-9b8f6ccf00662a42_bg.wasm" crossorigin="anonymous" integrity="sha384-3xQkI/EZr3HQiV5r1cyqekDY0zlwnAgcCTlUprut3y/UQzHtMQfQqzr/DC6kulhA" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/assets/strike-webui-4bfb949f023e3401.js" crossorigin="anonymous" integrity="sha384-Ok37TALLP4cidcY+MNooY9Nl9Vm10/YfdF66gs8YVoYc9+q+z1omPJbYw8z3CE50"><link rel="preload" href="/assets/strike-webui-41a1e7a557f6dc_bg.wasm" crossorigin="anonymous" integrity="sha384-44u1f7XN12N2W1EdjPKNBbeBgIkX9apE4wcmHaVqGwLTUUi8VYAwk6aLCF37w2w2" as="fetch" type="application/wasm"></head>
 <body></body>
 </html>

@@ -128,11 +128,12 @@ would have to be the real `!` shell path, which today is TUI-only.
 ## Composer triggers
 
 The web composer does not parse `/command`, `@file`, `$skill`, or `!shell`.
-The TUI expands `@file` and runs `!` shell. Dragging a file inserts `@path`
-as plain text. Planned: the same expansion on `user.input` in the daemon,
-so every client gets it, plus a `+` menu whose entries are only those real
-actions. Upload and screenshot stay out until the daemon accepts those
-attachments on the op.
+The TUI expands `@file` and runs `!` shell. Dragging a file path inserts
+`@path` as plain text. Planned: the same expansion on `user.input` in the
+daemon, so every client gets it, plus a `+` menu whose entries are only
+those real actions. Image and file upload is `POST /v1/attachments` (5 MiB,
+eight per message, filename redaction, optional PNG/JPEG region paint) and
+`images` on `user.input` and `steer`. Screenshot capture is still out.
 
 ## Context window hold
 
@@ -140,6 +141,26 @@ attachments on the op.
 Send when the window is full. Planned: a hold that refuses `user.input`
 when the live status says the next turn would not fit, with the number
 from the daemon. The client will not invent a limit.
+
+## Chat mode
+
+Conversation layout is a presentation of the same session shell. Cockpit
+stays the default (`strike.layout` in this browser). Conversation centers
+one column and opens the existing session list and side panel as drawers.
+It does not fork the transcript or the composer.
+
+The composer can attach files the daemon accepts. Names that look like
+credentials are redacted before they are stored. The transcript does not
+yet draw those refs back as images; that stays with session UX. Voice is
+the browser speech API when `SpeechRecognition` exists. Audio may leave
+the machine (browser vendor). There is no local model. Follow-up chips
+under a reply are three fixed prompts, not model suggestions.
+
+The service worker caches the app shell after a successful load and serves
+it when the network is down. `/v1/` and `/health` are never cached. A
+dropped event stream shows a reconnecting note and opens the stream again.
+The column stays up during the gap. The daemon replays the session log, so
+the first replay event replaces the column instead of appending a second copy.
 
 ## Not planned as a copy
 

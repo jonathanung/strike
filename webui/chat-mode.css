@@ -1,0 +1,189 @@
+/* feature:chat-mode begin */
+/* The layout control sits in the header. Below ~1180px the centered
+   command pill would overlap it, so the header wraps the way the 960px
+   shell already does. */
+@media (max-width: 1180px) {
+  .page-header {
+    flex-wrap: wrap;
+    height: auto;
+    padding: 8px 10px;
+    row-gap: 8px;
+  }
+  .header-actions {
+    order: 2;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+  .command-pill {
+    position: static;
+    transform: none;
+    width: 100%;
+    order: 3;
+  }
+}
+
+.layout-toggle .seg { padding: 0 8px; }
+
+.shell.layout-conversation {
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
+}
+.shell.layout-conversation .chat {
+  width: min(760px, 100%);
+  padding: 0 8px 12px;
+}
+.shell.layout-conversation .transcript {
+  padding: 12px 2px 8px;
+  gap: 14px;
+}
+.shell.layout-conversation .bubble {
+  border-left-width: 0;
+  background: transparent;
+  border-color: transparent;
+  padding: 2px 0;
+}
+.shell.layout-conversation .role-you {
+  background: var(--surface);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  margin-left: 18%;
+}
+.shell.layout-conversation .role-strike {
+  margin-right: 6%;
+}
+.shell.layout-conversation .role-tool,
+.shell.layout-conversation .role-child {
+  background: var(--surface-muted);
+  border: 1px solid var(--border-muted);
+  border-left: 2px solid var(--tool);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+}
+.shell.layout-conversation .role-child { border-left-color: var(--warning); }
+
+.chat-mode-bar,
+.follow-ups,
+.chat-scrim { display: none; }
+.shell.layout-conversation .chat-mode-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  margin: 4px 0 2px;
+}
+.shell.layout-conversation .chat-mode-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: var(--type-sm);
+}
+.shell.layout-conversation .follow-ups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 8px;
+}
+.shell.layout-conversation .follow-ups .chip { height: 26px; }
+
+.shell.layout-conversation .rail,
+.shell.layout-conversation .side { display: none; }
+.shell.layout-conversation.drawer-sessions .rail,
+.shell.layout-conversation.drawer-panel .side {
+  display: flex;
+  position: fixed;
+  z-index: 40;
+  top: 52px;
+  bottom: 12px;
+  width: min(320px, calc(100vw - 24px));
+  box-shadow: 0 16px 40px color-mix(in srgb, var(--ink) 18%, transparent);
+}
+.shell.layout-conversation.drawer-sessions .rail { left: 12px; }
+.shell.layout-conversation.drawer-panel .side { right: 12px; }
+.shell.layout-conversation.drawer-sessions .chat-scrim,
+.shell.layout-conversation.drawer-panel .chat-scrim {
+  display: block;
+  position: fixed;
+  inset: 0;
+  z-index: 35;
+  border: 0;
+  border-radius: 0;
+  height: auto;
+  background: color-mix(in srgb, var(--ground) 35%, transparent);
+}
+
+.attach-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.attach-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 4px 6px 4px 4px;
+  background: var(--ground);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  font-size: var(--type-sm);
+}
+.attach-chip img {
+  width: 28px;
+  height: 28px;
+  object-fit: cover;
+  border-radius: 4px;
+  background: var(--surface-muted);
+}
+.attach-chip .name {
+  font-weight: 600;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.attach-chip .path { color: var(--signal); }
+.attach-chip button {
+  height: 22px;
+  padding: 0 6px;
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+}
+.file-pick {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+}
+.composer-bar .chip.listening {
+  color: var(--signal);
+  border-color: var(--signal);
+}
+
+@media (max-width: 720px) {
+  html[data-layout="conversation"] .command-pill { width: 100%; }
+  .shell.layout-conversation .chat {
+    width: 100%;
+    padding: 0 8px calc(8px + env(safe-area-inset-bottom));
+  }
+  .shell.layout-conversation .role-you { margin-left: 8%; }
+  .shell.layout-conversation .role-strike { margin-right: 0; }
+  .shell.layout-conversation.drawer-sessions .rail,
+  .shell.layout-conversation.drawer-panel .side {
+    top: 0;
+    bottom: 0;
+    width: min(100vw - 28px, 360px);
+  }
+  .composer-bar { gap: 6px; }
+  .chat-mode-bar .chip { padding: 0 8px; }
+}
+/* feature:chat-mode end */

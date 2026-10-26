@@ -19,8 +19,10 @@ import (
 	"github.com/jonathanung/strike/harness/sandbox"
 	"github.com/jonathanung/strike/internal/frontend/host"
 	"github.com/jonathanung/strike/internal/frontend/server"
+	"github.com/jonathanung/strike/internal/persist/attachment"
 	"github.com/jonathanung/strike/internal/persist/session"
 	"github.com/jonathanung/strike/internal/persist/workspace"
+	"github.com/jonathanung/strike/internal/product/config"
 	"github.com/jonathanung/strike/internal/protocol"
 	"github.com/jonathanung/strike/internal/trust/audit"
 )
@@ -474,19 +476,25 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
+	attStore, err := attachment.Open(config.GlobalRoot())
+	if err != nil {
+		return fmt.Errorf("open attachments: %w", err)
+	}
+	defer func() { _ = attStore.Close() }()
 
 	srv, err := server.New(server.Options{
-		Addr:       opts.addr,
-		Auth:       opts.auth,
-		Token:      token,
-		TokenFile:  opts.tokenFile,
-		SessionDir: sessionDir,
-		Workspaces: wsStore,
-		LiveHub:    liveHub,
-		Services:   services,
-		Sandbox:    sandboxSnap,
-		ReadOnly:   opts.readOnly,
-		Audit:      auditSink,
+		Addr:        opts.addr,
+		Auth:        opts.auth,
+		Token:       token,
+		TokenFile:   opts.tokenFile,
+		SessionDir:  sessionDir,
+		Workspaces:  wsStore,
+		LiveHub:     liveHub,
+		Services:    services,
+		Sandbox:     sandboxSnap,
+		ReadOnly:    opts.readOnly,
+		Audit:       auditSink,
+		Attachments: attStore,
 	})
 	if err != nil {
 		return err

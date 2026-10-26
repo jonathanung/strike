@@ -111,6 +111,9 @@ type capabilities struct {
 	ConfigFiles bool `json:"configFiles"`
 	// Themes is true when host.Services.Themes is wired (catalog list/get).
 	Themes bool `json:"themes"`
+	// Attachments is true when composer uploads can be stored and user.input
+	// / steer images are accepted with size limits and name redaction.
+	Attachments bool `json:"attachments"`
 }
 
 type bootstrapResponse struct {
@@ -141,7 +144,7 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 	// Timeline is host-safe and derived from SessionDir JSONL (always available).
 	// TeamControl shares the live gate: Ops are handled by the same engine path.
 	live := s.hasLive()
-	c := capabilities{Live: live, Roots: s.opts.LiveHub != nil, Timeline: true, Sandbox: s.hasSandbox(), Diag: live, Team: live, TeamControl: live}
+	c := capabilities{Live: live, Roots: s.opts.LiveHub != nil, Timeline: true, Sandbox: s.hasSandbox(), Diag: live, Team: live, TeamControl: live, Attachments: s.opts.Attachments != nil}
 	var skills []map[string]any
 	if h := s.opts.Services; h != nil {
 		c.Auth, c.Catalog, c.Settings, c.History = h.Auth != nil, h.Catalog != nil, h.Settings != nil, h.History != nil
@@ -1297,6 +1300,12 @@ func (s *Server) handleOps(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	op, err = s.prepareOp(op, sessionID)
+	if err != nil {
+		s.recordServeOpError(r, "http", env.Type, sessionID)
+		writeJSON(w, attachmentHTTPStatus(err), opErrorResponse{Error: err.Error()})
+		return
+	}
 	// Team-control Ops wait for engine outcome so CAS/idempotency map to HTTP.
 	if protocol.IsTeamControlOp(op) {
 		s.handleTeamControlOp(w, r, live, env.Type, sessionID, op)
@@ -1521,6 +1530,13 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			}
 			sessionID := live.SessionID()
 			if err := s.admitOp(r, "ws", env.Type, sessionID); err != nil {
+				msg, _ := json.Marshal(map[string]any{"type": "error", "data": map[string]string{"message": err.Error()}})
+				_ = ws.WriteText(string(msg))
+				continue
+			}
+			op, err = s.prepareOp(op, sessionID)
+			if err != nil {
+				s.recordServeOpError(r, "ws", env.Type, sessionID)
 				msg, _ := json.Marshal(map[string]any{"type": "error", "data": map[string]string{"message": err.Error()}})
 				_ = ws.WriteText(string(msg))
 				continue
