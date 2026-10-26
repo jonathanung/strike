@@ -4,7 +4,7 @@ The Rust client (`webui/`) ships the surfaces the daemon can drive today:
 a session list (live roots, saved sessions, client-side unread and pins,
 delegated children nested under the open session), a transcript over
 `/v1/live/events`, a composer that can steer or queue and set the real
-permission mode, and a side panel with Activity, Files, and Changes.
+permission mode, and a side panel with Activity, Files, Changes, Git, and Worktrees.
 Blocked children (`schema:handoff`, #1201) show as `blocked`. Unread and
 pinned are browser storage, not server fields.
 
@@ -118,10 +118,14 @@ the approval chip.
 
 ## Extra side tabs
 
-Git status beyond `GET /v1/changed-files`, an embedded browser, a terminal,
-and a subagent board that is not the Activity list are not in the client.
-Activity is the subagent list. Changes is the diff list. A terminal tab
-would have to be the real `!` shell path, which today is TUI-only.
+Git status, branch, log, commit, and worktree list/create/remove are in the
+client (`/v1/git/*`). The Git panel reuses `GET /v1/changed-files` for the
+unstaged diff. Changing `session.childIsolation` stays in config; the
+Worktrees panel shows the effective value and does not write a second flag.
+An embedded browser, a terminal, and a subagent board that is not the
+Activity list are not in the client. Activity is the subagent list. Changes
+is the diff list. A terminal tab would have to be the real `!` shell path,
+which today is TUI-only.
 
 ## Composer triggers
 

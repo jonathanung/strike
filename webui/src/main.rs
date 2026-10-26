@@ -1,9 +1,10 @@
 //! Strike web client. The session list is live roots plus saved sessions.
-//! Activity, Files, and Changes are the side panel. Schedule, memory,
-//! knowledge, artifacts, and the task runner are not drawn here; see
-//! docs/webui-planned.md.
+//! Activity, Files, Changes, Git, and Worktrees are the side panel.
+//! Schedule, memory, knowledge, artifacts, and the task runner are not
+//! drawn here; see docs/webui-planned.md.
 
 mod api;
+mod git;
 mod model;
 
 use std::cell::{Cell, RefCell};
@@ -14,10 +15,10 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use model::{
     activity_panel, child_card_from_parts, child_card_from_text, child_keys_match, display_state,
-    filter_sessions, fmt_ago, fmt_elapsed, is_running, merge_sessions, mode_label, task_headline,
+    filter_sessions, fmt_ago, fmt_elapsed, is_running, merge_sessions, mode_label,
     permission_modes, prefer_summary, protocol_dump, session_label, status_kind, strip_echo_tip,
-    visible_sessions, ActivityRow, Bootstrap, ChangedFilesResponse, ChatLine, ChildCard,
-    ChildrenResponse, FilesResponse, Health, ModelInfo, ModelList, Remote, RootSummary,
+    task_headline, visible_sessions, ActivityRow, Bootstrap, ChangedFilesResponse, ChatLine,
+    ChildCard, ChildrenResponse, FilesResponse, Health, ModelInfo, ModelList, Remote, RootSummary,
     SessionItem, SessionsResponse, TeamSnapshot, Workspace, WorkspacesResponse,
 };
 use wasm_bindgen::closure::Closure;
@@ -410,6 +411,18 @@ fn palette_cmds() -> &'static [PaletteCmd] {
             detail: "This gateway, its token, and workspaces",
         },
         PaletteCmd {
+            section: "Apps",
+            id: "git",
+            label: "Git",
+            detail: "Status, diff, commit, and branches",
+        },
+        PaletteCmd {
+            section: "Apps",
+            id: "worktrees",
+            label: "Worktrees",
+            detail: "Session worktrees and child isolation",
+        },
+        PaletteCmd {
             section: "Settings",
             id: "steer",
             label: "Steer",
@@ -541,6 +554,12 @@ fn icon(name: &str) -> &'static str {
         }
         "changes" => {
             r#"<svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4.5h10M3 8h6M3 11.5h8"/></svg>"#
+        }
+        "git" => {
+            r#"<svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="4" cy="4" r="1.6"/><circle cx="4" cy="12" r="1.6"/><circle cx="12" cy="6" r="1.6"/><path d="M4 5.6v4.8M4 4h5.2a2.2 2.2 0 0 1 0 4.4H4"/></svg>"#
+        }
+        "worktrees" => {
+            r#"<svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13.5V3.5M3 8h6.5a2 2 0 0 0 0-4H8M9.5 8H13"/></svg>"#
         }
         "command" => {
             r#"<svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5h11v9h-11z"/><path d="M5 7l2 1.5L5 10M8.5 10.5h2.5"/></svg>"#
@@ -1152,6 +1171,14 @@ fn App() -> impl IntoView {
             "stop-all" => stop_all(),
             "chat" => mode.set("chat".into()),
             "daemon" => mode.set("daemon".into()),
+            "git" => {
+                mode.set("chat".into());
+                side_tab.set("git".into());
+            }
+            "worktrees" => {
+                mode.set("chat".into());
+                side_tab.set("worktrees".into());
+            }
             "steer" => set_enter("steer".into()),
             "queue" => set_enter("queue".into()),
             "mode-default" => set_perm("default".into()),
@@ -1244,6 +1271,24 @@ fn App() -> impl IntoView {
             } else if ev.alt_key() && !ev.meta_key() && !ev.ctrl_key() && ev.key() == "\\" {
                 ev.prevent_default();
                 focus.update(|v| *v = !*v);
+            } else if ev.alt_key()
+                && !ev.meta_key()
+                && !ev.ctrl_key()
+                && !git::shortcut_blocked(&ev)
+                && ev.key().eq_ignore_ascii_case("g")
+            {
+                ev.prevent_default();
+                mode.set("chat".into());
+                side_tab.set("git".into());
+            } else if ev.alt_key()
+                && !ev.meta_key()
+                && !ev.ctrl_key()
+                && !git::shortcut_blocked(&ev)
+                && ev.key().eq_ignore_ascii_case("w")
+            {
+                ev.prevent_default();
+                mode.set("chat".into());
+                side_tab.set("worktrees".into());
             } else if ev.key() == "Escape" {
                 palette_open.set(false);
                 mode_menu.set(false);
@@ -1693,6 +1738,8 @@ fn App() -> impl IntoView {
                         <button class=move || if side_tab.get() == "activity" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("activity".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("activity")></span>"Activity"</button>
                         <button class=move || if side_tab.get() == "files" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("files".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("files")></span>"Files"</button>
                         <button class=move || if side_tab.get() == "changes" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("changes".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("changes")></span>"Changes"</button>
+                        <button class=move || if side_tab.get() == "git" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("git".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("git")></span>"Git"</button>
+                        <button class=move || if side_tab.get() == "worktrees" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("worktrees".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("worktrees")></span>"Worktrees"</button>
                     </div>
                     <Show when=move || side_tab.get() == "activity">
                     <div class="activity">
@@ -1880,6 +1927,12 @@ fn App() -> impl IntoView {
                                 }).collect_view()}
                             </ul>
                         </div>
+                    </Show>
+                    <Show when=move || side_tab.get() == "git">
+                        <git::GitPanel base=base token=token status_line=status />
+                    </Show>
+                    <Show when=move || side_tab.get() == "worktrees">
+                        <git::WorktreePanel base=base token=token status_line=status active_root=active_root />
                     </Show>
                 </aside>
             </div>

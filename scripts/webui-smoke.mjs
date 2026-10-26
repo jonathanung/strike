@@ -197,13 +197,56 @@ try {
     if (text.includes("Run a command") && text.includes("Activity") && acid === "#7c3aed") break;
     await delay(250);
   }
-  const want = ["Run a command", "Strike", "Activity", "Files", "Changes", "Approval"];
+  const want = ["Run a command", "Strike", "Activity", "Files", "Changes", "Git", "Worktrees", "Approval"];
   const missingText = want.filter((s) => !text.includes(s));
   if (missingText.length || acid !== "#7c3aed" || ground !== "#14131c") {
     throw new Error(
       `cockpit check failed missing=${missingText.join(",")} acid=${acid} ground=${ground} text=${text.slice(0, 400)}`,
     );
   }
+
+  // Git and Worktrees call /v1 with the bearer from localStorage. The shell
+  // text above renders before that. Seed the smoke token and reload so the
+  // panel assertions hit the daemon, not an empty unauthorized panel.
+  await send("Runtime.evaluate", {
+    expression: `localStorage.setItem("strike.token", ${JSON.stringify(token)})`,
+    returnByValue: true,
+  });
+  await send("Page.reload", { ignoreCache: true });
+  for (let i = 0; i < 40; i++) {
+    const ev = await send("Runtime.evaluate", {
+      expression: "document.body ? document.body.innerText : ''",
+      returnByValue: true,
+    });
+    text = ev.result?.result?.value || "";
+    if (text.includes("Run a command") && text.includes("Git")) break;
+    await delay(250);
+  }
+
+  const clickTab = async (label, needle) => {
+    await send("Runtime.evaluate", {
+      expression: `(() => {
+        const btn = [...document.querySelectorAll(".side-tabs button")].find((b) => (b.textContent || "").includes(${JSON.stringify(label)}));
+        if (!btn) return "missing";
+        btn.click();
+        return "ok";
+      })()`,
+      returnByValue: true,
+    });
+    let seen = "";
+    for (let i = 0; i < 40; i++) {
+      const ev = await send("Runtime.evaluate", {
+        expression: "document.body ? document.body.innerText : ''",
+        returnByValue: true,
+      });
+      seen = ev.result?.result?.value || "";
+      if (seen.includes(needle)) return;
+      await delay(200);
+    }
+    throw new Error(`git panel ${label} missing ${needle}: ${seen.slice(0, 400)}`);
+  };
+  await clickTab("Git", "Staged");
+  await clickTab("Worktrees", "session.childIsolation");
   console.log("webui-smoke ok");
 } catch (err) {
   console.error(String(err));

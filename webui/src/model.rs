@@ -131,6 +131,9 @@ pub struct ChangedFile {
     pub added: i64,
     #[serde(default)]
     pub deleted: i64,
+    /// Unified diff from GET /v1/changed-files. The Git panel reuses it.
+    #[serde(default)]
+    pub diff: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]

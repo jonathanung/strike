@@ -80,10 +80,19 @@ Status: walking skeleton on branch `worktree-rust-webui-daemon`. Not merged.
   - Empty sessions rotate a short headline and offer six prompts that send
     as ordinary text. A failed load shows the error and Retry.
   - The side panel is Activity (team snapshot: status, elapsed, stop,
-    retry, expand, including `blocked` handoffs), Files (`/v1/files`), and
-    Changes (`/v1/changed-files`). Clicking or dragging a file inserts
-    `@path` as text. The web composer does not expand that token the way
-    the TUI does.
+    retry, expand, including `blocked` handoffs), Files (`/v1/files`),
+    Changes (`/v1/changed-files`), Git, and Worktrees. Clicking or dragging
+    a file in Files or Changes inserts `@path` as text. The web composer
+    does not expand that token the way the TUI does. Git
+    (`GET/POST /v1/git/status|diff|branches|log|stage|unstage|commit|checkout|discard|reset|branch/delete`
+    and `/v1/git/worktrees`) runs git as an argument vector. There is no
+    push route. Discard, hard reset, branch delete, worktree remove, and
+    stale prune require an exact confirm token. Hard reset is `HEAD` only.
+    Branch delete is `git branch -d`. Worktree create/remove uses the
+    existing strike worktree helper and only deletes paths under
+    `.strike/worktrees/`. Ownership comes from the session index (the same
+    records as `GET /v1/sessions/{id}/children`). `session.childIsolation`
+    is shown, not edited.
   - Schedule, memory, knowledge, artifacts, the task runner, onboarding,
     and a multi-gateway hub are documented in
     [webui-planned.md](webui-planned.md), not drawn as empty panels.

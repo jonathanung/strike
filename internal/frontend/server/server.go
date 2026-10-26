@@ -100,6 +100,10 @@ type Server struct {
 	// scriptCSPHashes allowlists inline <script> bodies from the embedded
 	// index.html (Trunk emits an inline WASM loader) without unsafe-inline.
 	scriptCSPHashes []string
+
+	// gitMu serializes git reads and mutations for this daemon. Overlapping
+	// status and reset calls on one repo corrupt the index.
+	gitMu sync.Mutex
 }
 
 // New validates options and builds a Server. Does not listen.
@@ -237,6 +241,21 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/files", s.handleFiles)
 	s.mux.HandleFunc("GET /v1/files/search", s.handleFilesSearch)
 	s.mux.HandleFunc("GET /v1/changed-files", s.handleChangedFiles)
+	s.mux.HandleFunc("GET /v1/git/status", s.handleGitStatus)
+	s.mux.HandleFunc("GET /v1/git/diff", s.handleGitDiff)
+	s.mux.HandleFunc("GET /v1/git/branches", s.handleGitBranches)
+	s.mux.HandleFunc("GET /v1/git/log", s.handleGitLog)
+	s.mux.HandleFunc("POST /v1/git/stage", s.handleGitStage)
+	s.mux.HandleFunc("POST /v1/git/unstage", s.handleGitUnstage)
+	s.mux.HandleFunc("POST /v1/git/commit", s.handleGitCommit)
+	s.mux.HandleFunc("POST /v1/git/checkout", s.handleGitCheckout)
+	s.mux.HandleFunc("POST /v1/git/discard", s.handleGitDiscard)
+	s.mux.HandleFunc("POST /v1/git/reset", s.handleGitReset)
+	s.mux.HandleFunc("POST /v1/git/branch/delete", s.handleGitBranchDelete)
+	s.mux.HandleFunc("GET /v1/git/worktrees", s.handleGitWorktrees)
+	s.mux.HandleFunc("POST /v1/git/worktrees", s.handleGitWorktreeCreate)
+	s.mux.HandleFunc("POST /v1/git/worktrees/remove", s.handleGitWorktreeRemove)
+	s.mux.HandleFunc("POST /v1/git/worktrees/prune", s.handleGitWorktreePrune)
 	s.mux.HandleFunc("GET /v1/file", s.handleFile)
 	// Reviewed file mutations (WEBUI.9 / #1084) — typed apply only, no free-form write.
 	s.mux.HandleFunc("POST /v1/files/apply-edit", s.handleFilesApplyEdit)
