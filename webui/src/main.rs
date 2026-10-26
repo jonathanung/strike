@@ -975,7 +975,6 @@ fn App() -> impl IntoView {
             Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |ev: web_sys::MessageEvent| {
                 if let Some(data) = ev.data().as_string() {
                     apply_envelope(lines_cb, &seq_cb, &open_cb, storage_rev, &data);
-                    apply_envelope(lines_cb, &seq_cb, &open_cb, &data);
                     let prev = LiveModelState {
                         provider: provider_name.get_untracked(),
                         model: model_name.get_untracked(),
