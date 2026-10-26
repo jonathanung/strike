@@ -1,7 +1,7 @@
 // Headless check that the embedded Rust cockpit boots and that --auth rejects
 // a missing or wrong bearer. Chrome is required (google-chrome or chromium).
 import { spawn } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -70,31 +70,83 @@ try {
 
   await writeFile(join(home, ".strike", "config.json"), '{"sandboxAllowDegrade":true}\n').catch(() => {});
 
+  // GitHub ubuntu-latest already has a `google-chrome` on PATH, so a conditional
+  // apt install never ran (job 121365125893). That binary never opened
+  // /json/list, and stdio "ignore" dropped the reason. These flags are what
+  // current headless Chrome needs to bind the DevTools port in a runner:
+  // /dev/shm is small, remote debugging refuses a missing allow-origins, and
+  // Ozone will not start headless without an explicit platform. Stderr is kept
+  // so a crash fails with the browser's own message instead of a blind timeout.
+  let chromeLog = "";
   chrome = spawn(
     chromeBin(),
     [
       "--headless=new",
       "--disable-gpu",
       "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--no-first-run",
+      "--no-default-browser-check",
+      "--disable-extensions",
+      "--ozone-platform=headless",
       `--remote-debugging-port=${chromePort}`,
+      "--remote-debugging-address=127.0.0.1",
+      "--remote-allow-origins=*",
       `--user-data-dir=${chromeData}`,
       "about:blank",
     ],
-    { stdio: "ignore" },
+    { stdio: ["ignore", "pipe", "pipe"] },
   );
+  const keep = (buf) => {
+    chromeLog += buf.toString();
+    if (chromeLog.length > 8000) chromeLog = chromeLog.slice(-8000);
+  };
+  chrome.stdout.on("data", keep);
+  chrome.stderr.on("data", keep);
   let target;
-  for (let i = 0; i < 40; i++) {
+  const deadline = Date.now() + 20000;
+  while (Date.now() < deadline) {
+    if (chrome.exitCode != null || chrome.signalCode) {
+      throw new Error(
+        `chrome exited before devtools (code=${chrome.exitCode} signal=${chrome.signalCode})\n${chromeLog.slice(-1500)}`,
+      );
+    }
+    let port = chromePort;
     try {
-      const list = await fetch(`http://127.0.0.1:${chromePort}/json/list`);
-      const tabs = await list.json();
-      target = tabs.find((t) => t.webSocketDebuggerUrl);
-      if (target) break;
+      const active = await readFile(join(chromeData, "DevToolsActivePort"), "utf8");
+      const n = Number(active.split("\n")[0]);
+      if (n > 0) port = n;
+    } catch {
+      // file appears once the browser binds the port
+    }
+    try {
+      const list = await fetch(`http://127.0.0.1:${port}/json/list`);
+      if (list.ok) {
+        const tabs = await list.json();
+        // Chrome's bundled component extensions also expose a DevTools
+        // websocket. Attaching to one of those leaves the cockpit on
+        // about:blank forever (href stays chrome-extension://…).
+        target = tabs.find(
+          (t) =>
+            t.type === "page" &&
+            t.webSocketDebuggerUrl &&
+            !String(t.url || "").startsWith("chrome-extension://") &&
+            !String(t.url || "").startsWith("chrome://"),
+        );
+        if (!target) {
+          await fetch(`http://127.0.0.1:${port}/json/new?about:blank`, { method: "PUT" }).catch(() => {});
+        }
+        if (target) break;
+      }
     } catch {
       // chrome still starting
     }
     await delay(100);
   }
-  if (!target) throw new Error("chrome devtools did not open");
+  if (!target) {
+    throw new Error(`chrome devtools did not open\n${chromeLog.slice(-1500)}`);
+  }
 
   const ws = new WebSocket(target.webSocketDebuggerUrl);
   await new Promise((resolve, reject) => {

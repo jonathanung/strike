@@ -186,11 +186,15 @@ jobs:
 
       - name: Install Chrome
         run: |
-          if ! command -v google-chrome >/dev/null 2>&1; then
-            wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-            sudo apt-get update
-            sudo apt-get install -y /tmp/chrome.deb
-          fi
+          # ubuntu-latest already ships a `google-chrome` shim. The smoke job
+          # used to skip this install when that name was on PATH, then Chrome
+          # never opened a DevTools port (run 40258392740). Always install the
+          # official stable deb and invoke that binary.
+          wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+          sudo apt-get update
+          sudo apt-get install -y /tmp/chrome.deb
+          command -v google-chrome-stable
+          google-chrome-stable --version
 
       - name: Generate TUI flatten
         run: go generate ./internal/frontend/tui/app
@@ -199,6 +203,8 @@ jobs:
         run: go build -o strike ./cmd/strike
 
       - name: Boot cockpit and check auth
+        env:
+          CHROME_BIN: /usr/bin/google-chrome-stable
         run: node scripts/webui-smoke.mjs
 
   # Darwin-only tests (//go:build darwin) never compile on ubuntu-latest, so a
