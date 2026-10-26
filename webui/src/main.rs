@@ -2119,6 +2119,13 @@ fn App() -> impl IntoView {
                     </div>
                     </Show>
                     <Show when=move || layout.get() == "conversation" && {
+                        // session_busy reads roots/live_busy untracked, so
+                        // subscribe to them here: without this the Show never
+                        // re-evaluates once the turn that produced the last
+                        // line ends, and the follow-ups stay hidden.
+                        let _ = roots.get();
+                        let _ = live_busy.get();
+                        let _ = live_busy_root.get();
                         let root = active_root.get();
                         !root.is_empty()
                             && !session_busy(&root)
