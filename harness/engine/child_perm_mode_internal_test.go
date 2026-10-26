@@ -7,7 +7,6 @@ import (
 
 	"github.com/jonathanung/strike/harness/permission"
 	"github.com/jonathanung/strike/harness/provider"
-	"github.com/jonathanung/strike/harness/provider/echo"
 	"github.com/jonathanung/strike/harness/tool"
 	"github.com/jonathanung/strike/pkg/protocol"
 )
@@ -82,13 +81,29 @@ func TestChildInitialPermissionMode(t *testing.T) {
 	}
 }
 
+// holdStream blocks until ctx is canceled. A fast echo child can finish and
+// leave the live map before the test reads the handle (CI -race).
+type holdStream struct{}
+
+func (holdStream) Name() string { return "hold" }
+
+func (holdStream) Stream(ctx context.Context, _ provider.Request) (<-chan provider.StreamEvent, error) {
+	ch := make(chan provider.StreamEvent, 1)
+	go func() {
+		defer close(ch)
+		<-ctx.Done()
+		ch <- provider.StreamEvent{Type: provider.EventError, Err: ctx.Err()}
+	}()
+	return ch, nil
+}
+
 func TestSpawnChildInheritsParentPermissionMode(t *testing.T) {
 	// End-to-end: parent live yolo → child Options.InitialPermissionMode yolo.
 	eng := New(Options{
 		SessionID:       "parent-perm-inherit",
 		InitialProvider: "echo",
 		Select: func(string) (provider.Provider, string, error) {
-			return echo.New(), "echo", nil
+			return holdStream{}, "echo", nil
 		},
 		Registry: tool.NewRegistry(tool.NewTask()),
 		WorkDir:  t.TempDir(),
@@ -152,7 +167,7 @@ func TestSpawnChildLockedPermissionModeIgnoresLive(t *testing.T) {
 		InitialPermissionMode: protocol.PermissionModeDefault,
 		LockPermissionMode:    true,
 		Select: func(string) (provider.Provider, string, error) {
-			return echo.New(), "echo", nil
+			return holdStream{}, "echo", nil
 		},
 		Registry: tool.NewRegistry(tool.NewTask()),
 		WorkDir:  t.TempDir(),

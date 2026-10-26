@@ -90,11 +90,12 @@ func TestTaskChildInvokesAgentHarness(t *testing.T) {
 		childCompletedNudgeStep("parent saw completion"),
 	)
 	eng := engine.New(engine.Options{
-		BuildDiagnostic: enginebind.Diagnostic(),
-		SessionID:       "parent",
-		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
-		InitialProvider: "scripted",
-		InitialAgent:    "parent",
+		ChildHandoffRequired: handoffOff(),
+		BuildDiagnostic:      enginebind.Diagnostic(),
+		SessionID:            "parent",
+		Select:               func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider:      "scripted",
+		InitialAgent:         "parent",
 		Agents: []engine.Agent{
 			{Name: "parent"},
 			{Name: "search", Harness: "search-fn"},
@@ -204,21 +205,27 @@ func testTaskChildHarnessEndToEnd(t *testing.T, run fn.Func) {
 	providerSteps := []streamStep{toolCallStep(taskCall)}
 	for _, candidate := range []string{"first", "the longest candidate", "third choice"} {
 		step := completedStep(candidate)
-		step.match = matchUserText(prompt)
+		// ChooseBest appends "Generate candidate N". Bind the step to that
+		// message so the parent's later turn cannot take it.
+		step.match = matchUserTextContains("Generate candidate")
 		providerSteps = append(providerSteps, step)
 	}
 	parentStep := completedStep("parent finished")
 	parentStep.match = matchToolResult("task-external")
 	providerSteps = append(providerSteps, parentStep, childCompletedNudgeStep("parent saw completion"))
 	prov := newScriptedProvider(providerSteps...)
-	progress := make(chan protocol.HarnessProgress, 3)
+	// The child-event forwarder calls AppendChildEvent synchronously. A full
+	// channel here stalls that forwarder, the child engine blocks on emit,
+	// and ChildCompleted never arrives.
+	progress := make(chan protocol.HarnessProgress, 16)
 
 	eng := engine.New(engine.Options{
-		BuildDiagnostic: enginebind.Diagnostic(),
-		SessionID:       "parent",
-		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
-		InitialProvider: "scripted",
-		InitialAgent:    "parent",
+		ChildHandoffRequired: handoffOff(),
+		BuildDiagnostic:      enginebind.Diagnostic(),
+		SessionID:            "parent",
+		Select:               func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider:      "scripted",
+		InitialAgent:         "parent",
 		Agents: []engine.Agent{
 			{Name: "parent"},
 			{Name: "search", Harness: "choose-best"},
@@ -229,7 +236,10 @@ func testTaskChildHarnessEndToEnd(t *testing.T, run fn.Func) {
 		Rules:           []permission.Ruleset{permission.Defaults()},
 		AppendChildEvent: func(_ string, event protocol.Event) error {
 			if event, ok := event.(protocol.HarnessProgress); ok {
-				progress <- event
+				select {
+				case progress <- event:
+				default:
+				}
 			}
 			return nil
 		},
@@ -238,7 +248,10 @@ func testTaskChildHarnessEndToEnd(t *testing.T, run fn.Func) {
 	defer cancel()
 	go eng.Run(ctx)
 	eng.Ops() <- protocol.UserInput{Text: "delegate"}
-	events := drainAndReply(t, eng, 10*time.Second)
+	// The harness and the parent share one scripted provider and overlap.
+	// Under CI -race the process can be descheduled long enough that a 10s
+	// drain fires before the in-process harness finishes.
+	events := drainAndReply(t, eng, 45*time.Second)
 
 	completed := false
 	for _, event := range events {
@@ -370,11 +383,12 @@ func TestTaskChildHarnessExecutesTool(t *testing.T) {
 	)
 	childEvents := make(chan protocol.Event, 32)
 	eng := engine.New(engine.Options{
-		BuildDiagnostic: enginebind.Diagnostic(),
-		SessionID:       "parent",
-		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
-		InitialProvider: "scripted",
-		InitialAgent:    "parent",
+		ChildHandoffRequired: handoffOff(),
+		BuildDiagnostic:      enginebind.Diagnostic(),
+		SessionID:            "parent",
+		Select:               func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider:      "scripted",
+		InitialAgent:         "parent",
 		Agents: []engine.Agent{
 			{Name: "parent"},
 			{Name: "worker", Harness: "reader"},
@@ -459,11 +473,12 @@ func TestTaskChildHarnessToolDenial(t *testing.T) {
 		childCompletedNudgeStep("parent saw completion"),
 	)
 	eng := engine.New(engine.Options{
-		BuildDiagnostic: enginebind.Diagnostic(),
-		SessionID:       "parent",
-		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
-		InitialProvider: "scripted",
-		InitialAgent:    "parent",
+		ChildHandoffRequired: handoffOff(),
+		BuildDiagnostic:      enginebind.Diagnostic(),
+		SessionID:            "parent",
+		Select:               func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider:      "scripted",
+		InitialAgent:         "parent",
 		Agents: []engine.Agent{
 			{Name: "parent"},
 			{Name: "worker", Harness: "denied"},
@@ -526,11 +541,12 @@ func TestTaskChildHarnessUnknownAndMalformedTool(t *testing.T) {
 		childCompletedNudgeStep("parent saw completion"),
 	)
 	eng := engine.New(engine.Options{
-		BuildDiagnostic: enginebind.Diagnostic(),
-		SessionID:       "parent",
-		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
-		InitialProvider: "scripted",
-		InitialAgent:    "parent",
+		ChildHandoffRequired: handoffOff(),
+		BuildDiagnostic:      enginebind.Diagnostic(),
+		SessionID:            "parent",
+		Select:               func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider:      "scripted",
+		InitialAgent:         "parent",
 		Agents: []engine.Agent{
 			{Name: "parent"},
 			{Name: "worker", Harness: "bad-tools"},
@@ -774,11 +790,12 @@ func TestTaskChildHarnessConcurrentToolsSerialized(t *testing.T) {
 		childCompletedNudgeStep("parent saw completion"),
 	)
 	eng := engine.New(engine.Options{
-		BuildDiagnostic: enginebind.Diagnostic(),
-		SessionID:       "parent",
-		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
-		InitialProvider: "scripted",
-		InitialAgent:    "parent",
+		ChildHandoffRequired: handoffOff(),
+		BuildDiagnostic:      enginebind.Diagnostic(),
+		SessionID:            "parent",
+		Select:               func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider:      "scripted",
+		InitialAgent:         "parent",
 		Agents: []engine.Agent{
 			{Name: "parent"},
 			{Name: "worker", Harness: "parallel"},
@@ -836,11 +853,12 @@ func TestTaskChildHarnessExternalToolExecute(t *testing.T) {
 		childCompletedNudgeStep("parent saw completion"),
 	)
 	eng := engine.New(engine.Options{
-		BuildDiagnostic: enginebind.Diagnostic(),
-		SessionID:       "parent",
-		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
-		InitialProvider: "scripted",
-		InitialAgent:    "parent",
+		ChildHandoffRequired: handoffOff(),
+		BuildDiagnostic:      enginebind.Diagnostic(),
+		SessionID:            "parent",
+		Select:               func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider:      "scripted",
+		InitialAgent:         "parent",
 		Agents: []engine.Agent{
 			{Name: "parent"},
 			{Name: "worker", Harness: "ext-like"},
@@ -864,4 +882,9 @@ func TestTaskChildHarnessExternalToolExecute(t *testing.T) {
 		}
 	}
 	t.Fatalf("missing ChildCompleted; events=%#v", events)
+}
+
+func handoffOff() *bool {
+	v := false
+	return &v
 }

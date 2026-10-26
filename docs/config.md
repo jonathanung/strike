@@ -622,7 +622,7 @@ bound).
 
 **Tool retry / error recovery:** `toolRetry` controls harness auto-retry and
 loop detection for tool dispatch (issue #795). Policy is **error code ×
-idempotency** (see `internal/tool/retry.go`):
+idempotency** (see `harness/tool/retry.go`):
 
 | | `safe-retry` | `conditional` | `unsafe` |
 |---|---|---|---|
@@ -652,7 +652,7 @@ emit `tool.retrying` (timeline) before each backoff sleep.
 Transient **model HTTP / transport** failures retry with a fresh attempt
 identity **before any tools from that stream run**, so a retry cannot
 double-apply tool side effects (`provider/retry.go`,
-`internal/engine/turn.go` `streamModel`). Default `MaxStreamAttempts` is **3**.
+`harness/engine/turn.go` `streamModel`). Default `MaxStreamAttempts` is **3**.
 Set the engine option to `1` to disable (not a config JSON key today).
 
 **Retried** (when `IsRetryable`):
@@ -949,6 +949,23 @@ conflict detection. Cancellation/cleanup removes only the strike-managed child
 worktree (never the primary checkout or unrelated worktrees). Soft-fails to
 shared mode outside a git repository.
 
+### Delegated completion handoff (`session.childHandoffRequired`)
+
+`task` and `delegate` children are required to end with parseable handoff JSON.
+The engine appends a `schema:handoff` gate unless it is already in `verify[]`.
+A prose-only child is `blocked` and carries a verification report. Interactive
+root turns are not gated.
+
+| Setting | Behavior |
+|---|---|
+| omitted / `true` (default) | `schema:handoff` runs |
+| `false` | prose-only completion stays `completed` and no report is attached |
+
+Agent frontmatter `childHandoffRequired: false` overrides the session value for
+that persona. Spawn argument `handoff_required` overrides both. Explicit
+`verify[]` entries still run; the default gate is added beside them, and it
+counts toward the 16-gate cap.
+
 ### Parallel children and path overlap
 
 Within one session team, `task` children share the lead's tool CWD (unless
@@ -1016,8 +1033,8 @@ Build the sidecar policy with `session.TraceRetentionFromConfig` from
 ### Checkpoints (`/undo` file restore)
 
 Per-turn snapshots power `/undo files` (chat undo without disk is `/undo chat`).
-Implementation: `internal/tool/checkpoint.go` + shadow-git
-(`internal/tool/shadowgit.go`). Architecture table:
+Implementation: `harness/tool/checkpoint.go` + shadow-git
+(`harness/tool/shadowgit.go`). Architecture table:
 [ARCHITECTURE.md](ARCHITECTURE.md#filesystem-transaction-safety-tools).
 UX: [usage.md](usage.md) `/undo`.
 
@@ -1958,7 +1975,7 @@ Notes:
 
 `/compact` and automatic threshold/overflow compaction shrink model-facing
 history while keeping a recent tail. Continuous tool-result prune
-(`internal/engine/prune.go`) blanks older tool bodies under that ceiling;
+(`harness/engine/prune.go`) blanks older tool bodies under that ceiling;
 threshold compaction is the coarser whole-history rewrite. Edit these dials in
 JSON or interactively via **`/settings` → Compaction**.
 
@@ -2014,7 +2031,7 @@ schemas or compaction/prune rewrites earlier history.
 ### OpenAI-compatible, xAI, ChatGPT
 
 The engine sets `provider.Request.CacheKey` to the **session id**
-(`internal/engine/turn.go`). Adapters emit `prompt_cache_key` on
+(`harness/engine/turn.go`). Adapters emit `prompt_cache_key` on
 chat-completions and Responses bodies (`openaicompat`, `chatgpt`). Empty key
 omits the field. ChatGPT never sends `prompt_cache_retention` (backend 400s).
 

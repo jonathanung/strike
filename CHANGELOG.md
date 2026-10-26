@@ -14,8 +14,41 @@ materially affect the shipped product.
 
 ## [Unreleased]
 
+### Added
+
+- **Web client shell** — session list with status, unread, in-progress,
+  and pinned filters; command field (Ctrl+K); gateway chip; approval mode,
+  model, and Steer/Queue on the composer; Activity, Files, and Changes.
+  See [docs/webui-daemon.md](docs/webui-daemon.md). Panels the daemon cannot
+  drive stay in [docs/webui-planned.md](docs/webui-planned.md).
+- **Workspace policy** — a registered workspace can store a rules file
+  inside its directory and a permission mode (`PATCH /v1/workspaces/{id}`).
+  Sessions do not point at that record yet, and activating it does not move
+  the engine. See [docs/webui-daemon.md](docs/webui-daemon.md).
+- **Gateway token rotation** — `strike daemon logout` replaces
+  `~/.strike/daemon.token`. A `strike serve --token-file` process reads that
+  file on every `/v1` check, so the previous bearer stops working without a
+  restart. See [docs/gateway.md](docs/gateway.md).
+- **Web client sessions and activity** — the Rust UI opens tabbed live
+  sessions and an Activity list of delegated children (status, elapsed time,
+  stop, retry, expand), including blocked handoffs. Schedule, memory,
+  knowledge, artifacts, and the task runner stay out of the UI until the
+  daemon can drive them ([docs/webui-planned.md](docs/webui-planned.md)).
+
 ### Changed
 
+- **Web client uses the TUI palette** — `webui/style.css` takes its colors from
+  `schemas/ui-tokens.json` (Strike dark by default, Strike light, and the
+  bundled Nord, Dracula, Gruvbox, Monokai, Tokyo Night, and Catppuccin themes).
+  Pick them from the command palette. The mapping is in
+  [docs/theme.md](docs/theme.md).
+- **Delegated children require a structured handoff** — `task` and `delegate`
+  children run a `schema:handoff` gate by default. A prose-only child finishes
+  `blocked` with a verification report on the task record. Root turns are
+  unchanged. Opt out with `session.childHandoffRequired: false`, agent
+  frontmatter `childHandoffRequired: false`, or spawn argument
+  `handoff_required: false`. An explicit `verify[]` list still runs; the
+  default gate is added beside it ([#1201](https://github.com/jonathanung/strike/issues/1201)).
 - **Repository and Go module path renamed** — the GitHub repo is now
   `jonathanung/strike` (was `jonathanung/strike-cli`), and all Go module
   paths follow: `github.com/jonathanung/strike`,

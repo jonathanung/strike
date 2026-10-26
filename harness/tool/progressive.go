@@ -41,24 +41,26 @@ type progressiveArgs struct {
 	Action string `json:"action"`
 
 	// Create / spawn fields (also used when action omitted and prompt set).
-	Prompt        string            `json:"prompt"`
-	Name          string            `json:"name"`
-	Agent         string            `json:"agent"`
-	Model         string            `json:"model"`
-	Effort        string            `json:"effort"`
-	Route         string            `json:"route"`
-	Specialty     string            `json:"specialty"`
-	Capabilities  []string          `json:"capabilities"`
-	MaxCostClass  string            `json:"max_cost_class"`
-	Models        []string          `json:"models"`
-	MaxConcurrent int               `json:"max_concurrent"`
-	Criteria      []string          `json:"criteria"`
-	Deps          []string          `json:"deps"`
-	Subscribe     []string          `json:"subscribe"`
-	Assignee      string            `json:"assignee"`
-	Verify        []VerifyGate      `json:"verify"`
-	Budget        AgentBudgetLimits `json:"budget"`
-	ContextBundle ContextBundle     `json:"context_bundle"`
+	Prompt        string       `json:"prompt"`
+	Name          string       `json:"name"`
+	Agent         string       `json:"agent"`
+	Model         string       `json:"model"`
+	Effort        string       `json:"effort"`
+	Route         string       `json:"route"`
+	Specialty     string       `json:"specialty"`
+	Capabilities  []string     `json:"capabilities"`
+	MaxCostClass  string       `json:"max_cost_class"`
+	Models        []string     `json:"models"`
+	MaxConcurrent int          `json:"max_concurrent"`
+	Criteria      []string     `json:"criteria"`
+	Deps          []string     `json:"deps"`
+	Subscribe     []string     `json:"subscribe"`
+	Assignee      string       `json:"assignee"`
+	Verify        []VerifyGate `json:"verify"`
+	// HandoffRequired overrides the default schema:handoff gate (#1201).
+	HandoffRequired *bool             `json:"handoff_required,omitempty"`
+	Budget          AgentBudgetLimits `json:"budget"`
+	ContextBundle   ContextBundle     `json:"context_bundle"`
 	// ForceDelegate overrides soft local-prefer policy (#876).
 	ForceDelegate bool `json:"force_delegate"`
 	// Isolation is shared|worktree for this spawn (#1036). Empty inherits session default.
@@ -297,26 +299,27 @@ func progressiveCreate(ctx context.Context, source, permission string, a progres
 		return Result{}, fmt.Errorf("task is not available")
 	}
 	res, err := tc.SpawnTask(ctx, TaskRequest{
-		Prompt:        a.Prompt,
-		Name:          a.Name,
-		Agent:         a.Agent,
-		Model:         a.Model,
-		Effort:        a.Effort,
-		Route:         a.Route,
-		Specialty:     a.Specialty,
-		Capabilities:  a.Capabilities,
-		MaxCostClass:  a.MaxCostClass,
-		Models:        a.Models,
-		MaxConcurrent: a.MaxConcurrent,
-		Criteria:      a.Criteria,
-		Deps:          a.Deps,
-		Subscribe:     a.Subscribe,
-		Assignee:      a.Assignee,
-		Verify:        gates,
-		Budget:        a.Budget,
-		ContextBundle: bundle,
-		ForceDelegate: a.ForceDelegate,
-		Isolation:     a.Isolation,
+		Prompt:          a.Prompt,
+		Name:            a.Name,
+		Agent:           a.Agent,
+		Model:           a.Model,
+		Effort:          a.Effort,
+		Route:           a.Route,
+		Specialty:       a.Specialty,
+		Capabilities:    a.Capabilities,
+		MaxCostClass:    a.MaxCostClass,
+		Models:          a.Models,
+		MaxConcurrent:   a.MaxConcurrent,
+		Criteria:        a.Criteria,
+		Deps:            a.Deps,
+		Subscribe:       a.Subscribe,
+		Assignee:        a.Assignee,
+		Verify:          gates,
+		HandoffRequired: a.HandoffRequired,
+		Budget:          a.Budget,
+		ContextBundle:   bundle,
+		ForceDelegate:   a.ForceDelegate,
+		Isolation:       a.Isolation,
 	})
 	if err != nil {
 		return Result{}, err
@@ -385,6 +388,7 @@ func progressiveLifecycle(ctx context.Context, source, permission, action string
 		Deps:            a.Deps,
 		Subscribe:       a.Subscribe,
 		Verify:          gates,
+		HandoffRequired: a.HandoffRequired,
 		Budget:          a.Budget,
 		ContextBundle:   bundle,
 		ForceDelegate:   a.ForceDelegate,

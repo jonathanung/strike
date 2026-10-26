@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -24,6 +25,7 @@ import (
 //	provider: openai
 //	effort: high
 //	harness: default
+//	childHandoffRequired: false
 //	permission.write: deny
 //	permission.edit: deny
 //	---
@@ -45,6 +47,12 @@ type Agent struct {
 	// Empty and "default" use the built-in child model/tool loop.
 	Harness     string
 	Permissions permission.Ruleset
+	// ChildHandoffRequired, when set, overrides session.childHandoffRequired
+	// for children spawned as this persona (#1201). Nil inherits (required
+	// by default). False accepts prose-only completion. Parsed from
+	// frontmatter childHandoffRequired: true|false. Spawn-time
+	// handoff_required still wins.
+	ChildHandoffRequired *bool
 }
 
 // Skill is a reusable prompt template invoked as a slash command
@@ -331,17 +339,26 @@ func parseAgentFile(path string) (*Agent, error) {
 	if err != nil {
 		return nil, fmt.Errorf("load agent %s: %w", path, err)
 	}
+	var handoffRequired *bool
+	if raw := strings.TrimSpace(meta["childHandoffRequired"]); raw != "" {
+		v, err := strconv.ParseBool(raw)
+		if err != nil {
+			return nil, fmt.Errorf("load agent %s: childHandoffRequired: %w", path, err)
+		}
+		handoffRequired = &v
+	}
 	provider, model := resolveAgentModel(meta["provider"], meta["model"])
 	return &Agent{
-		Name:         name,
-		Description:  meta["description"],
-		Capabilities: parseAgentCapabilities(meta),
-		Provider:     provider,
-		Model:        model,
-		Effort:       effort,
-		Harness:      harness,
-		Prompt:       body,
-		Permissions:  perms,
+		Name:                 name,
+		Description:          meta["description"],
+		Capabilities:         parseAgentCapabilities(meta),
+		Provider:             provider,
+		Model:                model,
+		Effort:               effort,
+		Harness:              harness,
+		Prompt:               body,
+		Permissions:          perms,
+		ChildHandoffRequired: handoffRequired,
 	}, nil
 }
 

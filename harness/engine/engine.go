@@ -81,6 +81,10 @@ type Agent struct {
 	// An unknown name falls back to default with a startup error.
 	Harness     string
 	Permissions permission.Ruleset
+	// ChildHandoffRequired, when set, overrides Options.ChildHandoffRequired
+	// for children spawned as this persona (#1201). Nil inherits. False
+	// accepts prose-only completion. Spawn-time HandoffRequired still wins.
+	ChildHandoffRequired *bool
 }
 
 type Options struct {
@@ -102,6 +106,12 @@ type Options struct {
 	// TurnCompleted. Distinct from task/delegate child gates (#780). Model
 	// self-report cannot pass a configured gate (#806).
 	Verify []tool.VerifyGate
+	// ChildHandoffRequired controls the default schema:handoff gate on
+	// task/delegate children (#1201). Nil means required. False accepts
+	// prose-only completion and skips the verification report. It does not
+	// affect root Options.Verify or interactive turns. A spawn-time
+	// HandoffRequired and the child agent's frontmatter override this.
+	ChildHandoffRequired *bool
 	// InitialProvider/InitialModel are tried once at startup; failure is
 	// silent (the user selects interactively later).
 	InitialProvider string

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/jonathanung/strike/internal/persist/session"
@@ -218,7 +219,9 @@ func TestAttachPage(t *testing.T) {
 		t.Fatalf("status = %d", res.Code)
 	}
 	body := res.Body.String()
-	if !strings.Contains(body, "Strike Workspace") || !strings.Contains(body, "/assets/") {
+	// The embedded shell is the Rust webui bundle once built
+	// (make webui-build); unbuilt checkouts serve the placeholder page.
+	if !strings.Contains(body, "<title>Strike</title>") {
 		t.Fatalf("attach page missing expected content")
 	}
 }
@@ -304,6 +307,50 @@ func TestAuthAcceptsBearerAndCookieRejectsQuery(t *testing.T) {
 	}
 }
 
+func TestTokenFileRotationReplacesBearer(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "daemon.token")
+	if err := os.WriteFile(path, []byte("old-token\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	srv, err := New(Options{
+		Auth:       true,
+		Token:      "old-token",
+		TokenFile:  path,
+		SessionDir: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	get := func(token string) int {
+		res := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/v1/bootstrap", nil)
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		srv.Handler().ServeHTTP(res, req)
+		return res.Code
+	}
+	if get("old-token") == http.StatusUnauthorized {
+		t.Fatal("startup token rejected")
+	}
+	if err := os.WriteFile(path, []byte("new-token\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := get("old-token"); got != http.StatusUnauthorized {
+		t.Fatalf("old token status = %d, want 401", got)
+	}
+	if got := get("new-token"); got == http.StatusUnauthorized {
+		t.Fatal("rotated token rejected")
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if got := get("new-token"); got != http.StatusUnauthorized {
+		t.Fatalf("missing token file status = %d, want 401", got)
+	}
+}
+
 func TestAttachTokenHandoffSetsCookieAndStripsQuery(t *testing.T) {
 	srv := testServer(t, t.TempDir(), "secret")
 
@@ -364,7 +411,21 @@ func TestAttachTokenHandoffSetsCookieAndStripsQuery(t *testing.T) {
 }
 
 func TestEmbeddedAssetAndSecurityHeaders(t *testing.T) {
-	srv := testServer(t, t.TempDir(), "")
+	// Injected bundle: the real embed is built by make webui-build and may
+	// be just the placeholder page in a fresh checkout.
+	srv, err := New(Options{
+		SessionDir: t.TempDir(),
+		Static: fstest.MapFS{
+			"index.html":           {Data: []byte(`<script type="module" src="/assets/app.js"></script>`)},
+			"assets/app.js":        {Data: []byte("console.log(1)")},
+			"assets/app.wasm":      {Data: []byte{0, 'a', 's', 'm'}},
+			"sw.js":                {Data: []byte("// sw")},
+			"manifest.webmanifest": {Data: []byte("{}")},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	index := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(index, httptest.NewRequest(http.MethodGet, "/", nil))
 	if got := index.Header().Get("Content-Security-Policy"); !strings.Contains(got, "default-src 'self'") {
@@ -387,6 +448,18 @@ func TestEmbeddedAssetAndSecurityHeaders(t *testing.T) {
 	}
 	if got := asset.Header().Get("Cache-Control"); !strings.Contains(got, "immutable") {
 		t.Fatalf("Cache-Control = %q", got)
+	}
+	wasm := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(wasm, httptest.NewRequest(http.MethodGet, "/assets/app.wasm", nil))
+	if wasm.Code != http.StatusOK || wasm.Header().Get("Content-Type") != "application/wasm" {
+		t.Fatalf("wasm asset = %d %q", wasm.Code, wasm.Header().Get("Content-Type"))
+	}
+	for _, path := range []string{"/sw.js", "/manifest.webmanifest"} {
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET %s = %d", path, rec.Code)
+		}
 	}
 }
 
@@ -411,7 +484,7 @@ func TestCORSLocalhostOnly(t *testing.T) {
 		{"http://localhost:5173", true},
 		{"http://127.0.0.1:3000", true},
 		{"https://evil.example", false},
-		{"http://192.168.1.1", false},
+		{"http://192.168.1.1", true}, // private-net daemon binds (token still required on /v1/*)
 		{"", false},
 	}
 	for _, tc := range cases {
@@ -449,10 +522,20 @@ func TestCORSPreflightAllowsMutationMethods(t *testing.T) {
 	}
 }
 
-func TestCORSRejectsPrivateOrigins(t *testing.T) {
-	// Private LAN origins are never reflected — serve is loopback-only.
+func TestCORSAllowsPrivateRejectsPublicOrigins(t *testing.T) {
+	// Daemon model: loopback + private/tailnet origins are reflected (the
+	// only binds serve accepts); public origins never are.
 	srv := testServer(t, t.TempDir(), "secret")
-	for _, origin := range []string{"http://192.168.1.20:5173", "http://10.0.0.5:3000", "https://evil.example"} {
+	for _, origin := range []string{"http://192.168.1.20:5173", "http://10.0.0.5:3000", "http://100.64.0.5:8787"} {
+		res := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/health", nil)
+		req.Header.Set("Origin", origin)
+		srv.Handler().ServeHTTP(res, req)
+		if got := res.Header().Get("Access-Control-Allow-Origin"); got != origin {
+			t.Errorf("origin %q: Allow-Origin = %q, want reflected", origin, got)
+		}
+	}
+	for _, origin := range []string{"https://evil.example", "http://8.8.8.8:3000"} {
 		res := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/health", nil)
 		req.Header.Set("Origin", origin)

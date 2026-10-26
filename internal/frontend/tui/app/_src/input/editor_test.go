@@ -224,6 +224,25 @@ func TestFileChangedSinceDetectsCreateModifyDelete(t *testing.T) {
 		t.Fatal("unchanged file reported as changed")
 	}
 
+	// Same length and restored mtime: content still changed (#1252).
+	before = snapshotFile(path)
+	if err := os.WriteFile(path, []byte("cd"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, before.modTime, before.modTime); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.ModTime().Equal(before.modTime) || info.Size() != before.size {
+		t.Fatalf("probe did not keep size+mtime: size %d→%d mtime %v→%v", before.size, info.Size(), before.modTime, info.ModTime())
+	}
+	if !fileChangedSince(path, before) {
+		t.Fatal("same-size same-mtime content change should count")
+	}
+
 	if err := os.Remove(path); err != nil {
 		t.Fatal(err)
 	}

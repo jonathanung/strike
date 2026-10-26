@@ -5,14 +5,9 @@
 coverage.out
 /.nix-go/
 */worktrees
-web/node_modules/
-web/dist/
-web/e2e-results/
-web/e2e-report/
-web/e2e-artifacts/
-web/test-results/
-web/playwright-report/
-web/.pw-browsers/
+webui/target/
+webui/dist/
+/.nix-rust/
 
 # Generated flatten of internal/frontend/tui/app/_src/ (go generate ./internal/frontend/tui/app).
 # Source of truth is _src/<group>/; make build/test and CI run generate first.

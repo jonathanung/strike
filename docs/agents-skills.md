@@ -130,7 +130,15 @@ when blocked. Mid-flight bodies stay plain text plus optional contract fields.
 `summary`, `files_changed`, `verification`, `findings`, `blockers`, and
 `recommended_next_action` (empty arrays/strings allowed). The engine merges
 tool-tracked file mutations into `files_changed` and sets `incomplete` when the
-child did not supply parseable structured fields. Messages inject at tool-round /
+child did not supply parseable structured fields. By default the engine also
+runs a `schema:handoff` gate on `task` / `delegate` children (#1201). A child
+that stops with free-form prose is **blocked** (verification report on
+`[child.completed]` and `verification.completed`), not completed. Valid handoff
+JSON with an empty optional list stays completed when no other gate fails.
+Explicit `verify[]` gates are appended; they do not replace the default.
+Opt out with `session.childHandoffRequired: false`, agent frontmatter
+`childHandoffRequired: false`, or spawn `handoff_required: false` (spawn wins).
+Root and solo turns are not gated unless `Options.Verify` is set. Messages inject at tool-round /
 idle turn boundaries (never mid-tool-call). Defaults **allow** team messaging;
 out-of-team targets fail closed; config/agent deny rules still hard-block.
 

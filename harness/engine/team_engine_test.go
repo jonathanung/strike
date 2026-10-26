@@ -55,14 +55,15 @@ func TestImplicitTeamLeadAndTwoChildren(t *testing.T) {
 		childCompletedNudgeStep("ack concurrent 2"),
 	)
 	eng := engine.New(engine.Options{
-		SessionID:       leadID,
-		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
-		InitialProvider: "scripted",
-		InitialAgent:    "build",
-		Agents:          []engine.Agent{{Name: "build"}, {Name: "explore"}},
-		Registry:        tool.NewRegistry(tool.NewTask()),
-		WorkDir:         t.TempDir(),
-		Rules:           []permission.Ruleset{permission.Defaults()},
+		ChildHandoffRequired: handoffOff(),
+		SessionID:            leadID,
+		Select:               func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider:      "scripted",
+		InitialAgent:         "build",
+		Agents:               []engine.Agent{{Name: "build"}, {Name: "explore"}},
+		Registry:             tool.NewRegistry(tool.NewTask()),
+		WorkDir:              t.TempDir(),
+		Rules:                []permission.Ruleset{permission.Defaults()},
 	})
 	tm := eng.Team()
 	if tm == nil {

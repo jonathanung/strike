@@ -209,7 +209,11 @@ type liveWorker struct {
 	invocations map[string]*invocation
 	dead        bool
 	deadErr     error
-	processDone chan error
+	// processDone is closed after pipe.Wait returns. waitErr is stored under
+	// mu before the close so shutdown and failAll can both observe exit
+	// (#1135). A single-value channel deadlocks when those two race.
+	processDone chan struct{}
+	waitErr     error
 	idleTimer   *time.Timer
 	stopping    bool
 	// retired is set under pool.mu when detached from the pool (once).
@@ -242,9 +246,15 @@ func startLiveWorker(ctx context.Context, p *pool) (*liveWorker, error) {
 		pool:        p,
 		pipe:        pipe,
 		invocations: make(map[string]*invocation),
-		processDone: make(chan error, 1),
+		processDone: make(chan struct{}),
 	}
-	go func() { lw.processDone <- pipe.Wait() }()
+	go func() {
+		err := pipe.Wait()
+		lw.mu.Lock()
+		lw.waitErr = err
+		lw.mu.Unlock()
+		close(lw.processDone)
+	}()
 	go lw.readLoop()
 	lw.armIdleLocked() // safe: no concurrent access yet
 	// Optional readiness: workers may emit harness.ready; we do not block on it.
@@ -403,14 +413,22 @@ func (lw *liveWorker) readLoop() {
 	}
 	// EOF
 	select {
-	case waitErr := <-lw.processDone:
-		if waitErr != nil {
+	case <-lw.processDone:
+		if waitErr := lw.processWaitErr(); waitErr != nil {
 			lw.failAll(fmt.Errorf("external harness exit: %w", waitErr))
 			return
 		}
 	default:
 	}
 	lw.failAll(errors.New("external harness exited without harness.complete or harness.error"))
+}
+
+// processWaitErr returns the process wait error. Call only after processDone
+// is closed so the write in the waiter happens-before this read.
+func (lw *liveWorker) processWaitErr() error {
+	lw.mu.Lock()
+	defer lw.mu.Unlock()
+	return lw.waitErr
 }
 
 // dispatch handles one inbound message for inv. Returns false when the worker

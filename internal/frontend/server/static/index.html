@@ -1,14 +1,32 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="color-scheme" content="dark light" />
-    <title>Strike Workspace</title>
-    <script type="module" crossorigin src="/assets/index-6rmd2u_c.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-DBVqz_vI.css">
-  </head>
-  <body>
-    <div id="root"></div>
-  </body>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#14131c">
+<title>Strike</title>
+<script>
+(function(){try{var ok={strike:1,nord:1,dracula:1,gruvbox:1,monokai:1,"tokyo-night":1,catppuccin:1};var t=localStorage.getItem("strike.theme")||"strike";var s=localStorage.getItem("strike.scheme")||"dark";if(!ok[t])t="strike";if(s!=="light")s="dark";var el=document.documentElement;el.setAttribute("data-theme",t);el.setAttribute("data-scheme",s);}catch(e){}})();
+</script>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="stylesheet" href="/assets/style-b675a6499c95b448.css" integrity="sha384-TzmCXhs4XZOIBJVTWsltYCqu3aIrajPO3IqX2vad7TJjohexRdJvdRFjmxs68fTu"/>
+
+
+
+
+<script type="module">
+import init, * as bindings from '/assets/strike-webui-4147883ebbe8ac8f.js';
+const wasm = await init({ module_or_path: '/assets/strike-webui-4147883ebbe8ac8f_bg.wasm' });
+
+
+window.wasmBindings = bindings;
+
+
+dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
+
+</script>
+<script src="/assets/register.js" defer></script>
+
+<link rel="modulepreload" href="/assets/strike-webui-4147883ebbe8ac8f.js" crossorigin="anonymous" integrity="sha384-gC8eO6SqqNzLKb57v3Y/nzRQoAJh7LmYNEF2GHxAj2nWiq/oAGXW1IX2NQR+ihc5"><link rel="preload" href="/assets/strike-webui-4147883ebbe8ac8f_bg.wasm" crossorigin="anonymous" integrity="sha384-3mdhftnZiwsKhrfFYJbhLjRRcFyQZaXlO9tCgt3zvUQoIpV8oB5k69GE+wt5Jpdi" as="fetch" type="application/wasm"></head>
+<body></body>
 </html>

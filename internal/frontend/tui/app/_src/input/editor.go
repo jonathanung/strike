@@ -1,7 +1,9 @@
 package tui
 
 import (
+	"crypto/sha256"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -90,10 +92,15 @@ type composerEditorFinishedMsg struct {
 }
 
 // fileMeta is a pre-launch snapshot used to detect post-editor changes.
+// modTime and size catch ordinary saves. sum catches same-length writes that
+// land in the same timestamp tick (#1252); some filesystems do not advance
+// mtime for a rewrite that keeps the byte length.
 type fileMeta struct {
 	exists  bool
 	modTime time.Time
 	size    int64
+	sum     [32]byte
+	hashed  bool
 }
 
 // editorWaitFlags maps known GUI editor basenames to flags that keep the
@@ -285,7 +292,27 @@ func snapshotFile(path string) fileMeta {
 	if err != nil {
 		return fileMeta{}
 	}
-	return fileMeta{exists: true, modTime: info.ModTime(), size: info.Size()}
+	meta := fileMeta{exists: true, modTime: info.ModTime(), size: info.Size()}
+	if sum, ok := hashFile(path); ok {
+		meta.sum = sum
+		meta.hashed = true
+	}
+	return meta
+}
+
+func hashFile(path string) ([32]byte, bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		return [32]byte{}, false
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return [32]byte{}, false
+	}
+	var sum [32]byte
+	copy(sum[:], h.Sum(nil))
+	return sum, true
 }
 
 func fileChangedSince(path string, before fileMeta) bool {
@@ -301,7 +328,18 @@ func fileChangedSince(path string, before fileMeta) bool {
 	if !before.exists {
 		return true
 	}
-	return !info.ModTime().Equal(before.modTime) || info.Size() != before.size
+	if !info.ModTime().Equal(before.modTime) || info.Size() != before.size {
+		return true
+	}
+	if !before.hashed {
+		return false
+	}
+	sum, ok := hashFile(path)
+	if !ok {
+		// Could not re-read a file we hashed at launch; do not hide an edit.
+		return true
+	}
+	return sum != before.sum
 }
 
 func absPathInWorkDir(workDir, p string) string {

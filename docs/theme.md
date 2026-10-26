@@ -19,13 +19,12 @@ valid `chrome: "soft"` option for named/custom themes.
 The machine-readable source of truth is [`schemas/ui-tokens.json`](../schemas/ui-tokens.json):
 every semantic role has a light+dark hex, plus chrome defaults
 (`mode: bordered`, `corners: square`, `radiusWebPx: 2`). `theme.Default()`
-hexes and `web/src/styles.css` `:root` pairs must match that file — Go
-(`tokens_test.go`) and web (`web/src/theme.test.ts`) fail on drift.
+hexes must match that file — `tokens_test.go` fails on drift. The old
+`web/src/styles.css` parity check left with the JavaScript UI. The Rust
+client stylesheet is `webui/style.css`.
 
 `theme.Default()` chrome is **bordered + square corners**, matching this file.
-Web consumes `radiusWebPx` (2px) and stock hexes from this file via
-`web/src/stockTokens.ts`. Bundled named themes (nord, …) keep their own hexes
-— only stock Default / `:root` use this map. Theme files may set
+Bundled named themes (nord, …) keep their own hexes. Theme files may set
 `chrome: "soft"` for Family rounded cards.
 
 ### Token → hex (light + dark)
@@ -80,16 +79,17 @@ error. Hexes stay in the token file; this table is the meaning contract.
 
 | Role | Meaning | TUI | Web CSS |
 |---|---|---|---|
-| Ready / idle | Awaiting input | `AgentStateReady` → `Success` | `.ui-status-idle`, `.pulse.idle`, `.root-idle`, `.session-idle` → `--success` |
-| Working | Turn or tool in flight | `AgentStateWorking` → `AccentAlt` | `.ui-status-busy`, `.pulse.busy`, `.root-busy`, `.tool-state-running`, `.child-state.running`, `.session-busy` → `--accent-alt` |
-| Needs you | Permission, question, or gate | `AgentStateAttention` → `Warning` | `.ui-status-needs-you`, `.pulse.needs-you`, `.root-attention`, `.needs-you`, `.tool-state-denied` → `--warning` |
-| Error | Failed turn, tool, or provider | `AgentStateError` → `Error` | `.ui-status-failed`, `.pulse.failed`, `.tool-state-error` → `--signal` |
-| Success | Complete / ok | `Success` | `.ui-status-complete`, `.tool-state-done`, `.child-state.completed` → `--success` |
-| Danger | Destructive action | `Danger` | `.ui-btn-danger`, `.pane-meter-fill.tone-danger` → `--danger` (never `--signal`) |
-| User | "You" transcript label | `UserLabel` | `.message.user` / `.message-label` → `--user` |
-| Tool | Tool-call transcript label | `ToolLabel` | `.message.tool`, `.tool-card summary` → `--tool` |
-| Selected | Cursor / active item | `Highlight` foreground | `--raised` fill + inset 2px `--acid` rule + `--highlight` text (no glow) |
-| Focus | Focused pane / control | `BorderFocus` + title-edge `SurfaceFocus` | `--focus-ring` / `--border-focus` |
+| Ready / idle | Awaiting input | `AgentStateReady` → `Success` | gateway `.chip.ok` → `--success` |
+| Working | Turn or tool in flight | `AgentStateWorking` → `AccentAlt` | `.badge-running`, `.gutter-running` → `--accent-alt` |
+| Needs you | Permission, question, or gate | `AgentStateAttention` → `Warning` | `.badge-blocked`, `.badge-stalled` → `--warning` |
+| Error | Failed turn, tool, or provider | `AgentStateError` → `Error` | `.badge-failed` → `--signal` |
+| Success | Complete / ok | `Success` | `.badge-done`, `.badge-completed` → `--success` |
+| Danger | Destructive action | `Danger` | `--danger`, distinct from `--signal` |
+| User | "You" transcript label | `UserLabel` | `.role-you` → `--user` |
+| Tool | Tool-call transcript label | `ToolLabel` | `.role-tool`, `.badge-tool` → `--tool` |
+| Selected | Cursor / active item | `Highlight` foreground | `.session-row.on` uses `--raised` and `--border-focus` |
+| Focus | Focused pane / control | `BorderFocus` + title-edge `SurfaceFocus` | `:focus-visible` outline `--border-focus` |
+| Stopped | Canceled or unknown | `TextMuted` | `.badge-stopped`, `.badge-canceled` → `--muted` |
 
 Permission/question wins over busy (TUI `agentState`, web `liveStatusKind`).
 Canceled / unknown stay muted (`TextMuted` / `--muted`).
@@ -195,22 +195,52 @@ picker opened. Install/update theme *plugins* through the generic plugin
 lifecycle (`/plugin` or `strike plugin`) — same catalog integrity and lockfile
 path as other contributions; there is no separate theme marketplace.
 
-## Web cockpit parity
+## Web client
 
-The `strike serve` attach UI (`web/src/styles.css`, embedded under
-`internal/frontend/server/static`) mirrors the stock token file via CSS
-custom properties (dark defaults; light via `prefers-color-scheme: light`).
-Semantic roles map as `--ink`←Text, `--muted`←TextMuted, `--ground`←Background,
-`--surface`/`--raised`/`--surface-muted`←Surface*, `--rule`←Border,
-`--acid`←Accent, `--accent-alt`←AccentAlt, `--signal`←Error, `--danger`←Danger,
-`--user`/`--tool`← transcript labels, `--diff-add`/`--diff-del`←diff roles.
-Information-color usage (working / needs-you / error / selected) is the table
-in [Information colors](#information-colors-tui--web).
-`--radius` is the 2px chrome token; stock role hexes are injected from the
-token file (`/* strike-stock:dark|light */`). Parity is guarded by
-`web/src/theme.test.ts`. The web settings dialog loads the
-host theme catalog (`/v1/themes`), supports preview/apply, and maps portable
-semantic roles onto CSS custom properties (`web/src/themeCatalog.ts`, WEBUI.11).
+The JavaScript cockpit is gone. `webui/style.css` mirrors
+[`schemas/ui-tokens.json`](../schemas/ui-tokens.json). `theme.Default()` is the
+same hexes (`tokens_test.go`). `TestWebUIStyleMirrorsUITokens` fails if a role's
+light hex, dark hex, or `cssVar` drops out of the stylesheet.
 
-See also [ARCHITECTURE.md](ARCHITECTURE.md) (theme tokens recipe),
-[web.md](web.md), and the `tui-components` skill catalog.
+Dark Strike is `:root`. Light Strike is `[data-scheme="light"]`. The command
+palette writes `strike.theme` and `strike.scheme` (`strike`, `nord`, `dracula`,
+`gruvbox`, `monokai`, `tokyo-night`, `catppuccin`, plus dark or light). An
+inline boot script sets the attributes before paint. Bundled theme JSON lives
+in `internal/frontend/tui/theme/themes/`. Roles a file omits — surface,
+surfaceFocus, surfaceMuted, overlayScrim — stay on the Strike ladder for the
+active scheme, which is what `theme.Resolve()` does. `--on-accent` is not a TUI
+role. It is the label color on a filled accent control.
+
+The TUI north star stays square (`radiusWebPx: 2`, no drop shadows). The
+cockpit uses a 10px panel radius and a pill command field so panels read as
+separate surfaces. That radius is a web layout exception. Colors are not.
+
+| TUI token | Light | Dark | CSS variable |
+|---|---|---|---|
+| Text | `#1a1528` | `#f3f1fa` | `--ink` |
+| TextMuted | `#5c586e` | `#9b99b0` | `--muted` |
+| Accent | `#5b21b6` | `#7c3aed` | `--acid` |
+| AccentAlt | `#0e7490` | `#22d3ee` | `--accent-alt` |
+| Highlight | `#4c1d95` | `#ddd6fe` | `--highlight` |
+| Success | `#15803d` | `#4ade80` | `--success` |
+| Warning | `#b45309` | `#fbbf24` | `--warning` |
+| Error | `#e11d48` | `#fb7185` | `--signal` |
+| Danger | `#ea580c` | `#fb923c` | `--danger` |
+| Background | `#ffffff` | `#14131c` | `--ground` |
+| Surface | `#f3eef9` | `#232230` | `--surface` |
+| SurfaceFocus | `#e9e0f7` | `#2e2c3e` | `--raised` |
+| SurfaceMuted | `#f8f5fc` | `#1a1924` | `--surface-muted` |
+| Border | `#c4bfd4` | `#4f4d63` | `--rule` |
+| BorderFocus | `#5b21b6` | `#7c3aed` | `--border-focus` |
+| BorderMuted | `#ddd8ea` | `#2c2a3a` | `--border-muted` |
+| UserLabel | `#0e7490` | `#22d3ee` | `--user` |
+| ToolLabel | `#2563eb` | `#7dd3fc` | `--tool` |
+| DiffAdded | `#15803d` | `#4ade80` | `--diff-add` |
+| DiffRemoved | `#e11d48` | `#fb7185` | `--diff-del` |
+| OverlayScrim | `#a8a3b8` | `#7c7a90` | `--overlay` |
+
+Working status is AccentAlt, not Success. A blocked handoff is a gate, so it
+uses Warning. Failed uses Error. Stopped uses TextMuted.
+
+See also [ARCHITECTURE.md](ARCHITECTURE.md) (theme tokens recipe) and
+[webui-daemon.md](webui-daemon.md).

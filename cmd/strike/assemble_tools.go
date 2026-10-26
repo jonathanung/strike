@@ -823,6 +823,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			LockPermissionMode:         cfg.Managed.PermissionMode,
 			Hooks:                      hookDefs,
 			HookRules:                  cfg.HookRules(),
+			ChildHandoffRequired:       cfg.Session.ChildHandoffRequired,
 			CompactionStrategy:         cfg.CompactionStrategy,
 			CompactionModel:            cfg.CompactionModel,
 			CompactionThreshold:        cfg.CompactionThreshold,

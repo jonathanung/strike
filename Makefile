@@ -1,4 +1,4 @@
-.PHONY: build run run-echo serve web-build web-test web-check web-e2e test vet cover cover-check clean setup restore tui-gen prompt-reg chaos harness-eval swebench-eval telemetry-check container-smoke
+.PHONY: build run run-echo serve webui-build webui-check web-check test vet cover cover-check clean setup restore tui-gen prompt-reg chaos harness-eval swebench-eval telemetry-check container-smoke
 
 # Multi-module workspace (go.work): ., ./pkg/protocol, ./pkg/redact,
 # ./harness.
@@ -47,24 +47,25 @@ run-echo: build
 serve: build
 	./strike serve --addr 127.0.0.1:8787
 
-# Vite workspace: builds production assets embedded by the Go binary.
-web-build:
-	@if [ ! -f web/package.json ]; then echo "web-build: no web/package.json"; exit 0; fi
-	cd web && npm ci && npm run build
+# Rust (Leptos) web UI: builds webui/dist into the Go embed dir.
+# Toolchain comes from `nix develop` (rustup + trunk per rust-toolchain.toml).
+webui-build:
+	@if ! command -v trunk >/dev/null; then echo "webui-build: trunk not found (run inside nix develop)"; exit 1; fi
+	cd webui && trunk build --release
+	rm -rf internal/frontend/server/static/assets
+	mkdir -p internal/frontend/server/static/assets
+	cp webui/dist/index.html webui/dist/sw.js webui/dist/manifest.webmanifest internal/frontend/server/static/
+	cp -r webui/dist/assets/. internal/frontend/server/static/assets/ 2>/dev/null || true
+	for f in webui/dist/*.wasm webui/dist/*.js webui/dist/*.css webui/dist/*.svg; do \
+		[ -e "$$f" ] && cp "$$f" internal/frontend/server/static/assets/ || true; \
+	done
 
-web-test:
-	@if [ ! -f web/package.json ]; then echo "web-test: no web/package.json"; exit 0; fi
-	cd web && npm ci && npm test
+webui-check:
+	@if ! command -v cargo >/dev/null; then echo "webui-check: cargo not found (run inside nix develop)"; exit 1; fi
+	cd webui && cargo check --target wasm32-unknown-unknown
 
-web-check:
-	@if [ ! -f web/package.json ]; then echo "web-check: no web/package.json"; exit 0; fi
-	cd web && npm ci && npm run build && npm test
-
-# Real-browser smokes (Playwright + offline echo serve). Not part of web-check.
-# Artifacts: web/e2e-artifacts/ (traces, screenshots, serve logs).
-web-e2e:
-	@if [ ! -f web/package.json ]; then echo "web-e2e: no web/package.json"; exit 0; fi
-	bash scripts/web-e2e.sh
+# Legacy alias: the old JS web/ UI is removed; web-check now means the Rust UI.
+web-check: webui-check
 
 test: tui-gen
 	go test ./...
@@ -138,7 +139,7 @@ container-smoke: build
 
 clean:
 	rm -f strike $(COVER_PROFILE)
-	rm -rf web/dist web/node_modules
+	rm -rf webui/dist webui/target
 
 # Recompute flake.nix vendorHash after go.mod/go.sum changes (CI also does this).
 .PHONY: nix-vendor-hash

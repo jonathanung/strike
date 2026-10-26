@@ -356,6 +356,7 @@ func TestSummarizeCompactFallsBackToTrim(t *testing.T) {
 	req := waitCompactTurnRequest(t, eng, prov)
 	foundMarker := false
 	foundSummaryWord := false
+	foundThird := false
 	for _, m := range req.Messages {
 		if m.Role == provider.RoleUser && strings.HasPrefix(m.Text, "[Prior conversation compacted") {
 			foundMarker = true
@@ -363,6 +364,12 @@ func TestSummarizeCompactFallsBackToTrim(t *testing.T) {
 				foundSummaryWord = true
 			}
 		}
+		if m.Role == provider.RoleUser && m.Text == "third" {
+			foundThird = true
+		}
+	}
+	if !foundThird {
+		t.Fatalf("third turn request missing (stale summarize request?): %#v", req.Messages)
 	}
 	if !foundMarker {
 		t.Fatalf("trim marker missing: %#v", req.Messages)
@@ -1035,18 +1042,32 @@ func waitCompactTurnRequest(t *testing.T, eng *engine.Engine, prov *scriptedProv
 	deadline := time.After(5 * time.Second)
 	var req provider.Request
 	gotReq := false
+	take := func(r provider.Request) {
+		req = r
+		gotReq = true
+	}
 	for {
 		select {
 		case r := <-prov.requests:
-			req = r
-			gotReq = true
+			take(r)
 		case ev := <-eng.Events():
 			switch ev := ev.(type) {
 			case protocol.TurnCompleted:
-				if !gotReq {
-					t.Fatal("turn completed without provider request")
+				// Stream sends the request before TurnCompleted is emitted.
+				// Drain the buffer so a leftover summarize call (#1251) is
+				// not reported as this turn's history. The newest request
+				// is the one this turn admitted.
+				for {
+					select {
+					case r := <-prov.requests:
+						take(r)
+					default:
+						if !gotReq {
+							t.Fatal("turn completed without provider request")
+						}
+						return req
+					}
 				}
-				return req
 			case protocol.EngineError:
 				t.Fatalf("EngineError: %s", ev.Message)
 			}

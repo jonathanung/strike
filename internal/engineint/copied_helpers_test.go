@@ -160,43 +160,67 @@ func drainAndReply(t *testing.T, eng *engine.Engine, timeout time.Duration) []pr
 	var turnsAfterNotice int
 	guard := time.NewTimer(timeout)
 	defer guard.Stop()
+	// After the deadline, keep reading events that are already queued. A loaded
+	// -race run can fire the timer in the same select as the child's terminal
+	// event; treating that as a timeout drops a completion that did arrive.
+	timedOut := false
 	for {
-		select {
-		case ev, ok := <-eng.Events():
-			if !ok {
-				t.Fatal("Events closed before drain finished")
+		var (
+			ev  protocol.Event
+			ok  bool
+			got bool
+		)
+		if timedOut {
+			select {
+			case ev, ok = <-eng.Events():
+				got = true
+			default:
 			}
-			collected = append(collected, ev)
-			switch ev := ev.(type) {
-			case protocol.PermissionAsked:
-				eng.Ops() <- protocol.PermissionReply{RequestID: ev.RequestID, Decision: protocol.DecisionOnce}
-			case protocol.QuestionAsked:
-			case protocol.ChildStarted:
-				started++
-			case protocol.ChildCompleted:
-				completed++
-			case protocol.UserMessage:
-				if strings.Contains(ev.Text, "[child.completed") {
-					noticeSeen = true
-				}
-			case protocol.TurnCompleted:
-				parentDone = true
-				if noticeSeen {
-					turnsAfterNotice++
-				}
+			if !got {
+				t.Fatalf("timed out; parentDone=%v started=%d completed=%d notice=%v turnsAfterNotice=%d notices=%d events=%v",
+					parentDone, started, completed, noticeSeen, turnsAfterNotice, childCompletionNotices(collected), summarizeEvents(collected))
 			}
-			if !parentDone || started != completed {
+		} else {
+			select {
+			case ev, ok = <-eng.Events():
+				got = true
+			case <-guard.C:
+				timedOut = true
+			}
+			if !got {
 				continue
 			}
-			if started == 0 {
-				return collected
+		}
+		if !ok {
+			t.Fatal("Events closed before drain finished")
+		}
+		collected = append(collected, ev)
+		switch ev := ev.(type) {
+		case protocol.PermissionAsked:
+			eng.Ops() <- protocol.PermissionReply{RequestID: ev.RequestID, Decision: protocol.DecisionOnce}
+		case protocol.QuestionAsked:
+		case protocol.ChildStarted:
+			started++
+		case protocol.ChildCompleted:
+			completed++
+		case protocol.UserMessage:
+			if strings.Contains(ev.Text, "[child.completed") {
+				noticeSeen = true
 			}
-			if turnsAfterNotice >= 1 && childCompletionNotices(collected) >= completed {
-				return collected
+		case protocol.TurnCompleted:
+			parentDone = true
+			if noticeSeen {
+				turnsAfterNotice++
 			}
-		case <-guard.C:
-			t.Fatalf("timed out; parentDone=%v started=%d completed=%d notice=%v turnsAfterNotice=%d notices=%d events=%v",
-				parentDone, started, completed, noticeSeen, turnsAfterNotice, childCompletionNotices(collected), summarizeEvents(collected))
+		}
+		if !parentDone || started != completed {
+			continue
+		}
+		if started == 0 {
+			return collected
+		}
+		if turnsAfterNotice >= 1 && childCompletionNotices(collected) >= completed {
+			return collected
 		}
 	}
 }

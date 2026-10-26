@@ -9,5 +9,5 @@ This directory contains the same choose-best behavior in all supported forms:
 - `ChooseBest.lean` is a Lean subprocess using the `sdk/lean` Lake package.
 - `config.example.json` configures the three subprocess examples.
 
-`internal/engine/harness_test.go` runs all three through the same task-subagent
+`internal/engineint/harness_test.go` runs all three through the same task-subagent
 integration test.

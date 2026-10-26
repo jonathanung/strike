@@ -18,6 +18,14 @@ import (
 	"github.com/jonathanung/strike/pkg/protocol"
 )
 
+// handoffOff opts a test engine out of the default schema:handoff gate.
+// Tests that assert prose completion, delegation "done", or task.done are
+// about that behavior, not handoff enforcement (#1201).
+func handoffOff() *bool {
+	v := false
+	return &v
+}
+
 func taskToolCall(id, prompt string) provider.ToolCall {
 	return provider.ToolCall{
 		ID:   id,
@@ -205,12 +213,13 @@ func TestForegroundTaskIndependentHistory(t *testing.T) {
 		childCompletedNudgeStep("parent ack child"),
 	)
 	eng := engine.New(engine.Options{
-		SessionID:       parentSession,
-		Select:          func(string) (provider.Provider, string, error) { return prov, "scripted-model", nil },
-		InitialProvider: "scripted",
-		Registry:        tool.NewRegistry(tool.NewTask()),
-		WorkDir:         t.TempDir(),
-		Rules:           []permission.Ruleset{permission.Defaults()},
+		ChildHandoffRequired: handoffOff(),
+		SessionID:            parentSession,
+		Select:               func(string) (provider.Provider, string, error) { return prov, "scripted-model", nil },
+		InitialProvider:      "scripted",
+		Registry:             tool.NewRegistry(tool.NewTask()),
+		WorkDir:              t.TempDir(),
+		Rules:                []permission.Ruleset{permission.Defaults()},
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -540,13 +549,14 @@ func TestNestedTaskDepthTwoCompletes(t *testing.T) {
 		childCompletedNudgeStep("ack nested 3"),
 	)
 	eng := engine.New(engine.Options{
-		SessionID:       "root-nest-2",
-		MaxChildDepth:   2,
-		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
-		InitialProvider: "scripted",
-		Registry:        tool.NewRegistry(tool.NewTask()),
-		WorkDir:         t.TempDir(),
-		Rules:           []permission.Ruleset{permission.Defaults()},
+		ChildHandoffRequired: handoffOff(),
+		SessionID:            "root-nest-2",
+		MaxChildDepth:        2,
+		Select:               func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider:      "scripted",
+		Registry:             tool.NewRegistry(tool.NewTask()),
+		WorkDir:              t.TempDir(),
+		Rules:                []permission.Ruleset{permission.Defaults()},
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1038,13 +1048,14 @@ func TestChildPermissionReplyRouting(t *testing.T) {
 	)
 	// Defaults: bash asks; task allows.
 	eng := engine.New(engine.Options{
-		SessionID:       "parent-ask-route",
-		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
-		InitialProvider: "scripted",
-		Registry:        tool.NewRegistry(tool.NewTask(), tool.NewBash()),
-		WorkDir:         t.TempDir(),
-		SandboxMode:     "off",
-		Rules:           []permission.Ruleset{permission.Defaults()},
+		ChildHandoffRequired: handoffOff(),
+		SessionID:            "parent-ask-route",
+		Select:               func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider:      "scripted",
+		Registry:             tool.NewRegistry(tool.NewTask(), tool.NewBash()),
+		WorkDir:              t.TempDir(),
+		SandboxMode:          "off",
+		Rules:                []permission.Ruleset{permission.Defaults()},
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1204,12 +1215,13 @@ func TestTaskChildInheritsParentProvider(t *testing.T) {
 		return prov, "model", nil
 	}
 	eng := engine.New(engine.Options{
-		SessionID:       "parent-inherit",
-		Select:          selectFn,
-		InitialProvider: "scripted",
-		Registry:        tool.NewRegistry(tool.NewTask()),
-		WorkDir:         t.TempDir(),
-		Rules:           []permission.Ruleset{permission.Defaults()},
+		ChildHandoffRequired: handoffOff(),
+		SessionID:            "parent-inherit",
+		Select:               selectFn,
+		InitialProvider:      "scripted",
+		Registry:             tool.NewRegistry(tool.NewTask()),
+		WorkDir:              t.TempDir(),
+		Rules:                []permission.Ruleset{permission.Defaults()},
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1367,12 +1379,13 @@ func TestTaskNonBlockingParentContinuesWhileChildRuns(t *testing.T) {
 		childCompletedNudgeStep("parent ack slow child"),
 	)
 	eng := engine.New(engine.Options{
-		SessionID:       "parent-nb",
-		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
-		InitialProvider: "scripted",
-		Registry:        tool.NewRegistry(tool.NewTask(), ct),
-		WorkDir:         t.TempDir(),
-		Rules:           []permission.Ruleset{permission.Defaults()},
+		ChildHandoffRequired: handoffOff(),
+		SessionID:            "parent-nb",
+		Select:               func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider:      "scripted",
+		Registry:             tool.NewRegistry(tool.NewTask(), ct),
+		WorkDir:              t.TempDir(),
+		Rules:                []permission.Ruleset{permission.Defaults()},
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1486,12 +1499,13 @@ func TestChildCompletedNudgeWhileIdle(t *testing.T) {
 		childCompletedNudgeStep("acked idle completion"),
 	)
 	eng := engine.New(engine.Options{
-		SessionID:       "parent-idle-nudge",
-		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
-		InitialProvider: "scripted",
-		Registry:        tool.NewRegistry(tool.NewTask(), ct),
-		WorkDir:         t.TempDir(),
-		Rules:           []permission.Ruleset{permission.Defaults()},
+		ChildHandoffRequired: handoffOff(),
+		SessionID:            "parent-idle-nudge",
+		Select:               func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider:      "scripted",
+		Registry:             tool.NewRegistry(tool.NewTask(), ct),
+		WorkDir:              t.TempDir(),
+		Rules:                []permission.Ruleset{permission.Defaults()},
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1811,13 +1825,14 @@ func TestReviewerChildHardDenyFeedsNextProviderTurn(t *testing.T) {
 		childCompletedNudgeStep("ack reviewer block"),
 	)
 	eng := engine.New(engine.Options{
-		SessionID:       "parent-review-deny",
-		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
-		InitialProvider: "scripted",
-		Registry:        tool.NewRegistry(tool.NewTask(), tool.NewBash()),
-		WorkDir:         t.TempDir(),
-		SandboxMode:     "off",
-		Rules:           []permission.Ruleset{permission.Defaults()},
+		ChildHandoffRequired: handoffOff(),
+		SessionID:            "parent-review-deny",
+		Select:               func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider:      "scripted",
+		Registry:             tool.NewRegistry(tool.NewTask(), tool.NewBash()),
+		WorkDir:              t.TempDir(),
+		SandboxMode:          "off",
+		Rules:                []permission.Ruleset{permission.Defaults()},
 		Agents: []engine.Agent{
 			{Name: "build"},
 			// Hard-deny all bash. (A trailing `git *` allow would now also cover
@@ -1914,12 +1929,13 @@ func TestChildCompletedInjectedDuringSleepPoll(t *testing.T) {
 		}(),
 	)
 	eng := engine.New(engine.Options{
-		SessionID:       "parent-sleep-poll",
-		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
-		InitialProvider: "scripted",
-		Registry:        tool.NewRegistry(tool.NewTask(), tool.NewSleep(), ct),
-		WorkDir:         t.TempDir(),
-		Rules:           []permission.Ruleset{permission.Defaults()},
+		ChildHandoffRequired: handoffOff(),
+		SessionID:            "parent-sleep-poll",
+		Select:               func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider:      "scripted",
+		Registry:             tool.NewRegistry(tool.NewTask(), tool.NewSleep(), ct),
+		WorkDir:              t.TempDir(),
+		Rules:                []permission.Ruleset{permission.Defaults()},
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

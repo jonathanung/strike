@@ -7,7 +7,9 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -24,6 +26,7 @@ import (
 
 	"github.com/jonathanung/strike/internal/frontend/host"
 	"github.com/jonathanung/strike/internal/persist/session"
+	"github.com/jonathanung/strike/internal/persist/workspace"
 	"github.com/jonathanung/strike/internal/product/version"
 )
 
@@ -33,8 +36,14 @@ type Options struct {
 	Addr string
 	// Auth enables bearer authentication for API routes.
 	Auth bool
-	// Token is required when Auth is true.
+	// Token is required when Auth is true. It is the bearer until TokenFile
+	// is set; a token file is re-read on every /v1 check so a rotated file
+	// (strike daemon logout) replaces it without restarting the process.
 	Token string
+	// TokenFile, when set, is the source of truth for the bearer. Missing
+	// or empty contents deny /v1. The process still needs Auth and an initial
+	// Token so a server cannot start authenticated with no credential.
+	TokenFile string
 	// SessionDir is the JSONL sessions directory. Default session.DefaultDir().
 	SessionDir string
 	// Static is optional override for the attach page FS (tests). Nil uses embed.
@@ -54,6 +63,9 @@ type Options struct {
 	// outside the list (all routes including /health). Unused by strike serve
 	// CLI (loopback-only bind); retained for programmatic hosts.
 	AllowCIDRs []*net.IPNet
+	// Workspaces is the durable workspace registry for /v1/workspaces.
+	// Nil returns 503 from those routes.
+	Workspaces *workspace.Store
 	// Services exposes optional frontend host capabilities.
 	Services *host.Services
 	// Sandbox enables the sandbox capability and seeds live roots that do not
@@ -84,6 +96,10 @@ type Server struct {
 	// paneHost supervises process panes for the web cockpit (#732).
 	paneHost *paneHost
 	opsLimit *opLimiter
+
+	// scriptCSPHashes allowlists inline <script> bodies from the embedded
+	// index.html (Trunk emits an inline WASM loader) without unsafe-inline.
+	scriptCSPHashes []string
 }
 
 // New validates options and builds a Server. Does not listen.
@@ -109,10 +125,11 @@ func New(opts Options) (*Server, error) {
 		static = staticFS
 	}
 	s := &Server{
-		opts:     opts,
-		static:   static,
-		mux:      http.NewServeMux(),
-		opsLimit: newOpLimiter(opts.OpsRate, opts.OpsBurst, opts.OpsClock),
+		opts:            opts,
+		static:          static,
+		mux:             http.NewServeMux(),
+		opsLimit:        newOpLimiter(opts.OpsRate, opts.OpsBurst, opts.OpsClock),
+		scriptCSPHashes: inlineScriptHashes(static),
 	}
 	s.routes()
 	s.http = &http.Server{
@@ -299,6 +316,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/sessions/{id}/timeline", s.handleSessionTimeline)
 	s.mux.HandleFunc("GET /v1/sessions/{id}/timeline/export", s.handleSessionTimelineExport)
 	s.mux.HandleFunc("GET /v1/sessions", s.handleSessions)
+	s.mux.HandleFunc("GET /v1/workspaces", s.handleWorkspacesList)
+	s.mux.HandleFunc("POST /v1/workspaces", s.handleWorkspaceAdd)
+	s.mux.HandleFunc("POST /v1/workspaces/{id}/activate", s.handleWorkspaceActivate)
+	s.mux.HandleFunc("PATCH /v1/workspaces/{id}", s.handleWorkspacePolicy)
+	s.mux.HandleFunc("DELETE /v1/workspaces/{id}", s.handleWorkspaceRemove)
 	s.mux.HandleFunc("GET /v1/roots", s.handleRoots)
 	s.mux.HandleFunc("POST /v1/roots", s.handleRootCreate)
 	s.mux.HandleFunc("POST /v1/roots/{id}/activate", s.handleRootActivate)
@@ -314,6 +336,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /{$}", s.handleAttach)
 	s.mux.HandleFunc("GET /attach", s.handleAttach)
 	s.mux.HandleFunc("GET /assets/{path...}", s.handleAsset)
+	s.mux.HandleFunc("GET /sw.js", s.handleStaticRoot("sw.js", "text/javascript; charset=utf-8"))
+	s.mux.HandleFunc("GET /manifest.webmanifest", s.handleStaticRoot("manifest.webmanifest", "application/manifest+json"))
 }
 
 func (s *Server) withMiddleware(next http.Handler) http.Handler {
@@ -377,8 +401,44 @@ func stateChanging(method string) bool {
 	return method == http.MethodPost || method == http.MethodPatch || method == http.MethodDelete || method == http.MethodPut
 }
 
+// inlineScriptHashes returns CSP 'sha256-...' sources for every inline
+// <script> body in the static index.html. Missing/unreadable index → nil.
+func inlineScriptHashes(static fs.FS) []string {
+	data, err := fs.ReadFile(static, "index.html")
+	if err != nil {
+		return nil
+	}
+	var out []string
+	rest := string(data)
+	for {
+		open := strings.Index(rest, "<script")
+		if open < 0 {
+			return out
+		}
+		rest = rest[open+len("<script"):]
+		gt := strings.Index(rest, ">")
+		if gt < 0 {
+			return out
+		}
+		tag, body := rest[:gt], rest[gt+1:]
+		end := strings.Index(body, "</script>")
+		if end < 0 {
+			return out
+		}
+		if !strings.Contains(tag, "src=") && end > 0 {
+			sum := sha256.Sum256([]byte(body[:end]))
+			out = append(out, "'sha256-"+base64.StdEncoding.EncodeToString(sum[:])+"'")
+		}
+		rest = body[end+len("</script>"):]
+	}
+}
+
 func (s *Server) applySecurityHeaders(w http.ResponseWriter) {
-	w.Header().Set("Content-Security-Policy", "default-src 'self'; connect-src 'self' ws: wss:; img-src 'self' data: blob:; style-src 'self'; script-src 'self'; font-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+	scriptSrc := "script-src 'self' 'wasm-unsafe-eval'"
+	for _, h := range s.scriptCSPHashes {
+		scriptSrc += " " + h
+	}
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; connect-src 'self' ws: wss: http: https:; img-src 'self' data: blob:; style-src 'self'; "+scriptSrc+"; font-src 'self'; worker-src 'self'; manifest-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("X-Frame-Options", "DENY")
@@ -392,7 +452,7 @@ func requiresToken(path string) bool {
 }
 
 func (s *Server) authorized(r *http.Request) bool {
-	want := s.opts.Token
+	want := s.currentToken()
 	if want == "" {
 		return false
 	}
@@ -408,6 +468,20 @@ func (s *Server) authorized(r *http.Request) bool {
 		return true
 	}
 	return false
+}
+
+// currentToken is the bearer checked on this request. A configured token
+// file wins over the value captured at startup.
+func (s *Server) currentToken() string {
+	path := strings.TrimSpace(s.opts.TokenFile)
+	if path == "" {
+		return s.opts.Token
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
 }
 
 // bearerToken extracts a Bearer credential. Scheme match is case-insensitive
@@ -448,16 +522,18 @@ func (s *Server) maybeHandoffToken(w http.ResponseWriter, r *http.Request) bool 
 	if tok == "" {
 		return false
 	}
-	if !tokenEqual(tok, s.opts.Token) {
+	current := s.currentToken()
+	if !tokenEqual(tok, current) {
 		return false
 	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     authCookieName,
-		Value:    s.opts.Token,
+		Value:    current,
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
-		// Secure omitted: strike serve is cleartext by design (loopback / --expose).
+		// Secure omitted: strike serve is cleartext by design (loopback, or a
+		// private bind with --auth). There is no public listener.
 	})
 	q := r.URL.Query()
 	q.Del("token")
@@ -482,8 +558,8 @@ func (s *Server) applyCORS(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// originAllowed permits only loopback browser origins (localhost / 127.0.0.1 /
-// ::1). Remote access is via SSH local forward, not cleartext LAN CORS.
+// originAllowed permits loopback and private-network browser origins
+// (localhost, RFC1918, CGNAT/tailnet), the only binds strike serves.
 func originAllowed(origin string) bool {
 	if origin == "" {
 		return false
@@ -499,8 +575,7 @@ func originAllowed(origin string) bool {
 	if strings.EqualFold(host, "localhost") {
 		return true
 	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
+	return IsPrivateBind(host)
 }
 
 func originHost(origin string) string {
@@ -561,9 +636,28 @@ func (s *Server) handleAsset(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/css; charset=utf-8")
 	case ".svg":
 		w.Header().Set("Content-Type", "image/svg+xml")
+	case ".wasm":
+		w.Header().Set("Content-Type", "application/wasm")
+	case ".webmanifest":
+		w.Header().Set("Content-Type", "application/manifest+json")
 	}
 	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	_, _ = w.Write(data)
+}
+
+// handleStaticRoot serves one file from the static root (PWA service worker
+// and manifest must live at the origin root, not under /assets/).
+func (s *Server) handleStaticRoot(name, contentType string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		data, err := fs.ReadFile(s.static, name)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", contentType)
+		w.Header().Set("Cache-Control", "no-store")
+		_, _ = w.Write(data)
+	}
 }
 
 func (s *Server) handleSessionEvents(w http.ResponseWriter, r *http.Request) {

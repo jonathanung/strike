@@ -2083,6 +2083,43 @@ func TestLoadSessionTurnTimeoutMerge(t *testing.T) {
 	}
 }
 
+func TestLoadSessionChildHandoffMerge(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	work := t.TempDir()
+
+	global := filepath.Join(home, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(global), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(global, []byte(`{"session":{"childHandoffRequired":true}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	project := filepath.Join(work, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(project), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(project, []byte(`{"session":{"childHandoffRequired":false}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Session.ChildHandoffRequired == nil || *cfg.Session.ChildHandoffRequired {
+		t.Fatalf("childHandoffRequired = %v, want false", cfg.Session.ChildHandoffRequired)
+	}
+
+	t.Setenv("HOME", t.TempDir())
+	plain, err := Load(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plain.Session.ChildHandoffRequired != nil {
+		t.Fatalf("omitted = %v, want nil (engine default required)", plain.Session.ChildHandoffRequired)
+	}
+}
+
 func TestNormalizeChildIsolation(t *testing.T) {
 	if got := NormalizeChildIsolation(""); got != ChildIsolationOff {
 		t.Fatalf("empty = %q", got)

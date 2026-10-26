@@ -10,6 +10,37 @@ import (
 	"github.com/jonathanung/strike/harness/permission"
 )
 
+func TestAgentFrontmatterChildHandoffRequired(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	work := t.TempDir()
+	dir := filepath.Join(work, ".strike", "agents")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "---\nchildHandoffRequired: false\n---\nStay prose.\n"
+	if err := os.WriteFile(filepath.Join(dir, "scribe.md"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var scribe Agent
+	found := false
+	for _, a := range LoadAgents(work) {
+		if a.Name == "scribe" {
+			scribe = a
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("missing scribe agent")
+	}
+	if scribe.ChildHandoffRequired == nil || *scribe.ChildHandoffRequired {
+		t.Fatalf("childHandoffRequired = %v", scribe.ChildHandoffRequired)
+	}
+	if scribe.Prompt != "Stay prose." {
+		t.Fatalf("prompt = %q", scribe.Prompt)
+	}
+}
+
 func TestParseFrontmatter(t *testing.T) {
 	meta, body, nested := parseFrontmatter("---\ndescription: reviews code\nmodel: gpt-5.5\n---\nYou are a reviewer.")
 	if meta["description"] != "reviews code" || meta["model"] != "gpt-5.5" {

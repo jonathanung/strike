@@ -156,7 +156,16 @@ func TestVerificationGatesCannotSelfCertify(t *testing.T) {
 	if cc.Verification == nil || cc.Verification.Passed || cc.Verification.Verified || !cc.Verification.Claimed {
 		t.Fatalf("verification = %#v", cc.Verification)
 	}
-	if len(cc.Verification.Checks) != 1 || cc.Verification.Checks[0].Passed {
+	var cmdFailed, schemaPassed bool
+	for _, c := range cc.Verification.Checks {
+		if c.Kind == "cmd" && c.Value == "false" && !c.Passed {
+			cmdFailed = true
+		}
+		if c.Kind == "schema" && c.Value == "handoff" && c.Passed {
+			schemaPassed = true
+		}
+	}
+	if !cmdFailed || !schemaPassed || len(cc.Verification.Checks) != 2 {
 		t.Fatalf("checks = %#v", cc.Verification.Checks)
 	}
 	// Actionable blockers for implementer/lead.
@@ -308,14 +317,16 @@ func TestVerificationGatesPathAndTaskStatus(t *testing.T) {
 	}
 }
 
-// TestNoVerifyGatesSkipsReport: without verify, no verification field (compat).
+// TestNoVerifyGatesSkipsReport: opting out of the default schema:handoff gate
+// restores prose completion with no verification report (#1201).
 func TestNoVerifyGatesSkipsReport(t *testing.T) {
 	const childPrompt = "no-gates"
+	off := false
 	taskCall := taskToolCall("task-nogate", childPrompt)
 	prov := newScriptedProvider(
 		toolCallStep(taskCall),
 		func() streamStep {
-			s := completedStep(`{"summary":"ok","files_changed":[],"findings":[],"blockers":[]}`)
+			s := completedStep("prose only, no handoff json")
 			s.match = matchUserText(childPrompt)
 			return s
 		}(),
@@ -327,12 +338,13 @@ func TestNoVerifyGatesSkipsReport(t *testing.T) {
 		childCompletedNudgeStep("ack"),
 	)
 	eng := engine.New(engine.Options{
-		SessionID:       "lead-nogate",
-		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
-		InitialProvider: "scripted",
-		Registry:        tool.NewRegistry(tool.NewTask()),
-		WorkDir:         t.TempDir(),
-		Rules:           []permission.Ruleset{permission.Defaults()},
+		SessionID:            "lead-nogate",
+		Select:               func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider:      "scripted",
+		Registry:             tool.NewRegistry(tool.NewTask()),
+		WorkDir:              t.TempDir(),
+		Rules:                []permission.Ruleset{permission.Defaults()},
+		ChildHandoffRequired: &off,
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -354,5 +366,209 @@ func TestNoVerifyGatesSkipsReport(t *testing.T) {
 	}
 	if completed[0].Verification != nil {
 		t.Fatalf("want nil verification without gates, got %#v", completed[0].Verification)
+	}
+}
+
+const defaultHandoffJSON = `{"summary":"ok","files_changed":[],"findings":[],"blockers":[]}`
+
+func childCompletedFrom(t *testing.T, events []protocol.Event) protocol.ChildCompleted {
+	t.Helper()
+	var completed []protocol.ChildCompleted
+	for _, ev := range events {
+		if cc, ok := ev.(protocol.ChildCompleted); ok {
+			completed = append(completed, cc)
+		}
+	}
+	if len(completed) != 1 {
+		t.Fatalf("ChildCompleted = %d; events=%v", len(completed), summarizeEvents(events))
+	}
+	return completed[0]
+}
+
+func countVerificationEvents(events []protocol.Event) (started, completed int) {
+	for _, ev := range events {
+		switch ev.(type) {
+		case protocol.VerificationStarted:
+			started++
+		case protocol.VerificationCompleted:
+			completed++
+		}
+	}
+	return started, completed
+}
+
+func scriptedChildEngine(t *testing.T, id, prompt, childText string, opts engine.Options, taskCall provider.ToolCall) *engine.Engine {
+	t.Helper()
+	prov := newScriptedProvider(
+		toolCallStep(taskCall),
+		func() streamStep {
+			s := completedStep(childText)
+			s.match = matchUserText(prompt)
+			return s
+		}(),
+		func() streamStep {
+			s := completedStep("parent")
+			s.match = matchToolResult(id)
+			return s
+		}(),
+		childCompletedNudgeStep("ack"),
+	)
+	if opts.SessionID == "" {
+		opts.SessionID = "lead-" + id
+	}
+	opts.Select = func(string) (provider.Provider, string, error) { return prov, "model", nil }
+	opts.InitialProvider = "scripted"
+	if opts.Registry == nil {
+		opts.Registry = tool.NewRegistry(tool.NewTask())
+	}
+	if opts.WorkDir == "" {
+		opts.WorkDir = t.TempDir()
+	}
+	if opts.Rules == nil {
+		opts.Rules = []permission.Ruleset{permission.Defaults()}
+	}
+	return engine.New(opts)
+}
+
+func runScriptedTurn(t *testing.T, eng *engine.Engine) []protocol.Event {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go eng.Run(ctx)
+	eng.Ops() <- protocol.UserInput{Text: "go"}
+	return drainAndReply(t, eng, 15*time.Second)
+}
+
+func TestDefaultHandoffBlocksProse(t *testing.T) {
+	const prompt = "prose-child"
+	eng := scriptedChildEngine(t, "task-prose", prompt, "I finished, trust me", engine.Options{}, taskToolCall("task-prose", prompt))
+	events := runScriptedTurn(t, eng)
+	cc := childCompletedFrom(t, events)
+	if cc.Status != protocol.ChildStatusBlocked {
+		t.Fatalf("status = %q, want blocked; ver=%#v", cc.Status, cc.Verification)
+	}
+	if cc.Verification == nil || cc.Verification.Passed {
+		t.Fatalf("verification = %#v", cc.Verification)
+	}
+	var sawSchema bool
+	for _, c := range cc.Verification.Checks {
+		if c.Kind == "schema" && c.Value == "handoff" && !c.Passed {
+			sawSchema = true
+		}
+	}
+	if !sawSchema {
+		t.Fatalf("checks = %#v", cc.Verification.Checks)
+	}
+	started, completed := countVerificationEvents(events)
+	if started != 1 || completed != 1 {
+		t.Fatalf("verification events started=%d completed=%d", started, completed)
+	}
+}
+
+func TestDefaultHandoffAcceptsJSON(t *testing.T) {
+	const prompt = "json-child"
+	eng := scriptedChildEngine(t, "task-json", prompt, defaultHandoffJSON, engine.Options{}, taskToolCall("task-json", prompt))
+	events := runScriptedTurn(t, eng)
+	cc := childCompletedFrom(t, events)
+	if cc.Status != protocol.ChildStatusCompleted {
+		t.Fatalf("status = %q, want completed; ver=%#v", cc.Status, cc.Verification)
+	}
+	if cc.Handoff.Incomplete || cc.Handoff.Summary != "ok" {
+		t.Fatalf("handoff = %#v", cc.Handoff)
+	}
+	if cc.Verification == nil || !cc.Verification.Passed {
+		t.Fatalf("verification = %#v", cc.Verification)
+	}
+	if len(cc.Verification.Checks) != 1 || cc.Verification.Checks[0].Kind != "schema" || !cc.Verification.Checks[0].Passed {
+		t.Fatalf("checks = %#v", cc.Verification.Checks)
+	}
+	started, completed := countVerificationEvents(events)
+	if started != 1 || completed != 1 {
+		t.Fatalf("verification events started=%d completed=%d", started, completed)
+	}
+}
+
+func TestDefaultHandoffUnionsExplicitVerify(t *testing.T) {
+	const prompt = "path-and-handoff"
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "artifact.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	taskCall := taskToolCallWith("task-union", map[string]any{
+		"prompt": prompt,
+		"verify": []map[string]any{{"kind": "path", "value": "artifact.txt"}},
+	})
+	eng := scriptedChildEngine(t, "task-union", prompt, defaultHandoffJSON, engine.Options{WorkDir: dir}, taskCall)
+	cc := childCompletedFrom(t, runScriptedTurn(t, eng))
+	if cc.Status != protocol.ChildStatusCompleted {
+		t.Fatalf("status = %q; ver=%#v", cc.Status, cc.Verification)
+	}
+	if cc.Verification == nil || !cc.Verification.Passed || len(cc.Verification.Checks) != 2 {
+		t.Fatalf("verification = %#v", cc.Verification)
+	}
+	var pathOK, schemaOK bool
+	for _, c := range cc.Verification.Checks {
+		if c.Kind == "path" && c.Value == "artifact.txt" && c.Passed {
+			pathOK = true
+		}
+		if c.Kind == "schema" && c.Value == "handoff" && c.Passed {
+			schemaOK = true
+		}
+	}
+	if !pathOK || !schemaOK {
+		t.Fatalf("checks = %#v", cc.Verification.Checks)
+	}
+}
+
+func TestSpawnHandoffRequiredOverridesSession(t *testing.T) {
+	const prompt = "spawn-override"
+	off := false
+	taskCall := taskToolCallWith("task-override", map[string]any{
+		"prompt":           prompt,
+		"handoff_required": true,
+	})
+	eng := scriptedChildEngine(t, "task-override", prompt, "still prose", engine.Options{
+		ChildHandoffRequired: &off,
+	}, taskCall)
+	cc := childCompletedFrom(t, runScriptedTurn(t, eng))
+	if cc.Status != protocol.ChildStatusBlocked {
+		t.Fatalf("status = %q, want blocked", cc.Status)
+	}
+	if cc.Verification == nil || cc.Verification.Passed {
+		t.Fatalf("verification = %#v", cc.Verification)
+	}
+}
+
+func TestSpawnCanOptOutOfDefaultHandoff(t *testing.T) {
+	const prompt = "spawn-off"
+	taskCall := taskToolCallWith("task-off", map[string]any{
+		"prompt":           prompt,
+		"handoff_required": false,
+	})
+	eng := scriptedChildEngine(t, "task-off", prompt, "prose is enough here", engine.Options{}, taskCall)
+	cc := childCompletedFrom(t, runScriptedTurn(t, eng))
+	if cc.Status != protocol.ChildStatusCompleted {
+		t.Fatalf("status = %q, want completed", cc.Status)
+	}
+	if cc.Verification != nil {
+		t.Fatalf("verification = %#v", cc.Verification)
+	}
+}
+
+func TestAgentFrontmatterOptsOutOfHandoff(t *testing.T) {
+	const prompt = "agent-off"
+	off := false
+	eng := scriptedChildEngine(t, "task-agent", prompt, "persona prose", engine.Options{
+		Agents: []engine.Agent{{
+			Name:                 "build",
+			ChildHandoffRequired: &off,
+		}},
+	}, taskToolCall("task-agent", prompt))
+	cc := childCompletedFrom(t, runScriptedTurn(t, eng))
+	if cc.Status != protocol.ChildStatusCompleted {
+		t.Fatalf("status = %q, want completed", cc.Status)
+	}
+	if cc.Verification != nil {
+		t.Fatalf("verification = %#v", cc.Verification)
 	}
 }

@@ -692,7 +692,11 @@ func (s *Server) handleSessionChildren(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"sessions": items})
+	summaries := make([]protocol.SessionSummary, 0, len(items))
+	for _, item := range items {
+		summaries = append(summaries, toSessionSummary(item))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"sessions": summaries})
 }
 
 func (s *Server) handleSessionFork(w http.ResponseWriter, r *http.Request) {

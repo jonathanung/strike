@@ -196,12 +196,13 @@ func TestTaskControlTwoChildren(t *testing.T) {
 	)
 
 	eng := engine.New(engine.Options{
-		SessionID:       "parent-ctrl",
-		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
-		InitialProvider: "scripted",
-		Registry:        taskControlRegistry(ct),
-		WorkDir:         t.TempDir(),
-		Rules:           []permission.Ruleset{permission.Defaults()},
+		ChildHandoffRequired: handoffOff(),
+		SessionID:            "parent-ctrl",
+		Select:               func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider:      "scripted",
+		Registry:             taskControlRegistry(ct),
+		WorkDir:              t.TempDir(),
+		Rules:                []permission.Ruleset{permission.Defaults()},
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -396,12 +397,13 @@ func TestTaskStatusTerminalAfterComplete(t *testing.T) {
 	)
 
 	eng := engine.New(engine.Options{
-		SessionID:       "parent-term",
-		Select:          func(string) (provider.Provider, string, error) { return prov, "model", nil },
-		InitialProvider: "scripted",
-		Registry:        taskControlRegistry(),
-		WorkDir:         t.TempDir(),
-		Rules:           []permission.Ruleset{permission.Defaults()},
+		ChildHandoffRequired: handoffOff(),
+		SessionID:            "parent-term",
+		Select:               func(string) (provider.Provider, string, error) { return prov, "model", nil },
+		InitialProvider:      "scripted",
+		Registry:             taskControlRegistry(),
+		WorkDir:              t.TempDir(),
+		Rules:                []permission.Ruleset{permission.Defaults()},
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

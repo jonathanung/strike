@@ -202,7 +202,7 @@ func TestAgentRosterMultiChildAndTeamEvents(t *testing.T) {
 			t.Fatalf("child row = %+v", m)
 		}
 		switch m.State {
-		case "starting", "working", "needs_attention", "completed", "failed", "canceled":
+		case "starting", "working", "needs_attention", "completed", "blocked", "failed", "canceled":
 		default:
 			t.Fatalf("bad state %q on %s", m.State, m.SessionID)
 		}
