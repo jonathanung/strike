@@ -216,9 +216,9 @@ func (s *Server) storeIngest(req attachmentIngestRequest, sessionFallback string
 			kind = attachment.KindImage
 		}
 	}
-	sessionID := cleanSessionID(req.SessionID)
+	sessionID, _ := cleanSessionID(req.SessionID)
 	if sessionID == "" {
-		sessionID = cleanSessionID(sessionFallback)
+		sessionID, _ = cleanSessionID(sessionFallback)
 	}
 	name := attachment.RedactName(clipAttachmentName(req.Name))
 	meta, err := s.opts.Attachments.Put(raw, attachment.PutInput{
@@ -276,16 +276,20 @@ func clipAttachmentName(name string) string {
 	return string([]rune(name)[:maxAttachmentNameRunes])
 }
 
-func cleanSessionID(id string) string {
+// cleanSessionID is the shared session-id validator for the server
+// package (also used by the session-status handlers): only letters,
+// digits, '-' and '_' are allowed, so path separators and ".." can
+// never appear in a cleaned id.
+func cleanSessionID(id string) (string, bool) {
 	id = strings.TrimSpace(id)
 	if id == "" || utf8.RuneCountInString(id) > 80 {
-		return ""
+		return "", false
 	}
 	for _, r := range id {
 		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '-' || r == '_' {
 			continue
 		}
-		return ""
+		return "", false
 	}
-	return id
+	return id, true
 }
