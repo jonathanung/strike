@@ -32,7 +32,7 @@ use wasm_bindgen::JsCast;
 use crate::api::{
     get_json, idempotency_key, now_ms, patch_json, post_json, post_json_value, post_op,
 };
-use crate::editor::{DocumentPane, LinkedBody};
+use crate::editor::{DocumentPane, LinkedBody, MarkdownView, has_markdown_table};
 use crate::side_chat::SideChatPanel;
 use crate::model::{budget_elapsed, can_retry, RootsResponse};
 
@@ -1547,7 +1547,14 @@ fn App() -> impl IntoView {
                                     </div>
                                 }.into_any()
                             } else if prose {
-                                view! { <LinkedBody text=body kind="prose" doc_path=doc_path doc_line=doc_line doc_diff=doc_diff /> }.into_any()
+                                // Table-bearing prose renders through the
+                                // shared markdown view (#1344); every other
+                                // bubble keeps the plain linked-text path.
+                                if has_markdown_table(&body) {
+                                    view! { <MarkdownView text=body /> }.into_any()
+                                } else {
+                                    view! { <LinkedBody text=body kind="prose" doc_path=doc_path doc_line=doc_line doc_diff=doc_diff /> }.into_any()
+                                }
                             } else if tool_dump {
                                 view! {
                                     <details>
