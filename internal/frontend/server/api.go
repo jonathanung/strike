@@ -1135,16 +1135,49 @@ func (s *Server) handleFilesApplyPatch(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleMemory(w http.ResponseWriter, r *http.Request) {
-	if s.opts.Services == nil || s.opts.Services.Memory == nil {
-		capabilityUnavailable(w, "memory")
+	mem := s.memoryService(w)
+	if mem == nil {
 		return
 	}
-	items, err := s.opts.Services.Memory.List(r.URL.Query().Get("tag"))
+	scope, err := memoryScope(r.URL.Query().Get("scope"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	var items []host.MemoryEntry
+	if scoped, ok := mem.(host.MemoryScopes); ok {
+		items, err = scoped.ListScope(scope, r.URL.Query().Get("tag"))
+	} else if scope == "global" {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "global memory is not configured"})
+		return
+	} else {
+		items, err = mem.List(r.URL.Query().Get("tag"))
+	}
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, opErrorResponse{Error: err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"entries": items})
+	if items == nil {
+		items = []host.MemoryEntry{}
+	}
+	body := map[string]any{"entries": items, "scope": scope}
+	if files, ok := mem.(host.MemoryFiles); ok {
+		md, audit := files.Files(scope)
+		body["markdownFile"] = md
+		body["auditFile"] = audit
+	}
+	writeJSON(w, http.StatusOK, body)
+}
+
+func memoryScope(raw string) (string, error) {
+	switch strings.TrimSpace(raw) {
+	case "", "project":
+		return "project", nil
+	case "global":
+		return "global", nil
+	default:
+		return "", fmt.Errorf("scope must be project or global")
+	}
 }
 
 func (s *Server) handleIssues(w http.ResponseWriter, r *http.Request) {
@@ -1867,11 +1900,35 @@ func (s *Server) handleMemoryPut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Value string   `json:"value"`
-		Tags  []string `json:"tags"`
+		Value  string   `json:"value"`
+		Tags   []string `json:"tags"`
+		Author string   `json:"author"`
+		Scope  string   `json:"scope"`
 	}
 	if err := decodeBody(w, r, &body); err != nil {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	rawScope := body.Scope
+	if strings.TrimSpace(rawScope) == "" {
+		rawScope = r.URL.Query().Get("scope")
+	}
+	scope, err := memoryScope(rawScope)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	if scoped, ok := mem.(host.MemoryScopes); ok {
+		entry, err := scoped.PutScope(scope, key, body.Value, body.Author, body.Tags)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, entry)
+		return
+	}
+	if scope == "global" {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "global memory is not configured"})
 		return
 	}
 	if err := mem.Put(key, body.Value, body.Tags); err != nil {
@@ -1901,6 +1958,27 @@ func (s *Server) handleMemoryDelete(w http.ResponseWriter, r *http.Request) {
 	key := strings.TrimSpace(r.PathValue("key"))
 	if key == "" {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "key is required"})
+		return
+	}
+	scope, err := memoryScope(r.URL.Query().Get("scope"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	if scoped, ok := mem.(host.MemoryScopes); ok {
+		if err := scoped.DeleteScope(scope, key); err != nil {
+			status := http.StatusBadRequest
+			if strings.Contains(strings.ToLower(err.Error()), "not found") {
+				status = http.StatusNotFound
+			}
+			writeJSON(w, status, opErrorResponse{Error: err.Error()})
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if scope == "global" {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "global memory is not configured"})
 		return
 	}
 	if err := mem.Delete(key); err != nil {

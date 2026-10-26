@@ -104,6 +104,11 @@
       "name": "prUpdatedAt",
       "type": "string",
       "omitEmpty": true
+    },
+    {
+      "name": "memoryMode",
+      "type": "string",
+      "omitEmpty": true
     }
   ],
   "events": [
