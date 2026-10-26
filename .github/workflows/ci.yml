@@ -165,7 +165,7 @@ jobs:
   # bundle (no Rust toolchain) plus headless Chrome.
   webui-smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - name: Checkout code
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -206,6 +206,22 @@ jobs:
         env:
           CHROME_BIN: /usr/bin/google-chrome-stable
         run: node scripts/webui-smoke.mjs
+
+      - name: Browser UAT assertions
+        env:
+          CHROME_BIN: /usr/bin/google-chrome-stable
+        run: |
+          node --test scripts/webui-uat/lib.test.mjs
+          node scripts/webui-uat.mjs --suite smoke --no-video --out webui-uat-artifacts
+
+      - name: Upload UAT screenshots
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: webui-uat
+          path: webui-uat-artifacts/
+          if-no-files-found: ignore
+          retention-days: 14
 
   # Darwin-only tests (//go:build darwin) never compile on ubuntu-latest, so a
   # broken libSystem trampoline or wrong-sysctl path ships green (#521, #602).

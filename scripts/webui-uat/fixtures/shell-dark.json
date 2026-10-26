@@ -1,0 +1,24 @@
+{
+  "tokens": {
+    "acid": "#7c3aed",
+    "ground": "#14131c"
+  },
+  "mustInclude": [
+    "Run a command",
+    "Strike",
+    "Sessions",
+    "Activity",
+    "Files",
+    "Changes",
+    "Approval",
+    "Steer",
+    "Queue",
+    "Send",
+    "Connected"
+  ],
+  "selectors": {
+    "textarea": 1,
+    "button.send": 1,
+    ".side-tabs button": 3
+  }
+}
