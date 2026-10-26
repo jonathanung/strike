@@ -312,7 +312,9 @@ try {
     centre = opened.result?.result?.value || "";
     if (
       centre.includes("Mark all read") &&
-      (centre.includes("Nothing yet") || centre.includes("Could not load notifications"))
+      (centre.includes("Nothing yet") ||
+        centre.includes("Could not load notifications") ||
+        centre.includes("Alt+N opens this panel"))
     ) {
       break;
     }
@@ -320,7 +322,9 @@ try {
   }
   if (
     !centre.includes("Mark all read") ||
-    (!centre.includes("Nothing yet") && !centre.includes("Could not load notifications"))
+    (!centre.includes("Nothing yet") &&
+      !centre.includes("Could not load notifications") &&
+      !centre.includes("Alt+N opens this panel"))
   ) {
     throw new Error(`notification centre did not open: ${String(centre).slice(0, 500)}`);
   }
