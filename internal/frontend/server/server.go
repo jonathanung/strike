@@ -101,6 +101,9 @@ type Server struct {
 	paneHost *paneHost
 	opsLimit *opLimiter
 
+	seenOnce sync.Once
+	seen     *SeenStore
+
 	// scriptCSPHashes allowlists inline <script> bodies from the embedded
 	// index.html (Trunk emits an inline WASM loader) without unsafe-inline.
 	scriptCSPHashes []string
@@ -341,6 +344,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/roots/{id}/resume", s.handleRootResume)
 	s.mux.HandleFunc("DELETE /v1/roots/{id}", s.handleRootClose)
 	s.mux.HandleFunc("GET /v1/status", s.handleStatus)
+	s.mux.HandleFunc("GET /v1/status/sessions", s.handleSessionStatusBoard)
+	s.mux.HandleFunc("GET /v1/status/events", s.handleSessionStatusEvents)
+	s.mux.HandleFunc("POST /v1/sessions/{id}/seen", s.handleSessionSeen)
+	s.mux.HandleFunc("DELETE /v1/sessions/{id}/seen", s.handleSessionUnseen)
 	s.mux.HandleFunc("GET /v1/agents", s.handleAgents)
 	s.mux.HandleFunc("GET /v1/diag", s.handleDiag)
 	s.mux.HandleFunc("POST /v1/diag", s.handleDiag)
@@ -615,6 +622,9 @@ type healthResponse struct {
 	OK      bool   `json:"ok"`
 	Version string `json:"version"`
 	Commit  string `json:"commit"`
+	// Now is unix milliseconds. Clients treat a gap longer than
+	// protocol.HeartbeatStaleMs as a dead gateway.
+	Now int64 `json:"now"`
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -622,6 +632,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		OK:      true,
 		Version: version.Version,
 		Commit:  version.Commit,
+		Now:     time.Now().UnixMilli(),
 	})
 }
 

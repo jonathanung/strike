@@ -68,6 +68,28 @@ try {
   if (missing !== 401 || wrong !== 401 || right !== 200) {
     throw new Error(`auth statuses missing=${missing} wrong=${wrong} right=${right}`);
   }
+  const healthBody = await (await fetch(`http://127.0.0.1:${port}/health`)).json();
+  if (!healthBody.ok || !(healthBody.now > 0)) {
+    throw new Error(`health missing now: ${JSON.stringify(healthBody)}`);
+  }
+  const boardRes = await fetch(`http://127.0.0.1:${port}/v1/status/sessions`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (boardRes.status !== 200) {
+    throw new Error(`status board HTTP ${boardRes.status}`);
+  }
+  const board = await boardRes.json();
+  if (!Array.isArray(board.sessions) || board.heartbeatStaleMs !== 6000 || board.heartbeatIntervalMs !== 2000) {
+    throw new Error(`status board shape ${JSON.stringify(board).slice(0, 400)}`);
+  }
+  const seenRes = await fetch(`http://127.0.0.1:${port}/v1/sessions/not-a-session/seen`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: "{}",
+  });
+  if (seenRes.status !== 200) {
+    throw new Error(`seen HTTP ${seenRes.status}`);
+  }
 
   const auth = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
   const secret = "sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789";
@@ -216,10 +238,14 @@ try {
       expression: `(() => {
         const body = document.body ? document.body.innerText : "";
         const cs = getComputedStyle(document.documentElement);
+        const mark = document.querySelector("[data-status]");
         return JSON.stringify({
           body,
           acid: cs.getPropertyValue("--acid").trim(),
           ground: cs.getPropertyValue("--ground").trim(),
+          title: document.title,
+          status: mark ? mark.getAttribute("data-status") : "",
+          chip: !!document.querySelector(".status-chip-hit"),
         });
       })()`,
       returnByValue: true,
@@ -231,19 +257,35 @@ try {
   let text = "";
   let acid = "";
   let ground = "";
+  let title = "";
+  let statusId = "";
+  let chip = false;
+  const statusIds = ["idle", "running", "waiting", "blocked", "failed", "done", "stopped", "disconnected"];
   for (let i = 0; i < 40; i++) {
     const parsed = await readCockpit();
     text = parsed.body || "";
     acid = parsed.acid || "";
     ground = parsed.ground || "";
-    if (text.includes("Run a command") && text.includes("Activity") && acid === "#7c3aed") break;
+    title = parsed.title || "";
+    statusId = parsed.status || "";
+    chip = !!parsed.chip;
+    if (
+      text.includes("Run a command") &&
+      text.includes("Activity") &&
+      acid === "#7c3aed" &&
+      chip &&
+      statusIds.includes(statusId) &&
+      title.includes("Strike")
+    ) {
+      break;
+    }
     await delay(250);
   }
   const want = ["Run a command", "Strike", "Activity", "Files", "Changes", "Memory", "Knowledge", "Artifacts", "Approval"];
   const missingText = want.filter((s) => !text.includes(s));
-  if (missingText.length || acid !== "#7c3aed" || ground !== "#14131c") {
+  if (missingText.length || acid !== "#7c3aed" || ground !== "#14131c" || !chip || !statusIds.includes(statusId) || !title.includes("Strike")) {
     throw new Error(
-      `cockpit check failed missing=${missingText.join(",")} acid=${acid} ground=${ground} text=${text.slice(0, 400)}`,
+      `cockpit check failed missing=${missingText.join(",")} acid=${acid} ground=${ground} status=${statusId} chip=${chip} title=${title} text=${text.slice(0, 400)}`,
     );
   }
 

@@ -23,6 +23,15 @@ type RootSummary struct {
 	HasRecentEvent    bool   `json:"hasRecentEvent"`
 	PermissionPending bool   `json:"permissionPending,omitempty"`
 	QuestionPending   bool   `json:"questionPending,omitempty"`
+	// Status is the canonical id from protocol.ClassifyLive. Empty on a raw
+	// hub list; HTTP handlers fill it.
+	Status string `json:"status,omitempty"`
+	// StatusSince is unix milliseconds when Status last changed.
+	StatusSince int64 `json:"statusSince,omitempty"`
+	// LastActivityAt is unix milliseconds of the last user-visible event.
+	LastActivityAt int64 `json:"lastActivityAt,omitempty"`
+	// Unread is true when that event is newer than the daemon seen map.
+	Unread bool `json:"unread"`
 }
 
 // RootCreateResult is returned after creating a new root.
@@ -304,6 +313,16 @@ type StatusSnapshot struct {
 	NetworkAllow      []string `json:"networkAllow,omitempty"`
 	PermissionPending bool     `json:"permissionPending,omitempty"`
 	QuestionPending   bool     `json:"questionPending,omitempty"`
+	// StopReason is the last TurnCompleted reason. Empty after a new turn starts.
+	StopReason string `json:"stopReason,omitempty"`
+	// TurnSince is unix milliseconds when the current turn state began.
+	TurnSince int64 `json:"turnSince,omitempty"`
+	// LastEventAt is unix milliseconds of the last user-visible event.
+	// Reads and status polls do not bump it.
+	LastEventAt int64 `json:"lastEventAt,omitempty"`
+	// TurnState is the canonical status id for this root, including child
+	// attention. Computed by Status; not stored.
+	TurnState string `json:"turnState,omitempty"`
 }
 
 // SandboxSnapshot is host-safe OS sandbox chrome for GET /v1/sandbox.
@@ -565,7 +584,42 @@ func (l *Live) Status() StatusSnapshot {
 	if len(l.status.NetworkAllow) > 0 {
 		out.NetworkAllow = append([]string(nil), l.status.NetworkAllow...)
 	}
+	running, waiting, blocked := childAttention(l.team)
+	out.TurnState = protocol.ClassifyLive(protocol.LiveStatusInput{
+		Busy:              out.Busy,
+		PermissionPending: out.PermissionPending,
+		QuestionPending:   out.QuestionPending,
+		StopReason:        out.StopReason,
+		ChildRunning:      running,
+		ChildWaiting:      waiting,
+		ChildBlocked:      blocked,
+	})
 	return out
+}
+
+func childAttention(team TeamSnapshot) (running, waiting, blocked bool) {
+	for _, m := range team.Members {
+		if strings.EqualFold(m.Role, "lead") {
+			continue
+		}
+		if !m.Terminal {
+			if stall, _ := m.Budget["stall"].(bool); stall {
+				waiting = true
+				continue
+			}
+		}
+		switch protocol.NormalizeStatus(m.State) {
+		case protocol.StatusRunning:
+			if !m.Terminal {
+				running = true
+			}
+		case protocol.StatusWaiting:
+			waiting = true
+		case protocol.StatusBlocked:
+			blocked = true
+		}
+	}
+	return running, waiting, blocked
 }
 
 // Submit sends an op to the engine. Returns err if the live session is closed
@@ -710,18 +764,34 @@ func (l *Live) applyStatus(ev protocol.Event) {
 	case protocol.PhaseChanged:
 		l.status.Phase = e.Phase
 		l.status.Workflow = e.Workflow
+	case protocol.UserMessage, protocol.TextDelta, protocol.ReasoningDelta, protocol.ToolCallBegin, protocol.ToolCallEnd:
+		l.noteActivityLocked()
 	case protocol.TurnStarted:
 		l.status.Busy = true
+		l.status.StopReason = ""
+		l.status.TurnSince = time.Now().UnixMilli()
+		l.noteActivityLocked()
 	case protocol.TurnCompleted:
 		l.status.Busy = false
+		l.status.StopReason = e.StopReason
+		l.status.TurnSince = time.Now().UnixMilli()
+		l.noteActivityLocked()
 	case protocol.PermissionAsked:
 		l.status.PermissionPending = true
+		l.status.TurnSince = time.Now().UnixMilli()
+		l.noteActivityLocked()
 	case protocol.PermissionResolved:
 		l.status.PermissionPending = false
+		l.status.TurnSince = time.Now().UnixMilli()
+		l.noteActivityLocked()
 	case protocol.QuestionAsked:
 		l.status.QuestionPending = true
+		l.status.TurnSince = time.Now().UnixMilli()
+		l.noteActivityLocked()
 	case protocol.QuestionResolved:
 		l.status.QuestionPending = false
+		l.status.TurnSince = time.Now().UnixMilli()
+		l.noteActivityLocked()
 	case protocol.UsageReported:
 		if e.Used.Known {
 			l.status.ContextUsed = e.Used.N
@@ -736,8 +806,10 @@ func (l *Live) applyStatus(ev protocol.Event) {
 	case protocol.TeamRoster:
 		l.applyTeamRoster(e)
 	case protocol.ChildStarted:
+		l.noteActivityLocked()
 		l.applyChildStarted(e)
 	case protocol.ChildCompleted:
+		l.noteActivityLocked()
 		l.applyChildCompleted(e)
 	case protocol.DelegationChanged:
 		l.applyDelegation(e)
@@ -750,6 +822,10 @@ func (l *Live) applyStatus(ev protocol.Event) {
 	case protocol.LedgerUpdated:
 		l.applyLedger(e)
 	}
+}
+
+func (l *Live) noteActivityLocked() {
+	l.status.LastEventAt = time.Now().UnixMilli()
 }
 
 func teamTerminal(state string) bool {
