@@ -1038,10 +1038,16 @@ fn App() -> impl IntoView {
         let beat = last_beat;
         let kind = gateway_kind;
         let label = gateway_label;
+        let link = gateway;
         let roots_cb = roots;
         let sessions_cb = sessions;
         let on_msg =
             Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |ev: web_sys::MessageEvent| {
+                // A buffered frame can arrive after /health has already failed.
+                // Leave the chip on Unreachable until the next successful poll.
+                if link.get_untracked() == "unreachable" {
+                    return;
+                }
                 let Some(data) = ev.data().as_string() else {
                     return;
                 };
