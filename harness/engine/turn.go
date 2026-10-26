@@ -37,14 +37,16 @@ func (e *Engine) turnActive() bool {
 
 // pendingUserInput is one mid-turn buffered prompt (text + optional images).
 type pendingUserInput struct {
-	text   string
-	images []protocol.ImageAttachment
+	text    string
+	display string
+	images  []protocol.ImageAttachment
 }
 
 // pendingSteer is one active-turn redirect awaiting a safe request boundary.
 type pendingSteer struct {
-	text   string
-	images []protocol.ImageAttachment
+	text    string
+	display string
+	images  []protocol.ImageAttachment
 	// targetTurnID captured at accept time for durable TurnSteered events.
 	targetTurnID string
 }
@@ -223,9 +225,17 @@ func (e *Engine) providerAcceptsImages() bool {
 
 // handleSteer accepts an active-turn redirect. Distinct from UserInput (queue)
 // and Interrupt (cancel). Targets the live session/turn when ids are set.
-func (e *Engine) handleSteer(op protocol.Steer) {
+// Composer triggers (! / /command / $skill / @file) are expanded first.
+func (e *Engine) handleSteer(ctx context.Context, op protocol.Steer) {
 	if strings.TrimSpace(op.Text) == "" && len(op.Images) == 0 {
 		return
+	}
+	model, display, handled := e.consumeComposer(ctx, op.Text)
+	if handled {
+		return
+	}
+	if strings.TrimSpace(model) != "" {
+		op.Text = model
 	}
 	if !e.turnActive() {
 		e.emit(protocol.EngineError{
@@ -256,6 +266,7 @@ func (e *Engine) handleSteer(op protocol.Steer) {
 	e.pendingSteerMu.Lock()
 	e.pendingSteer = &pendingSteer{
 		text:         op.Text,
+		display:      display,
 		images:       append([]protocol.ImageAttachment(nil), op.Images...),
 		targetTurnID: e.activeTurnID,
 	}
@@ -291,7 +302,11 @@ func (e *Engine) applyPendingSteer(turnID, mode string) {
 	corr.TurnID = turnID
 	// Durable user.message so resume sees the guidance in the transcript.
 	persisted := e.persistImages(ps.images)
-	e.emit(protocol.UserMessage{Correlation: corr, Text: ps.text, Images: persisted})
+	shown := ps.text
+	if strings.TrimSpace(ps.display) != "" {
+		shown = ps.display
+	}
+	e.emit(protocol.UserMessage{Correlation: corr, Text: shown, Images: persisted})
 	e.messages = append(e.messages, provider.Message{
 		Role:   provider.RoleUser,
 		Text:   ps.text,
@@ -299,7 +314,7 @@ func (e *Engine) applyPendingSteer(turnID, mode string) {
 	})
 	e.emit(protocol.TurnSteered{
 		Correlation:  corr,
-		Text:         ps.text,
+		Text:         shown,
 		Mode:         mode,
 		TargetTurnID: ps.targetTurnID,
 	})
@@ -318,16 +333,21 @@ func (e *Engine) fallbackSteerToQueue(turnID string) {
 	}
 	corr := e.baseCorr()
 	corr.TurnID = turnID
+	shown := ps.text
+	if strings.TrimSpace(ps.display) != "" {
+		shown = ps.display
+	}
 	e.emit(protocol.TurnSteered{
 		Correlation:  corr,
-		Text:         ps.text,
+		Text:         shown,
 		Mode:         protocol.SteerModeQueuedFallback,
 		TargetTurnID: ps.targetTurnID,
 	})
 	e.pendingSteerMu.Lock()
 	e.steerQueueFallback = &pendingUserInput{
-		text:   ps.text,
-		images: append([]protocol.ImageAttachment(nil), ps.images...),
+		text:    ps.text,
+		display: ps.display,
+		images:  append([]protocol.ImageAttachment(nil), ps.images...),
 	}
 	e.pendingSteerMu.Unlock()
 }
@@ -346,6 +366,10 @@ func (e *Engine) takeSteerQueueFallback() *pendingUserInput {
 // When full (maxPendingUserInputs), rejects with EngineError code queue_full
 // rather than blocking the Ops sender (explicit backpressure).
 func (e *Engine) enqueueUserInput(op protocol.UserInput) {
+	e.enqueuePrepared(op, "")
+}
+
+func (e *Engine) enqueuePrepared(op protocol.UserInput, display string) {
 	if strings.TrimSpace(op.Text) == "" && len(op.Images) == 0 {
 		return
 	}
@@ -358,8 +382,9 @@ func (e *Engine) enqueueUserInput(op protocol.UserInput) {
 		return
 	}
 	e.pendingUserInputs = append(e.pendingUserInputs, pendingUserInput{
-		text:   op.Text,
-		images: append([]protocol.ImageAttachment(nil), op.Images...),
+		text:    op.Text,
+		display: display,
+		images:  append([]protocol.ImageAttachment(nil), op.Images...),
 	})
 }
 
@@ -369,7 +394,7 @@ func (e *Engine) enqueueUserInput(op protocol.UserInput) {
 func (e *Engine) drainIdleFollowups(ctx context.Context) {
 	// Promote deferred steer→queue items before draining the user-input FIFO.
 	if item := e.takeSteerQueueFallback(); item != nil {
-		e.enqueueUserInput(protocol.UserInput{Text: item.text, Images: item.images})
+		e.enqueuePrepared(protocol.UserInput{Text: item.text, Images: item.images}, item.display)
 	}
 	if e.startNextPendingUserInput(ctx) {
 		return
@@ -402,11 +427,15 @@ func (e *Engine) startNextPendingUserInput(ctx context.Context) bool {
 	if len(e.pendingUserInputs) == 0 {
 		e.pendingUserInputs = nil
 	}
-	e.startTurn(ctx, item.text, item.images)
+	e.startTurnShown(ctx, item.text, item.display, item.images)
 	return true
 }
 
 func (e *Engine) startTurn(ctx context.Context, text string, images []protocol.ImageAttachment) {
+	e.startTurnShown(ctx, text, "", images)
+}
+
+func (e *Engine) startTurnShown(ctx context.Context, text, display string, images []protocol.ImageAttachment) {
 	// Mint turn ID only after input acceptance (provider present, no active turn).
 	turnID := rand.Text()
 	var turnCtx context.Context
@@ -425,7 +454,7 @@ func (e *Engine) startTurn(ctx context.Context, text string, images []protocol.I
 	go func() {
 		defer close(done)
 		defer cancel()
-		e.runTurn(turnCtx, text, images, turnID, finishing)
+		e.runTurn(turnCtx, text, display, images, turnID, finishing)
 	}()
 }
 
@@ -484,7 +513,7 @@ func sessionTitleFromText(text string) string {
 // provider-request ID and attempt number (retries included). finishing is
 // closed exactly once immediately before the terminal TurnCompleted emission
 // so Run can join the worker before the next op.
-func (e *Engine) runTurn(ctx context.Context, text string, images []protocol.ImageAttachment, turnID string, finishing chan struct{}) {
+func (e *Engine) runTurn(ctx context.Context, text, display string, images []protocol.ImageAttachment, turnID string, finishing chan struct{}) {
 	turnCorr := e.baseCorr()
 	turnCorr.TurnID = turnID
 	e.checkpoints.BeginTurn(turnID)
@@ -507,8 +536,12 @@ func (e *Engine) runTurn(ctx context.Context, text string, images []protocol.Ima
 	e.sessionBudgetStopKind = ""
 	e.sessionBudgetStopMsg = ""
 	persisted := e.persistImages(images)
-	e.emit(protocol.UserMessage{Correlation: turnCorr, Text: text, Images: persisted})
-	e.maybeTitleSession(text)
+	shown := text
+	if strings.TrimSpace(display) != "" {
+		shown = display
+	}
+	e.emit(protocol.UserMessage{Correlation: turnCorr, Text: shown, Images: persisted})
+	e.maybeTitleSession(shown)
 	e.emit(protocol.TurnStarted{Correlation: turnCorr})
 	e.fireLifecycle(turnCorr, permission.HookEventTurnStart, "", "", "start", "")
 	e.messages = append(e.messages, provider.Message{

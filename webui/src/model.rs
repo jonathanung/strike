@@ -89,10 +89,38 @@ pub struct LiveStatus {
     pub busy: bool,
 }
 
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+pub struct SkillInfo {
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+pub struct ComposerCommand {
+    pub id: String,
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub detail: String,
+    #[serde(default)]
+    pub insert: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct FileSearchResponse {
+    #[serde(default)]
+    pub paths: Vec<String>,
+}
+
 #[derive(Clone, Debug, Deserialize)]
 pub struct Bootstrap {
     #[serde(default)]
     pub status: Option<LiveStatus>,
+    #[serde(default)]
+    pub skills: Vec<SkillInfo>,
+    #[serde(default, rename = "composerCommands")]
+    pub composer_commands: Vec<ComposerCommand>,
 }
 
 #[derive(Clone, Debug, Deserialize)]

@@ -296,6 +296,10 @@ type Options struct {
 	// PersistProjectRule, when set, is invoked after a DecisionProject grant
 	// so the rule can be written to project config. Optional.
 	PersistProjectRule func(permission.Rule) error
+	// PrepareInput, when set, expands composer text (!shell, /command,
+	// $skill, @file) before a user.input or steer turn. nil leaves the
+	// text unchanged. workDir is this engine's working directory.
+	PrepareInput func(text, workDir string) InputPrep
 	// MaxChildDepth bounds foreground task nesting. Zero defaults to 1 in New
 	// (root depth 0 may spawn one child; that child may not spawn further).
 	// Values above absoluteMaxChildDepth are clamped.

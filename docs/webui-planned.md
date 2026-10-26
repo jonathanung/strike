@@ -123,16 +123,24 @@ the approval chip.
 Git status beyond `GET /v1/changed-files`, an embedded browser, a terminal,
 and a subagent board that is not the Activity list are not in the client.
 Activity is the subagent list. Changes is the diff list. A terminal tab
-would have to be the real `!` shell path, which today is TUI-only.
+would be a persistent shell. Composer `!` already runs one command through
+the daemon permission model.
 
 ## Composer triggers
 
-The web composer does not parse `/command`, `@file`, `$skill`, or `!shell`.
-The TUI expands `@file` and runs `!` shell. Dragging a file inserts `@path`
-as plain text. Planned: the same expansion on `user.input` in the daemon,
-so every client gets it, plus a `+` menu whose entries are only those real
-actions. Upload and screenshot stay out until the daemon accepts those
-attachments on the op.
+`user.input` and `steer` expand in the daemon (`internal/composer/triggers`,
+wired by `Options.PrepareInput`). `/command`, `@file`, `$skill`, and `!shell`
+behave the same for every client. The web composer shows an autocomplete
+popup and a `+` menu whose entries are only those real actions. The catalog
+is `composerCommands` plus `skills` on `GET /v1/bootstrap`. `!` runs through
+the live bash permission ask and does not start a model turn.
+
+Upload and screenshot stay out. `UserInput.Images` exists on the wire, and
+the web composer still does not send images.
+
+Dragging a file inserts `@path`. Send attaches the file. A message the TUI
+already expanded (a `--- file:` fence, or a `!` the TUI ran itself) is not
+expanded a second time.
 
 ## Context window hold
 

@@ -211,6 +211,40 @@ try {
     token,
     repoDir: process.cwd(),
   });
+
+  const triggers = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const btn = document.querySelector('[aria-label="Composer actions"]');
+      if (!btn) return "missing-plus";
+      btn.click();
+      const plus = document.body.innerText.includes("Mention a file");
+      const ta = document.querySelector('[data-feature="composer-triggers"] textarea');
+      if (!ta) return plus ? "missing-textarea" : "missing-both";
+      ta.focus();
+      ta.value = "/";
+      ta.dispatchEvent(new InputEvent("input", { bubbles: true, data: "/" }));
+      return plus ? "plus-ok" : "plus-no-text";
+    })()`,
+    returnByValue: true,
+  });
+  if (triggers.result?.result?.value !== "plus-ok") {
+    throw new Error(`composer plus failed: ${triggers.result?.result?.value || JSON.stringify(triggers)}`);
+  }
+  let suggest = "";
+  for (let i = 0; i < 20; i++) {
+    const ev = await send("Runtime.evaluate", {
+      expression: `document.body.innerText`,
+      returnByValue: true,
+    });
+    suggest = ev.result?.result?.value || "";
+    if (suggest.includes("/stop") || suggest.includes("/mode") || suggest.includes("Mention a file")) {
+      if (suggest.includes("/stop") || suggest.includes("/mode")) break;
+    }
+    await delay(150);
+  }
+  if (!suggest.includes("/stop") && !suggest.includes("/mode")) {
+    throw new Error(`composer slash popup missing: ${suggest.slice(0, 500)}`);
+  }
   console.log("webui-smoke ok");
 } catch (err) {
   console.error(String(err));

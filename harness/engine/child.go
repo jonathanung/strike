@@ -538,6 +538,7 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 		Hooks:                      e.opts.Hooks,
 		HookRules:                  e.opts.HookRules,
 		PersistProjectRule:         e.opts.PersistProjectRule,
+		PrepareInput:               e.opts.PrepareInput,
 		DangerouslySkipPermissions: e.opts.DangerouslySkipPermissions,
 		DefaultChildBudget:         e.opts.DefaultChildBudget,
 		MaxSessionCostUSD:          e.opts.MaxSessionCostUSD,

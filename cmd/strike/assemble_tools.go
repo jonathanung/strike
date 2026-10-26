@@ -721,8 +721,11 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			return nil, nil, fmt.Errorf("opening attachments: %w", attErr)
 		}
 		eng := engine.New(engine.Options{
-			SessionID:        sid,
-			Select:           selectProvider,
+			SessionID: sid,
+			Select:    selectProvider,
+			PrepareInput: func(text, dir string) engine.InputPrep {
+				return composerPrepare(text, dir, skills)
+			},
 			Registry:         registry,
 			WorkDir:          toolDir,
 			Audit:            auditSink,
