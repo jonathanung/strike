@@ -27,6 +27,9 @@ In-tree code may still import `internal/protocol` (type aliases). Prefer
 | `v` | Schema version written by `Wrap` |
 | `data` | Event payload JSON object |
 
+On-disk session logs (the JSONL envelope, `session.header`, every event
+type, and the sidecar) are specified in [session-format.md](session-format.md).
+
 Ops use the same envelope idea via `OpEnvelope` (`WrapOp` / `Decode`).
 
 ## Compatibility policy
