@@ -14,7 +14,7 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use model::{
     activity_panel, child_card_from_parts, child_card_from_text, child_keys_match, display_state,
-    filter_sessions, fmt_ago, fmt_elapsed, is_running, merge_sessions, mode_label,
+    filter_sessions, fmt_ago, fmt_elapsed, is_running, merge_sessions, mode_label, task_headline,
     permission_modes, prefer_summary, protocol_dump, session_label, status_kind, strip_echo_tip,
     visible_sessions, ActivityRow, Bootstrap, ChangedFilesResponse, ChatLine, ChildCard,
     ChildrenResponse, FilesResponse, Health, ModelInfo, ModelList, Remote, RootSummary,
@@ -396,24 +396,6 @@ fn palette_cmds() -> &'static [PaletteCmd] {
             id: "stop-all",
             label: "Stop all",
             detail: "Interrupt running delegated children in this session",
-        },
-        PaletteCmd {
-            section: "Commands",
-            id: "back",
-            label: "Back",
-            detail: "Previous session",
-        },
-        PaletteCmd {
-            section: "Commands",
-            id: "forward",
-            label: "Forward",
-            detail: "Next session",
-        },
-        PaletteCmd {
-            section: "Commands",
-            id: "focus",
-            label: "Toggle focus",
-            detail: "Hide or show the side columns",
         },
         PaletteCmd {
             section: "Apps",
@@ -1168,9 +1150,6 @@ fn App() -> impl IntoView {
         match id.as_str() {
             "new" => new_session(),
             "stop-all" => stop_all(),
-            "back" => travel(true),
-            "forward" => travel(false),
-            "focus" => focus.update(|v| *v = !*v),
             "chat" => mode.set("chat".into()),
             "daemon" => mode.set("daemon".into()),
             "steer" => set_enter("steer".into()),
@@ -1256,6 +1235,15 @@ fn App() -> impl IntoView {
                 if palette_open.get_untracked() {
                     palette_query.set(String::new());
                 }
+            } else if ev.alt_key() && !ev.meta_key() && !ev.ctrl_key() && ev.key() == "ArrowLeft" {
+                ev.prevent_default();
+                travel(true);
+            } else if ev.alt_key() && !ev.meta_key() && !ev.ctrl_key() && ev.key() == "ArrowRight" {
+                ev.prevent_default();
+                travel(false);
+            } else if ev.alt_key() && !ev.meta_key() && !ev.ctrl_key() && ev.key() == "\\" {
+                ev.prevent_default();
+                focus.update(|v| *v = !*v);
             } else if ev.key() == "Escape" {
                 palette_open.set(false);
                 mode_menu.set(false);
@@ -1316,8 +1304,11 @@ fn App() -> impl IntoView {
 
     view! {
         <header class="page-header">
-            <div class="brand">"Strike" <small>{move || status.get()}</small></div>
-            <button class="command-pill" on:click=move |_| {
+            <div class="brand" title=move || status.get()>
+                "Strike"
+                <span class="brand-status">{move || status.get()}</span>
+            </div>
+            <button class="command-pill" title="Ctrl+K commands. Alt+Left and Alt+Right switch sessions. Alt+\\ focuses the transcript." on:click=move |_| {
                 palette_query.set(String::new());
                 palette_open.set(true);
             }>
@@ -1333,9 +1324,9 @@ fn App() -> impl IntoView {
                     "unreachable" => "chip bad",
                     _ => "chip",
                 }>{move || match gateway.get().as_str() {
-                    "connected" => "Gateway connected",
-                    "unreachable" => "Gateway unreachable",
-                    _ => "Gateway checking",
+                    "connected" => "Connected",
+                    "unreachable" => "Unreachable",
+                    _ => "Checking",
                 }}</span>
                 <div class="segmented" role="tablist" aria-label="View">
                     <button class=move || if mode.get() == "chat" { "seg on" } else { "seg" } on:click=move |_| mode.set("chat".into())>"Chat"</button>
@@ -1357,6 +1348,7 @@ fn App() -> impl IntoView {
                             }
                         }
                     />
+                    <div class="palette-list">
                     {move || {
                         let q = palette_query.get().to_ascii_lowercase();
                         let run = run_command;
@@ -1383,7 +1375,8 @@ fn App() -> impl IntoView {
                         }
                         blocks
                     }}
-                    <button class="primary" on:click=move |_| run_picked()>"Run"</button>
+                    </div>
+                    <p class="hint keys">"Enter runs the first match. Alt+Left and Alt+Right switch sessions. Alt+\\ focuses the transcript. Esc closes."</p>
                 </div>
             </div>
         </Show>
@@ -1428,7 +1421,6 @@ fn App() -> impl IntoView {
                         let can_fold = show_older && query.trim().is_empty() && filtered.len() > 6;
                         let open = open_session;
                         let pin = toggle_pin;
-                        let acts = activity.get();
                         let rows = shown.into_iter().map(|row| {
                             let id = row.id.clone();
                             let id_btn = id.clone();
@@ -1457,13 +1449,8 @@ fn App() -> impl IntoView {
                                 "dot"
                             };
                             let klass = if id == active { "session-row card on" } else { "session-row card" };
-                            let row_kids: Vec<_> = if id == active {
-                                kids.iter().filter(|c| c.parent_id.is_empty() || c.parent_id == id).cloned().collect()
-                            } else {
-                                Vec::new()
-                            };
-                            let acts = acts.clone();
                             let pin_label = if pinned { "Unpin" } else { "Pin" };
+                            let pin_class = if pinned { "pin on" } else { "pin" };
                             view! {
                                 <li class=klass>
                                     <button class="link session-main" on:click=move |_| open(id_btn.clone(), live)>
@@ -1476,26 +1463,10 @@ fn App() -> impl IntoView {
                                             <span class="path">{subtitle}</span>
                                         </span>
                                     </button>
-                                    <button class="secondary pin" on:click=move |ev: web_sys::MouseEvent| {
+                                    <button class=pin_class on:click=move |ev: web_sys::MouseEvent| {
                                         ev.stop_propagation();
                                         pin(id_pin.clone());
                                     }>{pin_label}</button>
-                                    <ul class="plain children">
-                                        {row_kids.into_iter().map(|c| {
-                                            let state = acts.iter().find(|r| r.session_id == c.id).map(|r| r.state.clone()).unwrap_or_default();
-                                            let state_kind = state.clone();
-                                            let state_label = state.clone();
-                                            let child_label = if c.title.is_empty() { short_id(&c.id) } else { c.title };
-                                            view! {
-                                                <li class="child-row">
-                                                    <span class="name">{child_label}</span>
-                                                    <Show when=move || !state.is_empty()>
-                                                        <Badge kind=state_kind.clone() label=state_label.clone() />
-                                                    </Show>
-                                                </li>
-                                            }
-                                        }).collect_view()}
-                                    </ul>
                                 </li>
                             }
                         }).collect_view();
@@ -1516,7 +1487,7 @@ fn App() -> impl IntoView {
                             </div>
                         }
                     }}
-                    <p class="hint">"Pins and unread stay in this browser."</p>
+                    <p class="hint keys">"Pins stay in this browser. Alt+Left and Alt+Right switch sessions. Alt+\\ focuses the transcript."</p>
                     <details class="fold">
                     <summary>"Workspaces"</summary>
                     <p class="hint">"Opening one records it. It does not move the live engine."</p>
@@ -1650,8 +1621,10 @@ fn App() -> impl IntoView {
                                     let label = m.label.to_string();
                                     let detail = m.detail.to_string();
                                     let set = set_perm;
+                                    let on = perm_mode.get() == id;
+                                    let klass = if on { "palette-row on" } else { "palette-row" };
                                     view! {
-                                        <button class="palette-row" on:click=move |_| set(id.clone())>
+                                        <button class=klass on:click=move |_| set(id.clone())>
                                             <span class="name">{label}</span>
                                             <span class="path">{detail}</span>
                                         </button>
@@ -1712,7 +1685,7 @@ fn App() -> impl IntoView {
                                 <button class="primary send" type="submit">"Send"</button>
                             </div>
                         </form>
-                        <p class="hint">"Queue waits until the turn finishes. Steer joins a running turn. Start a message with run <command> to use the shell. @path is text, not file contents."</p>
+                        <p class="hint">"Queue waits out the turn. Steer joins a running turn. run <command> uses the shell. @path is text."</p>
                     </div>
                 </section>
                 <aside class="side">
@@ -1724,21 +1697,21 @@ fn App() -> impl IntoView {
                     <Show when=move || side_tab.get() == "activity">
                     <div class="activity">
                     <header class="activity-head">
-                        <span class="hint">"Delegated children"</span>
+                        <span class="hint">"Live tasks"</span>
                         <button class="secondary" disabled=move || running_count() == 0 on:click=move |_| stop_all()>"Stop all"</button>
                     </header>
                         <div class="stats">
                         <StatCard label="Running".into()>{move || running_count().to_string()}</StatCard>
                         <StatCard label="Blocked".into()>{move || blocked_count().to_string()}</StatCard>
-                        <StatCard label="Sessions".into()>{move || { let _ = tick.get(); roots.get().len().to_string() }}</StatCard>
+                        <StatCard label="Tasks".into()>{move || activity.get().len().to_string()}</StatCard>
                     </div>
                     <Show when=move || !team_note.get().is_empty()>
                         <p class="hint">{move || team_note.get()}</p>
                     </Show>
                     <Show when=move || activity.get().is_empty()>
                         <EmptyState
-                            title="No delegated children yet.".into()
-                            body="".into()
+                            title="No live tasks".into()
+                            body="Delegated work for this session shows its status here.".into()
                         />
                     </Show>
                     <ul class="plain">
@@ -1761,15 +1734,25 @@ fn App() -> impl IntoView {
                                 let show_elapsed = !elapsed.is_empty();
                                 let sid = row.session_id.clone();
                                 let sid_stop = sid.clone();
-                                let task = if row.task.is_empty() { "(no task text)".to_string() } else { row.task.clone() };
-                                let task_retry = task.clone();
+                                let task_retry = row.task.clone();
+                                let headline = task_headline(&row.task);
+                                let show_task = !headline.is_empty();
                                 let output = row.output.clone();
                                 let expanded = row.expanded;
                                 let running = is_running(&state);
                                 let retry = can_retry(&state);
                                 let name = row.name.clone();
+                                let who = name.clone();
                                 let agent = row.agent.clone();
                                 let agent_label = agent.clone();
+                                let primary = if show_task { headline } else { name.clone() };
+                                let dot = match state.as_str() {
+                                    "running" | "working" => "dot dot-running",
+                                    "blocked" | "stalled" => "dot dot-blocked",
+                                    "done" | "completed" => "dot dot-done",
+                                    "failed" => "dot dot-failed",
+                                    _ => "dot",
+                                };
                                 view! {
                                     <li class="card activity-row">
                                         <button class="link activity-main" on:click=move |_| {
@@ -1780,16 +1763,20 @@ fn App() -> impl IntoView {
                                                 }
                                             });
                                         }>
-                                            <span class="icon-slot" aria-hidden="true" inner_html=icon("status")></span>
-                                            <span class="name">{name}</span>
-                                            <span class="path">{task.clone()}</span>
-                                            <span class="meta">
+                                            <span class="task-line">
+                                                <span class=dot></span>
+                                                <span class="name">{primary}</span>
                                                 <Badge kind=state.clone() label=state.clone() />
-                                                <Show when=move || show_elapsed>
-                                                    <span class="elapsed">{elapsed.clone()}</span>
+                                            </span>
+                                            <span class="task-meta">
+                                                <Show when=move || show_task>
+                                                    <span class="path">{who.clone()}</span>
                                                 </Show>
                                                 <Show when=move || !agent.is_empty()>
                                                     <span class="path">{agent_label.clone()}</span>
+                                                </Show>
+                                                <Show when=move || show_elapsed>
+                                                    <span class="elapsed">{elapsed.clone()}</span>
                                                 </Show>
                                             </span>
                                         </button>
@@ -2090,6 +2077,8 @@ fn DaemonPane(
                         on:input=move |ev| new_path.set(event_target_value(&ev)) />
                     <button class="primary" on:click=add_workspace>"Add"</button>
                 </div>
+            </section>
+            <section class="card">
                 <h2 class="panel-title">"Policy"</h2>
                 <p class="hint">"Rules must be a file inside the active workspace. The mode is stored here and is not applied to the live session."</p>
                 <label>"Rules file"</label>

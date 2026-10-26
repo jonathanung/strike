@@ -764,6 +764,26 @@ pub fn activity_panel(
     rows
 }
 
+/// Short label for an activity row. The transcript card keeps the full summary.
+pub fn task_headline(task: &str) -> String {
+    let flat = one_line(task);
+    if flat.is_empty() {
+        return String::new();
+    }
+    if let Some((head, _)) = flat.split_once(": ") {
+        let n = head.chars().count();
+        if (8..=42).contains(&n) {
+            return head.to_string();
+        }
+    }
+    if flat.chars().count() <= 42 {
+        return flat;
+    }
+    let mut short: String = flat.chars().take(41).collect();
+    short.push('…');
+    short
+}
+
 fn one_line(text: &str) -> String {
     let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
     let flat = flat.trim();
@@ -847,6 +867,17 @@ mod tests {
             &["scribe".into()],
         );
         assert_eq!(by_child.len(), 1);
+    }
+
+    #[test]
+    fn task_headline_keeps_the_short_clause() {
+        let long = "verification failed: schema: handoff: handoff schema: structured handoff missing or incomplete";
+        assert_eq!(task_headline(long), "verification failed");
+        assert_eq!(task_headline("say hello"), "say hello");
+        assert_eq!(task_headline(""), "");
+        let wide = "a very long task line without a colon that should be cut down to one row";
+        assert!(task_headline(wide).ends_with('…'));
+        assert!(task_headline(wide).chars().count() <= 42);
     }
 
     #[test]

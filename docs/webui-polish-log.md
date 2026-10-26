@@ -9,13 +9,14 @@ as `comparison-*.png` were two Strike screenshots side by side (an earlier
 Strike layout on the left, the palette pass on the right), squeezed into one
 wide image. They were not Kiro Crew. Those files are removed.
 
-The named Kiro full frames (`16-sessions-empty`,
-`33-chat-empty-activity-panel-open`, `25-settings-agent-harness`,
-`19-apps-discover`, `17-schedule-empty`, `46-dark-chat-empty-files-panel`) are
-not in this workspace. A contact sheet in the agent attachment store OCRs as a
-thumbnail index of those filenames; it is not a full-frame capture, so it was
-not used as a left half. No new comparison image is committed until those
-full frames are available.
+Iterations 8–10 compare the attached Kiro Crew 0.10.0 frames (1024×594)
+with Strike captured at the same CSS size and devicePixelRatio 2. Each
+`comparison-*.png` is Kiro on the left and Strike on the right. Kiro is
+Lanczos-upscaled from 1024×594 to 2048×1188 so neither half is shrunk.
+Strike keeps the Bubble Tea palette. Kiro's name, mascot, copy, and colors
+are not copied. Discover, Schedule, the plus menu, the model menu,
+crewmates, and the task runner are reference files only. Strike does not
+draw those screens.
 
 Viewports: 1440×900, 1024×594, and 390×844.
 
@@ -156,19 +157,89 @@ Measured:
   the tip removed.
 - Daemon sections use the same card, 16px padding, and 14px ink headings.
 
+## Iteration 8
+
+Shots: local `iter8/` at 1024×594, devicePixelRatio 2, against Kiro 16, 33,
+25, 46, 32, and 36. Kiro 16, 33, 25, 32, and 36 are light (corner near
+white). Kiro 46 is dark (corner about rgb(25, 21, 28)). Strike's default
+stays the dark Bubble Tea ground `#14131c`.
+
+Defects against those frames:
+
+- The active session row repeated each child with a status badge, so the
+  sidebar and the activity list were the same task list.
+- Activity's empty state had a title and a blank body.
+- Back, Forward, and Focus were still command-palette rows.
+- The rail was 320px and the side column 300px, so the transcript at 1024
+  was a narrow strip between them. Kiro's center is the wide column.
+- The header brand was two lines, and the gateway chip said "Gateway
+  connected", so the centered command field had little room.
+- Activity rows put the child name, the full verification sentence, the
+  badge, and the agent on one grid line.
+
+Fixes: sidebar rows are the session only (title, status dot, relative time,
+Idle/Unread/Saved). Activity is "Live tasks" and counts tasks, not sessions.
+Empty activity is an icon, "No live tasks", and one line of copy. Policy is
+its own card on the daemon page. Back, Forward, and Focus left the palette.
+Alt+Left, Alt+Right, and Alt+\ do that work, and the chords are in the rail
+and on the palette footer. Columns are 268 / flexible / 280.
+
+## Iteration 9
+
+Shots: local `iter9/`. Dark captures were forced back to the dark scheme
+after a light capture had stored `strike.scheme`.
+
+Defects still visible:
+
+- Activity was 222px wide. The verification sentence was the row title, so
+  it ellipsized to nothing useful, and Stop/Retry sat in a second column.
+- The shortcut line was a second paragraph under the pin hint, and the
+  palette footer sat inside the scrolling command list.
+- The composer hint wrapped to three lines under the pills.
+- A light-scheme capture leaked into later shots through localStorage.
+
+Fixes: an activity row is a short task headline, then the child name, then
+Stop/Retry on their own line. `task_headline` keeps the clause before the
+first colon ("verification failed") and the transcript card keeps the full
+summary. The palette list scrolls and the shortcut footer stays put. The
+composer hint is one shorter line. Captures set the scheme explicitly.
+
+## Iteration 10
+
+Shots: `docs/webui-screenshots/comparison-*.png`, from local `iter10/` at
+1024×594, devicePixelRatio 2.
+
+Measured on the dark empty shell: filter chips are one row (All x=21,
+Unread x=57, In progress x=121, Pinned x=207, all y=91). Session rows are
+44px. Composer controls are one row at y=507, height 28. The activity
+column is 254×476. Empty activity reads "No live tasks". The chat capture's
+sidebar row for `hello from the cockpit` is title, time, and Idle. The same
+children appear only as transcript cards and as activity rows whose title
+is "verification failed" and whose second line is `say-hello` or `scribe`.
+
+Defects still visible, and the fixes in this pass:
+
+- Three stat counters still shouted in the narrow activity column. The
+  value is 14px and the label does not wrap.
+- Approval rows did not show which mode was current. The open menu marks
+  the current mode.
+- Command rows were uneven. Palette and menu rows are at least 36px.
+- The side column grew from 248px to 280px so a file name and a task row
+  have a line to themselves. The center is still the wide column.
+
 ## Remaining gaps
 
-- Named Kiro full-frame captures are not in this workspace, so there is no
-  Kiro-left / Strike-right image. Schedule, Discover, and the agent-harness
-  page are not Strike screens. The daemon page is the settings surface.
 - Echo children still block on `schema:handoff`. Stop stays disabled while
-  nothing is running. Retry spawns another child.
-- The same child is listed in the sidebar, the transcript card, and the
-  activity row. Those are three surfaces, not three copies of the JSON note.
-  The stored session title is unchanged.
+  nothing is running. Retry spawns another child. The activity headline is
+  the short clause; the card still holds the long verification line.
+- Untitled sessions render a short id. The daemon did not store a title.
+- The sidebar, the transcript card, and the activity row can all mention
+  one child. The sidebar does not list task state. The card is the
+  completion record. The activity row is the live task.
 - Bundled themes that omit surfaces keep Strike's surface ladder. Nord's
   muted hex is the theme file.
-- Back, Forward, and Focus stay in the command palette.
 - `@path` is text. The composer does not expand slash commands.
-- The activity task line is one visual line; the full verification sentence
-  is still the summary, so it ellipsizes.
+- Discover, Schedule, crewmates, and the task runner are not Strike screens.
+- Kiro's chrome is light and airy. Strike stays on the Bubble Tea dark
+  ladder unless the scheme is Light. The light comparison is
+  `comparison-sessions-light.png`.

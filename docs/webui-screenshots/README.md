@@ -3,6 +3,26 @@
 Headless Chrome captures of `strike serve --provider echo` on this branch.
 These are the running UI, not mockups.
 
+## Kiro Crew 0.10.0 beside Strike
+
+Each comparison is 1024×594 CSS, rendered at devicePixelRatio 2. Kiro is the
+left half, Lanczos-upscaled from the attached 1024×594 capture to 2048×1188.
+Strike is the right half at the same pixel size. Neither half is shrunk.
+
+| File | Left | Right |
+|---|---|---|
+| `comparison-sessions.png` | Kiro 16, sessions and an empty chat | Strike sessions and an empty chat, dark |
+| `comparison-sessions-light.png` | Kiro 16, the same light frame | Strike sessions and an empty chat, light scheme |
+| `comparison-chat.png` | Kiro 33, chat with the activity panel open | Strike chat, activity open, blocked children |
+| `comparison-settings.png` | Kiro 25, settings | Strike daemon |
+| `comparison-dark.png` | Kiro 46, dark chat with the files panel | Strike dark chat with the files panel |
+| `comparison-command.png` | Kiro 32, command bar | Strike command palette |
+| `comparison-approval.png` | Kiro 36, approval menu | Strike approval menu |
+
+`strike-chat-1024.png` and `strike-daemon-1024.png` are the Strike halves
+alone, scaled back to 1024×594. `strike-chat-1440.png` and
+`strike-daemon-1440.png` are the earlier 1440×900 pass.
+
 ## Session list shell
 
 | File | What it shows |
