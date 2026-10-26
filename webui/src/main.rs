@@ -1395,10 +1395,10 @@ fn App() -> impl IntoView {
             />
         </Show>
         <Show when=move || mode.get() == "usage" fallback=move || ()>
-            <usage_audit::UsagePage base=base token=<redacted> status=status />
+            <usage_audit::UsagePage base=base token=token status=status />
         </Show>
         <Show when=move || mode.get() == "audit" fallback=move || ()>
-            <usage_audit::AuditPage base=base token=<redacted> status=status />
+            <usage_audit::AuditPage base=base token=token status=status />
         </Show>
         <Show when=move || mode.get() == "goals" fallback=move || ()>
             <goals::GoalsPane base=base token=token />
