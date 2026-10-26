@@ -324,7 +324,12 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
   }
 
   if (suite !== "smoke") {
-    const mods = suite === "full" ? await loadScenarios() : [await loadScenario(suite)];
+    let mods = [];
+    try {
+      mods = suite === "full" ? await loadScenarios() : [await loadScenario(suite)];
+    } catch (err) {
+      failures.push(`${err?.message || err}`);
+    }
     const ctx = {
       page,
       baseURL,
@@ -341,11 +346,18 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
       log,
     };
     for (const mod of mods) {
+      if (mod.error) {
+        failures.push(`scenario ${mod.name}: ${mod.error?.message || mod.error}`);
+        continue;
+      }
       if (cockpit) {
         await page.send("Page.navigate", { url: baseURL });
         const again = await waitUntil(BOOT_EXPR, 30000, `reload before ${mod.name}`);
         if (!again) continue;
       }
+      // Device metrics survive Page.navigate. A scenario that left the
+      // phone width must not leak into the next file.
+      await viewport(1440, 900);
       log(`scenario ${mod.name}`);
       try {
         await mod.scenario(ctx);

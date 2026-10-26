@@ -143,14 +143,17 @@ export async function createSession({ page, outDir, video, goldens, updateGolden
   };
 
   const shoot = async (name, which) => {
-    for (const key of which) {
-      const size = sizes[key];
-      if (!size) throw new Error(`unknown viewport ${key}`);
-      await viewport(size.width, size.height);
-      await delay(120);
-      await saveShot(`${name}-${size.tag}`);
+    try {
+      for (const key of which) {
+        const size = sizes[key];
+        if (!size) throw new Error(`unknown viewport ${key}`);
+        await viewport(size.width, size.height);
+        await delay(120);
+        await saveShot(`${name}-${size.tag}`);
+      }
+    } finally {
+      await viewport(DESK.width, DESK.height);
     }
-    await viewport(DESK.width, DESK.height);
   };
 
   // One phone-width still. Restores the 1440×900 desk so later frames stay wide.

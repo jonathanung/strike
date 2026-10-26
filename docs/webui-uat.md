@@ -16,7 +16,7 @@ From a checkout that already has `./strike` (or set `STRIKE_BIN`):
 make webui-uat
 ```
 
-That builds the binary, runs `node --test scripts/webui-uat/lib.test.mjs`,
+That builds the binary, runs `node --test scripts/webui-uat/*.test.mjs`,
 then:
 
 ```sh

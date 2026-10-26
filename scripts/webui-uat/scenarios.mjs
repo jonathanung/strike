@@ -2,7 +2,7 @@
 // that exports scenario(ctx). Files starting with _ are examples and are not run.
 // No edit to this loader, the cockpit pass, or the CI job is required.
 
-import { readdir } from "node:fs/promises";
+import { access, readdir } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 
 export function scenarioDir() {
@@ -35,8 +35,12 @@ export async function loadScenarios(dir = scenarioDir()) {
   const out = [];
   for (const file of files) {
     const name = file.slice(0, -".mjs".length);
-    const mod = await import(new URL(file, base).href);
-    out.push(wrap(name, mod));
+    try {
+      const mod = await import(new URL(file, base).href);
+      out.push(wrap(name, mod));
+    } catch (err) {
+      out.push({ name, error: err });
+    }
   }
   return out;
 }
@@ -48,13 +52,12 @@ export async function loadScenario(name, dir = scenarioDir()) {
   const base = dirURL(dir);
   const href = new URL(`${name}.mjs`, base).href;
   try {
-    const mod = await import(href);
-    return wrap(name, mod);
+    await access(new URL(href));
   } catch (err) {
-    const code = err?.code || err?.cause?.code;
-    if (code === "ERR_MODULE_NOT_FOUND") {
+    if (err?.code === "ENOENT") {
       throw new Error(`no scenario scripts/webui-uat/scenarios/${name}.mjs`);
     }
     throw err;
   }
+  return wrap(name, await import(href));
 }

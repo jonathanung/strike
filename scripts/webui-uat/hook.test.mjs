@@ -23,8 +23,20 @@ test("loadScenarios skips underscore files and requires scenario(ctx)", async ()
   assert.deepEqual(calls, ["approvals-empty"]);
 
   await writeFile(join(dir, "broken.mjs"), "export const nope = 1;\n");
-  await assert.rejects(() => loadScenarios(dir), /must export scenario/);
+  await writeFile(
+    join(dir, "helper.mjs"),
+    'import "./missing-helper.mjs";\nexport const scenario = () => {};\n',
+  );
+  const loaded = await loadScenarios(dir);
+  assert.equal(typeof loaded.find((m) => m.name === "approvals").scenario, "function");
+  assert.match(loaded.find((m) => m.name === "broken").error.message, /must export scenario/);
+  assert.match(loaded.find((m) => m.name === "helper").error.message, /missing-helper/);
   await assert.rejects(() => loadScenario("missing", dir), /no scenario/);
+  await assert.rejects(() => loadScenario("helper", dir), (err) => {
+    assert.match(String(err.message), /missing-helper/);
+    assert.doesNotMatch(String(err.message), /no scenario/);
+    return true;
+  });
 });
 
 test("the checked-in example is not loaded", async () => {
@@ -60,4 +72,21 @@ test("phone() captures 390x844 and restores the desk", async () => {
   assert.deepEqual(metrics[0], ["Emulation.setDeviceMetricsOverride", PHONE.width, PHONE.height, true]);
   assert.deepEqual(metrics.at(-1), ["Emulation.setDeviceMetricsOverride", 1440, 900, false]);
   assert.equal(page.size.width, 1440);
+});
+
+test("shoot restores the desk when a capture throws", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "uat-shoot-"));
+  const page = {
+    size: null,
+    send: async (method, params) => {
+      if (method === "Emulation.setDeviceMetricsOverride") page.size = { width: params.width, height: params.height };
+      if (method === "Page.captureScreenshot") throw new Error("shot failed");
+      return {};
+    },
+    evaluate: async () => "Run a command",
+  };
+  const session = await createSession({ page, outDir: dir, video: false, goldens: false, updateGoldens: false });
+  await assert.rejects(() => session.shoot("approvals-menu", ["mobile"]), /shot failed/);
+  assert.equal(page.size.width, 1440);
+  assert.equal(page.size.height, 900);
 });
