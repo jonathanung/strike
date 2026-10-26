@@ -421,12 +421,24 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
   if (controls) {
     await controls.stop();
     const down = await waitUntil(
-      `document.body && (document.body.innerText.includes("Unreachable") || document.body.innerText.includes("Could not reach the daemon") || document.body.innerText.includes("live event stream closed"))`,
+      `(() => {
+        const retry = [...document.querySelectorAll(".notice button")].some((b) => (b.innerText || "").includes("Retry"));
+        const text = document.body ? document.body.innerText : "";
+        const dead = text.includes("Unreachable") || text.includes("Could not reach the daemon");
+        return retry && dead;
+      })()`,
       15000,
-      "daemon unreachable",
+      "unreachable notice with Retry",
     );
-    check(Boolean(down), "stopping the daemon did not surface an error");
+    check(Boolean(down), "stopping the daemon did not show Unreachable and Retry");
     await shoot("shell-reconnect-error", ["desk1024", "desk1440"]);
+    // The cockpit polls refresh_meta every 2s. Once the daemon is back that
+    // poll clears the notice, so Retry can disappear before the click.
+    // Freeze intervals, then click Retry ourselves.
+    await page.evaluate(`(() => {
+      const top = window.setInterval(() => {}, 1e9);
+      for (let i = 1; i <= top; i++) window.clearInterval(i);
+    })()`);
     await controls.start();
     const retried = await page.evaluate(`(() => {
       const btn = [...document.querySelectorAll(".notice button")].find((b) => (b.innerText || "").includes("Retry"));
@@ -434,13 +446,18 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
       btn.click();
       return true;
     })()`);
-    if (!retried) await page.send("Page.reload", { ignoreCache: true });
-    const backOnline = await waitUntil(
-      `document.body && document.body.innerText.includes("Connected") && !document.body.innerText.includes("Unreachable")`,
-      10000,
-      "daemon reconnected",
-    );
-    check(Boolean(backOnline), "Retry did not restore Connected");
+    check(retried, "Retry was not clicked");
+    if (retried) {
+      const backOnline = await waitUntil(
+        `(() => {
+          const text = document.body ? document.body.innerText : "";
+          return text.includes("Connected") && !text.includes("Unreachable") && !text.includes("Could not reach the daemon");
+        })()`,
+        10000,
+        "daemon reconnected",
+      );
+      check(Boolean(backOnline), "Retry did not restore Connected");
+    }
     await shoot("shell-reconnect-ok", ["desk1024", "desk1440"]);
   }
 
