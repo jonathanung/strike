@@ -354,6 +354,13 @@ func TestLifecycleHooksCannotWidenHardDeny(t *testing.T) {
 func TestLifecycleDeclarativeOrderingBeforeShell(t *testing.T) {
 	dir := t.TempDir()
 	orderFile := filepath.Join(dir, "order")
+	// The event channel is buffered. Statting the marker when the test
+	// dequeues HookMatched races the hook process (CI, -race): printf can
+	// finish before the receive. The shell waits for this file, which the
+	// test creates only after it has observed HookMatched. If the shell ran
+	// to completion before that event, it would block forever and the test
+	// would time out.
+	release := filepath.Join(dir, "release")
 	call := provider.ToolCall{ID: "c1", Name: "sleep", Args: []byte(`{"seconds":0.01}`)}
 	prov := newScriptedProvider(
 		streamStep{events: []provider.StreamEvent{
@@ -382,7 +389,7 @@ func TestLifecycleDeclarativeOrderingBeforeShell(t *testing.T) {
 		Hooks: []tool.HookDef{{
 			Event:   tool.HookEventPreToolUse,
 			Matcher: "sleep",
-			Command: "printf shell >> " + orderFile,
+			Command: "while [ ! -f " + shellSingle(release) + " ]; do sleep 0.02; done; printf shell >> " + shellSingle(orderFile),
 		}},
 	})
 	ctx, cancel := context.WithCancel(context.Background())
@@ -399,10 +406,15 @@ func TestLifecycleDeclarativeOrderingBeforeShell(t *testing.T) {
 			t.Fatal("timeout")
 		case ev := <-eng.Events():
 			if hm, ok := ev.(protocol.HookMatched); ok && hm.Event == permission.HookEventPreToolUse {
-				sawRule = true
-				if _, err := os.Stat(orderFile); err != nil {
-					ruleBeforeShell = true
+				if !sawRule {
+					if _, err := os.Stat(orderFile); err != nil {
+						ruleBeforeShell = true
+					}
+					if err := os.WriteFile(release, []byte("1\n"), 0o644); err != nil {
+						t.Fatal(err)
+					}
 				}
+				sawRule = true
 			}
 			if _, ok := ev.(protocol.TurnCompleted); ok {
 				if !sawRule {
@@ -418,4 +430,8 @@ func TestLifecycleDeclarativeOrderingBeforeShell(t *testing.T) {
 			}
 		}
 	}
+}
+
+func shellSingle(path string) string {
+	return "'" + strings.ReplaceAll(path, "'", `'"'"'`) + "'"
 }
