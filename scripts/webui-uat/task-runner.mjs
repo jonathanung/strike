@@ -273,5 +273,6 @@ export async function runTaskRunnerPass({ page, baseURL, check, shoot, click, wa
     8000,
   );
   check(skipped?.sections?.[0]?.status === "skipped", `skip did not apply (${statuses(skipped)})`);
+  await click(".segmented button", "Chat");
   log("task runner pass done");
 }
