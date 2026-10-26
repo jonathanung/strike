@@ -324,17 +324,20 @@ function __wbg_get_imports() {
             const ret = result;
             return ret;
         },
-<<<<<<<< HEAD:internal/frontend/server/static/assets/strike-webui-9b8f6ccf00662a42.js
         __wbg_instanceof_HtmlElement_32fb153a5a0e2349: function(arg0) {
             let result;
             try {
                 result = arg0 instanceof HTMLElement;
-========
+            } catch (_) {
+                result = false;
+            }
+            const ret = result;
+            return ret;
+        },
         __wbg_instanceof_HtmlTextAreaElement_bbe97f862930488c: function(arg0) {
             let result;
             try {
                 result = arg0 instanceof HTMLTextAreaElement;
->>>>>>>> 8af50e54 (Expand composer triggers on the daemon and in the web composer.):internal/frontend/server/static/assets/strike-webui-8ce5d0ad7438a590.js
             } catch (_) {
                 result = false;
             }
@@ -650,93 +653,37 @@ function __wbg_get_imports() {
             return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
         },
         __wbindgen_generic_0000000000000001: function(arg0, arg1) {
-<<<<<<< HEAD:internal/frontend/server/static/assets/strike-webui-8ce5d0ad7438a590.js
-<<<<<<<< HEAD:internal/frontend/server/static/assets/strike-webui-9b8f6ccf00662a42.js
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 1571, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-========
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 1188, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
->>>>>>>> 8af50e54 (Expand composer triggers on the daemon and in the web composer.):internal/frontend/server/static/assets/strike-webui-8ce5d0ad7438a590.js
-=======
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 1191, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
->>>>>>> e0723963 (Refresh composer suggestions when the daemon catalog arrives.):internal/frontend/server/static/assets/strike-webui-c6e34d1ae794b8e0.js
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 1681, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_51e094a7b034e234___convert__closures_____invoke___wasm_bindgen_51e094a7b034e234___JsValue______true_);
             return ret;
         },
         __wbindgen_generic_0000000000000002: function(arg0, arg1) {
-<<<<<<< HEAD:internal/frontend/server/static/assets/strike-webui-8ce5d0ad7438a590.js
-<<<<<<<< HEAD:internal/frontend/server/static/assets/strike-webui-9b8f6ccf00662a42.js
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 1663, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
-========
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 1280, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
->>>>>>>> 8af50e54 (Expand composer triggers on the daemon and in the web composer.):internal/frontend/server/static/assets/strike-webui-8ce5d0ad7438a590.js
-=======
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 1283, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
->>>>>>> e0723963 (Refresh composer suggestions when the daemon catalog arrives.):internal/frontend/server/static/assets/strike-webui-c6e34d1ae794b8e0.js
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 1773, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_51e094a7b034e234___convert__closures_____invoke___wasm_bindgen_51e094a7b034e234___JsValue__core_37ee0ce0c4cd57d5___result__Result_____wasm_bindgen_51e094a7b034e234___JsError___true_);
             return ret;
         },
         __wbindgen_generic_0000000000000003: function(arg0, arg1) {
-<<<<<<< HEAD:internal/frontend/server/static/assets/strike-webui-8ce5d0ad7438a590.js
-<<<<<<<< HEAD:internal/frontend/server/static/assets/strike-webui-9b8f6ccf00662a42.js
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("Event")], shim_idx: 1571, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-========
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("Event")], shim_idx: 1188, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
->>>>>>>> 8af50e54 (Expand composer triggers on the daemon and in the web composer.):internal/frontend/server/static/assets/strike-webui-8ce5d0ad7438a590.js
-=======
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("Event")], shim_idx: 1191, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
->>>>>>> e0723963 (Refresh composer suggestions when the daemon catalog arrives.):internal/frontend/server/static/assets/strike-webui-c6e34d1ae794b8e0.js
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("Event")], shim_idx: 1681, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_51e094a7b034e234___convert__closures_____invoke___wasm_bindgen_51e094a7b034e234___JsValue______true__13);
             return ret;
         },
         __wbindgen_generic_0000000000000004: function(arg0, arg1) {
-<<<<<<< HEAD:internal/frontend/server/static/assets/strike-webui-8ce5d0ad7438a590.js
-<<<<<<<< HEAD:internal/frontend/server/static/assets/strike-webui-9b8f6ccf00662a42.js
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("Event")], shim_idx: 1602, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-========
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("Event")], shim_idx: 1219, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
->>>>>>>> 8af50e54 (Expand composer triggers on the daemon and in the web composer.):internal/frontend/server/static/assets/strike-webui-8ce5d0ad7438a590.js
-=======
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("Event")], shim_idx: 1222, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
->>>>>>> e0723963 (Refresh composer suggestions when the daemon catalog arrives.):internal/frontend/server/static/assets/strike-webui-c6e34d1ae794b8e0.js
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("Event")], shim_idx: 1712, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_51e094a7b034e234___convert__closures_____invoke___web_sys_c0125f8928b48049___features__gen_CloseEvent__CloseEvent______true_);
             return ret;
         },
         __wbindgen_generic_0000000000000005: function(arg0, arg1) {
-<<<<<<< HEAD:internal/frontend/server/static/assets/strike-webui-8ce5d0ad7438a590.js
-<<<<<<<< HEAD:internal/frontend/server/static/assets/strike-webui-9b8f6ccf00662a42.js
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("KeyboardEvent")], shim_idx: 1056, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-========
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("KeyboardEvent")], shim_idx: 694, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
->>>>>>>> 8af50e54 (Expand composer triggers on the daemon and in the web composer.):internal/frontend/server/static/assets/strike-webui-8ce5d0ad7438a590.js
-=======
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("KeyboardEvent")], shim_idx: 1132, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
->>>>>>> e0723963 (Refresh composer suggestions when the daemon catalog arrives.):internal/frontend/server/static/assets/strike-webui-c6e34d1ae794b8e0.js
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("KeyboardEvent")], shim_idx: 805, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_51e094a7b034e234___convert__closures_____invoke___web_sys_c0125f8928b48049___features__gen_KeyboardEvent__KeyboardEvent______true_);
             return ret;
         },
         __wbindgen_generic_0000000000000006: function(arg0, arg1) {
-<<<<<<< HEAD:internal/frontend/server/static/assets/strike-webui-8ce5d0ad7438a590.js
-<<<<<<<< HEAD:internal/frontend/server/static/assets/strike-webui-9b8f6ccf00662a42.js
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("MessageEvent")], shim_idx: 1602, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-========
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("MessageEvent")], shim_idx: 1219, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
->>>>>>>> 8af50e54 (Expand composer triggers on the daemon and in the web composer.):internal/frontend/server/static/assets/strike-webui-8ce5d0ad7438a590.js
-=======
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("MessageEvent")], shim_idx: 1222, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
->>>>>>> e0723963 (Refresh composer suggestions when the daemon catalog arrives.):internal/frontend/server/static/assets/strike-webui-c6e34d1ae794b8e0.js
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("MessageEvent")], shim_idx: 1712, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_51e094a7b034e234___convert__closures_____invoke___web_sys_c0125f8928b48049___features__gen_CloseEvent__CloseEvent______true__16);
             return ret;
         },
         __wbindgen_generic_0000000000000007: function(arg0, arg1) {
-<<<<<<< HEAD:internal/frontend/server/static/assets/strike-webui-8ce5d0ad7438a590.js
-<<<<<<<< HEAD:internal/frontend/server/static/assets/strike-webui-9b8f6ccf00662a42.js
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [], shim_idx: 1605, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-========
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [], shim_idx: 1222, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
->>>>>>>> 8af50e54 (Expand composer triggers on the daemon and in the web composer.):internal/frontend/server/static/assets/strike-webui-8ce5d0ad7438a590.js
-=======
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [], shim_idx: 1225, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
->>>>>>> e0723963 (Refresh composer suggestions when the daemon catalog arrives.):internal/frontend/server/static/assets/strike-webui-c6e34d1ae794b8e0.js
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [], shim_idx: 1715, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_51e094a7b034e234___convert__closures_____invoke_______true_);
             return ret;
         },
