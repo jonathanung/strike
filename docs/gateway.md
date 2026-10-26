@@ -183,6 +183,45 @@ Child processes run as the user who started `strike serve`. OS sandboxing
 for bash is a separate dial (`sandbox` in config, default workspace-write)
 and is not disabled by `--auth`.
 
+## Terminal
+
+`/v1/terminals` is a shell as the user who started `strike serve`. The
+routes sit behind the same auth middleware as the rest of `/v1`. A browser
+WebSocket cannot set `Authorization`, so the stream accepts the HttpOnly
+`strike_serve_token` cookie or a single-use ticket.
+
+The client mints that ticket with `POST /v1/terminals/{id}/ticket` (bearer
+or cookie) and presents it as the WebSocket subprotocol `ticket.<hex>`
+next to `strike.terminal`. The server echoes only `strike.terminal`. The
+ticket lasts 30 seconds, is bound to that terminal id, and is consumed on
+the upgrade. A query-string `token` or `ticket` on a terminal route is
+rejected. The ticket is not a bypass for any other `/v1` path.
+
+Loopback listeners allow the terminal. Any other bind requires
+`--terminal-remote`, and that flag requires `--auth`. A tailnet or private
+bind has no shell until the operator passes the flag.
+
+The client does not pick an arbitrary working directory. Create resolves
+the path inside the active workspace and rejects `..`, a sibling prefix,
+and a symlink that leaves the workspace. On Linux the daemon reads the PTY
+leader's `/proc/<pid>/cwd` and kills the shell when that directory is
+outside the workspace. The watch does not walk child processes. When the
+sandbox dial is not `off`, the shell is started through the same
+`sandbox.Wrap` path as bash. If that helper is missing and degrade is not
+allowed, create fails closed. A bwrap leader stays in the workspace, so
+the watch is not the write boundary in that case; the sandbox is.
+
+Plan mode on the workspace or the live session refuses a new shell. Other
+permission modes allow it: the user is at the keyboard, which is why `!`
+skips the bash prompt too. Keystrokes are not written to the audit log.
+`terminal.create` and `terminal.kill` are.
+
+The shell belongs to the user. The agent does not write to the PTY. The
+panel says when the bound session is busy in the same directory.
+`onSessionEnd` defaults to `kill` (the process ends when that session root
+closes). `keep` leaves it running. Closing the browser tab does not kill
+the PTY; the next visit reattaches and replays the scrollback ring.
+
 ## Threat model (this process)
 
 What an attacker gets:
@@ -205,6 +244,10 @@ What an attacker gets:
   access logs. `strike connect`'s local proxy also strips `?token=` and
   does not log the grant. `strike daemon grant` prints the grant on
   stdout on purpose; do not redirect that stream into a shared log.
+- The terminal is a shell as the serve user. It is authenticated, loopback
+  unless `--terminal-remote` is combined with `--auth`, and confined to the
+  workspace at create. See Terminal above. Keystrokes are not logged. The
+  websocket ticket is single-use and does not authorize any other route.
 - `strike daemon logout` rotates the file and drops grants on the next
   `/v1` read. A cookie already stored in a browser fails on its next
   request. Close those tabs after logout. Browser "Log out" only clears

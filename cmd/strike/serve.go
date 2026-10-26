@@ -43,6 +43,8 @@ Options:
   --model <id>           model id for the live provider
   --attach-only          read-only JSONL attach (no live engine)
   --read-only            reject mutating protocol ops (POST /v1/ops + WS frames)
+  --terminal-remote      allow the side-panel shell on a non-loopback bind
+                         (requires --auth; loopback serves a shell without it)
   --auto                 skip permission asks; network.allow still applies
   --dangerously-skip-permissions
                          skip permission asks and bypass network.allow
@@ -52,6 +54,8 @@ Endpoints:
   GET  /health                      JSON ok + version (no auth)
   GET  /  and  GET /attach          cockpit page
   GET  /v1/ws                       WebSocket: ops in, events out (live)
+  GET  /v1/terminals               side-panel PTY shells (workspace cwd)
+  GET  /v1/terminals/{id}/stream   terminal WebSocket (cookie, bearer, or one-time ticket)
   POST /v1/ops                      submit one op envelope (live)
   GET  /v1/sidechat                 list read-only side-chat turns
   POST /v1/sidechat/ask             ask about the session (no tools, no user.input)
@@ -95,6 +99,7 @@ type serveOptions struct {
 	readOnly                   bool
 	auto                       bool
 	dangerouslySkipPermissions bool
+	terminalRemote             bool
 }
 
 func runServeCLI(args []string, stdout, stderr io.Writer) int {
@@ -147,6 +152,7 @@ func parseServeArgs(args []string) (serveOptions, error) {
 	fs.BoolVar(&opts.readOnly, "read-only", false, "")
 	fs.BoolVar(&opts.auto, "auto", false, "")
 	fs.BoolVar(&opts.dangerouslySkipPermissions, "dangerously-skip-permissions", false, "")
+	fs.BoolVar(&opts.terminalRemote, "terminal-remote", false, "")
 	if err := fs.Parse(args); err != nil {
 		return serveOptions{}, err
 	}
@@ -187,6 +193,9 @@ func parseServeArgs(args []string) (serveOptions, error) {
 	}
 	if opts.allowPrivateBind && !opts.auth {
 		return serveOptions{}, fmt.Errorf("--allow-private-bind requires --auth")
+	}
+	if opts.terminalRemote && !opts.auth {
+		return serveOptions{}, fmt.Errorf("--terminal-remote requires --auth")
 	}
 	if opts.sessionDirSet && !opts.attachOnly {
 		return serveOptions{}, fmt.Errorf("--session-dir requires --attach-only; live sessions use %s", session.DefaultDir())
@@ -234,6 +243,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 	var services *host.Services
 	var sandboxSnap *server.SandboxSnapshot
 	var sideChat server.SideChatModel
+	var terminalSandbox sandbox.Policy
 	var cleanup func() error
 	var sharedAttachments *attachment.Store
 	sessionDir := opts.sessionDir
@@ -411,6 +421,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		roots[initialSlot.id] = initialSR
 
 		services = &a.services
+		terminalSandbox = a.sandboxPolicy
 
 		cleanup = func() error {
 			if liveHub != nil {
@@ -531,12 +542,14 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 				local.SetFilesWorkDir(services.Files, dir)
 			}
 		},
-		Sandbox:       sandboxSnap,
-		ReadOnly:      opts.readOnly,
-		Audit:         auditSink,
-		Attachments:   sharedAttachments,
-		UsageAuditDir: usageDir,
-		SideChat:      sideChat,
+		Sandbox:         sandboxSnap,
+		ReadOnly:        opts.readOnly,
+		Audit:           auditSink,
+		Attachments:     sharedAttachments,
+		UsageAuditDir:   usageDir,
+		SideChat:        sideChat,
+		TerminalRemote:  opts.terminalRemote,
+		TerminalSandbox: terminalSandbox,
 	})
 	if err != nil {
 		return err

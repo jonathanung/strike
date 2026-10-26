@@ -61,6 +61,8 @@ type assembled struct {
 	sandboxMode string
 	// sandboxExplain is the multi-line /sandbox explain text (config layers).
 	sandboxExplain string
+	// sandboxPolicy is the compiled OS sandbox dial for bash and the web terminal.
+	sandboxPolicy  sandbox.Policy
 	services       host.Services
 	historyClose   func() error
 	memoryClose    func() error
@@ -1220,6 +1222,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		cfg:            cfg,
 		sandboxMode:    sandboxMode,
 		sandboxExplain: sandboxExplain,
+		sandboxPolicy:  sandboxPolicy,
 		services:       services,
 		historyClose: func() error {
 			return historyStore.Close()

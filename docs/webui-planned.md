@@ -200,10 +200,14 @@ Git status, branch, log, commit, and worktree list/create/remove are in the
 client (`/v1/git/*`). The Git panel reuses `GET /v1/changed-files` for the
 unstaged diff. Changing `session.childIsolation` stays in config; the
 Worktrees panel shows the effective value and does not write a second flag.
-An embedded browser, a terminal, and a subagent board that is not the
-Activity list are not in the client. Activity is the subagent list. Changes
-is the diff list. A terminal tab would be a persistent shell. Composer `!`
-already runs one command through the daemon permission model.
+The Terminal tab is a daemon PTY (`POST /v1/terminals`, stream
+`GET /v1/terminals/{id}/stream`). It starts in the active workspace
+directory, uses the same `/v1` authentication as the rest of the daemon,
+and stays on loopback unless `strike serve --terminal-remote` is set with
+`--auth`. See [gateway.md](gateway.md). An embedded browser and a subagent
+board that is not the Activity list are not in the client. Activity is the
+subagent list. Changes is the diff list. Composer `!` already runs one
+command through the daemon permission model.
 
 ## Composer triggers
 
