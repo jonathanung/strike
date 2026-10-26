@@ -89,10 +89,14 @@ func TestAttachOnlyBootstrapDeclaresProtocolOpsUnavailable(t *testing.T) {
 			t.Errorf("bootstrap missing %s: %s", want, body)
 		}
 	}
-	for _, unwanted := range []string{`"set.fast"`, `"rewind"`} {
-		if strings.Contains(body, unwanted) {
-			t.Errorf("attach-only bootstrap unexpectedly includes %s: %s", unwanted, body)
-		}
+	var boot struct {
+		ProtocolOps []string `json:"protocolOps"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &boot); err != nil {
+		t.Fatalf("decode bootstrap: %v", err)
+	}
+	if boot.ProtocolOps != nil {
+		t.Fatalf("protocolOps = %#v, want null", boot.ProtocolOps)
 	}
 }
 
