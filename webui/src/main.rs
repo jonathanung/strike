@@ -21,6 +21,7 @@ use model::{
     ChildrenResponse, FilesResponse, Health, ModelInfo, ModelList, Remote, RootSummary,
     SessionItem, SessionsResponse, TeamSnapshot, Workspace, WorkspacesResponse,
 };
+use protocol_schema::Event;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 
@@ -28,7 +29,6 @@ use crate::api::{
     get_json, idempotency_key, now_ms, patch_json, post_json, post_json_value, post_op,
 };
 use crate::editor::{DocumentPane, LinkedBody};
-use protocol_schema::Event;
 use crate::model::{budget_elapsed, can_retry, RootsResponse};
 
 fn storage() -> Option<web_sys::Storage> {
