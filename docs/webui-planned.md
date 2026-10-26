@@ -128,6 +128,11 @@ the ops refusal still holds. The echo provider answers by echoing the
 question; a question that starts with `run ` is refused when the model
 tries to call a tool.
 
+`make webui-sidechat-uat` drives those paths in headless Chrome (composer,
+Activity row, Enter / Escape / Alt+S / Ctrl+K, and the tool-call refusal)
+and writes shots under `webui-uat-artifacts/side-chat/`. `make webui-uat`
+stays the cockpit pass.
+
 ## Extra side tabs
 
 Git status beyond `GET /v1/changed-files`, an embedded browser, a terminal,
