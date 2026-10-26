@@ -1,10 +1,11 @@
 //! Strike web client. The session list is live roots plus saved sessions.
-//! Activity, Files, and Changes are the side panel. Schedule, memory,
-//! knowledge, artifacts, and the task runner are not drawn here; see
+//! Activity, Files, Changes, Memory, Knowledge, and Artifacts are the side
+//! panel. Schedule and the task runner are not drawn here; see
 //! docs/webui-planned.md.
 
 mod api;
 mod model;
+mod storage;
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -24,8 +25,9 @@ use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 
 use crate::api::{
-    get_json, idempotency_key, now_ms, patch_json, post_json, post_json_value, post_op,
+    get_json, idempotency_key, now_ms, patch_json, post_json, post_json_value, post_op, put_json,
 };
+use crate::storage::StoragePanel;
 use crate::model::{budget_elapsed, can_retry, RootsResponse};
 
 fn storage() -> Option<web_sys::Storage> {
@@ -251,6 +253,7 @@ fn apply_envelope(
     lines: RwSignal<Vec<ChatLine>>,
     seq: &Rc<Cell<u32>>,
     open: &Rc<Cell<bool>>,
+    storage_rev: RwSignal<u32>,
     raw: &str,
 ) {
     let v: serde_json::Value = match serde_json::from_str(raw) {
@@ -339,6 +342,7 @@ fn apply_envelope(
                 child_card_from_parts(&name, &session, &status, &summary, &details),
             );
         }
+        "artifact.updated" => storage_rev.update(|n| *n = n.wrapping_add(1)),
         _ => {}
     }
 }
@@ -355,6 +359,14 @@ fn parent_path(dir: &str) -> String {
     match dir.rsplit_once('/') {
         Some((parent, _)) => parent.to_string(),
         None => String::new(),
+    }
+}
+
+fn memory_mode_label(mode: &str) -> &'static str {
+    match mode {
+        "incognito" => "Incognito",
+        "temporary" => "Temporary",
+        _ => "Normal",
     }
 }
 
@@ -396,6 +408,42 @@ fn palette_cmds() -> &'static [PaletteCmd] {
             id: "stop-all",
             label: "Stop all",
             detail: "Interrupt running delegated children in this session",
+        },
+        PaletteCmd {
+            section: "Commands",
+            id: "panel-memory",
+            label: "Memory",
+            detail: "Inspect and edit durable memory",
+        },
+        PaletteCmd {
+            section: "Commands",
+            id: "panel-knowledge",
+            label: "Knowledge",
+            detail: "Pinned paths the agent reads at session start",
+        },
+        PaletteCmd {
+            section: "Commands",
+            id: "panel-artifacts",
+            label: "Artifacts",
+            detail: "Versioned findings, patches, and reports",
+        },
+        PaletteCmd {
+            section: "Settings",
+            id: "memory-normal",
+            label: "Memory: Normal",
+            detail: "This session reads and writes memory",
+        },
+        PaletteCmd {
+            section: "Settings",
+            id: "memory-incognito",
+            label: "Memory: Incognito",
+            detail: "This session reads memory and learns nothing",
+        },
+        PaletteCmd {
+            section: "Settings",
+            id: "memory-temporary",
+            label: "Memory: Temporary",
+            detail: "This session has no memory",
         },
         PaletteCmd {
             section: "Apps",
@@ -542,6 +590,15 @@ fn icon(name: &str) -> &'static str {
         "changes" => {
             r#"<svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4.5h10M3 8h6M3 11.5h8"/></svg>"#
         }
+        "memory" => {
+            r#"<svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2.5h8v11l-4-2.2L4 13.5z"/></svg>"#
+        }
+        "knowledge" => {
+            r#"<svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3.5h4.2c.7 0 1.3.4 1.8 1 .5-.6 1.1-1 1.8-1H14.5v9h-3.7c-.7 0-1.3.4-1.8 1-.5-.6-1.1-1-1.8-1H3z"/></svg>"#
+        }
+        "artifacts" => {
+            r#"<svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 5.5 8 2.5l5.5 3L8 8.5z"/><path d="M2.5 5.5V10.5L8 13.5l5.5-3V5.5"/></svg>"#
+        }
         "command" => {
             r#"<svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5h11v9h-11z"/><path d="M5 7l2 1.5L5 10M8.5 10.5h2.5"/></svg>"#
         }
@@ -677,6 +734,9 @@ fn App() -> impl IntoView {
     let live_busy = RwSignal::new(false);
     let live_busy_root = RwSignal::new(String::new());
     let side_tab = RwSignal::new("activity".to_string());
+    let memory_mode = RwSignal::new("normal".to_string());
+    let memory_menu = RwSignal::new(false);
+    let storage_rev = RwSignal::new(0u32);
     let files_path = RwSignal::new(String::new());
     let files = RwSignal::new(Vec::<model::DirEntry>::new());
     let files_error = RwSignal::new(String::new());
@@ -869,7 +929,7 @@ fn App() -> impl IntoView {
         let on_msg =
             Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |ev: web_sys::MessageEvent| {
                 if let Some(data) = ev.data().as_string() {
-                    apply_envelope(lines_cb, &seq_cb, &open_cb, &data);
+                    apply_envelope(lines_cb, &seq_cb, &open_cb, storage_rev, &data);
                 }
             });
         es.set_onmessage(Some(on_msg.as_ref().unchecked_ref()));
@@ -1107,6 +1167,32 @@ fn App() -> impl IntoView {
         apply_theme(&load("strike.theme"), &scheme);
     };
 
+    let set_memory = move |mode: String| {
+        memory_menu.set(false);
+        memory_mode.set(mode.clone());
+        let root = active_root.get_untracked();
+        if root.is_empty() {
+            status.set("no live session yet".into());
+            return;
+        }
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            let path = format!("/v1/memory/mode?root={}", api::js_encode(&root));
+            match put_json(&b, &t, &path, serde_json::json!({"mode": mode})).await {
+                Ok(text) => {
+                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
+                        if let Some(saved) = v.get("mode").and_then(|m| m.as_str()) {
+                            if !saved.is_empty() {
+                                memory_mode.set(saved.to_string());
+                            }
+                        }
+                    }
+                }
+                Err(e) => status.set(format!("memory mode failed: {e}")),
+            }
+        });
+    };
+
     let set_perm = move |mode: String| {
         perm_mode.set(mode.clone());
         mode_menu.set(false);
@@ -1150,6 +1236,12 @@ fn App() -> impl IntoView {
         match id.as_str() {
             "new" => new_session(),
             "stop-all" => stop_all(),
+            "panel-memory" => side_tab.set("memory".into()),
+            "panel-knowledge" => side_tab.set("knowledge".into()),
+            "panel-artifacts" => side_tab.set("artifacts".into()),
+            "memory-normal" => set_memory("normal".into()),
+            "memory-incognito" => set_memory("incognito".into()),
+            "memory-temporary" => set_memory("temporary".into()),
             "chat" => mode.set("chat".into()),
             "daemon" => mode.set("daemon".into()),
             "steer" => set_enter("steer".into()),
@@ -1227,6 +1319,21 @@ fn App() -> impl IntoView {
         }
     });
 
+    Effect::new(move |_| {
+        let root = active_root.get();
+        let (b, t) = (base.get(), token.get());
+        spawn_local(async move {
+            let path = format!("/v1/memory/mode?root={}", api::js_encode(&root));
+            if let Ok(v) = get_json::<serde_json::Value>(&b, &t, &path).await {
+                if let Some(mode) = v.get("mode").and_then(|m| m.as_str()) {
+                    if !mode.is_empty() {
+                        memory_mode.set(mode.to_string());
+                    }
+                }
+            }
+        });
+    });
+
     let on_key =
         Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |ev: web_sys::KeyboardEvent| {
             if (ev.meta_key() || ev.ctrl_key()) && ev.key().eq_ignore_ascii_case("k") {
@@ -1248,6 +1355,7 @@ fn App() -> impl IntoView {
                 palette_open.set(false);
                 mode_menu.set(false);
                 model_menu.set(false);
+                memory_menu.set(false);
             }
         });
     if let Some(w) = web_sys::window() {
@@ -1338,6 +1446,7 @@ fn App() -> impl IntoView {
             <div class="palette-backdrop" on:click=move |_| palette_open.set(false)>
                 <div class="palette" on:click=move |ev: web_sys::MouseEvent| ev.stop_propagation()>
                     <input
+                        autofocus
                         placeholder="Type a command"
                         prop:value=move || palette_query.get()
                         on:input=move |ev| palette_query.set(event_target_value(&ev))
@@ -1632,6 +1741,28 @@ fn App() -> impl IntoView {
                                 }).collect_view()}
                             </div>
                         </Show>
+                        <Show when=move || memory_menu.get()>
+                            <div class="menu" role="menu" aria-label="Memory mode">
+                                {["normal", "incognito", "temporary"].into_iter().map(|id| {
+                                    let label = memory_mode_label(id).to_string();
+                                    let detail = match id {
+                                        "incognito" => "Reads memory. The agent learns nothing.",
+                                        "temporary" => "This session does not load memory.",
+                                        _ => "Reads and writes memory.",
+                                    };
+                                    let set = set_memory;
+                                    let on = memory_mode.get() == id;
+                                    let klass = if on { "palette-row on" } else { "palette-row" };
+                                    let id = id.to_string();
+                                    view! {
+                                        <button type="button" class=klass on:click=move |_| set(id.clone())>
+                                            <span class="name">{label}</span>
+                                            <span class="path">{detail}</span>
+                                        </button>
+                                    }
+                                }).collect_view()}
+                            </div>
+                        </Show>
                         <Show when=move || model_menu.get()>
                             <div class="menu">
                                 <p class="hint">{move || {
@@ -1674,8 +1805,14 @@ fn App() -> impl IntoView {
                             <div class="composer-bar">
                                 <button type="button" class="chip" on:click=move |_| {
                                     model_menu.set(false);
+                                    memory_menu.set(false);
                                     mode_menu.update(|v| *v = !*v);
                                 }>{move || format!("Approval · {}", mode_label(&perm_mode.get()))}</button>
+                                <button type="button" class="chip" aria-label="Memory mode" on:click=move |_| {
+                                    mode_menu.set(false);
+                                    model_menu.set(false);
+                                    memory_menu.update(|v| *v = !*v);
+                                }>{move || format!("Memory · {}", memory_mode_label(&memory_mode.get()))}</button>
                                 <button type="button" class="chip" on:click=open_models>{move || {
                                     let model = model_name.get();
                                     if model.is_empty() { "Model".into() } else { model }
@@ -1693,6 +1830,9 @@ fn App() -> impl IntoView {
                         <button class=move || if side_tab.get() == "activity" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("activity".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("activity")></span>"Activity"</button>
                         <button class=move || if side_tab.get() == "files" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("files".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("files")></span>"Files"</button>
                         <button class=move || if side_tab.get() == "changes" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("changes".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("changes")></span>"Changes"</button>
+                        <button class=move || if side_tab.get() == "memory" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("memory".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("memory")></span>"Memory"</button>
+                        <button class=move || if side_tab.get() == "knowledge" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("knowledge".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("knowledge")></span>"Knowledge"</button>
+                        <button class=move || if side_tab.get() == "artifacts" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("artifacts".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("artifacts")></span>"Artifacts"</button>
                     </div>
                     <Show when=move || side_tab.get() == "activity">
                     <div class="activity">
@@ -1880,6 +2020,20 @@ fn App() -> impl IntoView {
                                 }).collect_view()}
                             </ul>
                         </div>
+                    </Show>
+                    <Show when=move || {
+                        let tab = side_tab.get();
+                        tab == "memory" || tab == "knowledge" || tab == "artifacts"
+                    }>
+                        <StoragePanel
+                            tab=side_tab
+                            base=base
+                            token=token
+                            root=active_root
+                            memory_mode=memory_mode
+                            status=status
+                            storage_rev=storage_rev
+                        />
                     </Show>
                 </aside>
             </div>

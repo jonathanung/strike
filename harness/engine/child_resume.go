@@ -149,6 +149,7 @@ func (e *Engine) resumeChild(ctx context.Context, req tool.TaskResumeRequest) (t
 		ProjectRoot:                e.opts.ProjectRoot,
 		Instructions:               e.opts.Instructions,
 		Memory:                     e.opts.Memory,
+		InitialMemoryMode:          e.MemoryMode(),
 		Ledger:                     e.opts.Ledger,
 		Attachments:                e.opts.Attachments,
 		ProjectArtifact:            e.opts.ProjectArtifact,

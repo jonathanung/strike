@@ -308,6 +308,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 					return "", err
 				}
 				live := server.NewLive(slot.id, slot.workDir, agents, slot.eng.Ops())
+				a.attachMemoryMode(live, slot.id, slot.eng)
 				seedLiveSandbox(live)
 				sr := startServeRoot(ctx, slot, live)
 				mu.Lock()
@@ -348,6 +349,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 					return "", false, err
 				}
 				live := server.NewLive(slot.id, slot.workDir, agents, slot.eng.Ops())
+				a.attachMemoryMode(live, slot.id, slot.eng)
 				seedLiveSandbox(live)
 				sr := startServeRoot(ctx, slot, live)
 				mu.Lock()
@@ -364,6 +366,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		// Add initial root from the first assembly slot.
 		initialSlot := a.firstSlot
 		initialLive := server.NewLive(initialSlot.id, initialSlot.workDir, agents, initialSlot.eng.Ops())
+		a.attachMemoryMode(initialLive, initialSlot.id, initialSlot.eng)
 		seedLiveSandbox(initialLive)
 		liveHub.Add(initialSlot.id, initialLive)
 		if info, err := a.sessions.Get(initialSlot.id); err == nil && info.Title != "" {

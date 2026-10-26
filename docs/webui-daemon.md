@@ -80,13 +80,14 @@ Status: walking skeleton on branch `worktree-rust-webui-daemon`. Not merged.
   - Empty sessions rotate a short headline and offer six prompts that send
     as ordinary text. A failed load shows the error and Retry.
   - The side panel is Activity (team snapshot: status, elapsed, stop,
-    retry, expand, including `blocked` handoffs), Files (`/v1/files`), and
-    Changes (`/v1/changed-files`). Clicking or dragging a file inserts
-    `@path` as text. The web composer does not expand that token the way
-    the TUI does.
-  - Schedule, memory, knowledge, artifacts, the task runner, onboarding,
-    and a multi-gateway hub are documented in
-    [webui-planned.md](webui-planned.md), not drawn as empty panels.
+    retry, expand, including `blocked` handoffs), Files (`/v1/files`),
+    Changes (`/v1/changed-files`), Memory, Knowledge, and Artifacts.
+    Clicking or dragging a file inserts `@path` as text. The web composer
+    does not expand that token the way the TUI does. Memory mode
+    (normal, incognito, temporary) is a composer chip and a palette command.
+  - Schedule, the task runner, onboarding, and a multi-gateway hub are
+    documented in [webui-planned.md](webui-planned.md), not drawn as empty
+    panels. Memory, knowledge, and artifacts are drawn from the live routes.
 - Server serves `/sw.js` and `/manifest.webmanifest` at the origin root and
   the bundle under `/assets/` (WASM-aware CSP and content types).
 

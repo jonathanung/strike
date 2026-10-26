@@ -336,8 +336,9 @@ func TestGetVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok, err := s.GetVersion(a.ID, 1, "s", "r"); err != nil || ok {
-		t.Fatalf("old version should miss: ok=%v err=%v", ok, err)
+	old, ok, err := s.GetVersion(a.ID, 1, "s", "r")
+	if err != nil || !ok || old.Content != "1" || old.Version != 1 {
+		t.Fatalf("old version: ok=%v got=%#v err=%v", ok, old, err)
 	}
 	got, ok, err := s.GetVersion(a.ID, a2.Version, "s", "r")
 	if err != nil || !ok || got.Content != "2" {

@@ -392,11 +392,13 @@ type Files interface {
 	ApplyPatch(patch string) (summary string, err error)
 }
 
-// MemoryEntry is one project-local key/value memory record.
+// MemoryEntry is one durable key/value memory record.
 type MemoryEntry struct {
-	Key   string
-	Value string
-	Tags  []string
+	Key       string    `json:"key"`
+	Value     string    `json:"value"`
+	Tags      []string  `json:"tags,omitempty"`
+	Author    string    `json:"author,omitempty"`
+	UpdatedAt time.Time `json:"updatedAt,omitempty"`
 }
 
 // Memory is project-scoped durable key/value memory for /memory and tools.
@@ -418,6 +420,36 @@ type Memory interface {
 	// cleared first; otherwise entries merge by key (imported wins). Returns
 	// the number of entries applied from the file.
 	Import(path string, replace bool) (int, error)
+}
+
+// MemoryScopes is the optional project-plus-global surface. A Memory that
+// does not implement this keeps project-only behavior.
+type MemoryScopes interface {
+	ListScope(scope, tag string) ([]MemoryEntry, error)
+	PutScope(scope, key, value, author string, tags []string) (MemoryEntry, error)
+	DeleteScope(scope, key string) error
+}
+
+// MemoryFiles reports the plain-text projection and audit log for a scope.
+type MemoryFiles interface {
+	Files(scope string) (markdownPath, auditPath string)
+}
+
+// KnowledgePin is one pinned document path.
+type KnowledgePin struct {
+	Path     string    `json:"path"`
+	Note     string    `json:"note,omitempty"`
+	Author   string    `json:"author,omitempty"`
+	PinnedAt time.Time `json:"pinnedAt"`
+	Scope    string    `json:"scope"`
+}
+
+// Knowledge is the pinned-path store. Nil means the capability is absent.
+type Knowledge interface {
+	List(scope string) ([]KnowledgePin, error)
+	Put(scope, path, note, author string) (KnowledgePin, error)
+	Delete(scope, path string) error
+	Files(scope string) (markdownPath string)
 }
 
 // Issue is one project-local tracked issue.
@@ -754,6 +786,8 @@ type Artifact struct {
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 	ExpiresAt    *time.Time
+	// Versions lists retained CAS versions, oldest first, including current.
+	Versions []int
 }
 
 // ArtifactListFilter selects artifacts for Artifacts.List.
@@ -1093,6 +1127,7 @@ type Services struct {
 	Files       Files
 	Shell       Shell // composer ! bang; nil when unsupported
 	Memory      Memory
+	Knowledge   Knowledge // pinned paths; nil when unsupported
 	Issues      Issues
 	Plans       Plans     // structured root-owned plans; nil when unsupported
 	Artifacts   Artifacts // shared typed artifacts (read-only); nil when unsupported
