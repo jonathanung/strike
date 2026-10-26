@@ -165,7 +165,6 @@ func TestAckTimeoutEmitsEventAndEscalates(t *testing.T) {
 		}
 	}()
 
-	beforeLead := lead.Mailbox().Len()
 	st3 := tm.DeliverMessage(MailboxMessage{
 		From:       "A-ack",
 		To:         "B-ack",
@@ -179,24 +178,23 @@ func TestAckTimeoutEmitsEventAndEscalates(t *testing.T) {
 	if st3.Status != "accepted" {
 		t.Fatalf("st3 = %#v", st3)
 	}
+	// Wait for this message's escalation. An earlier timeout can land on the
+	// lead mailbox in the same window, so a length check is not enough.
 	deadline = time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if lead.Mailbox().Len() > beforeLead {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if lead.Mailbox().Len() <= beforeLead {
-		t.Fatal("expected escalation message on lead mailbox")
-	}
-	esc := lead.Mailbox().PeekUnread()
+	var esc []MailboxMessage
 	foundEsc := false
-	for _, m := range esc {
-		if m.Kind == protocol.AgentMessageKindEscalation && m.InReplyTo == st3.MessageID {
-			foundEsc = true
-			if m.TaskID != "d-peer" {
-				t.Fatalf("escalation task = %q", m.TaskID)
+	for time.Now().Before(deadline) && !foundEsc {
+		esc = lead.Mailbox().PeekUnread()
+		for _, m := range esc {
+			if m.Kind == protocol.AgentMessageKindEscalation && m.InReplyTo == st3.MessageID {
+				foundEsc = true
+				if m.TaskID != "d-peer" {
+					t.Fatalf("escalation task = %q", m.TaskID)
+				}
 			}
+		}
+		if !foundEsc {
+			time.Sleep(10 * time.Millisecond)
 		}
 	}
 	if !foundEsc {
