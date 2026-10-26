@@ -333,20 +333,6 @@ fn prefer_banner<'a>(cur: &'a Note, next: &'a Note) -> &'a Note {
     }
 }
 
-fn one_line(s: &str, max: usize) -> String {
-    let flat = s.split_whitespace().collect::<Vec<_>>().join(" ");
-    if flat.starts_with('{') || flat.starts_with('[') {
-        return "Open Strike to read it.".into();
-    }
-    let chars: Vec<char> = flat.chars().collect();
-    if chars.len() <= max {
-        return flat;
-    }
-    let mut out: String = chars.into_iter().take(max.saturating_sub(1)).collect();
-    out.push('…');
-    out
-}
-
 fn short_when(at: &str) -> String {
     let b = at.as_bytes();
     if b.len() < 16 {
@@ -428,15 +414,29 @@ fn request_notification_permission() {
     let _ = func.apply(&ctor, &js_sys::Array::new());
 }
 
-fn show_os(title: &str, body: &str, href: &str, tag: &str) {
+/// Generic OS banner text for a notification kind.
+///
+/// Banners are derived ONLY from `kind`: no session or child names, no
+/// handoff summaries, and no other user content — not even a
+/// redact-scrubbed or clamped version — ever reaches an OS banner.
+/// Names and summaries stay in the notification centre only.
+fn banner_text(kind: &str) -> (&'static str, &'static str) {
+    let body = match kind {
+        "approval.needed" => "An agent needs your input",
+        "child.finished" => "A delegated run finished",
+        "child.blocked" => "A delegated run is blocked",
+        "session.finished" => "A run finished",
+        "gateway.disconnected" => "The gateway disconnected",
+        _ => "Something needs your attention",
+    };
+    ("Strike", body)
+}
+
+fn show_os(kind: &str, href: &str, tag: &str) {
     if notification_permission() != "granted" {
         return;
     }
-    let title = one_line(title, 80);
-    let body = one_line(body, 140);
-    if title.is_empty() {
-        return;
-    }
+    let (title, body) = banner_text(kind);
     let href = if href.starts_with("/#") {
         href.to_string()
     } else {
@@ -457,19 +457,24 @@ fn show_os(title: &str, body: &str, href: &str, tag: &str) {
         );
         let _ = js_sys::Reflect::set(
             &obj,
-            &JsValue::from_str("title"),
-            &JsValue::from_str(&title),
+            &JsValue::from_str("kind"),
+            &JsValue::from_str(kind),
         );
-        let _ = js_sys::Reflect::set(&obj, &JsValue::from_str("body"), &JsValue::from_str(&body));
+        let _ = js_sys::Reflect::set(
+            &obj,
+            &JsValue::from_str("title"),
+            &JsValue::from_str(title),
+        );
+        let _ = js_sys::Reflect::set(&obj, &JsValue::from_str("body"), &JsValue::from_str(body));
         let _ = js_sys::Reflect::set(&obj, &JsValue::from_str("href"), &JsValue::from_str(&href));
         let _ = js_sys::Reflect::set(&obj, &JsValue::from_str("tag"), &JsValue::from_str(&tag));
         let _ = ctrl.post_message(&obj);
         return;
     }
     let opts = web_sys::NotificationOptions::new();
-    opts.set_body(&body);
+    opts.set_body(body);
     opts.set_tag(&tag);
-    let _ = web_sys::Notification::new_with_options(&title, &opts);
+    let _ = web_sys::Notification::new_with_options(title, &opts);
 }
 
 fn sw_controller() -> Option<web_sys::ServiceWorker> {
@@ -702,7 +707,7 @@ pub fn NotificationBell(
                 });
             }
             if let Some(note) = best {
-                show_os(&note.title, &note.body, &note.href, &note.id);
+                show_os(&note.kind, &note.href, &note.id);
             }
             if max > prev {
                 high.set(max);
@@ -870,7 +875,7 @@ pub fn NotificationBell(
         });
         let p = prefs.get_untracked();
         if p.enabled && !quiet_active(&p, local_minutes()) {
-            show_os(&note.title, &note.body, &note.href, &note.id);
+            show_os(&note.kind, &note.href, &note.id);
         }
     });
 
@@ -1330,9 +1335,61 @@ mod tests {
     }
 
     #[test]
-    fn one_line_drops_dumps_and_clamps() {
-        assert_eq!(one_line("{\n\"output\":1}", 40), "Open Strike to read it.");
-        assert_eq!(one_line("bash is waiting", 80), "bash is waiting");
-        assert!(one_line(&"a".repeat(200), 20).chars().count() <= 20);
+    fn banner_text_is_generic_per_kind() {
+        assert_eq!(
+            banner_text("approval.needed"),
+            ("Strike", "An agent needs your input")
+        );
+        assert_eq!(
+            banner_text("child.finished"),
+            ("Strike", "A delegated run finished")
+        );
+        assert_eq!(
+            banner_text("child.blocked"),
+            ("Strike", "A delegated run is blocked")
+        );
+        assert_eq!(
+            banner_text("session.finished"),
+            ("Strike", "A run finished")
+        );
+        assert_eq!(
+            banner_text("gateway.disconnected"),
+            ("Strike", "The gateway disconnected")
+        );
+        assert_eq!(
+            banner_text("something.unknown"),
+            ("Strike", "Something needs your attention")
+        );
+    }
+
+    #[test]
+    fn banner_text_never_contains_note_title_or_body() {
+        // Regression: a note whose centre title/body carry a child name
+        // and a handoff summary must produce only the generic banner for
+        // its kind. The banner seam takes `kind` alone, so there is no
+        // argument through which the name/summary could leak.
+        let name = "scout-secret-name";
+        let summary = "handoff summary with secret details";
+        let note = Note {
+            id: "x".into(),
+            seq: 1,
+            kind: "child.finished".into(),
+            session_id: "parent-1".into(),
+            subject_id: "child-1".into(),
+            title: format!("{name} finished"),
+            body: summary.into(),
+            href: "/#session=parent-1".into(),
+            request_id: String::new(),
+            banner: true,
+            at: String::new(),
+        };
+        let (title, body) = banner_text(&note.kind);
+        for text in [title, body] {
+            assert!(!text.contains(name), "banner leaked child name: {text}");
+            assert!(!text.contains(summary), "banner leaked summary: {text}");
+            assert!(!text.contains(&note.title), "banner leaked title: {text}");
+            assert!(!text.contains(&note.body), "banner leaked body: {text}");
+        }
+        assert_eq!((title, body), ("Strike", "A delegated run finished"));
     }
 }
