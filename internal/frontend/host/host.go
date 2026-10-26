@@ -335,6 +335,55 @@ type FileContent struct {
 	Skip    bool
 }
 
+// Document is a viewer snapshot of one regular file under the work root.
+// SHA256 is the hex digest of the bytes returned in Content (the full file
+// when Truncated is false). MtimeUnixNano is the file's mtime. Together they
+// are the conflict token for DocumentWrite.
+type Document struct {
+	Path          string
+	Content       string
+	SHA256        string
+	MtimeUnixNano int64
+	Size          int64
+	Binary        bool
+	Truncated     bool
+	Notice        string
+}
+
+// DocumentWrite replaces one existing text file. ExpectSHA256 is required.
+// ExpectMtimeUnixNano, when non-zero, must match the file's mtime as well.
+// Implementations must not create files and must not follow symlinks.
+type DocumentWrite struct {
+	Path                string
+	Content             string
+	ExpectSHA256        string
+	ExpectMtimeUnixNano int64
+}
+
+// DocumentWriteResult is the revision token after a successful save.
+type DocumentWriteResult struct {
+	Path          string
+	SHA256        string
+	MtimeUnixNano int64
+	Size          int64
+}
+
+// DocumentConflict means the file's hash or mtime changed since it was read.
+// SHA256 and MtimeUnixNano describe the file on disk. Content is never set.
+type DocumentConflict struct {
+	Path          string
+	SHA256        string
+	MtimeUnixNano int64
+	Size          int64
+}
+
+func (e *DocumentConflict) Error() string {
+	if e == nil {
+		return "conflict: file changed"
+	}
+	return "conflict: file changed"
+}
+
 // EditApply is one exact-string replacement for Files.ApplyEdit (diff viewer).
 type EditApply struct {
 	Path       string
@@ -380,6 +429,16 @@ type Files interface {
 	// and escapes set Skip. Directories expand to an immediate-child listing
 	// only (not recursive file contents); Path is returned with a trailing "/".
 	ReadScoped(path string) (FileContent, error)
+	// ReadDocument reads one regular file for the document viewer. The path
+	// must stay under the work root after symlink evaluation. Binary files
+	// return Binary with empty Content. Oversize files set Truncated and
+	// return a prefix. Missing paths, directories, and escapes return errors.
+	ReadDocument(path string) (Document, error)
+	// WriteDocument atomically replaces an existing text file when the caller's
+	// hash and mtime still match. Symlinks, binaries, escapes, and files outside
+	// an active root ceiling are rejected and left unchanged. A mismatch
+	// returns *DocumentConflict.
+	WriteDocument(req DocumentWrite) (DocumentWriteResult, error)
 	// ApplyEdit performs an exact string replacement under the work root
 	// (symlink-safe). Failures leave the file unchanged. When OldString is
 	// absent but NewString is already present (single-match case), returns
@@ -687,26 +746,39 @@ type GoalCriterion struct {
 
 // Goal is a project-local loop-harness goal for /goal.
 type Goal struct {
-	ID            string
-	Description   string
-	Criteria      []GoalCriterion
-	Status        string // pending|active|paused|done|failed|aborted
-	MaxIterations int
-	MaxCostUSD    float64
-	AllowedTools  []string
-	CostUSD       float64
-	LastIteration int
-	FailReason    string
-	CreatedAt     time.Time
+	ID                 string
+	Description        string
+	Criteria           []GoalCriterion
+	Status             string // pending|active|paused|done|failed|aborted|blocked
+	MaxIterations      int
+	MaxCostUSD         float64
+	MaxWallClockS      int
+	MaxTokens          int
+	MaxVerifyFailures  int
+	MaxNoProgressIters int
+	AllowedTools       []string
+	DenyTools          []string
+	Autopilot          bool
+	CostUSD            float64
+	TokensUsed         int
+	LastIteration      int
+	FailReason         string
+	Escalation         string // "human" when the loop is waiting on a person
+	CreatedAt          time.Time
 }
 
 // GoalSetOptions configures /goal set constraints.
+// Zero numeric fields keep the harness defaults.
 type GoalSetOptions struct {
 	MaxIterations      int
 	MaxCostUSD         float64
 	MaxWallClockS      int
 	MaxNoProgressIters int
+	MaxTokens          int
+	MaxVerifyFailures  int
 	AllowedTools       []string
+	DenyTools          []string
+	Autopilot          bool
 }
 
 // GoalIteration is one committed loop pass for /goal log.
@@ -715,6 +787,9 @@ type GoalIteration struct {
 	Plan      string
 	StateHash string
 	CostUSD   float64
+	Tokens    int
+	// Verified is true when the critic satisfied every criterion this pass.
+	Verified bool
 	// Summary is a short human-readable line (criteria matrix + action count).
 	Summary string
 }

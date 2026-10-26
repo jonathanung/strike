@@ -57,6 +57,30 @@ pub async fn post_json_value(
     serde_json::from_str(&text).map_err(|e| e.to_string())
 }
 
+pub async fn put_json_value(
+    base: &str,
+    token: &str,
+    path: &str,
+    body: Value,
+) -> Result<Value, String> {
+    let resp = Request::put(&api(base, path))
+        .header("Authorization", &auth_header(token))
+        .json(&body)
+        .map_err(|e| e.to_string())?
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let status = resp.status();
+    let text = resp.text().await.unwrap_or_default();
+    if !(200..300).contains(&status) {
+        return Err(format!("HTTP {status} {text}"));
+    }
+    if text.trim().is_empty() {
+        return Ok(Value::Null);
+    }
+    serde_json::from_str(&text).map_err(|e| e.to_string())
+}
+
 pub async fn post_json(base: &str, token: &str, path: &str, body: Value) -> Result<(), String> {
     post_json_value(base, token, path, body).await.map(|_| ())
 }

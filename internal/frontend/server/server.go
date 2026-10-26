@@ -81,6 +81,10 @@ type Options struct {
 	OpsBurst int
 	// OpsClock overrides time.Now for rate-limit tests.
 	OpsClock func() time.Time
+	// SideChat answers questions about a session transcript. It must not
+	// submit protocol ops. Nil makes POST /v1/sidechat/ask return 503.
+	// POST /v1/sidechat/ops still refuses every op, including permission.reply.
+	SideChat SideChatModel
 }
 
 // Server is an HTTP server for session attach and optional live cockpit.
@@ -100,6 +104,9 @@ type Server struct {
 	// scriptCSPHashes allowlists inline <script> bodies from the embedded
 	// index.html (Trunk emits an inline WASM loader) without unsafe-inline.
 	scriptCSPHashes []string
+
+	// sideChat stores read-only Q&A beside the session log, not in it.
+	sideChat sideChatStore
 }
 
 // New validates options and builds a Server. Does not listen.
@@ -238,6 +245,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/files/search", s.handleFilesSearch)
 	s.mux.HandleFunc("GET /v1/changed-files", s.handleChangedFiles)
 	s.mux.HandleFunc("GET /v1/file", s.handleFile)
+	s.mux.HandleFunc("GET /v1/file/view", s.handleFileView)
+	s.mux.HandleFunc("PUT /v1/file", s.handleFilePut)
 	// Reviewed file mutations (WEBUI.9 / #1084) — typed apply only, no free-form write.
 	s.mux.HandleFunc("POST /v1/files/apply-edit", s.handleFilesApplyEdit)
 	s.mux.HandleFunc("POST /v1/files/apply-patch", s.handleFilesApplyPatch)
@@ -336,6 +345,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/diag", s.handleDiag)
 	s.mux.HandleFunc("POST /v1/diag", s.handleDiag)
 	s.mux.HandleFunc("POST /v1/ops", s.handleOps)
+	s.mux.HandleFunc("GET /v1/sidechat", s.handleSideChatList)
+	s.mux.HandleFunc("POST /v1/sidechat/ask", s.handleSideChatAsk)
+	s.mux.HandleFunc("POST /v1/sidechat/ops", s.handleSideChatOps)
 	s.mux.HandleFunc("GET /v1/live/events", s.handleLiveEvents)
 	s.mux.HandleFunc("GET /v1/ws", s.handleWS)
 	s.mux.HandleFunc("GET /{$}", s.handleAttach)

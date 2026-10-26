@@ -31,10 +31,10 @@ type Hooks struct {
 	PreCommit func(g Goal, rec IterationRecord) error
 }
 
-// DefaultHooks enforces the tool allowlist in pre_act.
+// DefaultHooks enforces deny rules first, then the tool allowlist.
 func DefaultHooks() Hooks {
 	return Hooks{
-		PreAct: AllowlistPreAct,
+		PreAct: GuardedPreAct,
 	}
 }
 

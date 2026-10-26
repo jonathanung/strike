@@ -87,6 +87,12 @@ type assembled struct {
 	firstSlot *rootSlot
 	// frameStore holds the last painted TUI frame for tui_snapshot (#1183).
 	frameStore *tool.TUIFrameStore
+	// sideProvider is a separate provider instance for read-only side chat.
+	// It is not the engine, and side chat must not submit ops through it.
+	// sideSelect rebuilds that instance when the live root's provider changes.
+	sideProvider provider.Provider
+	sideModel    string
+	sideSelect   func(string) (provider.Provider, string, error)
 }
 
 // assemble resolves project/config/auth, builds the engine and session store,
@@ -293,6 +299,9 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	// An explicit --provider must work or fail loudly; the config default is
 	// only a silent best-effort initial selection (pick one in-app with
 	// /provider otherwise). Headless exec always requires a usable provider.
+	var sideProvider provider.Provider
+	var sideModel string
+	var sideSelect func(string) (provider.Provider, string, error)
 	if requireProvider || (opts.providerSet && opts.provider != "") {
 		if cfg.Provider == "" {
 			_ = ledgerStore.Close()
@@ -304,7 +313,8 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			_ = historyStore.Close()
 			return nil, fmt.Errorf("no provider configured (pass --provider or set provider in config)")
 		}
-		if _, _, err := selectProvider(cfg.Provider); err != nil {
+		p, model, err := selectProvider(cfg.Provider)
+		if err != nil {
 			_ = ledgerStore.Close()
 			_ = artifactStore.Close()
 			_ = planStore.Close()
@@ -313,6 +323,12 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			closeMemory()
 			_ = historyStore.Close()
 			return nil, err
+		}
+		sideProvider = p
+		sideModel = model
+		sideSelect = selectProvider
+		if strings.TrimSpace(cfg.Model) != "" {
+			sideModel = cfg.Model
 		}
 	}
 
@@ -1189,6 +1205,9 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		spawnRoot:      spawn,
 		firstSlot:      first,
 		frameStore:     frameStore,
+		sideProvider:   sideProvider,
+		sideModel:      sideModel,
+		sideSelect:     sideSelect,
 	}, nil
 }
 
