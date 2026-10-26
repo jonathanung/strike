@@ -383,27 +383,33 @@ pub fn effort_section(info: Option<&ModelInfo>, current: &str) -> EffortSection 
         };
     }
     let mut choices = Vec::new();
-    for id in &variants {
-        if let Some(level) = parse_effort(id) {
+    // Published variants are the provider's effort set. The protocol ladder
+    // is the fallback when the catalog only says "reasoning" (or the live
+    // session already has an effort) and does not name variants.
+    if variants.is_empty() {
+        for (level, detail) in EFFORTS {
             choices.push(EffortChoice {
-                label: id.clone(),
-                detail: format!("variant → {level}"),
-                level,
-            });
-        } else {
-            choices.push(EffortChoice {
-                label: id.clone(),
-                detail: "This variant does not report an effort level.".into(),
-                level: String::new(),
+                label: (*level).into(),
+                detail: (*detail).into(),
+                level: (*level).into(),
             });
         }
-    }
-    for (level, detail) in EFFORTS {
-        choices.push(EffortChoice {
-            label: (*level).into(),
-            detail: (*detail).into(),
-            level: (*level).into(),
-        });
+    } else {
+        for id in &variants {
+            if let Some(level) = parse_effort(id) {
+                choices.push(EffortChoice {
+                    label: id.clone(),
+                    detail: format!("variant → {level}"),
+                    level,
+                });
+            } else {
+                choices.push(EffortChoice {
+                    label: id.clone(),
+                    detail: "This variant does not report an effort level.".into(),
+                    level: String::new(),
+                });
+            }
+        }
     }
     let reason = if !reported {
         "The catalog does not report reasoning. This session already has an effort from the daemon.".into()
@@ -813,9 +819,11 @@ mod tests {
         reasoned.variant_ids = vec!["low".into(), "nightly".into()];
         let section = effort_section(Some(&reasoned), "");
         assert!(section.shown);
+        assert_eq!(section.choices.len(), 2);
         assert_eq!(section.choices[0].level, "low");
         assert_eq!(section.choices[1].level, "");
         assert!(section.choices[1].detail.contains("does not report"));
+        assert!(section.choices.iter().all(|c| c.level != "max"));
         assert!(parse_effort(" Max ").is_some());
         assert!(parse_effort("turbo").is_none());
     }

@@ -996,10 +996,8 @@ select.mode, .daemon select {
   width: 100%;
 }
 .model-menu-panel {
-  position: absolute;
+  position: fixed;
   z-index: 6;
-  left: 0;
-  bottom: calc(100% + 8px);
   width: min(360px, 92vw);
   max-height: min(70vh, 520px);
   overflow: auto;

@@ -150,8 +150,11 @@ warning and Send stays available. `contextFit` clears on
 later usage report falls under 80% of the daemon limit.
 
 Effort is offered when the catalog row reports `reasoning`, when it lists
-variants, or when the live session already has an effort. Otherwise the
-menu says reasoning is not reported. False capability flags are omitted.
+variants, or when the live session already has an effort. Published
+variants are the choices (a variant id that is not an effort level is
+shown disabled). The protocol ladder is the fallback when no variants are
+named. Otherwise the menu says reasoning is not reported. False capability
+flags are omitted.
 They mean unknown or unsupported; #1054 does not yet split those.
 
 Pins and the "this session / global default" mark are browser state plus

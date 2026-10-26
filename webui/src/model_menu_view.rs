@@ -2,7 +2,7 @@
 //! steer chips stay in the shell. Pins live in this browser
 //! (`strike.modelPins`), same idea as session pins.
 
-use leptos::html::Input;
+use leptos::html::{Button, Input};
 use leptos::prelude::*;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
@@ -32,6 +32,39 @@ fn save_pins(pins: &[String]) {
             let _ = s.set_item(PIN_STORAGE, &raw);
         }
     }
+}
+
+fn place_panel(chip_ref: NodeRef<Button>, panel_pos: RwSignal<String>) {
+    let Some(btn) = chip_ref.get_untracked() else {
+        return;
+    };
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let el: &web_sys::Element = btn.unchecked_ref();
+    let rect = el.get_bounding_client_rect();
+    let vw = window
+        .inner_width()
+        .ok()
+        .and_then(|v| v.as_f64())
+        .unwrap_or(1280.0);
+    let vh = window
+        .inner_height()
+        .ok()
+        .and_then(|v| v.as_f64())
+        .unwrap_or(800.0);
+    let width = 360.0_f64.min(vw * 0.92);
+    let mut left = rect.left();
+    if left + width > vw - 8.0 {
+        left = (vw - width - 8.0).max(8.0);
+    }
+    if left < 8.0 {
+        left = 8.0;
+    }
+    let bottom = (vh - rect.top() + 8.0).max(8.0);
+    panel_pos.set(format!(
+        "left:{left:.0}px;bottom:{bottom:.0}px;width:{width:.0}px;"
+    ));
 }
 
 fn focus_filter(filter_ref: NodeRef<Input>) {
@@ -84,9 +117,28 @@ pub fn ModelMenu(
     let cursor = RwSignal::new(0usize);
     let pins = RwSignal::new(load_pins());
     let filter_ref = NodeRef::<Input>::new();
+    let chip_ref = NodeRef::<Button>::new();
+    let panel_pos = RwSignal::new(String::new());
+
+    {
+        let chip_ref = chip_ref;
+        let panel_pos = panel_pos;
+        let open = open;
+        let on_resize = Closure::<dyn FnMut()>::new(move || {
+            if open.get_untracked() {
+                place_panel(chip_ref, panel_pos);
+            }
+        });
+        if let Some(window) = web_sys::window() {
+            let _ = window
+                .add_event_listener_with_callback("resize", on_resize.as_ref().unchecked_ref());
+        }
+        on_resize.forget();
+    }
 
     Effect::new(move |_| {
         if open.get() {
+            place_panel(chip_ref, panel_pos);
             focus_filter(filter_ref);
         } else {
             filter.set(String::new());
@@ -131,6 +183,7 @@ pub fn ModelMenu(
                     role="dialog"
                     aria-label="Models"
                     data-model-menu="true"
+                    style=move || panel_pos.get()
                     on:click=move |ev: web_sys::MouseEvent| ev.stop_propagation()
                 >
                     {move || {
@@ -427,6 +480,7 @@ pub fn ModelMenu(
                     }
                     class
                 }
+                node_ref=chip_ref
                 data-model-chip="true"
                 aria-haspopup="dialog"
                 aria-expanded=move || if open.get() { "true" } else { "false" }
