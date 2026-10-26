@@ -56,6 +56,9 @@ Endpoints:
   GET  /v1/sessions                 session list (+ liveId)
   GET  /v1/sessions/{id}/events     SSE tail of a session JSONL log
   GET  /v1/workflows                workflow catalog
+  GET  /v1/schedules                persisted schedules
+  POST /v1/schedules                create a cron, interval, one-shot, or heartbeat
+  POST /v1/schedules/{id}/run       start a root session now
   POST /v1/workflows/save           save document (never activates)
   POST /v1/workflows/{name}/start   start after confirm (rejects invalid)
   POST /v1/workflows/stop           stop active workflow
@@ -474,6 +477,17 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		cwd = ""
+	}
+	schedules, err := openScheduleService(workspace.DefaultDir(), liveHub, services, wsStore, cwd)
+	if err != nil {
+		return err
+	}
+	if liveHub != nil && !opts.readOnly {
+		go schedules.Run(ctx)
+	}
 
 	srv, err := server.New(server.Options{
 		Addr:       opts.addr,
@@ -482,6 +496,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		TokenFile:  opts.tokenFile,
 		SessionDir: sessionDir,
 		Workspaces: wsStore,
+		Schedules:  schedules,
 		LiveHub:    liveHub,
 		Services:   services,
 		Sandbox:    sandboxSnap,
@@ -570,6 +585,7 @@ func printServeBanner(w io.Writer, b serveBanner) {
 	}
 	fmt.Fprintf(w, "  sessions dir: %s\n", b.sessionDir)
 	fmt.Fprintln(w, "  audit:   serve ops → ~/.strike/audit (family serve_op)")
+	fmt.Fprintln(w, "  schedules: ~/.strike/schedules.json  (unattended runs use workspace mode, else plan)")
 	fmt.Fprintln(w, "  remote:  ssh -L 8787:127.0.0.1:8787 user@host  (loopback only; see docs/web.md)")
 	fmt.Fprintln(w, "experimental web cockpit — TUI remains primary")
 }

@@ -28,6 +28,7 @@ import (
 	"github.com/jonathanung/strike/internal/persist/session"
 	"github.com/jonathanung/strike/internal/persist/workspace"
 	"github.com/jonathanung/strike/internal/product/version"
+	"github.com/jonathanung/strike/internal/schedule"
 )
 
 // Options configures the attach server.
@@ -66,6 +67,8 @@ type Options struct {
 	// Workspaces is the durable workspace registry for /v1/workspaces.
 	// Nil returns 503 from those routes.
 	Workspaces *workspace.Store
+	// Schedules is the persisted clock (/v1/schedules). Nil returns 501.
+	Schedules *schedule.Service
 	// Services exposes optional frontend host capabilities.
 	Services *host.Services
 	// Sandbox enables the sandbox capability and seeds live roots that do not
@@ -318,6 +321,15 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/sessions/{id}/timeline", s.handleSessionTimeline)
 	s.mux.HandleFunc("GET /v1/sessions/{id}/timeline/export", s.handleSessionTimelineExport)
 	s.mux.HandleFunc("GET /v1/sessions", s.handleSessions)
+	s.mux.HandleFunc("GET /v1/schedules", s.handleSchedulesList)
+	s.mux.HandleFunc("POST /v1/schedules", s.handleScheduleCreate)
+	s.mux.HandleFunc("GET /v1/schedules/{id}/history", s.handleScheduleHistory)
+	s.mux.HandleFunc("POST /v1/schedules/{id}/pause", s.handleSchedulePause)
+	s.mux.HandleFunc("POST /v1/schedules/{id}/resume", s.handleScheduleResume)
+	s.mux.HandleFunc("POST /v1/schedules/{id}/run", s.handleScheduleRun)
+	s.mux.HandleFunc("GET /v1/schedules/{id}", s.handleScheduleGet)
+	s.mux.HandleFunc("PATCH /v1/schedules/{id}", s.handleScheduleUpdate)
+	s.mux.HandleFunc("DELETE /v1/schedules/{id}", s.handleScheduleDelete)
 	s.mux.HandleFunc("GET /v1/workspaces", s.handleWorkspacesList)
 	s.mux.HandleFunc("POST /v1/workspaces", s.handleWorkspaceAdd)
 	s.mux.HandleFunc("POST /v1/workspaces/{id}/activate", s.handleWorkspaceActivate)

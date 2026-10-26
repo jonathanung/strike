@@ -65,8 +65,9 @@ try {
   const missing = await status("/v1/workspaces");
   const wrong = await status("/v1/workspaces", { Authorization: "Bearer wrong" });
   const right = await status("/v1/workspaces", { Authorization: `Bearer ${token}` });
-  if (missing !== 401 || wrong !== 401 || right !== 200) {
-    throw new Error(`auth statuses missing=${missing} wrong=${wrong} right=${right}`);
+  const schedules = await status("/v1/schedules", { Authorization: `Bearer ${token}` });
+  if (missing !== 401 || wrong !== 401 || right !== 200 || schedules !== 200) {
+    throw new Error(`auth statuses missing=${missing} wrong=${wrong} right=${right} schedules=${schedules}`);
   }
 
   await writeFile(join(home, ".strike", "config.json"), '{"sandboxAllowDegrade":true}\n').catch(() => {});
@@ -211,6 +212,43 @@ try {
     token,
     repoDir: process.cwd(),
   });
+
+  // Same-origin Schedule page. The daemon token lives in localStorage
+  // (`strike.token`); the cookie handoff is HttpOnly and the page's fetch
+  // uses the Authorization header.
+  await send("Runtime.evaluate", {
+    expression: `localStorage.setItem("strike.token", ${JSON.stringify(token)})`,
+  });
+  await send("Page.reload", { ignoreCache: true });
+  text = "";
+  for (let i = 0; i < 40; i++) {
+    const ev = await send("Runtime.evaluate", {
+      expression: `document.body ? document.body.innerText : ""`,
+      returnByValue: true,
+    });
+    text = ev.result?.result?.value || "";
+    if (text.includes("Run a command") && text.includes("Schedule")) break;
+    await delay(250);
+  }
+  if (!text.includes("Schedule")) {
+    throw new Error(`schedule tab missing after reload text=${text.slice(0, 400)}`);
+  }
+  await send("Runtime.evaluate", {
+    expression: `document.querySelector('[data-view="schedule"]').click()`,
+  });
+  text = "";
+  for (let i = 0; i < 40; i++) {
+    const ev = await send("Runtime.evaluate", {
+      expression: `document.body ? document.body.innerText : ""`,
+      returnByValue: true,
+    });
+    text = ev.result?.result?.value || "";
+    if (text.includes("Nothing is scheduled") && !text.includes("unauthorized")) break;
+    await delay(250);
+  }
+  if (!text.includes("Nothing is scheduled") || text.includes("unauthorized")) {
+    throw new Error(`schedule page check failed text=${text.slice(0, 500)}`);
+  }
   console.log("webui-smoke ok");
 } catch (err) {
   console.error(String(err));

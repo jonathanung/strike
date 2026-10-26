@@ -1,11 +1,12 @@
 //! Strike web client. The session list is live roots plus saved sessions.
-//! Activity, Files, and Changes are the side panel. Schedule, memory,
-//! knowledge, artifacts, and the task runner are not drawn here; see
-//! docs/webui-planned.md.
+//! Activity, Files, and Changes are the side panel. Schedule is the clock
+//! (`schedule` module). Memory, knowledge, artifacts, and the task runner
+//! are not drawn here; see docs/webui-planned.md.
 
 mod api;
 mod editor;
 mod model;
+mod schedule;
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -410,6 +411,12 @@ fn palette_cmds() -> &'static [PaletteCmd] {
             id: "daemon",
             label: "Daemon",
             detail: "This gateway, its token, and workspaces",
+        },
+        PaletteCmd {
+            section: "Apps",
+            id: "schedule",
+            label: "Schedule",
+            detail: "Cron, interval, one-shot, and heartbeat runs",
         },
         PaletteCmd {
             section: "Settings",
@@ -1158,6 +1165,7 @@ fn App() -> impl IntoView {
             "stop-all" => stop_all(),
             "chat" => mode.set("chat".into()),
             "daemon" => mode.set("daemon".into()),
+            "schedule" => mode.set("schedule".into()),
             "steer" => set_enter("steer".into()),
             "queue" => set_enter("queue".into()),
             "mode-default" => set_perm("default".into()),
@@ -1250,6 +1258,9 @@ fn App() -> impl IntoView {
             } else if ev.alt_key() && !ev.meta_key() && !ev.ctrl_key() && ev.key() == "\\" {
                 ev.prevent_default();
                 focus.update(|v| *v = !*v);
+            } else if ev.alt_key() && !ev.meta_key() && !ev.ctrl_key() && ev.key().eq_ignore_ascii_case("s") {
+                ev.prevent_default();
+                mode.set("schedule".into());
             } else if ev.key() == "Escape" {
                 let menu = palette_open.get_untracked()
                     || mode_menu.get_untracked()
@@ -1346,6 +1357,7 @@ fn App() -> impl IntoView {
                 }}</span>
                 <div class="segmented" role="tablist" aria-label="View">
                     <button class=move || if mode.get() == "chat" { "seg on" } else { "seg" } on:click=move |_| mode.set("chat".into())>"Chat"</button>
+                    <button data-view="schedule" class=move || if mode.get() == "schedule" { "seg on" } else { "seg" } on:click=move |_| mode.set("schedule".into())>"Schedule"</button>
                     <button class=move || if mode.get() == "daemon" { "seg on" } else { "seg" } on:click=move |_| mode.set("daemon".into())>"Daemon"</button>
                 </div>
             </div>
@@ -1408,6 +1420,15 @@ fn App() -> impl IntoView {
                 remote_name=remote_name
                 remote_url=remote_url
                 refresh=refresh_meta
+            />
+        </Show>
+        <Show when=move || mode.get() == "schedule">
+            <schedule::SchedulePage
+                base=base
+                token=token
+                mode=mode
+                active_root=active_root
+                status=status
             />
         </Show>
         <Show when=move || mode.get() == "chat">

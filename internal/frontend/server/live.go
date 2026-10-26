@@ -180,18 +180,29 @@ func (h *LiveHub) List() []RootSummary {
 
 // Create spawns a new empty root engine via the spawn callback and activates it.
 func (h *LiveHub) Create(ctx context.Context) (RootCreateResult, error) {
-	if h.spawn == nil {
+	res, err := h.Spawn(ctx)
+	if err != nil {
+		return RootCreateResult{}, err
+	}
+	h.mu.Lock()
+	if h.entries[res.ID] != nil {
+		h.active = res.ID
+	}
+	h.mu.Unlock()
+	return res, nil
+}
+
+// Spawn registers a new root without changing the cockpit's active session.
+// Unattended callers (schedules, triggers) use this so a clock fire does not
+// steal the transcript the user is looking at.
+func (h *LiveHub) Spawn(ctx context.Context) (RootCreateResult, error) {
+	if h == nil || h.spawn == nil {
 		return RootCreateResult{}, errors.New("root creation unavailable")
 	}
 	rootID, err := h.spawn(ctx)
 	if err != nil {
 		return RootCreateResult{}, err
 	}
-	h.mu.Lock()
-	if h.entries[rootID] != nil {
-		h.active = rootID
-	}
-	h.mu.Unlock()
 	return RootCreateResult{ID: rootID, SessionID: rootID}, nil
 }
 
