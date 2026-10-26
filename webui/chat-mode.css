@@ -94,6 +94,7 @@
 .shell.layout-conversation.drawer-sessions .rail,
 .shell.layout-conversation.drawer-panel .side {
   display: flex;
+  flex-direction: column;
   position: fixed;
   z-index: 40;
   max-height: none;

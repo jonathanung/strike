@@ -334,6 +334,58 @@ try {
   if (!String(chat.cls).includes("layout-conversation") || chat.bar !== "flex" || !chat.sessions || !chat.panel) {
     throw new Error(`conversation layout failed: ${JSON.stringify(chat)}`);
   }
+  // Drawer content must lay out at full width, not crushed into a flex row:
+  // assert a content element inside each open drawer is >200px wide (the
+  // drawer class alone passed while the sessions card rendered ~35px wide).
+  const drawerMeasure = async (drawerClass, drawerSel, contentSel, fallbackSel) => {
+    let measured = {};
+    for (let i = 0; i < 20; i++) {
+      const ev = await send("Runtime.evaluate", {
+        expression: `(() => {
+          const shell = document.querySelector(".shell");
+          const drawer = document.querySelector(${JSON.stringify(drawerSel)});
+          const content = drawer ? drawer.querySelector(${JSON.stringify(contentSel)}) || drawer.querySelector(${JSON.stringify(fallbackSel)}) : null;
+          return JSON.stringify({
+            cls: shell ? shell.className : "",
+            direction: drawer ? getComputedStyle(drawer).flexDirection : "",
+            drawerWidth: drawer ? drawer.getBoundingClientRect().width : 0,
+            contentWidth: content ? content.getBoundingClientRect().width : 0,
+          });
+        })()`,
+        returnByValue: true,
+      });
+      measured = JSON.parse(ev.result?.result?.value || "{}");
+      if (
+        String(measured.cls).includes(drawerClass) &&
+        measured.direction === "column" &&
+        measured.drawerWidth > 200 &&
+        measured.contentWidth > 200
+      ) {
+        break;
+      }
+      await delay(100);
+    }
+    if (
+      !String(measured.cls).includes(drawerClass) ||
+      measured.direction !== "column" ||
+      measured.drawerWidth <= 200 ||
+      measured.contentWidth <= 200
+    ) {
+      throw new Error(`conversation drawer content crushed: ${JSON.stringify(measured)}`);
+    }
+    return measured;
+  };
+  await send("Runtime.evaluate", {
+    expression: `document.querySelector("[data-chat-sessions]")?.click()`,
+  });
+  await drawerMeasure("drawer-sessions", ".shell.drawer-sessions .rail", ".session-row", ".section-head");
+  await send("Runtime.evaluate", {
+    expression: `document.querySelector("[data-chat-panel]")?.click()`,
+  });
+  await drawerMeasure("drawer-panel", ".shell.drawer-panel .side", ".side-tabs", ".activity");
+  await send("Runtime.evaluate", {
+    expression: `document.querySelector("[data-chat-panel]")?.click()`,
+  });
   await send("Runtime.evaluate", {
     expression: `document.querySelector('[data-layout="cockpit"]')?.click()`,
   });
