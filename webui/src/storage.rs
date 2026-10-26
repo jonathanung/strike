@@ -4,7 +4,8 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use serde::Deserialize;
 
-use crate::api::{delete_json, get_json, put_json};
+use crate::api::{delete_json, get_json, now_ms, put_json};
+use crate::model::{fmt_ago, rfc3339_to_ms};
 
 #[derive(Clone, Deserialize, Default)]
 struct MemoryEntry {
@@ -355,7 +356,23 @@ pub fn StoragePanel(
                         };
                         let tags = entry.tags.join(", ");
                         let author = if entry.author.is_empty() { "unknown".to_string() } else { entry.author.clone() };
-                        let when = entry.updated_at.clone();
+                        // Short relative stamp in the UI's existing
+                        // vocabulary (fmt_ago, as the session list uses),
+                        // inside the link block: the full RFC3339 string
+                        // as a flex sibling starved the link block at
+                        // panel width. Fall back to the date alone when
+                        // the timestamp does not parse.
+                        let when_ms = rfc3339_to_ms(&entry.updated_at);
+                        let when = if when_ms > 0.0 {
+                            let rel = fmt_ago((when_ms / 1000.0) as i64, (now_ms() / 1000.0) as i64);
+                            if rel.is_empty() {
+                                entry.updated_at.chars().take(10).collect()
+                            } else {
+                                rel
+                            }
+                        } else {
+                            entry.updated_at.chars().take(10).collect::<String>()
+                        };
                         let del = key.clone();
                         view! {
                             <li class="storage-row">
@@ -367,8 +384,8 @@ pub fn StoragePanel(
                                     <span class="name">{key.clone()}</span>
                                     <span class="path">{shown}</span>
                                     <span class="path">{format!("{author} · {tags}")}</span>
+                                    <span class="path">{when}</span>
                                 </button>
-                                <span class="hint">{when}</span>
                                 <button type="button" class="secondary" on:click=move |_| delete_memory(del.clone())>"Delete"</button>
                             </li>
                         }

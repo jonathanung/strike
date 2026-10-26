@@ -367,6 +367,21 @@ try {
   if (memoryText.includes(secret)) {
     throw new Error("memory panel rendered the raw secret");
   }
+  // A memory row's key cell must stay readable at panel width: the full
+  // RFC3339 timestamp once sat as a flex sibling and crushed the link
+  // block to ~35px (PR #1305 review).
+  const memKeyWidth = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const row = [...document.querySelectorAll(".storage-row")].find((r) => r.textContent.includes("smoke-pref"));
+      const link = row ? row.querySelector(".link") : null;
+      return link ? link.getBoundingClientRect().width : 0;
+    })()`,
+    returnByValue: true,
+  });
+  const memKeyWidthPx = memKeyWidth.result?.result?.value || 0;
+  if (!(memKeyWidthPx > 100)) {
+    throw new Error(`memory row key cell too narrow width=${memKeyWidthPx}`);
+  }
   const goalCheck = async (expression, ready) => {
     let body = "";
     for (let i = 0; i < 40; i++) {
