@@ -39,7 +39,12 @@ func (m sideChatModel) resolve(in server.SideChatPrompt) (provider.Provider, str
 	p, model, name := m.p, m.model, m.name
 	wantP := strings.TrimSpace(in.Provider)
 	wantM := strings.TrimSpace(in.Model)
-	if wantP != "" && !strings.EqualFold(wantP, name) {
+	// Report the canonical id the live status stores. Vendor Name() values
+	// such as "openai (chatgpt)" are not that id.
+	if wantP != "" {
+		name = wantP
+	}
+	if wantP != "" && !strings.EqualFold(wantP, m.name) {
 		if m.pick == nil {
 			return nil, "", "", fmt.Errorf("side chat cannot switch to provider %s", wantP)
 		}
@@ -51,7 +56,6 @@ func (m sideChatModel) resolve(in server.SideChatPrompt) (provider.Provider, str
 			return nil, "", "", fmt.Errorf("side chat provider %s is not configured", wantP)
 		}
 		p = np
-		name = np.Name()
 		if strings.TrimSpace(defModel) != "" {
 			model = strings.TrimSpace(defModel)
 		}

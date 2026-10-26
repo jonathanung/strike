@@ -45,6 +45,8 @@ type SideChatTurn struct {
 	Answer    string `json:"answer,omitempty"`
 	At        string `json:"at"`
 	FocusName string `json:"focusName,omitempty"`
+	Provider  string `json:"provider,omitempty"`
+	Model     string `json:"model,omitempty"`
 }
 
 // SideChatPrompt is the context for one read-only model call.
@@ -78,7 +80,9 @@ type sideChatStore struct {
 }
 
 func sideChatPath(dir, id string) string {
-	return filepath.Join(dir, id+".sidechat.jsonl")
+	// A sibling *.jsonl is a session. Keep turns in a directory so
+	// session.Manager.List does not offer the sidecar as a root.
+	return filepath.Join(dir, "sidechat", id+".jsonl")
 }
 
 func sideChatRefusal(opType string) string {
@@ -195,7 +199,7 @@ func (s *Server) handleSideChatAsk(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "invalid session id"})
 		return
 	}
-	if focusID != "" && !sideChatFocusAllowed(live, focusID) {
+	if focusID != "" && !sideChatFocusAllowed(live, s.opts.SessionDir, focusID) {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "focus session is not part of this session"})
 		return
 	}
@@ -239,6 +243,8 @@ func (s *Server) handleSideChatAsk(w http.ResponseWriter, r *http.Request) {
 		Answer:    clip(answer, sideChatMaxRunes),
 		At:        time.Now().UTC().Format(time.RFC3339),
 		FocusName: focusName,
+		Provider:  completion.Provider,
+		Model:     completion.Model,
 	})
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, opErrorResponse{Error: "saving side chat: " + err.Error()})
@@ -313,7 +319,7 @@ func readSideChatBody(w http.ResponseWriter, r *http.Request) ([]byte, error) {
 
 // sideChatFocusAllowed is the live root itself or a child on its roster.
 // Any other id in the session directory is another root's log.
-func sideChatFocusAllowed(live *Live, focusID string) bool {
+func sideChatFocusAllowed(live *Live, dir, focusID string) bool {
 	if focusID == "" {
 		return true
 	}
@@ -328,7 +334,12 @@ func sideChatFocusAllowed(live *Live, focusID string) bool {
 			return true
 		}
 	}
-	return false
+	meta, err := session.ReadMeta(dir, focusID)
+	if err != nil {
+		return false
+	}
+	root := live.SessionID()
+	return meta.ParentSessionID == root || meta.LeadSessionID == root
 }
 
 func (s *Server) sideChatTranscript(sessionID, focusID, focusName string) (string, error) {
@@ -404,10 +415,11 @@ func (s *Server) appendSideChatTurn(sessionID string, turn SideChatTurn) (SideCh
 	}
 	s.sideChat.mu.Lock()
 	defer s.sideChat.mu.Unlock()
-	if err := os.MkdirAll(s.opts.SessionDir, 0o755); err != nil {
+	path := sideChatPath(s.opts.SessionDir, sessionID)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return SideChatTurn{}, err
 	}
-	f, err := os.OpenFile(sideChatPath(s.opts.SessionDir, sessionID), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		return SideChatTurn{}, err
 	}

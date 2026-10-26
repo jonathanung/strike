@@ -298,6 +298,78 @@ func TestSideChatTranscriptAllowsImageSizedLine(t *testing.T) {
 	}
 }
 
+func TestSideChatTurnsAreNotSessions(t *testing.T) {
+	ops := make(chan protocol.Op, 1)
+	dir := t.TempDir()
+	const id = "sess-side"
+	live := NewLive(id, dir, nil, ops)
+	defer live.Close()
+	appendSessionEvent(t, dir, id, protocol.UserMessage{Text: "hello"})
+	model := &scriptedSideChat{text: "noted"}
+	srv, err := New(Options{SessionDir: dir, Live: live, SideChat: model})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := postSide(t, srv, "/v1/sidechat/ask", `{"text":"what happened?"}`)
+	if res.Code != http.StatusOK {
+		t.Fatalf("ask = %d %s", res.Code, res.Body.String())
+	}
+	if _, err := os.Stat(sideChatPath(dir, id)); err != nil {
+		t.Fatal(err)
+	}
+	list, err := session.NewManager(dir).List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, info := range list {
+		if strings.Contains(info.ID, "sidechat") {
+			t.Fatalf("session list included sidecar %q", info.ID)
+		}
+	}
+	found := false
+	for _, info := range list {
+		if info.ID == id {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("real session missing from list: %#v", list)
+	}
+}
+
+func TestSideChatFocusAllowsSavedChild(t *testing.T) {
+	ops := make(chan protocol.Op, 1)
+	dir := t.TempDir()
+	const id = "sess-side"
+	live := NewLive(id, dir, nil, ops)
+	defer live.Close()
+	appendSessionEvent(t, dir, "child-1", protocol.TextDelta{Text: "saved child output"})
+	if err := session.WriteMeta(dir, "child-1", session.Meta{ParentSessionID: id}); err != nil {
+		t.Fatal(err)
+	}
+	model := &scriptedSideChat{text: "from the child"}
+	srv, err := New(Options{SessionDir: dir, Live: live, SideChat: model})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := postSide(t, srv, "/v1/sidechat/ask", `{"text":"what did the child see?","focusSessionId":"child-1","focusName":"scout"}`)
+	if res.Code != http.StatusOK {
+		t.Fatalf("ask = %d %s", res.Code, res.Body.String())
+	}
+	if !strings.Contains(model.got.Transcript, "saved child output") {
+		t.Fatalf("transcript = %q", model.got.Transcript)
+	}
+	if !strings.Contains(res.Body.String(), `"provider":"echo"`) || !strings.Contains(res.Body.String(), `"model":"echo"`) {
+		t.Fatalf("answer = %s", res.Body.String())
+	}
+	listReq := httptest.NewRequest(http.MethodGet, "/v1/sidechat", nil)
+	listRes := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(listRes, listReq)
+	if listRes.Code != http.StatusOK || !strings.Contains(listRes.Body.String(), `"provider":"echo"`) || !strings.Contains(listRes.Body.String(), `"model":"echo"`) {
+		t.Fatalf("list = %d %s", listRes.Code, listRes.Body.String())
+	}
+}
+
 func TestSideChatAskRequiresModel(t *testing.T) {
 	ops := make(chan protocol.Op, 1)
 	live := NewLive("sess-side", t.TempDir(), nil, ops)

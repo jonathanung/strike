@@ -1282,9 +1282,11 @@ fn App() -> impl IntoView {
                 ev.prevent_default();
                 side_open.update(|v| *v = !*v);
             } else if ev.key() == "Escape" {
+                let side_was_open = side_open.get_untracked();
                 let menu = palette_open.get_untracked()
                     || mode_menu.get_untracked()
-                    || model_menu.get_untracked();
+                    || model_menu.get_untracked()
+                    || side_was_open;
                 palette_open.set(false);
                 mode_menu.set(false);
                 model_menu.set(false);

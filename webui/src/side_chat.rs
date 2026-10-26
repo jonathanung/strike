@@ -198,11 +198,15 @@ pub fn SideChatPanel(
         draft.set(String::new());
         pending.set(true);
         error.set(String::new());
+        let expected = session.clone();
         let (b, t) = (base.get_untracked(), token.get_untracked());
         spawn_local(async move {
-            let path = format!("/v1/sidechat/ask?root={}", crate::api::js_encode(&session));
+            let path = format!("/v1/sidechat/ask?root={}", crate::api::js_encode(&expected));
             let result = post_json_value(&b, &t, &path, body).await;
             pending.set(false);
+            if root.get_untracked() != expected {
+                return;
+            }
             match result {
                 Ok(value) => match serde_json::from_value::<SideChatAnswer>(value) {
                     Ok(answer) if answer.read_only => {

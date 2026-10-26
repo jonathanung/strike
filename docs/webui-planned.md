@@ -120,8 +120,8 @@ route builds a transcript from the session JSONL and makes a separate model
 call with no tools, using the live root's current provider and model.
 `focusSessionId` is accepted only for that root or a child on its roster.
 Switching roots clears the drawer's focus. Turns are stored in
-`<session-id>.sidechat.jsonl`, not in the session log, so they are not
-`user.input`.
+`sidechat/<session-id>.jsonl`, not the session log, so they are not
+`user.input` and the session list does not treat the file as a root.
 
 `POST /v1/sidechat/ops` refuses every protocol op. A `permission.reply`
 from this channel cannot approve a tool; the daemon returns

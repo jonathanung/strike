@@ -188,7 +188,7 @@ func TestSideChatModelFollowsLiveProvider(t *testing.T) {
 	if other.req.Model != "claude-opus" || len(other.req.Tools) != 0 {
 		t.Fatalf("request = %#v", other.req)
 	}
-	if !strings.Contains(got.Text, "what changed?") || got.Model != "claude-opus" {
+	if !strings.Contains(got.Text, "what changed?") || got.Model != "claude-opus" || got.Provider != "anthropic" {
 		t.Fatalf("completion = %#v", got)
 	}
 
