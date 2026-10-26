@@ -1055,12 +1055,13 @@ select.mode, .daemon select {
   background: var(--surface);
 }
 @media (max-width: 960px) {
-  .gq-backdrop { padding-top: var(--space-3); }
+  .gq-backdrop { padding: var(--space-3) var(--space-3) var(--space-4); }
   .gq-dialog { max-height: calc(100vh - 24px); }
 }
 @media (max-width: 500px) {
-  .gq-qr, .gq-qr svg { width: 160px; height: 160px; }
+  .gq-dialog { padding: var(--space-3); }
   .gq-note { font-size: var(--type-sm); }
+  .gq-qr, .gq-qr svg { width: 160px; height: 160px; }
 }
 /* feature:gateway-qr end */
 
