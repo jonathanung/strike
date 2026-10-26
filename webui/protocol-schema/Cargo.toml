@@ -1,0 +1,10 @@
+[package]
+name = "protocol-schema"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Generated Strike Op/Event types. Source of truth is pkg/protocol."
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
