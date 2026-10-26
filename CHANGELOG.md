@@ -16,6 +16,13 @@ materially affect the shipped product.
 
 ### Added
 
+- **Phone cockpit** — at phone width the web client shows one pane at a
+  time (sessions, chat, activity, files, daemon) with a bottom nav, 44px
+  targets, and safe-area padding. The composer stays in the visual
+  viewport when the keyboard opens. Send stays on screen while the chip
+  row scrolls. A phone resume keeps the transcript and continues the live
+  stream from the last SSE id. See [docs/mobile.md](docs/mobile.md)
+  ([#1311](https://github.com/jonathanung/strike/issues/1311)).
 - **Session log contract for external ingesters** — `docs/session-format.md` specifies the JSONL envelope, `session.header`, every event type, and the sidecar. New sidecars repeat `sessionId` (the filename) and record the last selected `model`. Fork and import copy that model from the kept log (import falls back to the package sidecar when the log has no selection). Older sidecars still load. A golden fixture fails if a field or event type is renamed or removed ([#1274](https://github.com/jonathanung/strike/issues/1274)).
 - **Session status** — one vocabulary (`idle`, `running`, `waiting`,
   `blocked`, `failed`, `done`, `stopped`, `disconnected`) on the daemon and

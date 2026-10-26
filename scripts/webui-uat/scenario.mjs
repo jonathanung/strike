@@ -11,6 +11,7 @@ import { DARK_TOKENS, LIGHT_TOKENS, missingLabels, tokenMismatch } from "./lib.m
 import { encodeVideo } from "./media.mjs";
 import { loadScenario, loadScenarios } from "./scenarios.mjs";
 import { createSession } from "./session.mjs";
+import { capturePhoneFrame, runPhoneScreens } from "./phone.mjs";
 
 const MARKER = "uat-marker-alpha";
 const CHILD_OBJECTIVE = "Summarize the working directory";
@@ -25,6 +26,7 @@ const BOOT_EXPR = `(() => {
 export async function runScenario({ page, baseURL, outDir, video, goldens, updateGoldens, controls, suite = "full" }) {
   const session = await createSession({ page, outDir, video, goldens, updateGoldens });
   const { failures, shots, check, waitUntil, click, press, shoot, viewport, bodyText, tokens, log } = session;
+  let phone;
   const cockpit = suite === "full" || suite === "smoke";
 
   await page.send("Page.enable");
@@ -279,6 +281,12 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
     }
     await press("Escape");
 
+    try {
+      phone = await runPhoneScreens({ page, outDir, video, check, shots });
+    } catch (err) {
+      failures.push(`phone pass: ${err?.message || err}`);
+    }
+
     if (controls) {
       await controls.stop();
       const down = await waitUntil(
@@ -293,6 +301,7 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
       );
       check(Boolean(down), "stopping the daemon did not show Unreachable and Retry");
       await shoot("shell-reconnect-error", ["desk1024", "desk1440"]);
+      await capturePhoneFrame(page, phone, outDir, shots, "phone-reconnect-error-390");
       // The cockpit polls refresh_meta every 2s. Once the daemon is back that
       // poll clears the notice, so Retry can disappear before the click.
       // Freeze intervals, then click Retry ourselves.
@@ -320,6 +329,7 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
         check(Boolean(backOnline), "Retry did not restore Connected");
       }
       await shoot("shell-reconnect-ok", ["desk1024", "desk1440"]);
+      await capturePhoneFrame(page, phone, outDir, shots, "phone-reconnect-ok-390");
     }
   }
 
@@ -374,5 +384,14 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
     await encodeVideo(session.frameDir, videoPath, 4);
   }
 
-  return { failures, shots, videoPath, frames: frame };
+  let phoneVideo = "";
+  if (phone) {
+    try {
+      phoneVideo = await phone.finish(video);
+    } catch (err) {
+      failures.push(`phone video: ${err?.message || err}`);
+    }
+  }
+
+  return { failures, shots, videoPath, phoneVideo, frames: frame };
 }

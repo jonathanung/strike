@@ -83,6 +83,7 @@ try {
     baseURL,
     shots: result.shots,
     video: result.videoPath || "",
+    phoneVideo: result.phoneVideo || "",
     frames: result.frames || 0,
     failures,
   };
@@ -98,7 +99,7 @@ try {
     if (strike?.log) console.error(strike.log().slice(-1500));
     process.exitCode = 1;
   } else {
-    console.log(`webui-uat ok shots=${result.shots.length} video=${result.videoPath || "off"}`);
+    console.log(`webui-uat ok shots=${result.shots.length} video=${result.videoPath || "off"} phone=${result.phoneVideo || "off"}`);
   }
 } catch (err) {
   console.error(String(err?.stack || err));

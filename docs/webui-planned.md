@@ -70,6 +70,13 @@ root. The channel adapter interface is `trigger.Adapter`; this build does
 not dial Slack or any other chat network. Unattended runs resolve an empty
 permission mode to plan. See [gateway.md](gateway.md).
 
+## Phone
+
+The phone shell (`webui/mobile.css`, bottom nav) shows one pane at a
+time: sessions, chat, activity, files, and the daemon view. Memory,
+Knowledge, and Artifacts are the same side-panel tabs as on desktop
+(under Files), not extra bottom-nav buttons.
+
 ## Memory
 
 Shipped. The Memory tab lists `GET /v1/memory` for the project scope and for

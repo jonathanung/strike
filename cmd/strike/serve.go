@@ -753,5 +753,8 @@ func printServeBanner(w io.Writer, b serveBanner) {
 	fmt.Fprintln(w, "  audit:   serve ops → ~/.strike/audit (family serve_op)")
 	fmt.Fprintln(w, "  schedules: ~/.strike/schedules.json  (unattended runs use workspace mode, else plan)")
 	fmt.Fprintln(w, "  remote:  strike connect user@host   or   ssh -L 8787:127.0.0.1:8787 user@host")
+	if !server.IsLocalhostBind(b.listenAddr) {
+		fmt.Fprintln(w, "  warning: bound beyond loopback (cleartext). Keep --auth. Prefer tailscale serve in front of 127.0.0.1 so a phone gets HTTPS. See docs/mobile.md")
+	}
 	fmt.Fprintln(w, "experimental web cockpit — TUI remains primary")
 }

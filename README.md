@@ -101,6 +101,7 @@ curl -s http://127.0.0.1:8787/health
 | [Agents & skills](docs/agents-skills.md) | personas, skills, workflows / autonomy |
 | [Plugins](docs/plugins.md) | Agent Plugins 1.0.0 contract (skills, MCP, `com.strike.cli`, trust) |
 | [Web UI](docs/webui-daemon.md) | Rust client + `strike serve` daemon |
+| [Phone](docs/mobile.md) | tailnet reachability and the phone layout |
 | [Web cockpit contract](docs/web-cockpit-contract.md) | progressive modes, parity matrix, attach-only (#1069) |
 | [Go SDK](docs/sdk.md) | `pkg/sdk` client over `pkg/protocol` |
 | [Architecture](docs/ARCHITECTURE.md) | packages, seams, recipes |
