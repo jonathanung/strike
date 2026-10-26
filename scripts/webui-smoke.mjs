@@ -2,7 +2,7 @@
 // a missing or wrong bearer. Chrome is required (google-chrome or chromium).
 import { spawn } from "node:child_process";
 import { editorBrowserCheck } from "./webui-editor-check.mjs";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -67,6 +67,65 @@ try {
   const right = await status("/v1/workspaces", { Authorization: `Bearer ${token}` });
   if (missing !== 401 || wrong !== 401 || right !== 200) {
     throw new Error(`auth statuses missing=${missing} wrong=${wrong} right=${right}`);
+  }
+
+  const authz = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+  const call = async (method, path, body) => {
+    const res = await fetch(`http://127.0.0.1:${port}${path}`, {
+      method,
+      headers: authz,
+      body: body == null ? undefined : JSON.stringify(body),
+    });
+    const text = await res.text();
+    return { status: res.status, text };
+  };
+  const emptyFolder = await call("POST", "/v1/session-list/folders", { name: "   " });
+  if (emptyFolder.status !== 400) {
+    throw new Error(`empty folder ${emptyFolder.status} ${emptyFolder.text}`);
+  }
+  const created = await call("POST", "/v1/session-list/folders", { name: "Reviews" });
+  if (created.status !== 201 || !created.text.includes("Reviews")) {
+    throw new Error(`create folder ${created.status} ${created.text}`);
+  }
+  const dup = await call("POST", "/v1/session-list/folders", { name: "reviews" });
+  if (dup.status !== 400 || !dup.text.includes("already exists")) {
+    throw new Error(`dup folder ${dup.status} ${dup.text}`);
+  }
+  const listed = await call("GET", "/v1/session-list");
+  if (listed.status !== 200 || !listed.text.includes("Reviews")) {
+    throw new Error(`list ${listed.status} ${listed.text.slice(0, 300)}`);
+  }
+  const folder = JSON.parse(created.text);
+  const removed = await call("DELETE", `/v1/session-list/folders/${folder.id}`);
+  if (removed.status !== 200) {
+    throw new Error(`delete folder ${removed.status} ${removed.text}`);
+  }
+  const missingQ = await call("GET", "/v1/session-list/search");
+  if (missingQ.status !== 400) {
+    throw new Error(`search missing q ${missingQ.status}`);
+  }
+
+  const sessionsDir = join(home, ".strike", "sessions");
+  await mkdir(sessionsDir, { recursive: true });
+  const line = (text) =>
+    JSON.stringify({
+      type: "user.message",
+      time: "2026-10-26T06:00:00Z",
+      data: { text },
+    }) + "\n";
+  await writeFile(join(sessionsDir, "alpha-session.jsonl"), line("Alpha session notes"));
+  await writeFile(
+    join(sessionsDir, "alpha-session.meta.json"),
+    JSON.stringify({ title: "Alpha session" }) + "\n",
+  );
+  await writeFile(join(sessionsDir, "beta-session.jsonl"), line("remember the coral bookmark"));
+  await writeFile(
+    join(sessionsDir, "beta-session.meta.json"),
+    JSON.stringify({ title: "Palette polish" }) + "\n",
+  );
+  const found = await call("GET", "/v1/session-list/search?q=coral%20bookmark");
+  if (found.status !== 200 || !found.text.includes("beta-session") || !found.text.includes("content")) {
+    throw new Error(`content search ${found.status} ${found.text.slice(0, 300)}`);
   }
 
   await writeFile(join(home, ".strike", "config.json"), '{"sandboxAllowDegrade":true}\n').catch(() => {});
@@ -173,6 +232,12 @@ try {
   await send("Page.enable");
   await send("Runtime.enable");
   await send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
+  await delay(300);
+  await send("Runtime.evaluate", {
+    expression: `localStorage.setItem("strike.token", ${JSON.stringify(token)})`,
+    returnByValue: true,
+  });
+  await send("Page.navigate", { url: `http://127.0.0.1:${port}/?token=${token}` });
 
   let text = "";
   let acid = "";
@@ -198,12 +263,64 @@ try {
     if (text.includes("Run a command") && text.includes("Activity") && acid === "#7c3aed") break;
     await delay(250);
   }
-  const want = ["Run a command", "Strike", "Activity", "Files", "Changes", "Approval"];
+  const want = [
+    "Run a command",
+    "Strike",
+    "Activity",
+    "Files",
+    "Changes",
+    "Approval",
+    "Conductor",
+    "Archived",
+    "Folders group sessions",
+    "Palette polish",
+    "Alpha session",
+  ];
   const missingText = want.filter((s) => !text.includes(s));
   if (missingText.length || acid !== "#7c3aed" || ground !== "#14131c") {
     throw new Error(
-      `cockpit check failed missing=${missingText.join(",")} acid=${acid} ground=${ground} text=${text.slice(0, 400)}`,
+      `cockpit check failed missing=${missingText.join(",")} acid=${acid} ground=${ground} text=${text.slice(0, 500)}`,
     );
+  }
+  const before = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const panel = document.querySelector(".ss-panel");
+      if (panel) panel.focus();
+      const cur = document.querySelector(".ss-cursor");
+      return cur ? cur.getAttribute("data-session-id") : "";
+    })()`,
+    returnByValue: true,
+  });
+  const beforeId = before.result?.result?.value || "";
+  const key = async (type, keyName, code, vk) => {
+    await send("Input.dispatchKeyEvent", {
+      type,
+      key: keyName,
+      code,
+      windowsVirtualKeyCode: vk,
+      nativeVirtualKeyCode: vk,
+    });
+  };
+  await key("keyDown", "j", "KeyJ", 74);
+  await key("keyUp", "j", "KeyJ", 74);
+  await delay(200);
+  const after = await send("Runtime.evaluate", {
+    expression: `document.querySelector(".ss-cursor")?.getAttribute("data-session-id") || ""`,
+    returnByValue: true,
+  });
+  const afterId = after.result?.result?.value || "";
+  if (!beforeId || !afterId || beforeId === afterId) {
+    throw new Error(`keyboard j did not move the session cursor (${beforeId} -> ${afterId})`);
+  }
+  await key("keyDown", "x", "KeyX", 88);
+  await key("keyUp", "x", "KeyX", 88);
+  await delay(200);
+  const selected = await send("Runtime.evaluate", {
+    expression: `document.body.innerText.includes("1 selected") ? "yes" : "no"`,
+    returnByValue: true,
+  });
+  if (selected.result?.result?.value !== "yes") {
+    throw new Error("keyboard x did not select the cursor session");
   }
   await editorBrowserCheck({
     send,

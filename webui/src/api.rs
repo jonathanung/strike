@@ -85,6 +85,20 @@ pub async fn post_json(base: &str, token: &str, path: &str, body: Value) -> Resu
     post_json_value(base, token, path, body).await.map(|_| ())
 }
 
+pub async fn delete_json(base: &str, token: &str, path: &str) -> Result<(), String> {
+    let resp = Request::delete(&api(base, path))
+        .header("Authorization", &auth_header(token))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let status = resp.status();
+    if !(200..300).contains(&status) {
+        let text = resp.text().await.unwrap_or_default();
+        return Err(format!("HTTP {status} {text}"));
+    }
+    Ok(())
+}
+
 pub async fn patch_json(base: &str, token: &str, path: &str, body: Value) -> Result<(), String> {
     let resp = Request::patch(&api(base, path))
         .header("Authorization", &auth_header(token))
