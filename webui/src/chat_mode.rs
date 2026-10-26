@@ -480,3 +480,73 @@ mod tests {
         assert_eq!(reconnect_delay_ms(9), 8000);
     }
 }
+
+/// Page wiring for the shell contribution in `src/shell/contrib/chat_mode.rs`.
+/// The shell boots before App's signals exist, so App installs them here
+/// (same late-bind shape as `shell::HostBridge` and the status centre's
+/// host) and the slot render / palette commands read them.
+#[derive(Clone)]
+pub struct LayoutHost {
+    pub layout: RwSignal<String>,
+    pub set_layout: Rc<dyn Fn(&str)>,
+}
+
+thread_local! {
+    static LAYOUT_HOST: RefCell<Option<LayoutHost>> = const { RefCell::new(None) };
+}
+
+pub fn set_host(host: LayoutHost) {
+    LAYOUT_HOST.with(|slot| *slot.borrow_mut() = Some(host));
+}
+
+fn layout_host() -> Option<LayoutHost> {
+    LAYOUT_HOST.with(|slot| slot.borrow().clone())
+}
+
+/// Current layout ("cockpit" unless the page installed "conversation").
+pub fn current_layout() -> String {
+    layout_host()
+        .map(|host| host.layout.get_untracked())
+        .unwrap_or_else(|| "cockpit".into())
+}
+
+/// Palette entry point: switch the layout through the page's own setter
+/// (which persists `strike.layout` and closes the drawers for cockpit).
+pub fn host_set_layout(next: &str) -> Result<(), String> {
+    let host = layout_host().ok_or_else(|| "Layout is not ready.".to_string())?;
+    (host.set_layout)(next);
+    Ok(())
+}
+
+/// Slot render for the `layout` slot: the pre-shell header toggle,
+/// unchanged — a segmented Cockpit / Conversation pair whose buttons
+/// carry `data-layout` (the smoke and UAT drivers click them).
+pub fn layout_view() -> AnyView {
+    let Some(host) = layout_host() else {
+        return view! { <span></span> }.into_any();
+    };
+    let layout = host.layout;
+    let set_cockpit = host.set_layout.clone();
+    let set_conversation = host.set_layout.clone();
+    view! {
+        <div class="segmented layout-toggle" role="tablist" aria-label="Layout">
+            <button
+                type="button"
+                data-layout="cockpit"
+                class=move || if layout.get() != "conversation" { "seg on" } else { "seg" }
+                on:click=move |_| set_cockpit("cockpit")
+            >
+                "Cockpit"
+            </button>
+            <button
+                type="button"
+                data-layout="conversation"
+                class=move || if layout.get() == "conversation" { "seg on" } else { "seg" }
+                on:click=move |_| set_conversation("conversation")
+            >
+                "Conversation"
+            </button>
+        </div>
+    }
+    .into_any()
+}

@@ -122,6 +122,12 @@ func (s *Store) Create(description string, criteria []Criterion, constraints Con
 	if constraints.MaxNoProgressIters == 0 {
 		constraints.MaxNoProgressIters = def.MaxNoProgressIters
 	}
+	if constraints.MaxTokens == 0 {
+		constraints.MaxTokens = def.MaxTokens
+	}
+	if constraints.MaxVerifyFailures == 0 {
+		constraints.MaxVerifyFailures = def.MaxVerifyFailures
+	}
 	// Normalize criterion descriptions from check when empty.
 	clean := make([]Criterion, len(criteria))
 	for i, c := range criteria {
@@ -233,13 +239,22 @@ func (s *Store) SetStatus(id string, status Status, reason string) (Goal, error)
 		if g.Status != StatusActive {
 			return Goal{}, fmt.Errorf("%w: pause requires active (have %s)", ErrInvalidStatus, g.Status)
 		}
+		g.FreezeWallClock(now)
 		g.Status = StatusPaused
 	case StatusActive:
-		if g.Status != StatusPaused && g.Status != StatusPending {
-			return Goal{}, fmt.Errorf("%w: resume/run requires pending or paused (have %s)", ErrInvalidStatus, g.Status)
+		if g.Status != StatusPaused && g.Status != StatusPending && g.Status != StatusBlocked {
+			return Goal{}, fmt.Errorf("%w: resume/run requires pending, paused, or blocked (have %s)", ErrInvalidStatus, g.Status)
 		}
-		if g.Status == StatusPending || g.ActiveStartedAt.IsZero() {
+		if g.Status == StatusPaused || g.Status == StatusBlocked || g.Status == StatusPending || g.ActiveStartedAt.IsZero() {
+			// Paused and blocked waits are not billed. ActiveElapsed already
+			// holds finished stretches; this starts a new one.
 			g.ActiveStartedAt = now
+		}
+		if g.Status == StatusBlocked {
+			// The person saw this stop. Later streaks start after it.
+			g.GuardFloor = g.LastIteration
+			g.Escalation = ""
+			g.FailReason = ""
 		}
 		g.Status = StatusActive
 		g.AbortRequested = false
@@ -247,6 +262,7 @@ func (s *Store) SetStatus(id string, status Status, reason string) (Goal, error)
 		if g.Status == StatusDone || g.Status == StatusFailed || g.Status == StatusAborted {
 			return Goal{}, fmt.Errorf("%w: cannot abort terminal goal (%s)", ErrInvalidStatus, g.Status)
 		}
+		g.FreezeWallClock(now)
 		g.AbortRequested = true
 		g.Status = StatusAborted
 		g.FailReason = reason

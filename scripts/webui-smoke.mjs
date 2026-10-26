@@ -205,6 +205,85 @@ try {
       `cockpit check failed missing=${missingText.join(",")} acid=${acid} ground=${ground} text=${text.slice(0, 400)}`,
     );
   }
+
+  // feature:navbar — palette fuzzy match, argument error, shortcut overlay.
+  const navbar = async (expression) => {
+    const ev = await send("Runtime.evaluate", { expression, returnByValue: true });
+    const value = ev.result?.result?.value;
+    if (ev.result?.exceptionDetails) {
+      throw new Error(`navbar check exception: ${JSON.stringify(ev.result.exceptionDetails).slice(0, 500)}`);
+    }
+    return value;
+  };
+  await navbar(`document.querySelector('[data-nav="palette"]').click()`);
+  let palette = "";
+  for (let i = 0; i < 20; i++) {
+    palette = await navbar(`document.body.innerText`);
+    if (palette.includes("Open session") && palette.includes("New session")) break;
+    await delay(100);
+  }
+  if (!palette.includes("Open session") || !palette.includes("Alt+Left")) {
+    throw new Error(`palette did not open text=${palette.slice(0, 500)}`);
+  }
+  await navbar(`(() => {
+    const input = document.querySelector('[data-nav="palette-dialog"] input');
+    const set = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    set.call(input, "nord");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    return true;
+  })()`);
+  let filtered = "";
+  for (let i = 0; i < 20; i++) {
+    filtered = await navbar(`document.querySelector('[data-nav="palette-dialog"]').innerText`);
+    if (filtered.includes("Theme: Nord") && !filtered.includes("New session")) break;
+    await delay(50);
+  }
+  if (!filtered.includes("Theme: Nord") || filtered.includes("New session")) {
+    throw new Error(`palette fuzzy failed text=${filtered.slice(0, 500)}`);
+  }
+  await navbar(`(() => {
+    const input = document.querySelector('[data-nav="palette-dialog"] input');
+    const set = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    set.call(input, "open session");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    return true;
+  })()`);
+  await delay(50);
+  const typed = await navbar(`(() => {
+    const input = document.querySelector('[data-nav="palette-dialog"] input');
+    const set = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    set.call(input, "zzzz-no-such-session");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    return input ? input.value : "";
+  })()`);
+  let alertText = "";
+  for (let i = 0; i < 20; i++) {
+    alertText = await navbar(`(document.querySelector('[role="alert"]') || {}).innerText || ""`);
+    if (String(alertText).includes("Nothing matches")) break;
+    await delay(50);
+  }
+  if (!String(alertText).includes("Nothing matches")) {
+    throw new Error(`palette error path failed alert=${alertText} typed=${typed}`);
+  }
+  await navbar(`document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
+  await navbar(`document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
+  await navbar(`(() => { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); return true; })()`);
+  await navbar(`document.dispatchEvent(new KeyboardEvent("keydown", { key: "?", bubbles: true }))`);
+  let help = "";
+  for (let i = 0; i < 20; i++) {
+    help = await navbar(`(document.querySelector('[data-nav="help"]') || {}).innerText || ""`);
+    if (String(help).includes("Alt+Left") && String(help).includes("Focus mode")) break;
+    await delay(50);
+  }
+  if (!String(help).includes("Focus mode")) {
+    throw new Error(`shortcut overlay failed text=${help}`);
+  }
+  const crumbs = await navbar(`(document.querySelector('[data-nav="crumbs"]') || {}).innerText || ""`);
+  if (!String(crumbs).includes("Strike") || !String(crumbs).includes(">")) {
+    throw new Error(`breadcrumb missing text=${crumbs}`);
+  }
   await editorBrowserCheck({
     send,
     port,
@@ -283,6 +362,216 @@ try {
   });
   if (rejected.status !== 400) {
     throw new Error(`empty attachment status ${rejected.status}`);
+  }
+  await send("Runtime.evaluate", {
+    expression: `localStorage.setItem("strike.token", ${JSON.stringify(token)})`,
+  });
+  await send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
+  const goalCheck = async (expression, ready) => {
+    let body = "";
+    for (let i = 0; i < 40; i++) {
+      const ev = await send("Runtime.evaluate", { expression, returnByValue: true });
+      body = ev.result?.result?.value || "";
+      if (ready(body)) return body;
+      await delay(250);
+    }
+    throw new Error(`goals check timed out: ${body.slice(0, 400)}`);
+  };
+  await goalCheck(
+    `document.body ? document.body.innerText : ""`,
+    (body) => body.includes("Run a command") && body.includes("Goals"),
+  );
+  await send("Runtime.evaluate", {
+    expression: `document.querySelector('[data-view="goals"]').click()`,
+  });
+  await goalCheck(
+    `document.body ? document.body.innerText : ""`,
+    (body) => body.includes("Verification command") && body.includes("Autopilot"),
+  );
+  await send("Runtime.evaluate", {
+    expression: `(() => {
+      const set = (id, value) => {
+        const el = document.getElementById(id);
+        el.value = value;
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+      };
+      set("goals-desc", "smoke pass");
+      set("goals-verify", "true");
+      set("goals-turns", "8");
+      set("goals-fails", "3");
+      document.getElementById("goals-run").click();
+      return "sent";
+    })()`,
+  });
+  await goalCheck(
+    `document.body ? document.body.innerText : ""`,
+    (body) => body.includes("smoke pass") && body.includes("Done"),
+  );
+  await send("Runtime.evaluate", {
+    expression: `document.querySelector(".goals-list .secondary").click()`,
+  });
+  await goalCheck(
+    `document.getElementById("goals-desc") ? "form" : ""`,
+    (body) => body === "form",
+  );
+  await send("Runtime.evaluate", {
+    expression: `(() => {
+      const set = (id, value) => {
+        const el = document.getElementById(id);
+        el.value = value;
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+      };
+      set("goals-desc", "smoke fail");
+      set("goals-verify", "false");
+      set("goals-turns", "20");
+      set("goals-fails", "2");
+      document.getElementById("goals-run").click();
+      return "sent";
+    })()`,
+  });
+  await goalCheck(
+    `document.body ? document.body.innerText : ""`,
+    (body) => body.includes("Needs you") && body.includes("verification failed"),
+  );
+
+  await send("Runtime.evaluate", {
+    expression: `localStorage.setItem("strike.token", ${JSON.stringify(token)})`,
+    returnByValue: true,
+  });
+  await send("Page.navigate", {
+    url: `http://127.0.0.1:${port}/?token=${encodeURIComponent(token)}`,
+  });
+
+  let booted = {};
+  for (let i = 0; i < 40; i++) {
+    const ev = await send("Runtime.evaluate", {
+      expression: `(() => JSON.stringify({
+        rows: document.querySelectorAll(".session-row").length,
+        composer: !!document.querySelector(".side-chat-open-composer"),
+        activity: !!document.querySelector(".side-chat-open-activity"),
+        text: (document.body && document.body.innerText || "").slice(0, 240),
+      }))()`,
+      returnByValue: true,
+    });
+    booted = JSON.parse(ev.result?.result?.value || "{}");
+    if (booted.rows > 0 && booted.composer && booted.activity) break;
+    await delay(250);
+  }
+  if (!(booted.rows > 0 && booted.composer && booted.activity)) {
+    throw new Error(`side chat shell did not boot ${JSON.stringify(booted)}`);
+  }
+
+  const seeded = await fetch(`http://127.0.0.1:${port}/v1/ops`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ type: "user.input", data: { text: "read the makefile" } }),
+  });
+  if (!seeded.ok) {
+    throw new Error(`seed user.input ${seeded.status} ${await seeded.text()}`);
+  }
+
+  await send("Runtime.evaluate", {
+    expression: `document.querySelector(".side-chat-open-composer").click()`,
+    returnByValue: true,
+  });
+
+  let panel = {};
+  for (let i = 0; i < 20; i++) {
+    const ev = await send("Runtime.evaluate", {
+      expression: `(() => {
+        const el = document.querySelector(".side-chat");
+        if (!el) return "{}";
+        return JSON.stringify({
+          text: el.innerText,
+          buttons: [...el.querySelectorAll("button")].map((b) => b.textContent.trim()),
+        });
+      })()`,
+      returnByValue: true,
+    });
+    panel = JSON.parse(ev.result?.result?.value || "{}");
+    if ((panel.text || "").includes("Read-only") && (panel.buttons || []).includes("Ask")) break;
+    await delay(200);
+  }
+  if (!(panel.text || "").includes("Read-only") || !(panel.buttons || []).includes("Ask")) {
+    throw new Error(`side chat panel missing ${JSON.stringify(panel)}`);
+  }
+  if ((panel.buttons || []).some((b) => b.startsWith("Approval"))) {
+    throw new Error(`side chat rendered an approval control ${JSON.stringify(panel.buttons)}`);
+  }
+
+  const ask = async (text) => {
+    const ev = await send("Runtime.evaluate", {
+      expression: `(() => {
+        const input = document.getElementById("side-chat-input");
+        if (!input) return "missing input";
+        const proto = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value");
+        proto.set.call(input, ${JSON.stringify(text)});
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+        return "sent";
+      })()`,
+      returnByValue: true,
+    });
+    if (ev.result?.result?.value !== "sent") {
+      throw new Error(`side chat keyboard send failed ${JSON.stringify(ev.result)}`);
+    }
+  };
+
+  const panelText = async () => {
+    const ev = await send("Runtime.evaluate", {
+      expression: `document.querySelector(".side-chat") ? document.querySelector(".side-chat").innerText : ""`,
+      returnByValue: true,
+    });
+    return ev.result?.result?.value || "";
+  };
+
+  await ask("what is the agent doing?");
+  let answered = "";
+  for (let i = 0; i < 40; i++) {
+    answered = await panelText();
+    if (answered.includes("what is the agent doing?")) break;
+    await delay(250);
+  }
+  if (!answered.includes("what is the agent doing?")) {
+    throw new Error(`side chat answer missing ${answered.slice(0, 800)}`);
+  }
+
+  await ask("run true");
+  let refused = "";
+  for (let i = 0; i < 30; i++) {
+    refused = await panelText();
+    if (refused.toLowerCase().includes("refused a tool call")) break;
+    await delay(200);
+  }
+  if (!refused.toLowerCase().includes("refused a tool call")) {
+    throw new Error(`side chat did not refuse a tool call ${refused.slice(0, 500)}`);
+  }
+
+  await send("Runtime.evaluate", {
+    expression: `window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`,
+    returnByValue: true,
+  });
+  let closed = false;
+  for (let i = 0; i < 15; i++) {
+    const ev = await send("Runtime.evaluate", {
+      expression: `!!document.querySelector(".side-chat")`,
+      returnByValue: true,
+    });
+    closed = ev.result?.result?.value === false;
+    if (closed) break;
+    await delay(100);
+  }
+  if (!closed) throw new Error("Escape did not close side chat");
+
+  const still = await send("Runtime.evaluate", {
+    expression: `document.body.innerText.includes("Approval")`,
+    returnByValue: true,
+  });
+  if (still.result?.result?.value !== true) {
+    throw new Error("main composer lost its approval chip");
   }
   console.log("webui-smoke ok");
 } catch (err) {

@@ -4,26 +4,22 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#14131c">
-<meta name="description" content="Conversation and cockpit for a Strike daemon.">
-<meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<link rel="icon" href="/assets/icon.svg">
 <title>Strike</title>
 <script>
-(function(){try{var ok={strike:1,nord:1,dracula:1,gruvbox:1,monokai:1,"tokyo-night":1,catppuccin:1};var t=localStorage.getItem("strike.theme")||"strike";var s=localStorage.getItem("strike.scheme")||"dark";if(!ok[t])t="strike";if(s!=="light")s="dark";var lay=localStorage.getItem("strike.layout")||"cockpit";if(lay!=="conversation")lay="cockpit";var el=document.documentElement;el.setAttribute("data-theme",t);el.setAttribute("data-scheme",s);el.setAttribute("data-layout",lay);}catch(e){}})();
+(function(){try{var ok={strike:1,nord:1,dracula:1,gruvbox:1,monokai:1,"tokyo-night":1,catppuccin:1};var t=localStorage.getItem("strike.theme")||"strike";var s=localStorage.getItem("strike.scheme")||"dark";if(!ok[t])t="strike";if(s!=="light")s="dark";var el=document.documentElement;el.setAttribute("data-theme",t);el.setAttribute("data-scheme",s);}catch(e){}})();
 </script>
 <link rel="manifest" href="/manifest.webmanifest">
-<link rel="stylesheet" href="/assets/style-b675a6499c95b448.css" integrity="sha384-TzmCXhs4XZOIBJVTWsltYCqu3aIrajPO3IqX2vad7TJjohexRdJvdRFjmxs68fTu"/>
-<link rel="stylesheet" href="/assets/editor-0c775cc9b18a5458.css" integrity="sha384-AyOjM22LfkyGATt0RiB3O7FWiJR+tjHaI+BUHE+UrMDR7Ykaa5aNRaKgR7as4OR+"/>
-<link rel="stylesheet" href="/assets/chat-mode-4514f2e0c2ae2290.css" integrity="sha384-PItC5slnGyd6F0gVcUHqrdaNWrhpH01425DtUG7RdlCrFW18vwrZQnK4E1t0AvL4"/>
+<link rel="stylesheet" href="/assets/style-620c63c3396ef0be.css" integrity="sha384-w/jBXqzmb00U44E5TAn+XZMfW0Im1VYuxvM9W8QGN8ZWRkGRqKrBz73aavnG0jY/"/>
+<link rel="stylesheet" href="/assets/navbar-4aaaf28db500eacb.css" integrity="sha384-5TOOsJOEELXhQX9eaCeYAdolP2MTbzKY2Rs54jkUpbigS3rQ+1uG62wvDZTASCfR"/>
+<link rel="stylesheet" href="/assets/editor-b94eee6c774248b5.css" integrity="sha384-+9ZqewFDkMigo7FvJP5c3fz6AHPgvKtu9jHfIAjeW7Qtx7wW3GCJSZM+LHcEeR4D"/>
+<link rel="stylesheet" href="/assets/goals-5b895e22909a0f66.css" integrity="sha384-liP/FQF4QvouM0zc8WO7nxC1u3CzbFF/GBmvuED6zZS8f0rmPG1QWhWJitxfpRm1"/>
 
 
 
 
 <script type="module">
-import init, * as bindings from '/assets/strike-webui-24e367c63637f02e.js';
-const wasm = await init({ module_or_path: '/assets/strike-webui-4f11ecbc93772dee_bg.wasm' });
+import init, * as bindings from '/assets/strike-webui-6bdd8069b32bf3a.js';
+const wasm = await init({ module_or_path: '/assets/strike-webui-6bdd8069b32bf3a_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -34,6 +30,6 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 </script>
 <script src="/assets/register.js" defer></script>
 
-<link rel="modulepreload" href="/assets/strike-webui-24e367c63637f02e.js" crossorigin="anonymous" integrity="sha384-Yf/Ns/QAOt1jJJHeFI4I9IkvPkPllpbzGEy34ZGYwrIlyQuYRaZNurhZ1amAs1I7"><link rel="preload" href="/assets/strike-webui-4f11ecbc93772dee_bg.wasm" crossorigin="anonymous" integrity="sha384-1h6pnRAKy1h7nJw7i6/HgfG+a0N/455oQ3rMZPaNnJAKv2znjfjCb45xnM6il1Wn" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/assets/strike-webui-6bdd8069b32bf3a.js" crossorigin="anonymous" integrity="sha384-011ay+sq/2BgR4Sss5q+Ok93duRefzwRrHNBL/LFKtvdfMo0o4dtti6hDFhoE21f"><link rel="preload" href="/assets/strike-webui-6bdd8069b32bf3a_bg.wasm" crossorigin="anonymous" integrity="sha384-LqceG92xhJW0syfO58bGsdHQb6sbn91fcvTFUQb3u5BUa4RG3X/re3qbFVhPWN6l" as="fetch" type="application/wasm"></head>
 <body></body>
 </html>
