@@ -61,6 +61,20 @@ type Artifact struct {
 	CreatedAt    time.Time  `json:"created_at"`
 	UpdatedAt    time.Time  `json:"updated_at"`
 	ExpiresAt    *time.Time `json:"expires_at,omitempty"`
+	// History holds prior CAS snapshots, oldest first, capped at MaxHistory.
+	// The current Version and Content are not duplicated here.
+	History []VersionSnap `json:"history,omitempty"`
+}
+
+// MaxHistory is how many prior versions a single artifact keeps.
+const MaxHistory = 20
+
+// VersionSnap is the body of one prior CAS version.
+type VersionSnap struct {
+	Version   int       `json:"version"`
+	Title     string    `json:"title,omitempty"`
+	Content   string    `json:"content"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // Meta is list/index metadata (content omitted).
@@ -106,6 +120,23 @@ func Clone(a Artifact) Artifact {
 	if a.ExpiresAt != nil {
 		t := *a.ExpiresAt
 		out.ExpiresAt = &t
+	}
+	if len(a.History) > 0 {
+		out.History = append([]VersionSnap(nil), a.History...)
+	}
+	return out
+}
+
+// VersionList returns retained prior versions plus the current version, ascending.
+func (a Artifact) VersionList() []int {
+	out := make([]int, 0, len(a.History)+1)
+	for _, h := range a.History {
+		if h.Version > 0 {
+			out = append(out, h.Version)
+		}
+	}
+	if a.Version > 0 {
+		out = append(out, a.Version)
 	}
 	return out
 }

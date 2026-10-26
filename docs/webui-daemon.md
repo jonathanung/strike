@@ -81,10 +81,12 @@ Status: walking skeleton on branch `worktree-rust-webui-daemon`. Not merged.
   - Empty sessions rotate a short headline and offer six prompts that send
     as ordinary text. A failed load shows the error and Retry.
   - The side panel is Activity (team snapshot: status, elapsed, stop,
-    retry, expand, including `blocked` handoffs), Files (`/v1/files`), and
-    Changes (`/v1/changed-files`). Clicking or dragging a file inserts
-    `@path` as text. The web composer does not expand that token the way
-    the TUI does. Open on a file reads it in the center document pane
+    retry, expand, including `blocked` handoffs), Files (`/v1/files`),
+    Changes (`/v1/changed-files`), Memory, Knowledge, and Artifacts.
+    Clicking or dragging a file inserts `@path` as text. The web composer
+    does not expand that token the way the TUI does. Memory mode
+    (normal, incognito, temporary) is a composer chip and a palette command.
+    Open on a file reads it in the center document pane
     (`GET /v1/file/view`). The pane is read-only until Edit. Save is
     `PUT /v1/file` with the sha256 and mtime from the read; a mismatch is
     409 and does not write. Plan mode and an edit/write deny rule reject
@@ -101,9 +103,9 @@ Status: walking skeleton on branch `worktree-rust-webui-daemon`. Not merged.
     with a separate model call and no tools. `POST /v1/sidechat/ops` refuses
     `permission.reply` and `user.input`. Turns are not written to the session
     JSONL.
-  - Schedule, memory, knowledge, artifacts, the task runner, onboarding,
-    and a multi-gateway hub are documented in
-    [webui-planned.md](webui-planned.md), not drawn as empty panels.
+  - Schedule, the task runner, onboarding, and a multi-gateway hub are
+    documented in [webui-planned.md](webui-planned.md), not drawn as empty
+    panels. Memory, knowledge, and artifacts are drawn from the live routes.
 - Server serves `/sw.js` and `/manifest.webmanifest` at the origin root and
   the bundle under `/assets/` (WASM-aware CSP and content types).
 
