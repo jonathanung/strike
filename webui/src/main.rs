@@ -28,6 +28,7 @@ use crate::api::{
     get_json, idempotency_key, now_ms, patch_json, post_json, post_json_value, post_op,
 };
 use crate::editor::{DocumentPane, LinkedBody};
+use protocol_schema::Event;
 use crate::model::{budget_elapsed, can_retry, RootsResponse};
 
 fn storage() -> Option<web_sys::Storage> {
@@ -255,6 +256,13 @@ fn apply_envelope(
     open: &Rc<Cell<bool>>,
     raw: &str,
 ) {
+    // Generated contract: unknown events are skipped, and a known event whose
+    // payload does not match the schema is dropped. Rendering below still
+    // reads the raw object.
+    match protocol_schema::decode_event(raw) {
+        Ok(Event::Unknown { .. }) | Err(_) => return,
+        Ok(_) => {}
+    }
     let v: serde_json::Value = match serde_json::from_str(raw) {
         Ok(v) => v,
         Err(_) => return,

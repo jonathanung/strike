@@ -1,4 +1,7 @@
-//! Wire types the UI actually reads. Unknown JSON fields are ignored.
+//! Cockpit view models: HTTP projections and UI state.
+//! Op/Event wire types are generated in the `protocol-schema` crate from
+//! `pkg/protocol` (`schemas/protocol/v1/schema.json`). Do not hand-copy them
+//! here. Unknown JSON fields on these view models stay ignored.
 
 use std::collections::HashMap;
 
