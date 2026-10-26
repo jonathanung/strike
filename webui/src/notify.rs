@@ -567,6 +567,44 @@ pub fn NotificationBell(
     let save_inflight = Rc::new(Cell::new(false));
     let stream_on = Rc::new(Cell::new(false));
 
+    // The shell re-renders its top-bar slots whenever its width signal
+    // changes (shell/chrome.rs), which disposes and remounts this component
+    // — a viewport resize is enough. Everything registered on the window
+    // below (the 2s poll timer, the key/hash/message listeners, and the
+    // SSE stream) must therefore be released on cleanup. Leaked copies are
+    // not inert: each leaked timer keeps polling, and each leaked stream
+    // holds one of the browser's per-host HTTP/1.1 connections, so a few
+    // remounts starve the page's own API calls (the composer POST
+    // included) behind connections that never close.
+    let disposers: Rc<RefCell<Vec<Box<dyn FnOnce()>>>> = Rc::new(RefCell::new(Vec::new()));
+    let add_disposer = {
+        let disposers = disposers.clone();
+        move |f: Box<dyn FnOnce()>| disposers.borrow_mut().push(f)
+    };
+    // on_cleanup wants Send + Sync; the disposers are window-thread state,
+    // so they ride in a SendWrapper (the crate is already in the lock file
+    // via leptos) and are only ever run on this thread.
+    on_cleanup({
+        let disposers = disposers.clone();
+        let run = send_wrapper::SendWrapper::new(move || {
+            for f in disposers.borrow_mut().drain(..) {
+                f();
+            }
+        });
+        move || run.take()()
+    });
+    // The live notifications stream, kept so cleanup can close it (the
+    // same shape as App's live-events tail in main.rs).
+    let stream: Rc<RefCell<Option<Rc<web_sys::EventSource>>>> = Rc::new(RefCell::new(None));
+    add_disposer({
+        let stream = stream.clone();
+        Box::new(move || {
+            if let Some(es) = stream.borrow_mut().take() {
+                es.close();
+            }
+        })
+    });
+
     let apply_focus = UnsyncCallback::new(move |target: FocusTarget| {
         if target.session_id.is_empty() && target.approval_id.is_empty() {
             return;
@@ -640,11 +678,13 @@ pub fn NotificationBell(
     let refresh = UnsyncCallback::new({
         let save_inflight = save_inflight.clone();
         let stream_on = stream_on.clone();
+        let stream = stream.clone();
         move |_: ()| {
             perm.set(notification_permission());
             let (b, t) = (base.get_untracked(), token.get_untracked());
             let save_inflight = save_inflight.clone();
             let stream_on = stream_on.clone();
+            let stream = stream.clone();
             spawn_local(async move {
                 match get_json::<NotesResponse>(&b, &t, "/v1/notifications").await {
                     Ok(resp) => {
@@ -657,7 +697,7 @@ pub fn NotificationBell(
                         load_error.set(String::new());
                         if !stream_on.get() && page_same_origin(&b) {
                             stream_on.set(true);
-                            start_stream(resp.latest, items, consider);
+                            start_stream(resp.latest, items, consider, stream);
                         }
                     }
                     Err(e) => load_error.set(format!("Could not load notifications: {e}")),
@@ -669,12 +709,22 @@ pub fn NotificationBell(
 
     let interval = Closure::<dyn FnMut()>::new(move || refresh.run(()));
     if let Some(window) = web_sys::window() {
-        let _ = window.set_interval_with_callback_and_timeout_and_arguments_0(
+        let registered = window.set_interval_with_callback_and_timeout_and_arguments_0(
             interval.as_ref().unchecked_ref(),
             2000,
         );
+        if let Ok(id) = registered {
+            let kept = Rc::new(RefCell::new(Some(interval)));
+            let drop_cb = kept.clone();
+            add_disposer(Box::new(move || {
+                if let Some(w) = web_sys::window() {
+                    w.clear_interval_with_handle(id);
+                }
+                drop(drop_cb.borrow_mut().take());
+            }));
+        }
+        // If registration failed the closure drops here and never fires.
     }
-    interval.forget();
 
     {
         if let Some(window) = web_sys::window() {
@@ -687,7 +737,19 @@ pub fn NotificationBell(
             });
             let _ = window
                 .add_event_listener_with_callback("hashchange", on_hash.as_ref().unchecked_ref());
-            on_hash.forget();
+            let kept = Rc::new(RefCell::new(Some(on_hash)));
+            let drop_cb = kept.clone();
+            add_disposer(Box::new(move || {
+                if let Some(cb) = drop_cb.borrow_mut().take() {
+                    if let Some(w) = web_sys::window() {
+                        let _ = w.remove_event_listener_with_callback(
+                            "hashchange",
+                            cb.as_ref().unchecked_ref(),
+                        );
+                    }
+                    drop(cb);
+                }
+            }));
 
             let on_sw = Closure::<dyn FnMut(web_sys::Event)>::new(move |ev: web_sys::Event| {
                 let Ok(msg) = ev.dyn_into::<web_sys::MessageEvent>() else {
@@ -718,7 +780,25 @@ pub fn NotificationBell(
                 let _ = container
                     .add_event_listener_with_callback("message", on_sw.as_ref().unchecked_ref());
             }
-            on_sw.forget();
+            let kept = Rc::new(RefCell::new(Some(on_sw)));
+            let drop_cb = kept.clone();
+            add_disposer(Box::new(move || {
+                if let Some(cb) = drop_cb.borrow_mut().take() {
+                    if let Some(w) = web_sys::window() {
+                        if let Ok(container) = w
+                            .navigator()
+                            .service_worker()
+                            .dyn_into::<web_sys::EventTarget>()
+                        {
+                            let _ = container.remove_event_listener_with_callback(
+                                "message",
+                                cb.as_ref().unchecked_ref(),
+                            );
+                        }
+                    }
+                    drop(cb);
+                }
+            }));
         }
     }
 
@@ -861,7 +941,19 @@ pub fn NotificationBell(
     if let Some(window) = web_sys::window() {
         let _ = window.add_event_listener_with_callback("keydown", on_key.as_ref().unchecked_ref());
     }
-    on_key.forget();
+    let kept = Rc::new(RefCell::new(Some(on_key)));
+    let drop_cb = kept.clone();
+    add_disposer(Box::new(move || {
+        if let Some(cb) = drop_cb.borrow_mut().take() {
+            if let Some(w) = web_sys::window() {
+                let _ = w.remove_event_listener_with_callback(
+                    "keydown",
+                    cb.as_ref().unchecked_ref(),
+                );
+            }
+            drop(cb);
+        }
+    }));
 
     let unread = move || {
         let seen = seen.get();
@@ -1039,7 +1131,12 @@ pub fn NotificationBell(
     }
 }
 
-fn start_stream(since: i64, items: RwSignal<Vec<Note>>, consider: UnsyncCallback<Vec<Note>>) {
+fn start_stream(
+    since: i64,
+    items: RwSignal<Vec<Note>>,
+    consider: UnsyncCallback<Vec<Note>>,
+    stream: Rc<RefCell<Option<Rc<web_sys::EventSource>>>>,
+) {
     let url = format!("/v1/notifications/stream?since={since}");
     let Ok(es) = web_sys::EventSource::new(&url) else {
         return;
@@ -1066,6 +1163,11 @@ fn start_stream(since: i64, items: RwSignal<Vec<Note>>, consider: UnsyncCallback
     });
     es.set_onerror(Some(on_err.as_ref().unchecked_ref()));
     on_err.forget();
+    // Hand the socket to the component: cleanup closes it, and a restart
+    // closes the previous one first (App's live tail does the same).
+    if let Some(old) = stream.borrow_mut().replace(es) {
+        old.close();
+    }
 }
 
 #[cfg(test)]
