@@ -1,6 +1,7 @@
 // Headless check that the embedded Rust cockpit boots and that --auth rejects
 // a missing or wrong bearer. Chrome is required (google-chrome or chromium).
 import { spawn } from "node:child_process";
+import { editorBrowserCheck } from "./webui-editor-check.mjs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -204,6 +205,12 @@ try {
       `cockpit check failed missing=${missingText.join(",")} acid=${acid} ground=${ground} text=${text.slice(0, 400)}`,
     );
   }
+  await editorBrowserCheck({
+    send,
+    port,
+    token,
+    repoDir: process.cwd(),
+  });
   console.log("webui-smoke ok");
 } catch (err) {
   console.error(String(err));

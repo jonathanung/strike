@@ -886,6 +886,14 @@ func (f *fakeFiles) ApplyEdit(req host.EditApply) (host.EditApplyResult, error) 
 	return host.EditApplyResult{Path: path, Count: replaced}, nil
 }
 
+func (f *fakeFiles) ReadDocument(string) (host.Document, error) {
+	return host.Document{}, fmt.Errorf("unused")
+}
+
+func (f *fakeFiles) WriteDocument(host.DocumentWrite) (host.DocumentWriteResult, error) {
+	return host.DocumentWriteResult{}, fmt.Errorf("unused")
+}
+
 func (f *fakeFiles) ApplyPatch(patch string) (string, error) {
 	f.lastPatch = patch
 	if f.applyErr != nil {

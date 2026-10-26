@@ -37,7 +37,9 @@ lessons, or cross-session search. Those are not in the store.
 No knowledge or document index is exposed on `/v1`. A Knowledge panel would
 be a read view over files the daemon already serves (`/v1/files`,
 `/v1/changed-files`) plus any future pinned paths from a context bundle. It
-would not be a second memory store and it would not embed a model.
+would not be a second memory store and it would not embed a model. The
+document pane (`GET /v1/file/view`, `PUT /v1/file`) is that file read and
+edit surface; it is not a knowledge index.
 
 ## Artifacts
 
