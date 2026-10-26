@@ -22,6 +22,7 @@ use model::{
     ChildrenResponse, FilesResponse, Health, ModelInfo, ModelList, Remote, RootSummary,
     SessionItem, SessionsResponse, TeamSnapshot, Workspace, WorkspacesResponse,
 };
+use protocol_schema::Event;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 
@@ -257,6 +258,13 @@ fn apply_envelope(
     open: &Rc<Cell<bool>>,
     raw: &str,
 ) {
+    // Generated contract: unknown events are skipped, and a known event whose
+    // payload does not match the schema is dropped. Rendering below still
+    // reads the raw object.
+    match protocol_schema::decode_event(raw) {
+        Ok(Event::Unknown { .. }) | Err(_) => return,
+        Ok(_) => {}
+    }
     let v: serde_json::Value = match serde_json::from_str(raw) {
         Ok(v) => v,
         Err(_) => return,
