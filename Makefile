@@ -67,15 +67,17 @@ webui-check:
 # Legacy alias: the old JS web/ UI is removed; web-check now means the Rust UI.
 web-check: webui-check
 
-# Headless cockpit pass. See docs/webui-uat.md. Artifacts: webui-uat-artifacts/.
+# Headless cockpit pass, then every scripts/webui-uat/scenarios/<slug>.mjs.
+# SUITE=smoke is the cockpit only. SUITE=<slug> runs that file only.
+# See docs/webui-uat.md. Artifacts: webui-uat-artifacts/.
 webui-uat: build
-	node --test scripts/webui-uat/lib.test.mjs
-	node scripts/webui-uat.mjs
+	node --test scripts/webui-uat/*.test.mjs
+	node scripts/webui-uat.mjs $(if $(SUITE),--suite $(SUITE),)
 
-# Same assertions as webui-uat, without the video. CI webui-smoke runs this
-# after scripts/webui-smoke.mjs (auth). STRIKE_BIN defaults to ./strike.
+# Same cockpit assertions as webui-uat, without stream scenarios or video.
+# CI webui-smoke runs this after scripts/webui-smoke.mjs (auth).
 webui-uat-smoke: build
-	node --test scripts/webui-uat/lib.test.mjs
+	node --test scripts/webui-uat/*.test.mjs
 	node scripts/webui-uat.mjs --suite smoke --no-video
 
 test: tui-gen

@@ -211,7 +211,7 @@ jobs:
         env:
           CHROME_BIN: /usr/bin/google-chrome-stable
         run: |
-          node --test scripts/webui-uat/lib.test.mjs
+          node --test scripts/webui-uat/*.test.mjs
           node scripts/webui-uat.mjs --suite smoke --no-video --out webui-uat-artifacts
 
       - name: Upload UAT screenshots

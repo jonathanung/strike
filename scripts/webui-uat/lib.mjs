@@ -17,6 +17,18 @@ export const SHELL_LABELS = [
 export const DARK_TOKENS = { acid: "#7c3aed", ground: "#14131c" };
 export const LIGHT_TOKENS = { acid: "#5b21b6", ground: "#ffffff" };
 
+// Phone width used by the shell's one-column break (max-width: 960px).
+// Tag stays "mobile" so shot names match the existing shell-empty-mobile.png.
+export const PHONE = { width: 390, height: 844, tag: "mobile" };
+
+export function phoneShotName(name) {
+  const slug = String(name || "");
+  if (!/^[a-z][a-z0-9-]*$/.test(slug)) {
+    throw new Error(`phone shot name must be a slug, got ${name}`);
+  }
+  return `${slug}-${PHONE.tag}`;
+}
+
 // Coarse palette check. Headlines rotate and session times move, so a
 // full-frame pixel match is not stable across hosts. This threshold is only
 // for an opt-in downscale (`--goldens`).
@@ -126,18 +138,20 @@ export function parseArgs(argv) {
         throw new Error(`unknown argument ${a}`);
     }
   }
-  if (opt.suite !== "full" && opt.suite !== "smoke") {
-    throw new Error(`--suite must be full or smoke, got ${opt.suite}`);
+  if (!/^[a-z][a-z0-9-]*$/.test(opt.suite)) {
+    throw new Error(`--suite must be full, smoke, or a scenario slug, got ${opt.suite}`);
   }
   return opt;
 }
 
 export const HELP = `webui-uat — boot strike serve --provider echo and drive the cockpit
 
-  node scripts/webui-uat.mjs [--out dir] [--suite full|smoke] [--no-video]
+  node scripts/webui-uat.mjs [--out dir] [--suite full|smoke|<slug>] [--no-video]
   node scripts/webui-uat.mjs --compare-only --left kiro.png --right strike.png --compare-out out.png
 
 Screenshots land in <out>/screenshots. A video of the scripted pass lands in
-<out>/uat.mp4 unless --no-video. The process exits non-zero when an assertion
-fails. See docs/webui-uat.md.
+<out>/uat.mp4 unless --no-video. --suite full (the default) runs the cockpit
+pass, then every scripts/webui-uat/scenarios/<slug>.mjs. --suite <slug> runs
+only that file. --suite smoke is the cockpit pass and what CI runs. The
+process exits non-zero when an assertion fails. See docs/webui-uat.md.
 `;
