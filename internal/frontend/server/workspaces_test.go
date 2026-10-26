@@ -80,6 +80,65 @@ func TestWorkspacesAPI(t *testing.T) {
 	}
 }
 
+func TestWorkspacePolicyAPI(t *testing.T) {
+	dir := t.TempDir()
+	wsDir := filepath.Join(dir, "proj")
+	if err := os.MkdirAll(wsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rules := filepath.Join(wsDir, "AGENTS.md")
+	if err := os.WriteFile(rules, []byte("rules\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store, err := workspace.Open(filepath.Join(dir, "state"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv, err := New(Options{SessionDir: dir, PollInterval: 20 * time.Millisecond, Workspaces: store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := srv.Handler()
+	body, _ := json.Marshal(map[string]string{"path": wsDir, "name": "proj"})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/workspaces", bytes.NewReader(body)))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("add: %d %s", rec.Code, rec.Body.String())
+	}
+	var added workspace.Workspace
+	if err := json.NewDecoder(rec.Body).Decode(&added); err != nil {
+		t.Fatal(err)
+	}
+
+	patch, _ := json.Marshal(map[string]string{"rules": "AGENTS.md", "permissionMode": "plan"})
+	rec = httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPatch, "/v1/workspaces/"+added.ID, bytes.NewReader(patch))
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("policy: %d %s", rec.Code, rec.Body.String())
+	}
+	var updated workspace.Workspace
+	if err := json.NewDecoder(rec.Body).Decode(&updated); err != nil {
+		t.Fatal(err)
+	}
+	if updated.Rules != rules || updated.PermissionMode != "plan" {
+		t.Fatalf("updated = %+v", updated)
+	}
+
+	bad, _ := json.Marshal(map[string]string{"permissionMode": "trust"})
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPatch, "/v1/workspaces/"+added.ID, bytes.NewReader(bad)))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("bad mode: %d %s", rec.Code, rec.Body.String())
+	}
+	// The rejected mode must not stick.
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/workspaces", nil))
+	if !strings.Contains(rec.Body.String(), `"permissionMode":"plan"`) {
+		t.Fatalf("list after reject: %s", rec.Body.String())
+	}
+}
+
 func TestWorkspacesAPIUnavailable(t *testing.T) {
 	srv := testServer(t, t.TempDir(), "")
 	rec := httptest.NewRecorder()

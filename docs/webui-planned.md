@@ -55,6 +55,34 @@ the checkpoint. Checkpoints would be the plan section body plus the child
 verification report, not a hidden snapshot format. Until a run is defined as
 that sequence, the client does not show a Task Runner board.
 
+## Workspace binding
+
+The registry (`~/.strike/workspaces.json`) now stores a directory, an
+optional rules file inside that directory, and an optional permission mode.
+That is the named workspace. It is not wired through to a running session:
+
+- A session does not record which workspace it belongs to. The live engine
+  working directory is still the directory `strike serve` was started in.
+- Activating a workspace does not load its rules file into the prompt and
+  does not call `set.permission_mode`.
+- A delegated child's working directory is not checked against registered
+  workspace directories. Adding that check before sessions run inside those
+  directories would reject ordinary `strike serve` (the registry is often
+  empty, and the serve directory may be unregistered).
+- Context-bundle `allowed_paths` can already limit child filesystem tools.
+  That is a bundle, not a workspace-registry check.
+
+Planned: a session records a workspace id. The engine for that session uses
+the workspace directory. Child spawns whose working directory is outside
+that directory, and outside any extra roots recorded on the workspace, are
+rejected. The rules file is injected as project rules for that session only.
+The stored permission mode becomes the session's starting posture, still
+changeable with `set.permission_mode`.
+
+Per-child git worktrees stay the existing opt-in: `session.childIsolation:
+worktree` or spawn `isolation: "worktree"`. Default remains shared. Do not
+add a second flag for the same behavior.
+
 ## Not planned as a copy
 
 Stall is already a real badge when the team roster sets `budget.stall`.

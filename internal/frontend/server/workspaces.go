@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/jonathanung/strike/internal/persist/workspace"
+	"github.com/jonathanung/strike/internal/protocol"
 )
 
 type workspacesResponse struct {
@@ -58,6 +59,45 @@ func (s *Server) handleWorkspaceActivate(w http.ResponseWriter, r *http.Request)
 	ws, err := s.opts.Workspaces.Activate(strings.TrimSpace(r.PathValue("id")))
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, opErrorResponse{Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, ws)
+}
+
+type workspacePolicyBody struct {
+	Rules          *string `json:"rules"`
+	PermissionMode *string `json:"permissionMode"`
+}
+
+func (s *Server) handleWorkspacePolicy(w http.ResponseWriter, r *http.Request) {
+	if !s.requireWorkspaces(w) {
+		return
+	}
+	var body workspacePolicyBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "invalid json"})
+		return
+	}
+	if body.Rules == nil && body.PermissionMode == nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "rules or permissionMode is required"})
+		return
+	}
+	if body.PermissionMode != nil && strings.TrimSpace(*body.PermissionMode) != "" {
+		mode, ok := protocol.ParsePermissionMode(*body.PermissionMode)
+		if !ok {
+			writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "unknown permissionMode"})
+			return
+		}
+		canonical := string(mode)
+		body.PermissionMode = &canonical
+	}
+	ws, err := s.opts.Workspaces.SetPolicy(strings.TrimSpace(r.PathValue("id")), body.Rules, body.PermissionMode)
+	if err != nil {
+		status := http.StatusBadRequest
+		if strings.Contains(err.Error(), "not found") {
+			status = http.StatusNotFound
+		}
+		writeJSON(w, status, opErrorResponse{Error: err.Error()})
 		return
 	}
 	writeJSON(w, http.StatusOK, ws)

@@ -319,6 +319,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/workspaces", s.handleWorkspacesList)
 	s.mux.HandleFunc("POST /v1/workspaces", s.handleWorkspaceAdd)
 	s.mux.HandleFunc("POST /v1/workspaces/{id}/activate", s.handleWorkspaceActivate)
+	s.mux.HandleFunc("PATCH /v1/workspaces/{id}", s.handleWorkspacePolicy)
 	s.mux.HandleFunc("DELETE /v1/workspaces/{id}", s.handleWorkspaceRemove)
 	s.mux.HandleFunc("GET /v1/roots", s.handleRoots)
 	s.mux.HandleFunc("POST /v1/roots", s.handleRootCreate)

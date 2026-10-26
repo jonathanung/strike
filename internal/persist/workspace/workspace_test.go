@@ -69,6 +69,81 @@ func TestStoreAddListActivateRemove(t *testing.T) {
 	}
 }
 
+func TestSetPolicyRulesAndMode(t *testing.T) {
+	dir := t.TempDir()
+	ws := filepath.Join(dir, "proj")
+	if err := os.Mkdir(ws, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rules := filepath.Join(ws, "AGENTS.md")
+	if err := os.WriteFile(rules, []byte("# rules\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(dir, "secret.md")
+	if err := os.WriteFile(outside, []byte("nope"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(ws, "escape.md")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Open(filepath.Join(dir, "state"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	added, err := s.Add(ws, "proj")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mode := "plan"
+	rel := "AGENTS.md"
+	got, err := s.SetPolicy(added.ID, &rel, &mode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Rules != rules || got.PermissionMode != "plan" {
+		t.Fatalf("policy = %+v", got)
+	}
+	// Omitted fields stay. Empty rules clears.
+	onlyMode := "yolo"
+	got, err = s.SetPolicy(added.ID, nil, &onlyMode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Rules != rules || got.PermissionMode != "yolo" {
+		t.Fatalf("partial update = %+v", got)
+	}
+	clear := ""
+	got, err = s.SetPolicy(added.ID, &clear, &clear)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Rules != "" || got.PermissionMode != "" {
+		t.Fatalf("clear = %+v", got)
+	}
+	if _, err := s.SetPolicy(added.ID, &outside, nil); err == nil {
+		t.Fatal("rules outside workspace: want error")
+	}
+	if _, err := s.SetPolicy(added.ID, &link, nil); err == nil {
+		t.Fatal("symlink escape: want error")
+	}
+	missing := "missing.md"
+	if _, err := s.SetPolicy(added.ID, &missing, nil); err == nil {
+		t.Fatal("missing rules file: want error")
+	}
+	if _, err := s.SetPolicy("nope", &rel, nil); err == nil {
+		t.Fatal("missing id: want error")
+	}
+	s2, err := Open(filepath.Join(dir, "state"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, _ := s2.List()
+	if len(list) != 1 || list[0].PermissionMode != "" || list[0].Rules != "" {
+		t.Fatalf("reopen = %+v", list)
+	}
+}
+
 func TestStoreAddRejectsNonDir(t *testing.T) {
 	dir := t.TempDir()
 	f := filepath.Join(dir, "file.txt")

@@ -27,9 +27,25 @@ Status: walking skeleton on branch `worktree-rust-webui-daemon`. Not merged.
 
 - `internal/persist/workspace`: durable workspace registry
   (`~/.strike/workspaces.json`, 0600, atomic write). Directories are
-  validated on the daemon host; ids are stable path hashes.
+  validated on the daemon host; ids are stable path hashes. A workspace is
+  a named directory plus an optional rules file and permission mode. It is
+  not a session folder. Sessions do not store a workspace id yet, and
+  activate does not change the engine working directory or the live
+  permission mode. `PATCH /v1/workspaces/{id}` sets `rules` (a regular file
+  inside the directory; symlinks that escape are rejected) and
+  `permissionMode` (`default`, `plan`, `soft-approve`, `accept-edits`,
+  `yolo`). Empty strings clear the field.
 - API: `GET/POST /v1/workspaces`, `POST /v1/workspaces/{id}/activate`,
-  `DELETE /v1/workspaces/{id}` (token-gated like all `/v1/*` under `--auth`).
+  `PATCH /v1/workspaces/{id}`, `DELETE /v1/workspaces/{id}` (token-gated
+  like all `/v1/*` under `--auth`).
+- Per-child git worktrees already exist and stay off unless asked.
+  `session.childIsolation` `off` or `shared` (the default) keeps the
+  parent's directory. `worktree`, or a spawn `isolation: "worktree"`,
+  checks out `<repo>/.strike/worktrees/<child-id>/`. There is no second
+  flag. Outside a git repository the engine stays on the shared directory.
+  Delegated child working directories are not yet checked against the
+  workspace registry; that waits until a session actually runs in a
+  registered directory ([webui-planned.md](webui-planned.md)).
 - `strike daemon install|uninstall|status|token` + systemd user unit.
 - `strike serve --token-file` (stable 0600 token, minted once) and
   `--allow-private-bind`.

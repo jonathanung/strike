@@ -17,13 +17,22 @@ import (
 	"time"
 )
 
-// Workspace is one registered directory.
+// Workspace is one registered directory. It is not a session folder: sessions
+// do not yet store a workspace id, and activating one does not move the
+// engine's working directory.
+//
+// Rules is an optional project-rules file inside Path (absolute, after
+// symlink resolution). PermissionMode is an optional session posture name
+// (default, plan, soft-approve, accept-edits, yolo). Neither field is applied
+// to a live engine; they are configuration the host keeps with the directory.
 type Workspace struct {
-	ID         string    `json:"id"`
-	Name       string    `json:"name"`
-	Path       string    `json:"path"`
-	AddedAt    time.Time `json:"addedAt"`
-	LastOpened time.Time `json:"lastOpened,omitempty"`
+	ID             string    `json:"id"`
+	Name           string    `json:"name"`
+	Path           string    `json:"path"`
+	AddedAt        time.Time `json:"addedAt"`
+	LastOpened     time.Time `json:"lastOpened,omitempty"`
+	Rules          string    `json:"rules,omitempty"`
+	PermissionMode string    `json:"permissionMode,omitempty"`
 }
 
 type state struct {
@@ -139,6 +148,77 @@ func (s *Store) Activate(id string) (Workspace, error) {
 		}
 	}
 	return Workspace{}, fmt.Errorf("workspace: %q not found", id)
+}
+
+// SetPolicy updates the rules file and/or permission mode for id.
+// A nil pointer leaves that field unchanged. An empty rules string clears
+// the file. A non-empty rules path must be a regular file inside the
+// workspace directory; relative paths join Path, and a symlink that resolves
+// outside Path is rejected. permissionMode is stored as given (the HTTP
+// layer checks it is a real mode). An empty permissionMode clears it.
+func (s *Store) SetPolicy(id string, rules, mode *string) (Workspace, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.st.Workspaces {
+		if s.st.Workspaces[i].ID != id {
+			continue
+		}
+		if rules != nil {
+			resolved, err := rulesFileInside(s.st.Workspaces[i].Path, *rules)
+			if err != nil {
+				return Workspace{}, err
+			}
+			s.st.Workspaces[i].Rules = resolved
+		}
+		if mode != nil {
+			s.st.Workspaces[i].PermissionMode = strings.TrimSpace(*mode)
+		}
+		if err := s.saveLocked(); err != nil {
+			return Workspace{}, err
+		}
+		return s.st.Workspaces[i], nil
+	}
+	return Workspace{}, fmt.Errorf("workspace: %q not found", id)
+}
+
+// rulesFileInside resolves rules against root. Empty rules clears the field.
+func rulesFileInside(root, rules string) (string, error) {
+	rules = strings.TrimSpace(rules)
+	if rules == "" {
+		return "", nil
+	}
+	var abs string
+	if filepath.IsAbs(rules) {
+		abs = filepath.Clean(rules)
+	} else {
+		abs = filepath.Clean(filepath.Join(root, rules))
+	}
+	if !pathInside(root, abs) {
+		return "", fmt.Errorf("workspace: rules file must be inside %s", root)
+	}
+	resolved, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return "", fmt.Errorf("workspace: rules file: %w", err)
+	}
+	if !pathInside(root, resolved) {
+		return "", fmt.Errorf("workspace: rules file escapes %s", root)
+	}
+	info, err := os.Stat(resolved)
+	if err != nil {
+		return "", fmt.Errorf("workspace: rules file: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("workspace: rules path is not a file")
+	}
+	return resolved, nil
+}
+
+func pathInside(root, target string) bool {
+	rel, err := filepath.Rel(filepath.Clean(root), filepath.Clean(target))
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // Remove deletes id. Missing ids are an error.

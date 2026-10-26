@@ -16,6 +16,10 @@ materially affect the shipped product.
 
 ### Added
 
+- **Workspace policy** — a registered workspace can store a rules file
+  inside its directory and a permission mode (`PATCH /v1/workspaces/{id}`).
+  Sessions do not point at that record yet, and activating it does not move
+  the engine. See [docs/webui-daemon.md](docs/webui-daemon.md).
 - **Gateway token rotation** — `strike daemon logout` replaces
   `~/.strike/daemon.token`. A `strike serve --token-file` process reads that
   file on every `/v1` check, so the previous bearer stops working without a
