@@ -6,6 +6,7 @@
 mod api;
 mod editor;
 mod model;
+mod status;
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
