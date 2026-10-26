@@ -1099,3 +1099,7 @@ select.mode, .daemon select {
   }
 }
 /* feature:side-chat end */
+/* feature:markdown-tables begin */
+.bubble .ev-md { padding: 0; }
+.bubble .md-table-wrap { max-width: 100%; }
+/* feature:markdown-tables end */
