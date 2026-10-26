@@ -412,6 +412,9 @@ type Live struct {
 	subs    map[chan protocol.Event]struct{}
 	closed  bool
 	closeCh chan struct{}
+
+	memoryModeGet func() string
+	memoryModeSet func(string) error
 }
 
 // NewLive creates a live session bridge. ops must be the engine Ops channel.
@@ -444,6 +447,52 @@ func emptyTeamSnapshot() TeamSnapshot {
 		Verifications: nil,
 	}
 }
+
+// BindMemoryMode attaches the session flag getter and setter. set persists
+// the mode and enforces it on the engine. A nil binding reports unwired.
+func (l *Live) BindMemoryMode(get func() string, set func(string) error) {
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	l.memoryModeGet = get
+	l.memoryModeSet = set
+	l.mu.Unlock()
+}
+
+// MemoryMode returns the bound session mode. ok is false when unwired.
+func (l *Live) MemoryMode() (string, bool) {
+	if l == nil {
+		return memoryModeNormal, false
+	}
+	l.mu.RLock()
+	get := l.memoryModeGet
+	l.mu.RUnlock()
+	if get == nil {
+		return memoryModeNormal, false
+	}
+	mode := strings.TrimSpace(get())
+	if mode == "" {
+		mode = memoryModeNormal
+	}
+	return mode, true
+}
+
+// SetMemoryMode updates the bound session flag.
+func (l *Live) SetMemoryMode(mode string) error {
+	if l == nil || l.memoryModeSet == nil {
+		return errors.New("memory mode is not wired")
+	}
+	l.mu.RLock()
+	set := l.memoryModeSet
+	l.mu.RUnlock()
+	if set == nil {
+		return errors.New("memory mode is not wired")
+	}
+	return set(mode)
+}
+
+const memoryModeNormal = "normal"
 
 // Team returns a deep-ish copy of the observe-only team snapshot for this root.
 func (l *Live) Team() TeamSnapshot {

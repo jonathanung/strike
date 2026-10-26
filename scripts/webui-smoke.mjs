@@ -91,6 +91,43 @@ try {
     throw new Error(`seen HTTP ${seenRes.status}`);
   }
 
+  const auth = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+  const secret = "sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789";
+  const putPref = await fetch(`http://127.0.0.1:${port}/v1/memory/smoke-pref`, {
+    method: "PUT",
+    headers: auth,
+    body: JSON.stringify({
+      value: "smoke likes plain files",
+      tags: ["preference"],
+      author: "operator",
+      scope: "project",
+    }),
+  });
+  if (!putPref.ok) {
+    throw new Error(`memory put failed ${putPref.status} ${await putPref.text()}`);
+  }
+  const putSecret = await fetch(`http://127.0.0.1:${port}/v1/memory/smoke-secret`, {
+    method: "PUT",
+    headers: auth,
+    body: JSON.stringify({ value: secret, tags: ["note"], author: "operator" }),
+  });
+  if (!putSecret.ok) {
+    throw new Error(`memory secret put failed ${putSecret.status} ${await putSecret.text()}`);
+  }
+  const listed = await fetch(`http://127.0.0.1:${port}/v1/memory?scope=project`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const listedText = await listed.text();
+  const secretAt = listedText.indexOf(secret);
+  if (!listed.ok || !listedText.includes("smoke-pref") || secretAt >= 0 || !listedText.includes("REDACTED")) {
+    throw new Error(
+      `memory list redact check failed status=${listed.status} ok=${listed.ok} secretAt=${secretAt} b64=${Buffer.from(listedText).toString("base64")}`,
+    );
+  }
+  if (!listedText.includes("markdownFile") || !listedText.includes(".md")) {
+    throw new Error(`memory list missing plain-file path body=${listedText.slice(0, 500)}`);
+  }
+
   await writeFile(join(home, ".strike", "config.json"), '{"sandboxAllowDegrade":true}\n').catch(() => {});
 
   // GitHub ubuntu-latest already has a `google-chrome` on PATH, so a conditional
@@ -196,14 +233,7 @@ try {
   await send("Runtime.enable");
   await send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
 
-  let text = "";
-  let acid = "";
-  let ground = "";
-  let title = "";
-  let statusId = "";
-  let chip = false;
-  const statusIds = ["idle", "running", "waiting", "blocked", "failed", "done", "stopped", "disconnected"];
-  for (let i = 0; i < 40; i++) {
+  const readCockpit = async () => {
     const ev = await send("Runtime.evaluate", {
       expression: `(() => {
         const body = document.body ? document.body.innerText : "";
@@ -221,7 +251,18 @@ try {
       returnByValue: true,
     });
     const raw = ev.result?.result?.value || "{}";
-    const parsed = JSON.parse(raw);
+    return JSON.parse(raw);
+  };
+
+  let text = "";
+  let acid = "";
+  let ground = "";
+  let title = "";
+  let statusId = "";
+  let chip = false;
+  const statusIds = ["idle", "running", "waiting", "blocked", "failed", "done", "stopped", "disconnected"];
+  for (let i = 0; i < 40; i++) {
+    const parsed = await readCockpit();
     text = parsed.body || "";
     acid = parsed.acid || "";
     ground = parsed.ground || "";
@@ -240,7 +281,7 @@ try {
     }
     await delay(250);
   }
-  const want = ["Run a command", "Strike", "Activity", "Files", "Changes", "Approval"];
+  const want = ["Run a command", "Strike", "Activity", "Files", "Changes", "Memory", "Knowledge", "Artifacts", "Approval"];
   const missingText = want.filter((s) => !text.includes(s));
   if (missingText.length || acid !== "#7c3aed" || ground !== "#14131c" || !chip || !statusIds.includes(statusId) || !title.includes("Strike")) {
     throw new Error(
@@ -336,6 +377,53 @@ try {
     expression: `localStorage.setItem("strike.token", ${JSON.stringify(token)})`,
   });
   await send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
+  for (let i = 0; i < 40; i++) {
+    const parsed = await readCockpit();
+    text = parsed.body || "";
+    if (text.includes("Run a command") && text.includes("Memory")) break;
+    await delay(250);
+  }
+
+  await send("Runtime.evaluate", {
+    expression: `(() => {
+      const btn = [...document.querySelectorAll("button")].find((b) => b.textContent.trim() === "Memory");
+      if (!btn) return "missing";
+      btn.click();
+      return "clicked";
+    })()`,
+    returnByValue: true,
+  });
+  let memoryText = "";
+  for (let i = 0; i < 40; i++) {
+    const ev = await send("Runtime.evaluate", {
+      expression: `document.body ? document.body.innerText : ""`,
+      returnByValue: true,
+    });
+    memoryText = ev.result?.result?.value || "";
+    if (memoryText.includes("smoke-pref") && memoryText.includes("smoke likes plain files")) break;
+    await delay(250);
+  }
+  if (!memoryText.includes("smoke-pref") || !memoryText.includes("smoke likes plain files")) {
+    throw new Error(`memory panel did not show the seeded entry text=${memoryText.slice(0, 1500)}`);
+  }
+  if (memoryText.includes(secret)) {
+    throw new Error("memory panel rendered the raw secret");
+  }
+  // A memory row's key cell must stay readable at panel width: the full
+  // RFC3339 timestamp once sat as a flex sibling and crushed the link
+  // block to ~35px (PR #1305 review).
+  const memKeyWidth = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const row = [...document.querySelectorAll(".storage-row")].find((r) => r.textContent.includes("smoke-pref"));
+      const link = row ? row.querySelector(".link") : null;
+      return link ? link.getBoundingClientRect().width : 0;
+    })()`,
+    returnByValue: true,
+  });
+  const memKeyWidthPx = memKeyWidth.result?.result?.value || 0;
+  if (!(memKeyWidthPx > 100)) {
+    throw new Error(`memory row key cell too narrow width=${memKeyWidthPx}`);
+  }
   const goalCheck = async (expression, ready) => {
     let body = "";
     for (let i = 0; i < 40; i++) {
