@@ -55,7 +55,13 @@ func TestEngineSessionTempAllocatedAndCleaned(t *testing.T) {
 		defer close(done)
 		eng.Run(ctx)
 	}()
-	time.Sleep(20 * time.Millisecond)
+	// Run has passed its defers once a startup event is visible. Cancel only
+	// after that so cleanup cannot race a Run that has not entered yet.
+	select {
+	case <-eng.Events():
+	case <-time.After(5 * time.Second):
+		t.Fatal("startup event")
+	}
 	cancel()
 	close(eng.Ops())
 	select {

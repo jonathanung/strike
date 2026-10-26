@@ -97,6 +97,16 @@ func (holdStream) Stream(ctx context.Context, _ provider.Request) (<-chan provid
 	return ch, nil
 }
 
+// keepChildLive pins a provider that blocks in Stream. These tests call
+// spawnChild without Run, so Select never runs. An unpinned child emits
+// "no model selected", exits, and drops its handle before the assertion
+// (CI -race, missing child handle at 0s).
+func keepChildLive(e *Engine) {
+	e.prov = holdStream{}
+	e.provName = "echo"
+	e.model = "echo"
+}
+
 func TestSpawnChildInheritsParentPermissionMode(t *testing.T) {
 	// End-to-end: parent live yolo → child Options.InitialPermissionMode yolo.
 	eng := New(Options{
@@ -120,6 +130,7 @@ func TestSpawnChildInheritsParentPermissionMode(t *testing.T) {
 	})
 	eng.permMode = protocol.PermissionModeYolo
 	eng.agent = Agent{Name: "build", Description: "build"}
+	keepChildLive(eng)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -185,6 +196,7 @@ func TestSpawnChildLockedPermissionModeIgnoresLive(t *testing.T) {
 	// Live dial would be yolo if unlocked; lock must pin managed default.
 	eng.permMode = protocol.PermissionModeYolo
 	eng.agent = Agent{Name: "build", Description: "build"}
+	keepChildLive(eng)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
