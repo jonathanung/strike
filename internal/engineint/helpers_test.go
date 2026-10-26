@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -102,6 +103,17 @@ func matchUserText(text string) func(provider.Request) bool {
 	return func(req provider.Request) bool {
 		for _, m := range req.Messages {
 			if m.Role == provider.RoleUser && m.Text == text {
+				return true
+			}
+		}
+		return false
+	}
+}
+
+func matchUserTextContains(text string) func(provider.Request) bool {
+	return func(req provider.Request) bool {
+		for _, m := range req.Messages {
+			if m.Role == provider.RoleUser && strings.Contains(m.Text, text) {
 				return true
 			}
 		}
