@@ -78,6 +78,61 @@ func waitGoal(t *testing.T, srv *Server, id, status string) goalDTO {
 	return last
 }
 
+// A pause issued right after a background start must stick: the goal
+// ends paused (never reversed back into a run by the start path) and
+// stays paused.
+func TestGoalsBackgroundStartPauseSticks(t *testing.T) {
+	srv, _ := newGoalServer(t)
+
+	code, created := postGoal(t, srv, `{
+		"description":"slow check",
+		"verification":"exec sleep 30",
+		"maxIterations":5,
+		"maxNoProgressIters":5,
+		"maxVerifyFailures":5,
+		"maxWallClockS":120
+	}`)
+	if code != http.StatusCreated {
+		t.Fatalf("create = %d", code)
+	}
+	run := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(run, httptest.NewRequest(http.MethodPost, "/v1/goals/"+created.ID+"/run?background=1", nil))
+	if run.Code != http.StatusAccepted {
+		t.Fatalf("background = %d %s", run.Code, run.Body.String())
+	}
+	// A pause that lands before the background goroutine registers its
+	// run is rejected (the goal is not active yet) rather than silently
+	// reversed, so retry briefly like a user would; once accepted, it
+	// must stick.
+	pauseDeadline := time.Now().Add(3 * time.Second)
+	for {
+		pause := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(pause, httptest.NewRequest(http.MethodPost, "/v1/goals/"+created.ID+"/pause", nil))
+		if pause.Code == http.StatusOK {
+			break
+		}
+		if time.Now().After(pauseDeadline) {
+			t.Fatalf("pause never accepted: %d %s", pause.Code, pause.Body.String())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	paused := waitGoal(t, srv, created.ID, "paused")
+	if paused.LastIteration != 0 {
+		t.Fatalf("paused=%+v, want no committed iterations", paused)
+	}
+	time.Sleep(300 * time.Millisecond)
+	again := waitGoal(t, srv, created.ID, "paused")
+	if again.Status != "paused" {
+		t.Fatalf("status moved to %s after pause", again.Status)
+	}
+	// Leave no 30s check running behind the test.
+	abort := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(abort, httptest.NewRequest(http.MethodPost, "/v1/goals/"+created.ID+"/abort", nil))
+	if abort.Code != http.StatusOK {
+		t.Fatalf("abort = %d %s", abort.Code, abort.Body.String())
+	}
+}
+
 func TestGoalsVerificationAndAutopilotHTTP(t *testing.T) {
 	srv, _ := newGoalServer(t)
 

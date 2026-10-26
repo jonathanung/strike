@@ -77,6 +77,11 @@ func (l *Loop) Run(ctx context.Context, id string) (Goal, error) {
 	if !ok {
 		return Goal{}, ErrNotFound
 	}
+	// A stop that landed before the loop starts must not be undone by the
+	// activation below: a cancelled context means pause/abort already ran.
+	if err := ctx.Err(); err != nil {
+		return g, err
+	}
 	switch g.Status {
 	case StatusDone, StatusFailed, StatusAborted:
 		return g, nil
@@ -89,6 +94,20 @@ func (l *Loop) Run(ctx context.Context, id string) (Goal, error) {
 		}
 	default:
 		return Goal{}, fmt.Errorf("goal: cannot run status %s", g.Status)
+	}
+	if err := ctx.Err(); err != nil {
+		// Pause/abort landed while activating. If the goal is still in the
+		// active state activation left it in, put it back to paused; a
+		// status a concurrent control already wrote stands as stored.
+		if fresh, ok, getErr := l.Store.Get(id); getErr == nil && ok {
+			if fresh.Status == StatusActive {
+				if paused, perr := l.Store.SetStatus(id, StatusPaused, ""); perr == nil {
+					return paused, err
+				}
+			}
+			return fresh, err
+		}
+		return g, err
 	}
 
 	for {

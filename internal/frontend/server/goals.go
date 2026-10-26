@@ -345,10 +345,11 @@ func hasCheckPrefix(raw string) bool {
 	}
 }
 
-// handleGoalRunBackground marks the goal active and runs the loop off the
-// request so the client can poll the log. Closing the page does not cancel
-// the loop; pause and abort do. A second start while one is in progress
-// returns the current goal instead of a second loop.
+// handleGoalRunBackground starts the loop off the request (the adapter's
+// Run registers the run and marks the goal active) so the client can poll
+// the log. Closing the page does not cancel the loop; pause and abort do.
+// A second start while one is in progress returns the current goal
+// instead of a second loop.
 func (s *Server) handleGoalRunBackground(w http.ResponseWriter, api host.Goals, id string) {
 	g, ok, err := api.Get(id)
 	if err != nil {
@@ -363,13 +364,12 @@ func (s *Server) handleGoalRunBackground(w http.ResponseWriter, api host.Goals, 
 	case "done", "failed", "aborted":
 		writeJSON(w, http.StatusConflict, opErrorResponse{Error: "goal is already finished"})
 		return
-	case "pending", "paused", "blocked":
-		g, err = api.Resume(id)
-		if err != nil {
-			writeGoalErr(w, err)
-			return
-		}
 	}
+	// Do not Resume here: the adapter's Run owns registration and the
+	// status transition as one step. Resuming in the handler, outside the
+	// run registry, let a Pause landing before the goroutine registered
+	// its cancel func be silently reversed when the loop activated the
+	// goal, so the stop was lost.
 	go func() {
 		_, _ = api.Run(context.Background(), id)
 	}()

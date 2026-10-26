@@ -31,6 +31,10 @@ type goalsAdapter struct {
 	mu      sync.Mutex
 	running map[string]struct{}
 	cancel  map[string]context.CancelFunc
+	// runStarting, when set, runs right after a run registers itself and
+	// before it transitions the goal or starts the loop. It is a test seam
+	// for the pause-during-start window; nil in production.
+	runStarting func(id string)
 }
 
 func (a *goalsAdapter) Set(description string, criteria []string, opts host.GoalSetOptions) (host.Goal, error) {
@@ -121,8 +125,12 @@ func (a *goalsAdapter) Run(ctx context.Context, id string) (host.Goal, error) {
 		}
 		return g, nil
 	}
+	// Register the run (and its cancel func) before any status transition,
+	// so a Pause or Abort landing during start finds the cancel func and
+	// is honoured below instead of being overwritten by the transition.
 	a.running[id] = struct{}{}
 	a.cancel[id] = cancel
+	starting := a.runStarting
 	a.mu.Unlock()
 	defer func() {
 		cancel()
@@ -131,6 +139,55 @@ func (a *goalsAdapter) Run(ctx context.Context, id string) (host.Goal, error) {
 		delete(a.cancel, id)
 		a.mu.Unlock()
 	}()
+
+	if starting != nil {
+		starting(id)
+	}
+
+	// The run owns the status transition as part of starting (the loop
+	// would do the same, but only after this window). Terminal goals do
+	// not start; a goal a concurrent control already moved is left as
+	// that control left it.
+	g, ok, err := a.store.Get(id)
+	if err != nil {
+		return host.Goal{}, err
+	}
+	if !ok {
+		return host.Goal{}, fmt.Errorf("goal: not found")
+	}
+	switch g.Status {
+	case goal.StatusDone, goal.StatusFailed, goal.StatusAborted:
+		return toHostGoal(g), nil
+	case goal.StatusPending, goal.StatusPaused, goal.StatusBlocked:
+		if _, err := a.store.SetStatus(id, goal.StatusActive, ""); err != nil {
+			cur, ok, getErr := a.Get(id)
+			if getErr != nil || !ok {
+				return host.Goal{}, err
+			}
+			return cur, nil
+		}
+	case goal.StatusActive:
+		// Already active (Resume marked it); just run.
+	default:
+		return host.Goal{}, fmt.Errorf("goal: cannot run status %s", g.Status)
+	}
+
+	// A stop that landed during start cancelled runCtx. Do not hand the
+	// goal to the loop: it would run against an already-stopped request.
+	// A goal this start activated goes back to paused; an aborted goal is
+	// already terminal. Either way the stop stands.
+	if runCtx.Err() != nil {
+		cur, ok, getErr := a.store.Get(id)
+		if getErr != nil || !ok {
+			return host.Goal{}, fmt.Errorf("goal: not found")
+		}
+		if cur.Status == goal.StatusActive {
+			if paused, perr := a.store.SetStatus(id, goal.StatusPaused, ""); perr == nil {
+				return toHostGoal(paused), nil
+			}
+		}
+		return toHostGoal(cur), nil
+	}
 
 	loop := &goal.Loop{
 		Store:   a.store,
@@ -141,8 +198,8 @@ func (a *goalsAdapter) Run(ctx context.Context, id string) (host.Goal, error) {
 		Executor: goal.ShellExecutor{WorkDir: a.workDir},
 		Hooks:    goal.DefaultHooks(),
 	}
-	g, err := loop.Run(runCtx, id)
-	return a.finishRun(id, g, err)
+	lg, lerr := loop.Run(runCtx, id)
+	return a.finishRun(id, lg, lerr)
 }
 
 // finishRun records a loop error on a goal that is still active. Pause and
@@ -181,6 +238,24 @@ func (a *goalsAdapter) Pause(id string) (host.Goal, error) {
 	g, err := a.store.SetStatus(id, goal.StatusPaused, "")
 	a.cancelRun(id)
 	if err != nil {
+		// A run that is still starting has registered its cancel func but
+		// may not have transitioned the goal to active yet, so the store
+		// rejects the pause. The cancel above still stops the start (Run
+		// checks its context after transitioning), so the pause is not
+		// lost: report the current goal instead of an error.
+		a.mu.Lock()
+		_, starting := a.running[id]
+		a.mu.Unlock()
+		if starting {
+			if cur, ok, getErr := a.Get(id); getErr == nil && ok {
+				switch cur.Status {
+				case "done", "failed", "aborted":
+					// Terminal: the original error stands.
+				default:
+					return cur, nil
+				}
+			}
+		}
 		return host.Goal{}, err
 	}
 	return toHostGoal(g), nil

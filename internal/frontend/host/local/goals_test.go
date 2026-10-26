@@ -167,6 +167,61 @@ func TestPauseCancelsInFlightCheck(t *testing.T) {
 	}
 }
 
+// TestPauseDuringBackgroundStart covers the window the peer review
+// flagged: a Pause that lands after a start has registered but before the
+// loop begins. The pause must not be silently reversed by the start's
+// activation, and no iteration may run.
+func TestPauseDuringBackgroundStart(t *testing.T) {
+	dir := t.TempDir()
+	store, err := goal.Open(dir, "pausestart")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	gapi := NewGoals(store, dir)
+	adapter, ok := gapi.(*goalsAdapter)
+	if !ok {
+		t.Fatalf("NewGoals = %T, want *goalsAdapter", gapi)
+	}
+	g, err := gapi.Set("pass check", []string{"cmd: true"}, host.GoalSetOptions{MaxIterations: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pauseErr error
+	adapter.runStarting = func(id string) {
+		// The pause lands exactly in the start window: the run is
+		// registered, but the goal has not been transitioned yet.
+		_, pauseErr = gapi.Pause(id)
+	}
+	got, err := gapi.Run(context.Background(), g.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pauseErr != nil {
+		t.Fatalf("pause during start: %v", pauseErr)
+	}
+	if got.Status != "paused" {
+		t.Fatalf("run returned status=%s, want paused", got.Status)
+	}
+	cur, ok, err := gapi.Get(g.ID)
+	if err != nil || !ok || cur.Status != "paused" || cur.LastIteration != 0 {
+		t.Fatalf("got=%+v ok=%v err=%v", cur, ok, err)
+	}
+	log, err := gapi.Log(g.ID, 0)
+	if err != nil || len(log) != 0 {
+		t.Fatalf("log=%v err=%v, want no iterations", log, err)
+	}
+	// The goal is resumable afterwards: a fresh run completes it.
+	adapter.runStarting = nil
+	done, err := gapi.Run(context.Background(), g.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if done.Status != "done" {
+		t.Fatalf("resumed run status=%s reason=%s", done.Status, done.FailReason)
+	}
+}
+
 func TestCanceledRunMarksActiveGoalFailed(t *testing.T) {
 	dir := t.TempDir()
 	store, err := goal.Open(dir, "failrun")

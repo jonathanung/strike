@@ -364,6 +364,56 @@ func TestLoopPause(t *testing.T) {
 	}
 }
 
+// A run whose context is already cancelled (a pause/abort that landed
+// during start) must not activate a pending or paused goal: the stop
+// stands and no iteration runs.
+func TestLoopCancelledContextDoesNotActivate(t *testing.T) {
+	for _, start := range []string{"pending", "paused"} {
+		t.Run(start, func(t *testing.T) {
+			s, err := Open(t.TempDir(), "cancelstart")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer s.Close()
+			spec, _ := ParseCheckSpec("cmd: true")
+			g, err := s.Create("do not start", []Criterion{{Check: spec}}, DefaultConstraints())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if start == "paused" {
+				if _, err := s.SetStatus(g.ID, StatusActive, ""); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := s.SetStatus(g.ID, StatusPaused, ""); err != nil {
+					t.Fatal(err)
+				}
+			}
+			loop := &Loop{
+				Store:   s,
+				Planner: EvaluateOnlyPlanner{},
+				Critic: &DefaultCritic{
+					CmdRunner: func(context.Context, string, string) (int, string, error) {
+						return 0, "", nil
+					},
+				},
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			got, err := loop.Run(ctx, g.ID)
+			if err == nil {
+				t.Fatal("expected context error")
+			}
+			if got.Status != Status(start) {
+				t.Fatalf("status=%s, want %s", got.Status, start)
+			}
+			cur, ok, err := s.Get(g.ID)
+			if err != nil || !ok || cur.Status != Status(start) || cur.LastIteration != 0 {
+				t.Fatalf("stored=%+v ok=%v err=%v", cur, ok, err)
+			}
+		})
+	}
+}
+
 func TestLoopRaceRun(t *testing.T) {
 	s, err := Open(t.TempDir(), "race-loop")
 	if err != nil {
