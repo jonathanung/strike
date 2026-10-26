@@ -13,13 +13,14 @@
 <link rel="stylesheet" href="/assets/navbar-4aaaf28db500eacb.css" integrity="sha384-5TOOsJOEELXhQX9eaCeYAdolP2MTbzKY2Rs54jkUpbigS3rQ+1uG62wvDZTASCfR"/>
 <link rel="stylesheet" href="/assets/editor-b94eee6c774248b5.css" integrity="sha384-+9ZqewFDkMigo7FvJP5c3fz6AHPgvKtu9jHfIAjeW7Qtx7wW3GCJSZM+LHcEeR4D"/>
 <link rel="stylesheet" href="/assets/notify-8613309b82adb028.css" integrity="sha384-gf4TSJKQquVHJeFh3Vn2UOpQ27ghrO/chn9Wniak+PSSv39P8p1kFRiMHwBnplXN"/>
+<link rel="stylesheet" href="/assets/goals-5b895e22909a0f66.css" integrity="sha384-liP/FQF4QvouM0zc8WO7nxC1u3CzbFF/GBmvuED6zZS8f0rmPG1QWhWJitxfpRm1"/>
 
 
 
 
 <script type="module">
-import init, * as bindings from '/assets/strike-webui-d20a3ee84966cd94.js';
-const wasm = await init({ module_or_path: '/assets/strike-webui-d20a3ee84966cd94_bg.wasm' });
+import init, * as bindings from '/assets/strike-webui-d29a7e2e4f2ae3a5.js';
+const wasm = await init({ module_or_path: '/assets/strike-webui-d29a7e2e4f2ae3a5_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -30,6 +31,6 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 </script>
 <script src="/assets/register.js" defer></script>
 
-<link rel="modulepreload" href="/assets/strike-webui-d20a3ee84966cd94.js" crossorigin="anonymous" integrity="sha384-p024YALLBpBeVomdoGnc8dHckaLbH0aFruTzTOB87tXFeTuTo735UQRTFbMpzQHb"><link rel="preload" href="/assets/strike-webui-d20a3ee84966cd94_bg.wasm" crossorigin="anonymous" integrity="sha384-swQ5+mWtR+5NKuBSVQDGLrgJGBbzIwppJI8qHGnN8KloUK29lTpKDcZJfNvdeKkC" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/assets/strike-webui-d29a7e2e4f2ae3a5.js" crossorigin="anonymous" integrity="sha384-p1YS74/azb/kZuTbNGIE+AGBsyW3MiZKFUmduMg//2NTMm/QEva24ZAHaN5AvRuy"><link rel="preload" href="/assets/strike-webui-d29a7e2e4f2ae3a5_bg.wasm" crossorigin="anonymous" integrity="sha384-n6ujlT3wjH0Gy0G18J9e7KiDTTS46hqe4DgVbagpvOzRiWdC1M+2YKAh3DEWXZs8" as="fetch" type="application/wasm"></head>
 <body></body>
 </html>
