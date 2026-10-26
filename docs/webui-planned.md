@@ -1,9 +1,12 @@
 # Web UI planned panels
 
 The Rust client (`webui/`) ships the surfaces the daemon can drive today:
-tabbed live sessions, a chat transcript over `/v1/live/events`, and an
-Activity panel over `GET /v1/team` plus `team.spawn` / `team.child_interrupt`.
-Blocked children (`schema:handoff`, #1201) show as `blocked`.
+a session list (live roots, saved sessions, client-side unread and pins,
+delegated children nested under the open session), a transcript over
+`/v1/live/events`, a composer that can steer or queue and set the real
+permission mode, and a side panel with Activity, Files, and Changes.
+Blocked children (`schema:handoff`, #1201) show as `blocked`. Unread and
+pinned are browser storage, not server fields.
 
 These panels are not in the client. Drawing empty versions of them would
 pretend the daemon already has the Kiro-shaped workflow. Each one below is
@@ -82,6 +85,59 @@ changeable with `set.permission_mode`.
 Per-child git worktrees stay the existing opt-in: `session.childIsolation:
 worktree` or spawn `isolation: "worktree"`. Default remains shared. Do not
 add a second flag for the same behavior.
+
+## Onboarding
+
+No first-run flow is wired to the web client. Strike has host onboarding
+state, but the client does not show a privacy step, a theme picker, or a
+coach-mark tour. Planned: a first-run card that states which local files
+the daemon reads, then a single accent choice stored in browser settings.
+It would not send telemetry. There is no telemetry export on this client.
+
+## Gateway hub
+
+Saved daemon URLs in the Daemon view are a bookmark list in
+`localStorage`. They are not a hub. Planned: one switcher that reaches
+several loopback gateways over SSH port forwards, with a short-lived token
+minted on the host. Credentials stay on that host. The client must not open
+a public listener or store provider keys.
+
+## Memory mode
+
+There is no incognito or temporary transcript mode on the daemon. A pill
+for one would be a lie. Planned: a session flag that skips history and
+memory writes for that root only, enforced in the engine, not only hidden
+in the page.
+
+## Side chat
+
+A second read-only chat is not a daemon resource. Planned: a transcript
+view that subscribes to events and cannot post `user.input`, so it cannot
+approve a tool. Until that view exists, the only composer is the one with
+the approval chip.
+
+## Extra side tabs
+
+Git status beyond `GET /v1/changed-files`, an embedded browser, a terminal,
+and a subagent board that is not the Activity list are not in the client.
+Activity is the subagent list. Changes is the diff list. A terminal tab
+would have to be the real `!` shell path, which today is TUI-only.
+
+## Composer triggers
+
+The web composer does not parse `/command`, `@file`, `$skill`, or `!shell`.
+The TUI expands `@file` and runs `!` shell. Dragging a file inserts `@path`
+as plain text. Planned: the same expansion on `user.input` in the daemon,
+so every client gets it, plus a `+` menu whose entries are only those real
+actions. Upload and screenshot stay out until the daemon accepts those
+attachments on the op.
+
+## Context window hold
+
+`status.contextUsed` is reported on bootstrap. The client does not block
+Send when the window is full. Planned: a hold that refuses `user.input`
+when the live status says the next turn would not fit, with the number
+from the daemon. The client will not invent a limit.
 
 ## Not planned as a copy
 

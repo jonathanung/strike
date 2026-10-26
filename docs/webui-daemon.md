@@ -49,13 +49,44 @@ Status: walking skeleton on branch `worktree-rust-webui-daemon`. Not merged.
 - `strike daemon install|uninstall|status|token` + systemd user unit.
 - `strike serve --token-file` (stable 0600 token, minted once) and
   `--allow-private-bind`.
-- `webui/`: Leptos client. Daemon connect, workspaces, and saved remotes stay
-  on the Daemon view. Chat is tabbed live roots (`/v1/roots`) with a
-  transcript from `/v1/live/events` and a composer (`user.input`). Activity
-  lists delegated children from `GET /v1/team` (status, elapsed, stop, retry,
-  expand), including `blocked` handoffs. Schedule, memory, knowledge,
-  artifacts, and the task runner are documented in
-  [webui-planned.md](webui-planned.md), not drawn as empty panels.
+- `webui/`: Leptos client. The shell is a session list, a transcript, and
+  a side panel. Daemon connect, workspace policy, and saved remotes stay on
+  the Daemon view.
+  - Session list merges live roots (`/v1/roots`) with saved sessions.
+    A gutter marks in progress or unread. Chips filter Unread, In progress,
+    and Pinned. Search matches title, id, or a delegated child's title.
+    Older rows fold after six, keeping pinned, busy, and the open session.
+    Delegated children (`GET /v1/sessions/{id}/children`, team state when
+    the roster has them) nest under the open session. Unread and pinned
+    live in browser storage (`strike.seen`, `strike.pins`); the server does
+    not store them.
+  - The top bar has a command field (Ctrl+K or Cmd+K) for a new session,
+    stop-all, the Chat and Daemon views, Steer/Queue, and the five approval
+    modes. A gateway chip follows `/health`. Back and Forward walk the
+    sessions opened in this tab. Focus hides the side columns.
+  - The composer posts `user.input` when the root is idle. While it is
+    busy, Steer posts `steer` and Queue posts `user.input`. That choice is
+    `strike.enterMode` (default Queue, the same send as before). The
+    approval chip posts `set.permission_mode` with Strike's real modes:
+    `default` (ask on the normal rules), `plan` (writes denied; stricter
+    than read-only shell), `soft-approve` (15s countdown then allow once),
+    `accept-edits` (file edits allowed; shell and network still ask),
+    `yolo` (this session skips asks that are not hard-denied; other
+    sessions stay as they are). There is no read-only-shell mode and no
+    all-sessions skip. The model chip shows the live provider and model
+    from `/v1/bootstrap`. A catalog `GET /v1/models` that fails stays
+    "catalog unavailable" and does not invent models. `select.model` is
+    rejected while a turn is running.
+  - Empty sessions rotate a short headline and offer six prompts that send
+    as ordinary text. A failed load shows the error and Retry.
+  - The side panel is Activity (team snapshot: status, elapsed, stop,
+    retry, expand, including `blocked` handoffs), Files (`/v1/files`), and
+    Changes (`/v1/changed-files`). Clicking or dragging a file inserts
+    `@path` as text. The web composer does not expand that token the way
+    the TUI does.
+  - Schedule, memory, knowledge, artifacts, the task runner, onboarding,
+    and a multi-gateway hub are documented in
+    [webui-planned.md](webui-planned.md), not drawn as empty panels.
 - Server serves `/sw.js` and `/manifest.webmanifest` at the origin root and
   the bundle under `/assets/` (WASM-aware CSP and content types).
 
@@ -77,11 +108,10 @@ Foreground instead of systemd: `./strike serve --auth --token-file ~/.strike/dae
 1. Engine root per workspace: opening a workspace currently records it as
    active; spawning/attaching a live engine rooted at that directory (today
    roots spawn in the daemon's cwd) is the next engine-plumbing slice.
-2. Chat/session UI on `/v1/ws` + `/v1/ops` (transcript, composer, tool
-   calls, permission asks) — tabbed roots and Activity shipped in the Rust
-   client; permission asks are still only the protocol event.
-3. Session list/resume per workspace, file explorer, diffs. The session
-   list resumes a root; it does not yet follow the active workspace.
+2. Permission asks in the transcript. The composer can set the mode;
+   an in-flight ask is still only the protocol event.
+3. Session list and resume follow the active workspace. Files and diffs
+   follow the daemon working directory, which is not the workspace path.
 4. Per-remote tokens in the UI (today one token field for the selected
    daemon), daemon discovery on the tailnet.
 5. Tauri shell (optional), TUI removal decision, `docs/web.md` rewrite.

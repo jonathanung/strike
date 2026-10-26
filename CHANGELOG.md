@@ -16,6 +16,11 @@ materially affect the shipped product.
 
 ### Added
 
+- **Web client shell** — session list with status, unread, in-progress,
+  and pinned filters; command field (Ctrl+K); gateway chip; approval mode,
+  model, and Steer/Queue on the composer; Activity, Files, and Changes.
+  See [docs/webui-daemon.md](docs/webui-daemon.md). Panels the daemon cannot
+  drive stay in [docs/webui-planned.md](docs/webui-planned.md).
 - **Workspace policy** — a registered workspace can store a rules file
   inside its directory and a permission mode (`PATCH /v1/workspaces/{id}`).
   Sessions do not point at that record yet, and activating it does not move

@@ -14,7 +14,11 @@ pub fn auth_header(token: &str) -> String {
     format!("Bearer {token}")
 }
 
-pub async fn get_json<T: DeserializeOwned>(base: &str, token: &str, path: &str) -> Result<T, String> {
+pub async fn get_json<T: DeserializeOwned>(
+    base: &str,
+    token: &str,
+    path: &str,
+) -> Result<T, String> {
     let resp = Request::get(&api(base, path))
         .header("Authorization", &auth_header(token))
         .send()
@@ -29,7 +33,12 @@ pub async fn get_json<T: DeserializeOwned>(base: &str, token: &str, path: &str) 
     resp.json::<T>().await.map_err(|e| e.to_string())
 }
 
-pub async fn post_json_value(base: &str, token: &str, path: &str, body: Value) -> Result<Value, String> {
+pub async fn post_json_value(
+    base: &str,
+    token: &str,
+    path: &str,
+    body: Value,
+) -> Result<Value, String> {
     let resp = Request::post(&api(base, path))
         .header("Authorization", &auth_header(token))
         .json(&body)
@@ -52,14 +61,42 @@ pub async fn post_json(base: &str, token: &str, path: &str, body: Value) -> Resu
     post_json_value(base, token, path, body).await.map(|_| ())
 }
 
+pub async fn patch_json(base: &str, token: &str, path: &str, body: Value) -> Result<(), String> {
+    let resp = Request::patch(&api(base, path))
+        .header("Authorization", &auth_header(token))
+        .json(&body)
+        .map_err(|e| e.to_string())?
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let status = resp.status();
+    if !(200..300).contains(&status) {
+        let text = resp.text().await.unwrap_or_default();
+        return Err(format!("HTTP {status} {text}"));
+    }
+    Ok(())
+}
+
 /// Submit one protocol op to the live root (`?root=`).
-pub async fn post_op(base: &str, token: &str, root: &str, typ: &str, data: Value) -> Result<(), String> {
+pub async fn post_op(
+    base: &str,
+    token: &str,
+    root: &str,
+    typ: &str,
+    data: Value,
+) -> Result<(), String> {
     let path = if root.is_empty() {
         "/v1/ops".to_string()
     } else {
         format!("/v1/ops?root={}", js_encode(root))
     };
-    post_json(base, token, &path, serde_json::json!({"type": typ, "data": data})).await
+    post_json(
+        base,
+        token,
+        &path,
+        serde_json::json!({"type": typ, "data": data}),
+    )
+    .await
 }
 
 pub fn js_encode(s: &str) -> String {
