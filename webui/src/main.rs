@@ -16,7 +16,8 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use model::{
     activity_panel, child_card_from_parts, child_card_from_text, child_keys_match, display_state,
-    filter_sessions, fmt_ago, fmt_elapsed, is_running, merge_sessions, mode_label, task_headline,
+    filter_sessions, fmt_ago, fmt_elapsed, is_running, merge_sessions, mode_label, rfc3339_to_ms,
+    task_headline,
     permission_modes, prefer_summary, protocol_dump, session_label, status_kind, strip_echo_tip,
     visible_sessions, ActivityRow, Bootstrap, ChangedFilesResponse, ChatLine, ChildCard,
     ChildrenResponse, FilesResponse, Health, ModelInfo, ModelList, Remote, RootSummary,
@@ -150,6 +151,7 @@ fn Skeleton() -> impl IntoView {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn push_line(
     lines: RwSignal<Vec<ChatLine>>,
     seq: &Rc<Cell<u32>>,
@@ -157,6 +159,7 @@ fn push_line(
     title: &str,
     body: &str,
     badge: &str,
+    at_ms: f64,
 ) {
     let id = seq.get() + 1;
     seq.set(id);
@@ -169,6 +172,7 @@ fn push_line(
             badge: badge.into(),
             detail: String::new(),
             key: String::new(),
+            at_ms,
         });
     });
 }
@@ -197,6 +201,9 @@ fn upsert_child(lines: RwSignal<Vec<ChatLine>>, seq: &Rc<Cell<u32>>, card: Child
             if !kind.is_empty() {
                 existing.badge = kind.clone();
             }
+            if existing.at_ms <= 0.0 && card.at_ms > 0.0 {
+                existing.at_ms = card.at_ms;
+            }
             true
         })
         .unwrap_or(false);
@@ -219,6 +226,7 @@ fn upsert_child(lines: RwSignal<Vec<ChatLine>>, seq: &Rc<Cell<u32>>, card: Child
             badge: kind,
             detail: card.details,
             key: card.key,
+            at_ms: card.at_ms,
         });
     });
 }
@@ -231,7 +239,8 @@ fn absorb_noise(lines: RwSignal<Vec<ChatLine>>, seq: &Rc<Cell<u32>>) {
                 continue;
             }
             line.body = strip_echo_tip(&line.body);
-            if let Some(card) = child_card_from_text(&line.body) {
+            if let Some(mut card) = child_card_from_text(&line.body) {
+                card.at_ms = line.at_ms;
                 cards.push(card);
                 line.body.clear();
             } else if let Some((summary, details)) = protocol_dump(&line.body) {
@@ -241,6 +250,7 @@ fn absorb_noise(lines: RwSignal<Vec<ChatLine>>, seq: &Rc<Cell<u32>>) {
                     status: String::new(),
                     summary,
                     details,
+                    at_ms: line.at_ms,
                 });
                 line.body.clear();
             }
@@ -250,6 +260,61 @@ fn absorb_noise(lines: RwSignal<Vec<ChatLine>>, seq: &Rc<Cell<u32>>) {
     for card in cards {
         upsert_child(lines, seq, card);
     }
+}
+
+/// Header stamp for a transcript line (#1349): relative while the line is
+/// under a day old (the session list's `fmt_ago` vocabulary), local clock
+/// time after that. Empty when the line's envelope time is unknown.
+fn line_stamp(at_ms: f64) -> String {
+    if at_ms <= 0.0 {
+        return String::new();
+    }
+    let now = now_ms();
+    if now - at_ms < 86_400_000.0 {
+        let rel = fmt_ago((at_ms / 1000.0) as i64, (now / 1000.0) as i64);
+        if !rel.is_empty() {
+            return rel;
+        }
+    }
+    let d = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(at_ms));
+    format!("{:02}:{:02}", d.get_hours() as u32, d.get_minutes() as u32)
+}
+
+/// Full local timestamp for the stamp's tooltip. Empty when unknown.
+fn line_full_time(at_ms: f64) -> String {
+    if at_ms <= 0.0 {
+        return String::new();
+    }
+    js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(at_ms))
+        .to_string()
+        .as_string()
+        .unwrap_or_default()
+}
+
+/// Local calendar day of a line, as (year, month 0-based, day of month).
+fn line_day(at_ms: f64) -> (u32, u32, u32) {
+    let d = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(at_ms));
+    (
+        d.get_full_year() as u32,
+        d.get_month() as u32,
+        d.get_date() as u32,
+    )
+}
+
+/// Separator label shown when the local day changes between lines.
+fn line_day_label(at_ms: f64) -> String {
+    const DAYS: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let d = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(at_ms));
+    format!(
+        "{} {} {}, {}",
+        DAYS[(d.get_day() as usize) % 7],
+        MONTHS[(d.get_month() as usize) % 12],
+        d.get_date() as u32,
+        d.get_full_year() as u32
+    )
 }
 
 fn apply_envelope(
@@ -270,6 +335,13 @@ fn apply_envelope(
         Err(_) => return,
     };
     let typ = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
+    // The envelope's `time` is the event's original time (also what the
+    // JSONL log persists), so replayed lines keep their real timestamps.
+    let at_ms = v
+        .get("time")
+        .and_then(|t| t.as_str())
+        .map(rfc3339_to_ms)
+        .unwrap_or(0.0);
     let data = v.get("data").cloned().unwrap_or(serde_json::Value::Null);
     let text = |key: &str| match data.get(key) {
         Some(serde_json::Value::String(s)) => s.clone(),
@@ -279,7 +351,7 @@ fn apply_envelope(
     match typ {
         "user.message" => {
             open.set(false);
-            push_line(lines, seq, "you", "You", &text("text"), "");
+            push_line(lines, seq, "you", "You", &text("text"), "", at_ms);
             absorb_noise(lines, seq);
         }
         "turn.started" => open.set(false),
@@ -305,7 +377,7 @@ fn apply_envelope(
                 }
             }
             open.set(true);
-            push_line(lines, seq, "strike", "Strike", &chunk, "");
+            push_line(lines, seq, "strike", "Strike", &chunk, "", at_ms);
         }
         "turn.completed" => {
             open.set(false);
@@ -314,7 +386,7 @@ fn apply_envelope(
         "tool.begin" => {
             open.set(false);
             let name = text("name");
-            push_line(lines, seq, "tool", &name, &text("args"), "tool");
+            push_line(lines, seq, "tool", &name, &text("args"), "tool", at_ms);
         }
         "tool.end" => {
             let title = text("title");
@@ -329,7 +401,7 @@ fn apply_envelope(
             } else {
                 title
             };
-            push_line(lines, seq, "tool", &heading, &output, badge);
+            push_line(lines, seq, "tool", &heading, &output, badge, at_ms);
         }
         "child.completed" => {
             let status = text("status");
@@ -345,11 +417,9 @@ fn apply_envelope(
                     .to_string();
             }
             let details = serde_json::to_string_pretty(&data).unwrap_or_default();
-            upsert_child(
-                lines,
-                seq,
-                child_card_from_parts(&name, &session, &status, &summary, &details),
-            );
+            let mut card = child_card_from_parts(&name, &session, &status, &summary, &details);
+            card.at_ms = at_ms;
+            upsert_child(lines, seq, card);
         }
         _ => {}
     }
@@ -1619,13 +1689,38 @@ fn App() -> impl IntoView {
                                 </div>
                             </div>
                         </Show>
-                        {move || lines.get().into_iter().map(|line| {
+                        {move || {
+                            let list = lines.get();
+                            // A day separator precedes the first timed line of
+                            // each local day (#1349). Untimed lines never open
+                            // a new day.
+                            let mut prev_day: Option<(u32, u32, u32)> = None;
+                            let seps: Vec<Option<String>> = list
+                                .iter()
+                                .map(|line| {
+                                    if line.at_ms <= 0.0 {
+                                        return None;
+                                    }
+                                    let day = line_day(line.at_ms);
+                                    let label = if prev_day == Some(day) {
+                                        None
+                                    } else {
+                                        Some(line_day_label(line.at_ms))
+                                    };
+                                    prev_day = Some(day);
+                                    label
+                                })
+                                .collect();
+                            list.into_iter().zip(seps).map(|(line, sep)| {
                             let badge = line.badge.clone();
                             let badge_kind = badge.clone();
                             let role = line.role.clone();
                             let title = line.title.clone();
                             let body = line.body.clone();
                             let detail = line.detail.clone();
+                            let stamp = line_stamp(line.at_ms);
+                            let stamp_full = line_full_time(line.at_ms);
+                            let has_stamp = !stamp.is_empty();
                             let has_badge = !badge.is_empty();
                             let has_detail = !detail.is_empty();
                             let card = role == "child";
@@ -1662,17 +1757,20 @@ fn App() -> impl IntoView {
                                 view! { <LinkedBody text=body kind="pre" doc_path=doc_path doc_line=doc_line doc_diff=doc_diff /> }.into_any()
                             };
                             view! {
+                                {sep.map(|label| view! { <div class="day-sep" role="separator">{label}</div> })}
                                 <article class=format!("bubble card role-{role}")>
                                     <header>
                                         <span class="who">{title}</span>
                                         <Show when=move || has_badge>
                                             <Badge kind=badge_kind.clone() label=badge.clone() />
                                         </Show>
+                                        {has_stamp.then(|| view! { <span class="stamp" title=stamp_full.clone()>{stamp.clone()}</span> })}
                                     </header>
                                     {body_view}
                                 </article>
                             }
-                        }).collect_view()}
+                            }).collect_view()
+                        }}
                     </div>
                     </Show>
                     <div class="composer"
