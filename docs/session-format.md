@@ -102,7 +102,7 @@ written by a newer or older Strike still loads.
 |---|---|---|
 | Project key | `projectKey` | Session create. Launch workspace identity (the same key as history and memory). Often a filesystem path on a real machine. Empty on legacy sidecars |
 | Session id | `sessionId` | Every `WriteMeta`. Set to the filename stem, replacing a stale value. Empty until the next write on older files. Readers should still prefer the filename if the two disagree |
-| Last model | `model` | `Manager.Append` of `model.selected` when `model` is non-empty and the event's `sessionId` is empty or equals this session. A later selection replaces it. An empty model does not clear it. Provider is not stored here |
+| Last model | `model` | `Manager.Append` of `model.selected` when `model` is non-empty and the event's `sessionId` is empty or equals this session. Memory updates only after the sidecar write succeeds. `Fork` / `ForkAt` copy the last non-empty `model.selected` in the kept prefix, not the source sidecar. `Import` copies that selection from the package log, or the package sidecar `model` when the log has none. A later selection replaces it. An empty model does not clear it. Provider is not stored here |
 | Title | `title` | Create, rename, or `session.titled` |
 | Parent | `parentSessionId` | Child session create. Empty on roots and on forks |
 | Team lead | `leadSessionId` | Child create. Roots are their own lead and leave this empty. Nested children store the root lead, not the immediate parent |
