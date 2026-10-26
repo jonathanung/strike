@@ -58,6 +58,9 @@ type Meta struct {
 	PRNumber       int    `json:"prNumber,omitempty"`
 	PRState        string `json:"prState,omitempty"`     // open|merged|closed
 	PRUpdatedAt    string `json:"prUpdatedAt,omitempty"` // RFC3339 UTC when PR fields last written
+	// MemoryMode is normal, incognito, or temporary for this root session.
+	// Empty means normal. The engine enforces it; the sidecar restores it.
+	MemoryMode string `json:"memoryMode,omitempty"`
 }
 
 // NormalizePRState maps forge state strings to open|merged|closed, or "".

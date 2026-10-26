@@ -1010,8 +1010,14 @@ Permission asks appear as `permission.asked` events; resolve with
 
 ### Memory & issues write/export
 
-| `PUT` | `/v1/memory/{key}` | **yes** | Put/replace entry (`{value,tags?}`); blocked in attach-only |
-| `DELETE` | `/v1/memory/{key}` | **yes** | Delete entry; blocked in attach-only |
+| `GET` | `/v1/memory` | mode | List entries. `?scope=project` (default) or `global`. Response adds `markdownFile` and `auditFile` when the store is the file projection. |
+| `PUT` | `/v1/memory/{key}` | **yes** | Put/replace entry (`{value,tags?,author?,scope?}`); query `scope` is the fallback. Values, keys, and tags are credential-scrubbed. Blocked in attach-only. |
+| `DELETE` | `/v1/memory/{key}` | **yes** | Delete entry (`?scope=`); blocked in attach-only |
+| `GET` | `/v1/memory/mode` | mode | Session memory mode (`normal`, `incognito`, `temporary`) for `?root=`. `wired:false` when no live engine is bound. |
+| `PUT` | `/v1/memory/mode` | **yes** | Set that mode (`{mode}`) for `?root=`. Persists on the session meta sidecar. |
+| `GET` | `/v1/knowledge` | mode | Pinned paths for `?scope=project` or `global`. |
+| `PUT` | `/v1/knowledge` | **yes** | Pin (`{path,note?,author?,scope?}`). Notes are scrubbed. Blocked in attach-only. |
+| `DELETE` | `/v1/knowledge` | **yes** | Unpin (`{path,scope?}`). Blocked in attach-only. |
 | `GET` | `/v1/memory/export` | mode | Download portable `strike-memory.json` (TUI format) |
 | `POST` | `/v1/memory/import` | **yes** | Import (`{path}` or `{data}`, `replace?`); blocked in attach-only |
 | `POST` | `/v1/issues` | **yes** | Create issue (`{title,body?}`); blocked in attach-only |
@@ -1029,7 +1035,7 @@ Attach-only may read authorized rows; missing capability returns **501**.
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | `GET` | `/v1/artifacts` | mode | Bounded list (`type`, `scope`, `sessionId`, `includeExpired`, `limit`≤200, `offset`). Visibility uses `actorSession` + `actorRoot` (default: live/`?root=` session). Owner-access rows require matching owner session; team-access requires matching owner root. |
-| `GET` | `/v1/artifacts/{id}` | mode | Full artifact (`?version=` optional). **404** when missing or not visible. Content/title are credential-scrubbed. |
+| `GET` | `/v1/artifacts/{id}` | mode | Full artifact (`?version=` optional). Retained snapshots (last 20) replay through `?version=`. **404** when missing, not visible, or the version was dropped. Content/title are credential-scrubbed on write. |
 | `GET` | `/v1/ledger` | mode | History list (`status`, `kind`, `path`, `taskId`, `authorSession`, `limit`, `offset`) or active slice (`active=1` + optional `path`/`taskId`). Includes invalidated/superseded provenance fields. |
 | `GET` | `/v1/ledger/{id}` | mode | One ledger entry (any status). **404** when missing. Statements/evidence scrubbed. |
 
