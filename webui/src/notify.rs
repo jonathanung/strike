@@ -5,7 +5,7 @@
 //! `/#session=<id>&approval=<requestId>`.
 //! Status unread stays on the session list; this badge counts centre rows.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use gloo_net::http::Request;
@@ -32,6 +32,42 @@ pub fn request_open() {
             open.set(true);
         }
     });
+}
+
+/// Page wiring for the shell slot. The shell boots before App's signals
+/// exist, so App installs them here (same late-bind shape as
+/// `shell::HostBridge`) and the contrib slot renders the bell from them.
+#[derive(Clone)]
+pub struct NotifyHost {
+    pub base: RwSignal<String>,
+    pub token: RwSignal<String>,
+    pub gateway: RwSignal<String>,
+    pub on_focus: Callback<FocusTarget>,
+}
+
+thread_local! {
+    static HOST: RefCell<Option<NotifyHost>> = RefCell::new(None);
+}
+
+pub fn set_host(host: NotifyHost) {
+    HOST.with(|slot| *slot.borrow_mut() = Some(host));
+}
+
+/// Slot render for `src/shell/contrib/notifications.rs`.
+pub fn bell_view() -> AnyView {
+    let host = HOST.with(|slot| slot.borrow().clone());
+    match host {
+        Some(host) => view! {
+            <NotificationBell
+                base=host.base
+                token=host.token
+                gateway=host.gateway
+                on_focus=host.on_focus
+            />
+        }
+        .into_any(),
+        None => view! { <span></span> }.into_any(),
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -513,6 +549,14 @@ pub fn NotificationBell(
     let draft_start = RwSignal::new("22:00".to_string());
     let draft_end = RwSignal::new("07:00".to_string());
     OPEN_CENTRE.with(|slot| slot.set(Some(open)));
+    // The shell palette command dispatches here (docs/webui-shell.md).
+    crate::shell::bind(
+        "notifications.open",
+        Rc::new(|_args: &str| {
+            request_open();
+            Ok(())
+        }),
+    );
 
     let (stored_high, stored_primed) = match load_raw(HIGH_KEY).parse::<i64>() {
         Ok(n) if !load_raw(HIGH_KEY).is_empty() => (n, true),

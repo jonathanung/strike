@@ -10,6 +10,7 @@
 </script>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="/assets/style-b2b9379e5298992c.css" integrity="sha384-IAtTOdZ7bnog7BDcwtA5zvP/UlGwcSN/QNrueNntgghzY/mwyx23CzrwWVuKq+wD"/>
+<link rel="stylesheet" href="/assets/navbar-4aaaf28db500eacb.css" integrity="sha384-5TOOsJOEELXhQX9eaCeYAdolP2MTbzKY2Rs54jkUpbigS3rQ+1uG62wvDZTASCfR"/>
 <link rel="stylesheet" href="/assets/editor-c775cc9b18a5458.css" integrity="sha384-AyOjM22LfkyGATt0RiB3O7FWiJR+tjHaI+BUHE+UrMDR7Ykaa5aNRaKgR7as4OR+"/>
 <link rel="stylesheet" href="/assets/notify-8613309b82adb028.css" integrity="sha384-gf4TSJKQquVHJeFh3Vn2UOpQ27ghrO/chn9Wniak+PSSv39P8p1kFRiMHwBnplXN"/>
 
@@ -17,8 +18,8 @@
 
 
 <script type="module">
-import init, * as bindings from '/assets/strike-webui-b7c765dbff55715b.js';
-const wasm = await init({ module_or_path: '/assets/strike-webui-b7c765dbff55715b_bg.wasm' });
+import init, * as bindings from '/assets/strike-webui-7df9404a3e3ed269.js';
+const wasm = await init({ module_or_path: '/assets/strike-webui-7df9404a3e3ed269_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -29,6 +30,6 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 </script>
 <script src="/assets/register.js" defer></script>
 
-<link rel="modulepreload" href="/assets/strike-webui-b7c765dbff55715b.js" crossorigin="anonymous" integrity="sha384-Cy37hzCetEIM4UcKTiIVDhp3UUYKO3yJEKGTBnra5dscpX+cBa9tYuHjfpms5L5i"><link rel="preload" href="/assets/strike-webui-b7c765dbff55715b_bg.wasm" crossorigin="anonymous" integrity="sha384-K6dJDdicbOMLTIybeMUmC76GB4yn6/tc7BM/3EXAvOvjnjWzRd8oo41oYSIOEIWr" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/assets/strike-webui-7df9404a3e3ed269.js" crossorigin="anonymous" integrity="sha384-jFOakkrnG8WRlW1TCdlt37FPHfoQSYRg6l2SoJ1UlYWImhaeGmEKWsaVkm2WZAcE"><link rel="preload" href="/assets/strike-webui-7df9404a3e3ed269_bg.wasm" crossorigin="anonymous" integrity="sha384-Fvp1vtAKoIN1/Ghj1COeCyGXxBoH/QhzmcPGLvqZeHZtnzNDAocaa8IG+Dsa/p4R" as="fetch" type="application/wasm"></head>
 <body></body>
 </html>

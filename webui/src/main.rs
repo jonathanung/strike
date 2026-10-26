@@ -7,7 +7,10 @@ mod api;
 mod editor;
 mod model;
 mod notify;
+mod shell;
 mod side_chat;
+
+use crate::shell::icon;
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -458,157 +461,6 @@ const SUGGESTIONS: [&str; 6] = [
     "What should I look at next?",
 ];
 
-#[derive(Clone, Copy)]
-struct PaletteCmd {
-    section: &'static str,
-    id: &'static str,
-    label: &'static str,
-    detail: &'static str,
-}
-
-fn palette_cmds() -> &'static [PaletteCmd] {
-    &[
-        PaletteCmd {
-            section: "Commands",
-            id: "new",
-            label: "New session",
-            detail: "Open another live root",
-        },
-        PaletteCmd {
-            section: "Commands",
-            id: "stop-all",
-            label: "Stop all",
-            detail: "Interrupt running delegated children in this session",
-        },
-        PaletteCmd {
-            section: "Commands",
-            id: "side-chat",
-            label: "Side chat",
-            detail: "Ask about this session without steering it or approving a tool",
-        },
-        PaletteCmd {
-            section: "Apps",
-            id: "chat",
-            label: "Chat",
-            detail: "Sessions and the transcript",
-        },
-        PaletteCmd {
-            section: "Apps",
-            id: "daemon",
-            label: "Daemon",
-            detail: "This gateway, its token, and workspaces",
-        },
-        PaletteCmd {
-            section: "Apps",
-            id: "notifications",
-            label: "Notifications",
-            detail: "Approvals, finished work, and the gateway",
-        },
-        PaletteCmd {
-            section: "Settings",
-            id: "steer",
-            label: "Steer",
-            detail: "Enter adds your message to the current turn without stopping it",
-        },
-        PaletteCmd {
-            section: "Settings",
-            id: "queue",
-            label: "Queue",
-            detail: "Enter waits until the turn finishes",
-        },
-        PaletteCmd {
-            section: "Settings",
-            id: "mode-default",
-            label: "Approval: Default",
-            detail: "Ask on the normal rules",
-        },
-        PaletteCmd {
-            section: "Settings",
-            id: "mode-plan",
-            label: "Approval: Plan",
-            detail: "Deny writes and edits",
-        },
-        PaletteCmd {
-            section: "Settings",
-            id: "mode-soft",
-            label: "Approval: Soft",
-            detail: "Count down 15 seconds, then allow once",
-        },
-        PaletteCmd {
-            section: "Settings",
-            id: "mode-edits",
-            label: "Approval: Edits",
-            detail: "Allow file edits; still ask for shell and network",
-        },
-        PaletteCmd {
-            section: "Settings",
-            id: "mode-yolo",
-            label: "Approval: Yolo",
-            detail: "This session skips asks that are not hard-denied",
-        },
-        PaletteCmd {
-            section: "Theme",
-            id: "theme-strike",
-            label: "Theme: Strike",
-            detail: "Stock TUI palette. Royal purple, cyan working state",
-        },
-        PaletteCmd {
-            section: "Theme",
-            id: "theme-nord",
-            label: "Theme: Nord",
-            detail: "Bundled TUI theme. Missing surfaces stay Strike",
-        },
-        PaletteCmd {
-            section: "Theme",
-            id: "theme-dracula",
-            label: "Theme: Dracula",
-            detail: "Bundled TUI theme. Missing surfaces stay Strike",
-        },
-        PaletteCmd {
-            section: "Theme",
-            id: "theme-gruvbox",
-            label: "Theme: Gruvbox",
-            detail: "Bundled TUI theme. Missing surfaces stay Strike",
-        },
-        PaletteCmd {
-            section: "Theme",
-            id: "theme-monokai",
-            label: "Theme: Monokai",
-            detail: "Bundled TUI theme. Missing surfaces stay Strike",
-        },
-        PaletteCmd {
-            section: "Theme",
-            id: "theme-tokyo-night",
-            label: "Theme: Tokyo Night",
-            detail: "Bundled TUI theme. Missing surfaces stay Strike",
-        },
-        PaletteCmd {
-            section: "Theme",
-            id: "theme-catppuccin",
-            label: "Theme: Catppuccin",
-            detail: "Bundled TUI theme. Missing surfaces stay Strike",
-        },
-        PaletteCmd {
-            section: "Theme",
-            id: "scheme-dark",
-            label: "Scheme: Dark",
-            detail: "Dark hexes from the TUI token pair",
-        },
-        PaletteCmd {
-            section: "Theme",
-            id: "scheme-light",
-            label: "Scheme: Light",
-            detail: "Light hexes from the TUI token pair",
-        },
-    ]
-}
-
-fn palette_match(cmd: &PaletteCmd, query: &str) -> bool {
-    query.is_empty()
-        || cmd.label.to_ascii_lowercase().contains(query)
-        || cmd.detail.to_ascii_lowercase().contains(query)
-}
-
 fn load_string_list(key: &str) -> Vec<String> {
     serde_json::from_str(&load(key)).unwrap_or_default()
 }
@@ -620,30 +472,6 @@ fn load_seen() -> HashMap<String, i64> {
 fn set_drag(ev: &web_sys::DragEvent, path: &str) {
     if let Some(dt) = ev.data_transfer() {
         let _ = dt.set_data("text/plain", &format!("@{path}"));
-    }
-}
-
-fn icon(name: &str) -> &'static str {
-    match name {
-        "sessions" => {
-            r#"<svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h7"/></svg>"#
-        }
-        "activity" => {
-            r#"<svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 8h2.5l1.8-3.5L9 12l1.7-4H14.5"/></svg>"#
-        }
-        "files" => {
-            r#"<svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2.5h5l3 3V13.5H4z"/><path d="M9 2.5V5.5h3"/></svg>"#
-        }
-        "changes" => {
-            r#"<svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4.5h10M3 8h6M3 11.5h8"/></svg>"#
-        }
-        "command" => {
-            r#"<svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5h11v9h-11z"/><path d="M5 7l2 1.5L5 10M8.5 10.5h2.5"/></svg>"#
-        }
-        "status" => {
-            r#"<svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="2.5"/></svg>"#
-        }
-        _ => "",
     }
 }
 
@@ -746,8 +574,6 @@ fn App() -> impl IntoView {
     let load_error = RwSignal::new(String::new());
     let gateway = RwSignal::new("checking".to_string());
     let focus = RwSignal::new(false);
-    let palette_open = RwSignal::new(false);
-    let palette_query = RwSignal::new(String::new());
     let back_stack = RwSignal::new(Vec::<String>::new());
     let forward_stack = RwSignal::new(Vec::<String>::new());
     let pins = RwSignal::new(load_string_list("strike.pins"));
@@ -1263,47 +1089,6 @@ fn App() -> impl IntoView {
         );
     };
 
-    let run_command = move |id: String| {
-        palette_open.set(false);
-        match id.as_str() {
-            "new" => new_session(),
-            "stop-all" => stop_all(),
-            "side-chat" => open_side(String::new(), String::new()),
-            "chat" => mode.set("chat".into()),
-            "daemon" => mode.set("daemon".into()),
-            "notifications" => notify::request_open(),
-            "steer" => set_enter("steer".into()),
-            "queue" => set_enter("queue".into()),
-            "mode-default" => set_perm("default".into()),
-            "mode-plan" => set_perm("plan".into()),
-            "mode-soft" => set_perm("soft-approve".into()),
-            "mode-edits" => set_perm("accept-edits".into()),
-            "mode-yolo" => set_perm("yolo".into()),
-            "theme-strike" => set_theme("strike".into()),
-            "theme-nord" => set_theme("nord".into()),
-            "theme-dracula" => set_theme("dracula".into()),
-            "theme-gruvbox" => set_theme("gruvbox".into()),
-            "theme-monokai" => set_theme("monokai".into()),
-            "theme-tokyo-night" => set_theme("tokyo-night".into()),
-            "theme-catppuccin" => set_theme("catppuccin".into()),
-            "scheme-dark" => set_scheme("dark".into()),
-            "scheme-light" => set_scheme("light".into()),
-            _ => {}
-        }
-    };
-
-    let run_picked = move || {
-        let q = palette_query.get_untracked().to_ascii_lowercase();
-        let items: Vec<_> = palette_cmds()
-            .iter()
-            .copied()
-            .filter(|c| palette_match(c, &q))
-            .collect();
-        if let Some(cmd) = items.first() {
-            run_command(cmd.id.to_string());
-        }
-    };
-
     let load_files = move || {
         let (b, t, path) = (
             base.get_untracked(),
@@ -1346,50 +1131,6 @@ fn App() -> impl IntoView {
             load_changes();
         }
     });
-
-    let on_key =
-        Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |ev: web_sys::KeyboardEvent| {
-            if (ev.meta_key() || ev.ctrl_key()) && ev.key().eq_ignore_ascii_case("k") {
-                ev.prevent_default();
-                palette_open.set(!palette_open.get_untracked());
-                if palette_open.get_untracked() {
-                    palette_query.set(String::new());
-                }
-            } else if ev.alt_key() && !ev.meta_key() && !ev.ctrl_key() && ev.key() == "ArrowLeft" {
-                ev.prevent_default();
-                travel(true);
-            } else if ev.alt_key() && !ev.meta_key() && !ev.ctrl_key() && ev.key() == "ArrowRight" {
-                ev.prevent_default();
-                travel(false);
-            } else if ev.alt_key() && !ev.meta_key() && !ev.ctrl_key() && ev.key() == "\\" {
-                ev.prevent_default();
-                focus.update(|v| *v = !*v);
-            } else if ev.alt_key() && !ev.meta_key() && !ev.ctrl_key() && ev.key().eq_ignore_ascii_case("s") {
-                ev.prevent_default();
-                side_open.update(|v| *v = !*v);
-            } else if ev.key() == "Escape" {
-                let side_was_open = side_open.get_untracked();
-                let menu = palette_open.get_untracked()
-                    || mode_menu.get_untracked()
-                    || model_menu.get_untracked()
-                    || side_was_open;
-                palette_open.set(false);
-                mode_menu.set(false);
-                model_menu.set(false);
-                side_open.set(false);
-                if !menu
-                    && !doc_editing.get_untracked()
-                    && !doc_path.get_untracked().is_empty()
-                {
-                    doc_path.set(String::new());
-                    doc_editing.set(false);
-                }
-            }
-        });
-    if let Some(w) = web_sys::window() {
-        let _ = w.add_event_listener_with_callback("keydown", on_key.as_ref().unchecked_ref());
-    }
-    on_key.forget();
 
     let open_models = move |_| {
         let open = !model_menu.get_untracked();
@@ -1452,90 +1193,148 @@ fn App() -> impl IntoView {
             .count()
     };
 
+    // The shell slot (src/shell/contrib/notifications.rs) renders the bell
+    // with the page's signals; install them before the view reads them.
+    notify::set_host(notify::NotifyHost {
+        base,
+        token,
+        gateway,
+        on_focus: on_notify,
+    });
+
+    shell::boot();
+    shell::set_host(shell::HostBridge {
+        new_session: Rc::new(move || new_session()),
+        stop_all: Rc::new(move || stop_all()),
+        set_view: Rc::new(move |next: &str| mode.set(next.to_string())),
+        view: Rc::new(move || mode.get()),
+        set_enter: Rc::new(move |next: &str| set_enter(next.to_string())),
+        set_perm: Rc::new(move |next: &str| set_perm(next.to_string())),
+        set_theme: Rc::new(move |next: &str| set_theme(next.to_string())),
+        set_scheme: Rc::new(move |next: &str| set_scheme(next.to_string())),
+        travel: Rc::new(move |back: bool| travel(back)),
+        can_back: Rc::new(move || !back_stack.get().is_empty()),
+        can_forward: Rc::new(move || !forward_stack.get().is_empty()),
+        toggle_focus: Rc::new(move || focus.update(|value| *value = !*value)),
+        focus_on: Rc::new(move || focus.get()),
+        workspace_name: Rc::new(move || {
+            let id = active_workspace.get();
+            if id.is_empty() {
+                return "No workspace".into();
+            }
+            workspaces
+                .get()
+                .into_iter()
+                .find(|workspace| workspace.id == id)
+                .map(|workspace| {
+                    if workspace.name.is_empty() {
+                        workspace.path
+                    } else {
+                        workspace.name
+                    }
+                })
+                .unwrap_or_else(|| "No workspace".into())
+        }),
+        session_name: Rc::new(move || {
+            let id = active_root.get();
+            if id.is_empty() {
+                return "No session".into();
+            }
+            let active_running = activity.get().iter().any(|row| is_running(&row.state));
+            let merged = merge_sessions(
+                &roots.get(),
+                &sessions.get(),
+                &pins.get(),
+                &seen.get(),
+                &id,
+                active_running,
+            );
+            match merged.into_iter().find(|row| row.id == id) {
+                Some(row) => session_label(&row.title, &short_id(&row.id)),
+                None => short_id(&id),
+            }
+        }),
+        session_kind: Rc::new(move || {
+            let id = active_root.get();
+            if id.is_empty() || !session_busy(&id) {
+                "idle".into()
+            } else {
+                "running".into()
+            }
+        }),
+        gateway: Rc::new(move || gateway.get()),
+        version_label: Rc::new(move || status.get()),
+        dismiss_popups: Rc::new(move || {
+            // Escape semantics carried over from the pre-shell key handler:
+            // close the menus and the side chat drawer; only when none of
+            // them was open does Escape also close the open document.
+            let menu = mode_menu.get_untracked()
+                || model_menu.get_untracked()
+                || side_open.get_untracked();
+            mode_menu.set(false);
+            model_menu.set(false);
+            side_open.set(false);
+            if !menu && !doc_editing.get_untracked() && !doc_path.get_untracked().is_empty() {
+                doc_path.set(String::new());
+                doc_editing.set(false);
+            }
+        }),
+        open_side_chat: Rc::new(move || open_side(String::new(), String::new())),
+        toggle_side_chat: Rc::new(move || side_open.update(|v| *v = !*v)),
+        workspaces: Rc::new(move || {
+            workspaces
+                .get()
+                .into_iter()
+                .map(|workspace| {
+                    let name = if workspace.name.is_empty() {
+                        workspace.path
+                    } else {
+                        workspace.name
+                    };
+                    (workspace.id, name)
+                })
+                .collect()
+        }),
+        sessions: Rc::new(move || {
+            let id = active_root.get();
+            let active_running = activity.get().iter().any(|row| is_running(&row.state));
+            merge_sessions(
+                &roots.get(),
+                &sessions.get(),
+                &pins.get(),
+                &seen.get(),
+                &id,
+                active_running,
+            )
+            .into_iter()
+            .map(|row| {
+                (
+                    row.id.clone(),
+                    session_label(&row.title, &short_id(&row.id)),
+                )
+            })
+            .collect()
+        }),
+        open_session: Rc::new(move |id: &str| {
+            let id = id.to_string();
+            let live = roots.get().iter().any(|row| row.id == id);
+            open_session(id, live);
+        }),
+        activate_workspace: Rc::new(move |id: &str| {
+            let id = id.to_string();
+            let (b, t) = (base.get(), token.get());
+            spawn_local(async move {
+                let path = format!("/v1/workspaces/{id}/activate");
+                match post_json(&b, &t, &path, serde_json::json!({})).await {
+                    Ok(()) => active_workspace.set(id),
+                    Err(err) => status.set(format!("activate failed: {err}")),
+                }
+            });
+        }),
+    });
+
     view! {
-        <header class="page-header">
-            <div class="brand" title=move || status.get()>
-                "Strike"
-                <span class="brand-status">{move || status.get()}</span>
-            </div>
-            <button class="command-pill" title="Ctrl+K commands. Alt+Left and Alt+Right switch sessions. Alt+\\ focuses the transcript." on:click=move |_| {
-                palette_query.set(String::new());
-                palette_open.set(true);
-            }>
-                <span class="pill-label">
-                    <span class="icon-slot" aria-hidden="true" inner_html=icon("command")></span>
-                    <span>"Run a command"</span>
-                </span>
-                <kbd>"Ctrl+K"</kbd>
-            </button>
-            <div class="header-actions">
-                <notify::NotificationBell
-                    base=base
-                    token=token
-                    gateway=gateway
-                    on_focus=on_notify
-                />
-                <span class=move || match gateway.get().as_str() {
-                    "connected" => "chip ok",
-                    "unreachable" => "chip bad",
-                    _ => "chip",
-                }>{move || match gateway.get().as_str() {
-                    "connected" => "Connected",
-                    "unreachable" => "Unreachable",
-                    _ => "Checking",
-                }}</span>
-                <div class="segmented" role="tablist" aria-label="View">
-                    <button class=move || if mode.get() == "chat" { "seg on" } else { "seg" } on:click=move |_| mode.set("chat".into())>"Chat"</button>
-                    <button class=move || if mode.get() == "daemon" { "seg on" } else { "seg" } on:click=move |_| mode.set("daemon".into())>"Daemon"</button>
-                </div>
-            </div>
-        </header>
-        <Show when=move || palette_open.get()>
-            <div class="palette-backdrop" on:click=move |_| palette_open.set(false)>
-                <div class="palette" on:click=move |ev: web_sys::MouseEvent| ev.stop_propagation()>
-                    <input
-                        placeholder="Type a command"
-                        prop:value=move || palette_query.get()
-                        on:input=move |ev| palette_query.set(event_target_value(&ev))
-                        on:keydown=move |ev: web_sys::KeyboardEvent| {
-                            if ev.key() == "Enter" {
-                                ev.prevent_default();
-                                run_picked();
-                            }
-                        }
-                    />
-                    <div class="palette-list">
-                    {move || {
-                        let q = palette_query.get().to_ascii_lowercase();
-                        let run = run_command;
-                        let mut blocks: Vec<_> = Vec::new();
-                        for section in ["Commands", "Apps", "Settings", "Theme"] {
-                            let items: Vec<_> = palette_cmds().iter().copied().filter(|c| c.section == section && palette_match(c, &q)).collect();
-                            if items.is_empty() {
-                                continue;
-                            }
-                            let heading = section.to_string();
-                            blocks.push(view! { <h3 class="palette-section">{heading}</h3> }.into_any());
-                            for cmd in items {
-                                let id = cmd.id.to_string();
-                                let label = cmd.label.to_string();
-                                let detail = cmd.detail.to_string();
-                                let run = run;
-                                blocks.push(view! {
-                                    <button class="palette-row" on:click=move |_| run(id.clone())>
-                                        <span class="name">{label}</span>
-                                        <span class="path">{detail}</span>
-                                    </button>
-                                }.into_any());
-                            }
-                        }
-                        blocks
-                    }}
-                    </div>
-                    <p class="hint keys">"Enter runs the first match. Alt+Left and Alt+Right switch sessions. Alt+\\ focuses the transcript. Esc closes."</p>
-                </div>
-            </div>
-        </Show>
+        <shell::Chrome />
         <Show when=move || mode.get() == "daemon" fallback=move || ()>
             <DaemonPane
                 base=base
@@ -1643,7 +1442,7 @@ fn App() -> impl IntoView {
                             </div>
                         }
                     }}
-                    <p class="hint keys">"Pins stay in this browser. Alt+Left and Alt+Right switch sessions. Alt+\\ focuses the transcript."</p>
+                    <p class="hint keys">"Pins stay in this browser. Alt+Left goes back. Alt+Right goes forward. Alt+\\ hides the side panels."</p>
                     <details class="fold">
                     <summary>"Workspaces"</summary>
                     <p class="hint">"Opening one records it. It does not move the live engine."</p>
