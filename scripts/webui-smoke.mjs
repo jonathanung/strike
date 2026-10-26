@@ -172,6 +172,9 @@ try {
 
   await send("Page.enable");
   await send("Runtime.enable");
+  await send("Page.addScriptToEvaluateOnNewDocument", {
+    source: `try{localStorage.setItem("strike.token",${JSON.stringify(token)});localStorage.setItem("strike.base","");}catch(e){}`,
+  });
   await send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
 
   let text = "";
@@ -211,6 +214,39 @@ try {
     token,
     repoDir: process.cwd(),
   });
+  const openView = async (label, needles) => {
+    await send("Runtime.evaluate", {
+      expression: `(() => {
+        const btn = [...document.querySelectorAll("button")].find((b) => b.textContent.trim() === ${JSON.stringify(label)});
+        if (!btn) return "missing";
+        btn.click();
+        return "ok";
+      })()`,
+      returnByValue: true,
+    });
+    let body = "";
+    for (let i = 0; i < 30; i++) {
+      const ev = await send("Runtime.evaluate", {
+        expression: `document.body ? document.body.innerText : ""`,
+        returnByValue: true,
+      });
+      body = ev.result?.result?.value || "";
+      if (needles.every((s) => body.includes(s))) return;
+      await delay(200);
+    }
+    throw new Error(`${label} view missing ${needles.join(", ")} text=${body.slice(0, 500)}`);
+  };
+  await openView("Usage", ["Input tokens", "Daily budget (USD)"]);
+  await openView("Audit", ["Verify chain", "Export"]);
+  const verified = await send("Runtime.evaluate", {
+    expression: `document.body ? document.body.innerText : ""`,
+    returnByValue: true,
+  });
+  const auditText = verified.result?.result?.value || "";
+  if (!auditText.includes("Chain intact") && !auditText.includes("No audit entries") && !auditText.includes("Not configured")) {
+    throw new Error(`audit chain state missing: ${auditText.slice(0, 500)}`);
+  }
+
   console.log("webui-smoke ok");
 } catch (err) {
   console.error(String(err));

@@ -207,6 +207,19 @@ func (c Catalog) OutputLimit(provider, model string) (tokens int, ok bool) {
 	return m.Limit.Output, true
 }
 
+// Cost returns models.dev USD-per-million rates.
+// ok is false when the provider, model, or cost block is missing.
+// A present block with zero input and output rates is a published free
+// price, not an unknown one. Cache fields of zero are indistinguishable
+// from omitted fields; callers must not invent a cache price from them.
+func (c Catalog) Cost(provider, model string) (ModelCost, bool) {
+	m, ok := c.lookup(provider, model)
+	if !ok || m.Cost == nil {
+		return ModelCost{}, false
+	}
+	return *m.Cost, true
+}
+
 func (c Catalog) lookup(provider, model string) (Model, bool) {
 	p, ok := c[modelsDevID(provider)]
 	if !ok {

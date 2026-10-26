@@ -6,6 +6,7 @@
 mod api;
 mod editor;
 mod model;
+mod usage_audit;
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -15,10 +16,10 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use model::{
     activity_panel, child_card_from_parts, child_card_from_text, child_keys_match, display_state,
-    filter_sessions, fmt_ago, fmt_elapsed, is_running, merge_sessions, mode_label, task_headline,
+    filter_sessions, fmt_ago, fmt_elapsed, is_running, merge_sessions, mode_label,
     permission_modes, prefer_summary, protocol_dump, session_label, status_kind, strip_echo_tip,
-    visible_sessions, ActivityRow, Bootstrap, ChangedFilesResponse, ChatLine, ChildCard,
-    ChildrenResponse, FilesResponse, Health, ModelInfo, ModelList, Remote, RootSummary,
+    task_headline, visible_sessions, ActivityRow, Bootstrap, ChangedFilesResponse, ChatLine,
+    ChildCard, ChildrenResponse, FilesResponse, Health, ModelInfo, ModelList, Remote, RootSummary,
     SessionItem, SessionsResponse, TeamSnapshot, Workspace, WorkspacesResponse,
 };
 use wasm_bindgen::closure::Closure;
@@ -410,6 +411,18 @@ fn palette_cmds() -> &'static [PaletteCmd] {
             id: "daemon",
             label: "Daemon",
             detail: "This gateway, its token, and workspaces",
+        },
+        PaletteCmd {
+            section: "Apps",
+            id: "usage",
+            label: "Usage",
+            detail: "Tokens and cost from provider usage events",
+        },
+        PaletteCmd {
+            section: "Apps",
+            id: "audit",
+            label: "Audit",
+            detail: "Hash-chained log of sensitive actions",
         },
         PaletteCmd {
             section: "Settings",
@@ -1158,6 +1171,8 @@ fn App() -> impl IntoView {
             "stop-all" => stop_all(),
             "chat" => mode.set("chat".into()),
             "daemon" => mode.set("daemon".into()),
+            "usage" => mode.set("usage".into()),
+            "audit" => mode.set("audit".into()),
             "steer" => set_enter("steer".into()),
             "queue" => set_enter("queue".into()),
             "mode-default" => set_perm("default".into()),
@@ -1250,6 +1265,20 @@ fn App() -> impl IntoView {
             } else if ev.alt_key() && !ev.meta_key() && !ev.ctrl_key() && ev.key() == "\\" {
                 ev.prevent_default();
                 focus.update(|v| *v = !*v);
+            } else if ev.alt_key()
+                && !ev.meta_key()
+                && !ev.ctrl_key()
+                && ev.key().eq_ignore_ascii_case("u")
+            {
+                ev.prevent_default();
+                mode.set("usage".into());
+            } else if ev.alt_key()
+                && !ev.meta_key()
+                && !ev.ctrl_key()
+                && ev.key().eq_ignore_ascii_case("a")
+            {
+                ev.prevent_default();
+                mode.set("audit".into());
             } else if ev.key() == "Escape" {
                 let menu = palette_open.get_untracked()
                     || mode_menu.get_untracked()
@@ -1347,6 +1376,8 @@ fn App() -> impl IntoView {
                 <div class="segmented" role="tablist" aria-label="View">
                     <button class=move || if mode.get() == "chat" { "seg on" } else { "seg" } on:click=move |_| mode.set("chat".into())>"Chat"</button>
                     <button class=move || if mode.get() == "daemon" { "seg on" } else { "seg" } on:click=move |_| mode.set("daemon".into())>"Daemon"</button>
+                    <button class=move || if mode.get() == "usage" { "seg on" } else { "seg" } on:click=move |_| mode.set("usage".into())>"Usage"</button>
+                    <button class=move || if mode.get() == "audit" { "seg on" } else { "seg" } on:click=move |_| mode.set("audit".into())>"Audit"</button>
                 </div>
             </div>
         </header>
@@ -1409,6 +1440,12 @@ fn App() -> impl IntoView {
                 remote_url=remote_url
                 refresh=refresh_meta
             />
+        </Show>
+        <Show when=move || mode.get() == "usage">
+            <usage_audit::UsagePage base=base token=token status=status />
+        </Show>
+        <Show when=move || mode.get() == "audit">
+            <usage_audit::AuditPage base=base token=token status=status />
         </Show>
         <Show when=move || mode.get() == "chat">
             <div class=move || if focus.get() { "shell focus" } else { "shell" }>

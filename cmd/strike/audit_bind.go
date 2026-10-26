@@ -8,6 +8,7 @@ import (
 	"github.com/jonathanung/strike/internal/product/config"
 	"github.com/jonathanung/strike/internal/protocol"
 	"github.com/jonathanung/strike/internal/trust/audit"
+	"github.com/jonathanung/strike/internal/trust/usageaudit"
 )
 
 // auditBoundStore wraps a session store and fans security events into an audit sink.
@@ -25,10 +26,10 @@ func (a *auditBoundStore) Append(ev protocol.Event) error {
 }
 
 func (a *auditBoundStore) ObserveAudit(ev protocol.Event) {
-	if a == nil || a.sink == nil {
-		return
+	if a != nil && a.sink != nil {
+		_ = a.sink.Observe(ev)
 	}
-	_ = a.sink.Observe(ev)
+	usageaudit.NoteEvent(ev)
 }
 
 func (a *auditBoundStore) Close() error {

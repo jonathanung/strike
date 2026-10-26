@@ -7,6 +7,7 @@ import (
 
 	"github.com/jonathanung/strike/internal/persist/workspace"
 	"github.com/jonathanung/strike/internal/protocol"
+	"github.com/jonathanung/strike/internal/trust/usageaudit"
 )
 
 type workspacesResponse struct {
@@ -91,7 +92,8 @@ func (s *Server) handleWorkspacePolicy(w http.ResponseWriter, r *http.Request) {
 		canonical := string(mode)
 		body.PermissionMode = &canonical
 	}
-	ws, err := s.opts.Workspaces.SetPolicy(strings.TrimSpace(r.PathValue("id")), body.Rules, body.PermissionMode)
+	id := strings.TrimSpace(r.PathValue("id"))
+	ws, err := s.opts.Workspaces.SetPolicy(id, body.Rules, body.PermissionMode)
 	if err != nil {
 		status := http.StatusBadRequest
 		if strings.Contains(err.Error(), "not found") {
@@ -100,6 +102,20 @@ func (s *Server) handleWorkspacePolicy(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, status, opErrorResponse{Error: err.Error()})
 		return
 	}
+	action := usageaudit.ActionConfig
+	summary := "workspace policy updated"
+	if body.PermissionMode != nil && strings.TrimSpace(*body.PermissionMode) != "" {
+		action = usageaudit.ActionPermission
+		summary = "workspace permission mode " + strings.TrimSpace(*body.PermissionMode)
+	}
+	detail := map[string]any{"workspaceId": id}
+	if body.PermissionMode != nil {
+		detail["permissionMode"] = strings.TrimSpace(*body.PermissionMode)
+	}
+	if body.Rules != nil {
+		detail["rulesSet"] = strings.TrimSpace(*body.Rules) != ""
+	}
+	s.noteAudit(action, "", summary, detail)
 	writeJSON(w, http.StatusOK, ws)
 }
 

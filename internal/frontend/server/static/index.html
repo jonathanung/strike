@@ -11,13 +11,14 @@
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="/assets/style-b675a6499c95b448.css" integrity="sha384-TzmCXhs4XZOIBJVTWsltYCqu3aIrajPO3IqX2vad7TJjohexRdJvdRFjmxs68fTu"/>
 <link rel="stylesheet" href="/assets/editor-c775cc9b18a5458.css" integrity="sha384-AyOjM22LfkyGATt0RiB3O7FWiJR+tjHaI+BUHE+UrMDR7Ykaa5aNRaKgR7as4OR+"/>
+<link rel="stylesheet" href="/assets/usage-audit-4109f37a4c3f020.css" integrity="sha384-PG57uHfAoOyYrJLu5TZtnb1s2Ud6PPolTjB9IeCoVZ1qF7Qgrtsh0+5YiMBYYV9Z"/>
 
 
 
 
 <script type="module">
-import init, * as bindings from '/assets/strike-webui-9b8f6ccf00662a42.js';
-const wasm = await init({ module_or_path: '/assets/strike-webui-9b8f6ccf00662a42_bg.wasm' });
+import init, * as bindings from '/assets/strike-webui-1ca9174f0ca22490.js';
+const wasm = await init({ module_or_path: '/assets/strike-webui-1ca9174f0ca22490_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -28,6 +29,6 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 </script>
 <script src="/assets/register.js" defer></script>
 
-<link rel="modulepreload" href="/assets/strike-webui-9b8f6ccf00662a42.js" crossorigin="anonymous" integrity="sha384-FSJHKIQmc6jBxBz8T7FHDd07KgI95kfkIo7psvkfbdIfaeMv5hl8Y+Tba24iroMG"><link rel="preload" href="/assets/strike-webui-9b8f6ccf00662a42_bg.wasm" crossorigin="anonymous" integrity="sha384-3xQkI/EZr3HQiV5r1cyqekDY0zlwnAgcCTlUprut3y/UQzHtMQfQqzr/DC6kulhA" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/assets/strike-webui-1ca9174f0ca22490.js" crossorigin="anonymous" integrity="sha384-WwRMdCFveipmdfKTWpYp34RYRjkDjNyA44XM4CkE/XkVDj0iNmdD0wH42pP5PfJL"><link rel="preload" href="/assets/strike-webui-1ca9174f0ca22490_bg.wasm" crossorigin="anonymous" integrity="sha384-vugoFmHZy0fcL5HR7PCjOkebCIW0XHFp6NHPQd+oKQhot7z/HsJgX9ho7QbthTxo" as="fetch" type="application/wasm"></head>
 <body></body>
 </html>
