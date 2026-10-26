@@ -11,6 +11,11 @@ use serde::Deserialize;
 pub struct Health {
     pub ok: bool,
     pub version: String,
+    /// Unix milliseconds from the daemon. The client records its own receipt
+    /// time for the stale check, so this field is the wire clock, not a signal.
+    #[allow(dead_code)]
+    #[serde(default)]
+    pub now: i64,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -46,6 +51,20 @@ pub struct RootSummary {
     pub busy: bool,
     #[serde(default, rename = "createdAt")]
     pub created_at: i64,
+    /// Canonical status id. Empty when the daemon did not send one.
+    #[serde(default)]
+    pub status: String,
+    #[serde(default, rename = "statusSince")]
+    pub status_since: i64,
+    #[serde(default, rename = "lastActivityAt")]
+    pub last_activity_at: i64,
+    #[serde(default, rename = "permissionPending")]
+    pub permission_pending: bool,
+    #[serde(default, rename = "questionPending")]
+    pub question_pending: bool,
+    /// `None` when the field is absent (older daemon). Present `false` is read.
+    #[serde(default)]
+    pub unread: Option<bool>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -63,6 +82,12 @@ pub struct SessionItem {
     pub title: String,
     #[serde(default)]
     pub mtime: i64,
+    #[serde(default)]
+    pub status: String,
+    #[serde(default, rename = "lastActivityAt")]
+    pub last_activity_at: i64,
+    #[serde(default)]
+    pub unread: Option<bool>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -98,6 +123,49 @@ pub struct LiveStatus {
     pub context_limit: i64,
     #[serde(default, rename = "contextFit")]
     pub context_fit: String,
+    /// Wire fields from `GET /v1/status`. The shell classifies from roots.
+    #[allow(dead_code)]
+    #[serde(default, rename = "turnState")]
+    pub turn_state: String,
+    #[allow(dead_code)]
+    #[serde(default, rename = "turnSince")]
+    pub turn_since: i64,
+    #[allow(dead_code)]
+    #[serde(default, rename = "lastEventAt")]
+    pub last_event_at: i64,
+}
+
+/// One row of `GET /v1/status/sessions`. The shell applies SSE payloads as
+/// JSON and reads gateway from [`StatusBoard`], so these fields stay on the
+/// type for the contract.
+#[allow(dead_code)]
+#[derive(Clone, Debug, Deserialize)]
+pub struct BoardSession {
+    #[serde(default, rename = "sessionId")]
+    pub session_id: String,
+    #[serde(default)]
+    pub status: String,
+    #[serde(default)]
+    pub unread: bool,
+    #[serde(default)]
+    pub since: i64,
+    #[serde(default, rename = "lastActivityAt")]
+    pub last_activity_at: i64,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct StatusBoard {
+    #[serde(default)]
+    pub gateway: String,
+    #[allow(dead_code)]
+    #[serde(default)]
+    pub now: i64,
+    #[allow(dead_code)]
+    #[serde(default, rename = "heartbeatStaleMs")]
+    pub heartbeat_stale_ms: i64,
+    #[allow(dead_code)]
+    #[serde(default)]
+    pub sessions: Vec<BoardSession>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -175,7 +243,8 @@ pub struct ChangedFilesResponse {
     pub files: Vec<ChangedFile>,
 }
 
-/// One row in the session list. Unread and pinned are client state.
+/// One row in the session list. Pins stay in the browser. Unread prefers the
+/// daemon field when the payload includes it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SessionRow {
     pub id: String,
@@ -185,6 +254,12 @@ pub struct SessionRow {
     pub live: bool,
     pub pinned: bool,
     pub unread: bool,
+    /// Canonical status id. Empty only before classification.
+    pub status: String,
+    /// Unix milliseconds when `status` began.
+    pub status_since: i64,
+    /// Unix milliseconds of the last user-visible activity. 0 when unknown.
+    pub last_activity_at: i64,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -366,8 +441,25 @@ fn unix_seconds(created_at: i64) -> i64 {
     }
 }
 
-/// Merge live roots with saved sessions. `active_running` marks the active
-/// root in progress when a delegated child is still running.
+fn blank_row(id: &str, title: &str, mtime: i64, pinned: bool) -> SessionRow {
+    SessionRow {
+        id: id.to_string(),
+        title: title.to_string(),
+        mtime,
+        busy: false,
+        live: false,
+        pinned,
+        unread: false,
+        status: String::new(),
+        status_since: 0,
+        last_activity_at: 0,
+    }
+}
+
+/// Merge live roots with saved sessions. `active_running` upgrades an idle
+/// active root to running when a delegated child is still going.
+/// Server `unread` wins when the field was present. Otherwise the browser
+/// seen map is the fallback for an older daemon.
 pub fn merge_sessions(
     roots: &[RootSummary],
     sessions: &[SessionItem],
@@ -377,47 +469,69 @@ pub fn merge_sessions(
     active_running: bool,
 ) -> Vec<SessionRow> {
     let mut by_id: HashMap<String, SessionRow> = HashMap::new();
+    let mut server_unread: HashMap<String, bool> = HashMap::new();
     for s in sessions {
-        by_id.insert(
-            s.id.clone(),
-            SessionRow {
-                id: s.id.clone(),
-                title: s.title.clone(),
-                mtime: s.mtime.max(0),
-                busy: false,
-                live: false,
-                pinned: pins.iter().any(|p| p == &s.id),
-                unread: false,
-            },
-        );
+        let pinned = pins.iter().any(|p| p == &s.id);
+        let mut row = blank_row(&s.id, &s.title, s.mtime.max(0), pinned);
+        row.status = s.status.clone();
+        if s.last_activity_at > 0 {
+            row.last_activity_at = s.last_activity_at;
+        } else if s.mtime > 0 {
+            row.last_activity_at = s.mtime.saturating_mul(1000);
+        }
+        if let Some(flag) = s.unread {
+            server_unread.insert(s.id.clone(), flag);
+        }
+        by_id.insert(s.id.clone(), row);
     }
     for r in roots {
         let created = unix_seconds(r.created_at);
-        let entry = by_id.entry(r.id.clone()).or_insert_with(|| SessionRow {
-            id: r.id.clone(),
-            title: r.title.clone(),
-            mtime: created,
-            busy: false,
-            live: false,
-            pinned: pins.iter().any(|p| p == &r.id),
-            unread: false,
-        });
+        let pinned = pins.iter().any(|p| p == &r.id);
+        let entry = by_id
+            .entry(r.id.clone())
+            .or_insert_with(|| blank_row(&r.id, &r.title, created, pinned));
         entry.live = true;
         entry.busy = r.busy;
-        entry.pinned = pins.iter().any(|p| p == &r.id);
+        entry.pinned = pinned;
         if entry.title.is_empty() {
             entry.title = r.title.clone();
         }
         if entry.mtime == 0 {
             entry.mtime = created;
         }
+        if !r.status.is_empty() {
+            entry.status = r.status.clone();
+        }
+        if r.status_since > 0 {
+            entry.status_since = r.status_since;
+        }
+        if r.last_activity_at > 0 {
+            entry.last_activity_at = r.last_activity_at;
+        }
+        if let Some(flag) = r.unread {
+            server_unread.insert(r.id.clone(), flag);
+        }
     }
     for row in by_id.values_mut() {
-        if row.id == active && active_running {
+        if row.id == active && active_running && matches!(row.status.as_str(), "" | "idle" | "done")
+        {
+            row.status = "running".into();
             row.busy = true;
         }
-        let seen_at = seen.get(&row.id).copied().unwrap_or(0);
-        row.unread = row.id != active && row.mtime > seen_at && row.mtime > 0;
+        if matches!(row.status.as_str(), "running" | "waiting") {
+            row.busy = true;
+        }
+        let local = {
+            let seen_at = seen.get(&row.id).copied().unwrap_or(0);
+            row.id != active && row.mtime > seen_at && row.mtime > 0
+        };
+        row.unread = if row.id == active {
+            false
+        } else if let Some(flag) = server_unread.get(&row.id) {
+            *flag
+        } else {
+            local
+        };
     }
     let mut rows: Vec<_> = by_id.into_values().collect();
     rows.sort_by(|a, b| b.mtime.cmp(&a.mtime).then(a.id.cmp(&b.id)));
@@ -485,33 +599,7 @@ pub fn visible_sessions(
     (shown, hidden)
 }
 
-pub fn fmt_elapsed(secs: i64) -> String {
-    let secs = secs.max(0);
-    let m = secs / 60;
-    let s = secs % 60;
-    if m >= 60 {
-        format!("{}:{:02}:{:02}", m / 60, m % 60, s)
-    } else {
-        format!("{m}:{s:02}")
-    }
-}
-
-pub fn fmt_ago(mtime: i64, now_s: i64) -> String {
-    if mtime <= 0 || now_s <= 0 {
-        return String::new();
-    }
-    let delta = (now_s - mtime).max(0);
-    if delta < 60 {
-        return "now".into();
-    }
-    if delta < 3600 {
-        return format!("{}m", delta / 60);
-    }
-    if delta < 86_400 {
-        return format!("{}h", delta / 3600);
-    }
-    format!("{}d", delta / 86_400)
-}
+pub use crate::status::{fmt_ago, fmt_elapsed};
 
 /// Parse an RFC 3339 timestamp — the protocol envelope's `time` field, as
 /// emitted by Go's `time.Time` JSON encoding — into epoch milliseconds.
@@ -938,6 +1026,9 @@ mod tests {
             live: true,
             pinned,
             unread: false,
+            status: String::new(),
+            status_since: 0,
+            last_activity_at: 0,
         }
     }
 
@@ -948,11 +1039,20 @@ mod tests {
             title: String::new(),
             busy: false,
             created_at: 1_700_000_000_000,
+            status: String::new(),
+            status_since: 0,
+            last_activity_at: 0,
+            permission_pending: false,
+            question_pending: false,
+            unread: None,
         }];
         let sessions = vec![SessionItem {
             id: "a".into(),
             title: "Alpha".into(),
             mtime: 50,
+            status: String::new(),
+            last_activity_at: 0,
+            unread: None,
         }];
         let mut seen = HashMap::new();
         seen.insert("a".into(), 40i64);
@@ -966,6 +1066,37 @@ mod tests {
         let seen_active = merge_sessions(&roots, &sessions, &[], &seen, "a", true);
         assert!(!seen_active[0].unread);
         assert!(seen_active[0].busy);
+        assert_eq!(seen_active[0].status, "running");
+    }
+
+    #[test]
+    fn server_unread_overrides_browser_seen() {
+        let roots = vec![RootSummary {
+            id: "a".into(),
+            title: "Alpha".into(),
+            busy: false,
+            created_at: 0,
+            status: "waiting".into(),
+            status_since: 5_000,
+            last_activity_at: 9_000,
+            permission_pending: true,
+            question_pending: false,
+            unread: Some(true),
+        }];
+        let mut seen = HashMap::new();
+        seen.insert("a".into(), 10_000i64);
+        let rows = merge_sessions(&roots, &[], &[], &seen, "other", false);
+        assert!(rows[0].unread);
+        assert!(rows[0].busy);
+        assert_eq!(rows[0].status, "waiting");
+        assert_eq!(rows[0].last_activity_at, 9_000);
+
+        let acked = vec![RootSummary {
+            unread: Some(false),
+            ..roots[0].clone()
+        }];
+        let rows = merge_sessions(&acked, &[], &[], &seen, "other", false);
+        assert!(!rows[0].unread);
     }
 
     #[test]
