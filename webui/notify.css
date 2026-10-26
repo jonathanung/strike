@@ -109,6 +109,8 @@
   display: flex;
   align-items: flex-start;
   gap: var(--space-2);
+  min-width: 0;
+  max-width: 100%;
   border: 1px solid var(--border-muted);
   border-radius: var(--radius-sm);
   background: var(--surface-muted);
@@ -118,6 +120,7 @@
 
 button.notify-open {
   flex: 1;
+  min-width: 0;
   height: auto;
   min-height: 36px;
   padding: var(--space-2);
@@ -158,11 +161,26 @@ button.notify-open {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.notify-title {
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.notify-kicker {
+  min-width: 0;
+  max-width: 100%;
 }
 
 button.notify-mute {
   margin: var(--space-2) var(--space-2) 0 0;
   height: var(--control);
+  flex-shrink: 0;
 }
 
 .notify-check {

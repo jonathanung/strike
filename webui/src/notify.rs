@@ -288,6 +288,42 @@ fn merge_notes(existing: &[Note], incoming: &[Note]) -> Vec<Note> {
     locals
 }
 
+/// Upsert a single streamed note into the existing set.
+///
+/// The stream delivers one note at a time, so it must not go through
+/// `merge_notes` directly: that function treats `incoming` as the complete
+/// remote set (the poll path's semantics) and would discard every other
+/// remote row until the next poll. Here the existing remote rows are the
+/// base set, the streamed note replaces any row with the same id (or is
+/// inserted), and `merge_notes` re-applies the local-row + seq ordering.
+fn merge_stream_note(existing: &[Note], note: &Note) -> Vec<Note> {
+    if note.id.starts_with("local-") {
+        let remote: Vec<Note> = existing
+            .iter()
+            .filter(|n| !n.id.starts_with("local-"))
+            .cloned()
+            .collect();
+        let mut merged = merge_notes(existing, &remote);
+        if let Some(slot) = merged.iter_mut().find(|n| n.id == note.id) {
+            *slot = note.clone();
+        } else {
+            merged.insert(0, note.clone());
+        }
+        return merged;
+    }
+    let mut remote: Vec<Note> = existing
+        .iter()
+        .filter(|n| !n.id.starts_with("local-"))
+        .cloned()
+        .collect();
+    if let Some(slot) = remote.iter_mut().find(|n| n.id == note.id) {
+        *slot = note.clone();
+    } else {
+        remote.push(note.clone());
+    }
+    merge_notes(existing, &remote)
+}
+
 fn prefer_banner<'a>(cur: &'a Note, next: &'a Note) -> &'a Note {
     let rank = |n: &Note| i32::from(n.kind == "approval.needed");
     if rank(next) > rank(cur) || (rank(next) == rank(cur) && next.seq >= cur.seq) {
@@ -1150,7 +1186,7 @@ fn start_stream(
             let Ok(note) = serde_json::from_str::<Note>(&data) else {
                 return;
             };
-            let merged = merge_notes(&items.get_untracked(), &[note]);
+            let merged = merge_stream_note(&items.get_untracked(), &note);
             consider.run(merged.clone());
             items.set(merged);
         });
@@ -1236,6 +1272,61 @@ mod tests {
         assert_eq!(merged[0].id, "local-gateway");
         assert_eq!(merged[1].id, "b");
         assert_eq!(merged[2].id, "a");
+    }
+
+    #[test]
+    fn stream_upsert_keeps_existing_remote_notes() {
+        let local = Note {
+            id: "local-gateway".into(),
+            seq: 0,
+            kind: "gateway.disconnected".into(),
+            session_id: String::new(),
+            subject_id: String::new(),
+            title: "Gateway disconnected".into(),
+            body: String::new(),
+            href: "/".into(),
+            request_id: String::new(),
+            banner: false,
+            at: String::new(),
+        };
+        let a = Note {
+            id: "a".into(),
+            seq: 1,
+            kind: "session.finished".into(),
+            title: "old".into(),
+            ..local.clone()
+        };
+        let b = Note {
+            id: "b".into(),
+            seq: 2,
+            kind: "approval.needed".into(),
+            title: "new".into(),
+            ..local.clone()
+        };
+        let existing = vec![local.clone(), b.clone(), a.clone()];
+        // A single streamed note must upsert, not replace the remote set.
+        let streamed = Note {
+            id: "c".into(),
+            seq: 3,
+            kind: "session.finished".into(),
+            title: "streamed".into(),
+            ..local.clone()
+        };
+        let merged = merge_stream_note(&existing, &streamed);
+        let ids: Vec<&str> = merged.iter().map(|n| n.id.as_str()).collect();
+        assert_eq!(ids, vec!["local-gateway", "c", "b", "a"]);
+        // Re-delivery of the same id replaces it, never duplicates it.
+        let updated = Note {
+            title: "streamed v2".into(),
+            ..streamed.clone()
+        };
+        let merged = merge_stream_note(&merged, &updated);
+        assert_eq!(merged.len(), 4);
+        assert_eq!(merged.iter().filter(|n| n.id == "c").count(), 1);
+        assert_eq!(
+            merged.iter().find(|n| n.id == "c").unwrap().title,
+            "streamed v2"
+        );
     }
 
     #[test]
