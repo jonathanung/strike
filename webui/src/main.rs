@@ -42,6 +42,54 @@ fn save(key: &str, value: &str) {
     }
 }
 
+fn known_theme(id: &str) -> bool {
+    matches!(
+        id,
+        "strike" | "nord" | "dracula" | "gruvbox" | "monokai" | "tokyo-night" | "catppuccin"
+    )
+}
+
+fn theme_color(theme: &str, scheme: &str) -> &'static str {
+    match (theme, scheme) {
+        ("nord", "light") => "#eceff4",
+        ("nord", _) => "#2e3440",
+        ("dracula", "light") => "#f8f8f2",
+        ("dracula", _) => "#282a36",
+        ("gruvbox", "light") => "#fbf1c7",
+        ("gruvbox", _) => "#282828",
+        ("monokai", "light") => "#fafafa",
+        ("monokai", _) => "#272822",
+        ("tokyo-night", "light") => "#e1e2e7",
+        ("tokyo-night", _) => "#1a1b26",
+        ("catppuccin", "light") => "#eff1f5",
+        ("catppuccin", _) => "#1e1e2e",
+        (_, "light") => "#ffffff",
+        _ => "#14131c",
+    }
+}
+
+/// Applies a bundled TUI theme. Surfaces a theme file omits stay on the
+/// Strike ladder for that scheme (see webui/style.css).
+fn apply_theme(theme: &str, scheme: &str) {
+    let theme = if known_theme(theme) { theme } else { "strike" };
+    let scheme = if scheme == "light" { "light" } else { "dark" };
+    if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
+        if let Some(el) = doc.document_element() {
+            let _ = el.set_attribute("data-theme", theme);
+            let _ = el.set_attribute("data-scheme", scheme);
+        }
+        if let Some(meta) = doc
+            .query_selector("meta[name=\"theme-color\"]")
+            .ok()
+            .flatten()
+        {
+            let _ = meta.set_attribute("content", theme_color(theme, scheme));
+        }
+    }
+    save("strike.theme", theme);
+    save("strike.scheme", scheme);
+}
+
 fn same_origin(base: &str) -> bool {
     let base = base.trim().trim_end_matches('/');
     if base.is_empty() {
@@ -268,6 +316,24 @@ fn palette_cmds() -> &'static [PaletteCmd] {
             detail: "Interrupt running delegated children in this session",
         },
         PaletteCmd {
+            section: "Commands",
+            id: "back",
+            label: "Back",
+            detail: "Previous session",
+        },
+        PaletteCmd {
+            section: "Commands",
+            id: "forward",
+            label: "Forward",
+            detail: "Next session",
+        },
+        PaletteCmd {
+            section: "Commands",
+            id: "focus",
+            label: "Toggle focus",
+            detail: "Hide or show the side columns",
+        },
+        PaletteCmd {
             section: "Apps",
             id: "chat",
             label: "Chat",
@@ -320,6 +386,60 @@ fn palette_cmds() -> &'static [PaletteCmd] {
             id: "mode-yolo",
             label: "Approval: Yolo",
             detail: "This session skips asks that are not hard-denied",
+        },
+        PaletteCmd {
+            section: "Theme",
+            id: "theme-strike",
+            label: "Theme: Strike",
+            detail: "Stock TUI palette. Royal purple, cyan working state",
+        },
+        PaletteCmd {
+            section: "Theme",
+            id: "theme-nord",
+            label: "Theme: Nord",
+            detail: "Bundled TUI theme. Missing surfaces stay Strike",
+        },
+        PaletteCmd {
+            section: "Theme",
+            id: "theme-dracula",
+            label: "Theme: Dracula",
+            detail: "Bundled TUI theme. Missing surfaces stay Strike",
+        },
+        PaletteCmd {
+            section: "Theme",
+            id: "theme-gruvbox",
+            label: "Theme: Gruvbox",
+            detail: "Bundled TUI theme. Missing surfaces stay Strike",
+        },
+        PaletteCmd {
+            section: "Theme",
+            id: "theme-monokai",
+            label: "Theme: Monokai",
+            detail: "Bundled TUI theme. Missing surfaces stay Strike",
+        },
+        PaletteCmd {
+            section: "Theme",
+            id: "theme-tokyo-night",
+            label: "Theme: Tokyo Night",
+            detail: "Bundled TUI theme. Missing surfaces stay Strike",
+        },
+        PaletteCmd {
+            section: "Theme",
+            id: "theme-catppuccin",
+            label: "Theme: Catppuccin",
+            detail: "Bundled TUI theme. Missing surfaces stay Strike",
+        },
+        PaletteCmd {
+            section: "Theme",
+            id: "scheme-dark",
+            label: "Scheme: Dark",
+            detail: "Dark hexes from the TUI token pair",
+        },
+        PaletteCmd {
+            section: "Theme",
+            id: "scheme-light",
+            label: "Scheme: Light",
+            detail: "Light hexes from the TUI token pair",
         },
     ]
 }
@@ -484,6 +604,7 @@ fn App() -> impl IntoView {
     let files_error = RwSignal::new(String::new());
     let changes = RwSignal::new(Vec::<model::ChangedFile>::new());
     let changes_error = RwSignal::new(String::new());
+    apply_theme(&load("strike.theme"), &load("strike.scheme"));
 
     let poll_team = move || {
         let (b, t, root) = (
@@ -890,6 +1011,13 @@ fn App() -> impl IntoView {
         save("strike.enterMode", &mode);
     };
 
+    let set_theme = move |theme: String| {
+        apply_theme(&theme, &load("strike.scheme"));
+    };
+    let set_scheme = move |scheme: String| {
+        apply_theme(&load("strike.theme"), &scheme);
+    };
+
     let set_perm = move |mode: String| {
         perm_mode.set(mode.clone());
         mode_menu.set(false);
@@ -933,6 +1061,9 @@ fn App() -> impl IntoView {
         match id.as_str() {
             "new" => new_session(),
             "stop-all" => stop_all(),
+            "back" => travel(true),
+            "forward" => travel(false),
+            "focus" => focus.update(|v| *v = !*v),
             "chat" => mode.set("chat".into()),
             "daemon" => mode.set("daemon".into()),
             "steer" => set_enter("steer".into()),
@@ -942,6 +1073,15 @@ fn App() -> impl IntoView {
             "mode-soft" => set_perm("soft-approve".into()),
             "mode-edits" => set_perm("accept-edits".into()),
             "mode-yolo" => set_perm("yolo".into()),
+            "theme-strike" => set_theme("strike".into()),
+            "theme-nord" => set_theme("nord".into()),
+            "theme-dracula" => set_theme("dracula".into()),
+            "theme-gruvbox" => set_theme("gruvbox".into()),
+            "theme-monokai" => set_theme("monokai".into()),
+            "theme-tokyo-night" => set_theme("tokyo-night".into()),
+            "theme-catppuccin" => set_theme("catppuccin".into()),
+            "scheme-dark" => set_scheme("dark".into()),
+            "scheme-light" => set_scheme("light".into()),
             _ => {}
         }
     };
@@ -1070,15 +1210,6 @@ fn App() -> impl IntoView {
     view! {
         <header class="page-header">
             <div class="brand">"Strike" <small>{move || status.get()}</small></div>
-            <span class=move || match gateway.get().as_str() {
-                "connected" => "chip ok",
-                "unreachable" => "chip bad",
-                _ => "chip",
-            }>{move || match gateway.get().as_str() {
-                "connected" => "Gateway connected",
-                "unreachable" => "Gateway unreachable",
-                _ => "Gateway checking",
-            }}</span>
             <button class="command-pill" on:click=move |_| {
                 palette_query.set(String::new());
                 palette_open.set(true);
@@ -1087,9 +1218,15 @@ fn App() -> impl IntoView {
                 <kbd>"Ctrl+K"</kbd>
             </button>
             <div class="header-actions">
-                <button class="secondary" disabled=move || back_stack.get().is_empty() on:click=move |_| travel(true)>"Back"</button>
-                <button class="secondary" disabled=move || forward_stack.get().is_empty() on:click=move |_| travel(false)>"Forward"</button>
-                <button class="secondary" on:click=move |_| focus.update(|v| *v = !*v)>{move || if focus.get() { "Exit focus" } else { "Focus" }}</button>
+                <span class=move || match gateway.get().as_str() {
+                    "connected" => "chip ok",
+                    "unreachable" => "chip bad",
+                    _ => "chip",
+                }>{move || match gateway.get().as_str() {
+                    "connected" => "Gateway connected",
+                    "unreachable" => "Gateway unreachable",
+                    _ => "Gateway checking",
+                }}</span>
                 <div class="segmented" role="tablist" aria-label="View">
                     <button class=move || if mode.get() == "chat" { "seg on" } else { "seg" } on:click=move |_| mode.set("chat".into())>"Chat"</button>
                     <button class=move || if mode.get() == "daemon" { "seg on" } else { "seg" } on:click=move |_| mode.set("daemon".into())>"Daemon"</button>
@@ -1114,7 +1251,7 @@ fn App() -> impl IntoView {
                         let q = palette_query.get().to_ascii_lowercase();
                         let run = run_command;
                         let mut blocks: Vec<_> = Vec::new();
-                        for section in ["Commands", "Apps", "Settings"] {
+                        for section in ["Commands", "Apps", "Settings", "Theme"] {
                             let items: Vec<_> = palette_cmds().iter().copied().filter(|c| c.section == section && palette_match(c, &q)).collect();
                             if items.is_empty() {
                                 continue;
@@ -1136,7 +1273,7 @@ fn App() -> impl IntoView {
                         }
                         blocks
                     }}
-                    <button on:click=move |_| run_picked()>"Run"</button>
+                    <button class="primary" on:click=move |_| run_picked()>"Run"</button>
                 </div>
             </div>
         </Show>
@@ -1157,36 +1294,10 @@ fn App() -> impl IntoView {
         <Show when=move || mode.get() == "chat">
             <div class=move || if focus.get() { "shell focus" } else { "shell" }>
                 <aside class="rail">
-                    <h2>"Workspaces"</h2>
-                    <p class="hint">"Registered directories, not session folders. Opening one does not move the live engine."</p>
-                    <Show when=move || workspaces.get().is_empty()>
-                        <EmptyState title="No workspaces".into() body="Add a directory from the Daemon view.".into() />
-                    </Show>
-                    <ul class="plain">
-                        {move || workspaces.get().into_iter().map(|w| {
-                            let id = w.id.clone();
-                            let on = move || active_workspace.get() == id;
-                            let activate_id = w.id.clone();
-                            view! {
-                                <li class=move || if on() { "row card on" } else { "row card" }>
-                                    <button class="link" on:click=move |_| {
-                                        let (b, t, id) = (base.get(), token.get(), activate_id.clone());
-                                        spawn_local(async move {
-                                            let path = format!("/v1/workspaces/{id}/activate");
-                                            match post_json(&b, &t, &path, serde_json::json!({})).await {
-                                                Ok(()) => active_workspace.set(id),
-                                                Err(e) => status.set(format!("activate failed: {e}")),
-                                            }
-                                        });
-                                    }>
-                                        <span class="name">{w.name}</span>
-                                        <span class="path">{w.path}</span>
-                                    </button>
-                                </li>
-                            }
-                        }).collect_view()}
-                    </ul>
-                    <h2>"Sessions"</h2>
+                    <div class="section-head">
+                        <h2>"Sessions"</h2>
+                        <button class="secondary" on:click=move |_| new_session()>"New"</button>
+                    </div>
                     <div class="chips" role="tablist" aria-label="Session filter">
                         <button class=move || if session_filter.get() == "all" { "chip on" } else { "chip" } on:click=move |_| session_filter.set("all".into())>"All"</button>
                         <button class=move || if session_filter.get() == "unread" { "chip on" } else { "chip" } on:click=move |_| session_filter.set("unread".into())>"Unread"</button>
@@ -1194,7 +1305,6 @@ fn App() -> impl IntoView {
                         <button class=move || if session_filter.get() == "pinned" { "chip on" } else { "chip" } on:click=move |_| session_filter.set("pinned".into())>"Pinned"</button>
                     </div>
                     <input class="search" placeholder="Search sessions" prop:value=move || session_query.get() on:input=move |ev| session_query.set(event_target_value(&ev)) />
-                    <button class="secondary" on:click=move |_| new_session()>"New session"</button>
                     {move || {
                         let active = active_root.get();
                         let active_running = activity.get().iter().any(|r| is_running(&r.state));
@@ -1266,7 +1376,7 @@ fn App() -> impl IntoView {
                                 <Show when=move || no_rows>
                                     <EmptyState title="No sessions match".into() body="New roots show up here. Pins and unread marks stay in this browser.".into() />
                                 </Show>
-                                <ul class="plain">{rows}</ul>
+                                <ul class="plain sessions">{rows}</ul>
                                 <Show when=move || has_older>
                                     <button class="secondary" on:click=move |_| older_open.set(true)>{format!("Older sessions ({hidden})")}</button>
                                 </Show>
@@ -1276,7 +1386,36 @@ fn App() -> impl IntoView {
                             </div>
                         }
                     }}
-                    <p class="hint">"Unread and pinned are kept in this browser. Schedule, memory, knowledge, artifacts, and the task runner are not in this client."</p>
+                    <p class="hint">"Pins and unread stay in this browser."</p>
+                    <h2>"Workspaces"</h2>
+                    <p class="hint">"Opening one records it. It does not move the live engine."</p>
+                    <Show when=move || workspaces.get().is_empty()>
+                        <EmptyState title="No workspaces".into() body="Add a directory from Daemon.".into() />
+                    </Show>
+                    <ul class="plain">
+                        {move || workspaces.get().into_iter().map(|w| {
+                            let id = w.id.clone();
+                            let on = move || active_workspace.get() == id;
+                            let activate_id = w.id.clone();
+                            view! {
+                                <li class=move || if on() { "row card on" } else { "row card" }>
+                                    <button class="link" on:click=move |_| {
+                                        let (b, t, id) = (base.get(), token.get(), activate_id.clone());
+                                        spawn_local(async move {
+                                            let path = format!("/v1/workspaces/{id}/activate");
+                                            match post_json(&b, &t, &path, serde_json::json!({})).await {
+                                                Ok(()) => active_workspace.set(id),
+                                                Err(e) => status.set(format!("activate failed: {e}")),
+                                            }
+                                        });
+                                    }>
+                                        <span class="name">{w.name}</span>
+                                        <span class="path">{w.path}</span>
+                                    </button>
+                                </li>
+                            }
+                        }).collect_view()}
+                    </ul>
                 </aside>
                 <section class="chat">
                     <Show when=move || !load_error.get().is_empty()>
@@ -1293,9 +1432,9 @@ fn App() -> impl IntoView {
                             <Skeleton />
                         </Show>
                         <Show when=move || !loading.get() && lines.get().is_empty() && load_error.get().is_empty()>
-                            <div class="empty-state">
+                            <div class="empty-hero">
                                 <strong>{move || empty_headline(tick.get())}</strong>
-                                <p>"Send a message, or start from a suggestion. Delegated children show up under the session and in Activity."</p>
+                                <p>"Send a message, or start from a suggestion."</p>
                                 <div class="suggestions">
                                     {SUGGESTIONS.into_iter().map(|text| {
                                         let label = text.to_string();
@@ -1407,9 +1546,9 @@ fn App() -> impl IntoView {
                                     }
                                 }
                             ></textarea>
-                            <button type="submit">"Send"</button>
+                            <button class="primary" type="submit">"Send"</button>
                         </form>
-                        <p class="hint">"While a turn is running, Steer adds your message to that turn. Queue waits until it finishes. Idle sessions send either way. File names from the Files tab are inserted as @path text."</p>
+                        <p class="hint">"Steer joins the running turn. Queue waits. @path is text, not file contents."</p>
                     </div>
                 </section>
                 <aside class="side">
@@ -1421,7 +1560,7 @@ fn App() -> impl IntoView {
                     <Show when=move || side_tab.get() == "activity">
                     <div class="activity">
                     <header class="activity-head">
-                        <h2>"Activity"</h2>
+                        <span class="hint">"Delegated children"</span>
                         <button class="secondary" disabled=move || running_count() == 0 on:click=move |_| stop_all()>"Stop all"</button>
                     </header>
                         <div class="stats">
@@ -1435,7 +1574,7 @@ fn App() -> impl IntoView {
                     <Show when=move || activity.get().is_empty()>
                         <EmptyState
                             title="No delegated children".into()
-                            body="task and delegate runs appear here with elapsed time and status: running, done, failed, stalled, blocked, or stopped.".into()
+                            body="Running, done, failed, stalled, blocked, or stopped.".into()
                         />
                     </Show>
                     <ul class="plain">
@@ -1544,7 +1683,7 @@ fn App() -> impl IntoView {
                                     }
                                 }).collect_view()}
                             </ul>
-                            <p class="hint">"Click or drag a file to insert @path as text. This client does not expand that token into file contents."</p>
+                            <p class="hint">"Click or drag inserts @path as text."</p>
                         </div>
                     </Show>
                     <Show when=move || side_tab.get() == "changes">
@@ -1563,13 +1702,18 @@ fn App() -> impl IntoView {
                                     let path = file.path.clone();
                                     let path_drag = path.clone();
                                     let path_click = path.clone();
-                                    let label = format!("{path}  +{} -{}", file.added, file.deleted);
+                                    let added = file.added;
+                                    let deleted = file.deleted;
                                     view! {
                                         <li>
                                             <button class="link file-row" draggable="true"
                                                 on:dragstart=move |ev: web_sys::DragEvent| set_drag(&ev, &path_drag)
                                                 on:click=move |_| insert_mention(path_click.clone())
-                                            >{label}</button>
+                                            >
+                                                <span class="name">{path.clone()}</span>
+                                                <span class="diff-add">{format!("+{added}")}</span>
+                                                <span class="diff-del">{format!("-{deleted}")}</span>
+                                            </button>
                                         </li>
                                     }
                                 }).collect_view()}
@@ -1698,7 +1842,7 @@ fn DaemonPane(
                 <input type="password" autocomplete="off"
                     prop:value=move || token.get()
                     on:input=move |ev| token.set(event_target_value(&ev)) />
-                <button on:click=connect>"Connect"</button>
+                <button class="primary" on:click=connect>"Connect"</button>
                 <p class="hint">"Same-origin live transcript uses the daemon cookie. Open /?token=… once if the stream closes under --auth."</p>
             </section>
             <section class="card">
@@ -1770,7 +1914,7 @@ fn DaemonPane(
                     <input placeholder="/home/you/Projects/my-repo"
                         prop:value=move || new_path.get()
                         on:input=move |ev| new_path.set(event_target_value(&ev)) />
-                    <button on:click=add_workspace>"Add"</button>
+                    <button class="primary" on:click=add_workspace>"Add"</button>
                 </div>
                 <h2>"Policy"</h2>
                 <p class="hint">"Rules must be a file inside the active workspace. The mode is stored here and is not applied to the live session."</p>
@@ -1787,7 +1931,7 @@ fn DaemonPane(
                         view! { <option value=id>{label}</option> }
                     }).collect_view()}
                 </select>
-                <button on:click=save_policy>"Save policy"</button>
+                <button class="primary" on:click=save_policy>"Save policy"</button>
             </section>
         </main>
     }

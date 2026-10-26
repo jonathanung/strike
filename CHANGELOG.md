@@ -37,6 +37,11 @@ materially affect the shipped product.
 
 ### Changed
 
+- **Web client uses the TUI palette** — `webui/style.css` takes its colors from
+  `schemas/ui-tokens.json` (Strike dark by default, Strike light, and the
+  bundled Nord, Dracula, Gruvbox, Monokai, Tokyo Night, and Catppuccin themes).
+  Pick them from the command palette. The mapping is in
+  [docs/theme.md](docs/theme.md).
 - **Delegated children require a structured handoff** — `task` and `delegate`
   children run a `schema:handoff` gate by default. A prose-only child finishes
   `blocked` with a verification report on the task record. Root turns are
