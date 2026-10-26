@@ -243,7 +243,7 @@ try {
   if (menuMissing.length) {
     throw new Error(`model menu missing=${menuMissing.join("|")} text=${menu.slice(0, 500)}`);
   }
-  const filtered = await evalValue(`(() => {
+  const modelFiltered = await evalValue(`(() => {
     const el = document.querySelector("[data-model-filter]");
     if (!el) return "missing";
     el.focus();
@@ -251,8 +251,8 @@ try {
     el.dispatchEvent(new Event("input", { bubbles: true }));
     return "ok";
   })()`);
-  if (filtered !== "ok") {
-    throw new Error(`model filter input missing (${filtered})`);
+  if (modelFiltered !== "ok") {
+    throw new Error(`model filter input missing (${modelFiltered})`);
   }
   let empty = "";
   for (let i = 0; i < 20; i++) {
