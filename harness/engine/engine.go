@@ -624,6 +624,9 @@ type Engine struct {
 	mutatedMu    sync.Mutex
 	mutatedFiles map[string]struct{}
 
+	// titleMu guards titled. Composer shells title on the Run goroutine and
+	// model turns title on the turn worker.
+	titleMu sync.Mutex
 	// titled is set after the first SessionTitled emit so auto-titling runs once.
 	titled bool
 

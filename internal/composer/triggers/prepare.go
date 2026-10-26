@@ -1,10 +1,11 @@
 // Package triggers expands composer text on the daemon so every client
 // shares one behaviour for /command, @file, $skill, and !shell.
 //
-// The TUI already expands @file and runs ! before user.input. Expansion
-// here is idempotent for fences the TUI (or a previous pass) already
-// attached, and ! / /command are classified only when the message itself
-// starts with the trigger. Unknown $name stays literal text.
+// The TUI already expands @file and runs ! before user.input. A fence the
+// TUI attached is opaque: only the user prefix is mention-scanned, so @
+// tokens inside the file body are not new mentions. ! / /command are
+// classified only when the message itself starts with the trigger.
+// Unknown $name stays literal text.
 package triggers
 
 import (
@@ -401,8 +402,80 @@ func isFileMentionPathRune(r rune) bool {
 	}
 }
 
+// mentionScanPrefix is the text before the first file-mention fence.
+// Fence bodies stay opaque. The boundary matches the TUI helpers
+// indexFileMentionAttachmentStart and endFileMentionAttachment so a
+// second Prepare pass does not treat @tokens inside an attached file
+// as mentions the user typed.
+func mentionScanPrefix(text string) string {
+	start, _ := indexAttachmentStart(text)
+	if start < 0 {
+		return text
+	}
+	return text[:start]
+}
+
+func indexAttachmentStart(s string) (idx, prefixLen int) {
+	for _, nl := range []string{"\n\n--- ", "\n--- "} {
+		i := 0
+		for {
+			at := strings.Index(s[i:], nl)
+			if at < 0 {
+				break
+			}
+			at += i
+			chunk := s[at+len(nl)-len("--- "):]
+			if endAttachment(chunk) >= 0 {
+				return at, len(nl) - len("--- ")
+			}
+			i = at + 1
+		}
+	}
+	if strings.HasPrefix(s, "--- ") && endAttachment(s) >= 0 {
+		return 0, 0
+	}
+	return -1, 0
+}
+
+func endAttachment(s string) int {
+	if !strings.HasPrefix(s, "--- ") {
+		return -1
+	}
+	headerEnd := strings.Index(s, " ---\n")
+	if headerEnd < 0 {
+		headerEnd = strings.Index(s, " ---")
+		if headerEnd < 0 || headerEnd+4 > len(s) {
+			return -1
+		}
+		header := s[len("--- "):headerEnd]
+		kind, _, ok := strings.Cut(header, ": ")
+		if !ok || (kind != "file" && kind != "folder") {
+			return -1
+		}
+		return headerEnd + 4
+	}
+	header := s[len("--- "):headerEnd]
+	kind, path, ok := strings.Cut(header, ": ")
+	if !ok || (kind != "file" && kind != "folder") || path == "" {
+		return -1
+	}
+	bodyStart := headerEnd + len(" ---\n")
+	closeMark := "\n--- end " + kind + ": " + path + " ---"
+	if rel := strings.LastIndex(s[bodyStart:], closeMark); rel >= 0 {
+		return bodyStart + rel + len(closeMark)
+	}
+	alt := "--- end " + kind + ": " + path + " ---"
+	if strings.HasPrefix(s[bodyStart:], alt) {
+		return bodyStart + len(alt)
+	}
+	if rel := strings.LastIndex(s[bodyStart:], "\n"+alt); rel >= 0 {
+		return bodyStart + rel + 1 + len(alt)
+	}
+	return -1
+}
+
 func expandFileMentions(text string, files ScopedRead) (string, []string) {
-	spans := findFileMentions(text)
+	spans := findFileMentions(mentionScanPrefix(text))
 	if len(spans) == 0 {
 		return text, nil
 	}

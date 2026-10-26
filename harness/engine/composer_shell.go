@@ -15,8 +15,10 @@ import (
 // runComposerShell executes a composer ! command without starting a model
 // turn. Permission goes through the live permission service (the same Ask
 // path as the bash tool). The OS sandbox policy is the permission-compiled
-// bash policy. Checkpoint hooks are left unset so a shell that overlaps a
-// model turn does not race that turn's checkpoint store.
+// bash policy. Per-file Checkpoint snapshots stay unset so the shell does
+// not race the turn's first-touch copies. CheckpointUncovered is the same
+// MarkUncovered the bash tool uses: a no-op when no turn is active, and the
+// signal /rewind files needs when the shell mutates the workspace mid-turn.
 func (e *Engine) runComposerShell(ctx context.Context, display, command string) {
 	if e == nil {
 		return
@@ -50,13 +52,14 @@ func (e *Engine) execComposerShell(ctx context.Context, corr protocol.Correlatio
 		Args:        redact.JSON(args),
 	})
 	tc := &tool.Context{
-		WorkDir:         e.opts.WorkDir,
-		SandboxMode:     e.opts.SandboxMode,
-		Sandbox:         policy,
-		NetworkAllow:    network,
-		BashSecrets:     e.opts.BashSecrets,
-		Scheduler:       e.opts.Scheduler,
-		SchedulerPolicy: e.opts.SchedulerPolicy,
+		WorkDir:             e.opts.WorkDir,
+		SandboxMode:         e.opts.SandboxMode,
+		Sandbox:             policy,
+		NetworkAllow:        network,
+		BashSecrets:         e.opts.BashSecrets,
+		Scheduler:           e.opts.Scheduler,
+		SchedulerPolicy:     e.opts.SchedulerPolicy,
+		CheckpointUncovered: e.checkpoints.MarkUncovered,
 		OnSecretRefUse: func(refClass, refHash, action string) {
 			if e.opts.Audit == nil {
 				return

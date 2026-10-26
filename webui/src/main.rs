@@ -214,8 +214,41 @@ struct TriggerSignals {
     model_menu: RwSignal<bool>,
 }
 
+fn composer_caret() -> Option<u32> {
+    let el = web_sys::window()?
+        .document()?
+        .query_selector("[data-feature=\"composer-triggers\"] textarea")
+        .ok()
+        .flatten()?;
+    el.dyn_into::<web_sys::HtmlTextAreaElement>()
+        .ok()?
+        .selection_start()
+        .ok()
+        .flatten()
+}
+
+fn catalog_fingerprint(commands: &[ComposerCommand], skills: &[SkillInfo]) -> String {
+    let mut out = String::new();
+    for cmd in commands {
+        out.push_str(&cmd.id);
+        out.push('\n');
+    }
+    out.push('\u{1}');
+    for skill in skills {
+        out.push_str(&skill.name);
+        out.push('\n');
+        out.push_str(&skill.description);
+        out.push('\n');
+    }
+    out
+}
+
 fn sync_composer_trigger(text: String, utf16: u32, ui: &TriggerSignals) {
     ui.plus_open.set(false);
+    // Every entry invalidates an in-flight file search, including the path
+    // that closes the popup. A late response must not reopen it.
+    let gen = ui.search_gen.get_untracked().wrapping_add(1);
+    ui.search_gen.set(gen);
     let force = ui.ac_force.get_untracked();
     if force == "skills" || force == "commands" {
         let mut items = if force == "skills" {
@@ -280,8 +313,6 @@ fn sync_composer_trigger(text: String, utf16: u32, ui: &TriggerSignals) {
             ui.ac_items.set(items);
         }
         Kind::File => {
-            let gen = ui.search_gen.get_untracked().wrapping_add(1);
-            ui.search_gen.set(gen);
             let q = trig.query.clone();
             let (b, t) = (ui.base.get_untracked(), ui.token.get_untracked());
             let search_gen = ui.search_gen;
@@ -410,7 +441,16 @@ fn reply_permission(
     active_root: RwSignal<String>,
     status: RwSignal<String>,
 ) {
-    asks.update(|list| list.retain(|ask| ask.request_id != request_id));
+    let kept = asks.with_untracked(|list| {
+        list.iter()
+            .find(|ask| ask.request_id == request_id)
+            .cloned()
+    });
+    let Some(kept) = kept else {
+        return;
+    };
+    let reply_id = kept.request_id.clone();
+    asks.update(|list| list.retain(|ask| ask.request_id != reply_id));
     let (b, t, root) = (
         base.get_untracked(),
         token.get_untracked(),
@@ -422,11 +462,16 @@ fn reply_permission(
             &t,
             &root,
             "permission.reply",
-            serde_json::json!({"requestId": request_id, "decision": decision}),
+            serde_json::json!({"requestId": reply_id, "decision": decision}),
         )
         .await
         {
             status.set(format!("approval failed: {e}"));
+            asks.update(|list| {
+                if !list.iter().any(|ask| ask.request_id == kept.request_id) {
+                    list.push(kept);
+                }
+            });
         }
     });
 }
@@ -545,6 +590,7 @@ fn apply_envelope(
     match typ {
         "user.message" => {
             open.set(false);
+            trigger_note.set(String::new());
             push_line(
                 lines,
                 seq,
@@ -1623,10 +1669,7 @@ fn App() -> impl IntoView {
                 plus_open.set(false);
                 ac_open.set(false);
                 ac_force.set(String::new());
-                if !menu
-                    && !doc_editing.get_untracked()
-                    && !doc_path.get_untracked().is_empty()
-                {
+                if !menu && !doc_editing.get_untracked() && !doc_path.get_untracked().is_empty() {
                     doc_path.set(String::new());
                     doc_editing.set(false);
                 }
@@ -1706,20 +1749,30 @@ fn App() -> impl IntoView {
         model_menu,
     };
 
-    // Bootstrap can land after the first keystroke. Recompute from the
-    // catalog the daemon just sent, without tracking the draft itself.
+    // Bootstrap can land after the first keystroke. Recompute only when the
+    // catalog contents change, and only for the trigger at the real caret.
+    // refresh_meta writes the same lists every poll; a content match is a no-op.
+    let catalog_fp = RwSignal::new(String::new());
     Effect::new(move |_| {
-        commands.get();
-        skills.get();
+        let cmds = commands.get();
+        let sk = skills.get();
+        let fp = catalog_fingerprint(&cmds, &sk);
+        if fp == catalog_fp.get_untracked() {
+            return;
+        }
+        let Some(cursor) = composer_caret() else {
+            return;
+        };
+        catalog_fp.set(fp);
         let draft_now = draft.get_untracked();
-        let trimmed = draft_now.trim_start();
-        if trimmed.starts_with('/')
-            || trimmed.starts_with('$')
-            || trimmed.starts_with('!')
-            || draft_now.contains('@')
-        {
-            let cursor = draft_now.encode_utf16().count() as u32;
+        if !ui.ac_force.get_untracked().is_empty() {
             sync_composer_trigger(draft_now, cursor, &ui);
+            return;
+        }
+        if let Some(trig) = trigger_at(&draft_now, cursor) {
+            if matches!(trig.kind, Kind::Command | Kind::Skill) {
+                sync_composer_trigger(draft_now, cursor, &ui);
+            }
         }
     });
 
@@ -2192,6 +2245,7 @@ fn App() -> impl IntoView {
                                         }
                                     } else if ev.key() == "Escape" && (ac_open.get_untracked() || plus_open.get_untracked()) {
                                         ev.prevent_default();
+                                        ev.stop_propagation();
                                         ac_open.set(false);
                                         plus_open.set(false);
                                         ac_force.set(String::new());

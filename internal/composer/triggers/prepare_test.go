@@ -64,6 +64,36 @@ func TestPrepareFileMentionIdempotent(t *testing.T) {
 	}
 }
 
+func TestPrepareFenceBodyIsNotMentionScanned(t *testing.T) {
+	body := "review @src/App.java\n\n--- file: src/App.java ---\n    @Override\nSee @other.go\n--- end file: src/App.java ---"
+	files := memFiles{
+		"src/App.java": {Path: "src/App.java", Content: "    @Override\nSee @other.go\n"},
+		"other.go":     {Path: "other.go", Content: "secret-from-fence"},
+	}
+	got := Prepare(body, files, nil)
+	if got.Action != ActionPass || got.ModelText != "" || len(got.Notices) != 0 {
+		t.Fatalf("fence body was scanned: %#v", got)
+	}
+}
+
+func TestPreparePrefixMentionIgnoresFenceBody(t *testing.T) {
+	body := "also @notes.md\n\n--- file: src/App.java ---\nSee @other.go\n--- end file: src/App.java ---"
+	files := memFiles{
+		"notes.md": {Path: "notes.md", Content: "notes body"},
+		"other.go": {Path: "other.go", Content: "secret-from-fence"},
+	}
+	got := Prepare(body, files, nil)
+	if got.Action != ActionText {
+		t.Fatalf("action = %q", got.Action)
+	}
+	if !strings.Contains(got.ModelText, "--- file: notes.md ---") || !strings.Contains(got.ModelText, "notes body") {
+		t.Fatalf("prefix mention missing: %q", got.ModelText)
+	}
+	if strings.Contains(got.ModelText, "secret-from-fence") || strings.Contains(got.ModelText, "--- file: other.go ---") {
+		t.Fatalf("fence body was attached: %q", got.ModelText)
+	}
+}
+
 func TestPrepareMissingFileNotice(t *testing.T) {
 	got := Prepare("see @missing.go", memFiles{}, nil)
 	if got.Action != ActionText {

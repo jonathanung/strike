@@ -459,15 +459,20 @@ func (e *Engine) startTurnShown(ctx context.Context, text, display string, image
 }
 
 // maybeTitleSession emits SessionTitled once from the first non-empty user text.
+// titleMu covers the titled read/write: a composer shell on the Run goroutine
+// and a model turn on the turn worker can both title the first prompt.
 func (e *Engine) maybeTitleSession(text string) {
-	if e.titled {
-		return
-	}
 	title := sessionTitleFromText(text)
 	if title == "" {
 		return
 	}
+	e.titleMu.Lock()
+	if e.titled {
+		e.titleMu.Unlock()
+		return
+	}
 	e.titled = true
+	e.titleMu.Unlock()
 	e.emit(protocol.SessionTitled{Correlation: e.sessionCorr(), Title: title})
 }
 

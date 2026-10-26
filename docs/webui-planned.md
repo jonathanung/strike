@@ -138,9 +138,12 @@ the live bash permission ask and does not start a model turn.
 Upload and screenshot stay out. `UserInput.Images` exists on the wire, and
 the web composer still does not send images.
 
-Dragging a file inserts `@path`. Send attaches the file. A message the TUI
-already expanded (a `--- file:` fence, or a `!` the TUI ran itself) is not
-expanded a second time.
+Dragging a file inserts `@path`. Send attaches the file. A `---` file or
+folder fence is opaque: only the user prefix is mention-scanned, so `@`
+tokens inside an attached body are not new mentions. A `!` the TUI already
+ran is not sent as `user.input`. Composer `!` during a live turn marks that
+turn's checkpoint uncovered (`bash`), the same signal as the bash tool, and
+does not take per-file snapshots.
 
 ## Context window hold
 
