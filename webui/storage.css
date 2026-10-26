@@ -1,0 +1,82 @@
+/* feature:storage begin */
+.side-tabs { flex-wrap: wrap; }
+.storage {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.storage-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: flex-end;
+}
+.storage-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--text-sm);
+  color: var(--muted);
+  min-width: 0;
+}
+.storage-form label.grow { flex: 1 1 140px; }
+.storage-form input,
+.storage-form textarea {
+  background: var(--ground);
+  color: var(--ink);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 6px 8px;
+  font: inherit;
+}
+.storage-form textarea { min-height: 64px; resize: vertical; }
+.storage-row {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--rule);
+}
+.storage-row .link {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: left;
+  background: transparent;
+  color: var(--ink);
+  border: 0;
+  padding: 0;
+}
+.storage-row .name { display: block; }
+.storage-row .path { display: block; color: var(--muted); font-size: var(--text-sm); }
+.storage-banner {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  color: var(--ink);
+  background: color-mix(in srgb, var(--acid) 12%, var(--surface));
+}
+.storage-error { color: var(--signal); }
+.storage-path {
+  overflow-wrap: anywhere;
+  font-family: var(--mono, ui-monospace, monospace);
+}
+.storage-preview {
+  margin: 0;
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  background: var(--ground);
+  color: var(--ink);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 8px;
+  font-size: var(--text-sm);
+}
+.storage-detail { display: flex; flex-direction: column; gap: var(--space-2); }
+@media (max-width: 720px) {
+  .storage-row { flex-wrap: wrap; }
+  .storage-form { flex-direction: column; align-items: stretch; }
+}
+/* feature:storage end */

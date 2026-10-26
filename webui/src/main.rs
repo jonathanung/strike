@@ -1,7 +1,7 @@
 //! Strike web client. The session list is live roots plus saved sessions.
-//! Activity, Files, and Changes are the side panel. Side chat is a separate
-//! read-only drawer. Goals and Autopilot live in `goals`. Schedule, memory,
-//! knowledge, artifacts, and the task runner are not drawn here; see
+//! Activity, Files, Changes, Memory, Knowledge, and Artifacts are the side
+//! panel. Side chat is a separate read-only drawer. Goals and Autopilot live
+//! in `goals`. Schedule and the task runner are not drawn here; see
 //! docs/webui-planned.md.
 
 mod api;
@@ -10,11 +10,13 @@ mod goals;
 mod model;
 mod model_menu;
 mod model_menu_view;
+mod storage;
 mod shell;
 mod side_chat;
 mod status;
 
 use crate::shell::icon;
+
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -35,10 +37,12 @@ use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 
 use crate::api::{
-    get_json, idempotency_key, now_ms, patch_json, post_json, post_json_value, post_op,
+    get_json, idempotency_key, now_ms, patch_json, post_json, post_json_value, post_op, put_json,
 };
+use crate::storage::StoragePanel;
 use crate::editor::{DocumentPane, LinkedBody, MarkdownView, has_markdown_table};
 use crate::side_chat::SideChatPanel;
+
 use crate::model::{budget_elapsed, can_retry, RootsResponse};
 use crate::model_menu::{active_context, context_view, reduce_envelope, LiveModelState, ModelDefaults};
 use crate::model_menu_view::ModelMenu;
@@ -335,6 +339,7 @@ fn apply_envelope(
     lines: RwSignal<Vec<ChatLine>>,
     seq: &Rc<Cell<u32>>,
     open: &Rc<Cell<bool>>,
+    storage_rev: RwSignal<u32>,
     raw: &str,
 ) {
     // Generated contract: unknown events are skipped, and a known event whose
@@ -435,6 +440,7 @@ fn apply_envelope(
             card.at_ms = at_ms;
             upsert_child(lines, seq, card);
         }
+        "artifact.updated" => storage_rev.update(|n| *n = n.wrapping_add(1)),
         _ => {}
     }
 }
@@ -451,6 +457,14 @@ fn parent_path(dir: &str) -> String {
     match dir.rsplit_once('/') {
         Some((parent, _)) => parent.to_string(),
         None => String::new(),
+    }
+}
+
+fn memory_mode_label(mode: &str) -> &'static str {
+    match mode {
+        "incognito" => "Incognito",
+        "temporary" => "Temporary",
+        _ => "Normal",
     }
 }
 
@@ -670,6 +684,9 @@ fn App() -> impl IntoView {
     let live_busy = RwSignal::new(false);
     let live_busy_root = RwSignal::new(String::new());
     let side_tab = RwSignal::new("activity".to_string());
+    let memory_mode = RwSignal::new("normal".to_string());
+    let memory_menu = RwSignal::new(false);
+    let storage_rev = RwSignal::new(0u32);
     let doc_path = RwSignal::new(String::new());
     let doc_line = RwSignal::new(0u32);
     let doc_diff = RwSignal::new(false);
@@ -686,6 +703,7 @@ fn App() -> impl IntoView {
             side_focus_root.set(root);
         }
     });
+
     let files_path = RwSignal::new(String::new());
     let files = RwSignal::new(Vec::<model::DirEntry>::new());
     let files_error = RwSignal::new(String::new());
@@ -956,6 +974,7 @@ fn App() -> impl IntoView {
         let on_msg =
             Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |ev: web_sys::MessageEvent| {
                 if let Some(data) = ev.data().as_string() {
+                    apply_envelope(lines_cb, &seq_cb, &open_cb, storage_rev, &data);
                     apply_envelope(lines_cb, &seq_cb, &open_cb, &data);
                     let prev = LiveModelState {
                         provider: provider_name.get_untracked(),
@@ -1328,11 +1347,38 @@ fn App() -> impl IntoView {
         apply_theme(&load("strike.theme"), &scheme);
     };
 
+    let set_memory = move |mode: String| {
+        memory_menu.set(false);
+        memory_mode.set(mode.clone());
+        let root = active_root.get_untracked();
+        if root.is_empty() {
+            status.set("no live session yet".into());
+            return;
+        }
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            let path = format!("/v1/memory/mode?root={}", api::js_encode(&root));
+            match put_json(&b, &t, &path, serde_json::json!({"mode": mode})).await {
+                Ok(text) => {
+                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
+                        if let Some(saved) = v.get("mode").and_then(|m| m.as_str()) {
+                            if !saved.is_empty() {
+                                memory_mode.set(saved.to_string());
+                            }
+                        }
+                    }
+                }
+                Err(e) => status.set(format!("memory mode failed: {e}")),
+            }
+        });
+    };
+
     let open_side = move |id: String, name: String| {
         side_focus_id.set(id);
         side_focus_name.set(name);
         side_open.set(true);
         mode.set("chat".into());
+
     };
 
     let set_perm = move |mode: String| {
@@ -1427,6 +1473,21 @@ fn App() -> impl IntoView {
             mode_menu.set(false);
             load_model_catalog();
         }
+    });
+
+    Effect::new(move |_| {
+        let root = active_root.get();
+        let (b, t) = (base.get(), token.get());
+        spawn_local(async move {
+            let path = format!("/v1/memory/mode?root={}", api::js_encode(&root));
+            if let Ok(v) = get_json::<serde_json::Value>(&b, &t, &path).await {
+                if let Some(mode) = v.get("mode").and_then(|m| m.as_str()) {
+                    if !mode.is_empty() {
+                        memory_mode.set(mode.to_string());
+                    }
+                }
+            }
+        });
     });
 
     let on_select_model = Callback::new(move |(provider, id): (String, String)| {
@@ -1592,9 +1653,11 @@ fn App() -> impl IntoView {
             // them was open does Escape also close the open document.
             let menu = mode_menu.get_untracked()
                 || model_menu.get_untracked()
+                || memory_menu.get_untracked()
                 || side_open.get_untracked();
             mode_menu.set(false);
             model_menu.set(false);
+            memory_menu.set(false);
             side_open.set(false);
             if !menu && !doc_editing.get_untracked() && !doc_path.get_untracked().is_empty() {
                 doc_path.set(String::new());
@@ -1661,6 +1724,52 @@ fn App() -> impl IntoView {
         active_root,
         refresh: Rc::new(move || refresh_meta()),
     });
+
+    // Storage palette performers (#1271). The commands are registered at
+    // boot by src/shell/contrib/storage.rs and dispatch these ids; only
+    // the page owns the side-tab and memory-mode signals they drive.
+    shell::bind(
+        "panel-memory",
+        Rc::new(move |_args: &str| {
+            side_tab.set("memory".into());
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "panel-knowledge",
+        Rc::new(move |_args: &str| {
+            side_tab.set("knowledge".into());
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "panel-artifacts",
+        Rc::new(move |_args: &str| {
+            side_tab.set("artifacts".into());
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "memory-normal",
+        Rc::new(move |_args: &str| {
+            set_memory("normal".into());
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "memory-incognito",
+        Rc::new(move |_args: &str| {
+            set_memory("incognito".into());
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "memory-temporary",
+        Rc::new(move |_args: &str| {
+            set_memory("temporary".into());
+            Ok(())
+        }),
+    );
 
     // Alt+G opens Goals. The shell owns the other chords; this one stays
     // here because only the page can set `mode`. The shortcut is listed in
@@ -2073,6 +2182,28 @@ fn App() -> impl IntoView {
                                 context_view(context_used.get(), context_limit.get(), ctx, &context_fit.get()).hold_message
                             }}</p>
                         </Show>
+                        <Show when=move || memory_menu.get()>
+                            <div class="menu" role="menu" aria-label="Memory mode">
+                                {["normal", "incognito", "temporary"].into_iter().map(|id| {
+                                    let label = memory_mode_label(id).to_string();
+                                    let detail = match id {
+                                        "incognito" => "Reads memory. The agent learns nothing.",
+                                        "temporary" => "This session does not load memory.",
+                                        _ => "Reads and writes memory.",
+                                    };
+                                    let set = set_memory;
+                                    let on = memory_mode.get() == id;
+                                    let klass = if on { "palette-row on" } else { "palette-row" };
+                                    let id = id.to_string();
+                                    view! {
+                                        <button type="button" class=klass on:click=move |_| set(id.clone())>
+                                            <span class="name">{label}</span>
+                                            <span class="path">{detail}</span>
+                                        </button>
+                                    }
+                                }).collect_view()}
+                            </div>
+                        </Show>
                         <form on:submit=move |ev| { ev.prevent_default(); send(); }>
                             <textarea
                                 placeholder="Message this session"
@@ -2088,6 +2219,7 @@ fn App() -> impl IntoView {
                             <div class="composer-bar">
                                 <button type="button" class="chip" on:click=move |_| {
                                     model_menu.set(false);
+                                    memory_menu.set(false);
                                     mode_menu.update(|v| *v = !*v);
                                 }>{move || format!("Approval · {}", mode_label(&perm_mode.get()))}</button>
                                 <ModelMenu
@@ -2108,6 +2240,11 @@ fn App() -> impl IntoView {
                                     on_effort=on_effort
                                     on_default_effort=on_default_effort
                                 />
+                                <button type="button" class="chip" aria-label="Memory mode" on:click=move |_| {
+                                    mode_menu.set(false);
+                                    model_menu.set(false);
+                                    memory_menu.update(|v| *v = !*v);
+                                }>{move || format!("Memory · {}", memory_mode_label(&memory_mode.get()))}</button>
                                 <button type="button" class=move || if side_open.get() { "chip on side-chat-open-composer" } else { "chip side-chat-open-composer" } on:click=move |_| open_side(String::new(), String::new())>"Side chat"</button>
                                 <button type="button" class=move || if enter_mode.get() == "steer" { "chip on" } else { "chip" } on:click=move |_| set_enter("steer".into())>"Steer"</button>
                                 <button type="button" class=move || if enter_mode.get() == "queue" { "chip on" } else { "chip" } on:click=move |_| set_enter("queue".into())>"Queue"</button>
@@ -2128,6 +2265,9 @@ fn App() -> impl IntoView {
                         <button class=move || if side_tab.get() == "activity" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("activity".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("activity")></span>"Activity"</button>
                         <button class=move || if side_tab.get() == "files" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("files".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("files")></span>"Files"</button>
                         <button class=move || if side_tab.get() == "changes" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("changes".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("changes")></span>"Changes"</button>
+                        <button class=move || if side_tab.get() == "memory" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("memory".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("memory")></span>"Memory"</button>
+                        <button class=move || if side_tab.get() == "knowledge" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("knowledge".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("knowledge")></span>"Knowledge"</button>
+                        <button class=move || if side_tab.get() == "artifacts" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("artifacts".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("artifacts")></span>"Artifacts"</button>
                     </div>
                     <Show when=move || side_tab.get() == "activity">
                     <div class="activity">
@@ -2351,6 +2491,20 @@ fn App() -> impl IntoView {
                                 }).collect_view()}
                             </ul>
                         </div>
+                    </Show>
+                    <Show when=move || {
+                        let tab = side_tab.get();
+                        tab == "memory" || tab == "knowledge" || tab == "artifacts"
+                    }>
+                        <StoragePanel
+                            tab=side_tab
+                            base=base
+                            token=token
+                            root=active_root
+                            memory_mode=memory_mode
+                            status=status
+                            storage_rev=storage_rev
+                        />
                     </Show>
                 </aside>
             </div>

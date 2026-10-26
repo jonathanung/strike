@@ -861,6 +861,11 @@ type Context struct {
 	// caller is itself a root. Artifact tools use it as the team boundary
 	// (access=team shares within the same root lineage).
 	RootSessionID string
+	// MemoryMode is the calling session's storage mode: normal, incognito,
+	// or temporary. Empty means normal. Tools that persist memory or
+	// knowledge must refuse writes in incognito and refuse both reads and
+	// writes in temporary.
+	MemoryMode string
 	// NotifyArtifact, when non-nil, is invoked after a successful artifact
 	// create/update so the engine can emit protocol.ArtifactUpdated.
 	// op is "create" or "update". payload is the persist artifact value
