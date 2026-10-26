@@ -13,6 +13,20 @@ pretend the daemon already has the Kiro-shaped workflow. Each one below is
 the Strike-specific shape, using stores and events that already exist or are
 the next real slice.
 
+## Goals and autopilot
+
+The Goals view is in the client (`webui/src/goals.rs`). It creates a goal
+with a verification command and budgets (turns, wall clock, tokens), then
+runs `POST /v1/goals/{id}/run?background=1` and reads the log. Autopilot is
+off unless the operator names an allow list. Deny rules still block. Stall,
+repeated verification failure, and a hard budget stop are enforced in the
+goal harness, not only in the page.
+
+A goal is not a schedule and not a task runner. A schedule, when it exists,
+fires on a clock and may start a goal; it must not skip the goal guards.
+A task runner walks a plan section by section and checkpoints each section.
+The Goals view does not draw either of those.
+
 ## Schedule
 
 Recurring work is not a daemon resource yet. Strike has goal loops
@@ -21,6 +35,8 @@ documents (`/v1/workflows`), not a clock.
 
 Planned: a Schedule list of goal or workflow runs with a cron or interval,
 the next fire time, last status, and a link to the session the run wrote.
+Firing one may start a goal (see Goals and autopilot). The schedule does
+not own the loop guards.
 Creating one would persist beside `~/.strike` and the daemon would start a
 root session when it fires. There is no scheduler process in `strike serve`
 today, so the panel stays out until that exists.
@@ -53,6 +69,8 @@ CAS version already on the artifact, not a new kind of object.
 
 Plans exist (`/v1/plans`: sections, status, reopen). Delegations exist on
 `GET /v1/team`. There is no spec → plan → run → checkpoint pipeline.
+That pipeline is not a goal loop: a goal has one verification command and
+stops on the harness guards, and it does not checkpoint plan sections.
 
 Planned: one plan opened as a checklist. Run would mean spawning a child
 (`team.spawn`) per section, with that child's Activity row and handoff as

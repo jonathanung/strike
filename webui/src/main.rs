@@ -1,10 +1,11 @@
 //! Strike web client. The session list is live roots plus saved sessions.
-//! Activity, Files, and Changes are the side panel. Schedule, memory,
-//! knowledge, artifacts, and the task runner are not drawn here; see
-//! docs/webui-planned.md.
+//! Activity, Files, and Changes are the side panel. Goals and Autopilot
+//! live in `goals`. Schedule, memory, knowledge, artifacts, and the task
+//! runner are not drawn here; see docs/webui-planned.md.
 
 mod api;
 mod editor;
+mod goals;
 mod model;
 
 use std::cell::{Cell, RefCell};
@@ -410,6 +411,12 @@ fn palette_cmds() -> &'static [PaletteCmd] {
             id: "daemon",
             label: "Daemon",
             detail: "This gateway, its token, and workspaces",
+        },
+        PaletteCmd {
+            section: "Apps",
+            id: "goals",
+            label: "Goals",
+            detail: "Run a goal until its check passes or a guard stops it",
         },
         PaletteCmd {
             section: "Settings",
@@ -1158,6 +1165,7 @@ fn App() -> impl IntoView {
             "stop-all" => stop_all(),
             "chat" => mode.set("chat".into()),
             "daemon" => mode.set("daemon".into()),
+            "goals" => mode.set("goals".into()),
             "steer" => set_enter("steer".into()),
             "queue" => set_enter("queue".into()),
             "mode-default" => set_perm("default".into()),
@@ -1247,6 +1255,21 @@ fn App() -> impl IntoView {
             } else if ev.alt_key() && !ev.meta_key() && !ev.ctrl_key() && ev.key() == "ArrowRight" {
                 ev.prevent_default();
                 travel(false);
+            } else if ev.alt_key() && !ev.meta_key() && !ev.ctrl_key() && ev.key().eq_ignore_ascii_case("g") {
+                let typing = ev
+                    .target()
+                    .map(|t| {
+                        t.dyn_ref::<web_sys::Element>()
+                            .map(|el| {
+                                matches!(el.tag_name().as_str(), "INPUT" | "TEXTAREA" | "SELECT")
+                            })
+                            .unwrap_or(false)
+                    })
+                    .unwrap_or(false);
+                if !typing {
+                    ev.prevent_default();
+                    mode.set("goals".into());
+                }
             } else if ev.alt_key() && !ev.meta_key() && !ev.ctrl_key() && ev.key() == "\\" {
                 ev.prevent_default();
                 focus.update(|v| *v = !*v);
@@ -1346,6 +1369,7 @@ fn App() -> impl IntoView {
                 }}</span>
                 <div class="segmented" role="tablist" aria-label="View">
                     <button class=move || if mode.get() == "chat" { "seg on" } else { "seg" } on:click=move |_| mode.set("chat".into())>"Chat"</button>
+                    <button data-view="goals" class=move || if mode.get() == "goals" { "seg on" } else { "seg" } on:click=move |_| mode.set("goals".into())>"Goals"</button>
                     <button class=move || if mode.get() == "daemon" { "seg on" } else { "seg" } on:click=move |_| mode.set("daemon".into())>"Daemon"</button>
                 </div>
             </div>
@@ -1409,6 +1433,9 @@ fn App() -> impl IntoView {
                 remote_url=remote_url
                 refresh=refresh_meta
             />
+        </Show>
+        <Show when=move || mode.get() == "goals" fallback=move || ()>
+            <goals::GoalsPane base=base token=token />
         </Show>
         <Show when=move || mode.get() == "chat">
             <div class=move || if focus.get() { "shell focus" } else { "shell" }>

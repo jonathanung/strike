@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/jonathanung/strike/internal/frontend/host"
 	"github.com/jonathanung/strike/internal/product/goal"
@@ -15,15 +16,17 @@ func NewGoals(store *goal.Store, workDir string) host.Goals {
 	if store == nil {
 		return nil
 	}
-	return goalsAdapter{store: store, workDir: workDir}
+	return &goalsAdapter{store: store, workDir: workDir, running: map[string]struct{}{}}
 }
 
 type goalsAdapter struct {
 	store   *goal.Store
 	workDir string
+	mu      sync.Mutex
+	running map[string]struct{}
 }
 
-func (a goalsAdapter) Set(description string, criteria []string, opts host.GoalSetOptions) (host.Goal, error) {
+func (a *goalsAdapter) Set(description string, criteria []string, opts host.GoalSetOptions) (host.Goal, error) {
 	crit := make([]goal.Criterion, 0, len(criteria))
 	for _, raw := range criteria {
 		spec, err := goal.ParseCheckSpec(raw)
@@ -48,17 +51,35 @@ func (a goalsAdapter) Set(description string, criteria []string, opts host.GoalS
 	if opts.MaxNoProgressIters > 0 {
 		c.MaxNoProgressIters = opts.MaxNoProgressIters
 	}
+	if opts.MaxTokens > 0 {
+		c.MaxTokens = opts.MaxTokens
+	}
+	if opts.MaxVerifyFailures > 0 {
+		c.MaxVerifyFailures = opts.MaxVerifyFailures
+	}
 	if opts.AllowedTools != nil {
 		c.AllowedTools = append([]string(nil), opts.AllowedTools...)
+	}
+	if opts.DenyTools != nil {
+		c.DenyTools = append([]string(nil), opts.DenyTools...)
+	}
+	if err := goal.ValidateAutopilot(opts.Autopilot, c); err != nil {
+		return host.Goal{}, err
 	}
 	g, err := a.store.Create(description, crit, c)
 	if err != nil {
 		return host.Goal{}, err
 	}
+	if opts.Autopilot {
+		g.Autopilot = true
+		if err := a.store.UpdateGoal(g); err != nil {
+			return host.Goal{}, err
+		}
+	}
 	return toHostGoal(g), nil
 }
 
-func (a goalsAdapter) List() ([]host.Goal, error) {
+func (a *goalsAdapter) List() ([]host.Goal, error) {
 	list, err := a.store.List()
 	if err != nil {
 		return nil, err
@@ -70,7 +91,7 @@ func (a goalsAdapter) List() ([]host.Goal, error) {
 	return out, nil
 }
 
-func (a goalsAdapter) Get(id string) (host.Goal, bool, error) {
+func (a *goalsAdapter) Get(id string) (host.Goal, bool, error) {
 	g, ok, err := a.store.Get(id)
 	if err != nil || !ok {
 		return host.Goal{}, ok, err
@@ -78,7 +99,27 @@ func (a goalsAdapter) Get(id string) (host.Goal, bool, error) {
 	return toHostGoal(g), true, nil
 }
 
-func (a goalsAdapter) Run(ctx context.Context, id string) (host.Goal, error) {
+func (a *goalsAdapter) Run(ctx context.Context, id string) (host.Goal, error) {
+	a.mu.Lock()
+	if _, ok := a.running[id]; ok {
+		a.mu.Unlock()
+		g, ok, err := a.Get(id)
+		if err != nil || !ok {
+			if err == nil {
+				err = fmt.Errorf("goal: not found")
+			}
+			return host.Goal{}, err
+		}
+		return g, nil
+	}
+	a.running[id] = struct{}{}
+	a.mu.Unlock()
+	defer func() {
+		a.mu.Lock()
+		delete(a.running, id)
+		a.mu.Unlock()
+	}()
+
 	loop := &goal.Loop{
 		Store:   a.store,
 		Planner: goal.EvaluateOnlyPlanner{},
@@ -95,7 +136,7 @@ func (a goalsAdapter) Run(ctx context.Context, id string) (host.Goal, error) {
 	return toHostGoal(g), nil
 }
 
-func (a goalsAdapter) Pause(id string) (host.Goal, error) {
+func (a *goalsAdapter) Pause(id string) (host.Goal, error) {
 	g, err := a.store.SetStatus(id, goal.StatusPaused, "")
 	if err != nil {
 		return host.Goal{}, err
@@ -103,7 +144,7 @@ func (a goalsAdapter) Pause(id string) (host.Goal, error) {
 	return toHostGoal(g), nil
 }
 
-func (a goalsAdapter) Resume(id string) (host.Goal, error) {
+func (a *goalsAdapter) Resume(id string) (host.Goal, error) {
 	g, err := a.store.SetStatus(id, goal.StatusActive, "")
 	if err != nil {
 		return host.Goal{}, err
@@ -111,7 +152,7 @@ func (a goalsAdapter) Resume(id string) (host.Goal, error) {
 	return toHostGoal(g), nil
 }
 
-func (a goalsAdapter) Abort(id string) (host.Goal, error) {
+func (a *goalsAdapter) Abort(id string) (host.Goal, error) {
 	g, err := a.store.SetStatus(id, goal.StatusAborted, "aborted by user")
 	if err != nil {
 		return host.Goal{}, err
@@ -119,7 +160,7 @@ func (a goalsAdapter) Abort(id string) (host.Goal, error) {
 	return toHostGoal(g), nil
 }
 
-func (a goalsAdapter) Log(id string, iter int) ([]host.GoalIteration, error) {
+func (a *goalsAdapter) Log(id string, iter int) ([]host.GoalIteration, error) {
 	recs, err := a.store.ListIterations(id)
 	if err != nil {
 		return nil, err
@@ -134,6 +175,8 @@ func (a goalsAdapter) Log(id string, iter int) ([]host.GoalIteration, error) {
 			Plan:      r.Plan,
 			StateHash: r.StateHash,
 			CostUSD:   r.CostUSD,
+			Tokens:    r.Tokens,
+			Verified:  r.Evaluation.AllSatisfied,
 			Summary:   formatIterSummary(r),
 		})
 	}
@@ -170,16 +213,24 @@ func shortHash(h string) string {
 
 func toHostGoal(g goal.Goal) host.Goal {
 	out := host.Goal{
-		ID:            g.ID,
-		Description:   g.Description,
-		Status:        string(g.Status),
-		MaxIterations: g.Constraints.MaxIterations,
-		MaxCostUSD:    g.Constraints.MaxCostUSD,
-		AllowedTools:  append([]string(nil), g.Constraints.AllowedTools...),
-		CostUSD:       g.CostUSD,
-		LastIteration: g.LastIteration,
-		FailReason:    g.FailReason,
-		CreatedAt:     g.CreatedAt,
+		ID:                 g.ID,
+		Description:        g.Description,
+		Status:             string(g.Status),
+		MaxIterations:      g.Constraints.MaxIterations,
+		MaxCostUSD:         g.Constraints.MaxCostUSD,
+		MaxWallClockS:      g.Constraints.MaxWallClockS,
+		MaxTokens:          g.Constraints.MaxTokens,
+		MaxVerifyFailures:  g.Constraints.MaxVerifyFailures,
+		MaxNoProgressIters: g.Constraints.MaxNoProgressIters,
+		AllowedTools:       append([]string(nil), g.Constraints.AllowedTools...),
+		DenyTools:          append([]string(nil), g.Constraints.DenyTools...),
+		Autopilot:          g.Autopilot,
+		CostUSD:            g.CostUSD,
+		TokensUsed:         g.TokensUsed,
+		LastIteration:      g.LastIteration,
+		FailReason:         g.FailReason,
+		Escalation:         g.Escalation,
+		CreatedAt:          g.CreatedAt,
 	}
 	out.Criteria = make([]host.GoalCriterion, len(g.Criteria))
 	for i, c := range g.Criteria {

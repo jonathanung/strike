@@ -81,3 +81,32 @@ func TestGoalsPauseAbort(t *testing.T) {
 		t.Fatalf("status=%s", got.Status)
 	}
 }
+
+func TestGoalsAutopilotAndVerifyStop(t *testing.T) {
+	store, err := goal.Open(t.TempDir(), "auto")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	gapi := NewGoals(store, t.TempDir())
+	if _, err := gapi.Set("x", []string{"cmd: true"}, host.GoalSetOptions{Autopilot: true}); err == nil {
+		t.Fatal("autopilot without an allowlist must fail")
+	}
+	g, err := gapi.Set("nope", []string{"cmd: false"}, host.GoalSetOptions{
+		MaxIterations: 20, MaxNoProgressIters: 20, MaxVerifyFailures: 3, MaxTokens: 200_000,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := gapi.Run(context.Background(), g.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != "blocked" || got.Escalation != "human" || got.LastIteration != 3 {
+		t.Fatalf("got=%+v", got)
+	}
+	log, err := gapi.Log(g.ID, 0)
+	if err != nil || len(log) != 3 || log[2].Verified {
+		t.Fatalf("log=%+v err=%v", log, err)
+	}
+}

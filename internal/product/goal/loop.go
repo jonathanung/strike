@@ -67,7 +67,7 @@ func (l *Loop) Run(ctx context.Context, id string) (Goal, error) {
 		l.scratch = make(map[string]string)
 	}
 	if l.Hooks.PreAct == nil {
-		l.Hooks.PreAct = AllowlistPreAct
+		l.Hooks.PreAct = GuardedPreAct
 	}
 
 	g, ok, err := l.Store.Get(id)
@@ -82,7 +82,7 @@ func (l *Loop) Run(ctx context.Context, id string) (Goal, error) {
 		return g, nil
 	case StatusActive:
 		// resume
-	case StatusPending, StatusPaused:
+	case StatusPending, StatusPaused, StatusBlocked:
 		g, err = l.Store.SetStatus(id, StatusActive, "")
 		if err != nil {
 			return Goal{}, err
@@ -138,6 +138,7 @@ func (l *Loop) Run(ctx context.Context, id string) (Goal, error) {
 		g = live
 		ApplyEval(&g, rec.Evaluation)
 		g.CostUSD += rec.CostUSD
+		g.TokensUsed += rec.Tokens
 		g.LastIteration = rec.N
 
 		history = append(history, rec)
@@ -152,8 +153,10 @@ func (l *Loop) Run(ctx context.Context, id string) (Goal, error) {
 			if gr.Tripped {
 				g.Status = gr.NextStatus
 				g.FailReason = gr.Reason
+				g.Escalation = gr.Escalation
 				if gr.NextStatus == StatusDone {
 					g.FailReason = ""
+					g.Escalation = ""
 				}
 			}
 		}
@@ -180,8 +183,10 @@ func (l *Loop) Run(ctx context.Context, id string) (Goal, error) {
 func (l *Loop) applyGuard(g Goal, gr GuardResult) (Goal, error) {
 	g.Status = gr.NextStatus
 	g.FailReason = gr.Reason
+	g.Escalation = gr.Escalation
 	if gr.NextStatus == StatusDone {
 		g.FailReason = ""
+		g.Escalation = ""
 	}
 	if err := l.Store.UpdateGoal(g); err != nil {
 		return g, err
@@ -312,6 +317,7 @@ func (l *Loop) finishIteration(ctx context.Context, g Goal, n int, obs Observati
 		Payload: mustJSON(ev),
 	})
 	draft.Evaluation = ev
+	draft.Tokens = EstimateTokens(plan.Summary, actions, ev)
 
 	// state_hash: criteria booleans + check identities + action outcomes — not transcript.
 	draft.StateHash = stateHash(g, ev, actions)

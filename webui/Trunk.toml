@@ -3,6 +3,12 @@ target = "index.html"
 public_url = "/assets/"
 dist = "dist"
 
+# System binaryen 108 rewrites the externref export onto a fixed-size funcref
+# table, so the cockpit dies in __wbindgen_init_externref_table. Trunk's
+# version_123 keeps __wbindgen_externrefs growable.
+[tools]
+wasm_opt = "version_123"
+
 [serve]
 port = 8788
 # Dev only: proxy API calls to a locally running daemon.

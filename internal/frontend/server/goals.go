@@ -20,17 +20,25 @@ type goalCriterionDTO struct {
 }
 
 type goalDTO struct {
-	ID            string             `json:"id"`
-	Description   string             `json:"description"`
-	Criteria      []goalCriterionDTO `json:"criteria"`
-	Status        string             `json:"status"`
-	MaxIterations int                `json:"maxIterations"`
-	MaxCostUSD    float64            `json:"maxCostUsd"`
-	AllowedTools  []string           `json:"allowedTools,omitempty"`
-	CostUSD       float64            `json:"costUsd"`
-	LastIteration int                `json:"lastIteration"`
-	FailReason    string             `json:"failReason,omitempty"`
-	CreatedAt     time.Time          `json:"createdAt"`
+	ID                 string             `json:"id"`
+	Description        string             `json:"description"`
+	Criteria           []goalCriterionDTO `json:"criteria"`
+	Status             string             `json:"status"`
+	MaxIterations      int                `json:"maxIterations"`
+	MaxCostUSD         float64            `json:"maxCostUsd"`
+	MaxWallClockS      int                `json:"maxWallClockS"`
+	MaxTokens          int                `json:"maxTokens"`
+	MaxVerifyFailures  int                `json:"maxVerifyFailures"`
+	MaxNoProgressIters int                `json:"maxNoProgressIters"`
+	AllowedTools       []string           `json:"allowedTools,omitempty"`
+	DenyTools          []string           `json:"denyTools,omitempty"`
+	Autopilot          bool               `json:"autopilot"`
+	CostUSD            float64            `json:"costUsd"`
+	TokensUsed         int                `json:"tokensUsed"`
+	LastIteration      int                `json:"lastIteration"`
+	FailReason         string             `json:"failReason,omitempty"`
+	Escalation         string             `json:"escalation,omitempty"`
+	CreatedAt          time.Time          `json:"createdAt"`
 }
 
 type goalIterationDTO struct {
@@ -38,17 +46,24 @@ type goalIterationDTO struct {
 	Plan      string  `json:"plan,omitempty"`
 	StateHash string  `json:"stateHash,omitempty"`
 	CostUSD   float64 `json:"costUsd"`
+	Tokens    int     `json:"tokens"`
+	Verified  bool    `json:"verified"`
 	Summary   string  `json:"summary,omitempty"`
 }
 
 type goalSetRequest struct {
 	Description        string   `json:"description"`
 	Criteria           []string `json:"criteria"`
+	Verification       string   `json:"verification,omitempty"`
 	MaxIterations      int      `json:"maxIterations,omitempty"`
 	MaxCostUSD         float64  `json:"maxCostUsd,omitempty"`
 	MaxWallClockS      int      `json:"maxWallClockS,omitempty"`
 	MaxNoProgressIters int      `json:"maxNoProgressIters,omitempty"`
+	MaxTokens          int      `json:"maxTokens,omitempty"`
+	MaxVerifyFailures  int      `json:"maxVerifyFailures,omitempty"`
 	AllowedTools       []string `json:"allowedTools,omitempty"`
+	DenyTools          []string `json:"denyTools,omitempty"`
+	Autopilot          bool     `json:"autopilot,omitempty"`
 }
 
 func (s *Server) goals() host.Goals {
@@ -60,18 +75,28 @@ func (s *Server) goals() host.Goals {
 
 func toGoalDTO(g host.Goal) goalDTO {
 	out := goalDTO{
-		ID:            g.ID,
-		Description:   g.Description,
-		Status:        g.Status,
-		MaxIterations: g.MaxIterations,
-		MaxCostUSD:    g.MaxCostUSD,
-		CostUSD:       g.CostUSD,
-		LastIteration: g.LastIteration,
-		FailReason:    g.FailReason,
-		CreatedAt:     g.CreatedAt,
+		ID:                 g.ID,
+		Description:        g.Description,
+		Status:             g.Status,
+		MaxIterations:      g.MaxIterations,
+		MaxCostUSD:         g.MaxCostUSD,
+		MaxWallClockS:      g.MaxWallClockS,
+		MaxTokens:          g.MaxTokens,
+		MaxVerifyFailures:  g.MaxVerifyFailures,
+		MaxNoProgressIters: g.MaxNoProgressIters,
+		Autopilot:          g.Autopilot,
+		CostUSD:            g.CostUSD,
+		TokensUsed:         g.TokensUsed,
+		LastIteration:      g.LastIteration,
+		FailReason:         g.FailReason,
+		Escalation:         g.Escalation,
+		CreatedAt:          g.CreatedAt,
 	}
 	if len(g.AllowedTools) > 0 {
 		out.AllowedTools = append([]string(nil), g.AllowedTools...)
+	}
+	if len(g.DenyTools) > 0 {
+		out.DenyTools = append([]string(nil), g.DenyTools...)
 	}
 	out.Criteria = make([]goalCriterionDTO, len(g.Criteria))
 	for i, c := range g.Criteria {
@@ -92,6 +117,8 @@ func toGoalIterationDTOs(items []host.GoalIteration) []goalIterationDTO {
 			Plan:      it.Plan,
 			StateHash: it.StateHash,
 			CostUSD:   it.CostUSD,
+			Tokens:    it.Tokens,
+			Verified:  it.Verified,
 			Summary:   it.Summary,
 		}
 	}
@@ -135,16 +162,21 @@ func (s *Server) handleGoalsSet(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "description is required"})
 		return
 	}
-	if len(body.Criteria) == 0 {
+	criteria := mergeGoalCriteria(body.Criteria, body.Verification)
+	if len(criteria) == 0 {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "at least one criterion is required"})
 		return
 	}
-	g, err := api.Set(desc, body.Criteria, host.GoalSetOptions{
+	g, err := api.Set(desc, criteria, host.GoalSetOptions{
 		MaxIterations:      body.MaxIterations,
 		MaxCostUSD:         body.MaxCostUSD,
 		MaxWallClockS:      body.MaxWallClockS,
 		MaxNoProgressIters: body.MaxNoProgressIters,
+		MaxTokens:          body.MaxTokens,
+		MaxVerifyFailures:  body.MaxVerifyFailures,
 		AllowedTools:       body.AllowedTools,
+		DenyTools:          body.DenyTools,
+		Autopilot:          body.Autopilot,
 	})
 	if err != nil {
 		writeGoalErr(w, err)
@@ -189,6 +221,10 @@ func (s *Server) handleGoalRun(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimSpace(r.PathValue("id"))
 	if id == "" {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "id is required"})
+		return
+	}
+	if r.URL.Query().Get("background") == "1" {
+		s.handleGoalRunBackground(w, api, id)
 		return
 	}
 	// Loop respects goal wall-clock / iteration budgets and request cancel.
@@ -270,6 +306,77 @@ func (s *Server) handleGoalLog(w http.ResponseWriter, r *http.Request) {
 		items = []host.GoalIteration{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"iterations": toGoalIterationDTOs(items)})
+}
+
+func mergeGoalCriteria(criteria []string, verification string) []string {
+	out := make([]string, 0, len(criteria)+1)
+	for _, c := range criteria {
+		c = strings.TrimSpace(c)
+		if c != "" {
+			out = append(out, c)
+		}
+	}
+	v := strings.TrimSpace(verification)
+	if v == "" {
+		return out
+	}
+	spec := v
+	if !hasCheckPrefix(v) {
+		spec = "cmd: " + v
+	}
+	for _, c := range out {
+		if strings.EqualFold(strings.TrimSpace(c), spec) {
+			return out
+		}
+	}
+	return append(out, spec)
+}
+
+func hasCheckPrefix(raw string) bool {
+	kind, _, ok := strings.Cut(raw, ":")
+	if !ok {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "cmd", "predicate", "judge":
+		return true
+	default:
+		return false
+	}
+}
+
+// handleGoalRunBackground marks the goal active and runs the loop off the
+// request so the client can poll the log. Closing the page does not cancel
+// the loop; pause and abort do. A second start while one is in progress
+// returns the current goal instead of a second loop.
+func (s *Server) handleGoalRunBackground(w http.ResponseWriter, api host.Goals, id string) {
+	g, ok, err := api.Get(id)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, opErrorResponse{Error: err.Error()})
+		return
+	}
+	if !ok {
+		writeJSON(w, http.StatusNotFound, opErrorResponse{Error: "goal not found"})
+		return
+	}
+	switch g.Status {
+	case "done", "failed", "aborted":
+		writeJSON(w, http.StatusConflict, opErrorResponse{Error: "goal is already finished"})
+		return
+	case "pending", "paused", "blocked":
+		g, err = api.Resume(id)
+		if err != nil {
+			writeGoalErr(w, err)
+			return
+		}
+	}
+	go func() {
+		_, _ = api.Run(context.Background(), id)
+	}()
+	if fresh, ok, err := api.Get(id); err == nil && ok {
+		g = fresh
+	}
+	writeJSON(w, http.StatusAccepted, toGoalDTO(g))
 }
 
 func writeGoalErr(w http.ResponseWriter, err error) {

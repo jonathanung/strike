@@ -63,6 +63,7 @@ func TestLoopNoProgressTrips(t *testing.T) {
 	spec, _ := ParseCheckSpec("cmd: false")
 	g, err := s.Create("never", []Criterion{{Description: "x", Check: spec}}, Constraints{
 		MaxIterations: 10, MaxCostUSD: 10, MaxWallClockS: 600, MaxNoProgressIters: 3,
+		MaxVerifyFailures: 99,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -80,8 +81,8 @@ func TestLoopNoProgressTrips(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Status != StatusFailed {
-		t.Fatalf("status=%s reason=%s", got.Status, got.FailReason)
+	if got.Status != StatusBlocked || got.Escalation != "human" {
+		t.Fatalf("status=%s escalation=%s reason=%s", got.Status, got.Escalation, got.FailReason)
 	}
 	if got.LastIteration < 3 {
 		t.Fatalf("iters=%d", got.LastIteration)

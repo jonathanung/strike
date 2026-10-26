@@ -19,6 +19,10 @@ const (
 	StatusDone    Status = "done"
 	StatusFailed  Status = "failed"
 	StatusAborted Status = "aborted"
+	// StatusBlocked stops the loop and asks a person to continue.
+	// Budget exhaustion stays StatusFailed: raising the cap is a new limit,
+	// not a resume of the same one.
+	StatusBlocked Status = "blocked"
 )
 
 // CheckKind is how a criterion is verified.
@@ -45,11 +49,20 @@ type Criterion struct {
 
 // Constraints are hard limits enforced by the harness (never the prompt).
 type Constraints struct {
-	MaxIterations      int      `json:"max_iterations"`
-	MaxCostUSD         float64  `json:"max_cost_usd"`
-	MaxWallClockS      int      `json:"max_wall_clock_s"`
-	MaxNoProgressIters int      `json:"max_no_progress_iters"`
-	AllowedTools       []string `json:"allowed_tools"`
+	MaxIterations      int     `json:"max_iterations"`
+	MaxCostUSD         float64 `json:"max_cost_usd"`
+	MaxWallClockS      int     `json:"max_wall_clock_s"`
+	MaxNoProgressIters int     `json:"max_no_progress_iters"`
+	// MaxTokens is a hard token cap. Zero means unlimited (goals stored
+	// before the cap existed). New goals take DefaultConstraints.
+	MaxTokens int `json:"max_tokens,omitempty"`
+	// MaxVerifyFailures stops the loop after this many consecutive
+	// unsatisfied critic passes, even when the state hash keeps changing.
+	// Zero disables the guard (legacy records). New goals default to 3.
+	MaxVerifyFailures int      `json:"max_verify_failures,omitempty"`
+	AllowedTools      []string `json:"allowed_tools"`
+	// DenyTools always beat AllowedTools. Autopilot does not skip them.
+	DenyTools []string `json:"deny_tools,omitempty"`
 }
 
 // DefaultConstraints returns safe v1 defaults.
@@ -59,6 +72,8 @@ func DefaultConstraints() Constraints {
 		MaxCostUSD:         5.0,
 		MaxWallClockS:      1800,
 		MaxNoProgressIters: 3,
+		MaxTokens:          200_000,
+		MaxVerifyFailures:  3,
 		AllowedTools:       nil,
 	}
 }
@@ -80,8 +95,19 @@ type Goal struct {
 	LastIteration int `json:"last_iteration"`
 	// AbortRequested is set by /goal abort; guards flip status on next check.
 	AbortRequested bool `json:"abort_requested,omitempty"`
-	// FailReason is set when status becomes failed or aborted.
+	// FailReason is set when status becomes failed, blocked, or aborted.
 	FailReason string `json:"fail_reason,omitempty"`
+	// TokensUsed accumulates EstimateTokens across committed iterations.
+	TokensUsed int `json:"tokens_used,omitempty"`
+	// Autopilot allows the tool allowlist to run without an ask.
+	// Deny rules and an empty allowlist still block every tool.
+	Autopilot bool `json:"autopilot,omitempty"`
+	// Escalation is "human" when the loop stopped and is waiting for a person.
+	Escalation string `json:"escalation,omitempty"`
+	// GuardFloor is the last iteration a person acknowledged. Stall and
+	// verification streaks count only iterations after it, so Continue
+	// does not immediately re-trip the same window.
+	GuardFloor int `json:"guard_floor,omitempty"`
 }
 
 // ActionRecord is one tool invocation inside an iteration.
@@ -125,6 +151,7 @@ type IterationRecord struct {
 	Evaluation        EvalRecord     `json:"evaluation"`
 	StateHash         string         `json:"state_hash"`
 	CostUSD           float64        `json:"cost_usd"`
+	Tokens            int            `json:"tokens,omitempty"`
 	CommittedAt       time.Time      `json:"committed_at"`
 }
 
@@ -238,9 +265,23 @@ func validateConstraints(c Constraints) error {
 	if c.MaxNoProgressIters < 1 {
 		return fmt.Errorf("goal: max_no_progress_iters must be >= 1")
 	}
+	if c.MaxTokens < 0 {
+		return fmt.Errorf("goal: max_tokens must be >= 0")
+	}
+	if c.MaxVerifyFailures < 0 {
+		return fmt.Errorf("goal: max_verify_failures must be >= 0")
+	}
 	for _, t := range c.AllowedTools {
 		if strings.TrimSpace(t) == "" {
 			return fmt.Errorf("goal: allowed_tools contains an empty name")
+		}
+		if ToolDenied(t, c.DenyTools) {
+			return fmt.Errorf("goal: tool %q is denied and allowed; deny wins", strings.TrimSpace(t))
+		}
+	}
+	for _, t := range c.DenyTools {
+		if strings.TrimSpace(t) == "" {
+			return fmt.Errorf("goal: deny_tools contains an empty name")
 		}
 	}
 	return nil
@@ -268,6 +309,9 @@ func CloneGoal(g Goal) Goal {
 	}
 	if g.Constraints.AllowedTools != nil {
 		out.Constraints.AllowedTools = append([]string(nil), g.Constraints.AllowedTools...)
+	}
+	if g.Constraints.DenyTools != nil {
+		out.Constraints.DenyTools = append([]string(nil), g.Constraints.DenyTools...)
 	}
 	return out
 }
