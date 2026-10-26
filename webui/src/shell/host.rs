@@ -34,6 +34,8 @@ pub struct HostBridge {
     pub gateway: Rc<dyn Fn() -> String>,
     pub version_label: Rc<dyn Fn() -> String>,
     pub dismiss_popups: Rc<dyn Fn()>,
+    pub open_side_chat: Rc<dyn Fn()>,
+    pub toggle_side_chat: Rc<dyn Fn()>,
     pub sessions: Rc<dyn Fn() -> Vec<(String, String)>>,
     pub open_session: Rc<dyn Fn(&str)>,
     pub workspaces: Rc<dyn Fn() -> Vec<(String, String)>>,
@@ -201,6 +203,18 @@ pub fn dismiss_popups() {
             (bridge.dismiss_popups)();
         }
     });
+}
+
+pub fn open_side_chat() -> Result<(), String> {
+    let run = host_rc!(open_side_chat);
+    (*run)();
+    Ok(())
+}
+
+pub fn toggle_side_chat() -> Result<(), String> {
+    let run = host_rc!(toggle_side_chat);
+    (*run)();
+    Ok(())
 }
 
 pub fn sessions() -> Result<Vec<(String, String)>, String> {

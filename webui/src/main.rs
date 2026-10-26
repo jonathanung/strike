@@ -1,11 +1,13 @@
 //! Strike web client. The session list is live roots plus saved sessions.
-//! Activity, Files, and Changes are the side panel. Schedule, memory,
-//! knowledge, artifacts, and the task runner are not drawn here; see
-//! docs/webui-planned.md.
+//! Activity, Files, and Changes are the side panel. Side chat is a separate
+//! read-only drawer. Schedule, memory, knowledge, artifacts, and the task
+//! runner are not drawn here; see docs/webui-planned.md.
 
 mod api;
+mod editor;
 mod model;
 mod shell;
+mod side_chat;
 
 use crate::shell::icon;
 
@@ -29,6 +31,8 @@ use wasm_bindgen::JsCast;
 use crate::api::{
     get_json, idempotency_key, now_ms, patch_json, post_json, post_json_value, post_op,
 };
+use crate::editor::{DocumentPane, LinkedBody};
+use crate::side_chat::SideChatPanel;
 use crate::model::{budget_elapsed, can_retry, RootsResponse};
 
 fn storage() -> Option<web_sys::Storage> {
@@ -515,6 +519,22 @@ fn App() -> impl IntoView {
     let live_busy = RwSignal::new(false);
     let live_busy_root = RwSignal::new(String::new());
     let side_tab = RwSignal::new("activity".to_string());
+    let doc_path = RwSignal::new(String::new());
+    let doc_line = RwSignal::new(0u32);
+    let doc_diff = RwSignal::new(false);
+    let doc_editing = RwSignal::new(false);
+    let side_open = RwSignal::new(false);
+    let side_focus_id = RwSignal::new(String::new());
+    let side_focus_name = RwSignal::new(String::new());
+    let side_focus_root = RwSignal::new(String::new());
+    Effect::new(move |_| {
+        let root = active_root.get();
+        if side_focus_root.get_untracked() != root {
+            side_focus_id.set(String::new());
+            side_focus_name.set(String::new());
+            side_focus_root.set(root);
+        }
+    });
     let files_path = RwSignal::new(String::new());
     let files = RwSignal::new(Vec::<model::DirEntry>::new());
     let files_error = RwSignal::new(String::new());
@@ -945,6 +965,13 @@ fn App() -> impl IntoView {
         apply_theme(&load("strike.theme"), &scheme);
     };
 
+    let open_side = move |id: String, name: String| {
+        side_focus_id.set(id);
+        side_focus_name.set(name);
+        side_open.set(true);
+        mode.set("chat".into());
+    };
+
     let set_perm = move |mode: String| {
         perm_mode.set(mode.clone());
         mode_menu.set(false);
@@ -1136,9 +1163,22 @@ fn App() -> impl IntoView {
         gateway: Rc::new(move || gateway.get()),
         version_label: Rc::new(move || status.get()),
         dismiss_popups: Rc::new(move || {
+            // Escape semantics carried over from the pre-shell key handler:
+            // close the menus and the side chat drawer; only when none of
+            // them was open does Escape also close the open document.
+            let menu = mode_menu.get_untracked()
+                || model_menu.get_untracked()
+                || side_open.get_untracked();
             mode_menu.set(false);
             model_menu.set(false);
+            side_open.set(false);
+            if !menu && !doc_editing.get_untracked() && !doc_path.get_untracked().is_empty() {
+                doc_path.set(String::new());
+                doc_editing.set(false);
+            }
         }),
+        open_side_chat: Rc::new(move || open_side(String::new(), String::new())),
+        toggle_side_chat: Rc::new(move || side_open.update(|v| *v = !*v)),
         workspaces: Rc::new(move || {
             workspaces
                 .get()
@@ -1343,6 +1383,17 @@ fn App() -> impl IntoView {
                     <Show when=move || !stream_note.get().is_empty()>
                         <p class="hint banner">{move || stream_note.get()}</p>
                     </Show>
+                    <Show when=move || !doc_path.get().is_empty()>
+                        <DocumentPane
+                            base=base
+                            token=token
+                            path=doc_path
+                            jump_line=doc_line
+                            want_diff=doc_diff
+                            editing=doc_editing
+                        />
+                    </Show>
+                    <Show when=move || doc_path.get().is_empty()>
                     <div class="transcript" aria-live="polite">
                         <Show when=move || loading.get()>
                             <Skeleton />
@@ -1379,26 +1430,31 @@ fn App() -> impl IntoView {
                                 let summary = body;
                                 view! {
                                     <div>
-                                        <p class="summary">{summary}</p>
-                                        {has_detail.then(|| view! {
-                                            <details>
-                                                <summary>"Details"</summary>
-                                                <pre>{detail}</pre>
-                                            </details>
+                                        <p class="summary">
+                                            <LinkedBody text=summary kind="inline" doc_path=doc_path doc_line=doc_line doc_diff=doc_diff />
+                                        </p>
+                                        {has_detail.then(|| {
+                                            let detail = detail.clone();
+                                            view! {
+                                                <details>
+                                                    <summary>"Details"</summary>
+                                                    <LinkedBody text=detail kind="pre" doc_path=doc_path doc_line=doc_line doc_diff=doc_diff />
+                                                </details>
+                                            }
                                         })}
                                     </div>
                                 }.into_any()
                             } else if prose {
-                                view! { <p class="prose">{body}</p> }.into_any()
+                                view! { <LinkedBody text=body kind="prose" doc_path=doc_path doc_line=doc_line doc_diff=doc_diff /> }.into_any()
                             } else if tool_dump {
                                 view! {
                                     <details>
                                         <summary>"Details"</summary>
-                                        <pre>{body}</pre>
+                                        <LinkedBody text=body kind="pre" doc_path=doc_path doc_line=doc_line doc_diff=doc_diff />
                                     </details>
                                 }.into_any()
                             } else {
-                                view! { <pre>{body}</pre> }.into_any()
+                                view! { <LinkedBody text=body kind="pre" doc_path=doc_path doc_line=doc_line doc_diff=doc_diff /> }.into_any()
                             };
                             view! {
                                 <article class=format!("bubble card role-{role}")>
@@ -1413,6 +1469,7 @@ fn App() -> impl IntoView {
                             }
                         }).collect_view()}
                     </div>
+                    </Show>
                     <div class="composer"
                         on:dragover=move |ev: web_sys::DragEvent| ev.prevent_default()
                         on:drop=move |ev: web_sys::DragEvent| {
@@ -1493,6 +1550,7 @@ fn App() -> impl IntoView {
                                     let model = model_name.get();
                                     if model.is_empty() { "Model".into() } else { model }
                                 }}</button>
+                                <button type="button" class=move || if side_open.get() { "chip on side-chat-open-composer" } else { "chip side-chat-open-composer" } on:click=move |_| open_side(String::new(), String::new())>"Side chat"</button>
                                 <button type="button" class=move || if enter_mode.get() == "steer" { "chip on" } else { "chip" } on:click=move |_| set_enter("steer".into())>"Steer"</button>
                                 <button type="button" class=move || if enter_mode.get() == "queue" { "chip on" } else { "chip" } on:click=move |_| set_enter("queue".into())>"Queue"</button>
                                 <button class="primary send" type="submit">"Send"</button>
@@ -1511,7 +1569,10 @@ fn App() -> impl IntoView {
                     <div class="activity">
                     <header class="activity-head">
                         <span class="hint">"Live tasks"</span>
-                        <button class="secondary" disabled=move || running_count() == 0 on:click=move |_| stop_all()>"Stop all"</button>
+                        <span class="row-actions">
+                            <button type="button" class="secondary side-chat-open-activity" on:click=move |_| open_side(String::new(), String::new())>"Side chat"</button>
+                            <button class="secondary" disabled=move || running_count() == 0 on:click=move |_| stop_all()>"Stop all"</button>
+                        </span>
                     </header>
                         <div class="stats">
                         <StatCard label="Running".into()>{move || running_count().to_string()}</StatCard>
@@ -1555,6 +1616,8 @@ fn App() -> impl IntoView {
                                 let running = is_running(&state);
                                 let retry = can_retry(&state);
                                 let name = row.name.clone();
+                                let name_chat = name.clone();
+                                let sid_chat = sid.clone();
                                 let who = name.clone();
                                 let agent = row.agent.clone();
                                 let agent_label = agent.clone();
@@ -1594,6 +1657,14 @@ fn App() -> impl IntoView {
                                             </span>
                                         </button>
                                         <div class="row-actions">
+                                            <button type="button" class="secondary" on:click={
+                                                let sid_chat = sid_chat.clone();
+                                                let name_chat = name_chat.clone();
+                                                move |ev: web_sys::MouseEvent| {
+                                                    ev.stop_propagation();
+                                                    open_side(sid_chat.clone(), name_chat.clone());
+                                                }
+                                            }>"Side chat"</button>
                                             <button class="secondary" disabled=move || !running on:click={
                                                 let sid_stop = sid_stop.clone();
                                                 move |ev: web_sys::MouseEvent| {
@@ -1633,16 +1704,20 @@ fn App() -> impl IntoView {
                             <Show when=move || !files_path.get().is_empty()>
                                 <button class="secondary" on:click=move |_| files_path.set(parent_path(&files_path.get()))>"Up"</button>
                             </Show>
+                            <Show when=move || !doc_path.get().is_empty()>
+                                <p class="hint">{move || format!("Open: {}", doc_path.get())}</p>
+                            </Show>
                             <ul class="plain">
                                 {move || files.get().into_iter().map(|entry| {
                                     let name = entry.name.clone();
                                     let path = join_path(&files_path.get(), &entry.name);
                                     let path_drag = path.clone();
                                     let path_click = path.clone();
+                                    let path_open = path.clone();
                                     let is_dir = entry.is_dir;
-                                    let label = if is_dir { format!("{name}/") } else { name };
+                                    let label = if is_dir { format!("{name}/") } else { name.clone() };
                                     view! {
-                                        <li>
+                                        <li class="ev-fileline">
                                             <button class="link file-row" draggable="true"
                                                 on:dragstart=move |ev: web_sys::DragEvent| set_drag(&ev, &path_drag)
                                                 on:click=move |_| {
@@ -1653,11 +1728,22 @@ fn App() -> impl IntoView {
                                                     }
                                                 }
                                             >{label}</button>
+                                            {(!is_dir).then(|| {
+                                                let path_attr = path_open.clone();
+                                                let path_set = path_open.clone();
+                                                view! {
+                                                    <button type="button" class="secondary ev-open" data-ev-open=path_attr on:click=move |_| {
+                                                        doc_line.set(0);
+                                                        doc_diff.set(false);
+                                                        doc_path.set(path_set.clone());
+                                                    }>"Open"</button>
+                                                }
+                                            })}
                                         </li>
                                     }
                                 }).collect_view()}
                             </ul>
-                            <p class="hint">"Click or drag inserts @path as text."</p>
+                            <p class="hint">"Open reads the file. Click or drag still inserts @path."</p>
                         </div>
                     </Show>
                     <Show when=move || side_tab.get() == "changes">
@@ -1676,10 +1762,11 @@ fn App() -> impl IntoView {
                                     let path = file.path.clone();
                                     let path_drag = path.clone();
                                     let path_click = path.clone();
+                                    let path_open = path.clone();
                                     let added = file.added;
                                     let deleted = file.deleted;
                                     view! {
-                                        <li>
+                                        <li class="ev-fileline">
                                             <button class="link file-row" draggable="true"
                                                 on:dragstart=move |ev: web_sys::DragEvent| set_drag(&ev, &path_drag)
                                                 on:click=move |_| insert_mention(path_click.clone())
@@ -1688,6 +1775,11 @@ fn App() -> impl IntoView {
                                                 <span class="diff-add">{format!("+{added}")}</span>
                                                 <span class="diff-del">{format!("-{deleted}")}</span>
                                             </button>
+                                            <button type="button" class="secondary ev-open" data-ev-open=path_open.clone() on:click=move |_| {
+                                                doc_line.set(0);
+                                                doc_diff.set(true);
+                                                doc_path.set(path_open.clone());
+                                            }>"Open"</button>
                                         </li>
                                     }
                                 }).collect_view()}
@@ -1696,6 +1788,17 @@ fn App() -> impl IntoView {
                     </Show>
                 </aside>
             </div>
+            <SideChatPanel
+                open=side_open
+                base=base
+                token=token
+                root=active_root
+                lines=lines
+                focus_id=side_focus_id
+                focus_name=side_focus_name
+                live_provider=provider_name
+                live_model=model_name
+            />
         </Show>
     }
 }

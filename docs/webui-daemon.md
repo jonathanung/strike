@@ -83,7 +83,20 @@ Status: walking skeleton on branch `worktree-rust-webui-daemon`. Not merged.
     retry, expand, including `blocked` handoffs), Files (`/v1/files`), and
     Changes (`/v1/changed-files`). Clicking or dragging a file inserts
     `@path` as text. The web composer does not expand that token the way
-    the TUI does.
+    the TUI does. Open on a file reads it in the center document pane
+    (`GET /v1/file/view`). The pane is read-only until Edit. Save is
+    `PUT /v1/file` with the sha256 and mtime from the read; a mismatch is
+    409 and does not write. Plan mode and an edit/write deny rule reject
+    the save. Symlinks, binaries, oversize files, and paths outside the
+    work root (or an explicit allowed-root ceiling) are rejected. Markdown
+    can preview. Find-in-file is local. Agent diff reuses
+    `GET /v1/changed-files` for the open path. Transcript `path:line` and
+    `strike-file:path#Lline` open the same pane.
+  - Side chat is a read-only drawer (Activity, an Activity row, the composer,
+    or Alt+S). `POST /v1/sidechat/ask` answers from the session transcript
+    with a separate model call and no tools. `POST /v1/sidechat/ops` refuses
+    `permission.reply` and `user.input`. Turns are not written to the session
+    JSONL.
   - Schedule, memory, knowledge, artifacts, the task runner, onboarding,
     and a multi-gateway hub are documented in
     [webui-planned.md](webui-planned.md), not drawn as empty panels.

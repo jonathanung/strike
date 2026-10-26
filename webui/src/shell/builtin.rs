@@ -83,6 +83,14 @@ pub fn install(reg: &mut ShellHook) {
         order: 2,
     });
     reg.shortcut(Shortcut {
+        id: "side-chat-toggle",
+        keys: "Alt+S",
+        group: "Navigation",
+        group_order: 1,
+        label: "Open or close the side chat drawer",
+        order: 3,
+    });
+    reg.shortcut(Shortcut {
         id: "close",
         keys: "Esc",
         group: "Palette",
@@ -212,6 +220,18 @@ pub fn install(reg: &mut ShellHook) {
         70,
         None,
         run(|_| host::stop_all()),
+    ));
+    reg.command(command(
+        "side-chat",
+        "Commands",
+        0,
+        "Side chat",
+        "Ask about this session without steering it or approving a tool",
+        "Alt+S",
+        &["sidechat", "ask"],
+        75,
+        None,
+        run(|_| host::open_side_chat()),
     ));
     reg.command(command(
         "shortcuts",

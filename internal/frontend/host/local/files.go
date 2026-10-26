@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"io/fs"
@@ -48,6 +50,12 @@ type filesService struct {
 	cache     []string
 	cacheAt   time.Time
 	cacheRoot string
+
+	// ceilingOn, when true, rejects document reads and writes whose resolved
+	// path is outside every ceiling directory. #1260 allowed roots are that
+	// ceiling. nil/off means the work root is the only confinement.
+	ceilingOn bool
+	ceiling   []string
 }
 
 // NewFiles returns a host.Files that resolves paths relative to workDir
@@ -62,6 +70,24 @@ func NewFiles(workDir string) host.Files {
 		workDir:  workDir,
 		skipDirs: loadSkipDirs(workDir),
 	}
+}
+
+// SetFilesRootCeiling installs an explicit directory allow-list for document
+// reads and writes. on false clears it (work root only). An empty list with
+// on true rejects every document path. roots are copied.
+func SetFilesRootCeiling(f host.Files, roots []string, on bool) {
+	fs, ok := f.(*filesService)
+	if !ok || fs == nil {
+		return
+	}
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	fs.ceilingOn = on
+	if !on {
+		fs.ceiling = nil
+		return
+	}
+	fs.ceiling = append([]string(nil), roots...)
 }
 
 // SetFilesWorkDir updates the workspace root used for relative paths. Used when
@@ -421,6 +447,250 @@ func (f *filesService) ReadScoped(path string) (host.FileContent, error) {
 		fc.Notice = fmt.Sprintf("truncated to %d bytes", scopedTruncateCap)
 	}
 	return fc, nil
+}
+
+func (f *filesService) ReadDocument(path string) (host.Document, error) {
+	work, ceilingOn, ceiling := f.docRoots()
+	resolved, rel, info, err := f.statDocument(work, path)
+	if err != nil {
+		return host.Document{}, err
+	}
+	if err := withinCeiling(resolved, ceilingOn, ceiling); err != nil {
+		return host.Document{}, err
+	}
+	file, err := os.Open(resolved)
+	if err != nil {
+		return host.Document{}, err
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, maxFileBytes+1))
+	if err != nil {
+		return host.Document{}, err
+	}
+	doc := host.Document{
+		Path:          rel,
+		SHA256:        hex.EncodeToString(sumSHA(data)),
+		MtimeUnixNano: info.ModTime().UnixNano(),
+		Size:          info.Size(),
+	}
+	if int64(len(data)) > maxFileBytes {
+		data = data[:maxFileBytes]
+		doc.Truncated = true
+		doc.Notice = fmt.Sprintf("truncated to %d bytes", maxFileBytes)
+		doc.SHA256 = hex.EncodeToString(sumSHA(data))
+	}
+	if bytes.IndexByte(data, 0) >= 0 || !utf8.Valid(data) {
+		doc.Binary = true
+		doc.Content = ""
+		doc.Notice = "binary file"
+		return doc, nil
+	}
+	doc.Content = string(data)
+	return doc, nil
+}
+
+func (f *filesService) WriteDocument(req host.DocumentWrite) (host.DocumentWriteResult, error) {
+	// Hold the service lock across check and rename so two UI saves cannot
+	// both pass the hash check. An agent write from another process can still
+	// land between the hash read and the rename; the re-stat below catches a
+	// symlink swap, and the caller's next save sees the new hash.
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	work := f.workDir
+	ceilingOn, ceiling := f.ceilingOn, append([]string(nil), f.ceiling...)
+
+	path := strings.TrimSpace(req.Path)
+	if path == "" {
+		return host.DocumentWriteResult{}, fmt.Errorf("path is empty")
+	}
+	expect := strings.ToLower(strings.TrimSpace(req.ExpectSHA256))
+	if len(expect) != 64 || !isHex(expect) {
+		return host.DocumentWriteResult{}, fmt.Errorf("sha256 is required")
+	}
+	payload := []byte(req.Content)
+	if len(payload) > maxFileBytes {
+		return host.DocumentWriteResult{}, fmt.Errorf("file exceeds size limit")
+	}
+	if bytes.IndexByte(payload, 0) >= 0 || !utf8.Valid(payload) {
+		return host.DocumentWriteResult{}, fmt.Errorf("binary content is not allowed")
+	}
+	resolved, rel, info, err := f.statDocument(work, path)
+	if err != nil {
+		return host.DocumentWriteResult{}, err
+	}
+	if err := withinCeiling(resolved, ceilingOn, ceiling); err != nil {
+		return host.DocumentWriteResult{}, err
+	}
+	if info.Size() > maxFileBytes {
+		return host.DocumentWriteResult{}, fmt.Errorf("file exceeds size limit")
+	}
+	file, err := os.Open(resolved)
+	if err != nil {
+		return host.DocumentWriteResult{}, err
+	}
+	data, err := io.ReadAll(io.LimitReader(file, maxFileBytes+1))
+	_ = file.Close()
+	if err != nil {
+		return host.DocumentWriteResult{}, err
+	}
+	if int64(len(data)) > maxFileBytes {
+		return host.DocumentWriteResult{}, fmt.Errorf("file exceeds size limit")
+	}
+	again, err := os.Lstat(resolved)
+	if err != nil {
+		return host.DocumentWriteResult{}, err
+	}
+	if again.Mode()&os.ModeSymlink != 0 || !again.Mode().IsRegular() || !os.SameFile(info, again) {
+		return host.DocumentWriteResult{}, fmt.Errorf("symlink not allowed: %s", rel)
+	}
+	sum := hex.EncodeToString(sumSHA(data))
+	mtime := again.ModTime().UnixNano()
+	if sum != expect || (req.ExpectMtimeUnixNano != 0 && mtime != req.ExpectMtimeUnixNano) {
+		return host.DocumentWriteResult{}, &host.DocumentConflict{
+			Path:          rel,
+			SHA256:        sum,
+			MtimeUnixNano: mtime,
+			Size:          again.Size(),
+		}
+	}
+	if err := writeFileAtomic(resolved, payload, again.Mode().Perm()); err != nil {
+		return host.DocumentWriteResult{}, err
+	}
+	final, err := os.Lstat(resolved)
+	if err != nil {
+		return host.DocumentWriteResult{}, err
+	}
+	if final.Mode()&os.ModeSymlink != 0 {
+		return host.DocumentWriteResult{}, fmt.Errorf("symlink not allowed: %s", rel)
+	}
+	outSum := hex.EncodeToString(sumSHA(payload))
+	return host.DocumentWriteResult{
+		Path:          rel,
+		SHA256:        outSum,
+		MtimeUnixNano: final.ModTime().UnixNano(),
+		Size:          final.Size(),
+	}, nil
+}
+
+func (f *filesService) docRoots() (work string, ceilingOn bool, ceiling []string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.workDir, f.ceilingOn, append([]string(nil), f.ceiling...)
+}
+
+func (f *filesService) statDocument(work, path string) (resolved, rel string, info os.FileInfo, err error) {
+	// Reject a symlink anywhere in the lexical path before EvalSymlinks
+	// rewrites an in-root link onto its target.
+	if err := rejectSymlinkPath(work, path); err != nil {
+		return "", "", nil, err
+	}
+	resolved, rel, err = resolveUnderRoot(work, path)
+	if err != nil {
+		return "", "", nil, err
+	}
+	info, err = os.Lstat(resolved)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", "", nil, fmt.Errorf("file not found: %s", rel)
+		}
+		return "", "", nil, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return "", "", nil, fmt.Errorf("symlink not allowed: %s", rel)
+	}
+	if info.IsDir() {
+		return "", "", nil, fmt.Errorf("not a regular file: %s", rel)
+	}
+	if !info.Mode().IsRegular() {
+		return "", "", nil, fmt.Errorf("not a regular file: %s", rel)
+	}
+	return resolved, rel, info, nil
+}
+
+// rejectSymlinkPath fails when any lexical component of path is a symlink.
+// Missing components are left for resolveUnderRoot. Paths that already escape
+// the work root are left for resolveUnderRoot too.
+func rejectSymlinkPath(work, path string) error {
+	rootAbs, err := filepath.Abs(strings.TrimSpace(work))
+	if err != nil {
+		return nil
+	}
+	path = strings.TrimSpace(path)
+	var rel string
+	if filepath.IsAbs(path) {
+		rel, err = filepath.Rel(rootAbs, filepath.Clean(path))
+		if err != nil || !isRelInside(rel) {
+			return nil
+		}
+	} else {
+		rel = filepath.Clean(path)
+		if !isRelInside(rel) {
+			return nil
+		}
+	}
+	cur := rootAbs
+	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+		if part == "" || part == "." {
+			continue
+		}
+		cur = filepath.Join(cur, part)
+		info, statErr := os.Lstat(cur)
+		if statErr != nil {
+			return nil
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("symlink not allowed: %s", path)
+		}
+	}
+	return nil
+}
+
+func withinCeiling(resolved string, on bool, roots []string) error {
+	if !on {
+		return nil
+	}
+	for _, root := range roots {
+		if root == "" {
+			continue
+		}
+		if pathWithin(resolved, root) {
+			return nil
+		}
+	}
+	return fmt.Errorf("path is outside allowed roots")
+}
+
+func pathWithin(resolved, root string) bool {
+	rootAbs, err := filepath.Abs(root)
+	if err != nil {
+		return false
+	}
+	rootReal := rootAbs
+	if real, err := filepath.EvalSymlinks(rootAbs); err == nil {
+		rootReal = real
+	}
+	rel, err := filepath.Rel(rootReal, resolved)
+	if err != nil {
+		return false
+	}
+	return isRelInside(rel)
+}
+
+func sumSHA(data []byte) []byte {
+	sum := sha256.Sum256(data)
+	return sum[:]
+}
+
+func isHex(s string) bool {
+	for _, c := range s {
+		switch {
+		case c >= '0' && c <= '9':
+		case c >= 'a' && c <= 'f':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // readScopedDir expands a folder mention to an immediate child listing only

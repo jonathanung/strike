@@ -1,4 +1,4 @@
-.PHONY: build run run-echo serve webui-build webui-check webui-uat webui-uat-smoke web-check test vet cover cover-check clean setup restore tui-gen prompt-reg chaos harness-eval swebench-eval telemetry-check container-smoke
+.PHONY: build run run-echo serve webui-build webui-check webui-uat webui-uat-smoke webui-sidechat-uat web-check test vet cover cover-check clean setup restore tui-gen prompt-reg chaos harness-eval swebench-eval telemetry-check container-smoke
 
 # Multi-module workspace (go.work): ., ./pkg/protocol, ./pkg/redact,
 # ./harness.
@@ -77,6 +77,10 @@ webui-uat: build
 webui-uat-smoke: build
 	node --test scripts/webui-uat/lib.test.mjs
 	node scripts/webui-uat.mjs --suite smoke --no-video
+
+# Side-chat drawer: read-only ask, tool-call refusal, keyboard. See docs/webui-planned.md.
+webui-sidechat-uat: build
+	node scripts/webui-sidechat-uat.mjs
 
 test: tui-gen
 	go test ./...

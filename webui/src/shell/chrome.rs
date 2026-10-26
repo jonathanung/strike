@@ -261,6 +261,15 @@ pub fn Chrome() -> impl IntoView {
                 let _ = host::toggle_focus();
                 return;
             }
+            if ev.alt_key()
+                && !ev.meta_key()
+                && !ev.ctrl_key()
+                && key.eq_ignore_ascii_case("s")
+            {
+                ev.prevent_default();
+                let _ = host::toggle_side_chat();
+                return;
+            }
             if key == "?" && !ev.meta_key() && !ev.ctrl_key() && !ev.alt_key() {
                 if palette_open.get_untracked() || editable_target() {
                     return;

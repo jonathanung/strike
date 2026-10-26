@@ -1042,6 +1042,8 @@ writes remain coherent via the underlying stores; browser reads are race-safe.
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | `GET` | `/v1/files/search` | mode | Workspace file search (`q`, `limit`≤50) for `@file` completion; root-scoped via `host.Files.SearchFiles` |
+| `GET` | `/v1/file/view` | mode | Document read (`path`). JSON: content, sha256, mtimeUnixNano, binary, truncated, writable, writeBlock. Work-root confined; symlinks rejected. An explicit allowed-root ceiling (workspace `AllowedRoots`, when the registry grows one) also rejects paths outside that list. |
+| `PUT` | `/v1/file` | **yes** | Save one existing text file (`path`, `content`, `sha256`, `mtimeUnixNano`). 409 `conflict` when the hash or mtime moved; the body has the new revision, not the file text. Plan mode and edit/write deny rules return 403. Does not create files. Attach-only and read-only reject. |
 | `POST` | `/v1/history` | **yes** | Enqueue one prompt (`{prompt}`) into project history; blocked in attach-only. Web client calls once per accepted `user.input` (not on replay). |
 
 Composer: Ctrl/Cmd+K opens the command palette (modes, surfaces, slash, skills). Arrow Up/Down on an empty eligible composer walks prompt history. `@` triggers file search (not email-like tokens). Quiet first-run tip teaches palette / slash / `@file`.
