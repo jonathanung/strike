@@ -8,6 +8,10 @@ permission mode, and a side panel with Activity, Files, and Changes.
 Blocked children (`schema:handoff`, #1201) show as `blocked`. Unread and
 pinned are browser storage, not server fields.
 
+The top bar and command palette are the shell in `webui/src/shell/`. Other
+streams register a slot or a command by adding a file under
+`webui/src/shell/contrib/`. The contract is [webui-shell.md](webui-shell.md).
+
 These panels are not in the client. Drawing empty versions of them would
 pretend the daemon already has the Kiro-shaped workflow. Each one below is
 the Strike-specific shape, using stores and events that already exist or are

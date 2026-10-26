@@ -204,6 +204,85 @@ try {
       `cockpit check failed missing=${missingText.join(",")} acid=${acid} ground=${ground} text=${text.slice(0, 400)}`,
     );
   }
+
+  // feature:navbar — palette fuzzy match, argument error, shortcut overlay.
+  const navbar = async (expression) => {
+    const ev = await send("Runtime.evaluate", { expression, returnByValue: true });
+    const value = ev.result?.result?.value;
+    if (ev.result?.exceptionDetails) {
+      throw new Error(`navbar check exception: ${JSON.stringify(ev.result.exceptionDetails).slice(0, 500)}`);
+    }
+    return value;
+  };
+  await navbar(`document.querySelector('[data-nav="palette"]').click()`);
+  let palette = "";
+  for (let i = 0; i < 20; i++) {
+    palette = await navbar(`document.body.innerText`);
+    if (palette.includes("Open session") && palette.includes("New session")) break;
+    await delay(100);
+  }
+  if (!palette.includes("Open session") || !palette.includes("Alt+Left")) {
+    throw new Error(`palette did not open text=${palette.slice(0, 500)}`);
+  }
+  await navbar(`(() => {
+    const input = document.querySelector('[data-nav="palette-dialog"] input');
+    const set = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    set.call(input, "nord");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    return true;
+  })()`);
+  let filtered = "";
+  for (let i = 0; i < 20; i++) {
+    filtered = await navbar(`document.querySelector('[data-nav="palette-dialog"]').innerText`);
+    if (filtered.includes("Theme: Nord") && !filtered.includes("New session")) break;
+    await delay(50);
+  }
+  if (!filtered.includes("Theme: Nord") || filtered.includes("New session")) {
+    throw new Error(`palette fuzzy failed text=${filtered.slice(0, 500)}`);
+  }
+  await navbar(`(() => {
+    const input = document.querySelector('[data-nav="palette-dialog"] input');
+    const set = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    set.call(input, "open session");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    return true;
+  })()`);
+  await delay(50);
+  const typed = await navbar(`(() => {
+    const input = document.querySelector('[data-nav="palette-dialog"] input');
+    const set = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    set.call(input, "zzzz-no-such-session");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    return input ? input.value : "";
+  })()`);
+  let alertText = "";
+  for (let i = 0; i < 20; i++) {
+    alertText = await navbar(`(document.querySelector('[role="alert"]') || {}).innerText || ""`);
+    if (String(alertText).includes("Nothing matches")) break;
+    await delay(50);
+  }
+  if (!String(alertText).includes("Nothing matches")) {
+    throw new Error(`palette error path failed alert=${alertText} typed=${typed}`);
+  }
+  await navbar(`document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
+  await navbar(`document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
+  await navbar(`(() => { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); return true; })()`);
+  await navbar(`document.dispatchEvent(new KeyboardEvent("keydown", { key: "?", bubbles: true }))`);
+  let help = "";
+  for (let i = 0; i < 20; i++) {
+    help = await navbar(`(document.querySelector('[data-nav="help"]') || {}).innerText || ""`);
+    if (String(help).includes("Alt+Left") && String(help).includes("Focus mode")) break;
+    await delay(50);
+  }
+  if (!String(help).includes("Focus mode")) {
+    throw new Error(`shortcut overlay failed text=${help}`);
+  }
+  const crumbs = await navbar(`(document.querySelector('[data-nav="crumbs"]') || {}).innerText || ""`);
+  if (!String(crumbs).includes("Strike") || !String(crumbs).includes(">")) {
+    throw new Error(`breadcrumb missing text=${crumbs}`);
+  }
   console.log("webui-smoke ok");
 } catch (err) {
   console.error(String(err));
