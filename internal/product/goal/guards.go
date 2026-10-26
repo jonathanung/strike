@@ -103,8 +103,8 @@ func guardBudget(ctx GuardContext) GuardResult {
 			NextStatus: StatusFailed,
 		}
 	}
-	if !ctx.Goal.ActiveStartedAt.IsZero() && c.MaxWallClockS > 0 {
-		elapsed := ctx.Now.Sub(ctx.Goal.ActiveStartedAt)
+	if c.MaxWallClockS > 0 {
+		elapsed := ctx.Goal.WallElapsed(ctx.Now)
 		if elapsed >= time.Duration(c.MaxWallClockS)*time.Second {
 			return GuardResult{
 				Tripped:    true,
@@ -264,12 +264,15 @@ func guardIrrecoverable(ctx GuardContext) GuardResult {
 		cls  string
 	}
 	var recent []fail
-	for i := len(ctx.History) - 1; i >= 0 && len(recent) < need; i-- {
+	broken := false
+	for i := len(ctx.History) - 1; i >= 0 && len(recent) < need && !broken; i-- {
 		acts := ctx.History[i].Actions
 		for j := len(acts) - 1; j >= 0 && len(recent) < need; j-- {
 			a := acts[j]
 			if a.OK || a.Blocked {
-				continue
+				// A success or a deny ends the consecutive-failure streak.
+				broken = true
+				break
 			}
 			cls := a.Error
 			if cls == "" {

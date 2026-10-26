@@ -2,7 +2,13 @@ package local
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/jonathanung/strike/internal/frontend/host"
 	"github.com/jonathanung/strike/internal/product/goal"
@@ -108,5 +114,89 @@ func TestGoalsAutopilotAndVerifyStop(t *testing.T) {
 	log, err := gapi.Log(g.ID, 0)
 	if err != nil || len(log) != 3 || log[2].Verified {
 		t.Fatalf("log=%+v err=%v", log, err)
+	}
+}
+
+func TestPauseCancelsInFlightCheck(t *testing.T) {
+	dir := t.TempDir()
+	store, err := goal.Open(dir, "cancel")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	gapi := NewGoals(store, dir)
+	pidfile := filepath.Join(dir, "pid")
+	cmd := "cmd: echo $$ > '" + pidfile + "'; exec sleep 30"
+	g, err := gapi.Set("hold", []string{cmd}, host.GoalSetOptions{
+		MaxIterations: 5, MaxNoProgressIters: 5, MaxVerifyFailures: 5, MaxWallClockS: 120,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		_, _ = gapi.Run(context.Background(), g.ID)
+		close(done)
+	}()
+	var pid int
+	deadline := time.Now().Add(4 * time.Second)
+	for time.Now().Before(deadline) && pid == 0 {
+		b, err := os.ReadFile(pidfile)
+		if err == nil {
+			pid, _ = strconv.Atoi(strings.TrimSpace(string(b)))
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if pid <= 0 {
+		t.Fatal("verification command did not start")
+	}
+	if _, err := gapi.Pause(g.ID); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("run did not return after pause")
+	}
+	if err := syscall.Kill(pid, 0); err == nil {
+		t.Fatalf("pid %d still running after pause", pid)
+	}
+	got, ok, err := gapi.Get(g.ID)
+	if err != nil || !ok || got.Status != "paused" {
+		t.Fatalf("got=%+v ok=%v err=%v", got, ok, err)
+	}
+}
+
+func TestCanceledRunMarksActiveGoalFailed(t *testing.T) {
+	dir := t.TempDir()
+	store, err := goal.Open(dir, "failrun")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	gapi := NewGoals(store, dir)
+	g, err := gapi.Set("hold", []string{"cmd: exec sleep 30"}, host.GoalSetOptions{
+		MaxIterations: 5, MaxNoProgressIters: 5, MaxVerifyFailures: 5, MaxWallClockS: 120,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		cancel()
+	}()
+	started := time.Now()
+	_, runErr := gapi.Run(ctx, g.ID)
+	if runErr == nil {
+		t.Fatal("expected run error")
+	}
+	if time.Since(started) > 3*time.Second {
+		got, _, _ := gapi.Get(g.ID)
+		t.Fatalf("cancel took %s status=%s reason=%s err=%v", time.Since(started).Round(time.Millisecond), got.Status, got.FailReason, runErr)
+	}
+	got, ok, err := gapi.Get(g.ID)
+	if err != nil || !ok || got.Status != "failed" || got.FailReason == "" {
+		t.Fatalf("got=%+v ok=%v err=%v runErr=%v", got, ok, err, runErr)
 	}
 }

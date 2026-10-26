@@ -2,6 +2,7 @@ package goal
 
 import (
 	"testing"
+	"time"
 )
 
 func TestStoreCreateGetListResume(t *testing.T) {
@@ -189,5 +190,45 @@ func TestStoreRace(t *testing.T) {
 	}
 	for i := 0; i < 8; i++ {
 		<-done
+	}
+}
+
+func TestPauseFreezesWallClock(t *testing.T) {
+	t.Parallel()
+	s, err := Open(t.TempDir(), "clock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	spec, _ := ParseCheckSpec("cmd: true")
+	g, err := s.Create("g", []Criterion{{Check: spec}}, DefaultConstraints())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetStatus(g.ID, StatusActive, ""); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(30 * time.Millisecond)
+	paused, err := s.SetStatus(g.ID, StatusPaused, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !paused.ActiveStartedAt.IsZero() {
+		t.Fatal("pause left the wall clock running")
+	}
+	if paused.ActiveElapsed < 20*time.Millisecond {
+		t.Fatalf("elapsed=%s", paused.ActiveElapsed)
+	}
+	frozen := paused.ActiveElapsed
+	time.Sleep(40 * time.Millisecond)
+	resumed, err := s.SetStatus(g.ID, StatusActive, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resumed.ActiveElapsed != frozen {
+		t.Fatalf("resume billed the wait: frozen=%s now=%s", frozen, resumed.ActiveElapsed)
+	}
+	if resumed.ActiveStartedAt.IsZero() {
+		t.Fatal("resume did not start a new stretch")
 	}
 }

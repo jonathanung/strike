@@ -49,6 +49,9 @@ the state hash changes. Zero disables that guard for legacy records.
 5. stall — stable `state_hash` or identical action sequences (`blocked`, escalation `human`)  
 6. irrecoverable — same tool error class 3× (`blocked`, escalation `human`)  
 
+The wall-clock budget counts time spent `active` only. Pause and `blocked`
+stop the clock; the wait until Continue is not billed.
+
 Resume from `blocked` sets a guard floor at the current iteration so the
 same streak does not immediately trip again. Continue only after the check
 or the tree changed.

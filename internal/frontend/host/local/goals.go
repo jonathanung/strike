@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/jonathanung/strike/internal/frontend/host"
 	"github.com/jonathanung/strike/internal/product/goal"
@@ -16,7 +17,12 @@ func NewGoals(store *goal.Store, workDir string) host.Goals {
 	if store == nil {
 		return nil
 	}
-	return &goalsAdapter{store: store, workDir: workDir, running: map[string]struct{}{}}
+	return &goalsAdapter{
+		store:   store,
+		workDir: workDir,
+		running: map[string]struct{}{},
+		cancel:  map[string]context.CancelFunc{},
+	}
 }
 
 type goalsAdapter struct {
@@ -24,6 +30,7 @@ type goalsAdapter struct {
 	workDir string
 	mu      sync.Mutex
 	running map[string]struct{}
+	cancel  map[string]context.CancelFunc
 }
 
 func (a *goalsAdapter) Set(description string, criteria []string, opts host.GoalSetOptions) (host.Goal, error) {
@@ -100,9 +107,11 @@ func (a *goalsAdapter) Get(id string) (host.Goal, bool, error) {
 }
 
 func (a *goalsAdapter) Run(ctx context.Context, id string) (host.Goal, error) {
+	runCtx, cancel := context.WithCancel(ctx)
 	a.mu.Lock()
 	if _, ok := a.running[id]; ok {
 		a.mu.Unlock()
+		cancel()
 		g, ok, err := a.Get(id)
 		if err != nil || !ok {
 			if err == nil {
@@ -113,10 +122,13 @@ func (a *goalsAdapter) Run(ctx context.Context, id string) (host.Goal, error) {
 		return g, nil
 	}
 	a.running[id] = struct{}{}
+	a.cancel[id] = cancel
 	a.mu.Unlock()
 	defer func() {
+		cancel()
 		a.mu.Lock()
 		delete(a.running, id)
+		delete(a.cancel, id)
 		a.mu.Unlock()
 	}()
 
@@ -129,15 +141,45 @@ func (a *goalsAdapter) Run(ctx context.Context, id string) (host.Goal, error) {
 		Executor: goal.ShellExecutor{WorkDir: a.workDir},
 		Hooks:    goal.DefaultHooks(),
 	}
-	g, err := loop.Run(ctx, id)
-	if err != nil {
+	g, err := loop.Run(runCtx, id)
+	return a.finishRun(id, g, err)
+}
+
+// finishRun records a loop error on a goal that is still active. Pause and
+// abort set their own status before cancelling the check, so those returns
+// are not rewritten into a failure.
+func (a *goalsAdapter) finishRun(id string, g goal.Goal, err error) (host.Goal, error) {
+	if err == nil {
+		return toHostGoal(g), nil
+	}
+	cur, ok, getErr := a.store.Get(id)
+	if getErr != nil || !ok {
 		return host.Goal{}, err
 	}
-	return toHostGoal(g), nil
+	if cur.Status == goal.StatusActive {
+		cur.Status = goal.StatusFailed
+		cur.FailReason = err.Error()
+		cur.FreezeWallClock(time.Now().UTC())
+		if uerr := a.store.UpdateGoal(cur); uerr != nil {
+			return host.Goal{}, err
+		}
+		return toHostGoal(cur), err
+	}
+	return toHostGoal(cur), nil
+}
+
+func (a *goalsAdapter) cancelRun(id string) {
+	a.mu.Lock()
+	cancel := a.cancel[id]
+	a.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 }
 
 func (a *goalsAdapter) Pause(id string) (host.Goal, error) {
 	g, err := a.store.SetStatus(id, goal.StatusPaused, "")
+	a.cancelRun(id)
 	if err != nil {
 		return host.Goal{}, err
 	}
@@ -154,6 +196,7 @@ func (a *goalsAdapter) Resume(id string) (host.Goal, error) {
 
 func (a *goalsAdapter) Abort(id string) (host.Goal, error) {
 	g, err := a.store.SetStatus(id, goal.StatusAborted, "aborted by user")
+	a.cancelRun(id)
 	if err != nil {
 		return host.Goal{}, err
 	}

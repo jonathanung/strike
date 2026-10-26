@@ -65,6 +65,33 @@ type Constraints struct {
 	DenyTools []string `json:"deny_tools,omitempty"`
 }
 
+// FreezeWallClock folds the current active stretch into ActiveElapsed and
+// stops the clock. Call it when leaving active (pause, block, done, fail, abort).
+func (g *Goal) FreezeWallClock(now time.Time) {
+	if g.ActiveStartedAt.IsZero() {
+		return
+	}
+	if now.Before(g.ActiveStartedAt) {
+		now = g.ActiveStartedAt
+	}
+	g.ActiveElapsed += now.Sub(g.ActiveStartedAt)
+	g.ActiveStartedAt = time.Time{}
+}
+
+// WallElapsed is active time only: finished stretches plus the current one.
+func (g Goal) WallElapsed(now time.Time) time.Duration {
+	elapsed := g.ActiveElapsed
+	if !g.ActiveStartedAt.IsZero() {
+		if now.After(g.ActiveStartedAt) {
+			elapsed += now.Sub(g.ActiveStartedAt)
+		}
+	}
+	if elapsed < 0 {
+		return 0
+	}
+	return elapsed
+}
+
 // DefaultConstraints returns safe v1 defaults.
 func DefaultConstraints() Constraints {
 	return Constraints{
@@ -87,8 +114,12 @@ type Goal struct {
 	Status      Status      `json:"status"`
 	CreatedAt   time.Time   `json:"created_at"`
 	UpdatedAt   time.Time   `json:"updated_at"`
-	// ActiveStartedAt is set when status becomes active (for wall-clock guard).
+	// ActiveStartedAt is the start of the current active stretch. Zero while
+	// the goal is pending, paused, or blocked. Wall-clock budget adds
+	// ActiveElapsed to this stretch, so time spent waiting does not count.
 	ActiveStartedAt time.Time `json:"active_started_at,omitempty"`
+	// ActiveElapsed is time already spent active, excluding paused and blocked waits.
+	ActiveElapsed time.Duration `json:"active_elapsed_ns,omitempty"`
 	// CostUSD accumulates action costs across iterations.
 	CostUSD float64 `json:"cost_usd"`
 	// LastIteration is the highest committed iteration number (0 = none).

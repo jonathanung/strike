@@ -158,6 +158,9 @@ func (l *Loop) Run(ctx context.Context, id string) (Goal, error) {
 					g.FailReason = ""
 					g.Escalation = ""
 				}
+				if g.Status != StatusActive {
+					g.FreezeWallClock(l.Clock.Now())
+				}
 			}
 		}
 
@@ -187,6 +190,9 @@ func (l *Loop) applyGuard(g Goal, gr GuardResult) (Goal, error) {
 	if gr.NextStatus == StatusDone {
 		g.FailReason = ""
 		g.Escalation = ""
+	}
+	if g.Status != StatusActive {
+		g.FreezeWallClock(l.Clock.Now())
 	}
 	if err := l.Store.UpdateGoal(g); err != nil {
 		return g, err

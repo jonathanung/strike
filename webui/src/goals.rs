@@ -246,13 +246,11 @@ fn later(ms: i32, f: impl FnOnce() + 'static) {
     cb.forget();
 }
 
-fn pull(
+fn pull_list(
     base: RwSignal<String>,
     token: RwSignal<String>,
     goals: RwSignal<Vec<GoalView>>,
-    iterations: RwSignal<Vec<IterView>>,
     note: RwSignal<String>,
-    id: String,
 ) {
     let (b, t) = (base.get_untracked(), token.get_untracked());
     spawn_local(async move {
@@ -263,29 +261,85 @@ fn pull(
             }
             Err(e) => note.set(e),
         }
-        if id.is_empty() {
-            return;
-        }
-        let path = format!("/v1/goals/{}/log", crate::api::js_encode(&id));
-        if let Ok(log) = get_json::<GoalLog>(&b, &t, &path).await {
-            iterations.set(log.iterations);
-        }
     });
 }
 
-fn watch(
+/// follow polls until the goal leaves pending/active, or a newer follow starts.
+/// A slow check (longer than a few seconds) keeps updating the log and the
+/// "Needs you" banner. Responses from an older selection are dropped.
+fn follow(
     base: RwSignal<String>,
     token: RwSignal<String>,
     goals: RwSignal<Vec<GoalView>>,
     iterations: RwSignal<Vec<IterView>>,
     note: RwSignal<String>,
+    selected: RwSignal<String>,
+    watch_gen: RwSignal<u32>,
     id: String,
 ) {
-    pull(base, token, goals, iterations, note, id.clone());
-    for ms in [250, 700, 1400, 2500] {
-        let id = id.clone();
-        later(ms, move || pull(base, token, goals, iterations, note, id));
-    }
+    let gen = watch_gen.get_untracked().wrapping_add(1);
+    watch_gen.set(gen);
+    poll_goal(base, token, goals, iterations, note, selected, watch_gen, gen, id, 0, 1800);
+}
+
+fn poll_goal(
+    base: RwSignal<String>,
+    token: RwSignal<String>,
+    goals: RwSignal<Vec<GoalView>>,
+    iterations: RwSignal<Vec<IterView>>,
+    note: RwSignal<String>,
+    selected: RwSignal<String>,
+    watch_gen: RwSignal<u32>,
+    gen: u32,
+    id: String,
+    delay_ms: i32,
+    left: i32,
+) {
+    later(delay_ms, move || {
+        if watch_gen.get_untracked() != gen || left <= 0 {
+            return;
+        }
+        let id_for_fetch = id.clone();
+        spawn_local(async move {
+            if watch_gen.get_untracked() != gen {
+                return;
+            }
+            let (b, t) = (base.get_untracked(), token.get_untracked());
+            let list = match get_json::<GoalList>(&b, &t, "/v1/goals").await {
+                Ok(list) => list,
+                Err(e) => {
+                    if watch_gen.get_untracked() == gen {
+                        note.set(e);
+                        poll_goal(base, token, goals, iterations, note, selected, watch_gen, gen, id_for_fetch, 1000, left - 1);
+                    }
+                    return;
+                }
+            };
+            if watch_gen.get_untracked() != gen {
+                return;
+            }
+            let status = list
+                .goals
+                .iter()
+                .find(|g| g.id == id_for_fetch)
+                .map(|g| g.status.clone())
+                .unwrap_or_default();
+            goals.set(list.goals);
+            note.set(String::new());
+            if !id_for_fetch.is_empty() && selected.get_untracked() == id_for_fetch {
+                let path = format!("/v1/goals/{}/log", crate::api::js_encode(&id_for_fetch));
+                if let Ok(log) = get_json::<GoalLog>(&b, &t, &path).await {
+                    if watch_gen.get_untracked() == gen && selected.get_untracked() == id_for_fetch {
+                        iterations.set(log.iterations);
+                    }
+                }
+            }
+            let live = matches!(status.as_str(), "pending" | "active");
+            if live && selected.get_untracked() == id_for_fetch {
+                poll_goal(base, token, goals, iterations, note, selected, watch_gen, gen, id_for_fetch, 1000, left - 1);
+            }
+        });
+    });
 }
 
 fn draft_body(draft: &GoalDraft) -> Value {
@@ -323,12 +377,13 @@ pub fn GoalsPane(base: RwSignal<String>, token: RwSignal<String>) -> impl IntoVi
     let autopilot = RwSignal::new(false);
     let allow = RwSignal::new(String::new());
     let deny = RwSignal::new(String::new());
+    let watch_gen = RwSignal::new(0u32);
 
     {
         let base = base;
         let token = token;
         Effect::new(move |_| {
-            pull(base, token, goals, iterations, note, String::new());
+            pull_list(base, token, goals, note);
         });
     }
 
@@ -336,7 +391,7 @@ pub fn GoalsPane(base: RwSignal<String>, token: RwSignal<String>) -> impl IntoVi
         creating.set(false);
         selected.set(id.clone());
         iterations.set(Vec::new());
-        pull(base, token, goals, iterations, note, id);
+        follow(base, token, goals, iterations, note, selected, watch_gen, id);
     });
 
     let start_run: Arc<dyn Fn(String) + Send + Sync> = Arc::new(move |id: String| {
@@ -346,7 +401,7 @@ pub fn GoalsPane(base: RwSignal<String>, token: RwSignal<String>) -> impl IntoVi
             if let Err(e) = post_json(&b, &t, &path, json!({})).await {
                 note.set(e);
             }
-            watch(base, token, goals, iterations, note, id);
+            follow(base, token, goals, iterations, note, selected, watch_gen, id);
         });
     });
 
@@ -361,7 +416,7 @@ pub fn GoalsPane(base: RwSignal<String>, token: RwSignal<String>) -> impl IntoVi
             if let Err(e) = post_json(&b, &t, &path, json!({})).await {
                 note.set(e);
             }
-            watch(base, token, goals, iterations, note, id);
+            follow(base, token, goals, iterations, note, selected, watch_gen, id);
         });
     });
 
@@ -415,7 +470,7 @@ pub fn GoalsPane(base: RwSignal<String>, token: RwSignal<String>) -> impl IntoVi
                 busy.set(false);
                 selected.set(id.clone());
                 creating.set(false);
-                watch(base, token, goals, iterations, note, id);
+                follow(base, token, goals, iterations, note, selected, watch_gen, id);
                 return;
             }
             busy.set(false);
@@ -424,7 +479,7 @@ pub fn GoalsPane(base: RwSignal<String>, token: RwSignal<String>) -> impl IntoVi
             description.set(String::new());
             verification.set(String::new());
             extra.set(String::new());
-            watch(base, token, goals, iterations, note, id);
+            follow(base, token, goals, iterations, note, selected, watch_gen, id);
         });
     });
 
@@ -437,6 +492,7 @@ pub fn GoalsPane(base: RwSignal<String>, token: RwSignal<String>) -> impl IntoVi
                         creating.set(true);
                         selected.set(String::new());
                         form_error.set(String::new());
+                        watch_gen.set(watch_gen.get_untracked().wrapping_add(1));
                     }>"New"</button>
                 </div>
                 <p class="goals-aside-note">"A goal loops until its check passes or a guard stops it."</p>
@@ -478,7 +534,7 @@ pub fn GoalsPane(base: RwSignal<String>, token: RwSignal<String>) -> impl IntoVi
                         return view! {
                             <form id="goals-form" on:submit=move |ev| submit(ev)>
                                 <h2 class="goals-heading">"New goal"</h2>
-                                <p class="goals-lead">"Say what should be true, and the command that proves it. The loop is evaluate-only unless Autopilot is on with an allow list. Deny rules still block."</p>
+                                <p class="goals-lead">"Say what should be true, and the command that proves it. This page runs that check. It does not plan tool calls. Deny rules still block if a planner emits one."</p>
                                 <label class="goals-field">
                                     <span>"Goal"</span>
                                     <textarea id="goals-desc" rows="3" prop:value=move || description.get() on:input=move |ev| description.set(event_target_value(&ev)) placeholder="Tests pass on the package you changed"></textarea>
@@ -517,7 +573,7 @@ pub fn GoalsPane(base: RwSignal<String>, token: RwSignal<String>) -> impl IntoVi
                                     <input type="checkbox" prop:checked=move || autopilot.get() on:change=move |ev| autopilot.set(event_target_checked(&ev)) />
                                     <span>
                                         <strong>"Autopilot"</strong>
-                                        " runs the allow list without asking. Deny rules still apply. Off is the safe default: the check runs, tools do not."
+                                        " stores an allow list for a planner that emits tool calls. Deny rules still apply. This page does not emit those calls. Off is the default."
                                     </span>
                                 </label>
                                 <Show when=move || autopilot.get()>
@@ -567,12 +623,12 @@ pub fn GoalsPane(base: RwSignal<String>, token: RwSignal<String>) -> impl IntoVi
                     let run_label = if g.status == "pending" { "Run" } else { "Continue" };
                     let autopilot_line = if g.autopilot {
                         format!(
-                            "Autopilot on. Allow: {}. Deny: {}.",
+                            "Autopilot on. Allow: {}. Deny: {}. This page's planner does not emit tool calls.",
                             if g.allowed_tools.is_empty() { "none".into() } else { g.allowed_tools.join(", ") },
                             if g.deny_tools.is_empty() { "none".into() } else { g.deny_tools.join(", ") },
                         )
                     } else {
-                        "Autopilot off. The check runs. Tool side effects do not.".into()
+                        "Autopilot off. The check runs. This page does not plan tool calls.".into()
                     };
                     let budget = format!(
                         "Turns {}/{} · Tokens {}/{} · Wall {}m · Stall after {} · Stop after {} failed checks",

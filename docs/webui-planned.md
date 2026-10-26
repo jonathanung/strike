@@ -17,8 +17,10 @@ the next real slice.
 
 The Goals view is in the client (`webui/src/goals.rs`). It creates a goal
 with a verification command and budgets (turns, wall clock, tokens), then
-runs `POST /v1/goals/{id}/run?background=1` and reads the log. Autopilot is
-off unless the operator names an allow list. Deny rules still block. Stall,
+runs `POST /v1/goals/{id}/run?background=1` and reads the log until the goal
+leaves `pending` or `active`. The page planner is evaluate-only: Autopilot
+stores an allow list for a planner that emits tool calls, and this page does
+not emit them. Deny rules still block. Stall,
 repeated verification failure, and a hard budget stop are enforced in the
 goal harness, not only in the page.
 
