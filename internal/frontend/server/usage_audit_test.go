@@ -187,6 +187,57 @@ func TestTokenFileRotationIsAuditedWithoutTheToken(t *testing.T) {
 	}
 }
 
+func TestAuditListShowsDamageInsteadOfIntact(t *testing.T) {
+	auditDir := t.TempDir()
+	srv, err := New(Options{Auth: true, Token: "secret", UsageAuditDir: auditDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := srv.usageLog()
+	if _, err := log.Append(usageaudit.Input{Action: usageaudit.ActionConfig, Summary: "settings updated"}); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(auditDir, "chain.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(auditDir, "chain.jsonl"), append(raw, []byte("{not-json}\n")...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	res := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/audit", nil)
+	req.Header.Set("Authorization", "Bearer secret")
+	srv.Handler().ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("list status = %d body=%s", res.Code, res.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(res.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["verified"] != false || body["configured"] != true {
+		t.Fatalf("list = %s", res.Body.String())
+	}
+
+	if err := os.Remove(filepath.Join(auditDir, "chain.jsonl")); err != nil {
+		t.Fatal(err)
+	}
+	res = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/v1/audit/verify", nil)
+	req.Header.Set("Authorization", "Bearer secret")
+	srv.Handler().ServeHTTP(res, req)
+	if res.Code != http.StatusConflict {
+		t.Fatalf("verify status = %d body=%s", res.Code, res.Body.String())
+	}
+	res = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/v1/audit", nil)
+	req.Header.Set("Authorization", "Bearer secret")
+	srv.Handler().ServeHTTP(res, req)
+	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), "missing") {
+		t.Fatalf("missing chain list = %d %s", res.Code, res.Body.String())
+	}
+}
+
 func mustRead(t *testing.T, path string) string {
 	t.Helper()
 	b, err := os.ReadFile(path)

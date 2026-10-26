@@ -130,6 +130,117 @@ func TestAggregatePricesCacheAndLeavesUnknownModelsUnpriced(t *testing.T) {
 	}
 }
 
+func TestAggregateIgnoresChildBudgetWarningOnParentLog(t *testing.T) {
+	dir := t.TempDir()
+	writeSession(t, dir, "root", session.Meta{Title: "Root"}, []timed{
+		at("2026-10-26T01:00:00Z", protocol.SessionBudgetWarning{
+			Correlation: protocol.Correlation{SessionID: "child"},
+			Level:       protocol.SessionBudgetLevel80,
+			Message:     "child budget",
+		}),
+		at("2026-10-26T01:00:01Z", protocol.UsageReported{
+			Input: protocol.KnownTokens(10), Output: protocol.KnownTokens(1),
+			Source: protocol.UsageSourceActual,
+		}),
+	})
+	writeSession(t, dir, "child", session.Meta{Title: "Child", ParentSessionID: "root"}, []timed{
+		at("2026-10-26T01:00:00Z", protocol.SessionBudgetWarning{
+			Correlation: protocol.Correlation{SessionID: "child"},
+			Level:       protocol.SessionBudgetLevel80,
+			Message:     "child budget",
+		}),
+	})
+	report, err := Aggregate(dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rootN, childN int
+	for _, a := range report.Alerts {
+		switch a.SessionID {
+		case "root":
+			rootN++
+		case "child":
+			childN++
+		}
+	}
+	if rootN != 0 || childN != 1 {
+		t.Fatalf("alerts = %+v", report.Alerts)
+	}
+}
+
+func TestAggregateNotesMixedModels(t *testing.T) {
+	dir := t.TempDir()
+	writeSession(t, dir, "mix", session.Meta{Title: "Mix"}, []timed{
+		at("2026-10-26T01:00:00Z", protocol.ModelSelected{Correlation: protocol.Correlation{SessionID: "mix"}, Provider: "anthropic", Model: "opus"}),
+		at("2026-10-26T01:00:01Z", protocol.UsageReported{Input: protocol.KnownTokens(1_000_000), Output: protocol.KnownTokens(0), Source: protocol.UsageSourceActual}),
+		at("2026-10-26T01:00:02Z", protocol.ModelSelected{Correlation: protocol.Correlation{SessionID: "mix"}, Provider: "anthropic", Model: "haiku"}),
+		at("2026-10-26T01:00:03Z", protocol.UsageReported{Input: protocol.KnownTokens(1_000_000), Output: protocol.KnownTokens(0), Source: protocol.UsageSourceActual}),
+	})
+	price := func(provider, model string) (Rates, bool) {
+		switch model {
+		case "opus":
+			return Rates{Input: 15, Output: 75}, true
+		case "haiku":
+			return Rates{Input: 1, Output: 5}, true
+		default:
+			return Rates{}, false
+		}
+	}
+	report, err := Aggregate(dir, price)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Sessions) != 1 {
+		t.Fatalf("sessions = %+v", report.Sessions)
+	}
+	got := report.Sessions[0]
+	if got.Model != "haiku" || !got.CostPartial || !strings.Contains(got.CostNote, "more than one model") {
+		t.Fatalf("mixed row = %+v", got)
+	}
+	if !near(got.CostUSD, 16) {
+		t.Fatalf("cost = %v, want 16", got.CostUSD)
+	}
+}
+
+func TestAggregateSkipsOversizedLine(t *testing.T) {
+	env, err := protocol.Wrap(protocol.UsageReported{
+		Input: protocol.KnownTokens(4), Output: protocol.KnownTokens(1),
+		Source: protocol.UsageSourceEstimated,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	line, err := json.Marshal(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := sessionLineLimit
+	sessionLineLimit = len(line) + 8
+	t.Cleanup(func() { sessionLineLimit = old })
+	dir := t.TempDir()
+	path := session.LogPath(dir, "big")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(strings.Repeat("x", sessionLineLimit+40) + "\n"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Write(append(line, '\n')); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	report, err := Aggregate(dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.SkippedLines < 1 || len(report.Sessions) != 1 || report.Sessions[0].Input != 4 {
+		t.Fatalf("report = %+v", report)
+	}
+}
+
 type timed struct {
 	at time.Time
 	ev protocol.Event

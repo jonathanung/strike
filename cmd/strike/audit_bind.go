@@ -29,7 +29,23 @@ func (a *auditBoundStore) ObserveAudit(ev protocol.Event) {
 	if a != nil && a.sink != nil {
 		_ = a.sink.Observe(ev)
 	}
+	noteSensitive(ev)
+}
+
+// noteSensitive appends one protocol event to the process usage-audit log.
+func noteSensitive(ev protocol.Event) {
 	usageaudit.NoteEvent(ev)
+}
+
+// appendChildEvent records a delegated child's event. Child logs are not
+// written through ObserveAudit, and the parent drain does not re-emit
+// permission.decided or shell tool.begin.
+func appendChildEvent(write func(string, protocol.Event) error, childID string, ev protocol.Event) error {
+	noteSensitive(ev)
+	if write == nil {
+		return nil
+	}
+	return write(childID, ev)
 }
 
 func (a *auditBoundStore) Close() error {
@@ -92,12 +108,19 @@ func bindAuditSink(store sessionStore, cfg config.Config, sink *audit.Sink) sess
 	if store == nil {
 		return store
 	}
+	// TUI, ACP, and RPC share this path with serve. Opening here is what
+	// makes NoteEvent persist outside strike serve. Close stays with the
+	// process that called usageaudit.Open first (serve's defer); a second
+	// Open returns the same log and must not be closed per session.
+	if _, err := usageaudit.Open(usageaudit.DefaultDir()); err != nil {
+		fmt.Fprintf(os.Stderr, "strike: usage audit log unavailable: %v\n", err)
+	}
 	if sink == nil {
 		var err error
 		sink, err = openAuditSink(cfg)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "strike: audit sink unavailable: %v\n", err)
-			return store
+			sink = nil
 		}
 	}
 	path := ""

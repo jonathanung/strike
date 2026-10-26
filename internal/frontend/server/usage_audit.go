@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"math"
 	"net/http"
 	"strings"
@@ -113,26 +114,38 @@ func (s *Server) handleAuditList(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	entries, err := log.Entries()
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, opErrorResponse{Error: err.Error()})
+	entries, entErr := log.Entries()
+	verErr := log.Verify()
+	if entErr != nil && !chainDamage(entErr) {
+		writeJSON(w, http.StatusInternalServerError, opErrorResponse{Error: entErr.Error()})
+		return
+	}
+	if verErr != nil && entErr == nil && !chainDamage(verErr) {
+		writeJSON(w, http.StatusInternalServerError, opErrorResponse{Error: verErr.Error()})
 		return
 	}
 	if entries == nil {
 		entries = []usageaudit.Entry{}
 	}
-	verified := true
 	reason := ""
-	if err := log.Verify(); err != nil {
-		verified = false
-		reason = err.Error()
+	switch {
+	case entErr != nil:
+		reason = entErr.Error()
+	case verErr != nil:
+		reason = verErr.Error()
 	}
+	// 200 so the page can show "Chain broken". /v1/audit/verify stays 409.
 	writeJSON(w, http.StatusOK, map[string]any{
 		"configured": true,
-		"verified":   verified,
+		"verified":   entErr == nil && verErr == nil,
 		"error":      reason,
 		"entries":    entries,
 	})
+}
+
+func chainDamage(err error) bool {
+	var ve *usageaudit.VerifyError
+	return errors.As(err, &ve)
 }
 
 func (s *Server) handleAuditVerify(w http.ResponseWriter, r *http.Request) {

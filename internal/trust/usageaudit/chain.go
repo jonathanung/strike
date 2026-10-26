@@ -205,7 +205,17 @@ func (l *Log) Append(in Input) (Entry, error) {
 	}
 	f, err := os.OpenFile(l.path, os.O_RDWR, 0o600)
 	if err != nil {
-		return Entry{}, err
+		if errors.Is(err, os.ErrNotExist) {
+			if _, tipHash, terr := readTip(l.dir); terr != nil {
+				return Entry{}, terr
+			} else if tipHash != "" {
+				return Entry{}, &VerifyError{Reason: "chain file missing but tip is present"}
+			}
+			f, err = os.OpenFile(l.path, os.O_CREATE|os.O_RDWR, 0o600)
+		}
+		if err != nil {
+			return Entry{}, err
+		}
 	}
 	defer f.Close()
 	if err := lockFile(f, true); err != nil {
@@ -215,6 +225,9 @@ func (l *Log) Append(in Input) (Entry, error) {
 
 	prevSeq, prevHash, err := lastLocked(f)
 	if err != nil {
+		return Entry{}, err
+	}
+	if err := tipAgrees(l.dir, prevSeq, prevHash); err != nil {
 		return Entry{}, err
 	}
 	if prevHash == "" {
@@ -285,6 +298,11 @@ func (l *Log) Verify() error {
 	f, err := os.Open(l.path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
+			if _, tipHash, terr := readTip(l.dir); terr != nil {
+				return terr
+			} else if tipHash != "" {
+				return &VerifyError{Reason: "chain file missing but tip is present"}
+			}
 			return nil
 		}
 		return err
@@ -372,6 +390,26 @@ func (l *Log) Export() (Export, error) {
 type tipFile struct {
 	Seq  int64  `json:"seq"`
 	Hash string `json:"hash"`
+}
+
+// tipAgrees refuses to extend a chain whose tip does not name the current
+// tail. An empty chain may only grow when no tip file is present. Callers
+// hold the chain file lock.
+func tipAgrees(dir string, lastSeq int64, lastHash string) error {
+	tipSeq, tipHash, err := readTip(dir)
+	if err != nil {
+		return err
+	}
+	if lastSeq == 0 || lastHash == "" {
+		if tipHash != "" {
+			return &VerifyError{Reason: "tip present but chain is empty"}
+		}
+		return nil
+	}
+	if tipHash == "" || tipSeq != lastSeq || !strings.EqualFold(tipHash, lastHash) {
+		return &VerifyError{Seq: lastSeq, Reason: "tip does not match the last entry"}
+	}
+	return nil
 }
 
 func writeTip(dir string, seq int64, hash string) error {

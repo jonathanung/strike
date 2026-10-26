@@ -3,7 +3,9 @@ package usageaudit
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -143,6 +145,7 @@ type acc struct {
 	anyEst    bool
 	provider  string
 	model     string
+	seenModel map[string]struct{}
 	firstDay  string
 	lastDay   string
 	title     string
@@ -370,111 +373,46 @@ func scanSession(path, id string, price Pricer) (SessionUsage, map[string]dayPar
 	defer f.Close()
 	meta := readMeta(filepath.Dir(path), id)
 	var (
-		acc        acc
-		provider   string
-		model      string
-		days       = map[string]dayPart{}
-		alerts     []Alert
-		skipped    int
-		pricedNote string
+		acc      acc
+		provider string
+		model    string
+		days     = map[string]dayPart{}
+		alerts   []Alert
+		skipped  int
 	)
 	acc.title = meta.Title
 	acc.parent = meta.ParentSessionID
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
+	// Same ceiling as session.readLogLines. A larger tool argument or image
+	// line is skipped so one session cannot blank the whole dashboard.
+	br := bufio.NewReaderSize(f, 64*1024)
+	for {
+		raw, tooLong, err := readCappedLine(br, sessionLineLimit)
+		if tooLong {
+			skipped++
+		}
+		if err == io.EOF {
+			if !tooLong {
+				if line := strings.TrimSpace(raw); line != "" {
+					skipped += applyUsageLine(line, id, price, &acc, &provider, &model, days, &alerts)
+				}
+			}
+			break
+		}
+		if err != nil {
+			return SessionUsage{}, nil, nil, skipped, err
+		}
+		if tooLong {
+			continue
+		}
+		line := strings.TrimSpace(raw)
 		if line == "" {
 			continue
 		}
-		var env protocol.Envelope
-		if err := json.Unmarshal([]byte(line), &env); err != nil {
-			skipped++
-			continue
-		}
-		switch env.Type {
-		case "model.selected":
-			var ev protocol.ModelSelected
-			if err := json.Unmarshal(env.Data, &ev); err != nil {
-				skipped++
-				continue
-			}
-			if ev.Provider != "" {
-				provider = ev.Provider
-			}
-			if ev.Model != "" {
-				model = ev.Model
-			}
-		case "session.titled":
-			var ev protocol.SessionTitled
-			if err := json.Unmarshal(env.Data, &ev); err != nil {
-				skipped++
-				continue
-			}
-			if strings.TrimSpace(ev.Title) != "" && acc.title == "" {
-				acc.title = ev.Title
-			}
-		case "session.budget_warning":
-			var ev protocol.SessionBudgetWarning
-			if err := json.Unmarshal(env.Data, &ev); err != nil {
-				skipped++
-				continue
-			}
-			alerts = append(alerts, budgetAlert(id, ev))
-		case "usage.reported":
-			var ev protocol.UsageReported
-			if err := json.Unmarshal(env.Data, &ev); err != nil {
-				skipped++
-				continue
-			}
-			day := ""
-			if !env.Time.IsZero() {
-				day = env.Time.UTC().Format("2006-01-02")
-			}
-			acc.tokens.add(ev)
-			switch ev.Source {
-			case protocol.UsageSourceActual:
-				acc.anyActual = true
-			case protocol.UsageSourceEstimated:
-				acc.anyEst = true
-			}
-			if provider != "" {
-				acc.provider = provider
-			}
-			if model != "" {
-				acc.model = model
-			}
-			if day != "" {
-				if acc.firstDay == "" || day < acc.firstDay {
-					acc.firstDay = day
-				}
-				if day > acc.lastDay {
-					acc.lastDay = day
-				}
-			}
-			usd, known, partial, note := priceUsage(price, provider, model, ev)
-			acc.addCost(usd, known, partial, note)
-			pricedNote = note
-			part := days[day]
-			part.tokens.add(ev)
-			if known {
-				part.cost += usd
-				part.known = true
-			} else {
-				part.unpriced++
-			}
-			if partial || !known {
-				part.partial = true
-			}
-			if note != "" {
-				part.note = note
-			}
-			days[day] = part
-		default:
-		}
+		skipped += applyUsageLine(line, id, price, &acc, &provider, &model, days, &alerts)
 	}
-	if err := sc.Err(); err != nil {
-		return SessionUsage{}, nil, nil, skipped, err
+	if len(acc.seenModel) > 1 {
+		acc.note("priced across more than one model; the label is the latest")
+		acc.partial = true
 	}
 	if acc.tokens.Reports == 0 {
 		return SessionUsage{ID: id, Title: acc.title, ParentID: acc.parent}, nil, alerts, skipped, nil
@@ -502,10 +440,139 @@ func scanSession(path, id string, price Pricer) (SessionUsage, map[string]dayPar
 		CostPartial:      acc.partial,
 		CostNote:         acc.noteJoin(),
 	}
-	if su.CostNote == "" {
-		su.CostNote = pricedNote
-	}
 	return su, days, alerts, skipped, nil
+}
+
+// sessionLineLimit matches session.readLogLines. Tests lower it.
+var sessionLineLimit = 32 << 20
+
+func applyUsageLine(line, id string, price Pricer, acc *acc, provider, model *string, days map[string]dayPart, alerts *[]Alert) int {
+	var env protocol.Envelope
+	if err := json.Unmarshal([]byte(line), &env); err != nil {
+		return 1
+	}
+	switch env.Type {
+	case "model.selected":
+		var ev protocol.ModelSelected
+		if err := json.Unmarshal(env.Data, &ev); err != nil {
+			return 1
+		}
+		if ev.Provider != "" {
+			*provider = ev.Provider
+		}
+		if ev.Model != "" {
+			*model = ev.Model
+		}
+	case "session.titled":
+		var ev protocol.SessionTitled
+		if err := json.Unmarshal(env.Data, &ev); err != nil {
+			return 1
+		}
+		if strings.TrimSpace(ev.Title) != "" && acc.title == "" {
+			acc.title = ev.Title
+		}
+	case "session.budget_warning":
+		var ev protocol.SessionBudgetWarning
+		if err := json.Unmarshal(env.Data, &ev); err != nil {
+			return 1
+		}
+		// A child warning re-emitted onto the parent log names the child.
+		owner := strings.TrimSpace(ev.SessionID)
+		if owner != "" && owner != id {
+			return 0
+		}
+		*alerts = append(*alerts, budgetAlert(id, ev))
+	case "usage.reported":
+		var ev protocol.UsageReported
+		if err := json.Unmarshal(env.Data, &ev); err != nil {
+			return 1
+		}
+		day := ""
+		if !env.Time.IsZero() {
+			day = env.Time.UTC().Format("2006-01-02")
+		}
+		acc.tokens.add(ev)
+		switch ev.Source {
+		case protocol.UsageSourceActual:
+			acc.anyActual = true
+		case protocol.UsageSourceEstimated:
+			acc.anyEst = true
+		}
+		if *provider != "" {
+			acc.provider = *provider
+		}
+		if *model != "" {
+			acc.model = *model
+		}
+		if *provider != "" && *model != "" {
+			if acc.seenModel == nil {
+				acc.seenModel = map[string]struct{}{}
+			}
+			acc.seenModel[*provider+"/"+*model] = struct{}{}
+		}
+		if day != "" {
+			if acc.firstDay == "" || day < acc.firstDay {
+				acc.firstDay = day
+			}
+			if day > acc.lastDay {
+				acc.lastDay = day
+			}
+		}
+		usd, known, partial, note := priceUsage(price, *provider, *model, ev)
+		acc.addCost(usd, known, partial, note)
+		part := days[day]
+		part.tokens.add(ev)
+		if known {
+			part.cost += usd
+			part.known = true
+		} else {
+			part.unpriced++
+		}
+		if partial || !known {
+			part.partial = true
+		}
+		if note != "" {
+			part.note = note
+		}
+		days[day] = part
+	default:
+	}
+	return 0
+}
+
+func readCappedLine(r *bufio.Reader, max int) (string, bool, error) {
+	if max <= 0 {
+		max = 32 << 20
+	}
+	var b strings.Builder
+	tooLong := false
+	for {
+		chunk, err := r.ReadSlice('\n')
+		if !tooLong {
+			if b.Len()+len(chunk) > max {
+				tooLong = true
+				b.Reset()
+			} else {
+				b.Write(chunk)
+			}
+		}
+		if err == nil {
+			if tooLong {
+				return "", true, nil
+			}
+			return b.String(), false, nil
+		}
+		if errors.Is(err, bufio.ErrBufferFull) {
+			continue
+		}
+		if errors.Is(err, io.EOF) {
+			if tooLong {
+				return "", true, io.EOF
+			}
+			return b.String(), false, io.EOF
+		}
+		return "", false, err
+	}
 }
 
 func priceUsage(price Pricer, provider, model string, ev protocol.UsageReported) (usd float64, known, partial bool, note string) {

@@ -93,6 +93,36 @@ func TestChainVerifyDetectsTruncation(t *testing.T) {
 	if !strings.Contains(err.Error(), "tip") {
 		t.Fatalf("error = %v, want a tip mismatch (deleted seq %d)", err, second.Seq)
 	}
+	if _, err := log.Append(Input{Action: ActionConfig, Summary: "should not heal the chain"}); err == nil {
+		t.Fatal("append healed a truncated chain")
+	}
+	if err := log.Verify(); err == nil || !strings.Contains(err.Error(), "tip") {
+		t.Fatalf("verify after refused append = %v", err)
+	}
+}
+
+func TestVerifyMissingChainFileKeepsTheTip(t *testing.T) {
+	dir := t.TempDir()
+	log, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = log.Close() })
+	if _, err := log.Append(Input{Action: ActionToken, Summary: "daemon token file rotated"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(dir, "chain.jsonl")); err != nil {
+		t.Fatal(err)
+	}
+	if err := log.Verify(); err == nil || !strings.Contains(err.Error(), "missing") {
+		t.Fatalf("verify = %v", err)
+	}
+	if _, err := log.Append(Input{Action: ActionConfig, Summary: "should not start a new chain"}); err == nil {
+		t.Fatal("append recreated a chain over a leftover tip")
+	}
+	if err := log.Verify(); err == nil {
+		t.Fatal("verify succeeded after the chain file was removed")
+	}
 }
 
 func TestChainRedactsBeforeHash(t *testing.T) {

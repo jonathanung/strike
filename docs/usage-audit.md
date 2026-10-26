@@ -34,9 +34,9 @@ Pruning that sink would break a hash chain, so this log is not pruned.
 
 | Action | Source |
 |---|---|
-| `approval` | `permission.decided` when the user replied |
+| `approval` | `permission.decided` when the user replied, including a delegated child |
 | `permission` | `permission.decided` without a reply, `permission.mode_selected`, workspace permission mode |
-| `shell` | `tool.begin` for bash/shell, and `process.started` that is not already a tool call |
+| `shell` | `tool.begin` for bash/shell, including a delegated child, and `process.started` that is not already a tool call |
 | `terminal` | pane input (field count only, not keystrokes). A PTY terminal (#1279) should `POST /v1/audit` |
 | `config` | settings, sandbox, workspace rules, custom providers, daily budget |
 | `token` | provider API key stored or cleared (never the key), `strike daemon logout`, and a daemon token file change observed by `strike serve` |
