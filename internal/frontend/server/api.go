@@ -30,10 +30,11 @@ type sessionsResponse struct {
 }
 
 type sessionListItem struct {
-	ID         string `json:"id"`
-	Title      string `json:"title,omitempty"`
-	Mtime      int64  `json:"mtime,omitempty"`
-	ForkedFrom string `json:"forkedFrom,omitempty"`
+	ID          string `json:"id"`
+	Title       string `json:"title,omitempty"`
+	Mtime       int64  `json:"mtime,omitempty"`
+	ForkedFrom  string `json:"forkedFrom,omitempty"`
+	WorkspaceID string `json:"workspaceId,omitempty"`
 }
 
 type agentsResponse struct {
@@ -667,10 +668,11 @@ func listSessionFiles(dir string) ([]sessionListItem, error) {
 			continue // roots only in switcher
 		}
 		out = append(out, sessionListItem{
-			ID:         info.ID,
-			Title:      info.Title,
-			Mtime:      info.UpdatedAt.Unix(),
-			ForkedFrom: info.ForkedFrom,
+			ID:          info.ID,
+			Title:       info.Title,
+			Mtime:       info.UpdatedAt.Unix(),
+			ForkedFrom:  info.ForkedFrom,
+			WorkspaceID: info.WorkspaceID,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -1701,6 +1703,7 @@ func (s *Server) handleRootCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, result)
+	s.followLiveCWD(result.ID)
 }
 
 func (s *Server) handleRootActivate(w http.ResponseWriter, r *http.Request) {
@@ -1713,6 +1716,7 @@ func (s *Server) handleRootActivate(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
 		return
 	}
+	s.followLiveCWD(id)
 	writeJSON(w, http.StatusOK, opOKResponse{OK: true})
 }
 
@@ -1730,6 +1734,22 @@ func (s *Server) handleRootResume(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
+	s.followLiveCWD(result.ID)
+}
+
+func (s *Server) followLiveCWD(id string) {
+	if s.opts.SyncWorkDir == nil || s.opts.LiveHub == nil {
+		return
+	}
+	live := s.opts.LiveHub.LiveFor(id)
+	if live == nil {
+		return
+	}
+	cwd := strings.TrimSpace(live.Status().CWD)
+	if cwd == "" {
+		return
+	}
+	s.opts.SyncWorkDir(cwd)
 }
 
 func (s *Server) handleRootClose(w http.ResponseWriter, r *http.Request) {

@@ -5,6 +5,7 @@
 
 mod api;
 mod model;
+mod workspaces;
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -24,8 +25,9 @@ use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 
 use crate::api::{
-    get_json, idempotency_key, now_ms, patch_json, post_json, post_json_value, post_op,
+    get_json, idempotency_key, now_ms, post_json, post_json_value, post_op,
 };
+use crate::workspaces::WorkspacePicker;
 use crate::model::{budget_elapsed, can_retry, RootsResponse};
 
 fn storage() -> Option<web_sys::Storage> {
@@ -634,7 +636,9 @@ fn App() -> impl IntoView {
     );
     let workspaces = RwSignal::new(Vec::<Workspace>::new());
     let active_workspace = RwSignal::new(String::new());
-    let new_path = RwSignal::new(String::new());
+    let workspace_recents = RwSignal::new(Vec::<Workspace>::new());
+    let picker_open = RwSignal::new(false);
+    let session_cwd = RwSignal::new(String::new());
     let remotes = RwSignal::new(load_remotes());
     let remote_name = RwSignal::new(String::new());
     let remote_url = RwSignal::new(String::new());
@@ -744,6 +748,7 @@ fn App() -> impl IntoView {
                 Ok(r) => {
                     active_workspace.set(r.active_id);
                     workspaces.set(r.workspaces);
+                    workspace_recents.set(r.recents);
                 }
                 Err(e) => {
                     if err.is_empty() {
@@ -788,6 +793,7 @@ fn App() -> impl IntoView {
                             if !st.permission_mode.is_empty() {
                                 perm_mode.set(st.permission_mode);
                             }
+                            session_cwd.set(st.cwd);
                             live_busy.set(st.busy);
                             live_busy_root.set(root);
                         }
@@ -978,9 +984,7 @@ fn App() -> impl IntoView {
                         .await;
                         active_root.set(id);
                     }
-                    if let Ok(r) = get_json::<RootsResponse>(&b, &t, "/v1/roots").await {
-                        roots.set(r.roots);
-                    }
+                    refresh_meta();
                 }
                 Err(e) => status.set(format!("new session failed: {e}")),
             }
@@ -1385,13 +1389,11 @@ fn App() -> impl IntoView {
                 base=base
                 token=token
                 status=status
-                workspaces=workspaces
-                active_workspace=active_workspace
-                new_path=new_path
                 remotes=remotes
                 remote_name=remote_name
                 remote_url=remote_url
                 refresh=refresh_meta
+                open_picker=move || picker_open.set(true)
             />
         </Show>
         <Show when=move || mode.get() == "chat">
@@ -1432,7 +1434,7 @@ fn App() -> impl IntoView {
                             let fallback = short_id(&id);
                             let label = session_label(&row.title, &fallback);
                             let when = fmt_ago(row.mtime, (now_ms() / 1000.0) as i64);
-                            let subtitle = if busy {
+                            let state = if busy {
                                 "In progress"
                             } else if unread {
                                 "Unread"
@@ -1440,6 +1442,12 @@ fn App() -> impl IntoView {
                                 "Idle"
                             } else {
                                 "Saved"
+                            };
+                            let ws_name = workspaces.get().into_iter().find(|w| w.id == row.workspace_id).map(|w| w.name);
+                            let subtitle = if let Some(name) = ws_name {
+                                format!("{state} · workspace {name}")
+                            } else {
+                                state.to_string()
                             };
                             let dot = if busy {
                                 "dot dot-running"
@@ -1488,37 +1496,36 @@ fn App() -> impl IntoView {
                         }
                     }}
                     <p class="hint keys">"Pins stay in this browser. Alt+Left and Alt+Right switch sessions. Alt+\\ focuses the transcript."</p>
-                    <details class="fold">
-                    <summary>"Workspaces"</summary>
-                    <p class="hint">"Opening one records it. It does not move the live engine."</p>
-                    <Show when=move || workspaces.get().is_empty()>
-                        <EmptyState title="No workspaces".into() body="Add a directory from Daemon.".into() />
-                    </Show>
-                    <ul class="plain">
-                        {move || workspaces.get().into_iter().map(|w| {
-                            let id = w.id.clone();
-                            let on = move || active_workspace.get() == id;
-                            let activate_id = w.id.clone();
-                            view! {
-                                <li class=move || if on() { "row card on" } else { "row card" }>
-                                    <button class="link" on:click=move |_| {
-                                        let (b, t, id) = (base.get(), token.get(), activate_id.clone());
-                                        spawn_local(async move {
-                                            let path = format!("/v1/workspaces/{id}/activate");
-                                            match post_json(&b, &t, &path, serde_json::json!({})).await {
-                                                Ok(()) => active_workspace.set(id),
-                                                Err(e) => status.set(format!("activate failed: {e}")),
-                                            }
-                                        });
-                                    }>
-                                        <span class="name">{w.name}</span>
-                                        <span class="path">{w.path}</span>
-                                    </button>
-                                </li>
+                    <div class="ws-chip">
+                        <div class="section-head">
+                            <h2 class="panel-title">"Workspace"</h2>
+                            <button class="secondary ws-open" on:click=move |_| picker_open.set(true)>"Change workspace"</button>
+                        </div>
+                        <p class="name">{move || {
+                            let id = active_workspace.get();
+                            workspaces.get().into_iter().find(|w| w.id == id).map(|w| w.name).unwrap_or_else(|| "No workspace".into())
+                        }}</p>
+                        <p class="path">{move || {
+                            let id = active_workspace.get();
+                            if let Some(w) = workspaces.get().into_iter().find(|w| w.id == id) {
+                                w.path
+                            } else {
+                                let cwd = session_cwd.get();
+                                if cwd.is_empty() { "New sessions use the daemon directory.".into() } else { cwd }
                             }
-                        }).collect_view()}
-                    </ul>
-                    </details>
+                        }}</p>
+                        {move || {
+                            let id = active_workspace.get();
+                            let ws_path = workspaces.get().into_iter().find(|w| w.id == id).map(|w| w.path).unwrap_or_default();
+                            let note = crate::workspaces::chip_note(&ws_path, &session_cwd.get());
+                            if note.is_empty() {
+                                view! { <span></span> }.into_any()
+                            } else {
+                                view! { <p class="hint">{note}</p> }.into_any()
+                            }
+                        }}
+                        <p class="hint">"This line is the directory. Sessions above are chats, not folders."</p>
+                    </div>
                 </aside>
                 <section class="chat">
                     <Show when=move || !load_error.get().is_empty()>
@@ -1884,6 +1891,16 @@ fn App() -> impl IntoView {
                 </aside>
             </div>
         </Show>
+        <WorkspacePicker
+            open=picker_open
+            base=base
+            token=token
+            status=status
+            workspaces=workspaces
+            active_workspace=active_workspace
+            recents=workspace_recents
+            refresh=refresh_meta
+        />
     }
 }
 
@@ -1892,86 +1909,13 @@ fn DaemonPane(
     base: RwSignal<String>,
     token: RwSignal<String>,
     status: RwSignal<String>,
-    workspaces: RwSignal<Vec<Workspace>>,
-    active_workspace: RwSignal<String>,
-    new_path: RwSignal<String>,
     remotes: RwSignal<Vec<Remote>>,
     remote_name: RwSignal<String>,
     remote_url: RwSignal<String>,
     refresh: impl Fn() + Copy + Send + 'static,
+    open_picker: impl Fn() + Copy + 'static,
 ) -> impl IntoView {
-    let policy_rules = RwSignal::new(String::new());
-    let policy_mode = RwSignal::new(String::new());
-    let policy_for = RwSignal::new(String::new());
-    Effect::new(move |_| {
-        let id = active_workspace.get();
-        let list = workspaces.get();
-        if policy_for.get_untracked() != id {
-            if let Some(w) = list.iter().find(|w| w.id == id) {
-                policy_rules.set(w.rules.clone());
-                policy_mode.set(w.permission_mode.clone());
-            } else {
-                policy_rules.set(String::new());
-                policy_mode.set(String::new());
-            }
-            policy_for.set(id);
-        }
-    });
-    let save_policy = move |_| {
-        let id = active_workspace.get();
-        if id.is_empty() {
-            status.set("no active workspace".into());
-            return;
-        }
-        let rules = policy_rules.get();
-        let mode = policy_mode.get();
-        let (b, t) = (base.get(), token.get());
-        spawn_local(async move {
-            match patch_json(
-                &b,
-                &t,
-                &format!("/v1/workspaces/{id}"),
-                serde_json::json!({
-                    "rules": rules,
-                    "permissionMode": mode,
-                }),
-            )
-            .await
-            {
-                Ok(()) => {
-                    policy_for.set(String::new());
-                    refresh();
-                }
-                Err(e) => status.set(format!("workspace policy failed: {e}")),
-            }
-        });
-    };
-    let add_workspace = move |_| {
-        let path = new_path.get();
-        if path.trim().is_empty() {
-            return;
-        }
-        let (b, t) = (base.get(), token.get());
-        spawn_local(async move {
-            match post_json(
-                &b,
-                &t,
-                "/v1/workspaces",
-                serde_json::json!({ "path": path }),
-            )
-            .await
-            {
-                Ok(()) => {
-                    new_path.set(String::new());
-                    if let Ok(r) = get_json::<WorkspacesResponse>(&b, &t, "/v1/workspaces").await {
-                        active_workspace.set(r.active_id);
-                        workspaces.set(r.workspaces);
-                    }
-                }
-                Err(e) => status.set(format!("add workspace failed: {e}")),
-            }
-        });
-    };
+    let _ = status;
     let add_remote = move |_| {
         let (name, url) = (remote_name.get(), remote_url.get());
         if name.trim().is_empty() || url.trim().is_empty() {
@@ -2034,67 +1978,8 @@ fn DaemonPane(
             </section>
             <section class="card">
                 <h2 class="panel-title">"Workspaces"</h2>
-                <Show when=move || workspaces.get().is_empty()>
-                    <EmptyState title="No workspaces".into() body="Add a directory that exists on the daemon host.".into() />
-                </Show>
-                <ul class="plain">
-                    {move || workspaces.get().into_iter().map(|w| {
-                        let id = w.id.clone();
-                        let is_active = move || active_workspace.get() == id;
-                        let activate_id = w.id.clone();
-                        view! {
-                            <li class="row">
-                                <span>
-                                    {w.name}
-                                    <Show when=is_active>" "<Badge kind="done".into() label="active".into() /></Show>
-                                    <span class="path">{w.path.clone()}</span>
-                                    {(!w.rules.is_empty()).then(|| {
-                                        let rules = w.rules.clone();
-                                        view! { <span class="path">{format!("rules {rules}")}</span> }
-                                    })}
-                                    {(!w.permission_mode.is_empty()).then(|| {
-                                        let mode = w.permission_mode.clone();
-                                        view! { <span class="path">{format!("mode {mode}")}</span> }
-                                    })}
-                                </span>
-                                <button class="secondary" on:click=move |_| {
-                                    let (b, t, id) = (base.get(), token.get(), activate_id.clone());
-                                    spawn_local(async move {
-                                        let path = format!("/v1/workspaces/{id}/activate");
-                                        match post_json(&b, &t, &path, serde_json::json!({})).await {
-                                            Ok(()) => active_workspace.set(id),
-                                            Err(e) => status.set(format!("activate failed: {e}")),
-                                        }
-                                    });
-                                }>"Open"</button>
-                            </li>
-                        }
-                    }).collect_view()}
-                </ul>
-                <div class="row">
-                    <input placeholder="/home/you/Projects/my-repo"
-                        prop:value=move || new_path.get()
-                        on:input=move |ev| new_path.set(event_target_value(&ev)) />
-                    <button class="primary" on:click=add_workspace>"Add"</button>
-                </div>
-            </section>
-            <section class="card">
-                <h2 class="panel-title">"Policy"</h2>
-                <p class="hint">"Rules must be a file inside the active workspace. The mode is stored here and is not applied to the live session."</p>
-                <label>"Rules file"</label>
-                <input placeholder="AGENTS.md"
-                    prop:value=move || policy_rules.get()
-                    on:input=move |ev| policy_rules.set(event_target_value(&ev)) />
-                <label>"Permission mode"</label>
-                <select class="mode" prop:value=move || policy_mode.get() on:change=move |ev| policy_mode.set(event_target_value(&ev))>
-                    <option value="">"Unset"</option>
-                    {permission_modes().iter().map(|m| {
-                        let id = m.id.to_string();
-                        let label = m.label.to_string();
-                        view! { <option value=id>{label}</option> }
-                    }).collect_view()}
-                </select>
-                <button class="primary" on:click=save_policy>"Save policy"</button>
+                <p class="hint">"A workspace is a directory. Session lists are not folders."</p>
+                <button class="primary ws-open" on:click=move |_| open_picker()>"Change workspace"</button>
             </section>
         </main>
     }

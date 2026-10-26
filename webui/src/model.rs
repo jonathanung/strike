@@ -19,6 +19,12 @@ pub struct Workspace {
     pub rules: String,
     #[serde(default, rename = "permissionMode")]
     pub permission_mode: String,
+    #[serde(default, rename = "extraRoots")]
+    pub extra_roots: Vec<String>,
+    /// Present on the wire. Recents are already ordered by this field.
+    #[allow(dead_code)]
+    #[serde(default, rename = "lastOpened")]
+    pub last_opened: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -26,6 +32,28 @@ pub struct WorkspacesResponse {
     pub workspaces: Vec<Workspace>,
     #[serde(default, rename = "activeId")]
     pub active_id: String,
+    #[serde(default)]
+    pub recents: Vec<Workspace>,
+    /// Allowlist echoed by the daemon. The picker loads it through browse.
+    #[allow(dead_code)]
+    #[serde(default, rename = "browseRoots")]
+    pub browse_roots: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct BrowseEntry {
+    pub name: String,
+    pub path: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct BrowseResponse {
+    #[serde(default)]
+    pub path: String,
+    #[serde(default)]
+    pub parent: String,
+    #[serde(default)]
+    pub entries: Vec<BrowseEntry>,
 }
 
 #[derive(Clone, Debug, Deserialize, serde::Serialize)]
@@ -60,6 +88,8 @@ pub struct SessionItem {
     pub title: String,
     #[serde(default)]
     pub mtime: i64,
+    #[serde(default, rename = "workspaceId")]
+    pub workspace_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -85,6 +115,8 @@ pub struct LiveStatus {
     pub model: String,
     #[serde(default, rename = "permissionMode")]
     pub permission_mode: String,
+    #[serde(default)]
+    pub cwd: String,
     #[serde(default)]
     pub busy: bool,
 }
@@ -149,6 +181,8 @@ pub struct SessionRow {
     pub live: bool,
     pub pinned: bool,
     pub unread: bool,
+    /// Registry id of the workspace this chat is bound to. Empty when unbound.
+    pub workspace_id: String,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -349,6 +383,7 @@ pub fn merge_sessions(
                 live: false,
                 pinned: pins.iter().any(|p| p == &s.id),
                 unread: false,
+                workspace_id: s.workspace_id.clone(),
             },
         );
     }
@@ -362,6 +397,7 @@ pub fn merge_sessions(
             live: false,
             pinned: pins.iter().any(|p| p == &r.id),
             unread: false,
+            workspace_id: String::new(),
         });
         entry.live = true;
         entry.busy = r.busy;
@@ -808,6 +844,7 @@ mod tests {
             live: true,
             pinned,
             unread: false,
+            workspace_id: String::new(),
         }
     }
 
@@ -823,6 +860,7 @@ mod tests {
             id: "a".into(),
             title: "Alpha".into(),
             mtime: 50,
+            workspace_id: String::new(),
         }];
         let mut seen = HashMap::new();
         seen.insert("a".into(), 40i64);

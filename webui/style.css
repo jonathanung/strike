@@ -970,6 +970,48 @@ select.mode, .daemon select {
   }
   .shell, .shell.focus { grid-template-columns: 1fr; height: auto; }
   .suggestions { grid-template-columns: 1fr; }
-  .rail { max-height: 220px; }
+  .rail { max-height: 280px; }
   .side { max-height: 280px; }
 }
+
+/* feature:workspaces begin */
+.ws-chip { margin-top: var(--space-3); padding-top: var(--space-2); border-top: 1px solid var(--border-muted); }
+.ws-chip .name { display: block; font-weight: 600; }
+.ws-chip .path { display: block; color: var(--muted); font-size: var(--type-sm); word-break: break-all; }
+.ws-back {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  background: color-mix(in srgb, var(--overlay) 45%, transparent);
+  display: flex;
+  justify-content: center;
+  padding: var(--space-4);
+  overflow: auto;
+}
+.ws-dialog {
+  width: min(920px, 100%);
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: var(--space-3);
+  max-height: 100%;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.ws-dialog:focus { outline: 1px solid var(--border-focus); }
+.ws-head, .ws-browse-actions, .ws-dialog .row { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
+.ws-head { justify-content: space-between; }
+.ws-kicker { margin: var(--space-2) 0 var(--space-1); font-size: var(--type-sm); color: var(--muted); font-weight: 600; }
+.ws-cols { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); min-height: 0; }
+.ws-row { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; text-align: left; min-height: var(--control); }
+.ws-dialog .card { padding: var(--space-2); }
+.ws-dialog li.key { box-shadow: inset 0 0 0 1px var(--border-focus); }
+.ws-dialog textarea { min-height: 64px; width: 100%; }
+.ws-policy { border-top: 1px solid var(--border-muted); padding-top: var(--space-2); }
+@media (max-width: 800px) {
+  .ws-cols { grid-template-columns: 1fr; }
+  .ws-back { padding: var(--space-2); }
+}
+/* feature:workspaces end */

@@ -60,31 +60,36 @@ that sequence, the client does not show a Task Runner board.
 
 ## Workspace binding
 
-The registry (`~/.strike/workspaces.json`) now stores a directory, an
-optional rules file inside that directory, and an optional permission mode.
-That is the named workspace. It is not wired through to a running session:
+Shipped. A session records `workspaceId` on its sidecar. See
+[webui-daemon.md](webui-daemon.md) for how one daemon serves several
+workspaces and what stays shared.
 
-- A session does not record which workspace it belongs to. The live engine
-  working directory is still the directory `strike serve` was started in.
-- Activating a workspace does not load its rules file into the prompt and
-  does not call `set.permission_mode`.
-- A delegated child's working directory is not checked against registered
-  workspace directories. Adding that check before sessions run inside those
-  directories would reject ordinary `strike serve` (the registry is often
-  empty, and the serve directory may be unregistered).
-- Context-bundle `allowed_paths` can already limit child filesystem tools.
-  That is a bundle, not a workspace-registry check.
-
-Planned: a session records a workspace id. The engine for that session uses
-the workspace directory. Child spawns whose working directory is outside
-that directory, and outside any extra roots recorded on the workspace, are
-rejected. The rules file is injected as project rules for that session only.
-The stored permission mode becomes the session's starting posture, still
-changeable with `set.permission_mode`.
+- Web-created roots (`POST /v1/roots`) use the active workspace directory,
+  load that workspace's rules file into the prompt for that session, and
+  start in its stored permission mode.
+- Opening a workspace (`POST /v1/workspaces/{id}/activate`) applies the
+  stored mode to the active live root with `set.permission_mode` when a
+  mode is set. The composer chip can still change it afterwards.
+- Delegated children whose working directory is outside the workspace, and
+  outside `extraRoots`, are rejected. An empty `WorkspaceRoots` list (no
+  workspace bound, including an empty registry) does not check, so plain
+  `strike serve` is unchanged.
+- The first engine started by `strike serve` stays in the process directory.
+  If that directory is inside a registered workspace, the session records
+  the id and the child check uses that workspace's roots. It does not jump
+  to a different active workspace.
+- Resume uses the recorded workspace directory. A missing workspace falls
+  back to the process directory with the check off.
+- Context-bundle `allowed_paths` is still a separate, per-spawn filesystem
+  scope. It is not the workspace registry.
+- Memory, history, plans, artifacts, and the ledger stay keyed by the
+  process project, not by workspace id. The storage stream owns moving
+  those.
 
 Per-child git worktrees stay the existing opt-in: `session.childIsolation:
 worktree` or spawn `isolation: "worktree"`. Default remains shared. Do not
-add a second flag for the same behavior.
+add a second flag for the same behavior. A worktree that resolves outside
+the workspace roots is rejected when the session is bound.
 
 ## Onboarding
 
