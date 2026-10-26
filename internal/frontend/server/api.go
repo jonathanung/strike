@@ -114,6 +114,9 @@ type capabilities struct {
 	ConfigFiles bool `json:"configFiles"`
 	// Themes is true when host.Services.Themes is wired (catalog list/get).
 	Themes bool `json:"themes"`
+	// SideChat is true when a read-only side-chat model is wired. The ops
+	// refusal does not depend on this flag.
+	SideChat bool `json:"sideChat"`
 }
 
 type bootstrapResponse struct {
@@ -144,7 +147,7 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 	// Timeline is host-safe and derived from SessionDir JSONL (always available).
 	// TeamControl shares the live gate: Ops are handled by the same engine path.
 	live := s.hasLive()
-	c := capabilities{Live: live, Roots: s.opts.LiveHub != nil, Timeline: true, Sandbox: s.hasSandbox(), Diag: live, Team: live, TeamControl: live}
+	c := capabilities{Live: live, Roots: s.opts.LiveHub != nil, Timeline: true, Sandbox: s.hasSandbox(), Diag: live, Team: live, TeamControl: live, SideChat: s.opts.SideChat != nil}
 	var skills []map[string]any
 	if h := s.opts.Services; h != nil {
 		c.Auth, c.Catalog, c.Settings, c.History = h.Auth != nil, h.Catalog != nil, h.Settings != nil, h.History != nil

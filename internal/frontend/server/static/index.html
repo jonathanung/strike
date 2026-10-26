@@ -9,15 +9,16 @@
 (function(){try{var ok={strike:1,nord:1,dracula:1,gruvbox:1,monokai:1,"tokyo-night":1,catppuccin:1};var t=localStorage.getItem("strike.theme")||"strike";var s=localStorage.getItem("strike.scheme")||"dark";if(!ok[t])t="strike";if(s!=="light")s="dark";var el=document.documentElement;el.setAttribute("data-theme",t);el.setAttribute("data-scheme",s);}catch(e){}})();
 </script>
 <link rel="manifest" href="/manifest.webmanifest">
-<link rel="stylesheet" href="/assets/style-ee43125b5bb3174e.css" integrity="sha384-EYpu+ulmENyyRbPlrbk7UfpjHvMmRvrwJlMfmtexr5H2pUDvb3v02Q4XIuWnLlS/"/>
-<link rel="stylesheet" href="/assets/editor-0c775cc9b18a5458.css" integrity="sha384-AyOjM22LfkyGATt0RiB3O7FWiJR+tjHaI+BUHE+UrMDR7Ykaa5aNRaKgR7as4OR+"/>
+<link rel="stylesheet" href="/assets/style-3786d7a326ffc085.css" integrity="sha384-izMwkRBij4s/vs1kLV6HtjgiLUEYKkBFjJB5qYs5MXq8oYSZGlDYQLC16OsI2RPO"/>
+<link rel="stylesheet" href="/assets/navbar-4aaaf28db500eacb.css" integrity="sha384-5TOOsJOEELXhQX9eaCeYAdolP2MTbzKY2Rs54jkUpbigS3rQ+1uG62wvDZTASCfR"/>
+<link rel="stylesheet" href="/assets/editor-c775cc9b18a5458.css" integrity="sha384-AyOjM22LfkyGATt0RiB3O7FWiJR+tjHaI+BUHE+UrMDR7Ykaa5aNRaKgR7as4OR+"/>
 
 
 
 
 <script type="module">
-import init, * as bindings from '/assets/strike-webui-3d1726d1cc98a1ed.js';
-const wasm = await init({ module_or_path: '/assets/strike-webui-5135387beb308177_bg.wasm' });
+import init, * as bindings from '/assets/strike-webui-9837403b1a03584a.js';
+const wasm = await init({ module_or_path: '/assets/strike-webui-9837403b1a03584a_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -28,6 +29,6 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 </script>
 <script src="/assets/register.js" defer></script>
 
-<link rel="modulepreload" href="/assets/strike-webui-3d1726d1cc98a1ed.js" crossorigin="anonymous" integrity="sha384-mXjqWBrI8R6ZwTYWKkt+70oKtLxr4h8PqIxwC0t9BF9CL30+j7BaK3KOZoYUNCOn"><link rel="preload" href="/assets/strike-webui-5135387beb308177_bg.wasm" crossorigin="anonymous" integrity="sha384-Z4lchW9a8iRYdLOUMTni+j+Iu0jCNwoQ82fOtPo80+ZaP+xlmnJ6S0Q23NpNvioa" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/assets/strike-webui-9837403b1a03584a.js" crossorigin="anonymous" integrity="sha384-BEZfBianIJrrPSC/+WSj4MgentFCJnGjdUhSd1159vRrBHWOaQrLCvIeIWSYnXU9"><link rel="preload" href="/assets/strike-webui-9837403b1a03584a_bg.wasm" crossorigin="anonymous" integrity="sha384-z+FKz8DYIJhO6gauLDGcm7kW0nhTdGGDI0bttkLkcIeo7B6VU1p38wZvSvvaldLF" as="fetch" type="application/wasm"></head>
 <body></body>
 </html>

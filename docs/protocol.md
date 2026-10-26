@@ -49,6 +49,8 @@ Ops use the same envelope idea via `OpEnvelope` (`WrapOp` / `Decode`).
 - Do not break existing ops without a migration note in CHANGELOG.
 - Full third-party stable API freeze is a **non-goal** for v1; this document
   is the consumer contract for in-tree and thin external clients.
+- Machine-readable schema, Rust types, and the drift check:
+  [protocol-schema.md](protocol-schema.md).
 
 ### Forward-compat decode (`UnknownEvent`)
 
@@ -203,6 +205,7 @@ shows `disconnected` when `now` or a heartbeat is older than `heartbeatStaleMs`
 
 ## Related docs
 
+- [protocol-schema.md](protocol-schema.md) — generated JSON Schema, Rust types, versioning
 - [ARCHITECTURE.md](ARCHITECTURE.md) — package map and dataflow
 - [sdk.md](sdk.md) — Go client over this schema
 - [harnesses.md](harnesses.md) — function harness subprocess ABI

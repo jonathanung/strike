@@ -3,6 +3,10 @@ target = "index.html"
 public_url = "/assets/"
 dist = "dist"
 
+[tools]
+# binaryen 108 on PATH rewrites the externref table and the page never starts.
+wasm_opt = "version_131"
+
 [serve]
 port = 8788
 # Dev only: proxy API calls to a locally running daemon.

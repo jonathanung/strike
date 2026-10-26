@@ -25,8 +25,13 @@
 //! word. [`StatusTabs`] is the open-session strip. Both set `data-status`
 //! to the canonical id and `data-unread` to `true` or `false`.
 
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use leptos::callback::Callback;
 use leptos::prelude::*;
+
+use crate::model::RootSummary;
 
 /// Missed-heartbeat window. Matches `protocol.HeartbeatStaleMs` and the schema.
 pub const HEARTBEAT_STALE_MS: f64 = 6000.0;
@@ -211,6 +216,92 @@ pub fn fmt_ago(mtime: i64, now_s: i64) -> String {
         return format!("{}h", delta / 3600);
     }
     format!("{}d", delta / 86_400)
+}
+
+/// Page wiring for the shell slots in `src/shell/contrib/status.rs`.
+/// The shell boots before App's signals exist, so App installs them here
+/// (same late-bind shape as `shell::HostBridge` and the notifications
+/// centre's host) and the slot renders read them.
+#[derive(Clone)]
+pub struct StatusHost {
+    pub gateway_kind: RwSignal<StatusKind>,
+    pub gateway_label: RwSignal<String>,
+    pub roots: RwSignal<Vec<RootSummary>>,
+    pub active_root: RwSignal<String>,
+    pub refresh: Rc<dyn Fn()>,
+}
+
+thread_local! {
+    static HOST: RefCell<Option<StatusHost>> = const { RefCell::new(None) };
+}
+
+pub fn set_host(host: StatusHost) {
+    HOST.with(|slot| *slot.borrow_mut() = Some(host));
+}
+
+fn host() -> Option<StatusHost> {
+    HOST.with(|slot| slot.borrow().clone())
+}
+
+/// Slot render for the `gateway` slot: the pre-shell header chip, unchanged.
+/// A button so Enter/Space re-checks the daemon (`refresh`).
+pub fn gateway_view() -> AnyView {
+    let Some(host) = host() else {
+        return view! { <span></span> }.into_any();
+    };
+    let kind = host.gateway_kind;
+    let label = host.gateway_label;
+    let refresh = host.refresh.clone();
+    view! {
+        <button
+            type="button"
+            class="status-chip-hit"
+            aria-label=move || format!("Gateway {}", label.get())
+            title="Gateway status. Enter checks the daemon."
+            on:click=move |_| (*refresh)()
+        >
+            {move || {
+                view! {
+                    <StatusMark
+                        kind=kind.get()
+                        place=StatusSlot::Chip
+                        label=label.get()
+                    />
+                }
+            }}
+        </button>
+    }
+    .into_any()
+}
+
+/// Slot render for the `session-status` slot: the active live root's
+/// [`StatusMark`] chip, classified the same way as its [`StatusTabs`] tab.
+/// No live root is `idle`, matching the shell fallback it replaces.
+pub fn session_view() -> AnyView {
+    let Some(host) = host() else {
+        return view! { <span></span> }.into_any();
+    };
+    let roots = host.roots;
+    let active_root = host.active_root;
+    view! {
+        {move || {
+            let kind = roots
+                .get()
+                .iter()
+                .find(|row| row.id == active_root.get())
+                .map(|row| {
+                    session_kind(
+                        &row.status,
+                        row.busy,
+                        row.permission_pending,
+                        row.question_pending,
+                    )
+                })
+                .unwrap_or(StatusKind::Idle);
+            view! { <StatusMark kind=kind place=StatusSlot::Chip /> }
+        }}
+    }
+    .into_any()
 }
 
 pub fn chrome_title(kind: StatusKind, unread: usize) -> String {

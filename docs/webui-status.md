@@ -56,9 +56,13 @@ stay put.
 
 The shell brand line still says `Connected` while `/health` is ok and
 `Unreachable` when it is not. That keeps the cockpit's existing words.
-The chip next to it is [`StatusMark`] with the gateway aggregate
-(`idle` paints success). A missed heartbeat sets `data-status` to
-`disconnected` and the chip label to `Unreachable`.
+In the shell (`docs/webui-shell.md`) the chips register from
+`webui/src/shell/contrib/status.rs`, with the page's signals installed
+through `status::set_host`: `session-status` (Status region) is the
+active session's [`StatusMark`] chip, and `gateway` (Trailing) replaces
+the builtin gateway slot with [`StatusMark`] carrying the gateway
+aggregate (`idle` paints success). A missed heartbeat sets `data-status`
+to `disconnected` and the chip label to `Unreachable`.
 
 `apply_document_chrome(kind, unread_count)` sets `document.title`
 (`Strike`, `Strike · Running`, `(2) Strike · Waiting`) and a favicon whose
