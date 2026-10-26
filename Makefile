@@ -1,4 +1,4 @@
-.PHONY: build run run-echo serve webui-build webui-check webui-uat webui-uat-smoke web-check test vet cover cover-check clean setup restore tui-gen prompt-reg chaos harness-eval swebench-eval telemetry-check container-smoke
+.PHONY: build run run-echo serve webui-build webui-check webui-uat webui-uat-smoke webui-sidechat-uat web-check test vet cover cover-check clean setup restore tui-gen prompt-reg chaos harness-eval swebench-eval telemetry-check protocol-schema protocol-schema-check container-smoke
 
 # Multi-module workspace (go.work): ., ./pkg/protocol, ./pkg/redact,
 # ./harness.
@@ -78,6 +78,10 @@ webui-uat-smoke: build
 	node --test scripts/webui-uat/lib.test.mjs
 	node scripts/webui-uat.mjs --suite smoke --no-video
 
+# Side-chat drawer: read-only ask, tool-call refusal, keyboard. See docs/webui-planned.md.
+webui-sidechat-uat: build
+	node scripts/webui-sidechat-uat.mjs
+
 test: tui-gen
 	go test ./...
 	@for m in $(LEAF_MODS); do go -C $$m test ./... || exit 1; done
@@ -108,6 +112,17 @@ prompt-reg:
 #   UPDATE_HARNESS_EVAL=1 make harness-eval      # refresh testdata sample
 harness-eval:
 	go test ./internal/eval/replay/ -run 'TestHarnessEvalSuite|TestBuildEvalReport' -v -count=1
+
+# Op/Event JSON Schema + Rust types (#1306). Writes schemas/protocol/v1 and
+# webui/protocol-schema/src/lib.rs from pkg/protocol.
+protocol-schema:
+	UPDATE_SCHEMA=1 go -C pkg/protocol test -count=1 -run 'TestSchemaDrift'
+
+# Fails when those artifacts drift, and when the generated Rust types cannot
+# decode the golden event stream (including an unknown event).
+protocol-schema-check:
+	go -C pkg/protocol test -count=1 -run 'TestSchema'
+	cargo test --manifest-path webui/protocol-schema/Cargo.toml --locked
 
 # Security/harness telemetry schema drift gate (#894).
 # Fails when schemas/telemetry/v1/registry.json diverges from Go export

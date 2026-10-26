@@ -87,6 +87,18 @@ jobs:
           go -C pkg/redact test -race ./...
           go -C harness test -race ./...
 
+      # Generated protocol Rust types (#1306). Go drift already ran above
+      # (`go -C pkg/protocol test`). This job checks the golden event stream
+      # decodes, including an unknown event type.
+      - name: Protocol schema Rust tests
+        run: |
+          set -euo pipefail
+          if ! command -v cargo >/dev/null; then
+            curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain 1.83.0
+            . "$HOME/.cargo/env"
+          fi
+          cargo test --manifest-path webui/protocol-schema/Cargo.toml --locked
+
       # E3.2 prompt regression: verbose report of tool/turn/token deltas.
       # Non-blocking for now (test itself soft-fails metric drift unless
       # PROMPT_REGRESSION_STRICT=1). continue-on-error keeps the step visible

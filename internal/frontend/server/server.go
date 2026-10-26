@@ -81,6 +81,10 @@ type Options struct {
 	OpsBurst int
 	// OpsClock overrides time.Now for rate-limit tests.
 	OpsClock func() time.Time
+	// SideChat answers questions about a session transcript. It must not
+	// submit protocol ops. Nil makes POST /v1/sidechat/ask return 503.
+	// POST /v1/sidechat/ops still refuses every op, including permission.reply.
+	SideChat SideChatModel
 }
 
 // Server is an HTTP server for session attach and optional live cockpit.
@@ -104,6 +108,9 @@ type Server struct {
 	// notifyOnce lazily opens the redacted notification log under SessionDir.
 	notifyOnce sync.Once
 	notifyLog  *notifyLog
+
+	// sideChat stores read-only Q&A beside the session log, not in it.
+	sideChat sideChatStore
 }
 
 // New validates options and builds a Server. Does not listen.
@@ -337,6 +344,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/diag", s.handleDiag)
 	s.mux.HandleFunc("POST /v1/diag", s.handleDiag)
 	s.mux.HandleFunc("POST /v1/ops", s.handleOps)
+	s.mux.HandleFunc("GET /v1/sidechat", s.handleSideChatList)
+	s.mux.HandleFunc("POST /v1/sidechat/ask", s.handleSideChatAsk)
+	s.mux.HandleFunc("POST /v1/sidechat/ops", s.handleSideChatOps)
 	s.mux.HandleFunc("GET /v1/live/events", s.handleLiveEvents)
 	s.mux.HandleFunc("GET /v1/notifications", s.handleNotifications)
 	s.mux.HandleFunc("GET /v1/notifications/stream", s.handleNotificationStream)

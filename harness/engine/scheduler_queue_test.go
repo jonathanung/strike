@@ -308,21 +308,21 @@ func TestMultiRootQueueCorrelation(t *testing.T) {
 	b.Ops() <- protocol.UserInput{Text: "b"}
 
 	bySession := map[string]protocol.SchedulerQueued{}
-	deadline := time.Now().Add(5 * time.Second)
-	for len(bySession) < 2 && time.Now().Before(deadline) {
-		for _, eng := range []*engine.Engine{a, b} {
-			select {
-			case ev := <-eng.Events():
-				if q, ok := ev.(protocol.SchedulerQueued); ok {
-					bySession[q.SessionID] = q
-				}
-			default:
+	deadline := time.NewTimer(5 * time.Second)
+	defer deadline.Stop()
+	for len(bySession) < 2 {
+		select {
+		case ev := <-a.Events():
+			if q, ok := ev.(protocol.SchedulerQueued); ok {
+				bySession[q.SessionID] = q
 			}
+		case ev := <-b.Events():
+			if q, ok := ev.(protocol.SchedulerQueued); ok {
+				bySession[q.SessionID] = q
+			}
+		case <-deadline.C:
+			t.Fatalf("queued sessions=%v want root-1 and root-2", bySession)
 		}
-		time.Sleep(2 * time.Millisecond)
-	}
-	if len(bySession) < 2 {
-		t.Fatalf("queued sessions=%v want root-1 and root-2", bySession)
 	}
 	if bySession["root-1"].RequestID == "" || bySession["root-2"].RequestID == "" {
 		t.Fatalf("missing request ids: %+v", bySession)

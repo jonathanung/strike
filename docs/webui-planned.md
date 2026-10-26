@@ -113,10 +113,28 @@ in the page.
 
 ## Side chat
 
-A second read-only chat is not a daemon resource. Planned: a transcript
-view that subscribes to events and cannot post `user.input`, so it cannot
-approve a tool. Until that view exists, the only composer is the one with
-the approval chip.
+Shipped as a drawer opened from the Activity header, an Activity row, the
+composer chip, Ctrl+K, or Alt+S. It mirrors the session events the page
+already subscribes to and posts questions to `POST /v1/sidechat/ask`. That
+route builds a transcript from the session JSONL and makes a separate model
+call with no tools, using the live root's current provider and model.
+`focusSessionId` is accepted only for that root or a child on its roster.
+Switching roots clears the drawer's focus. Turns are stored in
+`sidechat/<session-id>.jsonl`, not the session log, so they are not
+`user.input` and the session list does not treat the file as a root.
+
+`POST /v1/sidechat/ops` refuses every protocol op. A `permission.reply`
+from this channel cannot approve a tool; the daemon returns
+`sidechat_read_only` and does not submit the op. The panel has no approval
+control. Attach-only serve has no side-chat model, so ask returns 503 while
+the ops refusal still holds. The echo provider answers by echoing the
+question; a question that starts with `run ` is refused when the model
+tries to call a tool.
+
+`make webui-sidechat-uat` drives those paths in headless Chrome (composer,
+Activity row, Enter / Escape / Alt+S / Ctrl+K, and the tool-call refusal)
+and writes shots under `webui-uat-artifacts/side-chat/`. `make webui-uat`
+stays the cockpit pass.
 
 ## Extra side tabs
 
