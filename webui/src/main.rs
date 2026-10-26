@@ -11,6 +11,7 @@ mod model;
 mod usage_audit;
 mod shell;
 mod side_chat;
+mod status;
 
 use crate::shell::icon;
 
@@ -26,7 +27,7 @@ use model::{
     permission_modes, prefer_summary, protocol_dump, session_label, status_kind, strip_echo_tip,
     task_headline, visible_sessions, ActivityRow, Bootstrap, ChangedFilesResponse, ChatLine,
     ChildCard, ChildrenResponse, FilesResponse, Health, ModelInfo, ModelList, Remote, RootSummary,
-    SessionItem, SessionsResponse, TeamSnapshot, Workspace, WorkspacesResponse,
+    SessionItem, SessionsResponse, StatusBoard, TeamSnapshot, Workspace, WorkspacesResponse,
 };
 use protocol_schema::Event;
 use wasm_bindgen::closure::Closure;
@@ -38,6 +39,10 @@ use crate::api::{
 use crate::editor::{DocumentPane, LinkedBody, MarkdownView, has_markdown_table};
 use crate::side_chat::SideChatPanel;
 use crate::model::{budget_elapsed, can_retry, RootsResponse};
+use crate::status::{
+    apply_document_chrome, elapsed_since, session_kind, StatusKind, StatusMark, StatusSlot,
+    StatusTab, StatusTabs, HEARTBEAT_STALE_MS,
+};
 
 fn storage() -> Option<web_sys::Storage> {
     web_sys::window()?.local_storage().ok().flatten()
@@ -544,6 +549,57 @@ fn rows_from_team(prev: &[ActivityRow], team: &TeamSnapshot, now: f64) -> Vec<Ac
     rows
 }
 
+fn apply_status_payload(
+    roots: RwSignal<Vec<model::RootSummary>>,
+    sessions: RwSignal<Vec<model::SessionItem>>,
+    sess: &serde_json::Value,
+) {
+    let Some(id) = sess.get("sessionId").and_then(|v| v.as_str()) else {
+        return;
+    };
+    if id.is_empty() {
+        return;
+    }
+    let id = id.to_string();
+    let state = sess
+        .get("status")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let unread = sess.get("unread").and_then(|v| v.as_bool()).unwrap_or(false);
+    let since = sess.get("since").and_then(|v| v.as_i64()).unwrap_or(0);
+    let last = sess
+        .get("lastActivityAt")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
+    roots.update(|rows| {
+        if let Some(row) = rows.iter_mut().find(|row| row.id == id) {
+            if !state.is_empty() {
+                row.busy = state == "running" || state == "waiting";
+                row.status = state.clone();
+            }
+            row.unread = Some(unread);
+            if since > 0 {
+                row.status_since = since;
+            }
+            if last > 0 {
+                row.last_activity_at = last;
+            }
+        }
+    });
+    sessions.update(|rows| {
+        if let Some(row) = rows.iter_mut().find(|row| row.id == id) {
+            if !state.is_empty() {
+                row.status = state.clone();
+            }
+            row.unread = Some(unread);
+            if last > 0 {
+                row.last_activity_at = last;
+            }
+        }
+    });
+}
+
 #[component]
 fn App() -> impl IntoView {
     let base = RwSignal::new(load("strike.base"));
@@ -574,6 +630,10 @@ fn App() -> impl IntoView {
     let stream_note = RwSignal::new(String::new());
     let load_error = RwSignal::new(String::new());
     let gateway = RwSignal::new("checking".to_string());
+    let gateway_kind = RwSignal::new(StatusKind::Idle);
+    let gateway_label = RwSignal::new("Checking".to_string());
+    let last_beat = RwSignal::new(0.0f64);
+    let boot_ms = now_ms();
     let focus = RwSignal::new(false);
     let back_stack = RwSignal::new(Vec::<String>::new());
     let forward_stack = RwSignal::new(Vec::<String>::new());
@@ -664,18 +724,41 @@ fn App() -> impl IntoView {
         let (b, t) = (base.get_untracked(), token.get_untracked());
         spawn_local(async move {
             let mut err = String::new();
+            let mut gateway_up = false;
             match get_json::<Health>(&b, &t, "/health").await {
                 Ok(h) if h.ok => {
                     gateway.set("connected".into());
-                    status.set(format!("strike {}", h.version));
+                    last_beat.set(now_ms());
+                    gateway_up = true;
+                    status.set(format!("Connected · {}", h.version));
                 }
                 Ok(_) => {
                     gateway.set("unreachable".into());
+                    gateway_kind.set(StatusKind::Disconnected);
+                    gateway_label.set("Unreachable".into());
+                    status.set("Unreachable".into());
                     err = "The daemon answered, but it is not ok.".into();
                 }
                 Err(e) => {
                     gateway.set("unreachable".into());
+                    gateway_kind.set(StatusKind::Disconnected);
+                    gateway_label.set("Unreachable".into());
+                    status.set("Unreachable".into());
                     err = format!("Could not reach the daemon: {e}");
+                }
+            }
+            if gateway_up {
+                match get_json::<StatusBoard>(&b, &t, "/v1/status/sessions").await {
+                    Ok(board) => {
+                        let kind = StatusKind::parse(&board.gateway);
+                        gateway_kind.set(kind);
+                        gateway_label.set(kind.label().into());
+                    }
+                    Err(e) => {
+                        if err.is_empty() {
+                            err = format!("Status board failed to load: {e}");
+                        }
+                    }
                 }
             }
             match get_json::<WorkspacesResponse>(&b, &t, "/v1/workspaces").await {
@@ -751,12 +834,27 @@ fn App() -> impl IntoView {
             .unwrap_or(0);
         let now = (now_ms() / 1000.0) as i64;
         seen.update(|map| {
-            map.insert(id, mtime.max(now));
+            map.insert(id.clone(), mtime.max(now));
         });
         save(
             "strike.seen",
             &serde_json::to_string(&seen.get_untracked()).unwrap_or_default(),
         );
+        roots.update(|rows| {
+            if let Some(row) = rows.iter_mut().find(|row| row.id == id) {
+                row.unread = Some(false);
+            }
+        });
+        sessions.update(|rows| {
+            if let Some(row) = rows.iter_mut().find(|row| row.id == id) {
+                row.unread = Some(false);
+            }
+        });
+        let (b, t, seen_id) = (base.get_untracked(), token.get_untracked(), id);
+        spawn_local(async move {
+            let path = format!("/v1/sessions/{}/seen", api::js_encode(&seen_id));
+            let _ = post_json(&b, &t, &path, serde_json::json!({})).await;
+        });
     };
 
     let tail: Rc<RefCell<Option<web_sys::EventSource>>> = Rc::new(RefCell::new(None));
@@ -822,9 +920,26 @@ fn App() -> impl IntoView {
     });
 
     let poll_tick = tick;
+    let beat_sig = last_beat;
+    let kind_sig = gateway_kind;
+    let label_sig = gateway_label;
+    let gateway_sig = gateway;
+    let status_sig = status;
     let interval = Closure::<dyn FnMut()>::new(move || {
         let n = poll_tick.get_untracked().wrapping_add(1);
         poll_tick.set(n);
+        let beat = beat_sig.get_untracked();
+        let age = if beat > 0.0 {
+            now_ms() - beat
+        } else {
+            now_ms() - boot_ms
+        };
+        if age > HEARTBEAT_STALE_MS {
+            kind_sig.set(StatusKind::Disconnected);
+            label_sig.set("Unreachable".into());
+            gateway_sig.set("unreachable".into());
+            status_sig.set("Unreachable".into());
+        }
         if n % 2 == 0 {
             poll_team();
             refresh_meta();
@@ -837,6 +952,87 @@ fn App() -> impl IntoView {
         );
     }
     interval.forget();
+
+    let status_tail: Rc<RefCell<Option<web_sys::EventSource>>> = Rc::new(RefCell::new(None));
+    let status_tail_fx = status_tail.clone();
+    Effect::new(move |_| {
+        let b = base.get();
+        if let Some(es) = status_tail_fx.borrow_mut().take() {
+            es.close();
+        }
+        if !same_origin(&b) {
+            return;
+        }
+        let es = match web_sys::EventSource::new("/v1/status/events") {
+            Ok(es) => es,
+            Err(_) => return,
+        };
+        let beat = last_beat;
+        let kind = gateway_kind;
+        let label = gateway_label;
+        let link = gateway;
+        let roots_cb = roots;
+        let sessions_cb = sessions;
+        let on_msg =
+            Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |ev: web_sys::MessageEvent| {
+                // A buffered frame can arrive after /health has already failed.
+                // Leave the chip on Unreachable until the next successful poll.
+                if link.get_untracked() == "unreachable" {
+                    return;
+                }
+                let Some(data) = ev.data().as_string() else {
+                    return;
+                };
+                let v: serde_json::Value = match serde_json::from_str(&data) {
+                    Ok(v) => v,
+                    Err(_) => return,
+                };
+                beat.set(now_ms());
+                if let Some(gw) = v.get("gateway").and_then(|g| g.as_str()) {
+                    if !gw.is_empty() {
+                        let parsed = StatusKind::parse(gw);
+                        kind.set(parsed);
+                        label.set(parsed.label().into());
+                    }
+                }
+                let typ = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                if typ == "session.status" {
+                    if let Some(sess) = v.get("session") {
+                        apply_status_payload(roots_cb, sessions_cb, sess);
+                    }
+                } else if typ == "snapshot" {
+                    if let Some(list) = v.get("sessions").and_then(|s| s.as_array()) {
+                        for sess in list {
+                            apply_status_payload(roots_cb, sessions_cb, sess);
+                        }
+                    }
+                }
+            });
+        es.set_onmessage(Some(on_msg.as_ref().unchecked_ref()));
+        on_msg.forget();
+        *status_tail_fx.borrow_mut() = Some(es);
+    });
+
+    Effect::new(move |_| {
+        let kind = gateway_kind.get();
+        let root_rows = roots.get();
+        let saved = sessions.get();
+        let active = active_root.get();
+        let mut n = 0usize;
+        let mut live_ids = std::collections::HashSet::new();
+        for row in &root_rows {
+            live_ids.insert(row.id.clone());
+            if row.unread == Some(true) && row.id != active {
+                n += 1;
+            }
+        }
+        for row in &saved {
+            if row.unread == Some(true) && !live_ids.contains(&row.id) {
+                n += 1;
+            }
+        }
+        apply_document_chrome(kind, n);
+    });
 
     let session_busy = move |root: &str| -> bool {
         roots.get_untracked().iter().any(|r| r.id == root && r.busy)
@@ -1310,6 +1506,13 @@ fn App() -> impl IntoView {
             });
         }),
     });
+    crate::status::set_host(crate::status::StatusHost {
+        gateway_kind,
+        gateway_label,
+        roots,
+        active_root,
+        refresh: Rc::new(move || refresh_meta()),
+    });
 
     // Alt+G opens Goals. The shell owns the other chords; this one stays
     // here because only the page can set `mode`. The shortcut is listed in
@@ -1418,6 +1621,7 @@ fn App() -> impl IntoView {
                     </div>
                     <input class="search" placeholder="Search sessions" prop:value=move || session_query.get() on:input=move |ev| session_query.set(event_target_value(&ev)) />
                     {move || {
+                        let _ = tick.get();
                         let active = active_root.get();
                         let active_running = activity.get().iter().any(|r| is_running(&r.state));
                         let merged = merge_sessions(&roots.get(), &sessions.get(), &pins.get(), &seen.get(), &active, active_running);
@@ -1435,39 +1639,45 @@ fn App() -> impl IntoView {
                             let id_btn = id.clone();
                             let id_pin = id.clone();
                             let live = row.live;
-                            let busy = row.busy;
                             let unread = row.unread;
                             let pinned = row.pinned;
                             let fallback = short_id(&id);
                             let label = session_label(&row.title, &fallback);
-                            let when = fmt_ago(row.mtime, (now_ms() / 1000.0) as i64);
-                            let subtitle = if busy {
-                                "In progress"
-                            } else if unread {
-                                "Unread"
-                            } else if live {
-                                "Idle"
+                            let now_s = (now_ms() / 1000.0) as i64;
+                            let activity_s = if row.last_activity_at > 0 {
+                                row.last_activity_at / 1000
                             } else {
-                                "Saved"
+                                row.mtime
                             };
-                            let dot = if busy {
-                                "dot dot-running"
-                            } else if unread {
-                                "dot dot-unread"
+                            let when = fmt_ago(activity_s, now_s);
+                            let kind = session_kind(&row.status, row.busy, false, false);
+                            let elapsed = elapsed_since(kind, row.status_since, now_ms() as i64);
+                            let mut subtitle = if unread {
+                                format!("{} · Unread", kind.label())
+                            } else if !row.live && row.status.is_empty() {
+                                "Saved".into()
                             } else {
-                                "dot"
+                                kind.label().to_string()
+                            };
+                            if !when.is_empty() && elapsed > 0 {
+                                subtitle = format!("{subtitle} · {when}");
+                            }
+                            let clock = if elapsed > 0 {
+                                fmt_elapsed(elapsed)
+                            } else {
+                                when.clone()
                             };
                             let klass = if id == active { "session-row card on" } else { "session-row card" };
                             let pin_label = if pinned { "Unpin" } else { "Pin" };
                             let pin_class = if pinned { "pin on" } else { "pin" };
                             view! {
                                 <li class=klass>
+                                    <StatusMark kind=kind place=StatusSlot::Gutter unread=unread />
                                     <button class="link session-main" on:click=move |_| open(id_btn.clone(), live)>
-                                        <span class=dot></span>
                                         <span class="session-copy">
                                             <span class="session-top">
                                                 <span class="name">{label}</span>
-                                                <span class="time">{when}</span>
+                                                <span class="time">{clock}</span>
                                             </span>
                                             <span class="path">{subtitle}</span>
                                         </span>
@@ -1484,7 +1694,7 @@ fn App() -> impl IntoView {
                         view! {
                             <div>
                                 <Show when=move || no_rows>
-                                    <EmptyState title="No sessions match".into() body="New roots show up here. Pins and unread marks stay in this browser.".into() />
+                                    <EmptyState title="No sessions match".into() body="New roots show up here. Pins stay in this browser. Unread is stored on the daemon.".into() />
                                 </Show>
                                 <ul class="plain sessions">{rows}</ul>
                                 <Show when=move || has_older>
@@ -1530,6 +1740,27 @@ fn App() -> impl IntoView {
                     </details>
                 </aside>
                 <section class="chat">
+                    {move || {
+                        let _ = tick.get();
+                        let active = active_root.get();
+                        let now = now_ms() as i64;
+                        let open = open_session;
+                        let tabs: Vec<StatusTab> = roots.get().into_iter().map(|row| {
+                            let kind = session_kind(&row.status, row.busy, row.permission_pending, row.question_pending);
+                            let fallback = short_id(&row.id);
+                            StatusTab {
+                                id: row.id.clone(),
+                                label: session_label(&row.title, &fallback),
+                                unread: row.unread.unwrap_or(false) && row.id != active,
+                                elapsed_s: elapsed_since(kind, row.status_since, now),
+                                active: row.id == active,
+                                kind,
+                            }
+                        }).collect();
+                        view! {
+                            <StatusTabs tabs=tabs on_select=move |id: String| open(id, true) />
+                        }
+                    }}
                     <Show when=move || !load_error.get().is_empty()>
                         <div class="notice" role="alert">
                             <span>{move || load_error.get()}</span>
@@ -1650,7 +1881,10 @@ fn App() -> impl IntoView {
                                     <header>
                                         <span class="who">{title}</span>
                                         <Show when=move || has_badge>
-                                            <Badge kind=badge_kind.clone() label=badge.clone() />
+                                            {match StatusKind::parse_known(&badge_kind) {
+                                                Some(kind) => view! { <StatusMark kind=kind place=StatusSlot::Badge /> }.into_any(),
+                                                None => view! { <Badge kind=badge_kind.clone() label=badge.clone() /> }.into_any(),
+                                            }}
                                         </Show>
                                         {has_stamp.then(|| view! { <span class="stamp" title=stamp_full.clone()>{stamp.clone()}</span> })}
                                     </header>
@@ -1813,13 +2047,15 @@ fn App() -> impl IntoView {
                                 let agent = row.agent.clone();
                                 let agent_label = agent.clone();
                                 let primary = if show_task { headline } else { name.clone() };
-                                let dot = match state.as_str() {
-                                    "running" | "working" => "dot dot-running",
-                                    "blocked" | "stalled" => "dot dot-blocked",
-                                    "done" | "completed" => "dot dot-done",
-                                    "failed" => "dot dot-failed",
-                                    _ => "dot",
+                                let kind = StatusKind::parse_known(&state);
+                                let status_label = if state == "stalled" {
+                                    "Stalled".to_string()
+                                } else if let Some(kind) = kind {
+                                    kind.label().to_string()
+                                } else {
+                                    state.clone()
                                 };
+                                let mark_kind = kind.unwrap_or(StatusKind::Idle);
                                 view! {
                                     <li class="card activity-row">
                                         <button class="link activity-main" on:click=move |_| {
@@ -1831,9 +2067,9 @@ fn App() -> impl IntoView {
                                             });
                                         }>
                                             <span class="task-line">
-                                                <span class=dot></span>
+                                                <StatusMark kind=mark_kind place=StatusSlot::Dot />
                                                 <span class="name">{primary}</span>
-                                                <Badge kind=state.clone() label=state.clone() />
+                                                <StatusMark kind=mark_kind place=StatusSlot::Badge label=status_label />
                                             </span>
                                             <span class="task-meta">
                                                 <Show when=move || show_task>

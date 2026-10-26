@@ -31,10 +31,13 @@ type sessionsResponse struct {
 }
 
 type sessionListItem struct {
-	ID         string `json:"id"`
-	Title      string `json:"title,omitempty"`
-	Mtime      int64  `json:"mtime,omitempty"`
-	ForkedFrom string `json:"forkedFrom,omitempty"`
+	ID             string `json:"id"`
+	Title          string `json:"title,omitempty"`
+	Mtime          int64  `json:"mtime,omitempty"`
+	ForkedFrom     string `json:"forkedFrom,omitempty"`
+	Status         string `json:"status,omitempty"`
+	Unread         bool   `json:"unread"`
+	LastActivityAt int64  `json:"lastActivityAt,omitempty"`
 }
 
 type agentsResponse struct {
@@ -648,24 +651,6 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, agentsResponse{Agents: live.Agents()})
 }
 
-func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
-	items, err := listSessionFiles(s.opts.SessionDir)
-	if err != nil {
-		http.Error(w, "session list unavailable", http.StatusInternalServerError)
-		return
-	}
-	liveID := ""
-	if s.opts.LiveHub != nil {
-		live := s.opts.LiveHub.Active()
-		if live != nil {
-			liveID = live.SessionID()
-		}
-	} else if s.opts.Live != nil {
-		liveID = s.opts.Live.SessionID()
-	}
-	writeJSON(w, http.StatusOK, sessionsResponse{Sessions: items, LiveID: liveID})
-}
-
 func listSessionFiles(dir string) ([]sessionListItem, error) {
 	mgr := session.NewManager(dir)
 	list, err := mgr.List()
@@ -694,6 +679,25 @@ func listSessionFiles(dir string) ([]sessionListItem, error) {
 		return out[i].ID < out[j].ID
 	})
 	return out, nil
+}
+
+func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
+	items, err := listSessionFiles(s.opts.SessionDir)
+	if err != nil {
+		http.Error(w, "session list unavailable", http.StatusInternalServerError)
+		return
+	}
+	items = s.decorateSessions(items)
+	liveID := ""
+	if s.opts.LiveHub != nil {
+		live := s.opts.LiveHub.Active()
+		if live != nil {
+			liveID = live.SessionID()
+		}
+	} else if s.opts.Live != nil {
+		liveID = s.opts.Live.SessionID()
+	}
+	writeJSON(w, http.StatusOK, sessionsResponse{Sessions: items, LiveID: liveID})
 }
 
 func (s *Server) handleSessionChildren(w http.ResponseWriter, r *http.Request) {
@@ -1678,8 +1682,10 @@ func (s *Server) handleRoots(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "multi-root unavailable", http.StatusServiceUnavailable)
 		return
 	}
+	roots := s.opts.LiveHub.List()
+	s.decorateRoots(roots)
 	writeJSON(w, http.StatusOK, rootsResponse{
-		Roots:    s.opts.LiveHub.List(),
+		Roots:    roots,
 		ActiveID: s.opts.LiveHub.ActiveID(),
 	})
 }
