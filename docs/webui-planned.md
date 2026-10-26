@@ -98,11 +98,16 @@ It would not send telemetry. There is no telemetry export on this client.
 
 ## Gateway hub
 
-Saved daemon URLs in the Daemon view are a bookmark list in
-`localStorage`. They are not a hub. Planned: one switcher that reaches
-several loopback gateways over SSH port forwards, with a short-lived token
-minted on the host. Credentials stay on that host. The client must not open
-a public listener or store provider keys.
+The header and the Daemon view share one Gateways switcher. Profiles are
+names and URLs in `localStorage` (`strike.gateways`). Bearers are
+`sessionStorage` only. `strike connect` opens the SSH local-forward and
+injects a short-lived grant on the laptop's loopback. The daemon still
+refuses a public bind. See [gateway.md](gateway.md).
+
+Not in this client: tailnet discovery, a browser-started SSH session, and
+syncing CLI profiles from the daemon. The switcher shows an `ssh`
+destination as a hint. It does not open that connection. A public tunnel
+is still something you run yourself, and it is a public edge.
 
 ## Memory mode
 

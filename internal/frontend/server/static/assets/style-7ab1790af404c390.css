@@ -973,3 +973,67 @@ select.mode, .daemon select {
   .rail { max-height: 220px; }
   .side { max-height: 280px; }
 }
+
+/* feature:ssh-gateway begin */
+.gw-anchor { position: relative; }
+.gw-btn {
+  height: var(--control);
+  padding: 0 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--rule);
+}
+.gw-pop, .gw-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.gw-pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 30;
+  width: min(420px, calc(100vw - 24px));
+  max-height: min(70vh, 560px);
+  overflow: auto;
+  padding: var(--space-3);
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  box-shadow: 0 12px 40px color-mix(in srgb, var(--ground) 55%, transparent);
+}
+.gw-panel { padding: var(--space-4); }
+.gw-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.gw-head .panel-title { margin: 0; }
+.gw-detail { margin: 0; }
+.gw-actions, .gw-panel .row, .gw-body .row { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.gw-actions button, .gw-row .secondary { margin-top: 0; }
+.gw-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
+.gw-row { display: flex; align-items: center; gap: var(--space-2); border-radius: var(--radius-sm); }
+.gw-row.cursor { outline: 1px solid var(--border-focus); }
+.gw-row.on { background: var(--raised); }
+.gw-use {
+  flex: 1;
+  min-width: 0;
+  height: auto;
+  min-height: 36px;
+  padding: 6px 8px;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+.gw-use .name { color: var(--ink); }
+.gw-use .path { color: var(--muted); font-size: var(--type-sm); overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.gw-panel label, .gw-body label { display: block; color: var(--muted); font-size: var(--type-sm); margin: var(--space-2) 0 var(--space-1); }
+.gw-panel input, .gw-body input { width: 100%; }
+@media (max-width: 720px) {
+  .gw-pop { position: fixed; top: 52px; left: 12px; right: 12px; width: auto; }
+  .gw-btn { padding: 0 8px; }
+}
+/* feature:ssh-gateway end */

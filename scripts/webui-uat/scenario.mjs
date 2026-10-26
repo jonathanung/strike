@@ -377,7 +377,7 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
 
   await click(".segmented button", "Daemon");
   await waitUntil(
-    `document.body && document.body.innerText.includes("Saved daemons")`,
+    `document.body && document.body.innerText.includes("This gateway")`,
     4000,
     "daemon view",
   );

@@ -198,19 +198,110 @@ try {
     if (text.includes("Run a command") && text.includes("Activity") && acid === "#7c3aed") break;
     await delay(250);
   }
-  const want = ["Run a command", "Strike", "Activity", "Files", "Changes", "Approval"];
+  const want = ["Run a command", "Strike", "Activity", "Files", "Changes", "Approval", "Gateways"];
   const missingText = want.filter((s) => !text.includes(s));
   if (missingText.length || acid !== "#7c3aed" || ground !== "#14131c") {
     throw new Error(
       `cockpit check failed missing=${missingText.join(",")} acid=${acid} ground=${ground} text=${text.slice(0, 400)}`,
     );
   }
+  if (text.includes(token)) {
+    throw new Error("cockpit innerText contains the smoke token");
+  }
+
+  const clicked = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const btn = [...document.querySelectorAll("button")].find((b) => (b.textContent || "").includes("Gateways"));
+      if (!btn) return "missing";
+      btn.click();
+      return "ok";
+    })()`,
+    returnByValue: true,
+  });
+  if (clicked.result?.result?.value !== "ok") {
+    throw new Error("gateway switcher button missing");
+  }
+
+  let gatewayText = "";
+  for (let i = 0; i < 40; i++) {
+    const ev = await send("Runtime.evaluate", {
+      expression: `(() => {
+        const pop = document.querySelector(".gw-pop");
+        const body = document.body ? document.body.innerText : "";
+        const inputs = [...document.querySelectorAll("input")].map((el) => el.value || "").join("\\n");
+        return JSON.stringify({
+          open: !!pop,
+          pop: pop ? pop.innerText : "",
+          body,
+          inputs,
+        });
+      })()`,
+      returnByValue: true,
+    });
+    const parsed = JSON.parse(ev.result?.result?.value || "{}");
+    gatewayText = parsed.pop || "";
+    if (
+      parsed.open &&
+      gatewayText.includes("This gateway") &&
+      gatewayText.includes("Reconnect") &&
+      gatewayText.includes("not authenticated")
+    ) {
+      if ((parsed.body || "").includes(token) || (parsed.inputs || "").includes(token)) {
+        throw new Error("gateway UI exposed the smoke token");
+      }
+      break;
+    }
+    await delay(250);
+  }
+  if (!gatewayText.includes("This gateway") || !gatewayText.includes("Reconnect") || !gatewayText.includes("not authenticated")) {
+    throw new Error(`gateway switcher check failed text=${gatewayText.slice(0, 400)}`);
+  }
+
+  await send("Runtime.evaluate", {
+    expression: `(() => { const pop = document.querySelector(".gw-pop"); if (pop) pop.focus(); return !!pop; })()`,
+    returnByValue: true,
+  });
+  // Trusted key events. A synthetic KeyboardEvent is not what the panel handles.
+  await send("Input.dispatchKeyEvent", {
+    type: "keyDown",
+    key: "Escape",
+    code: "Escape",
+    windowsVirtualKeyCode: 27,
+    nativeVirtualKeyCode: 27,
+  });
+  await send("Input.dispatchKeyEvent", {
+    type: "keyUp",
+    key: "Escape",
+    code: "Escape",
+    windowsVirtualKeyCode: 27,
+    nativeVirtualKeyCode: 27,
+  });
+  let dismissed = "still-open";
+  for (let i = 0; i < 10; i++) {
+    const ev = await send("Runtime.evaluate", {
+      expression: `document.querySelector(".gw-pop") ? "still-open" : "closed"`,
+      returnByValue: true,
+    });
+    dismissed = ev.result?.result?.value || "missing";
+    if (dismissed === "closed") break;
+    await delay(100);
+  }
+  if (dismissed !== "closed") {
+    throw new Error(`gateway Escape did not close the switcher (${dismissed})`);
+  }
+  if (strikeLog.includes(token)) {
+    throw new Error("daemon log contains the smoke token");
+  }
+
   await editorBrowserCheck({
     send,
     port,
     token,
     repoDir: process.cwd(),
   });
+  if (strikeLog.includes(token)) {
+    throw new Error("daemon log contains the smoke token");
+  }
   console.log("webui-smoke ok");
 } catch (err) {
   console.error(String(err));

@@ -8,7 +8,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -67,9 +66,10 @@ Authorization: Bearer <token> or the strike_serve_token cookie (set by opening
 /attach?token=… once; the server strips the query secret). Query tokens are
 not accepted on /v1/* routes.
 
-Bind is loopback-only (no cleartext LAN expose). For remote access use SSH:
+Bind is loopback-only (no cleartext LAN expose). For remote access:
+  strike connect user@host
   ssh -L 8787:127.0.0.1:8787 user@host
-See docs/web.md.`
+See docs/gateway.md.`
 
 // errExposeRemoved is returned when legacy --expose / --allow-cidr are passed.
 const errExposeRemoved = "--expose was removed (no cleartext LAN bind). Keep loopback and forward with: ssh -L 8787:127.0.0.1:8787 user@host (see docs/web.md)"
@@ -504,6 +504,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		token:      token,
 		auth:       opts.auth,
 		minted:     minted,
+		tokenFile:  opts.tokenFile != "",
 		liveHub:    liveHub,
 		provider:   opts.provider,
 		sessionDir: sessionDir,
@@ -535,6 +536,7 @@ type serveBanner struct {
 	token      string
 	auth       bool
 	minted     bool
+	tokenFile  bool
 	liveHub    *server.LiveHub
 	provider   string
 	sessionDir string
@@ -544,10 +546,11 @@ type serveBanner struct {
 func printServeBanner(w io.Writer, b serveBanner) {
 	fmt.Fprintf(w, "strike serve listening on http://%s\n", b.listenAddr)
 	fmt.Fprintf(w, "  health:  http://%s/health\n", b.listenAddr)
+	// The cockpit URL never carries the bearer. Paste it into the Gateways
+	// field, or use strike connect, which injects a grant on loopback.
+	fmt.Fprintf(w, "  cockpit: http://%s/attach\n", b.listenAddr)
 	if b.auth {
-		fmt.Fprintf(w, "  cockpit: http://%s/attach?token=%s\n", b.listenAddr, url.QueryEscape(b.token))
-	} else {
-		fmt.Fprintf(w, "  cockpit: http://%s/attach\n", b.listenAddr)
+		fmt.Fprintln(w, "  auth:    bearer or cookie; the token is not part of the URL")
 	}
 	if b.liveHub != nil {
 		active := b.liveHub.Active()
@@ -563,13 +566,17 @@ func printServeBanner(w io.Writer, b serveBanner) {
 	}
 	if !b.auth {
 		fmt.Fprintln(w, "  auth:    off (loopback only)")
+	} else if b.tokenFile {
+		fmt.Fprintln(w, "  token:   (from --token-file; not printed. strike daemon token prints the file)")
 	} else if b.minted {
-		fmt.Fprintf(w, "  token:   %s  (auto-minted; pass --token to set)\n", b.token)
+		// In-memory mint has no other copy. This line is the operator's tty,
+		// not an access log, and it is not a URL.
+		fmt.Fprintf(w, "  token:   %s  (auto-minted in memory; pass --token-file to keep it on disk)\n", b.token)
 	} else {
-		fmt.Fprintln(w, "  token:   (from --token)")
+		fmt.Fprintln(w, "  token:   (from --token; not printed)")
 	}
 	fmt.Fprintf(w, "  sessions dir: %s\n", b.sessionDir)
 	fmt.Fprintln(w, "  audit:   serve ops → ~/.strike/audit (family serve_op)")
-	fmt.Fprintln(w, "  remote:  ssh -L 8787:127.0.0.1:8787 user@host  (loopback only; see docs/web.md)")
+	fmt.Fprintln(w, "  remote:  strike connect user@host   or   ssh -L 8787:127.0.0.1:8787 user@host")
 	fmt.Fprintln(w, "experimental web cockpit — TUI remains primary")
 }

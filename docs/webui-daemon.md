@@ -92,9 +92,10 @@ Status: walking skeleton on branch `worktree-rust-webui-daemon`. Not merged.
     can preview. Find-in-file is local. Agent diff reuses
     `GET /v1/changed-files` for the open path. Transcript `path:line` and
     `strike-file:path#Lline` open the same pane.
-  - Schedule, memory, knowledge, artifacts, the task runner, onboarding,
-    and a multi-gateway hub are documented in
-    [webui-planned.md](webui-planned.md), not drawn as empty panels.
+  - Schedule, memory, knowledge, artifacts, the task runner, and onboarding
+    are documented in [webui-planned.md](webui-planned.md), not drawn as
+    empty panels. The gateway switcher is the Gateways control in the
+    header and on the Daemon view; see [gateway.md](gateway.md).
 - Server serves `/sw.js` and `/manifest.webmanifest` at the origin root and
   the bundle under `/assets/` (WASM-aware CSP and content types).
 
@@ -120,6 +121,6 @@ Foreground instead of systemd: `./strike serve --auth --token-file ~/.strike/dae
    an in-flight ask is still only the protocol event.
 3. Session list and resume follow the active workspace. Files and diffs
    follow the daemon working directory, which is not the workspace path.
-4. Per-remote tokens in the UI (today one token field for the selected
-   daemon), daemon discovery on the tailnet.
+4. Daemon discovery on the tailnet. Per-gateway tokens are in the switcher
+   (`sessionStorage`); the page does not open SSH itself.
 5. Tauri shell (optional), TUI removal decision, `docs/web.md` rewrite.
