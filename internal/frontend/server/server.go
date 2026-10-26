@@ -103,6 +103,10 @@ type Options struct {
 	Sandbox *SandboxSnapshot
 	// ReadOnly rejects mutating protocol ops (POST /v1/ops and WS op frames).
 	ReadOnly bool
+	// WorkDir is the daemon working directory used as workspace scope for
+	// Customize when no live session is attached. strike serve sets it from
+	// the process working directory. Empty leaves workspace scope unresolved.
+	WorkDir string
 	// Audit receives serve_op records (op type + source IP). Nil disables.
 	Audit OpAuditor
 	// UsageAuditDir is the hash-chained usage audit log. Empty leaves the
@@ -463,6 +467,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/plugins", s.handlePluginsList)
 	s.mux.HandleFunc("GET /v1/plugins/{id}/trust-preview", s.handlePluginTrustPreview)
 	s.mux.HandleFunc("GET /v1/plugins/{id}", s.handlePluginGet)
+	s.mux.HandleFunc("GET /v1/customize", s.handleCustomize)
+	s.mux.HandleFunc("GET /v1/customize/doc", s.handleCustomizeDoc)
+	s.mux.HandleFunc("POST /v1/customize/preview", s.handleCustomizePreview)
+	s.mux.HandleFunc("POST /v1/customize/apply", s.handleCustomizeApply)
 	s.mux.HandleFunc("GET /v1/panes", s.handlePanesList)
 	s.mux.HandleFunc("GET /v1/panes/{id}/snapshot", s.handlePaneSnapshot)
 	s.mux.HandleFunc("POST /v1/panes/{id}/mount", s.handlePaneMount)

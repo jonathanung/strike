@@ -293,6 +293,16 @@ board that is not the Activity list are not in the client. Activity is the
 subagent list. Changes is the diff list. Composer `!` already runs one
 command through the daemon permission model.
 
+## Customize
+
+Customize (`/v1/customize`) lists skills, agents, MCP servers, plugins, hooks,
+rules files, and the roster stall/handoff gate. Editable writes are strike-native
+files only, after a preview diff and a confirm. MCP env and header values are
+masked. Permission rules are shown and preserved; editing them is a different
+page. Plugin install and removal stay on `/v1/plugins`. The composer expands
+`$skill` through the daemon (see Composer triggers); this page is where those
+files are inspected and edited.
+
 ## Composer triggers
 
 `user.input` and `steer` expand in the daemon (`internal/composer/triggers`,

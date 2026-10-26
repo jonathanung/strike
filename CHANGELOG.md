@@ -35,6 +35,12 @@ materially affect the shipped product.
   session. The browser never sees a GitHub token. See
   [docs/webui-apps.md](docs/webui-apps.md)
   ([#1283](https://github.com/jonathanung/strike/issues/1283)).
+- **Customize** — the web client lists skills, agents, MCP servers, plugins,
+  hooks, rules files, and the roster stall/handoff gate. A write is a redacted
+  preview, then a confirm. MCP env, header, and URL secrets stay masked.
+  Permission rules are shown and preserved. Open it from Menu or the command
+  palette
+  ([#1281](https://github.com/jonathanung/strike/issues/1281)).
 - **Session log contract for external ingesters** — `docs/session-format.md` specifies the JSONL envelope, `session.header`, every event type, and the sidecar. New sidecars repeat `sessionId` (the filename) and record the last selected `model`. Fork and import copy that model from the kept log (import falls back to the package sidecar when the log has no selection). Older sidecars still load. A golden fixture fails if a field or event type is renamed or removed ([#1274](https://github.com/jonathanung/strike/issues/1274)).
 - **Session status** — one vocabulary (`idle`, `running`, `waiting`,
   `blocked`, `failed`, `done`, `stopped`, `disconnected`) on the daemon and
