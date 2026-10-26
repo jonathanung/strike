@@ -215,6 +215,9 @@ pub struct ChatLine {
     pub detail: String,
     /// Dedupe key for child cards (name, or session id).
     pub key: String,
+    /// Envelope time of the event that created this line, epoch ms.
+    /// 0 means unknown (old log line without a parseable `time`).
+    pub at_ms: f64,
 }
 
 #[derive(Clone, Debug)]
@@ -474,6 +477,94 @@ pub fn fmt_ago(mtime: i64, now_s: i64) -> String {
     format!("{}d", delta / 86_400)
 }
 
+/// Parse an RFC 3339 timestamp — the protocol envelope's `time` field, as
+/// emitted by Go's `time.Time` JSON encoding — into epoch milliseconds.
+/// Returns 0.0 for anything unparseable, the "unknown time" convention
+/// used by `ChatLine::at_ms`.
+pub fn rfc3339_to_ms(s: &str) -> f64 {
+    let b = s.as_bytes();
+    // Minimum shape: YYYY-MM-DDTHH:MM:SS plus a zone designator.
+    if b.len() < 20 {
+        return 0.0;
+    }
+    let num = |from: usize, len: usize| -> Option<i64> {
+        let mut v: i64 = 0;
+        for i in from..from + len {
+            let c = *b.get(i)?;
+            if !c.is_ascii_digit() {
+                return None;
+            }
+            v = v * 10 + (c - b'0') as i64;
+        }
+        Some(v)
+    };
+    if b[4] != b'-'
+        || b[7] != b'-'
+        || (b[10] != b'T' && b[10] != b't')
+        || b[13] != b':'
+        || b[16] != b':'
+    {
+        return 0.0;
+    }
+    let (year, month, day) = match (num(0, 4), num(5, 2), num(8, 2)) {
+        (Some(y), Some(m), Some(d)) => (y, m, d),
+        _ => return 0.0,
+    };
+    let (hour, min, sec) = match (num(11, 2), num(14, 2), num(17, 2)) {
+        (Some(h), Some(m), Some(s)) => (h, m, s),
+        _ => return 0.0,
+    };
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) || hour > 23 || min > 59 || sec > 60 {
+        return 0.0;
+    }
+    // Fractional seconds (Go emits up to nanoseconds; ms is enough here).
+    let mut i = 19;
+    let mut frac_ms: i64 = 0;
+    if b.get(i) == Some(&b'.') {
+        i += 1;
+        let mut scale: i64 = 100;
+        while let Some(c) = b.get(i) {
+            if !c.is_ascii_digit() {
+                break;
+            }
+            if scale > 0 {
+                frac_ms += (*c - b'0') as i64 * scale;
+                scale /= 10;
+            }
+            i += 1;
+        }
+    }
+    let offset_s: i64 = match b.get(i) {
+        Some(b'Z') | Some(b'z') => 0,
+        Some(sign) if *sign == b'+' || *sign == b'-' => {
+            if b.get(i + 3) != Some(&b':') {
+                return 0.0;
+            }
+            match (num(i + 1, 2), num(i + 4, 2)) {
+                (Some(hh), Some(mm)) => {
+                    let v = hh * 3600 + mm * 60;
+                    if *sign == b'-' {
+                        -v
+                    } else {
+                        v
+                    }
+                }
+                _ => return 0.0,
+            }
+        }
+        _ => return 0.0,
+    };
+    // Days from civil (Howard Hinnant's algorithm), days since 1970-01-01.
+    let y = if month <= 2 { year - 1 } else { year };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400;
+    let mp = (month + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+    ((((days * 24 + hour) * 60 + min) * 60 + sec) * 1000 + frac_ms - offset_s * 1000) as f64
+}
+
 /// Badge class suffix. Wire status `completed` renders as done.
 pub fn status_kind(status: &str) -> String {
     match status.to_ascii_lowercase().as_str() {
@@ -492,6 +583,8 @@ pub struct ChildCard {
     pub status: String,
     pub summary: String,
     pub details: String,
+    /// Envelope time of the originating event, epoch ms. 0 = unknown.
+    pub at_ms: f64,
 }
 
 pub fn child_keys_match(a: &str, b: &str) -> bool {
@@ -529,6 +622,7 @@ pub fn child_card_from_parts(
         status: status.trim().to_string(),
         summary,
         details: details.trim().to_string(),
+        at_ms: 0.0,
     }
 }
 
@@ -943,11 +1037,47 @@ mod tests {
             badge: "blocked".into(),
             detail: "handoff json".into(),
             key: "scribe".into(),
+            at_ms: 0.0,
         }];
         let rows = activity_panel(&[], &kids, &cards, "root");
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].name, "scribe");
         assert_eq!(rows[0].state, "blocked");
         assert_eq!(rows[0].task, "schema: handoff missing");
+    }
+
+    #[test]
+    fn rfc3339_parses_go_envelope_times() {
+        // 2026-10-26T12:51:31Z, verified against `date -u`.
+        assert_eq!(rfc3339_to_ms("2026-10-26T12:51:31Z"), 1_793_019_091_000.0);
+        // Fractional seconds (Go RFC3339Nano) keep millisecond precision.
+        assert_eq!(
+            rfc3339_to_ms("2026-10-26T12:51:31.5Z"),
+            1_793_019_091_500.0
+        );
+        assert_eq!(
+            rfc3339_to_ms("2026-10-26T12:51:31.123456789Z"),
+            1_793_019_091_123.0
+        );
+        // Numeric zones denote the same instant.
+        assert_eq!(
+            rfc3339_to_ms("2026-10-26T14:51:31+02:00"),
+            1_793_019_091_000.0
+        );
+        assert_eq!(
+            rfc3339_to_ms("2026-10-26T10:21:31-02:30"),
+            1_793_019_091_000.0
+        );
+    }
+
+    #[test]
+    fn rfc3339_rejects_non_timestamps() {
+        assert_eq!(rfc3339_to_ms(""), 0.0);
+        assert_eq!(rfc3339_to_ms("2026-10-26"), 0.0);
+        assert_eq!(rfc3339_to_ms("not a time at all........"), 0.0);
+        assert_eq!(rfc3339_to_ms("2026-13-26T12:51:31Z"), 0.0);
+        assert_eq!(rfc3339_to_ms("2026-10-26T25:51:31Z"), 0.0);
+        // Missing zone: ambiguous, treat as unknown rather than guessing.
+        assert_eq!(rfc3339_to_ms("2026-10-26T12:51:31"), 0.0);
     }
 }
