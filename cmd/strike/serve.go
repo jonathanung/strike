@@ -238,7 +238,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 			return err
 		}
 		sessionDir = a.sessions.Dir()
-		sideChat = newSideChatModel(a.sideProvider, a.sideModel)
+		sideChat = newSideChatModel(a.sideProvider, a.sideModel, a.sideSelect)
 
 		agents := make([]server.AgentInfo, 0, len(a.services.Agents))
 		for _, name := range a.services.Agents {

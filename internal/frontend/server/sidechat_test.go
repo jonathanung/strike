@@ -155,6 +155,16 @@ func TestSideChatAskUsesTranscriptAndDoesNotSubmit(t *testing.T) {
 	appendSessionEvent(t, dir, id, protocol.ToolCallBegin{Name: "read", CallID: "c1"})
 	appendSessionEvent(t, dir, id, protocol.PermissionAsked{RequestID: "r1", Permission: "read", Patterns: []string{"Makefile"}})
 	appendSessionEvent(t, dir, "child-1", protocol.TextDelta{Text: "child looked at the recipe"})
+	live.Publish(protocol.TeamRoster{
+		LeadID: id,
+		Members: []protocol.TeamRosterMember{{
+			SessionID:       "child-1",
+			Name:            "scout",
+			State:           "blocked",
+			ParentSessionID: id,
+		}},
+	})
+	live.Publish(protocol.ModelSelected{Provider: "echo", Model: "echo-1"})
 
 	before, err := os.ReadFile(session.LogPath(dir, id))
 	if err != nil {
@@ -193,6 +203,9 @@ func TestSideChatAskUsesTranscriptAndDoesNotSubmit(t *testing.T) {
 	}
 	if model.got.Question != "what is it doing?" {
 		t.Fatalf("question = %q", model.got.Question)
+	}
+	if model.got.Provider != "echo" || model.got.Model != "echo-1" {
+		t.Fatalf("live model = %#v", model.got)
 	}
 	select {
 	case op := <-ops:
@@ -256,6 +269,10 @@ func TestSideChatAskRejectsEmptyAndPathTraversal(t *testing.T) {
 	if escape.Code != http.StatusBadRequest {
 		t.Fatalf("escape = %d %s", escape.Code, escape.Body.String())
 	}
+	stranger := postSide(t, srv, "/v1/sidechat/ask", `{"text":"hi","focusSessionId":"other-root"}`)
+	if stranger.Code != http.StatusBadRequest || !strings.Contains(stranger.Body.String(), "not part of this session") {
+		t.Fatalf("stranger = %d %s", stranger.Code, stranger.Body.String())
+	}
 	if model.called {
 		t.Fatal("rejected ask called the model")
 	}
@@ -263,6 +280,21 @@ func TestSideChatAskRejectsEmptyAndPathTraversal(t *testing.T) {
 	case op := <-ops:
 		t.Fatalf("rejected ask submitted %T", op)
 	default:
+	}
+}
+
+func TestSideChatTranscriptAllowsImageSizedLine(t *testing.T) {
+	dir := t.TempDir()
+	const id = "sess-side"
+	// Larger than the old 1 MiB scanner cap, smaller than the session log cap.
+	appendSessionEvent(t, dir, id, protocol.UserMessage{Text: strings.Repeat("a", 1024*1024+64)})
+	appendSessionEvent(t, dir, id, protocol.UserMessage{Text: "after the image"})
+	got, err := sessionTranscript(session.LogPath(dir, id), sideChatMaxRunes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "after the image") {
+		t.Fatalf("transcript = %q", got)
 	}
 }
 

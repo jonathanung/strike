@@ -53,6 +53,10 @@ type SideChatPrompt struct {
 	Transcript string
 	History    []SideChatTurn
 	Question   string
+	// Provider and Model are the live root's current selection. Empty keeps
+	// the boot provider and its default model.
+	Provider string
+	Model    string
 }
 
 // SideChatCompletion is prose from that call. Tool calls are not a completion.
@@ -191,6 +195,11 @@ func (s *Server) handleSideChatAsk(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "invalid session id"})
 		return
 	}
+	if focusID != "" && !sideChatFocusAllowed(live, focusID) {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "focus session is not part of this session"})
+		return
+	}
+	status := live.Status()
 
 	transcript, err := s.sideChatTranscript(sessionID, focusID, focusName)
 	if err != nil {
@@ -209,6 +218,8 @@ func (s *Server) handleSideChatAsk(w http.ResponseWriter, r *http.Request) {
 		Transcript: transcript,
 		History:    history,
 		Question:   question,
+		Provider:   status.Provider,
+		Model:      status.Model,
 	})
 	if err != nil {
 		status := http.StatusBadGateway
@@ -298,6 +309,26 @@ func readSideChatBody(w http.ResponseWriter, r *http.Request) ([]byte, error) {
 		return nil, errors.New("empty body")
 	}
 	return body, nil
+}
+
+// sideChatFocusAllowed is the live root itself or a child on its roster.
+// Any other id in the session directory is another root's log.
+func sideChatFocusAllowed(live *Live, focusID string) bool {
+	if focusID == "" {
+		return true
+	}
+	if live == nil {
+		return false
+	}
+	if focusID == live.SessionID() {
+		return true
+	}
+	for _, member := range live.Team().Members {
+		if member.SessionID == focusID {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) sideChatTranscript(sessionID, focusID, focusName string) (string, error) {
@@ -417,7 +448,9 @@ func sessionTranscript(path string, maxRunes int) (string, error) {
 		b.WriteByte('\n')
 	}
 	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 64*1024), 1024*1024)
+	// Match the session log reader. user.message lines can carry multi-MiB
+	// images; a 1 MiB cap fails the whole ask on the first such line.
+	sc.Buffer(make([]byte, 64*1024), 32<<20)
 	for sc.Scan() {
 		line := bytes.TrimSpace(sc.Bytes())
 		if len(line) == 0 {

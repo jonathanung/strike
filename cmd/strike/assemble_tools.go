@@ -88,8 +88,10 @@ type assembled struct {
 	frameStore *tool.TUIFrameStore
 	// sideProvider is a separate provider instance for read-only side chat.
 	// It is not the engine, and side chat must not submit ops through it.
+	// sideSelect rebuilds that instance when the live root's provider changes.
 	sideProvider provider.Provider
 	sideModel    string
+	sideSelect   func(string) (provider.Provider, string, error)
 }
 
 // assemble resolves project/config/auth, builds the engine and session store,
@@ -256,6 +258,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	// /provider otherwise). Headless exec always requires a usable provider.
 	var sideProvider provider.Provider
 	var sideModel string
+	var sideSelect func(string) (provider.Provider, string, error)
 	if requireProvider || (opts.providerSet && opts.provider != "") {
 		if cfg.Provider == "" {
 			_ = ledgerStore.Close()
@@ -280,6 +283,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		}
 		sideProvider = p
 		sideModel = model
+		sideSelect = selectProvider
 		if strings.TrimSpace(cfg.Model) != "" {
 			sideModel = cfg.Model
 		}
@@ -1143,6 +1147,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		frameStore:     frameStore,
 		sideProvider:   sideProvider,
 		sideModel:      sideModel,
+		sideSelect:     sideSelect,
 	}, nil
 }
 

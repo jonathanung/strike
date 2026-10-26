@@ -635,65 +635,93 @@ function __wbg_get_imports() {
             return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
         },
         __wbindgen_generic_0000000000000001: function(arg0, arg1) {
+<<<<<<< HEAD:internal/frontend/server/static/assets/strike-webui-36df03142d44453b.js
 <<<<<<<< HEAD:internal/frontend/server/static/assets/strike-webui-9b8f6ccf00662a42.js
             // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 1571, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
 ========
             // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 1214, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
 >>>>>>>> 38852efc (feat(webui): add a read-only side chat):internal/frontend/server/static/assets/strike-webui-36df03142d44453b.js
+=======
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 1216, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+>>>>>>> b26c49c4 (fix(webui): keep side chat read-only under cancel and session switch):internal/frontend/server/static/assets/strike-webui-70797296afe5d9c4.js
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_51e094a7b034e234___convert__closures_____invoke___wasm_bindgen_51e094a7b034e234___JsValue______true_);
             return ret;
         },
         __wbindgen_generic_0000000000000002: function(arg0, arg1) {
+<<<<<<< HEAD:internal/frontend/server/static/assets/strike-webui-36df03142d44453b.js
 <<<<<<<< HEAD:internal/frontend/server/static/assets/strike-webui-9b8f6ccf00662a42.js
             // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 1663, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
 ========
             // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 1308, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
 >>>>>>>> 38852efc (feat(webui): add a read-only side chat):internal/frontend/server/static/assets/strike-webui-36df03142d44453b.js
+=======
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 1310, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+>>>>>>> b26c49c4 (fix(webui): keep side chat read-only under cancel and session switch):internal/frontend/server/static/assets/strike-webui-70797296afe5d9c4.js
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_51e094a7b034e234___convert__closures_____invoke___wasm_bindgen_51e094a7b034e234___JsValue__core_37ee0ce0c4cd57d5___result__Result_____wasm_bindgen_51e094a7b034e234___JsError___true_);
             return ret;
         },
         __wbindgen_generic_0000000000000003: function(arg0, arg1) {
+<<<<<<< HEAD:internal/frontend/server/static/assets/strike-webui-36df03142d44453b.js
 <<<<<<<< HEAD:internal/frontend/server/static/assets/strike-webui-9b8f6ccf00662a42.js
             // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("Event")], shim_idx: 1571, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
 ========
             // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("Event")], shim_idx: 1214, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
 >>>>>>>> 38852efc (feat(webui): add a read-only side chat):internal/frontend/server/static/assets/strike-webui-36df03142d44453b.js
+=======
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("Event")], shim_idx: 1216, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+>>>>>>> b26c49c4 (fix(webui): keep side chat read-only under cancel and session switch):internal/frontend/server/static/assets/strike-webui-70797296afe5d9c4.js
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_51e094a7b034e234___convert__closures_____invoke___wasm_bindgen_51e094a7b034e234___JsValue______true__13);
             return ret;
         },
         __wbindgen_generic_0000000000000004: function(arg0, arg1) {
+<<<<<<< HEAD:internal/frontend/server/static/assets/strike-webui-36df03142d44453b.js
 <<<<<<<< HEAD:internal/frontend/server/static/assets/strike-webui-9b8f6ccf00662a42.js
             // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("Event")], shim_idx: 1602, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
 ========
             // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("Event")], shim_idx: 1245, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
 >>>>>>>> 38852efc (feat(webui): add a read-only side chat):internal/frontend/server/static/assets/strike-webui-36df03142d44453b.js
+=======
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("Event")], shim_idx: 1247, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+>>>>>>> b26c49c4 (fix(webui): keep side chat read-only under cancel and session switch):internal/frontend/server/static/assets/strike-webui-70797296afe5d9c4.js
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_51e094a7b034e234___convert__closures_____invoke___web_sys_c0125f8928b48049___features__gen_CloseEvent__CloseEvent______true_);
             return ret;
         },
         __wbindgen_generic_0000000000000005: function(arg0, arg1) {
+<<<<<<< HEAD:internal/frontend/server/static/assets/strike-webui-36df03142d44453b.js
 <<<<<<<< HEAD:internal/frontend/server/static/assets/strike-webui-9b8f6ccf00662a42.js
             // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("KeyboardEvent")], shim_idx: 1056, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
 ========
             // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("KeyboardEvent")], shim_idx: 1147, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
 >>>>>>>> 38852efc (feat(webui): add a read-only side chat):internal/frontend/server/static/assets/strike-webui-36df03142d44453b.js
+=======
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("KeyboardEvent")], shim_idx: 595, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+>>>>>>> b26c49c4 (fix(webui): keep side chat read-only under cancel and session switch):internal/frontend/server/static/assets/strike-webui-70797296afe5d9c4.js
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_51e094a7b034e234___convert__closures_____invoke___web_sys_c0125f8928b48049___features__gen_KeyboardEvent__KeyboardEvent______true_);
             return ret;
         },
         __wbindgen_generic_0000000000000006: function(arg0, arg1) {
+<<<<<<< HEAD:internal/frontend/server/static/assets/strike-webui-36df03142d44453b.js
 <<<<<<<< HEAD:internal/frontend/server/static/assets/strike-webui-9b8f6ccf00662a42.js
             // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("MessageEvent")], shim_idx: 1602, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
 ========
             // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("MessageEvent")], shim_idx: 1245, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
 >>>>>>>> 38852efc (feat(webui): add a read-only side chat):internal/frontend/server/static/assets/strike-webui-36df03142d44453b.js
+=======
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("MessageEvent")], shim_idx: 1247, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+>>>>>>> b26c49c4 (fix(webui): keep side chat read-only under cancel and session switch):internal/frontend/server/static/assets/strike-webui-70797296afe5d9c4.js
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_51e094a7b034e234___convert__closures_____invoke___web_sys_c0125f8928b48049___features__gen_CloseEvent__CloseEvent______true__16);
             return ret;
         },
         __wbindgen_generic_0000000000000007: function(arg0, arg1) {
+<<<<<<< HEAD:internal/frontend/server/static/assets/strike-webui-36df03142d44453b.js
 <<<<<<<< HEAD:internal/frontend/server/static/assets/strike-webui-9b8f6ccf00662a42.js
             // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [], shim_idx: 1605, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
 ========
             // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [], shim_idx: 1248, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
 >>>>>>>> 38852efc (feat(webui): add a read-only side chat):internal/frontend/server/static/assets/strike-webui-36df03142d44453b.js
+=======
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [], shim_idx: 1250, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+>>>>>>> b26c49c4 (fix(webui): keep side chat read-only under cancel and session switch):internal/frontend/server/static/assets/strike-webui-70797296afe5d9c4.js
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_51e094a7b034e234___convert__closures_____invoke_______true_);
             return ret;
         },

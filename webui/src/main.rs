@@ -694,6 +694,15 @@ fn App() -> impl IntoView {
     let side_open = RwSignal::new(false);
     let side_focus_id = RwSignal::new(String::new());
     let side_focus_name = RwSignal::new(String::new());
+    let side_focus_root = RwSignal::new(String::new());
+    Effect::new(move |_| {
+        let root = active_root.get();
+        if side_focus_root.get_untracked() != root {
+            side_focus_id.set(String::new());
+            side_focus_name.set(String::new());
+            side_focus_root.set(root);
+        }
+    });
     let files_path = RwSignal::new(String::new());
     let files = RwSignal::new(Vec::<model::DirEntry>::new());
     let files_error = RwSignal::new(String::new());
@@ -1982,6 +1991,8 @@ fn App() -> impl IntoView {
                 lines=lines
                 focus_id=side_focus_id
                 focus_name=side_focus_name
+                live_provider=provider_name
+                live_model=model_name
             />
         </Show>
     }

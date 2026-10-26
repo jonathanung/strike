@@ -117,8 +117,11 @@ Shipped as a drawer opened from the Activity header, an Activity row, the
 composer chip, Ctrl+K, or Alt+S. It mirrors the session events the page
 already subscribes to and posts questions to `POST /v1/sidechat/ask`. That
 route builds a transcript from the session JSONL and makes a separate model
-call with no tools. Turns are stored in `<session-id>.sidechat.jsonl`, not
-in the session log, so they are not `user.input`.
+call with no tools, using the live root's current provider and model.
+`focusSessionId` is accepted only for that root or a child on its roster.
+Switching roots clears the drawer's focus. Turns are stored in
+`<session-id>.sidechat.jsonl`, not in the session log, so they are not
+`user.input`.
 
 `POST /v1/sidechat/ops` refuses every protocol op. A `permission.reply`
 from this channel cannot approve a tool; the daemon returns

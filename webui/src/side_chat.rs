@@ -20,6 +20,10 @@ struct SideChatTurn {
     answer: String,
     #[serde(default, rename = "focusName")]
     focus_name: String,
+    #[serde(default)]
+    provider: String,
+    #[serde(default)]
+    model: String,
 }
 
 #[derive(Deserialize)]
@@ -39,6 +43,10 @@ struct SideChatAnswer {
     read_only: bool,
     #[serde(default, rename = "focusName")]
     focus_name: String,
+    #[serde(default)]
+    provider: String,
+    #[serde(default)]
+    model: String,
 }
 
 /// Body for a side-chat question. None when the text is blank. The body has
@@ -60,6 +68,27 @@ pub fn side_chat_ask_body(text: &str, focus_id: &str, focus_name: &str) -> Optio
     Some(body)
 }
 
+/// Label when the answer's model is not the live root's model. Empty when
+/// they match, so an echo boot does not stamp every turn.
+fn answered_by_other(provider: &str, model: &str, live_provider: &str, live_model: &str) -> Option<String> {
+    let provider = provider.trim();
+    let model = model.trim();
+    if provider.is_empty() && model.is_empty() {
+        return None;
+    }
+    let same_provider = provider.eq_ignore_ascii_case(live_provider.trim()) || provider.is_empty();
+    let same_model = model.eq_ignore_ascii_case(live_model.trim()) || (model.is_empty() && live_model.trim().is_empty());
+    if same_provider && same_model {
+        return None;
+    }
+    let label = match (provider.is_empty(), model.is_empty()) {
+        (false, false) => format!("{provider} · {model}"),
+        (false, true) => provider.to_string(),
+        _ => model.to_string(),
+    };
+    Some(format!("Answered by {label}"))
+}
+
 fn clip_line(s: &str) -> String {
     let count = s.chars().count();
     if count <= 180 {
@@ -78,6 +107,8 @@ pub fn SideChatPanel(
     lines: RwSignal<Vec<ChatLine>>,
     focus_id: RwSignal<String>,
     focus_name: RwSignal<String>,
+    live_provider: RwSignal<String>,
+    live_model: RwSignal<String>,
 ) -> impl IntoView {
     let draft = RwSignal::new(String::new());
     let turns = RwSignal::new(Vec::<SideChatTurn>::new());
@@ -110,15 +141,25 @@ pub fn SideChatPanel(
             );
             focus_input.forget();
         }
-        if session.is_empty() || loaded_for.get_untracked() == session {
+        if session.is_empty() {
+            turns.set(Vec::new());
+            loaded_for.set(String::new());
             return;
         }
+        if loaded_for.get_untracked() == session {
+            return;
+        }
+        turns.set(Vec::new());
         loaded_for.set(session.clone());
+        let expected = session.clone();
         let (b, t) = (base.get(), token.get());
         spawn_local(async move {
-            let path = format!("/v1/sidechat?root={}", crate::api::js_encode(&session));
+            let path = format!("/v1/sidechat?root={}", crate::api::js_encode(&expected));
             match get_json::<SideChatList>(&b, &t, &path).await {
                 Ok(list) => {
+                    if root.get_untracked() != expected {
+                        return;
+                    }
                     if list.read_only {
                         turns.set(list.turns);
                         error.set(String::new());
@@ -127,6 +168,9 @@ pub fn SideChatPanel(
                     }
                 }
                 Err(e) => {
+                    if root.get_untracked() != expected {
+                        return;
+                    }
                     loaded_for.set(String::new());
                     error.set(e);
                 }
@@ -168,6 +212,8 @@ pub fn SideChatPanel(
                                 question: answer.question,
                                 answer: answer.answer,
                                 focus_name: answer.focus_name,
+                                provider: answer.provider,
+                                model: answer.model,
                             });
                         });
                     }
@@ -231,10 +277,14 @@ pub fn SideChatPanel(
                             }
                         }}
                     </div>
-                    {move || turns.get().into_iter().map(|turn| {
+                    {move || {
+                        let live_p = live_provider.get();
+                        let live_m = live_model.get();
+                        turns.get().into_iter().map(|turn| {
                         let question = turn.question.clone();
                         let answer = strip_echo_tip(&turn.answer);
                         let about = turn.focus_name.clone();
+                        let answered_by = answered_by_other(&turn.provider, &turn.model, &live_p, &live_m);
                         let _ = turn.id.clone();
                         view! {
                             <article class="side-chat-turn" data-side-chat-turn="true">
@@ -244,9 +294,11 @@ pub fn SideChatPanel(
                                     view! { <p class="hint">{label}</p> }
                                 })}
                                 <p class="side-chat-answer" data-side-chat-answer="true">{answer}</p>
+                                {answered_by.map(|label| view! { <p class="hint">{label}</p> })}
                             </article>
                         }
-                    }).collect_view()}
+                    }).collect_view()
+                    }}
                 </div>
                 <Show when=move || !error.get().is_empty()>
                     <div class="notice" role="alert" data-side-chat-error="true">
@@ -298,5 +350,10 @@ mod tests {
         let plain = side_chat_ask_body("hello", "", "  ").unwrap();
         assert!(plain.get("focusSessionId").is_none());
         assert!(plain.get("focusName").is_none());
+        assert!(answered_by_other("echo", "echo", "echo", "echo").is_none());
+        assert_eq!(
+            answered_by_other("anthropic", "claude-opus", "echo", "echo").as_deref(),
+            Some("Answered by anthropic · claude-opus")
+        );
     }
 }
