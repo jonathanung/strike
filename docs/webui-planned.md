@@ -20,9 +20,9 @@ streams register a slot or a command by adding a file under
 The sections below that are still unshipped are not drawn. An empty panel
 would pretend the daemon already has that workflow. Each one is the
 Strike-specific shape, using stores and events that already exist or are
-the next real slice. Memory, Knowledge, Artifacts, and Memory mode are
-the exception: they are in the client, and the notes under those headings
-say what shipped.
+the next real slice. Memory, Knowledge, Artifacts, Memory mode, and
+Triggers are the exception: they are in the client, and the notes under
+those headings say what shipped.
 
 ## Goals and autopilot
 
@@ -52,7 +52,18 @@ Firing one may start a goal (see Goals and autopilot). The schedule does
 not own the loop guards.
 Creating one would persist beside `~/.strike` and the daemon would start a
 root session when it fires. There is no scheduler process in `strike serve`
-today, so the panel stays out until that exists.
+today, so the panel stays out until that exists. When it does, start the
+root through `internal/daemon/rootstart.Launcher` (`server.NewRootLauncher`).
+Triggers already use that launcher. Do not add a second spawn path.
+
+## Triggers
+
+The Triggers page and `POST /hooks/{id}` are in the daemon. A webhook
+(HMAC over `timestamp + "." + body`), a GitHub `issues` / `pull_request` /
+comment event, or an in-process channel message can start or continue a
+root. The channel adapter interface is `trigger.Adapter`; this build does
+not dial Slack or any other chat network. Unattended runs resolve an empty
+permission mode to plan. See [gateway.md](gateway.md).
 
 ## Memory
 

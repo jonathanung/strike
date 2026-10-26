@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/jonathanung/strike/harness/sandbox"
+	"github.com/jonathanung/strike/internal/daemon/trigger"
 	"github.com/jonathanung/strike/internal/frontend/host"
 	"github.com/jonathanung/strike/internal/frontend/host/local"
 	"github.com/jonathanung/strike/internal/frontend/server"
@@ -61,6 +62,8 @@ Endpoints:
   GET  /v1/agents                   selectable agents
   GET  /v1/sessions                 session list (+ liveId)
   GET  /v1/sessions/{id}/events     SSE tail of a session JSONL log
+  GET  /v1/triggers                 trigger registry
+  POST /hooks/{id}                 inbound trigger (HMAC, not the daemon bearer)
   GET  /v1/workflows                workflow catalog
   POST /v1/workflows/save           save document (never activates)
   POST /v1/workflows/{name}/start   start after confirm (rejects invalid)
@@ -516,6 +519,12 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		defer func() { _ = st.Close() }()
 		sharedAttachments = st
 	}
+	trigStore, err := trigger.Open("")
+	if err != nil {
+		return err
+	}
+	// Scheduler (#1276) must call this same launcher. Do not spawn a second way.
+	trigSvc := trigger.New(trigStore, server.NewRootLauncher(liveHub))
 
 	srv, err := server.New(server.Options{
 		Addr:       opts.addr,
@@ -537,6 +546,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		Attachments:   sharedAttachments,
 		UsageAuditDir: usageDir,
 		SideChat:      sideChat,
+		Triggers:      trigSvc,
 	})
 	if err != nil {
 		return err
