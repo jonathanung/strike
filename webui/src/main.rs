@@ -4,6 +4,8 @@
 //! docs/webui-planned.md.
 
 mod api;
+mod approvals;
+mod approvals_ui;
 mod model;
 
 use std::cell::{Cell, RefCell};
@@ -26,6 +28,8 @@ use wasm_bindgen::JsCast;
 use crate::api::{
     get_json, idempotency_key, now_ms, patch_json, post_json, post_json_value, post_op,
 };
+use crate::approvals::{begin_session_mode, ModeChange};
+use crate::approvals_ui::{apply_perm_notes, commit_session_mode, ApprovalCards, ApprovalHost, ApprovalMenu};
 use crate::model::{budget_elapsed, can_retry, RootsResponse};
 
 fn storage() -> Option<web_sys::Storage> {
@@ -662,6 +666,18 @@ fn App() -> impl IntoView {
     let older_open = RwSignal::new(false);
     let children = RwSignal::new(Vec::<model::ChildSession>::new());
     let perm_mode = RwSignal::new("default".to_string());
+    let asks = RwSignal::new(Vec::<approvals::Ask>::new());
+    let live_audit = RwSignal::new(Vec::<approvals::AuditLine>::new());
+    let confirm = RwSignal::new(None::<approvals::PendingConfirm>);
+    let panel_open = RwSignal::new(false);
+    let reply_n = RwSignal::new(0u32);
+    let reply_id = RwSignal::new(String::new());
+    let reply_decision = RwSignal::new(String::new());
+    let rules_doc = RwSignal::new(approvals::RulesDocument::default());
+    let stored_audit = RwSignal::new(approvals::AuditDocument::default());
+    let panel_error = RwSignal::new(String::new());
+    let auto_seconds = RwSignal::new(0i32);
+    let auto_exclude = RwSignal::new(Vec::<String>::new());
     let provider_name = RwSignal::new(String::new());
     let model_name = RwSignal::new(String::new());
     let model_note = RwSignal::new(String::new());
@@ -837,6 +853,9 @@ fn App() -> impl IntoView {
         open_fx.set(false);
         lines.set(Vec::new());
         children.set(Vec::new());
+        asks.set(Vec::new());
+        live_audit.set(Vec::new());
+        confirm.set(None);
         if root.is_empty() {
             stream_note.set(String::new());
             return;
@@ -870,6 +889,7 @@ fn App() -> impl IntoView {
             Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |ev: web_sys::MessageEvent| {
                 if let Some(data) = ev.data().as_string() {
                     apply_envelope(lines_cb, &seq_cb, &open_cb, &data);
+                    apply_perm_notes(&data, asks, perm_mode, live_audit);
                 }
             });
         es.set_onmessage(Some(on_msg.as_ref().unchecked_ref()));
@@ -1108,27 +1128,14 @@ fn App() -> impl IntoView {
     };
 
     let set_perm = move |mode: String| {
-        perm_mode.set(mode.clone());
         mode_menu.set(false);
-        let root = active_root.get_untracked();
-        if root.is_empty() {
-            status.set("no live session yet".into());
-            return;
-        }
-        let (b, t) = (base.get_untracked(), token.get_untracked());
-        spawn_local(async move {
-            if let Err(e) = post_op(
-                &b,
-                &t,
-                &root,
-                "set.permission_mode",
-                serde_json::json!({"mode": mode}),
-            )
-            .await
-            {
-                status.set(format!("approval mode failed: {e}"));
+        match begin_session_mode(&perm_mode.get_untracked(), &mode) {
+            ModeChange::Same => {}
+            ModeChange::Apply(mode) => {
+                commit_session_mode(base, token, active_root, perm_mode, status, mode);
             }
-        });
+            ModeChange::Confirm(pending) => confirm.set(Some(pending)),
+        }
     };
 
     let toggle_pin = move |id: String| {
@@ -1303,6 +1310,28 @@ fn App() -> impl IntoView {
     };
 
     view! {
+        <ApprovalHost
+            base=base
+            token=token
+            root=active_root
+            perm_mode=perm_mode
+            menu_open=mode_menu
+            panel_open=panel_open
+            confirm=confirm
+            asks=asks
+            live_audit=live_audit
+            workspaces=workspaces
+            active_workspace=active_workspace
+            status=status
+            auto_seconds=auto_seconds
+            auto_exclude=auto_exclude
+            rules=rules_doc
+            stored_audit=stored_audit
+            panel_error=panel_error
+            reply_n=reply_n
+            reply_id=reply_id
+            reply_decision=reply_decision
+        />
         <header class="page-header">
             <div class="brand" title=move || status.get()>
                 "Strike"
@@ -1600,6 +1629,15 @@ fn App() -> impl IntoView {
                             }
                         }).collect_view()}
                     </div>
+                    <ApprovalCards
+                        asks=asks
+                        perm_mode=perm_mode
+                        auto_seconds=auto_seconds
+                        auto_exclude=auto_exclude
+                        reply_n=reply_n
+                        reply_id=reply_id
+                        reply_decision=reply_decision
+                    />
                     <div class="composer"
                         on:dragover=move |ev: web_sys::DragEvent| ev.prevent_default()
                         on:drop=move |ev: web_sys::DragEvent| {
@@ -1614,24 +1652,16 @@ fn App() -> impl IntoView {
                             }
                         }
                     >
-                        <Show when=move || mode_menu.get()>
-                            <div class="menu">
-                                {permission_modes().iter().map(|m| {
-                                    let id = m.id.to_string();
-                                    let label = m.label.to_string();
-                                    let detail = m.detail.to_string();
-                                    let set = set_perm;
-                                    let on = perm_mode.get() == id;
-                                    let klass = if on { "palette-row on" } else { "palette-row" };
-                                    view! {
-                                        <button class=klass on:click=move |_| set(id.clone())>
-                                            <span class="name">{label}</span>
-                                            <span class="path">{detail}</span>
-                                        </button>
-                                    }
-                                }).collect_view()}
-                            </div>
-                        </Show>
+                        <ApprovalMenu
+                            menu_open=mode_menu
+                            perm_mode=perm_mode
+                            confirm=confirm
+                            panel_open=panel_open
+                            base=base
+                            token=token
+                            root=active_root
+                            status=status
+                        />
                         <Show when=move || model_menu.get()>
                             <div class="menu">
                                 <p class="hint">{move || {
@@ -1672,7 +1702,13 @@ fn App() -> impl IntoView {
                                 }
                             ></textarea>
                             <div class="composer-bar">
-                                <button type="button" class="chip" on:click=move |_| {
+                                <button type="button" class=move || {
+                                    if approvals::is_dangerous(&perm_mode.get()) {
+                                        "chip approvals-mode-chip danger"
+                                    } else {
+                                        "chip approvals-mode-chip"
+                                    }
+                                } aria-haspopup="menu" aria-expanded=move || mode_menu.get() on:click=move |_| {
                                     model_menu.set(false);
                                     mode_menu.update(|v| *v = !*v);
                                 }>{move || format!("Approval · {}", mode_label(&perm_mode.get()))}</button>
@@ -1925,6 +1961,25 @@ fn DaemonPane(
         }
         let rules = policy_rules.get();
         let mode = policy_mode.get();
+        let stored = workspaces
+            .get()
+            .into_iter()
+            .find(|w| w.id == id)
+            .map(|w| w.permission_mode)
+            .unwrap_or_default();
+        if approvals::is_dangerous(&mode) && mode != stored {
+            let label = mode_label(&mode);
+            let msg = format!(
+                "Store {label} on this workspace? This does not change the live session. Deny rules still apply. Activating the workspace will not apply this mode."
+            );
+            let ok = web_sys::window()
+                .and_then(|w| w.confirm_with_message(&msg).ok())
+                .unwrap_or(false);
+            if !ok {
+                status.set("workspace mode left unchanged".into());
+                return;
+            }
+        }
         let (b, t) = (base.get(), token.get());
         spawn_local(async move {
             match patch_json(

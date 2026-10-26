@@ -72,8 +72,16 @@ Status: walking skeleton on branch `worktree-rust-webui-daemon`. Not merged.
     than read-only shell), `soft-approve` (15s countdown then allow once),
     `accept-edits` (file edits allowed; shell and network still ask),
     `yolo` (this session skips asks that are not hard-denied; other
-    sessions stay as they are). There is no read-only-shell mode and no
-    all-sessions skip. The model chip shows the live provider and model
+    sessions stay as they are). Soft, Edits, and Yolo ask for confirmation
+    before the post. Default and Plan apply immediately. A pending
+    `permission.asked` is a card above the composer (allow once, allow
+    session, allow project, deny) with the command or edit diff from the
+    event. The same chip opens the rules and audit panel
+    (`GET/POST /v1/permissions/rules`, `GET /v1/permissions/audit`).
+    Deny rules still apply in Yolo and Edits. Label mapping and the
+    confirm rules are in [webui-approvals.md](webui-approvals.md). There
+    is no read-only-shell mode and no all-sessions skip. The model chip
+    shows the live provider and model
     from `/v1/bootstrap`. A catalog `GET /v1/models` that fails stays
     "catalog unavailable" and does not invent models. `select.model` is
     rejected while a turn is running.
@@ -108,8 +116,9 @@ Foreground instead of systemd: `./strike serve --auth --token-file ~/.strike/dae
 1. Engine root per workspace: opening a workspace currently records it as
    active; spawning/attaching a live engine rooted at that directory (today
    roots spawn in the daemon's cwd) is the next engine-plumbing slice.
-2. Permission asks in the transcript. The composer can set the mode;
-   an in-flight ask is still only the protocol event.
+2. Permission asks render as cards from `permission.asked`. What is still
+   open is a transcript history of asks after they resolve, beyond the
+   audit list.
 3. Session list and resume follow the active workspace. Files and diffs
    follow the daemon working directory, which is not the workspace path.
 4. Per-remote tokens in the UI (today one token field for the selected

@@ -204,6 +204,118 @@ try {
       `cockpit check failed missing=${missingText.join(",")} acid=${acid} ground=${ground} text=${text.slice(0, 400)}`,
     );
   }
+
+  const click = async (script) => {
+    const ev = await send("Runtime.evaluate", { expression: script, returnByValue: true });
+    return ev.result?.result?.value || "";
+  };
+  const opened = await click(`(() => {
+    const btn = [...document.querySelectorAll("button")].find((b) => (b.textContent || "").includes("Approval"));
+    if (!btn) return "no-chip";
+    btn.click();
+    return "clicked";
+  })()`);
+  if (opened !== "clicked") throw new Error(`approval chip: ${opened}`);
+  let menu = "";
+  for (let i = 0; i < 20; i++) {
+    menu = await click("document.body ? document.body.innerText : \"\"");
+    if (menu.includes("Rules and audit") && menu.includes("Deny rules still apply") && menu.includes("Yolo")) break;
+    await delay(100);
+  }
+  if (!menu.includes("Default") || !menu.includes("Plan") || !menu.includes("Yolo") || !menu.includes("Deny rules still apply")) {
+    throw new Error(`approval menu missing copy: ${menu.slice(0, 500)}`);
+  }
+  const chose = await click(`(() => {
+    const btn = [...document.querySelectorAll("button")].find((b) => (b.textContent || "").trim().startsWith("Yolo"));
+    if (!btn) return "no-yolo";
+    btn.click();
+    return "clicked";
+  })()`);
+  if (chose !== "clicked") throw new Error(`yolo confirm: ${chose}`);
+  let dialog = "";
+  for (let i = 0; i < 20; i++) {
+    dialog = await click("document.body ? document.body.innerText : \"\"");
+    if (dialog.includes("Use Yolo for this session?")) break;
+    await delay(100);
+  }
+  if (!dialog.includes("Use Yolo for this session?")) {
+    throw new Error(`yolo dialog missing: ${dialog.slice(0, 500)}`);
+  }
+  await click(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
+  let after = "";
+  for (let i = 0; i < 20; i++) {
+    after = await click("document.body ? document.body.innerText : \"\"");
+    if (after.includes("Approval · Default") && !after.includes("Use Yolo for this session?")) break;
+    await delay(100);
+  }
+  if (!after.includes("Approval · Default") || after.includes("Use Yolo for this session?")) {
+    throw new Error(`escape did not keep Default: ${after.slice(0, 500)}`);
+  }
+
+  const auth = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+  const ruleCall = async (path, body) => {
+    const res = await fetch(`http://127.0.0.1:${port}${path}`, {
+      method: "POST",
+      headers: auth,
+      body: JSON.stringify(body),
+    });
+    const text = await res.text();
+    return { status: res.status, text };
+  };
+  const denied = await ruleCall("/v1/permissions/rules", {
+    scope: "global",
+    permission: "bash",
+    pattern: "smoke-deny",
+    action: "deny",
+    confirm: false,
+  });
+  if (denied.status !== 200 || !denied.text.includes("smoke-deny")) {
+    throw new Error(`deny rule: ${denied.status} ${denied.text.slice(0, 300)}`);
+  }
+  const listed = await fetch(`http://127.0.0.1:${port}/v1/permissions/rules`, { headers: auth });
+  const listedText = await listed.text();
+  if (listed.status !== 200 || !listedText.includes("smoke-deny")) {
+    throw new Error(`rules list: ${listed.status} ${listedText.slice(0, 300)}`);
+  }
+  const quiet = await ruleCall("/v1/permissions/rules", {
+    scope: "global",
+    permission: "bash",
+    pattern: "smoke-allow",
+    action: "allow",
+    confirm: false,
+  });
+  if (quiet.status !== 400 || !quiet.text.includes("confirmation required")) {
+    throw new Error(`allow without confirm: ${quiet.status} ${quiet.text.slice(0, 300)}`);
+  }
+  const allowed = await ruleCall("/v1/permissions/rules", {
+    scope: "global",
+    permission: "bash",
+    pattern: "smoke-allow",
+    action: "allow",
+    confirm: true,
+  });
+  if (allowed.status !== 200 || !allowed.text.includes("smoke-allow")) {
+    throw new Error(`allow with confirm: ${allowed.status} ${allowed.text.slice(0, 300)}`);
+  }
+  const rules = JSON.parse(listedText).rules || [];
+  const denyIndex = rules.find((row) => row.pattern === "smoke-deny" && row.action === "deny");
+  if (!denyIndex) throw new Error(`deny index missing: ${listedText.slice(0, 300)}`);
+  const kept = await ruleCall("/v1/permissions/rules/remove", {
+    scope: "global",
+    index: denyIndex.index,
+    confirm: false,
+  });
+  if (kept.status !== 400 || !kept.text.includes("confirmation required")) {
+    throw new Error(`remove deny without confirm: ${kept.status} ${kept.text.slice(0, 300)}`);
+  }
+  const removed = await ruleCall("/v1/permissions/rules/remove", {
+    scope: "global",
+    index: denyIndex.index,
+    confirm: true,
+  });
+  if (removed.status !== 200 || removed.text.includes("smoke-deny")) {
+    throw new Error(`remove deny: ${removed.status} ${removed.text.slice(0, 300)}`);
+  }
   console.log("webui-smoke ok");
 } catch (err) {
   console.error(String(err));

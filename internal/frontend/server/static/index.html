@@ -9,14 +9,14 @@
 (function(){try{var ok={strike:1,nord:1,dracula:1,gruvbox:1,monokai:1,"tokyo-night":1,catppuccin:1};var t=localStorage.getItem("strike.theme")||"strike";var s=localStorage.getItem("strike.scheme")||"dark";if(!ok[t])t="strike";if(s!=="light")s="dark";var el=document.documentElement;el.setAttribute("data-theme",t);el.setAttribute("data-scheme",s);}catch(e){}})();
 </script>
 <link rel="manifest" href="/manifest.webmanifest">
-<link rel="stylesheet" href="/assets/style-b675a6499c95b448.css" integrity="sha384-TzmCXhs4XZOIBJVTWsltYCqu3aIrajPO3IqX2vad7TJjohexRdJvdRFjmxs68fTu"/>
+<link rel="stylesheet" href="/assets/style-b3eada44930a4a55.css" integrity="sha384-9b97i3dMF7Fti6XIjAT1TvGj8EH7fst1S07mP691rOawUmeX3yOfkILQUHu8ECFc"/>
 
 
 
 
 <script type="module">
-import init, * as bindings from '/assets/strike-webui-4147883ebbe8ac8f.js';
-const wasm = await init({ module_or_path: '/assets/strike-webui-4147883ebbe8ac8f_bg.wasm' });
+import init, * as bindings from '/assets/strike-webui-208ce214fcbf8190.js';
+const wasm = await init({ module_or_path: '/assets/strike-webui-208ce214fcbf8190_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -27,6 +27,6 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 </script>
 <script src="/assets/register.js" defer></script>
 
-<link rel="modulepreload" href="/assets/strike-webui-4147883ebbe8ac8f.js" crossorigin="anonymous" integrity="sha384-gC8eO6SqqNzLKb57v3Y/nzRQoAJh7LmYNEF2GHxAj2nWiq/oAGXW1IX2NQR+ihc5"><link rel="preload" href="/assets/strike-webui-4147883ebbe8ac8f_bg.wasm" crossorigin="anonymous" integrity="sha384-3mdhftnZiwsKhrfFYJbhLjRRcFyQZaXlO9tCgt3zvUQoIpV8oB5k69GE+wt5Jpdi" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/assets/strike-webui-208ce214fcbf8190.js" crossorigin="anonymous" integrity="sha384-4pLq9xpgNlt5nzKl/I395JNyF6TmsiZd5XIWvBQna2Ers1BjcGfaioBz9Dd+FJ2D"><link rel="preload" href="/assets/strike-webui-208ce214fcbf8190_bg.wasm" crossorigin="anonymous" integrity="sha384-8nAiK7XL4g7V5Vh3qVGOEAFYoCsZ/OAbyBaQtcWNe8LzsB9nzegLNS6gahuYgH4t" as="fetch" type="application/wasm"></head>
 <body></body>
 </html>

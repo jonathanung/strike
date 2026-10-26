@@ -67,7 +67,10 @@ That is the named workspace. It is not wired through to a running session:
 - A session does not record which workspace it belongs to. The live engine
   working directory is still the directory `strike serve` was started in.
 - Activating a workspace does not load its rules file into the prompt and
-  does not call `set.permission_mode`.
+  does not call `set.permission_mode`. The approvals panel can store the
+  mode and can apply that stored value to the live session only when you
+  choose Apply. That button uses the same confirmation as the composer
+  chip. Opening the workspace does not apply it.
 - A delegated child's working directory is not checked against registered
   workspace directories. Adding that check before sessions run inside those
   directories would reject ordinary `strike serve` (the registry is often
