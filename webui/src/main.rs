@@ -1,11 +1,12 @@
 //! Strike web client. The session list is live roots plus saved sessions.
-//! Activity, Files, and Changes are the side panel. Schedule, memory,
-//! knowledge, artifacts, and the task runner are not drawn here; see
-//! docs/webui-planned.md.
+//! Activity, Files, and Changes are the side panel. Side chat is a separate
+//! read-only drawer. Schedule, memory, knowledge, artifacts, and the task
+//! runner are not drawn here; see docs/webui-planned.md.
 
 mod api;
 mod editor;
 mod model;
+mod side_chat;
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -28,6 +29,7 @@ use crate::api::{
     get_json, idempotency_key, now_ms, patch_json, post_json, post_json_value, post_op,
 };
 use crate::editor::{DocumentPane, LinkedBody};
+use crate::side_chat::SideChatPanel;
 use crate::model::{budget_elapsed, can_retry, RootsResponse};
 
 fn storage() -> Option<web_sys::Storage> {
@@ -400,6 +402,12 @@ fn palette_cmds() -> &'static [PaletteCmd] {
             detail: "Interrupt running delegated children in this session",
         },
         PaletteCmd {
+            section: "Commands",
+            id: "side-chat",
+            label: "Side chat",
+            detail: "Ask about this session without steering it or approving a tool",
+        },
+        PaletteCmd {
             section: "Apps",
             id: "chat",
             label: "Chat",
@@ -683,6 +691,9 @@ fn App() -> impl IntoView {
     let doc_line = RwSignal::new(0u32);
     let doc_diff = RwSignal::new(false);
     let doc_editing = RwSignal::new(false);
+    let side_open = RwSignal::new(false);
+    let side_focus_id = RwSignal::new(String::new());
+    let side_focus_name = RwSignal::new(String::new());
     let files_path = RwSignal::new(String::new());
     let files = RwSignal::new(Vec::<model::DirEntry>::new());
     let files_error = RwSignal::new(String::new());
@@ -1113,6 +1124,13 @@ fn App() -> impl IntoView {
         apply_theme(&load("strike.theme"), &scheme);
     };
 
+    let open_side = move |id: String, name: String| {
+        side_focus_id.set(id);
+        side_focus_name.set(name);
+        side_open.set(true);
+        mode.set("chat".into());
+    };
+
     let set_perm = move |mode: String| {
         perm_mode.set(mode.clone());
         mode_menu.set(false);
@@ -1156,6 +1174,7 @@ fn App() -> impl IntoView {
         match id.as_str() {
             "new" => new_session(),
             "stop-all" => stop_all(),
+            "side-chat" => open_side(String::new(), String::new()),
             "chat" => mode.set("chat".into()),
             "daemon" => mode.set("daemon".into()),
             "steer" => set_enter("steer".into()),
@@ -1250,6 +1269,9 @@ fn App() -> impl IntoView {
             } else if ev.alt_key() && !ev.meta_key() && !ev.ctrl_key() && ev.key() == "\\" {
                 ev.prevent_default();
                 focus.update(|v| *v = !*v);
+            } else if ev.alt_key() && !ev.meta_key() && !ev.ctrl_key() && ev.key().eq_ignore_ascii_case("s") {
+                ev.prevent_default();
+                side_open.update(|v| *v = !*v);
             } else if ev.key() == "Escape" {
                 let menu = palette_open.get_untracked()
                     || mode_menu.get_untracked()
@@ -1257,6 +1279,7 @@ fn App() -> impl IntoView {
                 palette_open.set(false);
                 mode_menu.set(false);
                 model_menu.set(false);
+                side_open.set(false);
                 if !menu
                     && !doc_editing.get_untracked()
                     && !doc_path.get_untracked().is_empty()
@@ -1713,6 +1736,7 @@ fn App() -> impl IntoView {
                                     let model = model_name.get();
                                     if model.is_empty() { "Model".into() } else { model }
                                 }}</button>
+                                <button type="button" class=move || if side_open.get() { "chip on side-chat-open-composer" } else { "chip side-chat-open-composer" } on:click=move |_| open_side(String::new(), String::new())>"Side chat"</button>
                                 <button type="button" class=move || if enter_mode.get() == "steer" { "chip on" } else { "chip" } on:click=move |_| set_enter("steer".into())>"Steer"</button>
                                 <button type="button" class=move || if enter_mode.get() == "queue" { "chip on" } else { "chip" } on:click=move |_| set_enter("queue".into())>"Queue"</button>
                                 <button class="primary send" type="submit">"Send"</button>
@@ -1731,7 +1755,10 @@ fn App() -> impl IntoView {
                     <div class="activity">
                     <header class="activity-head">
                         <span class="hint">"Live tasks"</span>
-                        <button class="secondary" disabled=move || running_count() == 0 on:click=move |_| stop_all()>"Stop all"</button>
+                        <span class="row-actions">
+                            <button type="button" class="secondary side-chat-open-activity" on:click=move |_| open_side(String::new(), String::new())>"Side chat"</button>
+                            <button class="secondary" disabled=move || running_count() == 0 on:click=move |_| stop_all()>"Stop all"</button>
+                        </span>
                     </header>
                         <div class="stats">
                         <StatCard label="Running".into()>{move || running_count().to_string()}</StatCard>
@@ -1775,6 +1802,8 @@ fn App() -> impl IntoView {
                                 let running = is_running(&state);
                                 let retry = can_retry(&state);
                                 let name = row.name.clone();
+                                let name_chat = name.clone();
+                                let sid_chat = sid.clone();
                                 let who = name.clone();
                                 let agent = row.agent.clone();
                                 let agent_label = agent.clone();
@@ -1814,6 +1843,14 @@ fn App() -> impl IntoView {
                                             </span>
                                         </button>
                                         <div class="row-actions">
+                                            <button type="button" class="secondary" on:click={
+                                                let sid_chat = sid_chat.clone();
+                                                let name_chat = name_chat.clone();
+                                                move |ev: web_sys::MouseEvent| {
+                                                    ev.stop_propagation();
+                                                    open_side(sid_chat.clone(), name_chat.clone());
+                                                }
+                                            }>"Side chat"</button>
                                             <button class="secondary" disabled=move || !running on:click={
                                                 let sid_stop = sid_stop.clone();
                                                 move |ev: web_sys::MouseEvent| {
@@ -1937,6 +1974,15 @@ fn App() -> impl IntoView {
                     </Show>
                 </aside>
             </div>
+            <SideChatPanel
+                open=side_open
+                base=base
+                token=token
+                root=active_root
+                lines=lines
+                focus_id=side_focus_id
+                focus_name=side_focus_name
+            />
         </Show>
     }
 }
