@@ -384,6 +384,9 @@ func TestCustomizeHookPreservesOtherKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if doc.Name != "pre_tool_use" {
+		t.Fatalf("hook doc name = %q", doc.Name)
+	}
 	idx := 1
 	ch := CustomizeChange{
 		Kind: "hook", Scope: "workspace", BaseHash: doc.BaseHash, Index: &idx,

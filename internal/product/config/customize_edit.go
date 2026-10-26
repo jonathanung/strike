@@ -1927,7 +1927,7 @@ func docHook(workDir, scope string, index int) (CustomizeDoc, error) {
 	row := rows[index]
 	idx := row.Index
 	return CustomizeDoc{
-		Kind: "hook", Scope: scope, Origin: row.Origin, Path: displayPath(path, workDir),
+		Kind: "hook", Name: row.Event, Scope: scope, Origin: row.Origin, Path: displayPath(path, workDir),
 		Editable: row.Editable, BaseHash: row.BaseHash, Index: &idx,
 		Hook: &CustomizeHookDraft{
 			Event: row.Event, Matcher: row.Matcher, Action: row.Action,
