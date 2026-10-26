@@ -173,6 +173,12 @@ try {
   await send("Page.enable");
   await send("Runtime.enable");
   await send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
+  await delay(200);
+  await send("Runtime.evaluate", {
+    expression: `localStorage.setItem("strike.token", ${JSON.stringify(token)})`,
+    returnByValue: true,
+  });
+  await send("Page.reload", { ignoreCache: true });
 
   let text = "";
   let acid = "";
@@ -217,20 +223,42 @@ try {
       const btn = document.querySelector('[aria-label="Composer actions"]');
       if (!btn) return "missing-plus";
       btn.click();
-      const plus = document.body.innerText.includes("Mention a file");
-      const ta = document.querySelector('[data-feature="composer-triggers"] textarea');
-      if (!ta) return plus ? "missing-textarea" : "missing-both";
-      ta.focus();
-      ta.value = "/";
-      ta.dispatchEvent(new InputEvent("input", { bubbles: true, data: "/" }));
-      return plus ? "plus-ok" : "plus-no-text";
+      return "clicked";
     })()`,
     returnByValue: true,
   });
-  if (triggers.result?.result?.value !== "plus-ok") {
+  if (triggers.result?.result?.value !== "clicked") {
     throw new Error(`composer plus failed: ${triggers.result?.result?.value || JSON.stringify(triggers)}`);
   }
   let suggest = "";
+  for (let i = 0; i < 40; i++) {
+    const ev = await send("Runtime.evaluate", {
+      expression: `document.body.innerText`,
+      returnByValue: true,
+    });
+    suggest = ev.result?.result?.value || "";
+    if (suggest.includes("Mention a file")) break;
+    await delay(150);
+  }
+  if (!suggest.includes("Mention a file")) {
+    throw new Error(`composer plus menu missing: ${suggest.slice(0, 500)}`);
+  }
+  const typed = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const ta = document.querySelector('[data-feature="composer-triggers"] textarea');
+      if (!ta) return "missing-textarea";
+      ta.focus();
+      ta.value = "/";
+      ta.setSelectionRange(1, 1);
+      ta.dispatchEvent(new InputEvent("input", { bubbles: true, data: "/" }));
+      return "typed";
+    })()`,
+    returnByValue: true,
+  });
+  if (typed.result?.result?.value !== "typed") {
+    throw new Error(`composer slash type failed: ${typed.result?.result?.value || JSON.stringify(typed)}`);
+  }
+  suggest = "";
   for (let i = 0; i < 40; i++) {
     const ev = await send("Runtime.evaluate", {
       expression: `document.body.innerText`,
