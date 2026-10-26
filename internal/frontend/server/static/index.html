@@ -9,15 +9,15 @@
 (function(){try{var ok={strike:1,nord:1,dracula:1,gruvbox:1,monokai:1,"tokyo-night":1,catppuccin:1};var t=localStorage.getItem("strike.theme")||"strike";var s=localStorage.getItem("strike.scheme")||"dark";if(!ok[t])t="strike";if(s!=="light")s="dark";var el=document.documentElement;el.setAttribute("data-theme",t);el.setAttribute("data-scheme",s);}catch(e){}})();
 </script>
 <link rel="manifest" href="/manifest.webmanifest">
-<link rel="stylesheet" href="/assets/style-90ac59ba46a3044.css" integrity="sha384-64QO0dRyvPmarRXLJeflPLnlkaCA/edj9DoQc1Y8/ZhoauQxg9ZTWRxqnsTUZcRi"/>
+<link rel="stylesheet" href="/assets/style-bb123c5de5fd8dea.css" integrity="sha384-8bV09yrbkwsbhD+nPq+niFZxVl79pn+ouYKnhF3QnR1AOY1l7CdfjkRgltkspZzg"/>
 <link rel="stylesheet" href="/assets/editor-c775cc9b18a5458.css" integrity="sha384-AyOjM22LfkyGATt0RiB3O7FWiJR+tjHaI+BUHE+UrMDR7Ykaa5aNRaKgR7as4OR+"/>
 
 
 
 
 <script type="module">
-import init, * as bindings from '/assets/strike-webui-99ab48311229b56d.js';
-const wasm = await init({ module_or_path: '/assets/strike-webui-99ab48311229b56d_bg.wasm' });
+import init, * as bindings from '/assets/strike-webui-e9bf4c3744d4decb.js';
+const wasm = await init({ module_or_path: '/assets/strike-webui-e9bf4c3744d4decb_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -28,6 +28,6 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 </script>
 <script src="/assets/register.js" defer></script>
 
-<link rel="modulepreload" href="/assets/strike-webui-99ab48311229b56d.js" crossorigin="anonymous" integrity="sha384-LZN6bOcC7UDXJGR9jL26OvxPsAf45CIaq1HWTNrT2rwIrx7VvFw1cH8ccoannRK4"><link rel="preload" href="/assets/strike-webui-99ab48311229b56d_bg.wasm" crossorigin="anonymous" integrity="sha384-x+GtTnDqh2DTAJiWhJIS5SnVFymEK8rKj0EUoOVnZ9ylr1MXJtfqcKmSmnqnadNm" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/assets/strike-webui-e9bf4c3744d4decb.js" crossorigin="anonymous" integrity="sha384-LZN6bOcC7UDXJGR9jL26OvxPsAf45CIaq1HWTNrT2rwIrx7VvFw1cH8ccoannRK4"><link rel="preload" href="/assets/strike-webui-e9bf4c3744d4decb_bg.wasm" crossorigin="anonymous" integrity="sha384-CS2r08WQKkb//MwdTb+oVwBItftL1kK5LWIlgf9zrV3pR3Jj2JBrsqYPGWMLSYdS" as="fetch" type="application/wasm"></head>
 <body></body>
 </html>

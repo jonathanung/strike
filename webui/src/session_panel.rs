@@ -677,9 +677,9 @@ pub(crate) fn SessionPanel(
             </div>
             <p class="hint ss-folder-note">"Folders group sessions. They are not directories on disk."</p>
             <Show when=move || !list_error.get().is_empty()>
-                <div class="notice" role="alert">
+                <div class="ss-notice" role="alert">
                     <span>{move || list_error.get()}</span>
-                    <button type="button" class="secondary" on:click=move |_| reload()>"Retry"</button>
+                    <button type="button" class="secondary" on:click=move |_| reload()>"Reload"</button>
                 </div>
             </Show>
             <Show when=move || !search_error.get().is_empty()>

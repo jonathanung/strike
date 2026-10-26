@@ -1044,6 +1044,19 @@ select.mode, .daemon select {
 .ss-folder-add button { height: 28px; padding: 0 8px; font-size: var(--type-sm); }
 .ss-folder-note { margin: 0 0 8px; }
 .ss-search-error { color: var(--signal); margin: 0 0 8px; }
+.ss-notice {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--signal);
+  background: color-mix(in srgb, var(--signal) 12%, var(--surface));
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+}
+.ss-notice button { height: 24px; padding: 0 8px; font-size: var(--type-sm); }
 .ss-bulk {
   display: flex;
   flex-wrap: wrap;
