@@ -120,6 +120,80 @@ func TestSchemaShape(t *testing.T) {
 	}
 }
 
+// TestSchemaValidTypeValues is the metaschema regression guard the byte-drift
+// test cannot provide: drift only proves the committed schema matches the
+// generator, not that either is valid JSON Schema. Every "type" keyword in
+// the generated document must use a JSON Schema 2020-12 primitive type name
+// (in particular Go bools are "boolean", never "bool" — #1333 review).
+func TestSchemaValidTypeValues(t *testing.T) {
+	files, err := emitFiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var schema map[string]any
+	for _, f := range files {
+		if f.rel != schemaRelPath {
+			continue
+		}
+		if bytes.Contains(f.body, []byte(`"type": "bool"`)) {
+			t.Fatal(`generated schema contains invalid "type": "bool" (want "boolean")`)
+		}
+		if err := json.Unmarshal(f.body, &schema); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if schema["$schema"] != "https://json-schema.org/draft/2020-12/schema" {
+		t.Fatalf("$schema %v", schema["$schema"])
+	}
+	allowed := map[string]bool{
+		"array": true, "boolean": true, "integer": true, "null": true,
+		"number": true, "object": true, "string": true,
+	}
+	sawBoolean := false
+	var walk func(path string, v any)
+	walk = func(path string, v any) {
+		switch node := v.(type) {
+		case map[string]any:
+			for key, child := range node {
+				if key == "type" {
+					switch tv := child.(type) {
+					case string:
+						if !allowed[tv] {
+							t.Errorf("%s: invalid JSON Schema type %q", path, tv)
+						}
+						if tv == "boolean" {
+							sawBoolean = true
+						}
+						continue
+					case []any:
+						for _, elem := range tv {
+							s, ok := elem.(string)
+							if !ok || !allowed[s] {
+								t.Errorf("%s: invalid JSON Schema type %v", path, elem)
+							}
+							if s == "boolean" {
+								sawBoolean = true
+							}
+						}
+						continue
+					}
+					// A map value is a subschema (e.g. the "type" property
+					// whose schema is {"const": ...}); fall through and walk it.
+				}
+				walk(path+"/"+key, child)
+			}
+		case []any:
+			for i, child := range node {
+				walk(path+"/"+strconv.Itoa(i), child)
+			}
+		}
+	}
+	walk("", schema)
+	if !sawBoolean {
+		t.Fatal("generated schema has no boolean fields; guard would pass vacuously")
+	}
+}
+
 func TestSchemaGoldenRoundTrip(t *testing.T) {
 	files, err := emitFiles()
 	if err != nil {

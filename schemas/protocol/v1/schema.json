@@ -93,7 +93,7 @@
           "type": "string"
         },
         "escalated": {
-          "type": "bool"
+          "type": "boolean"
         },
         "idleS": {
           "type": "integer"
@@ -102,7 +102,7 @@
           "type": "string"
         },
         "loop": {
-          "type": "bool"
+          "type": "boolean"
         },
         "loopDetectN": {
           "type": "integer"
@@ -123,7 +123,7 @@
           "type": "integer"
         },
         "stall": {
-          "type": "bool"
+          "type": "boolean"
         },
         "stallAfterS": {
           "type": "integer"
@@ -265,7 +265,7 @@
           "type": "string"
         },
         "requireAck": {
-          "type": "bool"
+          "type": "boolean"
         },
         "sessionId": {
           "type": "string"
@@ -812,7 +812,7 @@
           "type": "array"
         },
         "incomplete": {
-          "type": "bool"
+          "type": "boolean"
         },
         "isolation": {
           "type": "string"
@@ -842,7 +842,7 @@
           "type": "string"
         },
         "sectionBodySet": {
-          "type": "bool"
+          "type": "boolean"
         },
         "sectionTitle": {
           "type": "string"
@@ -1190,7 +1190,7 @@
           "type": "string"
         },
         "redacted": {
-          "type": "bool"
+          "type": "boolean"
         },
         "schemaVersion": {
           "type": "string"
@@ -1287,7 +1287,7 @@
           "type": "string"
         },
         "fast": {
-          "type": "bool"
+          "type": "boolean"
         },
         "leanCode": {
           "type": "string"
@@ -1337,7 +1337,7 @@
           "$ref": "#/$defs/RequestTokenAttribution"
         },
         "fromLastStream": {
-          "type": "bool"
+          "type": "boolean"
         },
         "layerCount": {
           "type": "integer"
@@ -1392,7 +1392,7 @@
           "type": "integer"
         },
         "isChild": {
-          "type": "bool"
+          "type": "boolean"
         },
         "parentSessionId": {
           "type": "string"
@@ -1429,7 +1429,7 @@
           "type": "array"
         },
         "fromLastStream": {
-          "type": "bool"
+          "type": "boolean"
         },
         "layers": {
           "items": {
@@ -1591,7 +1591,7 @@
           "type": "integer"
         },
         "enabled": {
-          "type": "bool"
+          "type": "boolean"
         },
         "parentSessionId": {
           "type": "string"
@@ -3848,28 +3848,28 @@
           "type": "string"
         },
         "engineRewind": {
-          "type": "bool"
+          "type": "boolean"
         },
         "fork": {
-          "type": "bool"
+          "type": "boolean"
         },
         "forkAt": {
-          "type": "bool"
+          "type": "boolean"
         },
         "get": {
-          "type": "bool"
+          "type": "boolean"
         },
         "list": {
-          "type": "bool"
+          "type": "boolean"
         },
         "load": {
-          "type": "bool"
+          "type": "boolean"
         },
         "replay": {
-          "type": "bool"
+          "type": "boolean"
         },
         "rewindPoints": {
-          "type": "bool"
+          "type": "boolean"
         }
       },
       "required": [
@@ -3995,7 +3995,7 @@
           "type": "integer"
         },
         "blocked": {
-          "type": "bool"
+          "type": "boolean"
         },
         "depth": {
           "type": "integer"
@@ -4332,7 +4332,7 @@
           "type": "integer"
         },
         "auto": {
-          "type": "bool"
+          "type": "boolean"
         },
         "depth": {
           "type": "integer"
@@ -4594,7 +4594,7 @@
           "type": "string"
         },
         "pinned": {
-          "type": "bool"
+          "type": "boolean"
         },
         "preview": {
           "type": "string"
@@ -4625,7 +4625,7 @@
           "type": "integer"
         },
         "fromProvider": {
-          "type": "bool"
+          "type": "boolean"
         },
         "message": {
           "type": "string"
@@ -4892,7 +4892,7 @@
       "description": "Rewind removes the last completed user↔assistant turn from model-facing history. When RestoreFiles is true, also restores per-file checkpoints captured before mutating tools in that turn (never git reset --hard). Rejected while a turn is running.",
       "properties": {
         "restoreFiles": {
-          "type": "bool"
+          "type": "boolean"
         }
       },
       "type": "object"
@@ -5093,7 +5093,7 @@
           "type": "integer"
         },
         "exhausted": {
-          "type": "bool"
+          "type": "boolean"
         },
         "kind": {
           "type": "string"
@@ -5171,7 +5171,7 @@
       "description": "SessionListParams is the body for session.list.",
       "properties": {
         "rootsOnly": {
-          "type": "bool"
+          "type": "boolean"
         }
       },
       "required": [
@@ -5200,7 +5200,7 @@
       "description": "SessionLoadResult confirms a load/resume binding.",
       "properties": {
         "active": {
-          "type": "bool"
+          "type": "boolean"
         },
         "id": {
           "type": "string"
@@ -5318,7 +5318,7 @@
           "type": "integer"
         },
         "restoreFiles": {
-          "type": "bool"
+          "type": "boolean"
         },
         "sessionId": {
           "type": "string"
@@ -5349,7 +5349,7 @@
           "type": "string"
         },
         "open": {
-          "type": "bool"
+          "type": "boolean"
         },
         "parentId": {
           "type": "string"
@@ -5431,10 +5431,10 @@
           "type": "array"
         },
         "setExclude": {
-          "type": "bool"
+          "type": "boolean"
         },
         "setPin": {
-          "type": "bool"
+          "type": "boolean"
         }
       },
       "type": "object"
@@ -5457,7 +5457,7 @@
       "description": "SetFast toggles OpenAI priority (fast) service tier for subsequent turns. Rejected while a turn is running. Providers and models that do not support priority tier ignore the flag silently.",
       "properties": {
         "enabled": {
-          "type": "bool"
+          "type": "boolean"
         }
       },
       "required": [
@@ -5716,7 +5716,7 @@
       "description": "TeamOpOutcome is the in-process result of a team-control Op (serve HTTP). Not an Event — never written to session JSONL.",
       "properties": {
         "alreadyTerminal": {
-          "type": "bool"
+          "type": "boolean"
         },
         "childSessionId": {
           "type": "string"
@@ -5740,7 +5740,7 @@
           "type": "string"
         },
         "ok": {
-          "type": "bool"
+          "type": "boolean"
         },
         "taskId": {
           "type": "string"
@@ -5997,7 +5997,7 @@
       "description": "TokenCount distinguishes unknown from zero: Known=false means the count was not reported; Known=true with N=0 means the vendor reported zero.",
       "properties": {
         "known": {
-          "type": "bool"
+          "type": "boolean"
         },
         "n": {
           "type": "integer"
@@ -6062,7 +6062,7 @@
           "type": "string"
         },
         "isError": {
-          "type": "bool"
+          "type": "boolean"
         },
         "metadata": {
           "description": "Any JSON value (Go json.RawMessage)."
@@ -6476,7 +6476,7 @@
           "type": "string"
         },
         "passed": {
-          "type": "bool"
+          "type": "boolean"
         },
         "value": {
           "type": "string"
@@ -6558,7 +6558,7 @@
           "type": "array"
         },
         "claimed": {
-          "type": "bool"
+          "type": "boolean"
         },
         "durationMs": {
           "type": "integer"
@@ -6567,13 +6567,13 @@
           "$ref": "#/$defs/VerificationEnv"
         },
         "passed": {
-          "type": "bool"
+          "type": "boolean"
         },
         "summary": {
           "type": "string"
         },
         "verified": {
-          "type": "bool"
+          "type": "boolean"
         }
       },
       "required": [
@@ -6633,7 +6633,7 @@
           "$ref": "#/$defs/CompletionHandoff"
         },
         "hasHandoff": {
-          "type": "bool"
+          "type": "boolean"
         },
         "outcome": {
           "type": "string"

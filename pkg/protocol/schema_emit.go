@@ -492,7 +492,7 @@ func schemaOf(t typeIR) any {
 	case "named":
 		return map[string]any{"$ref": "#/$defs/" + t.Name}
 	case "bool":
-		return map[string]any{"type": "bool"}
+		return map[string]any{"type": "boolean"}
 	case "int":
 		return map[string]any{"type": "integer"}
 	case "float":
