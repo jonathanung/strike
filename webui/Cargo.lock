@@ -993,6 +993,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "protocol-schema"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "quote"
 version = "1.0.47"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1318,6 +1326,7 @@ dependencies = [
  "gloo-net",
  "js-sys",
  "leptos",
+ "protocol-schema",
  "serde",
  "serde_json",
  "wasm-bindgen",
