@@ -13,8 +13,10 @@ use std::rc::Rc;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use model::{
-    display_state, filter_sessions, fmt_elapsed, is_running, merge_sessions, mode_label,
-    permission_modes, visible_sessions, ActivityRow, Bootstrap, ChangedFilesResponse, ChatLine,
+    activity_panel, child_card_from_parts, child_card_from_text, child_keys_match, display_state,
+    filter_sessions, fmt_ago, fmt_elapsed, is_running, merge_sessions, mode_label,
+    permission_modes, prefer_summary, protocol_dump, session_label, status_kind, strip_echo_tip,
+    visible_sessions, ActivityRow, Bootstrap, ChangedFilesResponse, ChatLine, ChildCard,
     ChildrenResponse, FilesResponse, Health, ModelInfo, ModelList, Remote, RootSummary,
     SessionItem, SessionsResponse, TeamSnapshot, Workspace, WorkspacesResponse,
 };
@@ -123,8 +125,10 @@ fn StatCard(label: String, children: Children) -> impl IntoView {
 
 #[component]
 fn EmptyState(title: String, body: String) -> impl IntoView {
+    let icon_html = icon("status");
     view! {
         <div class="empty-state">
+            <span class="icon-slot" aria-hidden="true" inner_html=icon_html></span>
             <strong>{title}</strong>
             <p>{body}</p>
         </div>
@@ -158,8 +162,89 @@ fn push_line(
             title: title.into(),
             body: body.into(),
             badge: badge.into(),
+            detail: String::new(),
+            key: String::new(),
         });
     });
+}
+
+fn upsert_child(lines: RwSignal<Vec<ChatLine>>, seq: &Rc<Cell<u32>>, card: ChildCard) {
+    if card.key.is_empty() {
+        return;
+    }
+    let kind = status_kind(&card.status);
+    let updated = lines
+        .try_update(|list| {
+            let Some(existing) = list
+                .iter_mut()
+                .rev()
+                .find(|line| line.role == "child" && child_keys_match(&line.key, &card.key))
+            else {
+                return false;
+            };
+            if !card.name.is_empty() {
+                existing.title = card.name.clone();
+            }
+            existing.body = prefer_summary(&existing.body, &card.summary);
+            if card.details.len() >= existing.detail.len() && !card.details.is_empty() {
+                existing.detail = card.details.clone();
+            }
+            if !kind.is_empty() {
+                existing.badge = kind.clone();
+            }
+            true
+        })
+        .unwrap_or(false);
+    if updated {
+        return;
+    }
+    let id = seq.get() + 1;
+    seq.set(id);
+    let title = if card.name.is_empty() {
+        "Child".into()
+    } else {
+        card.name
+    };
+    lines.update(|list| {
+        list.push(ChatLine {
+            id,
+            role: "child".into(),
+            title,
+            body: card.summary,
+            badge: kind,
+            detail: card.details,
+            key: card.key,
+        });
+    });
+}
+
+fn absorb_noise(lines: RwSignal<Vec<ChatLine>>, seq: &Rc<Cell<u32>>) {
+    let mut cards = Vec::new();
+    lines.update(|list| {
+        for line in list.iter_mut() {
+            if line.role != "you" && line.role != "strike" {
+                continue;
+            }
+            line.body = strip_echo_tip(&line.body);
+            if let Some(card) = child_card_from_text(&line.body) {
+                cards.push(card);
+                line.body.clear();
+            } else if let Some((summary, details)) = protocol_dump(&line.body) {
+                cards.push(ChildCard {
+                    key: format!("dump-{}", line.id),
+                    name: "Details".into(),
+                    status: String::new(),
+                    summary,
+                    details,
+                });
+                line.body.clear();
+            }
+        }
+        list.retain(|line| line.role == "child" || !line.body.trim().is_empty());
+    });
+    for card in cards {
+        upsert_child(lines, seq, card);
+    }
 }
 
 fn apply_envelope(
@@ -183,6 +268,7 @@ fn apply_envelope(
         "user.message" => {
             open.set(false);
             push_line(lines, seq, "you", "You", &text("text"), "");
+            absorb_noise(lines, seq);
         }
         "turn.started" => open.set(false),
         "text.delta" => {
@@ -209,7 +295,10 @@ fn apply_envelope(
             open.set(true);
             push_line(lines, seq, "strike", "Strike", &chunk, "");
         }
-        "turn.completed" => open.set(false),
+        "turn.completed" => {
+            open.set(false);
+            absorb_noise(lines, seq);
+        }
         "tool.begin" => {
             open.set(false);
             let name = text("name");
@@ -233,6 +322,7 @@ fn apply_envelope(
         "child.completed" => {
             let status = text("status");
             let name = text("name");
+            let session = text("sessionId");
             let mut summary = text("summary");
             if summary.is_empty() {
                 summary = data
@@ -242,19 +332,11 @@ fn apply_envelope(
                     .unwrap_or("")
                     .to_string();
             }
-            let who = if name.is_empty() {
-                text("sessionId")
-            } else {
-                name
-            };
-            let title = format!("Child {who}");
-            push_line(
+            let details = serde_json::to_string_pretty(&data).unwrap_or_default();
+            upsert_child(
                 lines,
                 seq,
-                "child",
-                &title,
-                &summary,
-                &status_badge(&status),
+                child_card_from_parts(&name, &session, &status, &summary, &details),
             );
         }
         _ => {}
@@ -464,6 +546,30 @@ fn set_drag(ev: &web_sys::DragEvent, path: &str) {
     }
 }
 
+fn icon(name: &str) -> &'static str {
+    match name {
+        "sessions" => {
+            r#"<svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h7"/></svg>"#
+        }
+        "activity" => {
+            r#"<svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 8h2.5l1.8-3.5L9 12l1.7-4H14.5"/></svg>"#
+        }
+        "files" => {
+            r#"<svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2.5h5l3 3V13.5H4z"/><path d="M9 2.5V5.5h3"/></svg>"#
+        }
+        "changes" => {
+            r#"<svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4.5h10M3 8h6M3 11.5h8"/></svg>"#
+        }
+        "command" => {
+            r#"<svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5h11v9h-11z"/><path d="M5 7l2 1.5L5 10M8.5 10.5h2.5"/></svg>"#
+        }
+        "status" => {
+            r#"<svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="2.5"/></svg>"#
+        }
+        _ => "",
+    }
+}
+
 fn short_id(id: &str) -> String {
     let tail = id.rsplit('-').next().unwrap_or(id);
     let count = tail.chars().count();
@@ -471,16 +577,6 @@ fn short_id(id: &str) -> String {
         return tail.to_string();
     }
     tail.chars().skip(count - 6).collect()
-}
-
-fn status_badge(status: &str) -> String {
-    match status.to_ascii_lowercase().as_str() {
-        "completed" => "done".into(),
-        "canceled" | "cancelled" => "stopped".into(),
-        "failed" => "failed".into(),
-        "blocked" => "blocked".into(),
-        other => other.to_string(),
-    }
 }
 
 fn rows_from_team(prev: &[ActivityRow], team: &TeamSnapshot, now: f64) -> Vec<ActivityRow> {
@@ -626,7 +722,18 @@ fn App() -> impl IntoView {
                     }
                     let now = now_ms();
                     let prev = activity.get_untracked();
-                    activity.set(rows_from_team(&prev, &team, now));
+                    let rows = rows_from_team(&prev, &team, now);
+                    let rows = if rows.is_empty() {
+                        activity_panel(
+                            &[],
+                            &children.get_untracked(),
+                            &lines.get_untracked(),
+                            &root,
+                        )
+                    } else {
+                        rows
+                    };
+                    activity.set(rows);
                 }
                 Err(e) => team_note.set(e),
             }
@@ -1214,7 +1321,10 @@ fn App() -> impl IntoView {
                 palette_query.set(String::new());
                 palette_open.set(true);
             }>
-                <span>"Run a command"</span>
+                <span class="pill-label">
+                    <span class="icon-slot" aria-hidden="true" inner_html=icon("command")></span>
+                    <span>"Run a command"</span>
+                </span>
                 <kbd>"Ctrl+K"</kbd>
             </button>
             <div class="header-actions">
@@ -1295,7 +1405,7 @@ fn App() -> impl IntoView {
             <div class=move || if focus.get() { "shell focus" } else { "shell" }>
                 <aside class="rail">
                     <div class="section-head">
-                        <h2>"Sessions"</h2>
+                        <h2 class="panel-title"><span class="icon-slot" aria-hidden="true" inner_html=icon("sessions")></span>"Sessions"</h2>
                         <button class="secondary" on:click=move |_| new_session()>"New"</button>
                     </div>
                     <div class="chips" role="tablist" aria-label="Session filter">
@@ -1327,8 +1437,25 @@ fn App() -> impl IntoView {
                             let busy = row.busy;
                             let unread = row.unread;
                             let pinned = row.pinned;
-                            let label = if row.title.is_empty() { short_id(&id) } else { row.title.clone() };
-                            let gutter = if busy { "gutter gutter-running" } else if unread { "gutter gutter-unread" } else { "gutter" };
+                            let fallback = short_id(&id);
+                            let label = session_label(&row.title, &fallback);
+                            let when = fmt_ago(row.mtime, (now_ms() / 1000.0) as i64);
+                            let subtitle = if busy {
+                                "In progress"
+                            } else if unread {
+                                "Unread"
+                            } else if live {
+                                "Idle"
+                            } else {
+                                "Saved"
+                            };
+                            let dot = if busy {
+                                "dot dot-running"
+                            } else if unread {
+                                "dot dot-unread"
+                            } else {
+                                "dot"
+                            };
                             let klass = if id == active { "session-row card on" } else { "session-row card" };
                             let row_kids: Vec<_> = if id == active {
                                 kids.iter().filter(|c| c.parent_id.is_empty() || c.parent_id == id).cloned().collect()
@@ -1339,11 +1466,14 @@ fn App() -> impl IntoView {
                             let pin_label = if pinned { "Unpin" } else { "Pin" };
                             view! {
                                 <li class=klass>
-                                    <span class=gutter></span>
-                                    <button class="link" on:click=move |_| open(id_btn.clone(), live)>
-                                        <span class="name">{label}</span>
-                                        <span class="path">
-                                            {if busy { "In progress" } else if unread { "Unread" } else if live { "Idle" } else { "Saved" }}
+                                    <button class="link session-main" on:click=move |_| open(id_btn.clone(), live)>
+                                        <span class=dot></span>
+                                        <span class="session-copy">
+                                            <span class="session-top">
+                                                <span class="name">{label}</span>
+                                                <span class="time">{when}</span>
+                                            </span>
+                                            <span class="path">{subtitle}</span>
                                         </span>
                                     </button>
                                     <button class="secondary pin" on:click=move |ev: web_sys::MouseEvent| {
@@ -1387,7 +1517,8 @@ fn App() -> impl IntoView {
                         }
                     }}
                     <p class="hint">"Pins and unread stay in this browser."</p>
-                    <h2>"Workspaces"</h2>
+                    <details class="fold">
+                    <summary>"Workspaces"</summary>
                     <p class="hint">"Opening one records it. It does not move the live engine."</p>
                     <Show when=move || workspaces.get().is_empty()>
                         <EmptyState title="No workspaces".into() body="Add a directory from Daemon.".into() />
@@ -1416,6 +1547,7 @@ fn App() -> impl IntoView {
                             }
                         }).collect_view()}
                     </ul>
+                    </details>
                 </aside>
                 <section class="chat">
                     <Show when=move || !load_error.get().is_empty()>
@@ -1450,15 +1582,49 @@ fn App() -> impl IntoView {
                         {move || lines.get().into_iter().map(|line| {
                             let badge = line.badge.clone();
                             let badge_kind = badge.clone();
+                            let role = line.role.clone();
+                            let title = line.title.clone();
+                            let body = line.body.clone();
+                            let detail = line.detail.clone();
+                            let has_badge = !badge.is_empty();
+                            let has_detail = !detail.is_empty();
+                            let card = role == "child";
+                            let prose = role == "you" || role == "strike";
+                            let tool_dump = !card && !prose && (body.trim_start().starts_with('{') || body.trim_start().starts_with('[') || body.chars().count() > 240);
+                            let body_view = if card {
+                                let summary = body;
+                                view! {
+                                    <div>
+                                        <p class="summary">{summary}</p>
+                                        {has_detail.then(|| view! {
+                                            <details>
+                                                <summary>"Details"</summary>
+                                                <pre>{detail}</pre>
+                                            </details>
+                                        })}
+                                    </div>
+                                }.into_any()
+                            } else if prose {
+                                view! { <p class="prose">{body}</p> }.into_any()
+                            } else if tool_dump {
+                                view! {
+                                    <details>
+                                        <summary>"Details"</summary>
+                                        <pre>{body}</pre>
+                                    </details>
+                                }.into_any()
+                            } else {
+                                view! { <pre>{body}</pre> }.into_any()
+                            };
                             view! {
-                                <article class=format!("bubble card role-{}", line.role)>
+                                <article class=format!("bubble card role-{role}")>
                                     <header>
-                                        <span class="who">{line.title.clone()}</span>
-                                        <Show when=move || !badge.is_empty()>
-                                            <Badge kind=badge_kind.clone() label=badge_kind.clone() />
+                                        <span class="who">{title}</span>
+                                        <Show when=move || has_badge>
+                                            <Badge kind=badge_kind.clone() label=badge.clone() />
                                         </Show>
                                     </header>
-                                    <pre>{line.body.clone()}</pre>
+                                    {body_view}
                                 </article>
                             }
                         }).collect_view()}
@@ -1477,20 +1643,6 @@ fn App() -> impl IntoView {
                             }
                         }
                     >
-                        <div class="composer-tools">
-                            <button type="button" class="chip" on:click=move |_| {
-                                model_menu.set(false);
-                                mode_menu.update(|v| *v = !*v);
-                            }>{move || format!("Approval: {}", mode_label(&perm_mode.get()))}</button>
-                            <button type="button" class="chip" on:click=open_models>{move || {
-                                let model = model_name.get();
-                                if model.is_empty() { "Model".into() } else { model }
-                            }}</button>
-                            <div class="segmented" role="group" aria-label="Enter while the session is working">
-                                <button type="button" class=move || if enter_mode.get() == "steer" { "seg on" } else { "seg" } on:click=move |_| set_enter("steer".into())>"Steer"</button>
-                                <button type="button" class=move || if enter_mode.get() == "queue" { "seg on" } else { "seg" } on:click=move |_| set_enter("queue".into())>"Queue"</button>
-                            </div>
-                        </div>
                         <Show when=move || mode_menu.get()>
                             <div class="menu">
                                 {permission_modes().iter().map(|m| {
@@ -1546,16 +1698,28 @@ fn App() -> impl IntoView {
                                     }
                                 }
                             ></textarea>
-                            <button class="primary" type="submit">"Send"</button>
+                            <div class="composer-bar">
+                                <button type="button" class="chip" on:click=move |_| {
+                                    model_menu.set(false);
+                                    mode_menu.update(|v| *v = !*v);
+                                }>{move || format!("Approval · {}", mode_label(&perm_mode.get()))}</button>
+                                <button type="button" class="chip" on:click=open_models>{move || {
+                                    let model = model_name.get();
+                                    if model.is_empty() { "Model".into() } else { model }
+                                }}</button>
+                                <button type="button" class=move || if enter_mode.get() == "steer" { "chip on" } else { "chip" } on:click=move |_| set_enter("steer".into())>"Steer"</button>
+                                <button type="button" class=move || if enter_mode.get() == "queue" { "chip on" } else { "chip" } on:click=move |_| set_enter("queue".into())>"Queue"</button>
+                                <button class="primary send" type="submit">"Send"</button>
+                            </div>
                         </form>
-                        <p class="hint">"Steer joins the running turn. Queue waits. @path is text, not file contents."</p>
+                        <p class="hint">"Queue waits until the turn finishes. Steer joins a running turn. Start a message with run <command> to use the shell. @path is text, not file contents."</p>
                     </div>
                 </section>
                 <aside class="side">
                     <div class="side-tabs" role="tablist" aria-label="Side panel">
-                        <button class=move || if side_tab.get() == "activity" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("activity".into())>"Activity"</button>
-                        <button class=move || if side_tab.get() == "files" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("files".into())>"Files"</button>
-                        <button class=move || if side_tab.get() == "changes" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("changes".into())>"Changes"</button>
+                        <button class=move || if side_tab.get() == "activity" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("activity".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("activity")></span>"Activity"</button>
+                        <button class=move || if side_tab.get() == "files" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("files".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("files")></span>"Files"</button>
+                        <button class=move || if side_tab.get() == "changes" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("changes".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("changes")></span>"Changes"</button>
                     </div>
                     <Show when=move || side_tab.get() == "activity">
                     <div class="activity">
@@ -1573,8 +1737,8 @@ fn App() -> impl IntoView {
                     </Show>
                     <Show when=move || activity.get().is_empty()>
                         <EmptyState
-                            title="No delegated children".into()
-                            body="Running, done, failed, stalled, blocked, or stopped.".into()
+                            title="No delegated children yet.".into()
+                            body="".into()
                         />
                     </Show>
                     <ul class="plain">
@@ -1584,10 +1748,17 @@ fn App() -> impl IntoView {
                                 let state = row.state.clone();
                                 let started_ms = row.started_ms;
                                 let server_elapsed = row.elapsed_s;
-                                let elapsed = {
-                                    let local = ((now_ms() - started_ms) / 1000.0) as i64;
+                                let elapsed = if started_ms <= 0.0 && server_elapsed <= 0 {
+                                    String::new()
+                                } else {
+                                    let local = if started_ms <= 0.0 {
+                                        server_elapsed
+                                    } else {
+                                        ((now_ms() - started_ms) / 1000.0) as i64
+                                    };
                                     fmt_elapsed(local.max(server_elapsed))
                                 };
+                                let show_elapsed = !elapsed.is_empty();
                                 let sid = row.session_id.clone();
                                 let sid_stop = sid.clone();
                                 let task = if row.task.is_empty() { "(no task text)".to_string() } else { row.task.clone() };
@@ -1609,11 +1780,14 @@ fn App() -> impl IntoView {
                                                 }
                                             });
                                         }>
+                                            <span class="icon-slot" aria-hidden="true" inner_html=icon("status")></span>
                                             <span class="name">{name}</span>
                                             <span class="path">{task.clone()}</span>
                                             <span class="meta">
                                                 <Badge kind=state.clone() label=state.clone() />
-                                                <span class="elapsed">{elapsed}</span>
+                                                <Show when=move || show_elapsed>
+                                                    <span class="elapsed">{elapsed.clone()}</span>
+                                                </Show>
                                                 <Show when=move || !agent.is_empty()>
                                                     <span class="path">{agent_label.clone()}</span>
                                                 </Show>
@@ -1833,7 +2007,7 @@ fn DaemonPane(
     view! {
         <main class="daemon">
             <section class="card">
-                <h2>"Daemon"</h2>
+                <h2 class="panel-title"><span class="icon-slot" aria-hidden="true" inner_html=icon("status")></span>"Daemon"</h2>
                 <label>"Base URL (blank = this daemon)"</label>
                 <input placeholder="http://100.64.0.5:8787"
                     prop:value=move || base.get()
@@ -1846,7 +2020,7 @@ fn DaemonPane(
                 <p class="hint">"Same-origin live transcript uses the daemon cookie. Open /?token=… once if the stream closes under --auth."</p>
             </section>
             <section class="card">
-                <h2>"Saved daemons"</h2>
+                <h2 class="panel-title">"Saved daemons"</h2>
                 <ul class="plain">
                     {move || remotes.get().into_iter().map(|r| {
                         let url = r.url.clone();
@@ -1872,7 +2046,7 @@ fn DaemonPane(
                 </div>
             </section>
             <section class="card">
-                <h2>"Workspaces"</h2>
+                <h2 class="panel-title">"Workspaces"</h2>
                 <Show when=move || workspaces.get().is_empty()>
                     <EmptyState title="No workspaces".into() body="Add a directory that exists on the daemon host.".into() />
                 </Show>
@@ -1916,7 +2090,7 @@ fn DaemonPane(
                         on:input=move |ev| new_path.set(event_target_value(&ev)) />
                     <button class="primary" on:click=add_workspace>"Add"</button>
                 </div>
-                <h2>"Policy"</h2>
+                <h2 class="panel-title">"Policy"</h2>
                 <p class="hint">"Rules must be a file inside the active workspace. The mode is stored here and is not applied to the live session."</p>
                 <label>"Rules file"</label>
                 <input placeholder="AGENTS.md"

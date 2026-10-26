@@ -211,6 +211,10 @@ pub struct ChatLine {
     pub title: String,
     pub body: String,
     pub badge: String,
+    /// Collapsed detail for a child or protocol card. Empty for prose.
+    pub detail: String,
+    /// Dedupe key for child cards (name, or session id).
+    pub key: String,
 }
 
 #[derive(Clone, Debug)]
@@ -453,6 +457,324 @@ pub fn fmt_elapsed(secs: i64) -> String {
     }
 }
 
+pub fn fmt_ago(mtime: i64, now_s: i64) -> String {
+    if mtime <= 0 || now_s <= 0 {
+        return String::new();
+    }
+    let delta = (now_s - mtime).max(0);
+    if delta < 60 {
+        return "now".into();
+    }
+    if delta < 3600 {
+        return format!("{}m", delta / 60);
+    }
+    if delta < 86_400 {
+        return format!("{}h", delta / 3600);
+    }
+    format!("{}d", delta / 86_400)
+}
+
+/// Badge class suffix. Wire status `completed` renders as done.
+pub fn status_kind(status: &str) -> String {
+    match status.to_ascii_lowercase().as_str() {
+        "completed" => "done".into(),
+        "canceled" | "cancelled" => "stopped".into(),
+        "failed" => "failed".into(),
+        "blocked" => "blocked".into(),
+        other => other.to_string(),
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ChildCard {
+    pub key: String,
+    pub name: String,
+    pub status: String,
+    pub summary: String,
+    pub details: String,
+}
+
+pub fn child_keys_match(a: &str, b: &str) -> bool {
+    if a.is_empty() || b.is_empty() {
+        return false;
+    }
+    let a = a.to_ascii_lowercase();
+    let b = b.to_ascii_lowercase();
+    a == b || a.starts_with(&b) || b.starts_with(&a)
+}
+
+pub fn child_card_from_parts(
+    name: &str,
+    session: &str,
+    status: &str,
+    summary: &str,
+    details: &str,
+) -> ChildCard {
+    let name = name.trim().to_string();
+    let session = session.trim().to_string();
+    let key = if !name.is_empty() {
+        name.to_ascii_lowercase()
+    } else {
+        session.to_ascii_lowercase()
+    };
+    let picked = prefer_summary("", summary);
+    let summary = if useful_summary(&picked) {
+        picked
+    } else {
+        status.trim().to_string()
+    };
+    ChildCard {
+        key,
+        name: if name.is_empty() { session } else { name },
+        status: status.trim().to_string(),
+        summary,
+        details: details.trim().to_string(),
+    }
+}
+
+/// Engine-injected `[child.completed …]` user text, including the handoff JSON.
+pub fn child_card_from_text(text: &str) -> Option<ChildCard> {
+    let start = text.find("[child.completed")?;
+    let rest = &text[start..];
+    let header_end = rest.find(']')?;
+    let header = &rest[..=header_end];
+    let session = header_field(header, "session");
+    let name = header_field(header, "name");
+    let status = header_field(header, "status");
+    if session.is_empty() && name.is_empty() && status.is_empty() {
+        return None;
+    }
+    let body = rest[header_end + 1..].trim();
+    let mut summary = handoff_summary(body).unwrap_or_default();
+    if !useful_summary(&summary) {
+        summary = first_blocker(body).unwrap_or_default();
+    }
+    if !useful_summary(&summary) {
+        summary = status.clone();
+    }
+    Some(child_card_from_parts(
+        &name,
+        &session,
+        &status,
+        &summary,
+        rest.trim(),
+    ))
+}
+
+/// Sidebar title. A stored `[child.completed]` blob becomes the child name.
+pub fn session_label(title: &str, fallback: &str) -> String {
+    let title = title.trim();
+    if let Some(card) = child_card_from_text(title) {
+        if !card.name.is_empty() {
+            return card.name;
+        }
+    }
+    if title.is_empty() {
+        return fallback.to_string();
+    }
+    if title.chars().count() > 72 {
+        let mut short: String = title.chars().take(72).collect();
+        short.push('…');
+        return short;
+    }
+    title.to_string()
+}
+
+const ECHO_TIP_MARK: &str = "Tip: start a message with `run <command>`";
+
+pub fn strip_echo_tip(text: &str) -> String {
+    let Some(i) = text.find(ECHO_TIP_MARK) else {
+        return text.to_string();
+    };
+    let mut end = i + ECHO_TIP_MARK.len();
+    if let Some(rel) = text[end..].find('.') {
+        end += rel + 1;
+    } else {
+        end = text.len();
+    }
+    let mut out = text[..i].trim_end().to_string();
+    let rest = text[end..].trim_start();
+    if !rest.is_empty() {
+        if !out.is_empty() {
+            out.push_str("\n\n");
+        }
+        out.push_str(rest);
+    }
+    out
+}
+
+/// Long JSON or handoff/verification dumps that should not sit in the transcript as a wall.
+pub fn protocol_dump(text: &str) -> Option<(String, String)> {
+    let t = text.trim();
+    if t.chars().count() < 80 {
+        return None;
+    }
+    let jsonish = t.starts_with('{')
+        || t.starts_with('[')
+        || t.contains("\nhandoff:")
+        || t.contains("handoff: {")
+        || t.contains("\nverification:")
+        || t.contains("verification: {");
+    if !jsonish {
+        return None;
+    }
+    let summary = one_line(t);
+    Some((summary, t.to_string()))
+}
+
+fn header_field(header: &str, key: &str) -> String {
+    let pat = format!("{key}=");
+    let Some(i) = header.find(&pat) else {
+        return String::new();
+    };
+    header[i + pat.len()..]
+        .split(|c: char| c.is_whitespace() || c == ']')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_string()
+}
+
+fn handoff_summary(body: &str) -> Option<String> {
+    let idx = body.find("handoff:")?;
+    let after = body[idx + "handoff:".len()..].trim_start();
+    let json = json_object(after)?;
+    let v: serde_json::Value = serde_json::from_str(json).ok()?;
+    let summary = v.get("summary")?.as_str()?.trim();
+    if summary.is_empty() {
+        return None;
+    }
+    Some(one_line(summary))
+}
+
+fn json_object(s: &str) -> Option<&str> {
+    let bytes = s.as_bytes();
+    if bytes.first() != Some(&b'{') {
+        return None;
+    }
+    let mut depth = 0i32;
+    let mut in_str = false;
+    let mut esc = false;
+    for (i, &b) in bytes.iter().enumerate() {
+        if in_str {
+            if esc {
+                esc = false;
+                continue;
+            }
+            if b == b'\\' {
+                esc = true;
+                continue;
+            }
+            if b == b'"' {
+                in_str = false;
+            }
+            continue;
+        }
+        match b {
+            b'"' => in_str = true,
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(&s[..=i]);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn useful_summary(summary: &str) -> bool {
+    let cleaned = strip_echo_tip(summary);
+    let t = cleaned.trim();
+    !t.is_empty() && !t.starts_with("You said:") && !t.contains(ECHO_TIP_MARK)
+}
+
+/// Keep a real status line. Echo "You said" text and the run-command tip lose.
+pub fn prefer_summary(current: &str, incoming: &str) -> String {
+    let current = one_line(&strip_echo_tip(current));
+    let incoming = one_line(&strip_echo_tip(incoming));
+    match (useful_summary(&current), useful_summary(&incoming)) {
+        (false, true) => incoming,
+        (true, false) => current,
+        (true, true) => {
+            if incoming.split_whitespace().count() > current.split_whitespace().count() {
+                incoming
+            } else {
+                current
+            }
+        }
+        (false, false) => String::new(),
+    }
+}
+
+fn first_blocker(body: &str) -> Option<String> {
+    let idx = body.find("handoff:")?;
+    let json = json_object(body[idx + "handoff:".len()..].trim_start())?;
+    let v: serde_json::Value = serde_json::from_str(json).ok()?;
+    let arr = v.get("blockers")?.as_array()?;
+    arr.iter().find_map(|item| {
+        let s = item.as_str()?.trim();
+        if s.is_empty() {
+            None
+        } else {
+            Some(s.to_string())
+        }
+    })
+}
+
+/// When the live team snapshot is empty, show saved children so the panel
+/// matches the session list. Status comes from the transcript card.
+pub fn activity_panel(
+    activity: &[ActivityRow],
+    kids: &[ChildSession],
+    cards: &[ChatLine],
+    active: &str,
+) -> Vec<ActivityRow> {
+    if !activity.is_empty() {
+        return activity.to_vec();
+    }
+    let mut rows = Vec::new();
+    for child in kids {
+        if !child.parent_id.is_empty() && child.parent_id != active {
+            continue;
+        }
+        let name = if child.title.is_empty() {
+            child.id.clone()
+        } else {
+            child.title.clone()
+        };
+        let card = cards.iter().rev().find(|line| {
+            line.role == "child"
+                && (child_keys_match(&line.key, &name) || child_keys_match(&line.key, &child.id))
+        });
+        rows.push(ActivityRow {
+            session_id: child.id.clone(),
+            name,
+            agent: String::new(),
+            task: card.map(|line| line.body.clone()).unwrap_or_default(),
+            state: card.map(|line| line.badge.clone()).unwrap_or_default(),
+            output: card.map(|line| line.detail.clone()).unwrap_or_default(),
+            elapsed_s: 0,
+            started_ms: 0.0,
+            expanded: false,
+        });
+    }
+    rows
+}
+
+fn one_line(text: &str) -> String {
+    let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let flat = flat.trim();
+    if flat.chars().count() <= 140 {
+        return flat.to_string();
+    }
+    let mut short: String = flat.chars().take(139).collect();
+    short.push('…');
+    short
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -536,5 +858,65 @@ mod tests {
         );
         assert_eq!(mode_label("plan"), "Plan");
         assert_eq!(mode_label("nope"), "Default");
+    }
+
+    #[test]
+    fn child_notice_is_one_card_and_echo_tip_is_stripped() {
+        let raw = "[child.completed session=abcd1234 name=scribe status=blocked]\nhandoff: {\"summary\":\"verification failed: schema: handoff\",\"blockers\":[\"schema\"]}\nverification: {\"passed\":false,\"summary\":\"gate\"}\nDo not sleep-poll for subagents; this is the terminal result.";
+        let card = child_card_from_text(raw).expect("card");
+        assert_eq!(card.name, "scribe");
+        assert_eq!(card.key, "scribe");
+        assert_eq!(card.status, "blocked");
+        assert!(card.summary.contains("schema: handoff"));
+        assert!(!card.summary.contains("Tip:"));
+        assert!(!card.summary.starts_with("You said:"));
+        assert!(card.details.contains("verification"));
+        assert!(child_keys_match(&card.key, "Scribe"));
+        assert!(child_keys_match("abcd1234", "abcd"));
+
+        let echoed = format!("You said: {raw}\n\nTip: start a message with `run <command>` to exercise the bash tool and the permission prompt.");
+        let stripped = strip_echo_tip(&echoed);
+        assert!(!stripped.contains("Tip:"));
+        assert!(child_card_from_text(&stripped).is_some());
+
+        let plain = strip_echo_tip("You said: hello\n\nTip: start a message with `run <command>` to exercise the bash tool and the permission prompt.");
+        assert_eq!(plain, "You said: hello");
+        assert!(child_card_from_text("hello from the cockpit").is_none());
+        assert!(protocol_dump("hello").is_none());
+        let dump = protocol_dump(&format!("handoff: {}", "{\"summary\":\"x\",\"blockers\":[\"a\",\"b\",\"c\",\"d\",\"e\"]} and more text to pass the length gate for a protocol wall"));
+        assert!(dump.is_some());
+
+        assert_eq!(session_label(raw, "fallback"), "scribe");
+        assert_eq!(session_label("", "short"), "short");
+        assert_eq!(fmt_ago(100, 160), "1m");
+        assert_eq!(status_kind("completed"), "done");
+        assert_eq!(status_kind("blocked"), "blocked");
+        assert_eq!(
+            prefer_summary(
+                "You said: say hello",
+                "verification failed: schema: handoff"
+            ),
+            "verification failed: schema: handoff"
+        );
+
+        let kids = vec![ChildSession {
+            id: "child-1".into(),
+            title: "scribe".into(),
+            parent_id: "root".into(),
+        }];
+        let cards = vec![ChatLine {
+            id: 1,
+            role: "child".into(),
+            title: "scribe".into(),
+            body: "schema: handoff missing".into(),
+            badge: "blocked".into(),
+            detail: "handoff json".into(),
+            key: "scribe".into(),
+        }];
+        let rows = activity_panel(&[], &kids, &cards, "root");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].name, "scribe");
+        assert_eq!(rows[0].state, "blocked");
+        assert_eq!(rows[0].task, "schema: handoff missing");
     }
 }

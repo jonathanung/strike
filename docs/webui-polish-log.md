@@ -1,10 +1,21 @@
 # Web cockpit polish log
 
-Compared with Kiro Crew 0.10.0 reference shots (sessions, chat with a side
-panel, files, settings). Strike keeps its own name, copy, and the Bubble Tea
-palette from `schemas/ui-tokens.json`. The references are a layout bar, not a
-skin. Panel radius is 10px on purpose; the TUI stays square. See
-[theme.md](theme.md).
+Strike keeps its own name, copy, and the Bubble Tea palette from
+`schemas/ui-tokens.json`. Panel radius is 10px on purpose; the TUI stays
+square. See [theme.md](theme.md).
+
+Iterations 1–4 were Strike-only layout passes. The files previously committed
+as `comparison-*.png` were two Strike screenshots side by side (an earlier
+Strike layout on the left, the palette pass on the right), squeezed into one
+wide image. They were not Kiro Crew. Those files are removed.
+
+The named Kiro full frames (`16-sessions-empty`,
+`33-chat-empty-activity-panel-open`, `25-settings-agent-harness`,
+`19-apps-discover`, `17-schedule-empty`, `46-dark-chat-empty-files-panel`) are
+not in this workspace. A contact sheet in the agent attachment store OCRs as a
+thumbnail index of those filenames; it is not a full-frame capture, so it was
+not used as a left half. No new comparison image is committed until those
+full frames are available.
 
 Viewports: 1440×900, 1024×594, and 390×844.
 
@@ -68,9 +79,8 @@ failed to compile (`FnOnce`); `:empty { display: none }` is what shipped.
 
 Shots: `iter4/empty-1440.png`, `empty-1024.png`, `chat-1440.png`,
 `chat-1024.png`, `files-1440.png`, `daemon-1440.png`, `palette-1440.png`,
-`approval-1440.png`, `mobile.png`. Side-by-side commits:
-`comparison-sessions.png`, `comparison-chat.png`, `comparison-files.png`,
-`comparison-settings.png`.
+`approval-1440.png`, `mobile.png`. The side-by-side PNGs committed with
+this iteration were Strike versus Strike. They are deleted.
 
 Defects:
 
@@ -84,19 +94,81 @@ leftover space.
 No further misalignment showed up at 1440 or 1024: panels share the top edge,
 gutters are 10px, borders are 1px `--rule`, the command field is centered.
 
+## Iteration 5
+
+Shot: local `iter5/chat-1440.png` (1440×900), session `hello from the cockpit`.
+
+Defects:
+
+- The transcript was a monospace wall: the engine's `[child.completed …]`
+  user note, with handoff and verification JSON inline.
+- The echo provider's `Tip: start a message with \`run <command>\`` was
+  rendered as part of that wall.
+- Filter chips were still a 2×2 grid. Workspaces still sat open under the
+  session list. Composer controls still wrapped. No icon set.
+
+Fix: a `[child.completed]` note and a `child.completed` event collapse to one
+card per child (name, status badge, one-line summary, Details closed). The
+echo tip is stripped from transcript text. The run-command guidance lives in
+the composer hint.
+
+## Iteration 6
+
+Shots: local `iter6/chat-1440.png`, `iter6/chat-1024.png`.
+
+Measured at 1024×594: filter chips are one row (All x=23, Unread x=59,
+In progress x=123, Pinned x=209, all y=88).
+
+Defects still visible:
+
+- The card summary was the handoff's echo line (`You said: say hello` plus
+  the tip), not the verification failure.
+- Activity stats said 2 blocked while the list rendered the empty state.
+  Saved sessions are not the live team snapshot, so `/v1/team` was empty.
+- A fallback clock used `started_ms == 0` and printed `498050:41:31`.
+- Composer pills were not yet one row with Send. No icons. Daemon headings
+  were still the muted 12px label.
+
+Fixes: summaries prefer the verification or blocker line and drop the tip.
+When the team snapshot has no members, activity rows are the session's saved
+children plus the transcript card. Spacing scale is 4/8/12/16 and 12/13/14px.
+Session rows are title, status dot, relative time, and one subtitle.
+Workspaces are a collapsed section. Rail is 320px so the four chips fit.
+
+## Iteration 7
+
+Shots: `docs/webui-screenshots/strike-chat-1440.png`,
+`strike-chat-1024.png`, `strike-daemon-1440.png`.
+
+Measured:
+
+- 1440×900 composer: Approval, Model, Steer, Queue, and Send all y=811,
+  height 28. Send sits at the right edge (x=1053).
+- 1024×594 composer: the same five controls all y=474, height 28.
+- Filter chips still one row (y=91).
+- Activity rows are 46px. The task line is `white-space: nowrap` (path
+  height 17px). The bogus elapsed is gone.
+- Seven inline SVGs in the shell (sessions, command, activity, files,
+  changes, status). No external asset or icon font.
+- Transcript cards read `scribe` / `blocked` plus the verification line, with
+  Details collapsed. The echo tip is not a message. `You said: hello from
+  the cockpit` remains once, because that is the echo provider's reply with
+  the tip removed.
+- Daemon sections use the same card, 16px padding, and 14px ink headings.
+
 ## Remaining gaps
 
-- Echo children block on `schema:handoff` immediately, so this pass did not
-  catch a running row. Stop is present and disabled while nothing is running.
-  Retry on a blocked row spawns another child (observed: scribe, then
-  say-hello, both blocked).
-- Suggestions and the rail have no icons. The web client has no icon set.
-- Bundled themes that omit surfaces keep Strike's surface ladder, matching
-  `theme.Resolve()`. Nord's own muted color is low contrast on Nord's
-  background; that hex is the theme file.
-- Schedule, Discover, and the agent-harness settings page are not Strike
-  screens. The daemon page is the real settings surface.
-- The transcript will show the engine's `[child.completed …]` note. That text
-  is stored on the session; the client does not rewrite it.
-- Back, Forward, and Focus are command-palette actions, not header buttons.
-- `@path` is inserted as text. The composer does not expand slash commands.
+- Named Kiro full-frame captures are not in this workspace, so there is no
+  Kiro-left / Strike-right image. Schedule, Discover, and the agent-harness
+  page are not Strike screens. The daemon page is the settings surface.
+- Echo children still block on `schema:handoff`. Stop stays disabled while
+  nothing is running. Retry spawns another child.
+- The same child is listed in the sidebar, the transcript card, and the
+  activity row. Those are three surfaces, not three copies of the JSON note.
+  The stored session title is unchanged.
+- Bundled themes that omit surfaces keep Strike's surface ladder. Nord's
+  muted hex is the theme file.
+- Back, Forward, and Focus stay in the command palette.
+- `@path` is text. The composer does not expand slash commands.
+- The activity task line is one visual line; the full verification sentence
+  is still the summary, so it ellipsizes.
