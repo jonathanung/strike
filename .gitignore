@@ -6,6 +6,7 @@ coverage.out
 /.nix-go/
 */worktrees
 webui/target/
+webui/protocol-schema/target/
 webui/dist/
 /webui-uat-artifacts/
 /usage-audit-uat/

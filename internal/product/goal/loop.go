@@ -67,7 +67,7 @@ func (l *Loop) Run(ctx context.Context, id string) (Goal, error) {
 		l.scratch = make(map[string]string)
 	}
 	if l.Hooks.PreAct == nil {
-		l.Hooks.PreAct = AllowlistPreAct
+		l.Hooks.PreAct = GuardedPreAct
 	}
 
 	g, ok, err := l.Store.Get(id)
@@ -77,18 +77,37 @@ func (l *Loop) Run(ctx context.Context, id string) (Goal, error) {
 	if !ok {
 		return Goal{}, ErrNotFound
 	}
+	// A stop that landed before the loop starts must not be undone by the
+	// activation below: a cancelled context means pause/abort already ran.
+	if err := ctx.Err(); err != nil {
+		return g, err
+	}
 	switch g.Status {
 	case StatusDone, StatusFailed, StatusAborted:
 		return g, nil
 	case StatusActive:
 		// resume
-	case StatusPending, StatusPaused:
+	case StatusPending, StatusPaused, StatusBlocked:
 		g, err = l.Store.SetStatus(id, StatusActive, "")
 		if err != nil {
 			return Goal{}, err
 		}
 	default:
 		return Goal{}, fmt.Errorf("goal: cannot run status %s", g.Status)
+	}
+	if err := ctx.Err(); err != nil {
+		// Pause/abort landed while activating. If the goal is still in the
+		// active state activation left it in, put it back to paused; a
+		// status a concurrent control already wrote stands as stored.
+		if fresh, ok, getErr := l.Store.Get(id); getErr == nil && ok {
+			if fresh.Status == StatusActive {
+				if paused, perr := l.Store.SetStatus(id, StatusPaused, ""); perr == nil {
+					return paused, err
+				}
+			}
+			return fresh, err
+		}
+		return g, err
 	}
 
 	for {
@@ -138,6 +157,7 @@ func (l *Loop) Run(ctx context.Context, id string) (Goal, error) {
 		g = live
 		ApplyEval(&g, rec.Evaluation)
 		g.CostUSD += rec.CostUSD
+		g.TokensUsed += rec.Tokens
 		g.LastIteration = rec.N
 
 		history = append(history, rec)
@@ -152,8 +172,13 @@ func (l *Loop) Run(ctx context.Context, id string) (Goal, error) {
 			if gr.Tripped {
 				g.Status = gr.NextStatus
 				g.FailReason = gr.Reason
+				g.Escalation = gr.Escalation
 				if gr.NextStatus == StatusDone {
 					g.FailReason = ""
+					g.Escalation = ""
+				}
+				if g.Status != StatusActive {
+					g.FreezeWallClock(l.Clock.Now())
 				}
 			}
 		}
@@ -180,8 +205,13 @@ func (l *Loop) Run(ctx context.Context, id string) (Goal, error) {
 func (l *Loop) applyGuard(g Goal, gr GuardResult) (Goal, error) {
 	g.Status = gr.NextStatus
 	g.FailReason = gr.Reason
+	g.Escalation = gr.Escalation
 	if gr.NextStatus == StatusDone {
 		g.FailReason = ""
+		g.Escalation = ""
+	}
+	if g.Status != StatusActive {
+		g.FreezeWallClock(l.Clock.Now())
 	}
 	if err := l.Store.UpdateGoal(g); err != nil {
 		return g, err
@@ -312,6 +342,7 @@ func (l *Loop) finishIteration(ctx context.Context, g Goal, n int, obs Observati
 		Payload: mustJSON(ev),
 	})
 	draft.Evaluation = ev
+	draft.Tokens = EstimateTokens(plan.Summary, actions, ev)
 
 	// state_hash: criteria booleans + check identities + action outcomes — not transcript.
 	draft.StateHash = stateHash(g, ev, actions)

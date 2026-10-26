@@ -92,6 +92,14 @@ Status: walking skeleton on branch `worktree-rust-webui-daemon`. Not merged.
     can preview. Find-in-file is local. Agent diff reuses
     `GET /v1/changed-files` for the open path. Transcript `path:line` and
     `strike-file:path#Lline` open the same pane.
+  - Goals (`/v1/goals`, the Goals view) define a verification command,
+    budgets, and an autopilot posture. Deny rules still apply. See
+    [goal.md](goal.md).
+  - Side chat is a read-only drawer (Activity, an Activity row, the composer,
+    or Alt+S). `POST /v1/sidechat/ask` answers from the session transcript
+    with a separate model call and no tools. `POST /v1/sidechat/ops` refuses
+    `permission.reply` and `user.input`. Turns are not written to the session
+    JSONL.
   - Schedule, memory, knowledge, artifacts, the task runner, onboarding,
     and a multi-gateway hub are documented in
     [webui-planned.md](webui-planned.md), not drawn as empty panels.

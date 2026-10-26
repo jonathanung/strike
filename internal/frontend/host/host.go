@@ -714,26 +714,39 @@ type GoalCriterion struct {
 
 // Goal is a project-local loop-harness goal for /goal.
 type Goal struct {
-	ID            string
-	Description   string
-	Criteria      []GoalCriterion
-	Status        string // pending|active|paused|done|failed|aborted
-	MaxIterations int
-	MaxCostUSD    float64
-	AllowedTools  []string
-	CostUSD       float64
-	LastIteration int
-	FailReason    string
-	CreatedAt     time.Time
+	ID                 string
+	Description        string
+	Criteria           []GoalCriterion
+	Status             string // pending|active|paused|done|failed|aborted|blocked
+	MaxIterations      int
+	MaxCostUSD         float64
+	MaxWallClockS      int
+	MaxTokens          int
+	MaxVerifyFailures  int
+	MaxNoProgressIters int
+	AllowedTools       []string
+	DenyTools          []string
+	Autopilot          bool
+	CostUSD            float64
+	TokensUsed         int
+	LastIteration      int
+	FailReason         string
+	Escalation         string // "human" when the loop is waiting on a person
+	CreatedAt          time.Time
 }
 
 // GoalSetOptions configures /goal set constraints.
+// Zero numeric fields keep the harness defaults.
 type GoalSetOptions struct {
 	MaxIterations      int
 	MaxCostUSD         float64
 	MaxWallClockS      int
 	MaxNoProgressIters int
+	MaxTokens          int
+	MaxVerifyFailures  int
 	AllowedTools       []string
+	DenyTools          []string
+	Autopilot          bool
 }
 
 // GoalIteration is one committed loop pass for /goal log.
@@ -742,6 +755,9 @@ type GoalIteration struct {
 	Plan      string
 	StateHash string
 	CostUSD   float64
+	Tokens    int
+	// Verified is true when the critic satisfied every criterion this pass.
+	Verified bool
 	// Summary is a short human-readable line (criteria matrix + action count).
 	Summary string
 }

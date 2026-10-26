@@ -51,6 +51,9 @@ Endpoints:
   GET  /  and  GET /attach          cockpit page
   GET  /v1/ws                       WebSocket: ops in, events out (live)
   POST /v1/ops                      submit one op envelope (live)
+  GET  /v1/sidechat                 list read-only side-chat turns
+  POST /v1/sidechat/ask             ask about the session (no tools, no user.input)
+  POST /v1/sidechat/ops             refused; cannot approve tools or post user.input
   GET  /v1/live/events              SSE of live engine events
   GET  /v1/status                   live status chrome
   GET  /v1/agents                   selectable agents
@@ -227,6 +230,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 	var liveHub *server.LiveHub
 	var services *host.Services
 	var sandboxSnap *server.SandboxSnapshot
+	var sideChat server.SideChatModel
 	var cleanup func() error
 	sessionDir := opts.sessionDir
 
@@ -243,6 +247,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 			return err
 		}
 		sessionDir = a.sessions.Dir()
+		sideChat = newSideChatModel(a.sideProvider, a.sideModel, a.sideSelect)
 
 		agents := make([]server.AgentInfo, 0, len(a.services.Agents))
 		for _, name := range a.services.Agents {
@@ -497,6 +502,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		ReadOnly:      opts.readOnly,
 		Audit:         auditSink,
 		UsageAuditDir: usageDir,
+		SideChat:      sideChat,
 	})
 	if err != nil {
 		return err
@@ -518,6 +524,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		provider:   opts.provider,
 		sessionDir: sessionDir,
 		readOnly:   opts.readOnly,
+		sideChat:   sideChat != nil,
 	})
 
 	errCh := make(chan error, 1)
@@ -549,6 +556,7 @@ type serveBanner struct {
 	provider   string
 	sessionDir string
 	readOnly   bool
+	sideChat   bool
 }
 
 func printServeBanner(w io.Writer, b serveBanner) {
@@ -570,6 +578,9 @@ func printServeBanner(w io.Writer, b serveBanner) {
 	}
 	if b.readOnly {
 		fmt.Fprintln(w, "  ops:     read-only (mutating ops rejected)")
+	}
+	if b.sideChat {
+		fmt.Fprintln(w, "  side chat: read-only (POST /v1/sidechat/ask; cannot approve tools)")
 	}
 	if !b.auth {
 		fmt.Fprintln(w, "  auth:    off (loopback only)")
