@@ -58,9 +58,15 @@ type attachmentIngestResponse struct {
 }
 
 func (s *Server) handleAttachmentIngest(w http.ResponseWriter, r *http.Request) {
-	if s.opts.ReadOnly {
-		s.recordServeOp("", "attachment.ingest", s.clientIPString(r), "http", opOutcomeReadOnly)
-		writeJSON(w, http.StatusForbidden, opErrorResponse{Error: errOpsReadOnly.Error()})
+	if err := s.admitOp(r, "http", "attachment.ingest", ""); err != nil {
+		switch {
+		case errors.Is(err, errOpsReadOnly):
+			writeJSON(w, http.StatusForbidden, opErrorResponse{Error: err.Error()})
+		case errors.Is(err, errOpsRateLimited):
+			writeJSON(w, http.StatusTooManyRequests, opErrorResponse{Error: err.Error()})
+		default:
+			writeJSON(w, http.StatusForbidden, opErrorResponse{Error: err.Error()})
+		}
 		return
 	}
 	if s.opts.Attachments == nil {

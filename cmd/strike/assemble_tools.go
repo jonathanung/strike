@@ -86,6 +86,10 @@ type assembled struct {
 	firstSlot *rootSlot
 	// frameStore holds the last painted TUI frame for tui_snapshot (#1183).
 	frameStore *tool.TUIFrameStore
+	// attachments is the one content-addressed store for every engine in
+	// this process. HTTP ingest uses the same pointer so two mutexes cannot
+	// interleave a blob write.
+	attachments *attachment.Store
 }
 
 // assemble resolves project/config/auth, builds the engine and session store,
@@ -591,6 +595,10 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	registry.Register(tools.NewRenamePreview(lspMgr))
 	registry.Register(tools.NewImpact(lspMgr))
 
+	// One store for every root in this process. Opened before the first
+	// openRoot call; the closure reads it at call time.
+	var sharedAttachments *attachment.Store
+
 	// openRoot builds one live root engine. resumeID empty creates a fresh
 	// session; non-empty opens that durable root (subagents rejected).
 	// applyCLI pins: only the process's first root applies --provider/--model/--effort.
@@ -708,8 +716,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		} else {
 			auditSink = s
 		}
-		attStore, attErr := attachment.Open(globalRoot)
-		if attErr != nil {
+		if sharedAttachments == nil {
 			if !resuming {
 				_ = sessions.Destroy(sessionID)
 			} else {
@@ -718,7 +725,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			if wtClose != nil {
 				_ = wtClose()
 			}
-			return nil, nil, fmt.Errorf("opening attachments: %w", attErr)
+			return nil, nil, fmt.Errorf("opening attachments: store is not open")
 		}
 		eng := engine.New(engine.Options{
 			SessionID:        sid,
@@ -731,7 +738,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			Instructions:     instructions,
 			Memory:           enginebind.Memory(memoryStore),
 			Ledger:           enginebind.Ledger(ledgerStore),
-			Attachments:      enginebind.Attachments(attStore),
+			Attachments:      enginebind.Attachments(sharedAttachments),
 			ProjectArtifact:  enginebind.ProjectArtifact,
 			ProjectLedger:    enginebind.ProjectLedger,
 			Worktrees:        enginebind.Worktrees(),
@@ -918,10 +925,29 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		}, replay, nil
 	}
 
+	sharedAttachments, err = attachment.Open(globalRoot)
+	if err != nil {
+		sched.Close()
+		_ = ledgerStore.Close()
+		_ = artifactStore.Close()
+		_ = planStore.Close()
+		_ = goalStore.Close()
+		_ = issueStore.Close()
+		_ = memoryStore.Close()
+		_ = historyStore.Close()
+		return nil, fmt.Errorf("opening attachments: %w", err)
+	}
+	closeAttachments := func() {
+		if sharedAttachments != nil {
+			_ = sharedAttachments.Close()
+		}
+	}
+
 	resumeID := strings.TrimSpace(opts.sessionID)
 	if opts.continueSession {
 		info, err := sessions.LatestRoot(projectIdentity.Key)
 		if err != nil {
+			closeAttachments()
 			sched.Close()
 			_ = ledgerStore.Close()
 			_ = artifactStore.Close()
@@ -936,6 +962,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	}
 	first, replay, err := openRoot(resumeID, true)
 	if err != nil {
+		closeAttachments()
 		sched.Close()
 		_ = ledgerStore.Close()
 		_ = artifactStore.Close()
@@ -1129,6 +1156,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		spawnRoot:      spawn,
 		firstSlot:      first,
 		frameStore:     frameStore,
+		attachments:    sharedAttachments,
 	}, nil
 }
 

@@ -159,8 +159,9 @@ under a reply are three fixed prompts, not model suggestions.
 The service worker caches the app shell after a successful load and serves
 it when the network is down. `/v1/` and `/health` are never cached. A
 dropped event stream shows a reconnecting note and opens the stream again.
-The column stays up during the gap. The daemon replays the session log, so
-the first replay event replaces the column instead of appending a second copy.
+The column stays up during the gap. When the new stream opens, the column
+is replaced and the daemon's log replay fills it. Events from a socket that
+has already been closed are ignored, so the log is not appended twice.
 
 ## Not planned as a copy
 

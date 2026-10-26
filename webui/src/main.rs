@@ -710,6 +710,7 @@ fn App() -> impl IntoView {
     let sessions_drawer = RwSignal::new(false);
     let panel_drawer = RwSignal::new(false);
     let pending_files = RwSignal::new(Vec::<chat_mode::PendingAttachment>::new());
+    let sending = RwSignal::new(false);
     let listening = RwSignal::new(false);
     let speech_ok = chat_mode::dictation_available();
     let reconnect_gen = RwSignal::new(0u32);
@@ -933,12 +934,12 @@ fn App() -> impl IntoView {
         let lines_cb = lines;
         let seq_cb = seq_fx.clone();
         let open_cb = open_fx.clone();
-        let wipe_cb = wipe_on_replay;
+        let epoch_msg = epoch;
+        let epochs_msg = stream_epoch;
         let on_msg =
             Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |ev: web_sys::MessageEvent| {
-                if wipe_cb.get_untracked() {
-                    wipe_cb.set(false);
-                    lines_cb.set(Vec::new());
+                if epochs_msg.get_untracked() != epoch_msg {
+                    return;
                 }
                 if let Some(data) = ev.data().as_string() {
                     apply_envelope(lines_cb, &seq_cb, &open_cb, &data);
@@ -950,11 +951,22 @@ fn App() -> impl IntoView {
         let fails_ok = stream_fails;
         let note_ok = stream_note;
         let gate_ok = gateway;
+        let epoch_open = epoch;
+        let epochs_open = stream_epoch;
+        let lines_open = lines;
+        let wipe_open = wipe_on_replay;
         let on_open = Closure::<dyn FnMut(web_sys::Event)>::new(move |_ev| {
+            if epochs_open.get_untracked() != epoch_open {
+                return;
+            }
             fails_ok.set(0);
             up.set(true);
             note_ok.set(String::new());
             gate_ok.set("connected".into());
+            if wipe_open.get_untracked() {
+                wipe_open.set(false);
+                lines_open.set(Vec::new());
+            }
         });
         es.set_onopen(Some(on_open.as_ref().unchecked_ref()));
         on_open.forget();
@@ -964,7 +976,11 @@ fn App() -> impl IntoView {
         let epochs = stream_epoch;
         let note_err = stream_note;
         let bump = reconnect_gen;
+        let epoch_err = epoch;
         let on_err = Closure::<dyn FnMut(web_sys::Event)>::new(move |_ev| {
+            if epochs.get_untracked() != epoch_err {
+                return;
+            }
             es_err.close();
             up_err.set(false);
             let n = fails_err.get_untracked();
@@ -1042,6 +1058,9 @@ fn App() -> impl IntoView {
     };
 
     let send = move || {
+        if sending.get_untracked() {
+            return;
+        }
         let text = draft.get_untracked().trim().to_string();
         let files = pending_files.get_untracked();
         if files.iter().any(|f| f.error.is_empty() && f.data_b64.is_empty() && f.uploaded_ref.is_empty()) {
@@ -1062,12 +1081,25 @@ fn App() -> impl IntoView {
         } else {
             "user.input"
         };
+        // Take the composer before the first await so a repeated Enter or a
+        // second click cannot post the same attachments again.
+        sending.set(true);
+        pending_files.set(Vec::new());
         draft.set(String::new());
         if listening.get_untracked() {
             let _ = chat_mode::toggle_dictation(|_| {}, |_| {});
             listening.set(false);
         }
         let (b, t) = (base.get_untracked(), token.get_untracked());
+        let restore = move |failed: Vec<chat_mode::PendingAttachment>, failed_text: String| {
+            draft.update(|d| {
+                *d = chat_mode::merge_failed_send(d, &failed_text);
+            });
+            pending_files.update(|rows| {
+                *rows = chat_mode::merge_failed_files(failed.clone(), rows.clone());
+            });
+            sending.set(false);
+        };
         spawn_local(async move {
             let mut updated = files;
             let mut images = Vec::new();
@@ -1094,8 +1126,7 @@ fn App() -> impl IntoView {
                         }
                         Err(err) => {
                             status.set(format!("attachment failed: {err}"));
-                            draft.set(text);
-                            pending_files.set(updated);
+                            restore(updated, text);
                             return;
                         }
                     }
@@ -1119,12 +1150,11 @@ fn App() -> impl IntoView {
                     for file in &updated {
                         chat_mode::revoke_preview(&file.preview);
                     }
-                    pending_files.set(Vec::new());
+                    sending.set(false);
                 }
                 Err(err) => {
                     status.set(format!("send failed: {err}"));
-                    draft.set(text);
-                    pending_files.set(updated);
+                    restore(updated, text);
                 }
             }
         });

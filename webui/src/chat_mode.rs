@@ -116,6 +116,38 @@ pub fn accept_local(already: usize, size: u64) -> Result<(), String> {
     Ok(())
 }
 
+/// Puts a failed send back without erasing text the user typed while it
+/// was in flight. `current` is whatever is in the composer now.
+pub fn merge_failed_send(current: &str, failed: &str) -> String {
+    if current.is_empty() {
+        return failed.to_string();
+    }
+    if failed.is_empty() || current == failed {
+        return current.to_string();
+    }
+    let mut out = failed.to_string();
+    if !out.ends_with(' ') && !out.ends_with('\n') {
+        out.push(' ');
+    }
+    out.push_str(current);
+    out
+}
+
+/// Keeps files added while a send was in flight, and puts the failed batch
+/// back in front of them.
+pub fn merge_failed_files(
+    failed: Vec<PendingAttachment>,
+    current: Vec<PendingAttachment>,
+) -> Vec<PendingAttachment> {
+    let mut merged = failed;
+    for row in current {
+        if !merged.iter().any(|f| f.id == row.id) {
+            merged.push(row);
+        }
+    }
+    merged
+}
+
 pub fn data_url_payload(url: &str) -> Result<(String, String), String> {
     let rest = url
         .strip_prefix("data:")
@@ -385,6 +417,27 @@ fn call0(obj: &JsValue, method: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn failed_send_keeps_text_typed_during_upload() {
+        assert_eq!(merge_failed_send("", "caption"), "caption");
+        assert_eq!(merge_failed_send("next", "caption"), "caption next");
+        assert_eq!(merge_failed_send("caption", "caption"), "caption");
+        let failed = vec![PendingAttachment {
+            id: 1,
+            name: "a.png".into(),
+            ..PendingAttachment::default()
+        }];
+        let added = vec![PendingAttachment {
+            id: 2,
+            name: "b.png".into(),
+            ..PendingAttachment::default()
+        }];
+        let merged = merge_failed_files(failed, added);
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0].id, 1);
+        assert_eq!(merged[1].id, 2);
+    }
 
     #[test]
     fn layout_defaults_to_cockpit() {

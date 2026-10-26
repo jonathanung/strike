@@ -16,14 +16,14 @@
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="/assets/style-b675a6499c95b448.css" integrity="sha384-TzmCXhs4XZOIBJVTWsltYCqu3aIrajPO3IqX2vad7TJjohexRdJvdRFjmxs68fTu"/>
 <link rel="stylesheet" href="/assets/editor-0c775cc9b18a5458.css" integrity="sha384-AyOjM22LfkyGATt0RiB3O7FWiJR+tjHaI+BUHE+UrMDR7Ykaa5aNRaKgR7as4OR+"/>
-<link rel="stylesheet" href="/assets/chat-mode-fe35cd416ae9052d.css" integrity="sha384-bxptQDWOLBO5uENqejP2yio6RIDct4UNKywkjIhTBvtwmoYAyeABSiC48kZHHw4j"/>
+<link rel="stylesheet" href="/assets/chat-mode-4514f2e0c2ae2290.css" integrity="sha384-PItC5slnGyd6F0gVcUHqrdaNWrhpH01425DtUG7RdlCrFW18vwrZQnK4E1t0AvL4"/>
 
 
 
 
 <script type="module">
-import init, * as bindings from '/assets/strike-webui-4bfb949f023e3401.js';
-const wasm = await init({ module_or_path: '/assets/strike-webui-41a1e7a557f6dc_bg.wasm' });
+import init, * as bindings from '/assets/strike-webui-24e367c63637f02e.js';
+const wasm = await init({ module_or_path: '/assets/strike-webui-4f11ecbc93772dee_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -34,6 +34,6 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 </script>
 <script src="/assets/register.js" defer></script>
 
-<link rel="modulepreload" href="/assets/strike-webui-4bfb949f023e3401.js" crossorigin="anonymous" integrity="sha384-Ok37TALLP4cidcY+MNooY9Nl9Vm10/YfdF66gs8YVoYc9+q+z1omPJbYw8z3CE50"><link rel="preload" href="/assets/strike-webui-41a1e7a557f6dc_bg.wasm" crossorigin="anonymous" integrity="sha384-44u1f7XN12N2W1EdjPKNBbeBgIkX9apE4wcmHaVqGwLTUUi8VYAwk6aLCF37w2w2" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/assets/strike-webui-24e367c63637f02e.js" crossorigin="anonymous" integrity="sha384-Yf/Ns/QAOt1jJJHeFI4I9IkvPkPllpbzGEy34ZGYwrIlyQuYRaZNurhZ1amAs1I7"><link rel="preload" href="/assets/strike-webui-4f11ecbc93772dee_bg.wasm" crossorigin="anonymous" integrity="sha384-1h6pnRAKy1h7nJw7i6/HgfG+a0N/455oQ3rMZPaNnJAKv2znjfjCb45xnM6il1Wn" as="fetch" type="application/wasm"></head>
 <body></body>
 </html>

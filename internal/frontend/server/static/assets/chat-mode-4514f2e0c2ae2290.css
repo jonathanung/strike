@@ -96,6 +96,7 @@
   display: flex;
   position: fixed;
   z-index: 40;
+  max-height: none;
   top: 52px;
   bottom: 12px;
   width: min(320px, calc(100vw - 24px));
@@ -181,6 +182,8 @@
   .shell.layout-conversation.drawer-panel .side {
     top: 0;
     bottom: 0;
+    max-height: none;
+    height: auto;
     width: min(100vw - 28px, 360px);
   }
   .composer-bar { gap: 6px; }

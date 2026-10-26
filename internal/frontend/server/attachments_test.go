@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jonathanung/strike/internal/persist/attachment"
 	"github.com/jonathanung/strike/pkg/protocol"
@@ -161,6 +162,27 @@ func TestAttachmentIngestRequiresStoreAuthAndWritable(t *testing.T) {
 	authed.Handler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("unauth = %d", rec.Code)
+	}
+}
+
+func TestAttachmentIngestRateLimit(t *testing.T) {
+	store := openAttachmentStore(t)
+	now := time.Unix(1_700_000_000, 0).UTC()
+	srv := mustServer(t, Options{
+		SessionDir:  t.TempDir(),
+		Attachments: store,
+		OpsRate:     1,
+		OpsBurst:    1,
+		OpsClock:    func() time.Time { return now },
+	})
+	body := `{"name":"pixel.png","mime":"image/png","data":"` + base64.StdEncoding.EncodeToString(solidPNG(t, color.RGBA{G: 255, A: 255})) + `"}`
+	first := postAttachment(t, srv, body)
+	if first.Code != http.StatusOK {
+		t.Fatalf("first = %d %s", first.Code, first.Body.String())
+	}
+	second := postAttachment(t, srv, body)
+	if second.Code != http.StatusTooManyRequests {
+		t.Fatalf("second = %d %s", second.Code, second.Body.String())
 	}
 }
 

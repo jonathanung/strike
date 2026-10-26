@@ -22,17 +22,17 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   if (event.request.method !== "GET" || url.origin !== self.location.origin) return;
   if (url.pathname.startsWith("/v1/") || url.pathname === "/health") return;
+  const cacheKey = new Request(url.pathname, { method: "GET" });
   event.respondWith((async () => {
     try {
       const res = await fetch(event.request);
       if (res && res.ok) {
         const copy = res.clone();
-        const cache = await caches.open(CACHE);
-        await cache.put(event.request, copy);
+        caches.open(CACHE).then((cache) => cache.put(cacheKey, copy)).catch(() => {});
       }
       return res;
     } catch (err) {
-      const cached = await caches.match(event.request);
+      const cached = await caches.match(cacheKey);
       if (cached) return cached;
       if (event.request.mode === "navigate") {
         const shell = await caches.match("/");

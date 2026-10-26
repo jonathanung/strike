@@ -221,6 +221,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 	var services *host.Services
 	var sandboxSnap *server.SandboxSnapshot
 	var cleanup func() error
+	var sharedAttachments *attachment.Store
 	sessionDir := opts.sessionDir
 
 	if !opts.attachOnly {
@@ -235,6 +236,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		if err != nil {
 			return err
 		}
+		sharedAttachments = a.attachments
 		sessionDir = a.sessions.Dir()
 
 		agents := make([]server.AgentInfo, 0, len(a.services.Agents))
@@ -476,11 +478,14 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	attStore, err := attachment.Open(config.GlobalRoot())
-	if err != nil {
-		return fmt.Errorf("open attachments: %w", err)
+	if sharedAttachments == nil {
+		st, err := attachment.Open(config.GlobalRoot())
+		if err != nil {
+			return fmt.Errorf("open attachments: %w", err)
+		}
+		defer func() { _ = st.Close() }()
+		sharedAttachments = st
 	}
-	defer func() { _ = attStore.Close() }()
 
 	srv, err := server.New(server.Options{
 		Addr:        opts.addr,
@@ -494,7 +499,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		Sandbox:     sandboxSnap,
 		ReadOnly:    opts.readOnly,
 		Audit:       auditSink,
-		Attachments: attStore,
+		Attachments: sharedAttachments,
 	})
 	if err != nil {
 		return err
