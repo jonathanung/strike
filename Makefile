@@ -1,4 +1,4 @@
-.PHONY: build run run-echo serve webui-build webui-check web-check test vet cover cover-check clean setup restore tui-gen prompt-reg chaos harness-eval swebench-eval telemetry-check container-smoke
+.PHONY: build run run-echo serve webui-build webui-check webui-uat webui-uat-smoke web-check test vet cover cover-check clean setup restore tui-gen prompt-reg chaos harness-eval swebench-eval telemetry-check container-smoke
 
 # Multi-module workspace (go.work): ., ./pkg/protocol, ./pkg/redact,
 # ./harness.
@@ -66,6 +66,17 @@ webui-check:
 
 # Legacy alias: the old JS web/ UI is removed; web-check now means the Rust UI.
 web-check: webui-check
+
+# Headless cockpit pass. See docs/webui-uat.md. Artifacts: webui-uat-artifacts/.
+webui-uat: build
+	node --test scripts/webui-uat/lib.test.mjs
+	node scripts/webui-uat.mjs
+
+# Same assertions as webui-uat, without the video. CI webui-smoke runs this
+# after scripts/webui-smoke.mjs (auth). STRIKE_BIN defaults to ./strike.
+webui-uat-smoke: build
+	node --test scripts/webui-uat/lib.test.mjs
+	node scripts/webui-uat.mjs --suite smoke --no-video
 
 test: tui-gen
 	go test ./...
