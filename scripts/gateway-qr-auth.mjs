@@ -75,12 +75,12 @@ try {
     mobile: false,
   });
   await page.send("Page.navigate", { url: baseURL });
-  const first = await waitFor(
+  const firstBoot = await waitFor(
     page,
     `document.body && document.body.innerText.includes("Run a command")`,
     20000,
   );
-  if (!first) failures.push("cockpit did not boot");
+  if (!firstBoot) failures.push("cockpit did not boot");
   await page.evaluate(`(() => {
     const raw = JSON.stringify({ this: ${JSON.stringify(token)} });
     sessionStorage.setItem("strike.gateway.tokens", raw);
@@ -90,10 +90,10 @@ try {
   await page.send("Page.reload", { ignoreCache: true });
   const booted = await waitFor(
     page,
-    `window.__strikeBoot !== 1 && document.body && document.body.innerText.includes("Run a command")`,
+    `document.body && document.body.innerText.includes("Run a command") && window.__strikeBoot !== 1`,
     20000,
   );
-  if (!booted) failures.push("cockpit did not boot again");
+  if (!booted) failures.push("cockpit did not reload with the saved token");
   await page.send("Input.dispatchKeyEvent", {
     type: "keyDown",
     key: "k",
@@ -109,17 +109,23 @@ try {
     modifiers: 2,
   });
   const palette = await waitFor(page, `Boolean(document.querySelector(".palette input"))`, 4000);
-  if (!palette) failures.push("palette did not open");
+  if (!palette) failures.push("command palette did not open");
   await page.evaluate(`document.querySelector(".palette input")?.focus()`);
-  await page.evaluate(`(() => {
-    const input = document.querySelector(".palette input");
-    if (!input) return false;
-    const proto = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
-    proto.set.call(input, "phone");
-    input.dispatchEvent(new InputEvent("input", { bubbles: true, data: "phone" }));
-    return true;
-  })()`);
-  await delay(200);
+  await page.send("Input.insertText", { text: "phone" });
+  await delay(150);
+  let typed = await page.evaluate(`document.querySelector(".palette input")?.value === "phone"`);
+  if (!typed) {
+    typed = await page.evaluate(`(() => {
+      const input = document.querySelector(".palette input");
+      if (!input) return false;
+      input.focus();
+      const proto = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
+      proto.set.call(input, "phone");
+      input.dispatchEvent(new InputEvent("input", { bubbles: true, data: "phone" }));
+      return input.value === "phone";
+    })()`);
+  }
+  if (!typed) failures.push("palette query did not accept phone");
   await page.evaluate(`document.querySelector(".palette input")?.focus()`);
   await page.send("Input.dispatchKeyEvent", {
     type: "keyDown",
@@ -138,7 +144,20 @@ try {
     `document.querySelector(".gq-dialog") && (document.querySelector("#gq-url")?.value || "").includes("#pair=")`,
     8000,
   );
-  if (!opened) failures.push("authenticated dialog did not mint a fragment URL");
+  if (!opened) {
+    const snap = await page.evaluate(`(() => {
+      const body = document.body ? document.body.innerText : "";
+      return {
+        dialog: Boolean(document.querySelector(".gq-dialog")),
+        palette: Boolean(document.querySelector(".palette")),
+        optIn: body.includes("A phone cannot open"),
+        noCode: body.includes("No pairing code"),
+        needToken: body.includes("not signed in"),
+        minted: body.includes("works once"),
+      };
+    })()`);
+    failures.push(`authenticated dialog did not mint a fragment URL ${JSON.stringify(snap)}`);
+  }
   const leak = await page.evaluate(`(() => {
     const value = document.querySelector("#gq-url")?.value || "";
     const shown = document.querySelector(".gq-url")?.innerText || "";
@@ -203,7 +222,8 @@ try {
   }
   if (chrome) {
     chrome.kill("SIGTERM");
-    await removeDir(chrome.userDataDir);
+    await delay(300);
+    await removeDir(chrome.userDataDir).catch(() => {});
   }
   await stopStrike(strike);
   await removeDir(home);
