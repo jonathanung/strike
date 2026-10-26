@@ -1,13 +1,19 @@
 //! Strike web client. The session list is live roots plus saved sessions.
-//! Activity, Files, and Changes are the side panel. Schedule, memory,
+//! Activity, Files, and Changes are the side panel. Side chat is a separate
+//! read-only drawer. Goals and Autopilot live in `goals`. Schedule, memory,
 //! knowledge, artifacts, and the task runner are not drawn here; see
 //! docs/webui-planned.md.
 
 mod api;
 mod editor;
+mod goals;
 mod model;
 mod session_list;
 mod session_panel;
+mod shell;
+mod side_chat;
+
+use crate::shell::icon;
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -17,11 +23,13 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use model::{
     activity_panel, child_card_from_parts, child_card_from_text, child_keys_match, display_state,
-    fmt_elapsed, is_running, mode_label, permission_modes, prefer_summary, protocol_dump,
-    status_kind, strip_echo_tip, task_headline, ActivityRow, Bootstrap, ChangedFilesResponse,
-    ChatLine, ChildCard, ChildrenResponse, FilesResponse, Health, ModelInfo, ModelList, Remote,
-    RootSummary, SessionItem, SessionsResponse, TeamSnapshot, Workspace, WorkspacesResponse,
+    fmt_ago, fmt_elapsed, is_running, merge_sessions, mode_label, rfc3339_to_ms,
+    permission_modes, prefer_summary, protocol_dump, session_label, status_kind, strip_echo_tip,
+    task_headline, ActivityRow, Bootstrap, ChangedFilesResponse, ChatLine,
+    ChildCard, ChildrenResponse, FilesResponse, Health, ModelInfo, ModelList, Remote, RootSummary,
+    SessionItem, SessionsResponse, TeamSnapshot, Workspace, WorkspacesResponse,
 };
+use protocol_schema::Event;
 use session_panel::{dispatch_session_key, SessionPanel};
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
@@ -29,7 +37,8 @@ use wasm_bindgen::JsCast;
 use crate::api::{
     get_json, idempotency_key, now_ms, patch_json, post_json, post_json_value, post_op,
 };
-use crate::editor::{DocumentPane, LinkedBody};
+use crate::editor::{DocumentPane, LinkedBody, MarkdownView, has_markdown_table};
+use crate::side_chat::SideChatPanel;
 use crate::model::{budget_elapsed, can_retry, RootsResponse};
 
 fn storage() -> Option<web_sys::Storage> {
@@ -149,6 +158,7 @@ fn Skeleton() -> impl IntoView {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn push_line(
     lines: RwSignal<Vec<ChatLine>>,
     seq: &Rc<Cell<u32>>,
@@ -156,6 +166,7 @@ fn push_line(
     title: &str,
     body: &str,
     badge: &str,
+    at_ms: f64,
 ) {
     let id = seq.get() + 1;
     seq.set(id);
@@ -168,6 +179,7 @@ fn push_line(
             badge: badge.into(),
             detail: String::new(),
             key: String::new(),
+            at_ms,
         });
     });
 }
@@ -196,6 +208,9 @@ fn upsert_child(lines: RwSignal<Vec<ChatLine>>, seq: &Rc<Cell<u32>>, card: Child
             if !kind.is_empty() {
                 existing.badge = kind.clone();
             }
+            if existing.at_ms <= 0.0 && card.at_ms > 0.0 {
+                existing.at_ms = card.at_ms;
+            }
             true
         })
         .unwrap_or(false);
@@ -218,6 +233,7 @@ fn upsert_child(lines: RwSignal<Vec<ChatLine>>, seq: &Rc<Cell<u32>>, card: Child
             badge: kind,
             detail: card.details,
             key: card.key,
+            at_ms: card.at_ms,
         });
     });
 }
@@ -230,7 +246,8 @@ fn absorb_noise(lines: RwSignal<Vec<ChatLine>>, seq: &Rc<Cell<u32>>) {
                 continue;
             }
             line.body = strip_echo_tip(&line.body);
-            if let Some(card) = child_card_from_text(&line.body) {
+            if let Some(mut card) = child_card_from_text(&line.body) {
+                card.at_ms = line.at_ms;
                 cards.push(card);
                 line.body.clear();
             } else if let Some((summary, details)) = protocol_dump(&line.body) {
@@ -240,6 +257,7 @@ fn absorb_noise(lines: RwSignal<Vec<ChatLine>>, seq: &Rc<Cell<u32>>) {
                     status: String::new(),
                     summary,
                     details,
+                    at_ms: line.at_ms,
                 });
                 line.body.clear();
             }
@@ -290,17 +308,86 @@ fn note_live_title(
     });
 }
 
+/// Header stamp for a transcript line (#1349): relative while the line is
+/// under a day old (the session list's `fmt_ago` vocabulary), local clock
+/// time after that. Empty when the line's envelope time is unknown.
+fn line_stamp(at_ms: f64) -> String {
+    if at_ms <= 0.0 {
+        return String::new();
+    }
+    let now = now_ms();
+    if now - at_ms < 86_400_000.0 {
+        let rel = fmt_ago((at_ms / 1000.0) as i64, (now / 1000.0) as i64);
+        if !rel.is_empty() {
+            return rel;
+        }
+    }
+    let d = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(at_ms));
+    format!("{:02}:{:02}", d.get_hours() as u32, d.get_minutes() as u32)
+}
+
+/// Full local timestamp for the stamp's tooltip. Empty when unknown.
+fn line_full_time(at_ms: f64) -> String {
+    if at_ms <= 0.0 {
+        return String::new();
+    }
+    js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(at_ms))
+        .to_string()
+        .as_string()
+        .unwrap_or_default()
+}
+
+/// Local calendar day of a line, as (year, month 0-based, day of month).
+fn line_day(at_ms: f64) -> (u32, u32, u32) {
+    let d = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(at_ms));
+    (
+        d.get_full_year() as u32,
+        d.get_month() as u32,
+        d.get_date() as u32,
+    )
+}
+
+/// Separator label shown when the local day changes between lines.
+fn line_day_label(at_ms: f64) -> String {
+    const DAYS: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let d = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(at_ms));
+    format!(
+        "{} {} {}, {}",
+        DAYS[(d.get_day() as usize) % 7],
+        MONTHS[(d.get_month() as usize) % 12],
+        d.get_date() as u32,
+        d.get_full_year() as u32
+    )
+}
+
 fn apply_envelope(
     lines: RwSignal<Vec<ChatLine>>,
     seq: &Rc<Cell<u32>>,
     open: &Rc<Cell<bool>>,
     raw: &str,
 ) {
+    // Generated contract: unknown events are skipped, and a known event whose
+    // payload does not match the schema is dropped. Rendering below still
+    // reads the raw object.
+    match protocol_schema::decode_event(raw) {
+        Ok(Event::Unknown { .. }) | Err(_) => return,
+        Ok(_) => {}
+    }
     let v: serde_json::Value = match serde_json::from_str(raw) {
         Ok(v) => v,
         Err(_) => return,
     };
     let typ = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
+    // The envelope's `time` is the event's original time (also what the
+    // JSONL log persists), so replayed lines keep their real timestamps.
+    let at_ms = v
+        .get("time")
+        .and_then(|t| t.as_str())
+        .map(rfc3339_to_ms)
+        .unwrap_or(0.0);
     let data = v.get("data").cloned().unwrap_or(serde_json::Value::Null);
     let text = |key: &str| match data.get(key) {
         Some(serde_json::Value::String(s)) => s.clone(),
@@ -310,7 +397,7 @@ fn apply_envelope(
     match typ {
         "user.message" => {
             open.set(false);
-            push_line(lines, seq, "you", "You", &text("text"), "");
+            push_line(lines, seq, "you", "You", &text("text"), "", at_ms);
             absorb_noise(lines, seq);
         }
         "turn.started" => open.set(false),
@@ -336,7 +423,7 @@ fn apply_envelope(
                 }
             }
             open.set(true);
-            push_line(lines, seq, "strike", "Strike", &chunk, "");
+            push_line(lines, seq, "strike", "Strike", &chunk, "", at_ms);
         }
         "turn.completed" => {
             open.set(false);
@@ -345,7 +432,7 @@ fn apply_envelope(
         "tool.begin" => {
             open.set(false);
             let name = text("name");
-            push_line(lines, seq, "tool", &name, &text("args"), "tool");
+            push_line(lines, seq, "tool", &name, &text("args"), "tool", at_ms);
         }
         "tool.end" => {
             let title = text("title");
@@ -360,7 +447,7 @@ fn apply_envelope(
             } else {
                 title
             };
-            push_line(lines, seq, "tool", &heading, &output, badge);
+            push_line(lines, seq, "tool", &heading, &output, badge, at_ms);
         }
         "child.completed" => {
             let status = text("status");
@@ -376,11 +463,9 @@ fn apply_envelope(
                     .to_string();
             }
             let details = serde_json::to_string_pretty(&data).unwrap_or_default();
-            upsert_child(
-                lines,
-                seq,
-                child_card_from_parts(&name, &session, &status, &summary, &details),
-            );
+            let mut card = child_card_from_parts(&name, &session, &status, &summary, &details);
+            card.at_ms = at_ms;
+            upsert_child(lines, seq, card);
         }
         _ => {}
     }
@@ -418,145 +503,6 @@ const SUGGESTIONS: [&str; 6] = [
     "What should I look at next?",
 ];
 
-#[derive(Clone, Copy)]
-struct PaletteCmd {
-    section: &'static str,
-    id: &'static str,
-    label: &'static str,
-    detail: &'static str,
-}
-
-fn palette_cmds() -> &'static [PaletteCmd] {
-    &[
-        PaletteCmd {
-            section: "Commands",
-            id: "new",
-            label: "New session",
-            detail: "Open another live root",
-        },
-        PaletteCmd {
-            section: "Commands",
-            id: "stop-all",
-            label: "Stop all",
-            detail: "Interrupt running delegated children in this session",
-        },
-        PaletteCmd {
-            section: "Apps",
-            id: "chat",
-            label: "Chat",
-            detail: "Sessions and the transcript",
-        },
-        PaletteCmd {
-            section: "Apps",
-            id: "daemon",
-            label: "Daemon",
-            detail: "This gateway, its token, and workspaces",
-        },
-        PaletteCmd {
-            section: "Settings",
-            id: "steer",
-            label: "Steer",
-            detail: "Enter adds your message to the current turn without stopping it",
-        },
-        PaletteCmd {
-            section: "Settings",
-            id: "queue",
-            label: "Queue",
-            detail: "Enter waits until the turn finishes",
-        },
-        PaletteCmd {
-            section: "Settings",
-            id: "mode-default",
-            label: "Approval: Default",
-            detail: "Ask on the normal rules",
-        },
-        PaletteCmd {
-            section: "Settings",
-            id: "mode-plan",
-            label: "Approval: Plan",
-            detail: "Deny writes and edits",
-        },
-        PaletteCmd {
-            section: "Settings",
-            id: "mode-soft",
-            label: "Approval: Soft",
-            detail: "Count down 15 seconds, then allow once",
-        },
-        PaletteCmd {
-            section: "Settings",
-            id: "mode-edits",
-            label: "Approval: Edits",
-            detail: "Allow file edits; still ask for shell and network",
-        },
-        PaletteCmd {
-            section: "Settings",
-            id: "mode-yolo",
-            label: "Approval: Yolo",
-            detail: "This session skips asks that are not hard-denied",
-        },
-        PaletteCmd {
-            section: "Theme",
-            id: "theme-strike",
-            label: "Theme: Strike",
-            detail: "Stock TUI palette. Royal purple, cyan working state",
-        },
-        PaletteCmd {
-            section: "Theme",
-            id: "theme-nord",
-            label: "Theme: Nord",
-            detail: "Bundled TUI theme. Missing surfaces stay Strike",
-        },
-        PaletteCmd {
-            section: "Theme",
-            id: "theme-dracula",
-            label: "Theme: Dracula",
-            detail: "Bundled TUI theme. Missing surfaces stay Strike",
-        },
-        PaletteCmd {
-            section: "Theme",
-            id: "theme-gruvbox",
-            label: "Theme: Gruvbox",
-            detail: "Bundled TUI theme. Missing surfaces stay Strike",
-        },
-        PaletteCmd {
-            section: "Theme",
-            id: "theme-monokai",
-            label: "Theme: Monokai",
-            detail: "Bundled TUI theme. Missing surfaces stay Strike",
-        },
-        PaletteCmd {
-            section: "Theme",
-            id: "theme-tokyo-night",
-            label: "Theme: Tokyo Night",
-            detail: "Bundled TUI theme. Missing surfaces stay Strike",
-        },
-        PaletteCmd {
-            section: "Theme",
-            id: "theme-catppuccin",
-            label: "Theme: Catppuccin",
-            detail: "Bundled TUI theme. Missing surfaces stay Strike",
-        },
-        PaletteCmd {
-            section: "Theme",
-            id: "scheme-dark",
-            label: "Scheme: Dark",
-            detail: "Dark hexes from the TUI token pair",
-        },
-        PaletteCmd {
-            section: "Theme",
-            id: "scheme-light",
-            label: "Scheme: Light",
-            detail: "Light hexes from the TUI token pair",
-        },
-    ]
-}
-
-fn palette_match(cmd: &PaletteCmd, query: &str) -> bool {
-    query.is_empty()
-        || cmd.label.to_ascii_lowercase().contains(query)
-        || cmd.detail.to_ascii_lowercase().contains(query)
-}
-
 pub(crate) fn load_string_list(key: &str) -> Vec<String> {
     serde_json::from_str(&load(key)).unwrap_or_default()
 }
@@ -571,28 +517,13 @@ fn set_drag(ev: &web_sys::DragEvent, path: &str) {
     }
 }
 
-pub(crate) fn icon(name: &str) -> &'static str {
-    match name {
-        "sessions" => {
-            r#"<svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h7"/></svg>"#
-        }
-        "activity" => {
-            r#"<svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 8h2.5l1.8-3.5L9 12l1.7-4H14.5"/></svg>"#
-        }
-        "files" => {
-            r#"<svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2.5h5l3 3V13.5H4z"/><path d="M9 2.5V5.5h3"/></svg>"#
-        }
-        "changes" => {
-            r#"<svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4.5h10M3 8h6M3 11.5h8"/></svg>"#
-        }
-        "command" => {
-            r#"<svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5h11v9h-11z"/><path d="M5 7l2 1.5L5 10M8.5 10.5h2.5"/></svg>"#
-        }
-        "status" => {
-            r#"<svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="2.5"/></svg>"#
-        }
-        _ => "",
+fn short_id(id: &str) -> String {
+    let tail = id.rsplit('-').next().unwrap_or(id);
+    let count = tail.chars().count();
+    if count <= 6 {
+        return tail.to_string();
     }
+    tail.chars().skip(count - 6).collect()
 }
 
 fn rows_from_team(prev: &[ActivityRow], team: &TeamSnapshot, now: f64) -> Vec<ActivityRow> {
@@ -685,10 +616,12 @@ fn App() -> impl IntoView {
     let load_error = RwSignal::new(String::new());
     let gateway = RwSignal::new("checking".to_string());
     let focus = RwSignal::new(false);
-    let palette_open = RwSignal::new(false);
-    let palette_query = RwSignal::new(String::new());
     let back_stack = RwSignal::new(Vec::<String>::new());
     let forward_stack = RwSignal::new(Vec::<String>::new());
+    // Kept for the shell host bridge (palette session list / breadcrumb
+    // label), which merges with the browser-local pins. The session panel
+    // itself uses the server-backed list from /v1/session-list.
+    let pins = RwSignal::new(load_string_list("strike.pins"));
     let seen = RwSignal::new(load_seen());
     let children = RwSignal::new(Vec::<model::ChildSession>::new());
     let perm_mode = RwSignal::new("default".to_string());
@@ -711,6 +644,18 @@ fn App() -> impl IntoView {
     let doc_line = RwSignal::new(0u32);
     let doc_diff = RwSignal::new(false);
     let doc_editing = RwSignal::new(false);
+    let side_open = RwSignal::new(false);
+    let side_focus_id = RwSignal::new(String::new());
+    let side_focus_name = RwSignal::new(String::new());
+    let side_focus_root = RwSignal::new(String::new());
+    Effect::new(move |_| {
+        let root = active_root.get();
+        if side_focus_root.get_untracked() != root {
+            side_focus_id.set(String::new());
+            side_focus_name.set(String::new());
+            side_focus_root.set(root);
+        }
+    });
     let files_path = RwSignal::new(String::new());
     let files = RwSignal::new(Vec::<model::DirEntry>::new());
     let files_error = RwSignal::new(String::new());
@@ -1145,6 +1090,13 @@ fn App() -> impl IntoView {
         apply_theme(&load("strike.theme"), &scheme);
     };
 
+    let open_side = move |id: String, name: String| {
+        side_focus_id.set(id);
+        side_focus_name.set(name);
+        side_open.set(true);
+        mode.set("chat".into());
+    };
+
     let set_perm = move |mode: String| {
         perm_mode.set(mode.clone());
         mode_menu.set(false);
@@ -1169,44 +1121,6 @@ fn App() -> impl IntoView {
         });
     };
 
-    let run_command = move |id: String| {
-        palette_open.set(false);
-        match id.as_str() {
-            "new" => new_session(),
-            "stop-all" => stop_all(),
-            "chat" => mode.set("chat".into()),
-            "daemon" => mode.set("daemon".into()),
-            "steer" => set_enter("steer".into()),
-            "queue" => set_enter("queue".into()),
-            "mode-default" => set_perm("default".into()),
-            "mode-plan" => set_perm("plan".into()),
-            "mode-soft" => set_perm("soft-approve".into()),
-            "mode-edits" => set_perm("accept-edits".into()),
-            "mode-yolo" => set_perm("yolo".into()),
-            "theme-strike" => set_theme("strike".into()),
-            "theme-nord" => set_theme("nord".into()),
-            "theme-dracula" => set_theme("dracula".into()),
-            "theme-gruvbox" => set_theme("gruvbox".into()),
-            "theme-monokai" => set_theme("monokai".into()),
-            "theme-tokyo-night" => set_theme("tokyo-night".into()),
-            "theme-catppuccin" => set_theme("catppuccin".into()),
-            "scheme-dark" => set_scheme("dark".into()),
-            "scheme-light" => set_scheme("light".into()),
-            _ => {}
-        }
-    };
-
-    let run_picked = move || {
-        let q = palette_query.get_untracked().to_ascii_lowercase();
-        let items: Vec<_> = palette_cmds()
-            .iter()
-            .copied()
-            .filter(|c| palette_match(c, &q))
-            .collect();
-        if let Some(cmd) = items.first() {
-            run_command(cmd.id.to_string());
-        }
-    };
 
     let load_files = move || {
         let (b, t, path) = (
@@ -1251,41 +1165,12 @@ fn App() -> impl IntoView {
         }
     });
 
+    // The shell owns the palette, travel, focus, and Escape chords;
+    // this listener only forwards keys to the session panel (j/k/x,
+    // Alt+1..9), whose handler guards modifiers and typing targets.
     let on_key =
         Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |ev: web_sys::KeyboardEvent| {
-            if dispatch_session_key(&ev) {
-                return;
-            }
-            if (ev.meta_key() || ev.ctrl_key()) && ev.key().eq_ignore_ascii_case("k") {
-                ev.prevent_default();
-                palette_open.set(!palette_open.get_untracked());
-                if palette_open.get_untracked() {
-                    palette_query.set(String::new());
-                }
-            } else if ev.alt_key() && !ev.meta_key() && !ev.ctrl_key() && ev.key() == "ArrowLeft" {
-                ev.prevent_default();
-                travel(true);
-            } else if ev.alt_key() && !ev.meta_key() && !ev.ctrl_key() && ev.key() == "ArrowRight" {
-                ev.prevent_default();
-                travel(false);
-            } else if ev.alt_key() && !ev.meta_key() && !ev.ctrl_key() && ev.key() == "\\" {
-                ev.prevent_default();
-                focus.update(|v| *v = !*v);
-            } else if ev.key() == "Escape" {
-                let menu = palette_open.get_untracked()
-                    || mode_menu.get_untracked()
-                    || model_menu.get_untracked();
-                palette_open.set(false);
-                mode_menu.set(false);
-                model_menu.set(false);
-                if !menu
-                    && !doc_editing.get_untracked()
-                    && !doc_path.get_untracked().is_empty()
-                {
-                    doc_path.set(String::new());
-                    doc_editing.set(false);
-                }
-            }
+            dispatch_session_key(&ev);
         });
     if let Some(w) = web_sys::window() {
         let _ = w.add_event_listener_with_callback("keydown", on_key.as_ref().unchecked_ref());
@@ -1339,84 +1224,170 @@ fn App() -> impl IntoView {
             .count()
     };
 
+    shell::boot();
+    shell::set_host(shell::HostBridge {
+        new_session: Rc::new(move || new_session()),
+        stop_all: Rc::new(move || stop_all()),
+        set_view: Rc::new(move |next: &str| mode.set(next.to_string())),
+        view: Rc::new(move || mode.get()),
+        set_enter: Rc::new(move |next: &str| set_enter(next.to_string())),
+        set_perm: Rc::new(move |next: &str| set_perm(next.to_string())),
+        set_theme: Rc::new(move |next: &str| set_theme(next.to_string())),
+        set_scheme: Rc::new(move |next: &str| set_scheme(next.to_string())),
+        travel: Rc::new(move |back: bool| travel(back)),
+        can_back: Rc::new(move || !back_stack.get().is_empty()),
+        can_forward: Rc::new(move || !forward_stack.get().is_empty()),
+        toggle_focus: Rc::new(move || focus.update(|value| *value = !*value)),
+        focus_on: Rc::new(move || focus.get()),
+        workspace_name: Rc::new(move || {
+            let id = active_workspace.get();
+            if id.is_empty() {
+                return "No workspace".into();
+            }
+            workspaces
+                .get()
+                .into_iter()
+                .find(|workspace| workspace.id == id)
+                .map(|workspace| {
+                    if workspace.name.is_empty() {
+                        workspace.path
+                    } else {
+                        workspace.name
+                    }
+                })
+                .unwrap_or_else(|| "No workspace".into())
+        }),
+        session_name: Rc::new(move || {
+            let id = active_root.get();
+            if id.is_empty() {
+                return "No session".into();
+            }
+            let active_running = activity.get().iter().any(|row| is_running(&row.state));
+            let merged = merge_sessions(
+                &roots.get(),
+                &sessions.get(),
+                &pins.get(),
+                &seen.get(),
+                &id,
+                active_running,
+            );
+            match merged.into_iter().find(|row| row.id == id) {
+                Some(row) => session_label(&row.title, &short_id(&row.id)),
+                None => short_id(&id),
+            }
+        }),
+        session_kind: Rc::new(move || {
+            let id = active_root.get();
+            if id.is_empty() || !session_busy(&id) {
+                "idle".into()
+            } else {
+                "running".into()
+            }
+        }),
+        gateway: Rc::new(move || gateway.get()),
+        version_label: Rc::new(move || status.get()),
+        dismiss_popups: Rc::new(move || {
+            // Escape semantics carried over from the pre-shell key handler:
+            // close the menus and the side chat drawer; only when none of
+            // them was open does Escape also close the open document.
+            let menu = mode_menu.get_untracked()
+                || model_menu.get_untracked()
+                || side_open.get_untracked();
+            mode_menu.set(false);
+            model_menu.set(false);
+            side_open.set(false);
+            if !menu && !doc_editing.get_untracked() && !doc_path.get_untracked().is_empty() {
+                doc_path.set(String::new());
+                doc_editing.set(false);
+            }
+        }),
+        open_side_chat: Rc::new(move || open_side(String::new(), String::new())),
+        toggle_side_chat: Rc::new(move || side_open.update(|v| *v = !*v)),
+        workspaces: Rc::new(move || {
+            workspaces
+                .get()
+                .into_iter()
+                .map(|workspace| {
+                    let name = if workspace.name.is_empty() {
+                        workspace.path
+                    } else {
+                        workspace.name
+                    };
+                    (workspace.id, name)
+                })
+                .collect()
+        }),
+        sessions: Rc::new(move || {
+            let id = active_root.get();
+            let active_running = activity.get().iter().any(|row| is_running(&row.state));
+            merge_sessions(
+                &roots.get(),
+                &sessions.get(),
+                &pins.get(),
+                &seen.get(),
+                &id,
+                active_running,
+            )
+            .into_iter()
+            .map(|row| {
+                (
+                    row.id.clone(),
+                    session_label(&row.title, &short_id(&row.id)),
+                )
+            })
+            .collect()
+        }),
+        open_session: Rc::new(move |id: &str| {
+            let id = id.to_string();
+            let live = roots.get().iter().any(|row| row.id == id);
+            open_session(id, live);
+        }),
+        activate_workspace: Rc::new(move |id: &str| {
+            let id = id.to_string();
+            let (b, t) = (base.get(), token.get());
+            spawn_local(async move {
+                let path = format!("/v1/workspaces/{id}/activate");
+                match post_json(&b, &t, &path, serde_json::json!({})).await {
+                    Ok(()) => active_workspace.set(id),
+                    Err(err) => status.set(format!("activate failed: {err}")),
+                }
+            });
+        }),
+    });
+
+    // Alt+G opens Goals. The shell owns the other chords; this one stays
+    // here because only the page can set `mode`. The shortcut is listed in
+    // the overlay via src/shell/contrib/goals.rs.
+    let on_goals_key =
+        Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |ev: web_sys::KeyboardEvent| {
+            if ev.alt_key()
+                && !ev.meta_key()
+                && !ev.ctrl_key()
+                && ev.key().eq_ignore_ascii_case("g")
+            {
+                let typing = ev
+                    .target()
+                    .map(|t| {
+                        t.dyn_ref::<web_sys::Element>()
+                            .map(|el| {
+                                matches!(el.tag_name().as_str(), "INPUT" | "TEXTAREA" | "SELECT")
+                            })
+                            .unwrap_or(false)
+                    })
+                    .unwrap_or(false);
+                if !typing {
+                    ev.prevent_default();
+                    mode.set("goals".into());
+                }
+            }
+        });
+    if let Some(w) = web_sys::window() {
+        let _ = w.add_event_listener_with_callback("keydown", on_goals_key.as_ref().unchecked_ref());
+    }
+    on_goals_key.forget();
+
     view! {
-        <header class="page-header">
-            <div class="brand" title=move || status.get()>
-                "Strike"
-                <span class="brand-status">{move || status.get()}</span>
-            </div>
-            <button class="command-pill" title="Ctrl+K commands. Alt+Left and Alt+Right switch sessions. Alt+\\ focuses the transcript." on:click=move |_| {
-                palette_query.set(String::new());
-                palette_open.set(true);
-            }>
-                <span class="pill-label">
-                    <span class="icon-slot" aria-hidden="true" inner_html=icon("command")></span>
-                    <span>"Run a command"</span>
-                </span>
-                <kbd>"Ctrl+K"</kbd>
-            </button>
-            <div class="header-actions">
-                <span class=move || match gateway.get().as_str() {
-                    "connected" => "chip ok",
-                    "unreachable" => "chip bad",
-                    _ => "chip",
-                }>{move || match gateway.get().as_str() {
-                    "connected" => "Connected",
-                    "unreachable" => "Unreachable",
-                    _ => "Checking",
-                }}</span>
-                <div class="segmented" role="tablist" aria-label="View">
-                    <button class=move || if mode.get() == "chat" { "seg on" } else { "seg" } on:click=move |_| mode.set("chat".into())>"Chat"</button>
-                    <button class=move || if mode.get() == "daemon" { "seg on" } else { "seg" } on:click=move |_| mode.set("daemon".into())>"Daemon"</button>
-                </div>
-            </div>
-        </header>
-        <Show when=move || palette_open.get()>
-            <div class="palette-backdrop" on:click=move |_| palette_open.set(false)>
-                <div class="palette" on:click=move |ev: web_sys::MouseEvent| ev.stop_propagation()>
-                    <input
-                        placeholder="Type a command"
-                        prop:value=move || palette_query.get()
-                        on:input=move |ev| palette_query.set(event_target_value(&ev))
-                        on:keydown=move |ev: web_sys::KeyboardEvent| {
-                            if ev.key() == "Enter" {
-                                ev.prevent_default();
-                                run_picked();
-                            }
-                        }
-                    />
-                    <div class="palette-list">
-                    {move || {
-                        let q = palette_query.get().to_ascii_lowercase();
-                        let run = run_command;
-                        let mut blocks: Vec<_> = Vec::new();
-                        for section in ["Commands", "Apps", "Settings", "Theme"] {
-                            let items: Vec<_> = palette_cmds().iter().copied().filter(|c| c.section == section && palette_match(c, &q)).collect();
-                            if items.is_empty() {
-                                continue;
-                            }
-                            let heading = section.to_string();
-                            blocks.push(view! { <h3 class="palette-section">{heading}</h3> }.into_any());
-                            for cmd in items {
-                                let id = cmd.id.to_string();
-                                let label = cmd.label.to_string();
-                                let detail = cmd.detail.to_string();
-                                let run = run;
-                                blocks.push(view! {
-                                    <button class="palette-row" on:click=move |_| run(id.clone())>
-                                        <span class="name">{label}</span>
-                                        <span class="path">{detail}</span>
-                                    </button>
-                                }.into_any());
-                            }
-                        }
-                        blocks
-                    }}
-                    </div>
-                    <p class="hint keys">"Enter runs the first match. Alt+Left and Alt+Right switch sessions. Alt+\\ focuses the transcript. Esc closes."</p>
-                </div>
-            </div>
-        </Show>
+        <shell::Chrome />
         <Show when=move || mode.get() == "daemon" fallback=move || ()>
             <DaemonPane
                 base=base
@@ -1431,6 +1402,9 @@ fn App() -> impl IntoView {
                 refresh=refresh_meta
             />
         </Show>
+        <Show when=move || mode.get() == "goals" fallback=move || ()>
+            <goals::GoalsPane base=base token=token />
+        </Show>
         <Show when=move || mode.get() == "chat">
             <div class=move || if focus.get() { "shell focus" } else { "shell" }>
                 <aside class="rail">
@@ -1442,7 +1416,6 @@ fn App() -> impl IntoView {
                         activity=activity
                         active_root=active_root
                         seen=seen
-                        palette_open=palette_open
                         on_open=open_session
                         on_new=new_session
                         on_refresh=refresh_meta
@@ -1520,13 +1493,38 @@ fn App() -> impl IntoView {
                                 </div>
                             </div>
                         </Show>
-                        {move || lines.get().into_iter().map(|line| {
+                        {move || {
+                            let list = lines.get();
+                            // A day separator precedes the first timed line of
+                            // each local day (#1349). Untimed lines never open
+                            // a new day.
+                            let mut prev_day: Option<(u32, u32, u32)> = None;
+                            let seps: Vec<Option<String>> = list
+                                .iter()
+                                .map(|line| {
+                                    if line.at_ms <= 0.0 {
+                                        return None;
+                                    }
+                                    let day = line_day(line.at_ms);
+                                    let label = if prev_day == Some(day) {
+                                        None
+                                    } else {
+                                        Some(line_day_label(line.at_ms))
+                                    };
+                                    prev_day = Some(day);
+                                    label
+                                })
+                                .collect();
+                            list.into_iter().zip(seps).map(|(line, sep)| {
                             let badge = line.badge.clone();
                             let badge_kind = badge.clone();
                             let role = line.role.clone();
                             let title = line.title.clone();
                             let body = line.body.clone();
                             let detail = line.detail.clone();
+                            let stamp = line_stamp(line.at_ms);
+                            let stamp_full = line_full_time(line.at_ms);
+                            let has_stamp = !stamp.is_empty();
                             let has_badge = !badge.is_empty();
                             let has_detail = !detail.is_empty();
                             let card = role == "child";
@@ -1551,7 +1549,14 @@ fn App() -> impl IntoView {
                                     </div>
                                 }.into_any()
                             } else if prose {
-                                view! { <LinkedBody text=body kind="prose" doc_path=doc_path doc_line=doc_line doc_diff=doc_diff /> }.into_any()
+                                // Table-bearing prose renders through the
+                                // shared markdown view (#1344); every other
+                                // bubble keeps the plain linked-text path.
+                                if has_markdown_table(&body) {
+                                    view! { <MarkdownView text=body /> }.into_any()
+                                } else {
+                                    view! { <LinkedBody text=body kind="prose" doc_path=doc_path doc_line=doc_line doc_diff=doc_diff /> }.into_any()
+                                }
                             } else if tool_dump {
                                 view! {
                                     <details>
@@ -1563,17 +1568,20 @@ fn App() -> impl IntoView {
                                 view! { <LinkedBody text=body kind="pre" doc_path=doc_path doc_line=doc_line doc_diff=doc_diff /> }.into_any()
                             };
                             view! {
+                                {sep.map(|label| view! { <div class="day-sep" role="separator">{label}</div> })}
                                 <article class=format!("bubble card role-{role}")>
                                     <header>
                                         <span class="who">{title}</span>
                                         <Show when=move || has_badge>
                                             <Badge kind=badge_kind.clone() label=badge.clone() />
                                         </Show>
+                                        {has_stamp.then(|| view! { <span class="stamp" title=stamp_full.clone()>{stamp.clone()}</span> })}
                                     </header>
                                     {body_view}
                                 </article>
                             }
-                        }).collect_view()}
+                            }).collect_view()
+                        }}
                     </div>
                     </Show>
                     <div class="composer"
@@ -1656,6 +1664,7 @@ fn App() -> impl IntoView {
                                     let model = model_name.get();
                                     if model.is_empty() { "Model".into() } else { model }
                                 }}</button>
+                                <button type="button" class=move || if side_open.get() { "chip on side-chat-open-composer" } else { "chip side-chat-open-composer" } on:click=move |_| open_side(String::new(), String::new())>"Side chat"</button>
                                 <button type="button" class=move || if enter_mode.get() == "steer" { "chip on" } else { "chip" } on:click=move |_| set_enter("steer".into())>"Steer"</button>
                                 <button type="button" class=move || if enter_mode.get() == "queue" { "chip on" } else { "chip" } on:click=move |_| set_enter("queue".into())>"Queue"</button>
                                 <button class="primary send" type="submit">"Send"</button>
@@ -1674,7 +1683,10 @@ fn App() -> impl IntoView {
                     <div class="activity">
                     <header class="activity-head">
                         <span class="hint">"Live tasks"</span>
-                        <button class="secondary" disabled=move || running_count() == 0 on:click=move |_| stop_all()>"Stop all"</button>
+                        <span class="row-actions">
+                            <button type="button" class="secondary side-chat-open-activity" on:click=move |_| open_side(String::new(), String::new())>"Side chat"</button>
+                            <button class="secondary" disabled=move || running_count() == 0 on:click=move |_| stop_all()>"Stop all"</button>
+                        </span>
                     </header>
                         <div class="stats">
                         <StatCard label="Running".into()>{move || running_count().to_string()}</StatCard>
@@ -1718,6 +1730,8 @@ fn App() -> impl IntoView {
                                 let running = is_running(&state);
                                 let retry = can_retry(&state);
                                 let name = row.name.clone();
+                                let name_chat = name.clone();
+                                let sid_chat = sid.clone();
                                 let who = name.clone();
                                 let agent = row.agent.clone();
                                 let agent_label = agent.clone();
@@ -1757,6 +1771,14 @@ fn App() -> impl IntoView {
                                             </span>
                                         </button>
                                         <div class="row-actions">
+                                            <button type="button" class="secondary" on:click={
+                                                let sid_chat = sid_chat.clone();
+                                                let name_chat = name_chat.clone();
+                                                move |ev: web_sys::MouseEvent| {
+                                                    ev.stop_propagation();
+                                                    open_side(sid_chat.clone(), name_chat.clone());
+                                                }
+                                            }>"Side chat"</button>
                                             <button class="secondary" disabled=move || !running on:click={
                                                 let sid_stop = sid_stop.clone();
                                                 move |ev: web_sys::MouseEvent| {
@@ -1880,6 +1902,17 @@ fn App() -> impl IntoView {
                     </Show>
                 </aside>
             </div>
+            <SideChatPanel
+                open=side_open
+                base=base
+                token=token
+                root=active_root
+                lines=lines
+                focus_id=side_focus_id
+                focus_name=side_focus_name
+                live_provider=provider_name
+                live_model=model_name
+            />
         </Show>
     }
 }

@@ -20,7 +20,8 @@ use crate::session_list::{
     alt_digit, assemble, human_title, select_range, stamp_times, step_index, title_is_raw_id,
     toggle_id, unread_flag, AssembleArgs, ChildIn, FolderIn, Layout, LayoutKind, SourceSession,
 };
-use crate::{icon, load, load_string_list, save};
+use crate::shell::icon;
+use crate::{load, load_string_list, save};
 
 thread_local! {
     static KEY_HANDLER: RefCell<Option<Box<dyn FnMut(&web_sys::KeyboardEvent) -> bool>>> =
@@ -196,6 +197,19 @@ fn is_typing(el: &web_sys::Element) -> bool {
     false
 }
 
+
+/// True while the shell's command palette dialog is mounted.
+fn palette_is_open() -> bool {
+    web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|d| {
+            d.query_selector("[data-nav=\"palette-dialog\"]")
+                .ok()
+                .flatten()
+        })
+        .is_some()
+}
+
 #[component]
 pub(crate) fn SessionPanel(
     base: RwSignal<String>,
@@ -205,7 +219,6 @@ pub(crate) fn SessionPanel(
     activity: RwSignal<Vec<ActivityRow>>,
     active_root: RwSignal<String>,
     seen: RwSignal<HashMap<String, i64>>,
-    palette_open: RwSignal<bool>,
     on_open: impl Fn(String, bool) + Copy + Send + 'static,
     on_new: impl Fn() + Copy + Send + 'static,
     on_refresh: impl Fn() + Copy + Send + 'static,
@@ -514,7 +527,10 @@ pub(crate) fn SessionPanel(
     {
         let layout = layout;
         set_key_handler(Some(Box::new(move |ev| {
-            if palette_open.get_untracked() || ev.meta_key() || ev.ctrl_key() {
+            // The shell owns the command palette now and keeps its open
+            // state internal; the dialog's presence in the DOM is the
+            // signal that panel keys must stand down.
+            if palette_is_open() || ev.meta_key() || ev.ctrl_key() {
                 return false;
             }
             let key = ev.key();

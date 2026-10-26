@@ -271,8 +271,11 @@ func TestLifecycleCompactionHook(t *testing.T) {
 	defer cancel()
 	go eng.Run(ctx)
 
-	// Wait for startup then compact.
-	time.Sleep(50 * time.Millisecond)
+	// Startup must finish before Compact; a fixed sleep loses that race under load.
+	waitForEvent(t, eng, func(ev protocol.Event) bool {
+		_, ok := ev.(protocol.AgentSelected)
+		return ok
+	})
 	eng.Ops() <- protocol.Compact{}
 
 	deadline := time.After(5 * time.Second)
