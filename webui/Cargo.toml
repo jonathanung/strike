@@ -8,9 +8,10 @@ leptos = { version = "0.7", features = ["csr"] }
 gloo-net = "0.6"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+protocol-schema = { path = "protocol-schema" }
 js-sys = "0.3"
 wasm-bindgen = "0.2"
-web-sys = { version = "0.3", features = ["DataTransfer", "Document", "DomRect", "DomRectReadOnly", "DragEvent", "Element", "Event", "EventSource", "HtmlButtonElement", "HtmlElement", "HtmlInputElement", "KeyboardEvent", "Location", "MessageEvent", "MouseEvent", "Storage", "SubmitEvent", "Window"] }
+web-sys = { version = "0.3", features = ["DataTransfer", "Document", "DomRect", "DomRectReadOnly", "DragEvent", "Element", "Event", "EventSource", "HtmlButtonElement", "HtmlElement", "HtmlInputElement", "HtmlTextAreaElement", "KeyboardEvent", "Location", "MessageEvent", "MouseEvent", "Storage", "SubmitEvent", "Window"] }
 
 [profile.release]
 opt-level = 2
