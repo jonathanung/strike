@@ -19,11 +19,15 @@ Usage:
   strike daemon uninstall
   strike daemon status
   strike daemon token
+  strike daemon logout
 
 install writes ~/.config/systemd/user/strike-daemon.service and a stable
 0600 API token at ~/.strike/daemon.token, then prints the systemctl
-commands to enable it. The daemon is "strike serve --auth"; the web UI
-connects with the token ("strike daemon token" prints it).
+commands to enable it. The daemon is "strike serve --auth --token-file";
+the web UI connects with the token ("strike daemon token" prints it).
+logout replaces that file with a new token. A daemon started with
+--token-file loads the new value on the next /v1 request; one started
+with --token keeps the old value until it is restarted.
 Default bind is loopback. For phone access over Tailscale, install with
 --addr <tailnet-ip>:8787 --allow-private-bind.`
 
@@ -53,6 +57,23 @@ func loadOrMintTokenFile(path string) (string, bool, error) {
 }
 
 func daemonTokenPath() string { return filepath.Join(workspace.DefaultDir(), "daemon.token") }
+
+// rotateDaemonToken replaces the token file with a new 0600 secret.
+// The previous bearer stops working for any serve process that re-reads
+// this path. The file is created if it was missing.
+func rotateDaemonToken(path string) (string, error) {
+	tok, err := server.MintToken()
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(path, []byte(tok+"\n"), 0o600); err != nil {
+		return "", fmt.Errorf("write token file: %w", err)
+	}
+	return tok, nil
+}
 
 func systemdUserUnitPath() (string, error) {
 	cfg, err := os.UserConfigDir()
@@ -117,6 +138,14 @@ func runDaemonCLI(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 		fmt.Fprintln(stdout, tok)
+		return 0
+	case "logout":
+		tok, err := rotateDaemonToken(daemonTokenPath())
+		if err != nil {
+			fmt.Fprintln(stderr, "strike:", err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "Rotated %s\n%s\nA serve process started with --token-file uses this token on the next /v1 request. A process started with --token keeps the previous value until restart.\n", daemonTokenPath(), tok)
 		return 0
 	default:
 		fmt.Fprintf(stderr, "strike: unknown daemon command %q\n%s\n", args[0], daemonUsage)

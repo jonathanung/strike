@@ -479,6 +479,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		Addr:       opts.addr,
 		Auth:       opts.auth,
 		Token:      token,
+		TokenFile:  opts.tokenFile,
 		SessionDir: sessionDir,
 		Workspaces: wsStore,
 		LiveHub:    liveHub,

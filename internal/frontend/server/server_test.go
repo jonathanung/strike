@@ -307,6 +307,50 @@ func TestAuthAcceptsBearerAndCookieRejectsQuery(t *testing.T) {
 	}
 }
 
+func TestTokenFileRotationReplacesBearer(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "daemon.token")
+	if err := os.WriteFile(path, []byte("old-token\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	srv, err := New(Options{
+		Auth:       true,
+		Token:      "old-token",
+		TokenFile:  path,
+		SessionDir: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	get := func(token string) int {
+		res := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/v1/bootstrap", nil)
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		srv.Handler().ServeHTTP(res, req)
+		return res.Code
+	}
+	if get("old-token") == http.StatusUnauthorized {
+		t.Fatal("startup token rejected")
+	}
+	if err := os.WriteFile(path, []byte("new-token\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := get("old-token"); got != http.StatusUnauthorized {
+		t.Fatalf("old token status = %d, want 401", got)
+	}
+	if got := get("new-token"); got == http.StatusUnauthorized {
+		t.Fatal("rotated token rejected")
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if got := get("new-token"); got != http.StatusUnauthorized {
+		t.Fatalf("missing token file status = %d, want 401", got)
+	}
+}
+
 func TestAttachTokenHandoffSetsCookieAndStripsQuery(t *testing.T) {
 	srv := testServer(t, t.TempDir(), "secret")
 

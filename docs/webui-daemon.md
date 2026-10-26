@@ -9,7 +9,8 @@ Status: walking skeleton on branch `worktree-rust-webui-daemon`. Not merged.
   desktop shell can wrap the same bundle later; it is not required.
 - The Go engine stays separate and mostly unchanged. The UI talks to it only
   through the existing daemon API (`/health`, `/v1/*`, `/v1/ws`, `/v1/ops`,
-  protocol Ops/Events). No engine rewrite.
+  protocol Ops/Events). No engine rewrite. The bind, token, and remote-access
+  rules are [gateway.md](gateway.md).
 - Strike runs as a per-user daemon: `strike daemon install` writes a systemd
   user unit running `strike serve --auth --token-file ~/.strike/daemon.token`.
 - Remotes are just other daemons you own. Bind stays loopback by default;

@@ -46,6 +46,38 @@ func TestLoadOrMintTokenFile(t *testing.T) {
 	}
 }
 
+func TestDaemonLogoutRotatesToken(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	var out, errb bytes.Buffer
+	if code := runDaemonCLI([]string{"token"}, &out, &errb); code != 0 {
+		t.Fatalf("token code = %d err=%s", code, errb.String())
+	}
+	first := strings.TrimSpace(out.String())
+	out.Reset()
+	if code := runDaemonCLI([]string{"logout"}, &out, &errb); code != 0 {
+		t.Fatalf("logout code = %d err=%s", code, errb.String())
+	}
+	second := ""
+	for _, line := range strings.Split(out.String(), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" && !strings.HasPrefix(line, "Rotated") && !strings.HasPrefix(line, "A serve") {
+			second = line
+			break
+		}
+	}
+	if second == "" || second == first {
+		t.Fatalf("logout token = %q, first = %q", second, first)
+	}
+	info, err := os.Stat(filepath.Join(home, ".strike", "daemon.token"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("perm = %v", info.Mode().Perm())
+	}
+}
+
 func TestRunDaemonCLIUsageAndUnknown(t *testing.T) {
 	var out, errb bytes.Buffer
 	if code := runDaemonCLI(nil, &out, &errb); code != 0 {

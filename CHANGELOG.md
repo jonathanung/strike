@@ -16,6 +16,10 @@ materially affect the shipped product.
 
 ### Added
 
+- **Gateway token rotation** — `strike daemon logout` replaces
+  `~/.strike/daemon.token`. A `strike serve --token-file` process reads that
+  file on every `/v1` check, so the previous bearer stops working without a
+  restart. See [docs/gateway.md](docs/gateway.md).
 - **Web client sessions and activity** — the Rust UI opens tabbed live
   sessions and an Activity list of delegated children (status, elapsed time,
   stop, retry, expand), including blocked handoffs. Schedule, memory,

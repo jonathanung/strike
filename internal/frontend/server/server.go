@@ -36,8 +36,14 @@ type Options struct {
 	Addr string
 	// Auth enables bearer authentication for API routes.
 	Auth bool
-	// Token is required when Auth is true.
+	// Token is required when Auth is true. It is the bearer until TokenFile
+	// is set; a token file is re-read on every /v1 check so a rotated file
+	// (strike daemon logout) replaces it without restarting the process.
 	Token string
+	// TokenFile, when set, is the source of truth for the bearer. Missing
+	// or empty contents deny /v1. The process still needs Auth and an initial
+	// Token so a server cannot start authenticated with no credential.
+	TokenFile string
 	// SessionDir is the JSONL sessions directory. Default session.DefaultDir().
 	SessionDir string
 	// Static is optional override for the attach page FS (tests). Nil uses embed.
@@ -445,7 +451,7 @@ func requiresToken(path string) bool {
 }
 
 func (s *Server) authorized(r *http.Request) bool {
-	want := s.opts.Token
+	want := s.currentToken()
 	if want == "" {
 		return false
 	}
@@ -461,6 +467,20 @@ func (s *Server) authorized(r *http.Request) bool {
 		return true
 	}
 	return false
+}
+
+// currentToken is the bearer checked on this request. A configured token
+// file wins over the value captured at startup.
+func (s *Server) currentToken() string {
+	path := strings.TrimSpace(s.opts.TokenFile)
+	if path == "" {
+		return s.opts.Token
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
 }
 
 // bearerToken extracts a Bearer credential. Scheme match is case-insensitive
@@ -501,16 +521,18 @@ func (s *Server) maybeHandoffToken(w http.ResponseWriter, r *http.Request) bool 
 	if tok == "" {
 		return false
 	}
-	if !tokenEqual(tok, s.opts.Token) {
+	current := s.currentToken()
+	if !tokenEqual(tok, current) {
 		return false
 	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     authCookieName,
-		Value:    s.opts.Token,
+		Value:    current,
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
-		// Secure omitted: strike serve is cleartext by design (loopback / --expose).
+		// Secure omitted: strike serve is cleartext by design (loopback, or a
+		// private bind with --auth). There is no public listener.
 	})
 	q := r.URL.Query()
 	q.Del("token")
