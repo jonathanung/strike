@@ -1,0 +1,102 @@
+/* feature:git-worktree begin */
+.side-tabs { flex-wrap: wrap; }
+
+.git-panel, .worktree-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-height: 0;
+}
+.git-panel:focus, .worktree-panel:focus {
+  outline: 1px solid var(--border-focus);
+  outline-offset: 2px;
+}
+.git-head, .git-actions, .wt-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  align-items: center;
+}
+.git-branch {
+  color: var(--ink);
+  font-weight: 600;
+}
+.git-meta { color: var(--muted); font-size: var(--type-sm); }
+.git-section { margin: var(--space-2) 0 0; }
+.git-section h3 {
+  margin: 0 0 var(--space-1);
+  color: var(--muted);
+  font-size: var(--type-sm);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.git-file {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  color: var(--ink);
+  border: 0;
+  border-bottom: 1px solid var(--border-muted);
+  border-radius: 0;
+  min-height: 32px;
+  padding: 4px 0;
+}
+.git-file.on { background: var(--raised); }
+.git-file .mark {
+  width: 1.2em;
+  color: var(--muted);
+  font-size: var(--type-sm);
+}
+.git-file .name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.git-diff {
+  margin: 0;
+  max-height: 220px;
+  overflow: auto;
+  background: var(--surface-muted);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2);
+  font-size: var(--type-sm);
+  line-height: 1.35;
+}
+.git-diff .add { color: var(--diff-add); }
+.git-diff .del { color: var(--diff-del); }
+.git-field, .git-panel select, .worktree-panel select {
+  width: 100%;
+  background: var(--ground);
+  color: var(--ink);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-sm);
+  min-height: var(--control);
+  padding: 4px 8px;
+}
+.git-panel textarea.git-field { min-height: 64px; resize: vertical; }
+.git-danger {
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2);
+}
+.git-danger summary { cursor: pointer; color: var(--danger); }
+.wt-card {
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.wt-card.stale { border-color: var(--warning); }
+.wt-card .path { color: var(--muted); word-break: break-all; }
+@media (max-width: 960px) {
+  .side:has(.git-panel), .side:has(.worktree-panel) { max-height: 70vh; }
+}
+/* feature:git-worktree end */

@@ -125,6 +125,10 @@ type Server struct {
 	// index.html (Trunk emits an inline WASM loader) without unsafe-inline.
 	scriptCSPHashes []string
 
+	// gitMu serializes git reads and mutations for this daemon. Overlapping
+	// status and reset calls on one repo corrupt the index.
+	gitMu sync.Mutex
+
 	// grants are short-lived bearers kept in memory only. grantNow overrides
 	// the clock in tests. rootSum is the last host-token hash; a change
 	// (strike daemon logout, or POST /v1/gateway/rotate) drops every grant.
@@ -295,6 +299,21 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/files", s.handleFiles)
 	s.mux.HandleFunc("GET /v1/files/search", s.handleFilesSearch)
 	s.mux.HandleFunc("GET /v1/changed-files", s.handleChangedFiles)
+	s.mux.HandleFunc("GET /v1/git/status", s.handleGitStatus)
+	s.mux.HandleFunc("GET /v1/git/diff", s.handleGitDiff)
+	s.mux.HandleFunc("GET /v1/git/branches", s.handleGitBranches)
+	s.mux.HandleFunc("GET /v1/git/log", s.handleGitLog)
+	s.mux.HandleFunc("POST /v1/git/stage", s.handleGitStage)
+	s.mux.HandleFunc("POST /v1/git/unstage", s.handleGitUnstage)
+	s.mux.HandleFunc("POST /v1/git/commit", s.handleGitCommit)
+	s.mux.HandleFunc("POST /v1/git/checkout", s.handleGitCheckout)
+	s.mux.HandleFunc("POST /v1/git/discard", s.handleGitDiscard)
+	s.mux.HandleFunc("POST /v1/git/reset", s.handleGitReset)
+	s.mux.HandleFunc("POST /v1/git/branch/delete", s.handleGitBranchDelete)
+	s.mux.HandleFunc("GET /v1/git/worktrees", s.handleGitWorktrees)
+	s.mux.HandleFunc("POST /v1/git/worktrees", s.handleGitWorktreeCreate)
+	s.mux.HandleFunc("POST /v1/git/worktrees/remove", s.handleGitWorktreeRemove)
+	s.mux.HandleFunc("POST /v1/git/worktrees/prune", s.handleGitWorktreePrune)
 	s.mux.HandleFunc("GET /v1/file", s.handleFile)
 	s.mux.HandleFunc("GET /v1/file/view", s.handleFileView)
 	s.mux.HandleFunc("PUT /v1/file", s.handleFilePut)
@@ -319,6 +338,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/permissions/explain", s.handlePermissionExplain)
 	s.mux.HandleFunc("GET /v1/permissions/diff", s.handlePermissionDiff)
 	s.mux.HandleFunc("GET /v1/permissions/presets", s.handlePermissionPresets)
+	s.mux.HandleFunc("GET /v1/permissions/rules", s.handlePermissionRules)
+	s.mux.HandleFunc("POST /v1/permissions/rules", s.handlePermissionRules)
+	s.mux.HandleFunc("POST /v1/permissions/rules/remove", s.handlePermissionRuleRemove)
+	s.mux.HandleFunc("GET /v1/permissions/audit", s.handlePermissionAudit)
 	s.mux.HandleFunc("GET /v1/plans", s.handlePlansList)
 	s.mux.HandleFunc("POST /v1/plans", s.handlePlanCreate)
 	s.mux.HandleFunc("GET /v1/plans/{id}", s.handlePlanGet)

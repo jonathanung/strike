@@ -5,8 +5,8 @@ a session list (live roots, saved sessions, server-backed pins, archive,
 and organisational folders, search across titles and recent transcript
 text, delegated children nested in the conductor view), a transcript over
 `/v1/live/events`, a composer that can steer or queue and set the real
-permission mode, and a side panel with Activity, Files, Changes, Memory, Knowledge,
-and Artifacts.
+permission mode, and a side panel with Activity, Files, Changes, Git, Worktrees,
+Memory, Knowledge, and Artifacts.
 Blocked children (`schema:handoff`, #1201) show as `blocked`. Folders group
 sessions in the list; they are not directories on disk. Unread is still the
 browser seen-map until the status stream (#1263) publishes a server field.
@@ -203,10 +203,14 @@ stays the cockpit pass.
 
 ## Extra side tabs
 
-Git status beyond `GET /v1/changed-files`, an embedded browser, a terminal,
-and a subagent board that is not the Activity list are not in the client.
-Activity is the subagent list. Changes is the diff list. A terminal tab
-would have to be the real `!` shell path, which today is TUI-only.
+Git status, branch, log, commit, and worktree list/create/remove are in the
+client (`/v1/git/*`). The Git panel reuses `GET /v1/changed-files` for the
+unstaged diff. Changing `session.childIsolation` stays in config; the
+Worktrees panel shows the effective value and does not write a second flag.
+An embedded browser, a terminal, and a subagent board that is not the
+Activity list are not in the client. Activity is the subagent list. Changes
+is the diff list. A terminal tab would have to be the real `!` shell path,
+which today is TUI-only.
 
 ## Composer triggers
 
