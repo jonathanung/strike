@@ -13,6 +13,7 @@ bearer. The token is not put in the page URL, the cookie jar, or
 
 ```sh
 # gateway manager, no WebKit required
+# Linux links libdbus for the keyring: pkg-config and libdbus-1-dev
 cargo run --manifest-path desktop/Cargo.toml -p strike-desktop
 # open the printed http://127.0.0.1:<port>/_desktop/
 

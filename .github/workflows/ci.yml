@@ -256,6 +256,9 @@ jobs:
         with:
           workspaces: desktop
 
+      - name: Install Linux keyring headers
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libdbus-1-dev
+
       - name: Test desktop gateway manager
         run: |
           cargo fmt --all --manifest-path desktop/Cargo.toml --check
