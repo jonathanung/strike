@@ -102,7 +102,7 @@ function minControl(page, selector) {
 function chipBox(page, label) {
   return page.evaluate(`(() => {
     const want = ${JSON.stringify(label)};
-    const el = [...document.querySelectorAll(".composer-chips button, .composer-bar button.send")].find((n) => (n.innerText || "").trim() === want || (want === "Send" && n.classList.contains("send")));
+    const el = [...document.querySelectorAll(".composer-bar button")].find((n) => (n.innerText || "").trim() === want || (want === "Send" && n.classList.contains("send")));
     if (!el) return null;
     const r = el.getBoundingClientRect();
     return { right: r.right, height: r.height, inner: window.innerWidth };
@@ -267,15 +267,20 @@ export async function runPhoneScreens({ page, outDir, video, check, shots }) {
   }
 
   check(await clickNav(page, "Files"), "files nav missing before Changes");
-  await page.evaluate(`(() => { const b = [...document.querySelectorAll(".side-tabs button")].find((n) => (n.innerText||"").includes("Changes")); b?.click(); })()`);
-  await delay(250);
-  const changesVisible = await page.evaluate(`(() => {
+  await delay(200);
+  await page.evaluate(`(() => { const b = [...document.querySelectorAll(".side-tabs button")].find((n) => (n.innerText||"").includes("Changes")); if (b) { b.scrollIntoView({block:"nearest"}); b.click(); } })()`);
+  await delay(300);
+  const changesInfo = await page.evaluate(`(() => {
+    const shell = document.querySelector(".shell");
+    const cls = shell ? shell.className : "";
+    const side = document.querySelector(".side");
+    const sideDisplay = side ? getComputedStyle(side).display : "missing";
     const pane = document.querySelector(".changes");
-    if (!pane || getComputedStyle(pane).display === "none") return false;
-    const text = pane.innerText || "";
-    return text.includes("No changes") || Boolean(pane.querySelector(".ev-fileline"));
+    const text = ((pane && pane.innerText) || "").replace(/\\s+/g, " ").trim().slice(0, 160);
+    const ok = cls.includes("phone-pane-files") && side && sideDisplay !== "none" && pane && getComputedStyle(pane).display !== "none" && text.length > 0;
+    return { ok, detail: "class=" + cls + " side=" + sideDisplay + " text=" + JSON.stringify(text) };
   })()`);
-  check(changesVisible, "Changes tab is not visible on the phone files pane");
+  check(changesInfo.ok, `Changes tab is not visible on the phone files pane (${changesInfo.detail})`);
   await shot(page, recorder, shotDir, shots, "phone-changes-390");
 
   check(await clickNav(page, "Daemon"), "no Daemon phone-nav button");
