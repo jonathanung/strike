@@ -366,7 +366,14 @@ try {
   await send("Runtime.enable");
   await send("Network.enable");
   await send("Log.enable");
-  await send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
+  // JSON calls send the bearer from localStorage. The live stream uses the
+  // cookie set by /?token= (HttpOnly, stripped from the URL before WASM boots).
+  await send("Page.addScriptToEvaluateOnNewDocument", {
+    source: `try{localStorage.setItem("strike.token", ${JSON.stringify(token)});}catch(e){}`,
+  });
+  await send("Page.navigate", {
+    url: `http://127.0.0.1:${port}/?token=${encodeURIComponent(token)}`,
+  });
 
   const readCockpit = async () => {
     const ev = await send("Runtime.evaluate", {
@@ -421,6 +428,79 @@ try {
       `cockpit check failed missing=${missingText.join(",")} acid=${acid} ground=${ground} status=${statusId} chip=${chip} title=${title} text=${text.slice(0, 400)}\n${await diagnostics()}`,
     );
   }
+  const evalValue = async (expression) => {
+    const ev = await send("Runtime.evaluate", { expression, returnByValue: true });
+    if (ev.result?.exceptionDetails) {
+      throw new Error(`evaluate failed: ${JSON.stringify(ev.result.exceptionDetails)}`);
+    }
+    return ev.result?.result?.value;
+  };
+  const bodyText = async () => String((await evalValue("document.body ? document.body.innerText : ''")) || "");
+
+  // Model menu: filter, honest "not reported" capabilities, keyboard, and a
+  // real select.model error from the daemon (unknown provider).
+  await send("Runtime.evaluate", {
+    expression: `document.querySelector("[data-model-chip]")?.click()`,
+  });
+  let menu = "";
+  for (let i = 0; i < 40; i++) {
+    menu = await bodyText();
+    if (menu.includes("Filter models") && menu.includes("echo") && menu.includes("not reported")) break;
+    await delay(250);
+  }
+  const menuWant = [
+    "Filter models",
+    "echo",
+    "Capabilities not reported",
+    "Context window not reported",
+    "Reasoning support is not reported",
+  ];
+  const menuMissing = menuWant.filter((s) => !menu.includes(s));
+  if (menuMissing.length) {
+    throw new Error(`model menu missing=${menuMissing.join("|")} text=${menu.slice(0, 500)}`);
+  }
+  const modelFiltered = await evalValue(`(() => {
+    const el = document.querySelector("[data-model-filter]");
+    if (!el) return "missing";
+    el.focus();
+    el.value = "zzz";
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    return "ok";
+  })()`);
+  if (modelFiltered !== "ok") {
+    throw new Error(`model filter input missing (${modelFiltered})`);
+  }
+  let empty = "";
+  for (let i = 0; i < 20; i++) {
+    empty = await bodyText();
+    if (empty.includes("No models match")) break;
+    await delay(100);
+  }
+  if (!empty.includes("No models match")) {
+    throw new Error(`model filter did not empty the list: ${empty.slice(0, 400)}`);
+  }
+  await evalValue(`(() => {
+    const el = document.querySelector("[data-model-filter]");
+    el.value = "nope/missing";
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    el.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    return "ok";
+  })()`);
+  let failed = "";
+  for (let i = 0; i < 40; i++) {
+    failed = await bodyText();
+    if (failed.includes("unknown provider")) break;
+    await delay(250);
+  }
+  if (!failed.includes("unknown provider")) {
+    throw new Error(`model error path missing daemon message: ${failed.slice(0, 500)}`);
+  }
+
+  // Close the model menu (and any error note) before the navbar pass.
+  await send("Runtime.evaluate", {
+    expression: `document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`,
+  });
+  await delay(250);
 
   // feature:navbar — palette fuzzy match, argument error, shortcut overlay.
   const navbar = async (expression) => {

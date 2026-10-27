@@ -39,6 +39,28 @@ alone, scaled back to 1024×594. `strike-chat-1440.png` and
 
 Echo produced `blocked` for both a prose objective and `run sleep 25` (the tool finished, then the handoff gate failed). It did not produce done, failed, or stalled.
 
+## Model menu
+
+Headless Chrome on `strike serve --provider echo`. The before shot is the
+flat list from `main` before this stream. The hold and effort shots use a
+temporary `~/.strike/providers.jsonc` overlay so echo reports a 24-token
+window and variants `low`, `high`, and `custom-route`. That file is not
+the default install.
+
+| File | What it shows |
+|---|---|
+| `model-menu-before.png` | The previous chip: one unlabeled row |
+| `model-menu-1440.png` | Filter, unreported capabilities, unreported window, hidden effort |
+| `model-menu-1024.png` | Same menu at 1024×594 |
+| `model-menu-mobile.png` | Same menu at 390×844 |
+| `model-menu-filter.png` | A query that matches nothing, with Enter still available for a freeform id |
+| `model-menu-error.png` | `nope/missing` rejected by the daemon (`unknown provider`) |
+| `model-menu-pinned.png` | A browser-local pin (`strike.modelPins`) |
+| `model-menu-default.png` | Ctrl/click save writes the global default and leaves this session on echo |
+| `model-menu-effort.png` | Variant effort. `custom-route` stays disabled |
+| `model-menu-meter.png` | 40/64 after a real turn. Under 80%, so Send is not held |
+| `model-menu-hold.png` | Critical fit on a 24-token window. Send is held |
+
 ## Earlier tabbed slice
 
 | File | What it shows |

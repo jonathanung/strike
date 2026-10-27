@@ -114,7 +114,15 @@ pub struct LiveStatus {
     #[serde(default, rename = "permissionMode")]
     pub permission_mode: String,
     #[serde(default)]
+    pub effort: String,
+    #[serde(default)]
     pub busy: bool,
+    #[serde(default, rename = "contextUsed")]
+    pub context_used: i64,
+    #[serde(default, rename = "contextLimit")]
+    pub context_limit: i64,
+    #[serde(default, rename = "contextFit")]
+    pub context_fit: String,
     /// Wire fields from `GET /v1/status`. The shell classifies from roots.
     #[allow(dead_code)]
     #[serde(default, rename = "turnState")]
@@ -173,6 +181,31 @@ pub struct ModelInfo {
     pub provider: String,
     #[serde(default)]
     pub name: String,
+    /// Context window tokens from the catalog. 0 means not reported.
+    #[serde(default)]
+    pub context: i64,
+    #[serde(default)]
+    pub output: i64,
+    #[serde(default, rename = "inputCost")]
+    pub input_cost: f64,
+    #[serde(default, rename = "outputCost")]
+    pub output_cost: f64,
+    #[serde(default, rename = "hasCost")]
+    pub has_cost: bool,
+    /// True only when the catalog reports the capability. False means
+    /// unknown or unsupported (#1054); the menu omits it.
+    #[serde(default, rename = "toolCall")]
+    pub tool_call: bool,
+    #[serde(default)]
+    pub reasoning: bool,
+    #[serde(default)]
+    pub attachment: bool,
+    #[serde(default, rename = "variantIds")]
+    pub variant_ids: Vec<String>,
+    /// catalog | config | merge. Deserialized so the wire field is not dropped.
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub source: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
