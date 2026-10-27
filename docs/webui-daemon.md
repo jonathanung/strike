@@ -83,7 +83,14 @@ Status: walking skeleton on branch `worktree-rust-webui-daemon`. Not merged.
     `accept-edits` (file edits allowed; shell and network still ask),
     `yolo` (this session skips asks that are not hard-denied; other
     sessions stay as they are). There is no read-only-shell mode and no
-    all-sessions skip. The model chip (Alt+M) opens a filterable menu
+    all-sessions skip. Soft, Edits, and Yolo ask for confirmation
+    before the post. Default and Plan apply immediately. A pending
+    `permission.asked` is a card above the composer (allow once, allow
+    session, allow project, deny) with the command or edit diff from the
+    event. The same chip opens the rules and audit panel
+    (`GET/POST /v1/permissions/rules`, `GET /v1/permissions/audit`).
+    Deny rules still apply in Yolo and Edits. Label mapping and the
+    confirm rules are in [webui-approvals.md](webui-approvals.md). The model chip (Alt+M) opens a filterable menu
     grouped by provider. Pins stay in this browser. Enter posts
     `select.model` for this session; saving a default patches
     `/v1/settings` and does not by itself switch the session. Effort is
@@ -183,8 +190,9 @@ only organise chats. They do not select a directory.
 
 ## Not yet done (next slices, in order)
 
-1. Permission asks in the transcript. The composer can set the mode;
-   an in-flight ask is still only the protocol event.
+1. Permission asks render as cards from `permission.asked`. What is
+   still open is a transcript history of asks after they resolve,
+   beyond the audit list.
 2. Session folders that organise chats, separate from workspace
    directories. The list already shows which workspace a chat is bound
    to. It does not hide chats from other workspaces.

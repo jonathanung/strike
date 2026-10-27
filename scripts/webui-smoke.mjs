@@ -202,6 +202,37 @@ try {
     join(sessionsDir, "beta-session.meta.json"),
     JSON.stringify({ title: "Palette polish" }) + "\n",
   );
+  // Turn elapsed (#1364) fixture: a replayed session with three turns —
+  // a fully timed 4m12s turn, a 20s turn, and a 5-minute turn containing
+  // one untimed (old-log) line. Only the first may show an elapsed label.
+  const envLine = (type, time, data) =>
+    JSON.stringify(time ? { type, time, data } : { type, data }) + "\n";
+  const elapsedSession =
+    JSON.stringify({ type: "session.header", schemaVersion: 1, time: "2026-10-26T06:00:00Z" }) +
+    "\n" +
+    envLine("user.message", "2026-10-26T06:00:00Z", { text: "start the slow replay" }) +
+    envLine("turn.started", "2026-10-26T06:00:01Z", {}) +
+    envLine("tool.begin", "2026-10-26T06:00:30Z", {
+      callId: "c1",
+      name: "bash",
+      args: { command: "sleep 180" },
+    }) +
+    envLine("tool.end", "2026-10-26T06:03:30Z", { callId: "c1", name: "bash", output: "done" }) +
+    envLine("text.delta", "2026-10-26T06:04:00Z", { text: "slow answer" }) +
+    envLine("turn.completed", "2026-10-26T06:04:12Z", { stopReason: "end_turn" }) +
+    envLine("user.message", "2026-10-26T06:10:00Z", { text: "quick follow up" }) +
+    envLine("text.delta", "2026-10-26T06:10:10Z", { text: "fast answer" }) +
+    envLine("turn.completed", "2026-10-26T06:10:20Z", { stopReason: "end_turn" }) +
+    envLine("user.message", "2026-10-26T06:20:00Z", { text: "old log turn" }) +
+    envLine("tool.begin", null, { callId: "c9", name: "bash", args: { command: "sleep 240" } }) +
+    envLine("tool.end", "2026-10-26T06:24:00Z", { callId: "c9", name: "bash", output: "done" }) +
+    envLine("text.delta", "2026-10-26T06:24:30Z", { text: "old answer" }) +
+    envLine("turn.completed", "2026-10-26T06:25:00Z", { stopReason: "end_turn" });
+  await writeFile(join(sessionsDir, "elapsed-session.jsonl"), elapsedSession);
+  await writeFile(
+    join(sessionsDir, "elapsed-session.meta.json"),
+    JSON.stringify({ title: "Elapsed replay" }) + "\n",
+  );
   const found = await call("GET", "/v1/session-list/search?q=coral%20bookmark");
   if (found.status !== 200 || !found.text.includes("beta-session") || !found.text.includes("content")) {
     throw new Error(`content search ${found.status} ${found.text.slice(0, 300)}`);
@@ -485,6 +516,134 @@ try {
     throw new Error(
       `cockpit check failed missing=${missingText.join(",")} acid=${acid} ground=${ground} status=${statusId} chip=${chip} title=${title} text=${text.slice(0, 400)}\n${await diagnostics()}`,
     );
+  }
+  // Approvals (#1266): mode menu, Yolo confirm + Escape, and the
+  // permission-rules API confirm gates. Runs while the boot session is
+  // live (rule writes require a live root) and leaves the chip on Default.
+  const apprEval = async (expression) => {
+    const ev = await send("Runtime.evaluate", { expression, returnByValue: true });
+    return ev.result?.result?.value || "";
+  };
+  const apprText = () => apprEval("document.body ? document.body.innerText : \"\"");
+  const apprClickChip = () =>
+    apprEval(`(() => {
+      const btn = [...document.querySelectorAll("button")].find((b) => (b.textContent || "").includes("Approval"));
+      if (!btn) return "no-chip";
+      btn.click();
+      return "clicked";
+    })()`);
+  // Condition-based waits with the clicks inside the probes (this file's
+  // post-#1378 discipline): a click that lands mid-render is retried
+  // instead of failing against a fixed deadline.
+  await waitFor(
+    "approval menu (modes, Rules and audit, deny copy)",
+    async () => {
+      const t = await apprText();
+      if (t.includes("Rules and audit") && t.includes("Deny rules still apply") && t.includes("Yolo")) {
+        return { ok: true, t };
+      }
+      await apprClickChip();
+      return { ok: false };
+    },
+    { timeout: STEP_MS, interval: 250 },
+  );
+  const apprMenu = await apprText();
+  if (!apprMenu.includes("Default") || !apprMenu.includes("Plan") || !apprMenu.includes("Yolo") || !apprMenu.includes("Deny rules still apply")) {
+    throw new Error(`approval menu missing copy: ${apprMenu.slice(0, 500)}`);
+  }
+  await waitFor(
+    "yolo confirm dialog",
+    async () => {
+      const t = await apprText();
+      if (t.includes("Use Yolo for this session?")) {
+        return { ok: true };
+      }
+      const r = await apprEval(`(() => {
+        const btn = [...document.querySelectorAll("button")].find((b) => (b.textContent || "").trim().startsWith("Yolo"));
+        if (!btn) return "no-yolo";
+        btn.click();
+        return "clicked";
+      })()`);
+      if (r !== "clicked") {
+        await apprClickChip();
+      }
+      return { ok: false };
+    },
+    { timeout: STEP_MS, interval: 250 },
+  );
+  await apprEval(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
+  await waitFor(
+    "escape keeps Default",
+    async () => {
+      const t = await apprText();
+      return { ok: t.includes("Approval · Default") && !t.includes("Use Yolo for this session?") };
+    },
+    { timeout: STEP_MS, interval: 250 },
+  );
+
+  const apprAuth = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+  const apprRuleCall = async (path, body) => {
+    const res = await fetch(`http://127.0.0.1:${port}${path}`, {
+      method: "POST",
+      headers: apprAuth,
+      body: JSON.stringify(body),
+    });
+    const text = await res.text();
+    return { status: res.status, text };
+  };
+  const apprDenied = await apprRuleCall("/v1/permissions/rules", {
+    scope: "global",
+    permission: "bash",
+    pattern: "smoke-deny",
+    action: "deny",
+    confirm: false,
+  });
+  if (apprDenied.status !== 200 || !apprDenied.text.includes("smoke-deny")) {
+    throw new Error(`deny rule: ${apprDenied.status} ${apprDenied.text.slice(0, 300)}`);
+  }
+  const apprListed = await fetch(`http://127.0.0.1:${port}/v1/permissions/rules`, { headers: apprAuth });
+  const apprListedText = await apprListed.text();
+  if (apprListed.status !== 200 || !apprListedText.includes("smoke-deny")) {
+    throw new Error(`rules list: ${apprListed.status} ${apprListedText.slice(0, 300)}`);
+  }
+  const apprQuiet = await apprRuleCall("/v1/permissions/rules", {
+    scope: "global",
+    permission: "bash",
+    pattern: "smoke-allow",
+    action: "allow",
+    confirm: false,
+  });
+  if (apprQuiet.status !== 400 || !apprQuiet.text.includes("confirmation required")) {
+    throw new Error(`allow without confirm: ${apprQuiet.status} ${apprQuiet.text.slice(0, 300)}`);
+  }
+  const apprAllowed = await apprRuleCall("/v1/permissions/rules", {
+    scope: "global",
+    permission: "bash",
+    pattern: "smoke-allow",
+    action: "allow",
+    confirm: true,
+  });
+  if (apprAllowed.status !== 200 || !apprAllowed.text.includes("smoke-allow")) {
+    throw new Error(`allow with confirm: ${apprAllowed.status} ${apprAllowed.text.slice(0, 300)}`);
+  }
+  const apprRules = JSON.parse(apprListedText).rules || [];
+  const apprDenyIndex = apprRules.find((row) => row.pattern === "smoke-deny" && row.action === "deny");
+  if (!apprDenyIndex) throw new Error(`deny index missing: ${apprListedText.slice(0, 300)}`);
+  const apprKept = await apprRuleCall("/v1/permissions/rules/remove", {
+    scope: "global",
+    index: apprDenyIndex.index,
+    confirm: false,
+  });
+  if (apprKept.status !== 400 || !apprKept.text.includes("confirmation required")) {
+    throw new Error(`remove deny without confirm: ${apprKept.status} ${apprKept.text.slice(0, 300)}`);
+  }
+  const apprRemoved = await apprRuleCall("/v1/permissions/rules/remove", {
+    scope: "global",
+    index: apprDenyIndex.index,
+    confirm: true,
+  });
+  if (apprRemoved.status !== 200 || apprRemoved.text.includes("smoke-deny")) {
+    throw new Error(`remove deny: ${apprRemoved.status} ${apprRemoved.text.slice(0, 300)}`);
   }
   const evalValue = async (expression) => {
     const ev = await send("Runtime.evaluate", { expression, returnByValue: true });
@@ -1745,6 +1904,38 @@ try {
     // The outer finally kills whichever daemon `strike` now points at.
     throw err;
   }
+  // Turn elapsed (#1364): resume the seeded replay session and check
+  // the label from the fixture above — exactly one "took 4:12", on the
+  // long turn's final line; the short turn and the untimed-line turn
+  // render nothing.
+  const elapsedClicked = await evaluate(`(() => {
+    const row = document.querySelector('[data-session-id="elapsed-session"]');
+    const btn = row && row.querySelector(".ss-main");
+    if (!btn) return "missing";
+    btn.click();
+    return "clicked";
+  })()`);
+  if (elapsedClicked !== "clicked") {
+    throw new Error(`turn-elapsed resume click -> ${elapsedClicked}`);
+  }
+  await waitFor(
+    "turn elapsed label on the replayed long turn only",
+    async () => {
+      const v = await evaluate(`(() => {
+        const labels = [...document.querySelectorAll(".turn-elapsed")];
+        return {
+          n: labels.length,
+          text: labels[0] ? labels[0].textContent.trim() : "",
+          onSlow: labels[0]
+            ? (labels[0].closest("article")?.innerText || "").includes("slow answer")
+            : false,
+          body: document.body.innerText.includes("old answer"),
+        };
+      })()`);
+      return { ok: v.n === 1 && v.text === "took 4:12" && v.onSlow && v.body, ...v };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
 
   const wsClicked = await send("Runtime.evaluate", {
     expression: `(() => {
@@ -1774,6 +1965,7 @@ try {
   if (strikeLog.includes(token)) {
     throw new Error("daemon log contains the smoke token");
   }
+
   console.log("webui-smoke ok");
 } catch (err) {
   console.error(String(err));
