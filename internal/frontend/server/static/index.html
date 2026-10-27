@@ -13,14 +13,15 @@
 <link rel="stylesheet" href="/assets/storage-c32d584bc182ee77.css" integrity="sha384-XNDaz3yqOR2+uEfPi+eY+9Mzja2F/5vYI647yiPLuy4KvGHAOICyrdh0pqlWr9Wn"/>
 <link rel="stylesheet" href="/assets/navbar-4aaaf28db500eacb.css" integrity="sha384-5TOOsJOEELXhQX9eaCeYAdolP2MTbzKY2Rs54jkUpbigS3rQ+1uG62wvDZTASCfR"/>
 <link rel="stylesheet" href="/assets/editor-b94eee6c774248b5.css" integrity="sha384-+9ZqewFDkMigo7FvJP5c3fz6AHPgvKtu9jHfIAjeW7Qtx7wW3GCJSZM+LHcEeR4D"/>
+<link rel="stylesheet" href="/assets/usage-audit-4109f37a4c3f020.css" integrity="sha384-PG57uHfAoOyYrJLu5TZtnb1s2Ud6PPolTjB9IeCoVZ1qF7Qgrtsh0+5YiMBYYV9Z"/>
 <link rel="stylesheet" href="/assets/goals-5b895e22909a0f66.css" integrity="sha384-liP/FQF4QvouM0zc8WO7nxC1u3CzbFF/GBmvuED6zZS8f0rmPG1QWhWJitxfpRm1"/>
 
 
 
 
 <script type="module">
-import init, * as bindings from '/assets/strike-webui-38d2f9c25ba8ac7e.js';
-const wasm = await init({ module_or_path: '/assets/strike-webui-38d2f9c25ba8ac7e_bg.wasm' });
+import init, * as bindings from '/assets/strike-webui-69e40c033ca2555b.js';
+const wasm = await init({ module_or_path: '/assets/strike-webui-69e40c033ca2555b_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -31,6 +32,6 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 </script>
 <script src="/assets/register.js" defer></script>
 
-<link rel="modulepreload" href="/assets/strike-webui-38d2f9c25ba8ac7e.js" crossorigin="anonymous" integrity="sha384-MZV3129VFoHbzVLlK3WFTEpnillUgykoBJtYR9s5zvs850/tl1FyztUSMRCj9f1a"><link rel="preload" href="/assets/strike-webui-38d2f9c25ba8ac7e_bg.wasm" crossorigin="anonymous" integrity="sha384-QorEdVzhZ8mnrjJLozjfaQBqoF8Ym7vbQhOMxZeV6vDjBQUXnsetTM46PKJnF2kN" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/assets/strike-webui-69e40c033ca2555b.js" crossorigin="anonymous" integrity="sha384-327K8HnBdxrXwkER1ZTiMoqnl3xlDwFLZNh0rGTEVQQziyQcxfqn/ZyOo/3ABwOR"><link rel="preload" href="/assets/strike-webui-69e40c033ca2555b_bg.wasm" crossorigin="anonymous" integrity="sha384-LqxWPgyzJoSsRzc+1SptnVYC6pv3Uku8z0528E15r2V6mWpr+k2v1NjUfQ+bYtTH" as="fetch" type="application/wasm"></head>
 <body></body>
 </html>

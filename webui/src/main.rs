@@ -11,6 +11,7 @@ mod model;
 mod model_menu;
 mod model_menu_view;
 mod storage;
+mod usage_audit;
 mod shell;
 mod side_chat;
 mod status;
@@ -1801,6 +1802,41 @@ fn App() -> impl IntoView {
     }
     on_goals_key.forget();
 
+    // Alt+U opens Usage and Alt+A opens Audit. Like Alt+G, these stay
+    // here because only the page can set `mode`. The shortcuts are listed
+    // in the overlay via src/shell/contrib/usage_audit.rs.
+    let on_usage_audit_key =
+        Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |ev: web_sys::KeyboardEvent| {
+            if ev.alt_key() && !ev.meta_key() && !ev.ctrl_key() {
+                let target = if ev.key().eq_ignore_ascii_case("u") {
+                    Some("usage")
+                } else if ev.key().eq_ignore_ascii_case("a") {
+                    Some("audit")
+                } else {
+                    None
+                };
+                if let Some(target) = target {
+                    let typing = ev
+                        .target()
+                        .map(|t| {
+                            t.dyn_ref::<web_sys::Element>()
+                                .map(|el| {
+                                    matches!(el.tag_name().as_str(), "INPUT" | "TEXTAREA" | "SELECT")
+                                })
+                                .unwrap_or(false)
+                        })
+                        .unwrap_or(false);
+                    if !typing {
+                        ev.prevent_default();
+                        mode.set(target.into());
+                    }
+                }
+            }
+        });
+    if let Some(w) = web_sys::window() {
+        let _ = w.add_event_listener_with_callback("keydown", on_usage_audit_key.as_ref().unchecked_ref());
+    }
+    on_usage_audit_key.forget();
     // Alt+M opens the model menu. The shell owns the other chords; this
     // one stays here because only the page owns the menu signal, like
     // Alt+G above. The palette command and shortcut listing live in
@@ -1847,6 +1883,12 @@ fn App() -> impl IntoView {
                 remote_url=remote_url
                 refresh=refresh_meta
             />
+        </Show>
+        <Show when=move || mode.get() == "usage" fallback=move || ()>
+            <usage_audit::UsagePage base=base token=token status=status />
+        </Show>
+        <Show when=move || mode.get() == "audit" fallback=move || ()>
+            <usage_audit::AuditPage base=base token=token status=status />
         </Show>
         <Show when=move || mode.get() == "goals" fallback=move || ()>
             <goals::GoalsPane base=base token=token />
