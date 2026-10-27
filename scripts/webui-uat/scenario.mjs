@@ -22,6 +22,13 @@ const BOOT_EXPR = `(() => {
   return text.includes("Run a command") && text.includes("Activity") && acid === "#7c3aed";
 })()`;
 
+// The shell fixture requires "Connected". The chip stays "Checking" until
+// /health returns, and the shell can paint before that fetch finishes.
+const CONNECTED_EXPR = `(() => {
+  const text = document.body ? document.body.innerText : "";
+  return text.includes("Connected") && !text.includes("Unreachable") && !text.includes("Could not reach the daemon");
+})()`;
+
 export async function runScenario({ page, baseURL, outDir, video, goldens, updateGoldens, controls, suite = "full" }) {
   const session = await createSession({ page, outDir, video, goldens, updateGoldens });
   const { failures, shots, check, waitUntil, click, press, shoot, viewport, bodyText, tokens, log } = session;
@@ -38,6 +45,8 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
   log("booted");
 
   if (cockpit) {
+    const online = await waitUntil(CONNECTED_EXPR, 15000, "gateway connected");
+    check(Boolean(online), "gateway did not reach Connected");
     const text = await bodyText();
     const tok = await tokens();
     const fixture = JSON.parse(
@@ -309,14 +318,7 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
       })()`);
       check(retried, "Retry was not clicked");
       if (retried) {
-        const backOnline = await waitUntil(
-          `(() => {
-            const text = document.body ? document.body.innerText : "";
-            return text.includes("Connected") && !text.includes("Unreachable") && !text.includes("Could not reach the daemon");
-          })()`,
-          10000,
-          "daemon reconnected",
-        );
+        const backOnline = await waitUntil(CONNECTED_EXPR, 10000, "daemon reconnected");
         check(Boolean(backOnline), "Retry did not restore Connected");
       }
       await shoot("shell-reconnect-ok", ["desk1024", "desk1440"]);
