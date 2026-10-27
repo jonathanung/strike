@@ -750,7 +750,7 @@ try {
     repoDir: process.cwd(),
   });
 
-  const before = await send("Runtime.evaluate", {
+  const beforeSelection = await send("Runtime.evaluate", {
     expression: `(() => {
       const shell = document.querySelector(".shell");
       return JSON.stringify({
@@ -761,7 +761,7 @@ try {
     })()`,
     returnByValue: true,
   });
-  const beforeState = JSON.parse(before.result?.result?.value || "{}");
+  const beforeState = JSON.parse(beforeSelection.result?.result?.value || "{}");
   if (beforeState.layout === "conversation" || String(beforeState.cls).includes("layout-conversation")) {
     throw new Error(`cockpit is not the default layout: ${JSON.stringify(beforeState)}`);
   }
