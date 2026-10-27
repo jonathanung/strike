@@ -1,6 +1,10 @@
 //! Session list panel. Daemon routes under `/v1/session-list` own pins,
 //! archive, and folders. Folders group sessions; they are not directories.
 //!
+//! The row Delete action (#1358) only arms the confirm dialog owned by
+//! `crate::session_delete` through the `on_delete` prop; the panel never
+//! issues a DELETE itself.
+//!
 //! The gutter is [`status_shim`] until #1263 lands the shared status
 //! component. Unread uses the seen-map unless a server bit arrives.
 
@@ -222,6 +226,7 @@ pub(crate) fn SessionPanel(
     on_open: impl Fn(String, bool) + Copy + Send + 'static,
     on_new: impl Fn() + Copy + Send + 'static,
     on_refresh: impl Fn() + Copy + Send + 'static,
+    on_delete: impl Fn(String, String) + Copy + Send + 'static,
 ) -> impl IntoView {
     let prefs = load_prefs();
     let filter = RwSignal::new(prefs.filter);
@@ -779,6 +784,7 @@ pub(crate) fn SessionPanel(
                     }
                 },
                 move |index| cursor.set(index),
+                on_delete,
             )}
             {move || {
                 let hidden = layout.get().hidden_older;
@@ -949,6 +955,7 @@ fn render_rows(
     on_remove_folder: impl Fn(String) + Copy + 'static,
     on_check: impl Fn(String, bool) + Copy + 'static,
     on_cursor: impl Fn(usize) + Copy + 'static,
+    on_delete: impl Fn(String, String) + Copy + 'static,
 ) -> impl IntoView {
     let nav_len = layout
         .items
@@ -1022,6 +1029,7 @@ fn render_rows(
                 let gutter = format!("ss-gutter ss-gutter-{kind}");
                 let open_label = if live { "Open" } else { "Resume" };
                 let pin_label = if pinned { "Unpin" } else { "Pin" };
+                let label_del = label.clone();
                 let tip = format!("{label} ({id})");
                 let open_main = open_id.clone();
                 let open_action = open_id.clone();
@@ -1073,6 +1081,21 @@ fn render_rows(
                                 let id = id.clone();
                                 view! {
                                     <button type="button" class="ss-quiet" on:click=move |_| on_pin(id.clone(), pinned)>{pin_label}</button>
+                                }
+                            })}
+                            {is_session.then(|| {
+                                let id = id.clone();
+                                let label = label_del.clone();
+                                view! {
+                                    <button
+                                        type="button"
+                                        class="ss-quiet session-delete-action"
+                                        data-session-delete=id.clone()
+                                        title="Delete this session permanently"
+                                        on:click=move |_| on_delete(id.clone(), label.clone())
+                                    >
+                                        "Delete"
+                                    </button>
                                 }
                             })}
                         </div>
