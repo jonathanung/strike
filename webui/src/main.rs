@@ -32,7 +32,7 @@ use leptos::callback::Callback;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use model::{
-    activity_panel, display_state, fmt_ago, fmt_elapsed, is_running, merge_sessions, mode_label,
+    activity_panel, display_state, fmt_elapsed, is_running, merge_sessions, mode_label,
     permission_modes, session_label, task_headline, ActivityRow, Bootstrap, ChangedFilesResponse,
     ChatLine, ChildrenResponse, FilesResponse, Health, ModelInfo, ModelList, Remote, RootSummary,
     SessionItem, SessionsResponse, StatusBoard, TeamSnapshot, Workspace, WorkspacesResponse,
