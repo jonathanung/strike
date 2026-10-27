@@ -16,6 +16,7 @@ import (
 
 	"github.com/jonathanung/strike/harness/permission"
 	"github.com/jonathanung/strike/harness/sandbox"
+	"github.com/jonathanung/strike/internal/persist/workspace"
 	"github.com/jonathanung/strike/internal/product/update"
 	"github.com/jonathanung/strike/internal/product/version"
 )
@@ -43,6 +44,9 @@ type cliOptions struct {
 	maxCostSet                 bool
 	upgrade                    bool
 	version                    bool
+	// workspaces is set by strike serve so new roots bind the registry.
+	// Nil for the TUI and headless exec, which keep the process directory.
+	workspaces *workspace.Store
 }
 
 type optionSpec struct {

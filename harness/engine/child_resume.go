@@ -146,6 +146,7 @@ func (e *Engine) resumeChild(ctx context.Context, req tool.TaskResumeRequest) (t
 		Select:                     e.opts.Select,
 		Registry:                   childReg,
 		WorkDir:                    e.opts.WorkDir,
+		WorkspaceRoots:             append([]string(nil), e.opts.WorkspaceRoots...),
 		ProjectRoot:                e.opts.ProjectRoot,
 		Instructions:               e.opts.Instructions,
 		Memory:                     e.opts.Memory,

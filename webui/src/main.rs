@@ -22,6 +22,7 @@ mod session_delete;
 mod shell;
 mod side_chat;
 mod status;
+mod workspaces;
 
 use crate::shell::icon;
 
@@ -49,6 +50,7 @@ use wasm_bindgen::JsCast;
 use crate::api::{
     get_json, idempotency_key, now_ms, patch_json, post_json, post_json_value, post_op, put_json,
 };
+use crate::workspaces::WorkspacePicker;
 use crate::storage::StoragePanel;
 use crate::editor::{DocumentPane, LinkedBody, MarkdownView, has_markdown_table};
 use crate::side_chat::SideChatPanel;
@@ -720,6 +722,9 @@ fn App() -> impl IntoView {
     let gateway_detail = RwSignal::new(String::new());
     let gateway_profiles = RwSignal::new(gateway::load_profiles());
     let gateway_selected = RwSignal::new("this".to_string());
+    let workspace_recents = RwSignal::new(Vec::<Workspace>::new());
+    let picker_open = RwSignal::new(false);
+    let session_cwd = RwSignal::new(String::new());
     let roots = RwSignal::new(Vec::<RootSummary>::new());
     let sessions = RwSignal::new(Vec::<SessionItem>::new());
     let active_root = RwSignal::new(String::new());
@@ -939,6 +944,7 @@ fn App() -> impl IntoView {
                 Ok(r) => {
                     active_workspace.set(r.active_id);
                     workspaces.set(r.workspaces);
+                    workspace_recents.set(r.recents);
                 }
                 Err(e) => {
                     if e.contains("HTTP 401") || e.contains("HTTP 403") {
@@ -990,6 +996,7 @@ fn App() -> impl IntoView {
                             if !st.permission_mode.is_empty() {
                                 perm_mode.set(st.permission_mode);
                             }
+                            session_cwd.set(st.cwd);
                             live_busy.set(st.busy);
                             live_busy_root.set(root);
                         }
@@ -1544,9 +1551,7 @@ fn App() -> impl IntoView {
                         .await;
                         active_root.set(id);
                     }
-                    if let Ok(r) = get_json::<RootsResponse>(&b, &t, "/v1/roots").await {
-                        roots.set(r.roots);
-                    }
+                    refresh_meta();
                 }
                 Err(e) => status.set(format!("new session failed: {e}")),
             }
@@ -2467,6 +2472,7 @@ fn App() -> impl IntoView {
                 gateway_profiles=gateway_profiles
                 gateway_selected=gateway_selected
                 refresh=refresh_meta
+                open_picker=move || picker_open.set(true)
             />
         </Show>
         <Show when=move || mode.get() == "usage" fallback=move || ()>
@@ -2493,11 +2499,42 @@ fn App() -> impl IntoView {
                         activity=activity
                         active_root=active_root
                         seen=seen
+                        workspaces=workspaces
                         on_open=open_session
                         on_new=new_session
                         on_refresh=refresh_meta
                         on_delete=request_delete
                     />
+                    <div class="ws-chip">
+                        <div class="section-head">
+                            <h2 class="panel-title">"Workspace"</h2>
+                            <button class="secondary ws-open" on:click=move |_| picker_open.set(true)>"Change workspace"</button>
+                        </div>
+                        <p class="name">{move || {
+                            let id = active_workspace.get();
+                            workspaces.get().into_iter().find(|w| w.id == id).map(|w| w.name).unwrap_or_else(|| "No workspace".into())
+                        }}</p>
+                        <p class="path">{move || {
+                            let id = active_workspace.get();
+                            if let Some(w) = workspaces.get().into_iter().find(|w| w.id == id) {
+                                w.path
+                            } else {
+                                let cwd = session_cwd.get();
+                                if cwd.is_empty() { "New sessions use the daemon directory.".into() } else { cwd }
+                            }
+                        }}</p>
+                        {move || {
+                            let id = active_workspace.get();
+                            let ws_path = workspaces.get().into_iter().find(|w| w.id == id).map(|w| w.path).unwrap_or_default();
+                            let note = crate::workspaces::chip_note(&ws_path, &session_cwd.get());
+                            if note.is_empty() {
+                                view! { <span></span> }.into_any()
+                            } else {
+                                view! { <p class="hint">{note}</p> }.into_any()
+                            }
+                        }}
+                        <p class="hint">"This line is the directory. Sessions above are chats, not folders."</p>
+                    </div>
                     <details class="fold">
                     <summary>"Workspaces"</summary>
                     <p class="hint">"Opening one records it. It does not move the live engine."</p>
@@ -3295,6 +3332,16 @@ fn App() -> impl IntoView {
                 live_model=model_name
             />
         </Show>
+        <WorkspacePicker
+            open=picker_open
+            base=base
+            token=token
+            status=status
+            workspaces=workspaces
+            active_workspace=active_workspace
+            recents=workspace_recents
+            refresh=refresh_meta
+        />
     }
 }
 
@@ -3312,6 +3359,7 @@ fn DaemonPane(
     gateway_profiles: RwSignal<Vec<gateway::Profile>>,
     gateway_selected: RwSignal<String>,
     refresh: impl Fn() + Copy + Send + Sync + 'static,
+    open_picker: impl Fn() + Copy + 'static,
 ) -> impl IntoView {
     let policy_rules = RwSignal::new(String::new());
     let policy_mode = RwSignal::new(String::new());
@@ -3419,6 +3467,11 @@ fn DaemonPane(
                 selected=gateway_selected
                 refresh=refresh
             />
+            <section class="card">
+                <h2 class="panel-title">"Workspaces"</h2>
+                <p class="hint">"A workspace is a directory. Session lists are not folders."</p>
+                <button class="primary ws-open" on:click=move |_| open_picker()>"Change workspace"</button>
+            </section>
             <section class="card">
                 <h2 class="panel-title">"Workspaces"</h2>
                 <Show when=move || workspaces.get().is_empty()>

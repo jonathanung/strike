@@ -22,6 +22,9 @@ pub struct SourceSession {
     pub unread: bool,
     pub folder_id: String,
     pub team_state: String,
+    /// Display name of the workspace this session is bound to (#1260).
+    /// Empty when unbound. Folders above are organisation, not this.
+    pub workspace: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -437,6 +440,8 @@ fn push_session(
         row.snippet.clone()
     } else if row.archived {
         format!("Archived · {label}")
+    } else if !row.workspace.is_empty() {
+        format!("{label} · workspace {}", row.workspace)
     } else {
         label.to_string()
     };
@@ -543,6 +548,7 @@ mod tests {
             unread: false,
             folder_id: String::new(),
             team_state: String::new(),
+            workspace: String::new(),
         }
     }
 
