@@ -13,7 +13,7 @@
 // what the page actually looked like.
 import { spawn } from "node:child_process";
 import { editorBrowserCheck } from "./webui-editor-check.mjs";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -146,6 +146,65 @@ try {
   }
   if (!listedText.includes("markdownFile") || !listedText.includes(".md")) {
     throw new Error(`memory list missing plain-file path body=${listedText.slice(0, 500)}`);
+  }
+
+  const authz = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+  const call = async (method, path, body) => {
+    const res = await fetch(`http://127.0.0.1:${port}${path}`, {
+      method,
+      headers: authz,
+      body: body == null ? undefined : JSON.stringify(body),
+    });
+    const text = await res.text();
+    return { status: res.status, text };
+  };
+  const emptyFolder = await call("POST", "/v1/session-list/folders", { name: "   " });
+  if (emptyFolder.status !== 400) {
+    throw new Error(`empty folder ${emptyFolder.status} ${emptyFolder.text}`);
+  }
+  const created = await call("POST", "/v1/session-list/folders", { name: "Reviews" });
+  if (created.status !== 201 || !created.text.includes("Reviews")) {
+    throw new Error(`create folder ${created.status} ${created.text}`);
+  }
+  const dup = await call("POST", "/v1/session-list/folders", { name: "reviews" });
+  if (dup.status !== 400 || !dup.text.includes("already exists")) {
+    throw new Error(`dup folder ${dup.status} ${dup.text}`);
+  }
+  const listedSessions = await call("GET", "/v1/session-list");
+  if (listedSessions.status !== 200 || !listedSessions.text.includes("Reviews")) {
+    throw new Error(`list ${listedSessions.status} ${listedSessions.text.slice(0, 300)}`);
+  }
+  const folder = JSON.parse(created.text);
+  const removed = await call("DELETE", `/v1/session-list/folders/${folder.id}`);
+  if (removed.status !== 200) {
+    throw new Error(`delete folder ${removed.status} ${removed.text}`);
+  }
+  const missingQ = await call("GET", "/v1/session-list/search");
+  if (missingQ.status !== 400) {
+    throw new Error(`search missing q ${missingQ.status}`);
+  }
+
+  const sessionsDir = join(home, ".strike", "sessions");
+  await mkdir(sessionsDir, { recursive: true });
+  const line = (text) =>
+    JSON.stringify({
+      type: "user.message",
+      time: "2026-10-26T06:00:00Z",
+      data: { text },
+    }) + "\n";
+  await writeFile(join(sessionsDir, "alpha-session.jsonl"), line("Alpha session notes"));
+  await writeFile(
+    join(sessionsDir, "alpha-session.meta.json"),
+    JSON.stringify({ title: "Alpha session" }) + "\n",
+  );
+  await writeFile(join(sessionsDir, "beta-session.jsonl"), line("remember the coral bookmark"));
+  await writeFile(
+    join(sessionsDir, "beta-session.meta.json"),
+    JSON.stringify({ title: "Palette polish" }) + "\n",
+  );
+  const found = await call("GET", "/v1/session-list/search?q=coral%20bookmark");
+  if (found.status !== 200 || !found.text.includes("beta-session") || !found.text.includes("content")) {
+    throw new Error(`content search ${found.status} ${found.text.slice(0, 300)}`);
   }
 
   await writeFile(join(home, ".strike", "config.json"), '{"sandboxAllowDegrade":true}\n').catch(() => {});
@@ -374,7 +433,6 @@ try {
   await send("Page.navigate", {
     url: `http://127.0.0.1:${port}/?token=${encodeURIComponent(token)}`,
   });
-
   const readCockpit = async () => {
     const ev = await send("Runtime.evaluate", {
       expression: `(() => {
@@ -421,8 +479,7 @@ try {
   const title = boot.title || "";
   const statusId = boot.status || "";
   const chip = !!boot.chip;
-  const want = ["Run a command", "Strike", "Activity", "Files", "Changes", "Memory", "Knowledge", "Artifacts", "Approval"];
-  const missingText = want.filter((s) => !text.includes(s));
+  const want = ["Run a command", "Strike", "Activity", "Files", "Changes", "Memory", "Knowledge", "Artifacts", "Approval"];  const missingText = want.filter((s) => !text.includes(s));
   if (missingText.length || acid !== "#7c3aed" || ground !== "#14131c" || !chip || !statusIds.includes(statusId) || !title.includes("Strike")) {
     throw new Error(
       `cockpit check failed missing=${missingText.join(",")} acid=${acid} ground=${ground} status=${statusId} chip=${chip} title=${title} text=${text.slice(0, 400)}\n${await diagnostics()}`,
@@ -557,7 +614,68 @@ try {
     expression: `document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`,
   });
   await delay(250);
-
+  // Session panel (#1309): seeded sessions, folder note, and conductor chip
+  // render in the rail; wait on condition (not a fixed delay) before the
+  // keyboard pass below drives its cursor.
+  await waitFor(
+    "session panel (seeded sessions, folders, conductor)",
+    textProbe((t) =>
+      ["Conductor", "Archived", "Folders group sessions", "Palette polish", "Alpha session"].every((x) =>
+        t.includes(x),
+      ),
+    ),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await waitFor(
+    "session panel cursor",
+    async () => {
+      const id = await evalValue(
+        `document.querySelector(".ss-cursor")?.getAttribute("data-session-id") || ""`,
+      );
+      return { ok: !!id, id };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  const before = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const panel = document.querySelector(".ss-panel");
+      if (panel) panel.focus();
+      const cur = document.querySelector(".ss-cursor");
+      return cur ? cur.getAttribute("data-session-id") : "";
+    })()`,
+    returnByValue: true,
+  });
+  const beforeId = before.result?.result?.value || "";
+  const key = async (type, keyName, code, vk) => {
+    await send("Input.dispatchKeyEvent", {
+      type,
+      key: keyName,
+      code,
+      windowsVirtualKeyCode: vk,
+      nativeVirtualKeyCode: vk,
+    });
+  };
+  await key("keyDown", "j", "KeyJ", 74);
+  await key("keyUp", "j", "KeyJ", 74);
+  await delay(200);
+  const after = await send("Runtime.evaluate", {
+    expression: `document.querySelector(".ss-cursor")?.getAttribute("data-session-id") || ""`,
+    returnByValue: true,
+  });
+  const afterId = after.result?.result?.value || "";
+  if (!beforeId || !afterId || beforeId === afterId) {
+    throw new Error(`keyboard j did not move the session cursor (${beforeId} -> ${afterId})`);
+  }
+  await key("keyDown", "x", "KeyX", 88);
+  await key("keyUp", "x", "KeyX", 88);
+  await delay(200);
+  const selected = await send("Runtime.evaluate", {
+    expression: `document.body.innerText.includes("1 selected") ? "yes" : "no"`,
+    returnByValue: true,
+  });
+  if (selected.result?.result?.value !== "yes") {
+    throw new Error("keyboard x did not select the cursor session");
+  }
   // feature:navbar — palette fuzzy match, argument error, shortcut overlay.
   const navbar = async (expression) => {
     try {
@@ -651,7 +769,7 @@ try {
     repoDir: process.cwd(),
   });
 
-  const before = await send("Runtime.evaluate", {
+  const beforeSelection = await send("Runtime.evaluate", {
     expression: `(() => {
       const shell = document.querySelector(".shell");
       return JSON.stringify({
@@ -662,7 +780,7 @@ try {
     })()`,
     returnByValue: true,
   });
-  const beforeState = JSON.parse(before.result?.result?.value || "{}");
+  const beforeState = JSON.parse(beforeSelection.result?.result?.value || "{}");
   if (beforeState.layout === "conversation" || String(beforeState.cls).includes("layout-conversation")) {
     throw new Error(`cockpit is not the default layout: ${JSON.stringify(beforeState)}`);
   }
