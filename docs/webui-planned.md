@@ -173,6 +173,11 @@ names and URLs in `localStorage` (`strike.gateways`). Bearers are
 injects a short-lived grant on the laptop's loopback. The daemon still
 refuses a public bind. See [gateway.md](gateway.md).
 
+Open on phone is a separate palette command. It shows a QR and a one-time
+`#pair=` link. Scanning another gateway's QR adds that base URL to the same
+profile list and stores the paired session in `sessionStorage`. It does not
+store the daemon token.
+
 Not in this client: tailnet discovery, a browser-started SSH session, and
 syncing CLI profiles from the daemon. The switcher shows an `ssh`
 destination as a hint. It does not open that connection. A public tunnel
