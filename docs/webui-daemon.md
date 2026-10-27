@@ -108,8 +108,13 @@ Status: walking skeleton on branch `worktree-rust-webui-daemon`. Not merged.
     retry, expand, including `blocked` handoffs), Files (`/v1/files`),
     Changes (`/v1/changed-files`), Git, Worktrees, Memory, Knowledge, and
     Artifacts.
-    Clicking or dragging a file inserts `@path` as text. The web composer
-    does not expand that token the way the TUI does. Git
+    Clicking or dragging a file inserts `@path`. The daemon expands
+    `@file`, `$skill`, `/command`, and `!shell` on `user.input` and `steer`
+    before a turn starts. `!` asks through the bash permission model and
+    does not start a model turn. The composer `+` menu and the suggestion
+    popup only list those real actions (`composerCommands` and `skills` on
+    bootstrap, files from `/v1/files/search`). A shell ask shows Allow once /
+    Reject on the composer until the approvals stream replaces that bar. Git
     (`GET/POST /v1/git/status|diff|branches|log|stage|unstage|commit|checkout|discard|reset|branch/delete`
     and `/v1/git/worktrees`) runs git as an argument vector. There is no
     push route. Discard, hard reset, branch delete, worktree remove, and

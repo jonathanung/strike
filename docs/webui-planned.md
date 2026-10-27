@@ -220,18 +220,28 @@ unstaged diff. Changing `session.childIsolation` stays in config; the
 Worktrees panel shows the effective value and does not write a second flag.
 An embedded browser, a terminal, and a subagent board that is not the
 Activity list are not in the client. Activity is the subagent list. Changes
-is the diff list. A terminal tab would have to be the real `!` shell path,
-which today is TUI-only.
+is the diff list. A terminal tab would be a persistent shell. Composer `!`
+already runs one command through the daemon permission model.
 
 ## Composer triggers
 
-The web composer does not parse `/command`, `@file`, `$skill`, or `!shell`.
-The TUI expands `@file` and runs `!` shell. Dragging a file path inserts
-`@path` as plain text. Planned: the same expansion on `user.input` in the
-daemon, so every client gets it, plus a `+` menu whose entries are only
-those real actions. Image and file upload is `POST /v1/attachments` (5 MiB,
-eight per message, filename redaction, optional PNG/JPEG region paint) and
-`images` on `user.input` and `steer`. Screenshot capture is still out.
+`user.input` and `steer` expand in the daemon (`internal/composer/triggers`,
+wired by `Options.PrepareInput`). `/command`, `@file`, `$skill`, and `!shell`
+behave the same for every client. The web composer shows an autocomplete
+popup and a `+` menu whose entries are only those real actions. The catalog
+is `composerCommands` plus `skills` on `GET /v1/bootstrap`. `!` runs through
+the live bash permission ask and does not start a model turn.
+
+Image and file upload is `POST /v1/attachments` (5 MiB, eight per message,
+filename redaction, optional PNG/JPEG region paint) and `images` on
+`user.input` and `steer`. Screenshot capture is still out.
+
+Dragging a file inserts `@path`. Send attaches the file. A `---` file or
+folder fence is opaque: only the user prefix is mention-scanned, so `@`
+tokens inside an attached body are not new mentions. A `!` the TUI already
+ran is not sent as `user.input`. Composer `!` during a live turn marks that
+turn's checkpoint uncovered (`bash`), the same signal as the bash tool, and
+does not take per-file snapshots.
 
 ## Context window hold
 
