@@ -605,7 +605,14 @@ pub fn GitPanel(
                     {move || branches.get().into_iter().map(|b| {
                         let name = b.name.clone();
                         let label = if b.current { format!("{name} (current)") } else { name.clone() };
-                        view! { <option value=name>{label}</option> }
+                        // Bind each option's selected state to switch_to:
+                        // prop:value on the <select> is applied before the
+                        // options (re)render, so the browser otherwise falls
+                        // back to the first option and displays the wrong
+                        // branch (#1314). Options created after switch_to is
+                        // set must claim selection themselves.
+                        let sel_name = name.clone();
+                        view! { <option value=name prop:selected=move || switch_to.get() == sel_name>{label}</option> }
                     }).collect_view()}
                 </select>
                 <button type="button" class="secondary" on:click=do_switch>"Switch"</button>

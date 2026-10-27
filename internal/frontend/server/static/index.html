@@ -31,8 +31,8 @@
 
 
 <script type="module">
-import init, * as bindings from '/assets/strike-webui-e0bfae70aef6102a.js';
-const wasm = await init({ module_or_path: '/assets/strike-webui-e0bfae70aef6102a_bg.wasm' });
+import init, * as bindings from '/assets/strike-webui-54430cfe02e9f066.js';
+const wasm = await init({ module_or_path: '/assets/strike-webui-54430cfe02e9f066_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -43,6 +43,6 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 </script>
 <script src="/assets/register.js" defer></script>
 
-<link rel="modulepreload" href="/assets/strike-webui-e0bfae70aef6102a.js" crossorigin="anonymous" integrity="sha384-P1GnhawZXkWI7bxfr0BTyvkQGwtgmeCNCD6TgLHO0QRwLUAqlH8toyMP7Foewm8q"><link rel="preload" href="/assets/strike-webui-e0bfae70aef6102a_bg.wasm" crossorigin="anonymous" integrity="sha384-5deO2ToN4LDBhtsHWs0acW259FTbuGOkAwwMrV1FbWW+MHRezeSYD6cTkVJPvPMs" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/assets/strike-webui-54430cfe02e9f066.js" crossorigin="anonymous" integrity="sha384-EWuQvOhggAgnjrKQ+HYnictOCa8D6hOwC8c4uBb20kxHMfcpf0qI1HirZCzHIgof"><link rel="preload" href="/assets/strike-webui-54430cfe02e9f066_bg.wasm" crossorigin="anonymous" integrity="sha384-cW2RNot93M682ccaRkhL+42eU826ad1SbkozbSdtiSUN2D23rRYr7DLHuKA1lxrG" as="fetch" type="application/wasm"></head>
 <body></body>
 </html>
