@@ -59,7 +59,9 @@ and for side-by-side stills. `--no-video` skips ffmpeg.
 
 Named shots are taken at 1024×594 and 1440×900. The empty shell and the
 composer also get a 390×844 shot where the layout breaks to one column
-(`shell-empty-mobile.png`, `shell-composer-mobile.png`).
+(`shell-empty-mobile.png`, `shell-composer-mobile.png`). The phone dialog
+shots live in `scenarios/gateway-qr.mjs` (`shell-phone-1024.png`,
+`shell-phone-1440.png`, `shell-phone-mobile.png`).
 
 `--suite smoke` stops here. The default `--suite full` (`make webui-uat`)
 then reloads the shell and runs every stream scenario.
@@ -73,6 +75,11 @@ CI job. A file whose name starts with `_` is an example and is not loaded.
 // scripts/webui-uat/scenarios/approvals.mjs
 export const scenario = (ctx) => ctx.phone("approvals-empty");
 ```
+
+`scenarios/gateway-qr.mjs` opens Open on phone from the palette on the
+unauthenticated echo serve. The dialog must show `A phone cannot open`, a
+QR, and a URL with no `?token=` and no `#pair=`. New code says
+`No pairing code`. Escape closes the dialog.
 
 `ctx` is the shared driver: `phone`, `shoot`, `click`, `press`, `waitUntil`,
 `check`, `viewport`, `bodyText`, `tokens`, `log`, `page`, `baseURL`, and

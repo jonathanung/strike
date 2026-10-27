@@ -78,13 +78,17 @@ Endpoints:
   POST /v1/workflow-drafts/save     save draft JSON with confirm
 
 Auth: loopback is unauthenticated by default. Under --auth, use
-Authorization: Bearer <token> or the strike_serve_token cookie (set by opening
-/attach?token=… once; the server strips the query secret). Query tokens are
-not accepted on /v1/* routes.
+Authorization: Bearer <token> or the strike_serve_token cookie. A one-time
+pairing code (strike gateway url --qr, or the QR printed at startup) is how
+a phone authenticates. The daemon token is not put in that URL. The legacy
+/?token= handoff still sets the cookie and redirects; query tokens are not
+accepted on /v1/* routes.
 
-Bind is loopback-only (no cleartext LAN expose). For remote access:
+Bind is loopback unless you pass a private address with --allow-private-bind
+and --auth. 0.0.0.0 is rejected. For remote access:
   strike connect user@host
   ssh -L 8787:127.0.0.1:8787 user@host
+  strike serve --advertise-url https://your-tunnel.example
 See docs/gateway.md.`
 
 // errExposeRemoved is returned when legacy --expose / --allow-cidr are passed.
@@ -95,6 +99,7 @@ type serveOptions struct {
 	auth                       bool
 	token                      string
 	tokenFile                  string
+	advertiseURL               string
 	allowPrivateBind           bool
 	sessionDir                 string
 	sessionDirSet              bool
@@ -149,6 +154,7 @@ func parseServeArgs(args []string) (serveOptions, error) {
 	})
 	fs.StringVar(&opts.token, "token", "", "")
 	fs.StringVar(&opts.tokenFile, "token-file", "", "")
+	fs.StringVar(&opts.advertiseURL, "advertise-url", "", "")
 	fs.BoolVar(&opts.allowPrivateBind, "allow-private-bind", false, "")
 	fs.StringVar(&opts.sessionDir, "session-dir", "", "")
 	fs.StringVar(&opts.provider, "provider", "echo", "")
@@ -187,6 +193,12 @@ func parseServeArgs(args []string) (serveOptions, error) {
 		opts.provider = "echo"
 	}
 	opts.tokenFile = strings.TrimSpace(opts.tokenFile)
+	opts.advertiseURL = strings.TrimSpace(opts.advertiseURL)
+	if opts.advertiseURL != "" {
+		if _, err := server.ValidateAdvertiseURL(opts.advertiseURL); err != nil {
+			return serveOptions{}, err
+		}
+	}
 	if opts.token != "" && !opts.auth {
 		return serveOptions{}, fmt.Errorf("--token requires --auth")
 	}
@@ -603,15 +615,16 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 	}
 
 	srv, err := server.New(server.Options{
-		Addr:       opts.addr,
-		Auth:       opts.auth,
-		Token:      token,
-		TokenFile:  opts.tokenFile,
-		SessionDir: sessionDir,
-		Workspaces: wsStore,
-		Schedules:  schedules,
-		LiveHub:    liveHub,
-		Services:   services,
+		Addr:         opts.addr,
+		Auth:         opts.auth,
+		Token:        token,
+		TokenFile:    opts.tokenFile,
+		AdvertiseURL: opts.advertiseURL,
+		SessionDir:   sessionDir,
+		Workspaces:   wsStore,
+		Schedules:    schedules,
+		LiveHub:      liveHub,
+		Services:     services,
 		SyncWorkDir: func(dir string) {
 			if services != nil {
 				local.SetFilesWorkDir(services.Files, dir)
@@ -639,6 +652,8 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 	}
 
 	actual := ln.Addr().String()
+	srv.NoteBind(actual)
+	pairURL, pairQR, pairNote := startupPair(srv, opts.auth)
 
 	printServeBanner(stdout, serveBanner{
 		listenAddr: actual,
@@ -651,6 +666,9 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		sessionDir: sessionDir,
 		readOnly:   opts.readOnly,
 		sideChat:   sideChat != nil,
+		pairURL:    pairURL,
+		pairQR:     pairQR,
+		pairNote:   pairNote,
 	})
 
 	errCh := make(chan error, 1)
@@ -684,6 +702,37 @@ type serveBanner struct {
 	sessionDir string
 	readOnly   bool
 	sideChat   bool
+	pairURL    string
+	pairQR     string
+	pairNote   string
+}
+
+func startupPair(srv *server.Server, auth bool) (url, blocks, note string) {
+	info := srv.GatewayInfo()
+	if auth {
+		minted, err := srv.MintPair("serve")
+		if err != nil {
+			return "", "", info.OptIn
+		}
+		info = minted.Gateway
+		url = minted.URL
+	} else if len(info.URLs) > 0 {
+		url = info.URLs[0].URL
+	}
+	if url != "" {
+		blocks = server.QRBlocks(url)
+	}
+	var lines []string
+	if info.OptIn != "" {
+		lines = append(lines, info.OptIn)
+	}
+	if info.LanWarning != "" {
+		lines = append(lines, info.LanWarning)
+	}
+	if info.AdvertiseWarning != "" {
+		lines = append(lines, info.AdvertiseWarning)
+	}
+	return url, blocks, strings.Join(lines, "\n")
 }
 
 func printServeBanner(w io.Writer, b serveBanner) {
@@ -692,6 +741,17 @@ func printServeBanner(w io.Writer, b serveBanner) {
 	// The cockpit URL never carries the bearer. Paste it into the Gateways
 	// field, or use strike connect, which injects a grant on loopback.
 	fmt.Fprintf(w, "  cockpit: http://%s/attach\n", b.listenAddr)
+	if b.pairURL != "" && (b.token == "" || !strings.Contains(b.pairURL, b.token)) && !strings.Contains(b.pairURL, "?token=") {
+		fmt.Fprintf(w, "  pair:    %s\n", b.pairURL)
+		if b.pairQR != "" {
+			fmt.Fprintln(w, b.pairQR)
+		}
+	} else if b.pairURL != "" {
+		fmt.Fprintln(w, "  pair:    refused (url contained the daemon token)")
+	}
+	if b.pairNote != "" {
+		fmt.Fprintf(w, "  phone:   %s\n", strings.ReplaceAll(b.pairNote, "\n", "\n           "))
+	}
 	if b.auth {
 		fmt.Fprintln(w, "  auth:    bearer or cookie; the token is not part of the URL")
 	}

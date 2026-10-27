@@ -30,10 +30,10 @@ install writes ~/.config/systemd/user/strike-daemon.service and a stable
 0600 API token at ~/.strike/daemon.token, then prints the systemctl
 commands to enable it. The daemon is "strike serve --auth --token-file";
 the web UI connects with the token ("strike daemon token" prints it).
-logout replaces that file with a new token and drops short-lived grants
-on the next /v1 request. A daemon started with --token-file loads the new
-value without a restart; one started with --token keeps the old value
-until it is restarted.
+logout replaces that file with a new token, drops short-lived grants, and
+revokes paired browsers on the next /v1 request. A daemon started with
+--token-file loads the new value without a restart; one started with
+--token keeps the old value until it is restarted.
 grant asks the running daemon for a short-lived bearer and prints that
 bearer on stdout only. revoke drops those grants and does not rotate the
 host token. Neither command prints the host token.
@@ -160,7 +160,7 @@ func runDaemonCLI(args []string, stdout, stderr io.Writer) int {
 			_, _ = log.Append(usageaudit.Input{Action: usageaudit.ActionToken, Summary: "daemon token file rotated"})
 			_ = log.Close()
 		}
-		fmt.Fprintf(stdout, "Rotated %s\n%s\nA serve process started with --token-file uses this token on the next /v1 request and drops short-lived grants. A process started with --token keeps the previous value until restart.\n", daemonTokenPath(), tok)
+		fmt.Fprintf(stdout, "Rotated %s\n%s\nA serve process started with --token-file uses this token on the next /v1 request, drops short-lived grants, and revokes paired browsers. A process started with --token keeps the previous value until restart.\n", daemonTokenPath(), tok)
 		return 0
 	case "grant":
 		return daemonGrant(args[1:], stdout, stderr)

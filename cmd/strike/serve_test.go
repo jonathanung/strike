@@ -171,8 +171,13 @@ func TestPrintServeBanner(t *testing.T) {
 	if !strings.Contains(out, "tok123") {
 		t.Fatalf("in-memory mint must still show the only copy: %s", out)
 	}
-	if strings.Contains(out, "?token=") {
-		t.Fatalf("banner put the token in a URL: %s", out)
+	if strings.Contains(out, "?token=") || strings.Contains(out, "attach?token=") {
+		t.Fatalf("banner put the daemon token in a URL: %s", out)
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "cockpit:") && strings.Contains(line, "tok123") {
+			t.Fatalf("cockpit line contains the token: %s", line)
+		}
 	}
 	if !strings.Contains(out, "ssh -L") || !strings.Contains(out, "strike connect") {
 		t.Fatalf("missing remote hint: %s", out)
