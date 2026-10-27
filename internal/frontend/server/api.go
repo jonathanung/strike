@@ -22,6 +22,7 @@ import (
 	"github.com/jonathanung/strike/internal/persist/session"
 	"github.com/jonathanung/strike/internal/product/version"
 	"github.com/jonathanung/strike/internal/protocol"
+	"github.com/jonathanung/strike/internal/trust/usageaudit"
 )
 
 type sessionsResponse struct {
@@ -114,6 +115,9 @@ type capabilities struct {
 	ConfigFiles bool `json:"configFiles"`
 	// Themes is true when host.Services.Themes is wired (catalog list/get).
 	Themes bool `json:"themes"`
+	// Notifications is the redacted centre log (GET /v1/notifications).
+	// Always on when the server can read SessionDir.
+	Notifications bool `json:"notifications"`
 	// SideChat is true when a read-only side-chat model is wired. The ops
 	// refusal does not depend on this flag.
 	SideChat bool `json:"sideChat"`
@@ -147,7 +151,7 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 	// Timeline is host-safe and derived from SessionDir JSONL (always available).
 	// TeamControl shares the live gate: Ops are handled by the same engine path.
 	live := s.hasLive()
-	c := capabilities{Live: live, Roots: s.opts.LiveHub != nil, Timeline: true, Sandbox: s.hasSandbox(), Diag: live, Team: live, TeamControl: live, SideChat: s.opts.SideChat != nil}
+	c := capabilities{Live: live, Roots: s.opts.LiveHub != nil, Timeline: true, Sandbox: s.hasSandbox(), Diag: live, Team: live, TeamControl: live, Notifications: true, SideChat: s.opts.SideChat != nil}
 	var skills []map[string]any
 	if h := s.opts.Services; h != nil {
 		c.Auth, c.Catalog, c.Settings, c.History = h.Auth != nil, h.Catalog != nil, h.Settings != nil, h.History != nil
@@ -414,16 +418,25 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Sandbox dial uses the same yolo+off iKnow gate as PATCH /v1/sandbox.
+	sandboxMode := ""
 	if body.Sandbox != "" {
 		if err := s.saveSandboxDefault(body.Sandbox, body.IKnow, r); err != nil {
 			writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
 			return
 		}
+		sandboxMode = body.Sandbox
 		body.Sandbox = "" // already persisted; avoid double-write in applySettingsPatch
 	}
 	if err := applySettingsPatch(settings, body); err != nil {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
 		return
+	}
+	fields := settingsPatchFields(body)
+	if sandboxMode != "" {
+		fields = append(fields, "sandbox")
+	}
+	if len(fields) > 0 {
+		s.noteAudit(usageaudit.ActionConfig, "", "settings updated", map[string]any{"fields": fields})
 	}
 	writeJSON(w, http.StatusOK, settingsFromDefaults(settings.Defaults()))
 }
@@ -521,6 +534,7 @@ func (s *Server) handleSandboxPatch(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
 		return
 	}
+	s.noteAudit(usageaudit.ActionConfig, "", "sandbox default updated", map[string]string{"mode": strings.TrimSpace(body.Mode)})
 	writeJSON(w, http.StatusOK, s.sandboxSnapshot(r))
 }
 

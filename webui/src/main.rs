@@ -8,9 +8,11 @@ mod api;
 mod editor;
 mod goals;
 mod model;
+mod notify;
 mod model_menu;
 mod model_menu_view;
 mod storage;
+mod usage_audit;
 mod shell;
 mod side_chat;
 mod status;
@@ -22,6 +24,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use leptos::callback::Callback;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use model::{
@@ -46,7 +49,6 @@ use crate::side_chat::SideChatPanel;
 use crate::model::{budget_elapsed, can_retry, RootsResponse};
 use crate::model_menu::{active_context, context_view, reduce_envelope, LiveModelState, ModelDefaults};
 use crate::model_menu_view::ModelMenu;
-use leptos::callback::Callback;
 use crate::status::{
     apply_document_chrome, elapsed_since, session_kind, StatusKind, StatusMark, StatusSlot,
     StatusTab, StatusTabs, HEARTBEAT_STALE_MS,
@@ -1575,6 +1577,20 @@ fn App() -> impl IntoView {
         });
     });
 
+    // #1267 navbar hosts this bell. The component owns its panel and settings.
+    let on_notify = Callback::new(move |target: notify::FocusTarget| {
+        mode.set("chat".into());
+        focus.set(false);
+        if target.session_id.is_empty() {
+            return;
+        }
+        let live = roots
+            .get_untracked()
+            .iter()
+            .any(|r| r.id == target.session_id);
+        open_session(target.session_id, live);
+    });
+
     let running_count = move || {
         activity
             .get()
@@ -1589,6 +1605,15 @@ fn App() -> impl IntoView {
             .filter(|r| r.state == "blocked")
             .count()
     };
+
+    // The shell slot (src/shell/contrib/notifications.rs) renders the bell
+    // with the page's signals; install them before the view reads them.
+    notify::set_host(notify::NotifyHost {
+        base,
+        token,
+        gateway,
+        on_focus: on_notify,
+    });
 
     shell::boot();
     shell::set_host(shell::HostBridge {
@@ -1807,6 +1832,41 @@ fn App() -> impl IntoView {
     }
     on_goals_key.forget();
 
+    // Alt+U opens Usage and Alt+A opens Audit. Like Alt+G, these stay
+    // here because only the page can set `mode`. The shortcuts are listed
+    // in the overlay via src/shell/contrib/usage_audit.rs.
+    let on_usage_audit_key =
+        Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |ev: web_sys::KeyboardEvent| {
+            if ev.alt_key() && !ev.meta_key() && !ev.ctrl_key() {
+                let target = if ev.key().eq_ignore_ascii_case("u") {
+                    Some("usage")
+                } else if ev.key().eq_ignore_ascii_case("a") {
+                    Some("audit")
+                } else {
+                    None
+                };
+                if let Some(target) = target {
+                    let typing = ev
+                        .target()
+                        .map(|t| {
+                            t.dyn_ref::<web_sys::Element>()
+                                .map(|el| {
+                                    matches!(el.tag_name().as_str(), "INPUT" | "TEXTAREA" | "SELECT")
+                                })
+                                .unwrap_or(false)
+                        })
+                        .unwrap_or(false);
+                    if !typing {
+                        ev.prevent_default();
+                        mode.set(target.into());
+                    }
+                }
+            }
+        });
+    if let Some(w) = web_sys::window() {
+        let _ = w.add_event_listener_with_callback("keydown", on_usage_audit_key.as_ref().unchecked_ref());
+    }
+    on_usage_audit_key.forget();
     // Alt+M opens the model menu. The shell owns the other chords; this
     // one stays here because only the page owns the menu signal, like
     // Alt+G above. The palette command and shortcut listing live in
@@ -1853,6 +1913,12 @@ fn App() -> impl IntoView {
                 remote_url=remote_url
                 refresh=refresh_meta
             />
+        </Show>
+        <Show when=move || mode.get() == "usage" fallback=move || ()>
+            <usage_audit::UsagePage base=base token=token status=status />
+        </Show>
+        <Show when=move || mode.get() == "audit" fallback=move || ()>
+            <usage_audit::AuditPage base=base token=token status=status />
         </Show>
         <Show when=move || mode.get() == "goals" fallback=move || ()>
             <goals::GoalsPane base=base token=token />
