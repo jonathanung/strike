@@ -5,6 +5,8 @@
 //! not drawn here; see docs/webui-planned.md.
 
 mod api;
+mod approvals;
+mod approvals_ui;
 mod chat_mode;
 mod editor;
 mod gateway;
@@ -39,7 +41,7 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use model::{
     activity_panel, child_card_from_parts, child_card_from_text, child_keys_match, display_state,
-    fmt_ago, fmt_elapsed, is_running, merge_sessions, mode_label, permission_modes, prefer_summary,
+    fmt_ago, fmt_elapsed, is_running, merge_sessions, mode_label, prefer_summary,
     protocol_dump, rfc3339_to_ms, session_label, status_kind, strip_echo_tip, task_headline,
     ActivityRow, Bootstrap, ChangedFilesResponse, ChatLine, ChildCard, ChildrenResponse,
     FilesResponse, Health, ModelInfo, ModelList, Remote, RootSummary, SessionItem, SessionsResponse,
@@ -52,6 +54,10 @@ use wasm_bindgen::JsCast;
 use crate::api::{
     get_json, get_text, idempotency_key, now_ms, patch_json, post_json, post_json_value, post_op,
     put_json,
+};
+use crate::approvals::{begin_session_mode, ModeChange};
+use crate::approvals_ui::{
+    apply_perm_notes, commit_session_mode, ApprovalCards, ApprovalHost, ApprovalMenu,
 };
 use crate::transcript::Transcript;
 use crate::transcript_view::{save_download, TranscriptHandlers, TranscriptPane};
@@ -476,6 +482,18 @@ fn App() -> impl IntoView {
     let seen = RwSignal::new(load_seen());
     let children = RwSignal::new(Vec::<model::ChildSession>::new());
     let perm_mode = RwSignal::new("default".to_string());
+    let asks = RwSignal::new(Vec::<approvals::Ask>::new());
+    let live_audit = RwSignal::new(Vec::<approvals::AuditLine>::new());
+    let confirm = RwSignal::new(None::<approvals::PendingConfirm>);
+    let panel_open = RwSignal::new(false);
+    let reply_n = RwSignal::new(0u32);
+    let reply_id = RwSignal::new(String::new());
+    let reply_decision = RwSignal::new(String::new());
+    let rules_doc = RwSignal::new(approvals::RulesDocument::default());
+    let stored_audit = RwSignal::new(approvals::AuditDocument::default());
+    let panel_error = RwSignal::new(String::new());
+    let auto_seconds = RwSignal::new(0i32);
+    let auto_exclude = RwSignal::new(Vec::<String>::new());
     let provider_name = RwSignal::new(String::new());
     let model_name = RwSignal::new(String::new());
     let model_note = RwSignal::new(String::new());
@@ -800,6 +818,9 @@ fn App() -> impl IntoView {
             transcript.set(Transcript::new());
             ux_note.set(String::new());
             children.set(Vec::new());
+            asks.set(Vec::new());
+            live_audit.set(Vec::new());
+            confirm.set(None);
             wipe_on_replay.set(false);
             // Find belongs to the session that was open (#1342).
             tf_open.set(false);
@@ -839,6 +860,8 @@ fn App() -> impl IntoView {
         };
         let lines_cb = lines;
         let transcript_cb = transcript;
+        let asks_cb = asks;
+        let audit_cb = live_audit;
         let sessions_cb = sessions;
         let roots_cb = roots;
         let titled_root = root.clone();
@@ -852,6 +875,7 @@ fn App() -> impl IntoView {
                 if let Some(data) = ev.data().as_string() {
                     note_live_title(sessions_cb, roots_cb, &titled_root, &data);
                     transcript_cb.update(|t| t.apply_envelope(&data));
+                    apply_perm_notes(&data, asks_cb, perm_mode, audit_cb);
                     // Mirror into the ChatLine shape the side chat and the
                     // activity panel still consume.
                     lines_cb.set(transcript_cb.with_untracked(|t| t.chat_lines()));
@@ -1517,27 +1541,14 @@ fn App() -> impl IntoView {
     };
 
     let set_perm = move |mode: String| {
-        perm_mode.set(mode.clone());
         mode_menu.set(false);
-        let root = active_root.get_untracked();
-        if root.is_empty() {
-            status.set("no live session yet".into());
-            return;
-        }
-        let (b, t) = (base.get_untracked(), token.get_untracked());
-        spawn_local(async move {
-            if let Err(e) = post_op(
-                &b,
-                &t,
-                &root,
-                "set.permission_mode",
-                serde_json::json!({"mode": mode}),
-            )
-            .await
-            {
-                status.set(format!("approval mode failed: {e}"));
+        match begin_session_mode(&perm_mode.get_untracked(), &mode) {
+            ModeChange::Same => {}
+            ModeChange::Apply(mode) => {
+                commit_session_mode(base, token, active_root, perm_mode, status, mode);
             }
-        });
+            ModeChange::Confirm(pending) => confirm.set(Some(pending)),
+        }
     };
 
 
@@ -2438,6 +2449,28 @@ fn App() -> impl IntoView {
     };
 
     view! {
+        <ApprovalHost
+            base=base
+            token=token
+            root=active_root
+            perm_mode=perm_mode
+            menu_open=mode_menu
+            panel_open=panel_open
+            confirm=confirm
+            asks=asks
+            live_audit=live_audit
+            workspaces=workspaces
+            active_workspace=active_workspace
+            status=status
+            auto_seconds=auto_seconds
+            auto_exclude=auto_exclude
+            rules=rules_doc
+            stored_audit=stored_audit
+            panel_error=panel_error
+            reply_n=reply_n
+            reply_id=reply_id
+            reply_decision=reply_decision
+        />
         <shell::Chrome />
         <session_delete::SessionDeleteDialog
             target=delete_target
@@ -2692,6 +2725,15 @@ fn App() -> impl IntoView {
                             }).collect_view()}
                         </div>
                     </Show>
+                    <ApprovalCards
+                        asks=asks
+                        perm_mode=perm_mode
+                        auto_seconds=auto_seconds
+                        auto_exclude=auto_exclude
+                        reply_n=reply_n
+                        reply_id=reply_id
+                        reply_decision=reply_decision
+                    />
                     <div class="composer"
                         on:dragover=move |ev: web_sys::DragEvent| ev.prevent_default()
                         on:drop=move |ev: web_sys::DragEvent| {
@@ -2712,24 +2754,16 @@ fn App() -> impl IntoView {
                             }
                         }
                     >
-                        <Show when=move || mode_menu.get()>
-                            <div class="menu">
-                                {permission_modes().iter().map(|m| {
-                                    let id = m.id.to_string();
-                                    let label = m.label.to_string();
-                                    let detail = m.detail.to_string();
-                                    let set = set_perm;
-                                    let on = perm_mode.get() == id;
-                                    let klass = if on { "palette-row on" } else { "palette-row" };
-                                    view! {
-                                        <button class=klass on:click=move |_| set(id.clone())>
-                                            <span class="name">{label}</span>
-                                            <span class="path">{detail}</span>
-                                        </button>
-                                    }
-                                }).collect_view()}
-                            </div>
-                        </Show>
+                        <ApprovalMenu
+                            menu_open=mode_menu
+                            perm_mode=perm_mode
+                            confirm=confirm
+                            panel_open=panel_open
+                            base=base
+                            token=token
+                            root=active_root
+                            status=status
+                        />
                         <Show when=move || {
                             let ctx = active_context(&catalog.get(), &provider_name.get(), &model_name.get());
                             context_view(context_used.get(), context_limit.get(), ctx, &context_fit.get()).held
@@ -2863,7 +2897,13 @@ fn App() -> impl IntoView {
                                         }
                                     }>{move || if listening.get() { "Stop" } else { "Voice" }}</button>
                                 </Show>
-                                <button type="button" class="chip" on:click=move |_| {
+                                <button type="button" class=move || {
+                                    if approvals::is_dangerous(&perm_mode.get()) {
+                                        "chip approvals-mode-chip danger"
+                                    } else {
+                                        "chip approvals-mode-chip"
+                                    }
+                                } aria-haspopup="menu" aria-expanded=move || mode_menu.get() on:click=move |_| {
                                     model_menu.set(false);
                                     memory_menu.set(false);
                                     mode_menu.update(|v| *v = !*v);

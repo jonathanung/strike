@@ -1954,3 +1954,115 @@ select.mode, .daemon select {
   .sx-keys { display: none; }
 }
 /* feature:session-ux end */
+
+/* feature:approvals begin */
+.approvals-mode-chip.danger {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+.approvals-cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-2);
+}
+.approvals-card {
+  background: var(--surface);
+  border: 1px solid color-mix(in srgb, var(--warning) 55%, var(--rule));
+  border-radius: var(--radius);
+  padding: var(--space-3);
+}
+.approvals-card header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.approvals-heading {
+  margin: var(--space-2) 0 0;
+  color: var(--ink);
+  font-size: var(--type-md);
+}
+.approvals-command,
+.approvals-diff {
+  margin: var(--space-2) 0 0;
+  padding: var(--space-2);
+  max-height: 160px;
+  overflow: auto;
+  background: var(--surface-muted);
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  font-size: var(--type-sm);
+  white-space: pre-wrap;
+}
+.approvals-diff .add { color: var(--diff-add); }
+.approvals-diff .del { color: var(--diff-del); }
+.approvals-count { color: var(--warning); margin: var(--space-2) 0 0; }
+.approvals-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+.approvals-actions .danger {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+.approvals-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  background: color-mix(in srgb, var(--ground) 72%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4);
+}
+.approvals-dialog,
+.approvals-panel {
+  width: min(560px, 100%);
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: var(--space-4);
+}
+.approvals-panel {
+  width: min(720px, 100%);
+  max-height: min(80vh, 720px);
+  overflow: auto;
+}
+.approvals-panel-head,
+.approvals-rule,
+.approvals-audit-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.approvals-copy { color: var(--ink); line-height: 1.4; }
+.approvals-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+.approvals-form input,
+.approvals-form select { min-width: 140px; }
+.approvals-rules,
+.approvals-audit { margin: var(--space-2) 0 0; }
+.approvals-rule span,
+.approvals-audit-row .path {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.approvals-menu { z-index: 6; }
+@media (max-width: 960px) {
+  .approvals-dialog,
+  .approvals-panel {
+    width: 100%;
+    max-height: 100%;
+  }
+  .approvals-actions button,
+  .approvals-form button { flex: 1 1 140px; }
+}
+/* feature:approvals end */
