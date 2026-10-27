@@ -807,7 +807,10 @@ func gitDiff(ctx context.Context, cwd, rel string, staged bool) (string, bool, e
 }
 
 func gitBranches(ctx context.Context, cwd string) (string, []gitBranchJSON, error) {
-	out, stderr, err := gitRun(ctx, cwd, "for-each-ref", "--format=%(refname:short)%x1f%(HEAD)", "refs/heads")
+	// A literal tab separates the fields: for-each-ref formats on
+	// git < 2.44 pass "%x1f" through uninterpreted, which leaked the
+	// escape into branch names in the panel (prep port fix).
+	out, stderr, err := gitRun(ctx, cwd, "for-each-ref", "--format=%(refname:short)\t%(HEAD)", "refs/heads")
 	if err != nil {
 		return "", nil, errors.New(gitErr("branches", err, stderr))
 	}
@@ -817,7 +820,7 @@ func gitBranches(ctx context.Context, cwd string) (string, []gitBranchJSON, erro
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		name, head, _ := strings.Cut(line, "\x1f")
+		name, head, _ := strings.Cut(line, "\t")
 		name = strings.TrimSpace(name)
 		if name == "" {
 			continue
