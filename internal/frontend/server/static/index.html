@@ -15,6 +15,7 @@
 </script>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="/assets/style-511347a08cb4c7d3.css" integrity="sha384-4x3gJeiV9Jpezwu0DYh75pr7fht9YKhLhN8h/mYFLXxoueTSXIvlDtnBPVEef4C0"/>
+<link rel="stylesheet" href="/assets/git-ab00987af846b578.css" integrity="sha384-5Hpn8MQrQRdwz4yjyvf64ruljt3hOlWj2g2jpuRif8cb3NVZD+zCMUpqW7b87XnA"/>
 <link rel="stylesheet" href="/assets/storage-c32d584bc182ee77.css" integrity="sha384-XNDaz3yqOR2+uEfPi+eY+9Mzja2F/5vYI647yiPLuy4KvGHAOICyrdh0pqlWr9Wn"/>
 <link rel="stylesheet" href="/assets/navbar-4aaaf28db500eacb.css" integrity="sha384-5TOOsJOEELXhQX9eaCeYAdolP2MTbzKY2Rs54jkUpbigS3rQ+1uG62wvDZTASCfR"/>
 <link rel="stylesheet" href="/assets/editor-b94eee6c774248b5.css" integrity="sha384-+9ZqewFDkMigo7FvJP5c3fz6AHPgvKtu9jHfIAjeW7Qtx7wW3GCJSZM+LHcEeR4D"/>
@@ -29,8 +30,8 @@
 
 
 <script type="module">
-import init, * as bindings from '/assets/strike-webui-b06afaa796558948.js';
-const wasm = await init({ module_or_path: '/assets/strike-webui-b06afaa796558948_bg.wasm' });
+import init, * as bindings from '/assets/strike-webui-70e092bd3e0dc00b.js';
+const wasm = await init({ module_or_path: '/assets/strike-webui-70e092bd3e0dc00b_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -41,6 +42,6 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 </script>
 <script src="/assets/register.js" defer></script>
 
-<link rel="modulepreload" href="/assets/strike-webui-b06afaa796558948.js" crossorigin="anonymous" integrity="sha384-VZ9jMI8Zh+arO71jnTWxPLkAllWh13Ky+uCJ1xQfWYe+2kzcCM1keUWEJrBhz6y1"><link rel="preload" href="/assets/strike-webui-b06afaa796558948_bg.wasm" crossorigin="anonymous" integrity="sha384-xRZwcc7xHhGFAFZ7WioBNxKJTg2KDO0XiMvHyYtSd8KFcRePYWiPSCGnOW9PS30u" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/assets/strike-webui-70e092bd3e0dc00b.js" crossorigin="anonymous" integrity="sha384-efNd6vwDuluYhI8y3Q2EV7lUhuo//9BdOWsgE0NXpoQQQbwmwy8B4Trt2lUYMwdp"><link rel="preload" href="/assets/strike-webui-70e092bd3e0dc00b_bg.wasm" crossorigin="anonymous" integrity="sha384-ql4ulnG0zDmWc0HvbCJm08HImD6KlEypQgSqmOJGemZau8SdKkFSrMLF8sYVdGwD" as="fetch" type="application/wasm"></head>
 <body></body>
 </html>

@@ -479,7 +479,7 @@ try {
   const title = boot.title || "";
   const statusId = boot.status || "";
   const chip = !!boot.chip;
-  const want = ["Run a command", "Strike", "Activity", "Files", "Changes", "Memory", "Knowledge", "Artifacts", "Approval", "Gateways"];
+  const want = ["Run a command", "Strike", "Activity", "Files", "Changes", "Git", "Worktrees", "Memory", "Knowledge", "Artifacts", "Approval", "Gateways"];
   const missingText = want.filter((s) => !text.includes(s));
   if (missingText.length || acid !== "#7c3aed" || ground !== "#14131c" || !chip || !statusIds.includes(statusId) || !title.includes("Strike")) {
     throw new Error(
@@ -1537,6 +1537,32 @@ try {
     },
     { timeout: STEP_MS, interval: 200 },
   );
+  // Git and Worktrees side tabs (#1270): click each tab and wait for its
+  // panel's own marker — "Staged" section for Git, the displayed
+  // session.childIsolation value for Worktrees. Condition-based waits,
+  // like the rest of this hardened script. This runs while the boot live
+  // session is still open: the panels read the live session's repo, and
+  // the session-delete section below removes that session, after which
+  // the git endpoints have no live CWD to read.
+  const clickSideTab = async (label, needle) => {
+    const clicked = await evaluate(`(() => {
+      const btn = [...document.querySelectorAll(".side-tabs button")].find((b) => (b.textContent || "").includes(${JSON.stringify(label)}));
+      if (!btn) return "missing";
+      btn.click();
+      return "clicked";
+    })()`);
+    if (clicked !== "clicked") {
+      throw new Error(`side tab ${label} not found\n${await diagnostics()}`);
+    }
+    await waitFor(
+      `${label} panel (${needle})`,
+      textProbe((t) => t.includes(needle)),
+      { timeout: WAIT_MS, interval: 250 },
+    );
+  };
+  await clickSideTab("Git", "Staged");
+  await clickSideTab("Worktrees", "session.childIsolation");
+
   // Session delete (#1358): seed a session, close its root so it is
   // saved but not open, then delete it through the cockpit. Cancelling
   // the confirm must issue no request; confirming must remove it from

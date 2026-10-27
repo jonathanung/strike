@@ -106,9 +106,19 @@ Status: walking skeleton on branch `worktree-rust-webui-daemon`. Not merged.
     as ordinary text. A failed load shows the error and Retry.
   - The side panel is Activity (team snapshot: status, elapsed, stop,
     retry, expand, including `blocked` handoffs), Files (`/v1/files`),
-    Changes (`/v1/changed-files`), Memory, Knowledge, and Artifacts.
+    Changes (`/v1/changed-files`), Git, Worktrees, Memory, Knowledge, and
+    Artifacts.
     Clicking or dragging a file inserts `@path` as text. The web composer
-    does not expand that token the way the TUI does. Memory mode
+    does not expand that token the way the TUI does. Git
+    (`GET/POST /v1/git/status|diff|branches|log|stage|unstage|commit|checkout|discard|reset|branch/delete`
+    and `/v1/git/worktrees`) runs git as an argument vector. There is no
+    push route. Discard, hard reset, branch delete, worktree remove, and
+    stale prune require an exact confirm token. Hard reset is `HEAD` only.
+    Branch delete is `git branch -d`. Worktree create/remove uses the
+    existing strike worktree helper and only deletes paths under
+    `.strike/worktrees/`. Ownership comes from the session index (the same
+    records as `GET /v1/sessions/{id}/children`). `session.childIsolation`
+    is shown, not edited. Memory mode
     (normal, incognito, temporary) is a composer chip and a palette command.
     Open on a file reads it in the center document pane
     (`GET /v1/file/view`). The pane is read-only until Edit. Save is
