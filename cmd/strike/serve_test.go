@@ -160,13 +160,45 @@ func TestPrintServeBanner(t *testing.T) {
 	})
 	out := buf.String()
 	if !strings.Contains(out, "tok123") {
-		t.Fatalf("missing token in banner: %s", out)
+		t.Fatalf("in-memory mint must still show the only copy: %s", out)
 	}
-	if !strings.Contains(out, "ssh -L") {
-		t.Fatalf("missing remote ssh hint: %s", out)
+	if strings.Contains(out, "?token=") {
+		t.Fatalf("banner put the token in a URL: %s", out)
+	}
+	if !strings.Contains(out, "ssh -L") || !strings.Contains(out, "strike connect") {
+		t.Fatalf("missing remote hint: %s", out)
 	}
 	if strings.Contains(out, "EXPOSE") {
 		t.Fatalf("banner must not advertise EXPOSE: %s", out)
+	}
+
+	buf.Reset()
+	printServeBanner(&buf, serveBanner{
+		listenAddr: "127.0.0.1:8787",
+		token:      "from-flag-secret",
+		auth:       true,
+		sessionDir: "/tmp/s",
+	})
+	out = buf.String()
+	if strings.Contains(out, "from-flag-secret") || strings.Contains(out, "?token=") {
+		t.Fatalf("banner leaked a provided token: %s", out)
+	}
+	if !strings.Contains(out, "from --token") {
+		t.Fatalf("banner = %s", out)
+	}
+
+	buf.Reset()
+	printServeBanner(&buf, serveBanner{
+		listenAddr: "127.0.0.1:8787",
+		token:      "file-secret",
+		auth:       true,
+		tokenFile:  true,
+		minted:     true,
+		sessionDir: "/tmp/s",
+	})
+	out = buf.String()
+	if strings.Contains(out, "file-secret") || strings.Contains(out, "?token=") {
+		t.Fatalf("banner leaked a token-file secret: %s", out)
 	}
 }
 

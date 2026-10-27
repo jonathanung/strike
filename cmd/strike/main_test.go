@@ -24,7 +24,8 @@ const expectedUsage = `Usage:
   strike rpc [options]
   strike acp [options]
   strike serve [options]
-  strike daemon <install|uninstall|status|token>
+  strike daemon <install|uninstall|status|token|grant|revoke|logout>
+  strike connect [options] <user@host|profile>
   strike tui [options] (deprecated)
   strike mcp-serve [options]
   strike auth <command> [arguments]

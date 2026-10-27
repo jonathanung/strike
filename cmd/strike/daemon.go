@@ -1,9 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,14 +23,20 @@ Usage:
   strike daemon status
   strike daemon token
   strike daemon logout
+  strike daemon grant [--ttl 15m] [--base http://127.0.0.1:8787]
+  strike daemon revoke [--base http://127.0.0.1:8787]
 
 install writes ~/.config/systemd/user/strike-daemon.service and a stable
 0600 API token at ~/.strike/daemon.token, then prints the systemctl
 commands to enable it. The daemon is "strike serve --auth --token-file";
 the web UI connects with the token ("strike daemon token" prints it).
-logout replaces that file with a new token. A daemon started with
---token-file loads the new value on the next /v1 request; one started
-with --token keeps the old value until it is restarted.
+logout replaces that file with a new token and drops short-lived grants
+on the next /v1 request. A daemon started with --token-file loads the new
+value without a restart; one started with --token keeps the old value
+until it is restarted.
+grant asks the running daemon for a short-lived bearer and prints that
+bearer on stdout only. revoke drops those grants and does not rotate the
+host token. Neither command prints the host token.
 Default bind is loopback. For phone access over Tailscale, install with
 --addr <tailnet-ip>:8787 --allow-private-bind.`
 
@@ -152,8 +160,12 @@ func runDaemonCLI(args []string, stdout, stderr io.Writer) int {
 			_, _ = log.Append(usageaudit.Input{Action: usageaudit.ActionToken, Summary: "daemon token file rotated"})
 			_ = log.Close()
 		}
-		fmt.Fprintf(stdout, "Rotated %s\n%s\nA serve process started with --token-file uses this token on the next /v1 request. A process started with --token keeps the previous value until restart.\n", daemonTokenPath(), tok)
+		fmt.Fprintf(stdout, "Rotated %s\n%s\nA serve process started with --token-file uses this token on the next /v1 request and drops short-lived grants. A process started with --token keeps the previous value until restart.\n", daemonTokenPath(), tok)
 		return 0
+	case "grant":
+		return daemonGrant(args[1:], stdout, stderr)
+	case "revoke":
+		return daemonRevoke(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "strike: unknown daemon command %q\n%s\n", args[0], daemonUsage)
 		return 2
@@ -207,5 +219,93 @@ func daemonInstall(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	fmt.Fprintf(stdout, "Wrote %s\nToken: %s (0600; print with: strike daemon token)\nEnable:\n  systemctl --user daemon-reload\n  systemctl --user enable --now strike-daemon\nThen open http://%s/ in a browser.\n", unit, daemonTokenPath(), addr)
+	return 0
+}
+
+func daemonGrant(args []string, stdout, stderr io.Writer) int {
+	base := "http://127.0.0.1:8787"
+	ttlRaw := "15m"
+	for i := 0; i < len(args); i++ {
+		switch {
+		case args[i] == "--base" && i+1 < len(args):
+			i++
+			base = args[i]
+		case strings.HasPrefix(args[i], "--base="):
+			base = strings.TrimPrefix(args[i], "--base=")
+		case args[i] == "--ttl" && i+1 < len(args):
+			i++
+			ttlRaw = args[i]
+		case strings.HasPrefix(args[i], "--ttl="):
+			ttlRaw = strings.TrimPrefix(args[i], "--ttl=")
+		default:
+			fmt.Fprintf(stderr, "strike: unknown daemon grant flag %q\n", args[i])
+			return 2
+		}
+	}
+	ttl, err := parseGrantTTL(ttlRaw)
+	if err != nil {
+		fmt.Fprintln(stderr, "strike:", err)
+		return 2
+	}
+	base = daemonBaseURL(base)
+	hostToken, _, err := loadOrMintTokenFile(daemonTokenPath())
+	if err != nil {
+		fmt.Fprintln(stderr, "strike:", err)
+		return 1
+	}
+	status, body, err := daemonAuthedJSON(http.MethodPost, base+"/v1/gateway/grants", hostToken, map[string]any{
+		"ttlSeconds": int(ttl.Seconds()),
+	})
+	if err != nil {
+		fmt.Fprintln(stderr, "strike:", redactSecrets(err.Error(), hostToken))
+		return 1
+	}
+	if status != http.StatusCreated {
+		fmt.Fprintf(stderr, "strike: grant failed: %s\n", redactSecrets(string(body), hostToken))
+		return 1
+	}
+	var out struct {
+		Token     string `json:"token"`
+		ExpiresAt string `json:"expiresAt"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil || !validDaemonToken(out.Token) {
+		fmt.Fprintln(stderr, "strike: grant response was not a token")
+		return 1
+	}
+	fmt.Fprintln(stdout, out.Token)
+	fmt.Fprintf(stderr, "Grant expires %s. The secret is on stdout; do not log that stream.\n", out.ExpiresAt)
+	return 0
+}
+
+func daemonRevoke(args []string, stdout, stderr io.Writer) int {
+	base := "http://127.0.0.1:8787"
+	for i := 0; i < len(args); i++ {
+		switch {
+		case args[i] == "--base" && i+1 < len(args):
+			i++
+			base = args[i]
+		case strings.HasPrefix(args[i], "--base="):
+			base = strings.TrimPrefix(args[i], "--base=")
+		default:
+			fmt.Fprintf(stderr, "strike: unknown daemon revoke flag %q\n", args[i])
+			return 2
+		}
+	}
+	base = daemonBaseURL(base)
+	hostToken, _, err := loadOrMintTokenFile(daemonTokenPath())
+	if err != nil {
+		fmt.Fprintln(stderr, "strike:", err)
+		return 1
+	}
+	status, body, err := daemonAuthedJSON(http.MethodDelete, base+"/v1/gateway/grants", hostToken, nil)
+	if err != nil {
+		fmt.Fprintln(stderr, "strike:", redactSecrets(err.Error(), hostToken))
+		return 1
+	}
+	if status != http.StatusOK {
+		fmt.Fprintf(stderr, "strike: revoke failed: %s\n", redactSecrets(string(body), hostToken))
+		return 1
+	}
+	fmt.Fprintf(stdout, "Revoked short-lived grants on %s\nThe host token file was not changed. strike daemon logout rotates it.\n", base)
 	return 0
 }
