@@ -1281,6 +1281,27 @@ fn App() -> impl IntoView {
     };
 
     let send = move || {
+        // Context-hold gate (#1303), mirroring `send_text`: the composer
+        // form submit and textarea Enter call this closure directly, so
+        // the disabled Send button alone does not hold them. Return
+        // before taking the draft or pending files.
+        let held = {
+            let ctx = active_context(
+                &catalog.get_untracked(),
+                &provider_name.get_untracked(),
+                &model_name.get_untracked(),
+            );
+            context_view(
+                context_used.get_untracked(),
+                context_limit.get_untracked(),
+                ctx,
+                &context_fit.get_untracked(),
+            )
+        };
+        if held.held {
+            model_note.set(held.hold_message);
+            return;
+        }
         if sending.get_untracked() {
             return;
         }
