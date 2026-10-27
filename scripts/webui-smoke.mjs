@@ -326,6 +326,43 @@ try {
   if (menuMissing.length) {
     throw new Error(`model menu missing=${menuMissing.join("|")} text=${menu.slice(0, 500)}`);
   }
+  // Model-menu panel geometry: the panel must lie fully inside the
+  // viewport. innerText assertions alone missed PR #1303's CSP defect —
+  // placement was set via a style attribute that `style-src 'self'`
+  // (no 'unsafe-inline') makes full Chrome ignore, leaving the panel
+  // off-viewport while its text still read correctly.
+  let panelRect = null;
+  for (let i = 0; i < 20; i++) {
+    panelRect = await evalValue(`(() => {
+      const el = document.querySelector("[data-model-menu]");
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height, vw: window.innerWidth, vh: window.innerHeight };
+    })()`);
+    if (
+      panelRect &&
+      panelRect.width > 0 &&
+      panelRect.height > 0 &&
+      panelRect.left >= 0 &&
+      panelRect.top >= 0 &&
+      panelRect.right <= panelRect.vw &&
+      panelRect.bottom <= panelRect.vh
+    ) {
+      break;
+    }
+    await delay(100);
+  }
+  if (
+    !panelRect ||
+    !(panelRect.width > 0) ||
+    !(panelRect.height > 0) ||
+    panelRect.left < 0 ||
+    panelRect.top < 0 ||
+    panelRect.right > panelRect.vw ||
+    panelRect.bottom > panelRect.vh
+  ) {
+    throw new Error(`model menu panel outside viewport rect=${JSON.stringify(panelRect)}`);
+  }
   const modelFiltered = await evalValue(`(() => {
     const el = document.querySelector("[data-model-filter]");
     if (!el) return "missing";

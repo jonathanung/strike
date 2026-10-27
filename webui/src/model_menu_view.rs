@@ -34,7 +34,7 @@ fn save_pins(pins: &[String]) {
     }
 }
 
-fn place_panel(chip_ref: NodeRef<Button>, panel_pos: RwSignal<String>) {
+fn place_panel(chip_ref: NodeRef<Button>, panel_pos: RwSignal<(f64, f64, f64)>) {
     let Some(btn) = chip_ref.get_untracked() else {
         return;
     };
@@ -62,9 +62,11 @@ fn place_panel(chip_ref: NodeRef<Button>, panel_pos: RwSignal<String>) {
         left = 8.0;
     }
     let bottom = (vh - rect.top() + 8.0).max(8.0);
-    panel_pos.set(format!(
-        "left:{left:.0}px;bottom:{bottom:.0}px;width:{width:.0}px;"
-    ));
+    // Placement goes through the CSSOM (tachys `style:` directives in the
+    // view below), never a `style="…"` attribute: the server CSP is
+    // `style-src 'self'` with no 'unsafe-inline', so full Chrome ignores
+    // style attributes and the panel would render off-viewport.
+    panel_pos.set((left, bottom, width));
 }
 
 fn focus_filter(filter_ref: NodeRef<Input>) {
@@ -118,7 +120,7 @@ pub fn ModelMenu(
     let pins = RwSignal::new(load_pins());
     let filter_ref = NodeRef::<Input>::new();
     let chip_ref = NodeRef::<Button>::new();
-    let panel_pos = RwSignal::new(String::new());
+    let panel_pos = RwSignal::new((8.0_f64, 8.0_f64, 360.0_f64));
 
     {
         let chip_ref = chip_ref;
@@ -183,7 +185,9 @@ pub fn ModelMenu(
                     role="dialog"
                     aria-label="Models"
                     data-model-menu="true"
-                    style=move || panel_pos.get()
+                    style:left=move || format!("{:.0}px", panel_pos.get().0)
+                    style:bottom=move || format!("{:.0}px", panel_pos.get().1)
+                    style:width=move || format!("{:.0}px", panel_pos.get().2)
                     on:click=move |ev: web_sys::MouseEvent| ev.stop_propagation()
                 >
                     {move || {
