@@ -154,9 +154,11 @@ destination as a hint. It does not open that connection. A public tunnel
 is still something you run yourself, and it is a public edge.
 
 The desktop shell in `desktop/` (see [desktop.md](desktop.md)) is a separate
-loopback proxy and keyring, not that web switcher. It does not mint
-short-lived SSH grants (#1265), exchange pairing codes (#1289), or render
-the shared status component (#1263).
+window. A Tailscale or other VPN URL is an explicit saved gateway: HTTPS
+uses Web PKI or a pinned certificate, and cleartext HTTP is refused until
+the user allows it. SSH runs `strike connect`, so the short-lived grant
+stays in that process. The shell does not draw this switcher or the status
+chip, and it does not exchange pairing codes.
 
 ## Memory mode
 

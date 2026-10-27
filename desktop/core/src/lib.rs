@@ -25,9 +25,9 @@ pub use link::{parse_link, ParsedLink};
 pub use store::{Gateway, Mode};
 
 /// Wire schema this shell understands. Copied from `pkg/protocol` `Version`.
-/// `/health` today reports the product version, not this value. A mismatch is
-/// raised only when the daemon adds `protocol` or `protocolVersion` (#1306).
-pub const PROTOCOL_VERSION: &str = "1.18.0";
+/// `/health` `version` is the product version and is not compared. A mismatch
+/// is reported only when a health body carries `protocol` or `protocolVersion`.
+pub const PROTOCOL_VERSION: &str = "1.19.0";
 
 pub(crate) fn install_crypto() {
     let _ = rustls::crypto::ring::default_provider().install_default();

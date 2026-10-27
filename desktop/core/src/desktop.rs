@@ -7,10 +7,11 @@ use std::time::Duration;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, BufReader};
+#[cfg(test)]
 use tokio::net::TcpStream;
 use tokio::process::{Child, Command};
 use tokio::sync::{Mutex, Notify};
-use tokio::time::{sleep, timeout};
+use tokio::time::timeout;
 use url::Url;
 use uuid::Uuid;
 use zeroize::Zeroizing;
@@ -379,65 +380,88 @@ impl Desktop {
     }
 
     async fn prepare_ssh(&self, gw: &Gateway) -> Result<Prepared, GatewayError> {
-        let local = sshfwd::reserve_loopback_port().await?;
-        let args = sshfwd::ssh_args(local, &gw.ssh_target, gw.remote_port.max(1))?;
-        let mut child = Command::new("ssh");
+        // `strike connect` owns the SSH forward and the short-lived grant.
+        // The grant is not printed and is not copied into the keyring. This
+        // proxy sends no bearer, so that process is the one that adds it.
+        let args = sshfwd::connect_args(&gw.ssh_target, gw.remote_port)?;
+        let mut child = Command::new(&self.strike_bin);
         child
+            .arg("connect")
             .args(&args)
             .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .kill_on_drop(true);
         let mut child = child.spawn().map_err(|err| GatewayError::Ssh {
-            detail: format!("could not start ssh: {err}"),
+            detail: format!("could not start {}: {err}", self.strike_bin.display()),
         })?;
-        let stderr = child.stderr.take();
-        let ready = timeout(Duration::from_secs(8), async {
+        let stdout = child.stdout.take().ok_or_else(|| GatewayError::Ssh {
+            detail: "strike connect stdout was not piped".into(),
+        })?;
+        let mut err_lines = child
+            .stderr
+            .take()
+            .map(|stderr| BufReader::new(stderr).lines());
+        let mut out_lines = BufReader::new(stdout).lines();
+        let mut collected = String::new();
+        let ready = timeout(Duration::from_secs(20), async {
             loop {
-                if let Ok(Some(status)) = child.try_wait() {
-                    return Err(format!("ssh exited {status}"));
-                }
-                if TcpStream::connect(("127.0.0.1", local)).await.is_ok() {
-                    return Ok(());
-                }
-                sleep(Duration::from_millis(80)).await;
-            }
-        })
-        .await;
-        if ready.is_err() || matches!(ready, Ok(Err(_))) {
-            let mut detail = match ready {
-                Err(_) => "ssh forward did not open".to_string(),
-                Ok(Err(detail)) => detail,
-                Ok(Ok(())) => String::new(),
-            };
-            if let Some(stderr) = stderr {
-                let mut lines = BufReader::new(stderr).lines();
-                if let Ok(Some(line)) = lines.next_line().await {
-                    if detail.is_empty() {
-                        detail = line;
+                tokio::select! {
+                    line = out_lines.next_line() => {
+                        match line {
+                            Ok(Some(line)) => {
+                                collected.push_str(&line);
+                                collected.push('\n');
+                                if let Some(url) = sshfwd::parse_open_url(&collected) {
+                                    return Ok(url);
+                                }
+                            }
+                            Ok(None) => return Err("strike connect closed its output".into()),
+                            Err(err) => return Err(err.to_string()),
+                        }
+                    }
+                    status = child.wait() => {
+                        let code = status.map(|s| s.to_string()).unwrap_or_else(|e| e.to_string());
+                        return Err(format!("strike connect exited {code}"));
                     }
                 }
             }
-            let _ = child.start_kill();
-            return Err(GatewayError::Ssh { detail });
+        })
+        .await;
+        let base = match ready {
+            Ok(Ok(url)) => url,
+            other => {
+                let mut detail = match other {
+                    Err(_) => "strike connect did not print a loopback URL".to_string(),
+                    Ok(Err(detail)) => detail,
+                    Ok(Ok(_)) => String::new(),
+                };
+                if let Some(lines) = err_lines.as_mut() {
+                    if let Ok(Some(line)) = lines.next_line().await {
+                        if !line.trim().is_empty() {
+                            detail = line;
+                        }
+                    }
+                }
+                let _ = child.start_kill();
+                return Err(GatewayError::Ssh { detail });
+            }
+        };
+        tokio::spawn(async move { while let Ok(Some(_)) = out_lines.next_line().await {} });
+        if let Some(mut lines) = err_lines {
+            tokio::spawn(async move { while let Ok(Some(_)) = lines.next_line().await {} });
         }
-        let token = self
-            .keys
-            .get(&gw.id)
-            .map_err(|detail| GatewayError::Keyring { detail })?
-            .unwrap_or_else(|| Zeroizing::new(String::new()));
-        let base = format!("http://127.0.0.1:{local}");
         let mut guard = self.inner.lock().await;
         guard.running = Some(Running {
             id: gw.id.clone(),
             child,
             base: base.clone(),
-            token: token.clone(),
+            token: Zeroizing::new(String::new()),
             pin: String::new(),
         });
         Ok(Prepared {
             base,
-            token,
+            token: Zeroizing::new(String::new()),
             pin: String::new(),
         })
     }

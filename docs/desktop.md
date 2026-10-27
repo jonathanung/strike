@@ -41,18 +41,19 @@ reads. The token is not passed on the command line.
 |---|---|
 | `http://127.0.0.1:8787` | Connects to a daemon already on this machine |
 | `https://…` | Connects with normal Web PKI, or a pinned self-signed certificate |
-| `http://100.64.…` | Refused until you allow cleartext (VPN or Tailscale) |
-| `ssh://user@host:8787` or `user@host` | Runs `ssh -N -L` to that host's loopback port |
+| `http://100.64.…` or another Tailscale address | Refused until you allow cleartext. HTTPS needs no extra checkbox |
+| `ssh://user@host:8787` or `user@host` | Runs `strike connect`, which forwards to that host's loopback and keeps a 15-minute grant in that process |
 | `sidecar` | Spawns `strike serve` |
 | `strike://connect?url=…&token=…` | Saves the gateway and stores the token |
 | `strike://pair?code=…` | Refused. Pairing exchange is #1289 |
 
-`Alt+G` on the cockpit returns to the gateway list. `j` / `k` move, Enter
+`Alt+Shift+W` on the cockpit returns to this list. `Alt+W` stays the
+in-page gateway switcher and `Alt+G` stays Goals. `j` / `k` move, Enter
 connects, `n` focuses the name field, `t` toggles the theme.
 
-The cockpit's own navbar switcher belongs to #1265. This shell does not
-copy it. A corner link is injected only into HTML that passed through the
-proxy, so a browser pointed straight at `strike serve` does not grow it.
+The cockpit's navbar switcher is the one in the web UI. This shell does
+not copy it. A corner link is injected only into HTML that passed through
+the proxy, so a browser pointed straight at `strike serve` does not grow it.
 
 ## Security
 
@@ -66,9 +67,9 @@ proxy, so a browser pointed straight at `strike serve` does not grow it.
 - Certificate trust is trust-on-first-use. The saved pin is the SHA-256 of
   the end-entity certificate. A later mismatch is an error, not a new prompt
   that overwrites the pin by itself.
-- SSH arguments are a direct `exec` of `ssh`. The host must look like
-  `user@host` with no shell metacharacters. Host keys use OpenSSH
-  `accept-new`.
+- An SSH gateway is `strike connect` with an argv list, not a shell.
+  The host must look like `user@host`. The grant is not stored here.
+  Host-key policy is whatever `strike connect` already uses.
 - The shell does not pass `--allow-private-bind` and does not change the
   daemon's bind or CORS.
 
@@ -80,12 +81,14 @@ proxy, so a browser pointed straight at `strike serve` does not grow it.
   confirm. No silent install, and no phone-home in this shell today.
 - **In-app QR camera.** Paste the link. Scanning waits on #1289, and the
   phone's own camera can open a URL without this shell.
-- **Short-lived SSH grants and the web switcher.** #1265.
+- **A second gateway switcher.** The page already has one. This list is
+  the shell's saved gateways, including ones the browser cannot reach
+  until `strike connect` or a Tailscale address is up.
 - **Session notification stream.** The tray notifies when a gateway connects
-  or fails. Live session events wait on #1264.
-- **Protocol schema.** `/health` `version` is the product version. This shell
-  compares `protocol` or `protocolVersion` to `1.18.0` only when that field
-  is present (#1306).
+  or fails. It does not subscribe to the in-app notification centre.
+- **Protocol field on `/health`.** `version` there is the product version.
+  This shell compares `protocol` or `protocolVersion` to `1.19.0` only
+  when that field is present.
 - **Windows and macOS bundles.** Not measured here. On Windows the same
   Linux build can run under WSL2; a native WebView2 shell is a `tauri build`
   on Windows, with the keychain crate's Windows credential store. macOS uses
