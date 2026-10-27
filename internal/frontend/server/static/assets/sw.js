@@ -29,13 +29,25 @@ function clip(value, max) {
   return Array.from(one).slice(0, max).join("");
 }
 
+// OS banners are generic text derived ONLY from the notification kind.
+// Session/child names and handoff summaries never appear in a banner,
+// even scrubbed or clamped; they stay in the notification centre only.
+// Any title/body on the message is ignored here as a second line of
+// defence behind the page-side banner_text(kind) mapping.
+const BANNER_BODIES = {
+  "approval.needed": "An agent needs your input",
+  "child.finished": "A delegated run finished",
+  "child.blocked": "A delegated run is blocked",
+  "session.finished": "A run finished",
+  "gateway.disconnected": "The gateway disconnected",
+};
+
 function asNote(data) {
   if (!data || data.type !== "notify") return null;
-  const title = clip(data.title, 80);
-  const body = clip(data.body, 140);
+  const title = "Strike";
+  const body = BANNER_BODIES[data.kind] || "Something needs your attention";
   const href = typeof data.href === "string" && data.href.startsWith("/#") ? data.href : "/";
   const tag = clip(data.tag, 64).replace(/[^a-zA-Z0-9._:-]/g, "") || "strike";
-  if (!title) return null;
   return { title, body, href, tag };
 }
 

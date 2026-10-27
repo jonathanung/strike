@@ -9,6 +9,8 @@ mod editor;
 mod goals;
 mod model;
 mod notify;
+mod model_menu;
+mod model_menu_view;
 mod storage;
 mod shell;
 mod side_chat;
@@ -44,6 +46,8 @@ use crate::editor::{DocumentPane, LinkedBody, MarkdownView, has_markdown_table};
 use crate::side_chat::SideChatPanel;
 
 use crate::model::{budget_elapsed, can_retry, RootsResponse};
+use crate::model_menu::{active_context, context_view, reduce_envelope, LiveModelState, ModelDefaults};
+use crate::model_menu_view::ModelMenu;
 use crate::status::{
     apply_document_chrome, elapsed_since, session_kind, StatusKind, StatusMark, StatusSlot,
     StatusTab, StatusTabs, HEARTBEAT_STALE_MS,
@@ -662,8 +666,15 @@ fn App() -> impl IntoView {
     let provider_name = RwSignal::new(String::new());
     let model_name = RwSignal::new(String::new());
     let model_note = RwSignal::new(String::new());
+    let model_note_after = RwSignal::new(0i64);
+    let effort_level = RwSignal::new(String::new());
+    let context_used = RwSignal::new(0i64);
+    let context_limit = RwSignal::new(0i64);
+    let context_fit = RwSignal::new(String::new());
+    let model_defaults = RwSignal::new(ModelDefaults::default());
     let catalog = RwSignal::new(Vec::<ModelInfo>::new());
     let catalog_note = RwSignal::new(String::new());
+    let catalog_once = RwSignal::new(false);
     let mode_menu = RwSignal::new(false);
     let model_menu = RwSignal::new(false);
     let enter_mode = RwSignal::new(if load("strike.enterMode") == "steer" {
@@ -735,6 +746,32 @@ fn App() -> impl IntoView {
                     activity.set(rows);
                 }
                 Err(e) => team_note.set(e),
+            }
+        });
+    };
+
+    let load_model_catalog = move || {
+        let (b, t, provider) = (
+            base.get_untracked(),
+            token.get_untracked(),
+            provider_name.get_untracked(),
+        );
+        spawn_local(async move {
+            let path = if provider.is_empty() {
+                "/v1/models".to_string()
+            } else {
+                format!("/v1/models?provider={}", api::js_encode(&provider))
+            };
+            match get_json::<ModelList>(&b, &t, &path).await {
+                Ok(list) => {
+                    catalog.set(list.models);
+                    catalog_note.set(String::new());
+                }
+                Err(_) => {
+                    catalog.set(Vec::new());
+                    catalog_note
+                        .set("Catalog unavailable. The chip still shows the live model.".into());
+                }
             }
         });
     };
@@ -825,16 +862,26 @@ fn App() -> impl IntoView {
                         if let Some(st) = boot.status {
                             provider_name.set(st.provider);
                             model_name.set(st.model);
+                            effort_level.set(st.effort);
+                            context_used.set(st.context_used);
+                            context_limit.set(st.context_limit);
+                            context_fit.set(st.context_fit);
                             if !st.permission_mode.is_empty() {
                                 perm_mode.set(st.permission_mode);
                             }
                             live_busy.set(st.busy);
                             live_busy_root.set(root);
                         }
-                        model_note.set(String::new());
+                        if !catalog_once.get_untracked() {
+                            catalog_once.set(true);
+                            load_model_catalog();
+                        }
                     }
                     Err(e) => model_note.set(format!("Live status unavailable: {e}")),
                 }
+            }
+            if let Ok(defaults) = get_json::<ModelDefaults>(&b, &t, "/v1/settings").await {
+                model_defaults.set(defaults);
             }
             load_error.set(err);
             loading.set(false);
@@ -892,6 +939,10 @@ fn App() -> impl IntoView {
         open_fx.set(false);
         lines.set(Vec::new());
         children.set(Vec::new());
+        effort_level.set(String::new());
+        context_used.set(0);
+        context_limit.set(0);
+        context_fit.set(String::new());
         if root.is_empty() {
             stream_note.set(String::new());
             return;
@@ -925,6 +976,25 @@ fn App() -> impl IntoView {
             Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |ev: web_sys::MessageEvent| {
                 if let Some(data) = ev.data().as_string() {
                     apply_envelope(lines_cb, &seq_cb, &open_cb, storage_rev, &data);
+                    let prev = LiveModelState {
+                        provider: provider_name.get_untracked(),
+                        model: model_name.get_untracked(),
+                        effort: effort_level.get_untracked(),
+                        context_used: context_used.get_untracked(),
+                        context_limit: context_limit.get_untracked(),
+                        context_fit: context_fit.get_untracked(),
+                        note: model_note.get_untracked(),
+                        note_after: model_note_after.get_untracked(),
+                    };
+                    let next = reduce_envelope(prev, &data);
+                    provider_name.set(next.provider);
+                    model_name.set(next.model);
+                    effort_level.set(next.effort);
+                    context_used.set(next.context_used);
+                    context_limit.set(next.context_limit);
+                    context_fit.set(next.context_fit);
+                    model_note.set(next.note);
+                    model_note_after.set(next.note_after);
                 }
             });
         es.set_onmessage(Some(on_msg.as_ref().unchecked_ref()));
@@ -1061,6 +1131,23 @@ fn App() -> impl IntoView {
     let send_text = move |text: String| {
         let text = text.trim().to_string();
         if text.is_empty() {
+            return;
+        }
+        let held = {
+            let ctx = active_context(
+                &catalog.get_untracked(),
+                &provider_name.get_untracked(),
+                &model_name.get_untracked(),
+            );
+            context_view(
+                context_used.get_untracked(),
+                context_limit.get_untracked(),
+                ctx,
+                &context_fit.get_untracked(),
+            )
+        };
+        if held.held {
+            model_note.set(held.hold_message);
             return;
         }
         let root = active_root.get_untracked();
@@ -1375,6 +1462,19 @@ fn App() -> impl IntoView {
         }
     });
 
+    let session_busy_now = Memo::new(move |_| {
+        let root = active_root.get();
+        roots.get().iter().any(|r| r.id == root && r.busy)
+            || (live_busy.get() && live_busy_root.get() == root)
+    });
+
+    Effect::new(move |_| {
+        if model_menu.get() {
+            mode_menu.set(false);
+            load_model_catalog();
+        }
+    });
+
     Effect::new(move |_| {
         let root = active_root.get();
         let (b, t) = (base.get(), token.get());
@@ -1390,37 +1490,85 @@ fn App() -> impl IntoView {
         });
     });
 
-    let open_models = move |_| {
-        let open = !model_menu.get_untracked();
-        mode_menu.set(false);
-        model_menu.set(open);
-        if !open {
-            return;
-        }
-        let (b, t, provider) = (
-            base.get_untracked(),
-            token.get_untracked(),
-            provider_name.get_untracked(),
-        );
+    let on_select_model = Callback::new(move |(provider, id): (String, String)| {
+        model_note_after.set(now_ms() as i64);
+        model_note.set(String::new());
+        let (b, t, root) = (base.get_untracked(), token.get_untracked(), active_root.get_untracked());
         spawn_local(async move {
-            let path = if provider.is_empty() {
-                "/v1/models".to_string()
-            } else {
-                format!("/v1/models?provider={}", api::js_encode(&provider))
-            };
-            match get_json::<ModelList>(&b, &t, &path).await {
-                Ok(list) => {
-                    catalog.set(list.models);
-                    catalog_note.set(String::new());
-                }
-                Err(_) => {
-                    catalog.set(Vec::new());
-                    catalog_note
-                        .set("Catalog unavailable. The chip still shows the live model.".into());
-                }
+            if let Err(e) = post_op(
+                &b,
+                &t,
+                &root,
+                "select.model",
+                serde_json::json!({"provider": provider, "model": id}),
+            )
+            .await
+            {
+                model_note.set(format!("model change failed: {e}"));
+                model_note_after.set(0);
             }
         });
-    };
+    });
+    let on_default_model = Callback::new(move |(provider, id): (String, String)| {
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            match patch_json(
+                &b,
+                &t,
+                "/v1/settings",
+                serde_json::json!({"provider": provider, "model": id}),
+            )
+            .await
+            {
+                Ok(()) => {
+                    model_defaults.update(|d| {
+                        d.provider = provider;
+                        d.model = id;
+                    });
+                    model_note.set("Saved as the global default. This session stays on its current model until you pick one.".into());
+                }
+                Err(e) => model_note.set(format!("saving the default failed: {e}")),
+            }
+        });
+    });
+    let on_effort = Callback::new(move |level: String| {
+        model_note_after.set(now_ms() as i64);
+        model_note.set(String::new());
+        let (b, t, root) = (base.get_untracked(), token.get_untracked(), active_root.get_untracked());
+        spawn_local(async move {
+            if let Err(e) = post_op(
+                &b,
+                &t,
+                &root,
+                "set.effort",
+                serde_json::json!({"level": level}),
+            )
+            .await
+            {
+                model_note.set(format!("effort change failed: {e}"));
+                model_note_after.set(0);
+            }
+        });
+    });
+    let on_default_effort = Callback::new(move |level: String| {
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            match patch_json(
+                &b,
+                &t,
+                "/v1/settings",
+                serde_json::json!({"effort": level}),
+            )
+            .await
+            {
+                Ok(()) => {
+                    model_defaults.update(|d| d.effort = level);
+                    model_note.set("Saved the effort as the global default.".into());
+                }
+                Err(e) => model_note.set(format!("saving the effort default failed: {e}")),
+            }
+        });
+    });
 
     // #1267 navbar hosts this bell. The component owns its panel and settings.
     let on_notify = Callback::new(move |target: notify::FocusTarget| {
@@ -1676,6 +1824,37 @@ fn App() -> impl IntoView {
         let _ = w.add_event_listener_with_callback("keydown", on_goals_key.as_ref().unchecked_ref());
     }
     on_goals_key.forget();
+
+    // Alt+M opens the model menu. The shell owns the other chords; this
+    // one stays here because only the page owns the menu signal, like
+    // Alt+G above. The palette command and shortcut listing live in
+    // src/shell/contrib/model_menu.rs; the command dispatches to the
+    // binding below (the pattern docs/webui-shell.md describes for
+    // commands whose state lives in a component).
+    shell::bind(
+        "model-menu.open",
+        Rc::new(move |_args| {
+            mode_menu.set(false);
+            model_menu.update(|v| *v = !*v);
+            Ok(())
+        }),
+    );
+    let on_model_key =
+        Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |ev: web_sys::KeyboardEvent| {
+            if ev.alt_key()
+                && !ev.meta_key()
+                && !ev.ctrl_key()
+                && ev.key().eq_ignore_ascii_case("m")
+            {
+                ev.prevent_default();
+                mode_menu.set(false);
+                model_menu.update(|v| *v = !*v);
+            }
+        });
+    if let Some(w) = web_sys::window() {
+        let _ = w.add_event_listener_with_callback("keydown", on_model_key.as_ref().unchecked_ref());
+    }
+    on_model_key.forget();
 
     view! {
         <shell::Chrome />
@@ -2017,6 +2196,15 @@ fn App() -> impl IntoView {
                                 }).collect_view()}
                             </div>
                         </Show>
+                        <Show when=move || {
+                            let ctx = active_context(&catalog.get(), &provider_name.get(), &model_name.get());
+                            context_view(context_used.get(), context_limit.get(), ctx, &context_fit.get()).held
+                        }>
+                            <p class="model-hold" role="status" data-context-hold="true">{move || {
+                                let ctx = active_context(&catalog.get(), &provider_name.get(), &model_name.get());
+                                context_view(context_used.get(), context_limit.get(), ctx, &context_fit.get()).hold_message
+                            }}</p>
+                        </Show>
                         <Show when=move || memory_menu.get()>
                             <div class="menu" role="menu" aria-label="Memory mode">
                                 {["normal", "incognito", "temporary"].into_iter().map(|id| {
@@ -2039,33 +2227,6 @@ fn App() -> impl IntoView {
                                 }).collect_view()}
                             </div>
                         </Show>
-                        <Show when=move || model_menu.get()>
-                            <div class="menu">
-                                <p class="hint">{move || {
-                                    let p = provider_name.get();
-                                    let m = model_name.get();
-                                    if m.is_empty() { "No live model reported yet.".into() } else if p.is_empty() { m } else { format!("{p} · {m}") }
-                                }}</p>
-                                <Show when=move || !model_note.get().is_empty()><p class="hint">{move || model_note.get()}</p></Show>
-                                <Show when=move || !catalog_note.get().is_empty()><p class="hint">{move || catalog_note.get()}</p></Show>
-                                {move || catalog.get().into_iter().map(|m| {
-                                    let id = m.id.clone();
-                                    let provider = if m.provider.is_empty() { provider_name.get() } else { m.provider.clone() };
-                                    let label = if m.name.is_empty() { m.id.clone() } else { m.name.clone() };
-                                    view! {
-                                        <button class="palette-row" on:click=move |_| {
-                                            model_menu.set(false);
-                                            let (b, t, root, provider, id) = (base.get(), token.get(), active_root.get(), provider.clone(), id.clone());
-                                            spawn_local(async move {
-                                                if let Err(e) = post_op(&b, &t, &root, "select.model", serde_json::json!({"provider": provider, "model": id})).await {
-                                                    status.set(format!("model change failed: {e}"));
-                                                }
-                                            });
-                                        }>{label}</button>
-                                    }
-                                }).collect_view()}
-                            </div>
-                        </Show>
                         <form on:submit=move |ev| { ev.prevent_default(); send(); }>
                             <textarea
                                 placeholder="Message this session"
@@ -2084,21 +2245,41 @@ fn App() -> impl IntoView {
                                     memory_menu.set(false);
                                     mode_menu.update(|v| *v = !*v);
                                 }>{move || format!("Approval · {}", mode_label(&perm_mode.get()))}</button>
+                                <ModelMenu
+                                    open=model_menu
+                                    provider=provider_name
+                                    model=model_name
+                                    effort=effort_level
+                                    context_used=context_used
+                                    context_limit=context_limit
+                                    context_fit=context_fit
+                                    catalog=catalog
+                                    catalog_note=catalog_note
+                                    model_note=model_note
+                                    defaults=model_defaults
+                                    busy=session_busy_now
+                                    on_select=on_select_model
+                                    on_default_model=on_default_model
+                                    on_effort=on_effort
+                                    on_default_effort=on_default_effort
+                                />
                                 <button type="button" class="chip" aria-label="Memory mode" on:click=move |_| {
                                     mode_menu.set(false);
                                     model_menu.set(false);
                                     memory_menu.update(|v| *v = !*v);
                                 }>{move || format!("Memory · {}", memory_mode_label(&memory_mode.get()))}</button>
-                                <button type="button" class="chip" on:click=open_models>{move || {
-                                    let model = model_name.get();
-                                    if model.is_empty() { "Model".into() } else { model }
-                                }}</button>
                                 <button type="button" class=move || if side_open.get() { "chip on side-chat-open-composer" } else { "chip side-chat-open-composer" } on:click=move |_| open_side(String::new(), String::new())>"Side chat"</button>
                                 <button type="button" class=move || if enter_mode.get() == "steer" { "chip on" } else { "chip" } on:click=move |_| set_enter("steer".into())>"Steer"</button>
                                 <button type="button" class=move || if enter_mode.get() == "queue" { "chip on" } else { "chip" } on:click=move |_| set_enter("queue".into())>"Queue"</button>
-                                <button class="primary send" type="submit">"Send"</button>
+                                <button class="primary send" type="submit" disabled=move || {
+                                    let ctx = active_context(&catalog.get(), &provider_name.get(), &model_name.get());
+                                    context_view(context_used.get(), context_limit.get(), ctx, &context_fit.get()).held
+                                }>"Send"</button>
                             </div>
                         </form>
+                        <Show when=move || !model_note.get().is_empty() && !model_menu.get()>
+                            <p class="hint" data-model-note="true">{move || model_note.get()}</p>
+                        </Show>
                         <p class="hint">"Queue waits out the turn. Steer joins a running turn. run <command> uses the shell. @path is text."</p>
                     </div>
                 </section>

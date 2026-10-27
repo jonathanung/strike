@@ -74,10 +74,18 @@ Status: walking skeleton on branch `worktree-rust-webui-daemon`. Not merged.
     `accept-edits` (file edits allowed; shell and network still ask),
     `yolo` (this session skips asks that are not hard-denied; other
     sessions stay as they are). There is no read-only-shell mode and no
-    all-sessions skip. The model chip shows the live provider and model
-    from `/v1/bootstrap`. A catalog `GET /v1/models` that fails stays
-    "catalog unavailable" and does not invent models. `select.model` is
-    rejected while a turn is running.
+    all-sessions skip. The model chip (Alt+M) opens a filterable menu
+    grouped by provider. Pins stay in this browser. Enter posts
+    `select.model` for this session; saving a default patches
+    `/v1/settings` and does not by itself switch the session. Effort is
+    shown when the catalog reports reasoning or variants, or when the
+    session already has an effort (`set.effort`). The context meter uses
+    `contextUsed`, `contextLimit`, and `contextFit` from the live status,
+    and the catalog window only when the daemon has not named a limit.
+    Send is held on a critical fit or a full known window. A catalog
+    `GET /v1/models` that fails stays "catalog unavailable" and does not
+    invent models. `select.model` and `set.effort` are rejected while a
+    turn is running.
   - Empty sessions rotate a short headline and offer six prompts that send
     as ordinary text. A failed load shows the error and Retry.
   - The side panel is Activity (team snapshot: status, elapsed, stop,
