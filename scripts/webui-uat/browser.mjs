@@ -194,7 +194,8 @@ export function attachCDP(wsUrl) {
       awaitPromise: true,
     });
     if (result.exceptionDetails) {
-      const text = result.exceptionDetails.text || JSON.stringify(result.exceptionDetails);
+      const details = result.exceptionDetails;
+      const text = details.exception?.description || details.text || JSON.stringify(details);
       throw new Error(text);
     }
     return result.result?.value;

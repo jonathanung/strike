@@ -18,7 +18,9 @@ const CHILD_NAME = "uat-child";
 
 const BOOT_EXPR = `(() => {
   const text = document.body ? document.body.innerText : "";
-  const acid = getComputedStyle(document.documentElement).getPropertyValue("--acid").trim();
+  const root = document.documentElement;
+  if (!root) return false;
+  const acid = getComputedStyle(root).getPropertyValue("--acid").trim();
   return text.includes("Run a command") && text.includes("Activity") && acid === "#7c3aed";
 })()`;
 
