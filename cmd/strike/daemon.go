@@ -12,6 +12,7 @@ import (
 
 	"github.com/jonathanung/strike/internal/frontend/server"
 	"github.com/jonathanung/strike/internal/persist/workspace"
+	"github.com/jonathanung/strike/internal/trust/usageaudit"
 )
 
 const daemonUsage = `Run strike as a per-user background daemon (systemd user service).
@@ -152,6 +153,12 @@ func runDaemonCLI(args []string, stdout, stderr io.Writer) int {
 		if err != nil {
 			fmt.Fprintln(stderr, "strike:", err)
 			return 1
+		}
+		if log, err := usageaudit.Open(usageaudit.DefaultDir()); err != nil {
+			fmt.Fprintf(stderr, "strike: usage audit log: %v\n", err)
+		} else {
+			_, _ = log.Append(usageaudit.Input{Action: usageaudit.ActionToken, Summary: "daemon token file rotated"})
+			_ = log.Close()
 		}
 		fmt.Fprintf(stdout, "Rotated %s\n%s\nA serve process started with --token-file uses this token on the next /v1 request and drops short-lived grants. A process started with --token keeps the previous value until restart.\n", daemonTokenPath(), tok)
 		return 0

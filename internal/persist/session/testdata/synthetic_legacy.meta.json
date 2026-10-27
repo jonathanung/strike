@@ -1,0 +1,14 @@
+{
+  "projectKey": "proj-synthetic",
+  "title": "synthetic",
+  "parentSessionId": "sess-parent",
+  "leadSessionId": "sess-lead",
+  "forkedFrom": "sess-fork-src",
+  "worktreePath": "wt-synthetic",
+  "worktreeBranch": "branch-synthetic",
+  "createdAt": "2026-01-01T00:00:00Z",
+  "prUrl": "https://example.com/pull/1",
+  "prNumber": 1,
+  "prState": "open",
+  "prUpdatedAt": "2026-01-01T00:00:00Z"
+}

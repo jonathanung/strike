@@ -19,6 +19,10 @@ const (
 	StatusDone    Status = "done"
 	StatusFailed  Status = "failed"
 	StatusAborted Status = "aborted"
+	// StatusBlocked stops the loop and asks a person to continue.
+	// Budget exhaustion stays StatusFailed: raising the cap is a new limit,
+	// not a resume of the same one.
+	StatusBlocked Status = "blocked"
 )
 
 // CheckKind is how a criterion is verified.
@@ -45,11 +49,47 @@ type Criterion struct {
 
 // Constraints are hard limits enforced by the harness (never the prompt).
 type Constraints struct {
-	MaxIterations      int      `json:"max_iterations"`
-	MaxCostUSD         float64  `json:"max_cost_usd"`
-	MaxWallClockS      int      `json:"max_wall_clock_s"`
-	MaxNoProgressIters int      `json:"max_no_progress_iters"`
-	AllowedTools       []string `json:"allowed_tools"`
+	MaxIterations      int     `json:"max_iterations"`
+	MaxCostUSD         float64 `json:"max_cost_usd"`
+	MaxWallClockS      int     `json:"max_wall_clock_s"`
+	MaxNoProgressIters int     `json:"max_no_progress_iters"`
+	// MaxTokens is a hard token cap. Zero means unlimited (goals stored
+	// before the cap existed). New goals take DefaultConstraints.
+	MaxTokens int `json:"max_tokens,omitempty"`
+	// MaxVerifyFailures stops the loop after this many consecutive
+	// unsatisfied critic passes, even when the state hash keeps changing.
+	// Zero disables the guard (legacy records). New goals default to 3.
+	MaxVerifyFailures int      `json:"max_verify_failures,omitempty"`
+	AllowedTools      []string `json:"allowed_tools"`
+	// DenyTools always beat AllowedTools. Autopilot does not skip them.
+	DenyTools []string `json:"deny_tools,omitempty"`
+}
+
+// FreezeWallClock folds the current active stretch into ActiveElapsed and
+// stops the clock. Call it when leaving active (pause, block, done, fail, abort).
+func (g *Goal) FreezeWallClock(now time.Time) {
+	if g.ActiveStartedAt.IsZero() {
+		return
+	}
+	if now.Before(g.ActiveStartedAt) {
+		now = g.ActiveStartedAt
+	}
+	g.ActiveElapsed += now.Sub(g.ActiveStartedAt)
+	g.ActiveStartedAt = time.Time{}
+}
+
+// WallElapsed is active time only: finished stretches plus the current one.
+func (g Goal) WallElapsed(now time.Time) time.Duration {
+	elapsed := g.ActiveElapsed
+	if !g.ActiveStartedAt.IsZero() {
+		if now.After(g.ActiveStartedAt) {
+			elapsed += now.Sub(g.ActiveStartedAt)
+		}
+	}
+	if elapsed < 0 {
+		return 0
+	}
+	return elapsed
 }
 
 // DefaultConstraints returns safe v1 defaults.
@@ -59,6 +99,8 @@ func DefaultConstraints() Constraints {
 		MaxCostUSD:         5.0,
 		MaxWallClockS:      1800,
 		MaxNoProgressIters: 3,
+		MaxTokens:          200_000,
+		MaxVerifyFailures:  3,
 		AllowedTools:       nil,
 	}
 }
@@ -72,16 +114,31 @@ type Goal struct {
 	Status      Status      `json:"status"`
 	CreatedAt   time.Time   `json:"created_at"`
 	UpdatedAt   time.Time   `json:"updated_at"`
-	// ActiveStartedAt is set when status becomes active (for wall-clock guard).
+	// ActiveStartedAt is the start of the current active stretch. Zero while
+	// the goal is pending, paused, or blocked. Wall-clock budget adds
+	// ActiveElapsed to this stretch, so time spent waiting does not count.
 	ActiveStartedAt time.Time `json:"active_started_at,omitempty"`
+	// ActiveElapsed is time already spent active, excluding paused and blocked waits.
+	ActiveElapsed time.Duration `json:"active_elapsed_ns,omitempty"`
 	// CostUSD accumulates action costs across iterations.
 	CostUSD float64 `json:"cost_usd"`
 	// LastIteration is the highest committed iteration number (0 = none).
 	LastIteration int `json:"last_iteration"`
 	// AbortRequested is set by /goal abort; guards flip status on next check.
 	AbortRequested bool `json:"abort_requested,omitempty"`
-	// FailReason is set when status becomes failed or aborted.
+	// FailReason is set when status becomes failed, blocked, or aborted.
 	FailReason string `json:"fail_reason,omitempty"`
+	// TokensUsed accumulates EstimateTokens across committed iterations.
+	TokensUsed int `json:"tokens_used,omitempty"`
+	// Autopilot allows the tool allowlist to run without an ask.
+	// Deny rules and an empty allowlist still block every tool.
+	Autopilot bool `json:"autopilot,omitempty"`
+	// Escalation is "human" when the loop stopped and is waiting for a person.
+	Escalation string `json:"escalation,omitempty"`
+	// GuardFloor is the last iteration a person acknowledged. Stall and
+	// verification streaks count only iterations after it, so Continue
+	// does not immediately re-trip the same window.
+	GuardFloor int `json:"guard_floor,omitempty"`
 }
 
 // ActionRecord is one tool invocation inside an iteration.
@@ -125,6 +182,7 @@ type IterationRecord struct {
 	Evaluation        EvalRecord     `json:"evaluation"`
 	StateHash         string         `json:"state_hash"`
 	CostUSD           float64        `json:"cost_usd"`
+	Tokens            int            `json:"tokens,omitempty"`
 	CommittedAt       time.Time      `json:"committed_at"`
 }
 
@@ -238,9 +296,23 @@ func validateConstraints(c Constraints) error {
 	if c.MaxNoProgressIters < 1 {
 		return fmt.Errorf("goal: max_no_progress_iters must be >= 1")
 	}
+	if c.MaxTokens < 0 {
+		return fmt.Errorf("goal: max_tokens must be >= 0")
+	}
+	if c.MaxVerifyFailures < 0 {
+		return fmt.Errorf("goal: max_verify_failures must be >= 0")
+	}
 	for _, t := range c.AllowedTools {
 		if strings.TrimSpace(t) == "" {
 			return fmt.Errorf("goal: allowed_tools contains an empty name")
+		}
+		if ToolDenied(t, c.DenyTools) {
+			return fmt.Errorf("goal: tool %q is denied and allowed; deny wins", strings.TrimSpace(t))
+		}
+	}
+	for _, t := range c.DenyTools {
+		if strings.TrimSpace(t) == "" {
+			return fmt.Errorf("goal: deny_tools contains an empty name")
 		}
 	}
 	return nil
@@ -268,6 +340,9 @@ func CloneGoal(g Goal) Goal {
 	}
 	if g.Constraints.AllowedTools != nil {
 		out.Constraints.AllowedTools = append([]string(nil), g.Constraints.AllowedTools...)
+	}
+	if g.Constraints.DenyTools != nil {
+		out.Constraints.DenyTools = append([]string(nil), g.Constraints.DenyTools...)
 	}
 	return out
 }

@@ -4,17 +4,28 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#14131c">
+<meta name="description" content="Conversation and cockpit for a Strike daemon.">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="icon" href="/assets/icon.svg">
 <title>Strike</title>
 <script>
-(function(){try{var ok={strike:1,nord:1,dracula:1,gruvbox:1,monokai:1,"tokyo-night":1,catppuccin:1};var t=localStorage.getItem("strike.theme")||"strike";var s=localStorage.getItem("strike.scheme")||"dark";if(!ok[t])t="strike";if(s!=="light")s="dark";var el=document.documentElement;el.setAttribute("data-theme",t);el.setAttribute("data-scheme",s);}catch(e){}})();
+(function(){try{var ok={strike:1,nord:1,dracula:1,gruvbox:1,monokai:1,"tokyo-night":1,catppuccin:1};var t=localStorage.getItem("strike.theme")||"strike";var s=localStorage.getItem("strike.scheme")||"dark";if(!ok[t])t="strike";if(s!=="light")s="dark";var lay=localStorage.getItem("strike.layout")||"cockpit";if(lay!=="conversation")lay="cockpit";var el=document.documentElement;el.setAttribute("data-theme",t);el.setAttribute("data-scheme",s);el.setAttribute("data-layout",lay);}catch(e){}})();
 </script>
 <link rel="manifest" href="/manifest.webmanifest">
 <link data-trunk rel="css" href="style.css">
+<link data-trunk rel="css" href="storage.css">
+<link data-trunk rel="css" href="navbar.css">
 <link data-trunk rel="css" href="editor.css">
+<link data-trunk rel="css" href="chat-mode.css">
+<link data-trunk rel="css" href="notify.css">
+<link data-trunk rel="css" href="usage-audit.css">
+<link data-trunk rel="css" href="goals.css">
 <link data-trunk rel="copy-file" href="sw.js">
 <link data-trunk rel="copy-file" href="manifest.webmanifest">
 <link data-trunk rel="copy-file" href="icon.svg">
-<link data-trunk rel="rust">
+<link data-trunk rel="rust" data-reference-types>
 <script src="/assets/register.js" defer></script>
 <link data-trunk rel="copy-file" href="register.js">
 </head>

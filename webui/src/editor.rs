@@ -33,6 +33,14 @@ pub struct Tok {
     pub text: String,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MdAlign {
+    None,
+    Left,
+    Center,
+    Right,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MdBlock {
     Heading(u8, String),
@@ -41,6 +49,11 @@ pub enum MdBlock {
     List(Vec<String>),
     Quote(String),
     Rule,
+    Table {
+        header: Vec<String>,
+        aligns: Vec<MdAlign>,
+        rows: Vec<Vec<String>>,
+    },
 }
 
 pub fn language_of(path: &str) -> &'static str {
@@ -415,6 +428,139 @@ fn ext_has_letter(path: &str) -> bool {
     ext.chars().any(|c| c.is_ascii_alphabetic()) && ext.len() <= 8
 }
 
+/// Splits one pipe-table row into trimmed cells. A pipe escaped as `\|`
+/// and a pipe inside a `code span` do not split. A leading or trailing
+/// pipe is a border, not an empty cell, so rows may omit either one.
+fn split_table_row(line: &str) -> Vec<String> {
+    let trimmed = line.trim();
+    let mut cells: Vec<String> = Vec::new();
+    let mut cell = String::new();
+    let mut in_code = false;
+    let mut chars = trimmed.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\\' => match chars.peek() {
+                Some('|') => {
+                    cell.push('|');
+                    chars.next();
+                }
+                Some('\\') => {
+                    cell.push('\\');
+                    chars.next();
+                }
+                _ => cell.push('\\'),
+            },
+            '`' => {
+                in_code = !in_code;
+                cell.push('`');
+            }
+            '|' if !in_code => cells.push(std::mem::take(&mut cell)),
+            _ => cell.push(ch),
+        }
+    }
+    cells.push(cell);
+    if trimmed.starts_with('|') && !cells.is_empty() {
+        cells.remove(0);
+    }
+    if trimmed.ends_with('|') && !trimmed.ends_with("\\|") && cells.len() > 1 {
+        cells.pop();
+    }
+    cells.iter().map(|c| c.trim().to_string()).collect()
+}
+
+/// Parses a GFM separator row (`---`, `:---`, `---:`, `:---:`) into
+/// per-column alignments. Returns `None` when any cell is not a
+/// colon/dash marker, so ordinary pipe text never qualifies.
+fn parse_separator_row(line: &str) -> Option<Vec<MdAlign>> {
+    if !line.contains('|') || !line.contains('-') {
+        return None;
+    }
+    let cells = split_table_row(line);
+    if cells.is_empty() {
+        return None;
+    }
+    let mut aligns = Vec::with_capacity(cells.len());
+    for cell in &cells {
+        let mut core = cell.as_str();
+        let mut left = false;
+        let mut right = false;
+        if let Some(rest) = core.strip_prefix(':') {
+            left = true;
+            core = rest;
+        }
+        if let Some(rest) = core.strip_suffix(':') {
+            right = true;
+            core = rest;
+        }
+        if core.is_empty() || !core.chars().all(|c| c == '-') {
+            return None;
+        }
+        aligns.push(match (left, right) {
+            (true, true) => MdAlign::Center,
+            (true, false) => MdAlign::Left,
+            (false, true) => MdAlign::Right,
+            (false, false) => MdAlign::None,
+        });
+    }
+    Some(aligns)
+}
+
+/// Tries to read a GFM pipe table starting at `lines[start]` (header row,
+/// separator row, then body rows). Returns the block parts and the number
+/// of lines consumed. Any malformation — missing separator, header /
+/// separator column mismatch, or a ragged body row — returns `None` so
+/// the caller falls back to paragraph rendering and no text is lost.
+fn table_at(
+    lines: &[&str],
+    start: usize,
+) -> Option<(Vec<String>, Vec<MdAlign>, Vec<Vec<String>>, usize)> {
+    if start + 1 >= lines.len() {
+        return None;
+    }
+    let header_line = lines[start].trim();
+    if !header_line.contains('|') || parse_separator_row(header_line).is_some() {
+        return None;
+    }
+    let aligns = parse_separator_row(lines[start + 1])?;
+    let header = split_table_row(header_line);
+    if header.is_empty() || header.len() != aligns.len() {
+        return None;
+    }
+    let mut rows = Vec::new();
+    let mut i = start + 2;
+    while i < lines.len() {
+        let t = lines[i].trim();
+        if t.is_empty() || !t.contains('|') {
+            break;
+        }
+        let cells = split_table_row(t);
+        if cells.len() != header.len() {
+            return None;
+        }
+        rows.push(cells);
+        i += 1;
+    }
+    Some((header, aligns, rows, i - start))
+}
+
+/// True when `src` contains at least one well-formed markdown table.
+/// The transcript uses this to pick the markdown renderer only for
+/// table-bearing prose, leaving every other bubble untouched.
+pub fn has_markdown_table(src: &str) -> bool {
+    markdown_blocks(src)
+        .iter()
+        .any(|b| matches!(b, MdBlock::Table { .. }))
+}
+
+fn align_class(align: MdAlign) -> &'static str {
+    match align {
+        MdAlign::Left => "md-left",
+        MdAlign::Center => "md-center",
+        MdAlign::Right => "md-right",
+        MdAlign::None => "",
+    }
+}
+
 pub fn markdown_blocks(src: &str) -> Vec<MdBlock> {
     let mut blocks = Vec::new();
     let lines = lines_of(src);
@@ -477,6 +623,15 @@ pub fn markdown_blocks(src: &str) -> Vec<MdBlock> {
             blocks.push(MdBlock::List(items));
             continue;
         }
+        if let Some((header, aligns, rows, used)) = table_at(&lines, i) {
+            blocks.push(MdBlock::Table {
+                header,
+                aligns,
+                rows,
+            });
+            i += used;
+            continue;
+        }
         let mut body = String::new();
         while i < lines.len() {
             let t = lines[i].trim();
@@ -485,6 +640,7 @@ pub fn markdown_blocks(src: &str) -> Vec<MdBlock> {
                 || heading_level(t).is_some()
                 || t.starts_with('>')
                 || list_item(t).is_some()
+                || table_at(&lines, i).is_some()
             {
                 break;
             }
@@ -757,7 +913,7 @@ fn Inlines(text: String) -> impl IntoView {
 }
 
 #[component]
-fn MarkdownView(text: String) -> impl IntoView {
+pub fn MarkdownView(text: String) -> impl IntoView {
     let blocks = markdown_blocks(&text);
     view! {
         <div class="ev-md">
@@ -779,6 +935,33 @@ fn MarkdownView(text: String) -> impl IntoView {
                     </ul>
                 }.into_any(),
                 MdBlock::Rule => view! { <hr /> }.into_any(),
+                MdBlock::Table { header, aligns, rows } => {
+                    let head_aligns = aligns.clone();
+                    view! {
+                        <div class="md-table-wrap">
+                            <table class="md-table">
+                                <thead>
+                                    <tr>
+                                        {header.into_iter().enumerate().map(|(idx, cell)| {
+                                            let cls = align_class(head_aligns.get(idx).copied().unwrap_or(MdAlign::None));
+                                            view! { <th scope="col" class=cls><Inlines text=cell /></th> }
+                                        }).collect_view()}
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {rows.into_iter().map(|row| view! {
+                                        <tr>
+                                            {row.into_iter().enumerate().map(|(idx, cell)| {
+                                                let cls = align_class(aligns.get(idx).copied().unwrap_or(MdAlign::None));
+                                                view! { <td class=cls><Inlines text=cell /></td> }
+                                            }).collect_view()}
+                                        </tr>
+                                    }).collect_view()}
+                                </tbody>
+                            </table>
+                        </div>
+                    }.into_any()
+                }
             }).collect_view()}
         </div>
     }
@@ -1336,6 +1519,126 @@ mod tests {
         assert!(inline.iter().any(|p| matches!(p, Inline::Strong(t) if t == "bold")));
         assert!(inline.iter().any(|p| matches!(p, Inline::Link { href, .. } if href == "https://example.com")));
         assert!(!inline.iter().any(|p| matches!(p, Inline::Link { href, .. } if href.contains("javascript"))));
+    }
+
+    #[test]
+    fn markdown_table_simple() {
+        let blocks = markdown_blocks("| Name | Score |\n| --- | --- |\n| alpha | 1 |\n| beta | 2 |\n");
+        assert_eq!(blocks.len(), 1);
+        match &blocks[0] {
+            MdBlock::Table {
+                header,
+                aligns,
+                rows,
+            } => {
+                assert_eq!(header, &vec!["Name".to_string(), "Score".to_string()]);
+                assert_eq!(aligns, &vec![MdAlign::None, MdAlign::None]);
+                assert_eq!(rows.len(), 2);
+                assert_eq!(rows[0], vec!["alpha".to_string(), "1".to_string()]);
+                assert_eq!(rows[1], vec!["beta".to_string(), "2".to_string()]);
+            }
+            other => panic!("expected table, got {other:?}"),
+        }
+        assert!(has_markdown_table("| A |\n| - |\n| 1 |"));
+        assert!(!has_markdown_table("plain | text\nmore text"));
+    }
+
+    #[test]
+    fn markdown_table_alignments() {
+        let blocks = markdown_blocks("| L | C | R | N |\n| :--- | :---: | ---: | --- |\n| a | b | c | d |\n");
+        match &blocks[0] {
+            MdBlock::Table { aligns, .. } => assert_eq!(
+                aligns,
+                &vec![
+                    MdAlign::Left,
+                    MdAlign::Center,
+                    MdAlign::Right,
+                    MdAlign::None
+                ]
+            ),
+            other => panic!("expected table, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn markdown_table_missing_trailing_pipes_and_empty_cells() {
+        // Rows may omit the leading and/or trailing border pipe.
+        let blocks = markdown_blocks("Name | Score\n--- | ---:\nalpha | 1\n| beta | 2\n");
+        match &blocks[0] {
+            MdBlock::Table {
+                header,
+                aligns,
+                rows,
+            } => {
+                assert_eq!(header, &vec!["Name".to_string(), "Score".to_string()]);
+                assert_eq!(aligns, &vec![MdAlign::None, MdAlign::Right]);
+                assert_eq!(rows[0], vec!["alpha".to_string(), "1".to_string()]);
+                assert_eq!(rows[1], vec!["beta".to_string(), "2".to_string()]);
+            }
+            other => panic!("expected table, got {other:?}"),
+        }
+        let blocks = markdown_blocks("| A | B |\n|---|---|\n|  | x |\n");
+        match &blocks[0] {
+            MdBlock::Table { rows, .. } => {
+                assert_eq!(rows[0], vec!["".to_string(), "x".to_string()]);
+            }
+            other => panic!("expected table, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn markdown_table_escaped_and_code_span_pipes() {
+        let blocks = markdown_blocks("| Expr | Note |\n| --- | --- |\n| `a|b` | c\\|d |\n");
+        match &blocks[0] {
+            MdBlock::Table { rows, .. } => {
+                assert_eq!(rows[0], vec!["`a|b`".to_string(), "c|d".to_string()]);
+            }
+            other => panic!("expected table, got {other:?}"),
+        }
+        // The code-span cell content still parses as inline code.
+        let parts = inline_parse("`a|b`");
+        assert!(parts.iter().any(|p| matches!(p, Inline::Code(t) if t == "a|b")));
+    }
+
+    #[test]
+    fn markdown_table_malformed_falls_back_to_paragraph() {
+        // Missing separator row.
+        let blocks = markdown_blocks("| A | B |\n| 1 | 2 |\n");
+        assert!(matches!(blocks[0], MdBlock::Paragraph(ref t) if t.contains("| A | B |") && t.contains("| 1 | 2 |")));
+        // Header / separator column mismatch.
+        let blocks = markdown_blocks("| A | B | C |\n| --- | --- |\n| 1 | 2 | 3 |\n");
+        assert!(matches!(blocks[0], MdBlock::Paragraph(ref t) if t.contains("| A | B | C |")));
+        assert!(!has_markdown_table("| A | B | C |\n| --- | --- |\n| 1 | 2 | 3 |"));
+        // Ragged body row: the whole table degrades, no cell text is lost.
+        let blocks = markdown_blocks("| A | B |\n| --- | --- |\n| 1 | 2 | 3 |\n");
+        assert_eq!(blocks.len(), 1);
+        assert!(matches!(blocks[0], MdBlock::Paragraph(ref t) if t.contains("| 1 | 2 | 3 |")));
+        // A lone separator-looking line is a rule/paragraph, never a table.
+        let blocks = markdown_blocks("| --- | --- |\n");
+        assert!(!matches!(blocks[0], MdBlock::Table { .. }));
+    }
+
+    #[test]
+    fn markdown_table_inside_longer_markdown() {
+        let src = "# Report\n\nIntro line\n| File | Tests |\n| :--- | ---: |\n| `a.go` | 12 |\n| `b.go` | 3 |\n\nDone **now**.\n";
+        let blocks = markdown_blocks(src);
+        assert!(matches!(blocks[0], MdBlock::Heading(1, _)));
+        assert!(matches!(blocks[1], MdBlock::Paragraph(ref t) if t == "Intro line"));
+        match &blocks[2] {
+            MdBlock::Table {
+                header,
+                aligns,
+                rows,
+            } => {
+                assert_eq!(header, &vec!["File".to_string(), "Tests".to_string()]);
+                assert_eq!(aligns, &vec![MdAlign::Left, MdAlign::Right]);
+                assert_eq!(rows.len(), 2);
+                assert_eq!(rows[0][0], "`a.go`");
+            }
+            other => panic!("expected table, got {other:?}"),
+        }
+        assert!(matches!(blocks[3], MdBlock::Paragraph(ref t) if t.contains("**now**")));
+        assert!(has_markdown_table(src));
     }
 
     #[test]

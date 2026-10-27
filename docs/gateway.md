@@ -145,7 +145,7 @@ Point them at the loopback port. Strike does not mint a public URL.
 
 ## Web UI switcher
 
-The header mounts a self-contained Gateways control (Alt+G). The Daemon
+The header mounts a Gateways control (Alt+W) registered with the web shell; Alt+G belongs to Goals, which landed first. The Daemon
 view mounts the same component inline, on the same signals. The navbar
 and command palette do not own this control. The existing connection
 chip stays in the header so another stream can keep owning heartbeat

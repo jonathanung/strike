@@ -27,6 +27,9 @@ In-tree code may still import `internal/protocol` (type aliases). Prefer
 | `v` | Schema version written by `Wrap` |
 | `data` | Event payload JSON object |
 
+On-disk session logs (the JSONL envelope, `session.header`, every event
+type, and the sidecar) are specified in [session-format.md](session-format.md).
+
 Ops use the same envelope idea via `OpEnvelope` (`WrapOp` / `Decode`).
 
 ## Compatibility policy
@@ -46,6 +49,8 @@ Ops use the same envelope idea via `OpEnvelope` (`WrapOp` / `Decode`).
 - Do not break existing ops without a migration note in CHANGELOG.
 - Full third-party stable API freeze is a **non-goal** for v1; this document
   is the consumer contract for in-tree and thin external clients.
+- Machine-readable schema, Rust types, and the drift check:
+  [protocol-schema.md](protocol-schema.md).
 
 ### Forward-compat decode (`UnknownEvent`)
 
@@ -170,8 +175,37 @@ switching requires restart with `--session`.
 
 Older readers ignore the new optional fields and still decode inline `data` on legacy logs.
 
+## Session status vocabulary (1.19+)
+
+Not a transcript event. `protocol.Version` is `1.19.0` because live status
+JSON gained optional fields and the daemon publishes a status board. Old
+session logs still decode. Unknown event types are unchanged.
+
+Ids: `idle`, `running`, `waiting`, `blocked`, `failed`, `done`, `stopped`,
+`disconnected`. Aliases and tones live in
+[`schemas/session-status.json`](../schemas/session-status.json).
+`ClassifyLive` priority is waiting, then running, then blocked, then failed,
+then stopped, then idle. A clean `end_turn` leaves a root `idle`. `done` is a
+finished child. `disconnected` is client-only.
+
+| Surface | Role |
+|---|---|
+| `GET /health` | `now` unix milliseconds. Public, like the rest of `/health`. |
+| `GET /v1/status` | Unchanged live cockpit snapshot, plus `turnState`, `turnSince`, `lastEventAt`, `stopReason`. |
+| `GET /v1/status/sessions` | Board: `gateway`, heartbeat windows, `sessions[]`. |
+| `GET /v1/status/events` | SSE. `snapshot`, then `heartbeat` every 2s, and `session.status` when a row changes. |
+| `POST /v1/sessions/{id}/seen` | Ack unread. Body `{}` or `{"at": millis}`. |
+| `DELETE /v1/sessions/{id}/seen` | Force unread until the next ack. |
+| `GET /v1/roots`, `GET /v1/sessions` | Additive `status`, `unread`, `lastActivityAt` (`statusSince` on roots). |
+
+`unread` is one map for the daemon operator (`<session-dir>/status-seen.json`,
+mode `0600`). Activity before that file's `epoch` is not unread. The client
+shows `disconnected` when `now` or a heartbeat is older than `heartbeatStaleMs`
+(6000). The normative UI notes are [webui-status.md](webui-status.md).
+
 ## Related docs
 
+- [protocol-schema.md](protocol-schema.md) — generated JSON Schema, Rust types, versioning
 - [ARCHITECTURE.md](ARCHITECTURE.md) — package map and dataflow
 - [sdk.md](sdk.md) — Go client over this schema
 - [harnesses.md](harnesses.md) — function harness subprocess ABI

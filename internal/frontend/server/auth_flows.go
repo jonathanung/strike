@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jonathanung/strike/internal/frontend/host"
+	"github.com/jonathanung/strike/internal/trust/usageaudit"
 	"github.com/jonathanung/strike/pkg/redact"
 )
 
@@ -200,6 +201,7 @@ func (s *Server) handleAuthKey(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: redactAuthErr(err)})
 		return
 	}
+	s.noteAudit(usageaudit.ActionToken, "", "provider api key stored", map[string]string{"provider": strings.TrimSpace(body.Provider)})
 	// Return refreshed status (never the key).
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":       true,
@@ -224,6 +226,7 @@ func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: redactAuthErr(err)})
 		return
 	}
+	s.noteAudit(usageaudit.ActionToken, "", "provider logged out", map[string]string{"provider": provider})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":       true,
 		"provider": providerStatusByName(s.opts.Services.Auth, provider),
@@ -582,6 +585,7 @@ func (s *Server) handleCustomProviders(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		got, _ := s.opts.Services.Providers.Get(body.Name)
+		s.noteAudit(usageaudit.ActionConfig, "", "custom provider saved", map[string]string{"name": strings.TrimSpace(body.Name)})
 		writeJSON(w, http.StatusOK, got)
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, opErrorResponse{Error: "method not allowed"})
@@ -605,6 +609,7 @@ func (s *Server) handleCustomProviderDelete(w http.ResponseWriter, r *http.Reque
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
 		return
 	}
+	s.noteAudit(usageaudit.ActionConfig, "", "custom provider removed", map[string]string{"name": name})
 	w.WriteHeader(http.StatusNoContent)
 }
 

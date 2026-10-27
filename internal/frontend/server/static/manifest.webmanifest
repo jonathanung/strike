@@ -1,1 +1,19 @@
-{"name":"Strike","short_name":"Strike","start_url":"/","scope":"/","display":"standalone","background_color":"#101216","theme_color":"#101216","icons":[{"src":"/assets/icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any"}]}
+{
+  "name": "Strike",
+  "short_name": "Strike",
+  "description": "Conversation and cockpit for a Strike daemon.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#14131c",
+  "theme_color": "#14131c",
+  "icons": [
+    {
+      "src": "/assets/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

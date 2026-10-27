@@ -4,7 +4,9 @@
 //! a local port; this component only switches among daemons the browser
 //! can already reach.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -14,6 +16,63 @@ use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 
 use crate::api::{api, auth_header};
+
+/// Page wiring for the shell slot in `src/shell/contrib/gateway.rs`.
+/// The shell boots before App's signals exist, so App installs them here
+/// (same late-bind shape as `crate::status::StatusHost`) and the slot
+/// render reads them. This replaces the pre-shell header mount; the
+/// status aggregate keeps its own `gateway` slot (#1263) untouched.
+#[derive(Clone)]
+pub struct GatewayHost {
+    pub base: RwSignal<String>,
+    pub token: RwSignal<String>,
+    pub gateway: RwSignal<String>,
+    pub detail: RwSignal<String>,
+    pub open: RwSignal<bool>,
+    pub profiles: RwSignal<Vec<Profile>>,
+    pub selected: RwSignal<String>,
+    pub refresh: Rc<dyn Fn()>,
+}
+
+thread_local! {
+    static HOST: RefCell<Option<GatewayHost>> = const { RefCell::new(None) };
+}
+
+pub fn set_host(host: GatewayHost) {
+    HOST.with(|slot| *slot.borrow_mut() = Some(host));
+}
+
+fn host() -> Option<GatewayHost> {
+    HOST.with(|slot| slot.borrow().clone())
+}
+
+/// Slot render for the `gateway-switcher` slot: the primary switcher.
+/// The refresh closure re-reads the host so it stays `Copy` for the
+/// component's prop, matching how App passes `refresh_meta`.
+pub fn switcher_view() -> AnyView {
+    let Some(h0) = host() else {
+        return view! { <span></span> }.into_any();
+    };
+    view! {
+        <GatewaySwitcher
+            inline=false
+            primary=true
+            base=h0.base
+            token=h0.token
+            gateway=h0.gateway
+            detail=h0.detail
+            open=h0.open
+            profiles=h0.profiles
+            selected=h0.selected
+            refresh=move || {
+                if let Some(h) = host() {
+                    (*h.refresh)();
+                }
+            }
+        />
+    }
+    .into_any()
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Profile {
@@ -408,6 +467,14 @@ pub fn GatewaySwitcher(
     };
 
     if primary {
+        // The shell palette command dispatches here (docs/webui-shell.md).
+        crate::shell::bind(
+            "gateways.open",
+            Rc::new(move |_args: &str| {
+                open.update(|v| *v = !*v);
+                Ok(())
+            }),
+        );
         let probe_boot = probe;
         probe_boot();
         let probe_tick = probe_boot;
@@ -422,7 +489,7 @@ pub fn GatewaySwitcher(
 
         let open_key = open;
         let on_key = Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |ev: web_sys::KeyboardEvent| {
-            if ev.alt_key() && !ev.ctrl_key() && !ev.meta_key() && ev.key() == "g" {
+            if ev.alt_key() && !ev.ctrl_key() && !ev.meta_key() && ev.key().eq_ignore_ascii_case("w") {
                 ev.prevent_default();
                 open_key.update(|v| *v = !*v);
             }
@@ -664,7 +731,7 @@ pub fn GatewaySwitcher(
                 <button class="secondary" on:click=add_profile>"Save"</button>
             </div>
             <p class="hint">{move || form_note.get()}</p>
-            <p class="hint keys">"Alt+G opens this list. Arrow keys move. Enter selects. Esc closes."</p>
+            <p class="hint keys">"Alt+W opens this list. Arrow keys move. Enter selects. Esc closes."</p>
         }
     };
 
@@ -707,7 +774,7 @@ pub fn GatewaySwitcher(
     view! {
         <div class=wrap>
             <Show when=move || !inline>
-                <button class="gw-btn" title="Alt+G" aria-haspopup="dialog" aria-expanded=move || open.get().to_string()
+                <button class="gw-btn" title="Alt+W" aria-haspopup="dialog" aria-expanded=move || open.get().to_string()
                     on:click=move |_| open.update(|v| *v = !*v)>"Gateways"</button>
             </Show>
             <Show when=move || inline || open.get()>

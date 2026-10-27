@@ -263,8 +263,9 @@ func TestMailboxRejectsCompletedRecipient(t *testing.T) {
 		for range lead.Events() {
 		}
 	}()
-	time.Sleep(20 * time.Millisecond)
 
+	// Completed state is set before Run. Rejection does not wait for attach;
+	// a short sleep raced startup and was not the signal the assertion needs.
 	st := lead.EnqueueTeamMessage(leadID, toID, "too late")
 	if st.Status != "rejected" {
 		t.Fatalf("want rejected, got %#v", st)
