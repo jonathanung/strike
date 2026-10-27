@@ -489,52 +489,66 @@ try {
   // Approvals (#1266): mode menu, Yolo confirm + Escape, and the
   // permission-rules API confirm gates. Runs while the boot session is
   // live (rule writes require a live root) and leaves the chip on Default.
-  const apprClick = async (script) => {
-    const ev = await send("Runtime.evaluate", { expression: script, returnByValue: true });
+  const apprEval = async (expression) => {
+    const ev = await send("Runtime.evaluate", { expression, returnByValue: true });
     return ev.result?.result?.value || "";
   };
-  const apprOpened = await apprClick(`(() => {
-    const btn = [...document.querySelectorAll("button")].find((b) => (b.textContent || "").includes("Approval"));
-    if (!btn) return "no-chip";
-    btn.click();
-    return "clicked";
-  })()`);
-  if (apprOpened !== "clicked") throw new Error(`approval chip: ${apprOpened}`);
-  let apprMenu = "";
-  for (let i = 0; i < 20; i++) {
-    apprMenu = await apprClick("document.body ? document.body.innerText : \"\"");
-    if (apprMenu.includes("Rules and audit") && apprMenu.includes("Deny rules still apply") && apprMenu.includes("Yolo")) break;
-    await delay(100);
-  }
+  const apprText = () => apprEval("document.body ? document.body.innerText : \"\"");
+  const apprClickChip = () =>
+    apprEval(`(() => {
+      const btn = [...document.querySelectorAll("button")].find((b) => (b.textContent || "").includes("Approval"));
+      if (!btn) return "no-chip";
+      btn.click();
+      return "clicked";
+    })()`);
+  // Condition-based waits with the clicks inside the probes (this file's
+  // post-#1378 discipline): a click that lands mid-render is retried
+  // instead of failing against a fixed deadline.
+  await waitFor(
+    "approval menu (modes, Rules and audit, deny copy)",
+    async () => {
+      const t = await apprText();
+      if (t.includes("Rules and audit") && t.includes("Deny rules still apply") && t.includes("Yolo")) {
+        return { ok: true, t };
+      }
+      await apprClickChip();
+      return { ok: false };
+    },
+    { timeout: STEP_MS, interval: 250 },
+  );
+  const apprMenu = await apprText();
   if (!apprMenu.includes("Default") || !apprMenu.includes("Plan") || !apprMenu.includes("Yolo") || !apprMenu.includes("Deny rules still apply")) {
     throw new Error(`approval menu missing copy: ${apprMenu.slice(0, 500)}`);
   }
-  const apprChose = await apprClick(`(() => {
-    const btn = [...document.querySelectorAll("button")].find((b) => (b.textContent || "").trim().startsWith("Yolo"));
-    if (!btn) return "no-yolo";
-    btn.click();
-    return "clicked";
-  })()`);
-  if (apprChose !== "clicked") throw new Error(`yolo confirm: ${apprChose}`);
-  let apprDialog = "";
-  for (let i = 0; i < 20; i++) {
-    apprDialog = await apprClick("document.body ? document.body.innerText : \"\"");
-    if (apprDialog.includes("Use Yolo for this session?")) break;
-    await delay(100);
-  }
-  if (!apprDialog.includes("Use Yolo for this session?")) {
-    throw new Error(`yolo dialog missing: ${apprDialog.slice(0, 500)}`);
-  }
-  await apprClick(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
-  let apprAfter = "";
-  for (let i = 0; i < 20; i++) {
-    apprAfter = await apprClick("document.body ? document.body.innerText : \"\"");
-    if (apprAfter.includes("Approval · Default") && !apprAfter.includes("Use Yolo for this session?")) break;
-    await delay(100);
-  }
-  if (!apprAfter.includes("Approval · Default") || apprAfter.includes("Use Yolo for this session?")) {
-    throw new Error(`escape did not keep Default: ${apprAfter.slice(0, 500)}`);
-  }
+  await waitFor(
+    "yolo confirm dialog",
+    async () => {
+      const t = await apprText();
+      if (t.includes("Use Yolo for this session?")) {
+        return { ok: true };
+      }
+      const r = await apprEval(`(() => {
+        const btn = [...document.querySelectorAll("button")].find((b) => (b.textContent || "").trim().startsWith("Yolo"));
+        if (!btn) return "no-yolo";
+        btn.click();
+        return "clicked";
+      })()`);
+      if (r !== "clicked") {
+        await apprClickChip();
+      }
+      return { ok: false };
+    },
+    { timeout: STEP_MS, interval: 250 },
+  );
+  await apprEval(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
+  await waitFor(
+    "escape keeps Default",
+    async () => {
+      const t = await apprText();
+      return { ok: t.includes("Approval · Default") && !t.includes("Use Yolo for this session?") };
+    },
+    { timeout: STEP_MS, interval: 250 },
+  );
 
   const apprAuth = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
   const apprRuleCall = async (path, body) => {
