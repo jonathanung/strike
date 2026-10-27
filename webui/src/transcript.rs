@@ -4,6 +4,7 @@
 
 use serde_json::Value;
 
+use crate::composer_triggers::{display_user_text, PermAsk};
 use crate::model::{
     child_card_from_parts, child_card_from_text, child_keys_match, protocol_dump, status_kind,
     strip_echo_tip, ChatLine, ChildCard,
@@ -27,6 +28,8 @@ pub enum Role {
     Strike,
     Tool,
     Child,
+    Notice,
+    Permission,
 }
 
 impl Role {
@@ -36,6 +39,8 @@ impl Role {
             Role::Strike => "strike",
             Role::Tool => "tool",
             Role::Child => "child",
+            Role::Notice => "notice",
+            Role::Permission => "permission",
         }
     }
 }
@@ -228,6 +233,13 @@ pub struct Transcript {
     /// Count of `artifact.updated` envelopes seen; the shell mirrors this
     /// into its storage revision signal so the storage panel refreshes.
     pub artifact_updates: u32,
+    /// Open permission asks from `permission.asked` envelopes, in arrival
+    /// order. The composer ask bar renders these and replies through the
+    /// daemon's normal `permission.reply` op.
+    pub asks: Vec<PermAsk>,
+    /// Latest `engine.error` notice with code `composer_notice` (a skipped
+    /// `@file` or similar). Cleared by the next `user.message`.
+    pub trigger_note: String,
     assistant_open: bool,
     event_count: usize,
     turn_start: Option<u32>,
@@ -248,6 +260,8 @@ impl Transcript {
             title_pin: None,
             next_id: 0,
             artifact_updates: 0,
+            asks: Vec::new(),
+            trigger_note: String::new(),
             assistant_open: false,
             event_count: 0,
             turn_start: None,
@@ -376,8 +390,9 @@ impl Transcript {
         match typ {
             "user.message" => {
                 self.assistant_open = false;
+                self.trigger_note.clear();
                 let text = field_str(&data, "text");
-                let shown = strip_echo_progress(&text);
+                let shown = display_user_text(&strip_echo_progress(&text));
                 let id = self.push(Message {
                     id: 0,
                     role: Role::You,
@@ -555,6 +570,85 @@ impl Transcript {
             }
             "artifact.updated" => {
                 self.artifact_updates = self.artifact_updates.wrapping_add(1)
+            }
+            "engine.error" => {
+                let message = field_str(&data, "message");
+                if message.is_empty() {
+                    return;
+                }
+                let code = field_str(&data, "code");
+                if code == "composer_notice" {
+                    self.trigger_note = message.clone();
+                }
+                self.push(Message {
+                    id: 0,
+                    role: Role::Notice,
+                    title: "Notice".into(),
+                    body: message,
+                    badge: code,
+                    detail: String::new(),
+                    key: String::new(),
+                    call_id: String::new(),
+                    diff: None,
+                    chips: Vec::new(),
+                    keep_events: -1,
+                    retry_text: String::new(),
+                    copy_text: String::new(),
+                    at_ms,
+                });
+            }
+            "permission.asked" => {
+                let request_id = field_str(&data, "requestId");
+                if request_id.is_empty() {
+                    return;
+                }
+                let permission = field_str(&data, "permission");
+                let patterns = pattern_list(&data);
+                if !self.asks.iter().any(|ask| ask.request_id == request_id) {
+                    self.asks.push(PermAsk {
+                        request_id: request_id.clone(),
+                        permission: permission.clone(),
+                        patterns: patterns.clone(),
+                    });
+                }
+                let body = if patterns.is_empty() {
+                    permission.clone()
+                } else {
+                    format!("{permission} · {patterns}")
+                };
+                self.push(Message {
+                    id: 0,
+                    role: Role::Permission,
+                    title: "Approval".into(),
+                    body,
+                    badge: "ask".into(),
+                    detail: String::new(),
+                    key: request_id,
+                    call_id: String::new(),
+                    diff: None,
+                    chips: Vec::new(),
+                    keep_events: -1,
+                    retry_text: String::new(),
+                    copy_text: permission,
+                    at_ms,
+                });
+            }
+            "permission.resolved" => {
+                let request_id = field_str(&data, "requestId");
+                let decision = field_str(&data, "decision");
+                self.asks.retain(|ask| ask.request_id != request_id);
+                if let Some(msg) = self
+                    .messages
+                    .iter_mut()
+                    .rev()
+                    .find(|m| m.key == request_id && m.role == Role::Permission)
+                {
+                    msg.badge = if decision.is_empty() {
+                        "done".into()
+                    } else {
+                        decision
+                    };
+                }
             }
             _ => {}
         }
@@ -737,6 +831,19 @@ struct ToolFace {
     diff: Option<DiffStat>,
     chips: Vec<Chip>,
     copy: String,
+}
+
+fn pattern_list(data: &Value) -> String {
+    data.get("patterns")
+        .and_then(|v| v.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|v| v.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+        .unwrap_or_default()
 }
 
 fn finish_tool(

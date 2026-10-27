@@ -823,8 +823,11 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			initialMemoryMode = meta.MemoryMode
 		}
 		eng := engine.New(engine.Options{
-			SessionID:      sid,
-			Select:         selectProvider,
+			SessionID: sid,
+			Select:    selectProvider,
+			PrepareInput: func(text, dir string) engine.InputPrep {
+				return composerPrepare(text, dir, skills)
+			},
 			Registry:       registry,
 			WorkDir:        toolDir,
 			WorkspaceRoots: append([]string(nil), binding.Roots...),

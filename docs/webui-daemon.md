@@ -100,8 +100,14 @@ Status: walking skeleton on branch `worktree-rust-webui-daemon`. Not merged.
   - The side panel is Activity (team snapshot: status, elapsed, stop,
     retry, expand, including `blocked` handoffs), Files (`/v1/files`),
     Changes (`/v1/changed-files`), Memory, Knowledge, and Artifacts.
-    Clicking or dragging a file inserts `@path` as text. The web composer
-    does not expand that token the way the TUI does. Memory mode
+    Clicking or dragging a file inserts `@path`. The daemon expands
+    `@file`, `$skill`, `/command`, and `!shell` on `user.input` and `steer`
+    before a turn starts. `!` asks through the bash permission model and
+    does not start a model turn. The composer `+` menu and the suggestion
+    popup only list those real actions (`composerCommands` and `skills` on
+    bootstrap, files from `/v1/files/search`). A shell ask shows Allow once /
+    Reject on the composer until the approvals stream replaces that bar.
+    Memory mode
     (normal, incognito, temporary) is a composer chip and a palette command.
     Open on a file reads it in the center document pane
     (`GET /v1/file/view`). The pane is read-only until Edit. Save is

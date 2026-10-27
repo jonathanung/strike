@@ -18,6 +18,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/jonathanung/strike/internal/composer/triggers"
 	"github.com/jonathanung/strike/internal/frontend/host"
 	"github.com/jonathanung/strike/internal/persist/session"
 	"github.com/jonathanung/strike/internal/product/version"
@@ -128,14 +129,15 @@ type capabilities struct {
 }
 
 type bootstrapResponse struct {
-	Version      string           `json:"version"`
-	AuthRequired bool             `json:"authRequired"`
-	AttachOnly   bool             `json:"attachOnly"`
-	Capabilities capabilities     `json:"capabilities"`
-	Status       *StatusSnapshot  `json:"status,omitempty"`
-	Agents       []AgentInfo      `json:"agents"`
-	Skills       []map[string]any `json:"skills"`
-	ProtocolOps  []string         `json:"protocolOps"`
+	Version          string             `json:"version"`
+	AuthRequired     bool               `json:"authRequired"`
+	AttachOnly       bool               `json:"attachOnly"`
+	Capabilities     capabilities       `json:"capabilities"`
+	Status           *StatusSnapshot    `json:"status,omitempty"`
+	Agents           []AgentInfo        `json:"agents"`
+	Skills           []map[string]any   `json:"skills"`
+	ProtocolOps      []string           `json:"protocolOps"`
+	ComposerCommands []triggers.Command `json:"composerCommands,omitempty"`
 }
 
 var browserProtocolOps = []string{
@@ -204,7 +206,7 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 	if live {
 		protocolOps = browserProtocolOpsWithTeamControl()
 	}
-	writeJSON(w, http.StatusOK, bootstrapResponse{Version: version.Version, AuthRequired: s.opts.Auth, AttachOnly: !live, Capabilities: c, Status: status, Agents: agents, Skills: skills, ProtocolOps: protocolOps})
+	writeJSON(w, http.StatusOK, bootstrapResponse{Version: version.Version, AuthRequired: s.opts.Auth, AttachOnly: !live, Capabilities: c, Status: status, Agents: agents, Skills: skills, ProtocolOps: protocolOps, ComposerCommands: triggers.Commands()})
 }
 
 func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
