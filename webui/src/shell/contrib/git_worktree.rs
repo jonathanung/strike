@@ -1,12 +1,14 @@
 //! Git status and worktrees (#1270): palette commands for the Git and
-//! Worktrees side-panel tabs, plus the Alt+W shortcut listing. The
+//! Worktrees side-panel tabs, plus the Alt+T shortcut listing. The
 //! panels themselves live in `crate::git` and are rendered by `main.rs`
 //! when their side tab is active; this file only registers the commands
 //! with the shell, following docs/webui-shell.md. The performers are
 //! bound by `main.rs` in `App`, because only the page owns the side-tab
-//! signal. The Alt+W key binding itself also stays in `main.rs`, like
+//! signal. The Alt+T key binding itself also stays in `main.rs`, like
 //! Alt+G for Goals. Git has no Alt chord in this port: the PR's
-//! original Alt+G now belongs to Goals (#1300) on main.
+//! original Alt+G now belongs to Goals (#1300) on main, and its
+//! original Alt+W for Worktrees now belongs to the gateway switcher
+//! (#1308), which landed first — so Worktrees takes the free Alt+T.
 
 use std::rc::Rc;
 
@@ -31,7 +33,7 @@ pub fn install(reg: &mut ShellHook) {
         section_order: 0,
         label: "Worktrees",
         detail: "Session worktrees and child isolation",
-        shortcut: "Alt+W",
+        shortcut: "Alt+T",
         keywords: &["git", "isolation"],
         argument: None,
         order: 110,
@@ -39,7 +41,7 @@ pub fn install(reg: &mut ShellHook) {
     });
     reg.shortcut(Shortcut {
         id: "panel-worktrees",
-        keys: "Alt+W",
+        keys: "Alt+T",
         group: "Navigation",
         group_order: 1,
         label: "Open Worktrees",

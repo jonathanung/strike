@@ -495,6 +495,25 @@ try {
   };
   const bodyText = async () => String((await evalValue("document.body ? document.body.innerText : ''")) || "");
 
+  // Session-ux transcript (#1310): an empty transcript teaches with
+  // suggestion cards whose detail line is the prompt that gets sent, and
+  // the pane header carries Rename / Regenerate / Export.
+  await waitFor(
+    "session-ux empty transcript (suggestion cards, rename, export)",
+    async () => {
+      const t = await bodyText();
+      return {
+        ok:
+          t.includes("See what is here") &&
+          t.includes("Summarize the working directory. Do not change files.") &&
+          t.includes("Rename") &&
+          t.includes("Regenerate") &&
+          t.includes("Export"),
+      };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+
   // Gateway switcher (#1265): opens from the header, shows this gateway,
   // never exposes the smoke token in page text, in a visible (non-password)
   // input, or in the daemon log, and Escape closes it. The PR's original
@@ -570,6 +589,7 @@ try {
   if (strikeLog.includes(token)) {
     throw new Error("daemon log contains the smoke token");
   }
+
 
   // Model menu: filter, honest "not reported" capabilities, keyboard, and a
   // real select.model error from the daemon (unknown provider).

@@ -821,7 +821,7 @@ pub fn WorktreePanel(
 
     view! {
         <div id="worktree-panel" class="worktree-panel" tabindex="0" role="tabpanel" aria-label="Worktrees" on:keydown=on_key>
-            <p class="hint">"Alt+W opens this panel. Esc clears a pending remove."</p>
+            <p class="hint">"Alt+T opens this panel. Esc clears a pending remove."</p>
             <Show when=move || !error.get().is_empty()>
                 <div class="notice" role="alert">
                     <span>{move || error.get()}</span>
