@@ -114,6 +114,21 @@ func TestPermissionRulesRequireConfirm(t *testing.T) {
 		t.Fatalf("audit body = %s", rec.Body.String())
 	}
 
+	// Invalid glob syntax is rejected with 400 and nothing is persisted:
+	// evaluation would treat the pattern as never-matching, so storing it
+	// would leave an intended deny silently inert (fail-open under yolo).
+	rec = post("/v1/permissions/rules", map[string]any{
+		"scope": "global", "permission": "bash", "pattern": "[r*", "action": "deny", "confirm": true,
+	})
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "invalid glob syntax") || !strings.Contains(rec.Body.String(), "[r*") {
+		t.Fatalf("invalid glob: %d %s", rec.Code, rec.Body.String())
+	}
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/permissions/rules", nil))
+	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), "[r*") {
+		t.Fatalf("invalid glob persisted: %d %s", rec.Code, rec.Body.String())
+	}
+
 	ro, err := New(Options{SessionDir: t.TempDir(), PollInterval: time.Millisecond, Live: live, ReadOnly: true})
 	if err != nil {
 		t.Fatal(err)
