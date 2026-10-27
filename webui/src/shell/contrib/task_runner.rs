@@ -17,8 +17,10 @@ pub fn install(reg: &mut ShellHook) {
         label: "Task runner",
         detail: "Open a checklist, run each section, review the checkpoint",
         shortcut: "",
-        // Not "plan": the cockpit UAT pins the palette query "plan" to
-        // Approval: Plan, and an exact keyword match here outranks it.
+        // No "plan" keyword: an exact keyword match outranks the fuzzy
+        // label match for "Approval: Plan", so Enter on a "plan" palette
+        // query opened the task runner instead of setting Plan mode
+        // (webui-smoke failure on #1429, 22 cascading assertions).
         keywords: &["tasks", "checklist", "checkpoint"],
         argument: None,
         order: 35,
