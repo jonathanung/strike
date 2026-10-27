@@ -1281,6 +1281,28 @@ fn App() -> impl IntoView {
     };
 
     let send = move || {
+        // Context-hold gate (mirrors send_text): when the context fit is
+        // critical/full, do not dispatch and do not clear the draft or
+        // pending files, so a held submit never loses typed text. This
+        // gates both entry points (form submit and textarea Enter),
+        // which call this shared closure unconditionally.
+        let held = {
+            let ctx = active_context(
+                &catalog.get_untracked(),
+                &provider_name.get_untracked(),
+                &model_name.get_untracked(),
+            );
+            context_view(
+                context_used.get_untracked(),
+                context_limit.get_untracked(),
+                ctx,
+                &context_fit.get_untracked(),
+            )
+        };
+        if held.held {
+            model_note.set(held.hold_message);
+            return;
+        }
         if sending.get_untracked() {
             return;
         }

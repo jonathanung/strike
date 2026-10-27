@@ -278,15 +278,21 @@ func clipAttachmentName(name string) string {
 
 // cleanSessionID is the shared session-id validator for the server
 // package (also used by the session-status handlers): only letters,
-// digits, '-' and '_' are allowed, so path separators and ".." can
-// never appear in a cleaned id.
+// digits, '-', '_' and '.' are allowed, so path separators can never
+// appear in a cleaned id. '.' must be allowed because the daemon's own
+// session ids (persist/session.NewID) are dotted timestamps such as
+// "20261027T015110.714741099Z-<suffix>"; ".." is still rejected
+// explicitly so a cleaned id can never traverse directories.
 func cleanSessionID(id string) (string, bool) {
 	id = strings.TrimSpace(id)
 	if id == "" || utf8.RuneCountInString(id) > 80 {
 		return "", false
 	}
+	if strings.Contains(id, "..") || strings.ContainsAny(id, "/\\") {
+		return "", false
+	}
 	for _, r := range id {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '-' || r == '_' {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '-' || r == '_' || r == '.' {
 			continue
 		}
 		return "", false
