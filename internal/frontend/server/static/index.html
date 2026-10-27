@@ -22,13 +22,14 @@
 <link rel="stylesheet" href="/assets/notify-750498e8d7d87548.css" integrity="sha384-l/TrTY1ETPTYhTEtEfPovdv2nck2zscWIo3mhOCEkb/RLhrZYW/bwgXX5qn68bAv"/>
 <link rel="stylesheet" href="/assets/usage-audit-4109f37a4c3f020.css" integrity="sha384-PG57uHfAoOyYrJLu5TZtnb1s2Ud6PPolTjB9IeCoVZ1qF7Qgrtsh0+5YiMBYYV9Z"/>
 <link rel="stylesheet" href="/assets/goals-5b895e22909a0f66.css" integrity="sha384-liP/FQF4QvouM0zc8WO7nxC1u3CzbFF/GBmvuED6zZS8f0rmPG1QWhWJitxfpRm1"/>
+<link rel="stylesheet" href="/assets/transcript-find-48ee7e8c29e3a7d5.css" integrity="sha384-eIxmvHVn9OZAgklNBggZLjZIuZ7orLHMdtsudrUHcg7zclIcXuQlOhMOgAMN1VtF"/>
 
 
 
 
 <script type="module">
-import init, * as bindings from '/assets/strike-webui-460c9517ec1d1cc9.js';
-const wasm = await init({ module_or_path: '/assets/strike-webui-460c9517ec1d1cc9_bg.wasm' });
+import init, * as bindings from '/assets/strike-webui-25b1bc372e19452d.js';
+const wasm = await init({ module_or_path: '/assets/strike-webui-25b1bc372e19452d_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -39,6 +40,6 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 </script>
 <script src="/assets/register.js" defer></script>
 
-<link rel="modulepreload" href="/assets/strike-webui-460c9517ec1d1cc9.js" crossorigin="anonymous" integrity="sha384-FIrqJMR8kq5ozbPjFL0s6fQ78NQ/DTxSHBWTC6O8uxCZbdFMLddztKb9fZgaGpQt"><link rel="preload" href="/assets/strike-webui-460c9517ec1d1cc9_bg.wasm" crossorigin="anonymous" integrity="sha384-CGjlesRkKcgplFFfLccl5q3Xgl/H51hHjAswIh+xlLa2UF4/1pVzyVfN1ccoIsPg" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/assets/strike-webui-25b1bc372e19452d.js" crossorigin="anonymous" integrity="sha384-60gBnjvTCui7CYvNGxhLtEbB9ux2JaEf1M5oQBbxzvzfl36bjyqRFWNqKngS/ssT"><link rel="preload" href="/assets/strike-webui-25b1bc372e19452d_bg.wasm" crossorigin="anonymous" integrity="sha384-gvCPKd7gnAG+O64zbgbQeSx4hkYyv/tLnwMBZs+z9SsMu9JXRDzszfjtnh4Wj0b7" as="fetch" type="application/wasm"></head>
 <body></body>
 </html>
