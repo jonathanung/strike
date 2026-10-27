@@ -908,9 +908,20 @@ func (s *Server) handleSessionDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	force := r.URL.Query().Get("force") == "true"
-	if err := s.opts.Services.Sessions.Delete(r.PathValue("id"), force); err != nil {
+	id := r.PathValue("id")
+	if err := s.opts.Services.Sessions.Delete(id, force); err != nil {
 		writeJSON(w, http.StatusConflict, opErrorResponse{Error: err.Error()})
 		return
+	}
+	// A successful durable delete also deregisters the session's live root
+	// (#1399), atomically from the client's point of view: GET /v1/roots
+	// must not keep listing a deleted session. RemoveForSession is a no-op
+	// when the session was not live, and leaves the root registered when
+	// another live entry still references it. Clients that already compose
+	// this with DELETE /v1/roots/{id} (the cockpit) are unaffected: that
+	// follow-up call simply 404s for the already-removed root.
+	if s.opts.LiveHub != nil {
+		s.opts.LiveHub.RemoveForSession(id)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
