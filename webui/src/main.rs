@@ -717,7 +717,6 @@ fn App() -> impl IntoView {
     let mode = RwSignal::new("chat".to_string());
     let workspaces = RwSignal::new(Vec::<Workspace>::new());
     let active_workspace = RwSignal::new(String::new());
-    let new_path = RwSignal::new(String::new());
     let gateway_open = RwSignal::new(false);
     let gateway_detail = RwSignal::new(String::new());
     let gateway_profiles = RwSignal::new(gateway::load_profiles());
@@ -2463,9 +2462,6 @@ fn App() -> impl IntoView {
                 base=base
                 token=token
                 status=status
-                workspaces=workspaces
-                active_workspace=active_workspace
-                new_path=new_path
                 gateway=gateway
                 gateway_detail=gateway_detail
                 gateway_open=gateway_open
@@ -3350,9 +3346,6 @@ fn DaemonPane(
     base: RwSignal<String>,
     token: RwSignal<String>,
     status: RwSignal<String>,
-    workspaces: RwSignal<Vec<Workspace>>,
-    active_workspace: RwSignal<String>,
-    new_path: RwSignal<String>,
     gateway: RwSignal<String>,
     gateway_detail: RwSignal<String>,
     gateway_open: RwSignal<bool>,
@@ -3361,78 +3354,7 @@ fn DaemonPane(
     refresh: impl Fn() + Copy + Send + Sync + 'static,
     open_picker: impl Fn() + Copy + 'static,
 ) -> impl IntoView {
-    let policy_rules = RwSignal::new(String::new());
-    let policy_mode = RwSignal::new(String::new());
-    let policy_for = RwSignal::new(String::new());
-    Effect::new(move |_| {
-        let id = active_workspace.get();
-        let list = workspaces.get();
-        if policy_for.get_untracked() != id {
-            if let Some(w) = list.iter().find(|w| w.id == id) {
-                policy_rules.set(w.rules.clone());
-                policy_mode.set(w.permission_mode.clone());
-            } else {
-                policy_rules.set(String::new());
-                policy_mode.set(String::new());
-            }
-            policy_for.set(id);
-        }
-    });
-    let save_policy = move |_| {
-        let id = active_workspace.get();
-        if id.is_empty() {
-            status.set("no active workspace".into());
-            return;
-        }
-        let rules = policy_rules.get();
-        let mode = policy_mode.get();
-        let (b, t) = (base.get(), token.get());
-        spawn_local(async move {
-            match patch_json(
-                &b,
-                &t,
-                &format!("/v1/workspaces/{id}"),
-                serde_json::json!({
-                    "rules": rules,
-                    "permissionMode": mode,
-                }),
-            )
-            .await
-            {
-                Ok(()) => {
-                    policy_for.set(String::new());
-                    refresh();
-                }
-                Err(e) => status.set(format!("workspace policy failed: {e}")),
-            }
-        });
-    };
-    let add_workspace = move |_| {
-        let path = new_path.get();
-        if path.trim().is_empty() {
-            return;
-        }
-        let (b, t) = (base.get(), token.get());
-        spawn_local(async move {
-            match post_json(
-                &b,
-                &t,
-                "/v1/workspaces",
-                serde_json::json!({ "path": path }),
-            )
-            .await
-            {
-                Ok(()) => {
-                    new_path.set(String::new());
-                    if let Ok(r) = get_json::<WorkspacesResponse>(&b, &t, "/v1/workspaces").await {
-                        active_workspace.set(r.active_id);
-                        workspaces.set(r.workspaces);
-                    }
-                }
-                Err(e) => status.set(format!("add workspace failed: {e}")),
-            }
-        });
-    };
+    let _ = status;
     let connect = move |_: web_sys::MouseEvent| {
         save("strike.base", &base.get());
         gateway::persist_token("this", &token.get());
@@ -3471,70 +3393,6 @@ fn DaemonPane(
                 <h2 class="panel-title">"Workspaces"</h2>
                 <p class="hint">"A workspace is a directory. Session lists are not folders."</p>
                 <button class="primary ws-open" on:click=move |_| open_picker()>"Change workspace"</button>
-            </section>
-            <section class="card">
-                <h2 class="panel-title">"Workspaces"</h2>
-                <Show when=move || workspaces.get().is_empty()>
-                    <EmptyState title="No workspaces".into() body="Add a directory that exists on the daemon host.".into() />
-                </Show>
-                <ul class="plain">
-                    {move || workspaces.get().into_iter().map(|w| {
-                        let id = w.id.clone();
-                        let is_active = move || active_workspace.get() == id;
-                        let activate_id = w.id.clone();
-                        view! {
-                            <li class="row">
-                                <span>
-                                    {w.name}
-                                    <Show when=is_active>" "<Badge kind="done".into() label="active".into() /></Show>
-                                    <span class="path">{w.path.clone()}</span>
-                                    {(!w.rules.is_empty()).then(|| {
-                                        let rules = w.rules.clone();
-                                        view! { <span class="path">{format!("rules {rules}")}</span> }
-                                    })}
-                                    {(!w.permission_mode.is_empty()).then(|| {
-                                        let mode = w.permission_mode.clone();
-                                        view! { <span class="path">{format!("mode {mode}")}</span> }
-                                    })}
-                                </span>
-                                <button class="secondary" on:click=move |_| {
-                                    let (b, t, id) = (base.get(), token.get(), activate_id.clone());
-                                    spawn_local(async move {
-                                        let path = format!("/v1/workspaces/{id}/activate");
-                                        match post_json(&b, &t, &path, serde_json::json!({})).await {
-                                            Ok(()) => active_workspace.set(id),
-                                            Err(e) => status.set(format!("activate failed: {e}")),
-                                        }
-                                    });
-                                }>"Open"</button>
-                            </li>
-                        }
-                    }).collect_view()}
-                </ul>
-                <div class="row">
-                    <input placeholder="/home/you/Projects/my-repo"
-                        prop:value=move || new_path.get()
-                        on:input=move |ev| new_path.set(event_target_value(&ev)) />
-                    <button class="primary" on:click=add_workspace>"Add"</button>
-                </div>
-            </section>
-            <section class="card">
-                <h2 class="panel-title">"Policy"</h2>
-                <p class="hint">"Rules must be a file inside the active workspace. The mode is stored here and is not applied to the live session."</p>
-                <label>"Rules file"</label>
-                <input placeholder="AGENTS.md"
-                    prop:value=move || policy_rules.get()
-                    on:input=move |ev| policy_rules.set(event_target_value(&ev)) />
-                <label>"Permission mode"</label>
-                <select class="mode" prop:value=move || policy_mode.get() on:change=move |ev| policy_mode.set(event_target_value(&ev))>
-                    <option value="">"Unset"</option>
-                    {permission_modes().iter().map(|m| {
-                        let id = m.id.to_string();
-                        let label = m.label.to_string();
-                        view! { <option value=id>{label}</option> }
-                    }).collect_view()}
-                </select>
-                <button class="primary" on:click=save_policy>"Save policy"</button>
             </section>
         </main>
     }

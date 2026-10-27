@@ -977,6 +977,7 @@ select.mode, .daemon select {
   /* feature:session-selection end */
 }
 
+
 /* feature:ssh-gateway begin */
 .gw-anchor { position: relative; }
 .gw-btn {

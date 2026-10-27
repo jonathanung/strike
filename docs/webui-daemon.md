@@ -174,9 +174,6 @@ only organise chats. They do not select a directory.
 2. Session folders that organise chats, separate from workspace
    directories. The list already shows which workspace a chat is bound
    to. It does not hide chats from other workspaces.
-3. Session list and resume follow the active workspace. Files and diffs
-   follow the active root's directory.
-4. Daemon discovery on the tailnet. Per-gateway tokens are in the switcher
-   (`sessionStorage`); the page does not open SSH itself. Per-remote tokens
-   in the UI are still one token field for the selected daemon.
-5. Tauri shell (optional), TUI removal decision, `docs/web.md` rewrite.
+3. Daemon discovery on the tailnet. Per-gateway tokens are in the switcher
+   (`sessionStorage`); the page does not open SSH itself.
+4. Tauri shell (optional), TUI removal decision, `docs/web.md` rewrite.

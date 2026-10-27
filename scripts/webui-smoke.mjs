@@ -1579,7 +1579,6 @@ try {
     }),
     { timeout: WAIT_MS, interval: 250 },
   );
-
   const wsClicked = await send("Runtime.evaluate", {
     expression: `(() => {
       const btn = document.querySelector(".ws-open");
