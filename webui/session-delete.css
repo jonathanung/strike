@@ -2,19 +2,11 @@
 /* Session delete (#1358): row affordance + confirm / force-confirm
    dialog. Tokens only; the danger colour is the theme's --signal. */
 
-.session-delete-action {
-  color: var(--muted);
-}
-
+/* The Delete action sits in the session panel's row actions
+   (.ss-actions), revealed on hover/focus like Open, Fork, and Pin, and
+   always shown on touch devices by the panel's own rules. */
 .session-delete-action:hover {
   color: var(--signal);
-}
-
-/* The open session's Delete stays visible, not hover-only: deleting the
-   session you are looking at is the 409/force path and must be easy to
-   find, while other rows keep the pin's hover reveal. */
-.session-row.on .session-delete-action {
-  opacity: 1;
 }
 
 .session-delete-backdrop {
