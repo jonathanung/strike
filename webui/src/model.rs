@@ -362,6 +362,9 @@ pub struct ChatLine {
     pub key: String,
     /// Envelope time of the event that created this line, epoch ms.
     /// 0 means unknown (old log line without a parseable `time`).
+    /// Carried for transcript consumers; the readable pane stamps its own
+    /// `Message::at_ms`.
+    #[allow(dead_code)]
     pub at_ms: f64,
 }
 

@@ -22,12 +22,14 @@ mod session_delete;
 mod shell;
 mod side_chat;
 mod status;
+mod transcript;
+mod transcript_view;
 mod workspaces;
 
 use crate::shell::icon;
 
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -36,23 +38,25 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use model::{
     activity_panel, child_card_from_parts, child_card_from_text, child_keys_match, display_state,
-    fmt_ago, fmt_elapsed, is_running, merge_sessions, mode_label, rfc3339_to_ms,
-    permission_modes, prefer_summary, protocol_dump, session_label, status_kind, strip_echo_tip,
-    task_headline, ActivityRow, Bootstrap, ChangedFilesResponse, ChatLine,
-    ChildCard, ChildrenResponse, FilesResponse, Health, ModelInfo, ModelList, RootSummary,
-    SessionItem, SessionsResponse, StatusBoard, TeamSnapshot, Workspace, WorkspacesResponse,
+    fmt_ago, fmt_elapsed, is_running, merge_sessions, mode_label, permission_modes, prefer_summary,
+    protocol_dump, rfc3339_to_ms, session_label, status_kind, strip_echo_tip, task_headline,
+    ActivityRow, Bootstrap, ChangedFilesResponse, ChatLine, ChildCard, ChildrenResponse,
+    FilesResponse, Health, ModelInfo, ModelList, Remote, RootSummary, SessionItem, SessionsResponse,
+    StatusBoard, TeamSnapshot, Workspace, WorkspacesResponse,
 };
-use protocol_schema::Event;
 use session_panel::{dispatch_session_key, SessionPanel};
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 
 use crate::api::{
-    get_json, idempotency_key, now_ms, patch_json, post_json, post_json_value, post_op, put_json,
+    get_json, get_text, idempotency_key, now_ms, patch_json, post_json, post_json_value, post_op,
+    put_json,
 };
+use crate::transcript::Transcript;
+use crate::transcript_view::{save_download, TranscriptHandlers, TranscriptPane};
 use crate::workspaces::WorkspacePicker;
 use crate::storage::StoragePanel;
-use crate::editor::{DocumentPane, LinkedBody, MarkdownView, has_markdown_table};
+use crate::editor::DocumentPane;
 use crate::side_chat::SideChatPanel;
 
 use crate::model::{budget_elapsed, can_retry, RootsResponse};
@@ -186,117 +190,6 @@ fn Skeleton() -> impl IntoView {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn push_line(
-    lines: RwSignal<Vec<ChatLine>>,
-    seq: &Rc<Cell<u32>>,
-    role: &str,
-    title: &str,
-    body: &str,
-    badge: &str,
-    at_ms: f64,
-) {
-    let id = seq.get() + 1;
-    seq.set(id);
-    lines.update(|list| {
-        list.push(ChatLine {
-            id,
-            role: role.into(),
-            title: title.into(),
-            body: body.into(),
-            badge: badge.into(),
-            detail: String::new(),
-            key: String::new(),
-            at_ms,
-        });
-    });
-}
-
-fn upsert_child(lines: RwSignal<Vec<ChatLine>>, seq: &Rc<Cell<u32>>, card: ChildCard) {
-    if card.key.is_empty() {
-        return;
-    }
-    let kind = status_kind(&card.status);
-    let updated = lines
-        .try_update(|list| {
-            let Some(existing) = list
-                .iter_mut()
-                .rev()
-                .find(|line| line.role == "child" && child_keys_match(&line.key, &card.key))
-            else {
-                return false;
-            };
-            if !card.name.is_empty() {
-                existing.title = card.name.clone();
-            }
-            existing.body = prefer_summary(&existing.body, &card.summary);
-            if card.details.len() >= existing.detail.len() && !card.details.is_empty() {
-                existing.detail = card.details.clone();
-            }
-            if !kind.is_empty() {
-                existing.badge = kind.clone();
-            }
-            if existing.at_ms <= 0.0 && card.at_ms > 0.0 {
-                existing.at_ms = card.at_ms;
-            }
-            true
-        })
-        .unwrap_or(false);
-    if updated {
-        return;
-    }
-    let id = seq.get() + 1;
-    seq.set(id);
-    let title = if card.name.is_empty() {
-        "Child".into()
-    } else {
-        card.name
-    };
-    lines.update(|list| {
-        list.push(ChatLine {
-            id,
-            role: "child".into(),
-            title,
-            body: card.summary,
-            badge: kind,
-            detail: card.details,
-            key: card.key,
-            at_ms: card.at_ms,
-        });
-    });
-}
-
-fn absorb_noise(lines: RwSignal<Vec<ChatLine>>, seq: &Rc<Cell<u32>>) {
-    let mut cards = Vec::new();
-    lines.update(|list| {
-        for line in list.iter_mut() {
-            if line.role != "you" && line.role != "strike" {
-                continue;
-            }
-            line.body = strip_echo_tip(&line.body);
-            if let Some(mut card) = child_card_from_text(&line.body) {
-                card.at_ms = line.at_ms;
-                cards.push(card);
-                line.body.clear();
-            } else if let Some((summary, details)) = protocol_dump(&line.body) {
-                cards.push(ChildCard {
-                    key: format!("dump-{}", line.id),
-                    name: "Details".into(),
-                    status: String::new(),
-                    summary,
-                    details,
-                    at_ms: line.at_ms,
-                });
-                line.body.clear();
-            }
-        }
-        list.retain(|line| line.role == "child" || !line.body.trim().is_empty());
-    });
-    for card in cards {
-        upsert_child(lines, seq, card);
-    }
-}
-
 /// SessionTitled is the daemon's title source (#1262 owns rename). Reflect it
 /// on the open root so the list does not keep a raw id until the next poll.
 fn note_live_title(
@@ -335,172 +228,6 @@ fn note_live_title(
         }
     });
 }
-
-/// Header stamp for a transcript line (#1349): relative while the line is
-/// under a day old (the session list's `fmt_ago` vocabulary), local clock
-/// time after that. Empty when the line's envelope time is unknown.
-fn line_stamp(at_ms: f64) -> String {
-    if at_ms <= 0.0 {
-        return String::new();
-    }
-    let now = now_ms();
-    if now - at_ms < 86_400_000.0 {
-        let rel = fmt_ago((at_ms / 1000.0) as i64, (now / 1000.0) as i64);
-        if !rel.is_empty() {
-            return rel;
-        }
-    }
-    let d = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(at_ms));
-    format!("{:02}:{:02}", d.get_hours() as u32, d.get_minutes() as u32)
-}
-
-/// Full local timestamp for the stamp's tooltip. Empty when unknown.
-fn line_full_time(at_ms: f64) -> String {
-    if at_ms <= 0.0 {
-        return String::new();
-    }
-    js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(at_ms))
-        .to_string()
-        .as_string()
-        .unwrap_or_default()
-}
-
-/// Local calendar day of a line, as (year, month 0-based, day of month).
-fn line_day(at_ms: f64) -> (u32, u32, u32) {
-    let d = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(at_ms));
-    (
-        d.get_full_year() as u32,
-        d.get_month() as u32,
-        d.get_date() as u32,
-    )
-}
-
-/// Separator label shown when the local day changes between lines.
-fn line_day_label(at_ms: f64) -> String {
-    const DAYS: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-    const MONTHS: [&str; 12] = [
-        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-    ];
-    let d = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(at_ms));
-    format!(
-        "{} {} {}, {}",
-        DAYS[(d.get_day() as usize) % 7],
-        MONTHS[(d.get_month() as usize) % 12],
-        d.get_date() as u32,
-        d.get_full_year() as u32
-    )
-}
-
-fn apply_envelope(
-    lines: RwSignal<Vec<ChatLine>>,
-    seq: &Rc<Cell<u32>>,
-    open: &Rc<Cell<bool>>,
-    storage_rev: RwSignal<u32>,
-    raw: &str,
-) {
-    // Generated contract: unknown events are skipped, and a known event whose
-    // payload does not match the schema is dropped. Rendering below still
-    // reads the raw object.
-    match protocol_schema::decode_event(raw) {
-        Ok(Event::Unknown { .. }) | Err(_) => return,
-        Ok(_) => {}
-    }
-    let v: serde_json::Value = match serde_json::from_str(raw) {
-        Ok(v) => v,
-        Err(_) => return,
-    };
-    let typ = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
-    // The envelope's `time` is the event's original time (also what the
-    // JSONL log persists), so replayed lines keep their real timestamps.
-    let at_ms = v
-        .get("time")
-        .and_then(|t| t.as_str())
-        .map(rfc3339_to_ms)
-        .unwrap_or(0.0);
-    let data = v.get("data").cloned().unwrap_or(serde_json::Value::Null);
-    let text = |key: &str| match data.get(key) {
-        Some(serde_json::Value::String(s)) => s.clone(),
-        Some(other) if !other.is_null() => other.to_string(),
-        _ => String::new(),
-    };
-    match typ {
-        "user.message" => {
-            open.set(false);
-            push_line(lines, seq, "you", "You", &text("text"), "", at_ms);
-            absorb_noise(lines, seq);
-        }
-        "turn.started" => open.set(false),
-        "text.delta" => {
-            let chunk = text("text");
-            if chunk.is_empty() {
-                return;
-            }
-            if open.get() {
-                lines.update(|list| {
-                    if let Some(last) = list.last_mut() {
-                        if last.role == "strike" {
-                            last.body.push_str(&chunk);
-                            return;
-                        }
-                    }
-                });
-                // If the last row was not the assistant, fall through by checking.
-                let appended =
-                    lines.with(|list| list.last().map(|l| l.role == "strike").unwrap_or(false));
-                if appended {
-                    return;
-                }
-            }
-            open.set(true);
-            push_line(lines, seq, "strike", "Strike", &chunk, "", at_ms);
-        }
-        "turn.completed" => {
-            open.set(false);
-            absorb_noise(lines, seq);
-        }
-        "tool.begin" => {
-            open.set(false);
-            let name = text("name");
-            push_line(lines, seq, "tool", &name, &text("args"), "tool", at_ms);
-        }
-        "tool.end" => {
-            let title = text("title");
-            let output = text("output");
-            let err = data
-                .get("isError")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-            let badge = if err { "failed" } else { "done" };
-            let heading = if title.is_empty() {
-                text("name")
-            } else {
-                title
-            };
-            push_line(lines, seq, "tool", &heading, &output, badge, at_ms);
-        }
-        "child.completed" => {
-            let status = text("status");
-            let name = text("name");
-            let session = text("sessionId");
-            let mut summary = text("summary");
-            if summary.is_empty() {
-                summary = data
-                    .get("handoff")
-                    .and_then(|h| h.get("summary"))
-                    .and_then(|s| s.as_str())
-                    .unwrap_or("")
-                    .to_string();
-            }
-            let details = serde_json::to_string_pretty(&data).unwrap_or_default();
-            let mut card = child_card_from_parts(&name, &session, &status, &summary, &details);
-            card.at_ms = at_ms;
-            upsert_child(lines, seq, card);
-        }
-        "artifact.updated" => storage_rev.update(|n| *n = n.wrapping_add(1)),
-        _ => {}
-    }
-}
-
 /// The body text find-in-transcript (#1342) may search for one line:
 /// the rendered body, except long / JSON-ish tool bodies the transcript
 /// folds into a collapsed <details> — those stay unsearchable in this
@@ -559,23 +286,6 @@ fn memory_mode_label(mode: &str) -> &'static str {
     }
 }
 
-fn empty_headline(tick: u32) -> &'static str {
-    match (tick / 4) % 3 {
-        0 => "What should this session do?",
-        1 => "This session is idle.",
-        _ => "Delegated results land in the transcript.",
-    }
-}
-
-const SUGGESTIONS: [&str; 6] = [
-    "What can you do in this session?",
-    "Summarize the working directory",
-    "Explain how the approval modes differ",
-    "Draft a short plan before changing files",
-    "Review what this session has done",
-    "What should I look at next?",
-];
-
 pub(crate) fn load_string_list(key: &str) -> Vec<String> {
     serde_json::from_str(&load(key)).unwrap_or_default()
 }
@@ -588,6 +298,19 @@ fn set_drag(ev: &web_sys::DragEvent, path: &str) {
     if let Some(dt) = ev.data_transfer() {
         let _ = dt.set_data("text/plain", &format!("@{path}"));
     }
+}
+
+fn file_stem(id: &str) -> String {
+    id.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .take(48)
+        .collect()
 }
 
 fn short_id(id: &str) -> String {
@@ -728,6 +451,8 @@ fn App() -> impl IntoView {
     let sessions = RwSignal::new(Vec::<SessionItem>::new());
     let active_root = RwSignal::new(String::new());
     let lines = RwSignal::new(Vec::<ChatLine>::new());
+    let transcript = RwSignal::new(Transcript::new());
+    let ux_note = RwSignal::new(String::new());
     let activity = RwSignal::new(Vec::<ActivityRow>::new());
     let team_note = RwSignal::new(String::new());
     let draft = RwSignal::new(String::new());
@@ -1051,13 +776,9 @@ fn App() -> impl IntoView {
     };
 
     let tail: Rc<RefCell<Option<web_sys::EventSource>>> = Rc::new(RefCell::new(None));
-    let seq = Rc::new(Cell::new(0u32));
-    let open = Rc::new(Cell::new(false));
     let shown_root = RwSignal::new(String::new());
     let wipe_on_replay = RwSignal::new(false);
     let tail_fx = tail.clone();
-    let seq_fx = seq.clone();
-    let open_fx = open.clone();
     Effect::new(move |_| {
         let root = active_root.get();
         let b = base.get();
@@ -1068,8 +789,6 @@ fn App() -> impl IntoView {
         if let Some(es) = tail_fx.borrow_mut().take() {
             es.close();
         }
-        seq_fx.set(0);
-        open_fx.set(false);
         // A new session must not keep the previous transcript. A reconnect of
         // the same session keeps the column until the daemon's log replay
         // arrives, then replaces it so lines are not doubled.
@@ -1077,6 +796,8 @@ fn App() -> impl IntoView {
         shown_root.set(root.clone());
         if switching {
             lines.set(Vec::new());
+            transcript.set(Transcript::new());
+            ux_note.set(String::new());
             children.set(Vec::new());
             wipe_on_replay.set(false);
             // Find belongs to the session that was open (#1342).
@@ -1116,8 +837,7 @@ fn App() -> impl IntoView {
             }
         };
         let lines_cb = lines;
-        let seq_cb = seq_fx.clone();
-        let open_cb = open_fx.clone();
+        let transcript_cb = transcript;
         let sessions_cb = sessions;
         let roots_cb = roots;
         let titled_root = root.clone();
@@ -1130,7 +850,14 @@ fn App() -> impl IntoView {
                 }
                 if let Some(data) = ev.data().as_string() {
                     note_live_title(sessions_cb, roots_cb, &titled_root, &data);
-                    apply_envelope(lines_cb, &seq_cb, &open_cb, storage_rev, &data);
+                    transcript_cb.update(|t| t.apply_envelope(&data));
+                    // Mirror into the ChatLine shape the side chat and the
+                    // activity panel still consume.
+                    lines_cb.set(transcript_cb.with_untracked(|t| t.chat_lines()));
+                    let artifact_rev = transcript_cb.with_untracked(|t| t.artifact_updates);
+                    if artifact_rev != storage_rev.get_untracked() {
+                        storage_rev.set(artifact_rev);
+                    }
                     let prev = LiveModelState {
                         provider: provider_name.get_untracked(),
                         model: model_name.get_untracked(),
@@ -1160,6 +887,7 @@ fn App() -> impl IntoView {
         let epoch_open = epoch;
         let epochs_open = stream_epoch;
         let lines_open = lines;
+        let transcript_open = transcript;
         let wipe_open = wipe_on_replay;
         let on_open = Closure::<dyn FnMut(web_sys::Event)>::new(move |_ev| {
             if epochs_open.get_untracked() != epoch_open {
@@ -1172,6 +900,7 @@ fn App() -> impl IntoView {
             if wipe_open.get_untracked() {
                 wipe_open.set(false);
                 lines_open.set(Vec::new());
+                transcript_open.set(Transcript::new());
             }
         });
         es.set_onopen(Some(on_open.as_ref().unchecked_ref()));
@@ -1216,6 +945,71 @@ fn App() -> impl IntoView {
         es.set_onerror(Some(on_err.as_ref().unchecked_ref()));
         on_err.forget();
         *tail_fx.borrow_mut() = Some(es);
+    });
+
+    // Listed title -> transcript (a durable rename or the daemon's title
+    // fills the pane header; a pinned rename is not wiped by a replay).
+    Effect::new(move |_| {
+        let id = active_root.get();
+        if id.is_empty() {
+            return;
+        }
+        let from_session = sessions.with(|list| {
+            list.iter()
+                .find(|s| s.id == id)
+                .map(|s| s.title.clone())
+                .unwrap_or_default()
+        });
+        let from_root = roots.with(|list| {
+            list.iter()
+                .find(|r| r.id == id)
+                .map(|r| r.title.clone())
+                .unwrap_or_default()
+        });
+        let listed = if !from_session.is_empty() {
+            from_session
+        } else {
+            from_root
+        };
+        if !listed.is_empty() {
+            transcript.update(|t| t.set_listed_title(&listed));
+        }
+    });
+
+    // Transcript title -> session/root lists (auto-title and renames show
+    // in the session list without waiting for the next poll).
+    Effect::new(move |_| {
+        let title = transcript.with(|t| t.title.clone());
+        let id = active_root.get();
+        if title.is_empty() || id.is_empty() {
+            return;
+        }
+        let session_stale = sessions.with_untracked(|list| {
+            list.iter()
+                .find(|s| s.id == id)
+                .map(|s| s.title != title)
+                .unwrap_or(false)
+        });
+        if session_stale {
+            sessions.update(|list| {
+                if let Some(s) = list.iter_mut().find(|s| s.id == id) {
+                    s.title = title.clone();
+                }
+            });
+        }
+        let root_stale = roots.with_untracked(|list| {
+            list.iter()
+                .find(|r| r.id == id)
+                .map(|r| r.title.is_empty() || (r.title != title && session_stale))
+                .unwrap_or(false)
+        });
+        if root_stale {
+            roots.update(|list| {
+                if let Some(r) = list.iter_mut().find(|r| r.id == id && r.title.is_empty()) {
+                    r.title = title;
+                }
+            });
+        }
     });
 
     let poll_tick = tick;
@@ -2449,6 +2243,156 @@ fn App() -> impl IntoView {
         }
     });
 
+    // Find-in-transcript view state for the readable pane (#1310 union):
+    // the matches over the ChatLine mirror — which is transcript.chat_lines(),
+    // index-aligned with Transcript::messages — plus the current match,
+    // republished whenever the query, bar state, step, or line list moves.
+    // TranscriptPane renders the <mark> highlights from this; the bar's
+    // count and the scroll effect above keep using `lines` directly.
+    let find_view = RwSignal::new(crate::transcript_view::FindView::default());
+    Effect::new(move |_| {
+        let q = tf_query.get();
+        let open = tf_open.get();
+        let idx = tf_idx.get();
+        let hits = if open && !q.is_empty() {
+            transcript_matches(&lines.get(), &q)
+        } else {
+            Vec::new()
+        };
+        let current = hits
+            .get(transcript_find::clamped_idx(idx, hits.len()))
+            .copied();
+        find_view.set(crate::transcript_view::FindView { hits, current });
+    });
+
+    let apply_title: Callback<(String,)> = (move |title: String| {
+        let id = active_root.get_untracked();
+        if id.is_empty() {
+            ux_note.set("No session to rename.".into());
+            return;
+        }
+        let title = title.trim().to_string();
+        if title.is_empty() {
+            ux_note.set("A title needs at least one character.".into());
+            return;
+        }
+        transcript.update(|t| t.pin_title(title.clone()));
+        sessions.update(|list| {
+            if let Some(s) = list.iter_mut().find(|s| s.id == id) {
+                s.title = title.clone();
+            }
+        });
+        roots.update(|list| {
+            if let Some(r) = list.iter_mut().find(|r| r.id == id) {
+                r.title = title.clone();
+            }
+        });
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            let path = format!("/v1/sessions/{}", api::js_encode(&id));
+            match patch_json(&b, &t, &path, serde_json::json!({"title": title})).await {
+                Ok(()) => ux_note.set(String::new()),
+                Err(e) => ux_note.set(format!("Rename failed: {e}")),
+            }
+        });
+    })
+    .into();
+    let handlers = TranscriptHandlers {
+        send: (move |text: String| {
+            send_text(text);
+        })
+        .into(),
+        rename: apply_title,
+        regenerate: (move || {
+            let title = transcript.with_untracked(|t| t.regenerated_title());
+            if title.is_empty() {
+                ux_note.set("No message to title from yet.".into());
+                return;
+            }
+            apply_title.run((title,));
+        })
+        .into(),
+        export_timeline: (move || {
+            let id = active_root.get_untracked();
+            if id.is_empty() {
+                ux_note.set("No session to export.".into());
+                return;
+            }
+            let (b, t) = (base.get_untracked(), token.get_untracked());
+            spawn_local(async move {
+                let path = format!(
+                    "/v1/sessions/{}/timeline/export?format=json",
+                    api::js_encode(&id)
+                );
+                match get_text(&b, &t, &path).await {
+                    Ok(text) => {
+                        save_download(
+                            &format!("strike-timeline-{}.json", file_stem(&id)),
+                            "application/json",
+                            &text,
+                        );
+                        ux_note.set("Exported the redacted timeline.".into());
+                    }
+                    Err(e) => ux_note.set(format!("Export failed: {e}")),
+                }
+            });
+        })
+        .into(),
+        export_markdown: (move || {
+            let md = transcript.with_untracked(|t| t.to_markdown());
+            let id = active_root.get_untracked();
+            let name = if id.is_empty() {
+                "strike-session.md".into()
+            } else {
+                format!("strike-session-{}.md", file_stem(&id))
+            };
+            save_download(&name, "text/markdown;charset=utf-8", &md);
+            ux_note.set("Downloaded the visible transcript.".into());
+        })
+        .into(),
+        retry: (move |text: String| {
+            send_text(text);
+        })
+        .into(),
+        fork: (move |keep: i32| {
+            let root = active_root.get_untracked();
+            if root.is_empty() {
+                ux_note.set("No session to fork.".into());
+                return;
+            }
+            let (b, t) = (base.get_untracked(), token.get_untracked());
+            spawn_local(async move {
+                let path = format!("/v1/sessions/{}/fork_at", api::js_encode(&root));
+                match post_json_value(&b, &t, &path, serde_json::json!({"keepEvents": keep})).await
+                {
+                    Ok(created) => {
+                        let id = created
+                            .get("id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        if id.is_empty() {
+                            ux_note.set("Fork did not return a session.".into());
+                            return;
+                        }
+                        ux_note.set("Forked this turn into a new session.".into());
+                        resume_session(id);
+                    }
+                    Err(e) => ux_note.set(format!("Fork failed: {e}")),
+                }
+            });
+        })
+        .into(),
+        open_file: (move |path: String, line: u32| {
+            // The editor stream (#1269) is wired now: a file chip opens the
+            // document pane at the line, beside the transcript.
+            doc_diff.set(false);
+            doc_line.set(line);
+            doc_path.set(path);
+        })
+        .into(),
+    };
+
     view! {
         <shell::Chrome />
         <session_delete::SessionDeleteDialog
@@ -2670,165 +2614,15 @@ fn App() -> impl IntoView {
                         </div>
                     </Show>
                     <Show when=move || doc_path.get().is_empty()>
-                    <div class="transcript" id="tf-transcript" aria-live="polite">
-                        <Show when=move || loading.get()>
-                            <Skeleton />
-                        </Show>
-                        <Show when=move || !loading.get() && lines.get().is_empty() && load_error.get().is_empty()>
-                            <div class="empty-hero">
-                                <strong>{move || empty_headline(tick.get())}</strong>
-                                <p>"Send a message, or start from a suggestion."</p>
-                                <div class="suggestions">
-                                    {SUGGESTIONS.into_iter().map(|text| {
-                                        let label = text.to_string();
-                                        let send_label = label.clone();
-                                        let send = send_text;
-                                        view! {
-                                            <button type="button" class="suggestion" on:click=move |_| { send(send_label.clone()); }>{label}</button>
-                                        }
-                                    }).collect_view()}
-                                </div>
-                            </div>
-                        </Show>
-                        {move || {
-                            let list = lines.get();
-                            // Find in transcript (#1342): matches over the
-                            // whole line model (not just visible DOM), so
-                            // off-screen matches count and highlight on
-                            // render. The current match drives scrolling
-                            // via the effect next to the Ctrl+F binding.
-                            let tf_q = tf_query.get();
-                            let find_active = !tf_q.is_empty();
-                            let all_hits = transcript_matches(&list, &tf_q);
-                            let cur_hit = all_hits
-                                .get(transcript_find::clamped_idx(tf_idx.get(), all_hits.len()))
-                                .copied();
-                            // A day separator precedes the first timed line of
-                            // each local day (#1349). Untimed lines never open
-                            // a new day.
-                            let mut prev_day: Option<(u32, u32, u32)> = None;
-                            let seps: Vec<Option<String>> = list
-                                .iter()
-                                .map(|line| {
-                                    if line.at_ms <= 0.0 {
-                                        return None;
-                                    }
-                                    let day = line_day(line.at_ms);
-                                    let label = if prev_day == Some(day) {
-                                        None
-                                    } else {
-                                        Some(line_day_label(line.at_ms))
-                                    };
-                                    prev_day = Some(day);
-                                    label
-                                })
-                                .collect();
-                            list.into_iter().zip(seps).enumerate().map(|(line_idx, (line, sep))| {
-                            let badge = line.badge.clone();
-                            let badge_kind = badge.clone();
-                            let role = line.role.clone();
-                            let title = line.title.clone();
-                            let body = line.body.clone();
-                            let detail = line.detail.clone();
-                            let stamp = line_stamp(line.at_ms);
-                            let stamp_full = line_full_time(line.at_ms);
-                            let has_stamp = !stamp.is_empty();
-                            let has_badge = !badge.is_empty();
-                            let has_detail = !detail.is_empty();
-                            let card = role == "child";
-                            let prose = role == "you" || role == "strike";
-                            let tool_dump = !card && !prose && (body.trim_start().starts_with('{') || body.trim_start().starts_with('[') || body.chars().count() > 240);
-                            let body_ranges: Vec<(usize, usize)> = all_hits
-                                .iter()
-                                .filter(|h| h.line == line_idx && h.field == transcript_find::Field::Body)
-                                .map(|h| (h.start, h.end))
-                                .collect();
-                            let title_ranges: Vec<(usize, usize)> = all_hits
-                                .iter()
-                                .filter(|h| h.line == line_idx && h.field == transcript_find::Field::Title)
-                                .map(|h| (h.start, h.end))
-                                .collect();
-                            let cur_body = cur_hit
-                                .filter(|h| h.line == line_idx && h.field == transcript_find::Field::Body)
-                                .map(|h| (h.start, h.end));
-                            let cur_title = cur_hit
-                                .filter(|h| h.line == line_idx && h.field == transcript_find::Field::Title)
-                                .map(|h| (h.start, h.end));
-                            let body_view = if card {
-                                let summary = body;
-                                let summary_inner = if find_active {
-                                    view! { <transcript_find::MarkedText text=summary.clone() kind="inline" ranges=body_ranges current=cur_body /> }.into_any()
-                                } else {
-                                    view! { <LinkedBody text=summary.clone() kind="inline" doc_path=doc_path doc_line=doc_line doc_diff=doc_diff /> }.into_any()
-                                };
-                                view! {
-                                    <div>
-                                        <p class="summary">
-                                            {summary_inner}
-                                        </p>
-                                        {has_detail.then(|| {
-                                            let detail = detail.clone();
-                                            view! {
-                                                <details>
-                                                    <summary>"Details"</summary>
-                                                    <LinkedBody text=detail kind="pre" doc_path=doc_path doc_line=doc_line doc_diff=doc_diff />
-                                                </details>
-                                            }
-                                        })}
-                                    </div>
-                                }.into_any()
-                            } else if prose {
-                                if find_active {
-                                    // While finding, prose renders as
-                                    // marked plain text so every match is
-                                    // visible in place; the markdown /
-                                    // linked renderers return when the
-                                    // find bar clears.
-                                    view! { <transcript_find::MarkedText text=body kind="prose" ranges=body_ranges current=cur_body /> }.into_any()
-                                } else if has_markdown_table(&body) {
-                                    // Table-bearing prose renders through the
-                                    // shared markdown view (#1344); every other
-                                    // bubble keeps the plain linked-text path.
-                                    view! { <MarkdownView text=body /> }.into_any()
-                                } else {
-                                    view! { <LinkedBody text=body kind="prose" doc_path=doc_path doc_line=doc_line doc_diff=doc_diff /> }.into_any()
-                                }
-                            } else if tool_dump {
-                                view! {
-                                    <details>
-                                        <summary>"Details"</summary>
-                                        <LinkedBody text=body kind="pre" doc_path=doc_path doc_line=doc_line doc_diff=doc_diff />
-                                    </details>
-                                }.into_any()
-                            } else if find_active {
-                                view! { <transcript_find::MarkedText text=body kind="pre" ranges=body_ranges current=cur_body /> }.into_any()
-                            } else {
-                                view! { <LinkedBody text=body kind="pre" doc_path=doc_path doc_line=doc_line doc_diff=doc_diff /> }.into_any()
-                            };
-                            let title_view = if find_active && !title_ranges.is_empty() {
-                                view! { <transcript_find::MarkedText text=title.clone() kind="inline" ranges=title_ranges current=cur_title /> }.into_any()
-                            } else {
-                                view! { <span>{title.clone()}</span> }.into_any()
-                            };
-                            view! {
-                                {sep.map(|label| view! { <div class="day-sep" role="separator">{label}</div> })}
-                                <article class=format!("bubble card role-{role}") id=format!("tf-line-{line_idx}")>
-                                    <header>
-                                        <span class="who">{title_view}</span>
-                                        <Show when=move || has_badge>
-                                            {match StatusKind::parse_known(&badge_kind) {
-                                                Some(kind) => view! { <StatusMark kind=kind place=StatusSlot::Badge /> }.into_any(),
-                                                None => view! { <Badge kind=badge_kind.clone() label=badge.clone() /> }.into_any(),
-                                            }}
-                                        </Show>
-                                        {has_stamp.then(|| view! { <span class="stamp" title=stamp_full.clone()>{stamp.clone()}</span> })}
-                                    </header>
-                                    {body_view}
-                                </article>
-                            }
-                            }).collect_view()
-                        }}
-                    </div>
+                    <TranscriptPane
+                        transcript=transcript
+                        loading=loading
+                        load_error=load_error
+                        tick=tick
+                        note=ux_note
+                        handlers=handlers
+                        find=find_view
+                    />
                     </Show>
                     <Show when=move || layout.get() == "conversation" && {
                         // session_busy reads roots/live_busy untracked, so
@@ -2841,7 +2635,7 @@ fn App() -> impl IntoView {
                         let root = active_root.get();
                         !root.is_empty()
                             && !session_busy(&root)
-                            && lines.with(|list| list.last().map(|line| line.role == "strike").unwrap_or(false))
+                            && transcript.with(|t| t.messages.last().map(|m| m.role == crate::transcript::Role::Strike).unwrap_or(false))
                     }>
                         <div class="follow-ups" aria-label="Suggestions">
                             {chat_mode::FOLLOW_UPS.into_iter().map(|text| {
