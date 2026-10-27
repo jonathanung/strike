@@ -83,7 +83,14 @@ Status: walking skeleton on branch `worktree-rust-webui-daemon`. Not merged.
     `accept-edits` (file edits allowed; shell and network still ask),
     `yolo` (this session skips asks that are not hard-denied; other
     sessions stay as they are). There is no read-only-shell mode and no
-    all-sessions skip. The model chip (Alt+M) opens a filterable menu
+    all-sessions skip. Soft, Edits, and Yolo ask for confirmation
+    before the post. Default and Plan apply immediately. A pending
+    `permission.asked` is a card above the composer (allow once, allow
+    session, allow project, deny) with the command or edit diff from the
+    event. The same chip opens the rules and audit panel
+    (`GET/POST /v1/permissions/rules`, `GET /v1/permissions/audit`).
+    Deny rules still apply in Yolo and Edits. Label mapping and the
+    confirm rules are in [webui-approvals.md](webui-approvals.md). The model chip (Alt+M) opens a filterable menu
     grouped by provider. Pins stay in this browser. Enter posts
     `select.model` for this session; saving a default patches
     `/v1/settings` and does not by itself switch the session. Effort is
@@ -99,15 +106,24 @@ Status: walking skeleton on branch `worktree-rust-webui-daemon`. Not merged.
     as ordinary text. A failed load shows the error and Retry.
   - The side panel is Activity (team snapshot: status, elapsed, stop,
     retry, expand, including `blocked` handoffs), Files (`/v1/files`),
-    Changes (`/v1/changed-files`), Memory, Knowledge, and Artifacts.
+    Changes (`/v1/changed-files`), Git, Worktrees, Memory, Knowledge, and
+    Artifacts.
     Clicking or dragging a file inserts `@path`. The daemon expands
     `@file`, `$skill`, `/command`, and `!shell` on `user.input` and `steer`
     before a turn starts. `!` asks through the bash permission model and
     does not start a model turn. The composer `+` menu and the suggestion
     popup only list those real actions (`composerCommands` and `skills` on
     bootstrap, files from `/v1/files/search`). A shell ask shows Allow once /
-    Reject on the composer until the approvals stream replaces that bar.
-    Memory mode
+    Reject on the composer until the approvals stream replaces that bar. Git
+    (`GET/POST /v1/git/status|diff|branches|log|stage|unstage|commit|checkout|discard|reset|branch/delete`
+    and `/v1/git/worktrees`) runs git as an argument vector. There is no
+    push route. Discard, hard reset, branch delete, worktree remove, and
+    stale prune require an exact confirm token. Hard reset is `HEAD` only.
+    Branch delete is `git branch -d`. Worktree create/remove uses the
+    existing strike worktree helper and only deletes paths under
+    `.strike/worktrees/`. Ownership comes from the session index (the same
+    records as `GET /v1/sessions/{id}/children`). `session.childIsolation`
+    is shown, not edited. Memory mode
     (normal, incognito, temporary) is a composer chip and a palette command.
     Open on a file reads it in the center document pane
     (`GET /v1/file/view`). The pane is read-only until Edit. Save is
@@ -175,8 +191,9 @@ only organise chats. They do not select a directory.
 
 ## Not yet done (next slices, in order)
 
-1. Permission asks in the transcript. The composer can set the mode;
-   an in-flight ask is still only the protocol event.
+1. Permission asks render as cards from `permission.asked`. What is
+   still open is a transcript history of asks after they resolve,
+   beyond the audit list.
 2. Session folders that organise chats, separate from workspace
    directories. The list already shows which workspace a chat is bound
    to. It does not hide chats from other workspaces.
