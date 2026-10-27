@@ -1031,26 +1031,6 @@ select.mode, .daemon select {
   opacity: 0.85;
   cursor: default;
 }
-.composer-asks {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.composer-ask {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  padding: 6px 8px;
-  border: 1px solid var(--rule);
-  border-radius: var(--radius-sm);
-  background: var(--ground);
-}
-.composer-ask .ask-label {
-  flex: 1;
-  min-width: 8rem;
-  font-size: var(--type-sm);
-}
 .composer-bar .plus {
   width: var(--control);
   padding: 0;
@@ -1080,10 +1060,6 @@ select.mode, .daemon select {
   /* feature:session-selection begin */
   .rail:has(.ss-panel) { max-height: 70vh; }
   /* feature:session-selection end */
-  /* feature:composer-triggers begin */
-  .composer-ask { align-items: stretch; }
-  .composer-ask .ask-label { flex-basis: 100%; }
-  /* feature:composer-triggers end */
 }
 
 
