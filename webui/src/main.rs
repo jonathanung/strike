@@ -13,9 +13,10 @@ mod model;
 mod notify;
 mod model_menu;
 mod model_menu_view;
+mod session_list;
+mod session_panel;
 mod storage;
-mod usage_audit;
-mod shell;
+mod usage_audit;mod shell;
 mod side_chat;
 mod status;
 
@@ -31,13 +32,14 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use model::{
     activity_panel, child_card_from_parts, child_card_from_text, child_keys_match, display_state,
-    filter_sessions, fmt_ago, fmt_elapsed, is_running, merge_sessions, mode_label, rfc3339_to_ms,
+    fmt_ago, fmt_elapsed, is_running, merge_sessions, mode_label, rfc3339_to_ms,
     permission_modes, prefer_summary, protocol_dump, session_label, status_kind, strip_echo_tip,
-    task_headline, visible_sessions, ActivityRow, Bootstrap, ChangedFilesResponse, ChatLine,
+    task_headline, ActivityRow, Bootstrap, ChangedFilesResponse, ChatLine,
     ChildCard, ChildrenResponse, FilesResponse, Health, ModelInfo, ModelList, RootSummary,
     SessionItem, SessionsResponse, StatusBoard, TeamSnapshot, Workspace, WorkspacesResponse,
 };
 use protocol_schema::Event;
+use session_panel::{dispatch_session_key, SessionPanel};
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 
@@ -60,13 +62,13 @@ fn storage() -> Option<web_sys::Storage> {
     web_sys::window()?.local_storage().ok().flatten()
 }
 
-fn load(key: &str) -> String {
+pub(crate) fn load(key: &str) -> String {
     storage()
         .and_then(|s| s.get_item(key).ok().flatten())
         .unwrap_or_default()
 }
 
-fn save(key: &str, value: &str) {
+pub(crate) fn save(key: &str, value: &str) {
     if let Some(s) = storage() {
         let _ = s.set_item(key, value);
     }
@@ -290,6 +292,45 @@ fn absorb_noise(lines: RwSignal<Vec<ChatLine>>, seq: &Rc<Cell<u32>>) {
     }
 }
 
+/// SessionTitled is the daemon's title source (#1262 owns rename). Reflect it
+/// on the open root so the list does not keep a raw id until the next poll.
+fn note_live_title(
+    sessions: RwSignal<Vec<SessionItem>>,
+    roots: RwSignal<Vec<RootSummary>>,
+    id: &str,
+    raw: &str,
+) {
+    if id.is_empty() {
+        return;
+    }
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(raw) else {
+        return;
+    };
+    if v.get("type").and_then(|t| t.as_str()) != Some("session.titled") {
+        return;
+    }
+    let Some(title) = v
+        .get("data")
+        .and_then(|d| d.get("title"))
+        .and_then(|t| t.as_str())
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+    else {
+        return;
+    };
+    let title = title.to_string();
+    sessions.update(|list| {
+        if let Some(row) = list.iter_mut().find(|row| row.id == id) {
+            row.title = title.clone();
+        }
+    });
+    roots.update(|list| {
+        if let Some(row) = list.iter_mut().find(|row| row.id == id) {
+            row.title = title;
+        }
+    });
+}
+
 /// Header stamp for a transcript line (#1349): relative while the line is
 /// under a day old (the session list's `fmt_ago` vocabulary), local clock
 /// time after that. Empty when the line's envelope time is unknown.
@@ -495,7 +536,7 @@ const SUGGESTIONS: [&str; 6] = [
     "What should I look at next?",
 ];
 
-fn load_string_list(key: &str) -> Vec<String> {
+pub(crate) fn load_string_list(key: &str) -> Vec<String> {
     serde_json::from_str(&load(key)).unwrap_or_default()
 }
 
@@ -660,11 +701,11 @@ fn App() -> impl IntoView {
     let focus = RwSignal::new(false);
     let back_stack = RwSignal::new(Vec::<String>::new());
     let forward_stack = RwSignal::new(Vec::<String>::new());
+    // Kept for the shell host bridge (palette session list / breadcrumb
+    // label), which merges with the browser-local pins. The session panel
+    // itself uses the server-backed list from /v1/session-list.
     let pins = RwSignal::new(load_string_list("strike.pins"));
     let seen = RwSignal::new(load_seen());
-    let session_filter = RwSignal::new("all".to_string());
-    let session_query = RwSignal::new(String::new());
-    let older_open = RwSignal::new(false);
     let children = RwSignal::new(Vec::<model::ChildSession>::new());
     let perm_mode = RwSignal::new("default".to_string());
     let provider_name = RwSignal::new(String::new());
@@ -1018,6 +1059,9 @@ fn App() -> impl IntoView {
         let lines_cb = lines;
         let seq_cb = seq_fx.clone();
         let open_cb = open_fx.clone();
+        let sessions_cb = sessions;
+        let roots_cb = roots;
+        let titled_root = root.clone();
         let epoch_msg = epoch;
         let epochs_msg = stream_epoch;
         let on_msg =
@@ -1026,6 +1070,7 @@ fn App() -> impl IntoView {
                     return;
                 }
                 if let Some(data) = ev.data().as_string() {
+                    note_live_title(sessions_cb, roots_cb, &titled_root, &data);
                     apply_envelope(lines_cb, &seq_cb, &open_cb, storage_rev, &data);
                     let prev = LiveModelState {
                         provider: provider_name.get_untracked(),
@@ -1045,8 +1090,7 @@ fn App() -> impl IntoView {
                     context_limit.set(next.context_limit);
                     context_fit.set(next.context_fit);
                     model_note.set(next.note);
-                    model_note_after.set(next.note_after);
-                }
+                    model_note_after.set(next.note_after);                }
             });
         es.set_onmessage(Some(on_msg.as_ref().unchecked_ref()));
         on_msg.forget();
@@ -1644,19 +1688,6 @@ fn App() -> impl IntoView {
         });
     };
 
-    let toggle_pin = move |id: String| {
-        pins.update(|list| {
-            if let Some(i) = list.iter().position(|p| p == &id) {
-                list.remove(i);
-            } else {
-                list.push(id);
-            }
-        });
-        save(
-            "strike.pins",
-            &serde_json::to_string(&pins.get_untracked()).unwrap_or_default(),
-        );
-    };
 
     let load_files = move || {
         let (b, t, path) = (
@@ -1701,6 +1732,18 @@ fn App() -> impl IntoView {
         }
     });
 
+    // The shell owns the palette, travel, focus, and Escape chords;
+    // this listener only forwards keys to the session panel (j/k/x,
+    // Alt+1..9), whose handler guards modifiers and typing targets.
+    let on_key =
+        Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |ev: web_sys::KeyboardEvent| {
+            dispatch_session_key(&ev);
+        });
+    if let Some(w) = web_sys::window() {
+        let _ = w.add_event_listener_with_callback("keydown", on_key.as_ref().unchecked_ref());
+    }
+    on_key.forget();
+
     let stream_up_online = stream_up;
     let reconnect_online = reconnect_gen;
     let on_online = Closure::<dyn FnMut(web_sys::Event)>::new(move |_ev| {
@@ -1721,8 +1764,7 @@ fn App() -> impl IntoView {
     Effect::new(move |_| {
         if model_menu.get() {
             mode_menu.set(false);
-            load_model_catalog();
-        }
+            load_model_catalog();        }
     });
 
     Effect::new(move |_| {
@@ -2199,105 +2241,18 @@ fn App() -> impl IntoView {
                     panel_drawer.set(false);
                 }></button>
                 <aside class="rail">
-                    <div class="section-head">
-                        <h2 class="panel-title"><span class="icon-slot" aria-hidden="true" inner_html=icon("sessions")></span>"Sessions"</h2>
-                        <button class="secondary" on:click=move |_| new_session()>"New"</button>
-                    </div>
-                    <div class="chips" role="tablist" aria-label="Session filter">
-                        <button class=move || if session_filter.get() == "all" { "chip on" } else { "chip" } on:click=move |_| session_filter.set("all".into())>"All"</button>
-                        <button class=move || if session_filter.get() == "unread" { "chip on" } else { "chip" } on:click=move |_| session_filter.set("unread".into())>"Unread"</button>
-                        <button class=move || if session_filter.get() == "progress" { "chip on" } else { "chip" } on:click=move |_| session_filter.set("progress".into())>"In progress"</button>
-                        <button class=move || if session_filter.get() == "pinned" { "chip on" } else { "chip" } on:click=move |_| session_filter.set("pinned".into())>"Pinned"</button>
-                    </div>
-                    <input class="search" placeholder="Search sessions" prop:value=move || session_query.get() on:input=move |ev| session_query.set(event_target_value(&ev)) />
-                    {move || {
-                        let _ = tick.get();
-                        let active = active_root.get();
-                        let active_running = activity.get().iter().any(|r| is_running(&r.state));
-                        let merged = merge_sessions(&roots.get(), &sessions.get(), &pins.get(), &seen.get(), &active, active_running);
-                        let kids = children.get();
-                        let titles: Vec<String> = kids.iter().map(|c| if c.title.is_empty() { short_id(&c.id) } else { c.title.clone() }).collect();
-                        let query = session_query.get();
-                        let filtered = filter_sessions(&merged, &session_filter.get(), &query, &active, &titles);
-                        let show_older = older_open.get();
-                        let (shown, hidden) = visible_sessions(&filtered, &query, &active, 6, show_older);
-                        let can_fold = show_older && query.trim().is_empty() && filtered.len() > 6;
-                        let open = open_session;
-                        let pin = toggle_pin;
-                        let rows = shown.into_iter().map(|row| {
-                            let id = row.id.clone();
-                            let id_btn = id.clone();
-                            let id_pin = id.clone();
-                            let live = row.live;
-                            let unread = row.unread;
-                            let pinned = row.pinned;
-                            let fallback = short_id(&id);
-                            let label = session_label(&row.title, &fallback);
-                            let now_s = (now_ms() / 1000.0) as i64;
-                            let activity_s = if row.last_activity_at > 0 {
-                                row.last_activity_at / 1000
-                            } else {
-                                row.mtime
-                            };
-                            let when = fmt_ago(activity_s, now_s);
-                            let kind = session_kind(&row.status, row.busy, false, false);
-                            let elapsed = elapsed_since(kind, row.status_since, now_ms() as i64);
-                            let mut subtitle = if unread {
-                                format!("{} · Unread", kind.label())
-                            } else if !row.live && row.status.is_empty() {
-                                "Saved".into()
-                            } else {
-                                kind.label().to_string()
-                            };
-                            if !when.is_empty() && elapsed > 0 {
-                                subtitle = format!("{subtitle} · {when}");
-                            }
-                            let clock = if elapsed > 0 {
-                                fmt_elapsed(elapsed)
-                            } else {
-                                when.clone()
-                            };
-                            let klass = if id == active { "session-row card on" } else { "session-row card" };
-                            let pin_label = if pinned { "Unpin" } else { "Pin" };
-                            let pin_class = if pinned { "pin on" } else { "pin" };
-                            view! {
-                                <li class=klass>
-                                    <StatusMark kind=kind place=StatusSlot::Gutter unread=unread />
-                                    <button class="link session-main" on:click=move |_| open(id_btn.clone(), live)>
-                                        <span class="session-copy">
-                                            <span class="session-top">
-                                                <span class="name">{label}</span>
-                                                <span class="time">{clock}</span>
-                                            </span>
-                                            <span class="path">{subtitle}</span>
-                                        </span>
-                                    </button>
-                                    <button class=pin_class on:click=move |ev: web_sys::MouseEvent| {
-                                        ev.stop_propagation();
-                                        pin(id_pin.clone());
-                                    }>{pin_label}</button>
-                                </li>
-                            }
-                        }).collect_view();
-                        let no_rows = rows.is_empty();
-                        let has_older = hidden > 0;
-                        view! {
-                            <div>
-                                <Show when=move || no_rows>
-                                    <EmptyState title="No sessions match".into() body="New roots show up here. Pins stay in this browser. Unread is stored on the daemon.".into() />
-                                </Show>
-                                <ul class="plain sessions">{rows}</ul>
-                                <Show when=move || has_older>
-                                    <button class="secondary" on:click=move |_| older_open.set(true)>{format!("Older sessions ({hidden})")}</button>
-                                </Show>
-                                <Show when=move || can_fold>
-                                    <button class="secondary" on:click=move |_| older_open.set(false)>"Fold older sessions"</button>
-                                </Show>
-                            </div>
-                        }
-                    }}
-                    <p class="hint keys">"Pins stay in this browser. Alt+Left goes back. Alt+Right goes forward. Alt+\\ hides the side panels."</p>
-                    <details class="fold">
+                    <SessionPanel
+                        base=base
+                        token=token
+                        sessions=sessions
+                        roots=roots
+                        activity=activity
+                        active_root=active_root
+                        seen=seen
+                        on_open=open_session
+                        on_new=new_session
+                        on_refresh=refresh_meta
+                    />                    <details class="fold">
                     <summary>"Workspaces"</summary>
                     <p class="hint">"Opening one records it. It does not move the live engine."</p>
                     <Show when=move || workspaces.get().is_empty()>
