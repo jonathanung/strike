@@ -123,6 +123,8 @@ Status: walking skeleton on branch `worktree-rust-webui-daemon`. Not merged.
   - Schedule, the task runner, onboarding, and a multi-gateway hub are
     documented in [webui-planned.md](webui-planned.md), not drawn as empty
     panels. Memory, knowledge, and artifacts are drawn from the live routes.
+    The gateway switcher is the Gateways control in the header and on the
+    Daemon view; see [gateway.md](gateway.md).
 - Server serves `/sw.js` and `/manifest.webmanifest` at the origin root and
   the bundle under `/assets/` (WASM-aware CSP and content types).
 
@@ -172,6 +174,6 @@ only organise chats. They do not select a directory.
 2. Session folders that organise chats, separate from workspace
    directories. The list already shows which workspace a chat is bound
    to. It does not hide chats from other workspaces.
-3. Per-remote tokens in the UI (today one token field for the selected
-   daemon), daemon discovery on the tailnet.
+3. Daemon discovery on the tailnet. Per-gateway tokens are in the switcher
+   (`sessionStorage`); the page does not open SSH itself.
 4. Tauri shell (optional), TUI removal decision, `docs/web.md` rewrite.

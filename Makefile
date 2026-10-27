@@ -51,7 +51,7 @@ serve: build
 # Toolchain comes from `nix develop` (rustup + trunk per rust-toolchain.toml).
 webui-build:
 	@if ! command -v trunk >/dev/null; then echo "webui-build: trunk not found (run inside nix develop)"; exit 1; fi
-	cd webui && trunk build --release
+	cd webui && env -u NO_COLOR -u FORCE_COLOR trunk build --release
 	rm -rf internal/frontend/server/static/assets
 	mkdir -p internal/frontend/server/static/assets
 	cp webui/dist/index.html webui/dist/sw.js webui/dist/manifest.webmanifest internal/frontend/server/static/

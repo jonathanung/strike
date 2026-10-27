@@ -7,6 +7,7 @@
 mod api;
 mod chat_mode;
 mod editor;
+mod gateway;
 mod goals;
 mod model;
 mod notify;
@@ -36,10 +37,12 @@ use leptos::callback::Callback;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use model::{
-    activity_panel, display_state, fmt_elapsed, is_running, merge_sessions, mode_label,
-    permission_modes, session_label, task_headline, ActivityRow, Bootstrap, ChangedFilesResponse,
-    ChatLine, ChildrenResponse, FilesResponse, Health, ModelInfo, ModelList, Remote, RootSummary,
-    SessionItem, SessionsResponse, StatusBoard, TeamSnapshot, Workspace, WorkspacesResponse,
+    activity_panel, child_card_from_parts, child_card_from_text, child_keys_match, display_state,
+    fmt_ago, fmt_elapsed, is_running, merge_sessions, mode_label, permission_modes, prefer_summary,
+    protocol_dump, rfc3339_to_ms, session_label, status_kind, strip_echo_tip, task_headline,
+    ActivityRow, Bootstrap, ChangedFilesResponse, ChatLine, ChildCard, ChildrenResponse,
+    FilesResponse, Health, ModelInfo, ModelList, Remote, RootSummary, SessionItem, SessionsResponse,
+    StatusBoard, TeamSnapshot, Workspace, WorkspacesResponse,
 };
 use session_panel::{dispatch_session_key, SessionPanel};
 use wasm_bindgen::closure::Closure;
@@ -147,10 +150,6 @@ fn same_origin(base: &str) -> bool {
         .and_then(|w| w.location().origin().ok())
         .map(|origin| origin.trim_end_matches('/') == base)
         .unwrap_or(false)
-}
-
-fn load_remotes() -> Vec<Remote> {
-    serde_json::from_str(&load("strike.remotes")).unwrap_or_default()
 }
 
 #[component]
@@ -436,23 +435,18 @@ fn apply_status_payload(
 #[component]
 fn App() -> impl IntoView {
     let base = RwSignal::new(load("strike.base"));
-    let token = RwSignal::new(load("strike.token"));
+    let token = RwSignal::new(gateway::initial_token());
     let status = RwSignal::new("connecting…".to_string());
-    let mode = RwSignal::new(
-        if load("strike.token").is_empty() && load("strike.base").is_empty() {
-            "chat".to_string()
-        } else {
-            "chat".to_string()
-        },
-    );
+    let mode = RwSignal::new("chat".to_string());
     let workspaces = RwSignal::new(Vec::<Workspace>::new());
     let active_workspace = RwSignal::new(String::new());
+    let gateway_open = RwSignal::new(false);
+    let gateway_detail = RwSignal::new(String::new());
+    let gateway_profiles = RwSignal::new(gateway::load_profiles());
+    let gateway_selected = RwSignal::new("this".to_string());
     let workspace_recents = RwSignal::new(Vec::<Workspace>::new());
     let picker_open = RwSignal::new(false);
     let session_cwd = RwSignal::new(String::new());
-    let remotes = RwSignal::new(load_remotes());
-    let remote_name = RwSignal::new(String::new());
-    let remote_url = RwSignal::new(String::new());
     let roots = RwSignal::new(Vec::<RootSummary>::new());
     let sessions = RwSignal::new(Vec::<SessionItem>::new());
     let active_root = RwSignal::new(String::new());
@@ -677,6 +671,9 @@ fn App() -> impl IntoView {
                     workspace_recents.set(r.recents);
                 }
                 Err(e) => {
+                    if e.contains("HTTP 401") || e.contains("HTTP 403") {
+                        gateway.set("unauthorized".into());
+                    }
                     if err.is_empty() {
                         err = format!("Workspaces failed to load: {e}");
                     }
@@ -1969,6 +1966,19 @@ fn App() -> impl IntoView {
         active_root,
         refresh: Rc::new(move || refresh_meta()),
     });
+    // Gateway switcher page wiring (#1265). The slot is registered at
+    // boot by src/shell/contrib/gateway.rs and renders through this
+    // late-bound host, because only the page owns these signals.
+    crate::gateway::set_host(crate::gateway::GatewayHost {
+        base,
+        token,
+        gateway,
+        detail: gateway_detail,
+        open: gateway_open,
+        profiles: gateway_profiles,
+        selected: gateway_selected,
+        refresh: Rc::new(move || refresh_meta()),
+    });
 
     // Storage palette performers (#1271). The commands are registered at
     // boot by src/shell/contrib/storage.rs and dispatch these ids; only
@@ -2396,9 +2406,11 @@ fn App() -> impl IntoView {
                 base=base
                 token=token
                 status=status
-                remotes=remotes
-                remote_name=remote_name
-                remote_url=remote_url
+                gateway=gateway
+                gateway_detail=gateway_detail
+                gateway_open=gateway_open
+                gateway_profiles=gateway_profiles
+                gateway_selected=gateway_selected
                 refresh=refresh_meta
                 open_picker=move || picker_open.set(true)
             />
@@ -3128,29 +3140,19 @@ fn DaemonPane(
     base: RwSignal<String>,
     token: RwSignal<String>,
     status: RwSignal<String>,
-    remotes: RwSignal<Vec<Remote>>,
-    remote_name: RwSignal<String>,
-    remote_url: RwSignal<String>,
-    refresh: impl Fn() + Copy + Send + 'static,
+    gateway: RwSignal<String>,
+    gateway_detail: RwSignal<String>,
+    gateway_open: RwSignal<bool>,
+    gateway_profiles: RwSignal<Vec<gateway::Profile>>,
+    gateway_selected: RwSignal<String>,
+    refresh: impl Fn() + Copy + Send + Sync + 'static,
     open_picker: impl Fn() + Copy + 'static,
 ) -> impl IntoView {
     let _ = status;
-    let add_remote = move |_| {
-        let (name, url) = (remote_name.get(), remote_url.get());
-        if name.trim().is_empty() || url.trim().is_empty() {
-            return;
-        }
-        remotes.update(|list| list.push(Remote { name, url }));
-        save(
-            "strike.remotes",
-            &serde_json::to_string(&remotes.get()).unwrap_or_default(),
-        );
-        remote_name.set(String::new());
-        remote_url.set(String::new());
-    };
     let connect = move |_: web_sys::MouseEvent| {
         save("strike.base", &base.get());
-        save("strike.token", &token.get());
+        gateway::persist_token("this", &token.get());
+        gateway::forget_persisted_host_token();
         refresh();
     };
 
@@ -3167,34 +3169,20 @@ fn DaemonPane(
                     prop:value=move || token.get()
                     on:input=move |ev| token.set(event_target_value(&ev)) />
                 <button class="primary" on:click=connect>"Connect"</button>
-                <p class="hint">"Same-origin live transcript uses the daemon cookie. Open /?token=… once if the stream closes under --auth."</p>
+                <p class="hint">"Same-origin live transcript uses the daemon cookie. strike connect keeps a short-lived grant in a local proxy so the URL has no token."</p>
             </section>
-            <section class="card">
-                <h2 class="panel-title">"Saved daemons"</h2>
-                <ul class="plain">
-                    {move || remotes.get().into_iter().map(|r| {
-                        let url = r.url.clone();
-                        view! {
-                            <li class="row">
-                                <span><span class="name">{r.name}</span><span class="path">{r.url}</span></span>
-                                <button class="secondary" on:click=move |_| {
-                                    base.set(url.clone());
-                                    save("strike.base", &base.get());
-                                    save("strike.token", &token.get());
-                                    refresh();
-                                }>"Use"</button>
-                            </li>
-                        }
-                    }).collect_view()}
-                </ul>
-                <div class="row">
-                    <input placeholder="name" prop:value=move || remote_name.get()
-                        on:input=move |ev| remote_name.set(event_target_value(&ev)) />
-                    <input placeholder="http://host:8787" prop:value=move || remote_url.get()
-                        on:input=move |ev| remote_url.set(event_target_value(&ev)) />
-                    <button class="secondary" on:click=add_remote>"Save"</button>
-                </div>
-            </section>
+            <gateway::GatewaySwitcher
+                inline=true
+                primary=false
+                base=base
+                token=token
+                gateway=gateway
+                detail=gateway_detail
+                open=gateway_open
+                profiles=gateway_profiles
+                selected=gateway_selected
+                refresh=refresh
+            />
             <section class="card">
                 <h2 class="panel-title">"Workspaces"</h2>
                 <p class="hint">"A workspace is a directory. Session lists are not folders."</p>
