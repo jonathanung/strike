@@ -1030,6 +1030,24 @@ func read(path string) (Config, error) {
 		}
 		c.Hooks = valid
 	}
+	// Drop permission rules whose glob syntax is invalid, with a log line:
+	// evaluation treats an invalid glob as never-matching, so keeping the
+	// rule would leave it silently inert (fail-open for a deny). Dropping
+	// it — the providers/hooks convention above — preserves the effective
+	// behaviour without bricking startup on one bad hand-edited rule; the
+	// rules read path (ReadPermissionRules) returns the error so the
+	// editor surfaces it. Valid patterns are untouched.
+	if len(c.Permissions) > 0 {
+		valid := make([]permission.Rule, 0, len(c.Permissions))
+		for _, rule := range c.Permissions {
+			if err := permission.ValidatePattern(rule.Pattern); err != nil {
+				fmt.Fprintf(os.Stderr, "config %s: skipping permission rule %s %q (%s): %v\n", path, rule.Permission, rule.Pattern, rule.Action, err)
+				continue
+			}
+			valid = append(valid, rule)
+		}
+		c.Permissions = valid
+	}
 	c.PermissionAutoApproveSeconds = ClampPermissionAutoApproveSeconds(c.PermissionAutoApproveSeconds)
 	c.PermissionAutoApproveExclude = normalizePermissionAutoApproveExclude(c.PermissionAutoApproveExclude)
 	c.MaxChildDepth = ClampMaxChildDepth(c.MaxChildDepth)
