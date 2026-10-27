@@ -22,13 +22,14 @@
 <link rel="stylesheet" href="/assets/notify-750498e8d7d87548.css" integrity="sha384-l/TrTY1ETPTYhTEtEfPovdv2nck2zscWIo3mhOCEkb/RLhrZYW/bwgXX5qn68bAv"/>
 <link rel="stylesheet" href="/assets/usage-audit-4109f37a4c3f020.css" integrity="sha384-PG57uHfAoOyYrJLu5TZtnb1s2Ud6PPolTjB9IeCoVZ1qF7Qgrtsh0+5YiMBYYV9Z"/>
 <link rel="stylesheet" href="/assets/goals-5b895e22909a0f66.css" integrity="sha384-liP/FQF4QvouM0zc8WO7nxC1u3CzbFF/GBmvuED6zZS8f0rmPG1QWhWJitxfpRm1"/>
+<link rel="stylesheet" href="/assets/session-delete-c180251d14f9221e.css" integrity="sha384-wojH/ANHPCyXiTF3rSVVPn9SXyjSMXEyQy9axftq5nuQenRNd2m/wfUw0ySVQwhr"/>
 
 
 
 
 <script type="module">
-import init, * as bindings from '/assets/strike-webui-f2e1ea770fb99d76.js';
-const wasm = await init({ module_or_path: '/assets/strike-webui-f2e1ea770fb99d76_bg.wasm' });
+import init, * as bindings from '/assets/strike-webui-186b0c14269f6fad.js';
+const wasm = await init({ module_or_path: '/assets/strike-webui-186b0c14269f6fad_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -39,6 +40,6 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 </script>
 <script src="/assets/register.js" defer></script>
 
-<link rel="modulepreload" href="/assets/strike-webui-f2e1ea770fb99d76.js" crossorigin="anonymous" integrity="sha384-2pdSmTlcVcVMm6KajkblNGBVaH4h6mTciwMCX5tFOgA/xQjcVafIc1+sjCKmLthy"><link rel="preload" href="/assets/strike-webui-f2e1ea770fb99d76_bg.wasm" crossorigin="anonymous" integrity="sha384-OJrMPahJa6nqe4JPZdEBRm+A4xTssCirSolwj/a9SCcnp0KpSFMn4YRCNSROvl59" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/assets/strike-webui-186b0c14269f6fad.js" crossorigin="anonymous" integrity="sha384-f0PiXzSz/glx9UoE33u9ZeIlZjx3Eq4O7V/mkZ5LO9hHLu+HgbDMwk3SYtNrDNK7"><link rel="preload" href="/assets/strike-webui-186b0c14269f6fad_bg.wasm" crossorigin="anonymous" integrity="sha384-K44gtdvTj+Atw5Bs1b6hC6UOJVGuQadvxFTBDuuHzD6Y8jIazXB3oh1Q2BCBTrpS" as="fetch" type="application/wasm"></head>
 <body></body>
 </html>
