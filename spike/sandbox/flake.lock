@@ -1,0 +1,58 @@
+{
+  "nodes": {
+    "microvm": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1792810338,
+        "narHash": "sha256-0DS+A3BsygKRpKe0qmUWVDSfKqpIHZCpHJagAklE0o4=",
+        "owner": "microvm-nix",
+        "repo": "microvm.nix",
+        "rev": "4876e2ae2de6ce225f4ccf664ae441128aa3f03a",
+        "type": "github"
+      },
+      "original": {
+        "owner": "microvm-nix",
+        "repo": "microvm.nix",
+        "rev": "4876e2ae2de6ce225f4ccf664ae441128aa3f03a",
+        "type": "github"
+      }
+    },
+    "nixpkgs": {
+      "locked": {
+        "lastModified": 1784992771,
+        "narHash": "sha256-xEE5I69+WNqcs7Z0v5D9xwcHYRbvC8k/fKBmlUBdCp4=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "37bfb33419c6e367e8bb6f44041eaecf953b5236",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "37bfb33419c6e367e8bb6f44041eaecf953b5236",
+        "type": "github"
+      }
+    },
+    "root": {
+      "inputs": {
+        "microvm": "microvm",
+        "nixpkgs": "nixpkgs",
+        "strikeSrc": "strikeSrc"
+      }
+    },
+    "strikeSrc": {
+      "flake": false,
+      "locked": {
+        "path": "../..",
+        "type": "path"
+      },
+      "original": {
+        "path": "../..",
+        "type": "path"
+      },
+      "parent": []
+    }
+  },
+  "root": "root",
+  "version": 7
+}

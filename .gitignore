@@ -25,3 +25,7 @@ webui/dist/
 .direnv/
 .envrc
 .strike/config
+
+# Phase 0 spike nix build symlink (throwaway; see spike/sandbox/README.md).
+/spike/sandbox/result
+/spike/sandbox/result-*
