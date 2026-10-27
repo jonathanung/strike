@@ -258,7 +258,7 @@ jobs:
 
       - name: Test desktop gateway manager
         run: |
-          cargo fmt --manifest-path desktop/Cargo.toml --check
+          cargo fmt --all --manifest-path desktop/Cargo.toml --check
           cargo test --locked --manifest-path desktop/Cargo.toml -p strike-desktop-core -p strike-desktop
 
   # Darwin-only tests (//go:build darwin) never compile on ubuntu-latest, so a
