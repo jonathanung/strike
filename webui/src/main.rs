@@ -8,6 +8,7 @@ mod api;
 mod approvals;
 mod approvals_ui;
 mod chat_mode;
+mod composer_triggers;
 mod editor;
 mod gateway;
 mod git;
@@ -38,6 +39,10 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use leptos::callback::Callback;
+use composer_triggers::{
+    file_suggestions, move_index, shell_hint, skill_suggestions,
+    slash_suggestions, splice_draft, trigger_at, trigger_status, Kind, Suggestion,
+};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use model::{
@@ -45,8 +50,8 @@ use model::{
     fmt_ago, fmt_elapsed, is_running, merge_sessions, mode_label, prefer_summary,
     protocol_dump, rfc3339_to_ms, session_label, status_kind, strip_echo_tip, task_headline,
     ActivityRow, Bootstrap, ChangedFilesResponse, ChatLine, ChildCard, ChildrenResponse,
-    FilesResponse, Health, ModelInfo, ModelList, Remote, RootSummary, SessionItem, SessionsResponse,
-    StatusBoard, TeamSnapshot, Workspace, WorkspacesResponse,
+    ComposerCommand, FileSearchResponse, FilesResponse, Health, ModelInfo, ModelList, Remote, RootSummary,
+    SessionItem, SessionsResponse, SkillInfo, StatusBoard, TeamSnapshot, Workspace, WorkspacesResponse,
 };
 use session_panel::{dispatch_session_key, SessionPanel};
 use wasm_bindgen::closure::Closure;
@@ -200,6 +205,295 @@ fn Skeleton() -> impl IntoView {
 
 /// SessionTitled is the daemon's title source (#1262 owns rename). Reflect it
 /// on the open root so the list does not keep a raw id until the next poll.
+fn textarea_state(target: Option<web_sys::EventTarget>) -> Option<(String, u32)> {
+    let el = target?.dyn_into::<web_sys::HtmlTextAreaElement>().ok()?;
+    let cursor = el.selection_start().ok().flatten().unwrap_or(0);
+    Some((el.value(), cursor))
+}
+
+#[derive(Clone, Copy)]
+struct TriggerSignals {
+    ac_force: RwSignal<String>,
+    ac_open: RwSignal<bool>,
+    ac_index: RwSignal<usize>,
+    ac_items: RwSignal<Vec<Suggestion>>,
+    ac_replace_all: RwSignal<bool>,
+    trig_start: RwSignal<usize>,
+    trig_end: RwSignal<usize>,
+    skills: RwSignal<Vec<SkillInfo>>,
+    commands: RwSignal<Vec<ComposerCommand>>,
+    search_gen: RwSignal<u32>,
+    base: RwSignal<String>,
+    token: RwSignal<String>,
+    draft: RwSignal<String>,
+    plus_open: RwSignal<bool>,
+    mode_menu: RwSignal<bool>,
+    model_menu: RwSignal<bool>,
+}
+
+fn composer_caret() -> Option<u32> {
+    let el = web_sys::window()?
+        .document()?
+        .query_selector("[data-feature=\"composer-triggers\"] textarea")
+        .ok()
+        .flatten()?;
+    el.dyn_into::<web_sys::HtmlTextAreaElement>()
+        .ok()?
+        .selection_start()
+        .ok()
+        .flatten()
+}
+
+fn catalog_fingerprint(commands: &[ComposerCommand], skills: &[SkillInfo]) -> String {
+    let mut out = String::new();
+    for cmd in commands {
+        out.push_str(&cmd.id);
+        out.push('\n');
+    }
+    out.push('\u{1}');
+    for skill in skills {
+        out.push_str(&skill.name);
+        out.push('\n');
+        out.push_str(&skill.description);
+        out.push('\n');
+    }
+    out
+}
+
+fn sync_composer_trigger(text: String, utf16: u32, ui: &TriggerSignals) {
+    ui.plus_open.set(false);
+    // Every entry invalidates an in-flight file search, including the path
+    // that closes the popup. A late response must not reopen it.
+    let gen = ui.search_gen.get_untracked().wrapping_add(1);
+    ui.search_gen.set(gen);
+    let force = ui.ac_force.get_untracked();
+    if force == "skills" || force == "commands" {
+        let mut items = if force == "skills" {
+            skill_suggestions(&ui.skills.get_untracked(), text.trim())
+        } else {
+            slash_suggestions(
+                &ui.commands.get_untracked(),
+                &ui.skills.get_untracked(),
+                text.trim(),
+            )
+        };
+        for item in &mut items {
+            item.replace_all = true;
+        }
+        if items.is_empty() {
+            items.push(Suggestion {
+                id: "empty-catalog".into(),
+                label: if force == "skills" {
+                    "No skills".into()
+                } else {
+                    "No commands".into()
+                },
+                detail: "Nothing in the daemon catalog matches.".into(),
+                insert: String::new(),
+                selectable: false,
+                replace_all: false,
+            });
+        }
+        ui.ac_replace_all.set(true);
+        ui.ac_items.set(items);
+        ui.ac_index.set(0);
+        ui.ac_open.set(true);
+        return;
+    }
+    let Some(trig) = trigger_at(&text, utf16) else {
+        ui.ac_open.set(false);
+        return;
+    };
+    ui.trig_start.set(trig.start);
+    ui.trig_end.set(trig.end);
+    ui.ac_replace_all.set(false);
+    match trig.kind {
+        Kind::Shell => {
+            ui.ac_items.set(shell_hint(&trig.query));
+            ui.ac_index.set(0);
+            ui.ac_open.set(true);
+        }
+        Kind::Command => {
+            let items = slash_suggestions(
+                &ui.commands.get_untracked(),
+                &ui.skills.get_untracked(),
+                &trig.query,
+            );
+            ui.ac_open.set(!items.is_empty());
+            ui.ac_index.set(0);
+            ui.ac_items.set(items);
+        }
+        Kind::Skill => {
+            let items = skill_suggestions(&ui.skills.get_untracked(), &trig.query);
+            ui.ac_open.set(!items.is_empty());
+            ui.ac_index.set(0);
+            ui.ac_items.set(items);
+        }
+        Kind::File => {
+            let q = trig.query.clone();
+            let (b, t) = (ui.base.get_untracked(), ui.token.get_untracked());
+            let search_gen = ui.search_gen;
+            let ac_items = ui.ac_items;
+            let ac_index = ui.ac_index;
+            let ac_open = ui.ac_open;
+            spawn_local(async move {
+                let path = format!("/v1/files/search?q={}&limit=12", api::js_encode(&q));
+                let items = match get_json::<FileSearchResponse>(&b, &t, &path).await {
+                    Ok(found) => file_suggestions(&found.paths),
+                    Err(_) => vec![Suggestion {
+                        id: "search-failed".into(),
+                        label: "File search failed".into(),
+                        detail: "The daemon could not list files.".into(),
+                        insert: String::new(),
+                        selectable: false,
+                        replace_all: false,
+                    }],
+                };
+                if search_gen.get_untracked() != gen {
+                    return;
+                }
+                let open = !items.is_empty();
+                ac_items.set(items);
+                ac_index.set(0);
+                ac_open.set(open);
+            });
+        }
+    }
+}
+
+fn accept_suggestion(item: Suggestion, ui: &TriggerSignals) {
+    if !item.selectable || item.insert.is_empty() {
+        return;
+    }
+    let next = if item.replace_all || ui.ac_replace_all.get_untracked() {
+        item.insert
+    } else {
+        splice_draft(
+            &ui.draft.get_untracked(),
+            ui.trig_start.get_untracked(),
+            ui.trig_end.get_untracked(),
+            &item.insert,
+        )
+    };
+    ui.draft.set(next);
+    ui.ac_open.set(false);
+    ui.plus_open.set(false);
+    ui.ac_force.set(String::new());
+}
+
+fn open_composer_catalog(kind: &str, ui: &TriggerSignals) {
+    ui.ac_force.set(kind.to_string());
+    ui.plus_open.set(false);
+    ui.mode_menu.set(false);
+    ui.model_menu.set(false);
+    let skills_menu = kind == "skills";
+    let mut items = if skills_menu {
+        skill_suggestions(&ui.skills.get_untracked(), "")
+    } else {
+        slash_suggestions(&ui.commands.get_untracked(), &ui.skills.get_untracked(), "")
+    };
+    for item in &mut items {
+        item.replace_all = true;
+    }
+    if items.is_empty() {
+        items.push(Suggestion {
+            id: "empty-catalog".into(),
+            label: if skills_menu {
+                "No skills loaded".into()
+            } else {
+                "No commands loaded".into()
+            },
+            detail: "The daemon bootstrap did not list any.".into(),
+            insert: String::new(),
+            selectable: false,
+            replace_all: false,
+        });
+    }
+    ui.ac_replace_all.set(true);
+    ui.ac_items.set(items);
+    ui.ac_index.set(0);
+    ui.ac_open.set(true);
+}
+
+fn mention_composer_file(ui: &TriggerSignals) {
+    let current = ui.draft.get_untracked();
+    let cursor = web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|doc| doc.active_element())
+        .and_then(|el| el.dyn_into::<web_sys::HtmlTextAreaElement>().ok())
+        .and_then(|el| el.selection_start().ok().flatten())
+        .unwrap_or_else(|| current.encode_utf16().count() as u32);
+    let byte = composer_triggers::utf16_to_byte(&current, cursor as usize);
+    let next = splice_draft(&current, byte, byte, "@");
+    ui.draft.set(next);
+    ui.plus_open.set(false);
+    ui.mode_menu.set(false);
+    ui.model_menu.set(false);
+    ui.ac_force.set(String::new());
+    sync_composer_trigger(ui.draft.get_untracked(), cursor.saturating_add(1), ui);
+}
+
+fn prefix_composer_shell(ui: &TriggerSignals) {
+    let current = ui.draft.get_untracked().trim().to_string();
+    let next = if current.starts_with('!') {
+        current
+    } else {
+        format!("!{current}")
+    };
+    ui.draft.set(next.clone());
+    ui.plus_open.set(false);
+    ui.mode_menu.set(false);
+    ui.model_menu.set(false);
+    ui.ac_force.set(String::new());
+    let cursor = next.encode_utf16().count() as u32;
+    sync_composer_trigger(next, cursor, ui);
+}
+
+fn reply_permission(
+    request_id: String,
+    decision: String,
+    transcript: RwSignal<Transcript>,
+    base: RwSignal<String>,
+    token: RwSignal<String>,
+    active_root: RwSignal<String>,
+    status: RwSignal<String>,
+) {
+    let kept = transcript.with_untracked(|t| {
+        t.asks
+            .iter()
+            .find(|ask| ask.request_id == request_id)
+            .cloned()
+    });
+    let Some(kept) = kept else {
+        return;
+    };
+    let reply_id = kept.request_id.clone();
+    transcript.update(|t| t.asks.retain(|ask| ask.request_id != reply_id));
+    let (b, t, root) = (
+        base.get_untracked(),
+        token.get_untracked(),
+        active_root.get_untracked(),
+    );
+    spawn_local(async move {
+        if let Err(e) = post_op(
+            &b,
+            &t,
+            &root,
+            "permission.reply",
+            serde_json::json!({"requestId": reply_id, "decision": decision}),
+        )
+        .await
+        {
+            status.set(format!("approval failed: {e}"));
+            transcript.update(|t| {
+                if !t.asks.iter().any(|ask| ask.request_id == kept.request_id) {
+                    t.asks.push(kept);
+                }
+            });
+        }
+    });
+}
+
 fn note_live_title(
     sessions: RwSignal<Vec<SessionItem>>,
     roots: RwSignal<Vec<RootSummary>>,
@@ -509,6 +803,17 @@ fn App() -> impl IntoView {
     let catalog_once = RwSignal::new(false);
     let mode_menu = RwSignal::new(false);
     let model_menu = RwSignal::new(false);
+    let plus_open = RwSignal::new(false);
+    let ac_open = RwSignal::new(false);
+    let ac_index = RwSignal::new(0usize);
+    let ac_items = RwSignal::new(Vec::<Suggestion>::new());
+    let ac_force = RwSignal::new(String::new());
+    let ac_replace_all = RwSignal::new(false);
+    let trig_start = RwSignal::new(0usize);
+    let trig_end = RwSignal::new(0usize);
+    let skills = RwSignal::new(Vec::<SkillInfo>::new());
+    let commands = RwSignal::new(Vec::<ComposerCommand>::new());
+    let search_gen = RwSignal::new(0u32);
     let enter_mode = RwSignal::new(if load("strike.enterMode") == "steer" {
         "steer".to_string()
     } else {
@@ -744,6 +1049,8 @@ fn App() -> impl IntoView {
                             live_busy.set(st.busy);
                             live_busy_root.set(root);
                         }
+                        skills.set(boot.skills);
+                        commands.set(boot.composer_commands);
                         if !catalog_once.get_untracked() {
                             catalog_once.set(true);
                             load_model_catalog();
@@ -1224,6 +1531,9 @@ fn App() -> impl IntoView {
             model_note.set(held.hold_message);
             return;
         }
+        ac_open.set(false);
+        plus_open.set(false);
+        ac_force.set(String::new());
         if sending.get_untracked() {
             return;
         }
@@ -1907,10 +2217,15 @@ fn App() -> impl IntoView {
             let menu = mode_menu.get_untracked()
                 || model_menu.get_untracked()
                 || memory_menu.get_untracked()
+                || plus_open.get_untracked()
+                || ac_open.get_untracked()
                 || side_open.get_untracked();
             mode_menu.set(false);
             model_menu.set(false);
             memory_menu.set(false);
+            plus_open.set(false);
+            ac_open.set(false);
+            ac_force.set(String::new());
             side_open.set(false);
             sessions_drawer.set(false);
             panel_drawer.set(false);
@@ -2189,6 +2504,9 @@ fn App() -> impl IntoView {
         "model-menu.open",
         Rc::new(move |_args| {
             mode_menu.set(false);
+            plus_open.set(false);
+            ac_open.set(false);
+            ac_force.set(String::new());
             model_menu.update(|v| *v = !*v);
             Ok(())
         }),
@@ -2202,6 +2520,9 @@ fn App() -> impl IntoView {
             {
                 ev.prevent_default();
                 mode_menu.set(false);
+                plus_open.set(false);
+                ac_open.set(false);
+                ac_force.set(String::new());
                 model_menu.update(|v| *v = !*v);
             }
         });
@@ -2448,6 +2769,52 @@ fn App() -> impl IntoView {
         })
         .into(),
     };
+
+    let ui = TriggerSignals {
+        ac_force,
+        ac_open,
+        ac_index,
+        ac_items,
+        ac_replace_all,
+        trig_start,
+        trig_end,
+        skills,
+        commands,
+        search_gen,
+        base,
+        token,
+        draft,
+        plus_open,
+        mode_menu,
+        model_menu,
+    };
+
+    // Bootstrap can land after the first keystroke. Recompute only when the
+    // catalog contents change, and only for the trigger at the real caret.
+    // refresh_meta writes the same lists every poll; a content match is a no-op.
+    let catalog_fp = RwSignal::new(String::new());
+    Effect::new(move |_| {
+        let cmds = commands.get();
+        let sk = skills.get();
+        let fp = catalog_fingerprint(&cmds, &sk);
+        if fp == catalog_fp.get_untracked() {
+            return;
+        }
+        let Some(cursor) = composer_caret() else {
+            return;
+        };
+        catalog_fp.set(fp);
+        let draft_now = draft.get_untracked();
+        if !ui.ac_force.get_untracked().is_empty() {
+            sync_composer_trigger(draft_now, cursor, &ui);
+            return;
+        }
+        if let Some(trig) = trigger_at(&draft_now, cursor) {
+            if matches!(trig.kind, Kind::Command | Kind::Skill) {
+                sync_composer_trigger(draft_now, cursor, &ui);
+            }
+        }
+    });
 
     view! {
         <ApprovalHost
@@ -2735,7 +3102,7 @@ fn App() -> impl IntoView {
                         reply_id=reply_id
                         reply_decision=reply_decision
                     />
-                    <div class="composer"
+                    <div class="composer" data-feature="composer-triggers"
                         on:dragover=move |ev: web_sys::DragEvent| ev.prevent_default()
                         on:drop=move |ev: web_sys::DragEvent| {
                             ev.prevent_default();
@@ -2796,6 +3163,69 @@ fn App() -> impl IntoView {
                                 }).collect_view()}
                             </div>
                         </Show>
+                        <Show when=move || plus_open.get()>
+                            <div class="menu composer-plus" data-composer-triggers="plus">
+                                <button type="button" class="palette-row" on:click=move |_| mention_composer_file(&ui)>
+                                    <span class="name">"Mention a file"</span>
+                                    <span class="path">"Insert @ and search the working tree"</span>
+                                </button>
+                                <button type="button" class="palette-row" on:click=move |_| prefix_composer_shell(&ui)>
+                                    <span class="name">"Run a shell command"</span>
+                                    <span class="path">"Prefix ! and ask before it runs"</span>
+                                </button>
+                                <button type="button" class="palette-row" on:click=move |_| open_composer_catalog("skills", &ui)>
+                                    <span class="name">"Use a skill"</span>
+                                    <span class="path">"Skills loaded for this daemon"</span>
+                                </button>
+                                <button type="button" class="palette-row" on:click=move |_| open_composer_catalog("commands", &ui)>
+                                    <span class="name">"Slash command"</span>
+                                    <span class="path">"Daemon commands from bootstrap"</span>
+                                </button>
+                            </div>
+                        </Show>
+                        <Show when=move || ac_open.get()>
+                            <div class="menu composer-suggest" role="listbox" data-composer-triggers="suggestions">
+                                {move || {
+                                    let selected_at = ac_index.get();
+                                    ac_items.get().into_iter().enumerate().map(move |(i, item)| {
+                                        let picked = item.clone();
+                                        let label = item.label.clone();
+                                        let detail = item.detail.clone();
+                                        let selectable = item.selectable;
+                                        let selected = i == selected_at;
+                                        let klass = if selected && selectable { "palette-row on" } else { "palette-row" };
+                                        view! {
+                                            <button type="button" role="option" class=klass disabled=move || !selectable aria-selected=selected.to_string() on:click=move |_| accept_suggestion(picked.clone(), &ui)>
+                                                <span class="name">{label}</span>
+                                                <span class="path">{detail}</span>
+                                            </button>
+                                        }
+                                    }).collect_view()
+                                }}
+                            </div>
+                        </Show>
+                        <Show when=move || transcript.with(|t| !t.asks.is_empty())>
+                            <div class="composer-asks" data-composer-triggers="asks">
+                                {move || {
+                                    transcript.with(|t| t.asks.clone()).into_iter().map(move |ask| {
+                                        let id_allow = ask.request_id.clone();
+                                        let id_reject = ask.request_id.clone();
+                                        let label = if ask.patterns.is_empty() {
+                                            ask.permission.clone()
+                                        } else {
+                                            format!("{} · {}", ask.permission, ask.patterns)
+                                        };
+                                        view! {
+                                            <div class="composer-ask">
+                                                <span class="ask-label">{label}</span>
+                                                <button type="button" class="primary" on:click=move |_| reply_permission(id_allow.clone(), "once".into(), transcript, base, token, active_root, status)>"Allow once"</button>
+                                                <button type="button" class="secondary" on:click=move |_| reply_permission(id_reject.clone(), "reject".into(), transcript, base, token, active_root, status)>"Reject"</button>
+                                            </div>
+                                        }
+                                    }).collect_view()
+                                }}
+                            </div>
+                        </Show>
                         <form on:submit=move |ev| { ev.prevent_default(); send(); }>
                             <Show when=move || !pending_files.get().is_empty()>
                                 <div class="attach-row">
@@ -2844,7 +3274,64 @@ fn App() -> impl IntoView {
                             <textarea
                                 placeholder="Message this session"
                                 prop:value=move || draft.get()
-                                on:input=move |ev| draft.set(event_target_value(&ev))
+                                on:input=move |ev| {
+                                    if let Some((text, cursor)) = textarea_state(ev.target()) {
+                                        draft.set(text.clone());
+                                        sync_composer_trigger(text, cursor, &ui);
+                                    }
+                                }
+                                on:click=move |ev: web_sys::MouseEvent| {
+                                    if let Some((text, cursor)) = textarea_state(ev.target()) {
+                                        sync_composer_trigger(text, cursor, &ui);
+                                    }
+                                }
+                                on:keyup=move |ev: web_sys::KeyboardEvent| {
+                                    if matches!(ev.key().as_str(), "ArrowLeft" | "ArrowRight" | "Home" | "End") {
+                                        if let Some((text, cursor)) = textarea_state(ev.target()) {
+                                            sync_composer_trigger(text, cursor, &ui);
+                                        }
+                                    }
+                                }
+                                on:keydown=move |ev: web_sys::KeyboardEvent| {
+                                    if ev.key() == "ArrowDown" || ev.key() == "ArrowUp" {
+                                        let items = ac_items.get_untracked();
+                                        if ac_open.get_untracked() && items.iter().any(|item| item.selectable) {
+                                            ev.prevent_default();
+                                            let delta = if ev.key() == "ArrowDown" { 1 } else { -1 };
+                                            ac_index.set(move_index(&items, ac_index.get_untracked(), delta));
+                                        }
+                                    } else if ev.key() == "Escape" && (ac_open.get_untracked() || plus_open.get_untracked()) {
+                                        ev.prevent_default();
+                                        ev.stop_propagation();
+                                        ac_open.set(false);
+                                        plus_open.set(false);
+                                        ac_force.set(String::new());
+                                    } else if ev.key() == "Tab" {
+                                        if ac_open.get_untracked() {
+                                            let items = ac_items.get_untracked();
+                                            let idx = ac_index.get_untracked();
+                                            if let Some(item) = items.get(idx) {
+                                                if item.selectable {
+                                                    ev.prevent_default();
+                                                    accept_suggestion(item.clone(), &ui);
+                                                }
+                                            }
+                                        }
+                                    } else if ev.key() == "Enter" && !ev.shift_key() {
+                                        ev.prevent_default();
+                                        if ac_open.get_untracked() {
+                                            let items = ac_items.get_untracked();
+                                            let idx = ac_index.get_untracked();
+                                            if let Some(item) = items.get(idx) {
+                                                if item.selectable {
+                                                    accept_suggestion(item.clone(), &ui);
+                                                    return;
+                                                }
+                                            }
+                                        }
+                                        send();
+                                    }
+                                }
                                 on:paste=move |ev: web_sys::ClipboardEvent| {
                                     if let Some(data) = ev.clipboard_data() {
                                         if let Some(files) = data.files() {
@@ -2855,14 +3342,15 @@ fn App() -> impl IntoView {
                                         }
                                     }
                                 }
-                                on:keydown=move |ev: web_sys::KeyboardEvent| {
-                                    if ev.key() == "Enter" && !ev.shift_key() {
-                                        ev.prevent_default();
-                                        send();
-                                    }
-                                }
-                            ></textarea>
+></textarea>
                             <div class="composer-bar">
+                                <button type="button" class="chip plus" aria-label="Composer actions" data-composer-triggers="plus-button" on:click=move |_| {
+                                    mode_menu.set(false);
+                                    model_menu.set(false);
+                                    ac_open.set(false);
+                                    ac_force.set(String::new());
+                                    plus_open.update(|v| *v = !*v);
+                                }>"+"</button>
                                 <button type="button" class="chip" data-chat-attach="true" on:click=move |_| {
                                     if let Some(el) = file_input.get() {
                                         el.click();
@@ -2906,6 +3394,9 @@ fn App() -> impl IntoView {
                                 } aria-haspopup="menu" aria-expanded=move || mode_menu.get() on:click=move |_| {
                                     model_menu.set(false);
                                     memory_menu.set(false);
+                                    plus_open.set(false);
+                                    ac_open.set(false);
+                                    ac_force.set(String::new());
                                     mode_menu.update(|v| *v = !*v);
                                 }>{move || format!("Approval · {}", mode_label(&perm_mode.get()))}</button>
                                 <ModelMenu
@@ -2943,7 +3434,16 @@ fn App() -> impl IntoView {
                         <Show when=move || !model_note.get().is_empty() && !model_menu.get()>
                             <p class="hint" data-model-note="true">{move || model_note.get()}</p>
                         </Show>
-                        <p class="hint">"Queue waits out the turn. Steer joins a running turn. run <command> uses the shell. @path is text."</p>
+                        <p class="hint" data-composer-triggers="status">{move || {
+                            let note = transcript.with(|t| t.trigger_note.clone());
+                            let pending = transcript.with(|t| t.asks.len());
+                            let custom = trigger_status(&note, pending);
+                            if custom.is_empty() {
+                                "Queue waits out the turn. Steer joins a running turn. ! runs a shell after approval. @file, /command, and $skill expand on send.".into()
+                            } else {
+                                custom
+                            }
+                        }}</p>
                     </div>
                 </section>
                 <aside class="side">
@@ -3137,7 +3637,7 @@ fn App() -> impl IntoView {
                                     }
                                 }).collect_view()}
                             </ul>
-                            <p class="hint">"Open reads the file. Click or drag still inserts @path."</p>
+                            <p class="hint">"Open reads the file. Click or drag inserts @path. Send attaches the file."</p>
                         </div>
                     </Show>
                     <Show when=move || side_tab.get() == "changes">

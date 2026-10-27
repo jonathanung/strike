@@ -14,7 +14,7 @@
 (function(){try{var ok={strike:1,nord:1,dracula:1,gruvbox:1,monokai:1,"tokyo-night":1,catppuccin:1};var t=localStorage.getItem("strike.theme")||"strike";var s=localStorage.getItem("strike.scheme")||"dark";if(!ok[t])t="strike";if(s!=="light")s="dark";var lay=localStorage.getItem("strike.layout")||"cockpit";if(lay!=="conversation")lay="cockpit";var el=document.documentElement;el.setAttribute("data-theme",t);el.setAttribute("data-scheme",s);el.setAttribute("data-layout",lay);}catch(e){}})();
 </script>
 <link rel="manifest" href="/manifest.webmanifest">
-<link rel="stylesheet" href="/assets/style-511347a08cb4c7d3.css" integrity="sha384-4x3gJeiV9Jpezwu0DYh75pr7fht9YKhLhN8h/mYFLXxoueTSXIvlDtnBPVEef4C0"/>
+<link rel="stylesheet" href="/assets/style-be3bf2dc3f68a5a2.css" integrity="sha384-Dx6s6SsuEpZAqjWernoWHcAYI8t68QPSvTwWqZaY4NhnzIiiJ9L6clgv4peMhM3y"/>
 <link rel="stylesheet" href="/assets/git-ab00987af846b578.css" integrity="sha384-5Hpn8MQrQRdwz4yjyvf64ruljt3hOlWj2g2jpuRif8cb3NVZD+zCMUpqW7b87XnA"/>
 <link rel="stylesheet" href="/assets/storage-c32d584bc182ee77.css" integrity="sha384-XNDaz3yqOR2+uEfPi+eY+9Mzja2F/5vYI647yiPLuy4KvGHAOICyrdh0pqlWr9Wn"/>
 <link rel="stylesheet" href="/assets/navbar-4aaaf28db500eacb.css" integrity="sha384-5TOOsJOEELXhQX9eaCeYAdolP2MTbzKY2Rs54jkUpbigS3rQ+1uG62wvDZTASCfR"/>
@@ -31,8 +31,8 @@
 
 
 <script type="module">
-import init, * as bindings from '/assets/strike-webui-b0662c9772eacb7c.js';
-const wasm = await init({ module_or_path: '/assets/strike-webui-dcbe737c8f29be8e_bg.wasm' });
+import init, * as bindings from '/assets/strike-webui-444390e362a7fd56.js';
+const wasm = await init({ module_or_path: '/assets/strike-webui-cb9344294c69c502_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -43,6 +43,6 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 </script>
 <script src="/assets/register.js" defer></script>
 
-<link rel="modulepreload" href="/assets/strike-webui-b0662c9772eacb7c.js" crossorigin="anonymous" integrity="sha384-nhgEXInncsLDc0u8ovwwYUSLLYl1/9UypK18tvzb0lq1YDyFejtDKotz1Bu2vBi3"><link rel="preload" href="/assets/strike-webui-dcbe737c8f29be8e_bg.wasm" crossorigin="anonymous" integrity="sha384-hP8PkzmITUwc1l0g5MM0W2e+gG4I9VwLbpAvc6x/mvegOhpfOwDB6YK+Hxu9ImqP" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/assets/strike-webui-444390e362a7fd56.js" crossorigin="anonymous" integrity="sha384-MoSbRJPNUkoDCFtQ0YkcLDplX87OuZzg1ct4cjmjM8nc/OX2FALOM4V0BLF91T43"><link rel="preload" href="/assets/strike-webui-cb9344294c69c502_bg.wasm" crossorigin="anonymous" integrity="sha384-WuhIM+0NAcltSN25ahKjIGogzRpQBFpHkkaC0j1XQVz4vIzZusB3qKTpucU5tdGh" as="fetch" type="application/wasm"></head>
 <body></body>
 </html>
