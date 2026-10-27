@@ -1954,3 +1954,120 @@ select.mode, .daemon select {
   .sx-keys { display: none; }
 }
 /* feature:session-ux end */
+
+/* feature:scheduler begin */
+.sched {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.sched-layout {
+  display: grid;
+  grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
+  gap: var(--space-4);
+  min-height: 0;
+}
+.sched-list, .sched-form {
+  background: var(--surface);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius);
+  padding: var(--space-3);
+  min-width: 0;
+}
+.sched-rows { display: flex; flex-direction: column; gap: var(--space-1); }
+.sched-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  height: auto;
+  text-align: left;
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+}
+.sched-row:hover, .sched-row.on {
+  background: var(--raised);
+  border-color: var(--border-muted);
+}
+.sched-row.on { border-color: var(--border-focus); }
+.sched-row .name { font-weight: 600; }
+.sched-row .meta, .sched-run .meta, .sched .hint { color: var(--muted); font-size: var(--type-sm); }
+.sched-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+}
+.sched-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--type-sm);
+  color: var(--muted);
+}
+.sched-form input, .sched-form select, .sched-form textarea {
+  color: var(--ink);
+  background: var(--surface-muted);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+  font: inherit;
+  min-height: var(--control);
+}
+.sched-form textarea { min-height: 88px; resize: vertical; }
+.sched-form input:focus, .sched-form select:focus, .sched-form textarea:focus {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 1px;
+}
+.sched-form .span-2, .sched-actions, .sched-history { grid-column: 1 / -1; }
+.sched-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.sched-actions .primary {
+  background: var(--acid);
+  color: var(--on-accent);
+  border: 1px solid var(--acid);
+  border-radius: var(--radius-sm);
+  min-height: var(--control);
+  padding: 0 12px;
+  cursor: pointer;
+}
+.sched-error, .sched-note {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-muted);
+}
+.sched-error { color: var(--signal); background: var(--surface-muted); }
+.sched-note { color: var(--ink); background: var(--surface); }
+.sched-run {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--border-muted);
+}
+.sched-history h3 { margin: 0 0 var(--space-2); font-size: var(--type-md); }
+button.linkish {
+  background: none;
+  border: none;
+  color: var(--accent-alt);
+  cursor: pointer;
+  padding: 0;
+  height: auto;
+  font: inherit;
+  text-decoration: underline;
+}
+button.linkish:disabled { color: var(--muted); cursor: default; text-decoration: none; }
+@media (max-width: 800px) {
+  .sched { padding: var(--space-3); }
+  .sched-layout, .sched-form { grid-template-columns: 1fr; }
+}
+/* feature:scheduler end */
