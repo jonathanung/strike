@@ -12,6 +12,7 @@ mod chat_mode;
 mod composer_triggers;
 mod editor;
 mod gateway;
+mod gateway_qr;
 mod git;
 mod goals;
 mod schedule;
@@ -700,6 +701,7 @@ fn App() -> impl IntoView {
     let workspaces = RwSignal::new(Vec::<Workspace>::new());
     let active_workspace = RwSignal::new(String::new());
     let gateway_open = RwSignal::new(false);
+    let phone_open = RwSignal::new(false);
     let gateway_detail = RwSignal::new(String::new());
     let gateway_profiles = RwSignal::new(gateway::load_profiles());
     let gateway_selected = RwSignal::new("this".to_string());
@@ -2176,7 +2178,8 @@ fn App() -> impl IntoView {
                 || memory_menu.get_untracked()
                 || plus_open.get_untracked()
                 || ac_open.get_untracked()
-                || side_open.get_untracked();
+                || side_open.get_untracked()
+                || phone_open.get_untracked();
             mode_menu.set(false);
             model_menu.set(false);
             memory_menu.set(false);
@@ -2184,6 +2187,7 @@ fn App() -> impl IntoView {
             ac_open.set(false);
             ac_force.set(String::new());
             side_open.set(false);
+            phone_open.set(false);
             sessions_drawer.set(false);
             panel_drawer.set(false);
             if !menu && !doc_editing.get_untracked() && !doc_path.get_untracked().is_empty() {
@@ -2264,6 +2268,20 @@ fn App() -> impl IntoView {
         selected: gateway_selected,
         refresh: Rc::new(move || refresh_meta()),
     });
+    crate::gateway_qr::set_host(crate::gateway_qr::PhoneHost {
+        base,
+        token,
+        status,
+        open: phone_open,
+        refresh: Rc::new(move || refresh_meta()),
+    });
+    shell::bind(
+        "phone.open",
+        Rc::new(move |_args: &str| {
+            phone_open.set(true);
+            Ok(())
+        }),
+    );
 
     // Storage palette performers (#1271). The commands are registered at
     // boot by src/shell/contrib/storage.rs and dispatch these ids; only
@@ -2833,6 +2851,7 @@ fn App() -> impl IntoView {
             reply_decision=reply_decision
         />
         <shell::Chrome />
+        {gateway_qr::phone_view()}
         <session_delete::SessionDeleteDialog
             target=delete_target
             base=base

@@ -14,13 +14,25 @@ pub fn auth_header(token: &str) -> String {
     format!("Bearer {token}")
 }
 
+fn with_auth(
+    builder: gloo_net::http::RequestBuilder,
+    token: &str,
+) -> gloo_net::http::RequestBuilder {
+    let builder = builder.credentials(web_sys::RequestCredentials::Include);
+    let token = token.trim();
+    if token.is_empty() {
+        builder
+    } else {
+        builder.header("Authorization", &auth_header(token))
+    }
+}
+
 pub async fn get_json<T: DeserializeOwned>(
     base: &str,
     token: &str,
     path: &str,
 ) -> Result<T, String> {
-    let resp = Request::get(&api(base, path))
-        .header("Authorization", &auth_header(token))
+    let resp = with_auth(Request::get(&api(base, path)), token)
         .send()
         .await
         .map_err(|e| e.to_string())?;
@@ -39,8 +51,7 @@ pub async fn post_json_value(
     path: &str,
     body: Value,
 ) -> Result<Value, String> {
-    let resp = Request::post(&api(base, path))
-        .header("Authorization", &auth_header(token))
+    let resp = with_auth(Request::post(&api(base, path)), token)
         .json(&body)
         .map_err(|e| e.to_string())?
         .send()
@@ -63,8 +74,7 @@ pub async fn put_json_value(
     path: &str,
     body: Value,
 ) -> Result<Value, String> {
-    let resp = Request::put(&api(base, path))
-        .header("Authorization", &auth_header(token))
+    let resp = with_auth(Request::put(&api(base, path)), token)
         .json(&body)
         .map_err(|e| e.to_string())?
         .send()
@@ -86,8 +96,7 @@ pub async fn post_json(base: &str, token: &str, path: &str, body: Value) -> Resu
 }
 
 pub async fn put_json(base: &str, token: &str, path: &str, body: Value) -> Result<String, String> {
-    let resp = Request::put(&api(base, path))
-        .header("Authorization", &auth_header(token))
+    let resp = with_auth(Request::put(&api(base, path)), token)
         .header("Content-Type", "application/json")
         .body(body.to_string())
         .map_err(|e| e.to_string())?
@@ -102,8 +111,13 @@ pub async fn put_json(base: &str, token: &str, path: &str, body: Value) -> Resul
     Ok(text)
 }
 
-pub async fn delete_json(base: &str, token: &str, path: &str, body: Option<Value>) -> Result<(), String> {
-    let req = Request::delete(&api(base, path)).header("Authorization", &auth_header(token));
+pub async fn delete_json(
+    base: &str,
+    token: &str,
+    path: &str,
+    body: Option<Value>,
+) -> Result<(), String> {
+    let req = with_auth(Request::delete(&api(base, path)), token);
     let resp = if let Some(body) = body {
         req.header("Content-Type", "application/json")
             .body(body.to_string())
@@ -146,13 +160,8 @@ impl std::fmt::Display for DeleteError {
 
 /// DELETE with no body, reporting failures as [`DeleteError`] so the
 /// status survives. Success is any 2xx (the daemon answers 204).
-pub async fn delete_with_status(
-    base: &str,
-    token: &str,
-    path: &str,
-) -> Result<(), DeleteError> {
-    let resp = Request::delete(&api(base, path))
-        .header("Authorization", &auth_header(token))
+pub async fn delete_with_status(base: &str, token: &str, path: &str) -> Result<(), DeleteError> {
+    let resp = with_auth(Request::delete(&api(base, path)), token)
         .send()
         .await
         .map_err(|e| DeleteError {
@@ -164,15 +173,11 @@ pub async fn delete_with_status(
         return Ok(());
     }
     let text = resp.text().await.unwrap_or_default();
-    Err(DeleteError {
-        status,
-        body: text,
-    })
+    Err(DeleteError { status, body: text })
 }
 
 pub async fn get_text(base: &str, token: &str, path: &str) -> Result<String, String> {
-    let resp = Request::get(&api(base, path))
-        .header("Authorization", &auth_header(token))
+    let resp = with_auth(Request::get(&api(base, path)), token)
         .send()
         .await
         .map_err(|e| e.to_string())?;
@@ -190,8 +195,7 @@ pub async fn get_text(base: &str, token: &str, path: &str) -> Result<String, Str
 }
 
 pub async fn patch_json(base: &str, token: &str, path: &str, body: Value) -> Result<(), String> {
-    let resp = Request::patch(&api(base, path))
-        .header("Authorization", &auth_header(token))
+    let resp = with_auth(Request::patch(&api(base, path)), token)
         .json(&body)
         .map_err(|e| e.to_string())?
         .send()

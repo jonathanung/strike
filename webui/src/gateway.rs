@@ -158,6 +158,41 @@ pub fn forget_persisted_host_token() {
     local_remove("strike.token");
 }
 
+/// Records a cross-origin paired session as a gateway profile plus a
+/// sessionStorage grant. The daemon token is not written. A public tunnel
+/// origin is kept with the switcher's warning rather than dropped.
+pub fn remember_paired_gateway(origin: &str, session: &str) {
+    let origin = origin.trim().trim_end_matches('/').to_string();
+    if origin.is_empty() || session.is_empty() {
+        return;
+    }
+    let mut list = load_profiles();
+    let id = if let Some(found) = list.iter().find(|p| p.base.trim_end_matches('/') == origin) {
+        found.id.clone()
+    } else {
+        let warn = classify_base(&origin).unwrap_or(true);
+        let id = format!("paired-{}", list.len() + 1);
+        list.push(Profile {
+            id: id.clone(),
+            name: "Paired".into(),
+            base: origin.clone(),
+            ssh: String::new(),
+            warn,
+        });
+        save_profiles(&list);
+        id
+    };
+    persist_token(&id, session);
+    if let Some(h) = host() {
+        h.profiles.set(load_profiles());
+        h.selected.set(id);
+        h.base.set(origin.clone());
+        h.token.set(session.to_string());
+        local_set("strike.base", &origin);
+        forget_persisted_host_token();
+    }
+}
+
 pub fn load_profiles() -> Vec<Profile> {
     let raw = local_get("strike.gateways");
     if !raw.is_empty() {
@@ -345,6 +380,7 @@ fn describe(body: &str) -> String {
     let cred_s = match cred {
         "root" => "host token",
         "grant" => "short-lived grant",
+        "session" => "paired browser",
         "open" => "open loopback",
         _ => "connected",
     };

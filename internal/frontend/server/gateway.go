@@ -170,34 +170,56 @@ func writeDaemonTokenFile(path, tok string) error {
 }
 
 type gatewayInfoBody struct {
-	OK         bool   `json:"ok"`
-	Auth       bool   `json:"auth"`
-	Bind       string `json:"bind"`
-	Loopback   bool   `json:"loopback"`
-	TokenFile  bool   `json:"tokenFile"`
-	Grants     int    `json:"grants"`
-	Credential string `json:"credential"`
-	Version    string `json:"version"`
+	OK               bool         `json:"ok"`
+	Auth             bool         `json:"auth"`
+	Bind             string       `json:"bind"`
+	Loopback         bool         `json:"loopback"`
+	TokenFile        bool         `json:"tokenFile"`
+	Grants           int          `json:"grants"`
+	Credential       string       `json:"credential"`
+	Version          string       `json:"version"`
+	PhoneReachable   bool         `json:"phoneReachable"`
+	LAN              bool         `json:"lan"`
+	URLs             []GatewayURL `json:"urls"`
+	OptIn            string       `json:"optIn,omitempty"`
+	LanWarning       string       `json:"lanWarning,omitempty"`
+	AdvertiseWarning string       `json:"advertiseWarning,omitempty"`
+	Unbound          []string     `json:"unbound,omitempty"`
 }
 
 func (s *Server) gatewayInfo(r *http.Request) gatewayInfoBody {
 	cred := "open"
 	if s.opts.Auth {
-		if s.rootAuthorized(r) {
+		switch {
+		case s.rootAuthorized(r):
 			cred = "root"
-		} else {
+		case s.sessionCredentialOK(r):
+			cred = "session"
+		default:
 			cred = "grant"
 		}
 	}
+	reach := s.GatewayInfo()
+	bind := reach.Bind
+	if bind == "" {
+		bind = s.opts.Addr
+	}
 	return gatewayInfoBody{
-		OK:         true,
-		Auth:       s.opts.Auth,
-		Bind:       s.opts.Addr,
-		Loopback:   IsLocalhostBind(s.opts.Addr),
-		TokenFile:  strings.TrimSpace(s.opts.TokenFile) != "",
-		Grants:     s.liveGrantCount(),
-		Credential: cred,
-		Version:    version.Version,
+		OK:               true,
+		Auth:             s.opts.Auth,
+		Bind:             bind,
+		Loopback:         reach.Loopback,
+		TokenFile:        strings.TrimSpace(s.opts.TokenFile) != "",
+		Grants:           s.liveGrantCount(),
+		Credential:       cred,
+		Version:          version.Version,
+		PhoneReachable:   reach.PhoneReachable,
+		LAN:              reach.LAN,
+		URLs:             reach.URLs,
+		OptIn:            reach.OptIn,
+		LanWarning:       reach.LanWarning,
+		AdvertiseWarning: reach.AdvertiseWarning,
+		Unbound:          reach.Unbound,
 	}
 }
 
@@ -285,7 +307,10 @@ func (s *Server) handleGatewayRotate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.revokeAllGrants()
-	// The next currentToken read observes the new file and is a no-op revoke.
+	// currentToken observes the new file (grants) and pairing sessions.
+	if s.pairs != nil {
+		s.pairs.observe(s.currentToken())
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "token": tok})
 }
 
