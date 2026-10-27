@@ -1312,6 +1312,196 @@ try {
     },
     { timeout: STEP_MS, interval: 200 },
   );
+  // Session delete (#1358): seed a session, close its root so it is
+  // saved but not open, then delete it through the cockpit. Cancelling
+  // the confirm must issue no request; confirming must remove it from
+  // the daemon and the list. Deleting the open session must surface the
+  // daemon's 409 as a separate force confirmation — also cancelled
+  // here, so the open session survives.
+  const listJSON = async (path) => {
+    const res = await fetch(`http://127.0.0.1:${port}${path}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) throw new Error(`session-delete list ${path} HTTP ${res.status}`);
+    return res.json();
+  };
+  const savedIDs = async () => ((await listJSON("/v1/sessions")).sessions || []).map((s) => s.id);
+  const rootIDs = async () => ((await listJSON("/v1/roots")).roots || []).map((r) => r.id);
+  const createdRes = await fetch(`http://127.0.0.1:${port}/v1/roots`, {
+    method: "POST",
+    headers: auth,
+    body: "{}",
+  });
+  if (!createdRes.ok) {
+    throw new Error(`session-delete seed root failed ${createdRes.status} ${await createdRes.text()}`);
+  }
+  const sacrificial = (await createdRes.json()).id;
+  if (!sacrificial) {
+    throw new Error("session-delete seed root returned no id");
+  }
+  const closeRes = await fetch(
+    `http://127.0.0.1:${port}/v1/roots/${encodeURIComponent(sacrificial)}`,
+    { method: "DELETE", headers: { Authorization: `Bearer ${token}` } },
+  );
+  if (!closeRes.ok) {
+    throw new Error(`session-delete seed close failed ${closeRes.status} ${await closeRes.text()}`);
+  }
+  if (!(await savedIDs()).includes(sacrificial)) {
+    throw new Error("session-delete seed session is not in the saved list");
+  }
+  const deleteBtnSel = (id) => `[data-session-delete="${id}"]`;
+  const clickSel = async (sel) => {
+    const v = await evaluate(
+      `(() => { const el = document.querySelector(${JSON.stringify(sel)}); if (!el) return "missing"; el.click(); return "clicked"; })()`,
+    );
+    if (v !== "clicked") throw new Error(`session-delete click ${sel} -> ${v}`);
+  };
+  const dialogText = async () =>
+    evaluate(
+      `(() => { const el = document.querySelector("[data-session-delete-dialog]"); return el ? el.innerText : ""; })()`,
+    );
+  await evaluate(`localStorage.setItem("strike.token", ${JSON.stringify(token)})`);
+  await send("Page.navigate", {
+    url: "http://127.0.0.1:" + port + "/?token=" + token,
+  });
+  await waitFor(
+    "cockpit re-boot for session delete",
+    textProbe((t) => t.includes("Run a command")),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await waitFor(
+    "seeded session row with a Delete button",
+    async () => ({
+      ok:
+        (await evaluate(
+          `!!document.querySelector(${JSON.stringify(deleteBtnSel(sacrificial))})`,
+        )) === true,
+    }),
+    { timeout: STEP_MS, interval: 250 },
+  );
+  await clickSel(deleteBtnSel(sacrificial));
+  const confirmText = await waitFor(
+    "delete confirm dialog naming the permanence",
+    async () => {
+      const t = (await dialogText()) || "";
+      return { ok: t.includes("Delete session") && t.includes("cannot be undone"), text: t };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  if (!confirmText.text.includes("cannot be undone")) {
+    throw new Error(`delete confirm copy wrong: ${confirmText.text.slice(0, 300)}`);
+  }
+  await clickSel("[data-session-delete-cancel]");
+  await waitFor(
+    "confirm dialog to close on cancel",
+    async () => ({
+      ok: (await evaluate(`!!document.querySelector("[data-session-delete-dialog]")`)) === false,
+    }),
+    { timeout: STEP_MS, interval: 200 },
+  );
+  if (!(await savedIDs()).includes(sacrificial)) {
+    throw new Error("cancelled delete still removed the session on the daemon");
+  }
+  await clickSel(deleteBtnSel(sacrificial));
+  await waitFor(
+    "delete confirm dialog to reopen",
+    async () => ({ ok: ((await dialogText()) || "").includes("cannot be undone") }),
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await clickSel("[data-session-delete-confirm]");
+  await waitFor(
+    "deleted session to leave the daemon list and the page",
+    async () => ({
+      ok:
+        !(await savedIDs()).includes(sacrificial) &&
+        (await evaluate(
+          `!!document.querySelector(${JSON.stringify(deleteBtnSel(sacrificial))})`,
+        )) === false,
+    }),
+    { timeout: STEP_MS, interval: 250 },
+  );
+  const openIDs = await rootIDs();
+  if (!openIDs.length) {
+    throw new Error("session-delete 409 check found no open root");
+  }
+  const openID = openIDs[0];
+  await waitFor(
+    "open session row with a Delete button",
+    async () => ({
+      ok:
+        (await evaluate(
+          `!!document.querySelector(${JSON.stringify(deleteBtnSel(openID))})`,
+        )) === true,
+    }),
+    { timeout: STEP_MS, interval: 250 },
+  );
+  await clickSel(deleteBtnSel(openID));
+  await waitFor(
+    "delete confirm for the open session",
+    async () => ({ ok: ((await dialogText()) || "").includes("cannot be undone") }),
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await clickSel("[data-session-delete-confirm]");
+  const forceText = await waitFor(
+    "force confirmation after the daemon 409",
+    async () => {
+      const t = (await dialogText()) || "";
+      const hasForceBtn =
+        (await evaluate(`!!document.querySelector("[data-session-delete-force]")`)) === true;
+      return {
+        ok: t.includes("is active") && t.includes("force required") && hasForceBtn,
+        text: t,
+      };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  if (!forceText.text.includes("Force delete")) {
+    throw new Error(`force confirmation copy wrong: ${forceText.text.slice(0, 300)}`);
+  }
+  await clickSel("[data-session-delete-cancel]");
+  await waitFor(
+    "force confirmation to close on cancel",
+    async () => ({
+      ok: (await evaluate(`!!document.querySelector("[data-session-delete-dialog]")`)) === false,
+    }),
+    { timeout: STEP_MS, interval: 200 },
+  );
+  if (!(await rootIDs()).includes(openID)) {
+    throw new Error("cancelled force delete still removed the open session");
+  }
+
+  // Force path through: reopen, confirm, then force. The open session
+  // must leave the roots list, the saved list, and the page (the page
+  // closes the live root after the session DELETE lands, because the
+  // daemon keeps a log-less root registered otherwise).
+  await clickSel(deleteBtnSel(openID));
+  await waitFor(
+    "delete confirm to reopen for the force-through",
+    async () => ({ ok: ((await dialogText()) || "").includes("cannot be undone") }),
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await clickSel("[data-session-delete-confirm]");
+  await waitFor(
+    "force confirmation to reopen",
+    async () => ({
+      ok:
+        (await evaluate(`!!document.querySelector("[data-session-delete-force]")`)) === true,
+    }),
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await clickSel("[data-session-delete-force]");
+  await waitFor(
+    "force-deleted session to leave the daemon lists and the page",
+    async () => ({
+      ok:
+        !(await rootIDs()).includes(openID) &&
+        !(await savedIDs()).includes(openID) &&
+        (await evaluate(
+          `!!document.querySelector(${JSON.stringify(deleteBtnSel(openID))})`,
+        )) === false,
+    }),
+    { timeout: WAIT_MS, interval: 250 },
+  );
   console.log("webui-smoke ok");
 } catch (err) {
   console.error(String(err));
