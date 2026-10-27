@@ -122,6 +122,15 @@ type Server struct {
 	// index.html (Trunk emits an inline WASM loader) without unsafe-inline.
 	scriptCSPHashes []string
 
+	// grants are short-lived bearers kept in memory only. grantNow overrides
+	// the clock in tests. rootSum is the last host-token hash; a change
+	// (strike daemon logout, or POST /v1/gateway/rotate) drops every grant.
+	grantMu  sync.Mutex
+	grants   []storedGrant
+	grantNow func() time.Time
+	rootSum  [32]byte
+	rootSeen bool
+
 	// notifyOnce lazily opens the redacted notification log under SessionDir.
 	notifyOnce sync.Once
 	notifyLog  *notifyLog
@@ -229,6 +238,11 @@ func IsLocalhostBind(addr string) bool {
 
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /health", s.handleHealth)
+	s.mux.HandleFunc("GET /v1/gateway", s.handleGatewayInfo)
+	s.mux.HandleFunc("POST /v1/gateway/grants", s.handleGatewayMint)
+	s.mux.HandleFunc("DELETE /v1/gateway/grants", s.handleGatewayRevoke)
+	s.mux.HandleFunc("POST /v1/gateway/rotate", s.handleGatewayRotate)
+	s.mux.HandleFunc("POST /v1/gateway/logout", s.handleGatewayLogout)
 	s.mux.HandleFunc("GET /v1/bootstrap", s.handleBootstrap)
 	s.mux.HandleFunc("GET /v1/team", s.handleTeam)
 	s.mux.HandleFunc("GET /v1/artifacts", s.handleArtifactsList)
@@ -521,37 +535,49 @@ func requiresToken(path string) bool {
 }
 
 func (s *Server) authorized(r *http.Request) bool {
-	want := s.currentToken()
-	if want == "" {
-		return false
-	}
-	// Bearer header or HttpOnly cookie from attach handoff only. Query-string
-	// tokens are rejected on /v1/* — they leak into shell history, proxy logs,
-	// and Referer. Open /attach?token=… (or /?token=…) once; the handoff sets
-	// the cookie and strips the secret from the URL so same-origin
-	// fetch/EventSource/WebSocket authenticate without a query param.
-	if tokenEqual(bearerToken(r.Header.Get("Authorization")), want) {
-		return true
-	}
-	if tokenEqual(cookieToken(r), want) {
-		return true
-	}
-	return false
+	// Bearer header or HttpOnly cookie. Query-string tokens are rejected on
+	// /v1/* — they leak into shell history, proxy logs, and Referer. A
+	// short-lived grant (POST /v1/gateway/grants) is accepted the same way
+	// as the host token. Both headers are checked so a wrong bearer does not
+	// hide a valid cookie, and the grant scan always walks every slot.
+	root := s.currentToken()
+	bearer := bearerToken(r.Header.Get("Authorization"))
+	cookie := cookieToken(r)
+	rootOK := tokenEqual(bearer, root) || tokenEqual(cookie, root)
+	grantOK := s.acceptAnyGrant(bearer, cookie)
+	return rootOK || grantOK
 }
 
-// currentToken is the bearer checked on this request. A configured token
-// file wins over the value captured at startup.
+// rootAuthorized reports whether this request presented the host token
+// (file or --token), not merely a short-lived grant. Mint, revoke-all, and
+// rotate require it so a stolen grant cannot replace the host credential.
+func (s *Server) rootAuthorized(r *http.Request) bool {
+	root := s.currentToken()
+	if root == "" {
+		return false
+	}
+	return tokenEqual(bearerToken(r.Header.Get("Authorization")), root) || tokenEqual(cookieToken(r), root)
+}
+
+// currentToken is the host bearer checked on this request. A configured
+// token file wins over the value captured at startup. A change in that
+// value drops in-memory grants so strike daemon logout revokes them on the
+// next /v1 request without a second call.
 func (s *Server) currentToken() string {
 	path := strings.TrimSpace(s.opts.TokenFile)
-	if path == "" {
-		return s.opts.Token
+	tok := s.opts.Token
+	if path != "" {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			tok = ""
+		} else {
+			tok = strings.TrimSpace(string(data))
+			// Record a token-file rotation for the audit log (main's
+			// noteTokenFile); observeRoot below drops grants on change.
+			s.noteTokenFile(tok)
+		}
 	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return ""
-	}
-	tok := strings.TrimSpace(string(data))
-	s.noteTokenFile(tok)
+	s.observeRoot(tok)
 	return tok
 }
 
@@ -593,13 +619,21 @@ func (s *Server) maybeHandoffToken(w http.ResponseWriter, r *http.Request) bool 
 	if tok == "" {
 		return false
 	}
+	// A grant must be stored as itself. Copying the host token into the
+	// cookie would turn a short-lived handoff into a long-lived one.
 	current := s.currentToken()
-	if !tokenEqual(tok, current) {
+	cookieVal := ""
+	switch {
+	case tokenEqual(tok, current):
+		cookieVal = current
+	case s.acceptAnyGrant(tok):
+		cookieVal = tok
+	default:
 		return false
 	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     authCookieName,
-		Value:    current,
+		Value:    cookieVal,
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,

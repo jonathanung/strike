@@ -479,7 +479,8 @@ try {
   const title = boot.title || "";
   const statusId = boot.status || "";
   const chip = !!boot.chip;
-  const want = ["Run a command", "Strike", "Activity", "Files", "Changes", "Memory", "Knowledge", "Artifacts", "Approval"];  const missingText = want.filter((s) => !text.includes(s));
+  const want = ["Run a command", "Strike", "Activity", "Files", "Changes", "Memory", "Knowledge", "Artifacts", "Approval", "Gateways"];
+  const missingText = want.filter((s) => !text.includes(s));
   if (missingText.length || acid !== "#7c3aed" || ground !== "#14131c" || !chip || !statusIds.includes(statusId) || !title.includes("Strike")) {
     throw new Error(
       `cockpit check failed missing=${missingText.join(",")} acid=${acid} ground=${ground} status=${statusId} chip=${chip} title=${title} text=${text.slice(0, 400)}\n${await diagnostics()}`,
@@ -493,6 +494,82 @@ try {
     return ev.result?.result?.value;
   };
   const bodyText = async () => String((await evalValue("document.body ? document.body.innerText : ''")) || "");
+
+  // Gateway switcher (#1265): opens from the header, shows this gateway,
+  // never exposes the smoke token in page text, in a visible (non-password)
+  // input, or in the daemon log, and Escape closes it. The PR's original
+  // checks expected the unauthenticated panel because its harness never
+  // handed the browser a token; the current harness authenticates via the
+  // /?token= cookie handoff, so the panel correctly reports Connected with
+  // the host token, and the token lives only in the designated password
+  // field (the PR's design: rotate writes the new token there). Assertions
+  // use the hardened waitFor poller.
+  if (text.includes(token)) {
+    throw new Error("cockpit innerText contains the smoke token");
+  }
+  const gwClicked = await evalValue(`(() => {
+    const btn = [...document.querySelectorAll("button")].find((b) => (b.textContent || "").includes("Gateways"));
+    if (!btn) return "missing";
+    btn.click();
+    return "ok";
+  })()`);
+  if (gwClicked !== "ok") {
+    throw new Error("gateway switcher button missing");
+  }
+  const gwState = await waitFor(
+    "gateway switcher panel (This gateway, Reconnect, Connected)",
+    async () => {
+      const parsed = JSON.parse((await evalValue(`(() => {
+        const pop = document.querySelector(".gw-pop");
+        const visibleInputs = [...document.querySelectorAll("input")]
+          .filter((el) => el.type !== "password")
+          .map((el) => el.value || "")
+          .join("\\n");
+        return JSON.stringify({
+          open: !!pop,
+          pop: pop ? pop.innerText : "",
+          body: document.body ? document.body.innerText : "",
+          visibleInputs,
+        });
+      })()`)) || "{}");
+      return {
+        ok:
+          !!parsed.open &&
+          (parsed.pop || "").includes("This gateway") &&
+          (parsed.pop || "").includes("Reconnect") &&
+          (parsed.pop || "").includes("Connected"),
+        ...parsed,
+      };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  if ((gwState.body || "").includes(token) || (gwState.visibleInputs || "").includes(token)) {
+    throw new Error("gateway UI exposed the smoke token");
+  }
+  await evalValue(`(() => { const pop = document.querySelector(".gw-pop"); if (pop) pop.focus(); return !!pop; })()`);
+  // Trusted key events. A synthetic KeyboardEvent is not what the panel handles.
+  await send("Input.dispatchKeyEvent", {
+    type: "keyDown",
+    key: "Escape",
+    code: "Escape",
+    windowsVirtualKeyCode: 27,
+    nativeVirtualKeyCode: 27,
+  });
+  await send("Input.dispatchKeyEvent", {
+    type: "keyUp",
+    key: "Escape",
+    code: "Escape",
+    windowsVirtualKeyCode: 27,
+    nativeVirtualKeyCode: 27,
+  });
+  await waitFor(
+    "gateway Escape closes the switcher",
+    async () => ({ ok: (await evalValue(`!!document.querySelector(".gw-pop")`)) === false }),
+    { timeout: STEP_MS, interval: 100 },
+  );
+  if (strikeLog.includes(token)) {
+    throw new Error("daemon log contains the smoke token");
+  }
 
   // Model menu: filter, honest "not reported" capabilities, keyboard, and a
   // real select.model error from the daemon (unknown provider).
@@ -1502,7 +1579,6 @@ try {
     }),
     { timeout: WAIT_MS, interval: 250 },
   );
-
   const wsClicked = await send("Runtime.evaluate", {
     expression: `(() => {
       const btn = document.querySelector(".ws-open");
@@ -1527,6 +1603,9 @@ try {
   }
   if (!picker.includes("A workspace is a directory")) {
     throw new Error(`workspace picker did not open: ${picker.slice(0, 400)}`);
+  }
+  if (strikeLog.includes(token)) {
+    throw new Error("daemon log contains the smoke token");
   }
   console.log("webui-smoke ok");
 } catch (err) {
