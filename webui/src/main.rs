@@ -14,6 +14,7 @@ mod model_menu;
 mod model_menu_view;
 mod storage;
 mod usage_audit;
+mod session_delete;
 mod shell;
 mod side_chat;
 mod status;
@@ -707,6 +708,10 @@ fn App() -> impl IntoView {
     let layout = RwSignal::new(chat_mode::normalize_layout(&load("strike.layout")));
     let sessions_drawer = RwSignal::new(false);
     let panel_drawer = RwSignal::new(false);
+    // Session delete (#1358): the session the confirm dialog is armed
+    // for. `None` means no deletion is pending; setting it never issues
+    // a request by itself.
+    let delete_target = RwSignal::new(None::<session_delete::DeleteTarget>);
     let pending_files = RwSignal::new(Vec::<chat_mode::PendingAttachment>::new());
     let sending = RwSignal::new(false);
     let listening = RwSignal::new(false);
@@ -1663,6 +1668,71 @@ fn App() -> impl IntoView {
         );
     };
 
+    // Session delete (#1358): arm the confirm dialog for one session.
+    // Shared by the row button and the palette command — one code path,
+    // and arming the dialog is all either surface does.
+    let request_delete = move |id: String, label: String| {
+        delete_target.set(Some(session_delete::DeleteTarget { id, label }));
+    };
+
+    // After the daemon confirms a deletion: drop the session from every
+    // local list, forget its pin/seen marks and history entries, and —
+    // via `remaining_active` — fall back to the empty/list state when
+    // the deleted session was the open one. Then re-read the lists from
+    // the daemon so the cockpit shows the daemon's truth, not a guess.
+    //
+    // One composition is needed for that to hold: the session DELETE
+    // removes the durable log, but a session that is also a live root
+    // stays registered in the daemon's LiveHub (GET /v1/roots keeps
+    // listing it, and a refresh would resurrect its row and reactivate
+    // it). So when the deleted session was a live root, close that root
+    // too (DELETE /v1/roots/{id} — LiveHub.Remove handles the active
+    // root by activating another or none). The daemon gap behind this
+    // is filed separately; this PR only composes the two existing
+    // endpoints, in delete-then-close order, after the user's force
+    // confirmation when one was required.
+    let on_deleted = Callback::new(move |id: String| {
+        let was_live = roots.get_untracked().iter().any(|row| row.id == id);
+        pins.update(|list| list.retain(|p| p != &id));
+        save(
+            "strike.pins",
+            &serde_json::to_string(&pins.get_untracked()).unwrap_or_default(),
+        );
+        seen.update(|map| {
+            map.remove(&id);
+        });
+        save(
+            "strike.seen",
+            &serde_json::to_string(&seen.get_untracked()).unwrap_or_default(),
+        );
+        sessions.update(|rows| rows.retain(|row| row.id != id));
+        roots.update(|rows| rows.retain(|row| row.id != id));
+        back_stack.update(|stack| stack.retain(|entry| entry != &id));
+        forward_stack.update(|stack| stack.retain(|entry| entry != &id));
+        let cur = active_root.get_untracked();
+        if session_delete::remaining_active(&cur, &id).is_none() && !cur.is_empty() {
+            active_root.set(String::new());
+        }
+        status.set("Session deleted.".into());
+        if was_live {
+            let (b, t) = (base.get_untracked(), token.get_untracked());
+            spawn_local(async move {
+                let path = format!(
+                    "/v1/roots/{}",
+                    session_delete::encode_segment(&id)
+                );
+                if let Err(e) = crate::api::delete_json(&b, &t, &path, None).await {
+                    status.set(format!(
+                        "Session deleted, but closing its live root failed: {e}"
+                    ));
+                }
+                refresh_meta();
+            });
+        } else {
+            refresh_meta();
+        }
+    });
+
     let load_files = move || {
         let (b, t, path) = (
             base.get_untracked(),
@@ -2060,6 +2130,37 @@ fn App() -> impl IntoView {
         }),
     );
 
+    // Session delete palette performer (#1358). The contrib command has
+    // already resolved the argument to exactly one session id via the
+    // shell's unique match; this only arms the same confirm dialog the
+    // row button opens. No request is issued here.
+    shell::bind(
+        "session-delete",
+        Rc::new(move |id: &str| {
+            let id = id.to_string();
+            let active = active_root.get_untracked();
+            let active_running = activity
+                .get_untracked()
+                .iter()
+                .any(|row| is_running(&row.state));
+            let label = merge_sessions(
+                &roots.get_untracked(),
+                &sessions.get_untracked(),
+                &pins.get_untracked(),
+                &seen.get_untracked(),
+                &active,
+                active_running,
+            )
+            .into_iter()
+            .find(|row| row.id == id)
+            .map(|row| session_label(&row.title, &short_id(&row.id)))
+            .unwrap_or_else(|| short_id(&id));
+            mode.set("chat".into());
+            request_delete(id, label);
+            Ok(())
+        }),
+    );
+
     // Alt+G opens Goals. The shell owns the other chords; this one stays
     // here because only the page can set `mode`. The shortcut is listed in
     // the overlay via src/shell/contrib/goals.rs.
@@ -2159,6 +2260,12 @@ fn App() -> impl IntoView {
 
     view! {
         <shell::Chrome />
+        <session_delete::SessionDeleteDialog
+            target=delete_target
+            base=base
+            token=token
+            on_deleted=on_deleted
+        />
         <Show when=move || mode.get() == "daemon" fallback=move || ()>
             <DaemonPane
                 base=base
@@ -2214,15 +2321,18 @@ fn App() -> impl IntoView {
                         let can_fold = show_older && query.trim().is_empty() && filtered.len() > 6;
                         let open = open_session;
                         let pin = toggle_pin;
+                        let del = request_delete;
                         let rows = shown.into_iter().map(|row| {
                             let id = row.id.clone();
                             let id_btn = id.clone();
                             let id_pin = id.clone();
+                            let id_del = id.clone();
                             let live = row.live;
                             let unread = row.unread;
                             let pinned = row.pinned;
                             let fallback = short_id(&id);
                             let label = session_label(&row.title, &fallback);
+                            let label_del = label.clone();
                             let now_s = (now_ms() / 1000.0) as i64;
                             let activity_s = if row.last_activity_at > 0 {
                                 row.last_activity_at / 1000
@@ -2266,6 +2376,17 @@ fn App() -> impl IntoView {
                                         ev.stop_propagation();
                                         pin(id_pin.clone());
                                     }>{pin_label}</button>
+                                    <button
+                                        class="pin session-delete-action"
+                                        data-session-delete=id.clone()
+                                        title="Delete this session permanently"
+                                        on:click=move |ev: web_sys::MouseEvent| {
+                                            ev.stop_propagation();
+                                            del(id_del.clone(), label_del.clone());
+                                        }
+                                    >
+                                        "Delete"
+                                    </button>
                                 </li>
                             }
                         }).collect_view();
