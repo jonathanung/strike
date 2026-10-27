@@ -85,8 +85,9 @@ try {
   const missing = await status("/v1/workspaces");
   const wrong = await status("/v1/workspaces", { Authorization: "Bearer wrong" });
   const right = await status("/v1/workspaces", { Authorization: `Bearer ${token}` });
-  if (missing !== 401 || wrong !== 401 || right !== 200) {
-    throw new Error(`auth statuses missing=${missing} wrong=${wrong} right=${right}`);
+  const schedules = await status("/v1/schedules", { Authorization: `Bearer ${token}` });
+  if (missing !== 401 || wrong !== 401 || right !== 200 || schedules !== 200) {
+    throw new Error(`auth statuses missing=${missing} wrong=${wrong} right=${right} schedules=${schedules}`);
   }
   const healthBody = await (await fetch(`http://127.0.0.1:${port}/health`)).json();
   if (!healthBody.ok || !(healthBody.now > 0)) {
@@ -1925,9 +1926,43 @@ try {
   if (!picker.includes("A workspace is a directory")) {
     throw new Error(`workspace picker did not open: ${picker.slice(0, 400)}`);
   }
+  // Schedule page (#1276): the top-bar switch (data-view="schedule",
+  // registered by src/shell/contrib/scheduler.rs) opens the page and the
+  // empty state shows; the daemon token is already in localStorage from
+  // the boot script, so no reload is needed (the original PR's reload
+  // loop is replaced by the shared waitFor/textProbe helpers).
+  await evaluate(`document.querySelector('button[data-view="schedule"]').click()`);
+  await waitFor(
+    "schedule page (empty state)",
+    textProbe((body) => body.includes("Nothing is scheduled") && !body.includes("unauthorized")),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+
   if (strikeLog.includes(token)) {
     throw new Error("daemon log contains the smoke token");
   }
+
+  // Back to Chat before the composer checks below: the Schedule section
+  // above leaves the app on the schedule view, where the composer (and
+  // its actions button) is not rendered. The view switcher is the
+  // segmented "View" control whose Chat button calls set_view("chat").
+  await evaluate(`(() => {
+    const btn = [...document.querySelectorAll('.segmented[aria-label="View"] button')]
+      .find((b) => b.textContent.trim() === "Chat");
+    if (btn) { btn.click(); return "clicked"; }
+    return "missing-chat-switch";
+  })()`);
+  await waitFor(
+    "chat view (composer actions button) after leaving Schedule",
+    async () => {
+      const raw = await evaluate(
+        `JSON.stringify({ plus: !!document.querySelector('[aria-label="Composer actions"]') })`,
+      );
+      const parsed = JSON.parse(raw || "{}");
+      return { ok: !!parsed.plus, ...parsed };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
 
   const composerTriggers = await send("Runtime.evaluate", {
     expression: `(() => {

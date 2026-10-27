@@ -84,6 +84,10 @@ type assembled struct {
 	// spawnRoot creates additional concurrent root engines (interactive multi-root).
 	// resumeID empty = new session; non-empty opens that durable root.
 	spawnRoot rootSpawner
+	// spawnUnattended is the same spawn without the process --auto /
+	// --dangerously-skip-permissions allow-all layer. Schedules and triggers
+	// use it. The request's permission mode is applied on that engine.
+	spawnUnattended rootSpawner
 	// firstSlot is the initial live root for multiRootHub (same as eng/store).
 	firstSlot *rootSlot
 	// frameStore holds the last painted TUI frame for tui_snapshot (#1183).
@@ -663,7 +667,9 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	// openRoot builds one live root engine. resumeID empty creates a fresh
 	// session; non-empty opens that durable root (subagents rejected).
 	// applyCLI pins: only the process's first root applies --provider/--model/--effort.
-	openRoot := func(resumeID string, applyCLI bool) (*rootSlot, []protocol.Event, error) {
+	// unattended strips the process permission bypass and starts in plan
+	// unless managed config locks the dial.
+	openRoot := func(resumeID string, applyCLI bool, unattended bool) (*rootSlot, []protocol.Event, error) {
 		resumeID = strings.TrimSpace(resumeID)
 		preferActive := !applyCLI && resumeID == ""
 		var binding workspace.SessionBinding
@@ -772,6 +778,13 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			return nil, nil, err
 		}
 
+		// A clock or trigger must not inherit --auto / --dangerously-skip-permissions.
+		// Those flags append an allow-all layer and auto-accept phase widening.
+		// SetPermissionMode cannot remove that layer, so plan would still allow bash.
+		bypass := processBypassEnabled(opts.skipPermissionAsks(), unattended)
+		if unattended && strings.TrimSpace(resumeID) == "" && !cfg.Managed.PermissionMode {
+			initialPermMode = protocol.PermissionModePlan
+		}
 		// Refuse yolo + sandbox off without --i-know (startup gate).
 		if !resuming && binding.Bound && binding.PermissionMode != "" && !cfg.Managed.PermissionMode {
 			if mode, ok := protocol.ParsePermissionMode(binding.PermissionMode); ok {
@@ -900,7 +913,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			InitialPermissionMode: initialPermMode,
 			SandboxMode:           sandboxMode,
 			SandboxAllowDegrade:   cfg.SandboxAllowDegrade,
-			NetworkAllow:          sessionNetworkAllow(cfg.Network.Allow, opts.skipNetworkAllow()),
+			NetworkAllow:          sessionNetworkAllow(cfg.Network.Allow, opts.skipNetworkAllow() && !unattended),
 			BashSecrets:           cloneBashSecrets(cfg.BashSecrets),
 			ContentGuard: tool.ContentGuardSettings{
 				Mode:       cfg.ContentGuard.Mode,
@@ -927,10 +940,10 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			InitialPlanHandoff:         initialPlanHandoff,
 			PlanStore:                  enginebind.Plan(planStore),
 			QuietStartup:               quietStartup,
-			DangerouslySkipPermissions: opts.skipPermissionAsks(),
+			DangerouslySkipPermissions: bypass,
 			Workflows:                  enginebind.Workflows(workflows),
-			Rules:                      permissionLayersWithPreset(cfg.Permissions, cfg.PermissionPreset, opts.skipPermissionAsks()),
-			RuleLayerNames:             permissionLayerNames(cfg.PermissionPreset, opts.skipPermissionAsks()),
+			Rules:                      permissionLayersWithPreset(cfg.Permissions, cfg.PermissionPreset, bypass),
+			RuleLayerNames:             permissionLayerNames(cfg.PermissionPreset, bypass),
 			ManagedRules:               append(permission.Ruleset(nil), cfg.Managed.DenyRules...),
 			LockPermissionMode:         cfg.Managed.PermissionMode,
 			Hooks:                      hookDefs,
@@ -1065,7 +1078,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		}
 		resumeID = info.ID
 	}
-	first, replay, err := openRoot(resumeID, true)
+	first, replay, err := openRoot(resumeID, true, false)
 	if err != nil {
 		closeAttachments()
 		sched.Close()
@@ -1206,7 +1219,11 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	services.Themes = themesAdapter{}
 
 	spawn := rootSpawner(func(id string) (*rootSlot, error) {
-		slot, _, err := openRoot(id, false)
+		slot, _, err := openRoot(id, false, false)
+		return slot, err
+	})
+	spawnUnattended := rootSpawner(func(id string) (*rootSlot, error) {
+		slot, _, err := openRoot(id, false, true)
 		return slot, err
 	})
 
@@ -1263,14 +1280,15 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			}
 			return first
 		},
-		schedulerClose: sched.Close,
-		spawnRoot:      spawn,
-		firstSlot:      first,
-		frameStore:     frameStore,
-		attachments:    sharedAttachments,
-		sideProvider:   sideProvider,
-		sideModel:      sideModel,
-		sideSelect:     sideSelect,
+		schedulerClose:  sched.Close,
+		spawnRoot:       spawn,
+		spawnUnattended: spawnUnattended,
+		firstSlot:       first,
+		frameStore:      frameStore,
+		attachments:     sharedAttachments,
+		sideProvider:    sideProvider,
+		sideModel:       sideModel,
+		sideSelect:      sideSelect,
 	}, nil
 }
 

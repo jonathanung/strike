@@ -989,6 +989,38 @@ budgets). **Run / pause / resume / abort** require a live session
 Default host run path is evaluate-only (empty tool allowlist) — same safety
 default as `/goal run` in the TUI. Wire JSON is camelCase host-safe DTOs only.
 
+### Schedules
+
+`~/.strike/schedules.json` (mode `0600`) is the clock. The daemon ticks
+about every 20 seconds and starts a background root session; it does not
+switch the cockpit's active session.
+
+| Method | Path | Body |
+|---|---|---|
+| `GET` | `/v1/schedules` | `{schedules:[...]}` |
+| `POST` | `/v1/schedules` | spec below; `201` the stored schedule |
+| `GET` | `/v1/schedules/{id}` | one schedule |
+| `PATCH` | `/v1/schedules/{id}` | full spec; history is kept |
+| `DELETE` | `/v1/schedules/{id}` | |
+| `POST` | `/v1/schedules/{id}/pause` | |
+| `POST` | `/v1/schedules/{id}/resume` | arms the next future slot; does not catch up |
+| `POST` | `/v1/schedules/{id}/run` | one session now; `409` when overlap is skip and the last session is busy |
+| `GET` | `/v1/schedules/{id}/history` | `{runs:[...]}` newest first |
+
+Spec fields: `name`, `kind` (`cron` \| `interval` \| `once` \| `heartbeat`),
+`cron` (5 fields, timezone-aware), `every` (Go duration, minimum `1m`),
+`at` (RFC3339), `timezone` (IANA, default `UTC`), `source` (`prompt` \|
+`goal` \| `workflow`), `prompt`, `goalId`, `workflow`, `workspaceId`,
+`permissionMode` (used only when the workspace has no mode; empty means
+`plan`), `overlap` (`skip` \| `queue` \| `allow`, default `skip`),
+`missed` (`skip` \| `once`, default `skip`), `enabled`.
+
+A workspace permission mode wins over `permissionMode`. Heartbeat fires
+compare a fingerprint of the workspace (git HEAD and status, otherwise a
+walk). An unchanged tree records `quiet` and does not start a session.
+Cron slots that fall in a DST gap are skipped. A repeated DST hour fires
+once, at the earlier offset.
+
 Events use the same envelopes as session JSONL (`type` + `time` + `data`).
 
 Example — full echo turn via HTTP:
