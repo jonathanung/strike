@@ -17,7 +17,11 @@ pub fn install(reg: &mut ShellHook) {
         label: "Task runner",
         detail: "Open a checklist, run each section, review the checkpoint",
         shortcut: "",
-        keywords: &["plan", "checklist", "checkpoint"],
+        // No "plan" keyword: an exact keyword match outranks the fuzzy
+        // label match for "Approval: Plan", so Enter on a "plan" palette
+        // query opened the task runner instead of setting Plan mode
+        // (webui-smoke failure on #1429, 22 cascading assertions).
+        keywords: &["tasks", "checklist", "checkpoint"],
         argument: None,
         order: 35,
         run: Rc::new(|_| crate::shell::host::set_view("tasks")),
