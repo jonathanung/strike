@@ -103,11 +103,18 @@ func (h *LiveHub) Add(id string, live *Live) {
 func (h *LiveHub) Remove(id string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	h.removeLocked(id)
+}
+
+// removeLocked is Remove with h.mu already held.
+func (h *LiveHub) removeLocked(id string) bool {
 	entry, ok := h.entries[id]
 	if !ok {
-		return
+		return false
 	}
-	entry.live.Close()
+	if entry.live != nil {
+		entry.live.Close()
+	}
 	delete(h.entries, id)
 	if h.active == id {
 		h.active = ""
@@ -116,6 +123,63 @@ func (h *LiveHub) Remove(id string) {
 			break
 		}
 	}
+	return true
+}
+
+// RemoveForSession deregisters the live root serving sessionID after that
+// session's durable log has been deleted (#1399). It returns false and
+// leaves the hub untouched when no entry serves sessionID, or when another
+// live entry still references the same session or the same Live bridge —
+// a root another live session still uses is never deregistered. The entry
+// is normally keyed by the session id itself; an entry whose Live reports
+// sessionID under a different key is also matched when it is the only one.
+func (h *LiveHub) RemoveForSession(sessionID string) bool {
+	if h == nil {
+		return false
+	}
+	sessionID = trimRootID(sessionID)
+	if sessionID == "" {
+		return false
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	// The candidate is normally the entry keyed by the session id. When no
+	// such entry exists, fall back to the unique entry whose Live serves
+	// this session, if there is exactly one.
+	key := sessionID
+	entry, ok := h.entries[key]
+	if !ok {
+		key = ""
+		for rid, e := range h.entries {
+			if e.live != nil && e.live.SessionID() == sessionID {
+				if key != "" {
+					return false // shared by multiple roots: keep all
+				}
+				key, entry = rid, e
+			}
+		}
+		if key == "" {
+			return false
+		}
+	}
+	// The candidate must actually serve this session: a root serving a
+	// different session is not this session's root.
+	if entry.live != nil {
+		if sid := entry.live.SessionID(); sid != "" && sid != sessionID {
+			return false
+		}
+	}
+	// Shared-root guard: another entry referencing the same Live bridge or
+	// the same session id still uses this root, so it stays registered.
+	for rid, other := range h.entries {
+		if rid == key || other.live == nil {
+			continue
+		}
+		if other.live == entry.live || other.live.SessionID() == sessionID {
+			return false
+		}
+	}
+	return h.removeLocked(key)
 }
 
 // Active returns the currently active live bridge, or nil.
