@@ -1240,10 +1240,12 @@ fn App() -> impl IntoView {
             || (live_busy.get_untracked() && live_busy_root.get_untracked() == root)
     };
 
-    let send_text = move |text: String| {
+    // Returns true only when the text was actually dispatched, so callers
+    // can keep the draft when a context hold (or no live session) blocks it.
+    let send_text = move |text: String| -> bool {
         let text = text.trim().to_string();
         if text.is_empty() {
-            return;
+            return false;
         }
         let held = {
             let ctx = active_context(
@@ -1260,12 +1262,12 @@ fn App() -> impl IntoView {
         };
         if held.held {
             model_note.set(held.hold_message);
-            return;
+            return false;
         }
         let root = active_root.get_untracked();
         if root.is_empty() {
             status.set("no live session yet".into());
-            return;
+            return false;
         }
         let op = if session_busy(&root) && enter_mode.get_untracked() == "steer" {
             "steer"
@@ -1278,6 +1280,7 @@ fn App() -> impl IntoView {
                 status.set(format!("send failed: {e}"));
             }
         });
+        true
     };
 
     let send = move || {
@@ -2392,7 +2395,7 @@ fn App() -> impl IntoView {
                                         let send_label = label.clone();
                                         let send = send_text;
                                         view! {
-                                            <button type="button" class="suggestion" on:click=move |_| send(send_label.clone())>{label}</button>
+                                            <button type="button" class="suggestion" on:click=move |_| { send(send_label.clone()); }>{label}</button>
                                         }
                                     }).collect_view()}
                                 </div>
@@ -2511,7 +2514,7 @@ fn App() -> impl IntoView {
                                 let send_label = label.clone();
                                 let send = send_text;
                                 view! {
-                                    <button type="button" class="chip" title="Fixed prompt, not a model suggestion" on:click=move |_| send(send_label.clone())>{label}</button>
+                                    <button type="button" class="chip" title="Fixed prompt, not a model suggestion" on:click=move |_| { send(send_label.clone()); }>{label}</button>
                                 }
                             }).collect_view()}
                         </div>
