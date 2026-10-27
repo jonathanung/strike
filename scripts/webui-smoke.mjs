@@ -486,6 +486,134 @@ try {
       `cockpit check failed missing=${missingText.join(",")} acid=${acid} ground=${ground} status=${statusId} chip=${chip} title=${title} text=${text.slice(0, 400)}\n${await diagnostics()}`,
     );
   }
+  // Approvals (#1266): mode menu, Yolo confirm + Escape, and the
+  // permission-rules API confirm gates. Runs while the boot session is
+  // live (rule writes require a live root) and leaves the chip on Default.
+  const apprEval = async (expression) => {
+    const ev = await send("Runtime.evaluate", { expression, returnByValue: true });
+    return ev.result?.result?.value || "";
+  };
+  const apprText = () => apprEval("document.body ? document.body.innerText : \"\"");
+  const apprClickChip = () =>
+    apprEval(`(() => {
+      const btn = [...document.querySelectorAll("button")].find((b) => (b.textContent || "").includes("Approval"));
+      if (!btn) return "no-chip";
+      btn.click();
+      return "clicked";
+    })()`);
+  // Condition-based waits with the clicks inside the probes (this file's
+  // post-#1378 discipline): a click that lands mid-render is retried
+  // instead of failing against a fixed deadline.
+  await waitFor(
+    "approval menu (modes, Rules and audit, deny copy)",
+    async () => {
+      const t = await apprText();
+      if (t.includes("Rules and audit") && t.includes("Deny rules still apply") && t.includes("Yolo")) {
+        return { ok: true, t };
+      }
+      await apprClickChip();
+      return { ok: false };
+    },
+    { timeout: STEP_MS, interval: 250 },
+  );
+  const apprMenu = await apprText();
+  if (!apprMenu.includes("Default") || !apprMenu.includes("Plan") || !apprMenu.includes("Yolo") || !apprMenu.includes("Deny rules still apply")) {
+    throw new Error(`approval menu missing copy: ${apprMenu.slice(0, 500)}`);
+  }
+  await waitFor(
+    "yolo confirm dialog",
+    async () => {
+      const t = await apprText();
+      if (t.includes("Use Yolo for this session?")) {
+        return { ok: true };
+      }
+      const r = await apprEval(`(() => {
+        const btn = [...document.querySelectorAll("button")].find((b) => (b.textContent || "").trim().startsWith("Yolo"));
+        if (!btn) return "no-yolo";
+        btn.click();
+        return "clicked";
+      })()`);
+      if (r !== "clicked") {
+        await apprClickChip();
+      }
+      return { ok: false };
+    },
+    { timeout: STEP_MS, interval: 250 },
+  );
+  await apprEval(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
+  await waitFor(
+    "escape keeps Default",
+    async () => {
+      const t = await apprText();
+      return { ok: t.includes("Approval · Default") && !t.includes("Use Yolo for this session?") };
+    },
+    { timeout: STEP_MS, interval: 250 },
+  );
+
+  const apprAuth = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+  const apprRuleCall = async (path, body) => {
+    const res = await fetch(`http://127.0.0.1:${port}${path}`, {
+      method: "POST",
+      headers: apprAuth,
+      body: JSON.stringify(body),
+    });
+    const text = await res.text();
+    return { status: res.status, text };
+  };
+  const apprDenied = await apprRuleCall("/v1/permissions/rules", {
+    scope: "global",
+    permission: "bash",
+    pattern: "smoke-deny",
+    action: "deny",
+    confirm: false,
+  });
+  if (apprDenied.status !== 200 || !apprDenied.text.includes("smoke-deny")) {
+    throw new Error(`deny rule: ${apprDenied.status} ${apprDenied.text.slice(0, 300)}`);
+  }
+  const apprListed = await fetch(`http://127.0.0.1:${port}/v1/permissions/rules`, { headers: apprAuth });
+  const apprListedText = await apprListed.text();
+  if (apprListed.status !== 200 || !apprListedText.includes("smoke-deny")) {
+    throw new Error(`rules list: ${apprListed.status} ${apprListedText.slice(0, 300)}`);
+  }
+  const apprQuiet = await apprRuleCall("/v1/permissions/rules", {
+    scope: "global",
+    permission: "bash",
+    pattern: "smoke-allow",
+    action: "allow",
+    confirm: false,
+  });
+  if (apprQuiet.status !== 400 || !apprQuiet.text.includes("confirmation required")) {
+    throw new Error(`allow without confirm: ${apprQuiet.status} ${apprQuiet.text.slice(0, 300)}`);
+  }
+  const apprAllowed = await apprRuleCall("/v1/permissions/rules", {
+    scope: "global",
+    permission: "bash",
+    pattern: "smoke-allow",
+    action: "allow",
+    confirm: true,
+  });
+  if (apprAllowed.status !== 200 || !apprAllowed.text.includes("smoke-allow")) {
+    throw new Error(`allow with confirm: ${apprAllowed.status} ${apprAllowed.text.slice(0, 300)}`);
+  }
+  const apprRules = JSON.parse(apprListedText).rules || [];
+  const apprDenyIndex = apprRules.find((row) => row.pattern === "smoke-deny" && row.action === "deny");
+  if (!apprDenyIndex) throw new Error(`deny index missing: ${apprListedText.slice(0, 300)}`);
+  const apprKept = await apprRuleCall("/v1/permissions/rules/remove", {
+    scope: "global",
+    index: apprDenyIndex.index,
+    confirm: false,
+  });
+  if (apprKept.status !== 400 || !apprKept.text.includes("confirmation required")) {
+    throw new Error(`remove deny without confirm: ${apprKept.status} ${apprKept.text.slice(0, 300)}`);
+  }
+  const apprRemoved = await apprRuleCall("/v1/permissions/rules/remove", {
+    scope: "global",
+    index: apprDenyIndex.index,
+    confirm: true,
+  });
+  if (apprRemoved.status !== 200 || apprRemoved.text.includes("smoke-deny")) {
+    throw new Error(`remove deny: ${apprRemoved.status} ${apprRemoved.text.slice(0, 300)}`);
+  }
   const evalValue = async (expression) => {
     const ev = await send("Runtime.evaluate", { expression, returnByValue: true });
     if (ev.result?.exceptionDetails) {
@@ -1653,6 +1781,7 @@ try {
   if (strikeLog.includes(token)) {
     throw new Error("daemon log contains the smoke token");
   }
+
   console.log("webui-smoke ok");
 } catch (err) {
   console.error(String(err));
