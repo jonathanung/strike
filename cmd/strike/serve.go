@@ -19,8 +19,10 @@ import (
 	"github.com/jonathanung/strike/harness/sandbox"
 	"github.com/jonathanung/strike/internal/frontend/host"
 	"github.com/jonathanung/strike/internal/frontend/server"
+	"github.com/jonathanung/strike/internal/persist/attachment"
 	"github.com/jonathanung/strike/internal/persist/session"
 	"github.com/jonathanung/strike/internal/persist/workspace"
+	"github.com/jonathanung/strike/internal/product/config"
 	"github.com/jonathanung/strike/internal/protocol"
 	"github.com/jonathanung/strike/internal/trust/audit"
 	"github.com/jonathanung/strike/internal/trust/usageaudit"
@@ -232,6 +234,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 	var sandboxSnap *server.SandboxSnapshot
 	var sideChat server.SideChatModel
 	var cleanup func() error
+	var sharedAttachments *attachment.Store
 	sessionDir := opts.sessionDir
 
 	if !opts.attachOnly {
@@ -246,6 +249,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		if err != nil {
 			return err
 		}
+		sharedAttachments = a.attachments
 		sessionDir = a.sessions.Dir()
 		sideChat = newSideChatModel(a.sideProvider, a.sideModel, a.sideSelect)
 
@@ -491,6 +495,14 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
+	if sharedAttachments == nil {
+		st, err := attachment.Open(config.GlobalRoot())
+		if err != nil {
+			return fmt.Errorf("open attachments: %w", err)
+		}
+		defer func() { _ = st.Close() }()
+		sharedAttachments = st
+	}
 
 	srv, err := server.New(server.Options{
 		Addr:          opts.addr,
@@ -504,6 +516,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		Sandbox:       sandboxSnap,
 		ReadOnly:      opts.readOnly,
 		Audit:         auditSink,
+		Attachments:   sharedAttachments,
 		UsageAuditDir: usageDir,
 		SideChat:      sideChat,
 	})

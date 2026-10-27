@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/jonathanung/strike/internal/frontend/host"
+	"github.com/jonathanung/strike/internal/persist/attachment"
 	"github.com/jonathanung/strike/internal/persist/session"
 	"github.com/jonathanung/strike/internal/persist/workspace"
 	"github.com/jonathanung/strike/internal/product/version"
@@ -87,6 +88,10 @@ type Options struct {
 	OpsBurst int
 	// OpsClock overrides time.Now for rate-limit tests.
 	OpsClock func() time.Time
+	// Attachments stores composer uploads and replaces inline bytes on
+	// user.input and steer with content-addressed refs. Nil leaves text-only
+	// ops alone and rejects ops that carry images.
+	Attachments *attachment.Store
 	// SideChat answers questions about a session transcript. It must not
 	// submit protocol ops. Nil makes POST /v1/sidechat/ask return 503.
 	// POST /v1/sidechat/ops still refuses every op, including permission.reply.
@@ -372,6 +377,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/agents", s.handleAgents)
 	s.mux.HandleFunc("GET /v1/diag", s.handleDiag)
 	s.mux.HandleFunc("POST /v1/diag", s.handleDiag)
+	s.mux.HandleFunc("POST /v1/attachments", s.handleAttachmentIngest)
 	s.mux.HandleFunc("POST /v1/ops", s.handleOps)
 	s.mux.HandleFunc("GET /v1/sidechat", s.handleSideChatList)
 	s.mux.HandleFunc("POST /v1/sidechat/ask", s.handleSideChatAsk)
@@ -490,7 +496,9 @@ func (s *Server) applySecurityHeaders(w http.ResponseWriter) {
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("X-Frame-Options", "DENY")
-	w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+	// microphone=(self) lets conversation mode use the browser speech API.
+	// Camera stays off: attachments are files, not capture.
+	w.Header().Set("Permissions-Policy", "camera=(), microphone=(self), geolocation=()")
 }
 
 const authCookieName = "strike_serve_token"
