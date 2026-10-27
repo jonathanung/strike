@@ -28,6 +28,7 @@ import (
 	"github.com/jonathanung/strike/internal/persist/session"
 	"github.com/jonathanung/strike/internal/persist/workspace"
 	"github.com/jonathanung/strike/internal/product/version"
+	"github.com/jonathanung/strike/internal/trust/usageaudit"
 )
 
 // Options configures the attach server.
@@ -75,6 +76,11 @@ type Options struct {
 	ReadOnly bool
 	// Audit receives serve_op records (op type + source IP). Nil disables.
 	Audit OpAuditor
+	// UsageAuditDir is the hash-chained usage audit log. Empty leaves the
+	// chain unconfigured; GET /v1/usage still reads SessionDir.
+	UsageAuditDir string
+	// UsagePricer overrides models.dev pricing for /v1/usage. Nil loads the catalog.
+	UsagePricer func(provider, model string) (usageaudit.Rates, bool)
 	// OpsRate is tokens/sec per client IP for ops (default 10). <=0 uses default.
 	OpsRate float64
 	// OpsBurst is the per-IP burst (default 20). <=0 uses default.
@@ -101,9 +107,21 @@ type Server struct {
 	paneHost *paneHost
 	opsLimit *opLimiter
 
+	seenOnce sync.Once
+	seen     *SeenStore
+
 	// scriptCSPHashes allowlists inline <script> bodies from the embedded
 	// index.html (Trunk emits an inline WASM loader) without unsafe-inline.
 	scriptCSPHashes []string
+
+	// notifyOnce lazily opens the redacted notification log under SessionDir.
+	notifyOnce sync.Once
+	notifyLog  *notifyLog
+
+	// tokenHash is the sha256 of the daemon token file last observed.
+	// A change appends a token-rotation audit entry. The token is not stored.
+	tokenMu   sync.Mutex
+	tokenHash string
 
 	// sideChat stores read-only Q&A beside the session log, not in it.
 	sideChat sideChatStore
@@ -261,8 +279,13 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/memory", s.handleMemory)
 	s.mux.HandleFunc("GET /v1/memory/export", s.handleMemoryExport)
 	s.mux.HandleFunc("POST /v1/memory/import", s.handleMemoryImport)
+	s.mux.HandleFunc("GET /v1/memory/mode", s.handleMemoryModeGet)
+	s.mux.HandleFunc("PUT /v1/memory/mode", s.handleMemoryModePut)
 	s.mux.HandleFunc("PUT /v1/memory/{key}", s.handleMemoryPut)
 	s.mux.HandleFunc("DELETE /v1/memory/{key}", s.handleMemoryDelete)
+	s.mux.HandleFunc("GET /v1/knowledge", s.handleKnowledgeList)
+	s.mux.HandleFunc("PUT /v1/knowledge", s.handleKnowledgePut)
+	s.mux.HandleFunc("DELETE /v1/knowledge", s.handleKnowledgeDelete)
 	s.mux.HandleFunc("POST /v1/issues", s.handleIssueCreate)
 	s.mux.HandleFunc("GET /v1/issues/export", s.handleIssuesExport)
 	s.mux.HandleFunc("POST /v1/issues/import", s.handleIssuesImport)
@@ -333,6 +356,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/sessions/{id}/timeline", s.handleSessionTimeline)
 	s.mux.HandleFunc("GET /v1/sessions/{id}/timeline/export", s.handleSessionTimelineExport)
 	s.mux.HandleFunc("GET /v1/sessions", s.handleSessions)
+	s.mux.HandleFunc("GET /v1/usage", s.handleUsage)
+	s.mux.HandleFunc("PUT /v1/usage/budget", s.handleUsageBudget)
+	s.mux.HandleFunc("GET /v1/audit", s.handleAuditList)
+	s.mux.HandleFunc("GET /v1/audit/verify", s.handleAuditVerify)
+	s.mux.HandleFunc("GET /v1/audit/export", s.handleAuditExport)
+	s.mux.HandleFunc("POST /v1/audit", s.handleAuditAppend)
 	s.mux.HandleFunc("GET /v1/workspaces", s.handleWorkspacesList)
 	s.mux.HandleFunc("POST /v1/workspaces", s.handleWorkspaceAdd)
 	s.mux.HandleFunc("POST /v1/workspaces/{id}/activate", s.handleWorkspaceActivate)
@@ -344,6 +373,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/roots/{id}/resume", s.handleRootResume)
 	s.mux.HandleFunc("DELETE /v1/roots/{id}", s.handleRootClose)
 	s.mux.HandleFunc("GET /v1/status", s.handleStatus)
+	s.mux.HandleFunc("GET /v1/status/sessions", s.handleSessionStatusBoard)
+	s.mux.HandleFunc("GET /v1/status/events", s.handleSessionStatusEvents)
+	s.mux.HandleFunc("POST /v1/sessions/{id}/seen", s.handleSessionSeen)
+	s.mux.HandleFunc("DELETE /v1/sessions/{id}/seen", s.handleSessionUnseen)
 	s.mux.HandleFunc("GET /v1/agents", s.handleAgents)
 	s.mux.HandleFunc("GET /v1/diag", s.handleDiag)
 	s.mux.HandleFunc("POST /v1/diag", s.handleDiag)
@@ -352,6 +385,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/sidechat/ask", s.handleSideChatAsk)
 	s.mux.HandleFunc("POST /v1/sidechat/ops", s.handleSideChatOps)
 	s.mux.HandleFunc("GET /v1/live/events", s.handleLiveEvents)
+	s.mux.HandleFunc("GET /v1/notifications", s.handleNotifications)
+	s.mux.HandleFunc("GET /v1/notifications/stream", s.handleNotificationStream)
+	s.mux.HandleFunc("PUT /v1/notifications/prefs", s.handleNotificationPrefs)
 	s.mux.HandleFunc("GET /v1/ws", s.handleWS)
 	s.mux.HandleFunc("GET /{$}", s.handleAttach)
 	s.mux.HandleFunc("GET /attach", s.handleAttach)
@@ -501,7 +537,9 @@ func (s *Server) currentToken() string {
 	if err != nil {
 		return ""
 	}
-	return strings.TrimSpace(string(data))
+	tok := strings.TrimSpace(string(data))
+	s.noteTokenFile(tok)
+	return tok
 }
 
 // bearerToken extracts a Bearer credential. Scheme match is case-insensitive
@@ -618,6 +656,9 @@ type healthResponse struct {
 	OK      bool   `json:"ok"`
 	Version string `json:"version"`
 	Commit  string `json:"commit"`
+	// Now is unix milliseconds. Clients treat a gap longer than
+	// protocol.HeartbeatStaleMs as a dead gateway.
+	Now int64 `json:"now"`
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -625,6 +666,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		OK:      true,
 		Version: version.Version,
 		Commit:  version.Commit,
+		Now:     time.Now().UnixMilli(),
 	})
 }
 

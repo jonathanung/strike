@@ -9,17 +9,20 @@
 (function(){try{var ok={strike:1,nord:1,dracula:1,gruvbox:1,monokai:1,"tokyo-night":1,catppuccin:1};var t=localStorage.getItem("strike.theme")||"strike";var s=localStorage.getItem("strike.scheme")||"dark";if(!ok[t])t="strike";if(s!=="light")s="dark";var el=document.documentElement;el.setAttribute("data-theme",t);el.setAttribute("data-scheme",s);}catch(e){}})();
 </script>
 <link rel="manifest" href="/manifest.webmanifest">
-<link rel="stylesheet" href="/assets/style-6ccbd1af2a061a87.css" integrity="sha384-eq5XwYMj5QdGal27hzlF/zaLk9IifFUBlT5iqJ7LbfWecHdQSN2f60ZhuP9B3gSH"/>
+<link rel="stylesheet" href="/assets/style-72d5a92fbceae384.css" integrity="sha384-QP4jtEVAn56o4DD7Ta8hbHH2RmxLJZ2IW0ZzOpjhq2bychKs9xYoz5wbYqQhNHwq"/>
+<link rel="stylesheet" href="/assets/storage-c32d584bc182ee77.css" integrity="sha384-XNDaz3yqOR2+uEfPi+eY+9Mzja2F/5vYI647yiPLuy4KvGHAOICyrdh0pqlWr9Wn"/>
 <link rel="stylesheet" href="/assets/navbar-4aaaf28db500eacb.css" integrity="sha384-5TOOsJOEELXhQX9eaCeYAdolP2MTbzKY2Rs54jkUpbigS3rQ+1uG62wvDZTASCfR"/>
 <link rel="stylesheet" href="/assets/editor-b94eee6c774248b5.css" integrity="sha384-+9ZqewFDkMigo7FvJP5c3fz6AHPgvKtu9jHfIAjeW7Qtx7wW3GCJSZM+LHcEeR4D"/>
+<link rel="stylesheet" href="/assets/notify-750498e8d7d87548.css" integrity="sha384-l/TrTY1ETPTYhTEtEfPovdv2nck2zscWIo3mhOCEkb/RLhrZYW/bwgXX5qn68bAv"/>
+<link rel="stylesheet" href="/assets/usage-audit-4109f37a4c3f020.css" integrity="sha384-PG57uHfAoOyYrJLu5TZtnb1s2Ud6PPolTjB9IeCoVZ1qF7Qgrtsh0+5YiMBYYV9Z"/>
 <link rel="stylesheet" href="/assets/goals-5b895e22909a0f66.css" integrity="sha384-liP/FQF4QvouM0zc8WO7nxC1u3CzbFF/GBmvuED6zZS8f0rmPG1QWhWJitxfpRm1"/>
 
 
 
 
 <script type="module">
-import init, * as bindings from '/assets/strike-webui-83b7a00526b125a4.js';
-const wasm = await init({ module_or_path: '/assets/strike-webui-83b7a00526b125a4_bg.wasm' });
+import init, * as bindings from '/assets/strike-webui-8e0eb2071ce798c3.js';
+const wasm = await init({ module_or_path: '/assets/strike-webui-8e0eb2071ce798c3_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -30,6 +33,6 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 </script>
 <script src="/assets/register.js" defer></script>
 
-<link rel="modulepreload" href="/assets/strike-webui-83b7a00526b125a4.js" crossorigin="anonymous" integrity="sha384-IpkiAXFuSFcDzB7CK7AVM+T5uFMF689EaQ6QL6p/qj5F3l5lYbuOQVYfPnd6cKR1"><link rel="preload" href="/assets/strike-webui-83b7a00526b125a4_bg.wasm" crossorigin="anonymous" integrity="sha384-RVxfv881gayRW3GzC2UXR2FaIdb7TH4egWDnafuzx+eq9B4LBGUjxgJNNppHqWOq" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/assets/strike-webui-8e0eb2071ce798c3.js" crossorigin="anonymous" integrity="sha384-Kd3IC87d36tmPFC382+x4SNmBsKuO1t9do7LJA8FcCO3S3u4r5Wu/pJltBVU4bsw"><link rel="preload" href="/assets/strike-webui-8e0eb2071ce798c3_bg.wasm" crossorigin="anonymous" integrity="sha384-woDb3JbH4bwOF73vnXhhgxJHF2kd5DUvBngCzJOR+CK+nhy5EUOe3txxuObRu8dP" as="fetch" type="application/wasm"></head>
 <body></body>
 </html>

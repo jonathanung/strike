@@ -53,13 +53,14 @@ Status: walking skeleton on branch `worktree-rust-webui-daemon`. Not merged.
   a side panel. Daemon connect, workspace policy, and saved remotes stay on
   the Daemon view.
   - Session list merges live roots (`/v1/roots`) with saved sessions.
-    A gutter marks in progress or unread. Chips filter Unread, In progress,
+    A gutter marks the canonical status (running, waiting, blocked, failed,
+    done, stopped, idle) and an unread pip. Chips filter Unread, In progress,
     and Pinned. Search matches title, id, or a delegated child's title.
     Older rows fold after six, keeping pinned, busy, and the open session.
     Delegated children (`GET /v1/sessions/{id}/children`, team state when
-    the roster has them) nest under the open session. Unread and pinned
-    live in browser storage (`strike.seen`, `strike.pins`); the server does
-    not store them.
+    the roster has them) nest under the open session. Unread is stored on
+    the daemon (`POST /v1/sessions/{id}/seen`, `docs/webui-status.md`).
+    Pins stay in browser storage (`strike.pins`).
   - The top bar has a command field (Ctrl+K or Cmd+K) for a new session,
     stop-all, the Chat and Daemon views, Steer/Queue, and the five approval
     modes. A gateway chip follows `/health`. Back and Forward walk the
@@ -73,17 +74,27 @@ Status: walking skeleton on branch `worktree-rust-webui-daemon`. Not merged.
     `accept-edits` (file edits allowed; shell and network still ask),
     `yolo` (this session skips asks that are not hard-denied; other
     sessions stay as they are). There is no read-only-shell mode and no
-    all-sessions skip. The model chip shows the live provider and model
-    from `/v1/bootstrap`. A catalog `GET /v1/models` that fails stays
-    "catalog unavailable" and does not invent models. `select.model` is
-    rejected while a turn is running.
+    all-sessions skip. The model chip (Alt+M) opens a filterable menu
+    grouped by provider. Pins stay in this browser. Enter posts
+    `select.model` for this session; saving a default patches
+    `/v1/settings` and does not by itself switch the session. Effort is
+    shown when the catalog reports reasoning or variants, or when the
+    session already has an effort (`set.effort`). The context meter uses
+    `contextUsed`, `contextLimit`, and `contextFit` from the live status,
+    and the catalog window only when the daemon has not named a limit.
+    Send is held on a critical fit or a full known window. A catalog
+    `GET /v1/models` that fails stays "catalog unavailable" and does not
+    invent models. `select.model` and `set.effort` are rejected while a
+    turn is running.
   - Empty sessions rotate a short headline and offer six prompts that send
     as ordinary text. A failed load shows the error and Retry.
   - The side panel is Activity (team snapshot: status, elapsed, stop,
-    retry, expand, including `blocked` handoffs), Files (`/v1/files`), and
-    Changes (`/v1/changed-files`). Clicking or dragging a file inserts
-    `@path` as text. The web composer does not expand that token the way
-    the TUI does. Open on a file reads it in the center document pane
+    retry, expand, including `blocked` handoffs), Files (`/v1/files`),
+    Changes (`/v1/changed-files`), Memory, Knowledge, and Artifacts.
+    Clicking or dragging a file inserts `@path` as text. The web composer
+    does not expand that token the way the TUI does. Memory mode
+    (normal, incognito, temporary) is a composer chip and a palette command.
+    Open on a file reads it in the center document pane
     (`GET /v1/file/view`). The pane is read-only until Edit. Save is
     `PUT /v1/file` with the sha256 and mtime from the read; a mismatch is
     409 and does not write. Plan mode and an edit/write deny rule reject
@@ -100,9 +111,9 @@ Status: walking skeleton on branch `worktree-rust-webui-daemon`. Not merged.
     with a separate model call and no tools. `POST /v1/sidechat/ops` refuses
     `permission.reply` and `user.input`. Turns are not written to the session
     JSONL.
-  - Schedule, memory, knowledge, artifacts, the task runner, onboarding,
-    and a multi-gateway hub are documented in
-    [webui-planned.md](webui-planned.md), not drawn as empty panels.
+  - Schedule, the task runner, onboarding, and a multi-gateway hub are
+    documented in [webui-planned.md](webui-planned.md), not drawn as empty
+    panels. Memory, knowledge, and artifacts are drawn from the live routes.
 - Server serves `/sw.js` and `/manifest.webmanifest` at the origin root and
   the bundle under `/assets/` (WASM-aware CSP and content types).
 

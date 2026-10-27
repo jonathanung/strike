@@ -467,7 +467,7 @@ pub(crate) fn SessionPanel(
         let n = start_op();
         spawn_local(async move {
             let path = format!("/v1/session-list/folders/{}", js_encode(&id));
-            match delete_json(&b, &t, &path).await {
+            match delete_json(&b, &t, &path, None).await {
                 Ok(()) => finish_op(n, String::new()),
                 Err(e) => finish_op(n, e),
             }

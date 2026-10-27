@@ -16,7 +16,7 @@ From a checkout that already has `./strike` (or set `STRIKE_BIN`):
 make webui-uat
 ```
 
-That builds the binary, runs `node --test scripts/webui-uat/lib.test.mjs`,
+That builds the binary, runs `node --test scripts/webui-uat/*.test.mjs`,
 then:
 
 ```sh
@@ -61,13 +61,56 @@ Named shots are taken at 1024×594 and 1440×900. The empty shell and the
 composer also get a 390×844 shot where the layout breaks to one column
 (`shell-empty-mobile.png`, `shell-composer-mobile.png`).
 
+`--suite smoke` stops here. The default `--suite full` (`make webui-uat`)
+then reloads the shell and runs every stream scenario.
+
+## Per-stream scenarios
+
+Add one file. Do not edit `scripts/webui-uat.mjs`, `scenario.mjs`, or the
+CI job. A file whose name starts with `_` is an example and is not loaded.
+
+```javascript
+// scripts/webui-uat/scenarios/approvals.mjs
+export const scenario = (ctx) => ctx.phone("approvals-empty");
+```
+
+`ctx` is the shared driver: `phone`, `shoot`, `click`, `press`, `waitUntil`,
+`check`, `viewport`, `bodyText`, `tokens`, `log`, `page`, `baseURL`, and
+`controls` (stop/start the echo daemon). `check(false, message)` records a
+failure and the process exits non-zero. A thrown error is recorded the same
+way. Prefix shot names with the stream slug so two files do not overwrite
+one PNG. Leave the daemon running for the next file.
+
+```sh
+make webui-uat                  # cockpit pass, then every scenarios/*.mjs
+make webui-uat SUITE=approvals  # only scenarios/approvals.mjs
+make webui-uat SUITE=smoke      # cockpit pass only (what CI runs)
+```
+
+`SUITE=approvals` is `node scripts/webui-uat.mjs --suite approvals`. The
+shell is already booted. The scenario does not replay the cockpit pass.
+
+## Phone width
+
+`ctx.phone("approvals-empty")` sets a 390×844 CSS viewport (device pixel
+ratio 1, mobile metrics), waits 120ms, writes
+`screenshots/approvals-empty-mobile.png`, and restores 1440×900 so later
+video frames stay at desk width. The same size is `ctx.shoot(name, ["mobile"])`
+when you also want 1024 and 1440 in one call:
+
+```javascript
+export const scenario = async (ctx) => {
+  await ctx.shoot("approvals-menu", ["desk1024", "desk1440", "mobile"]);
+};
+```
+
 ## CI
 
 `.github/workflows/ci.yml` job `webui-smoke` keeps the auth check in
 `scripts/webui-smoke.mjs`, then runs:
 
 ```sh
-node --test scripts/webui-uat/lib.test.mjs
+node --test scripts/webui-uat/*.test.mjs
 node scripts/webui-uat.mjs --suite smoke --no-video --out webui-uat-artifacts
 ```
 
@@ -106,7 +149,7 @@ them. A missing golden fails only when `--goldens` is set.
 | Flag | Effect |
 |---|---|
 | `--out dir` | Artifact directory (default `webui-uat-artifacts`) |
-| `--suite full\|smoke` | Recorded in `report.json`. Smoke is what CI runs |
+| `--suite full\|smoke\|<slug>` | `full` is the cockpit plus `scenarios/*.mjs`. `smoke` is the cockpit and what CI runs. `<slug>` runs only that scenario file |
 | `--no-video` / `--video` | Skip or force `uat.mp4` |
 | `--goldens` / `--update-goldens` | Opt-in downscale compare |
 | `--compare-only --left --right --compare-out` | Side-by-side, no daemon |

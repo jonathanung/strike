@@ -207,6 +207,7 @@ Not an event. First line of logs created by current writers. `schemaVersion` is 
 | `prNumber` | number | yes |
 | `prState` | string | yes |
 | `prUpdatedAt` | string | yes |
+| `memoryMode` | string | yes |
 
 ### Events
 

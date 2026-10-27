@@ -5,7 +5,8 @@ a session list (live roots, saved sessions, server-backed pins, archive,
 and organisational folders, search across titles and recent transcript
 text, delegated children nested in the conductor view), a transcript over
 `/v1/live/events`, a composer that can steer or queue and set the real
-permission mode, and a side panel with Activity, Files, and Changes.
+permission mode, and a side panel with Activity, Files, Changes, Memory, Knowledge,
+and Artifacts.
 Blocked children (`schema:handoff`, #1201) show as `blocked`. Folders group
 sessions in the list; they are not directories on disk. Unread is still the
 browser seen-map until the status stream (#1263) publishes a server field.
@@ -16,10 +17,12 @@ The top bar and command palette are the shell in `webui/src/shell/`. Other
 streams register a slot or a command by adding a file under
 `webui/src/shell/contrib/`. The contract is [webui-shell.md](webui-shell.md).
 
-These panels are not in the client. Drawing empty versions of them would
-pretend the daemon already has the Kiro-shaped workflow. Each one below is
-the Strike-specific shape, using stores and events that already exist or are
-the next real slice.
+The sections below that are still unshipped are not drawn. An empty panel
+would pretend the daemon already has that workflow. Each one is the
+Strike-specific shape, using stores and events that already exist or are
+the next real slice. Memory, Knowledge, Artifacts, and Memory mode are
+the exception: they are in the client, and the notes under those headings
+say what shipped.
 
 ## Goals and autopilot
 
@@ -53,27 +56,35 @@ today, so the panel stays out until that exists.
 
 ## Memory
 
-`GET/PUT/DELETE /v1/memory` is a project key/value store. The client does not
-show it. A Memory panel would list those keys, the value, and who wrote it,
-and would save through the same routes. It would not invent embeddings,
-lessons, or cross-session search. Those are not in the store.
+Shipped. The Memory tab lists `GET /v1/memory` for the project scope and for
+a separate global scope (`scope=global`). Save and delete use the same
+`PUT`/`DELETE /v1/memory/{key}` routes, with `author` and `scope`. Each write
+is scrubbed with `pkg/redact` before it hits disk. The JSON file stays the
+indexed store. A plain markdown projection and an append-only audit log are
+rewritten beside it so the file can be opened and diffed. The agent still
+reads the tagged subset (`preference`, `instruction`, `project-convention`)
+at each turn, including the first turn of a session. Embeddings, lessons as
+a separate object, and cross-session search are not in the store. Named
+workspace scope is still [Workspace binding](#workspace-binding).
 
 ## Knowledge
 
-No knowledge or document index is exposed on `/v1`. A Knowledge panel would
-be a read view over files the daemon already serves (`/v1/files`,
-`/v1/changed-files`) plus any future pinned paths from a context bundle. It
-would not be a second memory store and it would not embed a model. The
-document pane (`GET /v1/file/view`, `PUT /v1/file`) is that file read and
+Shipped as pinned paths, not a second memory store and not embeddings.
+`GET/PUT/DELETE /v1/knowledge` records a path, a short note, and who pinned
+it, in the project scope or the global scope. The panel can open the path
+through `GET /v1/file`. The agent sees the pin list (path and note, not the
+file body) when a session starts, under the same size cap as memory.
+The document pane (`GET /v1/file/view`, `PUT /v1/file`) is a file read and
 edit surface; it is not a knowledge index.
 
 ## Artifacts
 
-`GET /v1/artifacts` and `artifact.updated` events exist, and completion
-handoffs carry `artifact_refs`. The client does not list them. An Artifacts
-panel would show id, type, version, and the producing child session, and
-would open the body from `GET /v1/artifacts/{id}`. Version history is the
-CAS version already on the artifact, not a new kind of object.
+Shipped as a read panel. `GET /v1/artifacts` lists id, type, version, and
+owner for the open session. Opening a row loads `GET /v1/artifacts/{id}`,
+and retained versions are the same artifact (`?version=`), capped at the
+last 20 snapshots. `artifact.updated` refreshes the list. Title and content
+are scrubbed on write. Browser create, edit, and delete stay out: those
+writes remain on the agent tools. There is no browser write route.
 
 ## Task runner
 
@@ -134,10 +145,19 @@ a public listener or store provider keys.
 
 ## Memory mode
 
-There is no incognito or temporary transcript mode on the daemon. A pill
-for one would be a lie. Planned: a session flag that skips history and
-memory writes for that root only, enforced in the engine, not only hidden
-in the page.
+Shipped as a session flag, not a new protocol op. The composer pill and the
+command palette set `PUT /v1/memory/mode?root=`. The engine enforces it:
+
+- Normal reads and writes memory.
+- Incognito still reads memory into the prompt. Agent writes are refused.
+  The transcript is kept.
+- Temporary does not load memory or knowledge pins into the prompt, and
+  agent reads and writes are refused.
+
+The flag is stored on the session meta sidecar and restored when that
+session is opened again. The panel itself stays editable in every mode, so
+a person can still change what the next normal session will see. History
+skip for the transcript is not part of this flag.
 
 ## Side chat
 
@@ -182,10 +202,50 @@ attachments on the op.
 
 ## Context window hold
 
-`status.contextUsed` is reported on bootstrap. The client does not block
-Send when the window is full. Planned: a hold that refuses `user.input`
-when the live status says the next turn would not fit, with the number
-from the daemon. The client will not invent a limit.
+The model menu reads `status.contextUsed`. The denominator is
+`status.contextLimit` when a fit warning has named the window, otherwise
+the catalog `context` on the active model when that field is non-zero.
+Both numbers come from the daemon. If neither is known the meter says the
+window is not reported.
+
+Send (`user.input` and `steer`) is held when `status.contextFit` is
+`critical`, or when a known window is already full (`contextUsed` ≥ limit).
+A `warn` fit, or last-turn usage at or above 80% of a known window, is a
+warning and Send stays available. `contextFit` clears on
+`compaction.completed` (usage clears with it; the limit stays) and when a
+later usage report falls under 80% of the daemon limit.
+
+Effort is offered when the catalog row reports `reasoning`, when it lists
+variants, or when the live session already has an effort. Published
+variants are the choices (a variant id that is not an effort level is
+shown disabled). The protocol ladder is the fallback when no variants are
+named. Otherwise the menu says reasoning is not reported. False capability
+flags are omitted.
+They mean unknown or unsupported; #1054 does not yet split those.
+
+Pins and the "this session / global default" mark are browser state plus
+`PATCH /v1/settings`. `select.model` and `set.effort` change only the
+live session.
+
+## Notifications
+
+The centre is in the client. `GET /v1/notifications` and
+`GET /v1/notifications/stream` project an allowlist from session JSONL:
+approval needed, a delegated child finished or blocked, and a root turn
+finished. Bytes appended while the tab was closed are included on the next
+read. Names and one-line summaries are scrubbed and clamped. Permission
+patterns, tool output, handoff files, and verification reports are not
+copied.
+
+Per-session mute and quiet hours live in
+`PUT /v1/notifications/prefs`. They suppress browser banners. The record
+stays in the centre until this browser marks it read.
+
+Not built: a third-party web-push service, and an operating-system banner
+while the browser process is quit. Nothing can wake a quit browser without
+that push service. The next open replays the daemon log into the centre.
+A gateway drop is detected by the page (the daemon cannot deliver "I am
+gone"); it is not a JSONL record.
 
 ## Not planned as a copy
 

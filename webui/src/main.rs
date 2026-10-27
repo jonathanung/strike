@@ -1,24 +1,31 @@
 //! Strike web client. The session list is live roots plus saved sessions.
-//! Activity, Files, and Changes are the side panel. Side chat is a separate
-//! read-only drawer. Goals and Autopilot live in `goals`. Schedule, memory,
-//! knowledge, artifacts, and the task runner are not drawn here; see
+//! Activity, Files, Changes, Memory, Knowledge, and Artifacts are the side
+//! panel. Side chat is a separate read-only drawer. Goals and Autopilot live
+//! in `goals`. Schedule and the task runner are not drawn here; see
 //! docs/webui-planned.md.
 
 mod api;
 mod editor;
 mod goals;
 mod model;
+mod notify;
+mod model_menu;
+mod model_menu_view;
 mod session_list;
 mod session_panel;
-mod shell;
+mod storage;
+mod usage_audit;mod shell;
 mod side_chat;
+mod status;
 
 use crate::shell::icon;
+
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use leptos::callback::Callback;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use model::{
@@ -27,7 +34,7 @@ use model::{
     permission_modes, prefer_summary, protocol_dump, session_label, status_kind, strip_echo_tip,
     task_headline, ActivityRow, Bootstrap, ChangedFilesResponse, ChatLine,
     ChildCard, ChildrenResponse, FilesResponse, Health, ModelInfo, ModelList, Remote, RootSummary,
-    SessionItem, SessionsResponse, TeamSnapshot, Workspace, WorkspacesResponse,
+    SessionItem, SessionsResponse, StatusBoard, TeamSnapshot, Workspace, WorkspacesResponse,
 };
 use protocol_schema::Event;
 use session_panel::{dispatch_session_key, SessionPanel};
@@ -35,11 +42,19 @@ use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 
 use crate::api::{
-    get_json, idempotency_key, now_ms, patch_json, post_json, post_json_value, post_op,
+    get_json, idempotency_key, now_ms, patch_json, post_json, post_json_value, post_op, put_json,
 };
+use crate::storage::StoragePanel;
 use crate::editor::{DocumentPane, LinkedBody, MarkdownView, has_markdown_table};
 use crate::side_chat::SideChatPanel;
+
 use crate::model::{budget_elapsed, can_retry, RootsResponse};
+use crate::model_menu::{active_context, context_view, reduce_envelope, LiveModelState, ModelDefaults};
+use crate::model_menu_view::ModelMenu;
+use crate::status::{
+    apply_document_chrome, elapsed_since, session_kind, StatusKind, StatusMark, StatusSlot,
+    StatusTab, StatusTabs, HEARTBEAT_STALE_MS,
+};
 
 fn storage() -> Option<web_sys::Storage> {
     web_sys::window()?.local_storage().ok().flatten()
@@ -367,6 +382,7 @@ fn apply_envelope(
     lines: RwSignal<Vec<ChatLine>>,
     seq: &Rc<Cell<u32>>,
     open: &Rc<Cell<bool>>,
+    storage_rev: RwSignal<u32>,
     raw: &str,
 ) {
     // Generated contract: unknown events are skipped, and a known event whose
@@ -467,6 +483,7 @@ fn apply_envelope(
             card.at_ms = at_ms;
             upsert_child(lines, seq, card);
         }
+        "artifact.updated" => storage_rev.update(|n| *n = n.wrapping_add(1)),
         _ => {}
     }
 }
@@ -483,6 +500,14 @@ fn parent_path(dir: &str) -> String {
     match dir.rsplit_once('/') {
         Some((parent, _)) => parent.to_string(),
         None => String::new(),
+    }
+}
+
+fn memory_mode_label(mode: &str) -> &'static str {
+    match mode {
+        "incognito" => "Incognito",
+        "temporary" => "Temporary",
+        _ => "Normal",
     }
 }
 
@@ -585,6 +610,57 @@ fn rows_from_team(prev: &[ActivityRow], team: &TeamSnapshot, now: f64) -> Vec<Ac
     rows
 }
 
+fn apply_status_payload(
+    roots: RwSignal<Vec<model::RootSummary>>,
+    sessions: RwSignal<Vec<model::SessionItem>>,
+    sess: &serde_json::Value,
+) {
+    let Some(id) = sess.get("sessionId").and_then(|v| v.as_str()) else {
+        return;
+    };
+    if id.is_empty() {
+        return;
+    }
+    let id = id.to_string();
+    let state = sess
+        .get("status")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let unread = sess.get("unread").and_then(|v| v.as_bool()).unwrap_or(false);
+    let since = sess.get("since").and_then(|v| v.as_i64()).unwrap_or(0);
+    let last = sess
+        .get("lastActivityAt")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
+    roots.update(|rows| {
+        if let Some(row) = rows.iter_mut().find(|row| row.id == id) {
+            if !state.is_empty() {
+                row.busy = state == "running" || state == "waiting";
+                row.status = state.clone();
+            }
+            row.unread = Some(unread);
+            if since > 0 {
+                row.status_since = since;
+            }
+            if last > 0 {
+                row.last_activity_at = last;
+            }
+        }
+    });
+    sessions.update(|rows| {
+        if let Some(row) = rows.iter_mut().find(|row| row.id == id) {
+            if !state.is_empty() {
+                row.status = state.clone();
+            }
+            row.unread = Some(unread);
+            if last > 0 {
+                row.last_activity_at = last;
+            }
+        }
+    });
+}
+
 #[component]
 fn App() -> impl IntoView {
     let base = RwSignal::new(load("strike.base"));
@@ -615,6 +691,10 @@ fn App() -> impl IntoView {
     let stream_note = RwSignal::new(String::new());
     let load_error = RwSignal::new(String::new());
     let gateway = RwSignal::new("checking".to_string());
+    let gateway_kind = RwSignal::new(StatusKind::Idle);
+    let gateway_label = RwSignal::new("Checking".to_string());
+    let last_beat = RwSignal::new(0.0f64);
+    let boot_ms = now_ms();
     let focus = RwSignal::new(false);
     let back_stack = RwSignal::new(Vec::<String>::new());
     let forward_stack = RwSignal::new(Vec::<String>::new());
@@ -628,8 +708,15 @@ fn App() -> impl IntoView {
     let provider_name = RwSignal::new(String::new());
     let model_name = RwSignal::new(String::new());
     let model_note = RwSignal::new(String::new());
+    let model_note_after = RwSignal::new(0i64);
+    let effort_level = RwSignal::new(String::new());
+    let context_used = RwSignal::new(0i64);
+    let context_limit = RwSignal::new(0i64);
+    let context_fit = RwSignal::new(String::new());
+    let model_defaults = RwSignal::new(ModelDefaults::default());
     let catalog = RwSignal::new(Vec::<ModelInfo>::new());
     let catalog_note = RwSignal::new(String::new());
+    let catalog_once = RwSignal::new(false);
     let mode_menu = RwSignal::new(false);
     let model_menu = RwSignal::new(false);
     let enter_mode = RwSignal::new(if load("strike.enterMode") == "steer" {
@@ -640,6 +727,9 @@ fn App() -> impl IntoView {
     let live_busy = RwSignal::new(false);
     let live_busy_root = RwSignal::new(String::new());
     let side_tab = RwSignal::new("activity".to_string());
+    let memory_mode = RwSignal::new("normal".to_string());
+    let memory_menu = RwSignal::new(false);
+    let storage_rev = RwSignal::new(0u32);
     let doc_path = RwSignal::new(String::new());
     let doc_line = RwSignal::new(0u32);
     let doc_diff = RwSignal::new(false);
@@ -656,6 +746,7 @@ fn App() -> impl IntoView {
             side_focus_root.set(root);
         }
     });
+
     let files_path = RwSignal::new(String::new());
     let files = RwSignal::new(Vec::<model::DirEntry>::new());
     let files_error = RwSignal::new(String::new());
@@ -701,22 +792,71 @@ fn App() -> impl IntoView {
         });
     };
 
+    let load_model_catalog = move || {
+        let (b, t, provider) = (
+            base.get_untracked(),
+            token.get_untracked(),
+            provider_name.get_untracked(),
+        );
+        spawn_local(async move {
+            let path = if provider.is_empty() {
+                "/v1/models".to_string()
+            } else {
+                format!("/v1/models?provider={}", api::js_encode(&provider))
+            };
+            match get_json::<ModelList>(&b, &t, &path).await {
+                Ok(list) => {
+                    catalog.set(list.models);
+                    catalog_note.set(String::new());
+                }
+                Err(_) => {
+                    catalog.set(Vec::new());
+                    catalog_note
+                        .set("Catalog unavailable. The chip still shows the live model.".into());
+                }
+            }
+        });
+    };
+
     let refresh_meta = move || {
         let (b, t) = (base.get_untracked(), token.get_untracked());
         spawn_local(async move {
             let mut err = String::new();
+            let mut gateway_up = false;
             match get_json::<Health>(&b, &t, "/health").await {
                 Ok(h) if h.ok => {
                     gateway.set("connected".into());
-                    status.set(format!("strike {}", h.version));
+                    last_beat.set(now_ms());
+                    gateway_up = true;
+                    status.set(format!("Connected · {}", h.version));
                 }
                 Ok(_) => {
                     gateway.set("unreachable".into());
+                    gateway_kind.set(StatusKind::Disconnected);
+                    gateway_label.set("Unreachable".into());
+                    status.set("Unreachable".into());
                     err = "The daemon answered, but it is not ok.".into();
                 }
                 Err(e) => {
                     gateway.set("unreachable".into());
+                    gateway_kind.set(StatusKind::Disconnected);
+                    gateway_label.set("Unreachable".into());
+                    status.set("Unreachable".into());
                     err = format!("Could not reach the daemon: {e}");
+                }
+            }
+            if gateway_up {
+                match get_json::<StatusBoard>(&b, &t, "/v1/status/sessions").await {
+                    Ok(board) => {
+                        let kind = StatusKind::parse(&board.gateway);
+                        gateway_kind.set(kind);
+                        gateway_label.set(kind.label().into());
+                    }
+                    Err(e) => {
+                        if err.is_empty() {
+                            err = format!("Status board failed to load: {e}");
+                        }
+                    }
                 }
             }
             match get_json::<WorkspacesResponse>(&b, &t, "/v1/workspaces").await {
@@ -764,16 +904,26 @@ fn App() -> impl IntoView {
                         if let Some(st) = boot.status {
                             provider_name.set(st.provider);
                             model_name.set(st.model);
+                            effort_level.set(st.effort);
+                            context_used.set(st.context_used);
+                            context_limit.set(st.context_limit);
+                            context_fit.set(st.context_fit);
                             if !st.permission_mode.is_empty() {
                                 perm_mode.set(st.permission_mode);
                             }
                             live_busy.set(st.busy);
                             live_busy_root.set(root);
                         }
-                        model_note.set(String::new());
+                        if !catalog_once.get_untracked() {
+                            catalog_once.set(true);
+                            load_model_catalog();
+                        }
                     }
                     Err(e) => model_note.set(format!("Live status unavailable: {e}")),
                 }
+            }
+            if let Ok(defaults) = get_json::<ModelDefaults>(&b, &t, "/v1/settings").await {
+                model_defaults.set(defaults);
             }
             load_error.set(err);
             loading.set(false);
@@ -792,12 +942,27 @@ fn App() -> impl IntoView {
             .unwrap_or(0);
         let now = (now_ms() / 1000.0) as i64;
         seen.update(|map| {
-            map.insert(id, mtime.max(now));
+            map.insert(id.clone(), mtime.max(now));
         });
         save(
             "strike.seen",
             &serde_json::to_string(&seen.get_untracked()).unwrap_or_default(),
         );
+        roots.update(|rows| {
+            if let Some(row) = rows.iter_mut().find(|row| row.id == id) {
+                row.unread = Some(false);
+            }
+        });
+        sessions.update(|rows| {
+            if let Some(row) = rows.iter_mut().find(|row| row.id == id) {
+                row.unread = Some(false);
+            }
+        });
+        let (b, t, seen_id) = (base.get_untracked(), token.get_untracked(), id);
+        spawn_local(async move {
+            let path = format!("/v1/sessions/{}/seen", api::js_encode(&seen_id));
+            let _ = post_json(&b, &t, &path, serde_json::json!({})).await;
+        });
     };
 
     let tail: Rc<RefCell<Option<web_sys::EventSource>>> = Rc::new(RefCell::new(None));
@@ -816,6 +981,10 @@ fn App() -> impl IntoView {
         open_fx.set(false);
         lines.set(Vec::new());
         children.set(Vec::new());
+        effort_level.set(String::new());
+        context_used.set(0);
+        context_limit.set(0);
+        context_fit.set(String::new());
         if root.is_empty() {
             stream_note.set(String::new());
             return;
@@ -852,8 +1021,26 @@ fn App() -> impl IntoView {
             Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |ev: web_sys::MessageEvent| {
                 if let Some(data) = ev.data().as_string() {
                     note_live_title(sessions_cb, roots_cb, &titled_root, &data);
-                    apply_envelope(lines_cb, &seq_cb, &open_cb, &data);
-                }
+                    apply_envelope(lines_cb, &seq_cb, &open_cb, storage_rev, &data);
+                    let prev = LiveModelState {
+                        provider: provider_name.get_untracked(),
+                        model: model_name.get_untracked(),
+                        effort: effort_level.get_untracked(),
+                        context_used: context_used.get_untracked(),
+                        context_limit: context_limit.get_untracked(),
+                        context_fit: context_fit.get_untracked(),
+                        note: model_note.get_untracked(),
+                        note_after: model_note_after.get_untracked(),
+                    };
+                    let next = reduce_envelope(prev, &data);
+                    provider_name.set(next.provider);
+                    model_name.set(next.model);
+                    effort_level.set(next.effort);
+                    context_used.set(next.context_used);
+                    context_limit.set(next.context_limit);
+                    context_fit.set(next.context_fit);
+                    model_note.set(next.note);
+                    model_note_after.set(next.note_after);                }
             });
         es.set_onmessage(Some(on_msg.as_ref().unchecked_ref()));
         on_msg.forget();
@@ -867,9 +1054,26 @@ fn App() -> impl IntoView {
     });
 
     let poll_tick = tick;
+    let beat_sig = last_beat;
+    let kind_sig = gateway_kind;
+    let label_sig = gateway_label;
+    let gateway_sig = gateway;
+    let status_sig = status;
     let interval = Closure::<dyn FnMut()>::new(move || {
         let n = poll_tick.get_untracked().wrapping_add(1);
         poll_tick.set(n);
+        let beat = beat_sig.get_untracked();
+        let age = if beat > 0.0 {
+            now_ms() - beat
+        } else {
+            now_ms() - boot_ms
+        };
+        if age > HEARTBEAT_STALE_MS {
+            kind_sig.set(StatusKind::Disconnected);
+            label_sig.set("Unreachable".into());
+            gateway_sig.set("unreachable".into());
+            status_sig.set("Unreachable".into());
+        }
         if n % 2 == 0 {
             poll_team();
             refresh_meta();
@@ -883,6 +1087,87 @@ fn App() -> impl IntoView {
     }
     interval.forget();
 
+    let status_tail: Rc<RefCell<Option<web_sys::EventSource>>> = Rc::new(RefCell::new(None));
+    let status_tail_fx = status_tail.clone();
+    Effect::new(move |_| {
+        let b = base.get();
+        if let Some(es) = status_tail_fx.borrow_mut().take() {
+            es.close();
+        }
+        if !same_origin(&b) {
+            return;
+        }
+        let es = match web_sys::EventSource::new("/v1/status/events") {
+            Ok(es) => es,
+            Err(_) => return,
+        };
+        let beat = last_beat;
+        let kind = gateway_kind;
+        let label = gateway_label;
+        let link = gateway;
+        let roots_cb = roots;
+        let sessions_cb = sessions;
+        let on_msg =
+            Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |ev: web_sys::MessageEvent| {
+                // A buffered frame can arrive after /health has already failed.
+                // Leave the chip on Unreachable until the next successful poll.
+                if link.get_untracked() == "unreachable" {
+                    return;
+                }
+                let Some(data) = ev.data().as_string() else {
+                    return;
+                };
+                let v: serde_json::Value = match serde_json::from_str(&data) {
+                    Ok(v) => v,
+                    Err(_) => return,
+                };
+                beat.set(now_ms());
+                if let Some(gw) = v.get("gateway").and_then(|g| g.as_str()) {
+                    if !gw.is_empty() {
+                        let parsed = StatusKind::parse(gw);
+                        kind.set(parsed);
+                        label.set(parsed.label().into());
+                    }
+                }
+                let typ = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                if typ == "session.status" {
+                    if let Some(sess) = v.get("session") {
+                        apply_status_payload(roots_cb, sessions_cb, sess);
+                    }
+                } else if typ == "snapshot" {
+                    if let Some(list) = v.get("sessions").and_then(|s| s.as_array()) {
+                        for sess in list {
+                            apply_status_payload(roots_cb, sessions_cb, sess);
+                        }
+                    }
+                }
+            });
+        es.set_onmessage(Some(on_msg.as_ref().unchecked_ref()));
+        on_msg.forget();
+        *status_tail_fx.borrow_mut() = Some(es);
+    });
+
+    Effect::new(move |_| {
+        let kind = gateway_kind.get();
+        let root_rows = roots.get();
+        let saved = sessions.get();
+        let active = active_root.get();
+        let mut n = 0usize;
+        let mut live_ids = std::collections::HashSet::new();
+        for row in &root_rows {
+            live_ids.insert(row.id.clone());
+            if row.unread == Some(true) && row.id != active {
+                n += 1;
+            }
+        }
+        for row in &saved {
+            if row.unread == Some(true) && !live_ids.contains(&row.id) {
+                n += 1;
+            }
+        }
+        apply_document_chrome(kind, n);
+    });
+
     let session_busy = move |root: &str| -> bool {
         roots.get_untracked().iter().any(|r| r.id == root && r.busy)
             || (live_busy.get_untracked() && live_busy_root.get_untracked() == root)
@@ -891,6 +1176,23 @@ fn App() -> impl IntoView {
     let send_text = move |text: String| {
         let text = text.trim().to_string();
         if text.is_empty() {
+            return;
+        }
+        let held = {
+            let ctx = active_context(
+                &catalog.get_untracked(),
+                &provider_name.get_untracked(),
+                &model_name.get_untracked(),
+            );
+            context_view(
+                context_used.get_untracked(),
+                context_limit.get_untracked(),
+                ctx,
+                &context_fit.get_untracked(),
+            )
+        };
+        if held.held {
+            model_note.set(held.hold_message);
             return;
         }
         let root = active_root.get_untracked();
@@ -1090,11 +1392,38 @@ fn App() -> impl IntoView {
         apply_theme(&load("strike.theme"), &scheme);
     };
 
+    let set_memory = move |mode: String| {
+        memory_menu.set(false);
+        memory_mode.set(mode.clone());
+        let root = active_root.get_untracked();
+        if root.is_empty() {
+            status.set("no live session yet".into());
+            return;
+        }
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            let path = format!("/v1/memory/mode?root={}", api::js_encode(&root));
+            match put_json(&b, &t, &path, serde_json::json!({"mode": mode})).await {
+                Ok(text) => {
+                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
+                        if let Some(saved) = v.get("mode").and_then(|m| m.as_str()) {
+                            if !saved.is_empty() {
+                                memory_mode.set(saved.to_string());
+                            }
+                        }
+                    }
+                }
+                Err(e) => status.set(format!("memory mode failed: {e}")),
+            }
+        });
+    };
+
     let open_side = move |id: String, name: String| {
         side_focus_id.set(id);
         side_focus_name.set(name);
         side_open.set(true);
         mode.set("chat".into());
+
     };
 
     let set_perm = move |mode: String| {
@@ -1177,37 +1506,126 @@ fn App() -> impl IntoView {
     }
     on_key.forget();
 
-    let open_models = move |_| {
-        let open = !model_menu.get_untracked();
-        mode_menu.set(false);
-        model_menu.set(open);
-        if !open {
-            return;
-        }
-        let (b, t, provider) = (
-            base.get_untracked(),
-            token.get_untracked(),
-            provider_name.get_untracked(),
-        );
+    let session_busy_now = Memo::new(move |_| {
+        let root = active_root.get();
+        roots.get().iter().any(|r| r.id == root && r.busy)
+            || (live_busy.get() && live_busy_root.get() == root)
+    });
+
+    Effect::new(move |_| {
+        if model_menu.get() {
+            mode_menu.set(false);
+            load_model_catalog();        }
+    });
+
+    Effect::new(move |_| {
+        let root = active_root.get();
+        let (b, t) = (base.get(), token.get());
         spawn_local(async move {
-            let path = if provider.is_empty() {
-                "/v1/models".to_string()
-            } else {
-                format!("/v1/models?provider={}", api::js_encode(&provider))
-            };
-            match get_json::<ModelList>(&b, &t, &path).await {
-                Ok(list) => {
-                    catalog.set(list.models);
-                    catalog_note.set(String::new());
-                }
-                Err(_) => {
-                    catalog.set(Vec::new());
-                    catalog_note
-                        .set("Catalog unavailable. The chip still shows the live model.".into());
+            let path = format!("/v1/memory/mode?root={}", api::js_encode(&root));
+            if let Ok(v) = get_json::<serde_json::Value>(&b, &t, &path).await {
+                if let Some(mode) = v.get("mode").and_then(|m| m.as_str()) {
+                    if !mode.is_empty() {
+                        memory_mode.set(mode.to_string());
+                    }
                 }
             }
         });
-    };
+    });
+
+    let on_select_model = Callback::new(move |(provider, id): (String, String)| {
+        model_note_after.set(now_ms() as i64);
+        model_note.set(String::new());
+        let (b, t, root) = (base.get_untracked(), token.get_untracked(), active_root.get_untracked());
+        spawn_local(async move {
+            if let Err(e) = post_op(
+                &b,
+                &t,
+                &root,
+                "select.model",
+                serde_json::json!({"provider": provider, "model": id}),
+            )
+            .await
+            {
+                model_note.set(format!("model change failed: {e}"));
+                model_note_after.set(0);
+            }
+        });
+    });
+    let on_default_model = Callback::new(move |(provider, id): (String, String)| {
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            match patch_json(
+                &b,
+                &t,
+                "/v1/settings",
+                serde_json::json!({"provider": provider, "model": id}),
+            )
+            .await
+            {
+                Ok(()) => {
+                    model_defaults.update(|d| {
+                        d.provider = provider;
+                        d.model = id;
+                    });
+                    model_note.set("Saved as the global default. This session stays on its current model until you pick one.".into());
+                }
+                Err(e) => model_note.set(format!("saving the default failed: {e}")),
+            }
+        });
+    });
+    let on_effort = Callback::new(move |level: String| {
+        model_note_after.set(now_ms() as i64);
+        model_note.set(String::new());
+        let (b, t, root) = (base.get_untracked(), token.get_untracked(), active_root.get_untracked());
+        spawn_local(async move {
+            if let Err(e) = post_op(
+                &b,
+                &t,
+                &root,
+                "set.effort",
+                serde_json::json!({"level": level}),
+            )
+            .await
+            {
+                model_note.set(format!("effort change failed: {e}"));
+                model_note_after.set(0);
+            }
+        });
+    });
+    let on_default_effort = Callback::new(move |level: String| {
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            match patch_json(
+                &b,
+                &t,
+                "/v1/settings",
+                serde_json::json!({"effort": level}),
+            )
+            .await
+            {
+                Ok(()) => {
+                    model_defaults.update(|d| d.effort = level);
+                    model_note.set("Saved the effort as the global default.".into());
+                }
+                Err(e) => model_note.set(format!("saving the effort default failed: {e}")),
+            }
+        });
+    });
+
+    // #1267 navbar hosts this bell. The component owns its panel and settings.
+    let on_notify = Callback::new(move |target: notify::FocusTarget| {
+        mode.set("chat".into());
+        focus.set(false);
+        if target.session_id.is_empty() {
+            return;
+        }
+        let live = roots
+            .get_untracked()
+            .iter()
+            .any(|r| r.id == target.session_id);
+        open_session(target.session_id, live);
+    });
 
     let running_count = move || {
         activity
@@ -1223,6 +1641,15 @@ fn App() -> impl IntoView {
             .filter(|r| r.state == "blocked")
             .count()
     };
+
+    // The shell slot (src/shell/contrib/notifications.rs) renders the bell
+    // with the page's signals; install them before the view reads them.
+    notify::set_host(notify::NotifyHost {
+        base,
+        token,
+        gateway,
+        on_focus: on_notify,
+    });
 
     shell::boot();
     shell::set_host(shell::HostBridge {
@@ -1292,9 +1719,11 @@ fn App() -> impl IntoView {
             // them was open does Escape also close the open document.
             let menu = mode_menu.get_untracked()
                 || model_menu.get_untracked()
+                || memory_menu.get_untracked()
                 || side_open.get_untracked();
             mode_menu.set(false);
             model_menu.set(false);
+            memory_menu.set(false);
             side_open.set(false);
             if !menu && !doc_editing.get_untracked() && !doc_path.get_untracked().is_empty() {
                 doc_path.set(String::new());
@@ -1354,6 +1783,59 @@ fn App() -> impl IntoView {
             });
         }),
     });
+    crate::status::set_host(crate::status::StatusHost {
+        gateway_kind,
+        gateway_label,
+        roots,
+        active_root,
+        refresh: Rc::new(move || refresh_meta()),
+    });
+
+    // Storage palette performers (#1271). The commands are registered at
+    // boot by src/shell/contrib/storage.rs and dispatch these ids; only
+    // the page owns the side-tab and memory-mode signals they drive.
+    shell::bind(
+        "panel-memory",
+        Rc::new(move |_args: &str| {
+            side_tab.set("memory".into());
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "panel-knowledge",
+        Rc::new(move |_args: &str| {
+            side_tab.set("knowledge".into());
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "panel-artifacts",
+        Rc::new(move |_args: &str| {
+            side_tab.set("artifacts".into());
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "memory-normal",
+        Rc::new(move |_args: &str| {
+            set_memory("normal".into());
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "memory-incognito",
+        Rc::new(move |_args: &str| {
+            set_memory("incognito".into());
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "memory-temporary",
+        Rc::new(move |_args: &str| {
+            set_memory("temporary".into());
+            Ok(())
+        }),
+    );
 
     // Alt+G opens Goals. The shell owns the other chords; this one stays
     // here because only the page can set `mode`. The shortcut is listed in
@@ -1386,6 +1868,72 @@ fn App() -> impl IntoView {
     }
     on_goals_key.forget();
 
+    // Alt+U opens Usage and Alt+A opens Audit. Like Alt+G, these stay
+    // here because only the page can set `mode`. The shortcuts are listed
+    // in the overlay via src/shell/contrib/usage_audit.rs.
+    let on_usage_audit_key =
+        Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |ev: web_sys::KeyboardEvent| {
+            if ev.alt_key() && !ev.meta_key() && !ev.ctrl_key() {
+                let target = if ev.key().eq_ignore_ascii_case("u") {
+                    Some("usage")
+                } else if ev.key().eq_ignore_ascii_case("a") {
+                    Some("audit")
+                } else {
+                    None
+                };
+                if let Some(target) = target {
+                    let typing = ev
+                        .target()
+                        .map(|t| {
+                            t.dyn_ref::<web_sys::Element>()
+                                .map(|el| {
+                                    matches!(el.tag_name().as_str(), "INPUT" | "TEXTAREA" | "SELECT")
+                                })
+                                .unwrap_or(false)
+                        })
+                        .unwrap_or(false);
+                    if !typing {
+                        ev.prevent_default();
+                        mode.set(target.into());
+                    }
+                }
+            }
+        });
+    if let Some(w) = web_sys::window() {
+        let _ = w.add_event_listener_with_callback("keydown", on_usage_audit_key.as_ref().unchecked_ref());
+    }
+    on_usage_audit_key.forget();
+    // Alt+M opens the model menu. The shell owns the other chords; this
+    // one stays here because only the page owns the menu signal, like
+    // Alt+G above. The palette command and shortcut listing live in
+    // src/shell/contrib/model_menu.rs; the command dispatches to the
+    // binding below (the pattern docs/webui-shell.md describes for
+    // commands whose state lives in a component).
+    shell::bind(
+        "model-menu.open",
+        Rc::new(move |_args| {
+            mode_menu.set(false);
+            model_menu.update(|v| *v = !*v);
+            Ok(())
+        }),
+    );
+    let on_model_key =
+        Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |ev: web_sys::KeyboardEvent| {
+            if ev.alt_key()
+                && !ev.meta_key()
+                && !ev.ctrl_key()
+                && ev.key().eq_ignore_ascii_case("m")
+            {
+                ev.prevent_default();
+                mode_menu.set(false);
+                model_menu.update(|v| *v = !*v);
+            }
+        });
+    if let Some(w) = web_sys::window() {
+        let _ = w.add_event_listener_with_callback("keydown", on_model_key.as_ref().unchecked_ref());
+    }
+    on_model_key.forget();
+
     view! {
         <shell::Chrome />
         <Show when=move || mode.get() == "daemon" fallback=move || ()>
@@ -1401,6 +1949,12 @@ fn App() -> impl IntoView {
                 remote_url=remote_url
                 refresh=refresh_meta
             />
+        </Show>
+        <Show when=move || mode.get() == "usage" fallback=move || ()>
+            <usage_audit::UsagePage base=base token=token status=status />
+        </Show>
+        <Show when=move || mode.get() == "audit" fallback=move || ()>
+            <usage_audit::AuditPage base=base token=token status=status />
         </Show>
         <Show when=move || mode.get() == "goals" fallback=move || ()>
             <goals::GoalsPane base=base token=token />
@@ -1419,8 +1973,7 @@ fn App() -> impl IntoView {
                         on_open=open_session
                         on_new=new_session
                         on_refresh=refresh_meta
-                    />
-                    <details class="fold">
+                    />                    <details class="fold">
                     <summary>"Workspaces"</summary>
                     <p class="hint">"Opening one records it. It does not move the live engine."</p>
                     <Show when=move || workspaces.get().is_empty()>
@@ -1453,6 +2006,27 @@ fn App() -> impl IntoView {
                     </details>
                 </aside>
                 <section class="chat">
+                    {move || {
+                        let _ = tick.get();
+                        let active = active_root.get();
+                        let now = now_ms() as i64;
+                        let open = open_session;
+                        let tabs: Vec<StatusTab> = roots.get().into_iter().map(|row| {
+                            let kind = session_kind(&row.status, row.busy, row.permission_pending, row.question_pending);
+                            let fallback = short_id(&row.id);
+                            StatusTab {
+                                id: row.id.clone(),
+                                label: session_label(&row.title, &fallback),
+                                unread: row.unread.unwrap_or(false) && row.id != active,
+                                elapsed_s: elapsed_since(kind, row.status_since, now),
+                                active: row.id == active,
+                                kind,
+                            }
+                        }).collect();
+                        view! {
+                            <StatusTabs tabs=tabs on_select=move |id: String| open(id, true) />
+                        }
+                    }}
                     <Show when=move || !load_error.get().is_empty()>
                         <div class="notice" role="alert">
                             <span>{move || load_error.get()}</span>
@@ -1573,7 +2147,10 @@ fn App() -> impl IntoView {
                                     <header>
                                         <span class="who">{title}</span>
                                         <Show when=move || has_badge>
-                                            <Badge kind=badge_kind.clone() label=badge.clone() />
+                                            {match StatusKind::parse_known(&badge_kind) {
+                                                Some(kind) => view! { <StatusMark kind=kind place=StatusSlot::Badge /> }.into_any(),
+                                                None => view! { <Badge kind=badge_kind.clone() label=badge.clone() /> }.into_any(),
+                                            }}
                                         </Show>
                                         {has_stamp.then(|| view! { <span class="stamp" title=stamp_full.clone()>{stamp.clone()}</span> })}
                                     </header>
@@ -1616,29 +2193,33 @@ fn App() -> impl IntoView {
                                 }).collect_view()}
                             </div>
                         </Show>
-                        <Show when=move || model_menu.get()>
-                            <div class="menu">
-                                <p class="hint">{move || {
-                                    let p = provider_name.get();
-                                    let m = model_name.get();
-                                    if m.is_empty() { "No live model reported yet.".into() } else if p.is_empty() { m } else { format!("{p} · {m}") }
-                                }}</p>
-                                <Show when=move || !model_note.get().is_empty()><p class="hint">{move || model_note.get()}</p></Show>
-                                <Show when=move || !catalog_note.get().is_empty()><p class="hint">{move || catalog_note.get()}</p></Show>
-                                {move || catalog.get().into_iter().map(|m| {
-                                    let id = m.id.clone();
-                                    let provider = if m.provider.is_empty() { provider_name.get() } else { m.provider.clone() };
-                                    let label = if m.name.is_empty() { m.id.clone() } else { m.name.clone() };
+                        <Show when=move || {
+                            let ctx = active_context(&catalog.get(), &provider_name.get(), &model_name.get());
+                            context_view(context_used.get(), context_limit.get(), ctx, &context_fit.get()).held
+                        }>
+                            <p class="model-hold" role="status" data-context-hold="true">{move || {
+                                let ctx = active_context(&catalog.get(), &provider_name.get(), &model_name.get());
+                                context_view(context_used.get(), context_limit.get(), ctx, &context_fit.get()).hold_message
+                            }}</p>
+                        </Show>
+                        <Show when=move || memory_menu.get()>
+                            <div class="menu" role="menu" aria-label="Memory mode">
+                                {["normal", "incognito", "temporary"].into_iter().map(|id| {
+                                    let label = memory_mode_label(id).to_string();
+                                    let detail = match id {
+                                        "incognito" => "Reads memory. The agent learns nothing.",
+                                        "temporary" => "This session does not load memory.",
+                                        _ => "Reads and writes memory.",
+                                    };
+                                    let set = set_memory;
+                                    let on = memory_mode.get() == id;
+                                    let klass = if on { "palette-row on" } else { "palette-row" };
+                                    let id = id.to_string();
                                     view! {
-                                        <button class="palette-row" on:click=move |_| {
-                                            model_menu.set(false);
-                                            let (b, t, root, provider, id) = (base.get(), token.get(), active_root.get(), provider.clone(), id.clone());
-                                            spawn_local(async move {
-                                                if let Err(e) = post_op(&b, &t, &root, "select.model", serde_json::json!({"provider": provider, "model": id})).await {
-                                                    status.set(format!("model change failed: {e}"));
-                                                }
-                                            });
-                                        }>{label}</button>
+                                        <button type="button" class=klass on:click=move |_| set(id.clone())>
+                                            <span class="name">{label}</span>
+                                            <span class="path">{detail}</span>
+                                        </button>
                                     }
                                 }).collect_view()}
                             </div>
@@ -1658,18 +2239,44 @@ fn App() -> impl IntoView {
                             <div class="composer-bar">
                                 <button type="button" class="chip" on:click=move |_| {
                                     model_menu.set(false);
+                                    memory_menu.set(false);
                                     mode_menu.update(|v| *v = !*v);
                                 }>{move || format!("Approval · {}", mode_label(&perm_mode.get()))}</button>
-                                <button type="button" class="chip" on:click=open_models>{move || {
-                                    let model = model_name.get();
-                                    if model.is_empty() { "Model".into() } else { model }
-                                }}</button>
+                                <ModelMenu
+                                    open=model_menu
+                                    provider=provider_name
+                                    model=model_name
+                                    effort=effort_level
+                                    context_used=context_used
+                                    context_limit=context_limit
+                                    context_fit=context_fit
+                                    catalog=catalog
+                                    catalog_note=catalog_note
+                                    model_note=model_note
+                                    defaults=model_defaults
+                                    busy=session_busy_now
+                                    on_select=on_select_model
+                                    on_default_model=on_default_model
+                                    on_effort=on_effort
+                                    on_default_effort=on_default_effort
+                                />
+                                <button type="button" class="chip" aria-label="Memory mode" on:click=move |_| {
+                                    mode_menu.set(false);
+                                    model_menu.set(false);
+                                    memory_menu.update(|v| *v = !*v);
+                                }>{move || format!("Memory · {}", memory_mode_label(&memory_mode.get()))}</button>
                                 <button type="button" class=move || if side_open.get() { "chip on side-chat-open-composer" } else { "chip side-chat-open-composer" } on:click=move |_| open_side(String::new(), String::new())>"Side chat"</button>
                                 <button type="button" class=move || if enter_mode.get() == "steer" { "chip on" } else { "chip" } on:click=move |_| set_enter("steer".into())>"Steer"</button>
                                 <button type="button" class=move || if enter_mode.get() == "queue" { "chip on" } else { "chip" } on:click=move |_| set_enter("queue".into())>"Queue"</button>
-                                <button class="primary send" type="submit">"Send"</button>
+                                <button class="primary send" type="submit" disabled=move || {
+                                    let ctx = active_context(&catalog.get(), &provider_name.get(), &model_name.get());
+                                    context_view(context_used.get(), context_limit.get(), ctx, &context_fit.get()).held
+                                }>"Send"</button>
                             </div>
                         </form>
+                        <Show when=move || !model_note.get().is_empty() && !model_menu.get()>
+                            <p class="hint" data-model-note="true">{move || model_note.get()}</p>
+                        </Show>
                         <p class="hint">"Queue waits out the turn. Steer joins a running turn. run <command> uses the shell. @path is text."</p>
                     </div>
                 </section>
@@ -1678,6 +2285,9 @@ fn App() -> impl IntoView {
                         <button class=move || if side_tab.get() == "activity" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("activity".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("activity")></span>"Activity"</button>
                         <button class=move || if side_tab.get() == "files" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("files".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("files")></span>"Files"</button>
                         <button class=move || if side_tab.get() == "changes" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("changes".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("changes")></span>"Changes"</button>
+                        <button class=move || if side_tab.get() == "memory" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("memory".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("memory")></span>"Memory"</button>
+                        <button class=move || if side_tab.get() == "knowledge" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("knowledge".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("knowledge")></span>"Knowledge"</button>
+                        <button class=move || if side_tab.get() == "artifacts" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("artifacts".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("artifacts")></span>"Artifacts"</button>
                     </div>
                     <Show when=move || side_tab.get() == "activity">
                     <div class="activity">
@@ -1736,13 +2346,15 @@ fn App() -> impl IntoView {
                                 let agent = row.agent.clone();
                                 let agent_label = agent.clone();
                                 let primary = if show_task { headline } else { name.clone() };
-                                let dot = match state.as_str() {
-                                    "running" | "working" => "dot dot-running",
-                                    "blocked" | "stalled" => "dot dot-blocked",
-                                    "done" | "completed" => "dot dot-done",
-                                    "failed" => "dot dot-failed",
-                                    _ => "dot",
+                                let kind = StatusKind::parse_known(&state);
+                                let status_label = if state == "stalled" {
+                                    "Stalled".to_string()
+                                } else if let Some(kind) = kind {
+                                    kind.label().to_string()
+                                } else {
+                                    state.clone()
                                 };
+                                let mark_kind = kind.unwrap_or(StatusKind::Idle);
                                 view! {
                                     <li class="card activity-row">
                                         <button class="link activity-main" on:click=move |_| {
@@ -1754,9 +2366,9 @@ fn App() -> impl IntoView {
                                             });
                                         }>
                                             <span class="task-line">
-                                                <span class=dot></span>
+                                                <StatusMark kind=mark_kind place=StatusSlot::Dot />
                                                 <span class="name">{primary}</span>
-                                                <Badge kind=state.clone() label=state.clone() />
+                                                <StatusMark kind=mark_kind place=StatusSlot::Badge label=status_label />
                                             </span>
                                             <span class="task-meta">
                                                 <Show when=move || show_task>
@@ -1899,6 +2511,20 @@ fn App() -> impl IntoView {
                                 }).collect_view()}
                             </ul>
                         </div>
+                    </Show>
+                    <Show when=move || {
+                        let tab = side_tab.get();
+                        tab == "memory" || tab == "knowledge" || tab == "artifacts"
+                    }>
+                        <StoragePanel
+                            tab=side_tab
+                            base=base
+                            token=token
+                            root=active_root
+                            memory_mode=memory_mode
+                            status=status
+                            storage_rev=storage_rev
+                        />
                     </Show>
                 </aside>
             </div>

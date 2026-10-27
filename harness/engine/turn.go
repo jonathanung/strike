@@ -1182,6 +1182,7 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 			Files:         e.files,
 			SessionID:     e.opts.SessionID,
 			RootSessionID: e.rootSessionID(),
+			MemoryMode:    e.MemoryMode(),
 			NotifyArtifact: func(op string, payload any) {
 				if e.opts.ProjectArtifact == nil {
 					return

@@ -23,6 +23,7 @@ import (
 	"github.com/jonathanung/strike/internal/persist/workspace"
 	"github.com/jonathanung/strike/internal/protocol"
 	"github.com/jonathanung/strike/internal/trust/audit"
+	"github.com/jonathanung/strike/internal/trust/usageaudit"
 )
 
 const serveUsage = `Web agent workspace (live engine + durable session attach).
@@ -218,6 +219,14 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	usageDir := usageaudit.DefaultDir()
+	if usageLog, err := usageaudit.Open(usageDir); err != nil {
+		fmt.Fprintf(stderr, "strike: usage audit log unavailable: %v\n", err)
+		usageDir = ""
+	} else {
+		defer usageLog.Close()
+	}
+
 	var liveHub *server.LiveHub
 	var services *host.Services
 	var sandboxSnap *server.SandboxSnapshot
@@ -313,6 +322,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 					return "", err
 				}
 				live := server.NewLive(slot.id, slot.workDir, agents, slot.eng.Ops())
+				a.attachMemoryMode(live, slot.id, slot.eng)
 				seedLiveSandbox(live)
 				sr := startServeRoot(ctx, slot, live)
 				mu.Lock()
@@ -353,6 +363,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 					return "", false, err
 				}
 				live := server.NewLive(slot.id, slot.workDir, agents, slot.eng.Ops())
+				a.attachMemoryMode(live, slot.id, slot.eng)
 				seedLiveSandbox(live)
 				sr := startServeRoot(ctx, slot, live)
 				mu.Lock()
@@ -369,6 +380,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		// Add initial root from the first assembly slot.
 		initialSlot := a.firstSlot
 		initialLive := server.NewLive(initialSlot.id, initialSlot.workDir, agents, initialSlot.eng.Ops())
+		a.attachMemoryMode(initialLive, initialSlot.id, initialSlot.eng)
 		seedLiveSandbox(initialLive)
 		liveHub.Add(initialSlot.id, initialLive)
 		if info, err := a.sessions.Get(initialSlot.id); err == nil && info.Title != "" {
@@ -481,18 +493,19 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 	}
 
 	srv, err := server.New(server.Options{
-		Addr:       opts.addr,
-		Auth:       opts.auth,
-		Token:      token,
-		TokenFile:  opts.tokenFile,
-		SessionDir: sessionDir,
-		Workspaces: wsStore,
-		LiveHub:    liveHub,
-		Services:   services,
-		Sandbox:    sandboxSnap,
-		ReadOnly:   opts.readOnly,
-		Audit:      auditSink,
-		SideChat:   sideChat,
+		Addr:          opts.addr,
+		Auth:          opts.auth,
+		Token:         token,
+		TokenFile:     opts.tokenFile,
+		SessionDir:    sessionDir,
+		Workspaces:    wsStore,
+		LiveHub:       liveHub,
+		Services:      services,
+		Sandbox:       sandboxSnap,
+		ReadOnly:      opts.readOnly,
+		Audit:         auditSink,
+		UsageAuditDir: usageDir,
+		SideChat:      sideChat,
 	})
 	if err != nil {
 		return err

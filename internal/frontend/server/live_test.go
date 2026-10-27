@@ -49,6 +49,34 @@ func TestLiveStatusTracksUsageAndFitWarning(t *testing.T) {
 	if st.ContextUsed != 1500 {
 		t.Fatalf("ContextUsed = %d, want 1500 (keep measured)", st.ContextUsed)
 	}
+	if st.ContextFit != protocol.ContextFitWarn {
+		t.Fatalf("ContextFit = %q, want warn", st.ContextFit)
+	}
+
+	// Measured occupancy back under 80% of the limit retires the warning.
+	live.Publish(protocol.UsageReported{Used: protocol.KnownTokens(1000), Source: protocol.UsageSourceActual})
+	st = live.Status()
+	if st.ContextUsed != 1000 || st.ContextFit != "" {
+		t.Fatalf("after cool usage: used=%d fit=%q, want 1000 and empty fit", st.ContextUsed, st.ContextFit)
+	}
+
+	live.Publish(protocol.ContextFitWarning{
+		EstimatedTokens: 190_000,
+		ContextLimit:    200_000,
+		Level:           protocol.ContextFitCritical,
+		Message:         "full",
+	})
+	live.Publish(protocol.UsageReported{Used: protocol.KnownTokens(190_000), Source: protocol.UsageSourceActual})
+	st = live.Status()
+	if st.ContextFit != protocol.ContextFitCritical || st.ContextUsed != 190_000 {
+		t.Fatalf("critical kept: used=%d fit=%q", st.ContextUsed, st.ContextFit)
+	}
+
+	live.Publish(protocol.CompactionCompleted{Reason: "manual"})
+	st = live.Status()
+	if st.ContextUsed != 0 || st.ContextFit != "" || st.ContextLimit != 200_000 {
+		t.Fatalf("after compact: used=%d fit=%q limit=%d", st.ContextUsed, st.ContextFit, st.ContextLimit)
+	}
 }
 
 func TestLiveOpsPOSTAndStatus(t *testing.T) {
