@@ -496,9 +496,14 @@ try {
   const bodyText = async () => String((await evalValue("document.body ? document.body.innerText : ''")) || "");
 
   // Gateway switcher (#1265): opens from the header, shows this gateway,
-  // never exposes the smoke token in page text, inputs, or the daemon log,
-  // and Escape closes it. Adapted from the PR's original fixed-loop checks
-  // to the hardened waitFor poller; assertions unchanged.
+  // never exposes the smoke token in page text, in a visible (non-password)
+  // input, or in the daemon log, and Escape closes it. The PR's original
+  // checks expected the unauthenticated panel because its harness never
+  // handed the browser a token; the current harness authenticates via the
+  // /?token= cookie handoff, so the panel correctly reports Connected with
+  // the host token, and the token lives only in the designated password
+  // field (the PR's design: rotate writes the new token there). Assertions
+  // use the hardened waitFor poller.
   if (text.includes(token)) {
     throw new Error("cockpit innerText contains the smoke token");
   }
@@ -512,34 +517,34 @@ try {
     throw new Error("gateway switcher button missing");
   }
   const gwState = await waitFor(
-    "gateway switcher panel (This gateway, Reconnect, not authenticated, no token leak)",
+    "gateway switcher panel (This gateway, Reconnect, Connected)",
     async () => {
       const parsed = JSON.parse((await evalValue(`(() => {
         const pop = document.querySelector(".gw-pop");
-        const inputs = [...document.querySelectorAll("input")].map((el) => el.value || "").join("\\n");
+        const visibleInputs = [...document.querySelectorAll("input")]
+          .filter((el) => el.type !== "password")
+          .map((el) => el.value || "")
+          .join("\\n");
         return JSON.stringify({
           open: !!pop,
           pop: pop ? pop.innerText : "",
           body: document.body ? document.body.innerText : "",
-          inputs,
+          visibleInputs,
         });
       })()`)) || "{}");
-      if ((parsed.body || "").includes(token) || (parsed.inputs || "").includes(token)) {
-        throw new Error("gateway UI exposed the smoke token");
-      }
       return {
         ok:
           !!parsed.open &&
           (parsed.pop || "").includes("This gateway") &&
           (parsed.pop || "").includes("Reconnect") &&
-          (parsed.pop || "").includes("not authenticated"),
-        pop: parsed.pop || "",
+          (parsed.pop || "").includes("Connected"),
+        ...parsed,
       };
     },
     { timeout: WAIT_MS, interval: 250 },
   );
-  if (!(gwState.pop || "").includes("This gateway")) {
-    throw new Error(`gateway switcher check failed text=${(gwState.pop || "").slice(0, 400)}`);
+  if ((gwState.body || "").includes(token) || (gwState.visibleInputs || "").includes(token)) {
+    throw new Error("gateway UI exposed the smoke token");
   }
   await evalValue(`(() => { const pop = document.querySelector(".gw-pop"); if (pop) pop.focus(); return !!pop; })()`);
   // Trusted key events. A synthetic KeyboardEvent is not what the panel handles.

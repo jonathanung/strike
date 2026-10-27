@@ -1034,6 +1034,7 @@ select.mode, .daemon select {
 .gw-use .name { color: var(--ink); }
 .gw-use .path { color: var(--muted); font-size: var(--type-sm); overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 .gw-panel label, .gw-body label { display: block; color: var(--muted); font-size: var(--type-sm); margin: var(--space-2) 0 var(--space-1); }
+.gw-pop .row input, .gw-body .row input { flex: 1 1 0; min-width: 0; width: auto; }
 .gw-panel input, .gw-body input { width: 100%; }
 @media (max-width: 720px) {
   .gw-pop { position: fixed; top: 52px; left: 12px; right: 12px; width: auto; }
