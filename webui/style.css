@@ -1039,6 +1039,79 @@ select.mode, .daemon select {
 .sx-notice { border-left: 2px solid var(--warning); }
 .sx-permission { border-left: 2px solid var(--tool); }
 /* feature:composer-triggers end */
+/* feature:gateway-qr begin */
+.gq-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: color-mix(in srgb, var(--overlay) 45%, transparent);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 8vh 12px 24px;
+  overflow: auto;
+}
+.gq-dialog {
+  width: min(440px, calc(100vw - 24px));
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: var(--space-4);
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+}
+.gq-head, .gq-actions, .gq-device {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.gq-head { justify-content: space-between; }
+.gq-sub { margin: var(--space-4) 0 var(--space-2); font-size: var(--type-md); }
+.gq-note, .gq-warn { white-space: pre-wrap; }
+.gq-warn { color: var(--warning); }
+.gq-url {
+  font-size: var(--type-sm);
+  color: var(--muted);
+  word-break: break-all;
+}
+.gq-dialog input { width: 100%; }
+/* White plate so a camera can read the modules on a dark theme. */
+.gq-qr {
+  background: #ffffff;
+  width: 220px;
+  height: 220px;
+  margin: var(--space-3) auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.gq-qr svg { width: 220px; height: 220px; display: block; }
+.gq-video {
+  width: 100%;
+  max-height: 180px;
+  background: var(--ground);
+  border-radius: var(--radius-sm);
+}
+.gq-landing {
+  margin: var(--space-2) var(--space-4) 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+@media (max-width: 960px) {
+  .gq-backdrop { padding: var(--space-3) var(--space-3) var(--space-4); }
+  .gq-dialog { max-height: calc(100vh - 24px); }
+}
+@media (max-width: 500px) {
+  .gq-dialog { padding: var(--space-3); }
+  .gq-note { font-size: var(--type-sm); }
+  .gq-qr, .gq-qr svg { width: 160px; height: 160px; }
+}
+/* feature:gateway-qr end */
+
 @media (max-width: 960px) {
   .page-header {
     flex-wrap: wrap;
