@@ -280,7 +280,8 @@ pub fn TranscriptPane(
                 </Show>
                 {move || {
                     let fv = find.get();
-                    let msgs = transcript.get().messages;
+                    let snap = transcript.get();
+                    let msgs = snap.messages.clone();
                     // A day separator precedes the first timed message of
                     // each local day (#1349). Untimed messages never open
                     // a new day.
@@ -312,9 +313,10 @@ pub fn TranscriptPane(
                                 .copied()
                                 .collect();
                             let msg_current = fv.current.filter(|h| h.line == idx);
+                            let msg_elapsed = snap.elapsed_for(msg.id).map(str::to_owned);
                             view! {
                                 {sep.map(|label| view! { <div class="day-sep" role="separator">{label}</div> })}
-                                {message_view(msg, idx, cursor, open_file, retry, fork, msg_hits, msg_current)}
+                                {message_view(msg, idx, cursor, open_file, retry, fork, msg_hits, msg_current, msg_elapsed)}
                             }
                         })
                         .collect_view()
@@ -478,6 +480,7 @@ fn message_view(
     fork: Callback<(i32,)>,
     find_hits: Vec<crate::transcript_find::TMatch>,
     find_current: Option<crate::transcript_find::TMatch>,
+    turn_elapsed: Option<String>,
 ) -> impl IntoView {
     let id = msg.id;
     let role = msg.role.class();
@@ -547,6 +550,7 @@ fn message_view(
                     }}
                 </Show>
                 {has_stamp.then(|| view! { <span class="stamp" title=stamp_full.clone()>{stamp.clone()}</span> })}
+                {turn_elapsed.clone().map(|label| view! { <span class="turn-elapsed" title="Turn elapsed time">{label}</span> })}
                 {diff.clone().map(|d| view! {
                     <span class="sx-diff" aria-label=format!("+{} -{}", d.added, d.deleted)>
                         <span class="sx-add">{format!("+{}", d.added)}</span>

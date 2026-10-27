@@ -24,6 +24,7 @@ mod side_chat;
 mod status;
 mod transcript;
 mod transcript_view;
+mod turn_elapsed;
 mod workspaces;
 
 use crate::shell::icon;
