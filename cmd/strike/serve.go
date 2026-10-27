@@ -18,6 +18,7 @@ import (
 
 	"github.com/jonathanung/strike/harness/sandbox"
 	"github.com/jonathanung/strike/internal/frontend/host"
+	"github.com/jonathanung/strike/internal/frontend/host/local"
 	"github.com/jonathanung/strike/internal/frontend/server"
 	"github.com/jonathanung/strike/internal/persist/attachment"
 	"github.com/jonathanung/strike/internal/persist/session"
@@ -237,6 +238,21 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 	var sharedAttachments *attachment.Store
 	sessionDir := opts.sessionDir
 
+	wsStore, err := workspace.Open("")
+	if err != nil {
+		return err
+	}
+	var browse []string
+	if home, herr := os.UserHomeDir(); herr == nil && home != "" {
+		browse = append(browse, home)
+	}
+	if cwd, cerr := os.Getwd(); cerr == nil && cwd != "" {
+		browse = append(browse, cwd)
+	}
+	if len(browse) > 0 {
+		wsStore.ConfigureBrowse(browse)
+	}
+
 	if !opts.attachOnly {
 		cliOpts := cliOptions{
 			provider:                   opts.provider,
@@ -244,6 +260,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 			model:                      opts.model,
 			auto:                       opts.auto,
 			dangerouslySkipPermissions: opts.dangerouslySkipPermissions,
+			workspaces:                 wsStore,
 		}
 		a, err := assemble(cliOpts, true)
 		if err != nil {
@@ -491,10 +508,6 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 	}
 	defer func() { _ = auditSink.Close() }()
 
-	wsStore, err := workspace.Open("")
-	if err != nil {
-		return err
-	}
 	if sharedAttachments == nil {
 		st, err := attachment.Open(config.GlobalRoot())
 		if err != nil {
@@ -505,14 +518,19 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 	}
 
 	srv, err := server.New(server.Options{
-		Addr:          opts.addr,
-		Auth:          opts.auth,
-		Token:         token,
-		TokenFile:     opts.tokenFile,
-		SessionDir:    sessionDir,
-		Workspaces:    wsStore,
-		LiveHub:       liveHub,
-		Services:      services,
+		Addr:       opts.addr,
+		Auth:       opts.auth,
+		Token:      token,
+		TokenFile:  opts.tokenFile,
+		SessionDir: sessionDir,
+		Workspaces: wsStore,
+		LiveHub:    liveHub,
+		Services:   services,
+		SyncWorkDir: func(dir string) {
+			if services != nil {
+				local.SetFilesWorkDir(services.Files, dir)
+			}
+		},
 		Sandbox:       sandboxSnap,
 		ReadOnly:      opts.readOnly,
 		Audit:         auditSink,

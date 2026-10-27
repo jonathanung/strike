@@ -68,6 +68,9 @@ type Options struct {
 	// Workspaces is the durable workspace registry for /v1/workspaces.
 	// Nil returns 503 from those routes.
 	Workspaces *workspace.Store
+	// SyncWorkDir points host file listings at the active root's directory.
+	// Nil leaves the files service on the directory it was built with.
+	SyncWorkDir func(dir string)
 	// Services exposes optional frontend host capabilities.
 	Services *host.Services
 	// Sandbox enables the sandbox capability and seeds live roots that do not
@@ -368,7 +371,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/audit/export", s.handleAuditExport)
 	s.mux.HandleFunc("POST /v1/audit", s.handleAuditAppend)
 	s.mux.HandleFunc("GET /v1/workspaces", s.handleWorkspacesList)
+	s.mux.HandleFunc("GET /v1/workspaces/browse", s.handleWorkspaceBrowse)
 	s.mux.HandleFunc("POST /v1/workspaces", s.handleWorkspaceAdd)
+	s.mux.HandleFunc("POST /v1/workspaces/mkdir", s.handleWorkspaceMkdir)
 	s.mux.HandleFunc("POST /v1/workspaces/{id}/activate", s.handleWorkspaceActivate)
 	s.mux.HandleFunc("PATCH /v1/workspaces/{id}", s.handleWorkspacePolicy)
 	s.mux.HandleFunc("DELETE /v1/workspaces/{id}", s.handleWorkspaceRemove)

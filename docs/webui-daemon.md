@@ -28,24 +28,33 @@ Status: walking skeleton on branch `worktree-rust-webui-daemon`. Not merged.
 - `internal/persist/workspace`: durable workspace registry
   (`~/.strike/workspaces.json`, 0600, atomic write). Directories are
   validated on the daemon host; ids are stable path hashes. A workspace is
-  a named directory plus an optional rules file and permission mode. It is
-  not a session folder. Sessions do not store a workspace id yet, and
-  activate does not change the engine working directory or the live
-  permission mode. `PATCH /v1/workspaces/{id}` sets `rules` (a regular file
-  inside the directory; symlinks that escape are rejected) and
-  `permissionMode` (`default`, `plan`, `soft-approve`, `accept-edits`,
-  `yolo`). Empty strings clear the field.
-- API: `GET/POST /v1/workspaces`, `POST /v1/workspaces/{id}/activate`,
+  a named directory plus an optional rules file, a permission mode, and
+  extra roots. It is not a session folder. A root session records
+  `workspaceId`. Web-created sessions use that directory. Activating a
+  workspace applies its stored permission mode to the active live root.
+  `PATCH /v1/workspaces/{id}` sets `rules` (a regular file inside the
+  directory; symlinks that escape are rejected), `permissionMode`
+  (`default`, `plan`, `soft-approve`, `accept-edits`, `yolo`), `name`, and
+  `extraRoots` (existing directories, not the filesystem root; symlinks are
+  stored resolved). Empty strings clear rules and the mode. An empty
+  `extraRoots` array clears the extras.
+- API: `GET/POST /v1/workspaces`, `GET /v1/workspaces/browse`,
+  `POST /v1/workspaces/mkdir`, `POST /v1/workspaces/{id}/activate`,
   `PATCH /v1/workspaces/{id}`, `DELETE /v1/workspaces/{id}` (token-gated
-  like all `/v1/*` under `--auth`).
+  like all `/v1/*` under `--auth`). Browse and mkdir stay inside the
+  allowlist: the daemon user's home, the process directory, registered
+  workspace paths, and extra roots. A symlink that resolves outside that
+  set is omitted. Add, once the allowlist is configured, rejects a path
+  outside it.
 - Per-child git worktrees already exist and stay off unless asked.
   `session.childIsolation` `off` or `shared` (the default) keeps the
   parent's directory. `worktree`, or a spawn `isolation: "worktree"`,
   checks out `<repo>/.strike/worktrees/<child-id>/`. There is no second
   flag. Outside a git repository the engine stays on the shared directory.
-  Delegated child working directories are not yet checked against the
-  workspace registry; that waits until a session actually runs in a
-  registered directory ([webui-planned.md](webui-planned.md)).
+  A bound session rejects a delegated child whose working directory
+  resolves outside the workspace and its extra roots. An unbound session
+  (empty registry, or a launch directory that matched nothing) does not
+  run that check.
 - `strike daemon install|uninstall|status|token` + systemd user unit.
 - `strike serve --token-file` (stable 0600 token, minted once) and
   `--allow-private-bind`.
@@ -130,15 +139,39 @@ systemctl --user enable --now strike-daemon
 
 Foreground instead of systemd: `./strike serve --auth --token-file ~/.strike/daemon.token`.
 
+## Several workspaces, one daemon
+
+One `strike serve` process can hold several live roots at once. Each root
+keeps its own engine, transcript, and working directory. Creating a root
+from the web client uses the active workspace: that directory is the engine
+working directory, the rules file is appended to that session's prompt
+(capped at 64KiB), and the stored permission mode is the starting posture.
+Switching the active root points file listings and diffs at that root's
+directory. Children spawned from a bound session must stay inside the
+workspace directory or an extra root; a symlink out is rejected. Worktrees
+remain the existing opt-in and are rejected when they land outside those
+roots.
+
+Isolated per workspace: the session's directory, its rules text, its
+starting permission mode, and the child working-directory allowlist.
+
+Shared by every workspace in the process: the bearer token, provider
+credentials, the session log directory, MCP and LSP processes started from
+the launch tree, and project memory, history, plans, artifacts, and the
+ledger (still keyed by the launch project). An empty registry changes
+none of this: the engine stays in the process directory and child
+directories are not checked.
+
+The picker is not a session-folder tree. Session folders, when they exist,
+only organise chats. They do not select a directory.
+
 ## Not yet done (next slices, in order)
 
-1. Engine root per workspace: opening a workspace currently records it as
-   active; spawning/attaching a live engine rooted at that directory (today
-   roots spawn in the daemon's cwd) is the next engine-plumbing slice.
-2. Permission asks in the transcript. The composer can set the mode;
+1. Permission asks in the transcript. The composer can set the mode;
    an in-flight ask is still only the protocol event.
-3. Session list and resume follow the active workspace. Files and diffs
-   follow the daemon working directory, which is not the workspace path.
-4. Per-remote tokens in the UI (today one token field for the selected
+2. Session folders that organise chats, separate from workspace
+   directories. The list already shows which workspace a chat is bound
+   to. It does not hide chats from other workspaces.
+3. Per-remote tokens in the UI (today one token field for the selected
    daemon), daemon discovery on the tailnet.
-5. Tauri shell (optional), TUI removal decision, `docs/web.md` rewrite.
+4. Tauri shell (optional), TUI removal decision, `docs/web.md` rewrite.

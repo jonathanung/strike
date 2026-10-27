@@ -33,6 +33,7 @@ import (
 	"github.com/jonathanung/strike/internal/persist/memory"
 	"github.com/jonathanung/strike/internal/persist/plan"
 	"github.com/jonathanung/strike/internal/persist/session"
+	"github.com/jonathanung/strike/internal/persist/workspace"
 	"github.com/jonathanung/strike/internal/product/auth"
 	"github.com/jonathanung/strike/internal/product/config"
 	"github.com/jonathanung/strike/internal/product/goal"
@@ -664,6 +665,17 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	// applyCLI pins: only the process's first root applies --provider/--model/--effort.
 	openRoot := func(resumeID string, applyCLI bool) (*rootSlot, []protocol.Event, error) {
 		resumeID = strings.TrimSpace(resumeID)
+		preferActive := !applyCLI && resumeID == ""
+		var binding workspace.SessionBinding
+		if resumeID != "" {
+			meta, err := session.ReadMeta(sessionDir, resumeID)
+			if err != nil {
+				return nil, nil, err
+			}
+			binding = workspace.ForResume(opts.workspaces, meta.WorkspaceID, launchDir)
+		} else {
+			binding = workspace.ForNew(opts.workspaces, launchDir, preferActive)
+		}
 		var (
 			sessionID          string
 			bound              session.Bound
@@ -731,7 +743,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			quietStartup = !(applyCLI && (opts.providerSet || opts.model != "" || opts.effort != ""))
 		} else {
 			openRootsBefore = sessions.CountOpenRoots()
-			info, err := sessions.Create(session.CreateOptions{ProjectKey: projectIdentity.Key})
+			info, err := sessions.Create(session.CreateOptions{ProjectKey: projectIdentity.Key, WorkspaceID: binding.ID})
 			if err != nil {
 				return nil, nil, fmt.Errorf("creating session: %w", err)
 			}
@@ -746,7 +758,11 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		// Bind tool CWD to a per-session git worktree when configured / forced.
 		// Project-scoped state stays on projectIdentity.Key (launch repo).
 		// Non-git cwd soft-fails (launchDir + notice) so the app still starts.
-		toolDir, wtClose, wtNotice, err := bindSessionWorktree(sessions, sessionID, launchDir, cfg, opts.worktree, resuming, openRootsBefore)
+		baseDir := launchDir
+		if binding.Bound && strings.TrimSpace(binding.Dir) != "" {
+			baseDir = binding.Dir
+		}
+		toolDir, wtClose, wtNotice, err := bindSessionWorktree(sessions, sessionID, baseDir, cfg, opts.worktree, resuming, openRootsBefore)
 		if err != nil {
 			if !resuming {
 				_ = sessions.Destroy(sessionID)
@@ -757,6 +773,21 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		}
 
 		// Refuse yolo + sandbox off without --i-know (startup gate).
+		if !resuming && binding.Bound && binding.PermissionMode != "" && !cfg.Managed.PermissionMode {
+			if mode, ok := protocol.ParsePermissionMode(binding.PermissionMode); ok {
+				initialPermMode = mode
+			}
+		}
+		sessionInstructions := instructions
+		projectRoot := projectIdentity.Root
+		if binding.Bound {
+			projectRoot = binding.Root
+			sessionInstructions = config.LoadInstructions(binding.Dir, binding.Root)
+			if binding.RulesBlock != "" && !workspace.InstructionCovers(sessionInstructions, binding.RulesPath) {
+				sessionInstructions = append(sessionInstructions, binding.RulesBlock)
+			}
+		}
+
 		if err := sandbox.CheckYoloSandbox(string(initialPermMode.Normalize()), sandboxMode, opts.iKnow); err != nil {
 			if !resuming {
 				_ = sessions.Destroy(sessionID)
@@ -792,14 +823,15 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			initialMemoryMode = meta.MemoryMode
 		}
 		eng := engine.New(engine.Options{
-			SessionID:     sid,
-			Select:        selectProvider,
-			Registry:      registry,
-			WorkDir:       toolDir,
-			Audit:         auditSink,
-			CheckpointDir: tool.DefaultCheckpointDir(sid),
-			ProjectRoot:   projectIdentity.Root,
-			Instructions:  instructions,
+			SessionID:      sid,
+			Select:         selectProvider,
+			Registry:       registry,
+			WorkDir:        toolDir,
+			WorkspaceRoots: append([]string(nil), binding.Roots...),
+			Audit:          auditSink,
+			CheckpointDir:  tool.DefaultCheckpointDir(sid),
+			ProjectRoot:    projectRoot,
+			Instructions:   sessionInstructions,
 			Memory: enginebind.CombineMemory(
 				enginebind.Memory(memoryStore),
 				enginebind.Memory(globalMemory),

@@ -1502,6 +1502,32 @@ try {
     }),
     { timeout: WAIT_MS, interval: 250 },
   );
+
+  const wsClicked = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const btn = document.querySelector(".ws-open");
+      if (!btn) return "missing";
+      btn.click();
+      return "clicked";
+    })()`,
+    returnByValue: true,
+  });
+  if (wsClicked.result?.result?.value !== "clicked") {
+    throw new Error(`workspace picker button missing: ${wsClicked.result?.result?.value || ""}`);
+  }
+  let picker = "";
+  for (let i = 0; i < 20; i++) {
+    const ev = await send("Runtime.evaluate", {
+      expression: `document.body ? document.body.innerText : ""`,
+      returnByValue: true,
+    });
+    picker = ev.result?.result?.value || "";
+    if (picker.includes("A workspace is a directory")) break;
+    await delay(100);
+  }
+  if (!picker.includes("A workspace is a directory")) {
+    throw new Error(`workspace picker did not open: ${picker.slice(0, 400)}`);
+  }
   console.log("webui-smoke ok");
 } catch (err) {
   console.error(String(err));

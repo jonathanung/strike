@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/jonathanung/strike/internal/persist/workspace"
+	"github.com/jonathanung/strike/internal/protocol"
 )
 
 func TestWorkspacesAPI(t *testing.T) {
@@ -136,6 +137,100 @@ func TestWorkspacePolicyAPI(t *testing.T) {
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/workspaces", nil))
 	if !strings.Contains(rec.Body.String(), `"permissionMode":"plan"`) {
 		t.Fatalf("list after reject: %s", rec.Body.String())
+	}
+}
+
+func TestWorkspaceBrowseRenameAndActivateMode(t *testing.T) {
+	dir := t.TempDir()
+	root := filepath.Join(dir, "allowed")
+	outside := filepath.Join(dir, "outside")
+	if err := os.Mkdir(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	store, err := workspace.Open(filepath.Join(dir, "state"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.ConfigureBrowse([]string{root})
+	ops := make(chan protocol.Op, 1)
+	live := NewLive("root-1", root, nil, ops)
+	hub := NewLiveHub(nil, nil)
+	hub.Add("root-1", live)
+	srv, err := New(Options{SessionDir: dir, PollInterval: 20 * time.Millisecond, Workspaces: store, LiveHub: hub})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := srv.Handler()
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/workspaces/browse?path="+outside, nil))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("browse outside: %d %s", rec.Code, rec.Body.String())
+	}
+
+	body, _ := json.Marshal(map[string]string{"parent": root, "name": "child"})
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/workspaces/mkdir", bytes.NewReader(body)))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("mkdir: %d %s", rec.Code, rec.Body.String())
+	}
+	var made struct {
+		Path string `json:"path"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &made); err != nil {
+		t.Fatal(err)
+	}
+
+	add, _ := json.Marshal(map[string]string{"path": made.Path, "name": "Child"})
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/workspaces", bytes.NewReader(add)))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("add: %d %s", rec.Code, rec.Body.String())
+	}
+	var added workspace.Workspace
+	if err := json.NewDecoder(rec.Body).Decode(&added); err != nil {
+		t.Fatal(err)
+	}
+
+	patch, _ := json.Marshal(map[string]any{"name": "Renamed", "permissionMode": "plan", "extraRoots": []string{root}})
+	rec = httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPatch, "/v1/workspaces/"+added.ID, bytes.NewReader(patch))
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("patch: %d %s", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/workspaces/"+added.ID+"/activate", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("activate: %d %s", rec.Code, rec.Body.String())
+	}
+	select {
+	case op := <-ops:
+		mode, ok := op.(protocol.SetPermissionMode)
+		if !ok || mode.Mode != protocol.PermissionModePlan {
+			t.Fatalf("op = %#v", op)
+		}
+	default:
+		t.Fatal("activate did not apply the stored permission mode")
+	}
+
+	// Empty registry still lists. A second store with no rows answers 200.
+	empty, err := workspace.Open(filepath.Join(dir, "empty"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	emptySrv, err := New(Options{SessionDir: dir, Workspaces: empty})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec = httptest.NewRecorder()
+	emptySrv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/workspaces", nil))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"workspaces":[]`) {
+		t.Fatalf("empty registry: %d %s", rec.Code, rec.Body.String())
 	}
 }
 

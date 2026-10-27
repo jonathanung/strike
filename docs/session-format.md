@@ -200,6 +200,7 @@ Not an event. First line of logs created by current writers. `schemaVersion` is 
 | `parentSessionId` | string | yes |
 | `leadSessionId` | string | yes |
 | `forkedFrom` | string | yes |
+| `workspaceId` | string | yes |
 | `worktreePath` | string | yes |
 | `worktreeBranch` | string | yes |
 | `createdAt` | string | yes |
