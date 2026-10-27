@@ -7,7 +7,7 @@ use leptos::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
 
-use crate::status_shim::Badge;
+use crate::status::{StatusKind, StatusMark, StatusSlot};
 use crate::transcript::{
     empty_headline, parse_markdown, show_minimap, stick_to_bottom, suggestions, Block, Chip,
     ChipKind, Inline, Message, Role, Transcript,
@@ -266,9 +266,38 @@ pub fn TranscriptPane(
                         </div>
                     </div>
                 </Show>
-                {move || transcript.get().messages.into_iter().map(|msg| {
-                    message_view(msg, cursor, open_file, retry, fork)
-                }).collect_view()}
+                {move || {
+                    let msgs = transcript.get().messages;
+                    // A day separator precedes the first timed message of
+                    // each local day (#1349). Untimed messages never open
+                    // a new day.
+                    let mut prev_day: Option<(u32, u32, u32)> = None;
+                    let seps: Vec<Option<String>> = msgs
+                        .iter()
+                        .map(|msg| {
+                            if msg.at_ms <= 0.0 {
+                                return None;
+                            }
+                            let day = line_day(msg.at_ms);
+                            let label = if prev_day == Some(day) {
+                                None
+                            } else {
+                                Some(line_day_label(msg.at_ms))
+                            };
+                            prev_day = Some(day);
+                            label
+                        })
+                        .collect();
+                    msgs.into_iter()
+                        .zip(seps)
+                        .map(|(msg, sep)| {
+                            view! {
+                                {sep.map(|label| view! { <div class="day-sep" role="separator">{label}</div> })}
+                                {message_view(msg, cursor, open_file, retry, fork)}
+                            }
+                        })
+                        .collect_view()
+                }}
             </div>
             <Show when=move || show_minimap(transcript.with(|t| t.messages.len()))>
                 <div class="sx-map" aria-label="Transcript map">
@@ -439,6 +468,9 @@ fn message_view(
     };
     let retry_text = msg.retry_text.clone();
     let keep = msg.keep_events;
+    let stamp = line_stamp(msg.at_ms);
+    let stamp_full = line_full_time(msg.at_ms);
+    let has_stamp = !stamp.is_empty();
     let prose = matches!(msg.role, Role::You | Role::Strike);
     let show_retry = prose && !retry_text.trim().is_empty();
     let show_fork = prose && keep >= 0;
@@ -453,8 +485,15 @@ fn message_view(
             <header>
                 <span class="sx-who">{title}</span>
                 <Show when=move || show_badge>
-                    <Badge kind=badge.clone() label=badge.clone() />
+                    {match StatusKind::parse_known(&badge) {
+                        Some(kind) => view! { <StatusMark kind=kind place=StatusSlot::Badge /> }.into_any(),
+                        None => {
+                            let class = format!("sx-status sx-status-{badge}");
+                            view! { <span class=class data-status=badge.clone()>{badge.clone()}</span> }.into_any()
+                        }
+                    }}
                 </Show>
+                {has_stamp.then(|| view! { <span class="stamp" title=stamp_full.clone()>{stamp.clone()}</span> })}
                 {diff.clone().map(|d| view! {
                     <span class="sx-diff" aria-label=format!("+{} -{}", d.added, d.deleted)>
                         <span class="sx-add">{format!("+{}", d.added)}</span>
@@ -474,7 +513,11 @@ fn message_view(
                     </Show>
                 </span>
             </header>
-            {if prose {
+            {if prose && crate::editor::has_markdown_table(&body) {
+                // Table-bearing prose renders through the shared markdown
+                // view (#1344), as on the shell's bubble path.
+                view! { <crate::editor::MarkdownView text=body.clone() /> }.into_any()
+            } else if prose {
                 blocks_view(parse_markdown(&body), open_file).into_any()
             } else if body.is_empty() {
                 view! { <span></span> }.into_any()
@@ -609,4 +652,59 @@ fn chip_view(chip: Chip, open_file: Callback<(String, u32)>) -> impl IntoView {
             }
         }
     }
+}
+
+/// Header stamp for a transcript message (#1349): relative while the
+/// message is under a day old (the session list's `fmt_ago` vocabulary),
+/// local clock time after that. Empty when the time is unknown.
+fn line_stamp(at_ms: f64) -> String {
+    if at_ms <= 0.0 {
+        return String::new();
+    }
+    let now = crate::api::now_ms();
+    if now - at_ms < 86_400_000.0 {
+        let rel = crate::status::fmt_ago((at_ms / 1000.0) as i64, (now / 1000.0) as i64);
+        if !rel.is_empty() {
+            return rel;
+        }
+    }
+    let d = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(at_ms));
+    format!("{:02}:{:02}", d.get_hours() as u32, d.get_minutes() as u32)
+}
+
+/// Full local timestamp for the stamp's tooltip. Empty when unknown.
+fn line_full_time(at_ms: f64) -> String {
+    if at_ms <= 0.0 {
+        return String::new();
+    }
+    js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(at_ms))
+        .to_string()
+        .as_string()
+        .unwrap_or_default()
+}
+
+/// Local calendar day of a message, as (year, month 0-based, day of month).
+fn line_day(at_ms: f64) -> (u32, u32, u32) {
+    let d = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(at_ms));
+    (
+        d.get_full_year() as u32,
+        d.get_month() as u32,
+        d.get_date() as u32,
+    )
+}
+
+/// Separator label shown when the local day changes between messages.
+fn line_day_label(at_ms: f64) -> String {
+    const DAYS: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let d = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(at_ms));
+    format!(
+        "{} {} {}, {}",
+        DAYS[(d.get_day() as usize) % 7],
+        MONTHS[(d.get_month() as usize) % 12],
+        d.get_date() as u32,
+        d.get_full_year() as u32
+    )
 }

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -27,6 +28,36 @@ func TestParallelChildrenOverlapEmitsPathOverlap(t *testing.T) {
 	writeB := writeToolCall("wb", "shared.txt", "from-b")
 	listOwn := controlToolCall("own1", "agent_ownership", map[string]any{"action": "list"})
 
+	// Both writes must stay active together. A child that finishes before its
+	// sibling touches shared.txt deactivates the claim, so PathOverlap never
+	// fires and drainUntil hits its deadline under load. Hold each completion
+	// stream until both write results have been observed.
+	var writeMu sync.Mutex
+	writes := 0
+	bothWrites := make(chan struct{})
+	holdUntilBothWrites := func(text string) func(context.Context) <-chan provider.StreamEvent {
+		return func(ctx context.Context) <-chan provider.StreamEvent {
+			ch := make(chan provider.StreamEvent, 2)
+			go func() {
+				defer close(ch)
+				writeMu.Lock()
+				writes++
+				if writes == 2 {
+					close(bothWrites)
+				}
+				writeMu.Unlock()
+				select {
+				case <-bothWrites:
+				case <-ctx.Done():
+					return
+				}
+				ch <- provider.StreamEvent{Type: provider.EventTextDelta, Text: text}
+				ch <- provider.StreamEvent{Type: provider.EventDone, StopReason: "end_turn"}
+			}()
+			return ch
+		}
+	}
+
 	prov := newScriptedProvider(
 		// Lead turn 1: spawn A and B.
 		toolCallStep(taskA, taskB),
@@ -44,6 +75,7 @@ func TestParallelChildrenOverlapEmitsPathOverlap(t *testing.T) {
 		func() streamStep {
 			s := completedStep("a done")
 			s.match = matchToolResult("wa")
+			s.stream = holdUntilBothWrites("a done")
 			return s
 		}(),
 		// Child B
@@ -55,6 +87,7 @@ func TestParallelChildrenOverlapEmitsPathOverlap(t *testing.T) {
 		func() streamStep {
 			s := completedStep("b done")
 			s.match = matchToolResult("wb")
+			s.stream = holdUntilBothWrites("b done")
 			return s
 		}(),
 		// Lead nudge after first child.completed: list ownership

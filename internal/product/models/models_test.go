@@ -90,6 +90,13 @@ func TestInfosMetadata(t *testing.T) {
 	if bare.Context != 0 || bare.HasCost || bare.ToolCall || bare.Reasoning || bare.Attachment {
 		t.Errorf("z-bare should be empty metadata: %+v", bare)
 	}
+	cost, ok := c.Cost("openai", "a-full")
+	if !ok || cost.Input != 2.5 || cost.Output != 10 {
+		t.Fatalf("Cost(a-full) = %+v ok=%v", cost, ok)
+	}
+	if _, ok := c.Cost("openai", "z-bare"); ok {
+		t.Fatal("bare model reported a price")
+	}
 	if c.Infos("missing") != nil {
 		t.Fatal("expected nil for missing provider")
 	}

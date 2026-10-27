@@ -79,6 +79,9 @@ pub struct Message {
     pub keep_events: i32,
     pub retry_text: String,
     pub copy_text: String,
+    /// Envelope time of the event that created this message, epoch ms.
+    /// 0 means unknown (old log line without a parseable `time`).
+    pub at_ms: f64,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -222,6 +225,9 @@ pub struct Transcript {
     pub auto_title: String,
     pub title_pin: Option<String>,
     next_id: u32,
+    /// Count of `artifact.updated` envelopes seen; the shell mirrors this
+    /// into its storage revision signal so the storage panel refreshes.
+    pub artifact_updates: u32,
     assistant_open: bool,
     event_count: usize,
     turn_start: Option<u32>,
@@ -241,6 +247,7 @@ impl Transcript {
             auto_title: String::new(),
             title_pin: None,
             next_id: 0,
+            artifact_updates: 0,
             assistant_open: false,
             event_count: 0,
             turn_start: None,
@@ -286,18 +293,20 @@ impl Transcript {
             .unwrap_or_default()
     }
 
-    pub fn child_lines(&self) -> Vec<ChatLine> {
+    /// Every message as a shell `ChatLine` (the side chat and the activity
+    /// panel still consume that shape). Role strings match the shell's.
+    pub fn chat_lines(&self) -> Vec<ChatLine> {
         self.messages
             .iter()
-            .filter(|m| m.role == Role::Child)
             .map(|m| ChatLine {
                 id: m.id,
-                role: "child".into(),
+                role: m.role.class().into(),
                 title: m.title.clone(),
                 body: m.body.clone(),
                 badge: m.badge.clone(),
                 detail: m.detail.clone(),
                 key: m.key.clone(),
+                at_ms: m.at_ms,
             })
             .collect()
     }
@@ -340,6 +349,13 @@ impl Transcript {
     }
 
     pub fn apply_envelope(&mut self, raw: &str) {
+        // Generated contract gate (shared with the shell): unknown events
+        // are skipped, and a known event whose payload does not match the
+        // schema is dropped. Parsing below still reads the raw object.
+        match protocol_schema::decode_event(raw) {
+            Ok(protocol_schema::Event::Unknown { .. }) | Err(_) => return,
+            Ok(_) => {}
+        }
         let v: Value = match serde_json::from_str(raw) {
             Ok(v) => v,
             Err(_) => return,
@@ -348,6 +364,13 @@ impl Transcript {
         if typ.is_empty() || typ == "session.header" {
             return;
         }
+        // The envelope's `time` is the event's original time (also what the
+        // JSONL log persists), so replayed messages keep real timestamps.
+        let at_ms = v
+            .get("time")
+            .and_then(|t| t.as_str())
+            .map(crate::model::rfc3339_to_ms)
+            .unwrap_or(0.0);
         self.event_count += 1;
         let data = v.get("data").cloned().unwrap_or(Value::Null);
         match typ {
@@ -369,6 +392,7 @@ impl Transcript {
                     keep_events: -1,
                     retry_text: text,
                     copy_text: shown,
+                    at_ms,
                 });
                 self.turn_start = Some(id);
                 self.absorb();
@@ -409,6 +433,7 @@ impl Transcript {
                     keep_events: -1,
                     retry_text: retry,
                     copy_text: body,
+                    at_ms,
                 });
             }
             "turn.completed" => {
@@ -445,6 +470,7 @@ impl Transcript {
                     keep_events: -1,
                     retry_text: String::new(),
                     copy_text: copy,
+                    at_ms,
                 });
             }
             "tool.end" => {
@@ -499,6 +525,7 @@ impl Transcript {
                         keep_events: -1,
                         retry_text: String::new(),
                         copy_text: face.copy,
+                        at_ms,
                     });
                 }
             }
@@ -516,14 +543,18 @@ impl Transcript {
                         .to_string();
                 }
                 let summary = clip(&summary, 160);
-                let card = child_card_from_parts(
+                let mut card = child_card_from_parts(
                     &name,
                     &session,
                     &status,
                     &summary,
                     &human_child_detail(&data),
                 );
+                card.at_ms = at_ms;
                 self.upsert_child(card);
+            }
+            "artifact.updated" => {
+                self.artifact_updates = self.artifact_updates.wrapping_add(1)
             }
             _ => {}
         }
@@ -612,7 +643,8 @@ impl Transcript {
             line.body = strip_echo_progress(&line.body);
             line.copy_text = line.body.clone();
             line.chips = chips_in(&line.body);
-            if let Some(card) = child_card_from_text(&line.body) {
+            if let Some(mut card) = child_card_from_text(&line.body) {
+                card.at_ms = line.at_ms;
                 cards.push(card);
                 line.body.clear();
                 line.copy_text.clear();
@@ -624,6 +656,7 @@ impl Transcript {
                     status: String::new(),
                     summary,
                     details: String::new(),
+                    at_ms: line.at_ms,
                 });
                 line.body.clear();
                 line.copy_text.clear();
@@ -677,6 +710,7 @@ impl Transcript {
         } else {
             card.name
         };
+        let at_ms = card.at_ms;
         let summary = card.summary.clone();
         self.push(Message {
             id: 0,
@@ -692,6 +726,7 @@ impl Transcript {
             keep_events: -1,
             retry_text: String::new(),
             copy_text: summary,
+            at_ms,
         });
     }
 }

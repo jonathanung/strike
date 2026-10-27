@@ -111,6 +111,11 @@ if (Symbol.dispose) IntoUnderlyingSource.prototype[Symbol.dispose] = IntoUnderly
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,
+        __wbg___wbindgen_boolean_get_5b446f51afd21013: function(arg0) {
+            const v = arg0;
+            const ret = typeof(v) === 'boolean' ? v : undefined;
+            return isLikeNone(ret) ? 0xFFFFFF : ret ? 1 : 0;
+        },
         __wbg___wbindgen_debug_string_4687d8d8c2017d52: function(arg0, arg1) {
             const ret = debugString(arg1);
             const ptr1 = passStringToWasm0(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
@@ -134,6 +139,12 @@ function __wbg_get_imports() {
             const ret = arg0 === undefined;
             return ret;
         },
+        __wbg___wbindgen_number_get_2e0e7dee9f701a71: function(arg0, arg1) {
+            const obj = arg1;
+            const ret = typeof(obj) === 'number' ? obj : undefined;
+            getDataViewMemory0().setFloat64(arg0 + 8 * 1, isLikeNone(ret) ? 0 : ret, true);
+            getDataViewMemory0().setInt32(arg0 + 4 * 0, !isLikeNone(ret), true);
+        },
         __wbg___wbindgen_string_get_0380ccaa2f57f0d9: function(arg0, arg1) {
             const obj = arg1;
             const ret = typeof(obj) === 'string' ? obj : undefined;
@@ -148,6 +159,10 @@ function __wbg_get_imports() {
         __wbg__wbg_cb_unref_dcc1a90847f04c41: function(arg0) {
             arg0._wbg_cb_unref();
         },
+        __wbg_activeElement_69b55e3697f14d9b: function(arg0) {
+            const ret = arg0.activeElement;
+            return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
+        },
         __wbg_addEventListener_4d0db17c671ea324: function() { return handleError(function (arg0, arg1, arg2, arg3) {
             arg0.addEventListener(getStringFromWasm0(arg1, arg2), arg3);
         }, arguments); },
@@ -159,6 +174,13 @@ function __wbg_get_imports() {
             const ret = arg0.appendChild(arg1);
             return ret;
         }, arguments); },
+<<<<<<<< HEAD:internal/frontend/server/static/assets/strike-webui-a0b54fc5edcd27cc.js
+========
+        __wbg_apply_a910804df6e1e433: function() { return handleError(function (arg0, arg1, arg2) {
+            const ret = arg0.apply(arg1, arg2);
+            return ret;
+        }, arguments); },
+>>>>>>>> origin/main:internal/frontend/server/static/assets/strike-webui-460c9517ec1d1cc9.js
         __wbg_body_e549239eaff082e1: function(arg0) {
             const ret = arg0.body;
             return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
@@ -183,10 +205,15 @@ function __wbg_get_imports() {
             const ret = arg0.call(arg1, arg2);
             return ret;
         }, arguments); },
+        __wbg_call_6137034ef55c9d0f: function() { return handleError(function (arg0, arg1) {
+            const ret = arg0.call(arg1);
+            return ret;
+        }, arguments); },
         __wbg_cancelBubble_317b9e84df6f26ee: function(arg0) {
             const ret = arg0.cancelBubble;
             return ret;
         },
+<<<<<<<< HEAD:internal/frontend/server/static/assets/strike-webui-a0b54fc5edcd27cc.js
         __wbg_click_d990e70c576b7c54: function(arg0) {
             arg0.click();
         },
@@ -197,6 +224,21 @@ function __wbg_get_imports() {
         __wbg_clipboard_9bf6a11ffd0b00a8: function(arg0) {
             const ret = arg0.clipboard;
             return ret;
+========
+        __wbg_checked_dfbd69c1f78ce37d: function(arg0) {
+            const ret = arg0.checked;
+            return ret;
+        },
+        __wbg_clearInterval_f1a050672da2658c: function(arg0, arg1) {
+            arg0.clearInterval(arg1);
+        },
+        __wbg_click_d990e70c576b7c54: function(arg0) {
+            arg0.click();
+        },
+        __wbg_clipboardData_0048090643ed57a2: function(arg0) {
+            const ret = arg0.clipboardData;
+            return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
+>>>>>>>> origin/main:internal/frontend/server/static/assets/strike-webui-460c9517ec1d1cc9.js
         },
         __wbg_cloneNode_36b409d13a42e5ef: function() { return handleError(function (arg0, arg1) {
             const ret = arg0.cloneNode(arg1 !== 0);
@@ -215,13 +257,25 @@ function __wbg_get_imports() {
         __wbg_close_748f26698dabe269: function() { return handleError(function (arg0) {
             arg0.close();
         }, arguments); },
+        __wbg_closest_6abd1bf5d7559cda: function() { return handleError(function (arg0, arg1, arg2) {
+            const ret = arg0.closest(getStringFromWasm0(arg1, arg2));
+            return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
+        }, arguments); },
         __wbg_composedPath_ebbc1f73360cd735: function(arg0) {
             const ret = arg0.composedPath();
             return ret;
         },
+        __wbg_construct_2cc135b78387ed16: function() { return handleError(function (arg0, arg1) {
+            const ret = Reflect.construct(arg0, arg1);
+            return ret;
+        }, arguments); },
         __wbg_content_8137df3b9481cbf9: function(arg0) {
             const ret = arg0.content;
             return ret;
+        },
+        __wbg_controller_78bea95479c52bc2: function(arg0) {
+            const ret = arg0.controller;
+            return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
         },
         __wbg_createComment_9121ed4d148136d4: function(arg0, arg1, arg2) {
             const ret = arg0.createComment(getStringFromWasm0(arg1, arg2));
@@ -285,10 +339,36 @@ function __wbg_get_imports() {
             const ret = fetch(arg0);
             return ret;
         },
+        __wbg_files_cb1ce1b82f16c484: function(arg0) {
+            const ret = arg0.files;
+            return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
+        },
+        __wbg_files_fe03006f0ba1a5f0: function(arg0) {
+            const ret = arg0.files;
+            return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
+        },
         __wbg_firstElementChild_d5206a011a5ecd0c: function(arg0) {
             const ret = arg0.firstElementChild;
             return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
         },
+        __wbg_focus_f740d61348f422e7: function() { return handleError(function (arg0) {
+            arg0.focus();
+        }, arguments); },
+        __wbg_getAttribute_061ad00c16e2f622: function(arg0, arg1, arg2, arg3) {
+            const ret = arg1.getAttribute(getStringFromWasm0(arg2, arg3));
+            var ptr1 = isLikeNone(ret) ? 0 : passStringToWasm0(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            var len1 = WASM_VECTOR_LEN;
+            getDataViewMemory0().setInt32(arg0 + 4 * 1, len1, true);
+            getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
+        },
+        __wbg_getBoundingClientRect_57152b1a20f3de34: function(arg0) {
+            const ret = arg0.getBoundingClientRect();
+            return ret;
+        },
+        __wbg_getComputedStyle_dd0f456804795fd6: function() { return handleError(function (arg0, arg1) {
+            const ret = arg0.getComputedStyle(arg1);
+            return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
+        }, arguments); },
         __wbg_getData_bc58070c107b7d8a: function() { return handleError(function (arg0, arg1, arg2, arg3) {
             const ret = arg1.getData(getStringFromWasm0(arg2, arg3));
             const ptr1 = passStringToWasm0(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
@@ -296,14 +376,51 @@ function __wbg_get_imports() {
             getDataViewMemory0().setInt32(arg0 + 4 * 1, len1, true);
             getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
         }, arguments); },
+<<<<<<<< HEAD:internal/frontend/server/static/assets/strike-webui-a0b54fc5edcd27cc.js
+========
+        __wbg_getDate_1181c785ea4fdd21: function(arg0) {
+            const ret = arg0.getDate();
+            return ret;
+        },
+        __wbg_getDay_a7e78a6fb31f7a75: function(arg0) {
+            const ret = arg0.getDay();
+            return ret;
+        },
+>>>>>>>> origin/main:internal/frontend/server/static/assets/strike-webui-460c9517ec1d1cc9.js
         __wbg_getElementById_cc94972b404e4eaa: function(arg0, arg1, arg2) {
             const ret = arg0.getElementById(getStringFromWasm0(arg1, arg2));
             return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
         },
+<<<<<<<< HEAD:internal/frontend/server/static/assets/strike-webui-a0b54fc5edcd27cc.js
+========
+        __wbg_getFullYear_32050b2c56c56cd8: function(arg0) {
+            const ret = arg0.getFullYear();
+            return ret;
+        },
+        __wbg_getHours_f57dcda3efee150c: function(arg0) {
+            const ret = arg0.getHours();
+            return ret;
+        },
+>>>>>>>> origin/main:internal/frontend/server/static/assets/strike-webui-460c9517ec1d1cc9.js
         __wbg_getItem_4c80b7663197c7ff: function() { return handleError(function (arg0, arg1, arg2, arg3) {
             const ret = arg1.getItem(getStringFromWasm0(arg2, arg3));
             var ptr1 = isLikeNone(ret) ? 0 : passStringToWasm0(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
             var len1 = WASM_VECTOR_LEN;
+            getDataViewMemory0().setInt32(arg0 + 4 * 1, len1, true);
+            getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
+        }, arguments); },
+        __wbg_getMinutes_951e7f98fc4fdb30: function(arg0) {
+            const ret = arg0.getMinutes();
+            return ret;
+        },
+        __wbg_getMonth_aae5f530fd173536: function(arg0) {
+            const ret = arg0.getMonth();
+            return ret;
+        },
+        __wbg_getPropertyValue_e90a3628c2de4fb6: function() { return handleError(function (arg0, arg1, arg2, arg3) {
+            const ret = arg1.getPropertyValue(getStringFromWasm0(arg2, arg3));
+            const ptr1 = passStringToWasm0(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len1 = WASM_VECTOR_LEN;
             getDataViewMemory0().setInt32(arg0 + 4 * 1, len1, true);
             getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
         }, arguments); },
@@ -315,14 +432,43 @@ function __wbg_get_imports() {
             const ret = arg0[arg1 >>> 0];
             return ret;
         },
+        __wbg_hash_c4083658cccb641b: function() { return handleError(function (arg0, arg1) {
+            const ret = arg1.hash;
+            const ptr1 = passStringToWasm0(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len1 = WASM_VECTOR_LEN;
+            getDataViewMemory0().setInt32(arg0 + 4 * 1, len1, true);
+            getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
+        }, arguments); },
+        __wbg_head_37fa26d1df5b82da: function(arg0) {
+            const ret = arg0.head;
+            return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
+        },
         __wbg_host_c1e5897b2ece281c: function(arg0) {
             const ret = arg0.host;
             return ret;
         },
+        __wbg_innerHeight_7f20e0f1a7c5a573: function() { return handleError(function (arg0) {
+            const ret = arg0.innerHeight;
+            return ret;
+        }, arguments); },
+        __wbg_innerWidth_1bc526614080537c: function() { return handleError(function (arg0) {
+            const ret = arg0.innerWidth;
+            return ret;
+        }, arguments); },
         __wbg_insertBefore_f1ba67809033f6b1: function() { return handleError(function (arg0, arg1, arg2) {
             const ret = arg0.insertBefore(arg1, arg2);
             return ret;
         }, arguments); },
+        __wbg_instanceof_ClipboardEvent_cbfd05ef84dbba4f: function(arg0) {
+            let result;
+            try {
+                result = arg0 instanceof ClipboardEvent;
+            } catch (_) {
+                result = false;
+            }
+            const ret = result;
+            return ret;
+        },
         __wbg_instanceof_Element_818e11074cdb63b5: function(arg0) {
             let result;
             try {
@@ -343,10 +489,47 @@ function __wbg_get_imports() {
             const ret = result;
             return ret;
         },
+<<<<<<<< HEAD:internal/frontend/server/static/assets/strike-webui-a0b54fc5edcd27cc.js
         __wbg_instanceof_HtmlAnchorElement_e2e601da36602959: function(arg0) {
             let result;
             try {
                 result = arg0 instanceof HTMLAnchorElement;
+========
+        __wbg_instanceof_EventTarget_94388c373755118a: function(arg0) {
+            let result;
+            try {
+                result = arg0 instanceof EventTarget;
+            } catch (_) {
+                result = false;
+            }
+            const ret = result;
+            return ret;
+        },
+        __wbg_instanceof_HtmlElement_32fb153a5a0e2349: function(arg0) {
+            let result;
+            try {
+                result = arg0 instanceof HTMLElement;
+            } catch (_) {
+                result = false;
+            }
+            const ret = result;
+            return ret;
+        },
+        __wbg_instanceof_HtmlTextAreaElement_bbe97f862930488c: function(arg0) {
+            let result;
+            try {
+                result = arg0 instanceof HTMLTextAreaElement;
+            } catch (_) {
+                result = false;
+            }
+            const ret = result;
+            return ret;
+        },
+        __wbg_instanceof_MessageEvent_46c3b0b2da4bd1ab: function(arg0) {
+            let result;
+            try {
+                result = arg0 instanceof MessageEvent;
+>>>>>>>> origin/main:internal/frontend/server/static/assets/strike-webui-460c9517ec1d1cc9.js
             } catch (_) {
                 result = false;
             }
@@ -383,12 +566,24 @@ function __wbg_get_imports() {
             const ret = result;
             return ret;
         },
+        __wbg_item_2aa1ff983eca77b6: function(arg0, arg1) {
+            const ret = arg0.item(arg1 >>> 0);
+            return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
+        },
         __wbg_key_1193871533b99ae5: function(arg0, arg1) {
             const ret = arg1.key;
             const ptr1 = passStringToWasm0(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
             const len1 = WASM_VECTOR_LEN;
             getDataViewMemory0().setInt32(arg0 + 4 * 1, len1, true);
             getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
+        },
+        __wbg_left_e0a244490fe2f293: function(arg0) {
+            const ret = arg0.left;
+            return ret;
+        },
+        __wbg_length_06ca2697fe194eac: function(arg0) {
+            const ret = arg0.length;
+            return ret;
         },
         __wbg_length_7f3c00c40364105e: function(arg0) {
             const ret = arg0.length;
@@ -410,6 +605,13 @@ function __wbg_get_imports() {
             const ret = arg0.metaKey;
             return ret;
         },
+        __wbg_name_06fefa2542c6ce51: function(arg0, arg1) {
+            const ret = arg1.name;
+            const ptr1 = passStringToWasm0(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len1 = WASM_VECTOR_LEN;
+            getDataViewMemory0().setInt32(arg0 + 4 * 1, len1, true);
+            getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
+        },
         __wbg_name_e2eac7cdfa054f65: function(arg0) {
             const ret = arg0.name;
             return ret;
@@ -418,8 +620,19 @@ function __wbg_get_imports() {
             const ret = arg0.navigator;
             return ret;
         },
+<<<<<<<< HEAD:internal/frontend/server/static/assets/strike-webui-a0b54fc5edcd27cc.js
+========
+        __wbg_new_0_72d020f0c63443d4: function() {
+            const ret = new Date();
+            return ret;
+        },
+>>>>>>>> origin/main:internal/frontend/server/static/assets/strike-webui-460c9517ec1d1cc9.js
         __wbg_new_343a093a3c2ffb4e: function(arg0, arg1) {
             const ret = new Error(getStringFromWasm0(arg0, arg1));
+            return ret;
+        },
+        __wbg_new_34e56228080aa9f8: function(arg0) {
+            const ret = new Date(arg0);
             return ret;
         },
         __wbg_new_617a8cdb8bb1130e: function() {
@@ -438,6 +651,10 @@ function __wbg_get_imports() {
             const ret = new Headers();
             return ret;
         }, arguments); },
+        __wbg_new_ae4555a03ebb1118: function() { return handleError(function () {
+            const ret = new FileReader();
+            return ret;
+        }, arguments); },
         __wbg_new_d92488e3f585ed02: function() { return handleError(function () {
             const ret = new URLSearchParams();
             return ret;
@@ -446,10 +663,13 @@ function __wbg_get_imports() {
             const ret = new Array();
             return ret;
         },
+<<<<<<<< HEAD:internal/frontend/server/static/assets/strike-webui-a0b54fc5edcd27cc.js
         __wbg_new_from_slice_9a868026ffa4208a: function(arg0, arg1) {
             const ret = new Uint8Array(getArrayU8FromWasm0(arg0, arg1));
             return ret;
         },
+========
+>>>>>>>> origin/main:internal/frontend/server/static/assets/strike-webui-460c9517ec1d1cc9.js
         __wbg_new_typed_b01cb72a8af741a3: function(arg0, arg1) {
             try {
                 var state0 = {a: arg0, b: arg1};
@@ -472,8 +692,13 @@ function __wbg_get_imports() {
             const ret = new Uint8Array(arg0, arg1 >>> 0, arg2 >>> 0);
             return ret;
         },
+<<<<<<<< HEAD:internal/frontend/server/static/assets/strike-webui-a0b54fc5edcd27cc.js
         __wbg_new_with_event_init_dict_536cb65c14ffc56b: function() { return handleError(function (arg0, arg1, arg2) {
             const ret = new CustomEvent(getStringFromWasm0(arg0, arg1), arg2);
+========
+        __wbg_new_with_options_b6831044695b2de1: function() { return handleError(function (arg0, arg1, arg2) {
+            const ret = new Notification(getStringFromWasm0(arg0, arg1), arg2);
+>>>>>>>> origin/main:internal/frontend/server/static/assets/strike-webui-460c9517ec1d1cc9.js
             return ret;
         }, arguments); },
         __wbg_new_with_str_2d1292ac88699448: function() { return handleError(function (arg0, arg1) {
@@ -507,6 +732,13 @@ function __wbg_get_imports() {
             const ret = arg0.parentNode;
             return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
         },
+        __wbg_permission_1146614999e9e8d8: function() {
+            const ret = Notification.permission;
+            return (__wbindgen_enum_NotificationPermission.indexOf(ret) + 1 || 4) - 1;
+        },
+        __wbg_postMessage_9a5cd84af507c026: function() { return handleError(function (arg0, arg1) {
+            arg0.postMessage(arg1);
+        }, arguments); },
         __wbg_preventDefault_af59afb0f0a02e20: function(arg0) {
             arg0.preventDefault();
         },
@@ -525,6 +757,9 @@ function __wbg_get_imports() {
         __wbg_queueMicrotask_a72f977e97f23c5f: function(arg0) {
             queueMicrotask(arg0);
         },
+        __wbg_readAsDataURL_226837aa04d4a6ce: function() { return handleError(function (arg0, arg1) {
+            arg0.readAsDataURL(arg1);
+        }, arguments); },
         __wbg_removeAttribute_2f2700a6f933a6be: function() { return handleError(function (arg0, arg1, arg2) {
             arg0.removeAttribute(getStringFromWasm0(arg1, arg2));
         }, arguments); },
@@ -544,6 +779,7 @@ function __wbg_get_imports() {
         __wbg_respond_c102fabcc79e5ef0: function() { return handleError(function (arg0, arg1) {
             arg0.respond(arg1 >>> 0);
         }, arguments); },
+<<<<<<<< HEAD:internal/frontend/server/static/assets/strike-webui-a0b54fc5edcd27cc.js
         __wbg_revokeObjectURL_479ff72c2d109d80: function() { return handleError(function (arg0, arg1) {
             URL.revokeObjectURL(getStringFromWasm0(arg0, arg1));
         }, arguments); },
@@ -557,6 +793,17 @@ function __wbg_get_imports() {
         __wbg_scrollTop_6fe6db7638e11bc2: function(arg0) {
             const ret = arg0.scrollTop;
             return ret;
+========
+        __wbg_result_66ae42c57a28369f: function() { return handleError(function (arg0) {
+            const ret = arg0.result;
+            return ret;
+        }, arguments); },
+        __wbg_revokeObjectURL_479ff72c2d109d80: function() { return handleError(function (arg0, arg1) {
+            URL.revokeObjectURL(getStringFromWasm0(arg0, arg1));
+        }, arguments); },
+        __wbg_scrollIntoView_0ff76130a0b6bbbe: function(arg0, arg1) {
+            arg0.scrollIntoView(arg1 !== 0);
+>>>>>>>> origin/main:internal/frontend/server/static/assets/strike-webui-460c9517ec1d1cc9.js
         },
         __wbg_search_c401c3a62c560ce7: function(arg0, arg1) {
             const ret = arg1.search;
@@ -564,6 +811,10 @@ function __wbg_get_imports() {
             const len1 = WASM_VECTOR_LEN;
             getDataViewMemory0().setInt32(arg0 + 4 * 1, len1, true);
             getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
+        },
+        __wbg_serviceWorker_71f151264de518a6: function(arg0) {
+            const ret = arg0.serviceWorker;
+            return ret;
         },
         __wbg_setAttribute_9e7d603908f63705: function() { return handleError(function (arg0, arg1, arg2, arg3, arg4) {
             arg0.setAttribute(getStringFromWasm0(arg1, arg2), getStringFromWasm0(arg3, arg4));
@@ -578,6 +829,13 @@ function __wbg_get_imports() {
         __wbg_setItem_c5fb0966b484ecd3: function() { return handleError(function (arg0, arg1, arg2, arg3, arg4) {
             arg0.setItem(getStringFromWasm0(arg1, arg2), getStringFromWasm0(arg3, arg4));
         }, arguments); },
+        __wbg_setProperty_097bc3d55ce44513: function() { return handleError(function (arg0, arg1, arg2, arg3, arg4) {
+            arg0.setProperty(getStringFromWasm0(arg1, arg2), getStringFromWasm0(arg3, arg4));
+        }, arguments); },
+        __wbg_setTimeout_db7bbc18a17e152a: function() { return handleError(function (arg0, arg1, arg2) {
+            const ret = arg0.setTimeout(arg1, arg2);
+            return ret;
+        }, arguments); },
         __wbg_set_145a351398b48c65: function() { return handleError(function (arg0, arg1, arg2) {
             const ret = Reflect.set(arg0, arg1, arg2);
             return ret;
@@ -591,6 +849,7 @@ function __wbg_get_imports() {
         __wbg_set_body_1fb0f1008bfc7df6: function(arg0, arg1) {
             arg0.body = arg1;
         },
+<<<<<<<< HEAD:internal/frontend/server/static/assets/strike-webui-a0b54fc5edcd27cc.js
         __wbg_set_bubbles_13637ca47f23465d: function(arg0, arg1) {
             arg0.bubbles = arg1 !== 0;
         },
@@ -600,6 +859,14 @@ function __wbg_get_imports() {
         __wbg_set_download_327e0fbad75893f0: function(arg0, arg1, arg2) {
             arg0.download = getStringFromWasm0(arg1, arg2);
         },
+========
+        __wbg_set_body_872029ee0f2624cf: function(arg0, arg1, arg2) {
+            arg0.body = getStringFromWasm0(arg1, arg2);
+        },
+        __wbg_set_hash_12142688fd53f60c: function() { return handleError(function (arg0, arg1, arg2) {
+            arg0.hash = getStringFromWasm0(arg1, arg2);
+        }, arguments); },
+>>>>>>>> origin/main:internal/frontend/server/static/assets/strike-webui-460c9517ec1d1cc9.js
         __wbg_set_headers_40ad33dcf016613f: function(arg0, arg1) {
             arg0.headers = arg1;
         },
@@ -615,23 +882,49 @@ function __wbg_get_imports() {
         __wbg_set_nodeValue_e265de7160527936: function(arg0, arg1, arg2) {
             arg0.nodeValue = arg1 === 0 ? undefined : getStringFromWasm0(arg1, arg2);
         },
+        __wbg_set_onerror_0c093ffbb1e5dfe9: function(arg0, arg1) {
+            arg0.onerror = arg1;
+        },
         __wbg_set_onerror_ee06e0007c850393: function(arg0, arg1) {
             arg0.onerror = arg1;
+        },
+        __wbg_set_onload_a85e3f5ed3002dde: function(arg0, arg1) {
+            arg0.onload = arg1;
         },
         __wbg_set_onmessage_384a74ad4f1e8759: function(arg0, arg1) {
             arg0.onmessage = arg1;
         },
+<<<<<<<< HEAD:internal/frontend/server/static/assets/strike-webui-a0b54fc5edcd27cc.js
         __wbg_set_scrollTop_b7d4c4109ca5ccf9: function(arg0, arg1) {
             arg0.scrollTop = arg1;
+========
+        __wbg_set_onopen_c8bf488e57e0ddbc: function(arg0, arg1) {
+            arg0.onopen = arg1;
+>>>>>>>> origin/main:internal/frontend/server/static/assets/strike-webui-460c9517ec1d1cc9.js
         },
         __wbg_set_search_de4e8694f3b52c24: function(arg0, arg1, arg2) {
             arg0.search = getStringFromWasm0(arg1, arg2);
         },
+<<<<<<<< HEAD:internal/frontend/server/static/assets/strike-webui-a0b54fc5edcd27cc.js
         __wbg_set_type_dcf75b2afa60c694: function(arg0, arg1, arg2) {
             arg0.type = getStringFromWasm0(arg1, arg2);
+========
+        __wbg_set_tag_432c1cac7f4d4266: function(arg0, arg1, arg2) {
+            arg0.tag = getStringFromWasm0(arg1, arg2);
+        },
+        __wbg_set_title_26e2c1657f5010ca: function(arg0, arg1, arg2) {
+            arg0.title = getStringFromWasm0(arg1, arg2);
+        },
+        __wbg_set_value_fbd659f94bfb9181: function(arg0, arg1, arg2) {
+            arg0.value = getStringFromWasm0(arg1, arg2);
+>>>>>>>> origin/main:internal/frontend/server/static/assets/strike-webui-460c9517ec1d1cc9.js
         },
         __wbg_shiftKey_be6d5295ee392b33: function(arg0) {
             const ret = arg0.shiftKey;
+            return ret;
+        },
+        __wbg_size_8f1c0b1a1fbb3810: function(arg0) {
+            const ret = arg0.size;
             return ret;
         },
         __wbg_static_accessor_GLOBAL_266715b9d96ba635: function() {
@@ -657,6 +950,13 @@ function __wbg_get_imports() {
         __wbg_stopPropagation_effafbc3bc773f1c: function(arg0) {
             arg0.stopPropagation();
         },
+<<<<<<<< HEAD:internal/frontend/server/static/assets/strike-webui-a0b54fc5edcd27cc.js
+========
+        __wbg_style_4bce24230e493a7c: function(arg0) {
+            const ret = arg0.style;
+            return ret;
+        },
+>>>>>>>> origin/main:internal/frontend/server/static/assets/strike-webui-460c9517ec1d1cc9.js
         __wbg_tagName_e83500df63beeee1: function(arg0, arg1) {
             const ret = arg1.tagName;
             const ptr1 = passStringToWasm0(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
@@ -684,9 +984,24 @@ function __wbg_get_imports() {
             const ret = arg0.toString();
             return ret;
         },
+        __wbg_toString_4e7186eabbbe7165: function(arg0) {
+            const ret = arg0.toString();
+            return ret;
+        },
         __wbg_toString_83fab3d7c865ecd3: function(arg0) {
             const ret = arg0.toString();
             return ret;
+        },
+        __wbg_top_ff4627294d2cdeb8: function(arg0) {
+            const ret = arg0.top;
+            return ret;
+        },
+        __wbg_type_85d2ff75f5f5adb0: function(arg0, arg1) {
+            const ret = arg1.type;
+            const ptr1 = passStringToWasm0(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len1 = WASM_VECTOR_LEN;
+            getDataViewMemory0().setInt32(arg0 + 4 * 1, len1, true);
+            getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
         },
         __wbg_url_7bfada5c2297bc70: function(arg0, arg1) {
             const ret = arg1.url;
@@ -711,11 +1026,16 @@ function __wbg_get_imports() {
             return ret;
         },
         __wbindgen_generic_0000000000000001: function(arg0, arg1) {
+<<<<<<<< HEAD:internal/frontend/server/static/assets/strike-webui-a0b54fc5edcd27cc.js
             // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 1341, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+========
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 3844, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+>>>>>>>> origin/main:internal/frontend/server/static/assets/strike-webui-460c9517ec1d1cc9.js
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_51e094a7b034e234___convert__closures_____invoke___wasm_bindgen_51e094a7b034e234___JsValue______true_);
             return ret;
         },
         __wbindgen_generic_0000000000000002: function(arg0, arg1) {
+<<<<<<<< HEAD:internal/frontend/server/static/assets/strike-webui-a0b54fc5edcd27cc.js
             // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 1425, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_51e094a7b034e234___convert__closures_____invoke___wasm_bindgen_51e094a7b034e234___JsValue__core_37ee0ce0c4cd57d5___result__Result_____wasm_bindgen_51e094a7b034e234___JsError___true_);
             return ret;
@@ -743,9 +1063,43 @@ function __wbg_get_imports() {
         __wbindgen_generic_0000000000000007: function(arg0) {
             // Cast intrinsic for `F64 -> Externref`.
             const ret = arg0;
+========
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 3889, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, wasm_bindgen_51e094a7b034e234___convert__closures_____invoke___wasm_bindgen_51e094a7b034e234___JsValue______true__1_);
             return ret;
         },
-        __wbindgen_generic_0000000000000008: function(arg0, arg1) {
+        __wbindgen_generic_0000000000000003: function(arg0, arg1) {
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 3979, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, wasm_bindgen_51e094a7b034e234___convert__closures_____invoke___wasm_bindgen_51e094a7b034e234___JsValue__core_37ee0ce0c4cd57d5___result__Result_____wasm_bindgen_51e094a7b034e234___JsError___true_);
+            return ret;
+        },
+        __wbindgen_generic_0000000000000004: function(arg0, arg1) {
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("Event")], shim_idx: 3889, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, wasm_bindgen_51e094a7b034e234___convert__closures_____invoke___wasm_bindgen_51e094a7b034e234___JsValue______true__1__14);
+            return ret;
+        },
+        __wbindgen_generic_0000000000000005: function(arg0, arg1) {
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("KeyboardEvent")], shim_idx: 2957, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, wasm_bindgen_51e094a7b034e234___convert__closures_____invoke___web_sys_8fa90f9eed8f0edb___features__gen_KeyboardEvent__KeyboardEvent______true_);
+            return ret;
+        },
+        __wbindgen_generic_0000000000000006: function(arg0, arg1) {
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("MessageEvent")], shim_idx: 3918, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, wasm_bindgen_51e094a7b034e234___convert__closures_____invoke___web_sys_8fa90f9eed8f0edb___features__gen_CloseEvent__CloseEvent______true_);
+            return ret;
+        },
+        __wbindgen_generic_0000000000000007: function(arg0, arg1) {
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [], shim_idx: 3920, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, wasm_bindgen_51e094a7b034e234___convert__closures_____invoke_______true_);
+>>>>>>>> origin/main:internal/frontend/server/static/assets/strike-webui-460c9517ec1d1cc9.js
+            return ret;
+        },
+        __wbindgen_generic_0000000000000008: function(arg0) {
+            // Cast intrinsic for `F64 -> Externref`.
+            const ret = arg0;
+            return ret;
+        },
+        __wbindgen_generic_0000000000000009: function(arg0, arg1) {
             // Cast intrinsic for `Ref(String) -> Externref`.
             const ret = getStringFromWasm0(arg0, arg1);
             return ret;
@@ -774,16 +1128,29 @@ function wasm_bindgen_51e094a7b034e234___convert__closures_____invoke___wasm_bin
     wasm.wasm_bindgen_51e094a7b034e234___convert__closures_____invoke___wasm_bindgen_51e094a7b034e234___JsValue______true_(arg0, arg1, arg2);
 }
 
-function wasm_bindgen_51e094a7b034e234___convert__closures_____invoke___wasm_bindgen_51e094a7b034e234___JsValue______true__13(arg0, arg1, arg2) {
-    wasm.wasm_bindgen_51e094a7b034e234___convert__closures_____invoke___wasm_bindgen_51e094a7b034e234___JsValue______true__13(arg0, arg1, arg2);
+function wasm_bindgen_51e094a7b034e234___convert__closures_____invoke___wasm_bindgen_51e094a7b034e234___JsValue______true__1_(arg0, arg1, arg2) {
+    wasm.wasm_bindgen_51e094a7b034e234___convert__closures_____invoke___wasm_bindgen_51e094a7b034e234___JsValue______true__1_(arg0, arg1, arg2);
 }
 
+<<<<<<<< HEAD:internal/frontend/server/static/assets/strike-webui-a0b54fc5edcd27cc.js
 function wasm_bindgen_51e094a7b034e234___convert__closures_____invoke___web_sys_5edb68cd64657b74___features__gen_KeyboardEvent__KeyboardEvent______true_(arg0, arg1, arg2) {
     wasm.wasm_bindgen_51e094a7b034e234___convert__closures_____invoke___web_sys_5edb68cd64657b74___features__gen_KeyboardEvent__KeyboardEvent______true_(arg0, arg1, arg2);
 }
 
 function wasm_bindgen_51e094a7b034e234___convert__closures_____invoke___web_sys_5edb68cd64657b74___features__gen_CloseEvent__CloseEvent______true_(arg0, arg1, arg2) {
     wasm.wasm_bindgen_51e094a7b034e234___convert__closures_____invoke___web_sys_5edb68cd64657b74___features__gen_CloseEvent__CloseEvent______true_(arg0, arg1, arg2);
+========
+function wasm_bindgen_51e094a7b034e234___convert__closures_____invoke___wasm_bindgen_51e094a7b034e234___JsValue______true__1__14(arg0, arg1, arg2) {
+    wasm.wasm_bindgen_51e094a7b034e234___convert__closures_____invoke___wasm_bindgen_51e094a7b034e234___JsValue______true__1__14(arg0, arg1, arg2);
+}
+
+function wasm_bindgen_51e094a7b034e234___convert__closures_____invoke___web_sys_8fa90f9eed8f0edb___features__gen_KeyboardEvent__KeyboardEvent______true_(arg0, arg1, arg2) {
+    wasm.wasm_bindgen_51e094a7b034e234___convert__closures_____invoke___web_sys_8fa90f9eed8f0edb___features__gen_KeyboardEvent__KeyboardEvent______true_(arg0, arg1, arg2);
+}
+
+function wasm_bindgen_51e094a7b034e234___convert__closures_____invoke___web_sys_8fa90f9eed8f0edb___features__gen_CloseEvent__CloseEvent______true_(arg0, arg1, arg2) {
+    wasm.wasm_bindgen_51e094a7b034e234___convert__closures_____invoke___web_sys_8fa90f9eed8f0edb___features__gen_CloseEvent__CloseEvent______true_(arg0, arg1, arg2);
+>>>>>>>> origin/main:internal/frontend/server/static/assets/strike-webui-460c9517ec1d1cc9.js
 }
 
 function wasm_bindgen_51e094a7b034e234___convert__closures_____invoke___wasm_bindgen_51e094a7b034e234___JsValue__core_37ee0ce0c4cd57d5___result__Result_____wasm_bindgen_51e094a7b034e234___JsError___true_(arg0, arg1, arg2) {
@@ -796,6 +1163,9 @@ function wasm_bindgen_51e094a7b034e234___convert__closures_____invoke___wasm_bin
 function wasm_bindgen_51e094a7b034e234___convert__closures_____invoke___js_sys_723a831d88ca5fd8___Function_fn_wasm_bindgen_51e094a7b034e234___JsValue_____wasm_bindgen_51e094a7b034e234___sys__Undefined___js_sys_723a831d88ca5fd8___Function_fn_wasm_bindgen_51e094a7b034e234___JsValue_____wasm_bindgen_51e094a7b034e234___sys__Undefined_______true_(arg0, arg1, arg2, arg3) {
     wasm.wasm_bindgen_51e094a7b034e234___convert__closures_____invoke___js_sys_723a831d88ca5fd8___Function_fn_wasm_bindgen_51e094a7b034e234___JsValue_____wasm_bindgen_51e094a7b034e234___sys__Undefined___js_sys_723a831d88ca5fd8___Function_fn_wasm_bindgen_51e094a7b034e234___JsValue_____wasm_bindgen_51e094a7b034e234___sys__Undefined_______true_(arg0, arg1, arg2, arg3);
 }
+
+
+const __wbindgen_enum_NotificationPermission = ["default", "denied", "granted"];
 
 
 const __wbindgen_enum_ReadableStreamType = ["bytes"];

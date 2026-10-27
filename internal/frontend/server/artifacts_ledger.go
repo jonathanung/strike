@@ -28,7 +28,8 @@ type artifactMetaDTO struct {
 
 type artifactDTO struct {
 	artifactMetaDTO
-	Content string `json:"content"`
+	Content  string `json:"content"`
+	Versions []int  `json:"versions,omitempty"`
 }
 
 type ledgerEntryDTO struct {
@@ -270,7 +271,8 @@ func toArtifactDTO(a host.Artifact) artifactDTO {
 			UpdatedAt:    a.UpdatedAt,
 			ExpiresAt:    a.ExpiresAt,
 		}),
-		Content: a.Content,
+		Content:  a.Content,
+		Versions: append([]int(nil), a.Versions...),
 	}
 }
 

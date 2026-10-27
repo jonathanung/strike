@@ -1,4 +1,7 @@
-//! Wire types the UI actually reads. Unknown JSON fields are ignored.
+//! Cockpit view models: HTTP projections and UI state.
+//! Op/Event wire types are generated in the `protocol-schema` crate from
+//! `pkg/protocol` (`schemas/protocol/v1/schema.json`). Do not hand-copy them
+//! here. Unknown JSON fields on these view models stay ignored.
 
 use std::collections::HashMap;
 
@@ -8,6 +11,11 @@ use serde::Deserialize;
 pub struct Health {
     pub ok: bool,
     pub version: String,
+    /// Unix milliseconds from the daemon. The client records its own receipt
+    /// time for the stale check, so this field is the wire clock, not a signal.
+    #[allow(dead_code)]
+    #[serde(default)]
+    pub now: i64,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -43,6 +51,20 @@ pub struct RootSummary {
     pub busy: bool,
     #[serde(default, rename = "createdAt")]
     pub created_at: i64,
+    /// Canonical status id. Empty when the daemon did not send one.
+    #[serde(default)]
+    pub status: String,
+    #[serde(default, rename = "statusSince")]
+    pub status_since: i64,
+    #[serde(default, rename = "lastActivityAt")]
+    pub last_activity_at: i64,
+    #[serde(default, rename = "permissionPending")]
+    pub permission_pending: bool,
+    #[serde(default, rename = "questionPending")]
+    pub question_pending: bool,
+    /// `None` when the field is absent (older daemon). Present `false` is read.
+    #[serde(default)]
+    pub unread: Option<bool>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -60,6 +82,12 @@ pub struct SessionItem {
     pub title: String,
     #[serde(default)]
     pub mtime: i64,
+    #[serde(default)]
+    pub status: String,
+    #[serde(default, rename = "lastActivityAt")]
+    pub last_activity_at: i64,
+    #[serde(default)]
+    pub unread: Option<bool>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -86,7 +114,58 @@ pub struct LiveStatus {
     #[serde(default, rename = "permissionMode")]
     pub permission_mode: String,
     #[serde(default)]
+    pub effort: String,
+    #[serde(default)]
     pub busy: bool,
+    #[serde(default, rename = "contextUsed")]
+    pub context_used: i64,
+    #[serde(default, rename = "contextLimit")]
+    pub context_limit: i64,
+    #[serde(default, rename = "contextFit")]
+    pub context_fit: String,
+    /// Wire fields from `GET /v1/status`. The shell classifies from roots.
+    #[allow(dead_code)]
+    #[serde(default, rename = "turnState")]
+    pub turn_state: String,
+    #[allow(dead_code)]
+    #[serde(default, rename = "turnSince")]
+    pub turn_since: i64,
+    #[allow(dead_code)]
+    #[serde(default, rename = "lastEventAt")]
+    pub last_event_at: i64,
+}
+
+/// One row of `GET /v1/status/sessions`. The shell applies SSE payloads as
+/// JSON and reads gateway from [`StatusBoard`], so these fields stay on the
+/// type for the contract.
+#[allow(dead_code)]
+#[derive(Clone, Debug, Deserialize)]
+pub struct BoardSession {
+    #[serde(default, rename = "sessionId")]
+    pub session_id: String,
+    #[serde(default)]
+    pub status: String,
+    #[serde(default)]
+    pub unread: bool,
+    #[serde(default)]
+    pub since: i64,
+    #[serde(default, rename = "lastActivityAt")]
+    pub last_activity_at: i64,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct StatusBoard {
+    #[serde(default)]
+    pub gateway: String,
+    #[allow(dead_code)]
+    #[serde(default)]
+    pub now: i64,
+    #[allow(dead_code)]
+    #[serde(default, rename = "heartbeatStaleMs")]
+    pub heartbeat_stale_ms: i64,
+    #[allow(dead_code)]
+    #[serde(default)]
+    pub sessions: Vec<BoardSession>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -102,6 +181,31 @@ pub struct ModelInfo {
     pub provider: String,
     #[serde(default)]
     pub name: String,
+    /// Context window tokens from the catalog. 0 means not reported.
+    #[serde(default)]
+    pub context: i64,
+    #[serde(default)]
+    pub output: i64,
+    #[serde(default, rename = "inputCost")]
+    pub input_cost: f64,
+    #[serde(default, rename = "outputCost")]
+    pub output_cost: f64,
+    #[serde(default, rename = "hasCost")]
+    pub has_cost: bool,
+    /// True only when the catalog reports the capability. False means
+    /// unknown or unsupported (#1054); the menu omits it.
+    #[serde(default, rename = "toolCall")]
+    pub tool_call: bool,
+    #[serde(default)]
+    pub reasoning: bool,
+    #[serde(default)]
+    pub attachment: bool,
+    #[serde(default, rename = "variantIds")]
+    pub variant_ids: Vec<String>,
+    /// catalog | config | merge. Deserialized so the wire field is not dropped.
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub source: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -139,7 +243,8 @@ pub struct ChangedFilesResponse {
     pub files: Vec<ChangedFile>,
 }
 
-/// One row in the session list. Unread and pinned are client state.
+/// One row in the session list. Pins stay in the browser. Unread prefers the
+/// daemon field when the payload includes it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SessionRow {
     pub id: String,
@@ -149,6 +254,12 @@ pub struct SessionRow {
     pub live: bool,
     pub pinned: bool,
     pub unread: bool,
+    /// Canonical status id. Empty only before classification.
+    pub status: String,
+    /// Unix milliseconds when `status` began.
+    pub status_since: i64,
+    /// Unix milliseconds of the last user-visible activity. 0 when unknown.
+    pub last_activity_at: i64,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -215,6 +326,12 @@ pub struct ChatLine {
     pub detail: String,
     /// Dedupe key for child cards (name, or session id).
     pub key: String,
+    /// Envelope time of the event that created this line, epoch ms.
+    /// 0 means unknown (old log line without a parseable `time`).
+    /// Carried for transcript consumers; the readable pane stamps its own
+    /// `Message::at_ms`.
+    #[allow(dead_code)]
+    pub at_ms: f64,
 }
 
 #[derive(Clone, Debug)]
@@ -327,8 +444,25 @@ fn unix_seconds(created_at: i64) -> i64 {
     }
 }
 
-/// Merge live roots with saved sessions. `active_running` marks the active
-/// root in progress when a delegated child is still running.
+fn blank_row(id: &str, title: &str, mtime: i64, pinned: bool) -> SessionRow {
+    SessionRow {
+        id: id.to_string(),
+        title: title.to_string(),
+        mtime,
+        busy: false,
+        live: false,
+        pinned,
+        unread: false,
+        status: String::new(),
+        status_since: 0,
+        last_activity_at: 0,
+    }
+}
+
+/// Merge live roots with saved sessions. `active_running` upgrades an idle
+/// active root to running when a delegated child is still going.
+/// Server `unread` wins when the field was present. Otherwise the browser
+/// seen map is the fallback for an older daemon.
 pub fn merge_sessions(
     roots: &[RootSummary],
     sessions: &[SessionItem],
@@ -338,47 +472,69 @@ pub fn merge_sessions(
     active_running: bool,
 ) -> Vec<SessionRow> {
     let mut by_id: HashMap<String, SessionRow> = HashMap::new();
+    let mut server_unread: HashMap<String, bool> = HashMap::new();
     for s in sessions {
-        by_id.insert(
-            s.id.clone(),
-            SessionRow {
-                id: s.id.clone(),
-                title: s.title.clone(),
-                mtime: s.mtime.max(0),
-                busy: false,
-                live: false,
-                pinned: pins.iter().any(|p| p == &s.id),
-                unread: false,
-            },
-        );
+        let pinned = pins.iter().any(|p| p == &s.id);
+        let mut row = blank_row(&s.id, &s.title, s.mtime.max(0), pinned);
+        row.status = s.status.clone();
+        if s.last_activity_at > 0 {
+            row.last_activity_at = s.last_activity_at;
+        } else if s.mtime > 0 {
+            row.last_activity_at = s.mtime.saturating_mul(1000);
+        }
+        if let Some(flag) = s.unread {
+            server_unread.insert(s.id.clone(), flag);
+        }
+        by_id.insert(s.id.clone(), row);
     }
     for r in roots {
         let created = unix_seconds(r.created_at);
-        let entry = by_id.entry(r.id.clone()).or_insert_with(|| SessionRow {
-            id: r.id.clone(),
-            title: r.title.clone(),
-            mtime: created,
-            busy: false,
-            live: false,
-            pinned: pins.iter().any(|p| p == &r.id),
-            unread: false,
-        });
+        let pinned = pins.iter().any(|p| p == &r.id);
+        let entry = by_id
+            .entry(r.id.clone())
+            .or_insert_with(|| blank_row(&r.id, &r.title, created, pinned));
         entry.live = true;
         entry.busy = r.busy;
-        entry.pinned = pins.iter().any(|p| p == &r.id);
+        entry.pinned = pinned;
         if entry.title.is_empty() {
             entry.title = r.title.clone();
         }
         if entry.mtime == 0 {
             entry.mtime = created;
         }
+        if !r.status.is_empty() {
+            entry.status = r.status.clone();
+        }
+        if r.status_since > 0 {
+            entry.status_since = r.status_since;
+        }
+        if r.last_activity_at > 0 {
+            entry.last_activity_at = r.last_activity_at;
+        }
+        if let Some(flag) = r.unread {
+            server_unread.insert(r.id.clone(), flag);
+        }
     }
     for row in by_id.values_mut() {
-        if row.id == active && active_running {
+        if row.id == active && active_running && matches!(row.status.as_str(), "" | "idle" | "done")
+        {
+            row.status = "running".into();
             row.busy = true;
         }
-        let seen_at = seen.get(&row.id).copied().unwrap_or(0);
-        row.unread = row.id != active && row.mtime > seen_at && row.mtime > 0;
+        if matches!(row.status.as_str(), "running" | "waiting") {
+            row.busy = true;
+        }
+        let local = {
+            let seen_at = seen.get(&row.id).copied().unwrap_or(0);
+            row.id != active && row.mtime > seen_at && row.mtime > 0
+        };
+        row.unread = if row.id == active {
+            false
+        } else if let Some(flag) = server_unread.get(&row.id) {
+            *flag
+        } else {
+            local
+        };
     }
     let mut rows: Vec<_> = by_id.into_values().collect();
     rows.sort_by(|a, b| b.mtime.cmp(&a.mtime).then(a.id.cmp(&b.id)));
@@ -446,32 +602,94 @@ pub fn visible_sessions(
     (shown, hidden)
 }
 
-pub fn fmt_elapsed(secs: i64) -> String {
-    let secs = secs.max(0);
-    let m = secs / 60;
-    let s = secs % 60;
-    if m >= 60 {
-        format!("{}:{:02}:{:02}", m / 60, m % 60, s)
-    } else {
-        format!("{m}:{s:02}")
-    }
-}
+pub use crate::status::{fmt_ago, fmt_elapsed};
 
-pub fn fmt_ago(mtime: i64, now_s: i64) -> String {
-    if mtime <= 0 || now_s <= 0 {
-        return String::new();
+/// Parse an RFC 3339 timestamp — the protocol envelope's `time` field, as
+/// emitted by Go's `time.Time` JSON encoding — into epoch milliseconds.
+/// Returns 0.0 for anything unparseable, the "unknown time" convention
+/// used by `ChatLine::at_ms`.
+pub fn rfc3339_to_ms(s: &str) -> f64 {
+    let b = s.as_bytes();
+    // Minimum shape: YYYY-MM-DDTHH:MM:SS plus a zone designator.
+    if b.len() < 20 {
+        return 0.0;
     }
-    let delta = (now_s - mtime).max(0);
-    if delta < 60 {
-        return "now".into();
+    let num = |from: usize, len: usize| -> Option<i64> {
+        let mut v: i64 = 0;
+        for i in from..from + len {
+            let c = *b.get(i)?;
+            if !c.is_ascii_digit() {
+                return None;
+            }
+            v = v * 10 + (c - b'0') as i64;
+        }
+        Some(v)
+    };
+    if b[4] != b'-'
+        || b[7] != b'-'
+        || (b[10] != b'T' && b[10] != b't')
+        || b[13] != b':'
+        || b[16] != b':'
+    {
+        return 0.0;
     }
-    if delta < 3600 {
-        return format!("{}m", delta / 60);
+    let (year, month, day) = match (num(0, 4), num(5, 2), num(8, 2)) {
+        (Some(y), Some(m), Some(d)) => (y, m, d),
+        _ => return 0.0,
+    };
+    let (hour, min, sec) = match (num(11, 2), num(14, 2), num(17, 2)) {
+        (Some(h), Some(m), Some(s)) => (h, m, s),
+        _ => return 0.0,
+    };
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) || hour > 23 || min > 59 || sec > 60 {
+        return 0.0;
     }
-    if delta < 86_400 {
-        return format!("{}h", delta / 3600);
+    // Fractional seconds (Go emits up to nanoseconds; ms is enough here).
+    let mut i = 19;
+    let mut frac_ms: i64 = 0;
+    if b.get(i) == Some(&b'.') {
+        i += 1;
+        let mut scale: i64 = 100;
+        while let Some(c) = b.get(i) {
+            if !c.is_ascii_digit() {
+                break;
+            }
+            if scale > 0 {
+                frac_ms += (*c - b'0') as i64 * scale;
+                scale /= 10;
+            }
+            i += 1;
+        }
     }
-    format!("{}d", delta / 86_400)
+    let offset_s: i64 = match b.get(i) {
+        Some(b'Z') | Some(b'z') => 0,
+        Some(sign) if *sign == b'+' || *sign == b'-' => {
+            if b.get(i + 3) != Some(&b':') {
+                return 0.0;
+            }
+            match (num(i + 1, 2), num(i + 4, 2)) {
+                (Some(hh), Some(mm)) => {
+                    let v = hh * 3600 + mm * 60;
+                    if *sign == b'-' {
+                        -v
+                    } else {
+                        v
+                    }
+                }
+                _ => return 0.0,
+            }
+        }
+        _ => return 0.0,
+    };
+    // Days from civil (Howard Hinnant's algorithm), days since 1970-01-01.
+    let y = if month <= 2 { year - 1 } else { year };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400;
+    let mp = (month + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+    ((((days * 24 + hour) * 60 + min) * 60 + sec) * 1000 + frac_ms - offset_s * 1000) as f64
 }
 
 /// Badge class suffix. Wire status `completed` renders as done.
@@ -492,6 +710,8 @@ pub struct ChildCard {
     pub status: String,
     pub summary: String,
     pub details: String,
+    /// Envelope time of the originating event, epoch ms. 0 = unknown.
+    pub at_ms: f64,
 }
 
 pub fn child_keys_match(a: &str, b: &str) -> bool {
@@ -529,6 +749,7 @@ pub fn child_card_from_parts(
         status: status.trim().to_string(),
         summary,
         details: details.trim().to_string(),
+        at_ms: 0.0,
     }
 }
 
@@ -808,6 +1029,9 @@ mod tests {
             live: true,
             pinned,
             unread: false,
+            status: String::new(),
+            status_since: 0,
+            last_activity_at: 0,
         }
     }
 
@@ -818,11 +1042,20 @@ mod tests {
             title: String::new(),
             busy: false,
             created_at: 1_700_000_000_000,
+            status: String::new(),
+            status_since: 0,
+            last_activity_at: 0,
+            permission_pending: false,
+            question_pending: false,
+            unread: None,
         }];
         let sessions = vec![SessionItem {
             id: "a".into(),
             title: "Alpha".into(),
             mtime: 50,
+            status: String::new(),
+            last_activity_at: 0,
+            unread: None,
         }];
         let mut seen = HashMap::new();
         seen.insert("a".into(), 40i64);
@@ -836,6 +1069,37 @@ mod tests {
         let seen_active = merge_sessions(&roots, &sessions, &[], &seen, "a", true);
         assert!(!seen_active[0].unread);
         assert!(seen_active[0].busy);
+        assert_eq!(seen_active[0].status, "running");
+    }
+
+    #[test]
+    fn server_unread_overrides_browser_seen() {
+        let roots = vec![RootSummary {
+            id: "a".into(),
+            title: "Alpha".into(),
+            busy: false,
+            created_at: 0,
+            status: "waiting".into(),
+            status_since: 5_000,
+            last_activity_at: 9_000,
+            permission_pending: true,
+            question_pending: false,
+            unread: Some(true),
+        }];
+        let mut seen = HashMap::new();
+        seen.insert("a".into(), 10_000i64);
+        let rows = merge_sessions(&roots, &[], &[], &seen, "other", false);
+        assert!(rows[0].unread);
+        assert!(rows[0].busy);
+        assert_eq!(rows[0].status, "waiting");
+        assert_eq!(rows[0].last_activity_at, 9_000);
+
+        let acked = vec![RootSummary {
+            unread: Some(false),
+            ..roots[0].clone()
+        }];
+        let rows = merge_sessions(&acked, &[], &[], &seen, "other", false);
+        assert!(!rows[0].unread);
     }
 
     #[test]
@@ -943,11 +1207,47 @@ mod tests {
             badge: "blocked".into(),
             detail: "handoff json".into(),
             key: "scribe".into(),
+            at_ms: 0.0,
         }];
         let rows = activity_panel(&[], &kids, &cards, "root");
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].name, "scribe");
         assert_eq!(rows[0].state, "blocked");
         assert_eq!(rows[0].task, "schema: handoff missing");
+    }
+
+    #[test]
+    fn rfc3339_parses_go_envelope_times() {
+        // 2026-10-26T12:51:31Z, verified against `date -u`.
+        assert_eq!(rfc3339_to_ms("2026-10-26T12:51:31Z"), 1_793_019_091_000.0);
+        // Fractional seconds (Go RFC3339Nano) keep millisecond precision.
+        assert_eq!(
+            rfc3339_to_ms("2026-10-26T12:51:31.5Z"),
+            1_793_019_091_500.0
+        );
+        assert_eq!(
+            rfc3339_to_ms("2026-10-26T12:51:31.123456789Z"),
+            1_793_019_091_123.0
+        );
+        // Numeric zones denote the same instant.
+        assert_eq!(
+            rfc3339_to_ms("2026-10-26T14:51:31+02:00"),
+            1_793_019_091_000.0
+        );
+        assert_eq!(
+            rfc3339_to_ms("2026-10-26T10:21:31-02:30"),
+            1_793_019_091_000.0
+        );
+    }
+
+    #[test]
+    fn rfc3339_rejects_non_timestamps() {
+        assert_eq!(rfc3339_to_ms(""), 0.0);
+        assert_eq!(rfc3339_to_ms("2026-10-26"), 0.0);
+        assert_eq!(rfc3339_to_ms("not a time at all........"), 0.0);
+        assert_eq!(rfc3339_to_ms("2026-13-26T12:51:31Z"), 0.0);
+        assert_eq!(rfc3339_to_ms("2026-10-26T25:51:31Z"), 0.0);
+        // Missing zone: ambiguous, treat as unknown rather than guessing.
+        assert_eq!(rfc3339_to_ms("2026-10-26T12:51:31"), 0.0);
     }
 }

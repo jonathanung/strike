@@ -15,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/jonathanung/strike/pkg/redact"
 )
 
 const (
@@ -26,6 +28,12 @@ const (
 	maxTagLen     = 64
 	maxTags       = 16
 	maxEntries    = 1000
+	// maxAuditBytes caps the append-only audit log. Older lines are dropped
+	// from the front when a write would pass the cap.
+	maxAuditBytes = 512 * 1024
+	// GlobalKey is the store key for memory shared across projects. It is not
+	// a filesystem path. Named workspace binding is a separate concern.
+	GlobalKey = "strike:memory:global"
 )
 
 var (
@@ -45,6 +53,7 @@ type Entry struct {
 	Key       string    `json:"key"`
 	Value     string    `json:"value"`
 	Tags      []string  `json:"tags,omitempty"`
+	Author    string    `json:"author,omitempty"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
@@ -53,12 +62,15 @@ type fileDoc struct {
 	Entries []Entry `json:"entries"`
 }
 
-// Store is a project-scoped memory database backed by one JSON file.
+// Store is a memory database backed by one JSON file plus a plain-text
+// projection and an append-only audit log. projectKey selects the file.
+// GlobalKey is the cross-project store; any other key is one project.
 type Store struct {
-	mu      sync.Mutex
-	path    string
-	entries map[string]Entry
-	closed  bool
+	mu         sync.Mutex
+	path       string
+	projectKey string
+	entries    map[string]Entry
+	closed     bool
 }
 
 // Open opens (or creates) the memory file for projectKey under globalRoot/memory.
@@ -69,8 +81,7 @@ func Open(globalRoot, projectKey string) (*Store, error) {
 	if projectKey == "" {
 		return nil, fmt.Errorf("memory: project key is empty")
 	}
-	digest := sha256.Sum256([]byte(projectKey))
-	name := hex.EncodeToString(digest[:]) + ".json"
+	name := fileBase(projectKey)
 	dir := filepath.Join(globalRoot, "memory")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("create memory directory: %w", err)
@@ -80,13 +91,38 @@ func Open(globalRoot, projectKey string) (*Store, error) {
 		return nil, fmt.Errorf("resolve memory path: %w", err)
 	}
 	s := &Store{
-		path:    path,
-		entries: make(map[string]Entry),
+		path:       path,
+		projectKey: projectKey,
+		entries:    make(map[string]Entry),
 	}
 	if err := s.load(); err != nil {
 		return nil, err
 	}
+	if err := s.rewriteProjectionLocked(); err != nil {
+		return nil, err
+	}
 	return s, nil
+}
+
+// Scope is "global" for GlobalKey and "project" otherwise.
+func (s *Store) Scope() string {
+	if s == nil {
+		return ""
+	}
+	if s.projectKey == GlobalKey {
+		return "global"
+	}
+	return "project"
+}
+
+// MarkdownPath is the inspectable plain-text projection of the current entries.
+func (s *Store) MarkdownPath() string {
+	return strings.TrimSuffix(s.path, ".json") + ".md"
+}
+
+// AuditPath is the append-only audit log of puts, deletes, and imports.
+func (s *Store) AuditPath() string {
+	return strings.TrimSuffix(s.path, ".json") + ".audit.jsonl"
 }
 
 // Path returns the on-disk JSON path.
@@ -129,35 +165,39 @@ func (s *Store) List(tag string) ([]Entry, error) {
 	return out, nil
 }
 
-// Put inserts or replaces the entry for key.
+// Put inserts or replaces the entry for key. Value, key, and tags pass
+// through pkg/redact before they are stored. Author is empty.
 func (s *Store) Put(key, value string, tags []string) error {
-	key = strings.TrimSpace(key)
-	if err := validateKey(key); err != nil {
-		return err
-	}
-	if len(value) > maxValueLen {
-		return errValueTooLong
-	}
-	cleanTags, err := normalizeTags(tags)
+	return s.PutAuthored(key, value, "", tags)
+}
+
+// PutAuthored inserts or replaces key and records author on the entry and
+// in the append-only audit log. Stored text is credential-scrubbed.
+func (s *Store) PutAuthored(key, value, author string, tags []string) error {
+	entry, err := scrubEntry(Entry{
+		Key:    key,
+		Value:  value,
+		Tags:   tags,
+		Author: author,
+	})
 	if err != nil {
 		return err
 	}
+	entry.UpdatedAt = time.Now().UTC()
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
 		return errClosed
 	}
-	if _, exists := s.entries[key]; !exists && len(s.entries) >= maxEntries {
+	if _, exists := s.entries[entry.Key]; !exists && len(s.entries) >= maxEntries {
 		return errFull
 	}
-	s.entries[key] = Entry{
-		Key:       key,
-		Value:     value,
-		Tags:      cleanTags,
-		UpdatedAt: time.Now().UTC(),
+	s.entries[entry.Key] = entry
+	if err := s.persistLocked(); err != nil {
+		return err
 	}
-	return s.persistLocked()
+	return s.appendAuditLocked("put", entry)
 }
 
 // Delete removes key. It is a no-op error when the key is missing.
@@ -167,11 +207,16 @@ func (s *Store) Delete(key string) error {
 	if s.closed {
 		return errClosed
 	}
-	if _, ok := s.entries[key]; !ok {
+	prev, ok := s.entries[key]
+	if !ok {
 		return ErrNotFound
 	}
 	delete(s.entries, key)
-	return s.persistLocked()
+	if err := s.persistLocked(); err != nil {
+		s.entries[key] = prev
+		return err
+	}
+	return s.appendAuditLocked("delete", prev)
 }
 
 // Close marks the store closed. The file remains on disk.
@@ -244,31 +289,20 @@ func (s *Store) ImportBytes(data []byte, replace bool) (int, error) {
 	clean := make([]Entry, 0, len(doc.Entries))
 	seen := make(map[string]struct{}, len(doc.Entries))
 	for _, e := range doc.Entries {
-		key := strings.TrimSpace(e.Key)
-		if err := validateKey(key); err != nil {
-			return 0, fmt.Errorf("memory import: invalid key %q: %w", e.Key, err)
-		}
-		if len(e.Value) > maxValueLen {
-			return 0, fmt.Errorf("memory import: key %q: %w", key, errValueTooLong)
-		}
-		tags, err := normalizeTags(e.Tags)
+		entry, err := scrubEntry(e)
 		if err != nil {
-			return 0, fmt.Errorf("memory import: key %q: %w", key, err)
+			return 0, fmt.Errorf("memory import: key %q: %w", e.Key, err)
 		}
-		if _, dup := seen[key]; dup {
-			return 0, fmt.Errorf("memory import: duplicate key %q", key)
+		if _, dup := seen[entry.Key]; dup {
+			return 0, fmt.Errorf("memory import: duplicate key %q", entry.Key)
 		}
-		seen[key] = struct{}{}
-		updated := e.UpdatedAt
-		if updated.IsZero() {
-			updated = time.Now().UTC()
+		seen[entry.Key] = struct{}{}
+		if entry.UpdatedAt.IsZero() {
+			entry.UpdatedAt = time.Now().UTC()
+		} else {
+			entry.UpdatedAt = entry.UpdatedAt.UTC()
 		}
-		clean = append(clean, Entry{
-			Key:       key,
-			Value:     e.Value,
-			Tags:      tags,
-			UpdatedAt: updated.UTC(),
-		})
+		clean = append(clean, entry)
 	}
 
 	s.mu.Lock()
@@ -289,6 +323,9 @@ func (s *Store) ImportBytes(data []byte, replace bool) (int, error) {
 		s.entries[e.Key] = e
 	}
 	if err := s.persistLocked(); err != nil {
+		return 0, err
+	}
+	if err := s.appendAuditLocked("import", Entry{Key: fmt.Sprintf("%d", len(clean)), Value: fmt.Sprintf("%d entries", len(clean))}); err != nil {
 		return 0, err
 	}
 	return len(clean), nil
@@ -377,16 +414,22 @@ func (s *Store) load() error {
 	if doc.Version != fileVersion {
 		return fmt.Errorf("decode memory: unsupported version %d", doc.Version)
 	}
+	changed := false
 	for _, e := range doc.Entries {
-		if e.Key == "" {
+		if strings.TrimSpace(e.Key) == "" {
 			continue
 		}
-		s.entries[e.Key] = Entry{
-			Key:       e.Key,
-			Value:     e.Value,
-			Tags:      append([]string(nil), e.Tags...),
-			UpdatedAt: e.UpdatedAt,
+		clean, err := scrubEntry(e)
+		if err != nil {
+			return err
 		}
+		if clean.Key != e.Key || clean.Value != e.Value || clean.Author != e.Author || !sameTags(clean.Tags, e.Tags) {
+			changed = true
+		}
+		s.entries[clean.Key] = clean
+	}
+	if changed {
+		return s.persistLocked()
 	}
 	return nil
 }
@@ -434,7 +477,17 @@ func (s *Store) persistLocked() error {
 		return fmt.Errorf("replace memory file: %w", err)
 	}
 	cleanup = false
-	return nil
+	return s.rewriteProjectionLocked()
+}
+
+// ScrubKey applies the same credential scrub Put uses on keys.
+func ScrubKey(key string) string {
+	return redact.String(strings.TrimSpace(key))
+}
+
+func fileBase(projectKey string) string {
+	digest := sha256.Sum256([]byte(projectKey))
+	return hex.EncodeToString(digest[:]) + ".json"
 }
 
 func validateKey(key string) error {
@@ -493,6 +546,41 @@ func cloneEntry(e Entry) Entry {
 		Key:       e.Key,
 		Value:     e.Value,
 		Tags:      append([]string(nil), e.Tags...),
+		Author:    e.Author,
 		UpdatedAt: e.UpdatedAt,
 	}
+}
+
+func scrubEntry(e Entry) (Entry, error) {
+	e.Key = redact.String(strings.TrimSpace(e.Key))
+	e.Value = redact.String(e.Value)
+	e.Author = redact.String(strings.TrimSpace(e.Author))
+	if err := validateKey(e.Key); err != nil {
+		return Entry{}, err
+	}
+	if len(e.Value) > maxValueLen {
+		return Entry{}, errValueTooLong
+	}
+	tags := make([]string, len(e.Tags))
+	for i, tag := range e.Tags {
+		tags[i] = redact.String(tag)
+	}
+	clean, err := normalizeTags(tags)
+	if err != nil {
+		return Entry{}, err
+	}
+	e.Tags = clean
+	return e, nil
+}
+
+func sameTags(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

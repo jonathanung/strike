@@ -76,6 +76,16 @@ func TestDaemonLogoutRotatesToken(t *testing.T) {
 	if info.Mode().Perm() != 0o600 {
 		t.Fatalf("perm = %v", info.Mode().Perm())
 	}
+	raw, err := os.ReadFile(filepath.Join(home, ".strike", "usage-audit", "chain.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), first) || strings.Contains(string(raw), second) {
+		t.Fatalf("audit log contains a token: %s", raw)
+	}
+	if !strings.Contains(string(raw), "daemon token file rotated") {
+		t.Fatalf("audit log = %s", raw)
+	}
 }
 
 func TestRunDaemonCLIUsageAndUnknown(t *testing.T) {

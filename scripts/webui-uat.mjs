@@ -64,6 +64,7 @@ try {
     video: opt.video,
     goldens: opt.goldens,
     updateGoldens: opt.updateGoldens,
+    suite: opt.suite,
     controls: {
       stop: async () => {
         await stopStrike(strike);
@@ -72,7 +73,6 @@ try {
       start: async () => {
         strike = startStrike({ bin, port, home, cwd: process.cwd() });
         await waitHealth(`${baseURL}/health`);
-        await delay(300);
       },
     },
   });
