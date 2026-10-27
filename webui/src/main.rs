@@ -15,6 +15,7 @@ mod model_menu_view;
 mod session_list;
 mod session_panel;
 mod storage;
+mod transcript_find;
 mod usage_audit;
 mod session_delete;
 mod shell;
@@ -501,6 +502,41 @@ fn apply_envelope(
     }
 }
 
+/// The body text find-in-transcript (#1342) may search for one line:
+/// the rendered body, except long / JSON-ish tool bodies the transcript
+/// folds into a collapsed <details> — those stay unsearchable in this
+/// slice, matching the rendering rule in the transcript view below.
+fn transcript_search_body(line: &ChatLine) -> &str {
+    let card = line.role == "child";
+    let prose = line.role == "you" || line.role == "strike";
+    let body = &line.body;
+    let tool_dump = !card
+        && !prose
+        && (body.trim_start().starts_with('{')
+            || body.trim_start().starts_with('[')
+            || body.chars().count() > 240);
+    if tool_dump {
+        ""
+    } else {
+        body
+    }
+}
+
+/// All find-in-transcript matches over a line list, in transcript order.
+fn transcript_matches(
+    list: &[ChatLine],
+    query: &str,
+) -> Vec<transcript_find::TMatch> {
+    let rows: Vec<transcript_find::SearchLine<'_>> = list
+        .iter()
+        .map(|line| transcript_find::SearchLine {
+            title: &line.title,
+            body: transcript_search_body(line),
+        })
+        .collect();
+    transcript_find::matches_for_lines(&rows, query)
+}
+
 fn join_path(dir: &str, name: &str) -> String {
     if dir.is_empty() {
         name.to_string()
@@ -743,6 +779,13 @@ fn App() -> impl IntoView {
     let memory_mode = RwSignal::new("normal".to_string());
     let memory_menu = RwSignal::new(false);
     let storage_rev = RwSignal::new(0u32);
+    // Find in transcript (#1342): bar visibility, query, current match,
+    // and the transcript scroll offset saved when the bar opened so
+    // Escape / Close can restore it.
+    let tf_open = RwSignal::new(false);
+    let tf_query = RwSignal::new(String::new());
+    let tf_idx = RwSignal::new(0usize);
+    let tf_saved_scroll = RwSignal::new(0.0f64);
     let doc_path = RwSignal::new(String::new());
     let doc_line = RwSignal::new(0u32);
     let doc_diff = RwSignal::new(false);
@@ -1035,6 +1078,10 @@ fn App() -> impl IntoView {
             lines.set(Vec::new());
             children.set(Vec::new());
             wipe_on_replay.set(false);
+            // Find belongs to the session that was open (#1342).
+            tf_open.set(false);
+            tf_query.set(String::new());
+            tf_idx.set(0);
         } else if !root.is_empty() {
             wipe_on_replay.set(true);
         }
@@ -2301,6 +2348,95 @@ fn App() -> impl IntoView {
     }
     on_model_key.forget();
 
+    // Find in transcript (#1342). Opening saves the transcript scroll so
+    // closing can restore it; stepping wraps around the match list.
+    let open_find = move || {
+        if !tf_open.get_untracked() {
+            tf_saved_scroll.set(transcript_find::transcript_scroll());
+        }
+        tf_open.set(true);
+        transcript_find::focus_search_soon();
+    };
+    let close_find = move || {
+        if !tf_open.get_untracked() {
+            return;
+        }
+        tf_open.set(false);
+        tf_query.set(String::new());
+        tf_idx.set(0);
+        transcript_find::restore_scroll_soon(tf_saved_scroll.get_untracked());
+    };
+    let tf_step = move |delta: i32| {
+        let list = lines.get_untracked();
+        let hits = transcript_matches(&list, &tf_query.get_untracked());
+        if hits.is_empty() {
+            return;
+        }
+        tf_idx.set(transcript_find::step_idx(
+            tf_idx.get_untracked(),
+            delta,
+            hits.len(),
+        ));
+    };
+    // Palette command ("Find in transcript", registered in
+    // src/shell/contrib/transcript_find.rs) dispatches here.
+    shell::bind(
+        "transcript-find.open",
+        Rc::new(move |_args: &str| {
+            if !tf_open.get_untracked() {
+                tf_saved_scroll.set(transcript_find::transcript_scroll());
+            }
+            tf_open.set(true);
+            transcript_find::focus_search_soon();
+            Ok(())
+        }),
+    );
+    // Ctrl/Cmd+F opens find, cockpit-wide while the chat view is up —
+    // the issue's recommended default, matching the editor's "Ctrl+F
+    // finds" model. When a document is open the editor pane keeps
+    // Ctrl+F for find-in-file, so this handler stands down then.
+    // This does collide with the browser's native find while the
+    // cockpit is focused; that is the accepted trade-off of the
+    // recommended default, and Escape restores the page.
+    let on_find_key =
+        Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |ev: web_sys::KeyboardEvent| {
+            if (ev.ctrl_key() || ev.meta_key())
+                && !ev.alt_key()
+                && ev.key().eq_ignore_ascii_case("f")
+                && mode.get_untracked() == "chat"
+                && doc_path.get_untracked().is_empty()
+            {
+                ev.prevent_default();
+                if !tf_open.get_untracked() {
+                    tf_saved_scroll.set(transcript_find::transcript_scroll());
+                }
+                tf_open.set(true);
+                transcript_find::focus_search_soon();
+            }
+        });
+    if let Some(w) = web_sys::window() {
+        let _ = w.add_event_listener_with_callback("keydown", on_find_key.as_ref().unchecked_ref());
+    }
+    on_find_key.forget();
+    // Keep the current match scrolled into view as the query or the
+    // step position changes. Line appends alone do not retrigger this
+    // (the list is read untracked), so streaming does not yank scroll.
+    Effect::new(move |_| {
+        let _ = tf_idx.get();
+        let q = tf_query.get();
+        if !tf_open.get_untracked() || q.is_empty() {
+            return;
+        }
+        let list = lines.get_untracked();
+        let hits = transcript_matches(&list, &q);
+        if let Some(hit) = hits.get(transcript_find::clamped_idx(
+            tf_idx.get_untracked(),
+            hits.len(),
+        )) {
+            transcript_find::scroll_to_line_soon(hit.line);
+        }
+    });
+
     view! {
         <shell::Chrome />
         <session_delete::SessionDeleteDialog
@@ -2425,6 +2561,7 @@ fn App() -> impl IntoView {
                             sessions_drawer.set(false);
                             panel_drawer.update(|v| *v = !*v);
                         }>"Panel"</button>
+                        <button type="button" class="chip" data-tf-open="true" title="Find in transcript (Ctrl+F)" on:click=move |_| open_find()>"Find"</button>
                     </div>
                     <Show when=move || !load_error.get().is_empty()>
                         <div class="notice" role="alert">
@@ -2445,8 +2582,52 @@ fn App() -> impl IntoView {
                             editing=doc_editing
                         />
                     </Show>
+                    <Show when=move || tf_open.get() && doc_path.get().is_empty()>
+                        <div
+                            class="tf-bar"
+                            data-tf-bar="true"
+                            role="search"
+                            aria-label="Find in transcript"
+                            on:keydown=move |ev: web_sys::KeyboardEvent| {
+                                if ev.key() == "Escape" {
+                                    ev.prevent_default();
+                                    ev.stop_propagation();
+                                    close_find();
+                                }
+                            }
+                        >
+                            <input
+                                id="tf-search"
+                                class="tf-search"
+                                type="search"
+                                placeholder="Find in transcript"
+                                aria-label="Find in transcript"
+                                prop:value=move || tf_query.get()
+                                on:input=move |ev| {
+                                    tf_query.set(event_target_value(&ev));
+                                    tf_idx.set(0);
+                                }
+                                on:keydown=move |ev: web_sys::KeyboardEvent| {
+                                    if ev.key() == "Enter" {
+                                        ev.prevent_default();
+                                        ev.stop_propagation();
+                                        tf_step(if ev.shift_key() { -1 } else { 1 });
+                                    }
+                                }
+                            />
+                            <span class="tf-count" data-tf-count="">{move || {
+                                let q = tf_query.get();
+                                let list = lines.get();
+                                let hits = transcript_matches(&list, &q);
+                                transcript_find::count_label(&q, hits.len(), tf_idx.get())
+                            }}</span>
+                            <button type="button" class="secondary" data-tf-prev="true" on:click=move |_| tf_step(-1)>"Prev"</button>
+                            <button type="button" class="secondary" data-tf-next="true" on:click=move |_| tf_step(1)>"Next"</button>
+                            <button type="button" class="secondary" data-tf-close="true" on:click=move |_| close_find()>"Close"</button>
+                        </div>
+                    </Show>
                     <Show when=move || doc_path.get().is_empty()>
-                    <div class="transcript" aria-live="polite">
+                    <div class="transcript" id="tf-transcript" aria-live="polite">
                         <Show when=move || loading.get()>
                             <Skeleton />
                         </Show>
@@ -2468,6 +2649,17 @@ fn App() -> impl IntoView {
                         </Show>
                         {move || {
                             let list = lines.get();
+                            // Find in transcript (#1342): matches over the
+                            // whole line model (not just visible DOM), so
+                            // off-screen matches count and highlight on
+                            // render. The current match drives scrolling
+                            // via the effect next to the Ctrl+F binding.
+                            let tf_q = tf_query.get();
+                            let find_active = !tf_q.is_empty();
+                            let all_hits = transcript_matches(&list, &tf_q);
+                            let cur_hit = all_hits
+                                .get(transcript_find::clamped_idx(tf_idx.get(), all_hits.len()))
+                                .copied();
                             // A day separator precedes the first timed line of
                             // each local day (#1349). Untimed lines never open
                             // a new day.
@@ -2488,7 +2680,7 @@ fn App() -> impl IntoView {
                                     label
                                 })
                                 .collect();
-                            list.into_iter().zip(seps).map(|(line, sep)| {
+                            list.into_iter().zip(seps).enumerate().map(|(line_idx, (line, sep))| {
                             let badge = line.badge.clone();
                             let badge_kind = badge.clone();
                             let role = line.role.clone();
@@ -2503,12 +2695,33 @@ fn App() -> impl IntoView {
                             let card = role == "child";
                             let prose = role == "you" || role == "strike";
                             let tool_dump = !card && !prose && (body.trim_start().starts_with('{') || body.trim_start().starts_with('[') || body.chars().count() > 240);
+                            let body_ranges: Vec<(usize, usize)> = all_hits
+                                .iter()
+                                .filter(|h| h.line == line_idx && h.field == transcript_find::Field::Body)
+                                .map(|h| (h.start, h.end))
+                                .collect();
+                            let title_ranges: Vec<(usize, usize)> = all_hits
+                                .iter()
+                                .filter(|h| h.line == line_idx && h.field == transcript_find::Field::Title)
+                                .map(|h| (h.start, h.end))
+                                .collect();
+                            let cur_body = cur_hit
+                                .filter(|h| h.line == line_idx && h.field == transcript_find::Field::Body)
+                                .map(|h| (h.start, h.end));
+                            let cur_title = cur_hit
+                                .filter(|h| h.line == line_idx && h.field == transcript_find::Field::Title)
+                                .map(|h| (h.start, h.end));
                             let body_view = if card {
                                 let summary = body;
+                                let summary_inner = if find_active {
+                                    view! { <transcript_find::MarkedText text=summary.clone() kind="inline" ranges=body_ranges current=cur_body /> }.into_any()
+                                } else {
+                                    view! { <LinkedBody text=summary.clone() kind="inline" doc_path=doc_path doc_line=doc_line doc_diff=doc_diff /> }.into_any()
+                                };
                                 view! {
                                     <div>
                                         <p class="summary">
-                                            <LinkedBody text=summary kind="inline" doc_path=doc_path doc_line=doc_line doc_diff=doc_diff />
+                                            {summary_inner}
                                         </p>
                                         {has_detail.then(|| {
                                             let detail = detail.clone();
@@ -2522,10 +2735,17 @@ fn App() -> impl IntoView {
                                     </div>
                                 }.into_any()
                             } else if prose {
-                                // Table-bearing prose renders through the
-                                // shared markdown view (#1344); every other
-                                // bubble keeps the plain linked-text path.
-                                if has_markdown_table(&body) {
+                                if find_active {
+                                    // While finding, prose renders as
+                                    // marked plain text so every match is
+                                    // visible in place; the markdown /
+                                    // linked renderers return when the
+                                    // find bar clears.
+                                    view! { <transcript_find::MarkedText text=body kind="prose" ranges=body_ranges current=cur_body /> }.into_any()
+                                } else if has_markdown_table(&body) {
+                                    // Table-bearing prose renders through the
+                                    // shared markdown view (#1344); every other
+                                    // bubble keeps the plain linked-text path.
                                     view! { <MarkdownView text=body /> }.into_any()
                                 } else {
                                     view! { <LinkedBody text=body kind="prose" doc_path=doc_path doc_line=doc_line doc_diff=doc_diff /> }.into_any()
@@ -2537,14 +2757,21 @@ fn App() -> impl IntoView {
                                         <LinkedBody text=body kind="pre" doc_path=doc_path doc_line=doc_line doc_diff=doc_diff />
                                     </details>
                                 }.into_any()
+                            } else if find_active {
+                                view! { <transcript_find::MarkedText text=body kind="pre" ranges=body_ranges current=cur_body /> }.into_any()
                             } else {
                                 view! { <LinkedBody text=body kind="pre" doc_path=doc_path doc_line=doc_line doc_diff=doc_diff /> }.into_any()
                             };
+                            let title_view = if find_active && !title_ranges.is_empty() {
+                                view! { <transcript_find::MarkedText text=title.clone() kind="inline" ranges=title_ranges current=cur_title /> }.into_any()
+                            } else {
+                                view! { <span>{title.clone()}</span> }.into_any()
+                            };
                             view! {
                                 {sep.map(|label| view! { <div class="day-sep" role="separator">{label}</div> })}
-                                <article class=format!("bubble card role-{role}")>
+                                <article class=format!("bubble card role-{role}") id=format!("tf-line-{line_idx}")>
                                     <header>
-                                        <span class="who">{title}</span>
+                                        <span class="who">{title_view}</span>
                                         <Show when=move || has_badge>
                                             {match StatusKind::parse_known(&badge_kind) {
                                                 Some(kind) => view! { <StatusMark kind=kind place=StatusSlot::Badge /> }.into_any(),

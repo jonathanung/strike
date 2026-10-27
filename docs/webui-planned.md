@@ -268,6 +268,18 @@ that push service. The next open replays the daemon log into the centre.
 A gateway drop is detected by the page (the daemon cannot deliver "I am
 gone"); it is not a JSONL record.
 
+## Find in transcript
+
+Shipped (#1342): Ctrl/Cmd+F, the Find chip, or the palette command opens
+a find bar over the open session's transcript — case-insensitive match
+count, Enter / Shift+Enter (or Prev / Next) with wrap-around, matches
+highlighted in place, Escape closes and restores the prior scroll.
+Follow-up, deliberately not in the first slice: matches inside
+collapsed content (child-card details and long tool dumps the
+transcript folds away) are not searched and find does not expand
+collapsed cards to reveal a match; a case-sensitive toggle is likewise
+deferred until someone asks for it.
+
 ## Not planned as a copy
 
 Stall is already a real badge when the team roster sets `budget.stall`.
