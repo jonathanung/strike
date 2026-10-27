@@ -595,6 +595,46 @@ try {
     repoDir: process.cwd(),
   });
 
+  // Usage + Audit (#1286): open each view and confirm its controls
+  // render; the Audit view must also report a chain state. Ported onto
+  // the hardened script's helpers: evaluate() surfaces page exceptions,
+  // and waitFor()/textProbe() poll on condition with diagnostics on
+  // timeout instead of the old fixed-iteration body scrape.
+  const openView = async (label, needles) => {
+    const clicked = await evaluate(`(() => {
+      const btn = [...document.querySelectorAll("button")].find((b) => b.textContent.trim() === ${JSON.stringify(label)});
+      if (!btn) return "missing";
+      btn.click();
+      return "clicked";
+    })()`);
+    if (clicked !== "clicked") {
+      throw new Error(`${label} nav button not found\n${await diagnostics()}`);
+    }
+    await waitFor(
+      `${label} view (${needles.join(", ")})`,
+      textProbe((t) => needles.every((s) => t.includes(s))),
+      { timeout: WAIT_MS, interval: 250 },
+    );
+  };
+  await openView("Usage", ["Input tokens", "Daily budget (USD)"]);
+  await openView("Audit", ["Verify chain", "Export"]);
+  const auditProbe = await waitFor(
+    "audit chain state (Chain intact / No audit entries / Not configured)",
+    textProbe(
+      (t) =>
+        t.includes("Chain intact") || t.includes("No audit entries") || t.includes("Not configured"),
+    ),
+    { timeout: STEP_MS, interval: 250 },
+  );
+  const auditText = auditProbe.body || "";
+  if (
+    !auditText.includes("Chain intact") &&
+    !auditText.includes("No audit entries") &&
+    !auditText.includes("Not configured")
+  ) {
+    throw new Error(`audit chain state missing: ${auditText.slice(0, 500)}`);
+  }
+
   // Memory panel (#1305): reload with the token set, open Memory, and
   // confirm the seeded entry renders — redacted, with a readable key cell.
   await evaluate(`localStorage.setItem("strike.token", ${JSON.stringify(token)})`);

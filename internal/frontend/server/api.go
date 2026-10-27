@@ -22,6 +22,7 @@ import (
 	"github.com/jonathanung/strike/internal/persist/session"
 	"github.com/jonathanung/strike/internal/product/version"
 	"github.com/jonathanung/strike/internal/protocol"
+	"github.com/jonathanung/strike/internal/trust/usageaudit"
 )
 
 type sessionsResponse struct {
@@ -417,16 +418,25 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Sandbox dial uses the same yolo+off iKnow gate as PATCH /v1/sandbox.
+	sandboxMode := ""
 	if body.Sandbox != "" {
 		if err := s.saveSandboxDefault(body.Sandbox, body.IKnow, r); err != nil {
 			writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
 			return
 		}
+		sandboxMode = body.Sandbox
 		body.Sandbox = "" // already persisted; avoid double-write in applySettingsPatch
 	}
 	if err := applySettingsPatch(settings, body); err != nil {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
 		return
+	}
+	fields := settingsPatchFields(body)
+	if sandboxMode != "" {
+		fields = append(fields, "sandbox")
+	}
+	if len(fields) > 0 {
+		s.noteAudit(usageaudit.ActionConfig, "", "settings updated", map[string]any{"fields": fields})
 	}
 	writeJSON(w, http.StatusOK, settingsFromDefaults(settings.Defaults()))
 }
@@ -524,6 +534,7 @@ func (s *Server) handleSandboxPatch(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
 		return
 	}
+	s.noteAudit(usageaudit.ActionConfig, "", "sandbox default updated", map[string]string{"mode": strings.TrimSpace(body.Mode)})
 	writeJSON(w, http.StatusOK, s.sandboxSnapshot(r))
 }
 

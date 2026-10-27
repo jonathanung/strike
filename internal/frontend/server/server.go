@@ -28,6 +28,7 @@ import (
 	"github.com/jonathanung/strike/internal/persist/session"
 	"github.com/jonathanung/strike/internal/persist/workspace"
 	"github.com/jonathanung/strike/internal/product/version"
+	"github.com/jonathanung/strike/internal/trust/usageaudit"
 )
 
 // Options configures the attach server.
@@ -75,6 +76,11 @@ type Options struct {
 	ReadOnly bool
 	// Audit receives serve_op records (op type + source IP). Nil disables.
 	Audit OpAuditor
+	// UsageAuditDir is the hash-chained usage audit log. Empty leaves the
+	// chain unconfigured; GET /v1/usage still reads SessionDir.
+	UsageAuditDir string
+	// UsagePricer overrides models.dev pricing for /v1/usage. Nil loads the catalog.
+	UsagePricer func(provider, model string) (usageaudit.Rates, bool)
 	// OpsRate is tokens/sec per client IP for ops (default 10). <=0 uses default.
 	OpsRate float64
 	// OpsBurst is the per-IP burst (default 20). <=0 uses default.
@@ -111,6 +117,11 @@ type Server struct {
 	// notifyOnce lazily opens the redacted notification log under SessionDir.
 	notifyOnce sync.Once
 	notifyLog  *notifyLog
+
+	// tokenHash is the sha256 of the daemon token file last observed.
+	// A change appends a token-rotation audit entry. The token is not stored.
+	tokenMu   sync.Mutex
+	tokenHash string
 
 	// sideChat stores read-only Q&A beside the session log, not in it.
 	sideChat sideChatStore
@@ -337,6 +348,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/sessions/{id}/timeline", s.handleSessionTimeline)
 	s.mux.HandleFunc("GET /v1/sessions/{id}/timeline/export", s.handleSessionTimelineExport)
 	s.mux.HandleFunc("GET /v1/sessions", s.handleSessions)
+	s.mux.HandleFunc("GET /v1/usage", s.handleUsage)
+	s.mux.HandleFunc("PUT /v1/usage/budget", s.handleUsageBudget)
+	s.mux.HandleFunc("GET /v1/audit", s.handleAuditList)
+	s.mux.HandleFunc("GET /v1/audit/verify", s.handleAuditVerify)
+	s.mux.HandleFunc("GET /v1/audit/export", s.handleAuditExport)
+	s.mux.HandleFunc("POST /v1/audit", s.handleAuditAppend)
 	s.mux.HandleFunc("GET /v1/workspaces", s.handleWorkspacesList)
 	s.mux.HandleFunc("POST /v1/workspaces", s.handleWorkspaceAdd)
 	s.mux.HandleFunc("POST /v1/workspaces/{id}/activate", s.handleWorkspaceActivate)
@@ -512,7 +529,9 @@ func (s *Server) currentToken() string {
 	if err != nil {
 		return ""
 	}
-	return strings.TrimSpace(string(data))
+	tok := strings.TrimSpace(string(data))
+	s.noteTokenFile(tok)
+	return tok
 }
 
 // bearerToken extracts a Bearer credential. Scheme match is case-insensitive
