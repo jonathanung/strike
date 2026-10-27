@@ -24,7 +24,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jonathanung/strike/harness/sandbox"
 	"github.com/jonathanung/strike/internal/frontend/host"
+	"github.com/jonathanung/strike/internal/frontend/server/terminal"
 	"github.com/jonathanung/strike/internal/persist/attachment"
 	"github.com/jonathanung/strike/internal/persist/session"
 	"github.com/jonathanung/strike/internal/persist/taskrun"
@@ -109,6 +111,23 @@ type Options struct {
 	// submit protocol ops. Nil makes POST /v1/sidechat/ask return 503.
 	// POST /v1/sidechat/ops still refuses every op, including permission.reply.
 	SideChat SideChatModel
+	// TerminalRemote allows the terminal websocket on a non-loopback bind.
+	// It requires Auth. Loopback serves a terminal without this flag.
+	TerminalRemote bool
+	// TerminalSandbox is the startup OS sandbox dial for interactive shells.
+	// A live serve replaces it at create time with TerminalSandboxFor so plan
+	// and phase rules are current and deny paths expand under the workspace.
+	// Zero value is off. That is a real shell only when TerminalSandboxLoaded
+	// is set; attach-only leaves the flag false and the terminal routes refuse
+	// a shell.
+	TerminalSandbox sandbox.Policy
+	// TerminalSandboxLoaded reports that TerminalSandbox came from a live
+	// serve, including an explicit sandbox off. Attach-only leaves it false.
+	TerminalSandboxLoaded bool
+	// TerminalSandboxFor compiles the policy for one new shell. sessionID
+	// empty means the active root. The bool is false when no live engine can
+	// compile it. Nil means no compiler was installed.
+	TerminalSandboxFor func(sessionID, workDir string) (sandbox.Policy, bool)
 }
 
 // Server is an HTTP server for session attach and optional live cockpit.
@@ -124,6 +143,8 @@ type Server struct {
 	// paneHost supervises process panes for the web cockpit (#732).
 	paneHost *paneHost
 	opsLimit *opLimiter
+	// terms is the side-panel PTY manager.
+	terms *terminal.Manager
 
 	seenOnce sync.Once
 	seen     *SeenStore
@@ -167,6 +188,9 @@ func New(opts Options) (*Server, error) {
 	if !opts.Auth && opts.Token != "" {
 		return nil, errors.New("server: token requires auth")
 	}
+	if opts.TerminalRemote && !opts.Auth {
+		return nil, errors.New("server: terminal on a non-loopback listener requires auth")
+	}
 	if strings.TrimSpace(opts.Addr) == "" {
 		opts.Addr = "127.0.0.1:8787"
 	}
@@ -186,7 +210,16 @@ func New(opts Options) (*Server, error) {
 		mux:             http.NewServeMux(),
 		opsLimit:        newOpLimiter(opts.OpsRate, opts.OpsBurst, opts.OpsClock),
 		scriptCSPHashes: inlineScriptHashes(static),
+		terms:           terminal.NewManager(terminal.ManagerConfig{Sandbox: opts.TerminalSandbox}),
 	}
+	s.terms.SetAgentProbe(func(sessionID string) terminal.AgentView {
+		live := s.liveForTerminal(sessionID)
+		if live == nil {
+			return terminal.AgentView{}
+		}
+		st := live.Status()
+		return terminal.AgentView{CWD: st.CWD, Busy: st.Busy, PermissionMode: st.PermissionMode}
+	})
 	s.routes()
 	s.http = &http.Server{
 		Addr:              opts.Addr,
@@ -220,6 +253,9 @@ func (s *Server) Serve(ln net.Listener) error {
 
 // Shutdown gracefully stops the server.
 func (s *Server) Shutdown(ctx context.Context) error {
+	if s.terms != nil {
+		s.terms.Close()
+	}
 	return s.http.Shutdown(ctx)
 }
 
@@ -458,6 +494,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/notifications/stream", s.handleNotificationStream)
 	s.mux.HandleFunc("PUT /v1/notifications/prefs", s.handleNotificationPrefs)
 	s.mux.HandleFunc("GET /v1/ws", s.handleWS)
+	s.mux.HandleFunc("GET /v1/terminals", s.handleTerminalsList)
+	s.mux.HandleFunc("POST /v1/terminals", s.handleTerminalCreate)
+	s.mux.HandleFunc("POST /v1/terminals/{id}/resize", s.handleTerminalResize)
+	s.mux.HandleFunc("POST /v1/terminals/{id}/ticket", s.handleTerminalTicket)
+	s.mux.HandleFunc("GET /v1/terminals/{id}/stream", s.handleTerminalStream)
+	s.mux.HandleFunc("DELETE /v1/terminals/{id}", s.handleTerminalDelete)
 	s.mux.HandleFunc("GET /{$}", s.handleAttach)
 	s.mux.HandleFunc("GET /attach", s.handleAttach)
 	s.mux.HandleFunc("GET /assets/{path...}", s.handleAsset)
@@ -487,7 +529,7 @@ func (s *Server) withMiddleware(next http.Handler) http.Handler {
 			}
 		}
 		// Public: health + attach shell. Session event streams require a token.
-		if s.opts.Auth && requiresToken(r.URL.Path) && !s.authorized(r) {
+		if s.opts.Auth && requiresToken(r.URL.Path) && !s.terminalAuthorized(r) {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}

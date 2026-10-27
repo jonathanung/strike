@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jonathanung/strike/harness/engine"
 	"github.com/jonathanung/strike/harness/sandbox"
 	"github.com/jonathanung/strike/internal/frontend/host"
 	"github.com/jonathanung/strike/internal/frontend/host/local"
@@ -44,6 +45,8 @@ Options:
   --model <id>           model id for the live provider
   --attach-only          read-only JSONL attach (no live engine)
   --read-only            reject mutating protocol ops (POST /v1/ops + WS frames)
+  --terminal-remote      allow the side-panel shell on a non-loopback bind
+                         (requires --auth; loopback serves a shell without it)
   --auto                 skip permission asks; network.allow still applies
   --dangerously-skip-permissions
                          skip permission asks and bypass network.allow
@@ -53,6 +56,8 @@ Endpoints:
   GET  /health                      JSON ok + version (no auth)
   GET  /  and  GET /attach          cockpit page
   GET  /v1/ws                       WebSocket: ops in, events out (live)
+  GET  /v1/terminals               side-panel PTY shells (workspace cwd)
+  GET  /v1/terminals/{id}/stream   terminal WebSocket (cookie, bearer, or one-time ticket)
   POST /v1/ops                      submit one op envelope (live)
   GET  /v1/sidechat                 list read-only side-chat turns
   POST /v1/sidechat/ask             ask about the session (no tools, no user.input)
@@ -99,6 +104,7 @@ type serveOptions struct {
 	readOnly                   bool
 	auto                       bool
 	dangerouslySkipPermissions bool
+	terminalRemote             bool
 }
 
 func runServeCLI(args []string, stdout, stderr io.Writer) int {
@@ -151,6 +157,7 @@ func parseServeArgs(args []string) (serveOptions, error) {
 	fs.BoolVar(&opts.readOnly, "read-only", false, "")
 	fs.BoolVar(&opts.auto, "auto", false, "")
 	fs.BoolVar(&opts.dangerouslySkipPermissions, "dangerously-skip-permissions", false, "")
+	fs.BoolVar(&opts.terminalRemote, "terminal-remote", false, "")
 	if err := fs.Parse(args); err != nil {
 		return serveOptions{}, err
 	}
@@ -191,6 +198,9 @@ func parseServeArgs(args []string) (serveOptions, error) {
 	}
 	if opts.allowPrivateBind && !opts.auth {
 		return serveOptions{}, fmt.Errorf("--allow-private-bind requires --auth")
+	}
+	if opts.terminalRemote && !opts.auth {
+		return serveOptions{}, fmt.Errorf("--terminal-remote requires --auth")
 	}
 	if opts.sessionDirSet && !opts.attachOnly {
 		return serveOptions{}, fmt.Errorf("--session-dir requires --attach-only; live sessions use %s", session.DefaultDir())
@@ -239,6 +249,9 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 	var sandboxSnap *server.SandboxSnapshot
 	var sideChat server.SideChatModel
 	var taskRuns *taskrun.Store
+	var terminalSandbox sandbox.Policy
+	var terminalSandboxFor func(sessionID, workDir string) (sandbox.Policy, bool)
+	terminalSandboxLoaded := false
 	var cleanup func() error
 	var sharedAttachments *attachment.Store
 	sessionDir := opts.sessionDir
@@ -303,6 +316,15 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		}
 		var mu sync.Mutex
 		roots := make(map[string]*serveRoot)
+		engines := make(map[string]*engine.Engine)
+		noteEngine := func(id string, eng *engine.Engine) {
+			if id == "" || eng == nil {
+				return
+			}
+			mu.Lock()
+			engines[id] = eng
+			mu.Unlock()
+		}
 
 		// startServeRoot runs the engine and tees events to its Live bridge.
 		startServeRoot := func(ctx context.Context, slot *rootSlot, live *server.Live) *serveRoot {
@@ -343,6 +365,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		// Build LiveHub with spawn and resume callbacks.
 		registerLive := func(ctx context.Context, slot *rootSlot) (string, error) {
 			live := server.NewLive(slot.id, slot.workDir, agents, slot.eng.Ops())
+			noteEngine(slot.id, slot.eng)
 			a.attachMemoryMode(live, slot.id, slot.eng)
 			seedLiveSandbox(live)
 			sr := startServeRoot(ctx, slot, live)
@@ -397,6 +420,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 				a.attachMemoryMode(live, slot.id, slot.eng)
 				seedLiveSandbox(live)
 				sr := startServeRoot(ctx, slot, live)
+				noteEngine(slot.id, slot.eng)
 				mu.Lock()
 				roots[slot.id] = sr
 				mu.Unlock()
@@ -420,6 +444,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		initialLive := server.NewLive(initialSlot.id, initialSlot.workDir, agents, initialSlot.eng.Ops())
 		a.attachMemoryMode(initialLive, initialSlot.id, initialSlot.eng)
 		seedLiveSandbox(initialLive)
+		noteEngine(initialSlot.id, initialSlot.eng)
 		liveHub.Add(initialSlot.id, initialLive)
 		if info, err := a.sessions.Get(initialSlot.id); err == nil && info.Title != "" {
 			liveHub.SetTitle(initialSlot.id, info.Title)
@@ -445,6 +470,21 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 
 		services = &a.services
 		taskRuns = a.taskRuns
+		terminalSandbox = a.sandboxPolicy
+		terminalSandboxLoaded = true
+		terminalSandboxFor = func(sessionID, workDir string) (sandbox.Policy, bool) {
+			id := strings.TrimSpace(sessionID)
+			if id == "" && liveHub != nil {
+				id = liveHub.ActiveID()
+			}
+			mu.Lock()
+			eng := engines[id]
+			mu.Unlock()
+			if eng == nil {
+				return sandbox.Policy{}, false
+			}
+			return eng.BashSandboxPolicy(workDir), true
+		}
 
 		cleanup = func() error {
 			if liveHub != nil {
@@ -577,13 +617,17 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 				local.SetFilesWorkDir(services.Files, dir)
 			}
 		},
-		Sandbox:       sandboxSnap,
-		ReadOnly:      opts.readOnly,
-		Audit:         auditSink,
-		Attachments:   sharedAttachments,
-		UsageAuditDir: usageDir,
-		SideChat:      sideChat,
-		TaskRuns:      taskRuns,
+		Sandbox:               sandboxSnap,
+		ReadOnly:              opts.readOnly,
+		Audit:                 auditSink,
+		Attachments:           sharedAttachments,
+		UsageAuditDir:         usageDir,
+		SideChat:              sideChat,
+		TaskRuns:              taskRuns,
+		TerminalRemote:        opts.terminalRemote,
+		TerminalSandbox:       terminalSandbox,
+		TerminalSandboxLoaded: terminalSandboxLoaded,
+		TerminalSandboxFor:    terminalSandboxFor,
 	})
 	if err != nil {
 		return err
