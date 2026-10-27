@@ -2,6 +2,8 @@
 //! stays out of the visible text. The shell renders [`Transcript`]; it does
 //! not interpret tool args itself.
 
+use std::collections::HashMap;
+
 use serde_json::Value;
 
 use crate::composer_triggers::{display_user_text, PermAsk};
@@ -243,6 +245,11 @@ pub struct Transcript {
     assistant_open: bool,
     event_count: usize,
     turn_start: Option<u32>,
+    /// Turn elapsed labels (#1364), keyed by the id of the turn's final
+    /// message. Filled once per turn by `stamp_turn` at `turn.completed`;
+    /// turns under a minute, still in progress, or containing an untimed
+    /// line have no entry and render nothing.
+    pub turn_elapsed: HashMap<u32, String>,
 }
 
 impl Default for Transcript {
@@ -265,7 +272,14 @@ impl Transcript {
             assistant_open: false,
             event_count: 0,
             turn_start: None,
+            turn_elapsed: HashMap::new(),
         }
+    }
+
+    /// The turn elapsed label stamped on this message, if it is the
+    /// final line of a completed turn that exceeded a minute (#1364).
+    pub fn elapsed_for(&self, id: u32) -> Option<&str> {
+        self.turn_elapsed.get(&id).map(String::as_str)
     }
 
     pub fn set_listed_title(&mut self, listed: &str) {
@@ -454,7 +468,7 @@ impl Transcript {
             "turn.completed" => {
                 self.assistant_open = false;
                 self.absorb();
-                self.stamp_turn();
+                self.stamp_turn(at_ms);
             }
             "tool.begin" => {
                 self.assistant_open = false;
@@ -706,7 +720,7 @@ impl Transcript {
             .rposition(|m| m.role == Role::Tool && m.badge == "running")
     }
 
-    fn stamp_turn(&mut self) {
+    fn stamp_turn(&mut self, completed_ms: f64) {
         let Some(id) = self.turn_start else {
             return;
         };
@@ -722,6 +736,27 @@ impl Transcript {
             }
             if msg.role == Role::Strike && msg.retry_text.is_empty() {
                 msg.retry_text = retry.clone();
+            }
+        }
+        // Turn elapsed (#1364): span from the turn's first line to the
+        // `turn.completed` envelope time, labelled on the turn's final
+        // line only. Any untimed line in the turn suppresses the label
+        // (see turn_elapsed.rs). Computed here, once — a turn still in
+        // progress never reaches this point, so nothing ticks live.
+        if let (Some(first), Some(last)) = (
+            self.messages.get(start),
+            self.messages.last(),
+        ) {
+            let (first_ms, last_id) = (first.at_ms, last.id);
+            let all_timed = self
+                .messages
+                .iter()
+                .skip(start)
+                .all(|m| m.at_ms > 0.0);
+            if let Some(label) =
+                crate::turn_elapsed::turn_elapsed_label(first_ms, completed_ms, all_timed)
+            {
+                self.turn_elapsed.insert(last_id, label);
             }
         }
         self.turn_start = None;
@@ -1749,6 +1784,11 @@ mod tests {
         serde_json::json!({"type": typ, "data": data}).to_string()
     }
 
+    /// Envelope with an explicit `time`, as the JSONL log persists it.
+    fn env_at(typ: &str, data: Value, time: &str) -> String {
+        serde_json::json!({"type": typ, "data": data, "time": time}).to_string()
+    }
+
     fn visible(t: &Transcript) -> String {
         t.messages
             .iter()
@@ -2012,6 +2052,168 @@ mod tests {
         assert!(suggestions()
             .iter()
             .all(|s| !s.detail.is_empty() && !s.title.is_empty()));
+    }
+
+    #[test]
+    fn turn_elapsed_lands_once_on_the_final_line_of_a_long_turn() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env_at(
+            "user.message",
+            serde_json::json!({"text": "do the slow thing"}),
+            "2026-10-26T12:00:00Z",
+        ));
+        t.apply_envelope(&env_at(
+            "tool.begin",
+            serde_json::json!({"callId": "c1", "name": "bash", "args": {"command": "sleep 200"}}),
+            "2026-10-26T12:00:30Z",
+        ));
+        t.apply_envelope(&env_at(
+            "tool.end",
+            serde_json::json!({"callId": "c1", "name": "bash", "output": "done"}),
+            "2026-10-26T12:03:30Z",
+        ));
+        t.apply_envelope(&env_at(
+            "text.delta",
+            serde_json::json!({"text": "finished"}),
+            "2026-10-26T12:04:00Z",
+        ));
+        // Nothing yet: the turn is still in progress, so no label is
+        // stamped (and nothing ticks live).
+        assert!(t.turn_elapsed.is_empty());
+        t.apply_envelope(&env_at(
+            "turn.completed",
+            serde_json::json!({}),
+            "2026-10-26T12:04:12Z",
+        ));
+        assert_eq!(t.messages.len(), 3);
+        let last = t.messages.last().unwrap();
+        assert_eq!(last.role, Role::Strike);
+        assert_eq!(t.elapsed_for(last.id), Some("took 4:12"));
+        // Exactly one label in the whole transcript, on the final line.
+        assert_eq!(t.turn_elapsed.len(), 1);
+        for m in &t.messages[..t.messages.len() - 1] {
+            assert_eq!(t.elapsed_for(m.id), None);
+        }
+    }
+
+    #[test]
+    fn turn_elapsed_threshold_and_single_line_turns() {
+        // Exactly one minute: not shown ("exceeds a minute").
+        let mut t = Transcript::new();
+        t.apply_envelope(&env_at(
+            "user.message",
+            serde_json::json!({"text": "quick"}),
+            "2026-10-26T12:00:00Z",
+        ));
+        t.apply_envelope(&env_at(
+            "text.delta",
+            serde_json::json!({"text": "ok"}),
+            "2026-10-26T12:00:59Z",
+        ));
+        t.apply_envelope(&env_at(
+            "turn.completed",
+            serde_json::json!({}),
+            "2026-10-26T12:01:00Z",
+        ));
+        assert!(t.turn_elapsed.is_empty());
+
+        // A single-line turn (user line only) over the threshold: the
+        // user line is the turn's final line and carries the label.
+        let mut t = Transcript::new();
+        t.apply_envelope(&env_at(
+            "user.message",
+            serde_json::json!({"text": "wait for it"}),
+            "2026-10-26T12:00:00Z",
+        ));
+        t.apply_envelope(&env_at(
+            "turn.completed",
+            serde_json::json!({}),
+            "2026-10-26T12:01:30Z",
+        ));
+        assert_eq!(t.messages.len(), 1);
+        assert_eq!(t.elapsed_for(t.messages[0].id), Some("took 1:30"));
+    }
+
+    #[test]
+    fn turn_elapsed_missing_times_degrade_to_no_label() {
+        // One untimed line inside an otherwise long turn (old log):
+        // no label for that turn, and the next turn is unaffected.
+        let mut t = Transcript::new();
+        t.apply_envelope(&env_at(
+            "user.message",
+            serde_json::json!({"text": "old turn"}),
+            "2026-10-26T12:00:00Z",
+        ));
+        t.apply_envelope(&env(
+            "tool.begin",
+            serde_json::json!({"callId": "c1", "name": "bash", "args": {"command": "sleep 200"}}),
+        ));
+        t.apply_envelope(&env_at(
+            "tool.end",
+            serde_json::json!({"callId": "c1", "name": "bash", "output": "done"}),
+            "2026-10-26T12:05:00Z",
+        ));
+        t.apply_envelope(&env_at(
+            "turn.completed",
+            serde_json::json!({}),
+            "2026-10-26T12:05:10Z",
+        ));
+        assert!(t.turn_elapsed.is_empty(), "{:?}", t.turn_elapsed);
+
+        // Untimed completion envelope: also no label.
+        let mut t = Transcript::new();
+        t.apply_envelope(&env_at(
+            "user.message",
+            serde_json::json!({"text": "hi"}),
+            "2026-10-26T12:00:00Z",
+        ));
+        t.apply_envelope(&env_at(
+            "text.delta",
+            serde_json::json!({"text": "slow reply"}),
+            "2026-10-26T12:05:00Z",
+        ));
+        t.apply_envelope(&env("turn.completed", serde_json::json!({})));
+        assert!(t.turn_elapsed.is_empty());
+    }
+
+    #[test]
+    fn turn_elapsed_is_per_turn() {
+        let mut t = Transcript::new();
+        // Turn 1: short.
+        t.apply_envelope(&env_at(
+            "user.message",
+            serde_json::json!({"text": "one"}),
+            "2026-10-26T12:00:00Z",
+        ));
+        t.apply_envelope(&env_at(
+            "text.delta",
+            serde_json::json!({"text": "fast"}),
+            "2026-10-26T12:00:05Z",
+        ));
+        t.apply_envelope(&env_at(
+            "turn.completed",
+            serde_json::json!({}),
+            "2026-10-26T12:00:06Z",
+        ));
+        // Turn 2: long.
+        t.apply_envelope(&env_at(
+            "user.message",
+            serde_json::json!({"text": "two"}),
+            "2026-10-26T12:10:00Z",
+        ));
+        t.apply_envelope(&env_at(
+            "text.delta",
+            serde_json::json!({"text": "slow"}),
+            "2026-10-26T12:12:00Z",
+        ));
+        t.apply_envelope(&env_at(
+            "turn.completed",
+            serde_json::json!({}),
+            "2026-10-26T12:12:30Z",
+        ));
+        assert_eq!(t.turn_elapsed.len(), 1);
+        let last = t.messages.last().unwrap();
+        assert_eq!(t.elapsed_for(last.id), Some("took 2:30"));
     }
 
     #[test]
