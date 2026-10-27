@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/jonathanung/strike/pkg/redact"
 )
 
 const (
@@ -112,11 +114,12 @@ func (s *Store) Create(in CreateInput) (Artifact, error) {
 	if !ValidType(typ) {
 		return Artifact{}, fmt.Errorf("%w: %q", errInvalidType, typ)
 	}
-	title := strings.TrimSpace(in.Title)
+	title := redact.String(strings.TrimSpace(in.Title))
+	content := redact.String(in.Content)
 	if err := validateTitle(title); err != nil {
 		return Artifact{}, err
 	}
-	if err := validateContent(in.Content); err != nil {
+	if err := validateContent(content); err != nil {
 		return Artifact{}, err
 	}
 	scope := strings.TrimSpace(in.Scope)
@@ -170,7 +173,7 @@ func (s *Store) Create(in CreateInput) (Artifact, error) {
 		ID:           id,
 		Type:         typ,
 		Title:        title,
-		Content:      in.Content,
+		Content:      content,
 		Version:      1,
 		Scope:        scope,
 		SessionID:    sessionID,
@@ -220,10 +223,20 @@ func (s *Store) GetVersion(id string, version int, actorSession, actorRoot strin
 	if err != nil || !ok {
 		return a, ok, err
 	}
-	if version > 0 && a.Version != version {
-		return Artifact{}, false, nil
+	if version <= 0 || version == a.Version {
+		return a, true, nil
 	}
-	return a, true, nil
+	for _, h := range a.History {
+		if h.Version != version {
+			continue
+		}
+		a.Title = h.Title
+		a.Content = h.Content
+		a.Version = h.Version
+		a.UpdatedAt = h.UpdatedAt
+		return a, true, nil
+	}
+	return Artifact{}, false, nil
 }
 
 // ListFilter selects artifacts for List.
@@ -295,16 +308,18 @@ func (s *Store) Update(id, actorSession, actorRoot string, expectedVersion int, 
 		return Artifact{}, errEmptyOwner
 	}
 	if in.Title != nil {
-		t := strings.TrimSpace(*in.Title)
+		t := redact.String(strings.TrimSpace(*in.Title))
 		if err := validateTitle(t); err != nil {
 			return Artifact{}, err
 		}
 		in.Title = &t
 	}
 	if in.Content != nil {
-		if err := validateContent(*in.Content); err != nil {
+		c := redact.String(*in.Content)
+		if err := validateContent(c); err != nil {
 			return Artifact{}, err
 		}
+		in.Content = &c
 	}
 	if in.Access != nil {
 		a := strings.TrimSpace(*in.Access)
@@ -334,6 +349,15 @@ func (s *Store) Update(id, actorSession, actorRoot string, expectedVersion int, 
 	}
 
 	working := Clone(cur)
+	working.History = append(working.History, VersionSnap{
+		Version:   cur.Version,
+		Title:     cur.Title,
+		Content:   cur.Content,
+		UpdatedAt: cur.UpdatedAt,
+	})
+	if len(working.History) > MaxHistory {
+		working.History = append([]VersionSnap(nil), working.History[len(working.History)-MaxHistory:]...)
+	}
 	if in.Title != nil {
 		working.Title = *in.Title
 	}
@@ -406,6 +430,7 @@ func (s *Store) load() error {
 	if doc.Version != fileVersion {
 		return fmt.Errorf("decode artifacts: unsupported version %d", doc.Version)
 	}
+	dirty := false
 	for _, a := range doc.Artifacts {
 		if strings.TrimSpace(a.ID) == "" {
 			continue
@@ -425,7 +450,24 @@ func (s *Store) load() error {
 		if a.OwnerRoot == "" {
 			a.OwnerRoot = a.OwnerSession
 		}
+		beforeTitle, beforeContent := a.Title, a.Content
+		a.Title = redact.String(a.Title)
+		a.Content = redact.String(a.Content)
+		if a.Title != beforeTitle || a.Content != beforeContent {
+			dirty = true
+		}
+		for i := range a.History {
+			ht, hc := a.History[i].Title, a.History[i].Content
+			a.History[i].Title = redact.String(ht)
+			a.History[i].Content = redact.String(hc)
+			if a.History[i].Title != ht || a.History[i].Content != hc {
+				dirty = true
+			}
+		}
 		s.artifacts[a.ID] = a
+	}
+	if dirty {
+		return s.persistLocked()
 	}
 	return nil
 }

@@ -500,6 +500,7 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 		ProjectRoot:                e.opts.ProjectRoot,
 		Instructions:               e.opts.Instructions,
 		Memory:                     e.opts.Memory,
+		InitialMemoryMode:          e.MemoryMode(),
 		Ledger:                     e.opts.Ledger,
 		Attachments:                e.opts.Attachments,
 		ProjectArtifact:            e.opts.ProjectArtifact,

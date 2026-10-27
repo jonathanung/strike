@@ -198,6 +198,7 @@ func importPackageInto(m *Manager, pkg Package) (Info, error) {
 		return Info{}, fmt.Errorf("import: meta: %w", err)
 	}
 
+	var model string
 	for i, env := range pkg.Events {
 		if err := checkEnvelopeVersion(env); err != nil {
 			_ = m.Destroy(info.ID)
@@ -208,10 +209,26 @@ func importPackageInto(m *Manager, pkg Package) (Info, error) {
 			_ = m.Destroy(info.ID)
 			return Info{}, fmt.Errorf("import event %d: %w", i, err)
 		}
-		if err := m.Append(info.ID, secret.RedactEvent(ev)); err != nil {
+		redacted := secret.RedactEvent(ev)
+		if ms, ok := redacted.(protocol.ModelSelected); ok {
+			if got := strings.TrimSpace(ms.Model); got != "" {
+				model = got
+			}
+		}
+		if err := m.Append(info.ID, redacted); err != nil {
 			_ = m.Destroy(info.ID)
 			return Info{}, fmt.Errorf("import event %d: %w", i, err)
 		}
+	}
+	// Append ignores model.selected tagged with the source session id.
+	// The package log wins; the sidecar model covers logs that never recorded
+	// a selection.
+	if model == "" {
+		model = strings.TrimSpace(pkg.Meta.Model)
+	}
+	if err := m.rememberModel(info.ID, model); err != nil {
+		_ = m.Destroy(info.ID)
+		return Info{}, fmt.Errorf("import: model: %w", err)
 	}
 	if err := m.Close(info.ID); err != nil {
 		return Info{}, err

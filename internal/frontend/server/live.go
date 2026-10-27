@@ -23,6 +23,15 @@ type RootSummary struct {
 	HasRecentEvent    bool   `json:"hasRecentEvent"`
 	PermissionPending bool   `json:"permissionPending,omitempty"`
 	QuestionPending   bool   `json:"questionPending,omitempty"`
+	// Status is the canonical id from protocol.ClassifyLive. Empty on a raw
+	// hub list; HTTP handlers fill it.
+	Status string `json:"status,omitempty"`
+	// StatusSince is unix milliseconds when Status last changed.
+	StatusSince int64 `json:"statusSince,omitempty"`
+	// LastActivityAt is unix milliseconds of the last user-visible event.
+	LastActivityAt int64 `json:"lastActivityAt,omitempty"`
+	// Unread is true when that event is newer than the daemon seen map.
+	Unread bool `json:"unread"`
 }
 
 // RootCreateResult is returned after creating a new root.
@@ -293,6 +302,10 @@ type StatusSnapshot struct {
 	Busy           bool   `json:"busy"`
 	ContextUsed    int    `json:"contextUsed,omitempty"`
 	ContextLimit   int    `json:"contextLimit,omitempty"`
+	// ContextFit is the latest context.fit_warning level (warn|critical).
+	// Empty after compaction, or after a usage report falls under 80% of
+	// ContextLimit (the engine's fitWarnRatio). It is not a second limit.
+	ContextFit string `json:"contextFit,omitempty"`
 	// Sandbox is the active OS process sandbox dial for this live session
 	// (off|read-only|workspace-write). Distinct from permissionMode.
 	Sandbox string `json:"sandbox,omitempty"`
@@ -304,6 +317,16 @@ type StatusSnapshot struct {
 	NetworkAllow      []string `json:"networkAllow,omitempty"`
 	PermissionPending bool     `json:"permissionPending,omitempty"`
 	QuestionPending   bool     `json:"questionPending,omitempty"`
+	// StopReason is the last TurnCompleted reason. Empty after a new turn starts.
+	StopReason string `json:"stopReason,omitempty"`
+	// TurnSince is unix milliseconds when the current turn state began.
+	TurnSince int64 `json:"turnSince,omitempty"`
+	// LastEventAt is unix milliseconds of the last user-visible event.
+	// Reads and status polls do not bump it.
+	LastEventAt int64 `json:"lastEventAt,omitempty"`
+	// TurnState is the canonical status id for this root, including child
+	// attention. Computed by Status; not stored.
+	TurnState string `json:"turnState,omitempty"`
 }
 
 // SandboxSnapshot is host-safe OS sandbox chrome for GET /v1/sandbox.
@@ -393,6 +416,9 @@ type Live struct {
 	subs    map[chan protocol.Event]struct{}
 	closed  bool
 	closeCh chan struct{}
+
+	memoryModeGet func() string
+	memoryModeSet func(string) error
 }
 
 // NewLive creates a live session bridge. ops must be the engine Ops channel.
@@ -425,6 +451,52 @@ func emptyTeamSnapshot() TeamSnapshot {
 		Verifications: nil,
 	}
 }
+
+// BindMemoryMode attaches the session flag getter and setter. set persists
+// the mode and enforces it on the engine. A nil binding reports unwired.
+func (l *Live) BindMemoryMode(get func() string, set func(string) error) {
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	l.memoryModeGet = get
+	l.memoryModeSet = set
+	l.mu.Unlock()
+}
+
+// MemoryMode returns the bound session mode. ok is false when unwired.
+func (l *Live) MemoryMode() (string, bool) {
+	if l == nil {
+		return memoryModeNormal, false
+	}
+	l.mu.RLock()
+	get := l.memoryModeGet
+	l.mu.RUnlock()
+	if get == nil {
+		return memoryModeNormal, false
+	}
+	mode := strings.TrimSpace(get())
+	if mode == "" {
+		mode = memoryModeNormal
+	}
+	return mode, true
+}
+
+// SetMemoryMode updates the bound session flag.
+func (l *Live) SetMemoryMode(mode string) error {
+	if l == nil || l.memoryModeSet == nil {
+		return errors.New("memory mode is not wired")
+	}
+	l.mu.RLock()
+	set := l.memoryModeSet
+	l.mu.RUnlock()
+	if set == nil {
+		return errors.New("memory mode is not wired")
+	}
+	return set(mode)
+}
+
+const memoryModeNormal = "normal"
 
 // Team returns a deep-ish copy of the observe-only team snapshot for this root.
 func (l *Live) Team() TeamSnapshot {
@@ -516,7 +588,42 @@ func (l *Live) Status() StatusSnapshot {
 	if len(l.status.NetworkAllow) > 0 {
 		out.NetworkAllow = append([]string(nil), l.status.NetworkAllow...)
 	}
+	running, waiting, blocked := childAttention(l.team)
+	out.TurnState = protocol.ClassifyLive(protocol.LiveStatusInput{
+		Busy:              out.Busy,
+		PermissionPending: out.PermissionPending,
+		QuestionPending:   out.QuestionPending,
+		StopReason:        out.StopReason,
+		ChildRunning:      running,
+		ChildWaiting:      waiting,
+		ChildBlocked:      blocked,
+	})
 	return out
+}
+
+func childAttention(team TeamSnapshot) (running, waiting, blocked bool) {
+	for _, m := range team.Members {
+		if strings.EqualFold(m.Role, "lead") {
+			continue
+		}
+		if !m.Terminal {
+			if stall, _ := m.Budget["stall"].(bool); stall {
+				waiting = true
+				continue
+			}
+		}
+		switch protocol.NormalizeStatus(m.State) {
+		case protocol.StatusRunning:
+			if !m.Terminal {
+				running = true
+			}
+		case protocol.StatusWaiting:
+			waiting = true
+		case protocol.StatusBlocked:
+			blocked = true
+		}
+	}
+	return running, waiting, blocked
 }
 
 // Submit sends an op to the engine. Returns err if the live session is closed
@@ -661,21 +768,38 @@ func (l *Live) applyStatus(ev protocol.Event) {
 	case protocol.PhaseChanged:
 		l.status.Phase = e.Phase
 		l.status.Workflow = e.Workflow
+	case protocol.UserMessage, protocol.TextDelta, protocol.ReasoningDelta, protocol.ToolCallBegin, protocol.ToolCallEnd:
+		l.noteActivityLocked()
 	case protocol.TurnStarted:
 		l.status.Busy = true
+		l.status.StopReason = ""
+		l.status.TurnSince = time.Now().UnixMilli()
+		l.noteActivityLocked()
 	case protocol.TurnCompleted:
 		l.status.Busy = false
+		l.status.StopReason = e.StopReason
+		l.status.TurnSince = time.Now().UnixMilli()
+		l.noteActivityLocked()
 	case protocol.PermissionAsked:
 		l.status.PermissionPending = true
+		l.status.TurnSince = time.Now().UnixMilli()
+		l.noteActivityLocked()
 	case protocol.PermissionResolved:
 		l.status.PermissionPending = false
+		l.status.TurnSince = time.Now().UnixMilli()
+		l.noteActivityLocked()
 	case protocol.QuestionAsked:
 		l.status.QuestionPending = true
+		l.status.TurnSince = time.Now().UnixMilli()
+		l.noteActivityLocked()
 	case protocol.QuestionResolved:
 		l.status.QuestionPending = false
+		l.status.TurnSince = time.Now().UnixMilli()
+		l.noteActivityLocked()
 	case protocol.UsageReported:
 		if e.Used.Known {
 			l.status.ContextUsed = e.Used.N
+			l.relaxContextFit()
 		}
 	case protocol.ContextFitWarning:
 		if e.ContextLimit > 0 {
@@ -684,11 +808,22 @@ func (l *Live) applyStatus(ev protocol.Event) {
 		if e.EstimatedTokens > 0 && l.status.ContextUsed == 0 {
 			l.status.ContextUsed = e.EstimatedTokens
 		}
+		switch e.Level {
+		case protocol.ContextFitWarn, protocol.ContextFitCritical:
+			l.status.ContextFit = e.Level
+		}
+	case protocol.CompactionCompleted:
+		// Occupancy from before the compact is no longer the window.
+		// The next usage.reported fills it in. Keep the limit (window size).
+		l.status.ContextUsed = 0
+		l.status.ContextFit = ""
 	case protocol.TeamRoster:
 		l.applyTeamRoster(e)
 	case protocol.ChildStarted:
+		l.noteActivityLocked()
 		l.applyChildStarted(e)
 	case protocol.ChildCompleted:
+		l.noteActivityLocked()
 		l.applyChildCompleted(e)
 	case protocol.DelegationChanged:
 		l.applyDelegation(e)
@@ -701,6 +836,22 @@ func (l *Live) applyStatus(ev protocol.Event) {
 	case protocol.LedgerUpdated:
 		l.applyLedger(e)
 	}
+}
+
+// relaxContextFit drops a stale fit warning once measured occupancy is
+// back under the engine's warn ratio (0.80). A known zero does not clear
+// it: omitempty can omit n, and that must not wipe a critical flag.
+func (l *Live) relaxContextFit() {
+	if l.status.ContextFit == "" || l.status.ContextLimit <= 0 || l.status.ContextUsed <= 0 {
+		return
+	}
+	if int64(l.status.ContextUsed)*5 < int64(l.status.ContextLimit)*4 {
+		l.status.ContextFit = ""
+	}
+}
+
+func (l *Live) noteActivityLocked() {
+	l.status.LastEventAt = time.Now().UnixMilli()
 }
 
 func teamTerminal(state string) bool {

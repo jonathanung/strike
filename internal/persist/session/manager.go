@@ -20,6 +20,7 @@ type Info struct {
 	ParentSessionID string
 	LeadSessionID   string // team lead; empty on roots (self is lead)
 	Title           string
+	Model           string // last model.selected model; empty until persisted
 	ForkedFrom      string // source id when created via Fork; empty otherwise
 	ProjectKey      string // launch project identity; empty on legacy sessions
 	WorkspaceID     string // registry id; empty when the session is unbound
@@ -108,6 +109,7 @@ func (m *Manager) Create(opts CreateOptions) (Info, error) {
 		now = t
 	}
 	meta := Meta{
+		SessionID:       id,
 		Title:           strings.TrimSpace(opts.Title),
 		ParentSessionID: strings.TrimSpace(opts.ParentSessionID),
 		LeadSessionID:   strings.TrimSpace(opts.LeadSessionID),
@@ -312,7 +314,13 @@ func (m *Manager) Open(id string) (Info, error) {
 	return info, nil
 }
 
-// Append writes an event to an open session. SessionTitled updates durable title.
+// Append writes an event to an open session. SessionTitled updates the durable
+// title. A model.selected event whose model is non-empty, and whose
+// correlation session id is empty or this session, updates the sidecar model.
+// In-memory model changes only after that sidecar write succeeds, so a failed
+// write is retried by a later selection of the same model. The JSONL append
+// still counts as success. Copied logs (fork, import) keep the source session
+// id on each event, so they stamp model separately from the kept events.
 // On append/fsync failure it attempts one Recover onto a verified durable
 // prefix and retries the event once. If recovery is impossible, it returns a
 // fatal PersistenceError so the runtime can cancel side effects.
@@ -355,6 +363,13 @@ func (m *Manager) Append(id string, ev protocol.Event) error {
 	if t, ok := ev.(protocol.SessionTitled); ok {
 		title = strings.TrimSpace(t.Title)
 	}
+	var model string
+	if ms, ok := ev.(protocol.ModelSelected); ok {
+		model = strings.TrimSpace(ms.Model)
+		if sid := strings.TrimSpace(ms.SessionID); sid != "" && sid != id {
+			model = ""
+		}
+	}
 	var prMeta *protocol.SessionMeta
 	if sm, ok := ev.(protocol.SessionMeta); ok {
 		prMeta = &sm
@@ -372,6 +387,13 @@ func (m *Manager) Append(id string, ev protocol.Event) error {
 		_, _ = UpdateMeta(m.dir, id, func(meta *Meta) {
 			meta.Title = title
 		})
+	}
+	if model != "" && e.info.Model != model {
+		if _, err := UpdateMeta(m.dir, id, func(meta *Meta) {
+			meta.Model = model
+		}); err == nil {
+			e.info.Model = model
+		}
 	}
 	if prMeta != nil {
 		if prMeta.PRURL != "" {
@@ -784,7 +806,53 @@ func (m *Manager) ForkAt(sourceID string, keepEvents int) (Info, error) {
 			return Info{}, fmt.Errorf("fork: copying events: %w", err)
 		}
 	}
+	// Copied events still carry the source session id, so Append's live-session
+	// guard does not stamp model. Take the last non-empty selection in the kept
+	// prefix, not the source sidecar (a later selection may sit past keepEvents).
+	if err := m.rememberModel(info.ID, lastSelectedModel(events)); err != nil {
+		_ = m.Close(info.ID)
+		return Info{}, fmt.Errorf("fork: model: %w", err)
+	}
 	return m.Get(info.ID)
+}
+
+// lastSelectedModel is the last non-empty model.selected in events.
+func lastSelectedModel(events []protocol.Event) string {
+	var model string
+	for _, ev := range events {
+		ms, ok := ev.(protocol.ModelSelected)
+		if !ok {
+			continue
+		}
+		if got := strings.TrimSpace(ms.Model); got != "" {
+			model = got
+		}
+	}
+	return model
+}
+
+// rememberModel writes model onto an open session's sidecar and memory.
+// Memory changes only after the sidecar write succeeds. Empty model and a
+// session that is not open are no-ops.
+func (m *Manager) rememberModel(id, model string) error {
+	model = strings.TrimSpace(model)
+	if m == nil || model == "" {
+		return nil
+	}
+	id = strings.TrimSpace(id)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	e, ok := m.sessions[id]
+	if !ok || e.info.Model == model {
+		return nil
+	}
+	if _, err := UpdateMeta(m.dir, id, func(meta *Meta) {
+		meta.Model = model
+	}); err != nil {
+		return err
+	}
+	e.info.Model = model
+	return nil
 }
 
 // forkTitleOf builds a display title for a forked session.
@@ -997,6 +1065,7 @@ func (m *Manager) infoFromDiskLocked(id string, st os.FileInfo) (Info, error) {
 		ParentSessionID: meta.ParentSessionID,
 		LeadSessionID:   meta.LeadSessionID,
 		Title:           title,
+		Model:           meta.Model,
 		ForkedFrom:      meta.ForkedFrom,
 		ProjectKey:      meta.ProjectKey,
 		WorkspaceID:     meta.WorkspaceID,

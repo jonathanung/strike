@@ -22,6 +22,7 @@ import (
 	"github.com/jonathanung/strike/internal/persist/session"
 	"github.com/jonathanung/strike/internal/product/version"
 	"github.com/jonathanung/strike/internal/protocol"
+	"github.com/jonathanung/strike/internal/trust/usageaudit"
 )
 
 type sessionsResponse struct {
@@ -30,11 +31,14 @@ type sessionsResponse struct {
 }
 
 type sessionListItem struct {
-	ID          string `json:"id"`
-	Title       string `json:"title,omitempty"`
-	Mtime       int64  `json:"mtime,omitempty"`
-	ForkedFrom  string `json:"forkedFrom,omitempty"`
-	WorkspaceID string `json:"workspaceId,omitempty"`
+	ID             string `json:"id"`
+	Title          string `json:"title,omitempty"`
+	Mtime          int64  `json:"mtime,omitempty"`
+	ForkedFrom     string `json:"forkedFrom,omitempty"`
+	WorkspaceID    string `json:"workspaceId,omitempty"`
+	Status         string `json:"status,omitempty"`
+	Unread         bool   `json:"unread"`
+	LastActivityAt int64  `json:"lastActivityAt,omitempty"`
 }
 
 type agentsResponse struct {
@@ -112,6 +116,15 @@ type capabilities struct {
 	ConfigFiles bool `json:"configFiles"`
 	// Themes is true when host.Services.Themes is wired (catalog list/get).
 	Themes bool `json:"themes"`
+	// Attachments is true when composer uploads can be stored and user.input
+	// / steer images are accepted with size limits and name redaction.
+	Attachments bool `json:"attachments"`
+	// Notifications is the redacted centre log (GET /v1/notifications).
+	// Always on when the server can read SessionDir.
+	Notifications bool `json:"notifications"`
+	// SideChat is true when a read-only side-chat model is wired. The ops
+	// refusal does not depend on this flag.
+	SideChat bool `json:"sideChat"`
 }
 
 type bootstrapResponse struct {
@@ -142,7 +155,7 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 	// Timeline is host-safe and derived from SessionDir JSONL (always available).
 	// TeamControl shares the live gate: Ops are handled by the same engine path.
 	live := s.hasLive()
-	c := capabilities{Live: live, Roots: s.opts.LiveHub != nil, Timeline: true, Sandbox: s.hasSandbox(), Diag: live, Team: live, TeamControl: live}
+	c := capabilities{Live: live, Roots: s.opts.LiveHub != nil, Timeline: true, Sandbox: s.hasSandbox(), Diag: live, Team: live, TeamControl: live, Attachments: s.opts.Attachments != nil, Notifications: true, SideChat: s.opts.SideChat != nil}
 	var skills []map[string]any
 	if h := s.opts.Services; h != nil {
 		c.Auth, c.Catalog, c.Settings, c.History = h.Auth != nil, h.Catalog != nil, h.Settings != nil, h.History != nil
@@ -409,16 +422,25 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Sandbox dial uses the same yolo+off iKnow gate as PATCH /v1/sandbox.
+	sandboxMode := ""
 	if body.Sandbox != "" {
 		if err := s.saveSandboxDefault(body.Sandbox, body.IKnow, r); err != nil {
 			writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
 			return
 		}
+		sandboxMode = body.Sandbox
 		body.Sandbox = "" // already persisted; avoid double-write in applySettingsPatch
 	}
 	if err := applySettingsPatch(settings, body); err != nil {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
 		return
+	}
+	fields := settingsPatchFields(body)
+	if sandboxMode != "" {
+		fields = append(fields, "sandbox")
+	}
+	if len(fields) > 0 {
+		s.noteAudit(usageaudit.ActionConfig, "", "settings updated", map[string]any{"fields": fields})
 	}
 	writeJSON(w, http.StatusOK, settingsFromDefaults(settings.Defaults()))
 }
@@ -516,6 +538,7 @@ func (s *Server) handleSandboxPatch(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
 		return
 	}
+	s.noteAudit(usageaudit.ActionConfig, "", "sandbox default updated", map[string]string{"mode": strings.TrimSpace(body.Mode)})
 	writeJSON(w, http.StatusOK, s.sandboxSnapshot(r))
 }
 
@@ -635,24 +658,6 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, agentsResponse{Agents: live.Agents()})
 }
 
-func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
-	items, err := listSessionFiles(s.opts.SessionDir)
-	if err != nil {
-		http.Error(w, "session list unavailable", http.StatusInternalServerError)
-		return
-	}
-	liveID := ""
-	if s.opts.LiveHub != nil {
-		live := s.opts.LiveHub.Active()
-		if live != nil {
-			liveID = live.SessionID()
-		}
-	} else if s.opts.Live != nil {
-		liveID = s.opts.Live.SessionID()
-	}
-	writeJSON(w, http.StatusOK, sessionsResponse{Sessions: items, LiveID: liveID})
-}
-
 func listSessionFiles(dir string) ([]sessionListItem, error) {
 	mgr := session.NewManager(dir)
 	list, err := mgr.List()
@@ -682,6 +687,25 @@ func listSessionFiles(dir string) ([]sessionListItem, error) {
 		return out[i].ID < out[j].ID
 	})
 	return out, nil
+}
+
+func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
+	items, err := listSessionFiles(s.opts.SessionDir)
+	if err != nil {
+		http.Error(w, "session list unavailable", http.StatusInternalServerError)
+		return
+	}
+	items = s.decorateSessions(items)
+	liveID := ""
+	if s.opts.LiveHub != nil {
+		live := s.opts.LiveHub.Active()
+		if live != nil {
+			liveID = live.SessionID()
+		}
+	} else if s.opts.Live != nil {
+		liveID = s.opts.Live.SessionID()
+	}
+	writeJSON(w, http.StatusOK, sessionsResponse{Sessions: items, LiveID: liveID})
 }
 
 func (s *Server) handleSessionChildren(w http.ResponseWriter, r *http.Request) {
@@ -1127,16 +1151,49 @@ func (s *Server) handleFilesApplyPatch(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleMemory(w http.ResponseWriter, r *http.Request) {
-	if s.opts.Services == nil || s.opts.Services.Memory == nil {
-		capabilityUnavailable(w, "memory")
+	mem := s.memoryService(w)
+	if mem == nil {
 		return
 	}
-	items, err := s.opts.Services.Memory.List(r.URL.Query().Get("tag"))
+	scope, err := memoryScope(r.URL.Query().Get("scope"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	var items []host.MemoryEntry
+	if scoped, ok := mem.(host.MemoryScopes); ok {
+		items, err = scoped.ListScope(scope, r.URL.Query().Get("tag"))
+	} else if scope == "global" {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "global memory is not configured"})
+		return
+	} else {
+		items, err = mem.List(r.URL.Query().Get("tag"))
+	}
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, opErrorResponse{Error: err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"entries": items})
+	if items == nil {
+		items = []host.MemoryEntry{}
+	}
+	body := map[string]any{"entries": items, "scope": scope}
+	if files, ok := mem.(host.MemoryFiles); ok {
+		md, audit := files.Files(scope)
+		body["markdownFile"] = md
+		body["auditFile"] = audit
+	}
+	writeJSON(w, http.StatusOK, body)
+}
+
+func memoryScope(raw string) (string, error) {
+	switch strings.TrimSpace(raw) {
+	case "", "project":
+		return "project", nil
+	case "global":
+		return "global", nil
+	default:
+		return "", fmt.Errorf("scope must be project or global")
+	}
 }
 
 func (s *Server) handleIssues(w http.ResponseWriter, r *http.Request) {
@@ -1297,6 +1354,12 @@ func (s *Server) handleOps(w http.ResponseWriter, r *http.Request) {
 		default:
 			writeJSON(w, http.StatusForbidden, opErrorResponse{Error: err.Error()})
 		}
+		return
+	}
+	op, err = s.prepareOp(op, sessionID)
+	if err != nil {
+		s.recordServeOpError(r, "http", env.Type, sessionID)
+		writeJSON(w, attachmentHTTPStatus(err), opErrorResponse{Error: err.Error()})
 		return
 	}
 	// Team-control Ops wait for engine outcome so CAS/idempotency map to HTTP.
@@ -1527,6 +1590,13 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				_ = ws.WriteText(string(msg))
 				continue
 			}
+			op, err = s.prepareOp(op, sessionID)
+			if err != nil {
+				s.recordServeOpError(r, "ws", env.Type, sessionID)
+				msg, _ := json.Marshal(map[string]any{"type": "error", "data": map[string]string{"message": err.Error()}})
+				_ = ws.WriteText(string(msg))
+				continue
+			}
 			if protocol.IsTeamControlOp(op) {
 				if root := strings.TrimSpace(protocol.TeamControlRootSessionID(op)); root != "" && root != live.SessionID() {
 					s.recordServeOp(sessionID, env.Type, s.clientIPString(r), "ws", "denied")
@@ -1666,8 +1736,10 @@ func (s *Server) handleRoots(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "multi-root unavailable", http.StatusServiceUnavailable)
 		return
 	}
+	roots := s.opts.LiveHub.List()
+	s.decorateRoots(roots)
 	writeJSON(w, http.StatusOK, rootsResponse{
-		Roots:    s.opts.LiveHub.List(),
+		Roots:    roots,
 		ActiveID: s.opts.LiveHub.ActiveID(),
 	})
 }
@@ -1875,11 +1947,35 @@ func (s *Server) handleMemoryPut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Value string   `json:"value"`
-		Tags  []string `json:"tags"`
+		Value  string   `json:"value"`
+		Tags   []string `json:"tags"`
+		Author string   `json:"author"`
+		Scope  string   `json:"scope"`
 	}
 	if err := decodeBody(w, r, &body); err != nil {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	rawScope := body.Scope
+	if strings.TrimSpace(rawScope) == "" {
+		rawScope = r.URL.Query().Get("scope")
+	}
+	scope, err := memoryScope(rawScope)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	if scoped, ok := mem.(host.MemoryScopes); ok {
+		entry, err := scoped.PutScope(scope, key, body.Value, body.Author, body.Tags)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, entry)
+		return
+	}
+	if scope == "global" {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "global memory is not configured"})
 		return
 	}
 	if err := mem.Put(key, body.Value, body.Tags); err != nil {
@@ -1909,6 +2005,27 @@ func (s *Server) handleMemoryDelete(w http.ResponseWriter, r *http.Request) {
 	key := strings.TrimSpace(r.PathValue("key"))
 	if key == "" {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "key is required"})
+		return
+	}
+	scope, err := memoryScope(r.URL.Query().Get("scope"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	if scoped, ok := mem.(host.MemoryScopes); ok {
+		if err := scoped.DeleteScope(scope, key); err != nil {
+			status := http.StatusBadRequest
+			if strings.Contains(strings.ToLower(err.Error()), "not found") {
+				status = http.StatusNotFound
+			}
+			writeJSON(w, status, opErrorResponse{Error: err.Error()})
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if scope == "global" {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "global memory is not configured"})
 		return
 	}
 	if err := mem.Delete(key); err != nil {

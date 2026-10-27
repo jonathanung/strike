@@ -1,0 +1,50 @@
+{
+  "$comment": "Canonical session/gateway status vocabulary for the web UI and strike serve. Ids are stable. Aliases normalize to an id. Tones are CSS variables in webui/style.css (schemas/ui-tokens.json roles). This file is the contract other streams code against; Go and Rust tests fail if they drift.",
+  "ids": ["idle", "running", "waiting", "blocked", "failed", "done", "stopped", "disconnected"],
+  "labels": {
+    "idle": "Idle",
+    "running": "Running",
+    "waiting": "Waiting",
+    "blocked": "Blocked",
+    "failed": "Failed",
+    "done": "Done",
+    "stopped": "Stopped",
+    "disconnected": "Disconnected"
+  },
+  "tones": {
+    "idle": "--muted",
+    "running": "--accent-alt",
+    "waiting": "--warning",
+    "blocked": "--warning",
+    "failed": "--signal",
+    "done": "--success",
+    "stopped": "--muted",
+    "disconnected": "--signal"
+  },
+  "chipIdleTone": "--success",
+  "aliases": {
+    "ready": "idle",
+    "saved": "idle",
+    "thinking": "running",
+    "working": "running",
+    "in_progress": "running",
+    "in-progress": "running",
+    "busy": "running",
+    "starting": "running",
+    "active": "running",
+    "waiting-for-approval": "waiting",
+    "approval": "waiting",
+    "permission": "waiting",
+    "question": "waiting",
+    "stalled": "waiting",
+    "completed": "done",
+    "complete": "done",
+    "canceled": "stopped",
+    "cancelled": "stopped",
+    "error": "failed",
+    "unreachable": "disconnected"
+  },
+  "priority": ["disconnected", "waiting", "running", "blocked", "failed", "stopped", "done", "idle"],
+  "heartbeatIntervalMs": 2000,
+  "heartbeatStaleMs": 6000
+}

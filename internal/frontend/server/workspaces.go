@@ -10,6 +10,7 @@ import (
 
 	"github.com/jonathanung/strike/internal/persist/workspace"
 	"github.com/jonathanung/strike/internal/protocol"
+	"github.com/jonathanung/strike/internal/trust/usageaudit"
 )
 
 type workspacesResponse struct {
@@ -205,6 +206,20 @@ func (s *Server) handleWorkspacePolicy(w http.ResponseWriter, r *http.Request) {
 		}
 		ws = got
 	}
+	action := usageaudit.ActionConfig
+	summary := "workspace policy updated"
+	if body.PermissionMode != nil && strings.TrimSpace(*body.PermissionMode) != "" {
+		action = usageaudit.ActionPermission
+		summary = "workspace permission mode " + strings.TrimSpace(*body.PermissionMode)
+	}
+	detail := map[string]any{"workspaceId": id}
+	if body.PermissionMode != nil {
+		detail["permissionMode"] = strings.TrimSpace(*body.PermissionMode)
+	}
+	if body.Rules != nil {
+		detail["rulesSet"] = strings.TrimSpace(*body.Rules) != ""
+	}
+	s.noteAudit(action, "", summary, detail)
 	writeJSON(w, http.StatusOK, ws)
 }
 
