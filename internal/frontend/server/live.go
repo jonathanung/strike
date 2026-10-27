@@ -74,6 +74,21 @@ type LiveHub struct {
 
 	spawn  RootSpawnFunc
 	resume RootResumeFunc
+
+	// onRemove, when set, runs after a root leaves the hub so the owner
+	// can stop whatever the hub does not own (the root's engine and its
+	// session-manager handle). Set via SetOnRemove before use.
+	onRemove func(id string)
+}
+
+// SetOnRemove registers the callback Remove invokes after a root is
+// dropped from the hub. The hub never owned the root's engine: without
+// this hook a closed root keeps its session open in the manager, and a
+// later session delete reports it open and demands force.
+func (h *LiveHub) SetOnRemove(fn func(id string)) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.onRemove = fn
 }
 
 // NewLiveHub creates an empty hub. Callers wire lifecycle functions.
@@ -101,12 +116,11 @@ func (h *LiveHub) Add(id string, live *Live) {
 // entry becomes active.
 func (h *LiveHub) Remove(id string) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	entry, ok := h.entries[id]
 	if !ok {
+		h.mu.Unlock()
 		return
 	}
-	entry.live.Close()
 	delete(h.entries, id)
 	if h.active == id {
 		h.active = ""
@@ -114,6 +128,12 @@ func (h *LiveHub) Remove(id string) {
 			h.active = rid
 			break
 		}
+	}
+	onRemove := h.onRemove
+	h.mu.Unlock()
+	entry.live.Close()
+	if onRemove != nil {
+		onRemove(id)
 	}
 }
 

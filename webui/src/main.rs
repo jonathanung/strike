@@ -1,8 +1,9 @@
 //! Strike web client. The session list is live roots plus saved sessions.
 //! Activity, Files, Changes, Git, Worktrees, Memory, Knowledge, and
 //! Artifacts are the side panel. Side chat is a separate read-only drawer.
-//! Goals and Autopilot live in `goals`. Schedule and the task runner are
-//! not drawn here; see docs/webui-planned.md.
+//! Goals and Autopilot live in `goals`. The task runner is the Tasks view
+//! in `task_runner`. Schedule is not drawn here; see
+//! docs/webui-planned.md.
 
 mod api;
 mod chat_mode;
@@ -17,6 +18,7 @@ mod model_menu_view;
 mod session_list;
 mod session_panel;
 mod storage;
+mod task_runner;
 mod transcript_find;
 mod usage_audit;
 mod session_delete;
@@ -2467,6 +2469,14 @@ fn App() -> impl IntoView {
         </Show>
         <Show when=move || mode.get() == "goals" fallback=move || ()>
             <goals::GoalsPane base=base token=token />
+        </Show>
+        <Show when=move || mode.get() == "tasks" fallback=move || ()>
+            <task_runner::TaskRunner
+                base=base
+                token=token
+                active_root=active_root
+                status=status
+            />
         </Show>
         <Show when=move || mode.get() == "chat">
             <div class=move || chat_mode::shell_class(focus.get(), &layout.get(), sessions_drawer.get(), panel_drawer.get())>
