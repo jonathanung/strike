@@ -12,7 +12,7 @@ protocol-schema = { path = "protocol-schema" }
 js-sys = "0.3"
 send_wrapper = "0.6"
 wasm-bindgen = "0.2"
-web-sys = { version = "0.3", features = ["CssStyleDeclaration", "DataTransfer", "Document", "DomRect", "DomRectReadOnly", "DragEvent", "Element", "Event", "EventSource", "EventTarget", "HtmlButtonElement", "HtmlElement", "HtmlHeadElement", "HtmlInputElement", "HtmlTextAreaElement", "KeyboardEvent", "Location", "MessageEvent", "MouseEvent", "Navigator", "Node", "Notification", "NotificationOptions", "NotificationPermission", "ServiceWorker", "ServiceWorkerContainer", "Storage", "SubmitEvent", "Window"] }
+web-sys = { version = "0.3", features = ["Blob", "ClipboardEvent", "CssStyleDeclaration", "DataTransfer", "Document", "DomRect", "DomRectReadOnly", "DragEvent", "Element", "Event", "EventSource", "EventTarget", "File", "FileList", "FileReader", "HtmlButtonElement", "HtmlElement", "HtmlHeadElement", "HtmlInputElement", "HtmlTextAreaElement", "KeyboardEvent", "Location", "MessageEvent", "MouseEvent", "Navigator", "Node", "Notification", "NotificationOptions", "NotificationPermission", "ServiceWorker", "ServiceWorkerContainer", "Storage", "SubmitEvent", "Url", "Window"] }
 
 [profile.release]
 opt-level = 2
