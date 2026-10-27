@@ -1,9 +1,8 @@
 //! Strike web client. The session list is live roots plus saved sessions.
 //! Activity, Files, Changes, Git, Worktrees, Memory, Knowledge, and
 //! Artifacts are the side panel. Side chat is a separate read-only drawer.
-//! Goals and Autopilot live in `goals`. The task runner is the Tasks view
-//! in `task_runner`. Schedule is not drawn here; see
-//! docs/webui-planned.md.
+//! Goals and Autopilot live in `goals`. Schedule is the clock (`schedule`
+//! module). The task runner is the Tasks view in `task_runner`.
 
 mod api;
 mod approvals;
@@ -14,6 +13,7 @@ mod editor;
 mod gateway;
 mod git;
 mod goals;
+mod schedule;
 mod model;
 mod notify;
 mod model_menu;
@@ -2461,6 +2461,42 @@ fn App() -> impl IntoView {
     }
     on_goals_key.forget();
 
+    // Alt+C opens Schedule (the clock). The original PR shipped Alt+S,
+    // but side chat (#1282) landed first and owns Alt+S on main, so the
+    // reland takes the free Alt+C — the same resolution the gateway
+    // switcher used when it took Alt+W. Like Alt+G, this stays here
+    // because only the page can set `mode`; the shortcut is listed in
+    // the overlay via src/shell/contrib/scheduler.rs. Schedule unmounts
+    // the document pane, so an edit in progress or typing in a field
+    // must keep the key (the original PR's guard).
+    let on_schedule_key =
+        Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |ev: web_sys::KeyboardEvent| {
+            if ev.alt_key()
+                && !ev.meta_key()
+                && !ev.ctrl_key()
+                && ev.key().eq_ignore_ascii_case("c")
+            {
+                let typing = ev
+                    .target()
+                    .map(|t| {
+                        t.dyn_ref::<web_sys::Element>()
+                            .map(|el| {
+                                matches!(el.tag_name().as_str(), "INPUT" | "TEXTAREA" | "SELECT")
+                            })
+                            .unwrap_or(false)
+                    })
+                    .unwrap_or(false);
+                if !typing && !doc_editing.get_untracked() {
+                    ev.prevent_default();
+                    mode.set("schedule".into());
+                }
+            }
+        });
+    if let Some(w) = web_sys::window() {
+        let _ = w.add_event_listener_with_callback("keydown", on_schedule_key.as_ref().unchecked_ref());
+    }
+    on_schedule_key.forget();
+
     // Alt+U opens Usage and Alt+A opens Audit. Like Alt+G, these stay
     // here because only the page can set `mode`. The shortcuts are listed
     // in the overlay via src/shell/contrib/usage_audit.rs.
@@ -2875,6 +2911,15 @@ fn App() -> impl IntoView {
             <task_runner::TaskRunner
                 base=base
                 token=token
+                active_root=active_root
+                status=status
+            />
+        </Show>
+        <Show when=move || mode.get() == "schedule" fallback=move || ()>
+            <schedule::SchedulePage
+                base=base
+                token=token
+                mode=mode
                 active_root=active_root
                 status=status
             />

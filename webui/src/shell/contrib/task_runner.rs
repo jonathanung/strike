@@ -17,7 +17,9 @@ pub fn install(reg: &mut ShellHook) {
         label: "Task runner",
         detail: "Open a checklist, run each section, review the checkpoint",
         shortcut: "",
-        keywords: &["plan", "checklist", "checkpoint"],
+        // Not "plan": the cockpit UAT pins the palette query "plan" to
+        // Approval: Plan, and an exact keyword match here outranks it.
+        keywords: &["tasks", "checklist", "checkpoint"],
         argument: None,
         order: 35,
         run: Rc::new(|_| crate::shell::host::set_view("tasks")),

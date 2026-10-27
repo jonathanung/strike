@@ -63,6 +63,9 @@ Endpoints:
   GET  /v1/sessions                 session list (+ liveId)
   GET  /v1/sessions/{id}/events     SSE tail of a session JSONL log
   GET  /v1/workflows                workflow catalog
+  GET  /v1/schedules                persisted schedules
+  POST /v1/schedules                create a cron, interval, one-shot, or heartbeat
+  POST /v1/schedules/{id}/run       start a root session now
   POST /v1/workflows/save           save document (never activates)
   POST /v1/workflows/{name}/start   start after confirm (rejects invalid)
   POST /v1/workflows/stop           stop active workflow
@@ -338,6 +341,20 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		}
 
 		// Build LiveHub with spawn and resume callbacks.
+		registerLive := func(ctx context.Context, slot *rootSlot) (string, error) {
+			live := server.NewLive(slot.id, slot.workDir, agents, slot.eng.Ops())
+			a.attachMemoryMode(live, slot.id, slot.eng)
+			seedLiveSandbox(live)
+			sr := startServeRoot(ctx, slot, live)
+			mu.Lock()
+			roots[slot.id] = sr
+			mu.Unlock()
+			liveHub.Add(slot.id, live)
+			if info, err := a.sessions.Get(slot.id); err == nil && info.Title != "" {
+				liveHub.SetTitle(slot.id, info.Title)
+			}
+			return slot.id, nil
+		}
 		liveHub = server.NewLiveHub(
 			// The hub passes the HTTP request context. The engine has to live
 			// as long as the daemon, same as the initial root below.
@@ -346,18 +363,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 				if err != nil {
 					return "", err
 				}
-				live := server.NewLive(slot.id, slot.workDir, agents, slot.eng.Ops())
-				a.attachMemoryMode(live, slot.id, slot.eng)
-				seedLiveSandbox(live)
-				sr := startServeRoot(ctx, slot, live)
-				mu.Lock()
-				roots[slot.id] = sr
-				mu.Unlock()
-				liveHub.Add(slot.id, live)
-				if info, err := a.sessions.Get(slot.id); err == nil && info.Title != "" {
-					liveHub.SetTitle(slot.id, info.Title)
-				}
-				return slot.id, nil
+				return registerLive(ctx, slot)
 			},
 			func(_ context.Context, sessionID string) (string, bool, error) {
 				// Validate: session must exist and be a root.
@@ -401,6 +407,13 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 				return slot.id, false, nil
 			},
 		)
+		liveHub.SetUnattendedSpawn(func(ctx context.Context) (string, error) {
+			slot, err := a.spawnUnattended("")
+			if err != nil {
+				return "", err
+			}
+			return registerLive(ctx, slot)
+		})
 
 		// Add initial root from the first assembly slot.
 		initialSlot := a.firstSlot
@@ -537,6 +550,17 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		defer func() { _ = st.Close() }()
 		sharedAttachments = st
 	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		cwd = ""
+	}
+	schedules, err := openScheduleService(workspace.DefaultDir(), liveHub, services, wsStore, cwd)
+	if err != nil {
+		return err
+	}
+	if liveHub != nil && !opts.readOnly {
+		go schedules.Run(ctx)
+	}
 
 	srv, err := server.New(server.Options{
 		Addr:       opts.addr,
@@ -545,6 +569,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		TokenFile:  opts.tokenFile,
 		SessionDir: sessionDir,
 		Workspaces: wsStore,
+		Schedules:  schedules,
 		LiveHub:    liveHub,
 		Services:   services,
 		SyncWorkDir: func(dir string) {
@@ -654,6 +679,7 @@ func printServeBanner(w io.Writer, b serveBanner) {
 	}
 	fmt.Fprintf(w, "  sessions dir: %s\n", b.sessionDir)
 	fmt.Fprintln(w, "  audit:   serve ops → ~/.strike/audit (family serve_op)")
+	fmt.Fprintln(w, "  schedules: ~/.strike/schedules.json  (unattended runs use workspace mode, else plan)")
 	fmt.Fprintln(w, "  remote:  strike connect user@host   or   ssh -L 8787:127.0.0.1:8787 user@host")
 	fmt.Fprintln(w, "experimental web cockpit — TUI remains primary")
 }

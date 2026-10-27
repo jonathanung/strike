@@ -42,17 +42,24 @@ The Goals view does not draw either of those.
 
 ## Schedule
 
-Recurring work is not a daemon resource yet. Strike has goal loops
-(`GET/POST /v1/goals`, pause/resume/abort, a per-goal log) and workflow
-documents (`/v1/workflows`), not a clock.
+Shipped. `strike serve` persists schedules in `~/.strike/schedules.json`
+and exposes them at `/v1/schedules`. Kinds are cron, interval, one-shot,
+and heartbeat. A fire starts a root session from a prompt, a goal, or a
+workflow through `internal/rootstart` (the same seam inbound triggers
+should call). The Schedule page can create, pause, resume, run now, edit,
+delete, and open the session a run wrote.
 
-Planned: a Schedule list of goal or workflow runs with a cron or interval,
-the next fire time, last status, and a link to the session the run wrote.
-Firing one may start a goal (see Goals and autopilot). The schedule does
-not own the loop guards.
-Creating one would persist beside `~/.strike` and the daemon would start a
-root session when it fires. There is no scheduler process in `strike serve`
-today, so the panel stays out until that exists.
+Unattended runs use the workspace permission mode when that workspace has
+one. Otherwise they use plan, which denies writes. They do not inherit
+`strike serve --auto` or `--dangerously-skip-permissions`. Overlap defaults
+to skip. A restart with missed fires defaults to skip (record one miss and
+arm the next future slot); `missed: once` catches up a single run. A
+heartbeat records a quiet baseline and does not start a session until the
+workspace fingerprint changes. The first observation is that baseline.
+
+The goal loop (`POST /v1/goals/{id}/run`) is still the evaluate-only
+harness. A scheduled goal starts a root session whose prompt is the goal
+text; it does not call that loop.
 
 ## Memory
 
@@ -170,6 +177,13 @@ Not in this client: tailnet discovery, a browser-started SSH session, and
 syncing CLI profiles from the daemon. The switcher shows an `ssh`
 destination as a hint. It does not open that connection. A public tunnel
 is still something you run yourself, and it is a public edge.
+
+The desktop shell in `desktop/` (see [desktop.md](desktop.md)) is a separate
+window. A Tailscale or other VPN URL is an explicit saved gateway: HTTPS
+uses Web PKI or a pinned certificate, and cleartext HTTP is refused until
+the user allows it. SSH runs `strike connect`, so the short-lived grant
+stays in that process. The shell does not draw this switcher or the status
+chip, and it does not exchange pairing codes.
 
 ## Memory mode
 
