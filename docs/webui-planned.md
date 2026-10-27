@@ -104,16 +104,34 @@ writes remain on the agent tools. There is no browser write route.
 
 ## Task runner
 
-Plans exist (`/v1/plans`: sections, status, reopen). Delegations exist on
-`GET /v1/team`. There is no spec → plan → run → checkpoint pipeline.
-That pipeline is not a goal loop: a goal has one verification command and
-stops on the harness guards, and it does not checkpoint plan sections.
+Shipped as the Tasks view. One plan (`/v1/plans`) opens as a checklist.
+`POST /v1/plans/{id}/run` with `{"action":"open","ownerRoot":"..."}` creates
+the durable run (project file under `taskruns/`, same key as plans). Run
+(`"action":"start"`) spawns a child (`team.spawn`) for every section whose
+dependencies are approved or skipped. The child's handoff and verification
+report are the checkpoint. The user approves, retries, skips, or reorders
+from that board.
 
-Planned: one plan opened as a checklist. Run would mean spawning a child
-(`team.spawn`) per section, with that child's Activity row and handoff as
-the checkpoint. Checkpoints would be the plan section body plus the child
-verification report, not a hidden snapshot format. Until a run is defined as
-that sequence, the client does not show a Task Runner board.
+A section runs only after the user approves the previous checkpoint (or
+skips it). A failed child, a `schema:handoff` block (#1201), or an
+incomplete handoff marks the section failed and blocks dependants. Start
+will not spawn those dependants. The run file survives a daemon restart;
+an unbound claim (spawn never returned a child id) returns to pending.
+
+Other streams start a run with the same route. `expectedVersion` is the
+CAS token from the last response.
+
+```
+POST /v1/plans/{id}/run
+{"action":"open|start|approve|retry|skip|reorder","ownerRoot":"...","sectionId":"...","sectionIds":[],"expectedVersion":1}
+GET /v1/plans/{id}/run
+```
+
+`reorder` is a permutation of section ids. It re-chains only rows that
+still depend on pending sections, so it cannot route around a failure.
+Scheduler (#1276) and goals (#1284) should call `start` on this route
+rather than spawning sections themselves.
+
 
 ## Workspace binding
 
