@@ -646,6 +646,7 @@ try {
   if (apprRemoved.status !== 200 || apprRemoved.text.includes("smoke-deny")) {
     throw new Error(`remove deny: ${apprRemoved.status} ${apprRemoved.text.slice(0, 300)}`);
   }
+
   const evalValue = async (expression) => {
     const ev = await send("Runtime.evaluate", { expression, returnByValue: true });
     if (ev.result?.exceptionDetails) {
@@ -1626,6 +1627,57 @@ try {
   }
   await clickSideTab("Worktrees", "session.childIsolation");
 
+  // Single ask surface (#1424 review, #1319 Q3): ONE pending permission
+  // ask must render EXACTLY ONE decision UI across both ask containers
+  // — the ApprovalCards stream (.approvals-card) and the composer
+  // transcript-asks bar (.composer-ask, removed). Seed a model-tool ask
+  // via the ops API ("run echo ..." makes the echo provider call bash),
+  // count both containers, then resolve through the card's Deny and
+  // require both containers to clear.
+  const singleAskSeed = await fetch(`http://127.0.0.1:${port}/v1/ops`, {
+    method: "POST",
+    headers: apprAuth,
+    body: JSON.stringify({ type: "user.input", data: { text: "run echo single-ask-smoke-1424" } }),
+  });
+  if (!singleAskSeed.ok) {
+    throw new Error(`single-ask seed ${singleAskSeed.status} ${await singleAskSeed.text()}`);
+  }
+  const askCounts = async () => {
+    const raw = await evaluate(`(() => JSON.stringify({
+      cards: document.querySelectorAll(".approvals-card").length,
+      composerAsks: document.querySelectorAll(".composer-ask").length,
+      composerBar: document.querySelectorAll('[data-composer-triggers="asks"]').length,
+    }))()`);
+    return JSON.parse(raw || "{}");
+  };
+  const singleAsk = await waitFor(
+    "one pending ask renders exactly one ask row (ApprovalCards only, no composer bar)",
+    async () => {
+      const c = await askCounts();
+      return { ok: c.cards + c.composerAsks === 1 && c.cards === 1 && c.composerBar === 0, ...c };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  if (singleAsk.cards !== 1 || singleAsk.composerAsks !== 0) {
+    throw new Error(`single-ask count wrong: ${JSON.stringify(singleAsk)}`);
+  }
+  const singleAskDenied = await evaluate(`(() => {
+    const b = [...document.querySelectorAll(".approvals-card button")].find((x) => (x.textContent || "").includes("Deny"));
+    if (!b) return "no-deny";
+    b.click();
+    return "denied";
+  })()`);
+  if (singleAskDenied !== "denied") {
+    throw new Error(`single-ask Deny button missing (${singleAskDenied})`);
+  }
+  await waitFor(
+    "single ask clears from both containers after Deny",
+    async () => {
+      const c = await askCounts();
+      return { ok: c.cards + c.composerAsks === 0, ...c };
+    },
+    { timeout: STEP_MS, interval: 250 },
+  );
   // Session delete (#1358): seed a session, close its root so it is
   // saved but not open, then delete it through the cockpit. Cancelling
   // the confirm must issue no request; confirming must remove it from
