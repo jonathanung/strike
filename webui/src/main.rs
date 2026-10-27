@@ -9,6 +9,7 @@ mod chat_mode;
 mod editor;
 mod goals;
 mod model;
+mod notify;
 mod model_menu;
 mod model_menu_view;
 mod storage;
@@ -24,6 +25,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use leptos::callback::Callback;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use model::{
@@ -48,7 +50,6 @@ use crate::side_chat::SideChatPanel;
 use crate::model::{budget_elapsed, can_retry, RootsResponse};
 use crate::model_menu::{active_context, context_view, reduce_envelope, LiveModelState, ModelDefaults};
 use crate::model_menu_view::ModelMenu;
-use leptos::callback::Callback;
 use crate::status::{
     apply_document_chrome, elapsed_since, session_kind, StatusKind, StatusMark, StatusSlot,
     StatusTab, StatusTabs, HEARTBEAT_STALE_MS,
@@ -1799,6 +1800,20 @@ fn App() -> impl IntoView {
         });
     });
 
+    // #1267 navbar hosts this bell. The component owns its panel and settings.
+    let on_notify = Callback::new(move |target: notify::FocusTarget| {
+        mode.set("chat".into());
+        focus.set(false);
+        if target.session_id.is_empty() {
+            return;
+        }
+        let live = roots
+            .get_untracked()
+            .iter()
+            .any(|r| r.id == target.session_id);
+        open_session(target.session_id, live);
+    });
+
     let running_count = move || {
         activity
             .get()
@@ -1820,6 +1835,14 @@ fn App() -> impl IntoView {
     chat_mode::set_host(chat_mode::LayoutHost {
         layout,
         set_layout: Rc::new(move |next: &str| set_layout(next.to_string())),
+    });
+    // The shell slot (src/shell/contrib/notifications.rs) renders the bell
+    // with the page's signals; install them before the view reads them.
+    notify::set_host(notify::NotifyHost {
+        base,
+        token,
+        gateway,
+        on_focus: on_notify,
     });
 
     shell::boot();

@@ -19,6 +19,7 @@
 <link rel="stylesheet" href="/assets/navbar-4aaaf28db500eacb.css" integrity="sha384-5TOOsJOEELXhQX9eaCeYAdolP2MTbzKY2Rs54jkUpbigS3rQ+1uG62wvDZTASCfR"/>
 <link rel="stylesheet" href="/assets/editor-b94eee6c774248b5.css" integrity="sha384-+9ZqewFDkMigo7FvJP5c3fz6AHPgvKtu9jHfIAjeW7Qtx7wW3GCJSZM+LHcEeR4D"/>
 <link rel="stylesheet" href="/assets/chat-mode-c0a49864a0dd5243.css" integrity="sha384-McpfSccRV3saRSz8h4ulV3CS05un9+FK6ngy762vr2Ue/+x8ZumcRBVB0/5OG7Ao"/>
+<link rel="stylesheet" href="/assets/notify-750498e8d7d87548.css" integrity="sha384-l/TrTY1ETPTYhTEtEfPovdv2nck2zscWIo3mhOCEkb/RLhrZYW/bwgXX5qn68bAv"/>
 <link rel="stylesheet" href="/assets/usage-audit-4109f37a4c3f020.css" integrity="sha384-PG57uHfAoOyYrJLu5TZtnb1s2Ud6PPolTjB9IeCoVZ1qF7Qgrtsh0+5YiMBYYV9Z"/>
 <link rel="stylesheet" href="/assets/goals-5b895e22909a0f66.css" integrity="sha384-liP/FQF4QvouM0zc8WO7nxC1u3CzbFF/GBmvuED6zZS8f0rmPG1QWhWJitxfpRm1"/>
 
@@ -26,8 +27,8 @@
 
 
 <script type="module">
-import init, * as bindings from '/assets/strike-webui-9c7a59f2d21f7eae.js';
-const wasm = await init({ module_or_path: '/assets/strike-webui-9c7a59f2d21f7eae_bg.wasm' });
+import init, * as bindings from '/assets/strike-webui-cfd8833206700c16.js';
+const wasm = await init({ module_or_path: '/assets/strike-webui-cfd8833206700c16_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -38,6 +39,6 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 </script>
 <script src="/assets/register.js" defer></script>
 
-<link rel="modulepreload" href="/assets/strike-webui-9c7a59f2d21f7eae.js" crossorigin="anonymous" integrity="sha384-McfHctq3zh88HppiOwIWru/LFxJmcwIPEwmpKX30wTOhgv7I3ZUd6VGa0M9KxctP"><link rel="preload" href="/assets/strike-webui-9c7a59f2d21f7eae_bg.wasm" crossorigin="anonymous" integrity="sha384-ahTEIHwgsYvTGxncZsoTJUCqifW3X35BbcaATWJVw2wRzMiPimSTWm7s783IAL+5" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/assets/strike-webui-cfd8833206700c16.js" crossorigin="anonymous" integrity="sha384-lLJRh9IJjMqs1uzeJ0gIt2gQtlvW980yBtCx5vdYgZzKyrjTA5BOha3qbGheqc94"><link rel="preload" href="/assets/strike-webui-cfd8833206700c16_bg.wasm" crossorigin="anonymous" integrity="sha384-JYvPMVeRMqLa3c3k++SB+zUnFi/bVp77MRtHeLSnrrbQ81LU8PcWoZb87kNhkWrw" as="fetch" type="application/wasm"></head>
 <body></body>
 </html>

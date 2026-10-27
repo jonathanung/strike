@@ -119,6 +119,10 @@ type Server struct {
 	// index.html (Trunk emits an inline WASM loader) without unsafe-inline.
 	scriptCSPHashes []string
 
+	// notifyOnce lazily opens the redacted notification log under SessionDir.
+	notifyOnce sync.Once
+	notifyLog  *notifyLog
+
 	// tokenHash is the sha256 of the daemon token file last observed.
 	// A change appends a token-rotation audit entry. The token is not stored.
 	tokenMu   sync.Mutex
@@ -379,6 +383,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/sidechat/ask", s.handleSideChatAsk)
 	s.mux.HandleFunc("POST /v1/sidechat/ops", s.handleSideChatOps)
 	s.mux.HandleFunc("GET /v1/live/events", s.handleLiveEvents)
+	s.mux.HandleFunc("GET /v1/notifications", s.handleNotifications)
+	s.mux.HandleFunc("GET /v1/notifications/stream", s.handleNotificationStream)
+	s.mux.HandleFunc("PUT /v1/notifications/prefs", s.handleNotificationPrefs)
 	s.mux.HandleFunc("GET /v1/ws", s.handleWS)
 	s.mux.HandleFunc("GET /{$}", s.handleAttach)
 	s.mux.HandleFunc("GET /attach", s.handleAttach)

@@ -244,6 +244,25 @@ dropped event stream shows a reconnecting note and opens the stream again.
 The column stays up during the gap. When the new stream opens, the column
 is replaced and the daemon's log replay fills it. Events from a socket that
 has already been closed are ignored, so the log is not appended twice.
+## Notifications
+
+The centre is in the client. `GET /v1/notifications` and
+`GET /v1/notifications/stream` project an allowlist from session JSONL:
+approval needed, a delegated child finished or blocked, and a root turn
+finished. Bytes appended while the tab was closed are included on the next
+read. Names and one-line summaries are scrubbed and clamped. Permission
+patterns, tool output, handoff files, and verification reports are not
+copied.
+
+Per-session mute and quiet hours live in
+`PUT /v1/notifications/prefs`. They suppress browser banners. The record
+stays in the centre until this browser marks it read.
+
+Not built: a third-party web-push service, and an operating-system banner
+while the browser process is quit. Nothing can wake a quit browser without
+that push service. The next open replays the daemon log into the centre.
+A gateway drop is detected by the page (the daemon cannot deliver "I am
+gone"); it is not a JSONL record.
 
 ## Not planned as a copy
 
