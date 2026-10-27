@@ -1890,6 +1890,83 @@ try {
     throw new Error("daemon log contains the smoke token");
   }
 
+  // Back to Chat before the composer checks below: the Schedule section
+  // above leaves the app on the schedule view, where the composer (and
+  // its actions button) is not rendered. The view switcher is the
+  // segmented "View" control whose Chat button calls set_view("chat").
+  await evaluate(`(() => {
+    const btn = [...document.querySelectorAll('.segmented[aria-label="View"] button')]
+      .find((b) => b.textContent.trim() === "Chat");
+    if (btn) { btn.click(); return "clicked"; }
+    return "missing-chat-switch";
+  })()`);
+  await waitFor(
+    "chat view (composer actions button) after leaving Schedule",
+    async () => {
+      const raw = await evaluate(
+        `JSON.stringify({ plus: !!document.querySelector('[aria-label="Composer actions"]') })`,
+      );
+      const parsed = JSON.parse(raw || "{}");
+      return { ok: !!parsed.plus, ...parsed };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+
+  const composerTriggers = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const btn = document.querySelector('[aria-label="Composer actions"]');
+      if (!btn) return "missing-plus";
+      btn.click();
+      return "clicked";
+    })()`,
+    returnByValue: true,
+  });
+  if (composerTriggers.result?.result?.value !== "clicked") {
+    throw new Error(`composer plus failed: ${composerTriggers.result?.result?.value || JSON.stringify(composerTriggers)}`);
+  }
+  let composerSuggest = "";
+  for (let i = 0; i < 40; i++) {
+    const ev = await send("Runtime.evaluate", {
+      expression: `document.body.innerText`,
+      returnByValue: true,
+    });
+    composerSuggest = ev.result?.result?.value || "";
+    if (composerSuggest.includes("Mention a file")) break;
+    await delay(150);
+  }
+  if (!composerSuggest.includes("Mention a file")) {
+    throw new Error(`composer plus menu missing: ${composerSuggest.slice(0, 500)}`);
+  }
+  const composerTyped = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const ta = document.querySelector('[data-feature="composer-triggers"] textarea');
+      if (!ta) return "missing-textarea";
+      ta.focus();
+      ta.value = "/";
+      ta.setSelectionRange(1, 1);
+      ta.dispatchEvent(new InputEvent("input", { bubbles: true, data: "/" }));
+      return "typed";
+    })()`,
+    returnByValue: true,
+  });
+  if (composerTyped.result?.result?.value !== "typed") {
+    throw new Error(`composer slash type failed: ${composerTyped.result?.result?.value || JSON.stringify(composerTyped)}`);
+  }
+  composerSuggest = "";
+  for (let i = 0; i < 40; i++) {
+    const ev = await send("Runtime.evaluate", {
+      expression: `document.body.innerText`,
+      returnByValue: true,
+    });
+    composerSuggest = ev.result?.result?.value || "";
+    if (composerSuggest.includes("/stop") || composerSuggest.includes("/mode") || composerSuggest.includes("Mention a file")) {
+      if (composerSuggest.includes("/stop") || composerSuggest.includes("/mode")) break;
+    }
+    await delay(150);
+  }
+  if (!composerSuggest.includes("/stop") && !composerSuggest.includes("/mode")) {
+    throw new Error(`composer slash popup missing: ${composerSuggest.slice(0, 500)}`);
+  }
   console.log("webui-smoke ok");
 } catch (err) {
   console.error(String(err));
