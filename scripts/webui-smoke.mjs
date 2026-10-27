@@ -1307,6 +1307,88 @@ try {
     throw new Error("main composer lost its approval chip");
   }
 
+  // Find in transcript (#1342). The seed above sent "read the makefile"
+  // to the open session, so the transcript holds that word in the user
+  // bubble and in the echo reply. Keyboard path only: Ctrl+F opens,
+  // typing counts and highlights, Enter steps, a zero-match query is
+  // reported plainly, and Escape closes and clears the highlights.
+  await evaluate(
+    `window.dispatchEvent(new KeyboardEvent("keydown", { key: "f", ctrlKey: true, bubbles: true, cancelable: true }))`,
+  );
+  await waitFor(
+    "find bar to open on Ctrl+F",
+    async () => ({ ok: (await evaluate(`!!document.getElementById("tf-search")`)) === true }),
+    { timeout: STEP_MS, interval: 200 },
+  );
+  const tfType = async (value) => {
+    const sent = await evaluate(`(() => {
+      const el = document.getElementById("tf-search");
+      if (!el) return "missing";
+      const proto = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value");
+      proto.set.call(el, ${JSON.stringify(value)});
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      return "typed";
+    })()`);
+    if (sent !== "typed") {
+      throw new Error(`find type failed: ${sent}`);
+    }
+  };
+  const tfProbe = async () => {
+    const raw = await evaluate(`(() => JSON.stringify({
+      count: document.querySelector("[data-tf-count]") ? document.querySelector("[data-tf-count]").textContent.trim() : "",
+      marks: document.querySelectorAll(".tf-mark").length,
+      current: document.querySelectorAll(".tf-mark.tf-current").length,
+      bar: !!document.getElementById("tf-search"),
+    }))()`);
+    return JSON.parse(raw || "{}");
+  };
+  await tfType("makefile");
+  const tfFound = await waitFor(
+    "find count and highlights for a transcript word",
+    async () => {
+      const p = await tfProbe();
+      const m = /^(\d+)\/(\d+)$/.exec(p.count || "");
+      return {
+        ok: !!m && Number(m[2]) >= 1 && p.marks === Number(m[2]) && p.current === 1,
+        ...p,
+      };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  const tfTotal = Number(/^(\d+)\/(\d+)$/.exec(tfFound.count)[2]);
+  if (tfTotal > 1) {
+    await evaluate(
+      `document.getElementById("tf-search").dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }))`,
+    );
+    await waitFor(
+      "Enter to step to the next match",
+      async () => {
+        const p = await tfProbe();
+        return { ok: p.count === `2/${tfTotal}` && p.current === 1, ...p };
+      },
+      { timeout: STEP_MS, interval: 200 },
+    );
+  }
+  await tfType("zz-no-match-zz");
+  await waitFor(
+    "zero matches reported plainly, with no marks",
+    async () => {
+      const p = await tfProbe();
+      return { ok: p.count === "No matches" && p.marks === 0, ...p };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await evaluate(
+    `document.getElementById("tf-search").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }))`,
+  );
+  await waitFor(
+    "Escape to close the find bar and clear highlights",
+    async () => {
+      const p = await tfProbe();
+      return { ok: p.bar === false && p.marks === 0, ...p };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
   // Session delete (#1358): seed a session, close its root so it is
   // saved but not open, then delete it through the cockpit. Cancelling
   // the confirm must issue no request; confirming must remove it from
