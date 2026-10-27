@@ -21,7 +21,7 @@
 <link rel="stylesheet" href="/assets/editor-b94eee6c774248b5.css" integrity="sha384-+9ZqewFDkMigo7FvJP5c3fz6AHPgvKtu9jHfIAjeW7Qtx7wW3GCJSZM+LHcEeR4D"/>
 <link rel="stylesheet" href="/assets/chat-mode-c0a49864a0dd5243.css" integrity="sha384-McpfSccRV3saRSz8h4ulV3CS05un9+FK6ngy762vr2Ue/+x8ZumcRBVB0/5OG7Ao"/>
 <link rel="stylesheet" href="/assets/notify-750498e8d7d87548.css" integrity="sha384-l/TrTY1ETPTYhTEtEfPovdv2nck2zscWIo3mhOCEkb/RLhrZYW/bwgXX5qn68bAv"/>
-<link rel="stylesheet" href="/assets/usage-audit-4109f37a4c3f020.css" integrity="sha384-PG57uHfAoOyYrJLu5TZtnb1s2Ud6PPolTjB9IeCoVZ1qF7Qgrtsh0+5YiMBYYV9Z"/>
+<link rel="stylesheet" href="/assets/usage-audit-04109f37a4c3f020.css" integrity="sha384-PG57uHfAoOyYrJLu5TZtnb1s2Ud6PPolTjB9IeCoVZ1qF7Qgrtsh0+5YiMBYYV9Z"/>
 <link rel="stylesheet" href="/assets/goals-5b895e22909a0f66.css" integrity="sha384-liP/FQF4QvouM0zc8WO7nxC1u3CzbFF/GBmvuED6zZS8f0rmPG1QWhWJitxfpRm1"/>
 <link rel="stylesheet" href="/assets/transcript-find-48ee7e8c29e3a7d5.css" integrity="sha384-eIxmvHVn9OZAgklNBggZLjZIuZ7orLHMdtsudrUHcg7zclIcXuQlOhMOgAMN1VtF"/>
 <link rel="stylesheet" href="/assets/turn-elapsed-f4f0358258cee9df.css" integrity="sha384-PW9+AyyJlSzqXRvg7I4U6848KUSH7uEgIt4HLxhzf05rs01hAbUaWUSxPQV+borE"/>
@@ -31,8 +31,8 @@
 
 
 <script type="module">
-import init, * as bindings from '/assets/strike-webui-2dfc4fe78a69de85.js';
-const wasm = await init({ module_or_path: '/assets/strike-webui-2dfc4fe78a69de85_bg.wasm' });
+import init, * as bindings from '/assets/strike-webui-b0662c9772eacb7c.js';
+const wasm = await init({ module_or_path: '/assets/strike-webui-dcbe737c8f29be8e_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -43,6 +43,6 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 </script>
 <script src="/assets/register.js" defer></script>
 
-<link rel="modulepreload" href="/assets/strike-webui-2dfc4fe78a69de85.js" crossorigin="anonymous" integrity="sha384-ART/EF31b6G8mKQG3jqFF4Ihutku6HMf+2rvH3k7RsnGoyLeWJrv7dEaWQANzPRv"><link rel="preload" href="/assets/strike-webui-2dfc4fe78a69de85_bg.wasm" crossorigin="anonymous" integrity="sha384-O1KuNDVFFlzVjncv0mfC4q5gg/VsCUvdfrsaxebg1hJV74cpqT9QaJqEb+7c8nqz" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/assets/strike-webui-b0662c9772eacb7c.js" crossorigin="anonymous" integrity="sha384-nhgEXInncsLDc0u8ovwwYUSLLYl1/9UypK18tvzb0lq1YDyFejtDKotz1Bu2vBi3"><link rel="preload" href="/assets/strike-webui-dcbe737c8f29be8e_bg.wasm" crossorigin="anonymous" integrity="sha384-hP8PkzmITUwc1l0g5MM0W2e+gG4I9VwLbpAvc6x/mvegOhpfOwDB6YK+Hxu9ImqP" as="fetch" type="application/wasm"></head>
 <body></body>
 </html>
