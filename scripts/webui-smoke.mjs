@@ -1433,6 +1433,37 @@ try {
     );
   };
   await clickSideTab("Git", "Staged");
+  // Branch switcher regression (#1314): the rendered <select> value must
+  // equal the daemon's current branch once the options exist. The defect
+  // was prop:value being applied before the options rendered, so the
+  // browser fell back to the first option and displayed a branch the repo
+  // was not on. Only checked when the daemon reports a current branch
+  // (a detached checkout has none); option count is reported, not
+  // required, since a fresh CI checkout may carry a single branch.
+  const branchesRes = await fetch(`http://127.0.0.1:${port}/v1/git/branches`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!branchesRes.ok) {
+    throw new Error(`branch-select regression: branches HTTP ${branchesRes.status}`);
+  }
+  const branchesBody = await branchesRes.json();
+  const currentBranch =
+    branchesBody.current ||
+    (branchesBody.branches || []).find((b) => b.current)?.name ||
+    "";
+  if (currentBranch) {
+    await waitFor(
+      "branch select value equals current branch",
+      async () => {
+        const raw = await evaluate(
+          `(() => { const s = document.querySelector('select[aria-label="Branch"]'); return s ? JSON.stringify({ value: s.value, options: s.options.length }) : null; })()`,
+        );
+        const parsed = raw ? JSON.parse(raw) : {};
+        return { ok: parsed.value === currentBranch && parsed.options >= 1, ...parsed, currentBranch };
+      },
+      { timeout: STEP_MS, interval: 250 },
+    );
+  }
   await clickSideTab("Worktrees", "session.childIsolation");
 
   // Session delete (#1358): seed a session, close its root so it is
