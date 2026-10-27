@@ -451,51 +451,6 @@ fn prefix_composer_shell(ui: &TriggerSignals) {
     sync_composer_trigger(next, cursor, ui);
 }
 
-fn reply_permission(
-    request_id: String,
-    decision: String,
-    transcript: RwSignal<Transcript>,
-    base: RwSignal<String>,
-    token: RwSignal<String>,
-    active_root: RwSignal<String>,
-    status: RwSignal<String>,
-) {
-    let kept = transcript.with_untracked(|t| {
-        t.asks
-            .iter()
-            .find(|ask| ask.request_id == request_id)
-            .cloned()
-    });
-    let Some(kept) = kept else {
-        return;
-    };
-    let reply_id = kept.request_id.clone();
-    transcript.update(|t| t.asks.retain(|ask| ask.request_id != reply_id));
-    let (b, t, root) = (
-        base.get_untracked(),
-        token.get_untracked(),
-        active_root.get_untracked(),
-    );
-    spawn_local(async move {
-        if let Err(e) = post_op(
-            &b,
-            &t,
-            &root,
-            "permission.reply",
-            serde_json::json!({"requestId": reply_id, "decision": decision}),
-        )
-        .await
-        {
-            status.set(format!("approval failed: {e}"));
-            transcript.update(|t| {
-                if !t.asks.iter().any(|ask| ask.request_id == kept.request_id) {
-                    t.asks.push(kept);
-                }
-            });
-        }
-    });
-}
-
 fn note_live_title(
     sessions: RwSignal<Vec<SessionItem>>,
     roots: RwSignal<Vec<RootSummary>>,
@@ -3246,28 +3201,6 @@ fn App() -> impl IntoView {
                                                 <span class="name">{label}</span>
                                                 <span class="path">{detail}</span>
                                             </button>
-                                        }
-                                    }).collect_view()
-                                }}
-                            </div>
-                        </Show>
-                        <Show when=move || transcript.with(|t| !t.asks.is_empty())>
-                            <div class="composer-asks" data-composer-triggers="asks">
-                                {move || {
-                                    transcript.with(|t| t.asks.clone()).into_iter().map(move |ask| {
-                                        let id_allow = ask.request_id.clone();
-                                        let id_reject = ask.request_id.clone();
-                                        let label = if ask.patterns.is_empty() {
-                                            ask.permission.clone()
-                                        } else {
-                                            format!("{} · {}", ask.permission, ask.patterns)
-                                        };
-                                        view! {
-                                            <div class="composer-ask">
-                                                <span class="ask-label">{label}</span>
-                                                <button type="button" class="primary" on:click=move |_| reply_permission(id_allow.clone(), "once".into(), transcript, base, token, active_root, status)>"Allow once"</button>
-                                                <button type="button" class="secondary" on:click=move |_| reply_permission(id_reject.clone(), "reject".into(), transcript, base, token, active_root, status)>"Reject"</button>
-                                            </div>
                                         }
                                     }).collect_view()
                                 }}
