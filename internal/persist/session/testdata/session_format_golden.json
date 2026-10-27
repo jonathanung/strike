@@ -71,6 +71,11 @@
       "omitEmpty": true
     },
     {
+      "name": "workspaceId",
+      "type": "string",
+      "omitEmpty": true
+    },
+    {
       "name": "worktreePath",
       "type": "string",
       "omitEmpty": true

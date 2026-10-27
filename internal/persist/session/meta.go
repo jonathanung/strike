@@ -48,6 +48,10 @@ type Meta struct {
 	// Fork. Empty for ordinary roots and subagent children. Forks remain root
 	// sessions (ParentSessionID empty) so --continue / pickers still work.
 	ForkedFrom string `json:"forkedFrom,omitempty"`
+	// WorkspaceID is the registry id of the directory this session runs in.
+	// Empty means the session is not bound (plain strike serve, or a launch
+	// directory that matched no workspace). It is not a session-folder id.
+	WorkspaceID string `json:"workspaceId,omitempty"`
 	// WorktreePath is the absolute path of a strike-managed git worktree bound
 	// to this session (tool CWD). Empty when the session uses the launch cwd.
 	WorktreePath string `json:"worktreePath,omitempty"`

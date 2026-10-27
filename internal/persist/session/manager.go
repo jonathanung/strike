@@ -23,6 +23,7 @@ type Info struct {
 	Model           string // last model.selected model; empty until persisted
 	ForkedFrom      string // source id when created via Fork; empty otherwise
 	ProjectKey      string // launch project identity; empty on legacy sessions
+	WorkspaceID     string // registry id; empty when the session is unbound
 	WorktreePath    string // strike-managed git worktree; empty = launch cwd
 	WorktreeBranch  string
 	Path            string
@@ -41,6 +42,7 @@ type CreateOptions struct {
 	LeadSessionID   string // implicit team lead for children; empty on roots
 	Title           string
 	ProjectKey      string // same key as history/memory (canonical project root)
+	WorkspaceID     string // registry id; empty when the session is unbound
 }
 
 // listCacheTTL is how long Manager.List reuses an in-memory snapshot before
@@ -112,6 +114,7 @@ func (m *Manager) Create(opts CreateOptions) (Info, error) {
 		ParentSessionID: strings.TrimSpace(opts.ParentSessionID),
 		LeadSessionID:   strings.TrimSpace(opts.LeadSessionID),
 		ProjectKey:      strings.TrimSpace(opts.ProjectKey),
+		WorkspaceID:     strings.TrimSpace(opts.WorkspaceID),
 		CreatedAt:       now.Format(time.RFC3339Nano),
 	}
 	if err := WriteMeta(m.dir, id, meta); err != nil {
@@ -127,6 +130,7 @@ func (m *Manager) Create(opts CreateOptions) (Info, error) {
 		LeadSessionID:   meta.LeadSessionID,
 		Title:           meta.Title,
 		ProjectKey:      meta.ProjectKey,
+		WorkspaceID:     meta.WorkspaceID,
 		WorktreePath:    meta.WorktreePath,
 		WorktreeBranch:  meta.WorktreeBranch,
 		Path:            store.Path(),
@@ -769,7 +773,7 @@ func (m *Manager) ForkAt(sourceID string, keepEvents int) (Info, error) {
 	}
 	forkTitle := forkTitleOf(baseTitle)
 
-	info, err := m.Create(CreateOptions{Title: forkTitle, ProjectKey: src.ProjectKey})
+	info, err := m.Create(CreateOptions{Title: forkTitle, ProjectKey: src.ProjectKey, WorkspaceID: src.WorkspaceID})
 	if err != nil {
 		return Info{}, fmt.Errorf("fork: creating: %w", err)
 	}
@@ -777,6 +781,7 @@ func (m *Manager) ForkAt(sourceID string, keepEvents int) (Info, error) {
 		meta.Title = forkTitle
 		meta.ForkedFrom = sourceID
 		meta.ProjectKey = src.ProjectKey
+		meta.WorkspaceID = src.WorkspaceID
 	}); err != nil {
 		_ = m.Close(info.ID)
 		_ = os.Remove(LogPath(m.dir, info.ID))
@@ -788,10 +793,12 @@ func (m *Manager) ForkAt(sourceID string, keepEvents int) (Info, error) {
 	if e, ok := m.sessions[info.ID]; ok {
 		e.info.Title = forkTitle
 		e.info.ForkedFrom = sourceID
+		e.info.WorkspaceID = src.WorkspaceID
 	}
 	m.mu.Unlock()
 	info.Title = forkTitle
 	info.ForkedFrom = sourceID
+	info.WorkspaceID = src.WorkspaceID
 
 	for _, ev := range events {
 		if err := m.Append(info.ID, ev); err != nil {
@@ -1061,6 +1068,7 @@ func (m *Manager) infoFromDiskLocked(id string, st os.FileInfo) (Info, error) {
 		Model:           meta.Model,
 		ForkedFrom:      meta.ForkedFrom,
 		ProjectKey:      meta.ProjectKey,
+		WorkspaceID:     meta.WorkspaceID,
 		WorktreePath:    meta.WorktreePath,
 		WorktreeBranch:  meta.WorktreeBranch,
 		Path:            LogPath(m.dir, id),

@@ -94,6 +94,11 @@ type Options struct {
 	Select    SelectFunc
 	Registry  *tool.Registry
 	WorkDir   string
+	// WorkspaceRoots are the directories a delegated child's working directory
+	// must stay inside (the workspace plus its extra roots). Empty means the
+	// session is unbound: child cwd is not checked, so plain strike serve
+	// with an empty registry is unchanged.
+	WorkspaceRoots []string
 	// CheckpointDir is the durable per-session checkpoint stack directory
 	// (#573). Empty disables disk persistence (tests). cmd/strike sets
 	// tool.DefaultCheckpointDir(sessionID). Set to "-" for an explicit off.

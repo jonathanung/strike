@@ -19,7 +19,7 @@ use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 
 use crate::api::{delete_json, get_json, js_encode, now_ms, post_json, post_json_value};
-use crate::model::{is_running, merge_sessions, ActivityRow, RootSummary, SessionItem};
+use crate::model::{is_running, merge_sessions, ActivityRow, RootSummary, SessionItem, Workspace};
 use crate::session_list::{
     alt_digit, assemble, human_title, select_range, stamp_times, step_index, title_is_raw_id,
     toggle_id, unread_flag, AssembleArgs, ChildIn, FolderIn, Layout, LayoutKind, SourceSession,
@@ -223,6 +223,7 @@ pub(crate) fn SessionPanel(
     activity: RwSignal<Vec<ActivityRow>>,
     active_root: RwSignal<String>,
     seen: RwSignal<HashMap<String, i64>>,
+    workspaces: RwSignal<Vec<Workspace>>,
     on_open: impl Fn(String, bool) + Copy + Send + 'static,
     on_new: impl Fn() + Copy + Send + 'static,
     on_refresh: impl Fn() + Copy + Send + 'static,
@@ -367,6 +368,7 @@ pub(crate) fn SessionPanel(
         let query_now = query.get();
         let collapsed_now = collapsed.get();
         let active = active_root.get();
+        let workspaces_now = workspaces.get();
         build_layout(
             &snap,
             &sessions_now,
@@ -374,6 +376,7 @@ pub(crate) fn SessionPanel(
             &activity_now,
             &seen_now,
             &hits_now,
+            &workspaces_now,
             &filter_now,
             &query_now,
             &collapsed_now,
@@ -812,6 +815,7 @@ fn build_layout(
     activity: &[ActivityRow],
     seen: &HashMap<String, i64>,
     hits: &[SearchHit],
+    workspaces: &[Workspace],
     filter: &str,
     query: &str,
     collapsed: &[String],
@@ -864,6 +868,11 @@ fn build_layout(
                 ),
                 folder_id: org.map(|org| org.folder_id.clone()).unwrap_or_default(),
                 team_state: String::new(),
+                workspace: workspaces
+                    .iter()
+                    .find(|w| w.id == row.workspace_id)
+                    .map(|w| if w.name.is_empty() { w.path.clone() } else { w.name.clone() })
+                    .unwrap_or_default(),
                 id: row.id,
             }
         })
