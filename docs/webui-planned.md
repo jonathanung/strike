@@ -198,10 +198,30 @@ attachments on the op.
 
 ## Context window hold
 
-`status.contextUsed` is reported on bootstrap. The client does not block
-Send when the window is full. Planned: a hold that refuses `user.input`
-when the live status says the next turn would not fit, with the number
-from the daemon. The client will not invent a limit.
+The model menu reads `status.contextUsed`. The denominator is
+`status.contextLimit` when a fit warning has named the window, otherwise
+the catalog `context` on the active model when that field is non-zero.
+Both numbers come from the daemon. If neither is known the meter says the
+window is not reported.
+
+Send (`user.input` and `steer`) is held when `status.contextFit` is
+`critical`, or when a known window is already full (`contextUsed` ≥ limit).
+A `warn` fit, or last-turn usage at or above 80% of a known window, is a
+warning and Send stays available. `contextFit` clears on
+`compaction.completed` (usage clears with it; the limit stays) and when a
+later usage report falls under 80% of the daemon limit.
+
+Effort is offered when the catalog row reports `reasoning`, when it lists
+variants, or when the live session already has an effort. Published
+variants are the choices (a variant id that is not an effort level is
+shown disabled). The protocol ladder is the fallback when no variants are
+named. Otherwise the menu says reasoning is not reported. False capability
+flags are omitted.
+They mean unknown or unsupported; #1054 does not yet split those.
+
+Pins and the "this session / global default" mark are browser state plus
+`PATCH /v1/settings`. `select.model` and `set.effort` change only the
+live session.
 
 ## Not planned as a copy
 

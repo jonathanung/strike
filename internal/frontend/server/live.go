@@ -302,6 +302,10 @@ type StatusSnapshot struct {
 	Busy           bool   `json:"busy"`
 	ContextUsed    int    `json:"contextUsed,omitempty"`
 	ContextLimit   int    `json:"contextLimit,omitempty"`
+	// ContextFit is the latest context.fit_warning level (warn|critical).
+	// Empty after compaction, or after a usage report falls under 80% of
+	// ContextLimit (the engine's fitWarnRatio). It is not a second limit.
+	ContextFit string `json:"contextFit,omitempty"`
 	// Sandbox is the active OS process sandbox dial for this live session
 	// (off|read-only|workspace-write). Distinct from permissionMode.
 	Sandbox string `json:"sandbox,omitempty"`
@@ -795,6 +799,7 @@ func (l *Live) applyStatus(ev protocol.Event) {
 	case protocol.UsageReported:
 		if e.Used.Known {
 			l.status.ContextUsed = e.Used.N
+			l.relaxContextFit()
 		}
 	case protocol.ContextFitWarning:
 		if e.ContextLimit > 0 {
@@ -803,6 +808,15 @@ func (l *Live) applyStatus(ev protocol.Event) {
 		if e.EstimatedTokens > 0 && l.status.ContextUsed == 0 {
 			l.status.ContextUsed = e.EstimatedTokens
 		}
+		switch e.Level {
+		case protocol.ContextFitWarn, protocol.ContextFitCritical:
+			l.status.ContextFit = e.Level
+		}
+	case protocol.CompactionCompleted:
+		// Occupancy from before the compact is no longer the window.
+		// The next usage.reported fills it in. Keep the limit (window size).
+		l.status.ContextUsed = 0
+		l.status.ContextFit = ""
 	case protocol.TeamRoster:
 		l.applyTeamRoster(e)
 	case protocol.ChildStarted:
@@ -821,6 +835,18 @@ func (l *Live) applyStatus(ev protocol.Event) {
 		l.applyArtifact(e)
 	case protocol.LedgerUpdated:
 		l.applyLedger(e)
+	}
+}
+
+// relaxContextFit drops a stale fit warning once measured occupancy is
+// back under the engine's warn ratio (0.80). A known zero does not clear
+// it: omitempty can omit n, and that must not wipe a critical flag.
+func (l *Live) relaxContextFit() {
+	if l.status.ContextFit == "" || l.status.ContextLimit <= 0 || l.status.ContextUsed <= 0 {
+		return
+	}
+	if int64(l.status.ContextUsed)*5 < int64(l.status.ContextLimit)*4 {
+		l.status.ContextFit = ""
 	}
 }
 
