@@ -134,6 +134,9 @@ Status: walking skeleton on branch `worktree-rust-webui-daemon`. Not merged.
     can preview. Find-in-file is local. Agent diff reuses
     `GET /v1/changed-files` for the open path. Transcript `path:line` and
     `strike-file:path#Lline` open the same pane.
+  - The Tasks view is the task runner: a plan checklist, one child per
+    ready section, and a checkpoint from that child's handoff and
+    verification report. See [webui-planned.md](webui-planned.md).
   - Goals (`/v1/goals`, the Goals view) define a verification command,
     budgets, and an autopilot posture. Deny rules still apply. See
     [goal.md](goal.md).
@@ -142,11 +145,12 @@ Status: walking skeleton on branch `worktree-rust-webui-daemon`. Not merged.
     with a separate model call and no tools. `POST /v1/sidechat/ops` refuses
     `permission.reply` and `user.input`. Turns are not written to the session
     JSONL.
-  - Schedule, the task runner, onboarding, and a multi-gateway hub are
+  - Schedule, onboarding, and a multi-gateway hub are
     documented in [webui-planned.md](webui-planned.md), not drawn as empty
     panels. Memory, knowledge, and artifacts are drawn from the live routes.
     The gateway switcher is the Gateways control in the header and on the
     Daemon view; see [gateway.md](gateway.md).
+
 - Server serves `/sw.js` and `/manifest.webmanifest` at the origin root and
   the bundle under `/assets/` (WASM-aware CSP and content types).
 

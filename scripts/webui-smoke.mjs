@@ -57,7 +57,7 @@ async function status(path, headers) {
   return res.status;
 }
 
-const strike = spawn(
+let strike = spawn(
   process.env.STRIKE_BIN || "./strike",
   [
     "serve",
@@ -1868,6 +1868,126 @@ try {
     }),
     { timeout: WAIT_MS, interval: 250 },
   );
+  // Task runner (#1277): a plain echo section fails schema:handoff and
+  // blocks the next section. Restart the daemon so the run is read back
+  // from disk, then check the Tasks board (via the strict
+  // [data-view="tasks"] switch) shows the Failed and Blocked rows.
+  const taskApi = async (method, path, body) => {
+    const res = await fetch(`http://127.0.0.1:${port}${path}`, {
+      method,
+      headers: authz,
+      body: body == null ? undefined : JSON.stringify(body),
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      throw new Error(`task runner ${method} ${path} -> ${res.status} ${text.slice(0, 300)}`);
+    }
+    return JSON.parse(text);
+  };
+  const taskRootRes = await fetch(`http://127.0.0.1:${port}/v1/roots`, {
+    method: "POST",
+    headers: auth,
+    body: "{}",
+  });
+  if (!taskRootRes.ok) {
+    throw new Error(`task runner seed root failed ${taskRootRes.status} ${await taskRootRes.text()}`);
+  }
+  const taskRoot = await taskRootRes.json();
+  const taskOwner = taskRoot.sessionId || taskRoot.id;
+  if (!taskOwner) throw new Error(`task runner root returned no id: ${JSON.stringify(taskRoot)}`);
+  const taskPlan = await taskApi("POST", "/v1/plans", {
+    ownerRoot: taskOwner,
+    title: "Smoke checklist",
+    sections: [
+      { title: "First step", body: "plain echo body, no handoff" },
+      { title: "Second step", body: "depends on the first" },
+    ],
+  });
+  const taskPlanId = taskPlan.ID || taskPlan.id;
+  if (!taskPlanId) throw new Error(`plan create returned no id: ${JSON.stringify(taskPlan).slice(0, 300)}`);
+  const taskOpened = await taskApi("POST", `/v1/plans/${taskPlanId}/run`, {
+    action: "open",
+    ownerRoot: taskOwner,
+  });
+  const taskVersion = taskOpened.run && taskOpened.run.version;
+  if (!taskVersion) throw new Error(`open run returned no version: ${JSON.stringify(taskOpened).slice(0, 300)}`);
+  await taskApi("POST", `/v1/plans/${taskPlanId}/run`, {
+    action: "start",
+    ownerRoot: taskOwner,
+    expectedVersion: taskVersion,
+  });
+  let taskSections = [];
+  for (let i = 0; i < 60; i++) {
+    const taskBoard = await taskApi("GET", `/v1/plans/${taskPlanId}/run`);
+    taskSections = (taskBoard.run && taskBoard.run.sections) || [];
+    if (taskSections[0]?.status === "failed" && taskSections[1]?.status === "blocked") break;
+    await delay(500);
+  }
+  if (taskSections[0]?.status !== "failed" || taskSections[1]?.status !== "blocked") {
+    throw new Error(`task run did not block dependants: ${JSON.stringify(taskSections).slice(0, 500)}`);
+  }
+  try {
+    const exited = new Promise((resolve) => strike.once("exit", resolve));
+    strike.kill("SIGTERM");
+    await Promise.race([exited, delay(4000)]);
+    if (strike.exitCode == null && !strike.signalCode) strike.kill("SIGKILL");
+    await Promise.race([exited, delay(2000)]);
+    strike = spawn(
+      process.env.STRIKE_BIN || "./strike",
+      ["serve", "--addr", `127.0.0.1:${port}`, "--provider", "echo", "--auth", "--token", token],
+      { env: { ...process.env, HOME: home }, stdio: ["ignore", "pipe", "pipe"] },
+    );
+    strike.stdout.on("data", (b) => {
+      strikeLog += b.toString();
+    });
+    strike.stderr.on("data", (b) => {
+      strikeLog += b.toString();
+    });
+    await waitHealth(`http://127.0.0.1:${port}/health`);
+    const taskAfter = await taskApi("GET", `/v1/plans/${taskPlanId}/run`);
+    const taskAgain = (taskAfter.run && taskAfter.run.sections) || [];
+    if (taskAgain[0]?.status !== "failed" || taskAgain[1]?.status !== "blocked") {
+      throw new Error(`task run did not survive restart: ${JSON.stringify(taskAgain).slice(0, 500)}`);
+    }
+    await send("Page.navigate", {
+      url: "http://127.0.0.1:" + port + "/?token=" + token,
+    });
+    await waitFor(
+      "task runner board after restart (Failed and Blocked rows)",
+      async () => {
+        const clicked = await evaluate(
+          `(() => { const btn = document.querySelector('button[data-view="tasks"]'); if (!btn) return false; btn.click(); return true; })()`,
+        );
+        const boardText =
+          (await evaluate(
+            `(() => { const b = document.querySelector("#task-runner"); return b ? b.innerText : ""; })()`,
+          )) || "";
+        return {
+          ok:
+            clicked === true &&
+            boardText.includes("First step") &&
+            boardText.includes("Second step") &&
+            boardText.includes("Failed") &&
+            boardText.includes("Blocked"),
+          board: boardText.slice(0, 300),
+        };
+      },
+      { timeout: WAIT_MS, interval: 250 },
+    );
+    // Leave the cockpit on the Chat view: the checks after this block
+    // drive the chat and daemon surfaces, not the task board.
+    await evaluate(
+      `(() => { const btn = [...document.querySelectorAll(".segmented button")].find((b) => (b.textContent || "").trim() === "Chat"); if (btn) btn.click(); return true; })()`,
+    );
+    await waitFor(
+      "chat view after the task runner check",
+      textProbe((body) => body.includes("Run a command")),
+      { timeout: WAIT_MS, interval: 250 },
+    );
+  } catch (err) {
+    // The outer finally kills whichever daemon `strike` now points at.
+    throw err;
+  }
   // Turn elapsed (#1364): resume the seeded replay session and check
   // the label from the fixture above — exactly one "took 4:12", on the
   // long turn's final line; the short turn and the untimed-line turn

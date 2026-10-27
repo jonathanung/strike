@@ -75,6 +75,22 @@ type LiveHub struct {
 	spawn      RootSpawnFunc
 	resume     RootResumeFunc
 	unattended RootSpawnFunc
+
+	// onRemove, when set, runs after a root leaves the hub so the owner
+	// can stop whatever the hub does not own (the root's engine and its
+	// session-manager handle). Set via SetOnRemove before use.
+	onRemove func(id string)
+}
+
+// SetOnRemove registers the callback invoked after a root is dropped
+// from the hub (Remove or RemoveForSession). The hub never owned the
+// root's engine: without this hook a closed root keeps its session open
+// in the manager, and a later session delete reports it open and
+// demands force.
+func (h *LiveHub) SetOnRemove(fn func(id string)) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.onRemove = fn
 }
 
 // NewLiveHub creates an empty hub. Callers wire lifecycle functions.
@@ -102,18 +118,29 @@ func (h *LiveHub) Add(id string, live *Live) {
 // entry becomes active.
 func (h *LiveHub) Remove(id string) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.removeLocked(id)
-}
-
-// removeLocked is Remove with h.mu already held.
-func (h *LiveHub) removeLocked(id string) bool {
-	entry, ok := h.entries[id]
-	if !ok {
-		return false
+	entry := h.removeLocked(id)
+	onRemove := h.onRemove
+	h.mu.Unlock()
+	if entry == nil {
+		return
 	}
 	if entry.live != nil {
 		entry.live.Close()
+	}
+	if onRemove != nil {
+		onRemove(id)
+	}
+}
+
+// removeLocked deletes id's entry and fixes the active id, with h.mu
+// already held. It returns the removed entry, or nil when id was not
+// registered. It does NOT close the entry's Live or fire onRemove: the
+// caller does both after dropping the lock (Live.Close is idempotent
+// and onRemove may call back into session/engine teardown).
+func (h *LiveHub) removeLocked(id string) *rootEntry {
+	entry, ok := h.entries[id]
+	if !ok {
+		return nil
 	}
 	delete(h.entries, id)
 	if h.active == id {
@@ -123,7 +150,7 @@ func (h *LiveHub) removeLocked(id string) bool {
 			break
 		}
 	}
-	return true
+	return entry
 }
 
 // RemoveForSession deregisters the live root serving sessionID after that
@@ -142,7 +169,6 @@ func (h *LiveHub) RemoveForSession(sessionID string) bool {
 		return false
 	}
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	// The candidate is normally the entry keyed by the session id. When no
 	// such entry exists, fall back to the unique entry whose Live serves
 	// this session, if there is exactly one.
@@ -153,12 +179,14 @@ func (h *LiveHub) RemoveForSession(sessionID string) bool {
 		for rid, e := range h.entries {
 			if e.live != nil && e.live.SessionID() == sessionID {
 				if key != "" {
+					h.mu.Unlock()
 					return false // shared by multiple roots: keep all
 				}
 				key, entry = rid, e
 			}
 		}
 		if key == "" {
+			h.mu.Unlock()
 			return false
 		}
 	}
@@ -166,6 +194,7 @@ func (h *LiveHub) RemoveForSession(sessionID string) bool {
 	// different session is not this session's root.
 	if entry.live != nil {
 		if sid := entry.live.SessionID(); sid != "" && sid != sessionID {
+			h.mu.Unlock()
 			return false
 		}
 	}
@@ -176,10 +205,23 @@ func (h *LiveHub) RemoveForSession(sessionID string) bool {
 			continue
 		}
 		if other.live == entry.live || other.live.SessionID() == sessionID {
+			h.mu.Unlock()
 			return false
 		}
 	}
-	return h.removeLocked(key)
+	removed := h.removeLocked(key)
+	onRemove := h.onRemove
+	h.mu.Unlock()
+	if removed == nil {
+		return false
+	}
+	if removed.live != nil {
+		removed.live.Close()
+	}
+	if onRemove != nil {
+		onRemove(key)
+	}
+	return true
 }
 
 // Active returns the currently active live bridge, or nil.
