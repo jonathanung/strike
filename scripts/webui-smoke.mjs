@@ -723,12 +723,11 @@ try {
     expression: `localStorage.setItem("strike.token", ${JSON.stringify(token)})`,
   });
   await send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
-  for (let i = 0; i < 40; i++) {
-    const parsed = await readCockpit();
-    text = parsed.body || "";
-    if (text.includes("Run a command") && text.includes("Memory")) break;
-    await delay(250);
-  }
+  await waitFor(
+    "cockpit reload after attachment checks (Run a command, Memory)",
+    textProbe((t) => t.includes("Run a command") && t.includes("Memory")),
+    { timeout: WAIT_MS, interval: 250 },
+  );
 
   // Usage + Audit (#1286): open each view and confirm its controls
   // render; the Audit view must also report a chain state. Ported onto
