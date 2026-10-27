@@ -2,10 +2,13 @@ package attachment
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"image"
 	"image/color"
 	"image/png"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -102,6 +105,58 @@ func TestStorePutGetDedupAndSize(t *testing.T) {
 	_, err = s.Put(pngRaw, PutInput{MaxBytes: 4})
 	if !errors.Is(err, ErrTooLarge) {
 		t.Fatalf("size err = %v", err)
+	}
+}
+
+func TestStorePutRedactsNameAndReplacesCorruptBlob(t *testing.T) {
+	s := openTestStore(t)
+	pngRaw := encodeSolidPNG(t, 1, 1, color.RGBA{B: 255, A: 255})
+	secret := "notes-sk-abcdefghijklmnopqrstuvwxyz.png"
+	meta, err := s.Put(pngRaw, PutInput{Name: secret})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(meta.Name, "sk-abcdefghijklmnopqrstuvwxyz") || !strings.Contains(meta.Name, "[REDACTED_API_KEY]") {
+		t.Fatalf("stored name = %q", meta.Name)
+	}
+	metaPath := filepath.Join(s.Dir(), meta.SHA256[:2], meta.SHA256+".meta.json")
+	rawMeta, err := os.ReadFile(metaPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var legacy Meta
+	if err := json.Unmarshal(rawMeta, &legacy); err != nil {
+		t.Fatal(err)
+	}
+	legacy.Name = secret
+	rewritten, err := json.MarshalIndent(legacy, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(metaPath, rewritten, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	again, err := s.Put(pngRaw, PutInput{Name: "pixel.png"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(again.Name, "sk-abcdefghijklmnopqrstuvwxyz") {
+		t.Fatalf("dedup kept secret name %q", again.Name)
+	}
+	blobPath := filepath.Join(s.Dir(), meta.SHA256[:2], meta.SHA256)
+	if err := os.WriteFile(blobPath, []byte("not-the-png"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fixed, err := s.Put(pngRaw, PutInput{Name: "pixel.png"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _, err := s.Get(RefFor(fixed.SHA256))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, pngRaw) {
+		t.Fatal("corrupt blob was kept")
 	}
 }
 

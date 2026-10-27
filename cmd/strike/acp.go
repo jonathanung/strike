@@ -170,6 +170,7 @@ func runACP(opts cliOptions, stdin io.Reader, stdout, stderr io.Writer) (runErr 
 		sessionID = a.store.ID()
 	}
 	live := server.NewLive(sessionID, a.workDir, agents, a.eng.Ops())
+	a.attachMemoryMode(live, sessionID, a.eng)
 	defer live.Close()
 
 	storeOwned = true

@@ -1,6 +1,7 @@
 package goal
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -97,8 +98,11 @@ func TestGuardNoProgressHash(t *testing.T) {
 		{N: 3, StateHash: "same"},
 	}
 	r := CheckGuards(GuardContext{Goal: g, History: hist, Now: time.Now()})
-	if !r.Tripped || r.NextStatus != StatusFailed {
+	if !r.Tripped || r.NextStatus != StatusBlocked || r.Escalation != "human" {
 		t.Fatalf("got %+v", r)
+	}
+	if !strings.Contains(r.Reason, "stalled") {
+		t.Fatalf("reason=%q", r.Reason)
 	}
 }
 
@@ -118,7 +122,7 @@ func TestGuardNoProgressActionSequence(t *testing.T) {
 		{N: 3, StateHash: "h3", Actions: acts},
 	}
 	r := CheckGuards(GuardContext{Goal: g, History: hist, Now: time.Now()})
-	if !r.Tripped || r.NextStatus != StatusFailed {
+	if !r.Tripped || r.NextStatus != StatusBlocked || r.Escalation != "human" {
 		t.Fatalf("got %+v", r)
 	}
 }
@@ -139,7 +143,7 @@ func TestGuardIrrecoverable(t *testing.T) {
 		{N: 3, StateHash: "c", Actions: []ActionRecord{fail}},
 	}
 	r := CheckGuards(GuardContext{Goal: g, History: hist, Now: time.Now()})
-	if !r.Tripped || r.NextStatus != StatusFailed {
+	if !r.Tripped || r.NextStatus != StatusBlocked || r.Escalation != "human" {
 		t.Fatalf("got %+v", r)
 	}
 }
@@ -156,5 +160,126 @@ func TestGuardOrderSuccessBeforeAbort(t *testing.T) {
 	r := CheckGuards(GuardContext{Goal: g, Now: time.Now()})
 	if r.NextStatus != StatusDone {
 		t.Fatalf("want done first, got %+v", r)
+	}
+}
+
+func TestWallClockIgnoresBlockedWait(t *testing.T) {
+	t.Parallel()
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	g := Goal{
+		Status:          StatusActive,
+		ActiveStartedAt: start,
+		Constraints: Constraints{
+			MaxIterations: 25, MaxCostUSD: 100, MaxWallClockS: 60, MaxNoProgressIters: 99, MaxTokens: 0,
+		},
+	}
+	if r := guardBudget(GuardContext{Goal: g, Now: start.Add(10 * time.Second)}); r.Tripped {
+		t.Fatalf("10s of a 60s budget tripped: %+v", r)
+	}
+	g.FreezeWallClock(start.Add(10 * time.Second))
+	resumed := start.Add(10*time.Second + 2*time.Minute)
+	g.ActiveStartedAt = resumed
+	g.Status = StatusActive
+	if r := guardBudget(GuardContext{Goal: g, Now: resumed.Add(20 * time.Second)}); r.Tripped {
+		t.Fatalf("blocked wait counted toward the budget: %+v", r)
+	}
+	r := guardBudget(GuardContext{Goal: g, Now: resumed.Add(51 * time.Second)})
+	if !r.Tripped || r.NextStatus != StatusFailed || !strings.Contains(r.Reason, "wall-clock") {
+		t.Fatalf("remaining active time should exhaust the budget: %+v", r)
+	}
+}
+
+func TestIrrecoverableStreakBreaksOnSuccess(t *testing.T) {
+	t.Parallel()
+	g := Goal{
+		Status: StatusActive,
+		Constraints: Constraints{
+			MaxIterations: 25, MaxCostUSD: 100, MaxWallClockS: 9999, MaxNoProgressIters: 99,
+		},
+	}
+	hist := []IterationRecord{{
+		N: 1,
+		Actions: []ActionRecord{
+			{Tool: "bash", OK: false, Error: "boom"},
+			{Tool: "bash", OK: true},
+			{Tool: "bash", OK: false, Error: "boom"},
+			{Tool: "bash", OK: true},
+			{Tool: "bash", OK: false, Error: "boom"},
+		},
+	}}
+	if r := guardIrrecoverable(GuardContext{Goal: g, History: hist, Now: time.Now()}); r.Tripped {
+		t.Fatalf("successes should break the streak: %+v", r)
+	}
+	hist[0].Actions = []ActionRecord{
+		{Tool: "bash", OK: false, Error: "boom"},
+		{Tool: "bash", OK: false, Error: "boom"},
+		{Tool: "bash", OK: false, Error: "boom"},
+	}
+	r := guardIrrecoverable(GuardContext{Goal: g, History: hist, Now: time.Now()})
+	if !r.Tripped || r.NextStatus != StatusBlocked || r.Escalation != "human" {
+		t.Fatalf("three consecutive failures should escalate: %+v", r)
+	}
+}
+
+func TestGuardTokenBudget(t *testing.T) {
+	t.Parallel()
+	g := Goal{
+		Status:     StatusActive,
+		TokensUsed: 20,
+		Criteria:   []Criterion{{Description: "a"}},
+		Constraints: Constraints{
+			MaxIterations: 25, MaxCostUSD: 100, MaxWallClockS: 9999, MaxNoProgressIters: 99, MaxTokens: 20,
+		},
+	}
+	r := CheckGuards(GuardContext{Goal: g, Now: time.Now()})
+	if !r.Tripped || r.NextStatus != StatusFailed || !strings.Contains(r.Reason, "token budget") {
+		t.Fatalf("got %+v", r)
+	}
+}
+
+func TestGuardVerifyFailureStopsWhenHashWouldChange(t *testing.T) {
+	t.Parallel()
+	g := Goal{
+		Status:   StatusActive,
+		Criteria: []Criterion{{Description: "a"}},
+		Constraints: Constraints{
+			MaxIterations: 25, MaxCostUSD: 100, MaxWallClockS: 9999, MaxNoProgressIters: 99,
+			MaxVerifyFailures: 3,
+		},
+	}
+	hist := []IterationRecord{
+		{N: 1, StateHash: "h1", Evaluation: EvalRecord{Criteria: []CriterionResult{{Description: "a", Satisfied: false, Evidence: "e1"}}}},
+		{N: 2, StateHash: "h2", Evaluation: EvalRecord{Criteria: []CriterionResult{{Description: "a", Satisfied: false, Evidence: "e2"}}}},
+		{N: 3, StateHash: "h3", Evaluation: EvalRecord{Criteria: []CriterionResult{{Description: "a", Satisfied: false, Evidence: "e3"}}}},
+	}
+	r := CheckGuards(GuardContext{Goal: g, History: hist, Now: time.Now()})
+	if !r.Tripped || r.NextStatus != StatusBlocked || r.Escalation != "human" {
+		t.Fatalf("got %+v", r)
+	}
+	if !strings.Contains(r.Reason, "verification failed") {
+		t.Fatalf("reason=%q", r.Reason)
+	}
+}
+
+func TestGuardFloorSkipsAcknowledgedFailures(t *testing.T) {
+	t.Parallel()
+	g := Goal{
+		Status:     StatusActive,
+		GuardFloor: 3,
+		Criteria:   []Criterion{{Description: "a"}},
+		Constraints: Constraints{
+			MaxIterations: 25, MaxCostUSD: 100, MaxWallClockS: 9999, MaxNoProgressIters: 3,
+			MaxVerifyFailures: 3,
+		},
+	}
+	hist := []IterationRecord{
+		{N: 1, StateHash: "same", Evaluation: EvalRecord{Criteria: []CriterionResult{{Satisfied: false}}}},
+		{N: 2, StateHash: "same", Evaluation: EvalRecord{Criteria: []CriterionResult{{Satisfied: false}}}},
+		{N: 3, StateHash: "same", Evaluation: EvalRecord{Criteria: []CriterionResult{{Satisfied: false}}}},
+		{N: 4, StateHash: "new", Evaluation: EvalRecord{Criteria: []CriterionResult{{Satisfied: false, Evidence: "once"}}}},
+	}
+	r := CheckGuards(GuardContext{Goal: g, History: hist, Now: time.Now()})
+	if r.Tripped {
+		t.Fatalf("floor should hide the old streak, got %+v", r)
 	}
 }

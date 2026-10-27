@@ -18,11 +18,15 @@ import (
 
 	"github.com/jonathanung/strike/harness/sandbox"
 	"github.com/jonathanung/strike/internal/frontend/host"
+	"github.com/jonathanung/strike/internal/frontend/host/local"
 	"github.com/jonathanung/strike/internal/frontend/server"
+	"github.com/jonathanung/strike/internal/persist/attachment"
 	"github.com/jonathanung/strike/internal/persist/session"
 	"github.com/jonathanung/strike/internal/persist/workspace"
+	"github.com/jonathanung/strike/internal/product/config"
 	"github.com/jonathanung/strike/internal/protocol"
 	"github.com/jonathanung/strike/internal/trust/audit"
+	"github.com/jonathanung/strike/internal/trust/usageaudit"
 )
 
 const serveUsage = `Web agent workspace (live engine + durable session attach).
@@ -50,6 +54,9 @@ Endpoints:
   GET  /  and  GET /attach          cockpit page
   GET  /v1/ws                       WebSocket: ops in, events out (live)
   POST /v1/ops                      submit one op envelope (live)
+  GET  /v1/sidechat                 list read-only side-chat turns
+  POST /v1/sidechat/ask             ask about the session (no tools, no user.input)
+  POST /v1/sidechat/ops             refused; cannot approve tools or post user.input
   GET  /v1/live/events              SSE of live engine events
   GET  /v1/status                   live status chrome
   GET  /v1/agents                   selectable agents
@@ -215,11 +222,36 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	usageDir := usageaudit.DefaultDir()
+	if usageLog, err := usageaudit.Open(usageDir); err != nil {
+		fmt.Fprintf(stderr, "strike: usage audit log unavailable: %v\n", err)
+		usageDir = ""
+	} else {
+		defer usageLog.Close()
+	}
+
 	var liveHub *server.LiveHub
 	var services *host.Services
 	var sandboxSnap *server.SandboxSnapshot
+	var sideChat server.SideChatModel
 	var cleanup func() error
+	var sharedAttachments *attachment.Store
 	sessionDir := opts.sessionDir
+
+	wsStore, err := workspace.Open("")
+	if err != nil {
+		return err
+	}
+	var browse []string
+	if home, herr := os.UserHomeDir(); herr == nil && home != "" {
+		browse = append(browse, home)
+	}
+	if cwd, cerr := os.Getwd(); cerr == nil && cwd != "" {
+		browse = append(browse, cwd)
+	}
+	if len(browse) > 0 {
+		wsStore.ConfigureBrowse(browse)
+	}
 
 	if !opts.attachOnly {
 		cliOpts := cliOptions{
@@ -228,12 +260,15 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 			model:                      opts.model,
 			auto:                       opts.auto,
 			dangerouslySkipPermissions: opts.dangerouslySkipPermissions,
+			workspaces:                 wsStore,
 		}
 		a, err := assemble(cliOpts, true)
 		if err != nil {
 			return err
 		}
+		sharedAttachments = a.attachments
 		sessionDir = a.sessions.Dir()
+		sideChat = newSideChatModel(a.sideProvider, a.sideModel, a.sideSelect)
 
 		agents := make([]server.AgentInfo, 0, len(a.services.Agents))
 		for _, name := range a.services.Agents {
@@ -308,6 +343,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 					return "", err
 				}
 				live := server.NewLive(slot.id, slot.workDir, agents, slot.eng.Ops())
+				a.attachMemoryMode(live, slot.id, slot.eng)
 				seedLiveSandbox(live)
 				sr := startServeRoot(ctx, slot, live)
 				mu.Lock()
@@ -348,6 +384,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 					return "", false, err
 				}
 				live := server.NewLive(slot.id, slot.workDir, agents, slot.eng.Ops())
+				a.attachMemoryMode(live, slot.id, slot.eng)
 				seedLiveSandbox(live)
 				sr := startServeRoot(ctx, slot, live)
 				mu.Lock()
@@ -364,6 +401,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		// Add initial root from the first assembly slot.
 		initialSlot := a.firstSlot
 		initialLive := server.NewLive(initialSlot.id, initialSlot.workDir, agents, initialSlot.eng.Ops())
+		a.attachMemoryMode(initialLive, initialSlot.id, initialSlot.eng)
 		seedLiveSandbox(initialLive)
 		liveHub.Add(initialSlot.id, initialLive)
 		if info, err := a.sessions.Get(initialSlot.id); err == nil && info.Title != "" {
@@ -470,9 +508,13 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 	}
 	defer func() { _ = auditSink.Close() }()
 
-	wsStore, err := workspace.Open("")
-	if err != nil {
-		return err
+	if sharedAttachments == nil {
+		st, err := attachment.Open(config.GlobalRoot())
+		if err != nil {
+			return fmt.Errorf("open attachments: %w", err)
+		}
+		defer func() { _ = st.Close() }()
+		sharedAttachments = st
 	}
 
 	srv, err := server.New(server.Options{
@@ -484,9 +526,17 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		Workspaces: wsStore,
 		LiveHub:    liveHub,
 		Services:   services,
-		Sandbox:    sandboxSnap,
-		ReadOnly:   opts.readOnly,
-		Audit:      auditSink,
+		SyncWorkDir: func(dir string) {
+			if services != nil {
+				local.SetFilesWorkDir(services.Files, dir)
+			}
+		},
+		Sandbox:       sandboxSnap,
+		ReadOnly:      opts.readOnly,
+		Audit:         auditSink,
+		Attachments:   sharedAttachments,
+		UsageAuditDir: usageDir,
+		SideChat:      sideChat,
 	})
 	if err != nil {
 		return err
@@ -508,6 +558,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		provider:   opts.provider,
 		sessionDir: sessionDir,
 		readOnly:   opts.readOnly,
+		sideChat:   sideChat != nil,
 	})
 
 	errCh := make(chan error, 1)
@@ -539,6 +590,7 @@ type serveBanner struct {
 	provider   string
 	sessionDir string
 	readOnly   bool
+	sideChat   bool
 }
 
 func printServeBanner(w io.Writer, b serveBanner) {
@@ -560,6 +612,9 @@ func printServeBanner(w io.Writer, b serveBanner) {
 	}
 	if b.readOnly {
 		fmt.Fprintln(w, "  ops:     read-only (mutating ops rejected)")
+	}
+	if b.sideChat {
+		fmt.Fprintln(w, "  side chat: read-only (POST /v1/sidechat/ask; cannot approve tools)")
 	}
 	if !b.auth {
 		fmt.Fprintln(w, "  auth:    off (loopback only)")

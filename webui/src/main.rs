@@ -1,45 +1,79 @@
 //! Strike web client. The session list is live roots plus saved sessions.
-//! Activity, Files, Changes, Git, and Worktrees are the side panel.
-//! Schedule, memory, knowledge, artifacts, and the task runner are not
-//! drawn here; see docs/webui-planned.md.
+//! Activity, Files, Changes, Git, Worktrees, Memory, Knowledge, and
+//! Artifacts are the side panel. Side chat is a separate read-only drawer.
+//! Goals and Autopilot live in `goals`. Schedule and the task runner are
+//! not drawn here; see docs/webui-planned.md.
 
 mod api;
+mod chat_mode;
+mod editor;
 mod git;
+mod goals;
 mod model;
+mod notify;
+mod model_menu;
+mod model_menu_view;
+mod session_list;
+mod session_panel;
+mod storage;
+mod transcript_find;
+mod usage_audit;
+mod session_delete;
+mod shell;
+mod side_chat;
+mod status;
+mod workspaces;
+
+use crate::shell::icon;
+
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use leptos::callback::Callback;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use model::{
     activity_panel, child_card_from_parts, child_card_from_text, child_keys_match, display_state,
-    filter_sessions, fmt_ago, fmt_elapsed, is_running, merge_sessions, mode_label,
+    fmt_ago, fmt_elapsed, is_running, merge_sessions, mode_label, rfc3339_to_ms,
     permission_modes, prefer_summary, protocol_dump, session_label, status_kind, strip_echo_tip,
-    task_headline, visible_sessions, ActivityRow, Bootstrap, ChangedFilesResponse, ChatLine,
+    task_headline, ActivityRow, Bootstrap, ChangedFilesResponse, ChatLine,
     ChildCard, ChildrenResponse, FilesResponse, Health, ModelInfo, ModelList, Remote, RootSummary,
-    SessionItem, SessionsResponse, TeamSnapshot, Workspace, WorkspacesResponse,
+    SessionItem, SessionsResponse, StatusBoard, TeamSnapshot, Workspace, WorkspacesResponse,
 };
+use protocol_schema::Event;
+use session_panel::{dispatch_session_key, SessionPanel};
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 
 use crate::api::{
-    get_json, idempotency_key, now_ms, patch_json, post_json, post_json_value, post_op,
+    get_json, idempotency_key, now_ms, patch_json, post_json, post_json_value, post_op, put_json,
 };
+use crate::workspaces::WorkspacePicker;
+use crate::storage::StoragePanel;
+use crate::editor::{DocumentPane, LinkedBody, MarkdownView, has_markdown_table};
+use crate::side_chat::SideChatPanel;
+
 use crate::model::{budget_elapsed, can_retry, RootsResponse};
+use crate::model_menu::{active_context, context_view, reduce_envelope, LiveModelState, ModelDefaults};
+use crate::model_menu_view::ModelMenu;
+use crate::status::{
+    apply_document_chrome, elapsed_since, session_kind, StatusKind, StatusMark, StatusSlot,
+    StatusTab, StatusTabs, HEARTBEAT_STALE_MS,
+};
 
 fn storage() -> Option<web_sys::Storage> {
     web_sys::window()?.local_storage().ok().flatten()
 }
 
-fn load(key: &str) -> String {
+pub(crate) fn load(key: &str) -> String {
     storage()
         .and_then(|s| s.get_item(key).ok().flatten())
         .unwrap_or_default()
 }
 
-fn save(key: &str, value: &str) {
+pub(crate) fn save(key: &str, value: &str) {
     if let Some(s) = storage() {
         let _ = s.set_item(key, value);
     }
@@ -91,6 +125,16 @@ fn apply_theme(theme: &str, scheme: &str) {
     }
     save("strike.theme", theme);
     save("strike.scheme", scheme);
+}
+
+fn apply_layout(layout: &str) {
+    let layout = chat_mode::normalize_layout(layout);
+    if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
+        if let Some(el) = doc.document_element() {
+            let _ = el.set_attribute("data-layout", &layout);
+        }
+    }
+    save("strike.layout", &layout);
 }
 
 fn same_origin(base: &str) -> bool {
@@ -146,6 +190,7 @@ fn Skeleton() -> impl IntoView {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn push_line(
     lines: RwSignal<Vec<ChatLine>>,
     seq: &Rc<Cell<u32>>,
@@ -153,6 +198,7 @@ fn push_line(
     title: &str,
     body: &str,
     badge: &str,
+    at_ms: f64,
 ) {
     let id = seq.get() + 1;
     seq.set(id);
@@ -165,6 +211,7 @@ fn push_line(
             badge: badge.into(),
             detail: String::new(),
             key: String::new(),
+            at_ms,
         });
     });
 }
@@ -193,6 +240,9 @@ fn upsert_child(lines: RwSignal<Vec<ChatLine>>, seq: &Rc<Cell<u32>>, card: Child
             if !kind.is_empty() {
                 existing.badge = kind.clone();
             }
+            if existing.at_ms <= 0.0 && card.at_ms > 0.0 {
+                existing.at_ms = card.at_ms;
+            }
             true
         })
         .unwrap_or(false);
@@ -215,6 +265,7 @@ fn upsert_child(lines: RwSignal<Vec<ChatLine>>, seq: &Rc<Cell<u32>>, card: Child
             badge: kind,
             detail: card.details,
             key: card.key,
+            at_ms: card.at_ms,
         });
     });
 }
@@ -227,7 +278,8 @@ fn absorb_noise(lines: RwSignal<Vec<ChatLine>>, seq: &Rc<Cell<u32>>) {
                 continue;
             }
             line.body = strip_echo_tip(&line.body);
-            if let Some(card) = child_card_from_text(&line.body) {
+            if let Some(mut card) = child_card_from_text(&line.body) {
+                card.at_ms = line.at_ms;
                 cards.push(card);
                 line.body.clear();
             } else if let Some((summary, details)) = protocol_dump(&line.body) {
@@ -237,6 +289,7 @@ fn absorb_noise(lines: RwSignal<Vec<ChatLine>>, seq: &Rc<Cell<u32>>) {
                     status: String::new(),
                     summary,
                     details,
+                    at_ms: line.at_ms,
                 });
                 line.body.clear();
             }
@@ -248,17 +301,126 @@ fn absorb_noise(lines: RwSignal<Vec<ChatLine>>, seq: &Rc<Cell<u32>>) {
     }
 }
 
+/// SessionTitled is the daemon's title source (#1262 owns rename). Reflect it
+/// on the open root so the list does not keep a raw id until the next poll.
+fn note_live_title(
+    sessions: RwSignal<Vec<SessionItem>>,
+    roots: RwSignal<Vec<RootSummary>>,
+    id: &str,
+    raw: &str,
+) {
+    if id.is_empty() {
+        return;
+    }
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(raw) else {
+        return;
+    };
+    if v.get("type").and_then(|t| t.as_str()) != Some("session.titled") {
+        return;
+    }
+    let Some(title) = v
+        .get("data")
+        .and_then(|d| d.get("title"))
+        .and_then(|t| t.as_str())
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+    else {
+        return;
+    };
+    let title = title.to_string();
+    sessions.update(|list| {
+        if let Some(row) = list.iter_mut().find(|row| row.id == id) {
+            row.title = title.clone();
+        }
+    });
+    roots.update(|list| {
+        if let Some(row) = list.iter_mut().find(|row| row.id == id) {
+            row.title = title;
+        }
+    });
+}
+
+/// Header stamp for a transcript line (#1349): relative while the line is
+/// under a day old (the session list's `fmt_ago` vocabulary), local clock
+/// time after that. Empty when the line's envelope time is unknown.
+fn line_stamp(at_ms: f64) -> String {
+    if at_ms <= 0.0 {
+        return String::new();
+    }
+    let now = now_ms();
+    if now - at_ms < 86_400_000.0 {
+        let rel = fmt_ago((at_ms / 1000.0) as i64, (now / 1000.0) as i64);
+        if !rel.is_empty() {
+            return rel;
+        }
+    }
+    let d = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(at_ms));
+    format!("{:02}:{:02}", d.get_hours() as u32, d.get_minutes() as u32)
+}
+
+/// Full local timestamp for the stamp's tooltip. Empty when unknown.
+fn line_full_time(at_ms: f64) -> String {
+    if at_ms <= 0.0 {
+        return String::new();
+    }
+    js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(at_ms))
+        .to_string()
+        .as_string()
+        .unwrap_or_default()
+}
+
+/// Local calendar day of a line, as (year, month 0-based, day of month).
+fn line_day(at_ms: f64) -> (u32, u32, u32) {
+    let d = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(at_ms));
+    (
+        d.get_full_year() as u32,
+        d.get_month() as u32,
+        d.get_date() as u32,
+    )
+}
+
+/// Separator label shown when the local day changes between lines.
+fn line_day_label(at_ms: f64) -> String {
+    const DAYS: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let d = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(at_ms));
+    format!(
+        "{} {} {}, {}",
+        DAYS[(d.get_day() as usize) % 7],
+        MONTHS[(d.get_month() as usize) % 12],
+        d.get_date() as u32,
+        d.get_full_year() as u32
+    )
+}
+
 fn apply_envelope(
     lines: RwSignal<Vec<ChatLine>>,
     seq: &Rc<Cell<u32>>,
     open: &Rc<Cell<bool>>,
+    storage_rev: RwSignal<u32>,
     raw: &str,
 ) {
+    // Generated contract: unknown events are skipped, and a known event whose
+    // payload does not match the schema is dropped. Rendering below still
+    // reads the raw object.
+    match protocol_schema::decode_event(raw) {
+        Ok(Event::Unknown { .. }) | Err(_) => return,
+        Ok(_) => {}
+    }
     let v: serde_json::Value = match serde_json::from_str(raw) {
         Ok(v) => v,
         Err(_) => return,
     };
     let typ = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
+    // The envelope's `time` is the event's original time (also what the
+    // JSONL log persists), so replayed lines keep their real timestamps.
+    let at_ms = v
+        .get("time")
+        .and_then(|t| t.as_str())
+        .map(rfc3339_to_ms)
+        .unwrap_or(0.0);
     let data = v.get("data").cloned().unwrap_or(serde_json::Value::Null);
     let text = |key: &str| match data.get(key) {
         Some(serde_json::Value::String(s)) => s.clone(),
@@ -268,7 +430,7 @@ fn apply_envelope(
     match typ {
         "user.message" => {
             open.set(false);
-            push_line(lines, seq, "you", "You", &text("text"), "");
+            push_line(lines, seq, "you", "You", &text("text"), "", at_ms);
             absorb_noise(lines, seq);
         }
         "turn.started" => open.set(false),
@@ -294,7 +456,7 @@ fn apply_envelope(
                 }
             }
             open.set(true);
-            push_line(lines, seq, "strike", "Strike", &chunk, "");
+            push_line(lines, seq, "strike", "Strike", &chunk, "", at_ms);
         }
         "turn.completed" => {
             open.set(false);
@@ -303,7 +465,7 @@ fn apply_envelope(
         "tool.begin" => {
             open.set(false);
             let name = text("name");
-            push_line(lines, seq, "tool", &name, &text("args"), "tool");
+            push_line(lines, seq, "tool", &name, &text("args"), "tool", at_ms);
         }
         "tool.end" => {
             let title = text("title");
@@ -318,7 +480,7 @@ fn apply_envelope(
             } else {
                 title
             };
-            push_line(lines, seq, "tool", &heading, &output, badge);
+            push_line(lines, seq, "tool", &heading, &output, badge, at_ms);
         }
         "child.completed" => {
             let status = text("status");
@@ -334,14 +496,48 @@ fn apply_envelope(
                     .to_string();
             }
             let details = serde_json::to_string_pretty(&data).unwrap_or_default();
-            upsert_child(
-                lines,
-                seq,
-                child_card_from_parts(&name, &session, &status, &summary, &details),
-            );
+            let mut card = child_card_from_parts(&name, &session, &status, &summary, &details);
+            card.at_ms = at_ms;
+            upsert_child(lines, seq, card);
         }
+        "artifact.updated" => storage_rev.update(|n| *n = n.wrapping_add(1)),
         _ => {}
     }
+}
+
+/// The body text find-in-transcript (#1342) may search for one line:
+/// the rendered body, except long / JSON-ish tool bodies the transcript
+/// folds into a collapsed <details> — those stay unsearchable in this
+/// slice, matching the rendering rule in the transcript view below.
+fn transcript_search_body(line: &ChatLine) -> &str {
+    let card = line.role == "child";
+    let prose = line.role == "you" || line.role == "strike";
+    let body = &line.body;
+    let tool_dump = !card
+        && !prose
+        && (body.trim_start().starts_with('{')
+            || body.trim_start().starts_with('[')
+            || body.chars().count() > 240);
+    if tool_dump {
+        ""
+    } else {
+        body
+    }
+}
+
+/// All find-in-transcript matches over a line list, in transcript order.
+fn transcript_matches(
+    list: &[ChatLine],
+    query: &str,
+) -> Vec<transcript_find::TMatch> {
+    let rows: Vec<transcript_find::SearchLine<'_>> = list
+        .iter()
+        .map(|line| transcript_find::SearchLine {
+            title: &line.title,
+            body: transcript_search_body(line),
+        })
+        .collect();
+    transcript_find::matches_for_lines(&rows, query)
 }
 
 fn join_path(dir: &str, name: &str) -> String {
@@ -356,6 +552,14 @@ fn parent_path(dir: &str) -> String {
     match dir.rsplit_once('/') {
         Some((parent, _)) => parent.to_string(),
         None => String::new(),
+    }
+}
+
+fn memory_mode_label(mode: &str) -> &'static str {
+    match mode {
+        "incognito" => "Incognito",
+        "temporary" => "Temporary",
+        _ => "Normal",
     }
 }
 
@@ -376,158 +580,7 @@ const SUGGESTIONS: [&str; 6] = [
     "What should I look at next?",
 ];
 
-#[derive(Clone, Copy)]
-struct PaletteCmd {
-    section: &'static str,
-    id: &'static str,
-    label: &'static str,
-    detail: &'static str,
-}
-
-fn palette_cmds() -> &'static [PaletteCmd] {
-    &[
-        PaletteCmd {
-            section: "Commands",
-            id: "new",
-            label: "New session",
-            detail: "Open another live root",
-        },
-        PaletteCmd {
-            section: "Commands",
-            id: "stop-all",
-            label: "Stop all",
-            detail: "Interrupt running delegated children in this session",
-        },
-        PaletteCmd {
-            section: "Apps",
-            id: "chat",
-            label: "Chat",
-            detail: "Sessions and the transcript",
-        },
-        PaletteCmd {
-            section: "Apps",
-            id: "daemon",
-            label: "Daemon",
-            detail: "This gateway, its token, and workspaces",
-        },
-        PaletteCmd {
-            section: "Apps",
-            id: "git",
-            label: "Git",
-            detail: "Status, diff, commit, and branches",
-        },
-        PaletteCmd {
-            section: "Apps",
-            id: "worktrees",
-            label: "Worktrees",
-            detail: "Session worktrees and child isolation",
-        },
-        PaletteCmd {
-            section: "Settings",
-            id: "steer",
-            label: "Steer",
-            detail: "Enter adds your message to the current turn without stopping it",
-        },
-        PaletteCmd {
-            section: "Settings",
-            id: "queue",
-            label: "Queue",
-            detail: "Enter waits until the turn finishes",
-        },
-        PaletteCmd {
-            section: "Settings",
-            id: "mode-default",
-            label: "Approval: Default",
-            detail: "Ask on the normal rules",
-        },
-        PaletteCmd {
-            section: "Settings",
-            id: "mode-plan",
-            label: "Approval: Plan",
-            detail: "Deny writes and edits",
-        },
-        PaletteCmd {
-            section: "Settings",
-            id: "mode-soft",
-            label: "Approval: Soft",
-            detail: "Count down 15 seconds, then allow once",
-        },
-        PaletteCmd {
-            section: "Settings",
-            id: "mode-edits",
-            label: "Approval: Edits",
-            detail: "Allow file edits; still ask for shell and network",
-        },
-        PaletteCmd {
-            section: "Settings",
-            id: "mode-yolo",
-            label: "Approval: Yolo",
-            detail: "This session skips asks that are not hard-denied",
-        },
-        PaletteCmd {
-            section: "Theme",
-            id: "theme-strike",
-            label: "Theme: Strike",
-            detail: "Stock TUI palette. Royal purple, cyan working state",
-        },
-        PaletteCmd {
-            section: "Theme",
-            id: "theme-nord",
-            label: "Theme: Nord",
-            detail: "Bundled TUI theme. Missing surfaces stay Strike",
-        },
-        PaletteCmd {
-            section: "Theme",
-            id: "theme-dracula",
-            label: "Theme: Dracula",
-            detail: "Bundled TUI theme. Missing surfaces stay Strike",
-        },
-        PaletteCmd {
-            section: "Theme",
-            id: "theme-gruvbox",
-            label: "Theme: Gruvbox",
-            detail: "Bundled TUI theme. Missing surfaces stay Strike",
-        },
-        PaletteCmd {
-            section: "Theme",
-            id: "theme-monokai",
-            label: "Theme: Monokai",
-            detail: "Bundled TUI theme. Missing surfaces stay Strike",
-        },
-        PaletteCmd {
-            section: "Theme",
-            id: "theme-tokyo-night",
-            label: "Theme: Tokyo Night",
-            detail: "Bundled TUI theme. Missing surfaces stay Strike",
-        },
-        PaletteCmd {
-            section: "Theme",
-            id: "theme-catppuccin",
-            label: "Theme: Catppuccin",
-            detail: "Bundled TUI theme. Missing surfaces stay Strike",
-        },
-        PaletteCmd {
-            section: "Theme",
-            id: "scheme-dark",
-            label: "Scheme: Dark",
-            detail: "Dark hexes from the TUI token pair",
-        },
-        PaletteCmd {
-            section: "Theme",
-            id: "scheme-light",
-            label: "Scheme: Light",
-            detail: "Light hexes from the TUI token pair",
-        },
-    ]
-}
-
-fn palette_match(cmd: &PaletteCmd, query: &str) -> bool {
-    query.is_empty()
-        || cmd.label.to_ascii_lowercase().contains(query)
-        || cmd.detail.to_ascii_lowercase().contains(query)
-}
-
-fn load_string_list(key: &str) -> Vec<String> {
+pub(crate) fn load_string_list(key: &str) -> Vec<String> {
     serde_json::from_str(&load(key)).unwrap_or_default()
 }
 
@@ -538,36 +591,6 @@ fn load_seen() -> HashMap<String, i64> {
 fn set_drag(ev: &web_sys::DragEvent, path: &str) {
     if let Some(dt) = ev.data_transfer() {
         let _ = dt.set_data("text/plain", &format!("@{path}"));
-    }
-}
-
-fn icon(name: &str) -> &'static str {
-    match name {
-        "sessions" => {
-            r#"<svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h7"/></svg>"#
-        }
-        "activity" => {
-            r#"<svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 8h2.5l1.8-3.5L9 12l1.7-4H14.5"/></svg>"#
-        }
-        "files" => {
-            r#"<svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2.5h5l3 3V13.5H4z"/><path d="M9 2.5V5.5h3"/></svg>"#
-        }
-        "changes" => {
-            r#"<svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4.5h10M3 8h6M3 11.5h8"/></svg>"#
-        }
-        "git" => {
-            r#"<svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="4" cy="4" r="1.6"/><circle cx="4" cy="12" r="1.6"/><circle cx="12" cy="6" r="1.6"/><path d="M4 5.6v4.8M4 4h5.2a2.2 2.2 0 0 1 0 4.4H4"/></svg>"#
-        }
-        "worktrees" => {
-            r#"<svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13.5V3.5M3 8h6.5a2 2 0 0 0 0-4H8M9.5 8H13"/></svg>"#
-        }
-        "command" => {
-            r#"<svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5h11v9h-11z"/><path d="M5 7l2 1.5L5 10M8.5 10.5h2.5"/></svg>"#
-        }
-        "status" => {
-            r#"<svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="2.5"/></svg>"#
-        }
-        _ => "",
     }
 }
 
@@ -639,6 +662,57 @@ fn rows_from_team(prev: &[ActivityRow], team: &TeamSnapshot, now: f64) -> Vec<Ac
     rows
 }
 
+fn apply_status_payload(
+    roots: RwSignal<Vec<model::RootSummary>>,
+    sessions: RwSignal<Vec<model::SessionItem>>,
+    sess: &serde_json::Value,
+) {
+    let Some(id) = sess.get("sessionId").and_then(|v| v.as_str()) else {
+        return;
+    };
+    if id.is_empty() {
+        return;
+    }
+    let id = id.to_string();
+    let state = sess
+        .get("status")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let unread = sess.get("unread").and_then(|v| v.as_bool()).unwrap_or(false);
+    let since = sess.get("since").and_then(|v| v.as_i64()).unwrap_or(0);
+    let last = sess
+        .get("lastActivityAt")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
+    roots.update(|rows| {
+        if let Some(row) = rows.iter_mut().find(|row| row.id == id) {
+            if !state.is_empty() {
+                row.busy = state == "running" || state == "waiting";
+                row.status = state.clone();
+            }
+            row.unread = Some(unread);
+            if since > 0 {
+                row.status_since = since;
+            }
+            if last > 0 {
+                row.last_activity_at = last;
+            }
+        }
+    });
+    sessions.update(|rows| {
+        if let Some(row) = rows.iter_mut().find(|row| row.id == id) {
+            if !state.is_empty() {
+                row.status = state.clone();
+            }
+            row.unread = Some(unread);
+            if last > 0 {
+                row.last_activity_at = last;
+            }
+        }
+    });
+}
+
 #[component]
 fn App() -> impl IntoView {
     let base = RwSignal::new(load("strike.base"));
@@ -653,7 +727,9 @@ fn App() -> impl IntoView {
     );
     let workspaces = RwSignal::new(Vec::<Workspace>::new());
     let active_workspace = RwSignal::new(String::new());
-    let new_path = RwSignal::new(String::new());
+    let workspace_recents = RwSignal::new(Vec::<Workspace>::new());
+    let picker_open = RwSignal::new(false);
+    let session_cwd = RwSignal::new(String::new());
     let remotes = RwSignal::new(load_remotes());
     let remote_name = RwSignal::new(String::new());
     let remote_url = RwSignal::new(String::new());
@@ -669,23 +745,32 @@ fn App() -> impl IntoView {
     let stream_note = RwSignal::new(String::new());
     let load_error = RwSignal::new(String::new());
     let gateway = RwSignal::new("checking".to_string());
+    let gateway_kind = RwSignal::new(StatusKind::Idle);
+    let gateway_label = RwSignal::new("Checking".to_string());
+    let last_beat = RwSignal::new(0.0f64);
+    let boot_ms = now_ms();
     let focus = RwSignal::new(false);
-    let palette_open = RwSignal::new(false);
-    let palette_query = RwSignal::new(String::new());
     let back_stack = RwSignal::new(Vec::<String>::new());
     let forward_stack = RwSignal::new(Vec::<String>::new());
+    // Kept for the shell host bridge (palette session list / breadcrumb
+    // label), which merges with the browser-local pins. The session panel
+    // itself uses the server-backed list from /v1/session-list.
     let pins = RwSignal::new(load_string_list("strike.pins"));
     let seen = RwSignal::new(load_seen());
-    let session_filter = RwSignal::new("all".to_string());
-    let session_query = RwSignal::new(String::new());
-    let older_open = RwSignal::new(false);
     let children = RwSignal::new(Vec::<model::ChildSession>::new());
     let perm_mode = RwSignal::new("default".to_string());
     let provider_name = RwSignal::new(String::new());
     let model_name = RwSignal::new(String::new());
     let model_note = RwSignal::new(String::new());
+    let model_note_after = RwSignal::new(0i64);
+    let effort_level = RwSignal::new(String::new());
+    let context_used = RwSignal::new(0i64);
+    let context_limit = RwSignal::new(0i64);
+    let context_fit = RwSignal::new(String::new());
+    let model_defaults = RwSignal::new(ModelDefaults::default());
     let catalog = RwSignal::new(Vec::<ModelInfo>::new());
     let catalog_note = RwSignal::new(String::new());
+    let catalog_once = RwSignal::new(false);
     let mode_menu = RwSignal::new(false);
     let model_menu = RwSignal::new(false);
     let enter_mode = RwSignal::new(if load("strike.enterMode") == "steer" {
@@ -696,12 +781,56 @@ fn App() -> impl IntoView {
     let live_busy = RwSignal::new(false);
     let live_busy_root = RwSignal::new(String::new());
     let side_tab = RwSignal::new("activity".to_string());
+    let memory_mode = RwSignal::new("normal".to_string());
+    let memory_menu = RwSignal::new(false);
+    let storage_rev = RwSignal::new(0u32);
+    // Find in transcript (#1342): bar visibility, query, current match,
+    // and the transcript scroll offset saved when the bar opened so
+    // Escape / Close can restore it.
+    let tf_open = RwSignal::new(false);
+    let tf_query = RwSignal::new(String::new());
+    let tf_idx = RwSignal::new(0usize);
+    let tf_saved_scroll = RwSignal::new(0.0f64);
+    let doc_path = RwSignal::new(String::new());
+    let doc_line = RwSignal::new(0u32);
+    let doc_diff = RwSignal::new(false);
+    let doc_editing = RwSignal::new(false);
+    let layout = RwSignal::new(chat_mode::normalize_layout(&load("strike.layout")));
+    let sessions_drawer = RwSignal::new(false);
+    let panel_drawer = RwSignal::new(false);
+    // Session delete (#1358): the session the confirm dialog is armed
+    // for. `None` means no deletion is pending; setting it never issues
+    // a request by itself.
+    let delete_target = RwSignal::new(None::<session_delete::DeleteTarget>);
+    let pending_files = RwSignal::new(Vec::<chat_mode::PendingAttachment>::new());
+    let sending = RwSignal::new(false);
+    let listening = RwSignal::new(false);
+    let speech_ok = chat_mode::dictation_available();
+    let reconnect_gen = RwSignal::new(0u32);
+    let stream_epoch = RwSignal::new(0u32);
+    let stream_fails = RwSignal::new(0u32);
+    let stream_up = RwSignal::new(false);
+    let file_input = NodeRef::<leptos::html::Input>::new();
+    let side_open = RwSignal::new(false);
+    let side_focus_id = RwSignal::new(String::new());
+    let side_focus_name = RwSignal::new(String::new());
+    let side_focus_root = RwSignal::new(String::new());
+    Effect::new(move |_| {
+        let root = active_root.get();
+        if side_focus_root.get_untracked() != root {
+            side_focus_id.set(String::new());
+            side_focus_name.set(String::new());
+            side_focus_root.set(root);
+        }
+    });
+
     let files_path = RwSignal::new(String::new());
     let files = RwSignal::new(Vec::<model::DirEntry>::new());
     let files_error = RwSignal::new(String::new());
     let changes = RwSignal::new(Vec::<model::ChangedFile>::new());
     let changes_error = RwSignal::new(String::new());
     apply_theme(&load("strike.theme"), &load("strike.scheme"));
+    apply_layout(&layout.get_untracked());
 
     let poll_team = move || {
         let (b, t, root) = (
@@ -741,28 +870,89 @@ fn App() -> impl IntoView {
         });
     };
 
+    let load_model_catalog = move || {
+        let (b, t, provider) = (
+            base.get_untracked(),
+            token.get_untracked(),
+            provider_name.get_untracked(),
+        );
+        spawn_local(async move {
+            let path = if provider.is_empty() {
+                "/v1/models".to_string()
+            } else {
+                format!("/v1/models?provider={}", api::js_encode(&provider))
+            };
+            match get_json::<ModelList>(&b, &t, &path).await {
+                Ok(list) => {
+                    catalog.set(list.models);
+                    catalog_note.set(String::new());
+                }
+                Err(_) => {
+                    catalog.set(Vec::new());
+                    catalog_note
+                        .set("Catalog unavailable. The chip still shows the live model.".into());
+                }
+            }
+        });
+    };
+
     let refresh_meta = move || {
         let (b, t) = (base.get_untracked(), token.get_untracked());
         spawn_local(async move {
             let mut err = String::new();
+            let mut gateway_up = false;
             match get_json::<Health>(&b, &t, "/health").await {
                 Ok(h) if h.ok => {
+                    let was = gateway.get_untracked();
+                    let root_now = active_root.get_untracked();
                     gateway.set("connected".into());
-                    status.set(format!("strike {}", h.version));
+                    last_beat.set(now_ms());
+                    gateway_up = true;
+                    // HTTP is up. If the event stream is still down after an
+                    // outage, open it again now instead of waiting out backoff.
+                    if was == "unreachable"
+                        && !stream_up.get_untracked()
+                        && !root_now.is_empty()
+                        && same_origin(&b)
+                    {
+                        reconnect_gen.update(|n| *n = n.wrapping_add(1));
+                    }
+                    status.set(format!("Connected · {}", h.version));
                 }
                 Ok(_) => {
                     gateway.set("unreachable".into());
+                    gateway_kind.set(StatusKind::Disconnected);
+                    gateway_label.set("Unreachable".into());
+                    status.set("Unreachable".into());
                     err = "The daemon answered, but it is not ok.".into();
                 }
                 Err(e) => {
                     gateway.set("unreachable".into());
+                    gateway_kind.set(StatusKind::Disconnected);
+                    gateway_label.set("Unreachable".into());
+                    status.set("Unreachable".into());
                     err = format!("Could not reach the daemon: {e}");
+                }
+            }
+            if gateway_up {
+                match get_json::<StatusBoard>(&b, &t, "/v1/status/sessions").await {
+                    Ok(board) => {
+                        let kind = StatusKind::parse(&board.gateway);
+                        gateway_kind.set(kind);
+                        gateway_label.set(kind.label().into());
+                    }
+                    Err(e) => {
+                        if err.is_empty() {
+                            err = format!("Status board failed to load: {e}");
+                        }
+                    }
                 }
             }
             match get_json::<WorkspacesResponse>(&b, &t, "/v1/workspaces").await {
                 Ok(r) => {
                     active_workspace.set(r.active_id);
                     workspaces.set(r.workspaces);
+                    workspace_recents.set(r.recents);
                 }
                 Err(e) => {
                     if err.is_empty() {
@@ -804,16 +994,27 @@ fn App() -> impl IntoView {
                         if let Some(st) = boot.status {
                             provider_name.set(st.provider);
                             model_name.set(st.model);
+                            effort_level.set(st.effort);
+                            context_used.set(st.context_used);
+                            context_limit.set(st.context_limit);
+                            context_fit.set(st.context_fit);
                             if !st.permission_mode.is_empty() {
                                 perm_mode.set(st.permission_mode);
                             }
+                            session_cwd.set(st.cwd);
                             live_busy.set(st.busy);
                             live_busy_root.set(root);
                         }
-                        model_note.set(String::new());
+                        if !catalog_once.get_untracked() {
+                            catalog_once.set(true);
+                            load_model_catalog();
+                        }
                     }
                     Err(e) => model_note.set(format!("Live status unavailable: {e}")),
                 }
+            }
+            if let Ok(defaults) = get_json::<ModelDefaults>(&b, &t, "/v1/settings").await {
+                model_defaults.set(defaults);
             }
             load_error.set(err);
             loading.set(false);
@@ -832,30 +1033,69 @@ fn App() -> impl IntoView {
             .unwrap_or(0);
         let now = (now_ms() / 1000.0) as i64;
         seen.update(|map| {
-            map.insert(id, mtime.max(now));
+            map.insert(id.clone(), mtime.max(now));
         });
         save(
             "strike.seen",
             &serde_json::to_string(&seen.get_untracked()).unwrap_or_default(),
         );
+        roots.update(|rows| {
+            if let Some(row) = rows.iter_mut().find(|row| row.id == id) {
+                row.unread = Some(false);
+            }
+        });
+        sessions.update(|rows| {
+            if let Some(row) = rows.iter_mut().find(|row| row.id == id) {
+                row.unread = Some(false);
+            }
+        });
+        let (b, t, seen_id) = (base.get_untracked(), token.get_untracked(), id);
+        spawn_local(async move {
+            let path = format!("/v1/sessions/{}/seen", api::js_encode(&seen_id));
+            let _ = post_json(&b, &t, &path, serde_json::json!({})).await;
+        });
     };
 
     let tail: Rc<RefCell<Option<web_sys::EventSource>>> = Rc::new(RefCell::new(None));
     let seq = Rc::new(Cell::new(0u32));
     let open = Rc::new(Cell::new(false));
+    let shown_root = RwSignal::new(String::new());
+    let wipe_on_replay = RwSignal::new(false);
     let tail_fx = tail.clone();
     let seq_fx = seq.clone();
     let open_fx = open.clone();
     Effect::new(move |_| {
         let root = active_root.get();
         let b = base.get();
+        let _retry = reconnect_gen.get();
+        let epoch = stream_epoch.get_untracked().wrapping_add(1);
+        stream_epoch.set(epoch);
+        stream_up.set(false);
         if let Some(es) = tail_fx.borrow_mut().take() {
             es.close();
         }
         seq_fx.set(0);
         open_fx.set(false);
-        lines.set(Vec::new());
-        children.set(Vec::new());
+        // A new session must not keep the previous transcript. A reconnect of
+        // the same session keeps the column until the daemon's log replay
+        // arrives, then replaces it so lines are not doubled.
+        let switching = shown_root.get_untracked() != root;
+        shown_root.set(root.clone());
+        if switching {
+            lines.set(Vec::new());
+            children.set(Vec::new());
+            wipe_on_replay.set(false);
+            // Find belongs to the session that was open (#1342).
+            tf_open.set(false);
+            tf_query.set(String::new());
+            tf_idx.set(0);
+        } else if !root.is_empty() {
+            wipe_on_replay.set(true);
+        }
+        effort_level.set(String::new());
+        context_used.set(0);
+        context_limit.set(0);
+        context_fit.set(String::new());
         if root.is_empty() {
             stream_note.set(String::new());
             return;
@@ -873,7 +1113,6 @@ fn App() -> impl IntoView {
             stream_note.set("Live transcript follows the daemon that served this page. Activity still polls the selected base URL.".into());
             return;
         }
-        stream_note.set(String::new());
         let url = format!("/v1/live/events?root={}", api::js_encode(&root));
         let es = match web_sys::EventSource::new(&url) {
             Ok(es) => es,
@@ -885,17 +1124,100 @@ fn App() -> impl IntoView {
         let lines_cb = lines;
         let seq_cb = seq_fx.clone();
         let open_cb = open_fx.clone();
+        let sessions_cb = sessions;
+        let roots_cb = roots;
+        let titled_root = root.clone();
+        let epoch_msg = epoch;
+        let epochs_msg = stream_epoch;
         let on_msg =
             Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |ev: web_sys::MessageEvent| {
-                if let Some(data) = ev.data().as_string() {
-                    apply_envelope(lines_cb, &seq_cb, &open_cb, &data);
+                if epochs_msg.get_untracked() != epoch_msg {
+                    return;
                 }
+                if let Some(data) = ev.data().as_string() {
+                    note_live_title(sessions_cb, roots_cb, &titled_root, &data);
+                    apply_envelope(lines_cb, &seq_cb, &open_cb, storage_rev, &data);
+                    let prev = LiveModelState {
+                        provider: provider_name.get_untracked(),
+                        model: model_name.get_untracked(),
+                        effort: effort_level.get_untracked(),
+                        context_used: context_used.get_untracked(),
+                        context_limit: context_limit.get_untracked(),
+                        context_fit: context_fit.get_untracked(),
+                        note: model_note.get_untracked(),
+                        note_after: model_note_after.get_untracked(),
+                    };
+                    let next = reduce_envelope(prev, &data);
+                    provider_name.set(next.provider);
+                    model_name.set(next.model);
+                    effort_level.set(next.effort);
+                    context_used.set(next.context_used);
+                    context_limit.set(next.context_limit);
+                    context_fit.set(next.context_fit);
+                    model_note.set(next.note);
+                    model_note_after.set(next.note_after);                }
             });
         es.set_onmessage(Some(on_msg.as_ref().unchecked_ref()));
         on_msg.forget();
-        let note = stream_note;
+        let up = stream_up;
+        let fails_ok = stream_fails;
+        let note_ok = stream_note;
+        let gate_ok = gateway;
+        let epoch_open = epoch;
+        let epochs_open = stream_epoch;
+        let lines_open = lines;
+        let wipe_open = wipe_on_replay;
+        let on_open = Closure::<dyn FnMut(web_sys::Event)>::new(move |_ev| {
+            if epochs_open.get_untracked() != epoch_open {
+                return;
+            }
+            fails_ok.set(0);
+            up.set(true);
+            note_ok.set(String::new());
+            gate_ok.set("connected".into());
+            if wipe_open.get_untracked() {
+                wipe_open.set(false);
+                lines_open.set(Vec::new());
+            }
+        });
+        es.set_onopen(Some(on_open.as_ref().unchecked_ref()));
+        on_open.forget();
+        let es_err = es.clone();
+        let up_err = stream_up;
+        let fails_err = stream_fails;
+        let epochs = stream_epoch;
+        let note_err = stream_note;
+        let bump = reconnect_gen;
+        let epoch_err = epoch;
         let on_err = Closure::<dyn FnMut(web_sys::Event)>::new(move |_ev| {
-            note.set("live event stream closed. Reload after the daemon cookie handoff if /v1 requires a token.".into());
+            if epochs.get_untracked() != epoch_err {
+                return;
+            }
+            es_err.close();
+            up_err.set(false);
+            let n = fails_err.get_untracked();
+            fails_err.set(n.saturating_add(1));
+            if n >= 3 {
+                note_err.set("Reconnecting to the live session. If this stays up, open the page once with ?token= so the daemon cookie is set.".into());
+            } else {
+                note_err.set("Reconnecting to the live session…".into());
+            }
+            let delay = chat_mode::reconnect_delay_ms(n);
+            let epoch_now = epoch;
+            let epochs = epochs;
+            let bump = bump;
+            if let Some(win) = web_sys::window() {
+                let tick = Closure::once(move || {
+                    if epochs.get_untracked() == epoch_now {
+                        bump.update(|g| *g = g.wrapping_add(1));
+                    }
+                });
+                let _ = win.set_timeout_with_callback_and_timeout_and_arguments_0(
+                    tick.as_ref().unchecked_ref(),
+                    delay,
+                );
+                tick.forget();
+            }
         });
         es.set_onerror(Some(on_err.as_ref().unchecked_ref()));
         on_err.forget();
@@ -903,9 +1225,26 @@ fn App() -> impl IntoView {
     });
 
     let poll_tick = tick;
+    let beat_sig = last_beat;
+    let kind_sig = gateway_kind;
+    let label_sig = gateway_label;
+    let gateway_sig = gateway;
+    let status_sig = status;
     let interval = Closure::<dyn FnMut()>::new(move || {
         let n = poll_tick.get_untracked().wrapping_add(1);
         poll_tick.set(n);
+        let beat = beat_sig.get_untracked();
+        let age = if beat > 0.0 {
+            now_ms() - beat
+        } else {
+            now_ms() - boot_ms
+        };
+        if age > HEARTBEAT_STALE_MS {
+            kind_sig.set(StatusKind::Disconnected);
+            label_sig.set("Unreachable".into());
+            gateway_sig.set("unreachable".into());
+            status_sig.set("Unreachable".into());
+        }
         if n % 2 == 0 {
             poll_team();
             refresh_meta();
@@ -919,20 +1258,120 @@ fn App() -> impl IntoView {
     }
     interval.forget();
 
+    let status_tail: Rc<RefCell<Option<web_sys::EventSource>>> = Rc::new(RefCell::new(None));
+    let status_tail_fx = status_tail.clone();
+    Effect::new(move |_| {
+        let b = base.get();
+        if let Some(es) = status_tail_fx.borrow_mut().take() {
+            es.close();
+        }
+        if !same_origin(&b) {
+            return;
+        }
+        let es = match web_sys::EventSource::new("/v1/status/events") {
+            Ok(es) => es,
+            Err(_) => return,
+        };
+        let beat = last_beat;
+        let kind = gateway_kind;
+        let label = gateway_label;
+        let link = gateway;
+        let roots_cb = roots;
+        let sessions_cb = sessions;
+        let on_msg =
+            Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |ev: web_sys::MessageEvent| {
+                // A buffered frame can arrive after /health has already failed.
+                // Leave the chip on Unreachable until the next successful poll.
+                if link.get_untracked() == "unreachable" {
+                    return;
+                }
+                let Some(data) = ev.data().as_string() else {
+                    return;
+                };
+                let v: serde_json::Value = match serde_json::from_str(&data) {
+                    Ok(v) => v,
+                    Err(_) => return,
+                };
+                beat.set(now_ms());
+                if let Some(gw) = v.get("gateway").and_then(|g| g.as_str()) {
+                    if !gw.is_empty() {
+                        let parsed = StatusKind::parse(gw);
+                        kind.set(parsed);
+                        label.set(parsed.label().into());
+                    }
+                }
+                let typ = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                if typ == "session.status" {
+                    if let Some(sess) = v.get("session") {
+                        apply_status_payload(roots_cb, sessions_cb, sess);
+                    }
+                } else if typ == "snapshot" {
+                    if let Some(list) = v.get("sessions").and_then(|s| s.as_array()) {
+                        for sess in list {
+                            apply_status_payload(roots_cb, sessions_cb, sess);
+                        }
+                    }
+                }
+            });
+        es.set_onmessage(Some(on_msg.as_ref().unchecked_ref()));
+        on_msg.forget();
+        *status_tail_fx.borrow_mut() = Some(es);
+    });
+
+    Effect::new(move |_| {
+        let kind = gateway_kind.get();
+        let root_rows = roots.get();
+        let saved = sessions.get();
+        let active = active_root.get();
+        let mut n = 0usize;
+        let mut live_ids = std::collections::HashSet::new();
+        for row in &root_rows {
+            live_ids.insert(row.id.clone());
+            if row.unread == Some(true) && row.id != active {
+                n += 1;
+            }
+        }
+        for row in &saved {
+            if row.unread == Some(true) && !live_ids.contains(&row.id) {
+                n += 1;
+            }
+        }
+        apply_document_chrome(kind, n);
+    });
+
     let session_busy = move |root: &str| -> bool {
         roots.get_untracked().iter().any(|r| r.id == root && r.busy)
             || (live_busy.get_untracked() && live_busy_root.get_untracked() == root)
     };
 
-    let send_text = move |text: String| {
+    // Returns true only when the text was actually dispatched, so callers
+    // can keep the draft when a context hold (or no live session) blocks it.
+    let send_text = move |text: String| -> bool {
         let text = text.trim().to_string();
         if text.is_empty() {
-            return;
+            return false;
+        }
+        let held = {
+            let ctx = active_context(
+                &catalog.get_untracked(),
+                &provider_name.get_untracked(),
+                &model_name.get_untracked(),
+            );
+            context_view(
+                context_used.get_untracked(),
+                context_limit.get_untracked(),
+                ctx,
+                &context_fit.get_untracked(),
+            )
+        };
+        if held.held {
+            model_note.set(held.hold_message);
+            return false;
         }
         let root = active_root.get_untracked();
         if root.is_empty() {
             status.set("no live session yet".into());
-            return;
+            return false;
         }
         let op = if session_busy(&root) && enter_mode.get_untracked() == "steer" {
             "steer"
@@ -945,12 +1384,132 @@ fn App() -> impl IntoView {
                 status.set(format!("send failed: {e}"));
             }
         });
+        true
     };
 
     let send = move || {
-        let text = draft.get_untracked();
+        // Context-hold gate (mirrors send_text): when the context fit is
+        // critical/full, do not dispatch and do not clear the draft or
+        // pending files, so a held submit never loses typed text. This
+        // gates both entry points (form submit and textarea Enter),
+        // which call this shared closure unconditionally.
+        let held = {
+            let ctx = active_context(
+                &catalog.get_untracked(),
+                &provider_name.get_untracked(),
+                &model_name.get_untracked(),
+            );
+            context_view(
+                context_used.get_untracked(),
+                context_limit.get_untracked(),
+                ctx,
+                &context_fit.get_untracked(),
+            )
+        };
+        if held.held {
+            model_note.set(held.hold_message);
+            return;
+        }
+        if sending.get_untracked() {
+            return;
+        }
+        let text = draft.get_untracked().trim().to_string();
+        let files = pending_files.get_untracked();
+        if files.iter().any(|f| f.error.is_empty() && f.data_b64.is_empty() && f.uploaded_ref.is_empty()) {
+            status.set("Still reading an attachment.".into());
+            return;
+        }
+        let ready = files.iter().any(|f| f.error.is_empty());
+        if text.is_empty() && !ready {
+            return;
+        }
+        let root = active_root.get_untracked();
+        if root.is_empty() {
+            status.set("no live session yet".into());
+            return;
+        }
+        let op = if session_busy(&root) && enter_mode.get_untracked() == "steer" {
+            "steer"
+        } else {
+            "user.input"
+        };
+        // Take the composer before the first await so a repeated Enter or a
+        // second click cannot post the same attachments again.
+        sending.set(true);
+        pending_files.set(Vec::new());
         draft.set(String::new());
-        send_text(text);
+        if listening.get_untracked() {
+            let _ = chat_mode::toggle_dictation(|_| {}, |_| {});
+            listening.set(false);
+        }
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        let restore = move |failed: Vec<chat_mode::PendingAttachment>, failed_text: String| {
+            draft.update(|d| {
+                *d = chat_mode::merge_failed_send(d, &failed_text);
+            });
+            pending_files.update(|rows| {
+                *rows = chat_mode::merge_failed_files(failed.clone(), rows.clone());
+            });
+            sending.set(false);
+        };
+        spawn_local(async move {
+            let mut updated = files;
+            let mut images = Vec::new();
+            for file in updated.iter_mut() {
+                if !file.error.is_empty() {
+                    continue;
+                }
+                if file.uploaded_ref.is_empty() {
+                    match chat_mode::upload_attachment(&b, &t, &root, &file.name, &file.mime, &file.data_b64).await {
+                        Ok(up) => {
+                            file.uploaded_ref = up.reference.clone();
+                            file.uploaded_kind = up.kind;
+                            file.uploaded_sha = up.sha256;
+                            if !up.name.is_empty() {
+                                file.name = up.name;
+                            }
+                            if !up.mime.is_empty() {
+                                file.mime = up.mime;
+                            }
+                            if up.bytes > 0 {
+                                file.bytes = up.bytes as u64;
+                            }
+                            file.data_b64.clear();
+                        }
+                        Err(err) => {
+                            status.set(format!("attachment failed: {err}"));
+                            restore(updated, text);
+                            return;
+                        }
+                    }
+                }
+                images.push(serde_json::json!({
+                    "ref": file.uploaded_ref,
+                    "mime": file.mime,
+                    "kind": file.uploaded_kind,
+                    "name": file.name,
+                    "bytes": file.bytes,
+                    "sha256": file.uploaded_sha,
+                }));
+            }
+            let body = if images.is_empty() {
+                serde_json::json!({"text": text})
+            } else {
+                serde_json::json!({"text": text, "images": images})
+            };
+            match post_op(&b, &t, &root, op, body).await {
+                Ok(()) => {
+                    for file in &updated {
+                        chat_mode::revoke_preview(&file.preview);
+                    }
+                    sending.set(false);
+                }
+                Err(err) => {
+                    status.set(format!("send failed: {err}"));
+                    restore(updated, text);
+                }
+            }
+        });
     };
 
     let insert_mention = move |path: String| {
@@ -997,9 +1556,7 @@ fn App() -> impl IntoView {
                         .await;
                         active_root.set(id);
                     }
-                    if let Ok(r) = get_json::<RootsResponse>(&b, &t, "/v1/roots").await {
-                        roots.set(r.roots);
-                    }
+                    refresh_meta();
                 }
                 Err(e) => status.set(format!("new session failed: {e}")),
             }
@@ -1119,11 +1676,55 @@ fn App() -> impl IntoView {
         save("strike.enterMode", &mode);
     };
 
+    let set_layout = move |next: String| {
+        let next = chat_mode::normalize_layout(&next);
+        layout.set(next.clone());
+        apply_layout(&next);
+        if next != "conversation" {
+            sessions_drawer.set(false);
+            panel_drawer.set(false);
+        }
+    };
+
     let set_theme = move |theme: String| {
         apply_theme(&theme, &load("strike.scheme"));
     };
     let set_scheme = move |scheme: String| {
         apply_theme(&load("strike.theme"), &scheme);
+    };
+
+    let set_memory = move |mode: String| {
+        memory_menu.set(false);
+        memory_mode.set(mode.clone());
+        let root = active_root.get_untracked();
+        if root.is_empty() {
+            status.set("no live session yet".into());
+            return;
+        }
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            let path = format!("/v1/memory/mode?root={}", api::js_encode(&root));
+            match put_json(&b, &t, &path, serde_json::json!({"mode": mode})).await {
+                Ok(text) => {
+                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
+                        if let Some(saved) = v.get("mode").and_then(|m| m.as_str()) {
+                            if !saved.is_empty() {
+                                memory_mode.set(saved.to_string());
+                            }
+                        }
+                    }
+                }
+                Err(e) => status.set(format!("memory mode failed: {e}")),
+            }
+        });
+    };
+
+    let open_side = move |id: String, name: String| {
+        side_focus_id.set(id);
+        side_focus_name.set(name);
+        side_open.set(true);
+        mode.set("chat".into());
+
     };
 
     let set_perm = move |mode: String| {
@@ -1150,66 +1751,71 @@ fn App() -> impl IntoView {
         });
     };
 
-    let toggle_pin = move |id: String| {
-        pins.update(|list| {
-            if let Some(i) = list.iter().position(|p| p == &id) {
-                list.remove(i);
-            } else {
-                list.push(id);
-            }
-        });
+
+    // Session delete (#1358): arm the confirm dialog for one session.
+    // Shared by the row button and the palette command — one code path,
+    // and arming the dialog is all either surface does.
+    let request_delete = move |id: String, label: String| {
+        delete_target.set(Some(session_delete::DeleteTarget { id, label }));
+    };
+
+    // After the daemon confirms a deletion: drop the session from every
+    // local list, forget its pin/seen marks and history entries, and —
+    // via `remaining_active` — fall back to the empty/list state when
+    // the deleted session was the open one. Then re-read the lists from
+    // the daemon so the cockpit shows the daemon's truth, not a guess.
+    //
+    // One composition is needed for that to hold: the session DELETE
+    // removes the durable log, but a session that is also a live root
+    // stays registered in the daemon's LiveHub (GET /v1/roots keeps
+    // listing it, and a refresh would resurrect its row and reactivate
+    // it). So when the deleted session was a live root, close that root
+    // too (DELETE /v1/roots/{id} — LiveHub.Remove handles the active
+    // root by activating another or none). The daemon gap behind this
+    // is filed separately; this PR only composes the two existing
+    // endpoints, in delete-then-close order, after the user's force
+    // confirmation when one was required.
+    let on_deleted = Callback::new(move |id: String| {
+        let was_live = roots.get_untracked().iter().any(|row| row.id == id);
+        pins.update(|list| list.retain(|p| p != &id));
         save(
             "strike.pins",
             &serde_json::to_string(&pins.get_untracked()).unwrap_or_default(),
         );
-    };
-
-    let run_command = move |id: String| {
-        palette_open.set(false);
-        match id.as_str() {
-            "new" => new_session(),
-            "stop-all" => stop_all(),
-            "chat" => mode.set("chat".into()),
-            "daemon" => mode.set("daemon".into()),
-            "git" => {
-                mode.set("chat".into());
-                side_tab.set("git".into());
-            }
-            "worktrees" => {
-                mode.set("chat".into());
-                side_tab.set("worktrees".into());
-            }
-            "steer" => set_enter("steer".into()),
-            "queue" => set_enter("queue".into()),
-            "mode-default" => set_perm("default".into()),
-            "mode-plan" => set_perm("plan".into()),
-            "mode-soft" => set_perm("soft-approve".into()),
-            "mode-edits" => set_perm("accept-edits".into()),
-            "mode-yolo" => set_perm("yolo".into()),
-            "theme-strike" => set_theme("strike".into()),
-            "theme-nord" => set_theme("nord".into()),
-            "theme-dracula" => set_theme("dracula".into()),
-            "theme-gruvbox" => set_theme("gruvbox".into()),
-            "theme-monokai" => set_theme("monokai".into()),
-            "theme-tokyo-night" => set_theme("tokyo-night".into()),
-            "theme-catppuccin" => set_theme("catppuccin".into()),
-            "scheme-dark" => set_scheme("dark".into()),
-            "scheme-light" => set_scheme("light".into()),
-            _ => {}
+        seen.update(|map| {
+            map.remove(&id);
+        });
+        save(
+            "strike.seen",
+            &serde_json::to_string(&seen.get_untracked()).unwrap_or_default(),
+        );
+        sessions.update(|rows| rows.retain(|row| row.id != id));
+        roots.update(|rows| rows.retain(|row| row.id != id));
+        back_stack.update(|stack| stack.retain(|entry| entry != &id));
+        forward_stack.update(|stack| stack.retain(|entry| entry != &id));
+        let cur = active_root.get_untracked();
+        if session_delete::remaining_active(&cur, &id).is_none() && !cur.is_empty() {
+            active_root.set(String::new());
         }
-    };
-
-    let run_picked = move || {
-        let q = palette_query.get_untracked().to_ascii_lowercase();
-        let items: Vec<_> = palette_cmds()
-            .iter()
-            .copied()
-            .filter(|c| palette_match(c, &q))
-            .collect();
-        if let Some(cmd) = items.first() {
-            run_command(cmd.id.to_string());
+        status.set("Session deleted.".into());
+        if was_live {
+            let (b, t) = (base.get_untracked(), token.get_untracked());
+            spawn_local(async move {
+                let path = format!(
+                    "/v1/roots/{}",
+                    session_delete::encode_segment(&id)
+                );
+                if let Err(e) = crate::api::delete_json(&b, &t, &path, None).await {
+                    status.set(format!(
+                        "Session deleted, but closing its live root failed: {e}"
+                    ));
+                }
+                refresh_meta();
+            });
+        } else {
+            refresh_meta();
         }
-    };
+    });
 
     let load_files = move || {
         let (b, t, path) = (
@@ -1254,83 +1860,149 @@ fn App() -> impl IntoView {
         }
     });
 
+    // The shell owns the palette, travel, focus, and Escape chords;
+    // this listener only forwards keys to the session panel (j/k/x,
+    // Alt+1..9), whose handler guards modifiers and typing targets.
     let on_key =
         Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |ev: web_sys::KeyboardEvent| {
-            if (ev.meta_key() || ev.ctrl_key()) && ev.key().eq_ignore_ascii_case("k") {
-                ev.prevent_default();
-                palette_open.set(!palette_open.get_untracked());
-                if palette_open.get_untracked() {
-                    palette_query.set(String::new());
-                }
-            } else if ev.alt_key() && !ev.meta_key() && !ev.ctrl_key() && ev.key() == "ArrowLeft" {
-                ev.prevent_default();
-                travel(true);
-            } else if ev.alt_key() && !ev.meta_key() && !ev.ctrl_key() && ev.key() == "ArrowRight" {
-                ev.prevent_default();
-                travel(false);
-            } else if ev.alt_key() && !ev.meta_key() && !ev.ctrl_key() && ev.key() == "\\" {
-                ev.prevent_default();
-                focus.update(|v| *v = !*v);
-            } else if ev.alt_key()
-                && !ev.meta_key()
-                && !ev.ctrl_key()
-                && !git::shortcut_blocked(&ev)
-                && ev.key().eq_ignore_ascii_case("g")
-            {
-                ev.prevent_default();
-                mode.set("chat".into());
-                side_tab.set("git".into());
-            } else if ev.alt_key()
-                && !ev.meta_key()
-                && !ev.ctrl_key()
-                && !git::shortcut_blocked(&ev)
-                && ev.key().eq_ignore_ascii_case("w")
-            {
-                ev.prevent_default();
-                mode.set("chat".into());
-                side_tab.set("worktrees".into());
-            } else if ev.key() == "Escape" {
-                palette_open.set(false);
-                mode_menu.set(false);
-                model_menu.set(false);
-            }
+            dispatch_session_key(&ev);
         });
     if let Some(w) = web_sys::window() {
         let _ = w.add_event_listener_with_callback("keydown", on_key.as_ref().unchecked_ref());
     }
     on_key.forget();
 
-    let open_models = move |_| {
-        let open = !model_menu.get_untracked();
-        mode_menu.set(false);
-        model_menu.set(open);
-        if !open {
-            return;
+    let stream_up_online = stream_up;
+    let reconnect_online = reconnect_gen;
+    let on_online = Closure::<dyn FnMut(web_sys::Event)>::new(move |_ev| {
+        if !stream_up_online.get_untracked() {
+            reconnect_online.update(|n| *n = n.wrapping_add(1));
         }
-        let (b, t, provider) = (
-            base.get_untracked(),
-            token.get_untracked(),
-            provider_name.get_untracked(),
-        );
+    });
+    if let Some(w) = web_sys::window() {
+        let _ = w.add_event_listener_with_callback("online", on_online.as_ref().unchecked_ref());
+    }
+    on_online.forget();
+    let session_busy_now = Memo::new(move |_| {
+        let root = active_root.get();
+        roots.get().iter().any(|r| r.id == root && r.busy)
+            || (live_busy.get() && live_busy_root.get() == root)
+    });
+
+    Effect::new(move |_| {
+        if model_menu.get() {
+            mode_menu.set(false);
+            load_model_catalog();        }
+    });
+
+    Effect::new(move |_| {
+        let root = active_root.get();
+        let (b, t) = (base.get(), token.get());
         spawn_local(async move {
-            let path = if provider.is_empty() {
-                "/v1/models".to_string()
-            } else {
-                format!("/v1/models?provider={}", api::js_encode(&provider))
-            };
-            match get_json::<ModelList>(&b, &t, &path).await {
-                Ok(list) => {
-                    catalog.set(list.models);
-                    catalog_note.set(String::new());
-                }
-                Err(_) => {
-                    catalog.set(Vec::new());
-                    catalog_note
-                        .set("Catalog unavailable. The chip still shows the live model.".into());
+            let path = format!("/v1/memory/mode?root={}", api::js_encode(&root));
+            if let Ok(v) = get_json::<serde_json::Value>(&b, &t, &path).await {
+                if let Some(mode) = v.get("mode").and_then(|m| m.as_str()) {
+                    if !mode.is_empty() {
+                        memory_mode.set(mode.to_string());
+                    }
                 }
             }
         });
-    };
+    });
+
+    let on_select_model = Callback::new(move |(provider, id): (String, String)| {
+        model_note_after.set(now_ms() as i64);
+        model_note.set(String::new());
+        let (b, t, root) = (base.get_untracked(), token.get_untracked(), active_root.get_untracked());
+        spawn_local(async move {
+            if let Err(e) = post_op(
+                &b,
+                &t,
+                &root,
+                "select.model",
+                serde_json::json!({"provider": provider, "model": id}),
+            )
+            .await
+            {
+                model_note.set(format!("model change failed: {e}"));
+                model_note_after.set(0);
+            }
+        });
+    });
+    let on_default_model = Callback::new(move |(provider, id): (String, String)| {
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            match patch_json(
+                &b,
+                &t,
+                "/v1/settings",
+                serde_json::json!({"provider": provider, "model": id}),
+            )
+            .await
+            {
+                Ok(()) => {
+                    model_defaults.update(|d| {
+                        d.provider = provider;
+                        d.model = id;
+                    });
+                    model_note.set("Saved as the global default. This session stays on its current model until you pick one.".into());
+                }
+                Err(e) => model_note.set(format!("saving the default failed: {e}")),
+            }
+        });
+    });
+    let on_effort = Callback::new(move |level: String| {
+        model_note_after.set(now_ms() as i64);
+        model_note.set(String::new());
+        let (b, t, root) = (base.get_untracked(), token.get_untracked(), active_root.get_untracked());
+        spawn_local(async move {
+            if let Err(e) = post_op(
+                &b,
+                &t,
+                &root,
+                "set.effort",
+                serde_json::json!({"level": level}),
+            )
+            .await
+            {
+                model_note.set(format!("effort change failed: {e}"));
+                model_note_after.set(0);
+            }
+        });
+    });
+    let on_default_effort = Callback::new(move |level: String| {
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            match patch_json(
+                &b,
+                &t,
+                "/v1/settings",
+                serde_json::json!({"effort": level}),
+            )
+            .await
+            {
+                Ok(()) => {
+                    model_defaults.update(|d| d.effort = level);
+                    model_note.set("Saved the effort as the global default.".into());
+                }
+                Err(e) => model_note.set(format!("saving the effort default failed: {e}")),
+            }
+        });
+    });
+
+    // #1267 navbar hosts this bell. The component owns its panel and settings.
+    let on_notify = Callback::new(move |target: notify::FocusTarget| {
+        mode.set("chat".into());
+        focus.set(false);
+        if target.session_id.is_empty() {
+            return;
+        }
+        let live = roots
+            .get_untracked()
+            .iter()
+            .any(|r| r.id == target.session_id);
+        open_session(target.session_id, live);
+    });
 
     let running_count = move || {
         activity
@@ -1347,192 +2019,549 @@ fn App() -> impl IntoView {
             .count()
     };
 
+    // Conversation layout (#1285): the shell contribution in
+    // src/shell/contrib/chat_mode.rs renders the header toggle and the
+    // palette commands through this late-bound host.
+    chat_mode::set_host(chat_mode::LayoutHost {
+        layout,
+        set_layout: Rc::new(move |next: &str| set_layout(next.to_string())),
+    });
+    // The shell slot (src/shell/contrib/notifications.rs) renders the bell
+    // with the page's signals; install them before the view reads them.
+    notify::set_host(notify::NotifyHost {
+        base,
+        token,
+        gateway,
+        on_focus: on_notify,
+    });
+
+    shell::boot();
+    shell::set_host(shell::HostBridge {
+        new_session: Rc::new(move || new_session()),
+        stop_all: Rc::new(move || stop_all()),
+        set_view: Rc::new(move |next: &str| mode.set(next.to_string())),
+        view: Rc::new(move || mode.get()),
+        set_enter: Rc::new(move |next: &str| set_enter(next.to_string())),
+        set_perm: Rc::new(move |next: &str| set_perm(next.to_string())),
+        set_theme: Rc::new(move |next: &str| set_theme(next.to_string())),
+        set_scheme: Rc::new(move |next: &str| set_scheme(next.to_string())),
+        travel: Rc::new(move |back: bool| travel(back)),
+        can_back: Rc::new(move || !back_stack.get().is_empty()),
+        can_forward: Rc::new(move || !forward_stack.get().is_empty()),
+        toggle_focus: Rc::new(move || focus.update(|value| *value = !*value)),
+        focus_on: Rc::new(move || focus.get()),
+        workspace_name: Rc::new(move || {
+            let id = active_workspace.get();
+            if id.is_empty() {
+                return "No workspace".into();
+            }
+            workspaces
+                .get()
+                .into_iter()
+                .find(|workspace| workspace.id == id)
+                .map(|workspace| {
+                    if workspace.name.is_empty() {
+                        workspace.path
+                    } else {
+                        workspace.name
+                    }
+                })
+                .unwrap_or_else(|| "No workspace".into())
+        }),
+        session_name: Rc::new(move || {
+            let id = active_root.get();
+            if id.is_empty() {
+                return "No session".into();
+            }
+            let active_running = activity.get().iter().any(|row| is_running(&row.state));
+            let merged = merge_sessions(
+                &roots.get(),
+                &sessions.get(),
+                &pins.get(),
+                &seen.get(),
+                &id,
+                active_running,
+            );
+            match merged.into_iter().find(|row| row.id == id) {
+                Some(row) => session_label(&row.title, &short_id(&row.id)),
+                None => short_id(&id),
+            }
+        }),
+        session_kind: Rc::new(move || {
+            let id = active_root.get();
+            if id.is_empty() || !session_busy(&id) {
+                "idle".into()
+            } else {
+                "running".into()
+            }
+        }),
+        gateway: Rc::new(move || gateway.get()),
+        version_label: Rc::new(move || status.get()),
+        dismiss_popups: Rc::new(move || {
+            // Escape semantics carried over from the pre-shell key handler:
+            // close the menus and the side chat drawer; only when none of
+            // them was open does Escape also close the open document.
+            // The conversation layout's drawers (#1285) close on the same
+            // Escape, as they did in this feature's own key handler.
+            let menu = mode_menu.get_untracked()
+                || model_menu.get_untracked()
+                || memory_menu.get_untracked()
+                || side_open.get_untracked();
+            mode_menu.set(false);
+            model_menu.set(false);
+            memory_menu.set(false);
+            side_open.set(false);
+            sessions_drawer.set(false);
+            panel_drawer.set(false);
+            if !menu && !doc_editing.get_untracked() && !doc_path.get_untracked().is_empty() {
+                doc_path.set(String::new());
+                doc_editing.set(false);
+            }
+        }),
+        open_side_chat: Rc::new(move || open_side(String::new(), String::new())),
+        toggle_side_chat: Rc::new(move || side_open.update(|v| *v = !*v)),
+        workspaces: Rc::new(move || {
+            workspaces
+                .get()
+                .into_iter()
+                .map(|workspace| {
+                    let name = if workspace.name.is_empty() {
+                        workspace.path
+                    } else {
+                        workspace.name
+                    };
+                    (workspace.id, name)
+                })
+                .collect()
+        }),
+        sessions: Rc::new(move || {
+            let id = active_root.get();
+            let active_running = activity.get().iter().any(|row| is_running(&row.state));
+            merge_sessions(
+                &roots.get(),
+                &sessions.get(),
+                &pins.get(),
+                &seen.get(),
+                &id,
+                active_running,
+            )
+            .into_iter()
+            .map(|row| {
+                (
+                    row.id.clone(),
+                    session_label(&row.title, &short_id(&row.id)),
+                )
+            })
+            .collect()
+        }),
+        open_session: Rc::new(move |id: &str| {
+            let id = id.to_string();
+            let live = roots.get().iter().any(|row| row.id == id);
+            open_session(id, live);
+        }),
+        activate_workspace: Rc::new(move |id: &str| {
+            let id = id.to_string();
+            let (b, t) = (base.get(), token.get());
+            spawn_local(async move {
+                let path = format!("/v1/workspaces/{id}/activate");
+                match post_json(&b, &t, &path, serde_json::json!({})).await {
+                    Ok(()) => active_workspace.set(id),
+                    Err(err) => status.set(format!("activate failed: {err}")),
+                }
+            });
+        }),
+    });
+    crate::status::set_host(crate::status::StatusHost {
+        gateway_kind,
+        gateway_label,
+        roots,
+        active_root,
+        refresh: Rc::new(move || refresh_meta()),
+    });
+
+    // Storage palette performers (#1271). The commands are registered at
+    // boot by src/shell/contrib/storage.rs and dispatch these ids; only
+    // the page owns the side-tab and memory-mode signals they drive.
+    shell::bind(
+        "panel-memory",
+        Rc::new(move |_args: &str| {
+            side_tab.set("memory".into());
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "panel-knowledge",
+        Rc::new(move |_args: &str| {
+            side_tab.set("knowledge".into());
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "panel-artifacts",
+        Rc::new(move |_args: &str| {
+            side_tab.set("artifacts".into());
+            Ok(())
+        }),
+    );
+    // Git / Worktrees palette performers (#1270). Registered at boot by
+    // src/shell/contrib/git_worktree.rs; only the page owns side_tab.
+    shell::bind(
+        "panel-git",
+        Rc::new(move |_args: &str| {
+            side_tab.set("git".into());
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "panel-worktrees",
+        Rc::new(move |_args: &str| {
+            side_tab.set("worktrees".into());
+            Ok(())
+        }),
+    );
+
+    // Alt+W opens Worktrees. Like Alt+G for Goals, this stays here
+    // because only the page owns the view and side-tab signals; the
+    // shortcut listing lives in src/shell/contrib/git_worktree.rs.
+    // The PR's original Alt+G chord for Git is NOT ported: Alt+G is
+    // Goals on current main (#1300), so Git is reached by its tab or
+    // the palette instead of stealing the Goals chord.
+    let on_worktrees_key =
+        Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |ev: web_sys::KeyboardEvent| {
+            if ev.alt_key()
+                && !ev.meta_key()
+                && !ev.ctrl_key()
+                && !git::shortcut_blocked(&ev)
+                && ev.key().eq_ignore_ascii_case("w")
+            {
+                ev.prevent_default();
+                mode.set("chat".into());
+                side_tab.set("worktrees".into());
+            }
+        });
+    if let Some(w) = web_sys::window() {
+        let _ = w.add_event_listener_with_callback("keydown", on_worktrees_key.as_ref().unchecked_ref());
+    }
+    on_worktrees_key.forget();
+    shell::bind(
+        "memory-normal",
+        Rc::new(move |_args: &str| {
+            set_memory("normal".into());
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "memory-incognito",
+        Rc::new(move |_args: &str| {
+            set_memory("incognito".into());
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "memory-temporary",
+        Rc::new(move |_args: &str| {
+            set_memory("temporary".into());
+            Ok(())
+        }),
+    );
+
+    // Session delete palette performer (#1358). The contrib command has
+    // already resolved the argument to exactly one session id via the
+    // shell's unique match; this only arms the same confirm dialog the
+    // row button opens. No request is issued here.
+    shell::bind(
+        "session-delete",
+        Rc::new(move |id: &str| {
+            let id = id.to_string();
+            let active = active_root.get_untracked();
+            let active_running = activity
+                .get_untracked()
+                .iter()
+                .any(|row| is_running(&row.state));
+            let label = merge_sessions(
+                &roots.get_untracked(),
+                &sessions.get_untracked(),
+                &pins.get_untracked(),
+                &seen.get_untracked(),
+                &active,
+                active_running,
+            )
+            .into_iter()
+            .find(|row| row.id == id)
+            .map(|row| session_label(&row.title, &short_id(&row.id)))
+            .unwrap_or_else(|| short_id(&id));
+            mode.set("chat".into());
+            request_delete(id, label);
+            Ok(())
+        }),
+    );
+
+    // Alt+G opens Goals. The shell owns the other chords; this one stays
+    // here because only the page can set `mode`. The shortcut is listed in
+    // the overlay via src/shell/contrib/goals.rs.
+    let on_goals_key =
+        Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |ev: web_sys::KeyboardEvent| {
+            if ev.alt_key()
+                && !ev.meta_key()
+                && !ev.ctrl_key()
+                && ev.key().eq_ignore_ascii_case("g")
+            {
+                let typing = ev
+                    .target()
+                    .map(|t| {
+                        t.dyn_ref::<web_sys::Element>()
+                            .map(|el| {
+                                matches!(el.tag_name().as_str(), "INPUT" | "TEXTAREA" | "SELECT")
+                            })
+                            .unwrap_or(false)
+                    })
+                    .unwrap_or(false);
+                if !typing {
+                    ev.prevent_default();
+                    mode.set("goals".into());
+                }
+            }
+        });
+    if let Some(w) = web_sys::window() {
+        let _ = w.add_event_listener_with_callback("keydown", on_goals_key.as_ref().unchecked_ref());
+    }
+    on_goals_key.forget();
+
+    // Alt+U opens Usage and Alt+A opens Audit. Like Alt+G, these stay
+    // here because only the page can set `mode`. The shortcuts are listed
+    // in the overlay via src/shell/contrib/usage_audit.rs.
+    let on_usage_audit_key =
+        Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |ev: web_sys::KeyboardEvent| {
+            if ev.alt_key() && !ev.meta_key() && !ev.ctrl_key() {
+                let target = if ev.key().eq_ignore_ascii_case("u") {
+                    Some("usage")
+                } else if ev.key().eq_ignore_ascii_case("a") {
+                    Some("audit")
+                } else {
+                    None
+                };
+                if let Some(target) = target {
+                    let typing = ev
+                        .target()
+                        .map(|t| {
+                            t.dyn_ref::<web_sys::Element>()
+                                .map(|el| {
+                                    matches!(el.tag_name().as_str(), "INPUT" | "TEXTAREA" | "SELECT")
+                                })
+                                .unwrap_or(false)
+                        })
+                        .unwrap_or(false);
+                    if !typing {
+                        ev.prevent_default();
+                        mode.set(target.into());
+                    }
+                }
+            }
+        });
+    if let Some(w) = web_sys::window() {
+        let _ = w.add_event_listener_with_callback("keydown", on_usage_audit_key.as_ref().unchecked_ref());
+    }
+    on_usage_audit_key.forget();
+    // Alt+M opens the model menu. The shell owns the other chords; this
+    // one stays here because only the page owns the menu signal, like
+    // Alt+G above. The palette command and shortcut listing live in
+    // src/shell/contrib/model_menu.rs; the command dispatches to the
+    // binding below (the pattern docs/webui-shell.md describes for
+    // commands whose state lives in a component).
+    shell::bind(
+        "model-menu.open",
+        Rc::new(move |_args| {
+            mode_menu.set(false);
+            model_menu.update(|v| *v = !*v);
+            Ok(())
+        }),
+    );
+    let on_model_key =
+        Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |ev: web_sys::KeyboardEvent| {
+            if ev.alt_key()
+                && !ev.meta_key()
+                && !ev.ctrl_key()
+                && ev.key().eq_ignore_ascii_case("m")
+            {
+                ev.prevent_default();
+                mode_menu.set(false);
+                model_menu.update(|v| *v = !*v);
+            }
+        });
+    if let Some(w) = web_sys::window() {
+        let _ = w.add_event_listener_with_callback("keydown", on_model_key.as_ref().unchecked_ref());
+    }
+    on_model_key.forget();
+
+    // Find in transcript (#1342). Opening saves the transcript scroll so
+    // closing can restore it; stepping wraps around the match list.
+    let open_find = move || {
+        if !tf_open.get_untracked() {
+            tf_saved_scroll.set(transcript_find::transcript_scroll());
+        }
+        tf_open.set(true);
+        transcript_find::focus_search_soon();
+    };
+    let close_find = move || {
+        if !tf_open.get_untracked() {
+            return;
+        }
+        tf_open.set(false);
+        tf_query.set(String::new());
+        tf_idx.set(0);
+        transcript_find::restore_scroll_soon(tf_saved_scroll.get_untracked());
+    };
+    let tf_step = move |delta: i32| {
+        let list = lines.get_untracked();
+        let hits = transcript_matches(&list, &tf_query.get_untracked());
+        if hits.is_empty() {
+            return;
+        }
+        tf_idx.set(transcript_find::step_idx(
+            tf_idx.get_untracked(),
+            delta,
+            hits.len(),
+        ));
+    };
+    // Palette command ("Find in transcript", registered in
+    // src/shell/contrib/transcript_find.rs) dispatches here.
+    shell::bind(
+        "transcript-find.open",
+        Rc::new(move |_args: &str| {
+            if !tf_open.get_untracked() {
+                tf_saved_scroll.set(transcript_find::transcript_scroll());
+            }
+            tf_open.set(true);
+            transcript_find::focus_search_soon();
+            Ok(())
+        }),
+    );
+    // Ctrl/Cmd+F opens find, cockpit-wide while the chat view is up —
+    // the issue's recommended default, matching the editor's "Ctrl+F
+    // finds" model. When a document is open the editor pane keeps
+    // Ctrl+F for find-in-file, so this handler stands down then.
+    // This does collide with the browser's native find while the
+    // cockpit is focused; that is the accepted trade-off of the
+    // recommended default, and Escape restores the page.
+    let on_find_key =
+        Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |ev: web_sys::KeyboardEvent| {
+            if (ev.ctrl_key() || ev.meta_key())
+                && !ev.alt_key()
+                && ev.key().eq_ignore_ascii_case("f")
+                && mode.get_untracked() == "chat"
+                && doc_path.get_untracked().is_empty()
+            {
+                ev.prevent_default();
+                if !tf_open.get_untracked() {
+                    tf_saved_scroll.set(transcript_find::transcript_scroll());
+                }
+                tf_open.set(true);
+                transcript_find::focus_search_soon();
+            }
+        });
+    if let Some(w) = web_sys::window() {
+        let _ = w.add_event_listener_with_callback("keydown", on_find_key.as_ref().unchecked_ref());
+    }
+    on_find_key.forget();
+    // Keep the current match scrolled into view as the query or the
+    // step position changes. Line appends alone do not retrigger this
+    // (the list is read untracked), so streaming does not yank scroll.
+    Effect::new(move |_| {
+        let _ = tf_idx.get();
+        let q = tf_query.get();
+        if !tf_open.get_untracked() || q.is_empty() {
+            return;
+        }
+        let list = lines.get_untracked();
+        let hits = transcript_matches(&list, &q);
+        if let Some(hit) = hits.get(transcript_find::clamped_idx(
+            tf_idx.get_untracked(),
+            hits.len(),
+        )) {
+            transcript_find::scroll_to_line_soon(hit.line);
+        }
+    });
+
     view! {
-        <header class="page-header">
-            <div class="brand" title=move || status.get()>
-                "Strike"
-                <span class="brand-status">{move || status.get()}</span>
-            </div>
-            <button class="command-pill" title="Ctrl+K commands. Alt+Left and Alt+Right switch sessions. Alt+\\ focuses the transcript." on:click=move |_| {
-                palette_query.set(String::new());
-                palette_open.set(true);
-            }>
-                <span class="pill-label">
-                    <span class="icon-slot" aria-hidden="true" inner_html=icon("command")></span>
-                    <span>"Run a command"</span>
-                </span>
-                <kbd>"Ctrl+K"</kbd>
-            </button>
-            <div class="header-actions">
-                <span class=move || match gateway.get().as_str() {
-                    "connected" => "chip ok",
-                    "unreachable" => "chip bad",
-                    _ => "chip",
-                }>{move || match gateway.get().as_str() {
-                    "connected" => "Connected",
-                    "unreachable" => "Unreachable",
-                    _ => "Checking",
-                }}</span>
-                <div class="segmented" role="tablist" aria-label="View">
-                    <button class=move || if mode.get() == "chat" { "seg on" } else { "seg" } on:click=move |_| mode.set("chat".into())>"Chat"</button>
-                    <button class=move || if mode.get() == "daemon" { "seg on" } else { "seg" } on:click=move |_| mode.set("daemon".into())>"Daemon"</button>
-                </div>
-            </div>
-        </header>
-        <Show when=move || palette_open.get()>
-            <div class="palette-backdrop" on:click=move |_| palette_open.set(false)>
-                <div class="palette" on:click=move |ev: web_sys::MouseEvent| ev.stop_propagation()>
-                    <input
-                        placeholder="Type a command"
-                        prop:value=move || palette_query.get()
-                        on:input=move |ev| palette_query.set(event_target_value(&ev))
-                        on:keydown=move |ev: web_sys::KeyboardEvent| {
-                            if ev.key() == "Enter" {
-                                ev.prevent_default();
-                                run_picked();
-                            }
-                        }
-                    />
-                    <div class="palette-list">
-                    {move || {
-                        let q = palette_query.get().to_ascii_lowercase();
-                        let run = run_command;
-                        let mut blocks: Vec<_> = Vec::new();
-                        for section in ["Commands", "Apps", "Settings", "Theme"] {
-                            let items: Vec<_> = palette_cmds().iter().copied().filter(|c| c.section == section && palette_match(c, &q)).collect();
-                            if items.is_empty() {
-                                continue;
-                            }
-                            let heading = section.to_string();
-                            blocks.push(view! { <h3 class="palette-section">{heading}</h3> }.into_any());
-                            for cmd in items {
-                                let id = cmd.id.to_string();
-                                let label = cmd.label.to_string();
-                                let detail = cmd.detail.to_string();
-                                let run = run;
-                                blocks.push(view! {
-                                    <button class="palette-row" on:click=move |_| run(id.clone())>
-                                        <span class="name">{label}</span>
-                                        <span class="path">{detail}</span>
-                                    </button>
-                                }.into_any());
-                            }
-                        }
-                        blocks
-                    }}
-                    </div>
-                    <p class="hint keys">"Enter runs the first match. Alt+Left and Alt+Right switch sessions. Alt+\\ focuses the transcript. Esc closes."</p>
-                </div>
-            </div>
-        </Show>
+        <shell::Chrome />
+        <session_delete::SessionDeleteDialog
+            target=delete_target
+            base=base
+            token=token
+            on_deleted=on_deleted
+        />
         <Show when=move || mode.get() == "daemon" fallback=move || ()>
             <DaemonPane
                 base=base
                 token=token
                 status=status
-                workspaces=workspaces
-                active_workspace=active_workspace
-                new_path=new_path
                 remotes=remotes
                 remote_name=remote_name
                 remote_url=remote_url
                 refresh=refresh_meta
+                open_picker=move || picker_open.set(true)
             />
         </Show>
+        <Show when=move || mode.get() == "usage" fallback=move || ()>
+            <usage_audit::UsagePage base=base token=token status=status />
+        </Show>
+        <Show when=move || mode.get() == "audit" fallback=move || ()>
+            <usage_audit::AuditPage base=base token=token status=status />
+        </Show>
+        <Show when=move || mode.get() == "goals" fallback=move || ()>
+            <goals::GoalsPane base=base token=token />
+        </Show>
         <Show when=move || mode.get() == "chat">
-            <div class=move || if focus.get() { "shell focus" } else { "shell" }>
+            <div class=move || chat_mode::shell_class(focus.get(), &layout.get(), sessions_drawer.get(), panel_drawer.get())>
+                <button type="button" class="chat-scrim" aria-label="Close panel" on:click=move |_| {
+                    sessions_drawer.set(false);
+                    panel_drawer.set(false);
+                }></button>
                 <aside class="rail">
-                    <div class="section-head">
-                        <h2 class="panel-title"><span class="icon-slot" aria-hidden="true" inner_html=icon("sessions")></span>"Sessions"</h2>
-                        <button class="secondary" on:click=move |_| new_session()>"New"</button>
-                    </div>
-                    <div class="chips" role="tablist" aria-label="Session filter">
-                        <button class=move || if session_filter.get() == "all" { "chip on" } else { "chip" } on:click=move |_| session_filter.set("all".into())>"All"</button>
-                        <button class=move || if session_filter.get() == "unread" { "chip on" } else { "chip" } on:click=move |_| session_filter.set("unread".into())>"Unread"</button>
-                        <button class=move || if session_filter.get() == "progress" { "chip on" } else { "chip" } on:click=move |_| session_filter.set("progress".into())>"In progress"</button>
-                        <button class=move || if session_filter.get() == "pinned" { "chip on" } else { "chip" } on:click=move |_| session_filter.set("pinned".into())>"Pinned"</button>
-                    </div>
-                    <input class="search" placeholder="Search sessions" prop:value=move || session_query.get() on:input=move |ev| session_query.set(event_target_value(&ev)) />
-                    {move || {
-                        let active = active_root.get();
-                        let active_running = activity.get().iter().any(|r| is_running(&r.state));
-                        let merged = merge_sessions(&roots.get(), &sessions.get(), &pins.get(), &seen.get(), &active, active_running);
-                        let kids = children.get();
-                        let titles: Vec<String> = kids.iter().map(|c| if c.title.is_empty() { short_id(&c.id) } else { c.title.clone() }).collect();
-                        let query = session_query.get();
-                        let filtered = filter_sessions(&merged, &session_filter.get(), &query, &active, &titles);
-                        let show_older = older_open.get();
-                        let (shown, hidden) = visible_sessions(&filtered, &query, &active, 6, show_older);
-                        let can_fold = show_older && query.trim().is_empty() && filtered.len() > 6;
-                        let open = open_session;
-                        let pin = toggle_pin;
-                        let rows = shown.into_iter().map(|row| {
-                            let id = row.id.clone();
-                            let id_btn = id.clone();
-                            let id_pin = id.clone();
-                            let live = row.live;
-                            let busy = row.busy;
-                            let unread = row.unread;
-                            let pinned = row.pinned;
-                            let fallback = short_id(&id);
-                            let label = session_label(&row.title, &fallback);
-                            let when = fmt_ago(row.mtime, (now_ms() / 1000.0) as i64);
-                            let subtitle = if busy {
-                                "In progress"
-                            } else if unread {
-                                "Unread"
-                            } else if live {
-                                "Idle"
+<SessionPanel
+                        base=base
+                        token=token
+                        sessions=sessions
+                        roots=roots
+                        activity=activity
+                        active_root=active_root
+                        seen=seen
+                        workspaces=workspaces
+                        on_open=open_session
+                        on_new=new_session
+                        on_refresh=refresh_meta
+                        on_delete=request_delete
+                    />
+                    <div class="ws-chip">
+                        <div class="section-head">
+                            <h2 class="panel-title">"Workspace"</h2>
+                            <button class="secondary ws-open" on:click=move |_| picker_open.set(true)>"Change workspace"</button>
+                        </div>
+                        <p class="name">{move || {
+                            let id = active_workspace.get();
+                            workspaces.get().into_iter().find(|w| w.id == id).map(|w| w.name).unwrap_or_else(|| "No workspace".into())
+                        }}</p>
+                        <p class="path">{move || {
+                            let id = active_workspace.get();
+                            if let Some(w) = workspaces.get().into_iter().find(|w| w.id == id) {
+                                w.path
                             } else {
-                                "Saved"
-                            };
-                            let dot = if busy {
-                                "dot dot-running"
-                            } else if unread {
-                                "dot dot-unread"
-                            } else {
-                                "dot"
-                            };
-                            let klass = if id == active { "session-row card on" } else { "session-row card" };
-                            let pin_label = if pinned { "Unpin" } else { "Pin" };
-                            let pin_class = if pinned { "pin on" } else { "pin" };
-                            view! {
-                                <li class=klass>
-                                    <button class="link session-main" on:click=move |_| open(id_btn.clone(), live)>
-                                        <span class=dot></span>
-                                        <span class="session-copy">
-                                            <span class="session-top">
-                                                <span class="name">{label}</span>
-                                                <span class="time">{when}</span>
-                                            </span>
-                                            <span class="path">{subtitle}</span>
-                                        </span>
-                                    </button>
-                                    <button class=pin_class on:click=move |ev: web_sys::MouseEvent| {
-                                        ev.stop_propagation();
-                                        pin(id_pin.clone());
-                                    }>{pin_label}</button>
-                                </li>
+                                let cwd = session_cwd.get();
+                                if cwd.is_empty() { "New sessions use the daemon directory.".into() } else { cwd }
                             }
-                        }).collect_view();
-                        let no_rows = rows.is_empty();
-                        let has_older = hidden > 0;
-                        view! {
-                            <div>
-                                <Show when=move || no_rows>
-                                    <EmptyState title="No sessions match".into() body="New roots show up here. Pins and unread marks stay in this browser.".into() />
-                                </Show>
-                                <ul class="plain sessions">{rows}</ul>
-                                <Show when=move || has_older>
-                                    <button class="secondary" on:click=move |_| older_open.set(true)>{format!("Older sessions ({hidden})")}</button>
-                                </Show>
-                                <Show when=move || can_fold>
-                                    <button class="secondary" on:click=move |_| older_open.set(false)>"Fold older sessions"</button>
-                                </Show>
-                            </div>
-                        }
-                    }}
-                    <p class="hint keys">"Pins stay in this browser. Alt+Left and Alt+Right switch sessions. Alt+\\ focuses the transcript."</p>
+                        }}</p>
+                        {move || {
+                            let id = active_workspace.get();
+                            let ws_path = workspaces.get().into_iter().find(|w| w.id == id).map(|w| w.path).unwrap_or_default();
+                            let note = crate::workspaces::chip_note(&ws_path, &session_cwd.get());
+                            if note.is_empty() {
+                                view! { <span></span> }.into_any()
+                            } else {
+                                view! { <p class="hint">{note}</p> }.into_any()
+                            }
+                        }}
+                        <p class="hint">"This line is the directory. Sessions above are chats, not folders."</p>
+                    </div>
                     <details class="fold">
                     <summary>"Workspaces"</summary>
                     <p class="hint">"Opening one records it. It does not move the live engine."</p>
@@ -1566,6 +2595,48 @@ fn App() -> impl IntoView {
                     </details>
                 </aside>
                 <section class="chat">
+                    {move || {
+                        let _ = tick.get();
+                        let active = active_root.get();
+                        let now = now_ms() as i64;
+                        let open = open_session;
+                        let tabs: Vec<StatusTab> = roots.get().into_iter().map(|row| {
+                            let kind = session_kind(&row.status, row.busy, row.permission_pending, row.question_pending);
+                            let fallback = short_id(&row.id);
+                            StatusTab {
+                                id: row.id.clone(),
+                                label: session_label(&row.title, &fallback),
+                                unread: row.unread.unwrap_or(false) && row.id != active,
+                                elapsed_s: elapsed_since(kind, row.status_since, now),
+                                active: row.id == active,
+                                kind,
+                            }
+                        }).collect();
+                        view! {
+                            <StatusTabs tabs=tabs on_select=move |id: String| open(id, true) />
+                        }
+                    }}
+                    <div class="chat-mode-bar">
+                        <button type="button" class="chip" data-chat-sessions="true" on:click=move |_| {
+                            panel_drawer.set(false);
+                            sessions_drawer.update(|v| *v = !*v);
+                        }>"Sessions"</button>
+                        <span class="chat-mode-title">{move || {
+                            let id = active_root.get();
+                            if id.is_empty() {
+                                return "No session".to_string();
+                            }
+                            sessions.get().into_iter().find(|s| s.id == id).map(|s| {
+                                let fallback = short_id(&s.id);
+                                session_label(&s.title, &fallback)
+                            }).unwrap_or_else(|| short_id(&id))
+                        }}</span>
+                        <button type="button" class="chip" data-chat-panel="true" on:click=move |_| {
+                            sessions_drawer.set(false);
+                            panel_drawer.update(|v| *v = !*v);
+                        }>"Panel"</button>
+                        <button type="button" class="chip" data-tf-open="true" title="Find in transcript (Ctrl+F)" on:click=move |_| open_find()>"Find"</button>
+                    </div>
                     <Show when=move || !load_error.get().is_empty()>
                         <div class="notice" role="alert">
                             <span>{move || load_error.get()}</span>
@@ -1575,7 +2646,62 @@ fn App() -> impl IntoView {
                     <Show when=move || !stream_note.get().is_empty()>
                         <p class="hint banner">{move || stream_note.get()}</p>
                     </Show>
-                    <div class="transcript" aria-live="polite">
+                    <Show when=move || !doc_path.get().is_empty()>
+                        <DocumentPane
+                            base=base
+                            token=token
+                            path=doc_path
+                            jump_line=doc_line
+                            want_diff=doc_diff
+                            editing=doc_editing
+                        />
+                    </Show>
+                    <Show when=move || tf_open.get() && doc_path.get().is_empty()>
+                        <div
+                            class="tf-bar"
+                            data-tf-bar="true"
+                            role="search"
+                            aria-label="Find in transcript"
+                            on:keydown=move |ev: web_sys::KeyboardEvent| {
+                                if ev.key() == "Escape" {
+                                    ev.prevent_default();
+                                    ev.stop_propagation();
+                                    close_find();
+                                }
+                            }
+                        >
+                            <input
+                                id="tf-search"
+                                class="tf-search"
+                                type="search"
+                                placeholder="Find in transcript"
+                                aria-label="Find in transcript"
+                                prop:value=move || tf_query.get()
+                                on:input=move |ev| {
+                                    tf_query.set(event_target_value(&ev));
+                                    tf_idx.set(0);
+                                }
+                                on:keydown=move |ev: web_sys::KeyboardEvent| {
+                                    if ev.key() == "Enter" {
+                                        ev.prevent_default();
+                                        ev.stop_propagation();
+                                        tf_step(if ev.shift_key() { -1 } else { 1 });
+                                    }
+                                }
+                            />
+                            <span class="tf-count" data-tf-count="">{move || {
+                                let q = tf_query.get();
+                                let list = lines.get();
+                                let hits = transcript_matches(&list, &q);
+                                transcript_find::count_label(&q, hits.len(), tf_idx.get())
+                            }}</span>
+                            <button type="button" class="secondary" data-tf-prev="true" on:click=move |_| tf_step(-1)>"Prev"</button>
+                            <button type="button" class="secondary" data-tf-next="true" on:click=move |_| tf_step(1)>"Next"</button>
+                            <button type="button" class="secondary" data-tf-close="true" on:click=move |_| close_find()>"Close"</button>
+                        </div>
+                    </Show>
+                    <Show when=move || doc_path.get().is_empty()>
+                    <div class="transcript" id="tf-transcript" aria-live="polite">
                         <Show when=move || loading.get()>
                             <Skeleton />
                         </Show>
@@ -1589,67 +2715,187 @@ fn App() -> impl IntoView {
                                         let send_label = label.clone();
                                         let send = send_text;
                                         view! {
-                                            <button type="button" class="suggestion" on:click=move |_| send(send_label.clone())>{label}</button>
+                                            <button type="button" class="suggestion" on:click=move |_| { send(send_label.clone()); }>{label}</button>
                                         }
                                     }).collect_view()}
                                 </div>
                             </div>
                         </Show>
-                        {move || lines.get().into_iter().map(|line| {
+                        {move || {
+                            let list = lines.get();
+                            // Find in transcript (#1342): matches over the
+                            // whole line model (not just visible DOM), so
+                            // off-screen matches count and highlight on
+                            // render. The current match drives scrolling
+                            // via the effect next to the Ctrl+F binding.
+                            let tf_q = tf_query.get();
+                            let find_active = !tf_q.is_empty();
+                            let all_hits = transcript_matches(&list, &tf_q);
+                            let cur_hit = all_hits
+                                .get(transcript_find::clamped_idx(tf_idx.get(), all_hits.len()))
+                                .copied();
+                            // A day separator precedes the first timed line of
+                            // each local day (#1349). Untimed lines never open
+                            // a new day.
+                            let mut prev_day: Option<(u32, u32, u32)> = None;
+                            let seps: Vec<Option<String>> = list
+                                .iter()
+                                .map(|line| {
+                                    if line.at_ms <= 0.0 {
+                                        return None;
+                                    }
+                                    let day = line_day(line.at_ms);
+                                    let label = if prev_day == Some(day) {
+                                        None
+                                    } else {
+                                        Some(line_day_label(line.at_ms))
+                                    };
+                                    prev_day = Some(day);
+                                    label
+                                })
+                                .collect();
+                            list.into_iter().zip(seps).enumerate().map(|(line_idx, (line, sep))| {
                             let badge = line.badge.clone();
                             let badge_kind = badge.clone();
                             let role = line.role.clone();
                             let title = line.title.clone();
                             let body = line.body.clone();
                             let detail = line.detail.clone();
+                            let stamp = line_stamp(line.at_ms);
+                            let stamp_full = line_full_time(line.at_ms);
+                            let has_stamp = !stamp.is_empty();
                             let has_badge = !badge.is_empty();
                             let has_detail = !detail.is_empty();
                             let card = role == "child";
                             let prose = role == "you" || role == "strike";
                             let tool_dump = !card && !prose && (body.trim_start().starts_with('{') || body.trim_start().starts_with('[') || body.chars().count() > 240);
+                            let body_ranges: Vec<(usize, usize)> = all_hits
+                                .iter()
+                                .filter(|h| h.line == line_idx && h.field == transcript_find::Field::Body)
+                                .map(|h| (h.start, h.end))
+                                .collect();
+                            let title_ranges: Vec<(usize, usize)> = all_hits
+                                .iter()
+                                .filter(|h| h.line == line_idx && h.field == transcript_find::Field::Title)
+                                .map(|h| (h.start, h.end))
+                                .collect();
+                            let cur_body = cur_hit
+                                .filter(|h| h.line == line_idx && h.field == transcript_find::Field::Body)
+                                .map(|h| (h.start, h.end));
+                            let cur_title = cur_hit
+                                .filter(|h| h.line == line_idx && h.field == transcript_find::Field::Title)
+                                .map(|h| (h.start, h.end));
                             let body_view = if card {
                                 let summary = body;
+                                let summary_inner = if find_active {
+                                    view! { <transcript_find::MarkedText text=summary.clone() kind="inline" ranges=body_ranges current=cur_body /> }.into_any()
+                                } else {
+                                    view! { <LinkedBody text=summary.clone() kind="inline" doc_path=doc_path doc_line=doc_line doc_diff=doc_diff /> }.into_any()
+                                };
                                 view! {
                                     <div>
-                                        <p class="summary">{summary}</p>
-                                        {has_detail.then(|| view! {
-                                            <details>
-                                                <summary>"Details"</summary>
-                                                <pre>{detail}</pre>
-                                            </details>
+                                        <p class="summary">
+                                            {summary_inner}
+                                        </p>
+                                        {has_detail.then(|| {
+                                            let detail = detail.clone();
+                                            view! {
+                                                <details>
+                                                    <summary>"Details"</summary>
+                                                    <LinkedBody text=detail kind="pre" doc_path=doc_path doc_line=doc_line doc_diff=doc_diff />
+                                                </details>
+                                            }
                                         })}
                                     </div>
                                 }.into_any()
                             } else if prose {
-                                view! { <p class="prose">{body}</p> }.into_any()
+                                if find_active {
+                                    // While finding, prose renders as
+                                    // marked plain text so every match is
+                                    // visible in place; the markdown /
+                                    // linked renderers return when the
+                                    // find bar clears.
+                                    view! { <transcript_find::MarkedText text=body kind="prose" ranges=body_ranges current=cur_body /> }.into_any()
+                                } else if has_markdown_table(&body) {
+                                    // Table-bearing prose renders through the
+                                    // shared markdown view (#1344); every other
+                                    // bubble keeps the plain linked-text path.
+                                    view! { <MarkdownView text=body /> }.into_any()
+                                } else {
+                                    view! { <LinkedBody text=body kind="prose" doc_path=doc_path doc_line=doc_line doc_diff=doc_diff /> }.into_any()
+                                }
                             } else if tool_dump {
                                 view! {
                                     <details>
                                         <summary>"Details"</summary>
-                                        <pre>{body}</pre>
+                                        <LinkedBody text=body kind="pre" doc_path=doc_path doc_line=doc_line doc_diff=doc_diff />
                                     </details>
                                 }.into_any()
+                            } else if find_active {
+                                view! { <transcript_find::MarkedText text=body kind="pre" ranges=body_ranges current=cur_body /> }.into_any()
                             } else {
-                                view! { <pre>{body}</pre> }.into_any()
+                                view! { <LinkedBody text=body kind="pre" doc_path=doc_path doc_line=doc_line doc_diff=doc_diff /> }.into_any()
+                            };
+                            let title_view = if find_active && !title_ranges.is_empty() {
+                                view! { <transcript_find::MarkedText text=title.clone() kind="inline" ranges=title_ranges current=cur_title /> }.into_any()
+                            } else {
+                                view! { <span>{title.clone()}</span> }.into_any()
                             };
                             view! {
-                                <article class=format!("bubble card role-{role}")>
+                                {sep.map(|label| view! { <div class="day-sep" role="separator">{label}</div> })}
+                                <article class=format!("bubble card role-{role}") id=format!("tf-line-{line_idx}")>
                                     <header>
-                                        <span class="who">{title}</span>
+                                        <span class="who">{title_view}</span>
                                         <Show when=move || has_badge>
-                                            <Badge kind=badge_kind.clone() label=badge.clone() />
+                                            {match StatusKind::parse_known(&badge_kind) {
+                                                Some(kind) => view! { <StatusMark kind=kind place=StatusSlot::Badge /> }.into_any(),
+                                                None => view! { <Badge kind=badge_kind.clone() label=badge.clone() /> }.into_any(),
+                                            }}
                                         </Show>
+                                        {has_stamp.then(|| view! { <span class="stamp" title=stamp_full.clone()>{stamp.clone()}</span> })}
                                     </header>
                                     {body_view}
                                 </article>
                             }
-                        }).collect_view()}
+                            }).collect_view()
+                        }}
                     </div>
+                    </Show>
+                    <Show when=move || layout.get() == "conversation" && {
+                        // session_busy reads roots/live_busy untracked, so
+                        // subscribe to them here: without this the Show never
+                        // re-evaluates once the turn that produced the last
+                        // line ends, and the follow-ups stay hidden.
+                        let _ = roots.get();
+                        let _ = live_busy.get();
+                        let _ = live_busy_root.get();
+                        let root = active_root.get();
+                        !root.is_empty()
+                            && !session_busy(&root)
+                            && lines.with(|list| list.last().map(|line| line.role == "strike").unwrap_or(false))
+                    }>
+                        <div class="follow-ups" aria-label="Suggestions">
+                            {chat_mode::FOLLOW_UPS.into_iter().map(|text| {
+                                let label = text.to_string();
+                                let send_label = label.clone();
+                                let send = send_text;
+                                view! {
+                                    <button type="button" class="chip" title="Fixed prompt, not a model suggestion" on:click=move |_| { send(send_label.clone()); }>{label}</button>
+                                }
+                            }).collect_view()}
+                        </div>
+                    </Show>
                     <div class="composer"
                         on:dragover=move |ev: web_sys::DragEvent| ev.prevent_default()
                         on:drop=move |ev: web_sys::DragEvent| {
                             ev.prevent_default();
                             if let Some(dt) = ev.data_transfer() {
+                                if let Some(files) = dt.files() {
+                                    if files.length() > 0 {
+                                        chat_mode::enqueue_file_list(files, pending_files, status);
+                                        return;
+                                    }
+                                }
                                 if let Ok(text) = dt.get_data("text/plain") {
                                     let text = text.trim().to_string();
                                     if text.starts_with('@') {
@@ -1677,38 +2923,97 @@ fn App() -> impl IntoView {
                                 }).collect_view()}
                             </div>
                         </Show>
-                        <Show when=move || model_menu.get()>
-                            <div class="menu">
-                                <p class="hint">{move || {
-                                    let p = provider_name.get();
-                                    let m = model_name.get();
-                                    if m.is_empty() { "No live model reported yet.".into() } else if p.is_empty() { m } else { format!("{p} · {m}") }
-                                }}</p>
-                                <Show when=move || !model_note.get().is_empty()><p class="hint">{move || model_note.get()}</p></Show>
-                                <Show when=move || !catalog_note.get().is_empty()><p class="hint">{move || catalog_note.get()}</p></Show>
-                                {move || catalog.get().into_iter().map(|m| {
-                                    let id = m.id.clone();
-                                    let provider = if m.provider.is_empty() { provider_name.get() } else { m.provider.clone() };
-                                    let label = if m.name.is_empty() { m.id.clone() } else { m.name.clone() };
+                        <Show when=move || {
+                            let ctx = active_context(&catalog.get(), &provider_name.get(), &model_name.get());
+                            context_view(context_used.get(), context_limit.get(), ctx, &context_fit.get()).held
+                        }>
+                            <p class="model-hold" role="status" data-context-hold="true">{move || {
+                                let ctx = active_context(&catalog.get(), &provider_name.get(), &model_name.get());
+                                context_view(context_used.get(), context_limit.get(), ctx, &context_fit.get()).hold_message
+                            }}</p>
+                        </Show>
+                        <Show when=move || memory_menu.get()>
+                            <div class="menu" role="menu" aria-label="Memory mode">
+                                {["normal", "incognito", "temporary"].into_iter().map(|id| {
+                                    let label = memory_mode_label(id).to_string();
+                                    let detail = match id {
+                                        "incognito" => "Reads memory. The agent learns nothing.",
+                                        "temporary" => "This session does not load memory.",
+                                        _ => "Reads and writes memory.",
+                                    };
+                                    let set = set_memory;
+                                    let on = memory_mode.get() == id;
+                                    let klass = if on { "palette-row on" } else { "palette-row" };
+                                    let id = id.to_string();
                                     view! {
-                                        <button class="palette-row" on:click=move |_| {
-                                            model_menu.set(false);
-                                            let (b, t, root, provider, id) = (base.get(), token.get(), active_root.get(), provider.clone(), id.clone());
-                                            spawn_local(async move {
-                                                if let Err(e) = post_op(&b, &t, &root, "select.model", serde_json::json!({"provider": provider, "model": id})).await {
-                                                    status.set(format!("model change failed: {e}"));
-                                                }
-                                            });
-                                        }>{label}</button>
+                                        <button type="button" class=klass on:click=move |_| set(id.clone())>
+                                            <span class="name">{label}</span>
+                                            <span class="path">{detail}</span>
+                                        </button>
                                     }
                                 }).collect_view()}
                             </div>
                         </Show>
                         <form on:submit=move |ev| { ev.prevent_default(); send(); }>
+                            <Show when=move || !pending_files.get().is_empty()>
+                                <div class="attach-row">
+                                    {move || pending_files.get().into_iter().map(|file| {
+                                        let id = file.id;
+                                        let name = file.name.clone();
+                                        let preview = file.preview.clone();
+                                        let error = file.error.clone();
+                                        let show_img = !preview.is_empty();
+                                        let show_err = !error.is_empty();
+                                        view! {
+                                            <span class="attach-chip">
+                                                <Show when=move || show_img>
+                                                    <img src=preview.clone() alt="" />
+                                                </Show>
+                                                <span>
+                                                    <span class="name">{name}</span>
+                                                    <Show when=move || show_err>
+                                                        <span class="path">{error.clone()}</span>
+                                                    </Show>
+                                                </span>
+                                                <button type="button" aria-label="Remove attachment" on:click=move |_| {
+                                                    pending_files.update(|rows| {
+                                                        if let Some(i) = rows.iter().position(|row| row.id == id) {
+                                                            chat_mode::revoke_preview(&rows[i].preview);
+                                                            rows.remove(i);
+                                                        }
+                                                    });
+                                                }>"Remove"</button>
+                                            </span>
+                                        }
+                                    }).collect_view()}
+                                </div>
+                            </Show>
+                            <input class="file-pick" type="file" data-chat-file="true" node_ref=file_input multiple=true
+                                accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,image/svg+xml,text/plain,application/zip,application/gzip"
+                                on:change=move |_| {
+                                    if let Some(el) = file_input.get() {
+                                        if let Some(files) = el.files() {
+                                            chat_mode::enqueue_file_list(files, pending_files, status);
+                                        }
+                                        el.set_value("");
+                                    }
+                                }
+                            />
                             <textarea
                                 placeholder="Message this session"
                                 prop:value=move || draft.get()
                                 on:input=move |ev| draft.set(event_target_value(&ev))
+                                on:paste=move |ev: web_sys::Event| {
+                                    let Some(ev) = ev.dyn_ref::<web_sys::ClipboardEvent>() else { return };
+                                    if let Some(data) = ev.clipboard_data() {
+                                        if let Some(files) = data.files() {
+                                            if files.length() > 0 {
+                                                ev.prevent_default();
+                                                chat_mode::enqueue_file_list(files, pending_files, status);
+                                            }
+                                        }
+                                    }
+                                }
                                 on:keydown=move |ev: web_sys::KeyboardEvent| {
                                     if ev.key() == "Enter" && !ev.shift_key() {
                                         ev.prevent_default();
@@ -1717,19 +3022,80 @@ fn App() -> impl IntoView {
                                 }
                             ></textarea>
                             <div class="composer-bar">
+                                <button type="button" class="chip" data-chat-attach="true" on:click=move |_| {
+                                    if let Some(el) = file_input.get() {
+                                        el.click();
+                                    }
+                                }>"Attach"</button>
+                                <Show when=move || speech_ok>
+                                    <button type="button" data-chat-voice="true" title="Dictate with the browser speech API. Audio may be sent to the browser vendor." class=move || if listening.get() { "chip listening" } else { "chip" } on:click=move |_| {
+                                        let draft_cb = draft;
+                                        let status_cb = status;
+                                        let listen_cb = listening;
+                                        match chat_mode::toggle_dictation(
+                                            move |text| {
+                                                draft_cb.update(|d| {
+                                                    if !d.is_empty() && !d.ends_with(' ') && !d.ends_with('\n') {
+                                                        d.push(' ');
+                                                    }
+                                                    d.push_str(&text);
+                                                });
+                                            },
+                                            move |err| {
+                                                listen_cb.set(false);
+                                                if !err.is_empty() {
+                                                    status_cb.set(err);
+                                                }
+                                            },
+                                        ) {
+                                            Ok(on) => listen_cb.set(on),
+                                            Err(err) => {
+                                                listen_cb.set(false);
+                                                status_cb.set(err);
+                                            }
+                                        }
+                                    }>{move || if listening.get() { "Stop" } else { "Voice" }}</button>
+                                </Show>
                                 <button type="button" class="chip" on:click=move |_| {
                                     model_menu.set(false);
+                                    memory_menu.set(false);
                                     mode_menu.update(|v| *v = !*v);
                                 }>{move || format!("Approval · {}", mode_label(&perm_mode.get()))}</button>
-                                <button type="button" class="chip" on:click=open_models>{move || {
-                                    let model = model_name.get();
-                                    if model.is_empty() { "Model".into() } else { model }
-                                }}</button>
+                                <ModelMenu
+                                    open=model_menu
+                                    provider=provider_name
+                                    model=model_name
+                                    effort=effort_level
+                                    context_used=context_used
+                                    context_limit=context_limit
+                                    context_fit=context_fit
+                                    catalog=catalog
+                                    catalog_note=catalog_note
+                                    model_note=model_note
+                                    defaults=model_defaults
+                                    busy=session_busy_now
+                                    on_select=on_select_model
+                                    on_default_model=on_default_model
+                                    on_effort=on_effort
+                                    on_default_effort=on_default_effort
+                                />
+                                <button type="button" class="chip" aria-label="Memory mode" on:click=move |_| {
+                                    mode_menu.set(false);
+                                    model_menu.set(false);
+                                    memory_menu.update(|v| *v = !*v);
+                                }>{move || format!("Memory · {}", memory_mode_label(&memory_mode.get()))}</button>
+                                <button type="button" class=move || if side_open.get() { "chip on side-chat-open-composer" } else { "chip side-chat-open-composer" } on:click=move |_| open_side(String::new(), String::new())>"Side chat"</button>
                                 <button type="button" class=move || if enter_mode.get() == "steer" { "chip on" } else { "chip" } on:click=move |_| set_enter("steer".into())>"Steer"</button>
                                 <button type="button" class=move || if enter_mode.get() == "queue" { "chip on" } else { "chip" } on:click=move |_| set_enter("queue".into())>"Queue"</button>
-                                <button class="primary send" type="submit">"Send"</button>
+                                <button class="primary send" type="submit" disabled=move || {
+                                    let ctx = active_context(&catalog.get(), &provider_name.get(), &model_name.get());
+                                    context_view(context_used.get(), context_limit.get(), ctx, &context_fit.get()).held
+                                }>"Send"</button>
                             </div>
                         </form>
+                        <Show when=move || !model_note.get().is_empty() && !model_menu.get()>
+                            <p class="hint" data-model-note="true">{move || model_note.get()}</p>
+                        </Show>
                         <p class="hint">"Queue waits out the turn. Steer joins a running turn. run <command> uses the shell. @path is text."</p>
                     </div>
                 </section>
@@ -1740,12 +3106,18 @@ fn App() -> impl IntoView {
                         <button class=move || if side_tab.get() == "changes" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("changes".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("changes")></span>"Changes"</button>
                         <button class=move || if side_tab.get() == "git" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("git".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("git")></span>"Git"</button>
                         <button class=move || if side_tab.get() == "worktrees" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("worktrees".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("worktrees")></span>"Worktrees"</button>
+                        <button class=move || if side_tab.get() == "memory" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("memory".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("memory")></span>"Memory"</button>
+                        <button class=move || if side_tab.get() == "knowledge" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("knowledge".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("knowledge")></span>"Knowledge"</button>
+                        <button class=move || if side_tab.get() == "artifacts" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("artifacts".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("artifacts")></span>"Artifacts"</button>
                     </div>
                     <Show when=move || side_tab.get() == "activity">
                     <div class="activity">
                     <header class="activity-head">
                         <span class="hint">"Live tasks"</span>
-                        <button class="secondary" disabled=move || running_count() == 0 on:click=move |_| stop_all()>"Stop all"</button>
+                        <span class="row-actions">
+                            <button type="button" class="secondary side-chat-open-activity" on:click=move |_| open_side(String::new(), String::new())>"Side chat"</button>
+                            <button class="secondary" disabled=move || running_count() == 0 on:click=move |_| stop_all()>"Stop all"</button>
+                        </span>
                     </header>
                         <div class="stats">
                         <StatCard label="Running".into()>{move || running_count().to_string()}</StatCard>
@@ -1789,17 +3161,21 @@ fn App() -> impl IntoView {
                                 let running = is_running(&state);
                                 let retry = can_retry(&state);
                                 let name = row.name.clone();
+                                let name_chat = name.clone();
+                                let sid_chat = sid.clone();
                                 let who = name.clone();
                                 let agent = row.agent.clone();
                                 let agent_label = agent.clone();
                                 let primary = if show_task { headline } else { name.clone() };
-                                let dot = match state.as_str() {
-                                    "running" | "working" => "dot dot-running",
-                                    "blocked" | "stalled" => "dot dot-blocked",
-                                    "done" | "completed" => "dot dot-done",
-                                    "failed" => "dot dot-failed",
-                                    _ => "dot",
+                                let kind = StatusKind::parse_known(&state);
+                                let status_label = if state == "stalled" {
+                                    "Stalled".to_string()
+                                } else if let Some(kind) = kind {
+                                    kind.label().to_string()
+                                } else {
+                                    state.clone()
                                 };
+                                let mark_kind = kind.unwrap_or(StatusKind::Idle);
                                 view! {
                                     <li class="card activity-row">
                                         <button class="link activity-main" on:click=move |_| {
@@ -1811,9 +3187,9 @@ fn App() -> impl IntoView {
                                             });
                                         }>
                                             <span class="task-line">
-                                                <span class=dot></span>
+                                                <StatusMark kind=mark_kind place=StatusSlot::Dot />
                                                 <span class="name">{primary}</span>
-                                                <Badge kind=state.clone() label=state.clone() />
+                                                <StatusMark kind=mark_kind place=StatusSlot::Badge label=status_label />
                                             </span>
                                             <span class="task-meta">
                                                 <Show when=move || show_task>
@@ -1828,6 +3204,14 @@ fn App() -> impl IntoView {
                                             </span>
                                         </button>
                                         <div class="row-actions">
+                                            <button type="button" class="secondary" on:click={
+                                                let sid_chat = sid_chat.clone();
+                                                let name_chat = name_chat.clone();
+                                                move |ev: web_sys::MouseEvent| {
+                                                    ev.stop_propagation();
+                                                    open_side(sid_chat.clone(), name_chat.clone());
+                                                }
+                                            }>"Side chat"</button>
                                             <button class="secondary" disabled=move || !running on:click={
                                                 let sid_stop = sid_stop.clone();
                                                 move |ev: web_sys::MouseEvent| {
@@ -1867,16 +3251,20 @@ fn App() -> impl IntoView {
                             <Show when=move || !files_path.get().is_empty()>
                                 <button class="secondary" on:click=move |_| files_path.set(parent_path(&files_path.get()))>"Up"</button>
                             </Show>
+                            <Show when=move || !doc_path.get().is_empty()>
+                                <p class="hint">{move || format!("Open: {}", doc_path.get())}</p>
+                            </Show>
                             <ul class="plain">
                                 {move || files.get().into_iter().map(|entry| {
                                     let name = entry.name.clone();
                                     let path = join_path(&files_path.get(), &entry.name);
                                     let path_drag = path.clone();
                                     let path_click = path.clone();
+                                    let path_open = path.clone();
                                     let is_dir = entry.is_dir;
-                                    let label = if is_dir { format!("{name}/") } else { name };
+                                    let label = if is_dir { format!("{name}/") } else { name.clone() };
                                     view! {
-                                        <li>
+                                        <li class="ev-fileline">
                                             <button class="link file-row" draggable="true"
                                                 on:dragstart=move |ev: web_sys::DragEvent| set_drag(&ev, &path_drag)
                                                 on:click=move |_| {
@@ -1887,11 +3275,22 @@ fn App() -> impl IntoView {
                                                     }
                                                 }
                                             >{label}</button>
+                                            {(!is_dir).then(|| {
+                                                let path_attr = path_open.clone();
+                                                let path_set = path_open.clone();
+                                                view! {
+                                                    <button type="button" class="secondary ev-open" data-ev-open=path_attr on:click=move |_| {
+                                                        doc_line.set(0);
+                                                        doc_diff.set(false);
+                                                        doc_path.set(path_set.clone());
+                                                    }>"Open"</button>
+                                                }
+                                            })}
                                         </li>
                                     }
                                 }).collect_view()}
                             </ul>
-                            <p class="hint">"Click or drag inserts @path as text."</p>
+                            <p class="hint">"Open reads the file. Click or drag still inserts @path."</p>
                         </div>
                     </Show>
                     <Show when=move || side_tab.get() == "changes">
@@ -1910,10 +3309,11 @@ fn App() -> impl IntoView {
                                     let path = file.path.clone();
                                     let path_drag = path.clone();
                                     let path_click = path.clone();
+                                    let path_open = path.clone();
                                     let added = file.added;
                                     let deleted = file.deleted;
                                     view! {
-                                        <li>
+                                        <li class="ev-fileline">
                                             <button class="link file-row" draggable="true"
                                                 on:dragstart=move |ev: web_sys::DragEvent| set_drag(&ev, &path_drag)
                                                 on:click=move |_| insert_mention(path_click.clone())
@@ -1922,6 +3322,11 @@ fn App() -> impl IntoView {
                                                 <span class="diff-add">{format!("+{added}")}</span>
                                                 <span class="diff-del">{format!("-{deleted}")}</span>
                                             </button>
+                                            <button type="button" class="secondary ev-open" data-ev-open=path_open.clone() on:click=move |_| {
+                                                doc_line.set(0);
+                                                doc_diff.set(true);
+                                                doc_path.set(path_open.clone());
+                                            }>"Open"</button>
                                         </li>
                                     }
                                 }).collect_view()}
@@ -1934,9 +3339,44 @@ fn App() -> impl IntoView {
                     <Show when=move || side_tab.get() == "worktrees">
                         <git::WorktreePanel base=base token=token status_line=status active_root=active_root />
                     </Show>
+                    <Show when=move || {
+                        let tab = side_tab.get();
+                        tab == "memory" || tab == "knowledge" || tab == "artifacts"
+                    }>
+                        <StoragePanel
+                            tab=side_tab
+                            base=base
+                            token=token
+                            root=active_root
+                            memory_mode=memory_mode
+                            status=status
+                            storage_rev=storage_rev
+                        />
+                    </Show>
                 </aside>
             </div>
+            <SideChatPanel
+                open=side_open
+                base=base
+                token=token
+                root=active_root
+                lines=lines
+                focus_id=side_focus_id
+                focus_name=side_focus_name
+                live_provider=provider_name
+                live_model=model_name
+            />
         </Show>
+        <WorkspacePicker
+            open=picker_open
+            base=base
+            token=token
+            status=status
+            workspaces=workspaces
+            active_workspace=active_workspace
+            recents=workspace_recents
+            refresh=refresh_meta
+        />
     }
 }
 
@@ -1945,86 +3385,13 @@ fn DaemonPane(
     base: RwSignal<String>,
     token: RwSignal<String>,
     status: RwSignal<String>,
-    workspaces: RwSignal<Vec<Workspace>>,
-    active_workspace: RwSignal<String>,
-    new_path: RwSignal<String>,
     remotes: RwSignal<Vec<Remote>>,
     remote_name: RwSignal<String>,
     remote_url: RwSignal<String>,
     refresh: impl Fn() + Copy + Send + 'static,
+    open_picker: impl Fn() + Copy + 'static,
 ) -> impl IntoView {
-    let policy_rules = RwSignal::new(String::new());
-    let policy_mode = RwSignal::new(String::new());
-    let policy_for = RwSignal::new(String::new());
-    Effect::new(move |_| {
-        let id = active_workspace.get();
-        let list = workspaces.get();
-        if policy_for.get_untracked() != id {
-            if let Some(w) = list.iter().find(|w| w.id == id) {
-                policy_rules.set(w.rules.clone());
-                policy_mode.set(w.permission_mode.clone());
-            } else {
-                policy_rules.set(String::new());
-                policy_mode.set(String::new());
-            }
-            policy_for.set(id);
-        }
-    });
-    let save_policy = move |_| {
-        let id = active_workspace.get();
-        if id.is_empty() {
-            status.set("no active workspace".into());
-            return;
-        }
-        let rules = policy_rules.get();
-        let mode = policy_mode.get();
-        let (b, t) = (base.get(), token.get());
-        spawn_local(async move {
-            match patch_json(
-                &b,
-                &t,
-                &format!("/v1/workspaces/{id}"),
-                serde_json::json!({
-                    "rules": rules,
-                    "permissionMode": mode,
-                }),
-            )
-            .await
-            {
-                Ok(()) => {
-                    policy_for.set(String::new());
-                    refresh();
-                }
-                Err(e) => status.set(format!("workspace policy failed: {e}")),
-            }
-        });
-    };
-    let add_workspace = move |_| {
-        let path = new_path.get();
-        if path.trim().is_empty() {
-            return;
-        }
-        let (b, t) = (base.get(), token.get());
-        spawn_local(async move {
-            match post_json(
-                &b,
-                &t,
-                "/v1/workspaces",
-                serde_json::json!({ "path": path }),
-            )
-            .await
-            {
-                Ok(()) => {
-                    new_path.set(String::new());
-                    if let Ok(r) = get_json::<WorkspacesResponse>(&b, &t, "/v1/workspaces").await {
-                        active_workspace.set(r.active_id);
-                        workspaces.set(r.workspaces);
-                    }
-                }
-                Err(e) => status.set(format!("add workspace failed: {e}")),
-            }
-        });
-    };
+    let _ = status;
     let add_remote = move |_| {
         let (name, url) = (remote_name.get(), remote_url.get());
         if name.trim().is_empty() || url.trim().is_empty() {
@@ -2087,67 +3454,8 @@ fn DaemonPane(
             </section>
             <section class="card">
                 <h2 class="panel-title">"Workspaces"</h2>
-                <Show when=move || workspaces.get().is_empty()>
-                    <EmptyState title="No workspaces".into() body="Add a directory that exists on the daemon host.".into() />
-                </Show>
-                <ul class="plain">
-                    {move || workspaces.get().into_iter().map(|w| {
-                        let id = w.id.clone();
-                        let is_active = move || active_workspace.get() == id;
-                        let activate_id = w.id.clone();
-                        view! {
-                            <li class="row">
-                                <span>
-                                    {w.name}
-                                    <Show when=is_active>" "<Badge kind="done".into() label="active".into() /></Show>
-                                    <span class="path">{w.path.clone()}</span>
-                                    {(!w.rules.is_empty()).then(|| {
-                                        let rules = w.rules.clone();
-                                        view! { <span class="path">{format!("rules {rules}")}</span> }
-                                    })}
-                                    {(!w.permission_mode.is_empty()).then(|| {
-                                        let mode = w.permission_mode.clone();
-                                        view! { <span class="path">{format!("mode {mode}")}</span> }
-                                    })}
-                                </span>
-                                <button class="secondary" on:click=move |_| {
-                                    let (b, t, id) = (base.get(), token.get(), activate_id.clone());
-                                    spawn_local(async move {
-                                        let path = format!("/v1/workspaces/{id}/activate");
-                                        match post_json(&b, &t, &path, serde_json::json!({})).await {
-                                            Ok(()) => active_workspace.set(id),
-                                            Err(e) => status.set(format!("activate failed: {e}")),
-                                        }
-                                    });
-                                }>"Open"</button>
-                            </li>
-                        }
-                    }).collect_view()}
-                </ul>
-                <div class="row">
-                    <input placeholder="/home/you/Projects/my-repo"
-                        prop:value=move || new_path.get()
-                        on:input=move |ev| new_path.set(event_target_value(&ev)) />
-                    <button class="primary" on:click=add_workspace>"Add"</button>
-                </div>
-            </section>
-            <section class="card">
-                <h2 class="panel-title">"Policy"</h2>
-                <p class="hint">"Rules must be a file inside the active workspace. The mode is stored here and is not applied to the live session."</p>
-                <label>"Rules file"</label>
-                <input placeholder="AGENTS.md"
-                    prop:value=move || policy_rules.get()
-                    on:input=move |ev| policy_rules.set(event_target_value(&ev)) />
-                <label>"Permission mode"</label>
-                <select class="mode" prop:value=move || policy_mode.get() on:change=move |ev| policy_mode.set(event_target_value(&ev))>
-                    <option value="">"Unset"</option>
-                    {permission_modes().iter().map(|m| {
-                        let id = m.id.to_string();
-                        let label = m.label.to_string();
-                        view! { <option value=id>{label}</option> }
-                    }).collect_view()}
-                </select>
-                <button class="primary" on:click=save_policy>"Save policy"</button>
+                <p class="hint">"A workspace is a directory. Session lists are not folders."</p>
+                <button class="primary ws-open" on:click=move |_| open_picker()>"Change workspace"</button>
             </section>
         </main>
     }

@@ -94,6 +94,11 @@ type Options struct {
 	Select    SelectFunc
 	Registry  *tool.Registry
 	WorkDir   string
+	// WorkspaceRoots are the directories a delegated child's working directory
+	// must stay inside (the workspace plus its extra roots). Empty means the
+	// session is unbound: child cwd is not checked, so plain strike serve
+	// with an empty registry is unchanged.
+	WorkspaceRoots []string
 	// CheckpointDir is the durable per-session checkpoint stack directory
 	// (#573). Empty disables disk persistence (tests). cmd/strike sets
 	// tool.DefaultCheckpointDir(sessionID). Set to "-" for an explicit off.
@@ -240,6 +245,10 @@ type Options struct {
 	// nil disables auto-load. Refreshed every turn so memory_write is visible
 	// without restart.
 	Memory MemorySource
+	// InitialMemoryMode is normal, incognito, or temporary. Empty is normal.
+	// Temporary skips this Memory layer. Incognito still loads it; product
+	// tools refuse writes. SetMemoryMode changes it for a live session.
+	InitialMemoryMode string
 	// Ledger, when set, supplies the decision/assumption ledger for the
 	// auto-loaded decision_ledger system layer (active entries, path-scoped
 	// to WorkDir). nil disables. Shared with child spawns so specialists see
@@ -486,7 +495,10 @@ type Engine struct {
 	autonomy protocol.Autonomy
 	// permMode is the session tool-permission posture dial.
 	permMode protocol.PermissionMode
-	agent    Agent
+	// memMode is normal, incognito, or temporary. Empty is treated as normal.
+	memMode   string
+	memModeMu sync.RWMutex
+	agent     Agent
 	// taskHarness is attached only by spawnChild for the selected child agent.
 	taskHarness     fn.Func
 	taskHarnessName string
@@ -860,6 +872,7 @@ func New(opts Options) *Engine {
 		contextWindowTokens: opts.ContextWindow,
 		priority:            opts.InitialPriority,
 		titled:              opts.InitialTitled,
+		memMode:             "normal",
 		phaseIndex:          -1,
 		sessionBudget:       sb,
 	}
@@ -870,6 +883,7 @@ func New(opts Options) *Engine {
 		e.messages = append([]provider.Message(nil), opts.InitialMessages...)
 		e.hydrateMessageImages()
 	}
+	_ = e.SetMemoryMode(opts.InitialMemoryMode)
 	e.perms = permission.New(e.emitPermission, opts.Rules...)
 	if len(opts.RuleLayerNames) > 0 {
 		e.perms.SetBaseLayerNames(opts.RuleLayerNames...)

@@ -380,6 +380,16 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 		}
 	}
 
+	// Reject a child whose working directory is already outside the workspace
+	// before any session is opened. Worktree spawns are checked after the
+	// worktree path exists, because that path can land outside the roots.
+	if !WantChildWorktree(e.opts.ChildIsolation, req.Isolation) {
+		if err := childWorkDirAllowed(e.opts.WorkspaceRoots, e.opts.WorkDir); err != nil {
+			e.failDelegationSpawn(delegID, err.Error())
+			return tool.TaskResult{}, err
+		}
+	}
+
 	childID := rand.Text()
 	title := strings.TrimSpace(memberName)
 	if title == "" {
@@ -465,6 +475,14 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 			baseRev = e.opts.Worktrees.HeadRev(ctx, wt.Path)
 		}
 	}
+	if err := childWorkDirAllowed(e.opts.WorkspaceRoots, childWorkDir); err != nil {
+		if isolationMode == "worktree" && e.opts.Worktrees != nil && wtPath != "" {
+			_ = e.opts.Worktrees.Remove(ctx, wtRepo, wtPath, wtBranch)
+		}
+		e.failDelegationSpawn(delegID, err.Error())
+		e.closeChildSession(childID)
+		return tool.TaskResult{}, err
+	}
 
 	child := New(Options{
 		SessionID:                  childID,
@@ -478,9 +496,11 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 		Select:                     e.opts.Select,
 		Registry:                   childReg,
 		WorkDir:                    childWorkDir,
+		WorkspaceRoots:             append([]string(nil), e.opts.WorkspaceRoots...),
 		ProjectRoot:                e.opts.ProjectRoot,
 		Instructions:               e.opts.Instructions,
 		Memory:                     e.opts.Memory,
+		InitialMemoryMode:          e.MemoryMode(),
 		Ledger:                     e.opts.Ledger,
 		Attachments:                e.opts.Attachments,
 		ProjectArtifact:            e.opts.ProjectArtifact,

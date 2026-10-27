@@ -92,7 +92,9 @@ pump to stop filling a full buffer and never blocks on a stuck read. Call
 
 Strike persists each session as JSONL under `~/.strike/sessions/<id>.jsonl`.
 New logs may begin with a `session.header` line (`schemaVersion`); event lines
-are protocol envelopes (`type` / `time` / `v` / `data`). The stock CLI
+are protocol envelopes (`type` / `time` / `v` / `data`). The file layout,
+event catalog, and `<id>.meta.json` sidecar are specified in
+[session-format.md](session-format.md). The stock CLI
 (`internal/persist/session`) fsyncs each append, skips trailing crash residue on
 replay, and offers redacted portable packages (`strike.session`) plus fork/
 retention helpers — see [config.md](config.md) (session durability) and

@@ -575,7 +575,7 @@ pub fn GitPanel(
                 <button type="button" class="secondary" on:click=move |_| load()>"Refresh"</button>
                 <button type="button" class=move || if show_log.get() { "chip on" } else { "chip" } on:click=move |_| show_log.update(|v| *v = !*v)>"Log"</button>
             </div>
-            <p class="hint">"Arrows or j/k move. Enter opens the diff. Esc closes it. l toggles the log. Alt+G opens this panel."</p>
+            <p class="hint">"Arrows or j/k move. Enter opens the diff. Esc closes it. l toggles the log."</p>
             <Show when=move || !error.get().is_empty()>
                 <div class="notice" role="alert">
                     <span>{move || error.get()}</span>
