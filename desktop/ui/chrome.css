@@ -1,0 +1,24 @@
+#strike-desktop-chrome {
+  position: fixed;
+  z-index: 2147483646;
+  right: 12px;
+  bottom: 12px;
+  display: inline-flex;
+  align-items: center;
+  max-width: min(280px, calc(100vw - 24px));
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--rule, #4f4d63);
+  background: var(--surface, #232230);
+  color: var(--ink, #f3f1fa);
+  text-decoration: none;
+  font: 13px/1 ui-sans-serif, system-ui, sans-serif;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#strike-desktop-chrome:focus-visible {
+  outline: 2px solid var(--border-focus, #7c3aed);
+  outline-offset: 2px;
+}

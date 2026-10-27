@@ -160,6 +160,13 @@ syncing CLI profiles from the daemon. The switcher shows an `ssh`
 destination as a hint. It does not open that connection. A public tunnel
 is still something you run yourself, and it is a public edge.
 
+The desktop shell in `desktop/` (see [desktop.md](desktop.md)) is a separate
+window. A Tailscale or other VPN URL is an explicit saved gateway: HTTPS
+uses Web PKI or a pinned certificate, and cleartext HTTP is refused until
+the user allows it. SSH runs `strike connect`, so the short-lived grant
+stays in that process. The shell does not draw this switcher or the status
+chip, and it does not exchange pairing codes.
+
 ## Memory mode
 
 Shipped as a session flag, not a new protocol op. The composer pill and the

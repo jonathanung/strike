@@ -1,4 +1,4 @@
-.PHONY: build run run-echo serve webui-build webui-check webui-uat webui-uat-smoke webui-sidechat-uat web-check test vet cover cover-check clean setup restore tui-gen prompt-reg chaos harness-eval swebench-eval telemetry-check protocol-schema protocol-schema-check container-smoke
+.PHONY: build run run-echo serve webui-build webui-check webui-uat webui-uat-smoke webui-sidechat-uat web-check desktop-test test vet cover cover-check clean setup restore tui-gen prompt-reg chaos harness-eval swebench-eval telemetry-check protocol-schema protocol-schema-check container-smoke
 
 # Multi-module workspace (go.work): ., ./pkg/protocol, ./pkg/redact,
 # ./harness.
@@ -66,6 +66,11 @@ webui-check:
 
 # Legacy alias: the old JS web/ UI is removed; web-check now means the Rust UI.
 web-check: webui-check
+
+# Desktop shell (desktop/). Does not build the Tauri package; that needs
+# WebKitGTK headers. See docs/desktop.md.
+desktop-test:
+	cargo test --locked --manifest-path desktop/Cargo.toml -p strike-desktop-core -p strike-desktop
 
 # Headless cockpit pass, then every scripts/webui-uat/scenarios/<slug>.mjs.
 # SUITE=smoke is the cockpit only. SUITE=<slug> runs that file only.
