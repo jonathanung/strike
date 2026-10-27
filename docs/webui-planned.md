@@ -153,6 +153,11 @@ syncing CLI profiles from the daemon. The switcher shows an `ssh`
 destination as a hint. It does not open that connection. A public tunnel
 is still something you run yourself, and it is a public edge.
 
+The desktop shell in `desktop/` (see [desktop.md](desktop.md)) is a separate
+loopback proxy and keyring, not that web switcher. It does not mint
+short-lived SSH grants (#1265), exchange pairing codes (#1289), or render
+the shared status component (#1263).
+
 ## Memory mode
 
 Shipped as a session flag, not a new protocol op. The composer pill and the
