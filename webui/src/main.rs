@@ -5,6 +5,7 @@
 //! docs/webui-planned.md.
 
 mod api;
+mod chat_mode;
 mod editor;
 mod goals;
 mod model;
@@ -116,6 +117,16 @@ fn apply_theme(theme: &str, scheme: &str) {
     }
     save("strike.theme", theme);
     save("strike.scheme", scheme);
+}
+
+fn apply_layout(layout: &str) {
+    let layout = chat_mode::normalize_layout(layout);
+    if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
+        if let Some(el) = doc.document_element() {
+            let _ = el.set_attribute("data-layout", &layout);
+        }
+    }
+    save("strike.layout", &layout);
 }
 
 fn same_origin(base: &str) -> bool {
@@ -693,6 +704,18 @@ fn App() -> impl IntoView {
     let doc_line = RwSignal::new(0u32);
     let doc_diff = RwSignal::new(false);
     let doc_editing = RwSignal::new(false);
+    let layout = RwSignal::new(chat_mode::normalize_layout(&load("strike.layout")));
+    let sessions_drawer = RwSignal::new(false);
+    let panel_drawer = RwSignal::new(false);
+    let pending_files = RwSignal::new(Vec::<chat_mode::PendingAttachment>::new());
+    let sending = RwSignal::new(false);
+    let listening = RwSignal::new(false);
+    let speech_ok = chat_mode::dictation_available();
+    let reconnect_gen = RwSignal::new(0u32);
+    let stream_epoch = RwSignal::new(0u32);
+    let stream_fails = RwSignal::new(0u32);
+    let stream_up = RwSignal::new(false);
+    let file_input = NodeRef::<leptos::html::Input>::new();
     let side_open = RwSignal::new(false);
     let side_focus_id = RwSignal::new(String::new());
     let side_focus_name = RwSignal::new(String::new());
@@ -712,6 +735,7 @@ fn App() -> impl IntoView {
     let changes = RwSignal::new(Vec::<model::ChangedFile>::new());
     let changes_error = RwSignal::new(String::new());
     apply_theme(&load("strike.theme"), &load("strike.scheme"));
+    apply_layout(&layout.get_untracked());
 
     let poll_team = move || {
         let (b, t, root) = (
@@ -784,9 +808,20 @@ fn App() -> impl IntoView {
             let mut gateway_up = false;
             match get_json::<Health>(&b, &t, "/health").await {
                 Ok(h) if h.ok => {
+                    let was = gateway.get_untracked();
+                    let root_now = active_root.get_untracked();
                     gateway.set("connected".into());
                     last_beat.set(now_ms());
                     gateway_up = true;
+                    // HTTP is up. If the event stream is still down after an
+                    // outage, open it again now instead of waiting out backoff.
+                    if was == "unreachable"
+                        && !stream_up.get_untracked()
+                        && !root_now.is_empty()
+                        && same_origin(&b)
+                    {
+                        reconnect_gen.update(|n| *n = n.wrapping_add(1));
+                    }
                     status.set(format!("Connected · {}", h.version));
                 }
                 Ok(_) => {
@@ -927,19 +962,35 @@ fn App() -> impl IntoView {
     let tail: Rc<RefCell<Option<web_sys::EventSource>>> = Rc::new(RefCell::new(None));
     let seq = Rc::new(Cell::new(0u32));
     let open = Rc::new(Cell::new(false));
+    let shown_root = RwSignal::new(String::new());
+    let wipe_on_replay = RwSignal::new(false);
     let tail_fx = tail.clone();
     let seq_fx = seq.clone();
     let open_fx = open.clone();
     Effect::new(move |_| {
         let root = active_root.get();
         let b = base.get();
+        let _retry = reconnect_gen.get();
+        let epoch = stream_epoch.get_untracked().wrapping_add(1);
+        stream_epoch.set(epoch);
+        stream_up.set(false);
         if let Some(es) = tail_fx.borrow_mut().take() {
             es.close();
         }
         seq_fx.set(0);
         open_fx.set(false);
-        lines.set(Vec::new());
-        children.set(Vec::new());
+        // A new session must not keep the previous transcript. A reconnect of
+        // the same session keeps the column until the daemon's log replay
+        // arrives, then replaces it so lines are not doubled.
+        let switching = shown_root.get_untracked() != root;
+        shown_root.set(root.clone());
+        if switching {
+            lines.set(Vec::new());
+            children.set(Vec::new());
+            wipe_on_replay.set(false);
+        } else if !root.is_empty() {
+            wipe_on_replay.set(true);
+        }
         effort_level.set(String::new());
         context_used.set(0);
         context_limit.set(0);
@@ -961,7 +1012,6 @@ fn App() -> impl IntoView {
             stream_note.set("Live transcript follows the daemon that served this page. Activity still polls the selected base URL.".into());
             return;
         }
-        stream_note.set(String::new());
         let url = format!("/v1/live/events?root={}", api::js_encode(&root));
         let es = match web_sys::EventSource::new(&url) {
             Ok(es) => es,
@@ -973,8 +1023,13 @@ fn App() -> impl IntoView {
         let lines_cb = lines;
         let seq_cb = seq_fx.clone();
         let open_cb = open_fx.clone();
+        let epoch_msg = epoch;
+        let epochs_msg = stream_epoch;
         let on_msg =
             Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |ev: web_sys::MessageEvent| {
+                if epochs_msg.get_untracked() != epoch_msg {
+                    return;
+                }
                 if let Some(data) = ev.data().as_string() {
                     apply_envelope(lines_cb, &seq_cb, &open_cb, storage_rev, &data);
                     let prev = LiveModelState {
@@ -1000,9 +1055,65 @@ fn App() -> impl IntoView {
             });
         es.set_onmessage(Some(on_msg.as_ref().unchecked_ref()));
         on_msg.forget();
-        let note = stream_note;
+        let up = stream_up;
+        let fails_ok = stream_fails;
+        let note_ok = stream_note;
+        let gate_ok = gateway;
+        let epoch_open = epoch;
+        let epochs_open = stream_epoch;
+        let lines_open = lines;
+        let wipe_open = wipe_on_replay;
+        let on_open = Closure::<dyn FnMut(web_sys::Event)>::new(move |_ev| {
+            if epochs_open.get_untracked() != epoch_open {
+                return;
+            }
+            fails_ok.set(0);
+            up.set(true);
+            note_ok.set(String::new());
+            gate_ok.set("connected".into());
+            if wipe_open.get_untracked() {
+                wipe_open.set(false);
+                lines_open.set(Vec::new());
+            }
+        });
+        es.set_onopen(Some(on_open.as_ref().unchecked_ref()));
+        on_open.forget();
+        let es_err = es.clone();
+        let up_err = stream_up;
+        let fails_err = stream_fails;
+        let epochs = stream_epoch;
+        let note_err = stream_note;
+        let bump = reconnect_gen;
+        let epoch_err = epoch;
         let on_err = Closure::<dyn FnMut(web_sys::Event)>::new(move |_ev| {
-            note.set("live event stream closed. Reload after the daemon cookie handoff if /v1 requires a token.".into());
+            if epochs.get_untracked() != epoch_err {
+                return;
+            }
+            es_err.close();
+            up_err.set(false);
+            let n = fails_err.get_untracked();
+            fails_err.set(n.saturating_add(1));
+            if n >= 3 {
+                note_err.set("Reconnecting to the live session. If this stays up, open the page once with ?token= so the daemon cookie is set.".into());
+            } else {
+                note_err.set("Reconnecting to the live session…".into());
+            }
+            let delay = chat_mode::reconnect_delay_ms(n);
+            let epoch_now = epoch;
+            let epochs = epochs;
+            let bump = bump;
+            if let Some(win) = web_sys::window() {
+                let tick = Closure::once(move || {
+                    if epochs.get_untracked() == epoch_now {
+                        bump.update(|g| *g = g.wrapping_add(1));
+                    }
+                });
+                let _ = win.set_timeout_with_callback_and_timeout_and_arguments_0(
+                    tick.as_ref().unchecked_ref(),
+                    delay,
+                );
+                tick.forget();
+            }
         });
         es.set_onerror(Some(on_err.as_ref().unchecked_ref()));
         on_err.forget();
@@ -1170,9 +1281,128 @@ fn App() -> impl IntoView {
     };
 
     let send = move || {
-        let text = draft.get_untracked();
+        // Context-hold gate (mirrors send_text): when the context fit is
+        // critical/full, do not dispatch and do not clear the draft or
+        // pending files, so a held submit never loses typed text. This
+        // gates both entry points (form submit and textarea Enter),
+        // which call this shared closure unconditionally.
+        let held = {
+            let ctx = active_context(
+                &catalog.get_untracked(),
+                &provider_name.get_untracked(),
+                &model_name.get_untracked(),
+            );
+            context_view(
+                context_used.get_untracked(),
+                context_limit.get_untracked(),
+                ctx,
+                &context_fit.get_untracked(),
+            )
+        };
+        if held.held {
+            model_note.set(held.hold_message);
+            return;
+        }
+        if sending.get_untracked() {
+            return;
+        }
+        let text = draft.get_untracked().trim().to_string();
+        let files = pending_files.get_untracked();
+        if files.iter().any(|f| f.error.is_empty() && f.data_b64.is_empty() && f.uploaded_ref.is_empty()) {
+            status.set("Still reading an attachment.".into());
+            return;
+        }
+        let ready = files.iter().any(|f| f.error.is_empty());
+        if text.is_empty() && !ready {
+            return;
+        }
+        let root = active_root.get_untracked();
+        if root.is_empty() {
+            status.set("no live session yet".into());
+            return;
+        }
+        let op = if session_busy(&root) && enter_mode.get_untracked() == "steer" {
+            "steer"
+        } else {
+            "user.input"
+        };
+        // Take the composer before the first await so a repeated Enter or a
+        // second click cannot post the same attachments again.
+        sending.set(true);
+        pending_files.set(Vec::new());
         draft.set(String::new());
-        send_text(text);
+        if listening.get_untracked() {
+            let _ = chat_mode::toggle_dictation(|_| {}, |_| {});
+            listening.set(false);
+        }
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        let restore = move |failed: Vec<chat_mode::PendingAttachment>, failed_text: String| {
+            draft.update(|d| {
+                *d = chat_mode::merge_failed_send(d, &failed_text);
+            });
+            pending_files.update(|rows| {
+                *rows = chat_mode::merge_failed_files(failed.clone(), rows.clone());
+            });
+            sending.set(false);
+        };
+        spawn_local(async move {
+            let mut updated = files;
+            let mut images = Vec::new();
+            for file in updated.iter_mut() {
+                if !file.error.is_empty() {
+                    continue;
+                }
+                if file.uploaded_ref.is_empty() {
+                    match chat_mode::upload_attachment(&b, &t, &root, &file.name, &file.mime, &file.data_b64).await {
+                        Ok(up) => {
+                            file.uploaded_ref = up.reference.clone();
+                            file.uploaded_kind = up.kind;
+                            file.uploaded_sha = up.sha256;
+                            if !up.name.is_empty() {
+                                file.name = up.name;
+                            }
+                            if !up.mime.is_empty() {
+                                file.mime = up.mime;
+                            }
+                            if up.bytes > 0 {
+                                file.bytes = up.bytes as u64;
+                            }
+                            file.data_b64.clear();
+                        }
+                        Err(err) => {
+                            status.set(format!("attachment failed: {err}"));
+                            restore(updated, text);
+                            return;
+                        }
+                    }
+                }
+                images.push(serde_json::json!({
+                    "ref": file.uploaded_ref,
+                    "mime": file.mime,
+                    "kind": file.uploaded_kind,
+                    "name": file.name,
+                    "bytes": file.bytes,
+                    "sha256": file.uploaded_sha,
+                }));
+            }
+            let body = if images.is_empty() {
+                serde_json::json!({"text": text})
+            } else {
+                serde_json::json!({"text": text, "images": images})
+            };
+            match post_op(&b, &t, &root, op, body).await {
+                Ok(()) => {
+                    for file in &updated {
+                        chat_mode::revoke_preview(&file.preview);
+                    }
+                    sending.set(false);
+                }
+                Err(err) => {
+                    status.set(format!("send failed: {err}"));
+                    restore(updated, text);
+                }
+            }
+        });
     };
 
     let insert_mention = move |path: String| {
@@ -1341,6 +1571,16 @@ fn App() -> impl IntoView {
         save("strike.enterMode", &mode);
     };
 
+    let set_layout = move |next: String| {
+        let next = chat_mode::normalize_layout(&next);
+        layout.set(next.clone());
+        apply_layout(&next);
+        if next != "conversation" {
+            sessions_drawer.set(false);
+            panel_drawer.set(false);
+        }
+    };
+
     let set_theme = move |theme: String| {
         apply_theme(&theme, &load("strike.scheme"));
     };
@@ -1463,6 +1703,17 @@ fn App() -> impl IntoView {
         }
     });
 
+    let stream_up_online = stream_up;
+    let reconnect_online = reconnect_gen;
+    let on_online = Closure::<dyn FnMut(web_sys::Event)>::new(move |_ev| {
+        if !stream_up_online.get_untracked() {
+            reconnect_online.update(|n| *n = n.wrapping_add(1));
+        }
+    });
+    if let Some(w) = web_sys::window() {
+        let _ = w.add_event_listener_with_callback("online", on_online.as_ref().unchecked_ref());
+    }
+    on_online.forget();
     let session_busy_now = Memo::new(move |_| {
         let root = active_root.get();
         roots.get().iter().any(|r| r.id == root && r.busy)
@@ -1600,6 +1851,13 @@ fn App() -> impl IntoView {
             .count()
     };
 
+    // Conversation layout (#1285): the shell contribution in
+    // src/shell/contrib/chat_mode.rs renders the header toggle and the
+    // palette commands through this late-bound host.
+    chat_mode::set_host(chat_mode::LayoutHost {
+        layout,
+        set_layout: Rc::new(move |next: &str| set_layout(next.to_string())),
+    });
     // The shell slot (src/shell/contrib/notifications.rs) renders the bell
     // with the page's signals; install them before the view reads them.
     notify::set_host(notify::NotifyHost {
@@ -1675,6 +1933,8 @@ fn App() -> impl IntoView {
             // Escape semantics carried over from the pre-shell key handler:
             // close the menus and the side chat drawer; only when none of
             // them was open does Escape also close the open document.
+            // The conversation layout's drawers (#1285) close on the same
+            // Escape, as they did in this feature's own key handler.
             let menu = mode_menu.get_untracked()
                 || model_menu.get_untracked()
                 || memory_menu.get_untracked()
@@ -1683,6 +1943,8 @@ fn App() -> impl IntoView {
             model_menu.set(false);
             memory_menu.set(false);
             side_open.set(false);
+            sessions_drawer.set(false);
+            panel_drawer.set(false);
             if !menu && !doc_editing.get_untracked() && !doc_path.get_untracked().is_empty() {
                 doc_path.set(String::new());
                 doc_editing.set(false);
@@ -1918,7 +2180,11 @@ fn App() -> impl IntoView {
             <goals::GoalsPane base=base token=token />
         </Show>
         <Show when=move || mode.get() == "chat">
-            <div class=move || if focus.get() { "shell focus" } else { "shell" }>
+            <div class=move || chat_mode::shell_class(focus.get(), &layout.get(), sessions_drawer.get(), panel_drawer.get())>
+                <button type="button" class="chat-scrim" aria-label="Close panel" on:click=move |_| {
+                    sessions_drawer.set(false);
+                    panel_drawer.set(false);
+                }></button>
                 <aside class="rail">
                     <div class="section-head">
                         <h2 class="panel-title"><span class="icon-slot" aria-hidden="true" inner_html=icon("sessions")></span>"Sessions"</h2>
@@ -2072,6 +2338,26 @@ fn App() -> impl IntoView {
                             <StatusTabs tabs=tabs on_select=move |id: String| open(id, true) />
                         }
                     }}
+                    <div class="chat-mode-bar">
+                        <button type="button" class="chip" data-chat-sessions="true" on:click=move |_| {
+                            panel_drawer.set(false);
+                            sessions_drawer.update(|v| *v = !*v);
+                        }>"Sessions"</button>
+                        <span class="chat-mode-title">{move || {
+                            let id = active_root.get();
+                            if id.is_empty() {
+                                return "No session".to_string();
+                            }
+                            sessions.get().into_iter().find(|s| s.id == id).map(|s| {
+                                let fallback = short_id(&s.id);
+                                session_label(&s.title, &fallback)
+                            }).unwrap_or_else(|| short_id(&id))
+                        }}</span>
+                        <button type="button" class="chip" data-chat-panel="true" on:click=move |_| {
+                            sessions_drawer.set(false);
+                            panel_drawer.update(|v| *v = !*v);
+                        }>"Panel"</button>
+                    </div>
                     <Show when=move || !load_error.get().is_empty()>
                         <div class="notice" role="alert">
                             <span>{move || load_error.get()}</span>
@@ -2206,11 +2492,41 @@ fn App() -> impl IntoView {
                         }}
                     </div>
                     </Show>
+                    <Show when=move || layout.get() == "conversation" && {
+                        // session_busy reads roots/live_busy untracked, so
+                        // subscribe to them here: without this the Show never
+                        // re-evaluates once the turn that produced the last
+                        // line ends, and the follow-ups stay hidden.
+                        let _ = roots.get();
+                        let _ = live_busy.get();
+                        let _ = live_busy_root.get();
+                        let root = active_root.get();
+                        !root.is_empty()
+                            && !session_busy(&root)
+                            && lines.with(|list| list.last().map(|line| line.role == "strike").unwrap_or(false))
+                    }>
+                        <div class="follow-ups" aria-label="Suggestions">
+                            {chat_mode::FOLLOW_UPS.into_iter().map(|text| {
+                                let label = text.to_string();
+                                let send_label = label.clone();
+                                let send = send_text;
+                                view! {
+                                    <button type="button" class="chip" title="Fixed prompt, not a model suggestion" on:click=move |_| send(send_label.clone())>{label}</button>
+                                }
+                            }).collect_view()}
+                        </div>
+                    </Show>
                     <div class="composer"
                         on:dragover=move |ev: web_sys::DragEvent| ev.prevent_default()
                         on:drop=move |ev: web_sys::DragEvent| {
                             ev.prevent_default();
                             if let Some(dt) = ev.data_transfer() {
+                                if let Some(files) = dt.files() {
+                                    if files.length() > 0 {
+                                        chat_mode::enqueue_file_list(files, pending_files, status);
+                                        return;
+                                    }
+                                }
                                 if let Ok(text) = dt.get_data("text/plain") {
                                     let text = text.trim().to_string();
                                     if text.starts_with('@') {
@@ -2270,10 +2586,65 @@ fn App() -> impl IntoView {
                             </div>
                         </Show>
                         <form on:submit=move |ev| { ev.prevent_default(); send(); }>
+                            <Show when=move || !pending_files.get().is_empty()>
+                                <div class="attach-row">
+                                    {move || pending_files.get().into_iter().map(|file| {
+                                        let id = file.id;
+                                        let name = file.name.clone();
+                                        let preview = file.preview.clone();
+                                        let error = file.error.clone();
+                                        let show_img = !preview.is_empty();
+                                        let show_err = !error.is_empty();
+                                        view! {
+                                            <span class="attach-chip">
+                                                <Show when=move || show_img>
+                                                    <img src=preview.clone() alt="" />
+                                                </Show>
+                                                <span>
+                                                    <span class="name">{name}</span>
+                                                    <Show when=move || show_err>
+                                                        <span class="path">{error.clone()}</span>
+                                                    </Show>
+                                                </span>
+                                                <button type="button" aria-label="Remove attachment" on:click=move |_| {
+                                                    pending_files.update(|rows| {
+                                                        if let Some(i) = rows.iter().position(|row| row.id == id) {
+                                                            chat_mode::revoke_preview(&rows[i].preview);
+                                                            rows.remove(i);
+                                                        }
+                                                    });
+                                                }>"Remove"</button>
+                                            </span>
+                                        }
+                                    }).collect_view()}
+                                </div>
+                            </Show>
+                            <input class="file-pick" type="file" data-chat-file="true" node_ref=file_input multiple=true
+                                accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,image/svg+xml,text/plain,application/zip,application/gzip"
+                                on:change=move |_| {
+                                    if let Some(el) = file_input.get() {
+                                        if let Some(files) = el.files() {
+                                            chat_mode::enqueue_file_list(files, pending_files, status);
+                                        }
+                                        el.set_value("");
+                                    }
+                                }
+                            />
                             <textarea
                                 placeholder="Message this session"
                                 prop:value=move || draft.get()
                                 on:input=move |ev| draft.set(event_target_value(&ev))
+                                on:paste=move |ev: web_sys::Event| {
+                                    let Some(ev) = ev.dyn_ref::<web_sys::ClipboardEvent>() else { return };
+                                    if let Some(data) = ev.clipboard_data() {
+                                        if let Some(files) = data.files() {
+                                            if files.length() > 0 {
+                                                ev.prevent_default();
+                                                chat_mode::enqueue_file_list(files, pending_files, status);
+                                            }
+                                        }
+                                    }
+                                }
                                 on:keydown=move |ev: web_sys::KeyboardEvent| {
                                     if ev.key() == "Enter" && !ev.shift_key() {
                                         ev.prevent_default();
@@ -2282,6 +2653,40 @@ fn App() -> impl IntoView {
                                 }
                             ></textarea>
                             <div class="composer-bar">
+                                <button type="button" class="chip" data-chat-attach="true" on:click=move |_| {
+                                    if let Some(el) = file_input.get() {
+                                        el.click();
+                                    }
+                                }>"Attach"</button>
+                                <Show when=move || speech_ok>
+                                    <button type="button" data-chat-voice="true" title="Dictate with the browser speech API. Audio may be sent to the browser vendor." class=move || if listening.get() { "chip listening" } else { "chip" } on:click=move |_| {
+                                        let draft_cb = draft;
+                                        let status_cb = status;
+                                        let listen_cb = listening;
+                                        match chat_mode::toggle_dictation(
+                                            move |text| {
+                                                draft_cb.update(|d| {
+                                                    if !d.is_empty() && !d.ends_with(' ') && !d.ends_with('\n') {
+                                                        d.push(' ');
+                                                    }
+                                                    d.push_str(&text);
+                                                });
+                                            },
+                                            move |err| {
+                                                listen_cb.set(false);
+                                                if !err.is_empty() {
+                                                    status_cb.set(err);
+                                                }
+                                            },
+                                        ) {
+                                            Ok(on) => listen_cb.set(on),
+                                            Err(err) => {
+                                                listen_cb.set(false);
+                                                status_cb.set(err);
+                                            }
+                                        }
+                                    }>{move || if listening.get() { "Stop" } else { "Voice" }}</button>
+                                </Show>
                                 <button type="button" class="chip" on:click=move |_| {
                                     model_menu.set(false);
                                     memory_menu.set(false);

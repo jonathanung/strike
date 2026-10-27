@@ -595,6 +595,140 @@ try {
     repoDir: process.cwd(),
   });
 
+  const before = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const shell = document.querySelector(".shell");
+      return JSON.stringify({
+        layout: document.documentElement.getAttribute("data-layout") || "",
+        cls: shell ? shell.className : "",
+        attach: !!document.querySelector("[data-chat-attach]"),
+      });
+    })()`,
+    returnByValue: true,
+  });
+  const beforeState = JSON.parse(before.result?.result?.value || "{}");
+  if (beforeState.layout === "conversation" || String(beforeState.cls).includes("layout-conversation")) {
+    throw new Error(`cockpit is not the default layout: ${JSON.stringify(beforeState)}`);
+  }
+  if (!beforeState.attach) throw new Error("attach control missing in cockpit");
+
+  await send("Runtime.evaluate", {
+    expression: `document.querySelector('[data-layout="conversation"]')?.click()`,
+  });
+  let chat = {};
+  for (let i = 0; i < 20; i++) {
+    const ev = await send("Runtime.evaluate", {
+      expression: `(() => {
+        const shell = document.querySelector(".shell");
+        const bar = document.querySelector(".chat-mode-bar");
+        const shown = bar ? getComputedStyle(bar).display : "";
+        return JSON.stringify({
+          cls: shell ? shell.className : "",
+          bar: shown,
+          sessions: !!document.querySelector("[data-chat-sessions]"),
+          panel: !!document.querySelector("[data-chat-panel]"),
+        });
+      })()`,
+      returnByValue: true,
+    });
+    chat = JSON.parse(ev.result?.result?.value || "{}");
+    if (String(chat.cls).includes("layout-conversation") && chat.bar === "flex") break;
+    await delay(100);
+  }
+  if (!String(chat.cls).includes("layout-conversation") || chat.bar !== "flex" || !chat.sessions || !chat.panel) {
+    throw new Error(`conversation layout failed: ${JSON.stringify(chat)}`);
+  }
+  // Drawer content must lay out at full width, not crushed into a flex row:
+  // assert a content element inside each open drawer is >200px wide (the
+  // drawer class alone passed while the sessions card rendered ~35px wide).
+  const drawerMeasure = async (drawerClass, drawerSel, contentSel, fallbackSel) => {
+    let measured = {};
+    for (let i = 0; i < 20; i++) {
+      const ev = await send("Runtime.evaluate", {
+        expression: `(() => {
+          const shell = document.querySelector(".shell");
+          const drawer = document.querySelector(${JSON.stringify(drawerSel)});
+          const content = drawer ? drawer.querySelector(${JSON.stringify(contentSel)}) || drawer.querySelector(${JSON.stringify(fallbackSel)}) : null;
+          return JSON.stringify({
+            cls: shell ? shell.className : "",
+            direction: drawer ? getComputedStyle(drawer).flexDirection : "",
+            drawerWidth: drawer ? drawer.getBoundingClientRect().width : 0,
+            contentWidth: content ? content.getBoundingClientRect().width : 0,
+          });
+        })()`,
+        returnByValue: true,
+      });
+      measured = JSON.parse(ev.result?.result?.value || "{}");
+      if (
+        String(measured.cls).includes(drawerClass) &&
+        measured.direction === "column" &&
+        measured.drawerWidth > 200 &&
+        measured.contentWidth > 200
+      ) {
+        break;
+      }
+      await delay(100);
+    }
+    if (
+      !String(measured.cls).includes(drawerClass) ||
+      measured.direction !== "column" ||
+      measured.drawerWidth <= 200 ||
+      measured.contentWidth <= 200
+    ) {
+      throw new Error(`conversation drawer content crushed: ${JSON.stringify(measured)}`);
+    }
+    return measured;
+  };
+  await send("Runtime.evaluate", {
+    expression: `document.querySelector("[data-chat-sessions]")?.click()`,
+  });
+  await drawerMeasure("drawer-sessions", ".shell.drawer-sessions .rail", ".session-row", ".section-head");
+  await send("Runtime.evaluate", {
+    expression: `document.querySelector("[data-chat-panel]")?.click()`,
+  });
+  await drawerMeasure("drawer-panel", ".shell.drawer-panel .side", ".side-tabs", ".activity");
+  await send("Runtime.evaluate", {
+    expression: `document.querySelector("[data-chat-panel]")?.click()`,
+  });
+  await send("Runtime.evaluate", {
+    expression: `document.querySelector('[data-layout="cockpit"]')?.click()`,
+  });
+
+  const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+  const secretName = "notes-sk-abcdefghijklmnopqrstuvwxyz.png";
+  const uploaded = await fetch(`http://127.0.0.1:${port}/v1/attachments`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ name: secretName, mime: "image/png", data: png }),
+  });
+  const uploadedBody = await uploaded.text();
+  if (uploaded.status !== 200 || uploadedBody.includes("sk-abcdefghijklmnopqrstuvwxyz") || !uploadedBody.includes("[REDACTED_API_KEY]")) {
+    throw new Error(`attachment ingest failed ${uploaded.status} ${uploadedBody.slice(0, 300)}`);
+  }
+  const rejected = await fetch(`http://127.0.0.1:${port}/v1/attachments`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ data: "" }),
+  });
+  if (rejected.status !== 400) {
+    throw new Error(`empty attachment status ${rejected.status}`);
+  }
+  await send("Runtime.evaluate", {
+    expression: `localStorage.setItem("strike.token", ${JSON.stringify(token)})`,
+  });
+  await send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
+  await waitFor(
+    "cockpit reload after attachment checks (Run a command, Memory)",
+    textProbe((t) => t.includes("Run a command") && t.includes("Memory")),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+
   // Usage + Audit (#1286): open each view and confirm its controls
   // render; the Audit view must also report a chain state. Ported onto
   // the hardened script's helpers: evaluate() surfaces page exceptions,

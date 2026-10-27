@@ -4,15 +4,21 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#14131c">
+<meta name="description" content="Conversation and cockpit for a Strike daemon.">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="icon" href="/assets/icon.svg">
 <title>Strike</title>
 <script>
-(function(){try{var ok={strike:1,nord:1,dracula:1,gruvbox:1,monokai:1,"tokyo-night":1,catppuccin:1};var t=localStorage.getItem("strike.theme")||"strike";var s=localStorage.getItem("strike.scheme")||"dark";if(!ok[t])t="strike";if(s!=="light")s="dark";var el=document.documentElement;el.setAttribute("data-theme",t);el.setAttribute("data-scheme",s);}catch(e){}})();
+(function(){try{var ok={strike:1,nord:1,dracula:1,gruvbox:1,monokai:1,"tokyo-night":1,catppuccin:1};var t=localStorage.getItem("strike.theme")||"strike";var s=localStorage.getItem("strike.scheme")||"dark";if(!ok[t])t="strike";if(s!=="light")s="dark";var lay=localStorage.getItem("strike.layout")||"cockpit";if(lay!=="conversation")lay="cockpit";var el=document.documentElement;el.setAttribute("data-theme",t);el.setAttribute("data-scheme",s);el.setAttribute("data-layout",lay);}catch(e){}})();
 </script>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="/assets/style-803e8e234bb33fb9.css" integrity="sha384-SFhtcPMOSuepVlVnG3vFEFGDIQMir0YBMDx1kPY3v8m76COPQiv8KIj4t4EEt3YU"/>
 <link rel="stylesheet" href="/assets/storage-c32d584bc182ee77.css" integrity="sha384-XNDaz3yqOR2+uEfPi+eY+9Mzja2F/5vYI647yiPLuy4KvGHAOICyrdh0pqlWr9Wn"/>
 <link rel="stylesheet" href="/assets/navbar-4aaaf28db500eacb.css" integrity="sha384-5TOOsJOEELXhQX9eaCeYAdolP2MTbzKY2Rs54jkUpbigS3rQ+1uG62wvDZTASCfR"/>
 <link rel="stylesheet" href="/assets/editor-b94eee6c774248b5.css" integrity="sha384-+9ZqewFDkMigo7FvJP5c3fz6AHPgvKtu9jHfIAjeW7Qtx7wW3GCJSZM+LHcEeR4D"/>
+<link rel="stylesheet" href="/assets/chat-mode-c0a49864a0dd5243.css" integrity="sha384-McpfSccRV3saRSz8h4ulV3CS05un9+FK6ngy762vr2Ue/+x8ZumcRBVB0/5OG7Ao"/>
 <link rel="stylesheet" href="/assets/notify-750498e8d7d87548.css" integrity="sha384-l/TrTY1ETPTYhTEtEfPovdv2nck2zscWIo3mhOCEkb/RLhrZYW/bwgXX5qn68bAv"/>
 <link rel="stylesheet" href="/assets/usage-audit-4109f37a4c3f020.css" integrity="sha384-PG57uHfAoOyYrJLu5TZtnb1s2Ud6PPolTjB9IeCoVZ1qF7Qgrtsh0+5YiMBYYV9Z"/>
 <link rel="stylesheet" href="/assets/goals-5b895e22909a0f66.css" integrity="sha384-liP/FQF4QvouM0zc8WO7nxC1u3CzbFF/GBmvuED6zZS8f0rmPG1QWhWJitxfpRm1"/>
@@ -21,8 +27,8 @@
 
 
 <script type="module">
-import init, * as bindings from '/assets/strike-webui-d0bd1725d61929c1.js';
-const wasm = await init({ module_or_path: '/assets/strike-webui-d0bd1725d61929c1_bg.wasm' });
+import init, * as bindings from '/assets/strike-webui-e7d690ab2a17c7c9.js';
+const wasm = await init({ module_or_path: '/assets/strike-webui-e7d690ab2a17c7c9_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -33,6 +39,6 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 </script>
 <script src="/assets/register.js" defer></script>
 
-<link rel="modulepreload" href="/assets/strike-webui-d0bd1725d61929c1.js" crossorigin="anonymous" integrity="sha384-qeqac8gxbZ5SRcyFKPx3VLsrqucnMiwrIDrmHq86gYUJlVi1dtyZca6M+fWL1mc0"><link rel="preload" href="/assets/strike-webui-d0bd1725d61929c1_bg.wasm" crossorigin="anonymous" integrity="sha384-Muz3X4xnGcZWY5PqI+fy//0MD3J1hfqMl0HcxlTMIf4gFnDMFnR//lqBF7UG+kyg" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/assets/strike-webui-e7d690ab2a17c7c9.js" crossorigin="anonymous" integrity="sha384-qSkjfeo/8yDPaM+a7RI3klhSIxr2nnYjixA1NeOwNRqPVrQBQlY046R48D16mx2P"><link rel="preload" href="/assets/strike-webui-e7d690ab2a17c7c9_bg.wasm" crossorigin="anonymous" integrity="sha384-ZabxzSrjWSNRhJx5Ae3/30Y7Oxj7CGicoGGRF6JlpUtkYCtM97YCFWlR5nKNa8Dt" as="fetch" type="application/wasm"></head>
 <body></body>
 </html>

@@ -271,14 +271,6 @@ func (s *Server) handleSessionUnseen(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "sessionId": id, "unread": true})
 }
 
-func cleanSessionID(id string) (string, bool) {
-	id = strings.TrimSpace(id)
-	if id == "" || strings.ContainsAny(id, "/\\") || strings.Contains(id, "..") {
-		return "", false
-	}
-	return id, true
-}
-
 func (s *Server) buildStatusBoard(now time.Time) statusBoard {
 	rows := s.liveStatusRows(now)
 	have := make(map[string]struct{}, len(rows))
