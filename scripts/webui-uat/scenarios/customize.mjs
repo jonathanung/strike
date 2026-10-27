@@ -77,11 +77,14 @@ export async function scenario(ctx) {
   await shoot("customize-skill-diff", ["desk1440"]);
   await page.evaluate(`document.querySelector("[data-cz-save]")?.click()`);
   const saved = await waitUntil(
-    `document.body && document.body.innerText.includes("Saved")`,
+    `!!document.querySelector('[data-cz-item="uat-note"]')`,
     10000,
     "skill save",
   );
-  check(Boolean(saved), "skill save did not land");
+  if (!saved) {
+    const extra = await page.evaluate(`document.querySelector(".cz-error")?.textContent || ""`);
+    check(false, `skill save did not land: ${extra}`);
+  }
 
   await page.evaluate(`(() => {
     const tabs = document.querySelector('[aria-label="Customize sections"]');
@@ -138,6 +141,21 @@ export async function scenario(ctx) {
   })()`);
   check(seeded === "ok", `mcp seed failed: ${seeded}`);
 
+  // The catalog loads once per pane. A direct API write does not bump it,
+  // so reopen Customize before looking for the new server.
+  await page.send("Page.navigate", { url: ctx.baseURL });
+  const back = await waitUntil(
+    `document.body && document.body.innerText.includes("Run a command") && !!document.querySelector('[data-view="customize"]')`,
+    20000,
+    "reload after mcp seed",
+  );
+  check(Boolean(back), "cockpit did not return after the MCP seed");
+  await page.evaluate(`document.querySelector('[data-view="customize"]')?.click()`);
+  await waitUntil(
+    `document.body && document.body.innerText.includes("Slash skills")`,
+    15000,
+    "customize after reload",
+  );
   await page.evaluate(`document.querySelector('[data-cz-section="mcp"]')?.click()`);
   const listed = await waitUntil(
     `!!document.querySelector('[data-cz-item="docs"]')`,
