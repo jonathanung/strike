@@ -25,6 +25,7 @@ import (
 	"github.com/jonathanung/strike/internal/product/config"
 	"github.com/jonathanung/strike/internal/protocol"
 	"github.com/jonathanung/strike/internal/trust/audit"
+	"github.com/jonathanung/strike/internal/trust/usageaudit"
 )
 
 const serveUsage = `Web agent workspace (live engine + durable session attach).
@@ -219,6 +220,14 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	usageDir := usageaudit.DefaultDir()
+	if usageLog, err := usageaudit.Open(usageDir); err != nil {
+		fmt.Fprintf(stderr, "strike: usage audit log unavailable: %v\n", err)
+		usageDir = ""
+	} else {
+		defer usageLog.Close()
+	}
 
 	var liveHub *server.LiveHub
 	var services *host.Services
@@ -496,19 +505,20 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 	}
 
 	srv, err := server.New(server.Options{
-		Addr:        opts.addr,
-		Auth:        opts.auth,
-		Token:       token,
-		TokenFile:   opts.tokenFile,
-		SessionDir:  sessionDir,
-		Workspaces:  wsStore,
-		LiveHub:     liveHub,
-		Services:    services,
-		Sandbox:     sandboxSnap,
-		ReadOnly:    opts.readOnly,
-		Audit:       auditSink,
-		Attachments: sharedAttachments,
-		SideChat:    sideChat,
+		Addr:          opts.addr,
+		Auth:          opts.auth,
+		Token:         token,
+		TokenFile:     opts.tokenFile,
+		SessionDir:    sessionDir,
+		Workspaces:    wsStore,
+		LiveHub:       liveHub,
+		Services:      services,
+		Sandbox:       sandboxSnap,
+		ReadOnly:      opts.readOnly,
+		Audit:         auditSink,
+		Attachments:   sharedAttachments,
+		UsageAuditDir: usageDir,
+		SideChat:      sideChat,
 	})
 	if err != nil {
 		return err

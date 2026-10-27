@@ -10,6 +10,7 @@ webui/protocol-schema/target/
 webui/dist/
 /webui-uat-artifacts/
 /webui-chat-mode-artifacts/
+/usage-audit-uat/
 /.nix-rust/
 
 # Generated flatten of internal/frontend/tui/app/_src/ (go generate ./internal/frontend/tui/app).

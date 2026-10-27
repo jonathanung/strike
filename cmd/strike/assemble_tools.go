@@ -947,7 +947,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 				return info.ID, nil
 			},
 			AppendChildEvent: func(childID string, ev protocol.Event) error {
-				return sessions.Append(childID, ev)
+				return appendChildEvent(sessions.Append, childID, ev)
 			},
 			CloseChildSession: func(childID string) error {
 				return sessions.Close(childID)
