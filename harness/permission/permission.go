@@ -81,8 +81,21 @@ func KnownNames() []string {
 	return names
 }
 
+// ValidatePattern rejects a pattern whose glob syntax is invalid for the
+// matcher evaluation uses (doublestar.Match in Rule.matches / globMatches).
+// An invalid glob never matches, so a rule carrying one is silently inert —
+// for a deny rule that is a fail-open hole, hence admission must reject it
+// instead of storing it. Empty is allowed (matches as "*").
+func ValidatePattern(pattern string) error {
+	if pattern == "" || doublestar.ValidatePattern(pattern) {
+		return nil
+	}
+	return fmt.Errorf("pattern %q has invalid glob syntax — an invalid glob never matches, so the rule would do nothing; fix the pattern (check for an unclosed '[' or '{' or a trailing '\\')", pattern)
+}
+
 // ValidateRuleset rejects empty permission names, unknown permission
-// names, and invalid actions. Empty pattern is allowed (matches as "*").
+// names, invalid actions, and patterns with invalid glob syntax. Empty
+// pattern is allowed (matches as "*").
 func ValidateRuleset(rs Ruleset) error {
 	for i, r := range rs {
 		if r.Permission == "" {
@@ -93,6 +106,9 @@ func ValidateRuleset(rs Ruleset) error {
 		}
 		if !ValidAction(r.Action) {
 			return fmt.Errorf("rule %d: invalid action %q", i, r.Action)
+		}
+		if err := ValidatePattern(r.Pattern); err != nil {
+			return fmt.Errorf("rule %d: %w", i, err)
 		}
 	}
 	return nil

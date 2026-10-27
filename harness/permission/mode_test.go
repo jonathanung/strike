@@ -132,6 +132,33 @@ func TestYoloHonorsConfigDeny(t *testing.T) {
 	}
 }
 
+// TestInvalidGlobDenyCannotSilentlyAllowUnderYolo is the auditor's service
+// probe from the #1423 Tier-C audit: a ruleset {bash, "[r*", deny} over
+// Defaults under Yolo used to make Ask(bash, "rm -rf x") return nil (silent
+// allow) because the invalid glob never matched. Admission now rejects that
+// ruleset, so the probe setup itself fails; the valid spelling "[r]*" is
+// admitted and denies.
+func TestInvalidGlobDenyCannotSilentlyAllowUnderYolo(t *testing.T) {
+	bad := Ruleset{{Permission: "bash", Pattern: "[r*", Action: Deny}}
+	if err := ValidateRuleset(bad); err == nil {
+		t.Fatal("ValidateRuleset accepted an invalid glob deny; the Yolo probe below would silently allow")
+	}
+	good := Ruleset{{Permission: "bash", Pattern: "[r]*", Action: Deny}}
+	if err := ValidateRuleset(good); err != nil {
+		t.Fatalf("ValidateRuleset(valid [r]* deny) = %v", err)
+	}
+	svc := New(func(protocol.Event) {}, Defaults(), good)
+	svc.SetPermissionMode(protocol.PermissionModeYolo)
+	err := svc.Ask(context.Background(), tool.AskRequest{
+		Permission: "bash",
+		Patterns:   []string{"rm -rf x"},
+	})
+	var denied *DeniedError
+	if !errors.As(err, &denied) {
+		t.Fatalf("yolo + valid [r]* deny = %v, want DeniedError", err)
+	}
+}
+
 func TestPlanModeDenyBeatsSessionAlwaysGrant(t *testing.T) {
 	svc := New(func(protocol.Event) {}, Defaults())
 	svc.SeedAlwaysGrants(Ruleset{{Permission: "write", Pattern: "*", Action: Allow}})
