@@ -97,3 +97,81 @@ func TestPermissionRulesConfirmAndScopes(t *testing.T) {
 		t.Fatal("global config missing")
 	}
 }
+
+func TestPermissionRulesRejectInvalidGlobPatterns(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	work := t.TempDir()
+
+	for _, pattern := range []string{"[a-", "{unclosed", "[r*"} {
+		for _, action := range []permission.Action{permission.Deny, permission.Allow} {
+			rule := permission.Rule{Permission: "bash", Pattern: pattern, Action: action}
+			err := AppendPermissionRule(work, "global", rule, true)
+			if err == nil {
+				t.Fatalf("AppendPermissionRule(%+v) = nil, want invalid glob rejection", rule)
+			}
+			if !strings.Contains(err.Error(), pattern) || !strings.Contains(err.Error(), "invalid glob syntax") {
+				t.Fatalf("AppendPermissionRule(%+v) error = %q, want it to name the pattern and the invalid glob syntax", rule, err)
+			}
+		}
+		if err := AppendProjectPermission(work, permission.Rule{Permission: "bash", Pattern: pattern, Action: permission.Deny}); err == nil {
+			t.Fatalf("AppendProjectPermission(pattern %q) = nil, want invalid glob rejection", pattern)
+		}
+	}
+	view, err := ReadPermissionRules(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(view.Rules) != 0 {
+		t.Fatalf("invalid rules were persisted: %+v", view.Rules)
+	}
+
+	valid := []string{"**", "[r]*", "[a-z]*", "{rm,git} *", "**/*.go", "rm *"}
+	for _, pattern := range valid {
+		rule := permission.Rule{Permission: "bash", Pattern: pattern, Action: permission.Deny}
+		if err := AppendPermissionRule(work, "global", rule, false); err != nil {
+			t.Fatalf("AppendPermissionRule(valid %q) = %v", pattern, err)
+		}
+	}
+	view, err = ReadPermissionRules(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(view.Rules) != len(valid) {
+		t.Fatalf("valid rules = %+v, want %d", view.Rules, len(valid))
+	}
+}
+
+// TestStoredInvalidGlobSurfacesInRulesReadPath covers the load path for a
+// hand-edited config file: Load drops the inert rule (daemon startup is not
+// bricked and the effective ruleset validates), while ReadPermissionRules
+// returns the validation error so the editor surfaces it.
+func TestStoredInvalidGlobSurfacesInRulesReadPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	work := t.TempDir()
+
+	global := filepath.Join(home, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(global), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	raw := `{"permissions":[{"permission":"bash","pattern":"[r*","action":"deny"},{"permission":"bash","pattern":"ls *","action":"deny"}]}`
+	if err := os.WriteFile(global, []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := ReadPermissionRules(work); err == nil || !strings.Contains(err.Error(), "[r*") || !strings.Contains(err.Error(), "invalid glob syntax") {
+		t.Fatalf("ReadPermissionRules = %v, want error naming the invalid pattern", err)
+	}
+
+	cfg, err := Load(work)
+	if err != nil {
+		t.Fatalf("Load with a hand-edited invalid glob = %v, want startup not bricked", err)
+	}
+	if len(cfg.Permissions) != 1 || cfg.Permissions[0].Pattern != "ls *" {
+		t.Fatalf("Load permissions = %+v, want only the valid rule kept", cfg.Permissions)
+	}
+	if err := permission.ValidateRuleset(cfg.Permissions); err != nil {
+		t.Fatalf("loaded ruleset does not validate: %v", err)
+	}
+}

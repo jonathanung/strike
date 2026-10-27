@@ -52,6 +52,9 @@ func ReadPermissionRules(workDir string) (PermissionRulesView, error) {
 	if err != nil {
 		return view, err
 	}
+	if err := validateStoredRulePatterns("global", global.Permissions); err != nil {
+		return view, err
+	}
 	view.GlobalMode = modeOrDefault(global.PermissionMode)
 	view.Rules = append(view.Rules, ruleRecords("global", global.Permissions)...)
 	view.EffectiveMode = view.GlobalMode
@@ -60,6 +63,9 @@ func ReadPermissionRules(workDir string) (PermissionRulesView, error) {
 	}
 	project, err := readProjectFile(workDir)
 	if err != nil {
+		return view, err
+	}
+	if err := validateStoredRulePatterns("project", project.Permissions); err != nil {
 		return view, err
 	}
 	if project.PermissionMode != "" {
@@ -148,6 +154,20 @@ func DeletePermissionRule(workDir, scope string, index int, confirm bool) error 
 	}
 }
 
+// validateStoredRulePatterns surfaces a hand-edited rule whose glob syntax
+// is invalid. Load (read in config.go) drops such a rule with a stderr log
+// so it never reaches evaluation silently inert and never bricks startup;
+// this read path is where the editor sees the problem, so it returns the
+// error instead — the caller must fix the file, as with invalid JSON.
+func validateStoredRulePatterns(scope string, rules permission.Ruleset) error {
+	for _, rule := range rules {
+		if err := permission.ValidatePattern(rule.Pattern); err != nil {
+			return fmt.Errorf("%s permission rule (%s %s): %w — fix it in the config file", scope, rule.Permission, rule.Action, err)
+		}
+	}
+	return nil
+}
+
 func normalizeRule(rule permission.Rule) (permission.Rule, error) {
 	rule.Permission = strings.TrimSpace(rule.Permission)
 	rule.Pattern = strings.TrimSpace(rule.Pattern)
@@ -160,6 +180,13 @@ func normalizeRule(rule permission.Rule) (permission.Rule, error) {
 	}
 	if len(rule.Pattern) > 512 {
 		return rule, fmt.Errorf("pattern is too long")
+	}
+	// Reject invalid glob syntax explicitly: evaluation treats it as
+	// never-matching, so storing it would leave the rule silently inert
+	// (fail-open for a deny). ValidateRuleset below checks the same thing
+	// for non-API callers.
+	if err := permission.ValidatePattern(rule.Pattern); err != nil {
+		return rule, err
 	}
 	if err := permission.ValidateRuleset(permission.Ruleset{rule}); err != nil {
 		return rule, err

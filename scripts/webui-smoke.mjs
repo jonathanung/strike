@@ -203,6 +203,37 @@ try {
     join(sessionsDir, "beta-session.meta.json"),
     JSON.stringify({ title: "Palette polish" }) + "\n",
   );
+  // Turn elapsed (#1364) fixture: a replayed session with three turns —
+  // a fully timed 4m12s turn, a 20s turn, and a 5-minute turn containing
+  // one untimed (old-log) line. Only the first may show an elapsed label.
+  const envLine = (type, time, data) =>
+    JSON.stringify(time ? { type, time, data } : { type, data }) + "\n";
+  const elapsedSession =
+    JSON.stringify({ type: "session.header", schemaVersion: 1, time: "2026-10-26T06:00:00Z" }) +
+    "\n" +
+    envLine("user.message", "2026-10-26T06:00:00Z", { text: "start the slow replay" }) +
+    envLine("turn.started", "2026-10-26T06:00:01Z", {}) +
+    envLine("tool.begin", "2026-10-26T06:00:30Z", {
+      callId: "c1",
+      name: "bash",
+      args: { command: "sleep 180" },
+    }) +
+    envLine("tool.end", "2026-10-26T06:03:30Z", { callId: "c1", name: "bash", output: "done" }) +
+    envLine("text.delta", "2026-10-26T06:04:00Z", { text: "slow answer" }) +
+    envLine("turn.completed", "2026-10-26T06:04:12Z", { stopReason: "end_turn" }) +
+    envLine("user.message", "2026-10-26T06:10:00Z", { text: "quick follow up" }) +
+    envLine("text.delta", "2026-10-26T06:10:10Z", { text: "fast answer" }) +
+    envLine("turn.completed", "2026-10-26T06:10:20Z", { stopReason: "end_turn" }) +
+    envLine("user.message", "2026-10-26T06:20:00Z", { text: "old log turn" }) +
+    envLine("tool.begin", null, { callId: "c9", name: "bash", args: { command: "sleep 240" } }) +
+    envLine("tool.end", "2026-10-26T06:24:00Z", { callId: "c9", name: "bash", output: "done" }) +
+    envLine("text.delta", "2026-10-26T06:24:30Z", { text: "old answer" }) +
+    envLine("turn.completed", "2026-10-26T06:25:00Z", { stopReason: "end_turn" });
+  await writeFile(join(sessionsDir, "elapsed-session.jsonl"), elapsedSession);
+  await writeFile(
+    join(sessionsDir, "elapsed-session.meta.json"),
+    JSON.stringify({ title: "Elapsed replay" }) + "\n",
+  );
   const found = await call("GET", "/v1/session-list/search?q=coral%20bookmark");
   if (found.status !== 200 || !found.text.includes("beta-session") || !found.text.includes("content")) {
     throw new Error(`content search ${found.status} ${found.text.slice(0, 300)}`);
@@ -1562,6 +1593,37 @@ try {
     );
   };
   await clickSideTab("Git", "Staged");
+  // Branch switcher regression (#1314): the rendered <select> value must
+  // equal the daemon's current branch once the options exist. The defect
+  // was prop:value being applied before the options rendered, so the
+  // browser fell back to the first option and displayed a branch the repo
+  // was not on. Only checked when the daemon reports a current branch
+  // (a detached checkout has none); option count is reported, not
+  // required, since a fresh CI checkout may carry a single branch.
+  const branchesRes = await fetch(`http://127.0.0.1:${port}/v1/git/branches`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!branchesRes.ok) {
+    throw new Error(`branch-select regression: branches HTTP ${branchesRes.status}`);
+  }
+  const branchesBody = await branchesRes.json();
+  const currentBranch =
+    branchesBody.current ||
+    (branchesBody.branches || []).find((b) => b.current)?.name ||
+    "";
+  if (currentBranch) {
+    await waitFor(
+      "branch select value equals current branch",
+      async () => {
+        const raw = await evaluate(
+          `(() => { const s = document.querySelector('select[aria-label="Branch"]'); return s ? JSON.stringify({ value: s.value, options: s.options.length }) : null; })()`,
+        );
+        const parsed = raw ? JSON.parse(raw) : {};
+        return { ok: parsed.value === currentBranch && parsed.options >= 1, ...parsed, currentBranch };
+      },
+      { timeout: STEP_MS, interval: 250 },
+    );
+  }
   await clickSideTab("Worktrees", "session.childIsolation");
 
   // Session delete (#1358): seed a session, close its root so it is
@@ -1754,6 +1816,39 @@ try {
     }),
     { timeout: WAIT_MS, interval: 250 },
   );
+  // Turn elapsed (#1364): resume the seeded replay session and check
+  // the label from the fixture above — exactly one "took 4:12", on the
+  // long turn's final line; the short turn and the untimed-line turn
+  // render nothing.
+  const elapsedClicked = await evaluate(`(() => {
+    const row = document.querySelector('[data-session-id="elapsed-session"]');
+    const btn = row && row.querySelector(".ss-main");
+    if (!btn) return "missing";
+    btn.click();
+    return "clicked";
+  })()`);
+  if (elapsedClicked !== "clicked") {
+    throw new Error(`turn-elapsed resume click -> ${elapsedClicked}`);
+  }
+  await waitFor(
+    "turn elapsed label on the replayed long turn only",
+    async () => {
+      const v = await evaluate(`(() => {
+        const labels = [...document.querySelectorAll(".turn-elapsed")];
+        return {
+          n: labels.length,
+          text: labels[0] ? labels[0].textContent.trim() : "",
+          onSlow: labels[0]
+            ? (labels[0].closest("article")?.innerText || "").includes("slow answer")
+            : false,
+          body: document.body.innerText.includes("old answer"),
+        };
+      })()`);
+      return { ok: v.n === 1 && v.text === "took 4:12" && v.onSlow && v.body, ...v };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+
   const wsClicked = await send("Runtime.evaluate", {
     expression: `(() => {
       const btn = document.querySelector(".ws-open");
