@@ -1,0 +1,9 @@
+{
+  "identifier": "default",
+  "description": "Strike desktop shell. The window loads the loopback manager.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "notification:default"
+  ]
+}
