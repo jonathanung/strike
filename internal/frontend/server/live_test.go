@@ -894,3 +894,18 @@ func TestLiveHubListExposesAttentionFlags(t *testing.T) {
 		t.Fatalf("summary = %+v, want permissionPending+busy", list[0])
 	}
 }
+
+func TestLiveDoneUnblocksOnClose(t *testing.T) {
+	live := NewLive("s", "/tmp", nil, make(chan protocol.Op, 1))
+	select {
+	case <-live.Done():
+		t.Fatal("Done closed before Close")
+	default:
+	}
+	live.Close()
+	select {
+	case <-live.Done():
+	case <-time.After(time.Second):
+		t.Fatal("Done still open after Close")
+	}
+}

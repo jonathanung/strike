@@ -883,7 +883,14 @@ func (l *Live) Subscribe(ctx context.Context) <-chan protocol.Event {
 // engine for that root: LiveHub.Remove only closes the bridge, and a root
 // started on the process context would otherwise stay open.
 func (l *Live) Closed() <-chan struct{} {
-	if l == nil {
+	return l.Done()
+}
+
+// Done is closed when Close runs. Spawned engines wait on it so a root
+// outlives the HTTP request that created it and still stops when the hub
+// drops the root.
+func (l *Live) Done() <-chan struct{} {
+	if l == nil || l.closeCh == nil {
 		ch := make(chan struct{})
 		close(ch)
 		return ch

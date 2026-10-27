@@ -2283,31 +2283,74 @@ try {
     url: `http://127.0.0.1:${port}/?token=${encodeURIComponent(token)}`,
   });
 
-  const setDraft = (value) =>
-    evaluate(`(() => {
+  // The instance value setter does not notify Leptos. The prototype setter
+  // plus a bubbling input event is the path the UAT uses, and it updates
+  // the draft signal. Key handlers listen on the textarea, so a bubbling
+  // keydown on that node is the keyboard path.
+  const setDraft = async (value) => {
+    const ok = await evaluate(`(() => {
       const el = document.querySelector("#composer-input");
-      if (!el) return JSON.stringify({ ok: false });
+      if (!el) return false;
+      el.focus();
       const proto = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value");
       proto.set.call(el, ${JSON.stringify(value)});
-      el.dispatchEvent(new Event("input", { bubbles: true }));
-      return JSON.stringify({ ok: true });
+      el.dispatchEvent(new InputEvent("input", { bubbles: true, composed: true, data: ${JSON.stringify(value)} }));
+      return el.value === ${JSON.stringify(value)};
     })()`);
-  const press = (key, extra) =>
-    evaluate(`(() => {
+    if (ok !== true) throw new Error(`composer did not accept ${JSON.stringify(value)}`);
+  };
+  const press = async (key, extra = {}) => {
+    const ok = await evaluate(`(() => {
       const el = document.querySelector("#composer-input");
-      if (!el) return JSON.stringify({ ok: false });
-      el.dispatchEvent(new KeyboardEvent("keydown", Object.assign({ key: ${JSON.stringify(key)}, bubbles: true, cancelable: true }, ${JSON.stringify(extra || {})})));
-      return JSON.stringify({ ok: true, draft: el.value });
+      if (!el) return false;
+      el.focus();
+      const ev = new KeyboardEvent("keydown", {
+        key: ${JSON.stringify(key)},
+        code: ${JSON.stringify(key)},
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+        ctrlKey: ${extra.ctrlKey ? "true" : "false"},
+        metaKey: ${extra.metaKey ? "true" : "false"},
+        altKey: ${extra.altKey ? "true" : "false"},
+        shiftKey: ${extra.shiftKey ? "true" : "false"}
+      });
+      el.dispatchEvent(ev);
+      return true;
     })()`);
+    if (ok !== true) throw new Error(`composer missing for ${key}`);
+  };
 
   await waitFor(
     "authenticated composer",
     async () => {
-      const raw = await evaluate(`(() => JSON.stringify({
-        ok: !!document.querySelector("#composer-input") && !!document.querySelector("#send-primary") && (document.body.innerText || "").includes("strike "),
-        text: (document.body.innerText || "").slice(0, 240)
-      }))()`);
+      const raw = await evaluate(`(() => {
+        const text = document.body.innerText || "";
+        const composer = !!document.querySelector("#composer-input");
+        const send = !!document.querySelector("#send-primary");
+        return JSON.stringify({
+          ok: composer && send && /strike/i.test(text),
+          composer, send,
+          text: text.slice(0, 400)
+        });
+      })()`);
       return JSON.parse(raw || "{}");
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await evaluate(`(() => {
+    const btn = [...document.querySelectorAll("button")].find((b) => (b.innerText || "").trim() === "New");
+    if (btn) btn.click();
+    return !!btn;
+  })()`);
+  await waitFor(
+    "new live session",
+    async () => {
+      const roots = await (await fetch(`http://127.0.0.1:${port}/v1/roots`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })).json();
+      const id = roots.activeId || "";
+      return { ok: id.includes("T") && !id.startsWith("elapsed"), root: id };
     },
     { timeout: STEP_MS, interval: 200 },
   );
@@ -2343,7 +2386,12 @@ try {
     "running turn",
     async () => {
       const raw = await evaluate(`(() => JSON.stringify({
-        ok: !!document.querySelector("#stop-turn") && document.querySelector("#send-primary")?.innerText === "Queue"
+        ok: !!document.querySelector("#stop-turn") && document.querySelector("#send-primary")?.innerText === "Queue",
+        primary: document.querySelector("#send-primary")?.innerText || "",
+        stop: !!document.querySelector("#stop-turn"),
+        draft: document.querySelector("#composer-input")?.value || "",
+        err: document.querySelector(".steer-error")?.textContent || "",
+        hasSleep: (document.body.innerText || "").includes("run sleep")
       }))()`);
       return JSON.parse(raw || "{}");
     },
@@ -2352,6 +2400,17 @@ try {
 
   await setDraft("alpha later");
   await press("Enter");
+  await waitFor(
+    "first queued message",
+    async () => {
+      const raw = await evaluate(`(() => {
+        const texts = [...document.querySelectorAll(".queue-text")].map((n) => n.textContent);
+        return JSON.stringify({ ok: texts.includes("alpha later"), texts });
+      })()`);
+      return JSON.parse(raw || "{}");
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
   await setDraft("beta later");
   await press("Enter");
   await waitFor(
@@ -2395,12 +2454,17 @@ try {
   );
   await evaluate(`(() => {
     const el = document.querySelector(".queue-edit");
+    if (!el) return false;
+    el.focus();
     const proto = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value");
     proto.set.call(el, "beta edited");
-    el.dispatchEvent(new Event("input", { bubbles: true }));
+    el.dispatchEvent(new InputEvent("input", { bubbles: true, composed: true, data: "beta edited" }));
+    return el.value === "beta edited";
+  })()`);
+  await evaluate(`(() => {
     const save = [...document.querySelectorAll(".queue-actions button")].find((b) => b.textContent === "Save");
     if (save) save.click();
-    return "ok";
+    return !!save;
   })()`);
   await waitFor(
     "edited queue",
