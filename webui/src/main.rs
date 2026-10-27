@@ -1,13 +1,14 @@
 //! Strike web client. The session list is live roots plus saved sessions.
-//! Activity, Files, Changes, Memory, Knowledge, and Artifacts are the side
-//! panel. Side chat is a separate read-only drawer. Goals and Autopilot live
-//! in `goals`. Schedule and the task runner are not drawn here; see
-//! docs/webui-planned.md.
+//! Activity, Files, Changes, Git, Worktrees, Memory, Knowledge, and
+//! Artifacts are the side panel. Side chat is a separate read-only drawer.
+//! Goals and Autopilot live in `goals`. Schedule and the task runner are
+//! not drawn here; see docs/webui-planned.md.
 
 mod api;
 mod chat_mode;
 mod editor;
 mod gateway;
+mod git;
 mod goals;
 mod model;
 mod notify;
@@ -2004,6 +2005,49 @@ fn App() -> impl IntoView {
             Ok(())
         }),
     );
+    // Git / Worktrees palette performers (#1270). Registered at boot by
+    // src/shell/contrib/git_worktree.rs; only the page owns side_tab.
+    shell::bind(
+        "panel-git",
+        Rc::new(move |_args: &str| {
+            side_tab.set("git".into());
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "panel-worktrees",
+        Rc::new(move |_args: &str| {
+            side_tab.set("worktrees".into());
+            Ok(())
+        }),
+    );
+
+    // Alt+T opens Worktrees. Like Alt+G for Goals, this stays here
+    // because only the page owns the view and side-tab signals; the
+    // shortcut listing lives in src/shell/contrib/git_worktree.rs.
+    // The PR's original Alt+G chord for Git is NOT ported: Alt+G is
+    // Goals on current main (#1300), so Git is reached by its tab or
+    // the palette instead of stealing the Goals chord. Its original
+    // Alt+W chord for Worktrees is NOT kept either: Alt+W is the
+    // gateway switcher on current main (#1308), which landed first,
+    // so Worktrees takes the free Alt+T instead of double-binding.
+    let on_worktrees_key =
+        Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |ev: web_sys::KeyboardEvent| {
+            if ev.alt_key()
+                && !ev.meta_key()
+                && !ev.ctrl_key()
+                && !git::shortcut_blocked(&ev)
+                && ev.key().eq_ignore_ascii_case("t")
+            {
+                ev.prevent_default();
+                mode.set("chat".into());
+                side_tab.set("worktrees".into());
+            }
+        });
+    if let Some(w) = web_sys::window() {
+        let _ = w.add_event_listener_with_callback("keydown", on_worktrees_key.as_ref().unchecked_ref());
+    }
+    on_worktrees_key.forget();
     shell::bind(
         "memory-normal",
         Rc::new(move |_args: &str| {
@@ -2867,6 +2911,8 @@ fn App() -> impl IntoView {
                         <button class=move || if side_tab.get() == "activity" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("activity".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("activity")></span>"Activity"</button>
                         <button class=move || if side_tab.get() == "files" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("files".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("files")></span>"Files"</button>
                         <button class=move || if side_tab.get() == "changes" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("changes".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("changes")></span>"Changes"</button>
+                        <button class=move || if side_tab.get() == "git" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("git".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("git")></span>"Git"</button>
+                        <button class=move || if side_tab.get() == "worktrees" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("worktrees".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("worktrees")></span>"Worktrees"</button>
                         <button class=move || if side_tab.get() == "memory" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("memory".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("memory")></span>"Memory"</button>
                         <button class=move || if side_tab.get() == "knowledge" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("knowledge".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("knowledge")></span>"Knowledge"</button>
                         <button class=move || if side_tab.get() == "artifacts" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("artifacts".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("artifacts")></span>"Artifacts"</button>
@@ -3093,6 +3139,12 @@ fn App() -> impl IntoView {
                                 }).collect_view()}
                             </ul>
                         </div>
+                    </Show>
+                    <Show when=move || side_tab.get() == "git">
+                        <git::GitPanel base=base token=token status_line=status />
+                    </Show>
+                    <Show when=move || side_tab.get() == "worktrees">
+                        <git::WorktreePanel base=base token=token status_line=status active_root=active_root />
                     </Show>
                     <Show when=move || {
                         let tab = side_tab.get();
