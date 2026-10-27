@@ -681,8 +681,10 @@ fn chip_view(chip: Chip, open_file: Callback<(String, u32)>) -> impl IntoView {
                 <a
                     class="sx-chip sx-file"
                     href="#file"
-                    data-path=path_attr
+                    data-path=path_attr.clone()
                     data-line=line.to_string()
+                    data-ev-path=path_attr
+                    data-ev-line=line.to_string()
                     on:click=move |ev: web_sys::MouseEvent| {
                         ev.prevent_default();
                         dispatch_open_file(&path, line);
