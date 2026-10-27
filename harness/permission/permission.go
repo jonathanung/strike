@@ -9,6 +9,7 @@ package permission
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -68,6 +69,16 @@ func ValidAction(a Action) bool {
 		return true
 	}
 	return false
+}
+
+// KnownNames returns the permission names ValidateRuleset accepts, sorted.
+func KnownNames() []string {
+	names := make([]string, 0, len(knownPermissions))
+	for name := range knownPermissions {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // ValidateRuleset rejects empty permission names, unknown permission

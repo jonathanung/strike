@@ -5,7 +5,7 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::api::{js_encode, patch_json, post_json, post_json_value};
-use crate::model::{permission_modes, BrowseResponse, Workspace};
+use crate::model::{mode_label, permission_modes, BrowseResponse, Workspace};
 
 fn event_tag(ev: &web_sys::KeyboardEvent) -> String {
     ev.target()
@@ -286,6 +286,25 @@ pub fn WorkspacePicker(
             .filter(|s| !s.is_empty())
             .map(str::to_string)
             .collect();
+        let stored = workspaces
+            .get()
+            .into_iter()
+            .find(|w| w.id == id)
+            .map(|w| w.permission_mode)
+            .unwrap_or_default();
+        if crate::approvals::is_dangerous(&mode) && mode != stored {
+            let label = mode_label(&mode);
+            let msg = format!(
+                "Store {label} on this workspace? This does not change the live session now. Deny rules still apply. Opening the workspace applies its stored mode to the live session."
+            );
+            let ok = web_sys::window()
+                .and_then(|w| w.confirm_with_message(&msg).ok())
+                .unwrap_or(false);
+            if !ok {
+                status.set("workspace mode left unchanged".into());
+                return;
+            }
+        }
         let (b, t) = (base.get(), token.get());
         spawn_local(async move {
             match patch_json(
