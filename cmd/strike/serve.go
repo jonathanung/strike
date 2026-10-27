@@ -21,6 +21,7 @@ import (
 	"github.com/jonathanung/strike/internal/frontend/server"
 	"github.com/jonathanung/strike/internal/persist/attachment"
 	"github.com/jonathanung/strike/internal/persist/session"
+	"github.com/jonathanung/strike/internal/persist/taskrun"
 	"github.com/jonathanung/strike/internal/persist/workspace"
 	"github.com/jonathanung/strike/internal/product/config"
 	"github.com/jonathanung/strike/internal/protocol"
@@ -237,6 +238,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 	var services *host.Services
 	var sandboxSnap *server.SandboxSnapshot
 	var sideChat server.SideChatModel
+	var taskRuns *taskrun.Store
 	var cleanup func() error
 	var sharedAttachments *attachment.Store
 	sessionDir := opts.sessionDir
@@ -354,14 +356,16 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 			return slot.id, nil
 		}
 		liveHub = server.NewLiveHub(
-			func(ctx context.Context) (string, error) {
+			// The hub passes the HTTP request context. The engine has to live
+			// as long as the daemon, same as the initial root below.
+			func(context.Context) (string, error) {
 				slot, err := a.spawnRoot("")
 				if err != nil {
 					return "", err
 				}
 				return registerLive(ctx, slot)
 			},
-			func(ctx context.Context, sessionID string) (string, bool, error) {
+			func(_ context.Context, sessionID string) (string, bool, error) {
 				// Validate: session must exist and be a root.
 				sessionID = strings.TrimSpace(sessionID)
 				if sessionID == "" {
@@ -422,8 +426,25 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		}
 		initialSR := startServeRoot(ctx, initialSlot, initialLive)
 		roots[initialSlot.id] = initialSR
+		// Closing a root (DELETE /v1/roots) drops it from the hub; the hub
+		// does not own the root's engine or session, so stop both here.
+		// Without this, a root whose engine runs on the daemon lifetime
+		// (the task-runner fix above) stays open in the session manager
+		// after it is closed, and deleting its saved session then demands
+		// force for a session that is not open anywhere.
+		liveHub.SetOnRemove(func(id string) {
+			mu.Lock()
+			sr := roots[id]
+			delete(roots, id)
+			mu.Unlock()
+			if sr != nil && sr.cancel != nil {
+				sr.cancel()
+			}
+			_ = a.sessions.Close(id)
+		})
 
 		services = &a.services
+		taskRuns = a.taskRuns
 
 		cleanup = func() error {
 			if liveHub != nil {
@@ -562,6 +583,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		Attachments:   sharedAttachments,
 		UsageAuditDir: usageDir,
 		SideChat:      sideChat,
+		TaskRuns:      taskRuns,
 	})
 	if err != nil {
 		return err

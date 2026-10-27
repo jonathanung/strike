@@ -1972,6 +1972,79 @@ select.mode, .daemon select {
   .sx-keys { display: none; }
 }
 /* feature:session-ux end */
+/* feature:task-runner begin */
+.task-shell { min-height: 0; }
+.task-runner {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr) minmax(260px, 380px);
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4) var(--space-4);
+  height: calc(100vh - 52px);
+  min-height: 0;
+}
+.task-runner:focus { outline: none; }
+.task-runner:focus-visible { outline: 2px solid var(--border-focus); outline-offset: -2px; }
+.task-col {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  min-height: 0;
+  overflow: auto;
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.task-plan, .task-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  text-align: left;
+  background: var(--surface-muted);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2);
+  /* The global button rule fixes height at var(--control); a row whose
+     detail wraps to a second line must grow past it (the cockpit's other
+     multi-line buttons opt out the same way). */
+  height: auto;
+  min-height: var(--control);
+}
+.task-plan.on, .task-row.on { border-color: var(--acid); background: var(--raised); }
+.task-plan .name, .task-row .name { flex: 1; min-width: 0; }
+.task-plan .path, .task-row .path { color: var(--muted); font-size: var(--type-sm); }
+.task-detail { color: var(--muted); font-size: var(--type-sm); flex-basis: 100%; }
+.task-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.task-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.task-create { display: flex; flex-direction: column; gap: var(--space-2); }
+.task-create label { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: var(--type-sm); }
+.task-create input, .task-create textarea {
+  background: var(--ground);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+  min-height: var(--control);
+}
+.task-create textarea { min-height: 72px; resize: vertical; }
+.task-drafts { margin: 0; padding-left: 18px; color: var(--muted); }
+.task-check {
+  margin: 0;
+  white-space: pre-wrap;
+  background: var(--surface-muted);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2);
+  font: inherit;
+}
+.task-read h3 { margin: var(--space-2) 0 0; font-size: var(--type-md); }
+.task-note { margin: 0 var(--space-4) var(--space-3); color: var(--muted); min-height: 1.2em; }
+.task-plan-list { display: flex; flex-direction: column; gap: var(--space-2); }
+@media (max-width: 960px) {
+  .task-runner { grid-template-columns: 1fr; height: auto; }
+  .task-col { max-height: none; }
+}
+/* feature:task-runner end */
 
 /* feature:scheduler begin */
 .sched {

@@ -792,6 +792,23 @@ func TestLiveHubCreateAndRemove(t *testing.T) {
 	}
 }
 
+func TestLiveHubRemoveInvokesOnRemove(t *testing.T) {
+	live := NewLive("r1", "/a", nil, make(chan protocol.Op))
+	defer live.Close()
+	hub := NewLiveHub(nil, nil)
+	var removed []string
+	hub.SetOnRemove(func(id string) { removed = append(removed, id) })
+	hub.Add("r1", live)
+	hub.Remove("missing")
+	if len(removed) != 0 {
+		t.Fatalf("onRemove fired for a root that was not in the hub: %v", removed)
+	}
+	hub.Remove("r1")
+	if len(removed) != 1 || removed[0] != "r1" {
+		t.Fatalf("onRemove after Remove = %v, want [r1]", removed)
+	}
+}
+
 func TestLiveHubResolveLiveBackwardCompat(t *testing.T) {
 	dir := t.TempDir()
 	ops := make(chan protocol.Op, 1)
