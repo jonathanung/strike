@@ -159,6 +159,61 @@
     padding-bottom: calc(52px + env(safe-area-inset-bottom));
   }
 
+  /* Overlays as bottom sheets (#1490 slice 3; #1475, #1476). The
+     Workspaces dialog and the Gateways popover anchor to the bottom of
+     the visible viewport at full width, over a dimmed backdrop, and
+     grow to near full-screen when their content is tall. Dismissal
+     (Escape, navigation, backdrop tap, Close) is wired in the
+     components; these rules are only the sheet rendering. */
+  body[data-phone="1"] .gw-back {
+    background: color-mix(in srgb, var(--overlay) 45%, transparent);
+  }
+
+  body[data-phone="1"] .gw-pop {
+    top: auto;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    width: auto;
+    max-height: calc(var(--vv-height, 100dvh) * 0.92);
+    border-left: 0;
+    border-right: 0;
+    border-bottom: 0;
+    border-radius: var(--radius) var(--radius) 0 0;
+    padding-bottom: calc(var(--space-3) + env(safe-area-inset-bottom));
+    z-index: 31;
+  }
+
+  body[data-phone="1"] .ws-back {
+    padding: 0;
+    align-items: flex-end;
+  }
+
+  body[data-phone="1"] .ws-dialog {
+    width: 100%;
+    max-height: calc(var(--vv-height, 100dvh) * 0.96);
+    border-left: 0;
+    border-right: 0;
+    border-bottom: 0;
+    border-radius: var(--radius) var(--radius) 0 0;
+    padding-bottom: calc(var(--space-3) + env(safe-area-inset-bottom));
+  }
+
+  body[data-phone="1"] .gw-pop .gw-use,
+  body[data-phone="1"] .gw-pop input,
+  body[data-phone="1"] .ws-dialog .ws-row,
+  body[data-phone="1"] .ws-dialog input,
+  body[data-phone="1"] .ws-dialog select {
+    min-height: 44px;
+  }
+
+  body[data-phone="1"] .gw-pop input,
+  body[data-phone="1"] .ws-dialog input,
+  body[data-phone="1"] .ws-dialog select,
+  body[data-phone="1"] .ws-dialog textarea {
+    font-size: 16px;
+  }
+
   body[data-phone="1"] .phone-nav {
     display: flex;
     flex: 0 0 auto;
