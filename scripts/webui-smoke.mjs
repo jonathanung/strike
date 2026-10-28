@@ -2269,6 +2269,174 @@ try {
     textProbe((body) => body.includes("GitHub triage")),
     { timeout: WAIT_MS, interval: 250 },
   );
+
+
+  const mcpSecret = "sk-abcdefghijklmnopqrstuvwxyz0123456789";
+  await mkdir(join(home, ".strike", "skills"), { recursive: true });
+  await writeFile(
+    join(home, ".strike", "skills", "smoke-note.md"),
+    "---\nname: smoke-note\ndescription: seeded note\n---\nSay hello from smoke.\n",
+  );
+  await writeFile(
+    join(home, ".strike", "mcp.json"),
+    JSON.stringify({
+      servers: { docs: { command: "echo", args: ["ok"], env: { TOKEN: mcpSecret } } },
+    }),
+  );
+
+  const evalJson = async (expression) => {
+    const ev = await send("Runtime.evaluate", { expression, returnByValue: true });
+    if (ev.result?.exceptionDetails) {
+      throw new Error(`eval failed: ${JSON.stringify(ev.result.exceptionDetails).slice(0, 500)}`);
+    }
+    return ev.result?.result?.value;
+  };
+  await evalJson(`localStorage.setItem("strike.token", ${JSON.stringify(token)})`);
+  await send("Page.reload", { ignoreCache: true });
+  for (let i = 0; i < 40; i++) {
+    const body = await evalJson(`document.body ? document.body.innerText : ""`);
+    const ready = await evalJson(`!!document.querySelector('[data-view="customize"]') && !!document.querySelector('[data-nav="more"]')`);
+    if (String(body).includes("Menu") && ready === true) break;
+    if (i === 39) throw new Error(`reload did not show the cockpit: ${String(body).slice(0, 300)}`);
+    await delay(250);
+  }
+
+  let customizeText = "";
+  for (let i = 0; i < 40; i++) {
+    customizeText = String(await evalJson(`(() => {
+      const btn = document.querySelector('[data-view="customize"]');
+      if (btn) btn.click();
+      return document.body ? document.body.innerText : "";
+    })()`));
+    if (customizeText.includes("smoke-note") && customizeText.includes("Skills")) break;
+    await delay(250);
+  }
+  if (!customizeText.includes("smoke-note")) {
+    throw new Error(`customize catalog missing smoke-note: ${customizeText.slice(0, 500)}`);
+  }
+
+  await evalJson(`(() => {
+    const tabs = document.querySelector('[aria-label="Customize sections"]');
+    tabs.focus();
+    tabs.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    return "sent";
+  })()`);
+  let agentsSelected = "";
+  for (let i = 0; i < 20; i++) {
+    agentsSelected = String(await evalJson(`document.querySelector('[data-cz-section="agents"]')?.getAttribute("aria-selected") || ""`));
+    if (agentsSelected === "true") break;
+    await delay(50);
+  }
+  if (agentsSelected !== "true") {
+    throw new Error(`customize keyboard aria-selected=${agentsSelected}`);
+  }
+  await evalJson(`document.querySelector('[data-cz-section="skills"]').click()`);
+  await evalJson(`document.querySelector("[data-cz-new]").click()`);
+  let nameReady = false;
+  for (let i = 0; i < 20; i++) {
+    const value = await evalJson(`!!document.querySelector('[data-cz-field="name"]') && !!document.querySelector('[data-cz-field="body"]')`);
+    if (value === true) { nameReady = true; break; }
+    await delay(50);
+  }
+  if (!nameReady) throw new Error("new skill form did not open");
+  await evalJson(`(() => {
+    const set = (el, value) => {
+      const proto = el.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      Object.getOwnPropertyDescriptor(proto, "value").set.call(el, value);
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+    };
+    set(document.querySelector('[data-cz-field="name"]'), "mcp");
+    set(document.querySelector('[data-cz-field="body"]'), "Nope.");
+    document.querySelector("[data-cz-preview]").click();
+    return "ok";
+  })()`);
+  let errText = "";
+  for (let i = 0; i < 40; i++) {
+    errText = String(await evalJson(`document.body ? document.body.innerText : ""`));
+    if (errText.toLowerCase().includes("reserved")) break;
+    await delay(250);
+  }
+  if (!errText.toLowerCase().includes("reserved")) {
+    throw new Error(`reserved skill error missing: ${errText.slice(0, 500)}`);
+  }
+
+  await evalJson(`document.querySelector('[data-cz-item="smoke-note"]').click()`);
+  let opened = false;
+  for (let i = 0; i < 40; i++) {
+    const value = await evalJson(`document.querySelector('[data-cz-field="description"]')?.value || ""`);
+    if (value === "seeded note") { opened = true; break; }
+    await delay(250);
+  }
+  if (!opened) throw new Error("smoke-note editor did not open");
+  await evalJson(`(() => {
+    const el = document.querySelector('[data-cz-field="description"]');
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(el, "updated note");
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    document.querySelector("[data-cz-preview]").click();
+    return "ok";
+  })()`);
+  let diffText = "";
+  for (let i = 0; i < 40; i++) {
+    diffText = String(await evalJson(`document.querySelector(".cz-diff")?.textContent || ""`));
+    const save = await evalJson(`(() => { const b = document.querySelector("[data-cz-save]"); return b ? b.disabled : true; })()`);
+    if (diffText.includes("updated note") && save === false) break;
+    await delay(250);
+  }
+  if (!diffText.includes("updated note")) {
+    throw new Error(`preview diff missing update: ${diffText.slice(0, 400)}`);
+  }
+  await evalJson(`document.querySelector("[data-cz-save]").click()`);
+  let saved = "";
+  for (let i = 0; i < 40; i++) {
+    saved = String(await evalJson(`document.body ? document.body.innerText : ""`));
+    if (saved.includes("Saved") || saved.includes("updated note")) break;
+    await delay(250);
+  }
+  if (!saved.includes("Saved") && !saved.includes("updated note")) {
+    throw new Error(`save did not land: ${saved.slice(0, 400)}`);
+  }
+
+  await evalJson(`document.querySelector('[data-cz-section="mcp"]').click()`);
+  let openedMcp = false;
+  for (let i = 0; i < 20; i++) {
+    openedMcp = (await evalJson(`(() => {
+      const b = document.querySelector('[data-cz-item="docs"]');
+      if (!b) return false;
+      b.click();
+      return true;
+    })()`)) === true;
+    if (openedMcp) break;
+    await delay(50);
+  }
+  if (!openedMcp) throw new Error("mcp server docs was not listed");
+  let mcpText = "";
+  for (let i = 0; i < 40; i++) {
+    mcpText = String(await evalJson(`(() => {
+      const bits = [document.body ? document.body.innerText : ""];
+      for (const el of document.querySelectorAll("input,textarea")) bits.push(el.value || "");
+      return bits.join("\\n");
+    })()`));
+    if (mcpText.includes("TOKEN=")) break;
+    await delay(250);
+  }
+  if (mcpText.includes(mcpSecret)) {
+    throw new Error("customize UI showed an MCP secret");
+  }
+  const values = String(await evalJson(`(() => [...document.querySelectorAll("input,textarea")].map((el) => el.value || "").join("\\n"))()`));
+  if (values.includes(mcpSecret)) {
+    throw new Error("customize field showed an MCP secret");
+  }
+  if (!values.includes("TOKEN") || !values.includes("••••")) {
+    const extra = String(await evalJson(`document.querySelector(".cz-error")?.textContent || ""`));
+    const docEv = await send("Runtime.evaluate", {
+      expression: `fetch("/v1/customize/doc?kind=mcp&name=docs&scope=global",{headers:{Authorization:"Bearer "+localStorage.getItem("strike.token")}}).then(async (r) => r.status + " " + (await r.text()).slice(0, 500))`,
+      awaitPromise: true,
+      returnByValue: true,
+    });
+    const docHead = docEv.result?.result?.value || JSON.stringify(docEv).slice(0, 600);
+    throw new Error(`mcp form did not mask env err=${extra} doc=${docHead} values=${values.slice(0, 300)} body=${mcpText.slice(0, 300)}`);
+  }
+
   console.log("webui-smoke ok");
 } catch (err) {
   console.error(String(err));

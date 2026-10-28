@@ -4,7 +4,8 @@
 //! read-only drawer. Goals and Autopilot live in `goals`. Apps is the
 //! queue surface in `apps`. Triggers are a separate page. Schedule is
 //! the clock (`schedule` module). The task runner is the Tasks view in
-//! `task_runner`.
+//! `task_runner`. Customize (skills, agents, MCP, hooks, rules) lives
+//! in `customize`.
 
 mod api;
 mod appearance;
@@ -15,6 +16,7 @@ mod chat_mode;
 mod composer_triggers;
 mod editor;
 mod localfiles;
+mod customize;
 mod gateway;
 mod gateway_qr;
 mod git;
@@ -85,6 +87,7 @@ use crate::workspaces::WorkspacePicker;
 use crate::storage::StoragePanel;
 use crate::editor::DocumentPane;
 use crate::mobile::PhoneNav;
+use crate::customize::CustomizePane;
 use crate::side_chat::SideChatPanel;
 
 use crate::model::{budget_elapsed, can_retry, RootsResponse};
@@ -3133,6 +3136,9 @@ fn App() -> impl IntoView {
                     activate_root(id);
                 }
             />
+        </Show>
+        <Show when=move || mode.get() == "customize" fallback=move || ()>
+            <CustomizePane base=base token=token status=status />
         </Show>
         <Show when=move || mode.get() == "chat">
             <div
