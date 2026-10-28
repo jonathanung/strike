@@ -229,6 +229,18 @@
   overflow-x: auto;
 }
 
+@media (max-width: 720px), (max-height: 500px) and (max-width: 1024px) {
+  /* The chip row scrolls on a phone; fade its right edge so a chip
+     clipped mid-word reads as "more this way" instead of a defect.
+     End padding keeps the last chip clear of the fade once the row is
+     scrolled fully across. */
+  body[data-phone="1"] .composer-chips {
+    padding-right: 24px;
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
+  }
+}
+
 .phone-nav {
   display: none;
 }
