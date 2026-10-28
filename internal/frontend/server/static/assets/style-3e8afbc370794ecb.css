@@ -1112,6 +1112,35 @@ select.mode, .daemon select {
 }
 /* feature:gateway-qr end */
 
+/* Boot/offline shell (index.html placeholder, replaced when the cockpit
+   mounts). Uses the default Strike tokens so the cached shell reads as
+   Strike even before the app — or the gateway — is up. */
+.boot-shell {
+  min-height: 100dvh;
+  background: var(--ground);
+  color: var(--ink);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4);
+  box-sizing: border-box;
+}
+.boot-shell-card { max-width: 340px; text-align: center; }
+.boot-shell-title { font-size: 20px; font-weight: 650; margin: 0 0 var(--space-2); }
+.boot-shell-note { margin: 0; color: var(--muted); }
+
+/* Phone pairing dialog: 44px touch targets, dynamic viewport height so
+   mobile browser chrome and the virtual keyboard do not clip the dialog,
+   and safe-area insets so nothing sits under a notch or home bar. */
+@media (max-width: 500px) {
+  .gq-backdrop {
+    padding-bottom: calc(var(--space-4) + env(safe-area-inset-bottom, 0px));
+  }
+  .gq-dialog { max-height: calc(100dvh - 24px); }
+  .gq-dialog button { min-height: 44px; }
+  .gq-dialog input { min-height: 44px; }
+}
+
 @media (max-width: 960px) {
   .page-header {
     flex-wrap: wrap;
