@@ -422,7 +422,10 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 				return slot.id, false, nil
 			},
 		)
-		liveHub.SetUnattendedSpawn(func(ctx context.Context) (string, error) {
+		// Like the attended spawn above, ignore the caller's context: a
+		// trigger delivery passes the HTTP request context here, and the
+		// engine has to live as long as the daemon, not the request.
+		liveHub.SetUnattendedSpawn(func(context.Context) (string, error) {
 			slot, err := a.spawnUnattended("")
 			if err != nil {
 				return "", err

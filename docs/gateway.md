@@ -332,8 +332,9 @@ What an attacker gets:
 The trigger's HMAC secret is the credential. A missing or wrong signature
 is 401. The comparison is constant-time. Generic webhooks sign
 `timestamp + "." + raw body` (`X-Strike-Timestamp`, `X-Strike-Delivery`,
-`X-Strike-Signature: sha256=<hex>`) and must present a timestamp within five
-minutes. GitHub triggers use `X-Hub-Signature-256` over the raw body.
+`X-Strike-Signature: sha256=<hex>`) and must present a timestamp no more
+than five minutes in the past and no more than 60 seconds in the future.
+GitHub triggers use `X-Hub-Signature-256` over the raw body.
 Strike remembers a delivery id after a verified accept, ignore, or
 replay, so that delivery does not start a second session. A failed
 signature does not reserve the id, and once the signature-failure budget
