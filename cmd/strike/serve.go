@@ -17,6 +17,7 @@ import (
 
 	"github.com/jonathanung/strike/harness/engine"
 	"github.com/jonathanung/strike/harness/sandbox"
+	"github.com/jonathanung/strike/internal/daemon/trigger"
 	"github.com/jonathanung/strike/internal/frontend/host"
 	"github.com/jonathanung/strike/internal/frontend/host/local"
 	"github.com/jonathanung/strike/internal/frontend/server"
@@ -67,6 +68,8 @@ Endpoints:
   GET  /v1/agents                   selectable agents
   GET  /v1/sessions                 session list (+ liveId)
   GET  /v1/sessions/{id}/events     SSE tail of a session JSONL log
+  GET  /v1/triggers                 trigger registry
+  POST /hooks/{id}                 inbound trigger (HMAC, not the daemon bearer)
   GET  /v1/workflows                workflow catalog
   GET  /v1/schedules                persisted schedules
   POST /v1/schedules                create a cron, interval, one-shot, or heartbeat
@@ -613,6 +616,14 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 	if liveHub != nil && !opts.readOnly {
 		go schedules.Run(ctx)
 	}
+	trigStore, err := trigger.Open("")
+	if err != nil {
+		return err
+	}
+	// Triggers use their authored launcher (internal/daemon/rootstart,
+	// server.NewRootLauncher); the landed scheduler uses internal/rootstart.
+	// Do not spawn a third way.
+	trigSvc := trigger.New(trigStore, server.NewRootLauncher(liveHub))
 
 	srv, err := server.New(server.Options{
 		Addr:         opts.addr,
@@ -636,6 +647,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		Attachments:           sharedAttachments,
 		UsageAuditDir:         usageDir,
 		SideChat:              sideChat,
+		Triggers:              trigSvc,
 		TaskRuns:              taskRuns,
 		TerminalRemote:        opts.terminalRemote,
 		TerminalSandbox:       terminalSandbox,

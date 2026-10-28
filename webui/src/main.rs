@@ -1,9 +1,9 @@
 //! Strike web client. The session list is live roots plus saved sessions.
 //! Activity, Files, Changes, Git, Worktrees, Memory, Knowledge,
 //! Artifacts, and Terminal are the side panel. Side chat is a separate
-//! read-only drawer. Goals and Autopilot live in `goals`. Schedule is the
-//! clock (`schedule` module). The task runner is the Tasks view in
-//! `task_runner`.
+//! read-only drawer. Goals and Autopilot live in `goals`. Triggers are a
+//! separate page. Schedule is the clock (`schedule` module). The task
+//! runner is the Tasks view in `task_runner`.
 
 mod api;
 mod approvals;
@@ -34,6 +34,7 @@ mod term;
 mod terminal;
 mod transcript;
 mod transcript_view;
+mod triggers;
 mod turn_elapsed;
 mod workspaces;
 
@@ -2900,6 +2901,9 @@ fn App() -> impl IntoView {
                 active_root=active_root
                 status=status
             />
+        </Show>
+        <Show when=move || mode.get() == "triggers" fallback=move || ()>
+            <triggers::TriggersPage base=base token=token status=status />
         </Show>
         <Show when=move || mode.get() == "chat">
             <div class=move || chat_mode::shell_class(focus.get(), &layout.get(), sessions_drawer.get(), panel_drawer.get())>

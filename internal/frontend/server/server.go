@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/jonathanung/strike/harness/sandbox"
+	"github.com/jonathanung/strike/internal/daemon/trigger"
 	"github.com/jonathanung/strike/internal/frontend/host"
 	"github.com/jonathanung/strike/internal/frontend/server/terminal"
 	"github.com/jonathanung/strike/internal/persist/attachment"
@@ -109,6 +110,10 @@ type Options struct {
 	UsageAuditDir string
 	// UsagePricer overrides models.dev pricing for /v1/usage. Nil loads the catalog.
 	UsagePricer func(provider, model string) (usageaudit.Rates, bool)
+	// Triggers is the inbound trigger registry (webhooks, GitHub, channels).
+	// Nil makes /v1/triggers and POST /hooks 503. The launcher inside the
+	// service is NewRootLauncher (authored for #1282).
+	Triggers *trigger.Service
 	// OpsRate is tokens/sec per client IP for ops (default 10). <=0 uses default.
 	OpsRate float64
 	// OpsBurst is the per-IP burst (default 20). <=0 uses default.
@@ -500,6 +505,14 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/workspaces/{id}/activate", s.handleWorkspaceActivate)
 	s.mux.HandleFunc("PATCH /v1/workspaces/{id}", s.handleWorkspacePolicy)
 	s.mux.HandleFunc("DELETE /v1/workspaces/{id}", s.handleWorkspaceRemove)
+	s.mux.HandleFunc("GET /v1/triggers", s.handleTriggersList)
+	s.mux.HandleFunc("POST /v1/triggers", s.handleTriggerCreate)
+	s.mux.HandleFunc("GET /v1/triggers/{id}/deliveries", s.handleTriggerDeliveries)
+	s.mux.HandleFunc("POST /v1/triggers/{id}/test", s.handleTriggerTest)
+	s.mux.HandleFunc("POST /v1/triggers/{id}/replay", s.handleTriggerReplay)
+	s.mux.HandleFunc("PATCH /v1/triggers/{id}", s.handleTriggerUpdate)
+	s.mux.HandleFunc("DELETE /v1/triggers/{id}", s.handleTriggerDelete)
+	s.mux.HandleFunc("POST /hooks/{id}", s.handleHook)
 	s.mux.HandleFunc("GET /v1/roots", s.handleRoots)
 	s.mux.HandleFunc("POST /v1/roots", s.handleRootCreate)
 	s.mux.HandleFunc("POST /v1/roots/{id}/activate", s.handleRootActivate)
