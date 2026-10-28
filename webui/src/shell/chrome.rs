@@ -188,6 +188,15 @@ pub fn Chrome() -> impl IntoView {
         match (cmd.run)(&args) {
             Ok(()) => {
                 remember_command(&id);
+                if phone.get_untracked()
+                    && matches!(id.as_str(), "notifications.open" | "gateways.open")
+                {
+                    // On phone widths the single bell/switcher instances
+                    // live in the overflow sheet and their panels render
+                    // inside it; open the sheet so the panel the command
+                    // just opened is on screen (#1527).
+                    phone_open.set(true);
+                }
                 close_palette();
             }
             Err(message) => error.set(message),
@@ -249,9 +258,26 @@ pub fn Chrome() -> impl IntoView {
                 && !ev.ctrl_key()
                 && key.eq_ignore_ascii_case("n")
             {
-                // The bell lives in the menu. Opening the menu in the same
-                // turn as the notification toggle keeps the panel on screen.
-                more_open.set(true);
+                // The bell lives in the menu on desktop and in the phone
+                // sheet on phone widths. Opening that container in the
+                // same turn as the notification toggle keeps the panel
+                // on screen.
+                if phone.get_untracked() {
+                    phone_open.set(true);
+                } else {
+                    more_open.set(true);
+                    phone_open.set(true);
+                }
+            }
+            if ev.alt_key()
+                && !ev.meta_key()
+                && !ev.ctrl_key()
+                && key.eq_ignore_ascii_case("w")
+                && phone.get_untracked()
+            {
+                // The switcher lives in the phone sheet; its own Alt+W
+                // listener performs the toggle, this only makes sure the
+                // sheet holding it is open (#1527).
                 phone_open.set(true);
             }
             if key == "Escape" {
@@ -307,7 +333,7 @@ pub fn Chrome() -> impl IntoView {
     view! {
         <header class="page-header nav-bar" data-nav="header">
             {move || if phone.get() {
-                phone_bar(open_palette, phone_open, more_mark, command_mark)
+                phone_bar(phone_open, more_mark)
             } else {
                 view! {
             <div class="nav-zone nav-left">
@@ -376,6 +402,11 @@ pub fn Chrome() -> impl IntoView {
                 .into_any()
             }}
         </header>
+        {move || if phone.get() {
+            phone_sheet(open_palette, phone_open, command_mark)
+        } else {
+            view! {}.into_any()
+        }}
         <button
             type="button"
             class="nav-backdrop"
@@ -428,8 +459,18 @@ pub fn Chrome() -> impl IntoView {
                 <kbd>"?"</kbd>
             </button>
             {move || {
+                // On phone widths the gateway switcher and the
+                // notification bell render in the phone sheet instead
+                // (see phone_sheet), so each has exactly one live instance:
+                // a second mount leaks the switcher's probe timer and
+                // Alt+W listener, and strands the bell's palette handle
+                // on a disposed signal (#1527).
+                let on_phone = phone.get();
                 menu_slots()
                     .into_iter()
+                    .filter(|slot| {
+                        !(on_phone && matches!(slot.id, "gateway-switcher" | "notifications"))
+                    })
                     .map(|slot| {
                         // overflow_label is the accessible name when the slot
                         // control is an icon. collapse_below_px no longer
@@ -602,18 +643,10 @@ pub fn Chrome() -> impl IntoView {
 /// Phone header (#1490 slice 2): one compact row — workspace name and
 /// session status on the left, a single overflow button on the right.
 /// Everything the desktop bar shows inline (Gateways, Phone, layout,
-/// view, notifications, the gateway chip) moves into the sheet, next to
-/// Run a command, Back/Forward, and Focus mode. The sheet closes on a
-/// selection, on Escape, and on a backdrop tap — except clicks inside
-/// slots that own a popover (gateway panel, notification centre): those
-/// panels render inside the slot subtree and manage their own lifetime,
-/// so a click there is not a sheet selection.
-fn phone_bar(
-    open_palette: impl Fn() + Copy + Send + Sync + 'static,
-    phone_open: RwSignal<bool>,
-    more_mark: &'static str,
-    command_mark: &'static str,
-) -> AnyView {
+/// view, notifications, the gateway chip) moves into the overflow
+/// sheet (see `phone_sheet`), next to Run a command, Back/Forward, and
+/// Focus mode.
+fn phone_bar(phone_open: RwSignal<bool>, more_mark: &'static str) -> AnyView {
     view! {
         <div class="nav-leading phone-leading">
             <span
@@ -647,64 +680,89 @@ fn phone_bar(
             >
                 <span class="icon-slot" aria-hidden="true" inner_html=more_mark></span>
             </button>
-            <Show when=move || phone_open.get()>
-                <div
-                    class="phone-menu-backdrop"
-                    data-nav="phone-menu-backdrop"
-                    on:click=move |_| phone_open.set(false)
-                ></div>
-                <div
-                    class="menu phone-menu"
-                    role="menu"
-                    data-nav="phone-menu"
-                    on:click=move |ev: web_sys::MouseEvent| {
-                        if !in_popover_slot(&ev) {
-                            phone_open.set(false);
+        </div>
+    }
+    .into_any()
+}
+
+/// Phone overflow sheet: rendered next to the desktop menu, outside
+/// the header, so the bar itself never contains the sheet's action
+/// buttons. The sheet closes on a selection, on Escape, and on a
+/// backdrop tap — except clicks inside slots that own a popover
+/// (gateway panel, notification centre): those panels render inside
+/// the slot subtree and manage their own lifetime, so a click there is
+/// not a sheet selection.
+///
+/// Like the desktop menu, the sheet stays mounted while the phone
+/// layout is active; `data-open` decides visibility (mobile.css hides
+/// `[data-open="0"]`), so opening and closing it never remounts a slot.
+/// On phone widths the sheet is also the only place the gateway
+/// switcher and the notification bell are rendered — the desktop menu
+/// skips them there — because a second live copy of either leaks
+/// window registrations and strands shell handles (#1527).
+fn phone_sheet(
+    open_palette: impl Fn() + Copy + Send + Sync + 'static,
+    phone_open: RwSignal<bool>,
+    command_mark: &'static str,
+) -> AnyView {
+    view! {
+        <div
+            class="phone-menu-backdrop"
+            data-nav="phone-menu-backdrop"
+            data-open=move || if phone_open.get() { "1" } else { "0" }
+            on:click=move |_| phone_open.set(false)
+        ></div>
+        <div
+            class="menu phone-menu"
+            role="menu"
+            data-nav="phone-menu"
+            data-open=move || if phone_open.get() { "1" } else { "0" }
+            on:click=move |ev: web_sys::MouseEvent| {
+                if !in_popover_slot(&ev) {
+                    phone_open.set(false);
+                }
+            }
+        >
+            <button
+                type="button"
+                class="nav-menu-item"
+                data-nav="phone-run-command"
+                on:click=move |_| open_palette()
+            >
+                <span class="icon-slot" aria-hidden="true" inner_html=command_mark></span>
+                <span class="name">"Run a command"</span>
+                <kbd>"Ctrl+K"</kbd>
+            </button>
+            <button
+                type="button"
+                class="nav-menu-item"
+                data-nav="providers"
+                on:click=move |_| {
+                    phone_open.set(false);
+                    let _ = host::set_view("providers");
+                }
+            >
+                <span class="name">"Providers"</span>
+            </button>
+            <HistoryButton back=true labeled=true />
+            <HistoryButton back=false labeled=true />
+            <FocusButton labeled=true />
+            {move || {
+                phone_slots()
+                    .into_iter()
+                    .map(|slot| {
+                        let label = slot.overflow_label.to_string();
+                        let id = slot.id;
+                        let body = (slot.render)();
+                        view! {
+                            <div class="nav-overflow-slot" data-slot=id>
+                                <span class="path">{label}</span>
+                                {body}
+                            </div>
                         }
-                    }
-                >
-                    <button
-                        type="button"
-                        class="nav-menu-item"
-                        data-nav="phone-run-command"
-                        on:click=move |_| open_palette()
-                    >
-                        <span class="icon-slot" aria-hidden="true" inner_html=command_mark></span>
-                        <span class="name">"Run a command"</span>
-                        <kbd>"Ctrl+K"</kbd>
-                    </button>
-                    <button
-                        type="button"
-                        class="nav-menu-item"
-                        data-nav="providers"
-                        on:click=move |_| {
-                            phone_open.set(false);
-                            let _ = host::set_view("providers");
-                        }
-                    >
-                        <span class="name">"Providers"</span>
-                    </button>
-                    <HistoryButton back=true labeled=true />
-                    <HistoryButton back=false labeled=true />
-                    <FocusButton labeled=true />
-                    {move || {
-                        phone_slots()
-                            .into_iter()
-                            .map(|slot| {
-                                let label = slot.overflow_label.to_string();
-                                let id = slot.id;
-                                let body = (slot.render)();
-                                view! {
-                                    <div class="nav-overflow-slot" data-slot=id>
-                                        <span class="path">{label}</span>
-                                        {body}
-                                    </div>
-                                }
-                            })
-                            .collect_view()
-                    }}
-                </div>
-            </Show>
+                    })
+                    .collect_view()
+            }}
         </div>
     }
     .into_any()
@@ -712,6 +770,10 @@ fn phone_bar(
 
 /// Slots that live in the phone overflow sheet: everything the desktop
 /// bar renders inline except the session status, which stays in the bar.
+/// On phone widths this list is the only render of each slot — the
+/// desktop menu skips `gateway-switcher` and `notifications` there —
+/// so components with window-level side effects mount exactly once
+/// at any viewport (#1527).
 fn phone_slots() -> Vec<super::registry::TopSlot> {
     [TopRegion::Leading, TopRegion::Trailing]
         .into_iter()
@@ -721,8 +783,8 @@ fn phone_slots() -> Vec<super::registry::TopSlot> {
 
 /// True when a click inside the phone sheet landed in a slot that owns
 /// a popover (the gateway panel, the notification centre). Those panels
-/// render inside the slot subtree, so unmounting the sheet would kill
-/// the panel the click just opened.
+/// render inside the slot subtree, so closing the sheet would hide the
+/// panel the click just opened.
 fn in_popover_slot(ev: &web_sys::MouseEvent) -> bool {
     let Some(target) = ev.target() else {
         return false;
@@ -752,7 +814,10 @@ fn arg_placeholder(id: &str) -> String {
 
 /// Everything that is not the gateway status chip or the Chat/Daemon
 /// switch (the centre zone owns that). The menu stays in the DOM so
-/// existing `data-view` clicks still find their buttons.
+/// existing `data-view` clicks still find their buttons. The render in
+/// `Chrome` additionally skips `gateway-switcher` and `notifications`
+/// at phone widths, where the phone sheet renders the only copies
+/// (#1527).
 fn menu_slots() -> Vec<super::registry::TopSlot> {
     [TopRegion::Leading, TopRegion::Trailing]
         .into_iter()

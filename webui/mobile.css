@@ -77,6 +77,17 @@
     padding: 6px;
   }
 
+  /* The sheet stays mounted like the desktop menu (.nav-pop);
+     data-open decides visibility so open/close never remounts a
+     slot (#1527). */
+  body[data-phone="1"] .phone-menu[data-open="0"] {
+    display: none;
+  }
+
+  body[data-phone="1"] .phone-menu-backdrop[data-open="0"] {
+    display: none;
+  }
+
   body[data-phone="1"] .phone-menu .nav-menu-item {
     min-height: 44px;
     height: auto;

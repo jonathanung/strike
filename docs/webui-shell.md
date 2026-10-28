@@ -114,6 +114,16 @@ is still in the DOM. Back, Forward, and Focus live in the Menu. Ctrl/Cmd-K
 still opens the palette. Phone widths hide the centre zone and use the
 bottom tab bar.
 
+On phone widths the overflow sheet (`phone_sheet` in chrome.rs) holds the
+Leading and Trailing slots and stays mounted the same way. There,
+`gateway-switcher` and `notifications` render only in the sheet — the Menu
+skips them — so each has exactly one live instance at any viewport: a
+second switcher leaks its probe timer and Alt+W listener per remount, and
+a second bell can leave the palette handle pointing at a disposed signal
+(#1527). Slot components must release every window registration on
+cleanup; the shell remounts slots when the layout crosses the phone
+breakpoint.
+
 Builtin slots:
 
 | id | Region | Collapse | Replace when |
