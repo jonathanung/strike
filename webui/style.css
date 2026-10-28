@@ -1166,7 +1166,16 @@ select.mode, .daemon select {
   box-shadow: 0 12px 40px color-mix(in srgb, var(--ground) 55%, transparent);
 }
 .gw-panel { padding: var(--space-4); }
+/* Outside-tap catcher for the popover (#1476). Transparent on desktop so
+   the rendering is unchanged; the phone sheet dims it in mobile.css. */
+.gw-back {
+  position: fixed;
+  inset: 0;
+  z-index: 29;
+  background: transparent;
+}
 .gw-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.gw-head-end { display: flex; align-items: center; gap: var(--space-2); }
 .gw-head .panel-title { margin: 0; }
 .gw-detail { margin: 0; }
 .gw-actions, .gw-panel .row, .gw-body .row { display: flex; flex-wrap: wrap; gap: var(--space-2); }
