@@ -22,9 +22,9 @@ streams register a slot or a command by adding a file under
 The sections below that are still unshipped are not drawn. An empty panel
 would pretend the daemon already has that workflow. Each one is the
 Strike-specific shape, using stores and events that already exist or are
-the next real slice. Memory, Knowledge, Artifacts, and Memory mode are
-the exception: they are in the client, and the notes under those headings
-say what shipped.
+the next real slice. Memory, Knowledge, Artifacts, Memory mode, and
+Triggers are the exception: they are in the client, and the notes under
+those headings say what shipped.
 
 ## Goals and autopilot
 
@@ -70,6 +70,15 @@ workspace fingerprint changes. The first observation is that baseline.
 The goal loop (`POST /v1/goals/{id}/run`) is still the evaluate-only
 harness. A scheduled goal starts a root session whose prompt is the goal
 text; it does not call that loop.
+
+## Triggers
+
+The Triggers page and `POST /hooks/{id}` are in the daemon. A webhook
+(HMAC over `timestamp + "." + body`), a GitHub `issues` / `pull_request` /
+comment event, or an in-process channel message can start or continue a
+root. The channel adapter interface is `trigger.Adapter`; this build does
+not dial Slack or any other chat network. Unattended runs resolve an empty
+permission mode to plan. See [gateway.md](gateway.md).
 
 ## Memory
 
@@ -182,6 +191,11 @@ names and URLs in `localStorage` (`strike.gateways`). Bearers are
 `sessionStorage` only. `strike connect` opens the SSH local-forward and
 injects a short-lived grant on the laptop's loopback. The daemon still
 refuses a public bind. See [gateway.md](gateway.md).
+
+Open on phone is a separate palette command. It shows a QR and a one-time
+`#pair=` link. Scanning another gateway's QR adds that base URL to the same
+profile list and stores the paired session in `sessionStorage`. It does not
+store the daemon token.
 
 Not in this client: tailnet discovery, a browser-started SSH session, and
 syncing CLI profiles from the daemon. The switcher shows an `ssh`

@@ -24,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jonathanung/strike/internal/daemon/trigger"
 	"github.com/jonathanung/strike/internal/frontend/host"
 	"github.com/jonathanung/strike/internal/persist/attachment"
 	"github.com/jonathanung/strike/internal/persist/session"
@@ -48,6 +49,18 @@ type Options struct {
 	// or empty contents deny /v1. The process still needs Auth and an initial
 	// Token so a server cannot start authenticated with no credential.
 	TokenFile string
+	// AdvertiseURL is an operator-supplied tunnel origin (http or https, no
+	// query or fragment). Pairing QR codes prefer it over the bind address.
+	// Strike does not open that tunnel. Empty keeps the bind URL.
+	AdvertiseURL string
+	// PairTTL is the pairing-code lifetime. Zero uses 5 minutes.
+	PairTTL time.Duration
+	// PairClock overrides time for pairing expiry and rate limits. Nil is time.Now.
+	PairClock func() time.Time
+	// PairRedeemLimit is redeemed attempts per client IP per minute. Zero uses 8.
+	PairRedeemLimit int
+	// PairRedeemGlobal is redeemed attempts across all IPs per minute. Zero uses 64.
+	PairRedeemGlobal int
 	// SessionDir is the JSONL sessions directory. Default session.DefaultDir().
 	SessionDir string
 	// Static is optional override for the attach page FS (tests). Nil uses embed.
@@ -95,6 +108,10 @@ type Options struct {
 	UsageAuditDir string
 	// UsagePricer overrides models.dev pricing for /v1/usage. Nil loads the catalog.
 	UsagePricer func(provider, model string) (usageaudit.Rates, bool)
+	// Triggers is the inbound trigger registry (webhooks, GitHub, channels).
+	// Nil makes /v1/triggers and POST /hooks 503. The launcher inside the
+	// service is NewRootLauncher (authored for #1282).
+	Triggers *trigger.Service
 	// OpsRate is tokens/sec per client IP for ops (default 10). <=0 uses default.
 	OpsRate float64
 	// OpsBurst is the per-IP burst (default 20). <=0 uses default.
@@ -159,11 +176,19 @@ type Server struct {
 
 	// sideChat stores read-only Q&A beside the session log, not in it.
 	sideChat sideChatStore
+
+	// pairs holds single-use phone pairing codes and revocable session tokens.
+	pairs *pairStore
 }
 
 // New validates options and builds a Server. Does not listen.
 func New(opts Options) (*Server, error) {
 	opts.Token = strings.TrimSpace(opts.Token)
+	adv, err := ValidateAdvertiseURL(opts.AdvertiseURL)
+	if err != nil {
+		return nil, err
+	}
+	opts.AdvertiseURL = adv
 	if opts.Auth && opts.Token == "" {
 		return nil, errors.New("server: token is required when auth is enabled")
 	}
@@ -189,7 +214,9 @@ func New(opts Options) (*Server, error) {
 		mux:             http.NewServeMux(),
 		opsLimit:        newOpLimiter(opts.OpsRate, opts.OpsBurst, opts.OpsClock),
 		scriptCSPHashes: inlineScriptHashes(static),
+		pairs:           newPairStore(opts),
 	}
+	s.pairs.observe(s.currentToken())
 	s.routes()
 	s.http = &http.Server{
 		Addr:              opts.Addr,
@@ -260,6 +287,13 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /v1/gateway/grants", s.handleGatewayRevoke)
 	s.mux.HandleFunc("POST /v1/gateway/rotate", s.handleGatewayRotate)
 	s.mux.HandleFunc("POST /v1/gateway/logout", s.handleGatewayLogout)
+	// Phone pairing (#1289). Redeem is unauthenticated; the code is the secret.
+	s.mux.HandleFunc("POST /v1/pair", s.handlePairMint)
+	s.mux.HandleFunc("POST /v1/pair/redeem", s.handlePairRedeem)
+	s.mux.HandleFunc("GET /v1/pair/devices", s.handlePairDevices)
+	s.mux.HandleFunc("DELETE /v1/pair/devices/{id}", s.handlePairRevoke)
+	s.mux.HandleFunc("POST /v1/pair/revoke-all", s.handlePairRevokeAll)
+	s.mux.HandleFunc("POST /v1/pair/revoke-self", s.handlePairRevokeSelf)
 	s.mux.HandleFunc("GET /v1/bootstrap", s.handleBootstrap)
 	s.mux.HandleFunc("GET /v1/team", s.handleTeam)
 	s.mux.HandleFunc("GET /v1/artifacts", s.handleArtifactsList)
@@ -438,6 +472,14 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/workspaces/{id}/activate", s.handleWorkspaceActivate)
 	s.mux.HandleFunc("PATCH /v1/workspaces/{id}", s.handleWorkspacePolicy)
 	s.mux.HandleFunc("DELETE /v1/workspaces/{id}", s.handleWorkspaceRemove)
+	s.mux.HandleFunc("GET /v1/triggers", s.handleTriggersList)
+	s.mux.HandleFunc("POST /v1/triggers", s.handleTriggerCreate)
+	s.mux.HandleFunc("GET /v1/triggers/{id}/deliveries", s.handleTriggerDeliveries)
+	s.mux.HandleFunc("POST /v1/triggers/{id}/test", s.handleTriggerTest)
+	s.mux.HandleFunc("POST /v1/triggers/{id}/replay", s.handleTriggerReplay)
+	s.mux.HandleFunc("PATCH /v1/triggers/{id}", s.handleTriggerUpdate)
+	s.mux.HandleFunc("DELETE /v1/triggers/{id}", s.handleTriggerDelete)
+	s.mux.HandleFunc("POST /hooks/{id}", s.handleHook)
 	s.mux.HandleFunc("GET /v1/roots", s.handleRoots)
 	s.mux.HandleFunc("POST /v1/roots", s.handleRootCreate)
 	s.mux.HandleFunc("POST /v1/roots/{id}/activate", s.handleRootActivate)
@@ -575,29 +617,52 @@ func (s *Server) applySecurityHeaders(w http.ResponseWriter) {
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("X-Frame-Options", "DENY")
-	// microphone=(self) lets conversation mode use the browser speech API.
-	// Camera stays off: attachments are files, not capture.
-	w.Header().Set("Permissions-Policy", "camera=(), microphone=(self), geolocation=()")
+	// camera=(self) lets the cockpit scan a gateway QR. microphone=(self)
+	// lets conversation mode use the browser speech API. Geolocation stays off.
+	w.Header().Set("Permissions-Policy", "camera=(self), microphone=(self), geolocation=()")
 }
 
 const authCookieName = "strike_serve_token"
 
 func requiresToken(path string) bool {
+	// The phone has no daemon token yet. The single-use code in the POST body
+	// is the credential. Query-string codes are rejected inside the handler.
+	if path == "/v1/pair/redeem" {
+		return false
+	}
 	return strings.HasPrefix(path, "/v1/")
 }
 
 func (s *Server) authorized(r *http.Request) bool {
-	// Bearer header or HttpOnly cookie. Query-string tokens are rejected on
-	// /v1/* — they leak into shell history, proxy logs, and Referer. A
-	// short-lived grant (POST /v1/gateway/grants) is accepted the same way
-	// as the host token. Both headers are checked so a wrong bearer does not
-	// hide a valid cookie, and the grant scan always walks every slot.
+	// Query secrets are rejected even when a cookie or grant is also present.
+	// They leak into shell history, proxy logs, and Referer. Pairing codes
+	// belong in the URL fragment and are redeemed with POST /v1/pair/redeem.
+	if r.URL.Query().Get("token") != "" || r.URL.Query().Get("code") != "" || r.URL.Query().Get("pair") != "" {
+		return false
+	}
+	// Bearer header or HttpOnly cookie. A short-lived grant and a paired
+	// session are accepted the same way as the host token. Both headers are
+	// checked so a wrong bearer does not hide a valid cookie, and the grant
+	// scan always walks every slot.
 	root := s.currentToken()
+	if s.pairs != nil {
+		s.pairs.observe(root)
+	}
 	bearer := bearerToken(r.Header.Get("Authorization"))
 	cookie := cookieToken(r)
 	rootOK := tokenEqual(bearer, root) || tokenEqual(cookie, root)
 	grantOK := s.acceptAnyGrant(bearer, cookie)
-	return rootOK || grantOK
+	return rootOK || grantOK || s.sessionCredentialOK(r)
+}
+
+func (s *Server) sessionCredentialOK(r *http.Request) bool {
+	if s.pairs == nil {
+		return false
+	}
+	if s.pairs.sessionOK(bearerToken(r.Header.Get("Authorization"))) {
+		return true
+	}
+	return s.pairs.sessionOK(cookieToken(r))
 }
 
 // rootAuthorized reports whether this request presented the host token

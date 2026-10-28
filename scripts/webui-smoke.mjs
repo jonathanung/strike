@@ -2165,6 +2165,29 @@ try {
     textProbe((body) => body.includes("GitHub triage")),
     { timeout: WAIT_MS, interval: 250 },
   );
+  await send("Runtime.evaluate", {
+    expression: `(() => {
+      const b = [...document.querySelectorAll("button")].find((el) => (el.textContent || "").trim() === "Triggers");
+      if (!b) return "missing";
+      b.click();
+      return "ok";
+    })()`,
+    returnByValue: true,
+  });
+  let triggersText = "";
+  for (let i = 0; i < 25; i++) {
+    const ev = await send("Runtime.evaluate", {
+      expression: "document.body ? document.body.innerText : ''",
+      returnByValue: true,
+    });
+    triggersText = ev.result?.result?.value || "";
+    if (triggersText.includes("New trigger") && triggersText.includes("Delivery log")) break;
+    await delay(200);
+  }
+  if (!triggersText.includes("New trigger") || !triggersText.includes("Delivery log")) {
+    throw new Error(`triggers page missing: ${triggersText.slice(0, 400)}`);
+  }
+
   console.log("webui-smoke ok");
 } catch (err) {
   console.error(String(err));

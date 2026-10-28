@@ -2,6 +2,7 @@
 //! Activity, Files, Changes, Git, Worktrees, Memory, Knowledge, and
 //! Artifacts are the side panel. Side chat is a separate read-only drawer.
 //! Goals and Autopilot live in `goals`. Apps is the queue surface in `apps`.
+//! Triggers are a separate page.
 //! Schedule is the clock (`schedule` module). The task runner is the
 //! Tasks view in `task_runner`.
 
@@ -13,6 +14,7 @@ mod chat_mode;
 mod composer_triggers;
 mod editor;
 mod gateway;
+mod gateway_qr;
 mod git;
 mod goals;
 mod schedule;
@@ -32,6 +34,7 @@ mod side_chat;
 mod status;
 mod transcript;
 mod transcript_view;
+mod triggers;
 mod turn_elapsed;
 mod workspaces;
 
@@ -705,6 +708,7 @@ fn App() -> impl IntoView {
     let workspaces = RwSignal::new(Vec::<Workspace>::new());
     let active_workspace = RwSignal::new(String::new());
     let gateway_open = RwSignal::new(false);
+    let phone_open = RwSignal::new(false);
     let gateway_detail = RwSignal::new(String::new());
     let gateway_profiles = RwSignal::new(gateway::load_profiles());
     let gateway_selected = RwSignal::new("this".to_string());
@@ -2181,7 +2185,8 @@ fn App() -> impl IntoView {
                 || memory_menu.get_untracked()
                 || plus_open.get_untracked()
                 || ac_open.get_untracked()
-                || side_open.get_untracked();
+                || side_open.get_untracked()
+                || phone_open.get_untracked();
             mode_menu.set(false);
             model_menu.set(false);
             memory_menu.set(false);
@@ -2189,6 +2194,7 @@ fn App() -> impl IntoView {
             ac_open.set(false);
             ac_force.set(String::new());
             side_open.set(false);
+            phone_open.set(false);
             sessions_drawer.set(false);
             panel_drawer.set(false);
             if !menu && !doc_editing.get_untracked() && !doc_path.get_untracked().is_empty() {
@@ -2269,6 +2275,20 @@ fn App() -> impl IntoView {
         selected: gateway_selected,
         refresh: Rc::new(move || refresh_meta()),
     });
+    crate::gateway_qr::set_host(crate::gateway_qr::PhoneHost {
+        base,
+        token,
+        status,
+        open: phone_open,
+        refresh: Rc::new(move || refresh_meta()),
+    });
+    shell::bind(
+        "phone.open",
+        Rc::new(move |_args: &str| {
+            phone_open.set(true);
+            Ok(())
+        }),
+    );
 
     // Storage palette performers (#1271). The commands are registered at
     // boot by src/shell/contrib/storage.rs and dispatch these ids; only
@@ -2838,6 +2858,7 @@ fn App() -> impl IntoView {
             reply_decision=reply_decision
         />
         <shell::Chrome />
+        {gateway_qr::phone_view()}
         <session_delete::SessionDeleteDialog
             target=delete_target
             base=base
@@ -2895,6 +2916,9 @@ fn App() -> impl IntoView {
                     activate_root(id);
                 }
             />
+        </Show>
+        <Show when=move || mode.get() == "triggers" fallback=move || ()>
+            <triggers::TriggersPage base=base token=token status=status />
         </Show>
         <Show when=move || mode.get() == "chat">
             <div class=move || chat_mode::shell_class(focus.get(), &layout.get(), sessions_drawer.get(), panel_drawer.get())>
