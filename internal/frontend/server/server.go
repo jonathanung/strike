@@ -906,6 +906,8 @@ func (s *Server) handleAsset(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/css; charset=utf-8")
 	case ".svg":
 		w.Header().Set("Content-Type", "image/svg+xml")
+	case ".png":
+		w.Header().Set("Content-Type", "image/png")
 	case ".wasm":
 		w.Header().Set("Content-Type", "application/wasm")
 	case ".webmanifest":
