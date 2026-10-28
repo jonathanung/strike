@@ -2527,3 +2527,24 @@ button.linkish:disabled { color: var(--muted); cursor: default; text-decoration:
 }
 .term-check input { width: auto; height: auto; margin: 0; }
 /* feature:terminal end */
+
+/* feature:phone-reading begin */
+/* Kept last on purpose: these rules must win the cascade over the base
+   .sx-code / .ev-md rules above at equal specificity. */
+@media (max-width: 720px) {
+  /* Phone reading (#1490 slice 5): code keeps its line structure and
+     scrolls sideways inside its own box instead of wrapping mid-token.
+     Tables already scroll inside .md-table-wrap; the page itself never
+     scrolls horizontally. */
+  .sx-code, .sx-fold pre {
+    white-space: pre;
+    word-break: normal;
+    overflow-x: auto;
+    max-width: 100%;
+  }
+  .ev-md pre { max-width: 100%; }
+  /* Long unbroken strings in Markdown prose wrap inside the bubble
+     instead of bleeding past its edge. */
+  .ev-md p, .ev-md li, .ev-md blockquote { overflow-wrap: anywhere; }
+}
+/* feature:phone-reading end */

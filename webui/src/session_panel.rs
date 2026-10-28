@@ -228,6 +228,7 @@ pub(crate) fn SessionPanel(
     on_new: impl Fn() + Copy + Send + 'static,
     on_refresh: impl Fn() + Copy + Send + 'static,
     on_delete: impl Fn(String, String) + Copy + Send + 'static,
+    nav_order: RwSignal<Vec<(String, bool)>>,
 ) -> impl IntoView {
     let prefs = load_prefs();
     let filter = RwSignal::new(prefs.filter);
@@ -385,6 +386,22 @@ pub(crate) fn SessionPanel(
             older_days.get(),
             show_older.get(),
         )
+    });
+
+    // Publish the panel's flattened session order for edge-swipe
+    // navigation (#1490 slice 5): session rows only, in display order,
+    // as (open_id, live) pairs — the same rows j/k + Enter walk.
+    Effect::new(move |_| {
+        let order: Vec<(String, bool)> = layout
+            .get()
+            .items
+            .iter()
+            .filter(|item| item.nav.is_some() && item.kind == LayoutKind::Session)
+            .map(|item| (item.open_id.clone(), item.live))
+            .collect();
+        if nav_order.get_untracked() != order {
+            nav_order.set(order);
+        }
     });
 
     let report = move |err: String| {
