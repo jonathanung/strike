@@ -103,9 +103,10 @@ type Options struct {
 	Sandbox *SandboxSnapshot
 	// ReadOnly rejects mutating protocol ops (POST /v1/ops and WS op frames).
 	ReadOnly bool
-	// WorkDir is the daemon working directory used as workspace scope for
-	// Customize when no live session is attached. strike serve sets it from
-	// the process working directory. Empty leaves workspace scope unresolved.
+	// WorkDir is the process working directory. Customize uses it as the
+	// workspace scope when no live session is attached. Apps uses it as the
+	// git workspace for GitHub triage. The browser cannot choose it. Empty
+	// leaves Customize unresolved and Apps falls back to the process directory.
 	WorkDir string
 	// Audit receives serve_op records (op type + source IP). Nil disables.
 	Audit OpAuditor
@@ -152,9 +153,6 @@ type Options struct {
 	// empty means the active root. The bool is false when no live engine can
 	// compile it. Nil means no compiler was installed.
 	TerminalSandboxFor func(sessionID, workDir string) (sandbox.Policy, bool)
-	// WorkDir is the git workspace Apps reads (GitHub triage). The browser
-	// cannot choose it. Empty uses the process working directory.
-	WorkDir string
 }
 
 // Server is an HTTP server for session attach and optional live cockpit.
