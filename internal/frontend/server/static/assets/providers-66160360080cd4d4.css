@@ -1,0 +1,116 @@
+/* feature:providers begin */
+.providers-page {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  max-width: 880px;
+  width: 100%;
+  margin: 0 auto;
+  box-sizing: border-box;
+}
+
+.providers-head {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.providers-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.providers-card {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  background: var(--surface);
+  border: var(--border-width) solid var(--rule);
+  box-shadow: var(--shadow);
+}
+
+.providers-card h2 {
+  margin: 0;
+  font-size: var(--type-lg);
+  color: var(--ink);
+}
+
+.providers-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.providers-card label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  color: var(--muted);
+  font-size: var(--type-sm);
+}
+
+.providers-card input,
+.providers-card select {
+  width: 100%;
+  min-height: 36px;
+  background: var(--ground);
+  color: var(--ink);
+  border: var(--border-width) solid var(--rule);
+  padding: 0 var(--space-2);
+  box-sizing: border-box;
+}
+
+.providers-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.providers-env {
+  margin: 0;
+  color: var(--ink);
+  background: var(--surface-muted);
+  border: var(--border-width) solid var(--rule);
+  padding: var(--space-2) var(--space-3);
+}
+
+.providers-note {
+  margin: 0;
+  color: var(--ink);
+}
+
+.providers-base {
+  margin: 0;
+  font-family: var(--font-display);
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 720px) {
+  .providers-page {
+    padding: var(--space-3);
+    padding-bottom: calc(64px + env(safe-area-inset-bottom));
+  }
+
+  .providers-card input,
+  .providers-card select,
+  .providers-actions button,
+  .providers-card > button,
+  .providers-head button {
+    min-height: 44px;
+    font-size: 16px;
+  }
+}
+/* feature:providers end */

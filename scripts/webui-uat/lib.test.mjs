@@ -113,7 +113,7 @@ test("committed shell fixture matches the Strike dark tokens", async () => {
   const fx = JSON.parse(raw);
   assert.equal(fx.tokens.acid, DARK_TOKENS.acid);
   assert.equal(fx.tokens.ground, DARK_TOKENS.ground);
-  assert.ok(fx.mustInclude.includes("Run a command"));
+  assert.ok(fx.mustInclude.includes("Menu"));
   assert.ok(fx.mustInclude.includes("Activity"));
   assert.equal(fx.selectors["textarea"], 1);
 });

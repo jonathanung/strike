@@ -51,8 +51,9 @@ pub struct TopSlot {
     pub title: &'static str,
     /// Label used when the slot is inside the overflow menu.
     pub overflow_label: &'static str,
-    /// `0` stays in the bar at every width. Otherwise the slot moves into
-    /// the overflow menu when the viewport is narrower than this.
+    /// Retained for contributors. The three-zone header keeps non-status
+    /// slots in the menu at every width, so this value is not read.
+    #[allow(dead_code)]
     pub collapse_below_px: u32,
     pub render: Rc<dyn Fn() -> AnyView>,
 }
@@ -289,6 +290,10 @@ pub fn shortcuts() -> Vec<Shortcut> {
     })
 }
 
+/// Width predicate from the old bar. The three-zone header does not
+/// consult it; slots other than status and the gateway chip live in
+/// the menu at every width.
+#[allow(dead_code)]
 pub fn slot_inline(slot: &TopSlot, width: u32) -> bool {
     slot.collapse_below_px == 0 || width >= slot.collapse_below_px
 }

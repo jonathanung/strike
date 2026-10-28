@@ -3,7 +3,7 @@
 // after this pass when --suite is full (the default). Assertions accumulate
 // so one run reports every miss instead of stopping at the first.
 
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { delay } from "./browser.mjs";
@@ -14,6 +14,205 @@ import { createSession } from "./session.mjs";
 import { capturePhoneFrame, runPhoneScreens } from "./phone.mjs";
 
 const MARKER = "uat-marker-alpha";
+const FAKE_KEY = "sk-uat-fake-key-not-real";
+
+async function headerAt(page, check, viewport, grab) {
+  const widths = [
+    [390, 844],
+    [768, 1024],
+    [1024, 768],
+    [1440, 900],
+  ];
+  for (const [width, height] of widths) {
+    await viewport(width, height);
+    await delay(180);
+    const box = await page.evaluate(`(() => {
+      const h = document.querySelector('[data-nav="header"]');
+      if (!h) return null;
+      const wrapped = h.scrollHeight > h.clientHeight + 2;
+      const labels = [...h.querySelectorAll('[data-nav="primary"] button, .nav-menu-btn')].map((b) => ({
+        text: (b.innerText || "").trim(),
+        clipped: b.scrollWidth > b.clientWidth + 1,
+      }));
+      return {
+        height: Math.round(h.getBoundingClientRect().height),
+        overflow: h.scrollWidth > h.clientWidth + 1,
+        wrapped,
+        labels,
+      };
+    })()`);
+    check(Boolean(box), `header missing at ${width}`);
+    if (!box) continue;
+    check(!box.wrapped, `header wrapped at ${width} (height ${box.height})`);
+    check(!box.overflow, `header overflowed at ${width}`);
+    check(box.height > 0 && box.height <= 56, `header height ${box.height} at ${width} is outside 1..56`);
+    const clipped = box.labels.filter((row) => row.clipped).map((row) => row.text);
+    check(clipped.length === 0, `header label clipped at ${width}: ${clipped.join(", ")}`);
+    await grab(`header-${width}`);
+  }
+  await viewport(1440, 900);
+}
+
+async function providerFlow(page, check, waitUntil, grab) {
+  const opened = await page.evaluate(`(() => {
+    const more = document.querySelector('[data-nav="more"]');
+    if (!more) return false;
+    more.click();
+    const item = document.querySelector('[data-nav="providers"]');
+    if (!item) return false;
+    item.click();
+    return true;
+  })()`);
+  check(opened, "Menu did not expose Providers");
+  const listed = await waitUntil(
+    `(() => {
+      const root = document.querySelector("[data-providers-root]");
+      const names = [...document.querySelectorAll("[data-provider]")].map((el) => el.getAttribute("data-provider"));
+      return Boolean(root && names.includes("echo") && names.length >= 2);
+    })()`,
+    8000,
+    "provider list",
+  );
+  check(Boolean(listed), "provider list did not include echo and another daemon provider");
+  const echoState = await page.evaluate(
+    `document.querySelector('[data-provider="echo"]')?.innerText || ""`,
+  );
+  check(String(echoState).includes("Connected"), `echo was not Connected: ${echoState}`);
+  for (const [width, height] of [
+    [390, 844],
+    [768, 1024],
+    [1024, 768],
+    [1440, 900],
+  ]) {
+    await page.send("Emulation.setDeviceMetricsOverride", {
+      width,
+      height,
+      deviceScaleFactor: 1,
+      mobile: width < 500,
+      screenWidth: width,
+      screenHeight: height,
+    });
+    await delay(160);
+    await grab(`providers-list-${width}`);
+  }
+
+  const typed = await page.evaluate(`(() => {
+    const card = document.querySelector('[data-provider="openai"]');
+    const input = card && card.querySelector("[data-provider-key]");
+    if (!input) return false;
+    const proto = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value");
+    proto.set.call(input, ${JSON.stringify(FAKE_KEY)});
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    return input.value === ${JSON.stringify(FAKE_KEY)};
+  })()`);
+  check(typed, "openai key field did not take the paste");
+  await page.evaluate(
+    `document.querySelector('[data-provider="openai"] [data-save-key]')?.click()`,
+  );
+  const stored = await waitUntil(
+    `(() => {
+      const note = document.querySelector('[data-provider="openai"] [data-provider-note]');
+      return Boolean(note && note.innerText.includes("not shown again"));
+    })()`,
+    8000,
+    "key stored",
+  );
+  check(Boolean(stored), "saving the openai key did not confirm");
+  const connected = await waitUntil(
+    `(() => {
+      const state = document.querySelector('[data-provider="openai"] [data-provider-state]');
+      return Boolean(state && state.textContent.trim() === "Connected");
+    })()`,
+    8000,
+    "openai connected after save",
+  );
+  check(Boolean(connected), "openai did not show Connected after the key was stored");
+  const leaked = await page.evaluate(`(() => {
+    const body = document.body ? document.body.innerText : "";
+    let store = "";
+    try { store = JSON.stringify(localStorage); } catch (err) { store = ""; }
+    const key = ${JSON.stringify(FAKE_KEY)};
+    return body.includes(key) || store.includes(key);
+  })()`);
+  check(!leaked, "the pasted key is in the page text or localStorage");
+  await page.evaluate(
+    `document.querySelector('[data-provider="openai"] [data-test-provider]')?.click()`,
+  );
+  const tested = await waitUntil(
+    `(() => {
+      const note = document.querySelector('[data-provider="openai"] [data-provider-note]');
+      const text = note ? note.innerText : "";
+      return text.includes("Listed") && !text.includes(${JSON.stringify(FAKE_KEY)});
+    })()`,
+    15000,
+    "provider test",
+  );
+  check(Boolean(tested), "Test did not report a result");
+  for (const [width, height] of [
+    [390, 844],
+    [768, 1024],
+    [1024, 768],
+    [1440, 900],
+  ]) {
+    await page.send("Emulation.setDeviceMetricsOverride", {
+      width,
+      height,
+      deviceScaleFactor: 1,
+      mobile: width < 500,
+      screenWidth: width,
+      screenHeight: height,
+    });
+    await delay(120);
+    await grab(`providers-key-${width}`);
+  }
+  await page.send("Emulation.setDeviceMetricsOverride", {
+    width: 1440,
+    height: 900,
+    deviceScaleFactor: 1,
+    mobile: false,
+    screenWidth: 1440,
+    screenHeight: 900,
+  });
+  await page.evaluate(
+    `document.querySelector('[data-provider="openai"] [data-remove-key]')?.click()`,
+  );
+  const removed = await waitUntil(
+    `(() => {
+      const card = document.querySelector('[data-provider="openai"]');
+      const note = card && card.querySelector("[data-provider-note]");
+      const text = note ? note.innerText : "";
+      const state = card ? card.querySelector("[data-provider-state]")?.textContent || "" : "";
+      return text.includes("Stored credential removed") || state.trim() === "Not connected";
+    })()`,
+    8000,
+    "key removed",
+  );
+  check(Boolean(removed), "Remove stored key did not confirm");
+
+  await page.evaluate(`document.querySelector('[data-nav="primary"] [data-view="chat"]')?.click()`);
+  const chip = await waitUntil(
+    `Boolean(document.querySelector("[data-model-chip]"))`,
+    4000,
+    "model chip after leaving providers",
+  );
+  check(Boolean(chip), "model chip missing after returning to chat");
+  await page.evaluate(`document.querySelector("[data-model-chip]")?.click()`);
+  const menu = await waitUntil(
+    `Boolean(document.querySelector("[data-model-menu] [data-add-provider]"))`,
+    4000,
+    "model menu add provider",
+  );
+  check(Boolean(menu), "model menu is missing Add provider");
+  await grab("model-menu-add-provider-1440");
+  await page.evaluate(`document.querySelector("[data-model-menu] [data-add-provider]")?.click()`);
+  const back = await waitUntil(
+    `Boolean(document.querySelector("[data-providers-root]"))`,
+    4000,
+    "add provider from the model menu",
+  );
+  check(Boolean(back), "Add provider in the model menu did not open Providers");
+  await page.evaluate(`document.querySelector('[data-nav="primary"] [data-view="chat"]')?.click()`);
+}
 const CHILD_OBJECTIVE = "Summarize the working directory";
 const CHILD_NAME = "uat-child";
 
@@ -22,7 +221,7 @@ const BOOT_EXPR = `(() => {
   const root = document.documentElement;
   if (!root) return false;
   const acid = getComputedStyle(root).getPropertyValue("--acid").trim();
-  return text.includes("Run a command") && text.includes("Activity") && acid === "#7c3aed";
+  return text.includes("Menu") && text.includes("Activity") && acid === "#7c3aed";
 })()`;
 
 // The shell fixture requires "Connected". The chip stays "Checking" until
@@ -100,6 +299,15 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
     }
 
     await shoot("shell-empty", ["desk1024", "desk1440", "mobile"]);
+    const emptyAdd = await page.evaluate(
+      `Boolean(document.querySelector(".sx-empty [data-add-provider]"))`,
+    );
+    check(emptyAdd, "empty transcript is missing Add provider");
+    await headerAt(page, check, viewport, async (name) => {
+      const png = await page.send("Page.captureScreenshot", { format: "png" });
+      await writeFile(join(outDir, "screenshots", `${name}.png`), Buffer.from(png.data, "base64"));
+      shots.push(name);
+    });
 
     // Keyboard path: Ctrl+K opens the palette, "plan" filters to Approval: Plan, Enter applies it.
     await press("k", 2);
@@ -266,13 +474,13 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
     await press("ArrowLeft", 1);
     await delay(500);
     const stillHere = await page.evaluate(
-      `document.body && document.body.innerText.includes("Run a command")`,
+      `document.body && document.body.innerText.includes("Menu")`,
     );
     if (!stillHere) {
       failures.push("Alt+Left left the cockpit (headless Chrome treats it as history back)");
       await page.send("Page.navigate", { url: baseURL });
       await waitUntil(
-        `document.body && document.body.innerText.includes("Run a command")`,
+        `document.body && document.body.innerText.includes("Menu")`,
         15000,
         "return to cockpit after Alt+Left",
       );
@@ -291,6 +499,11 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
     );
     await shoot("shell-daemon", ["desk1440", "desk1024"]);
     await click(".segmented button", "Chat");
+    await providerFlow(page, check, waitUntil, async (name) => {
+      const png = await page.send("Page.captureScreenshot", { format: "png" });
+      await writeFile(join(outDir, "screenshots", `${name}.png`), Buffer.from(png.data, "base64"));
+      shots.push(name);
+    });
 
     await press("k", 2);
     const schemePalette = await waitUntil(

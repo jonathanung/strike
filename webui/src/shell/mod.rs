@@ -15,7 +15,7 @@ use std::cell::Cell;
 
 pub use chrome::Chrome;
 #[allow(unused_imports)]
-pub use host::{bind, dispatch, set_host, unbind, HostBridge};
+pub use host::{bind, dispatch, set_host, set_view, unbind, HostBridge};
 pub use icon::icon;
 #[allow(unused_imports)]
 pub use registry::{Argument, Command, ShellHook, Shortcut, TopRegion, TopSlot};

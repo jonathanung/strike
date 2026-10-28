@@ -99,18 +99,20 @@ Built-in command ids:
 
 ## Slots
 
-`TopRegion`:
+The header is three zones and does not wrap: brand + workspace, at most five
+primary views (Chat, Daemon), and status plus one Menu. `collapse_below_px`
+no longer decides what sits in the bar.
 
 | Region | Where it renders |
 |---|---|
-| `Status` | In the breadcrumb, in place of the fallback session chip. Any slot here hides that fallback. |
-| `Leading` | After the breadcrumb, before the command field. |
-| `Trailing` | Right cluster. |
+| `Status` | Right zone, with the gateway status chip. |
+| `Leading` | Menu. |
+| `Trailing` | Menu, except slot id `gateway` (the Connected chip, right zone) and `view` (the centre zone owns Chat / Daemon). |
 
-`collapse_below_px` of `0` stays in the bar. Any other value moves the slot
-into the overflow menu (“More”) below that viewport width. Back and Forward
-collapse below 1100px. Focus collapses below 1280px. Those three are chrome,
-not slots.
+The Menu stays mounted and hidden (`data-open="0"`) so a `data-view` button
+is still in the DOM. Back, Forward, and Focus live in the Menu. Ctrl/Cmd-K
+still opens the palette. Phone widths hide the centre zone and use the
+bottom tab bar.
 
 Builtin slots:
 
@@ -162,8 +164,9 @@ the keys.
 
 ## What the bar shows
 
-`Strike > workspace > session`, then the session chip (`Idle` or `Running`).
-No active workspace is the literal label “No workspace”. The gateway chip
-stays “Connected”, “Checking”, or “Unreachable” until a stream replaces slot
-`gateway`. The daemon version stays on the wordmark tooltip and, when the
-viewport is at least 1200px wide, as muted text.
+`Strike > workspace`, then Chat and Daemon, then the session chip and the
+gateway chip (`Connected`, `Checking`, or `Unreachable`), then Menu.
+No active workspace is the literal label “No workspace”. The full workspace
+name is also the first line of the Menu. The daemon version stays on the
+wordmark tooltip. Providers, theme, layout, and the other slots are in
+the Menu or the command palette.

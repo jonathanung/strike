@@ -506,8 +506,9 @@ try {
       const text = parsed.body || "";
       return {
         ok:
-          text.includes("Run a command") &&
+          text.includes("Menu") &&
           text.includes("Activity") &&
+          text.includes("Connected") &&
           parsed.acid === "#7c3aed" &&
           !!parsed.chip &&
           statusIds.includes(parsed.status || "") &&
@@ -523,7 +524,7 @@ try {
   const title = boot.title || "";
   const statusId = boot.status || "";
   const chip = !!boot.chip;
-  const want = ["Run a command", "Strike", "Activity", "Files", "Changes", "Git", "Worktrees", "Memory", "Knowledge", "Artifacts", "Terminal", "Approval", "Gateways"];
+  const want = ["Menu", "Strike", "Activity", "Files", "Changes", "Git", "Worktrees", "Memory", "Knowledge", "Artifacts", "Terminal", "Approval", "Connected"];
   const missingText = want.filter((s) => !text.includes(s));
   if (missingText.length || acid !== "#7c3aed" || ground !== "#14131c" || !chip || !statusIds.includes(statusId) || !title.includes("Strike")) {
     throw new Error(
@@ -700,6 +701,8 @@ try {
     throw new Error("cockpit innerText contains the smoke token");
   }
   const gwClicked = await evalValue(`(() => {
+    const more = document.querySelector('[data-nav="more"]');
+    if (more) more.click();
     const btn = [...document.querySelectorAll("button")].find((b) => (b.textContent || "").includes("Gateways"));
     if (!btn) return "missing";
     btn.click();
@@ -1148,8 +1151,8 @@ try {
   });
   await send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
   await waitFor(
-    "cockpit reload after attachment checks (Run a command, Memory)",
-    textProbe((t) => t.includes("Run a command") && t.includes("Memory")),
+    "cockpit reload after attachment checks (Menu, Memory)",
+    textProbe((t) => t.includes("Menu") && t.includes("Memory")),
     { timeout: WAIT_MS, interval: 250 },
   );
 
@@ -1203,7 +1206,7 @@ try {
       const parsed = await readCockpit();
       const body = parsed.body || "";
       return {
-        ok: body.includes("Run a command") && body.includes("Memory"),
+        ok: body.includes("Menu") && body.includes("Memory"),
         body: body.slice(0, 300),
       };
     },
@@ -1319,6 +1322,8 @@ try {
 
   const clicked = await send("Runtime.evaluate", {
     expression: `(() => {
+      const more = document.querySelector('[data-nav="more"]');
+      if (more && more.getAttribute("aria-expanded") !== "true") more.click();
       const btn = document.querySelector('[data-feature="notifications"]');
       if (!btn) return "missing-bell";
       btn.click();
@@ -1743,7 +1748,7 @@ try {
   });
   await waitFor(
     "cockpit re-boot for session delete",
-    textProbe((t) => t.includes("Run a command")),
+    textProbe((t) => t.includes("Menu")),
     { timeout: WAIT_MS, interval: 250 },
   );
   await waitFor(
@@ -1992,7 +1997,7 @@ try {
     );
     await waitFor(
       "chat view after the task runner check",
-      textProbe((body) => body.includes("Run a command")),
+      textProbe((body) => body.includes("Menu")),
       { timeout: WAIT_MS, interval: 250 },
     );
   } catch (err) {

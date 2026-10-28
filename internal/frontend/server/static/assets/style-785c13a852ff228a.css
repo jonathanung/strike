@@ -4,7 +4,9 @@
    Missing surface / surfaceFocus / surfaceMuted / overlayScrim inherit Strike
    for the active scheme, matching theme.Resolve().
    --on-accent is web-only, for text on a filled accent control.
-   Panel radius is 10px (docs/theme.md). The TUI contract stays square. */
+   Block language (peasantlabs.org / vetool.jonathanung.ca): square corners,
+   2px borders, hard offset shadow. Purple/blue stay. Yellow is --sharp.
+   See webui/theme.css. The TUI contract stays square. */
 
 :root {
   color-scheme: dark;
@@ -22,7 +24,7 @@
   --raised: #2e2c3e;
   --surface-muted: #1a1924;
   --rule: #4f4d63;
-  --border-focus: #7c3aed;
+  --border-focus: #FFD400;
   --border-muted: #2c2a3a;
   --user: #22d3ee;
   --tool: #7dd3fc;
@@ -30,12 +32,19 @@
   --diff-del: #fb7185;
   --overlay: #7c7a90;
   --on-accent: #f3f1fa;
-  --radius: 10px;
-  --radius-sm: 8px;
+  --sharp: #FFD400;
+  --on-sharp: #14131c;
+  --border-width: 2px;
+  --shadow: 4px 4px 0 #07060c;
+  --font-display: ui-monospace, "IBM Plex Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+  --font-body: ui-sans-serif, system-ui, sans-serif;
+  --radius: 2px;
+  --radius-sm: 0px;
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
   --space-4: 16px;
+  --space-5: 24px;
   --type-sm: 12px;
   --type-md: 13px;
   --type-lg: 14px;
@@ -67,6 +76,10 @@
   --diff-del: #e11d48;
   --overlay: #a8a3b8;
   --on-accent: #ffffff;
+  --sharp: #FFD400;
+  --on-sharp: #14131c;
+  --shadow: 4px 4px 0 #1a1528;
+  --border-focus: #5b21b6;
 }
 
 :root[data-theme="nord"]:not([data-scheme="light"]) {
@@ -333,7 +346,7 @@ body {
   margin: 0;
   background: var(--ground);
   color: var(--ink);
-  font: var(--type-md)/1.45 ui-sans-serif, system-ui, sans-serif;
+  font: var(--type-md)/1.45 var(--font-body);
   display: flex;
   flex-direction: column;
   height: 100%;

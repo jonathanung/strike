@@ -18,6 +18,7 @@ mod gateway_qr;
 mod git;
 mod goals;
 mod mobile;
+mod providers;
 mod schedule;
 mod model;
 mod notify;
@@ -2965,6 +2966,9 @@ fn App() -> impl IntoView {
             token=token
             on_deleted=on_deleted
         />
+        <Show when=move || mode.get() == "providers" fallback=move || ()>
+            <providers::ProvidersPage base=base token=token />
+        </Show>
         <Show when=move || mode.get() == "daemon" fallback=move || ()>
             <DaemonPane
                 base=base
