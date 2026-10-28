@@ -65,6 +65,15 @@ func TestParseServeArgs(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "--expose was removed") {
 		t.Fatalf("legacy --expose err = %v", err)
 	}
+	_, err = parseServeArgs([]string{"--terminal-remote"})
+	if err == nil || !strings.Contains(err.Error(), "--terminal-remote requires --auth") {
+		t.Fatalf("terminal remote without auth err = %v", err)
+	}
+	opts, err = parseServeArgs([]string{"--auth", "--token", "t", "--terminal-remote"})
+	if err != nil || !opts.terminalRemote {
+		t.Fatalf("terminal remote with auth = %+v err %v", opts, err)
+	}
+
 	_, err = parseServeArgs([]string{"--allow-cidr", "10.0.0.0/8"})
 	if err == nil || !strings.Contains(err.Error(), "--expose was removed") {
 		t.Fatalf("legacy --allow-cidr err = %v", err)

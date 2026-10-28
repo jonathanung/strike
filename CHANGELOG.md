@@ -16,6 +16,11 @@ materially affect the shipped product.
 
 ### Added
 
+- **Web terminal** — the side panel opens a daemon PTY in the active
+  workspace. The stream is an authenticated websocket (cookie or a
+  single-use ticket) and stays on loopback unless
+  `strike serve --terminal-remote` is set with `--auth`. Plan mode
+  refuses a new shell. See [docs/gateway.md](docs/gateway.md).
 - **Apps** — the web client opens a launcher of daemon queues. GitHub triage
   lists issues and pull requests for the repository in the serve working
   directory, with comment, close, reopen, and a handoff that starts a live

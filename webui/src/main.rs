@@ -1,10 +1,10 @@
 //! Strike web client. The session list is live roots plus saved sessions.
-//! Activity, Files, Changes, Git, Worktrees, Memory, Knowledge, and
-//! Artifacts are the side panel. Side chat is a separate read-only drawer.
-//! Goals and Autopilot live in `goals`. Apps is the queue surface in `apps`.
-//! Triggers are a separate page.
-//! Schedule is the clock (`schedule` module). The task runner is the
-//! Tasks view in `task_runner`.
+//! Activity, Files, Changes, Git, Worktrees, Memory, Knowledge,
+//! Artifacts, and Terminal are the side panel. Side chat is a separate
+//! read-only drawer. Goals and Autopilot live in `goals`. Apps is the
+//! queue surface in `apps`. Triggers are a separate page. Schedule is
+//! the clock (`schedule` module). The task runner is the Tasks view in
+//! `task_runner`.
 
 mod api;
 mod apps;
@@ -32,6 +32,8 @@ mod session_delete;
 mod shell;
 mod side_chat;
 mod status;
+mod term;
+mod terminal;
 mod transcript;
 mod transcript_view;
 mod triggers;
@@ -3486,6 +3488,7 @@ fn App() -> impl IntoView {
                         <button class=move || if side_tab.get() == "memory" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("memory".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("memory")></span>"Memory"</button>
                         <button class=move || if side_tab.get() == "knowledge" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("knowledge".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("knowledge")></span>"Knowledge"</button>
                         <button class=move || if side_tab.get() == "artifacts" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("artifacts".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("artifacts")></span>"Artifacts"</button>
+                        <button class=move || if side_tab.get() == "terminal" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("terminal".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("terminal")></span>"Terminal"</button>
                     </div>
                     <Show when=move || side_tab.get() == "activity">
                     <div class="activity">
@@ -3728,6 +3731,14 @@ fn App() -> impl IntoView {
                             memory_mode=memory_mode
                             status=status
                             storage_rev=storage_rev
+                        />
+                    </Show>
+                    <Show when=move || side_tab.get() == "terminal">
+                        <terminal::TerminalPanel
+                            base=base
+                            token=token
+                            workspace_id=active_workspace
+                            session_id=active_root
                         />
                     </Show>
                 </aside>
