@@ -846,6 +846,19 @@ fn App() -> impl IntoView {
     Effect::new(move |_| {
         mobile::set_pane(&phone_pane.get());
     });
+    // Overlays (#1475, #1476): one dismissal model for the Workspaces
+    // dialog and the Gateways popover — changing the view or the phone
+    // pane closes both, so a sheet can never be stranded on top of
+    // another view. Escape and backdrop/outside tap live with the
+    // overlays themselves (and in `dismiss_popups` below).
+    Effect::new(move |prev: Option<(String, String)>| {
+        let cur = (mode.get(), phone_pane.get());
+        if prev.is_some() {
+            picker_open.set(false);
+            gateway_open.set(false);
+        }
+        cur
+    });
     // Jump to chat when a document opens. A later Files or Activity tap
     // must stick while that document is still open.
     let doc_was_open = Rc::new(Cell::new(false));
@@ -2241,7 +2254,9 @@ fn App() -> impl IntoView {
                 || plus_open.get_untracked()
                 || ac_open.get_untracked()
                 || side_open.get_untracked()
-                || phone_open.get_untracked();
+                || phone_open.get_untracked()
+                || gateway_open.get_untracked()
+                || picker_open.get_untracked();
             mode_menu.set(false);
             model_menu.set(false);
             memory_menu.set(false);
@@ -2250,6 +2265,8 @@ fn App() -> impl IntoView {
             ac_force.set(String::new());
             side_open.set(false);
             phone_open.set(false);
+            gateway_open.set(false);
+            picker_open.set(false);
             sessions_drawer.set(false);
             panel_drawer.set(false);
             if !menu && !doc_editing.get_untracked() && !doc_path.get_untracked().is_empty() {
@@ -3896,4 +3913,14 @@ fn DaemonPane(
 
 fn main() {
     leptos::mount::mount_to_body(App);
+    // The cockpit mounted, so the static boot shell from index.html has
+    // done its job. mount_to_body appends rather than replacing the body,
+    // so remove the placeholder explicitly; if the wasm never runs, the
+    // placeholder stays and the user gets the honest shell state instead
+    // of a blank page.
+    if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
+        if let Some(el) = doc.query_selector(".boot-shell").ok().flatten() {
+            el.remove();
+        }
+    }
 }

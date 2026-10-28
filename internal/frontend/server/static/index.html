@@ -10,12 +10,13 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Strike">
 <link rel="icon" href="/assets/icon.svg">
+<link rel="apple-touch-icon" href="/assets/icon-180.png">
 <title>Strike</title>
 <script>
 (function(){try{var ok={strike:1,nord:1,dracula:1,gruvbox:1,monokai:1,"tokyo-night":1,catppuccin:1};var t=localStorage.getItem("strike.theme")||"strike";var s=localStorage.getItem("strike.scheme")||"dark";if(!ok[t])t="strike";if(s!=="light")s="dark";var lay=localStorage.getItem("strike.layout")||"cockpit";if(lay!=="conversation")lay="cockpit";var el=document.documentElement;el.setAttribute("data-theme",t);el.setAttribute("data-scheme",s);el.setAttribute("data-layout",lay);}catch(e){}})();
 </script>
 <link rel="manifest" href="/manifest.webmanifest">
-<link rel="stylesheet" href="/assets/style-cd71aad495385a7d.css" integrity="sha384-sQXEwpPvBfLUsU1r1sgKjV7kFhopbwvBDEvTMaJtoXJD8yIVgNYCAwOgZdnlyjTG"/>
+<link rel="stylesheet" href="/assets/style-ed8f40922d9ad2b8.css" integrity="sha384-HDythNeEJybkvyzK2pYgjbqTK5Hoi6fCnJM8ujrBdSdhnvT3+enpzdIxZ5B1vln9"/>
 <link rel="stylesheet" href="/assets/git-ab00987af846b578.css" integrity="sha384-5Hpn8MQrQRdwz4yjyvf64ruljt3hOlWj2g2jpuRif8cb3NVZD+zCMUpqW7b87XnA"/>
 <link rel="stylesheet" href="/assets/storage-c32d584bc182ee77.css" integrity="sha384-XNDaz3yqOR2+uEfPi+eY+9Mzja2F/5vYI647yiPLuy4KvGHAOICyrdh0pqlWr9Wn"/>
 <link rel="stylesheet" href="/assets/navbar-4aaaf28db500eacb.css" integrity="sha384-5TOOsJOEELXhQX9eaCeYAdolP2MTbzKY2Rs54jkUpbigS3rQ+1uG62wvDZTASCfR"/>
@@ -28,14 +29,18 @@
 <link rel="stylesheet" href="/assets/transcript-find-48ee7e8c29e3a7d5.css" integrity="sha384-eIxmvHVn9OZAgklNBggZLjZIuZ7orLHMdtsudrUHcg7zclIcXuQlOhMOgAMN1VtF"/>
 <link rel="stylesheet" href="/assets/turn-elapsed-f4f0358258cee9df.css" integrity="sha384-PW9+AyyJlSzqXRvg7I4U6848KUSH7uEgIt4HLxhzf05rs01hAbUaWUSxPQV+borE"/>
 <link rel="stylesheet" href="/assets/session-delete-c180251d14f9221e.css" integrity="sha384-wojH/ANHPCyXiTF3rSVVPn9SXyjSMXEyQy9axftq5nuQenRNd2m/wfUw0ySVQwhr"/>
-<link rel="stylesheet" href="/assets/mobile-2064b195ae25097b.css" integrity="sha384-IM/L+Tgy2JgRcJKmy65D3KSZjvP9iO3DXObkXJNY8sBU6prN1nGWlHPVgjLPNpcS"/>
+<link rel="stylesheet" href="/assets/mobile-a51cf7a08117aa01.css" integrity="sha384-S8Us8xC58bN6uBQyDQyVmo29FfjYMG4G99zxP/dmuBeMH8byFzXNBtzzSsdjf4e9"/>
+
+
+
+
 
 
 
 
 <script type="module">
-import init, * as bindings from '/assets/strike-webui-d9a3656c98911e3d.js';
-const wasm = await init({ module_or_path: '/assets/strike-webui-d9a3656c98911e3d_bg.wasm' });
+import init, * as bindings from '/assets/strike-webui-a7275eac9360d33f.js';
+const wasm = await init({ module_or_path: '/assets/strike-webui-a7275eac9360d33f_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -46,6 +51,18 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 </script>
 <script src="/assets/register.js" defer></script>
 
-<link rel="modulepreload" href="/assets/strike-webui-d9a3656c98911e3d.js" crossorigin="anonymous" integrity="sha384-bsvosRf3TC8lG7XiZ0RAg3SjV9vOu9R1FL6tzrLUWk+UyoR/y95y6rNMzMUuGF58"><link rel="preload" href="/assets/strike-webui-d9a3656c98911e3d_bg.wasm" crossorigin="anonymous" integrity="sha384-KCqW7vYz217tblXY7o99QXBwJ+Wybe9PbqvX0BOrdrICZgdN85f9iuEmh29m2rw4" as="fetch" type="application/wasm"></head>
-<body></body>
+<link rel="modulepreload" href="/assets/strike-webui-a7275eac9360d33f.js" crossorigin="anonymous" integrity="sha384-Rvrqo2m/QJ5JJ7ZI7it37lY3oL2eeFGk4JjcyKlU+wfejJz8Vp/4Y0PGVSsVlkfF"><link rel="preload" href="/assets/strike-webui-a7275eac9360d33f_bg.wasm" crossorigin="anonymous" integrity="sha384-AX2YV8aBfDPFd5M0MoNtW9se0diTYfmbzXm8XtQlwk5T0F8tdAJbp7GEzEg441w6" as="fetch" type="application/wasm"></head>
+<body>
+<!-- Boot shell: shown until the cockpit mounts (main.rs removes it on
+     mount). If the gateway is unreachable and only the cached shell
+     loads, this is the honest state the user sees instead of a blank
+     page: shell only, no app data. Styled by .boot-shell in style.css
+     (the server CSP blocks inline styles). -->
+<div class="boot-shell">
+  <div class="boot-shell-card">
+    <p class="boot-shell-title">Strike</p>
+    <p class="boot-shell-note">Loading the cockpit shell… If this stays here, the gateway may be unreachable. Check that the gateway is running, then reload.</p>
+  </div>
+</div>
+</body>
 </html>

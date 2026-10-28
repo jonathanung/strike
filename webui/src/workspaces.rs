@@ -391,6 +391,10 @@ pub fn WorkspacePicker(
                         if tag == "input" || tag == "textarea" || tag == "select" {
                             if ev.key() == "Escape" {
                                 ev.prevent_default();
+                                // The dialog consumed this Escape; keep the
+                                // window handlers from also dismissing
+                                // whatever sits behind it (#1475, #1476).
+                                ev.stop_propagation();
                                 open.set(false);
                             }
                             return;
@@ -399,6 +403,7 @@ pub fn WorkspacePicker(
                         match ev.key().as_str() {
                             "Escape" => {
                                 ev.prevent_default();
+                                ev.stop_propagation();
                                 open.set(false);
                             }
                             "ArrowDown" => {

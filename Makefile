@@ -56,7 +56,7 @@ webui-build:
 	mkdir -p internal/frontend/server/static/assets
 	cp webui/dist/index.html webui/dist/sw.js webui/dist/manifest.webmanifest internal/frontend/server/static/
 	cp -r webui/dist/assets/. internal/frontend/server/static/assets/ 2>/dev/null || true
-	for f in webui/dist/*.wasm webui/dist/*.js webui/dist/*.css webui/dist/*.svg; do \
+	for f in webui/dist/*.wasm webui/dist/*.js webui/dist/*.css webui/dist/*.svg webui/dist/*.png; do \
 		[ -e "$$f" ] && cp "$$f" internal/frontend/server/static/assets/ || true; \
 	done
 
