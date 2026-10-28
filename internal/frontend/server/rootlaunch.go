@@ -27,6 +27,13 @@ func (h hubLauncher) StartRoot(ctx context.Context, req rootstart.Request) (root
 	if h.hub == nil {
 		return rootstart.Result{}, errors.New("root creation unavailable")
 	}
+	// Callers are HTTP handlers (hook, test, replay): their context is
+	// cancelled when the response returns, but the spawned root must live
+	// as long as the daemon/session. Detach cancellation while keeping
+	// any values the caller carried. (serve.go's unattended spawn also
+	// registers the engine on the daemon-lifetime context; this keeps the
+	// launcher safe under any hub wiring.)
+	ctx = context.WithoutCancel(ctx)
 	prompt := strings.TrimSpace(req.Prompt)
 	if prompt == "" {
 		return rootstart.Result{}, errors.New("prompt is empty")

@@ -23,6 +23,17 @@ materially affect the shipped product.
   row scrolls. A phone resume keeps the transcript and continues the live
   stream from the last SSE id. See [docs/mobile.md](docs/mobile.md)
   ([#1311](https://github.com/jonathanung/strike/issues/1311)).
+- **Web terminal** — the side panel opens a daemon PTY in the active
+  workspace. The stream is an authenticated websocket (cookie or a
+  single-use ticket) and stays on loopback unless
+  `strike serve --terminal-remote` is set with `--auth`. Plan mode
+  refuses a new shell. See [docs/gateway.md](docs/gateway.md).
+- **Apps** — the web client opens a launcher of daemon queues. GitHub triage
+  lists issues and pull requests for the repository in the serve working
+  directory, with comment, close, reopen, and a handoff that starts a live
+  session. The browser never sees a GitHub token. See
+  [docs/webui-apps.md](docs/webui-apps.md)
+  ([#1283](https://github.com/jonathanung/strike/issues/1283)).
 - **Session log contract for external ingesters** — `docs/session-format.md` specifies the JSONL envelope, `session.header`, every event type, and the sidecar. New sidecars repeat `sessionId` (the filename) and record the last selected `model`. Fork and import copy that model from the kept log (import falls back to the package sidecar when the log has no selection). Older sidecars still load. A golden fixture fails if a field or event type is renamed or removed ([#1274](https://github.com/jonathanung/strike/issues/1274)).
 - **Session status** — one vocabulary (`idle`, `running`, `waiting`,
   `blocked`, `failed`, `done`, `stopped`, `disconnected`) on the daemon and

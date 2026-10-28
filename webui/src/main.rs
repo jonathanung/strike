@@ -1,11 +1,13 @@
 //! Strike web client. The session list is live roots plus saved sessions.
-//! Activity, Files, Changes, Git, Worktrees, Memory, Knowledge, and
-//! Artifacts are the side panel. Side chat is a separate read-only drawer.
-//! Goals and Autopilot live in `goals`. Triggers are a separate page.
-//! Schedule is the clock (`schedule` module). The task runner is the
-//! Tasks view in `task_runner`.
+//! Activity, Files, Changes, Git, Worktrees, Memory, Knowledge,
+//! Artifacts, and Terminal are the side panel. Side chat is a separate
+//! read-only drawer. Goals and Autopilot live in `goals`. Apps is the
+//! queue surface in `apps`. Triggers are a separate page. Schedule is
+//! the clock (`schedule` module). The task runner is the Tasks view in
+//! `task_runner`.
 
 mod api;
+mod apps;
 mod approvals;
 mod approvals_ui;
 mod chat_mode;
@@ -31,6 +33,8 @@ mod session_delete;
 mod shell;
 mod side_chat;
 mod status;
+mod term;
+mod terminal;
 mod transcript;
 mod transcript_view;
 mod triggers;
@@ -702,6 +706,9 @@ fn App() -> impl IntoView {
     let token = RwSignal::new(gateway::initial_token());
     let status = RwSignal::new("connecting…".to_string());
     let mode = RwSignal::new("chat".to_string());
+    // The shell palette preventDefaults its keys. This signal stays false;
+    // AppsPane also bails when the event is already default_prevented.
+    let apps_palette_open = RwSignal::new(false);
     let workspaces = RwSignal::new(Vec::<Workspace>::new());
     let active_workspace = RwSignal::new(String::new());
     let gateway_open = RwSignal::new(false);
@@ -2956,6 +2963,18 @@ fn App() -> impl IntoView {
         <Show when=move || mode.get() == "triggers" fallback=move || ()>
             <triggers::TriggersPage base=base token=token status=status />
         </Show>
+        <Show when=move || mode.get() == "apps" fallback=move || ()>
+            <apps::AppsPane
+                base=base
+                token=token
+                status=status
+                palette_open=apps_palette_open
+                open_session=move |id: String| {
+                    mode.set("chat".into());
+                    activate_root(id);
+                }
+            />
+        </Show>
         <Show when=move || mode.get() == "chat">
             <div class=move || {
                 let mut class = chat_mode::shell_class(
@@ -3411,8 +3430,7 @@ fn App() -> impl IntoView {
                                         }
                                     }
                                 }
-                                                            on:paste=move |ev: web_sys::Event| {
-                                    let Some(ev) = ev.dyn_ref::<web_sys::ClipboardEvent>() else { return };
+                                on:paste=move |ev: web_sys::ClipboardEvent| {
                                     if let Some(data) = ev.clipboard_data() {
                                         if let Some(files) = data.files() {
                                             if files.length() > 0 {
@@ -3538,6 +3556,7 @@ fn App() -> impl IntoView {
                         <button class=move || if side_tab.get() == "memory" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("memory".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("memory")></span>"Memory"</button>
                         <button class=move || if side_tab.get() == "knowledge" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("knowledge".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("knowledge")></span>"Knowledge"</button>
                         <button class=move || if side_tab.get() == "artifacts" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("artifacts".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("artifacts")></span>"Artifacts"</button>
+                        <button class=move || if side_tab.get() == "terminal" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("terminal".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("terminal")></span>"Terminal"</button>
                     </div>
                     <Show when=move || side_tab.get() == "activity">
                     <div class="activity">
@@ -3780,6 +3799,14 @@ fn App() -> impl IntoView {
                             memory_mode=memory_mode
                             status=status
                             storage_rev=storage_rev
+                        />
+                    </Show>
+                    <Show when=move || side_tab.get() == "terminal">
+                        <terminal::TerminalPanel
+                            base=base
+                            token=token
+                            workspace_id=active_workspace
+                            session_id=active_root
                         />
                     </Show>
                 </aside>

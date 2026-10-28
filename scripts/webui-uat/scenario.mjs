@@ -7,7 +7,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { delay } from "./browser.mjs";
-import { DARK_TOKENS, LIGHT_TOKENS, missingLabels, tokenMismatch } from "./lib.mjs";
+import { DARK_TOKENS, LIGHT_TOKENS, tokenMismatch, waitForLabels } from "./lib.mjs";
 import { encodeVideo } from "./media.mjs";
 import { loadScenario, loadScenarios } from "./scenarios.mjs";
 import { createSession } from "./session.mjs";
@@ -19,8 +19,17 @@ const CHILD_NAME = "uat-child";
 
 const BOOT_EXPR = `(() => {
   const text = document.body ? document.body.innerText : "";
-  const acid = getComputedStyle(document.documentElement).getPropertyValue("--acid").trim();
+  const root = document.documentElement;
+  if (!root) return false;
+  const acid = getComputedStyle(root).getPropertyValue("--acid").trim();
   return text.includes("Run a command") && text.includes("Activity") && acid === "#7c3aed";
+})()`;
+
+// The shell fixture requires "Connected". The chip stays "Checking" until
+// /health returns, and the shell can paint before that fetch finishes.
+const CONNECTED_EXPR = `(() => {
+  const text = document.body ? document.body.innerText : "";
+  return text.includes("Connected") && !text.includes("Unreachable") && !text.includes("Could not reach the daemon");
 })()`;
 
 export async function runScenario({ page, baseURL, outDir, video, goldens, updateGoldens, controls, suite = "full" }) {
@@ -40,13 +49,49 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
   log("booted");
 
   if (cockpit) {
-    const text = await bodyText();
-    const tok = await tokens();
+    const online = await waitUntil(CONNECTED_EXPR, 15000, "gateway connected");
+    check(Boolean(online), "gateway did not reach Connected");
     const fixture = JSON.parse(
       await readFile(new URL("./fixtures/shell-dark.json", import.meta.url), "utf8"),
     );
-    const missing = missingLabels(text, fixture.mustInclude);
-    check(missing.length === 0, `shell labels missing: ${missing.join(", ")}`);
+    // Wait for the shell labels on condition instead of snapshotting the
+    // body text once. BOOT_EXPR above is satisfied by the pre-spawn stub
+    // ("Run a command" + "Activity" + theme token), before the live
+    // session has spawned and the shell has rendered states like
+    // "Connected" — the one-shot read raced that render and failed
+    // healthy builds ~1/3 of runs with `shell labels missing: Connected`.
+    // The waiter (lib.mjs waitForLabels, the polling pattern PR #1378
+    // established in scripts/webui-smoke.mjs) polls until every fixture
+    // label is present or the deadline passes; it does not weaken the
+    // check — labels that genuinely never appear still fail below, now
+    // with a shell snapshot so a real failure is distinguishable from
+    // the race. Deadline is env-tunable like webui-smoke's waits.
+    const shellWaitRaw = Number(process.env.STRIKE_SMOKE_WAIT_MS || 30000);
+    const shellWaitMs = Number.isFinite(shellWaitRaw) && shellWaitRaw > 0 ? shellWaitRaw : 30000;
+    const { text, missing } = await waitForLabels(bodyText, fixture.mustInclude, {
+      timeoutMs: shellWaitMs,
+      intervalMs: 200,
+    });
+    let shellDiag = "";
+    if (missing.length > 0) {
+      let snapshot = "";
+      try {
+        snapshot = JSON.stringify(
+          await page.evaluate(`(() => ({
+            url: location.href,
+            readyState: document.readyState,
+            shell: document.querySelector(".shell")?.className || "",
+            status: document.querySelector("[data-status]")?.getAttribute("data-status") || "",
+            views: [...document.querySelectorAll("[data-view]")].map((e) => e.getAttribute("data-view")),
+          }))()`),
+        );
+      } catch (err) {
+        snapshot = `snapshot failed: ${err?.message || err}`;
+      }
+      shellDiag = ` (after polling ${shellWaitMs}ms; shell snapshot: ${snapshot}; page text: ${String(text).slice(0, 600)})`;
+    }
+    check(missing.length === 0, `shell labels missing: ${missing.join(", ")}${shellDiag}`);
+    const tok = await tokens();
     const tokenMiss = tokenMismatch(tok, fixture.tokens);
     check(tokenMiss.length === 0, `dark tokens ${tokenMiss.join("; ")}`);
     for (const [sel, min] of Object.entries(fixture.selectors)) {
@@ -318,14 +363,7 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
       })()`);
       check(retried, "Retry was not clicked");
       if (retried) {
-        const backOnline = await waitUntil(
-          `(() => {
-            const text = document.body ? document.body.innerText : "";
-            return text.includes("Connected") && !text.includes("Unreachable") && !text.includes("Could not reach the daemon");
-          })()`,
-          10000,
-          "daemon reconnected",
-        );
+        const backOnline = await waitUntil(CONNECTED_EXPR, 10000, "daemon reconnected");
         check(Boolean(backOnline), "Retry did not restore Connected");
       }
       await shoot("shell-reconnect-ok", ["desk1024", "desk1440"]);

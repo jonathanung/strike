@@ -744,6 +744,27 @@ func TestLiveHubList(t *testing.T) {
 	}
 }
 
+func TestLiveClosedFiresOnClose(t *testing.T) {
+	live := NewLive("r1", "/a", nil, make(chan protocol.Op))
+	select {
+	case <-live.Closed():
+		t.Fatal("Closed() fired before Close")
+	default:
+	}
+	live.Close()
+	select {
+	case <-live.Closed():
+	default:
+		t.Fatal("Closed() did not fire after Close")
+	}
+	live.Close()
+	select {
+	case <-live.Closed():
+	default:
+		t.Fatal("second Close dropped the Closed signal")
+	}
+}
+
 func TestLiveHubClose(t *testing.T) {
 	live := NewLive("r1", "/a", nil, make(chan protocol.Op))
 	hub := NewLiveHub(nil, nil)

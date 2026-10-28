@@ -1978,13 +1978,30 @@ func (e *Engine) toolNames() string {
 // (shared with webfetch). Bash OS network stays all-or-nothing via NetworkEnabled;
 // per-host filtering is application-layer preflight only.
 func (e *Engine) bashSandboxPolicy() sandbox.Policy {
+	if e == nil {
+		return sandbox.Policy{}
+	}
+	return e.BashSandboxPolicy(e.opts.WorkDir)
+}
+
+// BashSandboxPolicy compiles the live permission layers for an interactive
+// shell whose workspace root is workDir. An empty workDir uses the engine
+// workdir. Deny paths expand under that directory, and plan/phase hard-denies
+// are included. Bash and the web terminal both use this helper.
+func (e *Engine) BashSandboxPolicy(workDir string) sandbox.Policy {
+	if e == nil {
+		return sandbox.Policy{}
+	}
+	if strings.TrimSpace(workDir) == "" {
+		workDir = e.opts.WorkDir
+	}
 	mode := sandbox.ResolveMode(e.opts.SandboxMode)
 	var p sandbox.Policy
 	if e.perms == nil {
 		// No permission service: host networking on (Policy.NoNetwork zero value).
-		p = sandbox.Policy{Mode: mode, WorkDir: e.opts.WorkDir}
+		p = sandbox.Policy{Mode: mode, WorkDir: workDir}
 	} else {
-		p = e.perms.CompileSandbox(mode, e.opts.WorkDir)
+		p = e.perms.CompileSandbox(mode, workDir)
 	}
 	p.NetworkAllow = sandbox.CloneNetworkAllow(e.opts.NetworkAllow)
 	p.AllowDegrade = e.opts.SandboxAllowDegrade

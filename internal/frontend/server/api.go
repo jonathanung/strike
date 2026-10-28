@@ -1857,6 +1857,9 @@ func (s *Server) handleRootClose(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, opErrorResponse{Error: fmt.Sprintf("root %q is not active", id)})
 		return
 	}
+	if s.terms != nil {
+		s.terms.EndSession(id)
+	}
 	s.opts.LiveHub.Remove(id)
 	writeJSON(w, http.StatusOK, opOKResponse{OK: true})
 }

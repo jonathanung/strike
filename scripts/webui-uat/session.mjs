@@ -69,14 +69,28 @@ export async function createSession({ page, outDir, video, goldens, updateGolden
   const waitUntil = async (expression, timeoutMs, label) => {
     const deadline = Date.now() + timeoutMs;
     let last = "";
+    let lastErr = "";
     while (Date.now() < deadline) {
-      last = await page.evaluate(expression);
+      try {
+        last = await page.evaluate(expression);
+      } catch (err) {
+        // A navigation or a page exception makes evaluate throw. Keep
+        // polling; a real miss still fails when the deadline hits.
+        lastErr = err instanceof Error ? err.message : String(err);
+        last = "";
+      }
       if (last) return last;
       await grabFrame();
       await delay(200);
     }
-    const text = await bodyText();
-    failures.push(`timed out waiting for ${label}; page starts: ${String(text).slice(0, 360)}`);
+    let text = "";
+    try {
+      text = await bodyText();
+    } catch (err) {
+      lastErr = lastErr || (err instanceof Error ? err.message : String(err));
+    }
+    const extra = lastErr ? `; last error: ${lastErr.slice(0, 240)}` : "";
+    failures.push(`timed out waiting for ${label}; page starts: ${String(text).slice(0, 360)}${extra}`);
     return null;
   };
 

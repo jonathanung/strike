@@ -89,6 +89,15 @@ try {
   if (missing !== 401 || wrong !== 401 || right !== 200 || schedules !== 200) {
     throw new Error(`auth statuses missing=${missing} wrong=${wrong} right=${right} schedules=${schedules}`);
   }
+  const termMissing = await status("/v1/terminals");
+  const termWrong = await status("/v1/terminals", { Authorization: "Bearer wrong" });
+  const termRight = await status("/v1/terminals", { Authorization: `Bearer ${token}` });
+  const termQuery = await status(`/v1/terminals?token=${token}`);
+  if (termMissing !== 401 || termWrong !== 401 || termRight !== 200 || termQuery !== 401) {
+    throw new Error(
+      `terminal auth statuses missing=${termMissing} wrong=${termWrong} right=${termRight} query=${termQuery}`,
+    );
+  }
   const healthBody = await (await fetch(`http://127.0.0.1:${port}/health`)).json();
   if (!healthBody.ok || !(healthBody.now > 0)) {
     throw new Error(`health missing now: ${JSON.stringify(healthBody)}`);
@@ -238,7 +247,6 @@ try {
   if (found.status !== 200 || !found.text.includes("beta-session") || !found.text.includes("content")) {
     throw new Error(`content search ${found.status} ${found.text.slice(0, 300)}`);
   }
-
   await writeFile(join(home, ".strike", "config.json"), '{"sandboxAllowDegrade":true}\n').catch(() => {});
 
   // GitHub ubuntu-latest already has a `google-chrome` on PATH, so a conditional
@@ -515,7 +523,7 @@ try {
   const title = boot.title || "";
   const statusId = boot.status || "";
   const chip = !!boot.chip;
-  const want = ["Run a command", "Strike", "Activity", "Files", "Changes", "Git", "Worktrees", "Memory", "Knowledge", "Artifacts", "Approval", "Gateways"];
+  const want = ["Run a command", "Strike", "Activity", "Files", "Changes", "Git", "Worktrees", "Memory", "Knowledge", "Artifacts", "Terminal", "Approval", "Gateways"];
   const missingText = want.filter((s) => !text.includes(s));
   if (missingText.length || acid !== "#7c3aed" || ground !== "#14131c" || !chip || !statusIds.includes(statusId) || !title.includes("Strike")) {
     throw new Error(
@@ -1003,8 +1011,7 @@ try {
   }
   const crumbs = await navbar(`(document.querySelector('[data-nav="crumbs"]') || {}).innerText || ""`);
   if (!String(crumbs).includes("Strike") || !String(crumbs).includes(">")) {
-    throw new Error(`breadcrumb missing text=${crumbs}`);
-  }
+    throw new Error(`breadcrumb missing text=${crumbs}`);  }
   await editorBrowserCheck({
     send,
     port,
@@ -2166,6 +2173,32 @@ try {
     throw new Error(`triggers page missing: ${triggersText.slice(0, 400)}`);
   }
 
+  await send("Runtime.evaluate", {
+    expression: `localStorage.setItem("strike.token", ${JSON.stringify(token)})`,
+    returnByValue: true,
+  });
+  await send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
+  await waitFor(
+    "apps nav button",
+    async () => {
+      const raw = await evaluate(`(() => {
+        const btn = document.querySelector('button[data-view="apps"]');
+        return JSON.stringify({
+          btn: !!btn,
+          label: btn ? btn.textContent.trim() : "",
+        });
+      })()`);
+      const p = JSON.parse(raw || "{}");
+      return { ok: !!(p.btn && p.label === "Apps"), ...p };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await evaluate(`document.querySelector('button[data-view="apps"]').click()`);
+  await waitFor(
+    "apps launcher GitHub triage",
+    textProbe((body) => body.includes("GitHub triage")),
+    { timeout: WAIT_MS, interval: 250 },
+  );
   console.log("webui-smoke ok");
 } catch (err) {
   console.error(String(err));
