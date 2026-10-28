@@ -14,6 +14,7 @@ import {
   phoneShotName,
   sideBySideFilter,
   tokenMismatch,
+  waitForLabels,
 } from "./lib.mjs";
 
 test("parseViewport accepts the review sizes", () => {
@@ -30,6 +31,41 @@ test("missingLabels and tokenMismatch", () => {
   ]);
   assert.equal(LIGHT_TOKENS.ground, "#ffffff");
   assert.ok(GOLDEN_MEAN_ABS_MAX > 0);
+});
+
+test("waitForLabels polls until the labels render", async () => {
+  // The pre-spawn stub satisfies early labels first; "Connected" only
+  // appears once the live session has spawned. A one-shot snapshot taken
+  // at the first state is the flake this waiter replaces.
+  const states = ["Run a command Activity", "Run a command Activity Connected"];
+  let calls = 0;
+  const { text, missing } = await waitForLabels(
+    async () => states[Math.min(calls++, states.length - 1)],
+    ["Run a command", "Connected"],
+    { timeoutMs: 1000, intervalMs: 1, sleep: async () => {} },
+  );
+  assert.deepEqual(missing, []);
+  assert.ok(text.includes("Connected"));
+  assert.equal(calls, 2);
+});
+
+test("waitForLabels still fails when a label genuinely never appears", async () => {
+  let t = 0;
+  const { text, missing } = await waitForLabels(
+    async () => "Run a command Activity",
+    ["Run a command", "Connected"],
+    {
+      timeoutMs: 100,
+      intervalMs: 40,
+      now: () => t,
+      sleep: async (ms) => {
+        t += ms;
+      },
+    },
+  );
+  assert.deepEqual(missing, ["Connected"]);
+  assert.equal(text, "Run a command Activity");
+  assert.ok(t >= 100);
 });
 
 test("meanAbsDiff", () => {

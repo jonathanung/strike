@@ -48,6 +48,37 @@ export function missingLabels(text, labels) {
   return labels.filter((label) => !body.includes(label));
 }
 
+// Poll getText() until every label appears in the page text or the
+// deadline passes, and report the last text seen plus whatever is still
+// missing. The shell renders in stages — the boot stub satisfies a
+// "Run a command" probe before the live session has spawned and the
+// shell has painted states like "Connected" — so a one-shot snapshot
+// taken right after boot races that render and intermittently reports
+// labels missing on a healthy build. This waiter never weakens the
+// check: if the labels genuinely never appear it returns them in
+// `missing` after the full deadline, with the final page text for
+// diagnostics. `sleep`/`now` are injectable for tests.
+export async function waitForLabels(
+  getText,
+  labels,
+  { timeoutMs = 30000, intervalMs = 200, sleep, now } = {},
+) {
+  const pause =
+    sleep || ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+  const clock = now || Date.now;
+  const deadline = clock() + timeoutMs;
+  let text = "";
+  let missing = [...labels];
+  for (;;) {
+    text = String((await getText()) || "");
+    missing = missingLabels(text, labels);
+    if (missing.length === 0) return { text, missing };
+    const remaining = deadline - clock();
+    if (remaining <= 0) return { text, missing };
+    await pause(Math.min(intervalMs, remaining));
+  }
+}
+
 export function tokenMismatch(actual, expected) {
   const out = [];
   for (const key of Object.keys(expected)) {
