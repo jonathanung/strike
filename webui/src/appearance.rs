@@ -152,10 +152,6 @@ pub fn download(filename: &str, body: &str) {
     }
 }
 
-pub fn settings_icon() -> &'static str {
-    r#"<svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v1.6M8 12.6v1.6M1.8 8h1.6M12.6 8h1.6M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M12.6 3.4l-1.1 1.1M4.5 11.5l-1.1 1.1"/></svg>"#
-}
-
 #[component]
 pub fn ThemeChoices(
     group: &'static str,

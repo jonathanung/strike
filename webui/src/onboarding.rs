@@ -8,6 +8,7 @@ use serde_json::Value;
 use crate::api::{get_json, patch_json};
 use crate::appearance::ThemeChoices;
 use crate::localfiles::{auth_sentence, fetch_local_files, FileList, LocalFiles};
+use crate::providers::ProvidersPage;
 
 #[component]
 pub fn OnboardingCard(
@@ -147,7 +148,7 @@ pub fn OnboardingCard(
                     </Show>
                     <h3 class="panel-title">"Providers"</h3>
                     <p class="hint">"This is the Providers page. Keys stay on the daemon and are not copied into this browser."</p>
-                    <providers::ProvidersPage base=base token=token />
+                    <ProvidersPage base=base token=token />
                     <Show when=move || theme_ready.get() fallback=move || view! { <p class="hint">"Checking the theme saved in daemon config…"</p> }>
                         <ThemeChoices group="onboarding-accent" current=theme on_pick=pick />
                         <Show when=move || {

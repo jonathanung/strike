@@ -193,10 +193,11 @@ type size, and density stay in the browser (`strike.scheme`, `strike.font`,
 `{"theme": ...}` into `~/.strike/config` when the user picked a swatch, or
 when the settings read succeeded and the stored id is empty or already that
 accent. A custom theme id is left in place. A failed settings read does not
-overwrite it.
+overwrite it. The card embeds the Providers page instead of a second
+provider form.
 
-Settings is a page in the shell (the header gear, Ctrl/Cmd+comma, or the
-command palette). `?` lists shortcuts. It shows the saved model,
+Settings is a Menu row, a command-palette command, and Ctrl/Cmd+comma.
+`?` lists shortcuts. It shows the saved model,
 permission mode, and notify dial from `GET /v1/settings` and does not edit
 them. Those links set the location hash for the streams that own the pages:
 
@@ -206,6 +207,7 @@ them. Those links set the location hash for the streams that own the pages:
 | `#approvals` | #1266, and the link also opens Chat, where the approval chip lives |
 | `#notifications` | #1264 |
 | `#gateway` | #1265, and the link also opens Daemon, which holds the token today |
+| `#providers` | the Providers page, also linked from the Menu |
 
 `strike serve` does not call `host.Onboarding`. The TUI wizard remains
 `~/.strike/onboarding.json`, and that file is not in the daemon read list.
