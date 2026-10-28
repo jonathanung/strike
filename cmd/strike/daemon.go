@@ -15,10 +15,10 @@ import (
 	"github.com/jonathanung/strike/internal/trust/usageaudit"
 )
 
-const daemonUsage = `Run strike as a per-user background daemon (systemd user service).
+const daemonUsage = `Run strike as a per-user background daemon.
 
 Usage:
-  strike daemon install [--addr <host:port>] [--allow-private-bind]
+  strike daemon install [--addr <host:port>] [--allow-private-bind] [--start]
   strike daemon uninstall
   strike daemon status
   strike daemon token
@@ -26,10 +26,16 @@ Usage:
   strike daemon grant [--ttl 15m] [--base http://127.0.0.1:8787]
   strike daemon revoke [--base http://127.0.0.1:8787]
 
-install writes ~/.config/systemd/user/strike-daemon.service and a stable
-0600 API token at ~/.strike/daemon.token, then prints the systemctl
-commands to enable it. The daemon is "strike serve --auth --token-file";
-the web UI connects with the token ("strike daemon token" prints it).
+install writes a service definition and a stable 0600 API token at
+~/.strike/daemon.token. Linux writes
+$XDG_CONFIG_HOME/systemd/user/strike-daemon.service, or
+~/.config/systemd/user/strike-daemon.service when XDG_CONFIG_HOME is unset.
+macOS writes ~/Library/LaunchAgents/ca.jonathanung.strike-daemon.plist
+(launchd). Windows and other systems are unsupported; run strike serve
+manually (WSL2 is supported). --start enables and starts the service.
+Without --start, install prints the platform commands and recommends
+--start. The daemon is "strike serve --auth --token-file"; the web UI
+connects with the token ("strike daemon token" prints it).
 logout replaces that file with a new token, drops short-lived grants, and
 revokes paired browsers on the next /v1 request. A daemon started with
 --token-file loads the new value without a restart; one started with
@@ -84,30 +90,6 @@ func rotateDaemonToken(path string) (string, error) {
 	return tok, nil
 }
 
-func systemdUserUnitPath() (string, error) {
-	cfg, err := os.UserConfigDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(cfg, "systemd", "user", "strike-daemon.service"), nil
-}
-
-// renderSystemdUnit builds the user unit. exe is the absolute strike path.
-func renderSystemdUnit(exe, addr string, allowPrivateBind bool) string {
-	exec := fmt.Sprintf("%s serve --auth --token-file %s --addr %s", exe, daemonTokenPath(), addr)
-	if allowPrivateBind {
-		exec += " --allow-private-bind"
-	}
-	return "[Unit]\n" +
-		"Description=Strike daemon (web UI + engine API)\n" +
-		"After=network.target\n\n" +
-		"[Service]\n" +
-		"ExecStart=" + exec + "\n" +
-		"Restart=on-failure\n\n" +
-		"[Install]\n" +
-		"WantedBy=default.target\n"
-}
-
 func runDaemonCLI(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		fmt.Fprintln(stdout, daemonUsage)
@@ -117,29 +99,9 @@ func runDaemonCLI(args []string, stdout, stderr io.Writer) int {
 	case "install":
 		return daemonInstall(args[1:], stdout, stderr)
 	case "uninstall":
-		unit, err := systemdUserUnitPath()
-		if err != nil {
-			fmt.Fprintln(stderr, "strike:", err)
-			return 1
-		}
-		if err := os.Remove(unit); err != nil && !errors.Is(err, os.ErrNotExist) {
-			fmt.Fprintln(stderr, "strike:", err)
-			return 1
-		}
-		fmt.Fprintf(stdout, "Removed %s\nRun: systemctl --user daemon-reload\n", unit)
-		return 0
+		return daemonUninstall(stdout, stderr)
 	case "status":
-		unit, err := systemdUserUnitPath()
-		if err != nil {
-			fmt.Fprintln(stderr, "strike:", err)
-			return 1
-		}
-		if _, err := os.Stat(unit); errors.Is(err, os.ErrNotExist) {
-			fmt.Fprintln(stdout, "not installed (run: strike daemon install)")
-			return 0
-		}
-		fmt.Fprintf(stdout, "installed: %s\nCheck: systemctl --user status strike-daemon\n", unit)
-		return 0
+		return daemonStatus(stdout, stderr)
 	case "token":
 		tok, _, err := loadOrMintTokenFile(daemonTokenPath())
 		if err != nil {
@@ -173,53 +135,17 @@ func runDaemonCLI(args []string, stdout, stderr io.Writer) int {
 }
 
 func daemonInstall(args []string, stdout, stderr io.Writer) int {
-	addr := "127.0.0.1:8787"
-	allowPrivate := false
-	for i := 0; i < len(args); i++ {
-		switch {
-		case args[i] == "--allow-private-bind":
-			allowPrivate = true
-		case args[i] == "--addr" && i+1 < len(args):
-			i++
-			addr = args[i]
-		case strings.HasPrefix(args[i], "--addr="):
-			addr = strings.TrimPrefix(args[i], "--addr=")
-		default:
-			fmt.Fprintf(stderr, "strike: unknown daemon install flag %q\n", args[i])
-			return 2
-		}
-	}
-	if _, err := server.ResolveDaemonBindAddr(addr, allowPrivate); err != nil {
+	opts, code, err := parseDaemonInstallArgs(args)
+	if err != nil {
 		fmt.Fprintln(stderr, "strike:", err)
-		return 2
+		return code
 	}
-	exe, err := os.Executable()
+	host, err := currentDaemonHost()
 	if err != nil {
 		fmt.Fprintln(stderr, "strike:", err)
 		return 1
 	}
-	if abs, err := filepath.Abs(exe); err == nil {
-		exe = abs
-	}
-	if _, _, err := loadOrMintTokenFile(daemonTokenPath()); err != nil {
-		fmt.Fprintln(stderr, "strike:", err)
-		return 1
-	}
-	unit, err := systemdUserUnitPath()
-	if err != nil {
-		fmt.Fprintln(stderr, "strike:", err)
-		return 1
-	}
-	if err := os.MkdirAll(filepath.Dir(unit), 0o755); err != nil {
-		fmt.Fprintln(stderr, "strike:", err)
-		return 1
-	}
-	if err := os.WriteFile(unit, []byte(renderSystemdUnit(exe, addr, allowPrivate)), 0o644); err != nil {
-		fmt.Fprintln(stderr, "strike:", err)
-		return 1
-	}
-	fmt.Fprintf(stdout, "Wrote %s\nToken: %s (0600; print with: strike daemon token)\nEnable:\n  systemctl --user daemon-reload\n  systemctl --user enable --now strike-daemon\nThen open http://%s/ in a browser.\n", unit, daemonTokenPath(), addr)
-	return 0
+	return installDaemon(host, opts, nil, stdout, stderr)
 }
 
 func daemonGrant(args []string, stdout, stderr io.Writer) int {

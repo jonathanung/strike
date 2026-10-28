@@ -12,9 +12,14 @@ or Tailscale address is accepted only with both `--allow-private-bind` and
 `--auth`. There is no flag that opens a public port, and there is no TLS
 terminator in the process.
 
-`strike daemon install` writes a user unit that runs
-`strike serve --auth --token-file ~/.strike/daemon.token`. Install without
-`--addr` stays on loopback.
+`strike daemon install` writes a per-user service that runs
+`strike serve --auth --token-file ~/.strike/daemon.token`.
+Linux installs a systemd user unit (`~/.config/systemd/user/`, or
+`$XDG_CONFIG_HOME`). macOS installs a LaunchAgent at
+`~/Library/LaunchAgents/ca.jonathanung.strike-daemon.plist`.
+`--start` enables it (`systemctl --user` or `launchctl`). Install without
+`--addr` stays on loopback. Native Windows is unsupported; use WSL2 or
+`strike serve`.
 
 ## Authentication
 

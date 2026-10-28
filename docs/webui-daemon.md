@@ -11,8 +11,12 @@ Status: walking skeleton on branch `worktree-rust-webui-daemon`. Not merged.
   through the existing daemon API (`/health`, `/v1/*`, `/v1/ws`, `/v1/ops`,
   protocol Ops/Events). No engine rewrite. The bind, token, and remote-access
   rules are [gateway.md](gateway.md).
-- Strike runs as a per-user daemon: `strike daemon install` writes a systemd
-  user unit running `strike serve --auth --token-file ~/.strike/daemon.token`.
+- Strike runs as a per-user daemon: `strike daemon install` writes a service
+  that runs `strike serve --auth --token-file ~/.strike/daemon.token`.
+  Linux writes a systemd user unit at `~/.config/systemd/user/` (or
+  `$XDG_CONFIG_HOME`). macOS writes
+  `~/Library/LaunchAgents/ca.jonathanung.strike-daemon.plist`. `--start`
+  loads it. Native Windows is unsupported; run `strike serve` in WSL2.
 - Remotes are just other daemons you own. Bind stays loopback by default;
   `--allow-private-bind` (requires `--auth`) additionally allows RFC1918 and
   CGNAT/Tailscale (100.64.0.0/10) addresses. Public binds are rejected; there
@@ -55,7 +59,7 @@ Status: walking skeleton on branch `worktree-rust-webui-daemon`. Not merged.
   resolves outside the workspace and its extra roots. An unbound session
   (empty registry, or a launch directory that matched nothing) does not
   run that check.
-- `strike daemon install|uninstall|status|token` + systemd user unit.
+- `strike daemon install|uninstall|status|token` (systemd user unit on Linux, LaunchAgent on macOS).
 - `strike serve --token-file` (stable 0600 token, minted once) and
   `--allow-private-bind`.
 - `webui/`: Leptos client. The shell is a session list, a transcript, and
@@ -159,13 +163,18 @@ Status: walking skeleton on branch `worktree-rust-webui-daemon`. Not merged.
 ```sh
 nix develop -c make webui-build   # flake provides Go + Rust (fenix, wasm32) + trunk
 nix develop -c make build
-./strike daemon install     # or --addr <tailnet-ip>:8787 --allow-private-bind
-systemctl --user enable --now strike-daemon
+./strike daemon install --start   # or --addr <tailnet-ip>:8787 --allow-private-bind
+# Linux, without --start:
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now strike-daemon
+# macOS, without --start:
+#   launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ca.jonathanung.strike-daemon.plist
+#   launchctl kickstart -k gui/$(id -u)/ca.jonathanung.strike-daemon
 ./strike daemon token       # paste into the UI
 # open http://127.0.0.1:8787/ (or the tailnet URL) on desktop or phone
 ```
 
-Foreground instead of systemd: `./strike serve --auth --token-file ~/.strike/daemon.token`.
+Foreground instead of a service manager: `./strike serve --auth --token-file ~/.strike/daemon.token`.
 
 ## Several workspaces, one daemon
 

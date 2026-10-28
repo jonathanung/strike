@@ -290,3 +290,6 @@ jobs:
         run: |
           go test -race ./internal/persist/telemetry/...
           go -C harness test -race ./sandbox/...
+          # stdlib-only LaunchAgent/systemd renderer. Cheap on macos-latest
+          # and compiled by the darwin toolchain (daemon install, #1513).
+          go test -race -count=1 ./internal/daemon/unit/
