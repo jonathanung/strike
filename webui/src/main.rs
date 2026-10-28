@@ -3826,4 +3826,14 @@ fn DaemonPane(
 
 fn main() {
     leptos::mount::mount_to_body(App);
+    // The cockpit mounted, so the static boot shell from index.html has
+    // done its job. mount_to_body appends rather than replacing the body,
+    // so remove the placeholder explicitly; if the wasm never runs, the
+    // placeholder stays and the user gets the honest shell state instead
+    // of a blank page.
+    if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
+        if let Some(el) = doc.query_selector(".boot-shell").ok().flatten() {
+            el.remove();
+        }
+    }
 }

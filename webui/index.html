@@ -9,6 +9,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="icon" href="/assets/icon.svg">
+<link rel="apple-touch-icon" href="/assets/icon-180.png">
 <title>Strike</title>
 <script>
 (function(){try{var ok={strike:1,nord:1,dracula:1,gruvbox:1,monokai:1,"tokyo-night":1,catppuccin:1};var t=localStorage.getItem("strike.theme")||"strike";var s=localStorage.getItem("strike.scheme")||"dark";if(!ok[t])t="strike";if(s!=="light")s="dark";var lay=localStorage.getItem("strike.layout")||"cockpit";if(lay!=="conversation")lay="cockpit";var el=document.documentElement;el.setAttribute("data-theme",t);el.setAttribute("data-scheme",s);el.setAttribute("data-layout",lay);}catch(e){}})();
@@ -30,9 +31,25 @@
 <link data-trunk rel="copy-file" href="sw.js">
 <link data-trunk rel="copy-file" href="manifest.webmanifest">
 <link data-trunk rel="copy-file" href="icon.svg">
+<link data-trunk rel="copy-file" href="icon-192.png">
+<link data-trunk rel="copy-file" href="icon-512.png">
+<link data-trunk rel="copy-file" href="icon-maskable-512.png">
+<link data-trunk rel="copy-file" href="icon-180.png">
 <link data-trunk rel="rust" data-reference-types>
 <script src="/assets/register.js" defer></script>
 <link data-trunk rel="copy-file" href="register.js">
 </head>
-<body></body>
+<body>
+<!-- Boot shell: shown until the cockpit mounts (main.rs removes it on
+     mount). If the gateway is unreachable and only the cached shell
+     loads, this is the honest state the user sees instead of a blank
+     page: shell only, no app data. Styled by .boot-shell in style.css
+     (the server CSP blocks inline styles). -->
+<div class="boot-shell">
+  <div class="boot-shell-card">
+    <p class="boot-shell-title">Strike</p>
+    <p class="boot-shell-note">Loading the cockpit shell… If this stays here, the gateway may be unreachable. Check that the gateway is running, then reload.</p>
+  </div>
+</div>
+</body>
 </html>

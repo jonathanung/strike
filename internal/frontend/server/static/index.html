@@ -9,12 +9,13 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="icon" href="/assets/icon.svg">
+<link rel="apple-touch-icon" href="/assets/icon-180.png">
 <title>Strike</title>
 <script>
 (function(){try{var ok={strike:1,nord:1,dracula:1,gruvbox:1,monokai:1,"tokyo-night":1,catppuccin:1};var t=localStorage.getItem("strike.theme")||"strike";var s=localStorage.getItem("strike.scheme")||"dark";if(!ok[t])t="strike";if(s!=="light")s="dark";var lay=localStorage.getItem("strike.layout")||"cockpit";if(lay!=="conversation")lay="cockpit";var el=document.documentElement;el.setAttribute("data-theme",t);el.setAttribute("data-scheme",s);el.setAttribute("data-layout",lay);}catch(e){}})();
 </script>
 <link rel="manifest" href="/manifest.webmanifest">
-<link rel="stylesheet" href="/assets/style-cd71aad495385a7d.css" integrity="sha384-sQXEwpPvBfLUsU1r1sgKjV7kFhopbwvBDEvTMaJtoXJD8yIVgNYCAwOgZdnlyjTG"/>
+<link rel="stylesheet" href="/assets/style-d1dfd7cf48a05fe8.css" integrity="sha384-0rJ5rGubpQ3jsggAh5wCokFz8zZv3WEk+Gn6RWidXtx5qyJ7pcxV/hmy6ageTqIe"/>
 <link rel="stylesheet" href="/assets/git-ab00987af846b578.css" integrity="sha384-5Hpn8MQrQRdwz4yjyvf64ruljt3hOlWj2g2jpuRif8cb3NVZD+zCMUpqW7b87XnA"/>
 <link rel="stylesheet" href="/assets/storage-c32d584bc182ee77.css" integrity="sha384-XNDaz3yqOR2+uEfPi+eY+9Mzja2F/5vYI647yiPLuy4KvGHAOICyrdh0pqlWr9Wn"/>
 <link rel="stylesheet" href="/assets/navbar-4aaaf28db500eacb.css" integrity="sha384-5TOOsJOEELXhQX9eaCeYAdolP2MTbzKY2Rs54jkUpbigS3rQ+1uG62wvDZTASCfR"/>
@@ -31,9 +32,13 @@
 
 
 
+
+
+
+
 <script type="module">
-import init, * as bindings from '/assets/strike-webui-12eebc1e23825b0d.js';
-const wasm = await init({ module_or_path: '/assets/strike-webui-12eebc1e23825b0d_bg.wasm' });
+import init, * as bindings from '/assets/strike-webui-b251af2d8cecdd85.js';
+const wasm = await init({ module_or_path: '/assets/strike-webui-b251af2d8cecdd85_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -44,6 +49,18 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 </script>
 <script src="/assets/register.js" defer></script>
 
-<link rel="modulepreload" href="/assets/strike-webui-12eebc1e23825b0d.js" crossorigin="anonymous" integrity="sha384-LBgBst9Slgur1gwYeRI+w73M5oyahDw6kf5pGKuOvMAizncbyYL7ym4Eehai2uKU"><link rel="preload" href="/assets/strike-webui-12eebc1e23825b0d_bg.wasm" crossorigin="anonymous" integrity="sha384-NLb2hYe5eYHq/Z2VNODWMyOPA8DkeYsOKUHztGssV3fnZFyhLcRyLA2+gx6DolkP" as="fetch" type="application/wasm"></head>
-<body></body>
+<link rel="modulepreload" href="/assets/strike-webui-b251af2d8cecdd85.js" crossorigin="anonymous" integrity="sha384-LBgBst9Slgur1gwYeRI+w73M5oyahDw6kf5pGKuOvMAizncbyYL7ym4Eehai2uKU"><link rel="preload" href="/assets/strike-webui-b251af2d8cecdd85_bg.wasm" crossorigin="anonymous" integrity="sha384-Fi0Os+T82Lz/2vguXhKJzxTtB5pzGOeh9kp9uwW8EIZYmAjl8IWSeuXsl/JWqArh" as="fetch" type="application/wasm"></head>
+<body>
+<!-- Boot shell: shown until the cockpit mounts (main.rs removes it on
+     mount). If the gateway is unreachable and only the cached shell
+     loads, this is the honest state the user sees instead of a blank
+     page: shell only, no app data. Styled by .boot-shell in style.css
+     (the server CSP blocks inline styles). -->
+<div class="boot-shell">
+  <div class="boot-shell-card">
+    <p class="boot-shell-title">Strike</p>
+    <p class="boot-shell-note">Loading the cockpit shell… If this stays here, the gateway may be unreachable. Check that the gateway is running, then reload.</p>
+  </div>
+</div>
+</body>
 </html>

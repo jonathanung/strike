@@ -1,6 +1,15 @@
 // App shell only. API traffic (/v1/, /health) is never cached.
-const CACHE = "strike-shell-v2";
-const SHELL = ["/", "/manifest.webmanifest", "/assets/icon.svg", "/assets/register.js"];
+const CACHE = "strike-shell-v3";
+const SHELL = [
+  "/",
+  "/manifest.webmanifest",
+  "/assets/icon.svg",
+  "/assets/icon-192.png",
+  "/assets/icon-512.png",
+  "/assets/icon-maskable-512.png",
+  "/assets/icon-180.png",
+  "/assets/register.js",
+];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
