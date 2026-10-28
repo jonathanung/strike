@@ -86,6 +86,29 @@ export async function scenario(ctx) {
     check(false, `skill save did not land: ${extra}`);
   }
 
+  await page.evaluate(`document.querySelector('[data-cz-item="uat-note"]')?.click()`);
+  const removeReady = await waitUntil(
+    `!!document.querySelector("[data-cz-remove]")`,
+    8000,
+    "remove button",
+  );
+  check(Boolean(removeReady), "Remove was not offered for the saved skill");
+  await page.evaluate(`document.querySelector("[data-cz-remove]")?.click()`);
+  const armed = await waitUntil(
+    `!!document.querySelector("[data-cz-confirm-remove]") && !!document.querySelector('[data-cz-item="uat-note"]')`,
+    4000,
+    "confirm remove",
+  );
+  check(Boolean(armed), "Remove deleted the skill before confirm");
+  await shoot("customize-confirm-remove", ["desk1440"]);
+  await page.evaluate(`document.querySelector("[data-cz-cancel-remove]")?.click()`);
+  const stillThere = await waitUntil(
+    `!!document.querySelector('[data-cz-item="uat-note"]') && !document.querySelector("[data-cz-confirm-remove]")`,
+    4000,
+    "cancel remove",
+  );
+  check(Boolean(stillThere), "Cancel did not keep the skill");
+
   await page.evaluate(`(() => {
     const tabs = document.querySelector('[aria-label="Customize sections"]');
     if (!tabs) return false;
