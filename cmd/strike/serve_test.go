@@ -65,6 +65,15 @@ func TestParseServeArgs(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "--expose was removed") {
 		t.Fatalf("legacy --expose err = %v", err)
 	}
+	_, err = parseServeArgs([]string{"--terminal-remote"})
+	if err == nil || !strings.Contains(err.Error(), "--terminal-remote requires --auth") {
+		t.Fatalf("terminal remote without auth err = %v", err)
+	}
+	opts, err = parseServeArgs([]string{"--auth", "--token", "t", "--terminal-remote"})
+	if err != nil || !opts.terminalRemote {
+		t.Fatalf("terminal remote with auth = %+v err %v", opts, err)
+	}
+
 	_, err = parseServeArgs([]string{"--allow-cidr", "10.0.0.0/8"})
 	if err == nil || !strings.Contains(err.Error(), "--expose was removed") {
 		t.Fatalf("legacy --allow-cidr err = %v", err)
@@ -162,8 +171,13 @@ func TestPrintServeBanner(t *testing.T) {
 	if !strings.Contains(out, "tok123") {
 		t.Fatalf("in-memory mint must still show the only copy: %s", out)
 	}
-	if strings.Contains(out, "?token=") {
-		t.Fatalf("banner put the token in a URL: %s", out)
+	if strings.Contains(out, "?token=") || strings.Contains(out, "attach?token=") {
+		t.Fatalf("banner put the daemon token in a URL: %s", out)
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "cockpit:") && strings.Contains(line, "tok123") {
+			t.Fatalf("cockpit line contains the token: %s", line)
+		}
 	}
 	if !strings.Contains(out, "ssh -L") || !strings.Contains(out, "strike connect") {
 		t.Fatalf("missing remote hint: %s", out)

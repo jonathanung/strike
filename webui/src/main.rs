@@ -1,18 +1,23 @@
 //! Strike web client. The session list is live roots plus saved sessions.
-//! Activity, Files, Changes, Git, Worktrees, Memory, Knowledge, and
-//! Artifacts are the side panel. Side chat is a separate read-only drawer.
-//! Goals and Autopilot live in `goals`. Schedule and the task runner are
-//! not drawn here; see docs/webui-planned.md.
+//! Activity, Files, Changes, Git, Worktrees, Memory, Knowledge,
+//! Artifacts, and Terminal are the side panel. Side chat is a separate
+//! read-only drawer. Goals and Autopilot live in `goals`. Apps is the
+//! queue surface in `apps`. Triggers are a separate page. Schedule is
+//! the clock (`schedule` module). The task runner is the Tasks view in
+//! `task_runner`.
 
 mod api;
+mod apps;
 mod approvals;
 mod approvals_ui;
 mod chat_mode;
 mod composer_triggers;
 mod editor;
 mod gateway;
+mod gateway_qr;
 mod git;
 mod goals;
+mod schedule;
 mod model;
 mod notify;
 mod model_menu;
@@ -20,14 +25,18 @@ mod model_menu_view;
 mod session_list;
 mod session_panel;
 mod storage;
+mod task_runner;
 mod transcript_find;
 mod usage_audit;
 mod session_delete;
 mod shell;
 mod side_chat;
 mod status;
+mod term;
+mod terminal;
 mod transcript;
 mod transcript_view;
+mod triggers;
 mod turn_elapsed;
 mod workspaces;
 
@@ -449,51 +458,6 @@ fn prefix_composer_shell(ui: &TriggerSignals) {
     sync_composer_trigger(next, cursor, ui);
 }
 
-fn reply_permission(
-    request_id: String,
-    decision: String,
-    transcript: RwSignal<Transcript>,
-    base: RwSignal<String>,
-    token: RwSignal<String>,
-    active_root: RwSignal<String>,
-    status: RwSignal<String>,
-) {
-    let kept = transcript.with_untracked(|t| {
-        t.asks
-            .iter()
-            .find(|ask| ask.request_id == request_id)
-            .cloned()
-    });
-    let Some(kept) = kept else {
-        return;
-    };
-    let reply_id = kept.request_id.clone();
-    transcript.update(|t| t.asks.retain(|ask| ask.request_id != reply_id));
-    let (b, t, root) = (
-        base.get_untracked(),
-        token.get_untracked(),
-        active_root.get_untracked(),
-    );
-    spawn_local(async move {
-        if let Err(e) = post_op(
-            &b,
-            &t,
-            &root,
-            "permission.reply",
-            serde_json::json!({"requestId": reply_id, "decision": decision}),
-        )
-        .await
-        {
-            status.set(format!("approval failed: {e}"));
-            transcript.update(|t| {
-                if !t.asks.iter().any(|ask| ask.request_id == kept.request_id) {
-                    t.asks.push(kept);
-                }
-            });
-        }
-    });
-}
-
 fn note_live_title(
     sessions: RwSignal<Vec<SessionItem>>,
     roots: RwSignal<Vec<RootSummary>>,
@@ -740,9 +704,13 @@ fn App() -> impl IntoView {
     let token = RwSignal::new(gateway::initial_token());
     let status = RwSignal::new("connecting…".to_string());
     let mode = RwSignal::new("chat".to_string());
+    // The shell palette preventDefaults its keys. This signal stays false;
+    // AppsPane also bails when the event is already default_prevented.
+    let apps_palette_open = RwSignal::new(false);
     let workspaces = RwSignal::new(Vec::<Workspace>::new());
     let active_workspace = RwSignal::new(String::new());
     let gateway_open = RwSignal::new(false);
+    let phone_open = RwSignal::new(false);
     let gateway_detail = RwSignal::new(String::new());
     let gateway_profiles = RwSignal::new(gateway::load_profiles());
     let gateway_selected = RwSignal::new("this".to_string());
@@ -2219,7 +2187,8 @@ fn App() -> impl IntoView {
                 || memory_menu.get_untracked()
                 || plus_open.get_untracked()
                 || ac_open.get_untracked()
-                || side_open.get_untracked();
+                || side_open.get_untracked()
+                || phone_open.get_untracked();
             mode_menu.set(false);
             model_menu.set(false);
             memory_menu.set(false);
@@ -2227,6 +2196,7 @@ fn App() -> impl IntoView {
             ac_open.set(false);
             ac_force.set(String::new());
             side_open.set(false);
+            phone_open.set(false);
             sessions_drawer.set(false);
             panel_drawer.set(false);
             if !menu && !doc_editing.get_untracked() && !doc_path.get_untracked().is_empty() {
@@ -2307,6 +2277,20 @@ fn App() -> impl IntoView {
         selected: gateway_selected,
         refresh: Rc::new(move || refresh_meta()),
     });
+    crate::gateway_qr::set_host(crate::gateway_qr::PhoneHost {
+        base,
+        token,
+        status,
+        open: phone_open,
+        refresh: Rc::new(move || refresh_meta()),
+    });
+    shell::bind(
+        "phone.open",
+        Rc::new(move |_args: &str| {
+            phone_open.set(true);
+            Ok(())
+        }),
+    );
 
     // Storage palette performers (#1271). The commands are registered at
     // boot by src/shell/contrib/storage.rs and dispatch these ids; only
@@ -2458,6 +2442,42 @@ fn App() -> impl IntoView {
         let _ = w.add_event_listener_with_callback("keydown", on_goals_key.as_ref().unchecked_ref());
     }
     on_goals_key.forget();
+
+    // Alt+C opens Schedule (the clock). The original PR shipped Alt+S,
+    // but side chat (#1282) landed first and owns Alt+S on main, so the
+    // reland takes the free Alt+C — the same resolution the gateway
+    // switcher used when it took Alt+W. Like Alt+G, this stays here
+    // because only the page can set `mode`; the shortcut is listed in
+    // the overlay via src/shell/contrib/scheduler.rs. Schedule unmounts
+    // the document pane, so an edit in progress or typing in a field
+    // must keep the key (the original PR's guard).
+    let on_schedule_key =
+        Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |ev: web_sys::KeyboardEvent| {
+            if ev.alt_key()
+                && !ev.meta_key()
+                && !ev.ctrl_key()
+                && ev.key().eq_ignore_ascii_case("c")
+            {
+                let typing = ev
+                    .target()
+                    .map(|t| {
+                        t.dyn_ref::<web_sys::Element>()
+                            .map(|el| {
+                                matches!(el.tag_name().as_str(), "INPUT" | "TEXTAREA" | "SELECT")
+                            })
+                            .unwrap_or(false)
+                    })
+                    .unwrap_or(false);
+                if !typing && !doc_editing.get_untracked() {
+                    ev.prevent_default();
+                    mode.set("schedule".into());
+                }
+            }
+        });
+    if let Some(w) = web_sys::window() {
+        let _ = w.add_event_listener_with_callback("keydown", on_schedule_key.as_ref().unchecked_ref());
+    }
+    on_schedule_key.forget();
 
     // Alt+U opens Usage and Alt+A opens Audit. Like Alt+G, these stay
     // here because only the page can set `mode`. The shortcuts are listed
@@ -2840,6 +2860,7 @@ fn App() -> impl IntoView {
             reply_decision=reply_decision
         />
         <shell::Chrome />
+        {gateway_qr::phone_view()}
         <session_delete::SessionDeleteDialog
             target=delete_target
             base=base
@@ -2868,6 +2889,38 @@ fn App() -> impl IntoView {
         </Show>
         <Show when=move || mode.get() == "goals" fallback=move || ()>
             <goals::GoalsPane base=base token=token />
+        </Show>
+        <Show when=move || mode.get() == "tasks" fallback=move || ()>
+            <task_runner::TaskRunner
+                base=base
+                token=token
+                active_root=active_root
+                status=status
+            />
+        </Show>
+        <Show when=move || mode.get() == "schedule" fallback=move || ()>
+            <schedule::SchedulePage
+                base=base
+                token=token
+                mode=mode
+                active_root=active_root
+                status=status
+            />
+        </Show>
+        <Show when=move || mode.get() == "triggers" fallback=move || ()>
+            <triggers::TriggersPage base=base token=token status=status />
+        </Show>
+        <Show when=move || mode.get() == "apps" fallback=move || ()>
+            <apps::AppsPane
+                base=base
+                token=token
+                status=status
+                palette_open=apps_palette_open
+                open_session=move |id: String| {
+                    mode.set("chat".into());
+                    activate_root(id);
+                }
+            />
         </Show>
         <Show when=move || mode.get() == "chat">
             <div class=move || chat_mode::shell_class(focus.get(), &layout.get(), sessions_drawer.get(), panel_drawer.get())>
@@ -3204,28 +3257,6 @@ fn App() -> impl IntoView {
                                 }}
                             </div>
                         </Show>
-                        <Show when=move || transcript.with(|t| !t.asks.is_empty())>
-                            <div class="composer-asks" data-composer-triggers="asks">
-                                {move || {
-                                    transcript.with(|t| t.asks.clone()).into_iter().map(move |ask| {
-                                        let id_allow = ask.request_id.clone();
-                                        let id_reject = ask.request_id.clone();
-                                        let label = if ask.patterns.is_empty() {
-                                            ask.permission.clone()
-                                        } else {
-                                            format!("{} · {}", ask.permission, ask.patterns)
-                                        };
-                                        view! {
-                                            <div class="composer-ask">
-                                                <span class="ask-label">{label}</span>
-                                                <button type="button" class="primary" on:click=move |_| reply_permission(id_allow.clone(), "once".into(), transcript, base, token, active_root, status)>"Allow once"</button>
-                                                <button type="button" class="secondary" on:click=move |_| reply_permission(id_reject.clone(), "reject".into(), transcript, base, token, active_root, status)>"Reject"</button>
-                                            </div>
-                                        }
-                                    }).collect_view()
-                                }}
-                            </div>
-                        </Show>
                         <form on:submit=move |ev| { ev.prevent_default(); send(); }>
                             <Show when=move || !pending_files.get().is_empty()>
                                 <div class="attach-row">
@@ -3456,6 +3487,7 @@ fn App() -> impl IntoView {
                         <button class=move || if side_tab.get() == "memory" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("memory".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("memory")></span>"Memory"</button>
                         <button class=move || if side_tab.get() == "knowledge" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("knowledge".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("knowledge")></span>"Knowledge"</button>
                         <button class=move || if side_tab.get() == "artifacts" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("artifacts".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("artifacts")></span>"Artifacts"</button>
+                        <button class=move || if side_tab.get() == "terminal" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("terminal".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("terminal")></span>"Terminal"</button>
                     </div>
                     <Show when=move || side_tab.get() == "activity">
                     <div class="activity">
@@ -3698,6 +3730,14 @@ fn App() -> impl IntoView {
                             memory_mode=memory_mode
                             status=status
                             storage_rev=storage_rev
+                        />
+                    </Show>
+                    <Show when=move || side_tab.get() == "terminal">
+                        <terminal::TerminalPanel
+                            base=base
+                            token=token
+                            workspace_id=active_workspace
+                            session_id=active_root
                         />
                     </Show>
                 </aside>

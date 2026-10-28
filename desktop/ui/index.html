@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Strike</title>
+<link rel="stylesheet" href="/_desktop/app.css">
+<link rel="icon" href="/_desktop/icon.svg">
+<script src="/_desktop/boot.js"></script>
+</head>
+<body>
+<header class="page-header">
+  <div class="brand">Strike <span class="brand-status">Desktop</span></div>
+  <p class="hint header-hint">Gateways on this laptop. Tokens stay in the OS keyring.</p>
+  <div class="header-actions">
+    <button type="button" id="theme" class="secondary" aria-pressed="false">Theme</button>
+  </div>
+</header>
+<div id="error" class="banner" hidden></div>
+<main class="layout">
+  <section class="card pane" aria-labelledby="saved-heading">
+    <div class="section-head">
+      <h2 id="saved-heading">Saved gateways</h2>
+    </div>
+    <ul id="list" class="plain" role="listbox" aria-label="Saved gateways"></ul>
+    <p id="empty" class="hint">No gateways yet.</p>
+  </section>
+  <section class="card pane" aria-labelledby="add-heading">
+    <div class="section-head">
+      <h2 id="add-heading">Add a gateway</h2>
+    </div>
+    <form id="add">
+      <label for="name">Name</label>
+      <input id="name" name="name" autocomplete="off" maxlength="80" placeholder="Desk">
+      <label for="link">URL, SSH host, or strike:// link</label>
+      <input id="link" name="link" autocomplete="off" spellcheck="false" placeholder="https://100.64.0.5:8787" required>
+      <label for="token">Token</label>
+      <input id="token" name="token" type="password" autocomplete="off" placeholder="Leave blank if the link already has it">
+      <label for="provider">Local daemon provider</label>
+      <input id="provider" name="provider" autocomplete="off" placeholder="echo (sidecar only)">
+      <label class="check"><input id="cleartext" type="checkbox"> Allow cleartext HTTP on a VPN or Tailscale</label>
+      <div class="row">
+        <button type="submit" class="primary">Add</button>
+        <button type="button" id="local" class="secondary">This computer</button>
+      </div>
+      <p class="hint">Paste a pairing link if you have one. The camera scanner waits on the pairing routes. Alt+Shift+W returns here from the cockpit. j and k move, Enter connects, n focuses Name.</p>
+    </form>
+  </section>
+</main>
+<dialog id="trust">
+  <form method="dialog">
+    <h2>Trust this certificate?</h2>
+    <p class="hint">The gateway presented a certificate this shell has not pinned. Compare the fingerprint with the machine that runs the daemon.</p>
+    <p id="fp" class="fp"></p>
+    <div class="row">
+      <button type="submit" class="primary" id="trust-yes" value="yes">Trust</button>
+      <button type="submit" class="secondary" value="no">Cancel</button>
+    </div>
+  </form>
+</dialog>
+<dialog id="help">
+  <form method="dialog">
+    <h2>Keys</h2>
+    <p class="hint">j and k move the selection. Enter connects. n focuses the name field. t toggles the theme. ? opens this list. Escape closes it. Alt+Shift+W opens this list from the cockpit. Alt+W and Alt+G stay with the page.</p>
+    <button type="submit" class="primary">Close</button>
+  </form>
+</dialog>
+<script src="/_desktop/app.js" defer></script>
+</body>
+</html>

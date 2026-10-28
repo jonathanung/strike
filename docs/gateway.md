@@ -48,14 +48,15 @@ requires `--auth`.
 | Command | Effect |
 |---|---|
 | `strike daemon token` | Print `~/.strike/daemon.token`, minting a 0600 file if it is missing. |
-| `strike daemon logout` | Replace that file with a new token and print it. Short-lived grants drop on the next `/v1` request. |
+| `strike daemon logout` | Replace that file with a new token and print it. Short-lived grants drop, and paired browser sessions are revoked, on the next `/v1` request. |
 | `strike daemon grant [--ttl 15m] [--base URL]` | Ask the running daemon for a short-lived bearer. The secret is printed on stdout only. |
 | `strike daemon revoke [--base URL]` | Drop every short-lived grant. Does not rotate the host token file. |
 
 `logout` does not kill the process. A serve started with `--token-file`
 loads the new token on the next `/v1` request; the previous bearer fails,
-and every grant is dropped when that read observes the new file. A serve
-started with `--token` keeps the value it was given until restart, so
+every grant is dropped, outstanding pairing codes are dropped, and paired
+browser sessions are revoked. A serve started with `--token` keeps the
+value it was given until restart, including grants and paired sessions, so
 `logout` does not affect it. The token is a password. Do not commit it or
 pass it on a shared command line.
 
@@ -63,6 +64,88 @@ pass it on a shared command line.
 send it as a bearer to the loopback daemon. They do not print that host
 token. Errors on those commands are passed through `pkg/redact` and the
 exact secret is replaced before anything is written.
+
+## Pairing
+
+A phone or another browser must not receive the daemon token in a URL.
+`strike serve` (when `--auth` is on) and `strike gateway url` mint a
+short-lived code and print a URL whose fragment is `#pair=<code>`. The
+fragment is not sent on the HTTP request, so it does not land in access
+logs, proxy logs, or `Referer`. The web UI draws the same QR from
+`POST /v1/pair` and offers Copy. `strike gateway url --qr` and
+`strike gateway qr` draw a UTF-8 block QR in the terminal.
+
+`strike connect` is not this command. SSH forwards and a gateway switcher
+belong to #1265, which can alias `strike connect --qr` at this URL.
+
+| Command | Effect |
+|---|---|
+| `strike gateway url [--qr]` | Mint one code and print the URL. `--qr` adds a block QR. |
+| `strike gateway devices` | List paired browsers. |
+| `strike gateway revoke <id>` | Revoke one paired browser. |
+
+The token is read from `--token-file` or `~/.strike/daemon.token`. These
+commands never mint a token file and never print the daemon token. If a
+response body contains that token, the command refuses to print it.
+
+### HTTP API
+
+Native clients (a future React Native app included) use the same routes.
+All JSON. `Cache-Control: no-store`. Send the daemon token as
+`Authorization: Bearer` or the HttpOnly cookie. Do not put `token`, `code`,
+or `pair` in the query string; those requests fail with `query_secret` and
+do not consume a code.
+
+| Request | Who | Result |
+|---|---|---|
+| `GET /v1/gateway` | daemon token | `{bind, auth, loopback, phoneReachable, lan, urls[], optIn, lanWarning, advertiseWarning, unbound}`. No code and no token. |
+| `POST /v1/pair` | daemon token | `201` `{code, expiresAt, ttlSeconds, url, gateway}`. A paired session gets `403` `daemon_token_required`. Without `--auth`, `400` `auth_disabled` plus `gateway` and no code. |
+| `POST /v1/pair/redeem` | public, rate limited | Body `{code, label, delivery}`. `delivery` is `cookie` (default) or `token`. |
+| `GET /v1/pair/devices` | daemon token | `{devices: [{id, label, createdAt, lastSeen, revoked}]}`. |
+| `DELETE /v1/pair/devices/{id}` | daemon token | Revoke one browser. |
+| `POST /v1/pair/revoke-all` | daemon token | Revoke every session and drop outstanding codes. |
+| `POST /v1/pair/revoke-self` | that session | Revoke the calling session and clear the cookie. The daemon token gets `400` `use_device_revoke`. |
+
+`cookie` delivery sets `strike_serve_token` (`HttpOnly`, `SameSite=Strict`,
+`Path=/`, `Max-Age` 30 days) and the JSON body has no `sessionToken`.
+`token` delivery returns `sessionToken` (`s1.` plus 32 random bytes) and
+sets no cookie. Use `token` from a native client or a cross-origin scan.
+Browsers on the gateway origin use `cookie`.
+
+Codes look like `p1.` plus 16 random bytes, URL-safe, stored only as
+SHA-256. Default life is 5 minutes. The first successful redeem burns the
+code (`410` `code_used` after that, `410` `code_expired` after the TTL).
+At most 32 live codes (`429` `too_many_codes`). Redeem attempts are limited
+to 8 per minute per client IP and 64 per minute globally (`429`
+`rate_limited`, `Retry-After: 60`). Comparisons walk every stored hash in
+constant time. Error bodies do not echo the code or the daemon token.
+
+`strike serve --advertise-url <url>` puts that tunnel origin in the QR
+while the process stays bound to its listen address. The URL must be
+http(s), with a host, and without userinfo, query, or fragment. The default
+bind stays loopback. The API does not bind `0.0.0.0`. When `phoneReachable`
+is false, `optIn` is the exact step to take (private bind with
+`--allow-private-bind`, an SSH local forward, or `--advertise-url` for a
+tunnel you run). A private bind sets `lanWarning`.
+
+The web client may rewrite a loopback QR to `location.origin` when that
+origin is not itself loopback, so an operator who already arrived through
+a tunnel still hands the phone a reachable URL. The server does not trust
+the request `Host` header for this.
+
+Opening `/?token=` once is still the legacy cookie handoff for the daemon
+token itself. It is not the phone path. Do not print it from `strike serve`.
+
+In-browser scanning uses `BarcodeDetector` and `getUserMedia` where the
+browser has them (`Permissions-Policy: camera=(self)`). A scanned link is
+rejected when `token`, `code`, or `pair` is in the query string. Same-origin
+scans redeem with `delivery: cookie`. Cross-origin scans redeem with
+`delivery: token` and no credentials, then store that base URL in
+`strike.gateways` and the session in `sessionStorage` (`strike.gateway.tokens`).
+The phone camera opening the URL in a browser does not need this scanner.
+A small install hint listens for `beforeinstallprompt` after a same-origin
+redeem. The service worker is owned by the notification and PWA work, not
+by this dialog.
 
 Provider credentials (`strike auth logout <provider>`) are a different
 store. Logging out of a model provider does not rotate the gateway token.
@@ -92,7 +175,11 @@ The process stays on loopback, or on a tailnet address you opted into
 with `--allow-private-bind` and `--auth`. Nothing in this tree opens a
 public port.
 
-`strike connect user@host` is the path that keeps the secret off the URL:
+`strike connect user@host` is the path that keeps the secret off the URL.
+A phone that should open the cockpit uses the pairing URL (`#pair=`, see
+Pairing). When the QR should name a tunnel you already run, pass
+`--advertise-url`. Strike does not start that tunnel, and the daemon token
+is not part of the pairing URL.
 
 1. SSH local-forward to the remote loopback only (`--remote` must be
    loopback; the default is `127.0.0.1:8787`). The SSH options are
@@ -183,6 +270,56 @@ Child processes run as the user who started `strike serve`. OS sandboxing
 for bash is a separate dial (`sandbox` in config, default workspace-write)
 and is not disabled by `--auth`.
 
+## Terminal
+
+`/v1/terminals` is a shell as the user who started `strike serve`. The
+routes sit behind the same auth middleware as the rest of `/v1`. A browser
+WebSocket cannot set `Authorization`, so the stream accepts the HttpOnly
+`strike_serve_token` cookie or a single-use ticket.
+
+The client mints that ticket with `POST /v1/terminals/{id}/ticket` (bearer
+or cookie) and presents it as the WebSocket subprotocol `ticket.<hex>`
+next to `strike.terminal`. The server echoes only `strike.terminal`. The
+ticket lasts 30 seconds, is bound to that terminal id, and is consumed on
+every upgrade that presents it, including when the cookie or bearer already
+matched. A mismatch or a replay is 401. A query-string `token` or `ticket`
+on a terminal route is rejected. The ticket is not a bypass for any other
+`/v1` path.
+
+Loopback listeners allow the terminal. Any other bind requires
+`--terminal-remote`, and that flag requires `--auth`. A tailnet or private
+bind has no shell until the operator passes the flag.
+
+The client does not pick an arbitrary working directory. Create resolves
+the path inside the active workspace and rejects `..`, a sibling prefix,
+and a symlink that leaves the workspace. On Linux the daemon watches the
+foreground process group: the shell behind `bwrap`, and a child that is
+currently foreground (`bash -c 'cd /tmp'`). A cwd outside the workspace
+kills the shell. An unreadable cwd kills it when no OS sandbox was applied.
+Background helpers are not walked. A command that exits before the next
+sample can still finish; the sandbox is the write boundary when wrap applies.
+
+The policy is compiled at create from the live engine for that workspace,
+the same helper bash uses, so plan and phase hard-denies and deny paths
+match the current session. `--attach-only` does not load a dial, and the
+terminal routes refuse a shell there. A missing engine with a non-off dial
+fails closed. When the dial is not `off`, the shell is started through
+`sandbox.Wrap`. If that helper is missing and degrade is not allowed,
+create fails closed.
+
+Plan mode on the workspace or the resolved live session refuses a new
+shell. An omitted session id uses the active root. A non-plan live mode
+does not clear a workspace plan lock. Other permission modes allow the
+shell: the user is at the keyboard, which is why `!` skips the bash prompt
+too. Keystrokes are not written to the audit log. `terminal.create` and
+`terminal.kill` are.
+
+The shell belongs to the user. The agent does not write to the PTY. The
+panel says when the bound session is busy in the same directory.
+`onSessionEnd` defaults to `kill` (the process ends when that session root
+closes). `keep` leaves it running. Closing the browser tab does not kill
+the PTY; the next visit reattaches and replays the scrollback ring.
+
 ## Threat model (this process)
 
 What an attacker gets:
@@ -205,10 +342,24 @@ What an attacker gets:
   access logs. `strike connect`'s local proxy also strips `?token=` and
   does not log the grant. `strike daemon grant` prints the grant on
   stdout on purpose; do not redirect that stream into a shared log.
-- `strike daemon logout` rotates the file and drops grants on the next
-  `/v1` read. A cookie already stored in a browser fails on its next
-  request. Close those tabs after logout. Browser "Log out" only clears
-  this browser's cookie and the presented grant.
+- The terminal is a shell as the serve user. It is authenticated, loopback
+  unless `--terminal-remote` is combined with `--auth`, and confined to the
+  workspace at create and by the foreground cwd watch. See Terminal above.
+  Keystrokes are not logged. A presented websocket ticket is consumed even
+  when the cookie already authorized the upgrade, and it does not authorize
+  any other route. `--attach-only` does not start a shell.
+- `strike daemon logout` rotates the file. On the next `/v1` read every
+  grant is dropped, outstanding pairing codes are dropped, and paired
+  browser sessions are revoked. A cookie already stored in a browser fails
+  on its next request. Close those tabs after logout. Browser "Log out"
+  (`POST /v1/gateway/logout`) clears this browser's cookie and the presented
+  grant. `POST /v1/pair/revoke-self` revokes the calling paired session.
+  A `--token` process keeps the old value until restart.
+- Pairing codes are single-use, expire in minutes, and are stored as
+  SHA-256. The URL fragment `#pair=` is not sent to the server. Redeem
+  rejects `token`, `code`, or `pair` in the query string without consuming
+  the code. The daemon token is never placed in that URL. A paired session
+  cookie is not the daemon token and cannot mint codes or list devices.
 - The `strike connect` proxy holds the grant in memory until you press
   Ctrl+C. Anyone who can send HTTP to that loopback port while it is
   running is authenticated as the grant. It binds loopback only.
@@ -226,7 +377,29 @@ What an attacker gets:
   bytes. The grant accept path hashes every presented value and compares
   those 32-byte digests against a fixed 32-slot array, so a wrong grant
   is not faster than a right one and a miss is not faster when fewer
-  grants are live.
+  grants are live. Pairing compares SHA-256 digests the same way.
 - A public tunnel in front of loopback removes the "no public listener"
   property. The token is then the only boundary. Strike does not start
-  that tunnel.
+  that tunnel. `--advertise-url` only changes the QR text.
+
+## Inbound hooks
+
+`POST /hooks/{id}` is not under `/v1` and does not accept the daemon bearer.
+The trigger's HMAC secret is the credential. A missing or wrong signature
+is 401. The comparison is constant-time. Generic webhooks sign
+`timestamp + "." + raw body` (`X-Strike-Timestamp`, `X-Strike-Delivery`,
+`X-Strike-Signature: sha256=<hex>`) and must present a timestamp no more
+than five minutes in the past and no more than 60 seconds in the future.
+GitHub triggers use `X-Hub-Signature-256` over the raw body.
+Strike remembers a delivery id after a verified accept, ignore, or
+replay, so that delivery does not start a second session. A failed
+signature does not reserve the id, and once the signature-failure budget
+is spent Strike stops writing those attempts to the log. The registry,
+delivery log, and one-shot secret display live on the Triggers page
+(`GET /v1/triggers`, which does require the bearer).
+
+The bind rules above still apply. GitHub cannot reach loopback unless you
+forward the port yourself. Strike does not open a public listener for hooks.
+Unattended triggers start in plan mode unless the trigger names another
+posture. The signing secret is stored in `~/.strike/triggers.json` (mode
+0600) and is not written to the delivery log.

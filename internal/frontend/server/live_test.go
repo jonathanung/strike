@@ -744,6 +744,27 @@ func TestLiveHubList(t *testing.T) {
 	}
 }
 
+func TestLiveClosedFiresOnClose(t *testing.T) {
+	live := NewLive("r1", "/a", nil, make(chan protocol.Op))
+	select {
+	case <-live.Closed():
+		t.Fatal("Closed() fired before Close")
+	default:
+	}
+	live.Close()
+	select {
+	case <-live.Closed():
+	default:
+		t.Fatal("Closed() did not fire after Close")
+	}
+	live.Close()
+	select {
+	case <-live.Closed():
+	default:
+		t.Fatal("second Close dropped the Closed signal")
+	}
+}
+
 func TestLiveHubClose(t *testing.T) {
 	live := NewLive("r1", "/a", nil, make(chan protocol.Op))
 	hub := NewLiveHub(nil, nil)
@@ -789,6 +810,23 @@ func TestLiveHubCreateAndRemove(t *testing.T) {
 	list := hub.List()
 	if len(list) != 1 || list[0].ID != "r2" {
 		t.Fatalf("list after remove = %v", list)
+	}
+}
+
+func TestLiveHubRemoveInvokesOnRemove(t *testing.T) {
+	live := NewLive("r1", "/a", nil, make(chan protocol.Op))
+	defer live.Close()
+	hub := NewLiveHub(nil, nil)
+	var removed []string
+	hub.SetOnRemove(func(id string) { removed = append(removed, id) })
+	hub.Add("r1", live)
+	hub.Remove("missing")
+	if len(removed) != 0 {
+		t.Fatalf("onRemove fired for a root that was not in the hub: %v", removed)
+	}
+	hub.Remove("r1")
+	if len(removed) != 1 || removed[0] != "r1" {
+		t.Fatalf("onRemove after Remove = %v, want [r1]", removed)
 	}
 }
 

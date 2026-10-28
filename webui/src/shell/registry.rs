@@ -406,6 +406,23 @@ mod tests {
     }
 
     #[test]
+    fn plan_query_leads_with_approval_plan_not_the_task_runner() {
+        // Regression for #1429's webui-smoke failure: the task runner
+        // registered the exact keyword "plan", which outranked the fuzzy
+        // label match for "Approval: Plan" — Enter on a "plan" query
+        // opened the Tasks view and every later cockpit assertion failed.
+        let mut hook = ShellHook::new();
+        crate::shell::builtin::install(&mut hook);
+        crate::shell::contrib::install(&mut hook);
+        let groups = hook.query("plan", &[]);
+        let first = groups
+            .first()
+            .and_then(|g| g.hits.first())
+            .map(|h| h.id.as_str());
+        assert_eq!(first, Some("mode-plan"), "groups: {groups:?}");
+    }
+
+    #[test]
     fn argument_flag_is_visible_on_the_hit() {
         let mut hook = ShellHook::new();
         hook.command(Command {

@@ -72,8 +72,25 @@ type LiveHub struct {
 	entries map[string]*rootEntry
 	closeCh chan struct{}
 
-	spawn  RootSpawnFunc
-	resume RootResumeFunc
+	spawn      RootSpawnFunc
+	resume     RootResumeFunc
+	unattended RootSpawnFunc
+
+	// onRemove, when set, runs after a root leaves the hub so the owner
+	// can stop whatever the hub does not own (the root's engine and its
+	// session-manager handle). Set via SetOnRemove before use.
+	onRemove func(id string)
+}
+
+// SetOnRemove registers the callback invoked after a root is dropped
+// from the hub (Remove or RemoveForSession). The hub never owned the
+// root's engine: without this hook a closed root keeps its session open
+// in the manager, and a later session delete reports it open and
+// demands force.
+func (h *LiveHub) SetOnRemove(fn func(id string)) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.onRemove = fn
 }
 
 // NewLiveHub creates an empty hub. Callers wire lifecycle functions.
@@ -101,12 +118,30 @@ func (h *LiveHub) Add(id string, live *Live) {
 // entry becomes active.
 func (h *LiveHub) Remove(id string) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
-	entry, ok := h.entries[id]
-	if !ok {
+	entry := h.removeLocked(id)
+	onRemove := h.onRemove
+	h.mu.Unlock()
+	if entry == nil {
 		return
 	}
-	entry.live.Close()
+	if entry.live != nil {
+		entry.live.Close()
+	}
+	if onRemove != nil {
+		onRemove(id)
+	}
+}
+
+// removeLocked deletes id's entry and fixes the active id, with h.mu
+// already held. It returns the removed entry, or nil when id was not
+// registered. It does NOT close the entry's Live or fire onRemove: the
+// caller does both after dropping the lock (Live.Close is idempotent
+// and onRemove may call back into session/engine teardown).
+func (h *LiveHub) removeLocked(id string) *rootEntry {
+	entry, ok := h.entries[id]
+	if !ok {
+		return nil
+	}
 	delete(h.entries, id)
 	if h.active == id {
 		h.active = ""
@@ -115,6 +150,78 @@ func (h *LiveHub) Remove(id string) {
 			break
 		}
 	}
+	return entry
+}
+
+// RemoveForSession deregisters the live root serving sessionID after that
+// session's durable log has been deleted (#1399). It returns false and
+// leaves the hub untouched when no entry serves sessionID, or when another
+// live entry still references the same session or the same Live bridge —
+// a root another live session still uses is never deregistered. The entry
+// is normally keyed by the session id itself; an entry whose Live reports
+// sessionID under a different key is also matched when it is the only one.
+func (h *LiveHub) RemoveForSession(sessionID string) bool {
+	if h == nil {
+		return false
+	}
+	sessionID = trimRootID(sessionID)
+	if sessionID == "" {
+		return false
+	}
+	h.mu.Lock()
+	// The candidate is normally the entry keyed by the session id. When no
+	// such entry exists, fall back to the unique entry whose Live serves
+	// this session, if there is exactly one.
+	key := sessionID
+	entry, ok := h.entries[key]
+	if !ok {
+		key = ""
+		for rid, e := range h.entries {
+			if e.live != nil && e.live.SessionID() == sessionID {
+				if key != "" {
+					h.mu.Unlock()
+					return false // shared by multiple roots: keep all
+				}
+				key, entry = rid, e
+			}
+		}
+		if key == "" {
+			h.mu.Unlock()
+			return false
+		}
+	}
+	// The candidate must actually serve this session: a root serving a
+	// different session is not this session's root.
+	if entry.live != nil {
+		if sid := entry.live.SessionID(); sid != "" && sid != sessionID {
+			h.mu.Unlock()
+			return false
+		}
+	}
+	// Shared-root guard: another entry referencing the same Live bridge or
+	// the same session id still uses this root, so it stays registered.
+	for rid, other := range h.entries {
+		if rid == key || other.live == nil {
+			continue
+		}
+		if other.live == entry.live || other.live.SessionID() == sessionID {
+			h.mu.Unlock()
+			return false
+		}
+	}
+	removed := h.removeLocked(key)
+	onRemove := h.onRemove
+	h.mu.Unlock()
+	if removed == nil {
+		return false
+	}
+	if removed.live != nil {
+		removed.live.Close()
+	}
+	if onRemove != nil {
+		onRemove(key)
+	}
+	return true
 }
 
 // Active returns the currently active live bridge, or nil.
@@ -189,18 +296,58 @@ func (h *LiveHub) List() []RootSummary {
 
 // Create spawns a new empty root engine via the spawn callback and activates it.
 func (h *LiveHub) Create(ctx context.Context) (RootCreateResult, error) {
-	if h.spawn == nil {
-		return RootCreateResult{}, errors.New("root creation unavailable")
-	}
-	rootID, err := h.spawn(ctx)
+	res, err := h.Spawn(ctx)
 	if err != nil {
 		return RootCreateResult{}, err
 	}
 	h.mu.Lock()
-	if h.entries[rootID] != nil {
-		h.active = rootID
+	if h.entries[res.ID] != nil {
+		h.active = res.ID
 	}
 	h.mu.Unlock()
+	return res, nil
+}
+
+// SetUnattendedSpawn installs the spawn used by clocks and triggers.
+// That callback must not carry the process --auto allow-all layer.
+// When unset, SpawnUnattended uses Spawn.
+func (h *LiveHub) SetUnattendedSpawn(fn RootSpawnFunc) {
+	if h == nil {
+		return
+	}
+	h.mu.Lock()
+	h.unattended = fn
+	h.mu.Unlock()
+}
+
+// Spawn registers a new root without changing the cockpit's active session.
+func (h *LiveHub) Spawn(ctx context.Context) (RootCreateResult, error) {
+	return h.spawnWith(ctx, false)
+}
+
+// SpawnUnattended registers a background root. Serve wires this to a spawn
+// that starts in plan and omits the process permission bypass.
+func (h *LiveHub) SpawnUnattended(ctx context.Context) (RootCreateResult, error) {
+	return h.spawnWith(ctx, true)
+}
+
+func (h *LiveHub) spawnWith(ctx context.Context, unattended bool) (RootCreateResult, error) {
+	if h == nil {
+		return RootCreateResult{}, errors.New("root creation unavailable")
+	}
+	h.mu.RLock()
+	fn := h.spawn
+	if unattended && h.unattended != nil {
+		fn = h.unattended
+	}
+	h.mu.RUnlock()
+	if fn == nil {
+		return RootCreateResult{}, errors.New("root creation unavailable")
+	}
+	rootID, err := fn(ctx)
+	if err != nil {
+		return RootCreateResult{}, err
+	}
 	return RootCreateResult{ID: rootID, SessionID: rootID}, nil
 }
 
@@ -730,6 +877,18 @@ func (l *Live) Subscribe(ctx context.Context) <-chan protocol.Event {
 		l.mu.Unlock()
 	}()
 	return ch
+}
+
+// Closed fires when Close has been called. Serve uses it to stop the
+// engine for that root: LiveHub.Remove only closes the bridge, and a root
+// started on the process context would otherwise stay open.
+func (l *Live) Closed() <-chan struct{} {
+	if l == nil {
+		ch := make(chan struct{})
+		close(ch)
+		return ch
+	}
+	return l.closeCh
 }
 
 // Close marks the live session finished and unblocks subscribers.

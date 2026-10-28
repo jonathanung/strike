@@ -7,6 +7,8 @@ text, delegated children nested in the conductor view), a transcript over
 `/v1/live/events`, a composer that can steer or queue and set the real
 permission mode, and a side panel with Activity, Files, Changes, Git, Worktrees,
 Memory, Knowledge, and Artifacts.
+Apps is a separate surface: a launcher and one queue, GitHub triage
+(`docs/webui-apps.md`).
 Blocked children (`schema:handoff`, #1201) show as `blocked`. Folders group
 sessions in the list; they are not directories on disk. Unread is still the
 browser seen-map until the status stream (#1263) publishes a server field.
@@ -20,9 +22,9 @@ streams register a slot or a command by adding a file under
 The sections below that are still unshipped are not drawn. An empty panel
 would pretend the daemon already has that workflow. Each one is the
 Strike-specific shape, using stores and events that already exist or are
-the next real slice. Memory, Knowledge, Artifacts, and Memory mode are
-the exception: they are in the client, and the notes under those headings
-say what shipped.
+the next real slice. Memory, Knowledge, Artifacts, Memory mode, and
+Triggers are the exception: they are in the client, and the notes under
+those headings say what shipped.
 
 ## Goals and autopilot
 
@@ -40,19 +42,43 @@ fires on a clock and may start a goal; it must not skip the goal guards.
 A task runner walks a plan section by section and checkpoints each section.
 The Goals view does not draw either of those.
 
+## Apps
+
+GitHub triage is registered by the daemon and rendered by the client.
+Inbox and schedule results are the same queue shape, and they are not
+registered: there is no inbox store, and schedule runs have their own page
+(see Schedule). The launcher does not draw a card for an app the daemon
+did not return.
+
 ## Schedule
 
-Recurring work is not a daemon resource yet. Strike has goal loops
-(`GET/POST /v1/goals`, pause/resume/abort, a per-goal log) and workflow
-documents (`/v1/workflows`), not a clock.
+Shipped. `strike serve` persists schedules in `~/.strike/schedules.json`
+and exposes them at `/v1/schedules`. Kinds are cron, interval, one-shot,
+and heartbeat. A fire starts a root session from a prompt, a goal, or a
+workflow through `internal/rootstart` (the same seam inbound triggers
+should call). The Schedule page can create, pause, resume, run now, edit,
+delete, and open the session a run wrote.
 
-Planned: a Schedule list of goal or workflow runs with a cron or interval,
-the next fire time, last status, and a link to the session the run wrote.
-Firing one may start a goal (see Goals and autopilot). The schedule does
-not own the loop guards.
-Creating one would persist beside `~/.strike` and the daemon would start a
-root session when it fires. There is no scheduler process in `strike serve`
-today, so the panel stays out until that exists.
+Unattended runs use the workspace permission mode when that workspace has
+one. Otherwise they use plan, which denies writes. They do not inherit
+`strike serve --auto` or `--dangerously-skip-permissions`. Overlap defaults
+to skip. A restart with missed fires defaults to skip (record one miss and
+arm the next future slot); `missed: once` catches up a single run. A
+heartbeat records a quiet baseline and does not start a session until the
+workspace fingerprint changes. The first observation is that baseline.
+
+The goal loop (`POST /v1/goals/{id}/run`) is still the evaluate-only
+harness. A scheduled goal starts a root session whose prompt is the goal
+text; it does not call that loop.
+
+## Triggers
+
+The Triggers page and `POST /hooks/{id}` are in the daemon. A webhook
+(HMAC over `timestamp + "." + body`), a GitHub `issues` / `pull_request` /
+comment event, or an in-process channel message can start or continue a
+root. The channel adapter interface is `trigger.Adapter`; this build does
+not dial Slack or any other chat network. Unattended runs resolve an empty
+permission mode to plan. See [gateway.md](gateway.md).
 
 ## Memory
 
@@ -88,16 +114,34 @@ writes remain on the agent tools. There is no browser write route.
 
 ## Task runner
 
-Plans exist (`/v1/plans`: sections, status, reopen). Delegations exist on
-`GET /v1/team`. There is no spec → plan → run → checkpoint pipeline.
-That pipeline is not a goal loop: a goal has one verification command and
-stops on the harness guards, and it does not checkpoint plan sections.
+Shipped as the Tasks view. One plan (`/v1/plans`) opens as a checklist.
+`POST /v1/plans/{id}/run` with `{"action":"open","ownerRoot":"..."}` creates
+the durable run (project file under `taskruns/`, same key as plans). Run
+(`"action":"start"`) spawns a child (`team.spawn`) for every section whose
+dependencies are approved or skipped. The child's handoff and verification
+report are the checkpoint. The user approves, retries, skips, or reorders
+from that board.
 
-Planned: one plan opened as a checklist. Run would mean spawning a child
-(`team.spawn`) per section, with that child's Activity row and handoff as
-the checkpoint. Checkpoints would be the plan section body plus the child
-verification report, not a hidden snapshot format. Until a run is defined as
-that sequence, the client does not show a Task Runner board.
+A section runs only after the user approves the previous checkpoint (or
+skips it). A failed child, a `schema:handoff` block (#1201), or an
+incomplete handoff marks the section failed and blocks dependants. Start
+will not spawn those dependants. The run file survives a daemon restart;
+an unbound claim (spawn never returned a child id) returns to pending.
+
+Other streams start a run with the same route. `expectedVersion` is the
+CAS token from the last response.
+
+```
+POST /v1/plans/{id}/run
+{"action":"open|start|approve|retry|skip|reorder","ownerRoot":"...","sectionId":"...","sectionIds":[],"expectedVersion":1}
+GET /v1/plans/{id}/run
+```
+
+`reorder` is a permutation of section ids. It re-chains only rows that
+still depend on pending sections, so it cannot route around a failure.
+Scheduler (#1276) and goals (#1284) should call `start` on this route
+rather than spawning sections themselves.
+
 
 ## Workspace binding
 
@@ -148,10 +192,22 @@ names and URLs in `localStorage` (`strike.gateways`). Bearers are
 injects a short-lived grant on the laptop's loopback. The daemon still
 refuses a public bind. See [gateway.md](gateway.md).
 
+Open on phone is a separate palette command. It shows a QR and a one-time
+`#pair=` link. Scanning another gateway's QR adds that base URL to the same
+profile list and stores the paired session in `sessionStorage`. It does not
+store the daemon token.
+
 Not in this client: tailnet discovery, a browser-started SSH session, and
 syncing CLI profiles from the daemon. The switcher shows an `ssh`
 destination as a hint. It does not open that connection. A public tunnel
 is still something you run yourself, and it is a public edge.
+
+The desktop shell in `desktop/` (see [desktop.md](desktop.md)) is a separate
+window. A Tailscale or other VPN URL is an explicit saved gateway: HTTPS
+uses Web PKI or a pinned certificate, and cleartext HTTP is refused until
+the user allows it. SSH runs `strike connect`, so the short-lived grant
+stays in that process. The shell does not draw this switcher or the status
+chip, and it does not exchange pairing codes.
 
 ## Memory mode
 
@@ -200,10 +256,14 @@ Git status, branch, log, commit, and worktree list/create/remove are in the
 client (`/v1/git/*`). The Git panel reuses `GET /v1/changed-files` for the
 unstaged diff. Changing `session.childIsolation` stays in config; the
 Worktrees panel shows the effective value and does not write a second flag.
-An embedded browser, a terminal, and a subagent board that is not the
-Activity list are not in the client. Activity is the subagent list. Changes
-is the diff list. A terminal tab would be a persistent shell. Composer `!`
-already runs one command through the daemon permission model.
+The Terminal tab is a daemon PTY (`POST /v1/terminals`, stream
+`GET /v1/terminals/{id}/stream`). It starts in the active workspace
+directory, uses the same `/v1` authentication as the rest of the daemon,
+and stays on loopback unless `strike serve --terminal-remote` is set with
+`--auth`. See [gateway.md](gateway.md). An embedded browser and a subagent
+board that is not the Activity list are not in the client. Activity is the
+subagent list. Changes is the diff list. Composer `!` already runs one
+command through the daemon permission model.
 
 ## Composer triggers
 

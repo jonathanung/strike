@@ -57,7 +57,7 @@ async function status(path, headers) {
   return res.status;
 }
 
-const strike = spawn(
+let strike = spawn(
   process.env.STRIKE_BIN || "./strike",
   [
     "serve",
@@ -85,8 +85,18 @@ try {
   const missing = await status("/v1/workspaces");
   const wrong = await status("/v1/workspaces", { Authorization: "Bearer wrong" });
   const right = await status("/v1/workspaces", { Authorization: `Bearer ${token}` });
-  if (missing !== 401 || wrong !== 401 || right !== 200) {
-    throw new Error(`auth statuses missing=${missing} wrong=${wrong} right=${right}`);
+  const schedules = await status("/v1/schedules", { Authorization: `Bearer ${token}` });
+  if (missing !== 401 || wrong !== 401 || right !== 200 || schedules !== 200) {
+    throw new Error(`auth statuses missing=${missing} wrong=${wrong} right=${right} schedules=${schedules}`);
+  }
+  const termMissing = await status("/v1/terminals");
+  const termWrong = await status("/v1/terminals", { Authorization: "Bearer wrong" });
+  const termRight = await status("/v1/terminals", { Authorization: `Bearer ${token}` });
+  const termQuery = await status(`/v1/terminals?token=${token}`);
+  if (termMissing !== 401 || termWrong !== 401 || termRight !== 200 || termQuery !== 401) {
+    throw new Error(
+      `terminal auth statuses missing=${termMissing} wrong=${termWrong} right=${termRight} query=${termQuery}`,
+    );
   }
   const healthBody = await (await fetch(`http://127.0.0.1:${port}/health`)).json();
   if (!healthBody.ok || !(healthBody.now > 0)) {
@@ -237,7 +247,6 @@ try {
   if (found.status !== 200 || !found.text.includes("beta-session") || !found.text.includes("content")) {
     throw new Error(`content search ${found.status} ${found.text.slice(0, 300)}`);
   }
-
   await writeFile(join(home, ".strike", "config.json"), '{"sandboxAllowDegrade":true}\n').catch(() => {});
 
   // GitHub ubuntu-latest already has a `google-chrome` on PATH, so a conditional
@@ -510,7 +519,7 @@ try {
   const title = boot.title || "";
   const statusId = boot.status || "";
   const chip = !!boot.chip;
-  const want = ["Run a command", "Strike", "Activity", "Files", "Changes", "Git", "Worktrees", "Memory", "Knowledge", "Artifacts", "Approval", "Gateways"];
+  const want = ["Run a command", "Strike", "Activity", "Files", "Changes", "Git", "Worktrees", "Memory", "Knowledge", "Artifacts", "Terminal", "Approval", "Gateways"];
   const missingText = want.filter((s) => !text.includes(s));
   if (missingText.length || acid !== "#7c3aed" || ground !== "#14131c" || !chip || !statusIds.includes(statusId) || !title.includes("Strike")) {
     throw new Error(
@@ -645,6 +654,7 @@ try {
   if (apprRemoved.status !== 200 || apprRemoved.text.includes("smoke-deny")) {
     throw new Error(`remove deny: ${apprRemoved.status} ${apprRemoved.text.slice(0, 300)}`);
   }
+
   const evalValue = async (expression) => {
     const ev = await send("Runtime.evaluate", { expression, returnByValue: true });
     if (ev.result?.exceptionDetails) {
@@ -997,8 +1007,7 @@ try {
   }
   const crumbs = await navbar(`(document.querySelector('[data-nav="crumbs"]') || {}).innerText || ""`);
   if (!String(crumbs).includes("Strike") || !String(crumbs).includes(">")) {
-    throw new Error(`breadcrumb missing text=${crumbs}`);
-  }
+    throw new Error(`breadcrumb missing text=${crumbs}`);  }
   await editorBrowserCheck({
     send,
     port,
@@ -1625,6 +1634,57 @@ try {
   }
   await clickSideTab("Worktrees", "session.childIsolation");
 
+  // Single ask surface (#1424 review, #1319 Q3): ONE pending permission
+  // ask must render EXACTLY ONE decision UI across both ask containers
+  // — the ApprovalCards stream (.approvals-card) and the composer
+  // transcript-asks bar (.composer-ask, removed). Seed a model-tool ask
+  // via the ops API ("run echo ..." makes the echo provider call bash),
+  // count both containers, then resolve through the card's Deny and
+  // require both containers to clear.
+  const singleAskSeed = await fetch(`http://127.0.0.1:${port}/v1/ops`, {
+    method: "POST",
+    headers: apprAuth,
+    body: JSON.stringify({ type: "user.input", data: { text: "run echo single-ask-smoke-1424" } }),
+  });
+  if (!singleAskSeed.ok) {
+    throw new Error(`single-ask seed ${singleAskSeed.status} ${await singleAskSeed.text()}`);
+  }
+  const askCounts = async () => {
+    const raw = await evaluate(`(() => JSON.stringify({
+      cards: document.querySelectorAll(".approvals-card").length,
+      composerAsks: document.querySelectorAll(".composer-ask").length,
+      composerBar: document.querySelectorAll('[data-composer-triggers="asks"]').length,
+    }))()`);
+    return JSON.parse(raw || "{}");
+  };
+  const singleAsk = await waitFor(
+    "one pending ask renders exactly one ask row (ApprovalCards only, no composer bar)",
+    async () => {
+      const c = await askCounts();
+      return { ok: c.cards + c.composerAsks === 1 && c.cards === 1 && c.composerBar === 0, ...c };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  if (singleAsk.cards !== 1 || singleAsk.composerAsks !== 0) {
+    throw new Error(`single-ask count wrong: ${JSON.stringify(singleAsk)}`);
+  }
+  const singleAskDenied = await evaluate(`(() => {
+    const b = [...document.querySelectorAll(".approvals-card button")].find((x) => (x.textContent || "").includes("Deny"));
+    if (!b) return "no-deny";
+    b.click();
+    return "denied";
+  })()`);
+  if (singleAskDenied !== "denied") {
+    throw new Error(`single-ask Deny button missing (${singleAskDenied})`);
+  }
+  await waitFor(
+    "single ask clears from both containers after Deny",
+    async () => {
+      const c = await askCounts();
+      return { ok: c.cards + c.composerAsks === 0, ...c };
+    },
+    { timeout: STEP_MS, interval: 250 },
+  );
   // Session delete (#1358): seed a session, close its root so it is
   // saved but not open, then delete it through the cockpit. Cancelling
   // the confirm must issue no request; confirming must remove it from
@@ -1815,6 +1875,126 @@ try {
     }),
     { timeout: WAIT_MS, interval: 250 },
   );
+  // Task runner (#1277): a plain echo section fails schema:handoff and
+  // blocks the next section. Restart the daemon so the run is read back
+  // from disk, then check the Tasks board (via the strict
+  // [data-view="tasks"] switch) shows the Failed and Blocked rows.
+  const taskApi = async (method, path, body) => {
+    const res = await fetch(`http://127.0.0.1:${port}${path}`, {
+      method,
+      headers: authz,
+      body: body == null ? undefined : JSON.stringify(body),
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      throw new Error(`task runner ${method} ${path} -> ${res.status} ${text.slice(0, 300)}`);
+    }
+    return JSON.parse(text);
+  };
+  const taskRootRes = await fetch(`http://127.0.0.1:${port}/v1/roots`, {
+    method: "POST",
+    headers: auth,
+    body: "{}",
+  });
+  if (!taskRootRes.ok) {
+    throw new Error(`task runner seed root failed ${taskRootRes.status} ${await taskRootRes.text()}`);
+  }
+  const taskRoot = await taskRootRes.json();
+  const taskOwner = taskRoot.sessionId || taskRoot.id;
+  if (!taskOwner) throw new Error(`task runner root returned no id: ${JSON.stringify(taskRoot)}`);
+  const taskPlan = await taskApi("POST", "/v1/plans", {
+    ownerRoot: taskOwner,
+    title: "Smoke checklist",
+    sections: [
+      { title: "First step", body: "plain echo body, no handoff" },
+      { title: "Second step", body: "depends on the first" },
+    ],
+  });
+  const taskPlanId = taskPlan.ID || taskPlan.id;
+  if (!taskPlanId) throw new Error(`plan create returned no id: ${JSON.stringify(taskPlan).slice(0, 300)}`);
+  const taskOpened = await taskApi("POST", `/v1/plans/${taskPlanId}/run`, {
+    action: "open",
+    ownerRoot: taskOwner,
+  });
+  const taskVersion = taskOpened.run && taskOpened.run.version;
+  if (!taskVersion) throw new Error(`open run returned no version: ${JSON.stringify(taskOpened).slice(0, 300)}`);
+  await taskApi("POST", `/v1/plans/${taskPlanId}/run`, {
+    action: "start",
+    ownerRoot: taskOwner,
+    expectedVersion: taskVersion,
+  });
+  let taskSections = [];
+  for (let i = 0; i < 60; i++) {
+    const taskBoard = await taskApi("GET", `/v1/plans/${taskPlanId}/run`);
+    taskSections = (taskBoard.run && taskBoard.run.sections) || [];
+    if (taskSections[0]?.status === "failed" && taskSections[1]?.status === "blocked") break;
+    await delay(500);
+  }
+  if (taskSections[0]?.status !== "failed" || taskSections[1]?.status !== "blocked") {
+    throw new Error(`task run did not block dependants: ${JSON.stringify(taskSections).slice(0, 500)}`);
+  }
+  try {
+    const exited = new Promise((resolve) => strike.once("exit", resolve));
+    strike.kill("SIGTERM");
+    await Promise.race([exited, delay(4000)]);
+    if (strike.exitCode == null && !strike.signalCode) strike.kill("SIGKILL");
+    await Promise.race([exited, delay(2000)]);
+    strike = spawn(
+      process.env.STRIKE_BIN || "./strike",
+      ["serve", "--addr", `127.0.0.1:${port}`, "--provider", "echo", "--auth", "--token", token],
+      { env: { ...process.env, HOME: home }, stdio: ["ignore", "pipe", "pipe"] },
+    );
+    strike.stdout.on("data", (b) => {
+      strikeLog += b.toString();
+    });
+    strike.stderr.on("data", (b) => {
+      strikeLog += b.toString();
+    });
+    await waitHealth(`http://127.0.0.1:${port}/health`);
+    const taskAfter = await taskApi("GET", `/v1/plans/${taskPlanId}/run`);
+    const taskAgain = (taskAfter.run && taskAfter.run.sections) || [];
+    if (taskAgain[0]?.status !== "failed" || taskAgain[1]?.status !== "blocked") {
+      throw new Error(`task run did not survive restart: ${JSON.stringify(taskAgain).slice(0, 500)}`);
+    }
+    await send("Page.navigate", {
+      url: "http://127.0.0.1:" + port + "/?token=" + token,
+    });
+    await waitFor(
+      "task runner board after restart (Failed and Blocked rows)",
+      async () => {
+        const clicked = await evaluate(
+          `(() => { const btn = document.querySelector('button[data-view="tasks"]'); if (!btn) return false; btn.click(); return true; })()`,
+        );
+        const boardText =
+          (await evaluate(
+            `(() => { const b = document.querySelector("#task-runner"); return b ? b.innerText : ""; })()`,
+          )) || "";
+        return {
+          ok:
+            clicked === true &&
+            boardText.includes("First step") &&
+            boardText.includes("Second step") &&
+            boardText.includes("Failed") &&
+            boardText.includes("Blocked"),
+          board: boardText.slice(0, 300),
+        };
+      },
+      { timeout: WAIT_MS, interval: 250 },
+    );
+    // Leave the cockpit on the Chat view: the checks after this block
+    // drive the chat and daemon surfaces, not the task board.
+    await evaluate(
+      `(() => { const btn = [...document.querySelectorAll(".segmented button")].find((b) => (b.textContent || "").trim() === "Chat"); if (btn) btn.click(); return true; })()`,
+    );
+    await waitFor(
+      "chat view after the task runner check",
+      textProbe((body) => body.includes("Run a command")),
+      { timeout: WAIT_MS, interval: 250 },
+    );
+  } catch (err) {
+    // The outer finally kills whichever daemon `strike` now points at.
+    throw err;
+  }
   // Turn elapsed (#1364): resume the seeded replay session and check
   // the label from the fixture above — exactly one "took 4:12", on the
   // long turn's final line; the short turn and the untimed-line turn
@@ -1873,9 +2053,43 @@ try {
   if (!picker.includes("A workspace is a directory")) {
     throw new Error(`workspace picker did not open: ${picker.slice(0, 400)}`);
   }
+  // Schedule page (#1276): the top-bar switch (data-view="schedule",
+  // registered by src/shell/contrib/scheduler.rs) opens the page and the
+  // empty state shows; the daemon token is already in localStorage from
+  // the boot script, so no reload is needed (the original PR's reload
+  // loop is replaced by the shared waitFor/textProbe helpers).
+  await evaluate(`document.querySelector('button[data-view="schedule"]').click()`);
+  await waitFor(
+    "schedule page (empty state)",
+    textProbe((body) => body.includes("Nothing is scheduled") && !body.includes("unauthorized")),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+
   if (strikeLog.includes(token)) {
     throw new Error("daemon log contains the smoke token");
   }
+
+  // Back to Chat before the composer checks below: the Schedule section
+  // above leaves the app on the schedule view, where the composer (and
+  // its actions button) is not rendered. The view switcher is the
+  // segmented "View" control whose Chat button calls set_view("chat").
+  await evaluate(`(() => {
+    const btn = [...document.querySelectorAll('.segmented[aria-label="View"] button')]
+      .find((b) => b.textContent.trim() === "Chat");
+    if (btn) { btn.click(); return "clicked"; }
+    return "missing-chat-switch";
+  })()`);
+  await waitFor(
+    "chat view (composer actions button) after leaving Schedule",
+    async () => {
+      const raw = await evaluate(
+        `JSON.stringify({ plus: !!document.querySelector('[aria-label="Composer actions"]') })`,
+      );
+      const parsed = JSON.parse(raw || "{}");
+      return { ok: !!parsed.plus, ...parsed };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
 
   const composerTriggers = await send("Runtime.evaluate", {
     expression: `(() => {
@@ -1932,6 +2146,55 @@ try {
   if (!composerSuggest.includes("/stop") && !composerSuggest.includes("/mode")) {
     throw new Error(`composer slash popup missing: ${composerSuggest.slice(0, 500)}`);
   }
+  await send("Runtime.evaluate", {
+    expression: `(() => {
+      const b = [...document.querySelectorAll("button")].find((el) => (el.textContent || "").trim() === "Triggers");
+      if (!b) return "missing";
+      b.click();
+      return "ok";
+    })()`,
+    returnByValue: true,
+  });
+  let triggersText = "";
+  for (let i = 0; i < 25; i++) {
+    const ev = await send("Runtime.evaluate", {
+      expression: "document.body ? document.body.innerText : ''",
+      returnByValue: true,
+    });
+    triggersText = ev.result?.result?.value || "";
+    if (triggersText.includes("New trigger") && triggersText.includes("Delivery log")) break;
+    await delay(200);
+  }
+  if (!triggersText.includes("New trigger") || !triggersText.includes("Delivery log")) {
+    throw new Error(`triggers page missing: ${triggersText.slice(0, 400)}`);
+  }
+
+  await send("Runtime.evaluate", {
+    expression: `localStorage.setItem("strike.token", ${JSON.stringify(token)})`,
+    returnByValue: true,
+  });
+  await send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
+  await waitFor(
+    "apps nav button",
+    async () => {
+      const raw = await evaluate(`(() => {
+        const btn = document.querySelector('button[data-view="apps"]');
+        return JSON.stringify({
+          btn: !!btn,
+          label: btn ? btn.textContent.trim() : "",
+        });
+      })()`);
+      const p = JSON.parse(raw || "{}");
+      return { ok: !!(p.btn && p.label === "Apps"), ...p };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await evaluate(`document.querySelector('button[data-view="apps"]').click()`);
+  await waitFor(
+    "apps launcher GitHub triage",
+    textProbe((body) => body.includes("GitHub triage")),
+    { timeout: WAIT_MS, interval: 250 },
+  );
   console.log("webui-smoke ok");
 } catch (err) {
   console.error(String(err));

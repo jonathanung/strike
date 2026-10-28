@@ -15,12 +15,15 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jonathanung/strike/harness/engine"
 	"github.com/jonathanung/strike/harness/sandbox"
+	"github.com/jonathanung/strike/internal/daemon/trigger"
 	"github.com/jonathanung/strike/internal/frontend/host"
 	"github.com/jonathanung/strike/internal/frontend/host/local"
 	"github.com/jonathanung/strike/internal/frontend/server"
 	"github.com/jonathanung/strike/internal/persist/attachment"
 	"github.com/jonathanung/strike/internal/persist/session"
+	"github.com/jonathanung/strike/internal/persist/taskrun"
 	"github.com/jonathanung/strike/internal/persist/workspace"
 	"github.com/jonathanung/strike/internal/product/config"
 	"github.com/jonathanung/strike/internal/protocol"
@@ -43,6 +46,8 @@ Options:
   --model <id>           model id for the live provider
   --attach-only          read-only JSONL attach (no live engine)
   --read-only            reject mutating protocol ops (POST /v1/ops + WS frames)
+  --terminal-remote      allow the side-panel shell on a non-loopback bind
+                         (requires --auth; loopback serves a shell without it)
   --auto                 skip permission asks; network.allow still applies
   --dangerously-skip-permissions
                          skip permission asks and bypass network.allow
@@ -52,6 +57,8 @@ Endpoints:
   GET  /health                      JSON ok + version (no auth)
   GET  /  and  GET /attach          cockpit page
   GET  /v1/ws                       WebSocket: ops in, events out (live)
+  GET  /v1/terminals               side-panel PTY shells (workspace cwd)
+  GET  /v1/terminals/{id}/stream   terminal WebSocket (cookie, bearer, or one-time ticket)
   POST /v1/ops                      submit one op envelope (live)
   GET  /v1/sidechat                 list read-only side-chat turns
   POST /v1/sidechat/ask             ask about the session (no tools, no user.input)
@@ -61,7 +68,12 @@ Endpoints:
   GET  /v1/agents                   selectable agents
   GET  /v1/sessions                 session list (+ liveId)
   GET  /v1/sessions/{id}/events     SSE tail of a session JSONL log
+  GET  /v1/triggers                 trigger registry
+  POST /hooks/{id}                 inbound trigger (HMAC, not the daemon bearer)
   GET  /v1/workflows                workflow catalog
+  GET  /v1/schedules                persisted schedules
+  POST /v1/schedules                create a cron, interval, one-shot, or heartbeat
+  POST /v1/schedules/{id}/run       start a root session now
   POST /v1/workflows/save           save document (never activates)
   POST /v1/workflows/{name}/start   start after confirm (rejects invalid)
   POST /v1/workflows/stop           stop active workflow
@@ -69,13 +81,17 @@ Endpoints:
   POST /v1/workflow-drafts/save     save draft JSON with confirm
 
 Auth: loopback is unauthenticated by default. Under --auth, use
-Authorization: Bearer <token> or the strike_serve_token cookie (set by opening
-/attach?token=… once; the server strips the query secret). Query tokens are
-not accepted on /v1/* routes.
+Authorization: Bearer <token> or the strike_serve_token cookie. A one-time
+pairing code (strike gateway url --qr, or the QR printed at startup) is how
+a phone authenticates. The daemon token is not put in that URL. The legacy
+/?token= handoff still sets the cookie and redirects; query tokens are not
+accepted on /v1/* routes.
 
-Bind is loopback-only (no cleartext LAN expose). For remote access:
+Bind is loopback unless you pass a private address with --allow-private-bind
+and --auth. 0.0.0.0 is rejected. For remote access:
   strike connect user@host
   ssh -L 8787:127.0.0.1:8787 user@host
+  strike serve --advertise-url https://your-tunnel.example
 See docs/gateway.md.`
 
 // errExposeRemoved is returned when legacy --expose / --allow-cidr are passed.
@@ -86,6 +102,7 @@ type serveOptions struct {
 	auth                       bool
 	token                      string
 	tokenFile                  string
+	advertiseURL               string
 	allowPrivateBind           bool
 	sessionDir                 string
 	sessionDirSet              bool
@@ -95,6 +112,7 @@ type serveOptions struct {
 	readOnly                   bool
 	auto                       bool
 	dangerouslySkipPermissions bool
+	terminalRemote             bool
 }
 
 func runServeCLI(args []string, stdout, stderr io.Writer) int {
@@ -139,6 +157,7 @@ func parseServeArgs(args []string) (serveOptions, error) {
 	})
 	fs.StringVar(&opts.token, "token", "", "")
 	fs.StringVar(&opts.tokenFile, "token-file", "", "")
+	fs.StringVar(&opts.advertiseURL, "advertise-url", "", "")
 	fs.BoolVar(&opts.allowPrivateBind, "allow-private-bind", false, "")
 	fs.StringVar(&opts.sessionDir, "session-dir", "", "")
 	fs.StringVar(&opts.provider, "provider", "echo", "")
@@ -147,6 +166,7 @@ func parseServeArgs(args []string) (serveOptions, error) {
 	fs.BoolVar(&opts.readOnly, "read-only", false, "")
 	fs.BoolVar(&opts.auto, "auto", false, "")
 	fs.BoolVar(&opts.dangerouslySkipPermissions, "dangerously-skip-permissions", false, "")
+	fs.BoolVar(&opts.terminalRemote, "terminal-remote", false, "")
 	if err := fs.Parse(args); err != nil {
 		return serveOptions{}, err
 	}
@@ -176,6 +196,12 @@ func parseServeArgs(args []string) (serveOptions, error) {
 		opts.provider = "echo"
 	}
 	opts.tokenFile = strings.TrimSpace(opts.tokenFile)
+	opts.advertiseURL = strings.TrimSpace(opts.advertiseURL)
+	if opts.advertiseURL != "" {
+		if _, err := server.ValidateAdvertiseURL(opts.advertiseURL); err != nil {
+			return serveOptions{}, err
+		}
+	}
 	if opts.token != "" && !opts.auth {
 		return serveOptions{}, fmt.Errorf("--token requires --auth")
 	}
@@ -187,6 +213,9 @@ func parseServeArgs(args []string) (serveOptions, error) {
 	}
 	if opts.allowPrivateBind && !opts.auth {
 		return serveOptions{}, fmt.Errorf("--allow-private-bind requires --auth")
+	}
+	if opts.terminalRemote && !opts.auth {
+		return serveOptions{}, fmt.Errorf("--terminal-remote requires --auth")
 	}
 	if opts.sessionDirSet && !opts.attachOnly {
 		return serveOptions{}, fmt.Errorf("--session-dir requires --attach-only; live sessions use %s", session.DefaultDir())
@@ -234,6 +263,10 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 	var services *host.Services
 	var sandboxSnap *server.SandboxSnapshot
 	var sideChat server.SideChatModel
+	var taskRuns *taskrun.Store
+	var terminalSandbox sandbox.Policy
+	var terminalSandboxFor func(sessionID, workDir string) (sandbox.Policy, bool)
+	terminalSandboxLoaded := false
 	var cleanup func() error
 	var sharedAttachments *attachment.Store
 	sessionDir := opts.sessionDir
@@ -298,6 +331,15 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		}
 		var mu sync.Mutex
 		roots := make(map[string]*serveRoot)
+		engines := make(map[string]*engine.Engine)
+		noteEngine := func(id string, eng *engine.Engine) {
+			if id == "" || eng == nil {
+				return
+			}
+			mu.Lock()
+			engines[id] = eng
+			mu.Unlock()
+		}
 
 		// startServeRoot runs the engine and tees events to its Live bridge.
 		startServeRoot := func(ctx context.Context, slot *rootSlot, live *server.Live) *serveRoot {
@@ -309,6 +351,17 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 			if slot.done == nil {
 				slot.done = done
 			}
+			// DELETE /v1/roots closes the Live bridge. Cancel the engine so
+			// runSession closes the session file. Without this, a root that
+			// outlives its create POST stays "open" and a later delete asks
+			// for force.
+			go func() {
+				select {
+				case <-live.Closed():
+					rcancel()
+				case <-rctx.Done():
+				}
+			}()
 			sr := &serveRoot{
 				live:    live,
 				bound:   slot.bound,
@@ -336,26 +389,32 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		}
 
 		// Build LiveHub with spawn and resume callbacks.
+		registerLive := func(ctx context.Context, slot *rootSlot) (string, error) {
+			live := server.NewLive(slot.id, slot.workDir, agents, slot.eng.Ops())
+			noteEngine(slot.id, slot.eng)
+			a.attachMemoryMode(live, slot.id, slot.eng)
+			seedLiveSandbox(live)
+			sr := startServeRoot(ctx, slot, live)
+			mu.Lock()
+			roots[slot.id] = sr
+			mu.Unlock()
+			liveHub.Add(slot.id, live)
+			if info, err := a.sessions.Get(slot.id); err == nil && info.Title != "" {
+				liveHub.SetTitle(slot.id, info.Title)
+			}
+			return slot.id, nil
+		}
 		liveHub = server.NewLiveHub(
-			func(ctx context.Context) (string, error) {
+			// The hub passes the HTTP request context. The engine has to live
+			// as long as the daemon, same as the initial root below.
+			func(context.Context) (string, error) {
 				slot, err := a.spawnRoot("")
 				if err != nil {
 					return "", err
 				}
-				live := server.NewLive(slot.id, slot.workDir, agents, slot.eng.Ops())
-				a.attachMemoryMode(live, slot.id, slot.eng)
-				seedLiveSandbox(live)
-				sr := startServeRoot(ctx, slot, live)
-				mu.Lock()
-				roots[slot.id] = sr
-				mu.Unlock()
-				liveHub.Add(slot.id, live)
-				if info, err := a.sessions.Get(slot.id); err == nil && info.Title != "" {
-					liveHub.SetTitle(slot.id, info.Title)
-				}
-				return slot.id, nil
+				return registerLive(ctx, slot)
 			},
-			func(ctx context.Context, sessionID string) (string, bool, error) {
+			func(_ context.Context, sessionID string) (string, bool, error) {
 				// Validate: session must exist and be a root.
 				sessionID = strings.TrimSpace(sessionID)
 				if sessionID == "" {
@@ -387,6 +446,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 				a.attachMemoryMode(live, slot.id, slot.eng)
 				seedLiveSandbox(live)
 				sr := startServeRoot(ctx, slot, live)
+				noteEngine(slot.id, slot.eng)
 				mu.Lock()
 				roots[slot.id] = sr
 				mu.Unlock()
@@ -397,20 +457,63 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 				return slot.id, false, nil
 			},
 		)
+		// Like the attended spawn above, ignore the caller's context: a
+		// trigger delivery passes the HTTP request context here, and the
+		// engine has to live as long as the daemon, not the request.
+		liveHub.SetUnattendedSpawn(func(context.Context) (string, error) {
+			slot, err := a.spawnUnattended("")
+			if err != nil {
+				return "", err
+			}
+			return registerLive(ctx, slot)
+		})
 
 		// Add initial root from the first assembly slot.
 		initialSlot := a.firstSlot
 		initialLive := server.NewLive(initialSlot.id, initialSlot.workDir, agents, initialSlot.eng.Ops())
 		a.attachMemoryMode(initialLive, initialSlot.id, initialSlot.eng)
 		seedLiveSandbox(initialLive)
+		noteEngine(initialSlot.id, initialSlot.eng)
 		liveHub.Add(initialSlot.id, initialLive)
 		if info, err := a.sessions.Get(initialSlot.id); err == nil && info.Title != "" {
 			liveHub.SetTitle(initialSlot.id, info.Title)
 		}
 		initialSR := startServeRoot(ctx, initialSlot, initialLive)
 		roots[initialSlot.id] = initialSR
+		// Closing a root (DELETE /v1/roots) drops it from the hub; the hub
+		// does not own the root's engine or session, so stop both here.
+		// Without this, a root whose engine runs on the daemon lifetime
+		// (the task-runner fix above) stays open in the session manager
+		// after it is closed, and deleting its saved session then demands
+		// force for a session that is not open anywhere.
+		liveHub.SetOnRemove(func(id string) {
+			mu.Lock()
+			sr := roots[id]
+			delete(roots, id)
+			mu.Unlock()
+			if sr != nil && sr.cancel != nil {
+				sr.cancel()
+			}
+			_ = a.sessions.Close(id)
+		})
 
 		services = &a.services
+		taskRuns = a.taskRuns
+		terminalSandbox = a.sandboxPolicy
+		terminalSandboxLoaded = true
+		terminalSandboxFor = func(sessionID, workDir string) (sandbox.Policy, bool) {
+			id := strings.TrimSpace(sessionID)
+			if id == "" && liveHub != nil {
+				id = liveHub.ActiveID()
+			}
+			mu.Lock()
+			eng := engines[id]
+			mu.Unlock()
+			if eng == nil {
+				return sandbox.Policy{}, false
+			}
+			return eng.BashSandboxPolicy(workDir), true
+		}
 
 		cleanup = func() error {
 			if liveHub != nil {
@@ -516,27 +619,56 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		defer func() { _ = st.Close() }()
 		sharedAttachments = st
 	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		cwd = ""
+	}
+	schedules, err := openScheduleService(workspace.DefaultDir(), liveHub, services, wsStore, cwd)
+	if err != nil {
+		return err
+	}
+	if liveHub != nil && !opts.readOnly {
+		go schedules.Run(ctx)
+	}
+	trigStore, err := trigger.Open("")
+	if err != nil {
+		return err
+	}
+	// Triggers use their authored launcher (internal/daemon/rootstart,
+	// server.NewRootLauncher); the landed scheduler uses internal/rootstart.
+	// Do not spawn a third way.
+	trigSvc := trigger.New(trigStore, server.NewRootLauncher(liveHub))
 
+	workDir, _ := os.Getwd()
 	srv, err := server.New(server.Options{
-		Addr:       opts.addr,
-		Auth:       opts.auth,
-		Token:      token,
-		TokenFile:  opts.tokenFile,
-		SessionDir: sessionDir,
-		Workspaces: wsStore,
-		LiveHub:    liveHub,
-		Services:   services,
+		Addr:         opts.addr,
+		Auth:         opts.auth,
+		Token:        token,
+		TokenFile:    opts.tokenFile,
+		AdvertiseURL: opts.advertiseURL,
+		SessionDir:   sessionDir,
+		Workspaces:   wsStore,
+		Schedules:    schedules,
+		LiveHub:      liveHub,
+		Services:     services,
 		SyncWorkDir: func(dir string) {
 			if services != nil {
 				local.SetFilesWorkDir(services.Files, dir)
 			}
 		},
-		Sandbox:       sandboxSnap,
-		ReadOnly:      opts.readOnly,
-		Audit:         auditSink,
-		Attachments:   sharedAttachments,
-		UsageAuditDir: usageDir,
-		SideChat:      sideChat,
+		Sandbox:               sandboxSnap,
+		ReadOnly:              opts.readOnly,
+		Audit:                 auditSink,
+		Attachments:           sharedAttachments,
+		UsageAuditDir:         usageDir,
+		SideChat:              sideChat,
+		Triggers:              trigSvc,
+		TaskRuns:              taskRuns,
+		WorkDir:               workDir,
+		TerminalRemote:        opts.terminalRemote,
+		TerminalSandbox:       terminalSandbox,
+		TerminalSandboxLoaded: terminalSandboxLoaded,
+		TerminalSandboxFor:    terminalSandboxFor,
 	})
 	if err != nil {
 		return err
@@ -548,6 +680,8 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 	}
 
 	actual := ln.Addr().String()
+	srv.NoteBind(actual)
+	pairURL, pairQR, pairNote := startupPair(srv, opts.auth)
 
 	printServeBanner(stdout, serveBanner{
 		listenAddr: actual,
@@ -560,6 +694,9 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		sessionDir: sessionDir,
 		readOnly:   opts.readOnly,
 		sideChat:   sideChat != nil,
+		pairURL:    pairURL,
+		pairQR:     pairQR,
+		pairNote:   pairNote,
 	})
 
 	errCh := make(chan error, 1)
@@ -593,6 +730,37 @@ type serveBanner struct {
 	sessionDir string
 	readOnly   bool
 	sideChat   bool
+	pairURL    string
+	pairQR     string
+	pairNote   string
+}
+
+func startupPair(srv *server.Server, auth bool) (url, blocks, note string) {
+	info := srv.GatewayInfo()
+	if auth {
+		minted, err := srv.MintPair("serve")
+		if err != nil {
+			return "", "", info.OptIn
+		}
+		info = minted.Gateway
+		url = minted.URL
+	} else if len(info.URLs) > 0 {
+		url = info.URLs[0].URL
+	}
+	if url != "" {
+		blocks = server.QRBlocks(url)
+	}
+	var lines []string
+	if info.OptIn != "" {
+		lines = append(lines, info.OptIn)
+	}
+	if info.LanWarning != "" {
+		lines = append(lines, info.LanWarning)
+	}
+	if info.AdvertiseWarning != "" {
+		lines = append(lines, info.AdvertiseWarning)
+	}
+	return url, blocks, strings.Join(lines, "\n")
 }
 
 func printServeBanner(w io.Writer, b serveBanner) {
@@ -601,6 +769,17 @@ func printServeBanner(w io.Writer, b serveBanner) {
 	// The cockpit URL never carries the bearer. Paste it into the Gateways
 	// field, or use strike connect, which injects a grant on loopback.
 	fmt.Fprintf(w, "  cockpit: http://%s/attach\n", b.listenAddr)
+	if b.pairURL != "" && (b.token == "" || !strings.Contains(b.pairURL, b.token)) && !strings.Contains(b.pairURL, "?token=") {
+		fmt.Fprintf(w, "  pair:    %s\n", b.pairURL)
+		if b.pairQR != "" {
+			fmt.Fprintln(w, b.pairQR)
+		}
+	} else if b.pairURL != "" {
+		fmt.Fprintln(w, "  pair:    refused (url contained the daemon token)")
+	}
+	if b.pairNote != "" {
+		fmt.Fprintf(w, "  phone:   %s\n", strings.ReplaceAll(b.pairNote, "\n", "\n           "))
+	}
 	if b.auth {
 		fmt.Fprintln(w, "  auth:    bearer or cookie; the token is not part of the URL")
 	}
@@ -632,6 +811,7 @@ func printServeBanner(w io.Writer, b serveBanner) {
 	}
 	fmt.Fprintf(w, "  sessions dir: %s\n", b.sessionDir)
 	fmt.Fprintln(w, "  audit:   serve ops → ~/.strike/audit (family serve_op)")
+	fmt.Fprintln(w, "  schedules: ~/.strike/schedules.json  (unattended runs use workspace mode, else plan)")
 	fmt.Fprintln(w, "  remote:  strike connect user@host   or   ssh -L 8787:127.0.0.1:8787 user@host")
 	fmt.Fprintln(w, "experimental web cockpit — TUI remains primary")
 }
