@@ -144,6 +144,7 @@ var browserProtocolOps = []string{
 	"compact", "context.controls", "inspect.prompt", "interrupt", "permission.reply", "question.reply",
 	"rewind", "select.agent", "select.model", "set.autonomy", "set.effort",
 	"set.fast", "set.permission_mode", "steer", "user.input",
+	"input.queue_edit", "input.queue_cancel", "input.queue_reorder",
 	"workflow.start", "workflow.stop",
 }
 

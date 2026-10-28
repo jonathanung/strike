@@ -43,6 +43,12 @@ materially affect the shipped product.
   share one component. A missed heartbeat shows the gateway disconnected.
   Wire schema `1.19.0` (no new transcript event). See
   [docs/webui-status.md](docs/webui-status.md).
+- **Steer and queue in the web composer** — while a turn runs, Enter follows
+  a Steer or Queue default, and the other half of Send does that once.
+  Queued messages are the engine FIFO (`input.queued`, with edit, cancel,
+  and reorder). A steer is marked on the transcript when it lands. Send is
+  held when the daemon says the next turn would not fit. Wire schema
+  `1.20.0`.
 - **Web client shell** — session list with status, unread, in-progress,
   and pinned filters; command field (Ctrl+K); gateway chip; approval mode,
   model, and Steer/Queue on the composer; Activity, Files, and Changes.

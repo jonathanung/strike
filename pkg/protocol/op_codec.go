@@ -27,6 +27,12 @@ func opType(op Op) string {
 		return "interrupt"
 	case Steer:
 		return "steer"
+	case InputQueueEdit:
+		return "input.queue_edit"
+	case InputQueueCancel:
+		return "input.queue_cancel"
+	case InputQueueReorder:
+		return "input.queue_reorder"
 	case SelectModel:
 		return "select.model"
 	case SelectAgent:
@@ -116,6 +122,12 @@ func (e OpEnvelope) Decode() (Op, error) {
 		return Interrupt{}, nil
 	case "steer":
 		op = &Steer{}
+	case "input.queue_edit":
+		op = &InputQueueEdit{}
+	case "input.queue_cancel":
+		op = &InputQueueCancel{}
+	case "input.queue_reorder":
+		op = &InputQueueReorder{}
 	case "select.model":
 		op = &SelectModel{}
 	case "select.agent":
@@ -181,6 +193,12 @@ func derefOp(op Op) Op {
 	case *QuestionReply:
 		return *v
 	case *Steer:
+		return *v
+	case *InputQueueEdit:
+		return *v
+	case *InputQueueCancel:
+		return *v
+	case *InputQueueReorder:
 		return *v
 	case *SelectModel:
 		return *v

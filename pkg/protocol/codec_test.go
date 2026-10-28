@@ -931,6 +931,7 @@ func TestEventTypeCoverage(t *testing.T) {
 		"question.asked":         QuestionAsked{},
 		"question.resolved":      QuestionResolved{},
 		"turn.steered":           TurnSteered{Mode: SteerModeBoundary},
+		"input.queued":           InputQueued{Items: []InputQueueItem{{ID: "q1", Text: "later"}}},
 		"turn.completed":         TurnCompleted{},
 		"verification.started":   VerificationStarted{},
 		"verification.completed": VerificationCompleted{},

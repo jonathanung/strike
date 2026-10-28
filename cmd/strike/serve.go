@@ -344,8 +344,18 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		}
 
 		// startServeRoot runs the engine and tees events to its Live bridge.
-		startServeRoot := func(ctx context.Context, slot *rootSlot, live *server.Live) *serveRoot {
-			rctx, rcancel := context.WithCancel(ctx)
+		// parent is the process context, not the create/resume request: that
+		// request is cancelled as soon as the handler returns, and the engine
+		// has to keep reading ops after New or Resume.
+		startServeRoot := func(parent context.Context, slot *rootSlot, live *server.Live) *serveRoot {
+			rctx, rcancel := context.WithCancel(parent)
+			go func() {
+				select {
+				case <-parent.Done():
+				case <-live.Done():
+				}
+				rcancel()
+			}()
 			done := make(chan struct{})
 			if slot.cancel == nil {
 				slot.cancel = rcancel
@@ -391,7 +401,10 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		}
 
 		// Build LiveHub with spawn and resume callbacks.
-		registerLive := func(ctx context.Context, slot *rootSlot) (string, error) {
+		// The hub passes the HTTP request context. registerLive ignores it
+		// and starts the engine on the process context, so New and Resume
+		// keep reading ops after the handler returns.
+		registerLive := func(slot *rootSlot) (string, error) {
 			live := server.NewLive(slot.id, slot.workDir, agents, slot.eng.Ops())
 			noteEngine(slot.id, slot.eng)
 			a.attachMemoryMode(live, slot.id, slot.eng)
@@ -407,14 +420,12 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 			return slot.id, nil
 		}
 		liveHub = server.NewLiveHub(
-			// The hub passes the HTTP request context. The engine has to live
-			// as long as the daemon, same as the initial root below.
 			func(context.Context) (string, error) {
 				slot, err := a.spawnRoot("")
 				if err != nil {
 					return "", err
 				}
-				return registerLive(ctx, slot)
+				return registerLive(slot)
 			},
 			func(_ context.Context, sessionID string) (string, bool, error) {
 				// Validate: session must exist and be a root.
@@ -447,8 +458,8 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 				live := server.NewLive(slot.id, slot.workDir, agents, slot.eng.Ops())
 				a.attachMemoryMode(live, slot.id, slot.eng)
 				seedLiveSandbox(live)
-				sr := startServeRoot(ctx, slot, live)
 				noteEngine(slot.id, slot.eng)
+				sr := startServeRoot(ctx, slot, live)
 				mu.Lock()
 				roots[slot.id] = sr
 				mu.Unlock()
@@ -467,7 +478,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 			if err != nil {
 				return "", err
 			}
-			return registerLive(ctx, slot)
+			return registerLive(slot)
 		})
 
 		// Add initial root from the first assembly slot.

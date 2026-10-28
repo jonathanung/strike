@@ -4,7 +4,8 @@ The Rust client (`webui/`) ships the surfaces the daemon can drive today:
 a session list (live roots, saved sessions, server-backed pins, archive,
 and organisational folders, search across titles and recent transcript
 text, delegated children nested in the conductor view), a transcript over
-`/v1/live/events`, a composer that can steer or queue and set the real
+`/v1/live/events`, a composer that can steer or queue (split send,
+visible engine queue, stop, context hold) and set the real
 permission mode, and a side panel with Activity, Files, Changes, Git, Worktrees,
 Memory, Knowledge, and Artifacts.
 Apps is a separate surface: a launcher and one queue, GitHub triage
@@ -319,14 +320,17 @@ The model menu reads `status.contextUsed`. The denominator is
 `status.contextLimit` when a fit warning has named the window, otherwise
 the catalog `context` on the active model when that field is non-zero.
 Both numbers come from the daemon. If neither is known the meter says the
-window is not reported.
+window is not reported. The client does not invent a limit. Echo has no
+context window, so the hold stays hidden there.
 
 Send (`user.input` and `steer`) is held when `status.contextFit` is
 `critical`, or when a known window is already full (`contextUsed` ≥ limit).
 A `warn` fit, or last-turn usage at or above 80% of a known window, is a
 warning and Send stays available. `contextFit` clears on
-`compaction.completed` (usage clears with it; the limit stays) and when a
-later usage report falls under 80% of the daemon limit.
+`compaction.completed` (usage clears with it; the limit stays), when a
+later usage report falls under 80% of the daemon limit, and when a turn
+finishes while the level is still `critical` so a stale warning does not
+hold the next draft. Send anyway, or Alt+Enter, sends the held draft once.
 
 Effort is offered when the catalog row reports `reasoning`, when it lists
 variants, or when the live session already has an effort. Published
