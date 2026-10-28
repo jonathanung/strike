@@ -325,3 +325,24 @@ What an attacker gets:
 - A public tunnel in front of loopback removes the "no public listener"
   property. The token is then the only boundary. Strike does not start
   that tunnel. `--advertise-url` only changes the QR text.
+
+## Inbound hooks
+
+`POST /hooks/{id}` is not under `/v1` and does not accept the daemon bearer.
+The trigger's HMAC secret is the credential. A missing or wrong signature
+is 401. The comparison is constant-time. Generic webhooks sign
+`timestamp + "." + raw body` (`X-Strike-Timestamp`, `X-Strike-Delivery`,
+`X-Strike-Signature: sha256=<hex>`) and must present a timestamp within five
+minutes. GitHub triggers use `X-Hub-Signature-256` over the raw body.
+Strike remembers a delivery id after a verified accept, ignore, or
+replay, so that delivery does not start a second session. A failed
+signature does not reserve the id, and once the signature-failure budget
+is spent Strike stops writing those attempts to the log. The registry,
+delivery log, and one-shot secret display live on the Triggers page
+(`GET /v1/triggers`, which does require the bearer).
+
+The bind rules above still apply. GitHub cannot reach loopback unless you
+forward the port yourself. Strike does not open a public listener for hooks.
+Unattended triggers start in plan mode unless the trigger names another
+posture. The signing secret is stored in `~/.strike/triggers.json` (mode
+0600) and is not written to the delivery log.
