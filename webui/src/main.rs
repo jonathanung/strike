@@ -883,6 +883,10 @@ fn App() -> impl IntoView {
     let steer_mode = RwSignal::new(String::new());
     let queue_note = RwSignal::new(String::new());
     let hold_bypass = RwSignal::new(false);
+    // Cancel and Stop drop work. The first click arms the button; the
+    // second click is the confirm. Escape still stops immediately.
+    let confirm_cancel = RwSignal::new(String::new());
+    let confirm_stop = RwSignal::new(false);
     let live_busy = RwSignal::new(false);
     let live_busy_root = RwSignal::new(String::new());
     let side_tab = RwSignal::new("activity".to_string());
@@ -1237,6 +1241,8 @@ fn App() -> impl IntoView {
             steer_mode.set(String::new());
             queue_note.set(String::new());
             hold_bypass.set(false);
+            confirm_cancel.set(String::new());
+            confirm_stop.set(false);
         } else if mobile::resume_after(cursor_fx.get(), false).is_some() {
             // Same session, known SSE cursor: keep the column and ask
             // the daemon for events after that offset.
@@ -1306,6 +1312,10 @@ fn App() -> impl IntoView {
                             if !steer_queue::editing_still_valid(&items, &editing) {
                                 editing_id.set(String::new());
                             }
+                            let armed = confirm_cancel.get_untracked();
+                            if !armed.is_empty() && !items.iter().any(|it| it.id == armed) {
+                                confirm_cancel.set(String::new());
+                            }
                             queue_items.set(items);
                             queue_note.set(String::new());
                         }
@@ -1324,6 +1334,7 @@ fn App() -> impl IntoView {
                         }
                         steer_queue::LiveNote::TurnFinished => {
                             live_busy.set(false);
+                            confirm_stop.set(false);
                             if context_fit.get_untracked() == "critical" {
                                 context_fit.set(String::new());
                             }
@@ -3693,6 +3704,8 @@ fn App() -> impl IntoView {
                                         let id_for_when = id.clone();
                                         let id_for_fallback = id.clone();
                                         let id_cancel = id.clone();
+                                        let id_cancel_class = id.clone();
+                                        let id_cancel_label = id.clone();
                                         let id_up = id.clone();
                                         let id_down = id.clone();
                                         let text_for_edit = item.text.clone();
@@ -3740,9 +3753,16 @@ fn App() -> impl IntoView {
                                                             post_queue("input.queue_reorder", serde_json::json!({"ids": ids}));
                                                         }
                                                     }>"Down"</button>
-                                                    <button type="button" class="secondary" on:click=move |_| {
-                                                        post_queue("input.queue_cancel", serde_json::json!({"id": id_cancel.clone()}));
-                                                    }>"Cancel"</button>
+                                                    <button type="button" class=move || if confirm_cancel.get() == id_cancel_class { "secondary confirming" } else { "secondary" } title="Removes this queued message. Click again to confirm." on:click=move |_| {
+                                                        let id = id_cancel.clone();
+                                                        if confirm_cancel.get_untracked() == id {
+                                                            confirm_cancel.set(String::new());
+                                                            post_queue("input.queue_cancel", serde_json::json!({"id": id}));
+                                                        } else {
+                                                            confirm_stop.set(false);
+                                                            confirm_cancel.set(id);
+                                                        }
+                                                    }>{move || if confirm_cancel.get() == id_cancel_label { "Confirm" } else { "Cancel" }}</button>
                                                 </span>
                                             </li>
                                         }
@@ -3990,7 +4010,15 @@ fn App() -> impl IntoView {
                                     <button type="button" title="While a turn is running, the send button steers that turn" aria-pressed=move || if enter_mode.get() == "steer" { "true" } else { "false" } class=move || if enter_mode.get() == "steer" { "chip on" } else { "chip" } on:click=move |_| set_enter("steer".into())>"Steer"</button>
                                     <button type="button" title="While a turn is running, the send button waits until the turn finishes" aria-pressed=move || if enter_mode.get() == "queue" { "true" } else { "false" } class=move || if enter_mode.get() == "queue" { "chip on" } else { "chip" } on:click=move |_| set_enter("queue".into())>"Queue"</button>
                                     <Show when=move || session_busy_now.get()>
-                                        <button type="button" id="stop-turn" class="secondary" title="Stop the running turn (Escape when the draft is empty)" on:click=move |_| stop_turn()>"Stop"</button>
+                                        <button type="button" id="stop-turn" class=move || if confirm_stop.get() { "secondary confirming" } else { "secondary" } title="Stops the running turn. Click again to confirm. Escape still stops immediately." on:click=move |_| {
+                                            if confirm_stop.get_untracked() {
+                                                confirm_stop.set(false);
+                                                stop_turn();
+                                            } else {
+                                                confirm_cancel.set(String::new());
+                                                confirm_stop.set(true);
+                                            }
+                                        }>{move || if confirm_stop.get() { "Confirm" } else { "Stop" }}</button>
                                     </Show>
                                     <button id="send-primary" class="primary send" type="submit" disabled=move || {
                                         let ctx = active_context(&catalog.get(), &provider_name.get(), &model_name.get());

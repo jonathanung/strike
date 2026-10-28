@@ -2484,6 +2484,24 @@ try {
     return "ok";
   })()`);
   await waitFor(
+    "cancel confirm",
+    async () => {
+      const raw = await evaluate(`(() => {
+        const row = [...document.querySelectorAll(".queue-list li")].find((r) => r.innerText.includes("alpha later"));
+        const confirm = row && [...row.querySelectorAll("button")].find((b) => b.textContent === "Confirm");
+        return JSON.stringify({ ok: !!confirm });
+      })()`);
+      return JSON.parse(raw || "{}");
+    },
+    { timeout: STEP_MS, interval: 150 },
+  );
+  await evaluate(`(() => {
+    const row = [...document.querySelectorAll(".queue-list li")].find((r) => r.innerText.includes("alpha later"));
+    const confirm = row && [...row.querySelectorAll("button")].find((b) => b.textContent === "Confirm");
+    if (confirm) confirm.click();
+    return "ok";
+  })()`);
+  await waitFor(
     "cancelled queue item",
     async () => {
       const raw = await evaluate(`(() => {

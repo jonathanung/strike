@@ -95,6 +95,11 @@ body[data-phone="1"] .steer-queue {
   overflow: auto;
 }
 .steer-actions .send { margin-left: 0; }
+button.confirming {
+  border: var(--border-width) solid var(--signal);
+  color: var(--signal);
+  box-shadow: 3px 3px 0 var(--ink);
+}
 @media (max-width: 720px) {
   .steer-hold { flex-wrap: wrap; }
   .queue-list li { flex-wrap: wrap; align-items: stretch; }
