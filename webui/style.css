@@ -2098,6 +2098,9 @@ select.mode, .daemon select {
   position: absolute;
   right: 24px;
   bottom: 8px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 14px;
   background: var(--raised);
   border-color: var(--border-focus);
   color: var(--ink);

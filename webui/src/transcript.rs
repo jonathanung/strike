@@ -199,6 +199,36 @@ pub fn stick_to_bottom(scroll_top: f64, scroll_height: f64, client_height: f64) 
     scroll_height - scroll_top - client_height < STICK_PX
 }
 
+/// Scroll offset to use after the scroller's height changes — the phone
+/// keyboard opening or closing resizes the shell around the transcript,
+/// and a desktop window resize does the same. `prev_*` is the geometry
+/// at the last position the reader chose, `new_client` the height after
+/// the resize, and `scroll_height` the current content height.
+///
+/// A reader pinned to the bottom stays at the bottom. A reader scrolled
+/// up keeps their offset while it still fits; when growth clamps it away
+/// (keyboard closing over a short remaining tail), the offset moves only
+/// enough to keep the same distance from the bottom, so the lines on
+/// screen stay on screen and the resize never yanks the reader.
+pub fn anchored_scroll_top(
+    prev_top: f64,
+    prev_height: f64,
+    prev_client: f64,
+    new_client: f64,
+    scroll_height: f64,
+) -> f64 {
+    let distance = prev_height - prev_top - prev_client;
+    if distance < STICK_PX {
+        return scroll_height.max(0.0);
+    }
+    let max_top = (scroll_height - new_client).max(0.0);
+    if prev_top <= max_top {
+        prev_top
+    } else {
+        (scroll_height - distance - new_client).max(0.0)
+    }
+}
+
 pub fn show_minimap(count: usize) -> bool {
     count >= MINIMAP_MIN
 }
@@ -2052,6 +2082,52 @@ mod tests {
         assert!(suggestions()
             .iter()
             .all(|s| !s.detail.is_empty() && !s.title.is_empty()));
+    }
+
+    #[test]
+    fn anchored_scroll_top_keeps_a_pinned_reader_at_the_bottom() {
+        // Keyboard opens: the box shrinks from 1000 to 460 under a reader
+        // sitting at the bottom of 2000px of transcript.
+        assert_eq!(
+            anchored_scroll_top(1000.0, 2000.0, 1000.0, 460.0, 2000.0),
+            2000.0
+        );
+        // Near the bottom (inside STICK_PX) counts as pinned too.
+        assert_eq!(
+            anchored_scroll_top(970.0, 2000.0, 1000.0, 460.0, 2000.0),
+            2000.0
+        );
+        // Keyboard closes again: still the bottom.
+        assert_eq!(
+            anchored_scroll_top(1540.0, 2000.0, 460.0, 1000.0, 2000.0),
+            2000.0
+        );
+    }
+
+    #[test]
+    fn anchored_scroll_top_keeps_a_scrolled_up_reader_in_place() {
+        // Reading 700px above the bottom; the keyboard opening (shrink)
+        // and closing (grow) both leave the offset alone while it fits.
+        assert_eq!(
+            anchored_scroll_top(300.0, 2000.0, 1000.0, 460.0, 2000.0),
+            300.0
+        );
+        assert_eq!(
+            anchored_scroll_top(300.0, 2000.0, 460.0, 1000.0, 2000.0),
+            300.0
+        );
+    }
+
+    #[test]
+    fn anchored_scroll_top_restores_the_bottom_distance_when_clamped() {
+        // 100px above the bottom with the keyboard open (460 box). The
+        // keyboard closes to a 1000px box whose max offset is 1000, below
+        // the reader's 1440: keep the 100px bottom distance instead of
+        // landing on the clamped offset (which reads as the bottom).
+        assert_eq!(
+            anchored_scroll_top(1440.0, 2000.0, 460.0, 1000.0, 2000.0),
+            900.0
+        );
     }
 
     #[test]
