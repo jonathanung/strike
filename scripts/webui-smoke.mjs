@@ -2295,7 +2295,8 @@ try {
   await send("Page.reload", { ignoreCache: true });
   for (let i = 0; i < 40; i++) {
     const body = await evalJson(`document.body ? document.body.innerText : ""`);
-    if (String(body).includes("Run a command") && String(body).includes("Customize")) break;
+    const ready = await evalJson(`!!document.querySelector('[data-view="customize"]') && !!document.querySelector('[data-nav="more"]')`);
+    if (String(body).includes("Menu") && ready === true) break;
     if (i === 39) throw new Error(`reload did not show the cockpit: ${String(body).slice(0, 300)}`);
     await delay(250);
   }
@@ -2303,7 +2304,7 @@ try {
   let customizeText = "";
   for (let i = 0; i < 40; i++) {
     customizeText = String(await evalJson(`(() => {
-      const btn = [...document.querySelectorAll("button")].find((b) => b.textContent.trim() === "Customize");
+      const btn = document.querySelector('[data-view="customize"]');
       if (btn) btn.click();
       return document.body ? document.body.innerText : "";
     })()`));

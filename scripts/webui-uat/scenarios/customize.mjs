@@ -145,7 +145,7 @@ export async function scenario(ctx) {
   // so reopen Customize before looking for the new server.
   await page.send("Page.navigate", { url: ctx.baseURL });
   const back = await waitUntil(
-    `document.body && document.body.innerText.includes("Run a command") && !!document.querySelector('[data-view="customize"]')`,
+    `document.body && document.body.innerText.includes("Menu") && !!document.querySelector('[data-view="customize"]')`,
     20000,
     "reload after mcp seed",
   );
