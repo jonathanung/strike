@@ -27,10 +27,11 @@ Artifacts (gitignored) land in `webui-uat-artifacts/`:
 
 | Path | What |
 |---|---|
-| `screenshots/<name>.png` | PNG at a fixed CSS viewport, device pixel ratio 1 |
+| `screenshots/<name>.png` | PNG at a fixed CSS viewport. Desktop shots use device pixel ratio 1. Phone shots use 3 |
 | `dom/<name>.json` | Tokens plus the visible text at that shot |
 | `frames/` | JPEG frames used to encode the video |
 | `uat.mp4` | The scripted pass at 1440×900 |
+| `uat-phone.mp4` | The phone-width pass (omitted with `--no-video`) |
 | `report.json` | Shot list and assertion failures |
 
 Chrome is `google-chrome` or `$CHROME_BIN`. ffmpeg is required for the video
@@ -63,8 +64,26 @@ composer also get a 390×844 shot where the layout breaks to one column
 shots live in `scenarios/gateway-qr.mjs` (`shell-phone-1024.png`,
 `shell-phone-1440.png`, `shell-phone-mobile.png`).
 
-`--suite smoke` stops here. The default `--suite full` (`make webui-uat`)
-then reloads the shell and runs every stream scenario.
+`--suite smoke` stops after the cockpit pass below. The default
+`--suite full` (`make webui-uat`) then reloads the shell and runs every
+stream scenario.
+
+## Phone pass
+
+The cockpit pass (smoke and full) then drives a phone layout at 390×844
+and 360×740 (device pixel ratio 3, touch emulation) and a short landscape
+844×390. It checks the bottom nav, that Send and the Steer/Queue chips
+stay inside the viewport, 44px session chips and search, safe-area CSS,
+the manifest and `#14131c` theme color, each pane (sessions, approval,
+model, activity, files, editor when a file is listed, changes, daemon),
+a simulated keyboard inset via `window.__strikeSetViewport`, and a
+`strike-resume` bump. The reconnect error and the recovered cockpit are
+shot again at 390×844. `--video` also writes `uat-phone.mp4` from those
+frames. Headless Chrome has no software keyboard and no notch; see
+[mobile.md](mobile.md) for what still needs a real phone.
+
+Desktop frames stay at device pixel ratio 1. Phone frames are ratio 3, so
+a 390×844 shot is 1170×2532 pixels.
 
 ## Per-stream scenarios
 

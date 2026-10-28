@@ -16,6 +16,13 @@ materially affect the shipped product.
 
 ### Added
 
+- **Phone cockpit** — at phone width the web client shows one pane at a
+  time (sessions, chat, activity, files, daemon) with a bottom nav, 44px
+  targets, and safe-area padding. The composer stays in the visual
+  viewport when the keyboard opens. Send stays on screen while the chip
+  row scrolls. A phone resume keeps the transcript and continues the live
+  stream from the last SSE id. See [docs/mobile.md](docs/mobile.md)
+  ([#1311](https://github.com/jonathanung/strike/issues/1311)).
 - **Web terminal** — the side panel opens a daemon PTY in the active
   workspace. The stream is an authenticated websocket (cookie or a
   single-use ticket) and stays on loopback unless
