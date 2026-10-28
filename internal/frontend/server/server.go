@@ -573,7 +573,7 @@ func (s *Server) withMiddleware(next http.Handler) http.Handler {
 			return
 		}
 		if stateChanging(r.Method) {
-			if origin := r.Header.Get("Origin"); origin != "" && !originAllowed(origin) {
+			if origin := r.Header.Get("Origin"); origin != "" && !requestOriginAllowed(r) {
 				http.Error(w, "origin not allowed", http.StatusForbidden)
 				return
 			}
@@ -796,8 +796,10 @@ func (s *Server) maybeHandoffToken(w http.ResponseWriter, r *http.Request) bool 
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
-		// Secure omitted: strike serve is cleartext by design (loopback, or a
-		// private bind with --auth). There is no public listener.
+		// Secure only when a loopback TLS proxy (tailscale serve) says the
+		// browser is on HTTPS. A direct http://100.x bind must stay unset
+		// or the phone will not store the cookie. See docs/mobile.md.
+		Secure: cookieSecure(r),
 	})
 	q := r.URL.Query()
 	q.Del("token")
@@ -814,7 +816,7 @@ func (s *Server) maybeHandoffToken(w http.ResponseWriter, r *http.Request) bool 
 
 func (s *Server) applyCORS(w http.ResponseWriter, r *http.Request) {
 	origin := r.Header.Get("Origin")
-	if originAllowed(origin) {
+	if origin != "" && requestOriginAllowed(r) {
 		w.Header().Set("Access-Control-Allow-Origin", origin)
 		w.Header().Set("Vary", "Origin")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
@@ -960,9 +962,12 @@ func (s *Server) handleSessionEvents(w http.ResponseWriter, r *http.Request) {
 	flusher.Flush()
 
 	ctx := r.Context()
-	var offset int64
-	// Initial backlog.
-	n, err := s.writeEventsFrom(ctx, w, flusher, path, 0)
+	offset := eventCursor(r)
+	if st, err := os.Stat(path); err == nil {
+		offset = clampCursor(offset, st.Size())
+	}
+	// Backlog after Last-Event-ID / ?after=, then tail.
+	n, err := s.writeEventsFrom(ctx, w, flusher, path, offset)
 	if err != nil {
 		return
 	}
@@ -1045,7 +1050,9 @@ func (s *Server) writeEventsRangeFile(ctx context.Context, w http.ResponseWriter
 			if isSessionLogHeader(payload) {
 				continue
 			}
-			if _, err := fmt.Fprintf(w, "data: %s\n\n", payload); err != nil {
+			// id is the byte offset after this line. EventSource sends it
+			// back as Last-Event-ID on reconnect.
+			if _, err := fmt.Fprintf(w, "id: %d\ndata: %s\n\n", offset, payload); err != nil {
 				return offset, err
 			}
 			flusher.Flush()

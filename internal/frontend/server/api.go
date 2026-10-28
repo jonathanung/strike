@@ -1507,13 +1507,16 @@ func (s *Server) handleLiveEvents(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	id := live.SessionID()
 	path := session.LogPath(s.opts.SessionDir, id)
-	var offset int64
+	offset := eventCursor(r)
 	if st, err := os.Stat(path); err == nil {
+		offset = clampCursor(offset, st.Size())
 		boundary := st.Size()
-		var err error
-		offset, err = s.writeEventsRange(ctx, w, flusher, path, 0, boundary)
-		if err != nil {
-			return
+		if offset < boundary {
+			var err error
+			offset, err = s.writeEventsRange(ctx, w, flusher, path, offset, boundary)
+			if err != nil {
+				return
+			}
 		}
 	}
 
@@ -1538,7 +1541,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "live session unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	if origin := r.Header.Get("Origin"); origin != "" && !originAllowed(origin) {
+	if origin := r.Header.Get("Origin"); origin != "" && !requestOriginAllowed(r) {
 		http.Error(w, "websocket origin not allowed", http.StatusForbidden)
 		return
 	}
@@ -1562,13 +1565,16 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	// Replay to a fixed byte boundary, then tail strictly after that boundary.
 	id := live.SessionID()
 	path := session.LogPath(s.opts.SessionDir, id)
-	var offset int64
+	offset := eventCursor(r)
 	if st, err := os.Stat(path); err == nil {
+		offset = clampCursor(offset, st.Size())
 		boundary := st.Size()
-		var err error
-		offset, err = s.writeWSRange(ctx, ws, path, 0, boundary)
-		if err != nil {
-			return
+		if offset < boundary {
+			var err error
+			offset, err = s.writeWSRange(ctx, ws, path, offset, boundary)
+			if err != nil {
+				return
+			}
 		}
 	}
 

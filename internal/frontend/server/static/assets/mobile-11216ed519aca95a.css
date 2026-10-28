@@ -1,0 +1,236 @@
+/* feature:mobile-first begin
+   Phone and short-landscape cockpit. Tokens stay the variables in style.css
+   (schemas/ui-tokens.json). Desktop widths do not match data-phone=1.
+   1024×594 and 1440×900 keep the three-column shell. */
+
+@media (hover: none) {
+  .pin { opacity: 1; }
+}
+
+@media (max-width: 720px), (max-height: 500px) and (max-width: 1024px) {
+  body[data-phone="1"] {
+    height: var(--vv-height, 100dvh);
+    max-height: var(--vv-height, 100dvh);
+    overflow: hidden;
+    transform: translateY(var(--vv-top, 0px));
+    -webkit-text-size-adjust: 100%;
+    touch-action: manipulation;
+  }
+
+  body[data-phone="1"] .page-header {
+    flex-wrap: nowrap;
+    height: auto;
+    min-height: calc(44px + env(safe-area-inset-top));
+    padding: env(safe-area-inset-top) max(10px, env(safe-area-inset-right)) 0 max(10px, env(safe-area-inset-left));
+  }
+
+  body[data-phone="1"] .command-pill,
+  body[data-phone="1"] .header-actions .chip,
+  body[data-phone="1"] .segmented .seg {
+    min-height: 44px;
+  }
+
+  body[data-phone="1"] .segmented {
+    display: none;
+  }
+
+  body[data-phone="1"] .command-pill kbd {
+    display: none;
+  }
+
+  body[data-phone="1"] .shell,
+  body[data-phone="1"] .shell.focus {
+    display: flex;
+    flex-direction: column;
+    grid-template-columns: none;
+    flex: 1 1 auto;
+    min-height: 0;
+    height: auto;
+    padding: 0 8px;
+  }
+
+  body[data-phone="1"] .rail,
+  body[data-phone="1"] .side,
+  body[data-phone="1"] .chat {
+    max-height: none;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  body[data-phone="1"] .phone-pane-chat .rail,
+  body[data-phone="1"] .phone-pane-chat .side,
+  body[data-phone="1"] .phone-pane-sessions .chat,
+  body[data-phone="1"] .phone-pane-sessions .side,
+  body[data-phone="1"] .phone-pane-activity .rail,
+  body[data-phone="1"] .phone-pane-activity .chat,
+  body[data-phone="1"] .phone-pane-files .rail,
+  body[data-phone="1"] .phone-pane-files .chat {
+    display: none;
+  }
+
+  body[data-phone="1"] .daemon {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-width: none;
+    margin: 0;
+    padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+  }
+
+  body[data-phone="1"] .transcript,
+  body[data-phone="1"] .rail,
+  body[data-phone="1"] .side,
+  body[data-phone="1"] .daemon {
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  body[data-phone="1"] .composer {
+    position: sticky;
+    bottom: 0;
+    margin: 0;
+    border-radius: var(--radius) var(--radius) 0 0;
+    padding-bottom: max(8px, env(safe-area-inset-bottom));
+  }
+
+  body[data-phone="1"] .composer textarea {
+    font-size: 16px;
+    min-height: 44px;
+  }
+
+  body[data-phone="1"] .composer-bar {
+    flex-wrap: nowrap;
+    overflow: visible;
+    padding-bottom: 2px;
+  }
+
+  body[data-phone="1"] .composer-bar .chip,
+  body[data-phone="1"] .composer-bar .send,
+  body[data-phone="1"] .ss-chips .chip,
+  body[data-phone="1"] .chips .chip,
+  body[data-phone="1"] .phone-nav button,
+  body[data-phone="1"] .session-row,
+  body[data-phone="1"] .session-main,
+  body[data-phone="1"] .suggestion,
+  body[data-phone="1"] .palette-row,
+  body[data-phone="1"] .file-row,
+  body[data-phone="1"] .ev-open,
+  body[data-phone="1"] .side-tabs .chip,
+  body[data-phone="1"] .notice button,
+  body[data-phone="1"] button.primary,
+  body[data-phone="1"] button.secondary {
+    min-height: 44px;
+  }
+
+  body[data-phone="1"] .ss-chips .chip,
+  body[data-phone="1"] .chips .chip,
+  body[data-phone="1"] .search,
+  body[data-phone="1"] .ss-search,
+  body[data-phone="1"] .daemon input {
+    height: 44px;
+    min-height: 44px;
+    font-size: 16px;
+  }
+
+  body[data-phone="1"] .pin {
+    opacity: 1;
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  body[data-phone="1"] .composer .menu,
+  body[data-phone="1"] .palette {
+    position: fixed;
+    left: max(8px, env(safe-area-inset-left));
+    right: max(8px, env(safe-area-inset-right));
+    bottom: calc(52px + env(safe-area-inset-bottom));
+    top: auto;
+    width: auto;
+    max-height: min(60vh, var(--vv-height, 60vh));
+    z-index: 30;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+    overflow: auto;
+  }
+
+  body[data-phone="1"] .palette-backdrop {
+    align-items: flex-end;
+    padding-top: 0;
+    padding-bottom: calc(52px + env(safe-area-inset-bottom));
+  }
+
+  body[data-phone="1"] .phone-nav {
+    display: flex;
+    flex: 0 0 auto;
+    gap: 2px;
+    padding: 4px max(4px, env(safe-area-inset-right)) calc(4px + env(safe-area-inset-bottom)) max(4px, env(safe-area-inset-left));
+    background: var(--surface);
+    border-top: 1px solid var(--rule);
+    z-index: 5;
+  }
+
+  body[data-phone="1"] .phone-nav button {
+    flex: 1 1 0;
+    min-width: 0;
+    height: auto;
+    padding: 4px 2px;
+    font-size: 11px;
+    line-height: 1.2;
+    background: transparent;
+    color: var(--muted);
+    border: 0;
+    border-radius: var(--radius-sm);
+  }
+
+  body[data-phone="1"] .phone-nav button.on {
+    background: var(--raised);
+    color: var(--acid);
+  }
+
+  body[data-phone="1"] .ev-doc {
+    min-height: 0;
+    flex: 1 1 auto;
+  }
+
+  body[data-phone="1"] .side-tabs {
+    flex-wrap: wrap;
+  }
+
+  body[data-phone="1"] .side-tabs .chip {
+    height: 44px;
+  }
+
+  body[data-phone="1"] .ev-bar,
+  body[data-phone="1"] .ev-tools {
+    flex-wrap: wrap;
+  }
+
+  body[data-phone="1"] .ev-search {
+    width: 100%;
+  }
+
+  body[data-phone="1"][data-pull="1"] .page-header::after {
+    content: "Release to reconnect";
+    margin-left: auto;
+    color: var(--acid);
+    font-size: var(--type-sm);
+    font-weight: 650;
+  }
+}
+
+/* Send stays a sibling of this scroller so a long chip row cannot
+   push it past the viewport. Desktop and phone both use it. */
+.composer-chips {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: var(--space-2);
+  align-items: center;
+  overflow-x: auto;
+}
+
+.phone-nav {
+  display: none;
+}
+
+/* feature:mobile-first end */
