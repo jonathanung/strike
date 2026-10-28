@@ -151,6 +151,7 @@ export async function createSession({ page, outDir, video, goldens, updateGolden
   };
 
   const sizes = {
+    desk768: { width: 768, height: 1024, tag: "768" },
     desk1024: { width: 1024, height: 594, tag: "1024" },
     desk1440: { width: DESK.width, height: DESK.height, tag: "1440" },
     mobile: { width: PHONE.width, height: PHONE.height, tag: PHONE.tag },

@@ -7,12 +7,14 @@
 //! `task_runner`.
 
 mod api;
+mod appearance;
 mod apps;
 mod approvals;
 mod approvals_ui;
 mod chat_mode;
 mod composer_triggers;
 mod editor;
+mod localfiles;
 mod gateway;
 mod gateway_qr;
 mod git;
@@ -22,9 +24,11 @@ mod providers;
 mod schedule;
 mod model;
 mod notify;
+mod onboarding;
 mod model_menu;
 mod model_menu_view;
 mod session_list;
+mod settings;
 mod session_panel;
 mod storage;
 mod task_runner;
@@ -41,7 +45,6 @@ mod transcript_view;
 mod triggers;
 mod turn_elapsed;
 mod workspaces;
-
 use crate::shell::icon;
 
 
@@ -109,10 +112,21 @@ pub(crate) fn save(key: &str, value: &str) {
 }
 
 fn known_theme(id: &str) -> bool {
-    matches!(
-        id,
-        "strike" | "nord" | "dracula" | "gruvbox" | "monokai" | "tokyo-night" | "catppuccin"
-    )
+    appearance::known_theme(id)
+}
+
+fn event_in_field(ev: &web_sys::KeyboardEvent) -> bool {
+    let Some(target) = ev.target() else {
+        return false;
+    };
+    let Some(el) = target.dyn_ref::<web_sys::Element>() else {
+        return false;
+    };
+    let tag = el.tag_name();
+    tag.eq_ignore_ascii_case("input")
+        || tag.eq_ignore_ascii_case("textarea")
+        || tag.eq_ignore_ascii_case("select")
+        || el.get_attribute("contenteditable").is_some()
 }
 
 fn theme_color(theme: &str, scheme: &str) -> &'static str {
@@ -818,6 +832,22 @@ fn App() -> impl IntoView {
     } else {
         "queue".to_string()
     });
+    let theme_id = RwSignal::new({
+        let t = load("strike.theme");
+        if known_theme(&t) {
+            t
+        } else {
+            "strike".into()
+        }
+    });
+    let scheme_id: RwSignal<String> = RwSignal::new(if load("strike.scheme") == "light" {
+        "light".to_string()
+    } else {
+        "dark".to_string()
+    });
+    let font_id = RwSignal::new(appearance::normalize_font(&load("strike.font")));
+    let density_id = RwSignal::new(appearance::normalize_density(&load("strike.density")));
+    let onboarded = RwSignal::new(load("strike.onboarded") == "1");
     let live_busy = RwSignal::new(false);
     let live_busy_root = RwSignal::new(String::new());
     let side_tab = RwSignal::new("activity".to_string());
@@ -870,7 +900,8 @@ fn App() -> impl IntoView {
     let changes = RwSignal::new(Vec::<model::ChangedFile>::new());
     let changes_error = RwSignal::new(String::new());
     let phone_pane = RwSignal::new(mobile::PANE_CHAT.to_string());
-    apply_theme(&load("strike.theme"), &load("strike.scheme"));
+    apply_theme(&theme_id.get_untracked(), &scheme_id.get_untracked());
+    appearance::apply_type(&font_id.get_untracked(), &density_id.get_untracked());
     apply_layout(&layout.get_untracked());
     Effect::new(move |_| {
         mobile::set_pane(&phone_pane.get());
@@ -1857,10 +1888,51 @@ fn App() -> impl IntoView {
     };
 
     let set_theme = move |theme: String| {
-        apply_theme(&theme, &load("strike.scheme"));
+        let theme = if known_theme(&theme) {
+            theme
+        } else {
+            "strike".into()
+        };
+        theme_id.set(theme.clone());
+        apply_theme(&theme, &scheme_id.get_untracked());
     };
     let set_scheme = move |scheme: String| {
-        apply_theme(&load("strike.theme"), &scheme);
+        let scheme: String = if scheme == "light" {
+            "light".to_string()
+        } else {
+            "dark".to_string()
+        };
+        scheme_id.set(scheme.clone());
+        apply_theme(&theme_id.get_untracked(), &scheme);
+    };
+    let set_font = move |font: String| {
+        font_id.set(appearance::normalize_font(&font));
+        appearance::apply_type(&font_id.get_untracked(), &density_id.get_untracked());
+    };
+    let set_density = move |density: String| {
+        density_id.set(appearance::normalize_density(&density));
+        appearance::apply_type(&font_id.get_untracked(), &density_id.get_untracked());
+    };
+    let finish_onboarding = move || {
+        save("strike.onboarded", "1");
+        onboarded.set(true);
+    };
+    let on_cleared = move || {
+        set_theme("strike".into());
+        set_scheme("dark".into());
+        set_font("md".into());
+        set_density("comfortable".into());
+        onboarded.set(false);
+        set_layout("cockpit".into());
+        base.set(String::new());
+        token.set(String::new());
+        gateway::clear_session_tokens();
+        gateway_profiles.set(Vec::new());
+        gateway_selected.set("this".into());
+        pins.set(Vec::new());
+        seen.set(HashMap::new());
+        enter_mode.set("queue".into());
+        save("strike.enterMode", "queue");
     };
 
     let set_memory = move |mode: String| {
@@ -2023,6 +2095,16 @@ fn App() -> impl IntoView {
     let on_key =
         Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |ev: web_sys::KeyboardEvent| {
             dispatch_session_key(&ev);
+            // Ctrl/Cmd+, opens Settings. The shell owns Ctrl+K, Alt arrows,
+            // Escape, and ?. ? stays the shortcut overlay.
+            if (ev.meta_key() || ev.ctrl_key())
+                && !ev.alt_key()
+                && ev.key() == ","
+                && !event_in_field(&ev)
+            {
+                ev.prevent_default();
+                mode.set("settings".into());
+            }
         });
     if let Some(w) = web_sys::window() {
         let _ = w.add_event_listener_with_callback("keydown", on_key.as_ref().unchecked_ref());
@@ -2968,6 +3050,34 @@ fn App() -> impl IntoView {
         />
         <Show when=move || mode.get() == "providers" fallback=move || ()>
             <providers::ProvidersPage base=base token=token />
+        </Show>
+        <Show when=move || !onboarded.get()>
+            <onboarding::OnboardingCard
+                base=base
+                token=token
+                status=status
+                theme=theme_id
+                on_theme=set_theme
+                on_done=finish_onboarding
+            />
+        </Show>
+        <Show when=move || mode.get() == "settings">
+            <settings::SettingsPage
+                base=base
+                token=token
+                gateway=gateway
+                mode=mode
+                status=status
+                theme=theme_id
+                scheme=scheme_id
+                font=font_id
+                density=density_id
+                on_theme=set_theme
+                on_scheme=set_scheme
+                on_font=set_font
+                on_density=set_density
+                on_cleared=on_cleared
+            />
         </Show>
         <Show when=move || mode.get() == "daemon" fallback=move || ()>
             <DaemonPane

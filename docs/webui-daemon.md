@@ -149,12 +149,13 @@ Status: walking skeleton on branch `worktree-rust-webui-daemon`. Not merged.
     with a separate model call and no tools. `POST /v1/sidechat/ops` refuses
     `permission.reply` and `user.input`. Turns are not written to the session
     JSONL.
-  - Schedule, onboarding, and a multi-gateway hub are
+  - Schedule and a multi-gateway hub are
     documented in [webui-planned.md](webui-planned.md), not drawn as empty
     panels. Memory, knowledge, and artifacts are drawn from the live routes.
     The gateway switcher is the Gateways control in the header and on the
     Daemon view; see [gateway.md](gateway.md).
-
+  - First-run and Settings are in the client. `GET /v1/local-files` is the
+    path list the card shows. The first-run card reuses the Providers page.
 - Server serves `/sw.js` and `/manifest.webmanifest` at the origin root and
   the bundle under `/assets/` (WASM-aware CSP and content types).
 

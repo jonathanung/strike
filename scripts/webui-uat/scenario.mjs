@@ -298,6 +298,34 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
       check(count >= min, `${sel} count ${count} < ${min}`);
     }
 
+    const cardReady = await waitUntil(
+      `(() => {
+        const b = document.querySelector('[data-action="onboarding-continue"]');
+        return !b || !b.disabled;
+      })()`,
+      8000,
+      "onboarding ready",
+    );
+    if (cardReady && await page.evaluate(`Boolean(document.querySelector('[data-action="onboarding-continue"]'))`)) {
+      await shoot("onboarding", ["mobile", "desk768", "desk1024", "desk1440"]);
+      await page.evaluate(`document.querySelector('[data-action="onboarding-continue"]')?.click()`);
+      await waitUntil(
+        `document.querySelector('[data-action="telemetry-note"]') == null`,
+        4000,
+        "onboarding dismissed",
+      );
+    }
+    await page.evaluate(`document.querySelector('[data-action="open-settings"]')?.click()`);
+    const settingsUp = await waitUntil(
+      `document.body && document.body.innerText.includes("Keyboard")`,
+      8000,
+      "settings page",
+    );
+    if (settingsUp) {
+      await shoot("settings", ["mobile", "desk768", "desk1024", "desk1440"]);
+    }
+    await page.evaluate(`document.querySelector('[data-nav="primary"] button')?.click()`);
+
     await shoot("shell-empty", ["desk1024", "desk1440", "mobile"]);
     const emptyAdd = await page.evaluate(
       `Boolean(document.querySelector(".sx-empty [data-add-provider]"))`,

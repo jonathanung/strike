@@ -89,6 +89,14 @@ func IDForPath(path string) string {
 	return hex.EncodeToString(sum[:6])
 }
 
+// Path is the registry file. The handler that lists daemon files reports
+// this path and does not read the document into the response.
+func (s *Store) Path() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.path
+}
+
 // List returns workspaces sorted by name, plus the active id.
 func (s *Store) List() ([]Workspace, string) {
 	s.mu.Lock()

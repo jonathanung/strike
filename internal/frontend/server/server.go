@@ -114,6 +114,9 @@ type Options struct {
 	// Nil makes /v1/triggers and POST /hooks 503. The launcher inside the
 	// service is NewRootLauncher (authored for #1282).
 	Triggers *trigger.Service
+	// Assembled is true when this process ran assemble (config load, project
+	// stores, auth.json, attachments). Attach-only serve leaves it false.
+	Assembled bool
 	// OpsRate is tokens/sec per client IP for ops (default 10). <=0 uses default.
 	OpsRate float64
 	// OpsBurst is the per-IP burst (default 20). <=0 uses default.
@@ -352,6 +355,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/scheduler/presets", s.handleSchedulerPresets)
 	s.mux.HandleFunc("POST /v1/scheduler/presets", s.handleSchedulerPresetsApply)
 	s.mux.HandleFunc("GET /v1/config-sources", s.handleConfigSources)
+	s.mux.HandleFunc("GET /v1/local-files", s.handleLocalFiles)
 	s.mux.HandleFunc("GET /v1/models", s.handleModels)
 	s.mux.HandleFunc("GET /v1/history", s.handleHistory)
 	s.mux.HandleFunc("POST /v1/history", s.handleHistory)

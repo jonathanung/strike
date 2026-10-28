@@ -185,11 +185,32 @@ the workspace roots is rejected when the session is bound.
 
 ## Onboarding
 
-No first-run flow is wired to the web client. Strike has host onboarding
-state, but the client does not show a privacy step, a theme picker, or a
-coach-mark tour. Planned: a first-run card that states which local files
-the daemon reads, then a single accent choice stored in browser settings.
-It would not send telemetry. There is no telemetry export on this client.
+Shipped. A first-run card (`strike.onboarded` in localStorage) lists the
+paths from `GET /v1/local-files`, states that telemetry is off, and offers
+the bundled themes as the accent. Strike is the default. Light or dark,
+type size, and density stay in the browser (`strike.scheme`, `strike.font`,
+`strike.density`). Continue writes the theme id with `PATCH /v1/settings`
+`{"theme": ...}` into `~/.strike/config` when the user picked a swatch, or
+when the settings read succeeded and the stored id is empty or already that
+accent. A custom theme id is left in place. A failed settings read does not
+overwrite it. The card embeds the Providers page instead of a second
+provider form.
+
+Settings is a Menu row, a command-palette command, and Ctrl/Cmd+comma.
+`?` lists shortcuts. It shows the saved model,
+permission mode, and notify dial from `GET /v1/settings` and does not edit
+them. Those links set the location hash for the streams that own the pages:
+
+| Hash | Stream |
+|---|---|
+| `#models` | #1259, and the link also opens Chat, where the model chip lives |
+| `#approvals` | #1266, and the link also opens Chat, where the approval chip lives |
+| `#notifications` | #1264 |
+| `#gateway` | #1265, and the link also opens Daemon, which holds the token today |
+| `#providers` | the Providers page, also linked from the Menu |
+
+`strike serve` does not call `host.Onboarding`. The TUI wizard remains
+`~/.strike/onboarding.json`, and that file is not in the daemon read list.
 
 ## Gateway hub
 
