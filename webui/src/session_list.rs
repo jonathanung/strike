@@ -209,6 +209,24 @@ pub fn step_index(len: usize, cur: usize, delta: i32) -> usize {
     next as usize
 }
 
+/// Previous/next entry in a flattened session order of `(open_id, live)`
+/// pairs, for edge-swipe navigation (#1490 slice 5). Steps clamp at the
+/// ends like `step_index`: returns `None` when `active` is not in the
+/// order or the step would leave the list, so a swipe at the first or
+/// last session is a no-op instead of wrapping around.
+pub fn neighbour(
+    order: &[(String, bool)],
+    active: &str,
+    delta: i32,
+) -> Option<(String, bool)> {
+    let cur = order.iter().position(|(id, _)| id == active)?;
+    let next = step_index(order.len(), cur, delta);
+    if next == cur {
+        return None;
+    }
+    order.get(next).cloned()
+}
+
 pub fn alt_digit(key: &str) -> Option<usize> {
     match key {
         "1" => Some(0),
@@ -781,5 +799,27 @@ mod tests {
         );
         let order = vec!["a".into(), "b".into(), "c".into()];
         assert_eq!(select_range(&order, "c", "a"), order);
+    }
+
+    #[test]
+    fn neighbour_steps_and_clamps() {
+        let order: Vec<(String, bool)> = vec![
+            ("a".into(), true),
+            ("b".into(), false),
+            ("c".into(), true),
+        ];
+        // Middle steps in both directions, carrying the live flag.
+        assert_eq!(neighbour(&order, "a", 1), Some(("b".to_string(), false)));
+        assert_eq!(neighbour(&order, "b", 1), Some(("c".to_string(), true)));
+        assert_eq!(neighbour(&order, "c", -1), Some(("b".to_string(), false)));
+        assert_eq!(neighbour(&order, "b", -1), Some(("a".to_string(), true)));
+        // Ends clamp to a no-op instead of wrapping.
+        assert_eq!(neighbour(&order, "a", -1), None);
+        assert_eq!(neighbour(&order, "c", 1), None);
+        // Unknown active id and empty order never navigate.
+        assert_eq!(neighbour(&order, "zzz", 1), None);
+        assert_eq!(neighbour(&[], "a", 1), None);
+        // A single-entry order has no neighbour.
+        assert_eq!(neighbour(&order[..1], "a", 1), None);
     }
 }

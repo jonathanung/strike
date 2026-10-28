@@ -212,6 +212,29 @@ fn Skeleton() -> impl IntoView {
     }
 }
 
+/// True when a touch starting on `target` belongs to a horizontally
+/// scrollable element (code block, table wrap, code view) or a text
+/// field: those own horizontal drags, so edge-swipe session navigation
+/// must not claim the gesture (#1490 slice 5).
+fn touch_in_scroller(target: Option<web_sys::EventTarget>) -> bool {
+    let Some(el) = target.and_then(|t| t.dyn_into::<web_sys::Element>().ok()) else {
+        return false;
+    };
+    let mut cur = Some(el);
+    for _ in 0..12 {
+        let Some(el) = cur else { break };
+        let tag = el.tag_name();
+        if tag == "TEXTAREA" || tag == "INPUT" || tag == "SELECT" {
+            return true;
+        }
+        if el.scroll_width() > el.client_width() + 1 {
+            return true;
+        }
+        cur = el.parent_element();
+    }
+    false
+}
+
 /// SessionTitled is the daemon's title source (#1262 owns rename). Reflect it
 /// on the open root so the list does not keep a raw id until the next poll.
 fn textarea_state(target: Option<web_sys::EventTarget>) -> Option<(String, u32)> {
@@ -720,6 +743,11 @@ fn App() -> impl IntoView {
     let roots = RwSignal::new(Vec::<RootSummary>::new());
     let sessions = RwSignal::new(Vec::<SessionItem>::new());
     let active_root = RwSignal::new(String::new());
+    // Flattened session order published by SessionPanel for edge-swipe
+    // navigation (#1490 slice 5): (open_id, live) pairs in display order.
+    let session_nav = RwSignal::new(Vec::<(String, bool)>::new());
+    // Start point of a candidate edge swipe on the chat section.
+    let swipe_start = RwSignal::new(None::<(i32, i32)>);
     let lines = RwSignal::new(Vec::<ChatLine>::new());
     let transcript = RwSignal::new(Transcript::new());
     let ux_note = RwSignal::new(String::new());
@@ -2923,7 +2951,65 @@ fn App() -> impl IntoView {
             />
         </Show>
         <Show when=move || mode.get() == "chat">
-            <div class=move || chat_mode::shell_class(focus.get(), &layout.get(), sessions_drawer.get(), panel_drawer.get())>
+            <div
+                class=move || chat_mode::shell_class(focus.get(), &layout.get(), sessions_drawer.get(), panel_drawer.get())
+                on:touchstart=move |ev: web_sys::TouchEvent| {
+                    // Edge-swipe session navigation (#1490 slice 5): only
+                    // gestures that begin within 24px of the left/right
+                    // screen edge are candidates, and never ones that
+                    // begin on a horizontal scroller or a text field —
+                    // code blocks own their drags. The handlers live on
+                    // the shell so a swipe that starts on the outermost
+                    // pixels (outside the chat section's inset) counts.
+                    if sessions_drawer.get_untracked() || panel_drawer.get_untracked() {
+                        swipe_start.set(None);
+                        return;
+                    }
+                    if touch_in_scroller(ev.target()) {
+                        swipe_start.set(None);
+                        return;
+                    }
+                    if let Some(t) = ev.changed_touches().item(0) {
+                        swipe_start.set(Some((t.client_x(), t.client_y())));
+                    }
+                }
+                on:touchend=move |ev: web_sys::TouchEvent| {
+                    let Some((x0, y0)) = swipe_start.get_untracked() else {
+                        return;
+                    };
+                    swipe_start.set(None);
+                    if sessions_drawer.get_untracked() || panel_drawer.get_untracked() {
+                        return;
+                    }
+                    let Some(t) = ev.changed_touches().item(0) else {
+                        return;
+                    };
+                    let dx = t.client_x() - x0;
+                    let dy = t.client_y() - y0;
+                    if dx.abs() < 48 || dx.abs() < dy.abs() * 2 {
+                        return;
+                    }
+                    let iw = web_sys::window()
+                        .and_then(|w| w.inner_width().ok())
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(0.0) as i32;
+                    let delta = if x0 <= 24 && dx > 0 {
+                        -1
+                    } else if iw > 0 && x0 >= iw - 24 && dx < 0 {
+                        1
+                    } else {
+                        return;
+                    };
+                    if let Some((id, live)) = session_list::neighbour(
+                        &session_nav.get_untracked(),
+                        &active_root.get_untracked(),
+                        delta,
+                    ) {
+                        ev.prevent_default();
+                        open_session(id, live);
+                    }
+                }
+            >
                 <button type="button" class="chat-scrim" aria-label="Close panel" on:click=move |_| {
                     sessions_drawer.set(false);
                     panel_drawer.set(false);
@@ -2942,6 +3028,7 @@ fn App() -> impl IntoView {
                         on_new=new_session
                         on_refresh=refresh_meta
                         on_delete=request_delete
+                        nav_order=session_nav
                     />
                     <div class="ws-chip">
                         <div class="section-head">
