@@ -508,6 +508,7 @@ try {
         ok:
           text.includes("Menu") &&
           text.includes("Activity") &&
+          text.includes("Connected") &&
           parsed.acid === "#7c3aed" &&
           !!parsed.chip &&
           statusIds.includes(parsed.status || "") &&
