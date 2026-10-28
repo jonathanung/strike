@@ -879,6 +879,18 @@ func (l *Live) Subscribe(ctx context.Context) <-chan protocol.Event {
 	return ch
 }
 
+// Closed fires when Close has been called. Serve uses it to stop the
+// engine for that root: LiveHub.Remove only closes the bridge, and a root
+// started on the process context would otherwise stay open.
+func (l *Live) Closed() <-chan struct{} {
+	if l == nil {
+		ch := make(chan struct{})
+		close(ch)
+		return ch
+	}
+	return l.closeCh
+}
+
 // Close marks the live session finished and unblocks subscribers.
 func (l *Live) Close() {
 	if l == nil {

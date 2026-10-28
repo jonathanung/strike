@@ -1,10 +1,12 @@
 //! Strike web client. The session list is live roots plus saved sessions.
 //! Activity, Files, Changes, Git, Worktrees, Memory, Knowledge, and
 //! Artifacts are the side panel. Side chat is a separate read-only drawer.
-//! Goals and Autopilot live in `goals`. Schedule is the clock (`schedule`
-//! module). The task runner is the Tasks view in `task_runner`.
+//! Goals and Autopilot live in `goals`. Apps is the queue surface in `apps`.
+//! Schedule is the clock (`schedule` module). The task runner is the
+//! Tasks view in `task_runner`.
 
 mod api;
+mod apps;
 mod approvals;
 mod approvals_ui;
 mod chat_mode;
@@ -697,6 +699,9 @@ fn App() -> impl IntoView {
     let token = RwSignal::new(gateway::initial_token());
     let status = RwSignal::new("connecting…".to_string());
     let mode = RwSignal::new("chat".to_string());
+    // The shell palette preventDefaults its keys. This signal stays false;
+    // AppsPane also bails when the event is already default_prevented.
+    let apps_palette_open = RwSignal::new(false);
     let workspaces = RwSignal::new(Vec::<Workspace>::new());
     let active_workspace = RwSignal::new(String::new());
     let gateway_open = RwSignal::new(false);
@@ -2877,6 +2882,18 @@ fn App() -> impl IntoView {
                 mode=mode
                 active_root=active_root
                 status=status
+            />
+        </Show>
+        <Show when=move || mode.get() == "apps" fallback=move || ()>
+            <apps::AppsPane
+                base=base
+                token=token
+                status=status
+                palette_open=apps_palette_open
+                open_session=move |id: String| {
+                    mode.set("chat".into());
+                    activate_root(id);
+                }
             />
         </Show>
         <Show when=move || mode.get() == "chat">

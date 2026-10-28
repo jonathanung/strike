@@ -314,6 +314,17 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 			if slot.done == nil {
 				slot.done = done
 			}
+			// DELETE /v1/roots closes the Live bridge. Cancel the engine so
+			// runSession closes the session file. Without this, a root that
+			// outlives its create POST stays "open" and a later delete asks
+			// for force.
+			go func() {
+				select {
+				case <-live.Closed():
+					rcancel()
+				case <-rctx.Done():
+				}
+			}()
 			sr := &serveRoot{
 				live:    live,
 				bound:   slot.bound,
@@ -562,6 +573,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		go schedules.Run(ctx)
 	}
 
+	workDir, _ := os.Getwd()
 	srv, err := server.New(server.Options{
 		Addr:       opts.addr,
 		Auth:       opts.auth,
@@ -584,6 +596,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		UsageAuditDir: usageDir,
 		SideChat:      sideChat,
 		TaskRuns:      taskRuns,
+		WorkDir:       workDir,
 	})
 	if err != nil {
 		return err
