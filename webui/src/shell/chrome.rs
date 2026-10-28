@@ -346,6 +346,7 @@ pub fn Chrome() -> impl IntoView {
                         status.into_iter().map(slot_view).collect_view().into_any()
                     }
                 }}
+                <span class="brand-status nav-version">{move || host::version_label()}</span>
                 <button
                     type="button"
                     class="nav-menu-btn"

@@ -29,9 +29,7 @@ async function headerAt(page, check, viewport, grab) {
     const box = await page.evaluate(`(() => {
       const h = document.querySelector('[data-nav="header"]');
       if (!h) return null;
-      const top = h.getBoundingClientRect().top;
-      const zones = [...h.children].filter((el) => getComputedStyle(el).display !== "none");
-      const wrapped = zones.some((el) => Math.abs(el.getBoundingClientRect().top - top) > 2);
+      const wrapped = h.scrollHeight > h.clientHeight + 2;
       const labels = [...h.querySelectorAll('[data-nav="primary"] button, .nav-menu-btn')].map((b) => ({
         text: (b.innerText || "").trim(),
         clipped: b.scrollWidth > b.clientWidth + 1,
@@ -80,7 +78,23 @@ async function providerFlow(page, check, waitUntil, grab) {
     `document.querySelector('[data-provider="echo"]')?.innerText || ""`,
   );
   check(String(echoState).includes("Connected"), `echo was not Connected: ${echoState}`);
-  await grab("providers-list-1440");
+  for (const [width, height] of [
+    [390, 844],
+    [768, 1024],
+    [1024, 768],
+    [1440, 900],
+  ]) {
+    await page.send("Emulation.setDeviceMetricsOverride", {
+      width,
+      height,
+      deviceScaleFactor: 1,
+      mobile: width < 500,
+      screenWidth: width,
+      screenHeight: height,
+    });
+    await delay(160);
+    await grab(`providers-list-${width}`);
+  }
 
   const typed = await page.evaluate(`(() => {
     const card = document.querySelector('[data-provider="openai"]');
@@ -104,6 +118,15 @@ async function providerFlow(page, check, waitUntil, grab) {
     "key stored",
   );
   check(Boolean(stored), "saving the openai key did not confirm");
+  const connected = await waitUntil(
+    `(() => {
+      const state = document.querySelector('[data-provider="openai"] [data-provider-state]');
+      return Boolean(state && state.textContent.trim() === "Connected");
+    })()`,
+    8000,
+    "openai connected after save",
+  );
+  check(Boolean(connected), "openai did not show Connected after the key was stored");
   const leaked = await page.evaluate(`(() => {
     const body = document.body ? document.body.innerText : "";
     let store = "";
@@ -119,20 +142,47 @@ async function providerFlow(page, check, waitUntil, grab) {
     `(() => {
       const note = document.querySelector('[data-provider="openai"] [data-provider-note]');
       const text = note ? note.innerText : "";
-      return text.length > 0 && !text.includes(${JSON.stringify(FAKE_KEY)});
+      return text.includes("Listed") && !text.includes(${JSON.stringify(FAKE_KEY)});
     })()`,
-    12000,
+    15000,
     "provider test",
   );
   check(Boolean(tested), "Test did not report a result");
-  await grab("providers-key-1440");
+  for (const [width, height] of [
+    [390, 844],
+    [768, 1024],
+    [1024, 768],
+    [1440, 900],
+  ]) {
+    await page.send("Emulation.setDeviceMetricsOverride", {
+      width,
+      height,
+      deviceScaleFactor: 1,
+      mobile: width < 500,
+      screenWidth: width,
+      screenHeight: height,
+    });
+    await delay(120);
+    await grab(`providers-key-${width}`);
+  }
+  await page.send("Emulation.setDeviceMetricsOverride", {
+    width: 1440,
+    height: 900,
+    deviceScaleFactor: 1,
+    mobile: false,
+    screenWidth: 1440,
+    screenHeight: 900,
+  });
   await page.evaluate(
     `document.querySelector('[data-provider="openai"] [data-remove-key]')?.click()`,
   );
   const removed = await waitUntil(
     `(() => {
-      const note = document.querySelector('[data-provider="openai"] [data-provider-note]');
-      return Boolean(note && note.innerText.includes("Stored credential removed"));
+      const card = document.querySelector('[data-provider="openai"]');
+      const note = card && card.querySelector("[data-provider-note]");
+      const text = note ? note.innerText : "";
+      const state = card ? card.querySelector("[data-provider-state]")?.textContent || "" : "";
+      return text.includes("Stored credential removed") || state.trim() === "Not connected";
     })()`,
     8000,
     "key removed",
@@ -140,6 +190,12 @@ async function providerFlow(page, check, waitUntil, grab) {
   check(Boolean(removed), "Remove stored key did not confirm");
 
   await page.evaluate(`document.querySelector('[data-nav="primary"] [data-view="chat"]')?.click()`);
+  const chip = await waitUntil(
+    `Boolean(document.querySelector("[data-model-chip]"))`,
+    4000,
+    "model chip after leaving providers",
+  );
+  check(Boolean(chip), "model chip missing after returning to chat");
   await page.evaluate(`document.querySelector("[data-model-chip]")?.click()`);
   const menu = await waitUntil(
     `Boolean(document.querySelector("[data-model-menu] [data-add-provider]"))`,

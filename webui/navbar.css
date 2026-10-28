@@ -163,7 +163,15 @@
   color: var(--muted);
 }
 .crumb.current { color: var(--ink); font-weight: 650; }
-.nav-version { max-width: 120px; }
+.nav-version {
+  max-width: 180px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+@media (max-width: 1200px) {
+  .nav-version { display: none; }
+}
 .nav-icon {
   width: 28px;
   height: 28px;

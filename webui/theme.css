@@ -23,10 +23,8 @@ h3,
   letter-spacing: 0.04em;
 }
 
-.brand-mark,
-.nav-center .seg,
 .providers-card h2 {
-  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 
 button,
