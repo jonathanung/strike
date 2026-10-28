@@ -2162,6 +2162,32 @@ try {
     throw new Error(`triggers page missing: ${triggersText.slice(0, 400)}`);
   }
 
+  await send("Runtime.evaluate", {
+    expression: `localStorage.setItem("strike.token", ${JSON.stringify(token)})`,
+    returnByValue: true,
+  });
+  await send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
+  await waitFor(
+    "apps nav button",
+    async () => {
+      const raw = await evaluate(`(() => {
+        const btn = document.querySelector('button[data-view="apps"]');
+        return JSON.stringify({
+          btn: !!btn,
+          label: btn ? btn.textContent.trim() : "",
+        });
+      })()`);
+      const p = JSON.parse(raw || "{}");
+      return { ok: !!(p.btn && p.label === "Apps"), ...p };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await evaluate(`document.querySelector('button[data-view="apps"]').click()`);
+  await waitFor(
+    "apps launcher GitHub triage",
+    textProbe((body) => body.includes("GitHub triage")),
+    { timeout: WAIT_MS, interval: 250 },
+  );
   console.log("webui-smoke ok");
 } catch (err) {
   console.error(String(err));
