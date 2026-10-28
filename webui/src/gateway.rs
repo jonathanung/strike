@@ -504,6 +504,9 @@ pub fn GatewaySwitcher(
 
     if primary {
         // The shell palette command dispatches here (docs/webui-shell.md).
+        // The binding captures only the host-owned `open` signal, which
+        // outlives this component, so it stays correct across remounts
+        // and is deliberately not unbound on cleanup.
         crate::shell::bind(
             "gateways.open",
             Rc::new(move |_args: &str| {
@@ -511,29 +514,82 @@ pub fn GatewaySwitcher(
                 Ok(())
             }),
         );
-        let probe_boot = probe;
-        probe_boot();
-        let probe_tick = probe_boot;
-        let interval = Closure::<dyn FnMut()>::new(move || probe_tick());
+        probe();
+
+        // The shell remounts top-bar slots (a breakpoint flip disposes
+        // and recreates this component), so everything registered on
+        // the window below — the 5s probe timer and the Alt+W listener
+        // — is released on cleanup, the same pattern as notify.rs.
+        // Leaked copies are not inert: each leaked timer panics on its
+        // disposed signals every tick, and each leaked Alt+W listener
+        // toggles the shared `open` signal, so a few remounts leave the
+        // shortcut firing an even number of toggles and looking dead
+        // (#1527).
+        let disposers: Rc<RefCell<Vec<Box<dyn FnOnce()>>>> = Rc::new(RefCell::new(Vec::new()));
+        let add_disposer = {
+            let disposers = disposers.clone();
+            move |f: Box<dyn FnOnce()>| disposers.borrow_mut().push(f)
+        };
+        // on_cleanup wants Send + Sync; the disposers are window-thread
+        // state, so they ride in a SendWrapper (the same shape notify.rs
+        // uses) and are only ever run on this thread.
+        on_cleanup({
+            let disposers = disposers.clone();
+            let run = send_wrapper::SendWrapper::new(move || {
+                for f in disposers.borrow_mut().drain(..) {
+                    f();
+                }
+            });
+            move || run.take()()
+        });
+
+        let interval = Closure::<dyn FnMut()>::new(move || probe());
         if let Some(w) = web_sys::window() {
-            let _ = w.set_interval_with_callback_and_timeout_and_arguments_0(
+            let registered = w.set_interval_with_callback_and_timeout_and_arguments_0(
                 interval.as_ref().unchecked_ref(),
                 5000,
             );
-        }
-        interval.forget();
-
-        let open_key = open;
-        let on_key = Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |ev: web_sys::KeyboardEvent| {
-            if ev.alt_key() && !ev.ctrl_key() && !ev.meta_key() && ev.key().eq_ignore_ascii_case("w") {
-                ev.prevent_default();
-                open_key.update(|v| *v = !*v);
+            if let Ok(id) = registered {
+                let kept = Rc::new(RefCell::new(Some(interval)));
+                let drop_cb = kept.clone();
+                add_disposer(Box::new(move || {
+                    if let Some(w) = web_sys::window() {
+                        w.clear_interval_with_handle(id);
+                    }
+                    drop(drop_cb.borrow_mut().take());
+                }));
             }
-        });
+            // If registration failed the closure drops here and never fires.
+        }
+
+        let on_key = Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(
+            move |ev: web_sys::KeyboardEvent| {
+                if ev.alt_key()
+                    && !ev.ctrl_key()
+                    && !ev.meta_key()
+                    && ev.key().eq_ignore_ascii_case("w")
+                {
+                    ev.prevent_default();
+                    open.update(|v| *v = !*v);
+                }
+            },
+        );
         if let Some(w) = web_sys::window() {
             let _ = w.add_event_listener_with_callback("keydown", on_key.as_ref().unchecked_ref());
         }
-        on_key.forget();
+        let kept = Rc::new(RefCell::new(Some(on_key)));
+        let drop_cb = kept.clone();
+        add_disposer(Box::new(move || {
+            if let Some(cb) = drop_cb.borrow_mut().take() {
+                if let Some(w) = web_sys::window() {
+                    let _ = w.remove_event_listener_with_callback(
+                        "keydown",
+                        cb.as_ref().unchecked_ref(),
+                    );
+                }
+                drop(cb);
+            }
+        }));
     }
 
     // (generation, id, base). A shared signal so click and keyboard can both

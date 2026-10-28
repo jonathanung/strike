@@ -646,6 +646,23 @@ pub fn NotificationBell(
         })
     });
 
+    // The palette path (request_open) reads OPEN_CENTRE, which this
+    // mount overwrote with its own `open` signal above. Clear it on
+    // cleanup — but only if it still names this instance, so a newer
+    // bell that mounted before this one disposed keeps its
+    // registration. Without this, a remounted-away copy leaves the
+    // palette dispatching to a disposed signal, which traps (#1527).
+    // The shell action bound above needs no matching unbind: it only
+    // calls request_open, so every binding is equivalent and none can
+    // go stale ahead of this clear.
+    add_disposer(Box::new(move || {
+        OPEN_CENTRE.with(|slot| {
+            if slot.get() == Some(open) {
+                slot.set(None);
+            }
+        });
+    }));
+
     let apply_focus = UnsyncCallback::new(move |target: FocusTarget| {
         if target.session_id.is_empty() && target.approval_id.is_empty() {
             return;

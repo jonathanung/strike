@@ -186,9 +186,124 @@ export async function runPhoneScreens({ page, outDir, video, check, shots }) {
   await shot(page, recorder, shotDir, shots, "phone-header-menu-390");
   await page.evaluate(`document.querySelector("[data-nav='phone-menu-backdrop']")?.click()`);
   await delay(120);
-  const sheetClosed = await page.evaluate(`!document.querySelector("[data-nav='phone-menu']")`);
+  // The sheet stays mounted (data-open toggles visibility, like the
+  // desktop menu), so closed means hidden, not absent from the DOM.
+  const sheetClosed = await page.evaluate(`(() => {
+    const el = document.querySelector("[data-nav='phone-menu']");
+    return Boolean(el) && el.dataset.open === "0" && getComputedStyle(el).display === "none";
+  })()`);
   check(sheetClosed, "phone overflow sheet did not close on backdrop tap");
   await shot(page, recorder, shotDir, shots, "phone-chat-390");
+
+  // Sheet slot lifecycle (#1527): the sheet must hold the ONLY gateway
+  // switcher and notification bell at phone widths, open or closed —
+  // a second mount leaks the switcher's 5s probe timer (each tick
+  // traps on disposed signals) and an Alt+W listener per cycle, and
+  // strands the palette's notification handle on a disposed bell.
+  await page.evaluate(`(() => {
+    if (!window.__trapLog) {
+      window.__trapLog = [];
+      window.addEventListener("error", (e) => {
+        window.__trapLog.push(String((e && e.message) || "error"));
+      });
+    }
+    return true;
+  })()`);
+  const slotCounts = () =>
+    page.evaluate(`(() => ({
+      bells: document.querySelectorAll(".notify-bell").length,
+      gwBtns: document.querySelectorAll(".gw-btn").length,
+    }))()`);
+  const closedCounts = await slotCounts();
+  check(
+    closedCounts.bells === 1 && closedCounts.gwBtns === 1,
+    `sheet closed: expected 1 bell and 1 Gateways button, got ${closedCounts.bells}/${closedCounts.gwBtns}`,
+  );
+  for (let i = 0; i < 5; i++) {
+    await page.evaluate(`document.querySelector("[data-nav='phone-more']")?.click()`);
+    await delay(120);
+    const openCounts = await slotCounts();
+    check(
+      openCounts.bells === 1 && openCounts.gwBtns === 1,
+      `sheet open ${i + 1}: expected 1 bell and 1 Gateways button, got ${openCounts.bells}/${openCounts.gwBtns}`,
+    );
+    await page.evaluate(`document.querySelector("[data-nav='phone-menu-backdrop']")?.click()`);
+    await delay(120);
+  }
+  // Alt+W parity: each press must toggle the switcher exactly once.
+  // Leaked listeners toggle the shared open signal again, so after an
+  // odd number of cycles a press would land back where it started.
+  const expanded0 = await page.evaluate(
+    `document.querySelector(".gw-btn")?.getAttribute("aria-expanded") || "missing"`,
+  );
+  check(expanded0 !== "missing", "Gateways button missing after sheet cycles");
+  const altW = () =>
+    page.evaluate(
+      `document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "w", altKey: true, bubbles: true, cancelable: true }))`,
+    );
+  await altW();
+  await delay(150);
+  const expanded1 = await page.evaluate(
+    `document.querySelector(".gw-btn")?.getAttribute("aria-expanded") || "missing"`,
+  );
+  check(
+    expanded1 !== "missing" && expanded1 !== expanded0,
+    `Alt+W did not toggle the gateway switcher exactly once (${expanded0} -> ${expanded1})`,
+  );
+  await shot(page, recorder, shotDir, shots, "phone-sheet-gateways-390");
+  await altW();
+  await delay(150);
+  const expanded2 = await page.evaluate(
+    `document.querySelector(".gw-btn")?.getAttribute("aria-expanded") || "missing"`,
+  );
+  check(expanded2 === expanded0, `second Alt+W did not toggle back (${expanded1} -> ${expanded2})`);
+  await page.evaluate(`document.querySelector("[data-nav='phone-menu-backdrop']")?.click()`);
+  await delay(120);
+
+  // The palette's Notifications command must still reach the live bell
+  // after the cycles (its handle is cleared when a bell unmounts, never
+  // left pointing at a disposed one).
+  await page.evaluate(
+    `document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true, cancelable: true }))`,
+  );
+  await delay(250);
+  const paletteOpen = await page.evaluate(`Boolean(document.querySelector(".palette input"))`);
+  check(paletteOpen, "command palette did not open on the phone");
+  if (paletteOpen) {
+    await page.evaluate(`document.querySelector(".palette input")?.focus()`);
+    await page.send("Input.insertText", { text: "Notifications" });
+    await delay(300);
+    const ran = await page.evaluate(`(() => {
+      const row = document.querySelector('[data-command-id="notifications.open"]');
+      if (!row) return false;
+      row.click();
+      return true;
+    })()`);
+    check(ran, "palette has no Notifications command row");
+    await delay(300);
+    const centre = await page.evaluate(`(() => {
+      const panel = document.querySelector(".notify-panel");
+      if (!panel) return { open: false, text: "" };
+      const r = panel.getBoundingClientRect();
+      return {
+        open: getComputedStyle(panel).display !== "none" && r.width > 0 && r.height > 0,
+        text: (panel.innerText || "").slice(0, 80),
+      };
+    })()`);
+    check(centre.open, `palette Notifications did not open the centre after sheet cycles (${JSON.stringify(centre)})`);
+    await shot(page, recorder, shotDir, shots, "phone-notify-centre-390");
+    await page.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+    await page.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+    await delay(150);
+  }
+
+  // A leaked probe timer traps every 5s. Give any timer leaked by the
+  // cycles above a full period to fire before counting traps.
+  await delay(6000);
+  const traps = await page.evaluate(
+    `(window.__trapLog || []).filter((m) => m.includes("unreachable") || m.includes("RuntimeError")).length`,
+  );
+  check(traps === 0, `${traps} wasm trap(s) after sheet open/close cycles (leaked probe timer)`);
 
   await setSize(page, NARROW);
   await delay(120);
@@ -225,7 +340,7 @@ export async function runPhoneScreens({ page, outDir, video, check, shots }) {
   })()`);
   check(opened, "approval chip missing on the phone composer");
   await delay(150);
-  const menu = await page.evaluate(`Boolean(document.querySelector(".menu")) && (document.querySelector(".menu").innerText || "").includes("Yolo")`);
+  const menu = await page.evaluate(`Boolean(document.querySelector(".composer .menu")) && (document.querySelector(".composer .menu").innerText || "").includes("Yolo")`);
   check(menu, "approval menu did not open on the phone");
   await shot(page, recorder, shotDir, shots, "phone-approval-390");
   await page.evaluate(`(() => {
