@@ -3363,8 +3363,7 @@ fn App() -> impl IntoView {
                                         send();
                                     }
                                 }
-                                                            on:paste=move |ev: web_sys::Event| {
-                                    let Some(ev) = ev.dyn_ref::<web_sys::ClipboardEvent>() else { return };
+                                on:paste=move |ev: web_sys::ClipboardEvent| {
                                     if let Some(data) = ev.clipboard_data() {
                                         if let Some(files) = data.files() {
                                             if files.length() > 0 {

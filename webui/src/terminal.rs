@@ -660,8 +660,7 @@ pub fn TerminalPanel(
                             ctl.send_raw(data);
                         }
                     }
-                    on:paste=move |ev: web_sys::Event| {
-                        let Ok(ev) = ev.dyn_into::<web_sys::ClipboardEvent>() else { return };
+                    on:paste=move |ev: web_sys::ClipboardEvent| {
                         if let Some(data) = ev.clipboard_data().and_then(|d| d.get_data("text/plain").ok()) {
                             if !data.is_empty() {
                                 ev.prevent_default();
