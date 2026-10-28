@@ -150,6 +150,15 @@ by this dialog.
 Provider credentials (`strike auth logout <provider>`) are a different
 store. Logging out of a model provider does not rotate the gateway token.
 
+## Phone on the same tailnet
+
+A phone uses the web UI, not a native app. Two setups are supported:
+`tailscale serve` HTTPS in front of loopback, or `--addr` on a Tailscale
+or WireGuard address with `--allow-private-bind` and `--auth`. MagicDNS
+origins, the attach cookie, and SSE `Last-Event-ID` resume are documented
+in [mobile.md](mobile.md). Binding past loopback prints a warning in the
+serve banner. There is no `--listen` flag.
+
 ## Short-lived grants
 
 A grant is a second bearer, minted with the same 32-hex `MintToken` as the

@@ -185,6 +185,9 @@ func TestPrintServeBanner(t *testing.T) {
 	if strings.Contains(out, "EXPOSE") {
 		t.Fatalf("banner must not advertise EXPOSE: %s", out)
 	}
+	if strings.Contains(out, "beyond loopback") {
+		t.Fatalf("loopback banner warned: %s", out)
+	}
 
 	buf.Reset()
 	printServeBanner(&buf, serveBanner{
@@ -213,6 +216,23 @@ func TestPrintServeBanner(t *testing.T) {
 	out = buf.String()
 	if strings.Contains(out, "file-secret") || strings.Contains(out, "?token=") {
 		t.Fatalf("banner leaked a token-file secret: %s", out)
+	}
+}
+
+func TestPrintServeBannerWarnsBeyondLoopback(t *testing.T) {
+	var buf bytes.Buffer
+	printServeBanner(&buf, serveBanner{
+		listenAddr: "100.64.0.5:8787",
+		token:      "tok",
+		auth:       true,
+		sessionDir: "/tmp/s",
+	})
+	out := buf.String()
+	if !strings.Contains(out, "beyond loopback") {
+		t.Fatalf("missing private-bind warning: %s", out)
+	}
+	if !strings.Contains(out, "docs/mobile.md") {
+		t.Fatalf("warning should point at docs/mobile.md: %s", out)
 	}
 }
 

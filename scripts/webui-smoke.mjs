@@ -261,6 +261,10 @@ try {
     chromeBin(),
     [
       "--headless=new",
+      // Phone layout starts at 720px wide, or a short landscape. Headless
+      // Chrome's default window is small enough on some runners to hide the
+      // side tabs this check reads. Pin a desktop size.
+      "--window-size=1440,900",
       "--disable-gpu",
       "--no-sandbox",
       "--disable-setuid-sandbox",

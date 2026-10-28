@@ -17,6 +17,7 @@ mod gateway;
 mod gateway_qr;
 mod git;
 mod goals;
+mod mobile;
 mod schedule;
 mod model;
 mod notify;
@@ -43,7 +44,7 @@ mod workspaces;
 use crate::shell::icon;
 
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -79,6 +80,7 @@ use crate::transcript_view::{save_download, TranscriptHandlers, TranscriptPane};
 use crate::workspaces::WorkspacePicker;
 use crate::storage::StoragePanel;
 use crate::editor::DocumentPane;
+use crate::mobile::PhoneNav;
 use crate::side_chat::SideChatPanel;
 
 use crate::model::{budget_elapsed, can_retry, RootsResponse};
@@ -866,8 +868,23 @@ fn App() -> impl IntoView {
     let files_error = RwSignal::new(String::new());
     let changes = RwSignal::new(Vec::<model::ChangedFile>::new());
     let changes_error = RwSignal::new(String::new());
+    let phone_pane = RwSignal::new(mobile::PANE_CHAT.to_string());
     apply_theme(&load("strike.theme"), &load("strike.scheme"));
     apply_layout(&layout.get_untracked());
+    Effect::new(move |_| {
+        mobile::set_pane(&phone_pane.get());
+    });
+    // Jump to chat when a document opens. A later Files or Activity tap
+    // must stick while that document is still open.
+    let doc_was_open = Rc::new(Cell::new(false));
+    let doc_was = doc_was_open.clone();
+    Effect::new(move |_| {
+        let open = !doc_path.get().is_empty();
+        if open && !doc_was.get() {
+            phone_pane.set(mobile::PANE_CHAT.into());
+        }
+        doc_was.set(open);
+    });
 
     let poll_team = move || {
         let (b, t, root) = (
@@ -1099,9 +1116,11 @@ fn App() -> impl IntoView {
     };
 
     let tail: Rc<RefCell<Option<web_sys::EventSource>>> = Rc::new(RefCell::new(None));
+    let live_cursor: Rc<Cell<u64>> = Rc::new(Cell::new(0));
     let shown_root = RwSignal::new(String::new());
     let wipe_on_replay = RwSignal::new(false);
     let tail_fx = tail.clone();
+    let cursor_fx = live_cursor.clone();
     Effect::new(move |_| {
         let root = active_root.get();
         let b = base.get();
@@ -1118,6 +1137,7 @@ fn App() -> impl IntoView {
         let switching = shown_root.get_untracked() != root;
         shown_root.set(root.clone());
         if switching {
+            cursor_fx.set(0);
             lines.set(Vec::new());
             transcript.set(Transcript::new());
             ux_note.set(String::new());
@@ -1130,6 +1150,10 @@ fn App() -> impl IntoView {
             tf_open.set(false);
             tf_query.set(String::new());
             tf_idx.set(0);
+        } else if mobile::resume_after(cursor_fx.get(), false).is_some() {
+            // Same session, known SSE cursor: keep the column and ask
+            // the daemon for events after that offset.
+            wipe_on_replay.set(false);
         } else if !root.is_empty() {
             wipe_on_replay.set(true);
         }
@@ -1154,7 +1178,11 @@ fn App() -> impl IntoView {
             stream_note.set("Live transcript follows the daemon that served this page. Activity still polls the selected base URL.".into());
             return;
         }
-        let url = format!("/v1/live/events?root={}", api::js_encode(&root));
+        let mut url = format!("/v1/live/events?root={}", api::js_encode(&root));
+        if let Some(after) = mobile::resume_after(cursor_fx.get(), switching) {
+            url.push_str("&after=");
+            url.push_str(&after.to_string());
+        }
         let es = match web_sys::EventSource::new(&url) {
             Ok(es) => es,
             Err(e) => {
@@ -1171,10 +1199,16 @@ fn App() -> impl IntoView {
         let titled_root = root.clone();
         let epoch_msg = epoch;
         let epochs_msg = stream_epoch;
+        let cursor_msg = cursor_fx.clone();
         let on_msg =
             Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |ev: web_sys::MessageEvent| {
                 if epochs_msg.get_untracked() != epoch_msg {
                     return;
+                }
+                if let Ok(id) = ev.last_event_id().parse::<u64>() {
+                    if id > 0 {
+                        cursor_msg.set(id);
+                    }
                 }
                 if let Some(data) = ev.data().as_string() {
                     note_live_title(sessions_cb, roots_cb, &titled_root, &data);
@@ -1652,6 +1686,7 @@ fn App() -> impl IntoView {
     };
 
     let new_session = move || {
+        phone_pane.set(mobile::PANE_CHAT.into());
         let (b, t) = (base.get_untracked(), token.get_untracked());
         let cur = active_root.get_untracked();
         spawn_local(async move {
@@ -1756,6 +1791,7 @@ fn App() -> impl IntoView {
     };
 
     let open_session = move |id: String, live: bool| {
+        phone_pane.set(mobile::PANE_CHAT.into());
         remember(&id);
         if live {
             activate_root(id);
@@ -1978,6 +2014,23 @@ fn App() -> impl IntoView {
         let _ = w.add_event_listener_with_callback("keydown", on_key.as_ref().unchecked_ref());
     }
     on_key.forget();
+
+    {
+        let tail_resume = tail.clone();
+        let refresh = refresh_meta;
+        let bump = reconnect_gen;
+        mobile::install(move || {
+            refresh();
+            let needs = tail_resume
+                .borrow()
+                .as_ref()
+                .map(|es| mobile::resume_reconnect(es.ready_state()))
+                .unwrap_or(false);
+            if needs {
+                bump.update(|n| *n = n.wrapping_add(1));
+            }
+        });
+    }
 
     let stream_up_online = stream_up;
     let reconnect_online = reconnect_gen;
@@ -2952,7 +3005,17 @@ fn App() -> impl IntoView {
         </Show>
         <Show when=move || mode.get() == "chat">
             <div
-                class=move || chat_mode::shell_class(focus.get(), &layout.get(), sessions_drawer.get(), panel_drawer.get())
+                class=move || {
+                    let mut class = chat_mode::shell_class(
+                        focus.get(),
+                        &layout.get(),
+                        sessions_drawer.get(),
+                        panel_drawer.get(),
+                    );
+                    class.push_str(" phone-pane-");
+                    class.push_str(&phone_pane.get());
+                    class
+                }
                 on:touchstart=move |ev: web_sys::TouchEvent| {
                     // Edge-swipe session navigation (#1490 slice 5): only
                     // gestures that begin within 24px of the left/right
@@ -3436,18 +3499,22 @@ fn App() -> impl IntoView {
                                             }
                                         }
                                     } else if ev.key() == "Enter" && !ev.shift_key() {
-                                        ev.prevent_default();
                                         if ac_open.get_untracked() {
+                                            ev.prevent_default();
                                             let items = ac_items.get_untracked();
                                             let idx = ac_index.get_untracked();
                                             if let Some(item) = items.get(idx) {
                                                 if item.selectable {
                                                     accept_suggestion(item.clone(), &ui);
-                                                    return;
                                                 }
                                             }
+                                            return;
                                         }
-                                        send();
+                                        // Phone keyboards use Enter for a newline. Send is the button.
+                                        if !mobile::is_phone() {
+                                            ev.prevent_default();
+                                            send();
+                                        }
                                     }
                                 }
                                 on:paste=move |ev: web_sys::ClipboardEvent| {
@@ -3462,6 +3529,7 @@ fn App() -> impl IntoView {
                                 }
 ></textarea>
                             <div class="composer-bar">
+                                <div class="composer-chips">
                                 <button type="button" class="chip plus" aria-label="Composer actions" data-composer-triggers="plus-button" on:click=move |_| {
                                     mode_menu.set(false);
                                     model_menu.set(false);
@@ -3541,6 +3609,7 @@ fn App() -> impl IntoView {
                                     memory_menu.update(|v| *v = !*v);
                                 }>{move || format!("Memory · {}", memory_mode_label(&memory_mode.get()))}</button>
                                 <button type="button" class=move || if side_open.get() { "chip on side-chat-open-composer" } else { "chip side-chat-open-composer" } on:click=move |_| open_side(String::new(), String::new())>"Side chat"</button>
+                                </div>
                                 <button type="button" class=move || if enter_mode.get() == "steer" { "chip on" } else { "chip" } on:click=move |_| set_enter("steer".into())>"Steer"</button>
                                 <button type="button" class=move || if enter_mode.get() == "queue" { "chip on" } else { "chip" } on:click=move |_| set_enter("queue".into())>"Queue"</button>
                                 <button class="primary send" type="submit" disabled=move || {
@@ -3851,6 +3920,7 @@ fn App() -> impl IntoView {
             recents=workspace_recents
             refresh=refresh_meta
         />
+        <PhoneNav pane=phone_pane side_tab=side_tab mode=mode />
     }
 }
 

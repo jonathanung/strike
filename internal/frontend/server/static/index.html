@@ -2,12 +2,13 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <meta name="theme-color" content="#14131c">
 <meta name="description" content="Conversation and cockpit for a Strike daemon.">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Strike">
 <link rel="icon" href="/assets/icon.svg">
 <title>Strike</title>
 <script>
@@ -27,13 +28,14 @@
 <link rel="stylesheet" href="/assets/transcript-find-48ee7e8c29e3a7d5.css" integrity="sha384-eIxmvHVn9OZAgklNBggZLjZIuZ7orLHMdtsudrUHcg7zclIcXuQlOhMOgAMN1VtF"/>
 <link rel="stylesheet" href="/assets/turn-elapsed-f4f0358258cee9df.css" integrity="sha384-PW9+AyyJlSzqXRvg7I4U6848KUSH7uEgIt4HLxhzf05rs01hAbUaWUSxPQV+borE"/>
 <link rel="stylesheet" href="/assets/session-delete-c180251d14f9221e.css" integrity="sha384-wojH/ANHPCyXiTF3rSVVPn9SXyjSMXEyQy9axftq5nuQenRNd2m/wfUw0ySVQwhr"/>
+<link rel="stylesheet" href="/assets/mobile-11216ed519aca95a.css" integrity="sha384-j8jFN/5jApZoOHLGb8Wr35GUYdvlPE32ELBI9CC7UyeBXZnvyGJaZLymlsmiVs0k"/>
 
 
 
 
 <script type="module">
-import init, * as bindings from '/assets/strike-webui-d5771956c08bcdbd.js';
-const wasm = await init({ module_or_path: '/assets/strike-webui-d5771956c08bcdbd_bg.wasm' });
+import init, * as bindings from '/assets/strike-webui-b3bd78576944c28e.js';
+const wasm = await init({ module_or_path: '/assets/strike-webui-b3bd78576944c28e_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -44,6 +46,6 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 </script>
 <script src="/assets/register.js" defer></script>
 
-<link rel="modulepreload" href="/assets/strike-webui-d5771956c08bcdbd.js" crossorigin="anonymous" integrity="sha384-4uAx+QGjdqOMhmMg8XAqJPQ6UdWJvo3c5BA/WzodD0WRDucJRjmdBmQGI7XbFnAe"><link rel="preload" href="/assets/strike-webui-d5771956c08bcdbd_bg.wasm" crossorigin="anonymous" integrity="sha384-xtRFGXEamoLo4ssz165ImeHRcRtqp0PUuTVn9L0LkcrDwQOFFjkzGxZIZliHxnAh" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/assets/strike-webui-b3bd78576944c28e.js" crossorigin="anonymous" integrity="sha384-1MKXdcQZJNn5JOPbStYq/fcTCeyNB0mlg+guvQWUA8r/sJT/FWzgaHiEvSdbFfje"><link rel="preload" href="/assets/strike-webui-b3bd78576944c28e_bg.wasm" crossorigin="anonymous" integrity="sha384-z1edpb+P9mXpfJIUj6QuGAbmNguDebsGltwEwt+wgSZ4kcOTiUD19yZkRYiE+RH2" as="fetch" type="application/wasm"></head>
 <body></body>
 </html>
