@@ -1322,6 +1322,8 @@ try {
 
   const clicked = await send("Runtime.evaluate", {
     expression: `(() => {
+      const more = document.querySelector('[data-nav="more"]');
+      if (more && more.getAttribute("aria-expanded") !== "true") more.click();
       const btn = document.querySelector('[data-feature="notifications"]');
       if (!btn) return "missing-bell";
       btn.click();

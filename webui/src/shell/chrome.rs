@@ -244,6 +244,16 @@ pub fn Chrome() -> impl IntoView {
                 help_open.set(false);
                 return;
             }
+            if ev.alt_key()
+                && !ev.meta_key()
+                && !ev.ctrl_key()
+                && key.eq_ignore_ascii_case("n")
+            {
+                // The bell lives in the menu. Opening the menu in the same
+                // turn as the notification toggle keeps the panel on screen.
+                more_open.set(true);
+                phone_open.set(true);
+            }
             if key == "Escape" {
                 more_open.set(false);
                 phone_open.set(false);
