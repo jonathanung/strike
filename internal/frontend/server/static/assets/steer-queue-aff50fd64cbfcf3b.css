@@ -85,7 +85,14 @@
   align-items: center;
   gap: var(--space-2);
   margin-left: auto;
-  padding: 0 4px 4px 0;
+}
+body[data-phone="1"] .composer > .hint {
+  max-height: 2.4em;
+  overflow: hidden;
+}
+body[data-phone="1"] .steer-queue {
+  max-height: 88px;
+  overflow: auto;
 }
 .steer-actions .send { margin-left: 0; }
 @media (max-width: 720px) {
