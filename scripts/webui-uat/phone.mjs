@@ -154,6 +154,40 @@ export async function runPhoneScreens({ page, outDir, video, check, shots }) {
     return r.bottom <= window.innerHeight + 2 && r.top < window.innerHeight;
   })()`);
   check(composer, "composer is outside the 390×844 viewport");
+
+  // Phone header (#1490 slice 2): one compact row (<=56px), a >=44px
+  // overflow button, and no floating action buttons left in the bar.
+  // The sheet holds Run a command / Gateways / Phone and closes on a
+  // backdrop tap.
+  const header = await page.evaluate(`(() => {
+    const el = document.querySelector(".page-header");
+    if (!el) return null;
+    const more = document.querySelector("[data-nav='phone-more']");
+    const mr = more ? more.getBoundingClientRect() : null;
+    return {
+      height: el.getBoundingClientRect().height,
+      moreH: mr ? mr.height : 0,
+      moreW: mr ? mr.width : 0,
+      floating: Boolean(document.querySelector(".page-header .command-pill, .page-header .gw-btn, .page-header .gq-open")),
+    };
+  })()`);
+  check(header && header.height > 0 && header.height <= 56, `phone header height ${header && header.height} not within 56px`);
+  check(header && header.moreH >= 44 && header.moreW >= 44, `phone overflow button ${header && header.moreW}x${header && header.moreH} under 44px`);
+  check(header && !header.floating, "phone header still renders floating action buttons inline");
+  await page.evaluate(`document.querySelector("[data-nav='phone-more']")?.click()`);
+  await delay(150);
+  const sheet = await page.evaluate(`(() => {
+    const el = document.querySelector("[data-nav='phone-menu']");
+    return el ? (el.innerText || "") : "";
+  })()`);
+  check(sheet.includes("Run a command"), "phone overflow sheet is missing Run a command");
+  check(sheet.includes("Gateways"), "phone overflow sheet is missing Gateways");
+  check(sheet.includes("Phone"), "phone overflow sheet is missing Phone");
+  await shot(page, recorder, shotDir, shots, "phone-header-menu-390");
+  await page.evaluate(`document.querySelector("[data-nav='phone-menu-backdrop']")?.click()`);
+  await delay(120);
+  const sheetClosed = await page.evaluate(`!document.querySelector("[data-nav='phone-menu']")`);
+  check(sheetClosed, "phone overflow sheet did not close on backdrop tap");
   await shot(page, recorder, shotDir, shots, "phone-chat-390");
 
   await setSize(page, NARROW);
@@ -163,6 +197,11 @@ export async function runPhoneScreens({ page, outDir, video, check, shots }) {
   for (const label of ["Send", "Steer", "Queue"]) {
     onScreen(await chipBox(page, label), `${label} at 360`, check);
   }
+  const header360 = await page.evaluate(`(() => {
+    const el = document.querySelector(".page-header");
+    return el ? el.getBoundingClientRect().height : 0;
+  })()`);
+  check(header360 > 0 && header360 <= 56, `phone header height ${header360} at 360 not within 56px`);
   await shot(page, recorder, shotDir, shots, "phone-chat-360");
   await setSize(page, PHONE);
 

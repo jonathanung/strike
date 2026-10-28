@@ -23,6 +23,16 @@ fn viewport_width() -> u32 {
         .unwrap_or(1280)
 }
 
+/// Phone layout, keyed on the same media query that sets `data-phone`
+/// (mobile.rs), so the Rust header and the phone CSS never disagree.
+fn phone_layout() -> bool {
+    web_sys::window()
+        .and_then(|window| window.match_media(crate::mobile::PHONE_MQ).ok())
+        .flatten()
+        .map(|mql| mql.matches())
+        .unwrap_or(false)
+}
+
 fn editable_target() -> bool {
     let Some(doc) = web_sys::window().and_then(|window| window.document()) else {
         return false;
@@ -118,12 +128,14 @@ pub fn Chrome() -> impl IntoView {
     let palette_open = RwSignal::new(false);
     let help_open = RwSignal::new(false);
     let more_open = RwSignal::new(false);
+    let phone_open = RwSignal::new(false);
     let query = RwSignal::new(String::new());
     let arg_id = RwSignal::new(String::new());
     let arg_text = RwSignal::new(String::new());
     let error = RwSignal::new(String::new());
     let cursor = RwSignal::new(0usize);
     let width = RwSignal::new(viewport_width());
+    let phone = RwSignal::new(phone_layout());
     let query_ref = NodeRef::<Input>::new();
 
     let open_palette = move || {
@@ -133,6 +145,7 @@ pub fn Chrome() -> impl IntoView {
         error.set(String::new());
         cursor.set(0);
         more_open.set(false);
+        phone_open.set(false);
         help_open.set(false);
         palette_open.set(true);
     };
@@ -147,6 +160,7 @@ pub fn Chrome() -> impl IntoView {
         arg_id.set(String::new());
         error.set(String::new());
         more_open.set(false);
+        phone_open.set(false);
         help_open.set(true);
     }));
 
@@ -207,8 +221,16 @@ pub fn Chrome() -> impl IntoView {
             more_open.set(false);
         }
     });
+    Effect::new(move |_| {
+        if !phone.get() {
+            phone_open.set(false);
+        }
+    });
 
-    let on_resize = Closure::<dyn FnMut()>::new(move || width.set(viewport_width()));
+    let on_resize = Closure::<dyn FnMut()>::new(move || {
+        width.set(viewport_width());
+        phone.set(phone_layout());
+    });
     let on_key =
         Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |ev: web_sys::KeyboardEvent| {
             let key = ev.key();
@@ -239,6 +261,7 @@ pub fn Chrome() -> impl IntoView {
             }
             if key == "Escape" {
                 more_open.set(false);
+                phone_open.set(false);
                 host::dismiss_popups();
                 return;
             }
@@ -292,6 +315,10 @@ pub fn Chrome() -> impl IntoView {
 
     view! {
         <header class="page-header nav-bar">
+            {move || if phone.get() {
+                phone_bar(open_palette, phone_open, more_mark, command_mark)
+            } else {
+                view! {
             <div class="nav-leading">
                 {move || {
                     (width.get() >= BACK_COLLAPSE).then(|| view! {
@@ -398,6 +425,9 @@ pub fn Chrome() -> impl IntoView {
                     </div>
                 </Show>
             </div>
+                }
+                .into_any()
+            }}
         </header>
         <Show when=move || palette_open.get()>
             <div class="palette-backdrop" on:click=move |_| close_palette()>
@@ -555,6 +585,131 @@ pub fn Chrome() -> impl IntoView {
             </div>
         </Show>
     }
+}
+
+/// Phone header (#1490 slice 2): one compact row — workspace name and
+/// session status on the left, a single overflow button on the right.
+/// Everything the desktop bar shows inline (Gateways, Phone, layout,
+/// view, notifications, the gateway chip) moves into the sheet, next to
+/// Run a command, Back/Forward, and Focus mode. The sheet closes on a
+/// selection, on Escape, and on a backdrop tap — except clicks inside
+/// slots that own a popover (gateway panel, notification centre): those
+/// panels render inside the slot subtree and manage their own lifetime,
+/// so a click there is not a sheet selection.
+fn phone_bar(
+    open_palette: impl Fn() + Copy + Send + Sync + 'static,
+    phone_open: RwSignal<bool>,
+    more_mark: &'static str,
+    command_mark: &'static str,
+) -> AnyView {
+    view! {
+        <div class="nav-leading phone-leading">
+            <span
+                class="crumb current phone-ws"
+                data-nav="phone-workspace"
+                title=move || host::workspace_name()
+            >
+                {move || host::workspace_name()}
+            </span>
+            {move || {
+                let found = registry::slots(TopRegion::Status);
+                if found.is_empty() {
+                    view! { <SessionChip /> }.into_any()
+                } else {
+                    found.into_iter().map(slot_view).collect_view().into_any()
+                }
+            }}
+        </div>
+        <div class="nav-more phone-more">
+            <button
+                type="button"
+                class="nav-icon phone-more-btn"
+                aria-label="More actions"
+                aria-haspopup="menu"
+                aria-expanded=move || if phone_open.get() { "true" } else { "false" }
+                data-nav="phone-more"
+                on:click=move |ev: web_sys::MouseEvent| {
+                    ev.stop_propagation();
+                    phone_open.update(|open| *open = !*open);
+                }
+            >
+                <span class="icon-slot" aria-hidden="true" inner_html=more_mark></span>
+            </button>
+            <Show when=move || phone_open.get()>
+                <div
+                    class="phone-menu-backdrop"
+                    data-nav="phone-menu-backdrop"
+                    on:click=move |_| phone_open.set(false)
+                ></div>
+                <div
+                    class="menu phone-menu"
+                    role="menu"
+                    data-nav="phone-menu"
+                    on:click=move |ev: web_sys::MouseEvent| {
+                        if !in_popover_slot(&ev) {
+                            phone_open.set(false);
+                        }
+                    }
+                >
+                    <button
+                        type="button"
+                        class="nav-menu-item"
+                        data-nav="phone-run-command"
+                        on:click=move |_| open_palette()
+                    >
+                        <span class="icon-slot" aria-hidden="true" inner_html=command_mark></span>
+                        <span class="name">"Run a command"</span>
+                        <kbd>"Ctrl+K"</kbd>
+                    </button>
+                    <HistoryButton back=true labeled=true />
+                    <HistoryButton back=false labeled=true />
+                    <FocusButton labeled=true />
+                    {move || {
+                        phone_slots()
+                            .into_iter()
+                            .map(|slot| {
+                                let label = slot.overflow_label.to_string();
+                                let id = slot.id;
+                                let body = (slot.render)();
+                                view! {
+                                    <div class="nav-overflow-slot" data-slot=id>
+                                        <span class="path">{label}</span>
+                                        {body}
+                                    </div>
+                                }
+                            })
+                            .collect_view()
+                    }}
+                </div>
+            </Show>
+        </div>
+    }
+    .into_any()
+}
+
+/// Slots that live in the phone overflow sheet: everything the desktop
+/// bar renders inline except the session status, which stays in the bar.
+fn phone_slots() -> Vec<super::registry::TopSlot> {
+    [TopRegion::Leading, TopRegion::Trailing]
+        .into_iter()
+        .flat_map(registry::slots)
+        .collect()
+}
+
+/// True when a click inside the phone sheet landed in a slot that owns
+/// a popover (the gateway panel, the notification centre). Those panels
+/// render inside the slot subtree, so unmounting the sheet would kill
+/// the panel the click just opened.
+fn in_popover_slot(ev: &web_sys::MouseEvent) -> bool {
+    let Some(target) = ev.target() else {
+        return false;
+    };
+    let Ok(el) = target.dyn_into::<web_sys::Element>() else {
+        return false;
+    };
+    el.closest("[data-slot=\"gateway-switcher\"], [data-slot=\"notifications\"]")
+        .map(|found| found.is_some())
+        .unwrap_or(false)
 }
 
 fn slot_view(slot: super::registry::TopSlot) -> AnyView {
