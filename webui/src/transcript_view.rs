@@ -2,15 +2,19 @@
 //! Composer send and queue stay in the shell. File tabs stay in the editor
 //! stream; this pane only emits `path:line` links.
 
+use std::cell::Cell;
+use std::rc::Rc;
+
 use leptos::callback::{Callable, Callback};
 use leptos::prelude::*;
+use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
 
 use crate::status::{StatusKind, StatusMark, StatusSlot};
 use crate::transcript::{
-    empty_headline, parse_markdown, show_minimap, stick_to_bottom, suggestions, Block, Chip,
-    ChipKind, Inline, Message, Role, Transcript,
+    anchored_scroll_top, empty_headline, parse_markdown, show_minimap, stick_to_bottom,
+    suggestions, Block, Chip, ChipKind, Inline, Message, Role, Transcript,
 };
 
 #[derive(Clone, Copy)]
@@ -65,15 +69,50 @@ pub fn TranscriptPane(
         }
     });
 
-    let on_scroll = move |_| {
-        if let Some(el) = scroller_fx.get() {
-            let next = stick_to_bottom(
-                el.scroll_top() as f64,
-                el.scroll_height() as f64,
-                el.client_height() as f64,
-            );
-            if pinned.get_untracked() != next {
-                pinned.set(next);
+    // Geometry at the last scroll position the reader chose:
+    // (scroll_top, scroll_height, client_height). The phone keyboard
+    // resizes the shell around the transcript; `settle_scroll` compares
+    // against this so the resize keeps a pinned reader at the bottom and
+    // never yanks a reader who scrolled up. Returns true when it handled
+    // a resize, in which case it has already restored the anchor and the
+    // follow state.
+    let geom = Rc::new(Cell::new((0.0f64, 0.0f64, 0.0f64)));
+    let settle_scroll: Rc<dyn Fn(&web_sys::Element) -> bool> = {
+        let geom = Rc::clone(&geom);
+        Rc::new(move |el: &web_sys::Element| -> bool {
+            let top = el.scroll_top() as f64;
+            let height = el.scroll_height() as f64;
+            let client = el.client_height() as f64;
+            let (prev_top, prev_height, prev_client) = geom.get();
+            if prev_client <= 0.0 || (client - prev_client).abs() <= 0.5 {
+                geom.set((top, height, client));
+                return false;
+            }
+            let next = anchored_scroll_top(prev_top, prev_height, prev_client, client, height);
+            if (next - top).abs() > 0.5 {
+                el.set_scroll_top(next as i32);
+            }
+            pinned.set(stick_to_bottom(prev_top, prev_height, prev_client));
+            geom.set((next, height, client));
+            true
+        })
+    };
+
+    let on_scroll = {
+        let settle_scroll = Rc::clone(&settle_scroll);
+        move |_| {
+            if let Some(el) = scroller_fx.get() {
+                if settle_scroll(&el) {
+                    return;
+                }
+                let next = stick_to_bottom(
+                    el.scroll_top() as f64,
+                    el.scroll_height() as f64,
+                    el.client_height() as f64,
+                );
+                if pinned.get_untracked() != next {
+                    pinned.set(next);
+                }
             }
         }
     };
@@ -84,6 +123,45 @@ pub fn TranscriptPane(
             el.set_scroll_top(el.scroll_height());
         }
     };
+
+    // The scroller's own box is what the keyboard actually resizes, so
+    // watch it directly; the scroll handler above covers engines that
+    // clamp the offset before the observer fires.
+    struct ScrollWatch {
+        obs: web_sys::ResizeObserver,
+        _cb: Closure<dyn FnMut(js_sys::Array, web_sys::ResizeObserver)>,
+    }
+    let ro_slot = StoredValue::new_local(None::<ScrollWatch>);
+    on_cleanup(move || {
+        ro_slot.update_value(|slot| {
+            if let Some(watch) = slot.take() {
+                watch.obs.disconnect();
+            }
+        });
+    });
+    scroller.on_load({
+        let settle_scroll = Rc::clone(&settle_scroll);
+        move |el| {
+            let settle = Rc::clone(&settle_scroll);
+            let cb = Closure::wrap(
+                Box::new(move |_: js_sys::Array, _: web_sys::ResizeObserver| {
+                    if let Some(el) = scroller_fx.get() {
+                        settle(&el);
+                    }
+                }) as Box<dyn FnMut(js_sys::Array, web_sys::ResizeObserver)>,
+            );
+            let Ok(obs) = web_sys::ResizeObserver::new(cb.as_ref().unchecked_ref()) else {
+                return;
+            };
+            let el: &web_sys::Element = &el;
+            obs.observe(el);
+            ro_slot.update_value(|slot| {
+                if let Some(old) = slot.replace(ScrollWatch { obs, _cb: cb }) {
+                    old.obs.disconnect();
+                }
+            });
+        }
+    });
 
     let rename = handlers.rename;
     let open_file = handlers.open_file;
