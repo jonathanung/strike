@@ -708,7 +708,12 @@ pub fn GatewaySwitcher(
         view! {
             <div class="gw-head">
                 <h2 class="panel-title">"Gateways"</h2>
-                <span class=state_class>{state_label}</span>
+                <span class="gw-head-end">
+                    <span class=state_class>{state_label}</span>
+                    {(!inline).then(|| view! {
+                        <button class="secondary" on:click=move |_| open.set(false)>"Close"</button>
+                    })}
+                </span>
             </div>
             <p class="hint gw-detail" aria-live="polite">{move || detail.get()}</p>
             <div class="gw-actions">
@@ -776,6 +781,9 @@ pub fn GatewaySwitcher(
         match ev.key().as_str() {
             "Escape" => {
                 ev.prevent_default();
+                // The popover consumed this Escape; keep the window
+                // handlers from also dismissing what sits behind it.
+                ev.stop_propagation();
                 open.set(false);
             }
             "ArrowDown" => {
@@ -812,6 +820,9 @@ pub fn GatewaySwitcher(
             <Show when=move || !inline>
                 <button class="gw-btn" title="Alt+W" aria-haspopup="dialog" aria-expanded=move || open.get().to_string()
                     on:click=move |_| open.update(|v| *v = !*v)>"Gateways"</button>
+            </Show>
+            <Show when=move || !inline && open.get()>
+                <div class="gw-back" aria-hidden="true" on:click=move |_| open.set(false)></div>
             </Show>
             <Show when=move || inline || open.get()>
                 <div class=body_class
