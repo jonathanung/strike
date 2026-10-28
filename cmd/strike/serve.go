@@ -351,6 +351,17 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 			if slot.done == nil {
 				slot.done = done
 			}
+			// DELETE /v1/roots closes the Live bridge. Cancel the engine so
+			// runSession closes the session file. Without this, a root that
+			// outlives its create POST stays "open" and a later delete asks
+			// for force.
+			go func() {
+				select {
+				case <-live.Closed():
+					rcancel()
+				case <-rctx.Done():
+				}
+			}()
 			sr := &serveRoot{
 				live:    live,
 				bound:   slot.bound,
@@ -625,6 +636,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 	// Do not spawn a third way.
 	trigSvc := trigger.New(trigStore, server.NewRootLauncher(liveHub))
 
+	workDir, _ := os.Getwd()
 	srv, err := server.New(server.Options{
 		Addr:         opts.addr,
 		Auth:         opts.auth,
@@ -649,6 +661,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		SideChat:              sideChat,
 		Triggers:              trigSvc,
 		TaskRuns:              taskRuns,
+		WorkDir:               workDir,
 		TerminalRemote:        opts.terminalRemote,
 		TerminalSandbox:       terminalSandbox,
 		TerminalSandboxLoaded: terminalSandboxLoaded,

@@ -145,6 +145,9 @@ type Options struct {
 	// empty means the active root. The bool is false when no live engine can
 	// compile it. Nil means no compiler was installed.
 	TerminalSandboxFor func(sessionID, workDir string) (sandbox.Policy, bool)
+	// WorkDir is the git workspace Apps reads (GitHub triage). The browser
+	// cannot choose it. Empty uses the process working directory.
+	WorkDir string
 }
 
 // Server is an HTTP server for session attach and optional live cockpit.
@@ -518,6 +521,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/roots/{id}/activate", s.handleRootActivate)
 	s.mux.HandleFunc("POST /v1/roots/{id}/resume", s.handleRootResume)
 	s.mux.HandleFunc("DELETE /v1/roots/{id}", s.handleRootClose)
+	s.mux.HandleFunc("GET /v1/apps", s.handleApps)
+	s.mux.HandleFunc("GET /v1/apps/{id}/items", s.handleAppItems)
+	s.mux.HandleFunc("GET /v1/apps/{id}/items/{itemID}", s.handleAppItem)
+	s.mux.HandleFunc("POST /v1/apps/{id}/items/{itemID}/act", s.handleAppAct)
+	s.mux.HandleFunc("POST /v1/apps/{id}/items/{itemID}/handoff", s.handleAppHandoff)
 	s.mux.HandleFunc("GET /v1/status", s.handleStatus)
 	s.mux.HandleFunc("GET /v1/status/sessions", s.handleSessionStatusBoard)
 	s.mux.HandleFunc("GET /v1/status/events", s.handleSessionStatusEvents)

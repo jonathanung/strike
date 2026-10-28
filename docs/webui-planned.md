@@ -7,6 +7,8 @@ text, delegated children nested in the conductor view), a transcript over
 `/v1/live/events`, a composer that can steer or queue and set the real
 permission mode, and a side panel with Activity, Files, Changes, Git, Worktrees,
 Memory, Knowledge, and Artifacts.
+Apps is a separate surface: a launcher and one queue, GitHub triage
+(`docs/webui-apps.md`).
 Blocked children (`schema:handoff`, #1201) show as `blocked`. Folders group
 sessions in the list; they are not directories on disk. Unread is still the
 browser seen-map until the status stream (#1263) publishes a server field.
@@ -39,6 +41,14 @@ A goal is not a schedule and not a task runner. A schedule, when it exists,
 fires on a clock and may start a goal; it must not skip the goal guards.
 A task runner walks a plan section by section and checkpoints each section.
 The Goals view does not draw either of those.
+
+## Apps
+
+GitHub triage is registered by the daemon and rendered by the client.
+Inbox and schedule results are the same queue shape, and they are not
+registered: there is no inbox store, and schedule runs have their own page
+(see Schedule). The launcher does not draw a card for an app the daemon
+did not return.
 
 ## Schedule
 
