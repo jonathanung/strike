@@ -298,36 +298,6 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
       check(count >= min, `${sel} count ${count} < ${min}`);
     }
 
-    if (cardReady) {
-      const showingCard = await page.evaluate(
-        `Boolean(document.querySelector('[data-action="onboarding-continue"]'))`,
-      );
-      if (showingCard) {
-        await shoot("onboarding", ["desk1024", "desk1440", "mobile"]);
-        await page.evaluate(`document.querySelector('[data-action="onboarding-continue"]')?.click()`);
-        await waitUntil(
-          `document.querySelector('[data-action="telemetry-note"]') == null`,
-          4000,
-          "onboarding dismissed",
-        );
-      }
-    }
-    await page.evaluate(`document.querySelector('[data-action="open-settings"]')?.click()`);
-    const settingsUp = await waitUntil(
-      `document.body && document.body.innerText.includes("Keyboard") && document.body.innerText.includes("Open model menu")`,
-      8000,
-      "settings page",
-    );
-    if (settingsUp) {
-      await shoot("settings", ["desk1024", "desk1440", "mobile"]);
-    }
-    await click(".segmented button", "Chat");
-    await waitUntil(
-      `document.body && document.body.innerText.includes("Activity")`,
-      4000,
-      "back to chat",
-    );
-
     const cardReady = await waitUntil(
       `(() => {
         const b = document.querySelector('[data-action="onboarding-continue"]');

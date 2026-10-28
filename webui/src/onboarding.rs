@@ -146,9 +146,6 @@ pub fn OnboardingCard(
                     <Show when=move || !loading.get() && files_error.get().is_empty()>
                         {move || view! { <FileList doc=files.get() /> }}
                     </Show>
-                    <h3 class="panel-title">"Providers"</h3>
-                    <p class="hint">"This is the Providers page. Keys stay on the daemon and are not copied into this browser."</p>
-                    <ProvidersPage base=base token=token />
                     <Show when=move || theme_ready.get() fallback=move || view! { <p class="hint">"Checking the theme saved in daemon config…"</p> }>
                         <ThemeChoices group="onboarding-accent" current=theme on_pick=pick />
                         <Show when=move || {
@@ -158,6 +155,7 @@ pub fn OnboardingCard(
                             <p class="hint">{move || format!("Daemon config theme: {}. It is not a bundled accent. Continue leaves it in place until you pick one.", daemon_theme.get())}</p>
                         </Show>
                     </Show>
+                    <ProvidersPage base=base token=token />
                     <div class="onboarding-actions">
                         <button type="button" class="secondary" data-action="onboarding-dismiss" on:click=dismiss>"Not now"</button>
                         <button type="button" class="primary" data-action="onboarding-continue" disabled=move || !theme_ready.get() || (loading.get() && files_error.get().is_empty()) on:click=continue_on>"Continue"</button>
