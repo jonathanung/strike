@@ -222,11 +222,11 @@ const tuiDeprecationNotice = "notice: the strike TUI is deprecated; the web UI i
 
 const bareStrikeHint = `Strike now runs as a daemon with a web UI.
 
-  strike daemon install   install the per-user systemd service
-  strike serve            run the daemon in the foreground
-  strike gateway url --qr one-time phone pairing QR (not the daemon token)
-  strike tui              open the deprecated terminal UI
-  strike --help           all commands and options`
+  strike daemon install --start   install and start the per-user daemon
+  strike serve                    run the daemon in the foreground
+  strike gateway url --qr         one-time phone pairing QR (not the daemon token)
+  strike tui                      open the deprecated terminal UI
+  strike --help                   all commands and options`
 
 func main() {
 	os.Exit(runCLI(os.Args[1:], os.Stdout, os.Stderr))

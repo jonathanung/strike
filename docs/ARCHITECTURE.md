@@ -105,6 +105,7 @@ TUI rendered from (see `pkg/protocol/codec.go`).
 | `internal/persist/history` | Project-scoped prompt history | stdlib |
 | `internal/daemon/rootstart` | Shared unattended root starter (`Launcher`). Triggers and the scheduler (#1276) both call it. Empty permission mode resolves to plan. | `protocol`, stdlib |
 | `internal/daemon/trigger` | Trigger registry (webhook HMAC, GitHub events, channel adapter interface), delivery log, rate limit, and dedupe under `~/.strike/triggers.json` | `rootstart`, `pkg/redact`, stdlib |
+| `internal/daemon/unit` | Pure systemd user unit and launchd LaunchAgent render, path resolution (`XDG_CONFIG_HOME` / `~/Library/LaunchAgents`), and service-manager argv for `strike daemon install` | stdlib |
 | `internal/product/project` | Stable filesystem identity + optional per-session git worktrees under `.strike/worktrees/` | stdlib, os/exec |
 | `internal/frontend/host` | **Frozen contract**: the services a frontend needs from its host process (includes `SchedulerPresets` catalog + global apply, `Permissions` explain/presets for `/permission`, `Plugins` lifecycle for `/plugin`) | stdlib only — enforced by the boundary test |
 | `internal/frontend/host/local` | Real `host.Services` implementation; wraps auth/config/models/history/memory/issue/plan/goal/files/mcp/plugin/scheduler presets for the frontend | `auth`, `config`, `history`, `host`, `issue`, `plan`, `goal`, `mcp`, `plugin`, `memory`, `models`, `sandbox`, `scheduler`, `tool` (composer `!` shell) |
