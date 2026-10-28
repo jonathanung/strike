@@ -382,7 +382,22 @@ pub fn ModelMenu(
                                 } else {
                                     format!("No models match. Enter uses \"{}\" for this session.", raw.trim())
                                 };
-                                return view! { <p class="hint" data-model-empty="true">{message}</p> }.into_any();
+                                return view! {
+                                    <div>
+                                        <p class="hint" data-model-empty="true">{message}</p>
+                                        <button
+                                            type="button"
+                                            class="primary"
+                                            data-add-provider="true"
+                                            on:click=move |_| {
+                                                open.set(false);
+                                                let _ = crate::shell::set_view("providers");
+                                            }
+                                        >
+                                            "Add provider"
+                                        </button>
+                                    </div>
+                                }.into_any();
                             }
                             let mut flat_i = 0usize;
                             let mut blocks = Vec::new();
@@ -437,6 +452,17 @@ pub fn ModelMenu(
                             view! {
                                 <div>
                                     {blocks}
+                                    <button
+                                        type="button"
+                                        class="secondary"
+                                        data-add-provider="true"
+                                        on:click=move |_| {
+                                            open.set(false);
+                                            let _ = crate::shell::set_view("providers");
+                                        }
+                                    >
+                                        "Add provider"
+                                    </button>
                                     <button
                                         type="button"
                                         class="secondary model-text"

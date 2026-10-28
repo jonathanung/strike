@@ -1,0 +1,273 @@
+/* feature:navbar begin
+   Three zones, one row. Spacing is the 4/8/12/16/24 scale (--space-1..5).
+   Centre holds PRIMARY only (chrome.rs, max 5). Everything else is the menu.
+   The menu stays mounted (data-open=0) so data-view buttons remain clickable. */
+.nav-slot { display: contents; }
+.nav-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  column-gap: var(--space-3);
+  height: 48px;
+  max-height: 48px;
+  padding: 0 var(--space-4);
+  flex-wrap: nowrap;
+  overflow: hidden;
+  background: var(--ground);
+  border-bottom: var(--border-width) solid var(--rule);
+  box-sizing: border-box;
+}
+.nav-zone {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  flex-wrap: nowrap;
+}
+.nav-left { justify-content: flex-start; }
+.nav-center { justify-content: center; }
+.nav-right { justify-content: flex-end; }
+.nav-center .segmented {
+  height: 32px;
+  border: var(--border-width) solid var(--rule);
+  border-radius: var(--radius-sm);
+  background: var(--ground);
+  flex: 0 0 auto;
+}
+.nav-center .seg {
+  height: 100%;
+  padding: 0 var(--space-3);
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+.nav-workspace {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nav-menu-btn {
+  height: 32px;
+  padding: 0 var(--space-3);
+  flex: 0 0 auto;
+  white-space: nowrap;
+  border: var(--border-width) solid var(--ink);
+  background: var(--surface);
+  box-shadow: 2px 2px 0 var(--ink);
+}
+.nav-menu-btn:focus-visible,
+.nav-center .seg:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+.nav-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  background: transparent;
+  border: 0;
+  padding: 0;
+}
+.nav-backdrop[data-open="1"] { display: block; }
+.nav-pop {
+  position: absolute;
+  right: var(--space-2);
+  top: calc(48px + var(--space-1));
+  bottom: auto;
+  left: auto;
+  z-index: 21;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-1);
+  width: min(320px, calc(100vw - var(--space-4)));
+  max-height: min(70vh, 520px);
+  overflow: auto;
+  padding: var(--space-2);
+  background: var(--surface);
+  border: var(--border-width) solid var(--rule);
+  box-shadow: var(--shadow);
+}
+.nav-pop[data-open="0"] { display: none; }
+.nav-menu-workspace {
+  margin: 0;
+  padding: var(--space-2);
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.nav-menu-item {
+  width: 100%;
+  min-height: 36px;
+  height: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  background: transparent;
+  border: var(--border-width) solid transparent;
+  color: var(--ink);
+  text-align: left;
+  white-space: nowrap;
+}
+.nav-menu-item .name { flex: 1; min-width: 0; }
+.nav-menu-item:hover { background: var(--raised); }
+.nav-menu-slot { display: flex; flex-direction: column; gap: var(--space-1); }
+.nav-menu-slot .segmented {
+  height: auto;
+  border: 0;
+  border-radius: 0;
+  flex-direction: column;
+  overflow: visible;
+}
+.nav-menu-slot .seg,
+.nav-menu-slot button {
+  width: 100%;
+  min-height: 36px;
+  height: auto;
+  justify-content: flex-start;
+  white-space: nowrap;
+}
+.nav-leading,
+.nav-trailing {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.nav-leading { max-width: calc(50% - 230px); }
+.nav-trailing {
+  justify-content: flex-end;
+  max-width: calc(50% - 230px);
+}
+.crumbs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 13px;
+}
+.brand-mark {
+  flex: 0 0 auto;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+}
+.crumb-sep { color: var(--muted); flex: 0 0 auto; }
+.crumb {
+  min-width: 0;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+}
+.crumb.current { color: var(--ink); font-weight: 650; }
+.nav-version { max-width: 120px; }
+.nav-icon {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  flex: 0 0 auto;
+}
+.nav-icon:hover { color: var(--ink); border-color: var(--rule); }
+.nav-icon.on { color: var(--acid); border-color: var(--border-focus); }
+.nav-icon:disabled { opacity: 0.35; }
+.nav-bar { z-index: 5; }
+.nav-more { position: relative; }
+.nav-pop {
+  position: fixed;
+  right: var(--space-2);
+  top: calc(48px + var(--space-1));
+  bottom: auto;
+  left: auto;
+  z-index: 21;
+}
+.nav-menu-item {
+  width: 100%;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  background: transparent;
+  border: 0;
+  color: var(--ink);
+  text-align: left;
+}
+.nav-menu-item .name { flex: 1; min-width: 0; }
+.nav-menu-item:hover { background: var(--raised); }
+.nav-menu-item:disabled { opacity: 0.35; }
+.nav-overflow-slot {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px;
+}
+.palette-arg {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.palette-arg .secondary { flex: 0 0 auto; }
+.palette-arg .name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 650;
+}
+.palette .palette-row {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.palette .palette-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+.palette .palette-copy .path,
+.palette .palette-copy .name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.palette-error { margin: 0 0 8px; }
+.help-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.help-sheet { width: min(480px, 92vw); }
+.shortcut-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 8px;
+  min-height: 32px;
+}
+.shortcut-row .name { min-width: 0; }
+@media (max-width: 1200px) {
+  .nav-version { display: none; }
+}
+@media (max-width: 960px) {
+  .nav-leading,
+  .nav-trailing { max-width: none; }
+  .crumb { max-width: 96px; }
+}
+/* feature:navbar end */

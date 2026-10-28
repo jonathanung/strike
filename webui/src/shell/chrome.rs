@@ -9,19 +9,11 @@ use wasm_bindgen::JsCast;
 
 use super::host::{self, status_badge_class, status_label};
 use super::icon::icon;
-use super::registry::{self, slot_inline, TopRegion};
+use super::registry::{self, TopRegion};
 use super::storage::{load_recents, remember_command};
 
-const BACK_COLLAPSE: u32 = 1100;
-const FOCUS_COLLAPSE: u32 = 1280;
-
-fn viewport_width() -> u32 {
-    web_sys::window()
-        .and_then(|window| window.inner_width().ok())
-        .and_then(|value| value.as_f64())
-        .map(|width| width as u32)
-        .unwrap_or(1280)
-}
+/// Centre-zone pages. Cap is 5. Secondary pages stay in the menu.
+const PRIMARY: &[(&str, &str)] = &[("chat", "Chat"), ("daemon", "Daemon")];
 
 /// Phone layout, keyed on the same media query that sets `data-phone`
 /// (mobile.rs), so the Rust header and the phone CSS never disagree.
@@ -134,7 +126,6 @@ pub fn Chrome() -> impl IntoView {
     let arg_text = RwSignal::new(String::new());
     let error = RwSignal::new(String::new());
     let cursor = RwSignal::new(0usize);
-    let width = RwSignal::new(viewport_width());
     let phone = RwSignal::new(phone_layout());
     let query_ref = NodeRef::<Input>::new();
 
@@ -217,18 +208,12 @@ pub fn Chrome() -> impl IntoView {
         }
     });
     Effect::new(move |_| {
-        if collapsed_count(width.get()) == 0 {
-            more_open.set(false);
-        }
-    });
-    Effect::new(move |_| {
         if !phone.get() {
             phone_open.set(false);
         }
     });
 
     let on_resize = Closure::<dyn FnMut()>::new(move || {
-        width.set(viewport_width());
         phone.set(phone_layout());
     });
     let on_key =
@@ -284,11 +269,7 @@ pub fn Chrome() -> impl IntoView {
                 let _ = host::toggle_focus();
                 return;
             }
-            if ev.alt_key()
-                && !ev.meta_key()
-                && !ev.ctrl_key()
-                && key.eq_ignore_ascii_case("s")
-            {
+            if ev.alt_key() && !ev.meta_key() && !ev.ctrl_key() && key.eq_ignore_ascii_case("s") {
                 ev.prevent_default();
                 let _ = host::toggle_side_chat();
                 return;
@@ -314,121 +295,141 @@ pub fn Chrome() -> impl IntoView {
     let more_mark = icon("more");
 
     view! {
-        <header class="page-header nav-bar">
+        <header class="page-header nav-bar" data-nav="header">
             {move || if phone.get() {
                 phone_bar(open_palette, phone_open, more_mark, command_mark)
             } else {
                 view! {
-            <div class="nav-leading">
-                {move || {
-                    (width.get() >= BACK_COLLAPSE).then(|| view! {
-                        <HistoryButton back=true labeled=false />
-                        <HistoryButton back=false labeled=false />
-                    })
-                }}
+            <div class="nav-zone nav-left">
                 <nav class="crumbs" aria-label="Location" data-nav="crumbs">
                     <span class="brand-mark" title=move || host::version_label()>"Strike"</span>
                     <span class="crumb-sep" aria-hidden="true">">"</span>
-                    <span class="crumb">{move || host::workspace_name()}</span>
-                    <span class="crumb-sep" aria-hidden="true">">"</span>
-                    <span class="crumb current">{move || host::session_name()}</span>
+                    <span
+                        class="nav-workspace crumb"
+                        title=move || host::workspace_name()
+                    >
+                        {move || host::workspace_name()}
+                    </span>
                 </nav>
-                <span class="brand-status nav-version">{move || host::version_label()}</span>
+            </div>
+            <div class="nav-zone nav-center">
+                <div class="segmented" role="tablist" aria-label="View" data-nav="primary">
+                    {PRIMARY.iter().map(|(id, label)| {
+                        let id = *id;
+                        let label = *label;
+                        view! {
+                            <button
+                                type="button"
+                                data-view=id
+                                class=move || if host::view() == id { "seg on" } else { "seg" }
+                                on:click=move |_| {
+                                    let _ = host::set_view(id);
+                                }
+                            >
+                                {label}
+                            </button>
+                        }
+                    }).collect_view()}
+                </div>
+            </div>
+            <div class="nav-zone nav-right">
                 {move || {
-                    let found = registry::slots(TopRegion::Status);
-                    if found.is_empty() {
+                    let mut status = registry::slots(TopRegion::Status);
+                    status.extend(
+                        registry::slots(TopRegion::Trailing)
+                            .into_iter()
+                            .filter(|slot| slot.id == "gateway"),
+                    );
+                    if status.is_empty() {
                         view! { <SessionChip /> }.into_any()
                     } else {
-                        found
-                            .into_iter()
-                            .filter(|slot| slot_inline(slot, width.get()))
-                            .map(slot_view)
-                            .collect_view()
-                            .into_any()
+                        status.into_iter().map(slot_view).collect_view().into_any()
                     }
                 }}
-                {move || {
-                    registry::slots(TopRegion::Leading)
-                        .into_iter()
-                        .filter(|slot| slot_inline(slot, width.get()))
-                        .map(slot_view)
-                        .collect_view()
-                }}
-                {move || (width.get() >= FOCUS_COLLAPSE).then(|| view! { <FocusButton labeled=false /> })}
-            </div>
-            <button
-                type="button"
-                class="command-pill"
-                data-nav="palette"
-                title="Ctrl+K or Cmd+K opens commands. Alt+Left goes back. Alt+Right goes forward. Alt+\\ is focus mode. ? lists shortcuts."
-                on:click=move |_| open_palette()
-            >
-                <span class="pill-label">
-                    <span class="icon-slot" aria-hidden="true" inner_html=command_mark></span>
-                    <span>"Run a command"</span>
-                </span>
-                <kbd>"Ctrl+K"</kbd>
-            </button>
-            <div class="header-actions nav-trailing">
-                {move || {
-                    registry::slots(TopRegion::Trailing)
-                        .into_iter()
-                        .filter(|slot| slot_inline(slot, width.get()))
-                        .map(slot_view)
-                        .collect_view()
-                }}
-                <Show when=move || { collapsed_count(width.get()) > 0 }>
-                    <div class="nav-more">
-                        <button
-                            type="button"
-                            class="nav-icon"
-                            aria-label="More"
-                            aria-haspopup="menu"
-                            aria-expanded=move || if more_open.get() { "true" } else { "false" }
-                            data-nav="more"
-                            on:click=move |ev: web_sys::MouseEvent| {
-                                ev.stop_propagation();
-                                more_open.update(|open| *open = !*open);
-                            }
-                        >
-                            <span class="icon-slot" aria-hidden="true" inner_html=more_mark></span>
-                        </button>
-                        <Show when=move || more_open.get()>
-                            <div
-                                class="menu nav-pop"
-                                role="menu"
-                                data-nav="more-menu"
-                                on:click=move |_| more_open.set(false)
-                            >
-                                {move || (width.get() < BACK_COLLAPSE).then(|| view! {
-                                    <HistoryButton back=true labeled=true />
-                                    <HistoryButton back=false labeled=true />
-                                })}
-                                {move || (width.get() < FOCUS_COLLAPSE).then(|| view! { <FocusButton labeled=true /> })}
-                                {move || {
-                                    overflow_slots(width.get())
-                                        .into_iter()
-                                        .map(|slot| {
-                                            let label = slot.overflow_label.to_string();
-                                            let view = (slot.render)();
-                                            view! {
-                                                <div class="nav-overflow-slot">
-                                                    <span class="path">{label}</span>
-                                                    {view}
-                                                </div>
-                                            }
-                                        })
-                                        .collect_view()
-                                }}
-                            </div>
-                        </Show>
-                    </div>
-                </Show>
+                <button
+                    type="button"
+                    class="nav-menu-btn"
+                    data-nav="more"
+                    aria-haspopup="menu"
+                    aria-expanded=move || if more_open.get() { "true" } else { "false" }
+                    aria-controls="nav-menu"
+                    on:click=move |ev: web_sys::MouseEvent| {
+                        ev.stop_propagation();
+                        more_open.update(|open| *open = !*open);
+                    }
+                >
+                    "Menu"
+                </button>
             </div>
                 }
                 .into_any()
             }}
         </header>
+        <button
+            type="button"
+            class="nav-backdrop"
+            data-open=move || if more_open.get() { "1" } else { "0" }
+            aria-label="Close menu"
+            tabindex="-1"
+            on:click=move |_| more_open.set(false)
+        ></button>
+        <div
+            id="nav-menu"
+            class="nav-pop"
+            role="menu"
+            data-nav="more-menu"
+            data-open=move || if more_open.get() { "1" } else { "0" }
+        >
+            <p class="nav-menu-workspace">{move || host::workspace_name()}</p>
+            <p class="hint">{move || host::session_name()}</p>
+            <button
+                type="button"
+                class="nav-menu-item"
+                data-nav="palette"
+                on:click=move |_| open_palette()
+            >
+                <span class="name">"Run a command"</span>
+                <kbd>"Ctrl+K"</kbd>
+            </button>
+            <button
+                type="button"
+                class="nav-menu-item"
+                data-nav="providers"
+                on:click=move |_| {
+                    more_open.set(false);
+                    let _ = host::set_view("providers");
+                }
+            >
+                <span class="name">"Providers"</span>
+            </button>
+            <HistoryButton back=true labeled=true />
+            <HistoryButton back=false labeled=true />
+            <FocusButton labeled=true />
+            <button
+                type="button"
+                class="nav-menu-item"
+                on:click=move |_| {
+                    more_open.set(false);
+                    help_open.set(true);
+                }
+            >
+                <span class="name">"Keyboard shortcuts"</span>
+                <kbd>"?"</kbd>
+            </button>
+            {move || {
+                menu_slots()
+                    .into_iter()
+                    .map(|slot| {
+                        // overflow_label is the accessible name when the slot
+                        // control is an icon. collapse_below_px no longer
+                        // moves slots; the menu holds them at every width.
+                        let title = slot.overflow_label.to_string();
+                        let body = (slot.render)();
+                        view! { <div class="nav-menu-slot" title=title>{body}</div> }
+                    })
+                    .collect_view()
+            }}
+        </div>
         <Show when=move || palette_open.get()>
             <div class="palette-backdrop" on:click=move |_| close_palette()>
                 <div
@@ -661,6 +662,17 @@ fn phone_bar(
                         <span class="name">"Run a command"</span>
                         <kbd>"Ctrl+K"</kbd>
                     </button>
+                    <button
+                        type="button"
+                        class="nav-menu-item"
+                        data-nav="providers"
+                        on:click=move |_| {
+                            phone_open.set(false);
+                            let _ = host::set_view("providers");
+                        }
+                    >
+                        <span class="name">"Providers"</span>
+                    </button>
                     <HistoryButton back=true labeled=true />
                     <HistoryButton back=false labeled=true />
                     <FocusButton labeled=true />
@@ -727,23 +739,28 @@ fn arg_placeholder(id: &str) -> String {
         .unwrap_or_else(|| "Argument".into())
 }
 
-fn overflow_slots(width: u32) -> Vec<super::registry::TopSlot> {
-    [TopRegion::Status, TopRegion::Leading, TopRegion::Trailing]
+/// Everything that is not the gateway status chip or the Chat/Daemon
+/// switch (the centre zone owns that). The menu stays in the DOM so
+/// existing `data-view` clicks still find their buttons.
+fn menu_slots() -> Vec<super::registry::TopSlot> {
+    [TopRegion::Leading, TopRegion::Trailing]
         .into_iter()
         .flat_map(registry::slots)
-        .filter(|slot| !slot_inline(slot, width))
+        .filter(|slot| slot.id != "view" && slot.id != "gateway")
         .collect()
 }
 
-fn collapsed_count(width: u32) -> usize {
-    let mut count = overflow_slots(width).len();
-    if width < BACK_COLLAPSE {
-        count += 2;
+#[cfg(test)]
+mod tests {
+    use super::PRIMARY;
+
+    #[test]
+    fn primary_views_stay_within_the_cap() {
+        assert!(PRIMARY.len() <= 5);
+        assert!(PRIMARY.len() >= 1);
+        assert!(PRIMARY.iter().any(|(id, _)| *id == "chat"));
+        assert!(PRIMARY.iter().any(|(id, _)| *id == "daemon"));
     }
-    if width < FOCUS_COLLAPSE {
-        count += 1;
-    }
-    count
 }
 
 fn shortcut_groups() -> Vec<AnyView> {
