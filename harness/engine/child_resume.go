@@ -177,6 +177,7 @@ func (e *Engine) resumeChild(ctx context.Context, req tool.TaskResumeRequest) (t
 		InitialAutonomy:            restored.Autonomy,
 		InitialPermissionMode:      childPermMode,
 		InitialAlwaysGrants:        restored.AlwaysGrants,
+		InitialFolderGrants:        restored.FolderGrants,
 		QuietStartup:               true,
 		SandboxMode:                e.opts.SandboxMode,
 		NetworkAllow:               e.opts.NetworkAllow,

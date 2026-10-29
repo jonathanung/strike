@@ -84,6 +84,7 @@ const (
 	DecisionOnce    = pub.DecisionOnce
 	DecisionAlways  = pub.DecisionAlways
 	DecisionProject = pub.DecisionProject
+	DecisionFolder  = pub.DecisionFolder
 	DecisionReject  = pub.DecisionReject
 )
 

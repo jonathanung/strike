@@ -391,6 +391,12 @@ type pending struct {
 	correlation protocol.Correlation
 	ch          chan protocol.PermissionReply
 
+	// folder is the daemon-derived folder grant a DecisionFolder reply
+	// records for this ask; nil when the ask has no expressible folder
+	// scope (see DeriveFolderGrant). Computed at ask time from the ask's
+	// own patterns/metadata so a reply can never widen it.
+	folder *FolderGrant
+
 	// announced is set after PermissionAsked emission returns. Reply queues
 	// terminal PermissionResolved onto deferredDecision until then so a
 	// blocked or reentrant emitter cannot publish Resolved first.
@@ -436,19 +442,25 @@ type Service struct {
 
 	mu        sync.Mutex
 	base      []Ruleset
-	baseNames []string      // optional stable names parallel to base (explain)
-	project   Ruleset       // runtime project-scoped grants (DecisionProject)
-	agent     Ruleset       // active agent profile; evaluated after project, before granted
-	granted   Ruleset       // session-scoped "always" grants (DecisionAlways)
-	scoped    []scopedGrant // TTL / path / tool / command-class grants
-	modeLate  Ruleset       // permission-mode hard-denies (plan); after granted, before phase
-	phase     Ruleset       // active workflow phase profile
-	managed   Ruleset       // MDM deny ceiling; last ruleset before mode upgrade
-	permMode  protocol.PermissionMode
-	pending   map[string]*pending
-	nextID    int
-	nextGrant int
-	clock     func() time.Time
+	baseNames []string // optional stable names parallel to base (explain)
+	project   Ruleset  // runtime project-scoped grants (DecisionProject)
+	agent     Ruleset  // active agent profile; evaluated after project, before granted
+	granted   Ruleset  // session-scoped "always" grants (DecisionAlways)
+	// folderGrants tracks the DecisionFolder records behind the folder
+	// rules inside granted, so they can be listed and revoked distinctly.
+	// Invariant: every record's Patterns are present in granted (Reply and
+	// SeedFolderGrants add both; RevokeFolderGrant and SetAgentRules
+	// remove both).
+	folderGrants []FolderGrant
+	scoped       []scopedGrant // TTL / path / tool / command-class grants
+	modeLate     Ruleset       // permission-mode hard-denies (plan); after granted, before phase
+	phase        Ruleset       // active workflow phase profile
+	managed      Ruleset       // MDM deny ceiling; last ruleset before mode upgrade
+	permMode     protocol.PermissionMode
+	pending      map[string]*pending
+	nextID       int
+	nextGrant    int
+	clock        func() time.Time
 
 	// persistProject, when set, is called outside the mutex after a project
 	// grant is recorded in memory. Failures are ignored so the in-session
@@ -551,6 +563,7 @@ func (s *Service) SetAgentRules(rs Ruleset) {
 	s.replaceProfileLocked(func() {
 		s.agent = append(Ruleset(nil), rs...)
 		s.granted = nil
+		s.folderGrants = nil
 	}, "agent changed")
 }
 
@@ -677,6 +690,68 @@ func (s *Service) SeedAlwaysGrants(rs Ruleset) {
 	s.mu.Lock()
 	s.granted = append(Ruleset(nil), rs...)
 	s.mu.Unlock()
+}
+
+// FolderGrants returns the session's DecisionFolder grants in the order
+// they were recorded. Defensively copies.
+func (s *Service) FolderGrants() []FolderGrant {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]FolderGrant, len(s.folderGrants))
+	for i, g := range s.folderGrants {
+		g.Patterns = append([]string(nil), g.Patterns...)
+		out[i] = g
+	}
+	return out
+}
+
+// SeedFolderGrants restores DecisionFolder grants after a resume: it
+// appends each record's rules to the session grants and tracks the
+// records, exactly as if the replies had just arrived. Call it after
+// SeedAlwaysGrants; folder rules are not part of the AlwaysGrants set.
+// Defensively copies records.
+func (s *Service) SeedFolderGrants(records []FolderGrant) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, g := range records {
+		g.Patterns = append([]string(nil), g.Patterns...)
+		for _, pat := range g.Patterns {
+			s.granted = append(s.granted, Rule{Permission: g.Permission, Pattern: pat, Action: Allow})
+		}
+		s.folderGrants = append(s.folderGrants, g)
+	}
+}
+
+// RevokeFolderGrant removes the folder grant at index and the rules it
+// recorded, so later asks in that folder prompt again. It reports whether
+// a grant was removed. Duplicate grants of the same folder are independent
+// records: revoking one leaves the other in force.
+func (s *Service) RevokeFolderGrant(index int) bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if index < 0 || index >= len(s.folderGrants) {
+		return false
+	}
+	rec := s.folderGrants[index]
+	for _, pat := range rec.Patterns {
+		for i, rule := range s.granted {
+			if rule.Permission == rec.Permission && rule.Pattern == pat && rule.Action == Allow {
+				s.granted = append(s.granted[:i], s.granted[i+1:]...)
+				break
+			}
+		}
+	}
+	s.folderGrants = append(s.folderGrants[:index], s.folderGrants[index+1:]...)
+	return true
 }
 
 // replaceProfileLocked applies mut under the service lock, then rejects all
@@ -807,6 +882,9 @@ func (s *Service) ask(ctx context.Context, req tool.AskRequest, corr protocol.Co
 		correlation: corr,
 		ch:          make(chan protocol.PermissionReply, 1),
 		chainHit:    chainHit,
+	}
+	if g, ok := DeriveFolderGrant(req.Permission, req.Patterns, req.Metadata); ok {
+		p.folder = &g
 	}
 	s.pending[id] = p
 	workDir, projectRulePath := s.askWorkDir, s.askProjectRulePath
@@ -946,10 +1024,24 @@ func (s *Service) Reply(r protocol.PermissionReply) {
 	var projectRules Ruleset
 	persist := s.persistProject
 	switch r.Decision {
-	case protocol.DecisionAlways, protocol.DecisionProject:
-		patterns := p.always
-		if len(patterns) == 0 {
-			patterns = p.patterns
+	case protocol.DecisionAlways, protocol.DecisionProject, protocol.DecisionFolder:
+		var patterns []string
+		var folderRec *FolderGrant
+		if r.Decision == protocol.DecisionFolder {
+			// The grant patterns are the daemon-derived folder patterns
+			// computed when the ask was created — never the ask's Always
+			// set (which for write/edit is "*") and never anything the
+			// client sent. An ask with no expressible folder scope
+			// records nothing and resolves as approve-once.
+			if p.folder != nil {
+				patterns = p.folder.Patterns
+				folderRec = p.folder
+			}
+		} else {
+			patterns = p.always
+			if len(patterns) == 0 {
+				patterns = p.patterns
+			}
 		}
 		for _, pat := range patterns {
 			rule := Rule{Permission: p.permission, Pattern: pat, Action: Allow}
@@ -959,6 +1051,9 @@ func (s *Service) Reply(r protocol.PermissionReply) {
 			} else {
 				s.granted = append(s.granted, rule)
 			}
+		}
+		if folderRec != nil {
+			s.folderGrants = append(s.folderGrants, *folderRec)
 		}
 		for id, other := range s.pending {
 			if s.evaluateLocked(other.permission, other.patterns) == Allow {

@@ -16,6 +16,13 @@ import (
 
 const workspaceModeNote = "Stored on the workspace only; storing does not change the live session. Opening the workspace applies its stored mode to the live session. Apply it here if this session should use it now."
 
+// sessionFolderScope is the rules-document scope for live session folder
+// grants (DecisionFolder replies). Unlike global/project records these
+// are not stored in a config file: listing and removal go through the
+// host permissions service bound to the live session, and removal revokes
+// the grant in the running engine.
+const sessionFolderScope = "session folder"
+
 type permissionRuleBody struct {
 	Scope      string `json:"scope"`
 	Permission string `json:"permission"`
@@ -47,6 +54,15 @@ func (s *Server) handlePermissionRuleRemove(w http.ResponseWriter, r *http.Reque
 	var body permissionRuleBody
 	if err := decodeBody(w, r, &body); err != nil {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	if strings.TrimSpace(body.Scope) == sessionFolderScope {
+		if s.opts.Services == nil || s.opts.Services.Permissions == nil ||
+			!s.opts.Services.Permissions.RevokeSessionFolderGrant(body.Index) {
+			writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "session folder grant index out of range"})
+			return
+		}
+		s.writePermissionRules(w, r)
 		return
 	}
 	err := config.DeletePermissionRule(s.currentCWD(r), strings.TrimSpace(body.Scope), body.Index, body.Confirm)
@@ -92,6 +108,19 @@ func (s *Server) writePermissionRules(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
 		return
+	}
+	// Live session folder grants ride along as their own scope so the
+	// panel lists them next to the file rules and can revoke them.
+	if s.opts.Services != nil && s.opts.Services.Permissions != nil {
+		for _, g := range s.opts.Services.Permissions.SessionFolderGrants() {
+			view.Rules = append(view.Rules, config.PermissionRuleRecord{
+				Scope:      sessionFolderScope,
+				Index:      g.Index,
+				Permission: g.Permission,
+				Pattern:    g.Pattern,
+				Action:     string(permission.Allow),
+			})
+		}
 	}
 	modes := make([]string, 0, len(protocol.PermissionModes()))
 	for _, mode := range protocol.PermissionModes() {

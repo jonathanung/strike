@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jonathanung/strike/internal/frontend/host"
 	"github.com/jonathanung/strike/internal/protocol"
 	"github.com/jonathanung/strike/internal/trust/audit"
 	"github.com/jonathanung/strike/pkg/telemetry"
@@ -138,5 +139,71 @@ func TestPermissionRulesRequireConfirm(t *testing.T) {
 	ro.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/permissions/rules", bytes.NewReader(raw)))
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("readonly: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestPermissionRulesSessionFolderGrants(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	perms := &testPermissions{
+		folderGrants: []host.PermissionFolderGrant{
+			{Index: 0, Permission: "write", Folder: "docs", Pattern: "docs/**"},
+			{Index: 1, Permission: "edit", Folder: "src/api", Pattern: "src/api/**"},
+		},
+	}
+	ops := make(chan protocol.Op, 4)
+	live := NewLive("s1", t.TempDir(), nil, ops)
+	srv, err := New(Options{
+		SessionDir:   t.TempDir(),
+		PollInterval: 20 * time.Millisecond,
+		Live:         live,
+		Services:     &host.Services{Permissions: perms},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := srv.Handler()
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/permissions/rules", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list: %d %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, want := range []string{`"scope":"session folder"`, `"pattern":"docs/**"`, `"pattern":"src/api/**"`, `"permission":"write"`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("list body missing %s: %s", want, body)
+		}
+	}
+
+	post := func(body map[string]any) *httptest.ResponseRecorder {
+		t.Helper()
+		raw, err := json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/permissions/rules/remove", bytes.NewReader(raw)))
+		return rec
+	}
+
+	// Out-of-range index is a 400 and removes nothing.
+	rec = post(map[string]any{"scope": "session folder", "index": 7})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("remove out of range: %d %s", rec.Code, rec.Body.String())
+	}
+	if len(perms.folderGrants) != 2 {
+		t.Fatalf("grants after bad remove = %d, want 2", len(perms.folderGrants))
+	}
+
+	// Removing index 0 revokes that grant; the response lists the rest.
+	rec = post(map[string]any{"scope": "session folder", "index": 0})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("remove: %d %s", rec.Code, rec.Body.String())
+	}
+	if len(perms.folderGrants) != 1 || perms.folderGrants[0].Folder != "src/api" {
+		t.Fatalf("grants after remove = %+v", perms.folderGrants)
+	}
+	if strings.Contains(rec.Body.String(), `"pattern":"docs/**"`) {
+		t.Fatalf("removed grant still listed: %s", rec.Body.String())
 	}
 }

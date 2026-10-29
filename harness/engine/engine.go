@@ -427,6 +427,10 @@ type Options struct {
 	// InitialAlwaysGrants restores session DecisionAlways rules after the
 	// initial agent profile is applied (SetAgentRules clears grants).
 	InitialAlwaysGrants permission.Ruleset
+	// InitialFolderGrants restores session DecisionFolder grants the same
+	// way; their rules are seeded by SeedFolderGrants, not via
+	// InitialAlwaysGrants.
+	InitialFolderGrants []permission.FolderGrant
 	// DangerouslySkipPermissions mirrors --auto / --dangerously-skip-permissions:
 	// workflow phase permission widening is accepted without a review prompt.
 	// Hard sandbox and path protections are unchanged. Agent denies still apply
@@ -1148,6 +1152,9 @@ func (e *Engine) Run(ctx context.Context) {
 	}
 	if len(e.opts.InitialAlwaysGrants) > 0 {
 		e.perms.SeedAlwaysGrants(e.opts.InitialAlwaysGrants)
+	}
+	if len(e.opts.InitialFolderGrants) > 0 {
+		e.perms.SeedFolderGrants(e.opts.InitialFolderGrants)
 	}
 	// Session lifecycle hooks observe start vs resume before quietStartup clears.
 	e.fireSessionLifecycle()

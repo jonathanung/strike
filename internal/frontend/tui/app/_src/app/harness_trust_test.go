@@ -253,6 +253,10 @@ func (s stubPermissions) DiffPresets(leftID, rightID string) (host.PermissionDif
 	return host.PermissionDiff{}, nil
 }
 func (s stubPermissions) Presets() []host.PermissionPresetInfo { return nil }
+func (s stubPermissions) SessionFolderGrants() []host.PermissionFolderGrant {
+	return nil
+}
+func (s stubPermissions) RevokeSessionFolderGrant(int) bool { return false }
 
 func TestPermissionDecidedDenyUsesHostExplain(t *testing.T) {
 	m, _ := newAppTestModel(nil, nil)
