@@ -816,10 +816,21 @@ pub fn GatewaySwitcher(
                 <button class="secondary" on:click=reconnect>"Reconnect"</button>
                 <button class="secondary" data-action="rotate-token" on:click=move |_| {
                     let rotate = rotate;
+                    let id = selected.get_untracked();
+                    let who = if id == "this" {
+                        "this gateway".to_string()
+                    } else {
+                        profiles
+                            .get_untracked()
+                            .iter()
+                            .find(|p| p.id == id)
+                            .map(|p| p.name.clone())
+                            .unwrap_or_else(|| "the selected gateway".to_string())
+                    };
                     crate::confirm::ask(
                         crate::confirm::ConfirmRequest {
-                            title: "Rotate gateway token?".into(),
-                            body: "The current token stops working everywhere it was copied. This browser stores the new one.".into(),
+                            title: format!("Rotate token for {who}?"),
+                            body: "This invalidates the current token everywhere it was copied and drops all pairing grants. This browser stores the new one.".into(),
                             confirm_label: "Rotate token".into(),
                         },
                         Rc::new(move || rotate()),

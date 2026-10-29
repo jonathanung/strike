@@ -294,6 +294,7 @@ pub(crate) fn GatewayQR(
                         {move || devices.get().into_iter().map(|d| {
                             let id = d.id.clone();
                             let label = if d.label.is_empty() { "browser".to_string() } else { d.label };
+                            let ask_label = label.clone();
                             let revoked = d.revoked;
                             view! {
                                 <li class="row gq-device">
@@ -306,8 +307,8 @@ pub(crate) fn GatewayQR(
                                             let id = id.clone();
                                             crate::confirm::ask(
                                                 crate::confirm::ConfirmRequest {
-                                                    title: "Revoke this browser?".into(),
-                                                    body: "That paired browser loses its grant.".into(),
+                                                    title: format!("Revoke {ask_label}?"),
+                                                    body: format!("{ask_label} loses its grant and has to pair again to come back."),
                                                     confirm_label: "Revoke".into(),
                                                 },
                                                 Rc::new(move || revoke_device(base, token, id.clone(), devices, device_note)),
@@ -319,10 +320,16 @@ pub(crate) fn GatewayQR(
                         }).collect_view()}
                     </ul>
                     <button class="secondary" type="button" on:click=move |_| {
+                        let live = devices.get_untracked().iter().filter(|d| !d.revoked).count();
+                        let body = match live {
+                            0 => "Every paired browser loses its grant. Pairing again mints a new code.".to_string(),
+                            1 => "The one paired browser loses its grant. Pairing again mints a new code.".to_string(),
+                            n => format!("All {n} paired browsers lose their grants. Pairing again mints a new code."),
+                        };
                         crate::confirm::ask(
                             crate::confirm::ConfirmRequest {
                                 title: "Revoke paired browsers?".into(),
-                                body: "Every paired browser loses its grant. Pairing again mints a new code.".into(),
+                                body,
                                 confirm_label: "Revoke all".into(),
                             },
                             Rc::new(move || revoke_all(base, token, devices, device_note)),

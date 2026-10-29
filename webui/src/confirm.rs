@@ -132,6 +132,21 @@ fn dismiss(accept: bool) {
 #[component]
 pub fn ConfirmDialog() -> impl IntoView {
     let request = install();
+    // Focus Cancel whenever a prompt opens. The Escape and Tab handling
+    // below is keyed on the dialog subtree, so without this the keyboard
+    // contract of the wired surfaces (Escape cancels, the safe choice is
+    // the default) never engages: focus would stay on the button behind
+    // the backdrop that opened the prompt.
+    Effect::new(move |_| {
+        if request.get().is_some() {
+            let cancel = web_sys::window()
+                .and_then(|w| w.document())
+                .and_then(|doc| doc.query_selector("[data-confirm='cancel']").ok().flatten());
+            if let Some(el) = cancel.and_then(|el| el.dyn_into::<web_sys::HtmlElement>().ok()) {
+                let _ = el.focus();
+            }
+        }
+    });
     view! {
         <Show when=move || request.get().is_some()>
             <div

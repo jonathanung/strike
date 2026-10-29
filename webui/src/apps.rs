@@ -364,18 +364,34 @@ pub fn AppsPane(
     let close_go = RwSignal::new(false);
     let run_action = move |action: String| {
         if action == "close" && !close_go.get_untracked() {
-            let title = detail
+            let (title, number, kind) = detail
                 .get_untracked()
-                .map(|row| row.item.title.clone())
-                .filter(|title| !title.is_empty())
-                .unwrap_or_else(|| "this item".into());
+                .map(|row| {
+                    (
+                        row.item.title.clone(),
+                        row.item.number,
+                        row.item.kind.clone(),
+                    )
+                })
+                .filter(|(title, _, _)| !title.is_empty())
+                .unwrap_or_else(|| ("this item".into(), 0, String::new()));
+            let noun = if kind == "pr" {
+                "pull request"
+            } else {
+                "issue"
+            };
+            let heading = if number > 0 {
+                format!("Close #{number} on GitHub?")
+            } else {
+                "Close on GitHub?".into()
+            };
             crate::confirm::ask(
                 crate::confirm::ConfirmRequest {
-                    title: "Close this issue?".into(),
+                    title: heading,
                     body: format!(
-                        "This closes {title} on GitHub. Watchers are notified. Reopening means finding it under the closed filter."
+                        "This closes the {noun} \u{201c}{title}\u{201d} on GitHub itself. Watchers are notified, and it leaves the open queue. To undo it, switch the queue filter to Closed and choose Reopen."
                     ),
-                    confirm_label: "Close issue".into(),
+                    confirm_label: "Close on GitHub".into(),
                 },
                 Rc::new(move || close_go.set(true)),
             );
@@ -403,6 +419,7 @@ pub fn AppsPane(
         }
         action_error.set(String::new());
         busy.set(true);
+        let is_close = action == "close";
         let (b, t) = (base.get_untracked(), token.get_untracked());
         let path = format!(
             "/v1/apps/{}/items/{}/act",
@@ -422,7 +439,11 @@ pub fn AppsPane(
                 Ok(_) => {
                     comment.set(String::new());
                     action_error.set(String::new());
-                    status.set("Triage action sent.".into());
+                    status.set(if is_close {
+                        "Closed on GitHub. To undo it, switch the queue filter to Closed and choose Reopen.".into()
+                    } else {
+                        "Triage action sent.".into()
+                    });
                     reload.update(|n| *n = n.wrapping_add(1));
                 }
                 Err(e) => action_error.set(e),
