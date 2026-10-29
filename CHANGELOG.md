@@ -14,6 +14,10 @@ materially affect the shipped product.
 
 ## [Unreleased]
 
+### Added
+
+- **"Allow in this folder" approval scope** — write/edit approval cards in the web cockpit offer a fourth grant scope between Allow once and Allow session/project: the daemon records a session-only grant for the folder the file lives in (covering its subfolders), derived server-side from the ask — never from a client-supplied pattern. The card names the exact folder before you commit, the grant is listed under Permissions → Rules and audit as a "session folder" rule, and removing it there revokes it in the live session. Hard and managed denies still win. Wire: `PermissionReply` decision `folder` (protocol 1.22.0); older daemons treat it as allow-once.
+
 ## [v0.10.0] - 2026-10-29
 
 Pre-release line. v0.10.0 deliberately jumps far ahead of v0.5.2 to mark the
