@@ -1,0 +1,8 @@
+[package]
+name = "strike-load-guard"
+version = "0.1.0"
+edition = "2021"
+description = "Generation tokens for cockpit loads that must commit in request order"
+publish = false
+
+[dependencies]

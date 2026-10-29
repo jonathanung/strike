@@ -8,6 +8,7 @@
 
 mod api;
 mod appearance;
+mod epoch;
 mod apps;
 mod approvals;
 mod approvals_ui;
@@ -47,6 +48,7 @@ mod transcript_view;
 mod triggers;
 mod turn_elapsed;
 mod workspaces;
+use crate::epoch::{bootstrap_gate, clear_loading, gateway_switched, BootstrapGate, LoadEpoch};
 use crate::shell::icon;
 
 
@@ -801,6 +803,8 @@ fn App() -> impl IntoView {
     let team_note = RwSignal::new(String::new());
     let draft = RwSignal::new(String::new());
     let loading = RwSignal::new(true);
+    let meta_epoch = RwSignal::new(LoadEpoch::default());
+    let meta_base = RwSignal::new(load("strike.base"));
     let tick = RwSignal::new(0u32);
     let stream_note = RwSignal::new(String::new());
     let load_error = RwSignal::new(String::new());
@@ -1037,11 +1041,28 @@ fn App() -> impl IntoView {
 
     let refresh_meta = move || {
         let (b, t) = (base.get_untracked(), token.get_untracked());
+        let ticket = epoch::issue(meta_epoch);
+        // Another machine's sessions are not a loading state. Clear them
+        // before the new pipeline returns; a superseded pipeline cannot
+        // write them back.
+        if gateway_switched(&meta_base.get_untracked(), &b) {
+            sessions.set(Vec::new());
+            workspaces.set(Vec::new());
+            workspace_recents.set(Vec::new());
+            roots.set(Vec::new());
+            active_workspace.set(String::new());
+            meta_base.set(b.clone());
+        }
         spawn_local(async move {
+            let live = move || meta_epoch.get_untracked().is_current(ticket);
             let mut err = String::new();
             let mut gateway_up = false;
             match get_json::<Health>(&b, &t, "/health").await {
                 Ok(h) if h.ok => {
+                    if !live() {
+                        poll_team();
+                        return;
+                    }
                     let was = gateway.get_untracked();
                     let root_now = active_root.get_untracked();
                     gateway.set("connected".into());
@@ -1059,6 +1080,10 @@ fn App() -> impl IntoView {
                     status.set(format!("Connected · {}", h.version));
                 }
                 Ok(_) => {
+                    if !live() {
+                        poll_team();
+                        return;
+                    }
                     gateway.set("unreachable".into());
                     gateway_kind.set(StatusKind::Disconnected);
                     gateway_label.set("Unreachable".into());
@@ -1066,6 +1091,10 @@ fn App() -> impl IntoView {
                     err = "The daemon answered, but it is not ok.".into();
                 }
                 Err(e) => {
+                    if !live() {
+                        poll_team();
+                        return;
+                    }
                     gateway.set("unreachable".into());
                     gateway_kind.set(StatusKind::Disconnected);
                     gateway_label.set("Unreachable".into());
@@ -1076,11 +1105,19 @@ fn App() -> impl IntoView {
             if gateway_up {
                 match get_json::<StatusBoard>(&b, &t, "/v1/status/sessions").await {
                     Ok(board) => {
+                        if !live() {
+                            poll_team();
+                            return;
+                        }
                         let kind = StatusKind::parse(&board.gateway);
                         gateway_kind.set(kind);
                         gateway_label.set(kind.label().into());
                     }
                     Err(e) => {
+                        if !live() {
+                            poll_team();
+                            return;
+                        }
                         if err.is_empty() {
                             err = format!("Status board failed to load: {e}");
                         }
@@ -1089,11 +1126,19 @@ fn App() -> impl IntoView {
             }
             match get_json::<WorkspacesResponse>(&b, &t, "/v1/workspaces").await {
                 Ok(r) => {
+                    if !live() {
+                        poll_team();
+                        return;
+                    }
                     active_workspace.set(r.active_id);
                     workspaces.set(r.workspaces);
                     workspace_recents.set(r.recents);
                 }
                 Err(e) => {
+                    if !live() {
+                        poll_team();
+                        return;
+                    }
                     if e.contains("HTTP 401") || e.contains("HTTP 403") {
                         gateway.set("unauthorized".into());
                     }
@@ -1104,6 +1149,10 @@ fn App() -> impl IntoView {
             }
             match get_json::<RootsResponse>(&b, &t, "/v1/roots").await {
                 Ok(r) => {
+                    if !live() {
+                        poll_team();
+                        return;
+                    }
                     if active_root.get_untracked().is_empty() {
                         let id = if !r.active_id.is_empty() {
                             r.active_id.clone()
@@ -1115,14 +1164,28 @@ fn App() -> impl IntoView {
                     roots.set(r.roots);
                 }
                 Err(e) => {
+                    if !live() {
+                        poll_team();
+                        return;
+                    }
                     if err.is_empty() {
                         err = format!("Sessions failed to load: {e}");
                     }
                 }
             }
             match get_json::<SessionsResponse>(&b, &t, "/v1/sessions").await {
-                Ok(r) => sessions.set(r.sessions),
+                Ok(r) => {
+                    if !live() {
+                        poll_team();
+                        return;
+                    }
+                    sessions.set(r.sessions);
+                }
                 Err(e) => {
+                    if !live() {
+                        poll_team();
+                        return;
+                    }
                     if err.is_empty() {
                         err = format!("Saved sessions failed to load: {e}");
                     }
@@ -1133,35 +1196,74 @@ fn App() -> impl IntoView {
                 let path = format!("/v1/bootstrap?root={}", api::js_encode(&root));
                 match get_json::<Bootstrap>(&b, &t, &path).await {
                     Ok(boot) => {
-                        if let Some(st) = boot.status {
-                            provider_name.set(st.provider);
-                            model_name.set(st.model);
-                            effort_level.set(st.effort);
-                            context_used.set(st.context_used);
-                            context_limit.set(st.context_limit);
-                            context_fit.set(st.context_fit);
-                            if !st.permission_mode.is_empty() {
-                                perm_mode.set(st.permission_mode);
+                        match bootstrap_gate(
+                            &meta_epoch.get_untracked(),
+                            ticket,
+                            &root,
+                            &active_root.get_untracked(),
+                        ) {
+                            BootstrapGate::Superseded => {
+                                poll_team();
+                                return;
                             }
-                            session_cwd.set(st.cwd);
-                            live_busy.set(st.busy);
-                            live_busy_root.set(root);
-                        }
-                        skills.set(boot.skills);
-                        commands.set(boot.composer_commands);
-                        if !catalog_once.get_untracked() {
-                            catalog_once.set(true);
-                            load_model_catalog();
+                            BootstrapGate::SkipRoot => {}
+                            BootstrapGate::Paint => {
+                                if let Some(st) = boot.status {
+                                    provider_name.set(st.provider);
+                                    model_name.set(st.model);
+                                    effort_level.set(st.effort);
+                                    context_used.set(st.context_used);
+                                    context_limit.set(st.context_limit);
+                                    context_fit.set(st.context_fit);
+                                    if !st.permission_mode.is_empty() {
+                                        perm_mode.set(st.permission_mode);
+                                    }
+                                    session_cwd.set(st.cwd);
+                                    live_busy.set(st.busy);
+                                    live_busy_root.set(root);
+                                }
+                                skills.set(boot.skills);
+                                commands.set(boot.composer_commands);
+                                if !catalog_once.get_untracked() {
+                                    catalog_once.set(true);
+                                    load_model_catalog();
+                                }
+                            }
                         }
                     }
-                    Err(e) => model_note.set(format!("Live status unavailable: {e}")),
+                    Err(e) => {
+                        match bootstrap_gate(
+                            &meta_epoch.get_untracked(),
+                            ticket,
+                            &root,
+                            &active_root.get_untracked(),
+                        ) {
+                            BootstrapGate::Superseded => {
+                                poll_team();
+                                return;
+                            }
+                            BootstrapGate::SkipRoot => {}
+                            BootstrapGate::Paint => {
+                                model_note.set(format!("Live status unavailable: {e}"));
+                            }
+                        }
+                    }
                 }
             }
             if let Ok(defaults) = get_json::<ModelDefaults>(&b, &t, "/v1/settings").await {
+                if !live() {
+                    poll_team();
+                    return;
+                }
                 model_defaults.set(defaults);
+            } else if !live() {
+                poll_team();
+                return;
             }
-            load_error.set(err);
-            loading.set(false);
+            if clear_loading(&meta_epoch.get_untracked(), ticket) {
+                load_error.set(err);
+                loading.set(false);
+            }
             poll_team();
         });
     };

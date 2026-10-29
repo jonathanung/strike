@@ -19,6 +19,7 @@ use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 
 use crate::api::{delete_json, get_json, js_encode, now_ms, post_json, post_json_value};
+use crate::epoch::{self, request_current_for, LoadEpoch};
 use crate::model::{is_running, merge_sessions, ActivityRow, RootSummary, SessionItem, Workspace};
 use crate::session_list::{
     alt_digit, assemble, human_title, select_range, stamp_times, step_index, title_is_raw_id,
@@ -247,45 +248,80 @@ pub(crate) fn SessionPanel(
     let anchor = RwSignal::new(String::new());
     let folder_draft = RwSignal::new(String::new());
     let migrated = RwSignal::new(false);
-    let search_gen = RwSignal::new(0u32);
+    let search_epoch = RwSignal::new(LoadEpoch::default());
+    let reload_epoch = RwSignal::new(LoadEpoch::default());
 
     let reload = move || {
         let (b, t) = (base.get_untracked(), token.get_untracked());
+        let ticket = epoch::issue(reload_epoch);
         spawn_local(async move {
+            let still = |b: &str| {
+                request_current_for(
+                    &reload_epoch.get_untracked(),
+                    ticket,
+                    &base.get_untracked(),
+                    b,
+                )
+            };
             match get_json::<Snapshot>(&b, &t, "/v1/session-list").await {
                 Ok(snap) => {
                     let local = load_string_list("strike.pins");
                     let any_pin = snap.sessions.values().any(|org| org.pinned);
+                    let Some(decision) = epoch::session_reload_ok(
+                        &reload_epoch.get_untracked(),
+                        ticket,
+                        &base.get_untracked(),
+                        &b,
+                        migrated.get_untracked(),
+                        any_pin,
+                        &local,
+                        load_failed.get_untracked(),
+                    ) else {
+                        return;
+                    };
                     snapshot.set(snap);
-                    if load_failed.get_untracked() {
+                    if decision.clear_error {
                         load_failed.set(false);
                         list_error.set(String::new());
                     }
-                    if !migrated.get_untracked() {
+                    // Migration is one-shot and wipes the local pin store.
+                    // A superseded snapshot must not claim it or POST.
+                    if decision.claim_migration && still(&b) {
                         migrated.set(true);
-                        if !any_pin && !local.is_empty() {
+                        if !decision.post_ids.is_empty() && still(&b) {
                             let body = serde_json::json!({
-                                "ids": local,
+                                "ids": decision.post_ids,
                                 "op": "pin",
                                 "folderId": "",
                             });
                             if post_json_value(&b, &t, "/v1/session-list/bulk", body)
                                 .await
                                 .is_ok()
+                                && still(&b)
                             {
                                 save("strike.pins", "[]");
                                 if let Ok(again) =
                                     get_json::<Snapshot>(&b, &t, "/v1/session-list").await
                                 {
-                                    snapshot.set(again);
+                                    if still(&b) {
+                                        snapshot.set(again);
+                                    }
                                 }
                             }
                         }
                     }
                 }
                 Err(e) => {
-                    load_failed.set(true);
-                    list_error.set(friendly(&e));
+                    if let Some(msg) = epoch::session_reload_err(
+                        &reload_epoch.get_untracked(),
+                        ticket,
+                        &base.get_untracked(),
+                        &b,
+                        friendly(&e),
+                    ) {
+                        load_failed.set(true);
+                        list_error.set(msg);
+                    }
                 }
             }
         });
@@ -307,8 +343,7 @@ pub(crate) fn SessionPanel(
 
     Effect::new(move |_| {
         let q = query.get();
-        let n = search_gen.get_untracked().wrapping_add(1);
-        search_gen.set(n);
+        let n = epoch::issue(search_epoch);
         let trimmed = q.trim().to_string();
         if trimmed.is_empty() {
             hits.set(Vec::new());
@@ -317,17 +352,26 @@ pub(crate) fn SessionPanel(
         }
         let (b, t) = (base.get_untracked(), token.get_untracked());
         let fire = Closure::once(move || {
-            if search_gen.get_untracked() != n {
+            if !search_epoch.get_untracked().is_current(n) {
                 return;
             }
             spawn_local(async move {
                 let path = format!("/v1/session-list/search?q={}", js_encode(&trimmed));
-                match get_json::<SearchResponse>(&b, &t, &path).await {
-                    Ok(found) => {
-                        hits.set(found.hits);
-                        search_error.set(String::new());
-                    }
-                    Err(e) => search_error.set(friendly(&e)),
+                let result = match get_json::<SearchResponse>(&b, &t, &path).await {
+                    Ok(found) => Ok(found.hits),
+                    Err(e) => Err(friendly(&e)),
+                };
+                let mut next_hits = hits.get_untracked();
+                let mut next_error = search_error.get_untracked();
+                if epoch::apply_search(
+                    &search_epoch.get_untracked(),
+                    n,
+                    &mut next_hits,
+                    &mut next_error,
+                    result,
+                ) {
+                    hits.set(next_hits);
+                    search_error.set(next_error);
                 }
             });
         });
