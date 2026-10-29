@@ -16,6 +16,46 @@ materially affect the shipped product.
 
 ### Added
 
+- **Web first-run and Settings** — the cockpit states that telemetry is off and lists the paths `strike serve` reads (`GET /v1/local-files`). Settings picks a bundled theme, type size, and density, and links to the model, approval, notification, and gateway controls. Theme id is the daemon config; scheme, type size, and density stay in the browser.
+- **Phone cockpit** — at phone width the web client shows one pane at a
+  time (sessions, chat, activity, files, daemon) with a bottom nav, 44px
+  targets, and safe-area padding. The composer stays in the visual
+  viewport when the keyboard opens. Send stays on screen while the chip
+  row scrolls. A phone resume keeps the transcript and continues the live
+  stream from the last SSE id. See [docs/mobile.md](docs/mobile.md)
+  ([#1311](https://github.com/jonathanung/strike/issues/1311)).
+- **Web terminal** — the side panel opens a daemon PTY in the active
+  workspace. The stream is an authenticated websocket (cookie or a
+  single-use ticket) and stays on loopback unless
+  `strike serve --terminal-remote` is set with `--auth`. Plan mode
+  refuses a new shell. See [docs/gateway.md](docs/gateway.md).
+- **Apps** — the web client opens a launcher of daemon queues. GitHub triage
+  lists issues and pull requests for the repository in the serve working
+  directory, with comment, close, reopen, and a handoff that starts a live
+  session. The browser never sees a GitHub token. See
+  [docs/webui-apps.md](docs/webui-apps.md)
+  ([#1283](https://github.com/jonathanung/strike/issues/1283)).
+- **Session log contract for external ingesters** — `docs/session-format.md` specifies the JSONL envelope, `session.header`, every event type, and the sidecar. New sidecars repeat `sessionId` (the filename) and record the last selected `model`. Fork and import copy that model from the kept log (import falls back to the package sidecar when the log has no selection). Older sidecars still load. A golden fixture fails if a field or event type is renamed or removed ([#1274](https://github.com/jonathanung/strike/issues/1274)).
+- **Session status** — one vocabulary (`idle`, `running`, `waiting`,
+  `blocked`, `failed`, `done`, `stopped`, `disconnected`) on the daemon and
+  in the web client. Unread is a daemon field, not only browser storage.
+  The gateway chip, session gutter, open-session tabs, and activity rows
+  share one component. A missed heartbeat shows the gateway disconnected.
+  Wire schema `1.19.0` (no new transcript event). See
+  [docs/webui-status.md](docs/webui-status.md).
+- **Steer and queue in the web composer** — while a turn runs, Enter follows
+  a Steer or Queue default, and the other half of Send does that once.
+  Queued messages are the engine FIFO (`input.queued`, with edit, cancel,
+  and reorder). A steer is marked on the transcript when it lands. Send is
+  held when the daemon says the next turn would not fit. Wire schema
+  `1.20.0`.
+- **Send now for queued web messages** — every queued row gains a Send now
+  action: the message leaves the FIFO and lands in the running turn as a
+  steer, acknowledged like any steer, while the messages it jumps stay
+  queued in order. Leaving the queue is the claim, so a promoted message
+  is never delivered twice; with no turn running the queued messages send
+  on their own and the action steps aside. Wire schema `1.21.0`
+  ([#1571](https://github.com/jonathanung/strike/issues/1571)).
 - **Web client shell** — session list with status, unread, in-progress,
   and pinned filters; command field (Ctrl+K); gateway chip; approval mode,
   model, and Steer/Queue on the composer; Activity, Files, and Changes.

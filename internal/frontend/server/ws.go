@@ -61,6 +61,9 @@ func upgradeWebSocket(w http.ResponseWriter, r *http.Request) (*wsConn, error) {
 	_, _ = fmt.Fprintf(bufrw, "Upgrade: websocket\r\n")
 	_, _ = fmt.Fprintf(bufrw, "Connection: Upgrade\r\n")
 	_, _ = fmt.Fprintf(bufrw, "Sec-WebSocket-Accept: %s\r\n", accept)
+	if selectedWSProtocol(r) == "strike.terminal" {
+		_, _ = fmt.Fprintf(bufrw, "Sec-WebSocket-Protocol: strike.terminal\r\n")
+	}
 	_, _ = fmt.Fprintf(bufrw, "\r\n")
 	if err := bufrw.Flush(); err != nil {
 		_ = conn.Close()
@@ -80,6 +83,15 @@ func wsAcceptKey(key string) string {
 	h := sha1.New()
 	_, _ = io.WriteString(h, key+wsGUID)
 	return base64.StdEncoding.EncodeToString(h.Sum(nil))
+}
+
+func selectedWSProtocol(r *http.Request) string {
+	for _, part := range strings.Split(r.Header.Get("Sec-WebSocket-Protocol"), ",") {
+		if strings.TrimSpace(part) == "strike.terminal" {
+			return "strike.terminal"
+		}
+	}
+	return ""
 }
 
 func headerContainsToken(header, token string) bool {

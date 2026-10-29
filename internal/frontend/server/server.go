@@ -24,10 +24,17 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jonathanung/strike/harness/sandbox"
+	"github.com/jonathanung/strike/internal/daemon/trigger"
 	"github.com/jonathanung/strike/internal/frontend/host"
+	"github.com/jonathanung/strike/internal/frontend/server/terminal"
+	"github.com/jonathanung/strike/internal/persist/attachment"
 	"github.com/jonathanung/strike/internal/persist/session"
+	"github.com/jonathanung/strike/internal/persist/taskrun"
 	"github.com/jonathanung/strike/internal/persist/workspace"
 	"github.com/jonathanung/strike/internal/product/version"
+	"github.com/jonathanung/strike/internal/schedule"
+	"github.com/jonathanung/strike/internal/trust/usageaudit"
 )
 
 // Options configures the attach server.
@@ -44,6 +51,18 @@ type Options struct {
 	// or empty contents deny /v1. The process still needs Auth and an initial
 	// Token so a server cannot start authenticated with no credential.
 	TokenFile string
+	// AdvertiseURL is an operator-supplied tunnel origin (http or https, no
+	// query or fragment). Pairing QR codes prefer it over the bind address.
+	// Strike does not open that tunnel. Empty keeps the bind URL.
+	AdvertiseURL string
+	// PairTTL is the pairing-code lifetime. Zero uses 5 minutes.
+	PairTTL time.Duration
+	// PairClock overrides time for pairing expiry and rate limits. Nil is time.Now.
+	PairClock func() time.Time
+	// PairRedeemLimit is redeemed attempts per client IP per minute. Zero uses 8.
+	PairRedeemLimit int
+	// PairRedeemGlobal is redeemed attempts across all IPs per minute. Zero uses 64.
+	PairRedeemGlobal int
 	// SessionDir is the JSONL sessions directory. Default session.DefaultDir().
 	SessionDir string
 	// Static is optional override for the attach page FS (tests). Nil uses embed.
@@ -66,8 +85,19 @@ type Options struct {
 	// Workspaces is the durable workspace registry for /v1/workspaces.
 	// Nil returns 503 from those routes.
 	Workspaces *workspace.Store
+	// SyncWorkDir points host file listings at the active root's directory.
+	// Nil leaves the files service on the directory it was built with.
+	SyncWorkDir func(dir string)
+	// Schedules is the persisted clock (/v1/schedules). Nil returns 501.
+	Schedules *schedule.Service
 	// Services exposes optional frontend host capabilities.
 	Services *host.Services
+	// TaskRuns is the durable plan-run board (GET/POST /v1/plans/{id}/run).
+	// Nil makes those routes report the taskRuns capability unavailable.
+	TaskRuns *taskrun.Store
+	// TaskSpawn, when set, replaces team.spawn while starting a plan run.
+	// Production leaves it nil and spawns through the live engine.
+	TaskSpawn func(ctx context.Context, ownerRoot, name, objective string) (childID string, err error)
 	// Sandbox enables the sandbox capability and seeds live roots that do not
 	// call Live.SetSandbox themselves. Nil keeps capabilities.sandbox false.
 	Sandbox *SandboxSnapshot
@@ -75,12 +105,52 @@ type Options struct {
 	ReadOnly bool
 	// Audit receives serve_op records (op type + source IP). Nil disables.
 	Audit OpAuditor
+	// UsageAuditDir is the hash-chained usage audit log. Empty leaves the
+	// chain unconfigured; GET /v1/usage still reads SessionDir.
+	UsageAuditDir string
+	// UsagePricer overrides models.dev pricing for /v1/usage. Nil loads the catalog.
+	UsagePricer func(provider, model string) (usageaudit.Rates, bool)
+	// Triggers is the inbound trigger registry (webhooks, GitHub, channels).
+	// Nil makes /v1/triggers and POST /hooks 503. The launcher inside the
+	// service is NewRootLauncher (authored for #1282).
+	Triggers *trigger.Service
+	// Assembled is true when this process ran assemble (config load, project
+	// stores, auth.json, attachments). Attach-only serve leaves it false.
+	Assembled bool
 	// OpsRate is tokens/sec per client IP for ops (default 10). <=0 uses default.
 	OpsRate float64
 	// OpsBurst is the per-IP burst (default 20). <=0 uses default.
 	OpsBurst int
 	// OpsClock overrides time.Now for rate-limit tests.
 	OpsClock func() time.Time
+	// Attachments stores composer uploads and replaces inline bytes on
+	// user.input and steer with content-addressed refs. Nil leaves text-only
+	// ops alone and rejects ops that carry images.
+	Attachments *attachment.Store
+	// SideChat answers questions about a session transcript. It must not
+	// submit protocol ops. Nil makes POST /v1/sidechat/ask return 503.
+	// POST /v1/sidechat/ops still refuses every op, including permission.reply.
+	SideChat SideChatModel
+	// TerminalRemote allows the terminal websocket on a non-loopback bind.
+	// It requires Auth. Loopback serves a terminal without this flag.
+	TerminalRemote bool
+	// TerminalSandbox is the startup OS sandbox dial for interactive shells.
+	// A live serve replaces it at create time with TerminalSandboxFor so plan
+	// and phase rules are current and deny paths expand under the workspace.
+	// Zero value is off. That is a real shell only when TerminalSandboxLoaded
+	// is set; attach-only leaves the flag false and the terminal routes refuse
+	// a shell.
+	TerminalSandbox sandbox.Policy
+	// TerminalSandboxLoaded reports that TerminalSandbox came from a live
+	// serve, including an explicit sandbox off. Attach-only leaves it false.
+	TerminalSandboxLoaded bool
+	// TerminalSandboxFor compiles the policy for one new shell. sessionID
+	// empty means the active root. The bool is false when no live engine can
+	// compile it. Nil means no compiler was installed.
+	TerminalSandboxFor func(sessionID, workDir string) (sandbox.Policy, bool)
+	// WorkDir is the git workspace Apps reads (GitHub triage). The browser
+	// cannot choose it. Empty uses the process working directory.
+	WorkDir string
 }
 
 // Server is an HTTP server for session attach and optional live cockpit.
@@ -96,20 +166,61 @@ type Server struct {
 	// paneHost supervises process panes for the web cockpit (#732).
 	paneHost *paneHost
 	opsLimit *opLimiter
+	// terms is the side-panel PTY manager.
+	terms *terminal.Manager
+
+	seenOnce sync.Once
+	seen     *SeenStore
 
 	// scriptCSPHashes allowlists inline <script> bodies from the embedded
 	// index.html (Trunk emits an inline WASM loader) without unsafe-inline.
 	scriptCSPHashes []string
+
+	// gitMu serializes git reads and mutations for this daemon. Overlapping
+	// status and reset calls on one repo corrupt the index.
+	gitMu sync.Mutex
+
+	// grants are short-lived bearers kept in memory only. grantNow overrides
+	// the clock in tests. rootSum is the last host-token hash; a change
+	// (strike daemon logout, or POST /v1/gateway/rotate) drops every grant.
+	grantMu  sync.Mutex
+	grants   []storedGrant
+	grantNow func() time.Time
+	rootSum  [32]byte
+	rootSeen bool
+
+	// notifyOnce lazily opens the redacted notification log under SessionDir.
+	notifyOnce sync.Once
+	notifyLog  *notifyLog
+
+	// tokenHash is the sha256 of the daemon token file last observed.
+	// A change appends a token-rotation audit entry. The token is not stored.
+	tokenMu   sync.Mutex
+	tokenHash string
+
+	// sideChat stores read-only Q&A beside the session log, not in it.
+	sideChat sideChatStore
+
+	// pairs holds single-use phone pairing codes and revocable session tokens.
+	pairs *pairStore
 }
 
 // New validates options and builds a Server. Does not listen.
 func New(opts Options) (*Server, error) {
 	opts.Token = strings.TrimSpace(opts.Token)
+	adv, err := ValidateAdvertiseURL(opts.AdvertiseURL)
+	if err != nil {
+		return nil, err
+	}
+	opts.AdvertiseURL = adv
 	if opts.Auth && opts.Token == "" {
 		return nil, errors.New("server: token is required when auth is enabled")
 	}
 	if !opts.Auth && opts.Token != "" {
 		return nil, errors.New("server: token requires auth")
+	}
+	if opts.TerminalRemote && !opts.Auth {
+		return nil, errors.New("server: terminal on a non-loopback listener requires auth")
 	}
 	if strings.TrimSpace(opts.Addr) == "" {
 		opts.Addr = "127.0.0.1:8787"
@@ -130,7 +241,18 @@ func New(opts Options) (*Server, error) {
 		mux:             http.NewServeMux(),
 		opsLimit:        newOpLimiter(opts.OpsRate, opts.OpsBurst, opts.OpsClock),
 		scriptCSPHashes: inlineScriptHashes(static),
+		terms:           terminal.NewManager(terminal.ManagerConfig{Sandbox: opts.TerminalSandbox}),
+		pairs:           newPairStore(opts),
 	}
+	s.terms.SetAgentProbe(func(sessionID string) terminal.AgentView {
+		live := s.liveForTerminal(sessionID)
+		if live == nil {
+			return terminal.AgentView{}
+		}
+		st := live.Status()
+		return terminal.AgentView{CWD: st.CWD, Busy: st.Busy, PermissionMode: st.PermissionMode}
+	})
+	s.pairs.observe(s.currentToken())
 	s.routes()
 	s.http = &http.Server{
 		Addr:              opts.Addr,
@@ -164,6 +286,9 @@ func (s *Server) Serve(ln net.Listener) error {
 
 // Shutdown gracefully stops the server.
 func (s *Server) Shutdown(ctx context.Context) error {
+	if s.terms != nil {
+		s.terms.Close()
+	}
 	return s.http.Shutdown(ctx)
 }
 
@@ -196,6 +321,18 @@ func IsLocalhostBind(addr string) bool {
 
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /health", s.handleHealth)
+	s.mux.HandleFunc("GET /v1/gateway", s.handleGatewayInfo)
+	s.mux.HandleFunc("POST /v1/gateway/grants", s.handleGatewayMint)
+	s.mux.HandleFunc("DELETE /v1/gateway/grants", s.handleGatewayRevoke)
+	s.mux.HandleFunc("POST /v1/gateway/rotate", s.handleGatewayRotate)
+	s.mux.HandleFunc("POST /v1/gateway/logout", s.handleGatewayLogout)
+	// Phone pairing (#1289). Redeem is unauthenticated; the code is the secret.
+	s.mux.HandleFunc("POST /v1/pair", s.handlePairMint)
+	s.mux.HandleFunc("POST /v1/pair/redeem", s.handlePairRedeem)
+	s.mux.HandleFunc("GET /v1/pair/devices", s.handlePairDevices)
+	s.mux.HandleFunc("DELETE /v1/pair/devices/{id}", s.handlePairRevoke)
+	s.mux.HandleFunc("POST /v1/pair/revoke-all", s.handlePairRevokeAll)
+	s.mux.HandleFunc("POST /v1/pair/revoke-self", s.handlePairRevokeSelf)
 	s.mux.HandleFunc("GET /v1/bootstrap", s.handleBootstrap)
 	s.mux.HandleFunc("GET /v1/team", s.handleTeam)
 	s.mux.HandleFunc("GET /v1/artifacts", s.handleArtifactsList)
@@ -218,6 +355,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/scheduler/presets", s.handleSchedulerPresets)
 	s.mux.HandleFunc("POST /v1/scheduler/presets", s.handleSchedulerPresetsApply)
 	s.mux.HandleFunc("GET /v1/config-sources", s.handleConfigSources)
+	s.mux.HandleFunc("GET /v1/local-files", s.handleLocalFiles)
 	s.mux.HandleFunc("GET /v1/models", s.handleModels)
 	s.mux.HandleFunc("GET /v1/history", s.handleHistory)
 	s.mux.HandleFunc("POST /v1/history", s.handleHistory)
@@ -234,18 +372,48 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/sessions/{id}/rewind_points", s.handleSessionRewindPoints)
 	s.mux.HandleFunc("PATCH /v1/sessions/{id}", s.handleSessionRename)
 	s.mux.HandleFunc("DELETE /v1/sessions/{id}", s.handleSessionDelete)
+	// Session list organisation (pins, archive, folders, search). Not filesystem dirs.
+	s.mux.HandleFunc("GET /v1/session-list/search", s.handleSessionListSearch)
+	s.mux.HandleFunc("POST /v1/session-list/bulk", s.handleSessionListBulk)
+	s.mux.HandleFunc("POST /v1/session-list/folders", s.handleSessionListFolderCreate)
+	s.mux.HandleFunc("PATCH /v1/session-list/folders/{id}", s.handleSessionListFolderRename)
+	s.mux.HandleFunc("DELETE /v1/session-list/folders/{id}", s.handleSessionListFolderDelete)
+	s.mux.HandleFunc("PATCH /v1/session-list/sessions/{id}", s.handleSessionListSessionPatch)
+	s.mux.HandleFunc("GET /v1/session-list", s.handleSessionList)
 	s.mux.HandleFunc("GET /v1/files", s.handleFiles)
 	s.mux.HandleFunc("GET /v1/files/search", s.handleFilesSearch)
 	s.mux.HandleFunc("GET /v1/changed-files", s.handleChangedFiles)
+	s.mux.HandleFunc("GET /v1/git/status", s.handleGitStatus)
+	s.mux.HandleFunc("GET /v1/git/diff", s.handleGitDiff)
+	s.mux.HandleFunc("GET /v1/git/branches", s.handleGitBranches)
+	s.mux.HandleFunc("GET /v1/git/log", s.handleGitLog)
+	s.mux.HandleFunc("POST /v1/git/stage", s.handleGitStage)
+	s.mux.HandleFunc("POST /v1/git/unstage", s.handleGitUnstage)
+	s.mux.HandleFunc("POST /v1/git/commit", s.handleGitCommit)
+	s.mux.HandleFunc("POST /v1/git/checkout", s.handleGitCheckout)
+	s.mux.HandleFunc("POST /v1/git/discard", s.handleGitDiscard)
+	s.mux.HandleFunc("POST /v1/git/reset", s.handleGitReset)
+	s.mux.HandleFunc("POST /v1/git/branch/delete", s.handleGitBranchDelete)
+	s.mux.HandleFunc("GET /v1/git/worktrees", s.handleGitWorktrees)
+	s.mux.HandleFunc("POST /v1/git/worktrees", s.handleGitWorktreeCreate)
+	s.mux.HandleFunc("POST /v1/git/worktrees/remove", s.handleGitWorktreeRemove)
+	s.mux.HandleFunc("POST /v1/git/worktrees/prune", s.handleGitWorktreePrune)
 	s.mux.HandleFunc("GET /v1/file", s.handleFile)
+	s.mux.HandleFunc("GET /v1/file/view", s.handleFileView)
+	s.mux.HandleFunc("PUT /v1/file", s.handleFilePut)
 	// Reviewed file mutations (WEBUI.9 / #1084) — typed apply only, no free-form write.
 	s.mux.HandleFunc("POST /v1/files/apply-edit", s.handleFilesApplyEdit)
 	s.mux.HandleFunc("POST /v1/files/apply-patch", s.handleFilesApplyPatch)
 	s.mux.HandleFunc("GET /v1/memory", s.handleMemory)
 	s.mux.HandleFunc("GET /v1/memory/export", s.handleMemoryExport)
 	s.mux.HandleFunc("POST /v1/memory/import", s.handleMemoryImport)
+	s.mux.HandleFunc("GET /v1/memory/mode", s.handleMemoryModeGet)
+	s.mux.HandleFunc("PUT /v1/memory/mode", s.handleMemoryModePut)
 	s.mux.HandleFunc("PUT /v1/memory/{key}", s.handleMemoryPut)
 	s.mux.HandleFunc("DELETE /v1/memory/{key}", s.handleMemoryDelete)
+	s.mux.HandleFunc("GET /v1/knowledge", s.handleKnowledgeList)
+	s.mux.HandleFunc("PUT /v1/knowledge", s.handleKnowledgePut)
+	s.mux.HandleFunc("DELETE /v1/knowledge", s.handleKnowledgeDelete)
 	s.mux.HandleFunc("POST /v1/issues", s.handleIssueCreate)
 	s.mux.HandleFunc("GET /v1/issues/export", s.handleIssuesExport)
 	s.mux.HandleFunc("POST /v1/issues/import", s.handleIssuesImport)
@@ -254,6 +422,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/permissions/explain", s.handlePermissionExplain)
 	s.mux.HandleFunc("GET /v1/permissions/diff", s.handlePermissionDiff)
 	s.mux.HandleFunc("GET /v1/permissions/presets", s.handlePermissionPresets)
+	s.mux.HandleFunc("GET /v1/permissions/rules", s.handlePermissionRules)
+	s.mux.HandleFunc("POST /v1/permissions/rules", s.handlePermissionRules)
+	s.mux.HandleFunc("POST /v1/permissions/rules/remove", s.handlePermissionRuleRemove)
+	s.mux.HandleFunc("GET /v1/permissions/audit", s.handlePermissionAudit)
 	s.mux.HandleFunc("GET /v1/plans", s.handlePlansList)
 	s.mux.HandleFunc("POST /v1/plans", s.handlePlanCreate)
 	s.mux.HandleFunc("GET /v1/plans/{id}", s.handlePlanGet)
@@ -262,6 +434,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("PATCH /v1/plans/{id}/sections/{sectionID}", s.handlePlanUpdateSection)
 	s.mux.HandleFunc("POST /v1/plans/{id}/status", s.handlePlanSetStatus)
 	s.mux.HandleFunc("POST /v1/plans/{id}/reopen", s.handlePlanReopen)
+	s.mux.HandleFunc("GET /v1/plans/{id}/run", s.handleTaskRunGet)
+	s.mux.HandleFunc("POST /v1/plans/{id}/run", s.handleTaskRunPost)
 	s.mux.HandleFunc("GET /v1/goals", s.handleGoalsList)
 	s.mux.HandleFunc("POST /v1/goals", s.handleGoalsSet)
 	s.mux.HandleFunc("GET /v1/goals/{id}", s.handleGoalGet)
@@ -316,23 +490,70 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/sessions/{id}/timeline", s.handleSessionTimeline)
 	s.mux.HandleFunc("GET /v1/sessions/{id}/timeline/export", s.handleSessionTimelineExport)
 	s.mux.HandleFunc("GET /v1/sessions", s.handleSessions)
+	s.mux.HandleFunc("GET /v1/usage", s.handleUsage)
+	s.mux.HandleFunc("PUT /v1/usage/budget", s.handleUsageBudget)
+	s.mux.HandleFunc("GET /v1/audit", s.handleAuditList)
+	s.mux.HandleFunc("GET /v1/audit/verify", s.handleAuditVerify)
+	s.mux.HandleFunc("GET /v1/audit/export", s.handleAuditExport)
+	s.mux.HandleFunc("POST /v1/audit", s.handleAuditAppend)
+	s.mux.HandleFunc("GET /v1/schedules", s.handleSchedulesList)
+	s.mux.HandleFunc("POST /v1/schedules", s.handleScheduleCreate)
+	s.mux.HandleFunc("GET /v1/schedules/{id}/history", s.handleScheduleHistory)
+	s.mux.HandleFunc("POST /v1/schedules/{id}/pause", s.handleSchedulePause)
+	s.mux.HandleFunc("POST /v1/schedules/{id}/resume", s.handleScheduleResume)
+	s.mux.HandleFunc("POST /v1/schedules/{id}/run", s.handleScheduleRun)
+	s.mux.HandleFunc("GET /v1/schedules/{id}", s.handleScheduleGet)
+	s.mux.HandleFunc("PATCH /v1/schedules/{id}", s.handleScheduleUpdate)
+	s.mux.HandleFunc("DELETE /v1/schedules/{id}", s.handleScheduleDelete)
 	s.mux.HandleFunc("GET /v1/workspaces", s.handleWorkspacesList)
+	s.mux.HandleFunc("GET /v1/workspaces/browse", s.handleWorkspaceBrowse)
 	s.mux.HandleFunc("POST /v1/workspaces", s.handleWorkspaceAdd)
+	s.mux.HandleFunc("POST /v1/workspaces/mkdir", s.handleWorkspaceMkdir)
 	s.mux.HandleFunc("POST /v1/workspaces/{id}/activate", s.handleWorkspaceActivate)
 	s.mux.HandleFunc("PATCH /v1/workspaces/{id}", s.handleWorkspacePolicy)
 	s.mux.HandleFunc("DELETE /v1/workspaces/{id}", s.handleWorkspaceRemove)
+	s.mux.HandleFunc("GET /v1/triggers", s.handleTriggersList)
+	s.mux.HandleFunc("POST /v1/triggers", s.handleTriggerCreate)
+	s.mux.HandleFunc("GET /v1/triggers/{id}/deliveries", s.handleTriggerDeliveries)
+	s.mux.HandleFunc("POST /v1/triggers/{id}/test", s.handleTriggerTest)
+	s.mux.HandleFunc("POST /v1/triggers/{id}/replay", s.handleTriggerReplay)
+	s.mux.HandleFunc("PATCH /v1/triggers/{id}", s.handleTriggerUpdate)
+	s.mux.HandleFunc("DELETE /v1/triggers/{id}", s.handleTriggerDelete)
+	s.mux.HandleFunc("POST /hooks/{id}", s.handleHook)
 	s.mux.HandleFunc("GET /v1/roots", s.handleRoots)
 	s.mux.HandleFunc("POST /v1/roots", s.handleRootCreate)
 	s.mux.HandleFunc("POST /v1/roots/{id}/activate", s.handleRootActivate)
 	s.mux.HandleFunc("POST /v1/roots/{id}/resume", s.handleRootResume)
 	s.mux.HandleFunc("DELETE /v1/roots/{id}", s.handleRootClose)
+	s.mux.HandleFunc("GET /v1/apps", s.handleApps)
+	s.mux.HandleFunc("GET /v1/apps/{id}/items", s.handleAppItems)
+	s.mux.HandleFunc("GET /v1/apps/{id}/items/{itemID}", s.handleAppItem)
+	s.mux.HandleFunc("POST /v1/apps/{id}/items/{itemID}/act", s.handleAppAct)
+	s.mux.HandleFunc("POST /v1/apps/{id}/items/{itemID}/handoff", s.handleAppHandoff)
 	s.mux.HandleFunc("GET /v1/status", s.handleStatus)
+	s.mux.HandleFunc("GET /v1/status/sessions", s.handleSessionStatusBoard)
+	s.mux.HandleFunc("GET /v1/status/events", s.handleSessionStatusEvents)
+	s.mux.HandleFunc("POST /v1/sessions/{id}/seen", s.handleSessionSeen)
+	s.mux.HandleFunc("DELETE /v1/sessions/{id}/seen", s.handleSessionUnseen)
 	s.mux.HandleFunc("GET /v1/agents", s.handleAgents)
 	s.mux.HandleFunc("GET /v1/diag", s.handleDiag)
 	s.mux.HandleFunc("POST /v1/diag", s.handleDiag)
+	s.mux.HandleFunc("POST /v1/attachments", s.handleAttachmentIngest)
 	s.mux.HandleFunc("POST /v1/ops", s.handleOps)
+	s.mux.HandleFunc("GET /v1/sidechat", s.handleSideChatList)
+	s.mux.HandleFunc("POST /v1/sidechat/ask", s.handleSideChatAsk)
+	s.mux.HandleFunc("POST /v1/sidechat/ops", s.handleSideChatOps)
 	s.mux.HandleFunc("GET /v1/live/events", s.handleLiveEvents)
+	s.mux.HandleFunc("GET /v1/notifications", s.handleNotifications)
+	s.mux.HandleFunc("GET /v1/notifications/stream", s.handleNotificationStream)
+	s.mux.HandleFunc("PUT /v1/notifications/prefs", s.handleNotificationPrefs)
 	s.mux.HandleFunc("GET /v1/ws", s.handleWS)
+	s.mux.HandleFunc("GET /v1/terminals", s.handleTerminalsList)
+	s.mux.HandleFunc("POST /v1/terminals", s.handleTerminalCreate)
+	s.mux.HandleFunc("POST /v1/terminals/{id}/resize", s.handleTerminalResize)
+	s.mux.HandleFunc("POST /v1/terminals/{id}/ticket", s.handleTerminalTicket)
+	s.mux.HandleFunc("GET /v1/terminals/{id}/stream", s.handleTerminalStream)
+	s.mux.HandleFunc("DELETE /v1/terminals/{id}", s.handleTerminalDelete)
 	s.mux.HandleFunc("GET /{$}", s.handleAttach)
 	s.mux.HandleFunc("GET /attach", s.handleAttach)
 	s.mux.HandleFunc("GET /assets/{path...}", s.handleAsset)
@@ -356,13 +577,13 @@ func (s *Server) withMiddleware(next http.Handler) http.Handler {
 			return
 		}
 		if stateChanging(r.Method) {
-			if origin := r.Header.Get("Origin"); origin != "" && !originAllowed(origin) {
+			if origin := r.Header.Get("Origin"); origin != "" && !requestOriginAllowed(r) {
 				http.Error(w, "origin not allowed", http.StatusForbidden)
 				return
 			}
 		}
 		// Public: health + attach shell. Session event streams require a token.
-		if s.opts.Auth && requiresToken(r.URL.Path) && !s.authorized(r) {
+		if s.opts.Auth && requiresToken(r.URL.Path) && !s.terminalAuthorized(r) {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -442,46 +663,85 @@ func (s *Server) applySecurityHeaders(w http.ResponseWriter) {
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("X-Frame-Options", "DENY")
-	w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+	// camera=(self) lets the cockpit scan a gateway QR. microphone=(self)
+	// lets conversation mode use the browser speech API. Geolocation stays off.
+	w.Header().Set("Permissions-Policy", "camera=(self), microphone=(self), geolocation=()")
 }
 
 const authCookieName = "strike_serve_token"
 
 func requiresToken(path string) bool {
+	// The phone has no daemon token yet. The single-use code in the POST body
+	// is the credential. Query-string codes are rejected inside the handler.
+	if path == "/v1/pair/redeem" {
+		return false
+	}
 	return strings.HasPrefix(path, "/v1/")
 }
 
 func (s *Server) authorized(r *http.Request) bool {
-	want := s.currentToken()
-	if want == "" {
+	// Query secrets are rejected even when a cookie or grant is also present.
+	// They leak into shell history, proxy logs, and Referer. Pairing codes
+	// belong in the URL fragment and are redeemed with POST /v1/pair/redeem.
+	if r.URL.Query().Get("token") != "" || r.URL.Query().Get("code") != "" || r.URL.Query().Get("pair") != "" {
 		return false
 	}
-	// Bearer header or HttpOnly cookie from attach handoff only. Query-string
-	// tokens are rejected on /v1/* — they leak into shell history, proxy logs,
-	// and Referer. Open /attach?token=… (or /?token=…) once; the handoff sets
-	// the cookie and strips the secret from the URL so same-origin
-	// fetch/EventSource/WebSocket authenticate without a query param.
-	if tokenEqual(bearerToken(r.Header.Get("Authorization")), want) {
-		return true
+	// Bearer header or HttpOnly cookie. A short-lived grant and a paired
+	// session are accepted the same way as the host token. Both headers are
+	// checked so a wrong bearer does not hide a valid cookie, and the grant
+	// scan always walks every slot.
+	root := s.currentToken()
+	if s.pairs != nil {
+		s.pairs.observe(root)
 	}
-	if tokenEqual(cookieToken(r), want) {
-		return true
-	}
-	return false
+	bearer := bearerToken(r.Header.Get("Authorization"))
+	cookie := cookieToken(r)
+	rootOK := tokenEqual(bearer, root) || tokenEqual(cookie, root)
+	grantOK := s.acceptAnyGrant(bearer, cookie)
+	return rootOK || grantOK || s.sessionCredentialOK(r)
 }
 
-// currentToken is the bearer checked on this request. A configured token
-// file wins over the value captured at startup.
+func (s *Server) sessionCredentialOK(r *http.Request) bool {
+	if s.pairs == nil {
+		return false
+	}
+	if s.pairs.sessionOK(bearerToken(r.Header.Get("Authorization"))) {
+		return true
+	}
+	return s.pairs.sessionOK(cookieToken(r))
+}
+
+// rootAuthorized reports whether this request presented the host token
+// (file or --token), not merely a short-lived grant. Mint, revoke-all, and
+// rotate require it so a stolen grant cannot replace the host credential.
+func (s *Server) rootAuthorized(r *http.Request) bool {
+	root := s.currentToken()
+	if root == "" {
+		return false
+	}
+	return tokenEqual(bearerToken(r.Header.Get("Authorization")), root) || tokenEqual(cookieToken(r), root)
+}
+
+// currentToken is the host bearer checked on this request. A configured
+// token file wins over the value captured at startup. A change in that
+// value drops in-memory grants so strike daemon logout revokes them on the
+// next /v1 request without a second call.
 func (s *Server) currentToken() string {
 	path := strings.TrimSpace(s.opts.TokenFile)
-	if path == "" {
-		return s.opts.Token
+	tok := s.opts.Token
+	if path != "" {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			tok = ""
+		} else {
+			tok = strings.TrimSpace(string(data))
+			// Record a token-file rotation for the audit log (main's
+			// noteTokenFile); observeRoot below drops grants on change.
+			s.noteTokenFile(tok)
+		}
 	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(data))
+	s.observeRoot(tok)
+	return tok
 }
 
 // bearerToken extracts a Bearer credential. Scheme match is case-insensitive
@@ -522,18 +782,28 @@ func (s *Server) maybeHandoffToken(w http.ResponseWriter, r *http.Request) bool 
 	if tok == "" {
 		return false
 	}
+	// A grant must be stored as itself. Copying the host token into the
+	// cookie would turn a short-lived handoff into a long-lived one.
 	current := s.currentToken()
-	if !tokenEqual(tok, current) {
+	cookieVal := ""
+	switch {
+	case tokenEqual(tok, current):
+		cookieVal = current
+	case s.acceptAnyGrant(tok):
+		cookieVal = tok
+	default:
 		return false
 	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     authCookieName,
-		Value:    current,
+		Value:    cookieVal,
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
-		// Secure omitted: strike serve is cleartext by design (loopback, or a
-		// private bind with --auth). There is no public listener.
+		// Secure only when a loopback TLS proxy (tailscale serve) says the
+		// browser is on HTTPS. A direct http://100.x bind must stay unset
+		// or the phone will not store the cookie. See docs/mobile.md.
+		Secure: cookieSecure(r),
 	})
 	q := r.URL.Query()
 	q.Del("token")
@@ -550,7 +820,7 @@ func (s *Server) maybeHandoffToken(w http.ResponseWriter, r *http.Request) bool 
 
 func (s *Server) applyCORS(w http.ResponseWriter, r *http.Request) {
 	origin := r.Header.Get("Origin")
-	if originAllowed(origin) {
+	if origin != "" && requestOriginAllowed(r) {
 		w.Header().Set("Access-Control-Allow-Origin", origin)
 		w.Header().Set("Vary", "Origin")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
@@ -598,6 +868,9 @@ type healthResponse struct {
 	OK      bool   `json:"ok"`
 	Version string `json:"version"`
 	Commit  string `json:"commit"`
+	// Now is unix milliseconds. Clients treat a gap longer than
+	// protocol.HeartbeatStaleMs as a dead gateway.
+	Now int64 `json:"now"`
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -605,6 +878,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		OK:      true,
 		Version: version.Version,
 		Commit:  version.Commit,
+		Now:     time.Now().UnixMilli(),
 	})
 }
 
@@ -636,6 +910,8 @@ func (s *Server) handleAsset(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/css; charset=utf-8")
 	case ".svg":
 		w.Header().Set("Content-Type", "image/svg+xml")
+	case ".png":
+		w.Header().Set("Content-Type", "image/png")
 	case ".wasm":
 		w.Header().Set("Content-Type", "application/wasm")
 	case ".webmanifest":
@@ -690,9 +966,12 @@ func (s *Server) handleSessionEvents(w http.ResponseWriter, r *http.Request) {
 	flusher.Flush()
 
 	ctx := r.Context()
-	var offset int64
-	// Initial backlog.
-	n, err := s.writeEventsFrom(ctx, w, flusher, path, 0)
+	offset := eventCursor(r)
+	if st, err := os.Stat(path); err == nil {
+		offset = clampCursor(offset, st.Size())
+	}
+	// Backlog after Last-Event-ID / ?after=, then tail.
+	n, err := s.writeEventsFrom(ctx, w, flusher, path, offset)
 	if err != nil {
 		return
 	}
@@ -775,7 +1054,9 @@ func (s *Server) writeEventsRangeFile(ctx context.Context, w http.ResponseWriter
 			if isSessionLogHeader(payload) {
 				continue
 			}
-			if _, err := fmt.Fprintf(w, "data: %s\n\n", payload); err != nil {
+			// id is the byte offset after this line. EventSource sends it
+			// back as Last-Event-ID on reconnect.
+			if _, err := fmt.Fprintf(w, "id: %d\ndata: %s\n\n", offset, payload); err != nil {
 				return offset, err
 			}
 			flusher.Flush()

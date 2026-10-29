@@ -87,6 +87,18 @@ jobs:
           go -C pkg/redact test -race ./...
           go -C harness test -race ./...
 
+      # Generated protocol Rust types (#1306). Go drift already ran above
+      # (`go -C pkg/protocol test`). This job checks the golden event stream
+      # decodes, including an unknown event type.
+      - name: Protocol schema Rust tests
+        run: |
+          set -euo pipefail
+          if ! command -v cargo >/dev/null; then
+            curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain 1.83.0
+            . "$HOME/.cargo/env"
+          fi
+          cargo test --manifest-path webui/protocol-schema/Cargo.toml --locked
+
       # E3.2 prompt regression: verbose report of tool/turn/token deltas.
       # Non-blocking for now (test itself soft-fails metric drift unless
       # PROMPT_REGRESSION_STRICT=1). continue-on-error keeps the step visible
@@ -165,7 +177,7 @@ jobs:
   # bundle (no Rust toolchain) plus headless Chrome.
   webui-smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - name: Checkout code
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -207,6 +219,51 @@ jobs:
           CHROME_BIN: /usr/bin/google-chrome-stable
         run: node scripts/webui-smoke.mjs
 
+      - name: Browser UAT assertions
+        env:
+          CHROME_BIN: /usr/bin/google-chrome-stable
+        run: |
+          node --test scripts/webui-uat/*.test.mjs
+          node scripts/webui-uat.mjs --suite smoke --no-video --out webui-uat-artifacts
+
+      - name: Upload UAT screenshots
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: webui-uat
+          path: webui-uat-artifacts/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # Rust desktop shell. Tests the loopback gateway manager only.
+  # The Tauri package (desktop/app) needs WebKitGTK and is not built here.
+  # See docs/desktop.md.
+  desktop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8
+        with:
+          toolchain: "1.90.0"
+          components: rustfmt
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31
+        with:
+          workspaces: desktop
+
+      - name: Install Linux keyring headers
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libdbus-1-dev
+
+      - name: Test desktop gateway manager
+        run: |
+          cargo fmt --all --manifest-path desktop/Cargo.toml --check
+          cargo test --locked --manifest-path desktop/Cargo.toml -p strike-desktop-core -p strike-desktop
+
   # Darwin-only tests (//go:build darwin) never compile on ubuntu-latest, so a
   # broken libSystem trampoline or wrong-sysctl path ships green (#521, #602).
   # Restrict to packages with _darwin.go — not the full suite — because macOS
@@ -233,3 +290,6 @@ jobs:
         run: |
           go test -race ./internal/persist/telemetry/...
           go -C harness test -race ./sandbox/...
+          # stdlib-only LaunchAgent/systemd renderer. Cheap on macos-latest
+          # and compiled by the darwin toolchain (daemon install, #1513).
+          go test -race -count=1 ./internal/daemon/unit/

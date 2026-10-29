@@ -18,10 +18,12 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/jonathanung/strike/internal/composer/triggers"
 	"github.com/jonathanung/strike/internal/frontend/host"
 	"github.com/jonathanung/strike/internal/persist/session"
 	"github.com/jonathanung/strike/internal/product/version"
 	"github.com/jonathanung/strike/internal/protocol"
+	"github.com/jonathanung/strike/internal/trust/usageaudit"
 )
 
 type sessionsResponse struct {
@@ -30,10 +32,14 @@ type sessionsResponse struct {
 }
 
 type sessionListItem struct {
-	ID         string `json:"id"`
-	Title      string `json:"title,omitempty"`
-	Mtime      int64  `json:"mtime,omitempty"`
-	ForkedFrom string `json:"forkedFrom,omitempty"`
+	ID             string `json:"id"`
+	Title          string `json:"title,omitempty"`
+	Mtime          int64  `json:"mtime,omitempty"`
+	ForkedFrom     string `json:"forkedFrom,omitempty"`
+	WorkspaceID    string `json:"workspaceId,omitempty"`
+	Status         string `json:"status,omitempty"`
+	Unread         bool   `json:"unread"`
+	LastActivityAt int64  `json:"lastActivityAt,omitempty"`
 }
 
 type agentsResponse struct {
@@ -111,23 +117,34 @@ type capabilities struct {
 	ConfigFiles bool `json:"configFiles"`
 	// Themes is true when host.Services.Themes is wired (catalog list/get).
 	Themes bool `json:"themes"`
+	// Attachments is true when composer uploads can be stored and user.input
+	// / steer images are accepted with size limits and name redaction.
+	Attachments bool `json:"attachments"`
+	// Notifications is the redacted centre log (GET /v1/notifications).
+	// Always on when the server can read SessionDir.
+	Notifications bool `json:"notifications"`
+	// SideChat is true when a read-only side-chat model is wired. The ops
+	// refusal does not depend on this flag.
+	SideChat bool `json:"sideChat"`
 }
 
 type bootstrapResponse struct {
-	Version      string           `json:"version"`
-	AuthRequired bool             `json:"authRequired"`
-	AttachOnly   bool             `json:"attachOnly"`
-	Capabilities capabilities     `json:"capabilities"`
-	Status       *StatusSnapshot  `json:"status,omitempty"`
-	Agents       []AgentInfo      `json:"agents"`
-	Skills       []map[string]any `json:"skills"`
-	ProtocolOps  []string         `json:"protocolOps"`
+	Version          string             `json:"version"`
+	AuthRequired     bool               `json:"authRequired"`
+	AttachOnly       bool               `json:"attachOnly"`
+	Capabilities     capabilities       `json:"capabilities"`
+	Status           *StatusSnapshot    `json:"status,omitempty"`
+	Agents           []AgentInfo        `json:"agents"`
+	Skills           []map[string]any   `json:"skills"`
+	ProtocolOps      []string           `json:"protocolOps"`
+	ComposerCommands []triggers.Command `json:"composerCommands,omitempty"`
 }
 
 var browserProtocolOps = []string{
 	"compact", "context.controls", "inspect.prompt", "interrupt", "permission.reply", "question.reply",
 	"rewind", "select.agent", "select.model", "set.autonomy", "set.effort",
 	"set.fast", "set.permission_mode", "steer", "user.input",
+	"input.queue_edit", "input.queue_cancel", "input.queue_reorder", "input.queue_send_now",
 	"workflow.start", "workflow.stop",
 }
 
@@ -141,7 +158,7 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 	// Timeline is host-safe and derived from SessionDir JSONL (always available).
 	// TeamControl shares the live gate: Ops are handled by the same engine path.
 	live := s.hasLive()
-	c := capabilities{Live: live, Roots: s.opts.LiveHub != nil, Timeline: true, Sandbox: s.hasSandbox(), Diag: live, Team: live, TeamControl: live}
+	c := capabilities{Live: live, Roots: s.opts.LiveHub != nil, Timeline: true, Sandbox: s.hasSandbox(), Diag: live, Team: live, TeamControl: live, Attachments: s.opts.Attachments != nil, Notifications: true, SideChat: s.opts.SideChat != nil}
 	var skills []map[string]any
 	if h := s.opts.Services; h != nil {
 		c.Auth, c.Catalog, c.Settings, c.History = h.Auth != nil, h.Catalog != nil, h.Settings != nil, h.History != nil
@@ -190,7 +207,7 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 	if live {
 		protocolOps = browserProtocolOpsWithTeamControl()
 	}
-	writeJSON(w, http.StatusOK, bootstrapResponse{Version: version.Version, AuthRequired: s.opts.Auth, AttachOnly: !live, Capabilities: c, Status: status, Agents: agents, Skills: skills, ProtocolOps: protocolOps})
+	writeJSON(w, http.StatusOK, bootstrapResponse{Version: version.Version, AuthRequired: s.opts.Auth, AttachOnly: !live, Capabilities: c, Status: status, Agents: agents, Skills: skills, ProtocolOps: protocolOps, ComposerCommands: triggers.Commands()})
 }
 
 func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
@@ -408,16 +425,25 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Sandbox dial uses the same yolo+off iKnow gate as PATCH /v1/sandbox.
+	sandboxMode := ""
 	if body.Sandbox != "" {
 		if err := s.saveSandboxDefault(body.Sandbox, body.IKnow, r); err != nil {
 			writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
 			return
 		}
+		sandboxMode = body.Sandbox
 		body.Sandbox = "" // already persisted; avoid double-write in applySettingsPatch
 	}
 	if err := applySettingsPatch(settings, body); err != nil {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
 		return
+	}
+	fields := settingsPatchFields(body)
+	if sandboxMode != "" {
+		fields = append(fields, "sandbox")
+	}
+	if len(fields) > 0 {
+		s.noteAudit(usageaudit.ActionConfig, "", "settings updated", map[string]any{"fields": fields})
 	}
 	writeJSON(w, http.StatusOK, settingsFromDefaults(settings.Defaults()))
 }
@@ -515,6 +541,7 @@ func (s *Server) handleSandboxPatch(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
 		return
 	}
+	s.noteAudit(usageaudit.ActionConfig, "", "sandbox default updated", map[string]string{"mode": strings.TrimSpace(body.Mode)})
 	writeJSON(w, http.StatusOK, s.sandboxSnapshot(r))
 }
 
@@ -634,24 +661,6 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, agentsResponse{Agents: live.Agents()})
 }
 
-func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
-	items, err := listSessionFiles(s.opts.SessionDir)
-	if err != nil {
-		http.Error(w, "session list unavailable", http.StatusInternalServerError)
-		return
-	}
-	liveID := ""
-	if s.opts.LiveHub != nil {
-		live := s.opts.LiveHub.Active()
-		if live != nil {
-			liveID = live.SessionID()
-		}
-	} else if s.opts.Live != nil {
-		liveID = s.opts.Live.SessionID()
-	}
-	writeJSON(w, http.StatusOK, sessionsResponse{Sessions: items, LiveID: liveID})
-}
-
 func listSessionFiles(dir string) ([]sessionListItem, error) {
 	mgr := session.NewManager(dir)
 	list, err := mgr.List()
@@ -667,10 +676,11 @@ func listSessionFiles(dir string) ([]sessionListItem, error) {
 			continue // roots only in switcher
 		}
 		out = append(out, sessionListItem{
-			ID:         info.ID,
-			Title:      info.Title,
-			Mtime:      info.UpdatedAt.Unix(),
-			ForkedFrom: info.ForkedFrom,
+			ID:          info.ID,
+			Title:       info.Title,
+			Mtime:       info.UpdatedAt.Unix(),
+			ForkedFrom:  info.ForkedFrom,
+			WorkspaceID: info.WorkspaceID,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -680,6 +690,25 @@ func listSessionFiles(dir string) ([]sessionListItem, error) {
 		return out[i].ID < out[j].ID
 	})
 	return out, nil
+}
+
+func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
+	items, err := listSessionFiles(s.opts.SessionDir)
+	if err != nil {
+		http.Error(w, "session list unavailable", http.StatusInternalServerError)
+		return
+	}
+	items = s.decorateSessions(items)
+	liveID := ""
+	if s.opts.LiveHub != nil {
+		live := s.opts.LiveHub.Active()
+		if live != nil {
+			liveID = live.SessionID()
+		}
+	} else if s.opts.Live != nil {
+		liveID = s.opts.Live.SessionID()
+	}
+	writeJSON(w, http.StatusOK, sessionsResponse{Sessions: items, LiveID: liveID})
 }
 
 func (s *Server) handleSessionChildren(w http.ResponseWriter, r *http.Request) {
@@ -880,9 +909,20 @@ func (s *Server) handleSessionDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	force := r.URL.Query().Get("force") == "true"
-	if err := s.opts.Services.Sessions.Delete(r.PathValue("id"), force); err != nil {
+	id := r.PathValue("id")
+	if err := s.opts.Services.Sessions.Delete(id, force); err != nil {
 		writeJSON(w, http.StatusConflict, opErrorResponse{Error: err.Error()})
 		return
+	}
+	// A successful durable delete also deregisters the session's live root
+	// (#1399), atomically from the client's point of view: GET /v1/roots
+	// must not keep listing a deleted session. RemoveForSession is a no-op
+	// when the session was not live, and leaves the root registered when
+	// another live entry still references it. Clients that already compose
+	// this with DELETE /v1/roots/{id} (the cockpit) are unaffected: that
+	// follow-up call simply 404s for the already-removed root.
+	if s.opts.LiveHub != nil {
+		s.opts.LiveHub.RemoveForSession(id)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -1125,16 +1165,49 @@ func (s *Server) handleFilesApplyPatch(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleMemory(w http.ResponseWriter, r *http.Request) {
-	if s.opts.Services == nil || s.opts.Services.Memory == nil {
-		capabilityUnavailable(w, "memory")
+	mem := s.memoryService(w)
+	if mem == nil {
 		return
 	}
-	items, err := s.opts.Services.Memory.List(r.URL.Query().Get("tag"))
+	scope, err := memoryScope(r.URL.Query().Get("scope"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	var items []host.MemoryEntry
+	if scoped, ok := mem.(host.MemoryScopes); ok {
+		items, err = scoped.ListScope(scope, r.URL.Query().Get("tag"))
+	} else if scope == "global" {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "global memory is not configured"})
+		return
+	} else {
+		items, err = mem.List(r.URL.Query().Get("tag"))
+	}
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, opErrorResponse{Error: err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"entries": items})
+	if items == nil {
+		items = []host.MemoryEntry{}
+	}
+	body := map[string]any{"entries": items, "scope": scope}
+	if files, ok := mem.(host.MemoryFiles); ok {
+		md, audit := files.Files(scope)
+		body["markdownFile"] = md
+		body["auditFile"] = audit
+	}
+	writeJSON(w, http.StatusOK, body)
+}
+
+func memoryScope(raw string) (string, error) {
+	switch strings.TrimSpace(raw) {
+	case "", "project":
+		return "project", nil
+	case "global":
+		return "global", nil
+	default:
+		return "", fmt.Errorf("scope must be project or global")
+	}
 }
 
 func (s *Server) handleIssues(w http.ResponseWriter, r *http.Request) {
@@ -1297,6 +1370,12 @@ func (s *Server) handleOps(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	op, err = s.prepareOp(op, sessionID)
+	if err != nil {
+		s.recordServeOpError(r, "http", env.Type, sessionID)
+		writeJSON(w, attachmentHTTPStatus(err), opErrorResponse{Error: err.Error()})
+		return
+	}
 	// Team-control Ops wait for engine outcome so CAS/idempotency map to HTTP.
 	if protocol.IsTeamControlOp(op) {
 		s.handleTeamControlOp(w, r, live, env.Type, sessionID, op)
@@ -1429,13 +1508,16 @@ func (s *Server) handleLiveEvents(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	id := live.SessionID()
 	path := session.LogPath(s.opts.SessionDir, id)
-	var offset int64
+	offset := eventCursor(r)
 	if st, err := os.Stat(path); err == nil {
+		offset = clampCursor(offset, st.Size())
 		boundary := st.Size()
-		var err error
-		offset, err = s.writeEventsRange(ctx, w, flusher, path, 0, boundary)
-		if err != nil {
-			return
+		if offset < boundary {
+			var err error
+			offset, err = s.writeEventsRange(ctx, w, flusher, path, offset, boundary)
+			if err != nil {
+				return
+			}
 		}
 	}
 
@@ -1460,7 +1542,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "live session unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	if origin := r.Header.Get("Origin"); origin != "" && !originAllowed(origin) {
+	if origin := r.Header.Get("Origin"); origin != "" && !requestOriginAllowed(r) {
 		http.Error(w, "websocket origin not allowed", http.StatusForbidden)
 		return
 	}
@@ -1484,13 +1566,16 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	// Replay to a fixed byte boundary, then tail strictly after that boundary.
 	id := live.SessionID()
 	path := session.LogPath(s.opts.SessionDir, id)
-	var offset int64
+	offset := eventCursor(r)
 	if st, err := os.Stat(path); err == nil {
+		offset = clampCursor(offset, st.Size())
 		boundary := st.Size()
-		var err error
-		offset, err = s.writeWSRange(ctx, ws, path, 0, boundary)
-		if err != nil {
-			return
+		if offset < boundary {
+			var err error
+			offset, err = s.writeWSRange(ctx, ws, path, offset, boundary)
+			if err != nil {
+				return
+			}
 		}
 	}
 
@@ -1521,6 +1606,13 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			}
 			sessionID := live.SessionID()
 			if err := s.admitOp(r, "ws", env.Type, sessionID); err != nil {
+				msg, _ := json.Marshal(map[string]any{"type": "error", "data": map[string]string{"message": err.Error()}})
+				_ = ws.WriteText(string(msg))
+				continue
+			}
+			op, err = s.prepareOp(op, sessionID)
+			if err != nil {
+				s.recordServeOpError(r, "ws", env.Type, sessionID)
 				msg, _ := json.Marshal(map[string]any{"type": "error", "data": map[string]string{"message": err.Error()}})
 				_ = ws.WriteText(string(msg))
 				continue
@@ -1664,8 +1756,10 @@ func (s *Server) handleRoots(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "multi-root unavailable", http.StatusServiceUnavailable)
 		return
 	}
+	roots := s.opts.LiveHub.List()
+	s.decorateRoots(roots)
 	writeJSON(w, http.StatusOK, rootsResponse{
-		Roots:    s.opts.LiveHub.List(),
+		Roots:    roots,
 		ActiveID: s.opts.LiveHub.ActiveID(),
 	})
 }
@@ -1701,6 +1795,7 @@ func (s *Server) handleRootCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, result)
+	s.followLiveCWD(result.ID)
 }
 
 func (s *Server) handleRootActivate(w http.ResponseWriter, r *http.Request) {
@@ -1713,6 +1808,7 @@ func (s *Server) handleRootActivate(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
 		return
 	}
+	s.followLiveCWD(id)
 	writeJSON(w, http.StatusOK, opOKResponse{OK: true})
 }
 
@@ -1730,6 +1826,22 @@ func (s *Server) handleRootResume(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
+	s.followLiveCWD(result.ID)
+}
+
+func (s *Server) followLiveCWD(id string) {
+	if s.opts.SyncWorkDir == nil || s.opts.LiveHub == nil {
+		return
+	}
+	live := s.opts.LiveHub.LiveFor(id)
+	if live == nil {
+		return
+	}
+	cwd := strings.TrimSpace(live.Status().CWD)
+	if cwd == "" {
+		return
+	}
+	s.opts.SyncWorkDir(cwd)
 }
 
 func (s *Server) handleRootClose(w http.ResponseWriter, r *http.Request) {
@@ -1745,6 +1857,9 @@ func (s *Server) handleRootClose(w http.ResponseWriter, r *http.Request) {
 	if s.opts.LiveHub.LiveFor(id) == nil {
 		writeJSON(w, http.StatusNotFound, opErrorResponse{Error: fmt.Sprintf("root %q is not active", id)})
 		return
+	}
+	if s.terms != nil {
+		s.terms.EndSession(id)
 	}
 	s.opts.LiveHub.Remove(id)
 	writeJSON(w, http.StatusOK, opOKResponse{OK: true})
@@ -1855,11 +1970,35 @@ func (s *Server) handleMemoryPut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Value string   `json:"value"`
-		Tags  []string `json:"tags"`
+		Value  string   `json:"value"`
+		Tags   []string `json:"tags"`
+		Author string   `json:"author"`
+		Scope  string   `json:"scope"`
 	}
 	if err := decodeBody(w, r, &body); err != nil {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	rawScope := body.Scope
+	if strings.TrimSpace(rawScope) == "" {
+		rawScope = r.URL.Query().Get("scope")
+	}
+	scope, err := memoryScope(rawScope)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	if scoped, ok := mem.(host.MemoryScopes); ok {
+		entry, err := scoped.PutScope(scope, key, body.Value, body.Author, body.Tags)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, entry)
+		return
+	}
+	if scope == "global" {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "global memory is not configured"})
 		return
 	}
 	if err := mem.Put(key, body.Value, body.Tags); err != nil {
@@ -1889,6 +2028,27 @@ func (s *Server) handleMemoryDelete(w http.ResponseWriter, r *http.Request) {
 	key := strings.TrimSpace(r.PathValue("key"))
 	if key == "" {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "key is required"})
+		return
+	}
+	scope, err := memoryScope(r.URL.Query().Get("scope"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	if scoped, ok := mem.(host.MemoryScopes); ok {
+		if err := scoped.DeleteScope(scope, key); err != nil {
+			status := http.StatusBadRequest
+			if strings.Contains(strings.ToLower(err.Error()), "not found") {
+				status = http.StatusNotFound
+			}
+			writeJSON(w, status, opErrorResponse{Error: err.Error()})
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if scope == "global" {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "global memory is not configured"})
 		return
 	}
 	if err := mem.Delete(key); err != nil {

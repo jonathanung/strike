@@ -9,6 +9,7 @@ package permission
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -70,8 +71,31 @@ func ValidAction(a Action) bool {
 	return false
 }
 
+// KnownNames returns the permission names ValidateRuleset accepts, sorted.
+func KnownNames() []string {
+	names := make([]string, 0, len(knownPermissions))
+	for name := range knownPermissions {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// ValidatePattern rejects a pattern whose glob syntax is invalid for the
+// matcher evaluation uses (doublestar.Match in Rule.matches / globMatches).
+// An invalid glob never matches, so a rule carrying one is silently inert —
+// for a deny rule that is a fail-open hole, hence admission must reject it
+// instead of storing it. Empty is allowed (matches as "*").
+func ValidatePattern(pattern string) error {
+	if pattern == "" || doublestar.ValidatePattern(pattern) {
+		return nil
+	}
+	return fmt.Errorf("pattern %q has invalid glob syntax — an invalid glob never matches, so the rule would do nothing; fix the pattern (check for an unclosed '[' or '{' or a trailing '\\')", pattern)
+}
+
 // ValidateRuleset rejects empty permission names, unknown permission
-// names, and invalid actions. Empty pattern is allowed (matches as "*").
+// names, invalid actions, and patterns with invalid glob syntax. Empty
+// pattern is allowed (matches as "*").
 func ValidateRuleset(rs Ruleset) error {
 	for i, r := range rs {
 		if r.Permission == "" {
@@ -82,6 +106,9 @@ func ValidateRuleset(rs Ruleset) error {
 		}
 		if !ValidAction(r.Action) {
 			return fmt.Errorf("rule %d: invalid action %q", i, r.Action)
+		}
+		if err := ValidatePattern(r.Pattern); err != nil {
+			return fmt.Errorf("rule %d: %w", i, err)
 		}
 	}
 	return nil
@@ -428,6 +455,13 @@ type Service struct {
 	// grant still applies; the caller may log them.
 	persistProject func(Rule) error
 
+	// askWorkDir / askProjectRulePath are display facts stamped onto every
+	// PermissionAsked this service emits: where the tool call runs, and the
+	// file a project grant appends its rule to (empty when project grants
+	// are not persisted). Set once by the owning engine; read under mu.
+	askWorkDir         string
+	askProjectRulePath string
+
 	// chain is content-free multi-step correlation within a turn (#891).
 	// Never nil after New.
 	chain *Correlator
@@ -485,6 +519,23 @@ func (s *Service) SetBaseLayerNames(names ...string) {
 func (s *Service) SetProjectPersister(fn func(Rule) error) {
 	s.mu.Lock()
 	s.persistProject = fn
+	s.mu.Unlock()
+}
+
+// SetAskFacts records the facts stamped onto every PermissionAsked this
+// service emits: the working directory the owning engine's tool calls run
+// in, and the file a DecisionProject grant appends its rule to (empty when
+// project grants are not persisted to disk). The values describe the
+// engine's real execution context and persistence target — frontends show
+// them verbatim on the ask card and must not invent them. Safe to call at
+// any time; concurrent with Ask/Reply.
+func (s *Service) SetAskFacts(workDir, projectRulePath string) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.askWorkDir = workDir
+	s.askProjectRulePath = projectRulePath
 	s.mu.Unlock()
 }
 
@@ -758,15 +809,18 @@ func (s *Service) ask(ctx context.Context, req tool.AskRequest, corr protocol.Co
 		chainHit:    chainHit,
 	}
 	s.pending[id] = p
+	workDir, projectRulePath := s.askWorkDir, s.askProjectRulePath
 	s.mu.Unlock()
 
 	s.emit(protocol.PermissionAsked{
-		Correlation: corr,
-		RequestID:   id,
-		Permission:  req.Permission,
-		Patterns:    req.Patterns,
-		Always:      req.Always,
-		Metadata:    req.Metadata,
+		Correlation:     corr,
+		RequestID:       id,
+		Permission:      req.Permission,
+		Patterns:        req.Patterns,
+		Always:          req.Always,
+		Metadata:        req.Metadata,
+		WorkDir:         workDir,
+		ProjectRulePath: projectRulePath,
 	})
 	// Audit: ask suspended (timeline KindPermission waiting).
 	s.emitDecided(corr, req, Ask, id, "", det, chainHit)

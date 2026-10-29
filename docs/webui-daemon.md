@@ -11,8 +11,12 @@ Status: walking skeleton on branch `worktree-rust-webui-daemon`. Not merged.
   through the existing daemon API (`/health`, `/v1/*`, `/v1/ws`, `/v1/ops`,
   protocol Ops/Events). No engine rewrite. The bind, token, and remote-access
   rules are [gateway.md](gateway.md).
-- Strike runs as a per-user daemon: `strike daemon install` writes a systemd
-  user unit running `strike serve --auth --token-file ~/.strike/daemon.token`.
+- Strike runs as a per-user daemon: `strike daemon install` writes a service
+  that runs `strike serve --auth --token-file ~/.strike/daemon.token`.
+  Linux writes a systemd user unit at `~/.config/systemd/user/` (or
+  `$XDG_CONFIG_HOME`). macOS writes
+  `~/Library/LaunchAgents/ca.jonathanung.strike-daemon.plist`. `--start`
+  loads it. Native Windows is unsupported; run `strike serve` in WSL2.
 - Remotes are just other daemons you own. Bind stays loopback by default;
   `--allow-private-bind` (requires `--auth`) additionally allows RFC1918 and
   CGNAT/Tailscale (100.64.0.0/10) addresses. Public binds are rejected; there
@@ -28,65 +32,140 @@ Status: walking skeleton on branch `worktree-rust-webui-daemon`. Not merged.
 - `internal/persist/workspace`: durable workspace registry
   (`~/.strike/workspaces.json`, 0600, atomic write). Directories are
   validated on the daemon host; ids are stable path hashes. A workspace is
-  a named directory plus an optional rules file and permission mode. It is
-  not a session folder. Sessions do not store a workspace id yet, and
-  activate does not change the engine working directory or the live
-  permission mode. `PATCH /v1/workspaces/{id}` sets `rules` (a regular file
-  inside the directory; symlinks that escape are rejected) and
-  `permissionMode` (`default`, `plan`, `soft-approve`, `accept-edits`,
-  `yolo`). Empty strings clear the field.
-- API: `GET/POST /v1/workspaces`, `POST /v1/workspaces/{id}/activate`,
+  a named directory plus an optional rules file, a permission mode, and
+  extra roots. It is not a session folder. A root session records
+  `workspaceId`. Web-created sessions use that directory. Activating a
+  workspace applies its stored permission mode to the active live root.
+  `PATCH /v1/workspaces/{id}` sets `rules` (a regular file inside the
+  directory; symlinks that escape are rejected), `permissionMode`
+  (`default`, `plan`, `soft-approve`, `accept-edits`, `yolo`), `name`, and
+  `extraRoots` (existing directories, not the filesystem root; symlinks are
+  stored resolved). Empty strings clear rules and the mode. An empty
+  `extraRoots` array clears the extras.
+- API: `GET/POST /v1/workspaces`, `GET /v1/workspaces/browse`,
+  `POST /v1/workspaces/mkdir`, `POST /v1/workspaces/{id}/activate`,
   `PATCH /v1/workspaces/{id}`, `DELETE /v1/workspaces/{id}` (token-gated
-  like all `/v1/*` under `--auth`).
+  like all `/v1/*` under `--auth`). Browse and mkdir stay inside the
+  allowlist: the daemon user's home, the process directory, registered
+  workspace paths, and extra roots. A symlink that resolves outside that
+  set is omitted. Add, once the allowlist is configured, rejects a path
+  outside it.
 - Per-child git worktrees already exist and stay off unless asked.
   `session.childIsolation` `off` or `shared` (the default) keeps the
   parent's directory. `worktree`, or a spawn `isolation: "worktree"`,
   checks out `<repo>/.strike/worktrees/<child-id>/`. There is no second
   flag. Outside a git repository the engine stays on the shared directory.
-  Delegated child working directories are not yet checked against the
-  workspace registry; that waits until a session actually runs in a
-  registered directory ([webui-planned.md](webui-planned.md)).
-- `strike daemon install|uninstall|status|token` + systemd user unit.
+  A bound session rejects a delegated child whose working directory
+  resolves outside the workspace and its extra roots. An unbound session
+  (empty registry, or a launch directory that matched nothing) does not
+  run that check.
+- `strike daemon install|uninstall|status|token` (systemd user unit on Linux, LaunchAgent on macOS).
 - `strike serve --token-file` (stable 0600 token, minted once) and
   `--allow-private-bind`.
 - `webui/`: Leptos client. The shell is a session list, a transcript, and
   a side panel. Daemon connect, workspace policy, and saved remotes stay on
   the Daemon view.
   - Session list merges live roots (`/v1/roots`) with saved sessions.
-    A gutter marks in progress or unread. Chips filter Unread, In progress,
+    A gutter marks the canonical status (running, waiting, blocked, failed,
+    done, stopped, idle) and an unread pip. Chips filter Unread, In progress,
     and Pinned. Search matches title, id, or a delegated child's title.
     Older rows fold after six, keeping pinned, busy, and the open session.
     Delegated children (`GET /v1/sessions/{id}/children`, team state when
-    the roster has them) nest under the open session. Unread and pinned
-    live in browser storage (`strike.seen`, `strike.pins`); the server does
-    not store them.
+    the roster has them) nest under the open session. Unread is stored on
+    the daemon (`POST /v1/sessions/{id}/seen`, `docs/webui-status.md`).
+    Pins stay in browser storage (`strike.pins`).
   - The top bar has a command field (Ctrl+K or Cmd+K) for a new session,
-    stop-all, the Chat and Daemon views, Steer/Queue, and the five approval
+    stop-all, stop-turn, the Chat and Daemon views, Steer/Queue, and the five approval
     modes. A gateway chip follows `/health`. Back and Forward walk the
     sessions opened in this tab. Focus hides the side columns.
   - The composer posts `user.input` when the root is idle. While it is
-    busy, Steer posts `steer` and Queue posts `user.input`. That choice is
-    `strike.enterMode` (default Queue, the same send as before). The
-    approval chip posts `set.permission_mode` with Strike's real modes:
+    busy, the saved default (`strike.enterMode`, default Queue) is the
+    main send button: Steer posts `steer`, Queue posts `user.input`. The
+    other half of that button, and Ctrl+Enter or Cmd+Enter, does the other
+    action for this message only. Enter uses the default. Escape stops the
+    running turn when the draft is empty (`interrupt`). Backspace on an
+    empty draft pulls the last queued message into the draft and cancels
+    it. The queue list is the engine FIFO (`input.queued`, edit, cancel,
+    reorder). A steer shows on the user line and in a note when
+    `turn.steered` arrives; until then the note says it is waiting. A
+    context hold blocks send when the daemon reports critical fit or
+    occupancy at the window. It does not invent a limit. Send anyway, or
+    Alt+Enter, sends once. The approval chip posts `set.permission_mode`
+    with Strike's real modes:
     `default` (ask on the normal rules), `plan` (writes denied; stricter
     than read-only shell), `soft-approve` (15s countdown then allow once),
     `accept-edits` (file edits allowed; shell and network still ask),
     `yolo` (this session skips asks that are not hard-denied; other
     sessions stay as they are). There is no read-only-shell mode and no
-    all-sessions skip. The model chip shows the live provider and model
-    from `/v1/bootstrap`. A catalog `GET /v1/models` that fails stays
-    "catalog unavailable" and does not invent models. `select.model` is
-    rejected while a turn is running.
+    all-sessions skip. Soft, Edits, and Yolo ask for confirmation
+    before the post. Default and Plan apply immediately. A pending
+    `permission.asked` is a card above the composer (allow once, allow
+    session, allow project, deny) with the command or edit diff from the
+    event. The same chip opens the rules and audit panel
+    (`GET/POST /v1/permissions/rules`, `GET /v1/permissions/audit`).
+    Deny rules still apply in Yolo and Edits. Label mapping and the
+    confirm rules are in [webui-approvals.md](webui-approvals.md). The model chip (Alt+M) opens a filterable menu
+    grouped by provider. Pins stay in this browser. Enter posts
+    `select.model` for this session; saving a default patches
+    `/v1/settings` and does not by itself switch the session. Effort is
+    shown when the catalog reports reasoning or variants, or when the
+    session already has an effort (`set.effort`). The context meter uses
+    `contextUsed`, `contextLimit`, and `contextFit` from the live status,
+    and the catalog window only when the daemon has not named a limit.
+    Send is held on a critical fit or a full known window. A catalog
+    `GET /v1/models` that fails stays "catalog unavailable" and does not
+    invent models. `select.model` and `set.effort` are rejected while a
+    turn is running.
   - Empty sessions rotate a short headline and offer six prompts that send
     as ordinary text. A failed load shows the error and Retry.
   - The side panel is Activity (team snapshot: status, elapsed, stop,
-    retry, expand, including `blocked` handoffs), Files (`/v1/files`), and
-    Changes (`/v1/changed-files`). Clicking or dragging a file inserts
-    `@path` as text. The web composer does not expand that token the way
-    the TUI does.
-  - Schedule, memory, knowledge, artifacts, the task runner, onboarding,
-    and a multi-gateway hub are documented in
-    [webui-planned.md](webui-planned.md), not drawn as empty panels.
+    retry, expand, including `blocked` handoffs), Files (`/v1/files`),
+    Changes (`/v1/changed-files`), Git, Worktrees, Memory, Knowledge, and
+    Artifacts.
+    Clicking or dragging a file inserts `@path`. The daemon expands
+    `@file`, `$skill`, `/command`, and `!shell` on `user.input` and `steer`
+    before a turn starts. `!` asks through the bash permission model and
+    does not start a model turn. The composer `+` menu and the suggestion
+    popup only list those real actions (`composerCommands` and `skills` on
+    bootstrap, files from `/v1/files/search`). A shell ask shows Allow once /
+    Reject on the composer until the approvals stream replaces that bar. Git
+    (`GET/POST /v1/git/status|diff|branches|log|stage|unstage|commit|checkout|discard|reset|branch/delete`
+    and `/v1/git/worktrees`) runs git as an argument vector. There is no
+    push route. Discard, hard reset, branch delete, worktree remove, and
+    stale prune require an exact confirm token. Hard reset is `HEAD` only.
+    Branch delete is `git branch -d`. Worktree create/remove uses the
+    existing strike worktree helper and only deletes paths under
+    `.strike/worktrees/`. Ownership comes from the session index (the same
+    records as `GET /v1/sessions/{id}/children`). `session.childIsolation`
+    is shown, not edited. Memory mode
+    (normal, incognito, temporary) is a composer chip and a palette command.
+    Open on a file reads it in the center document pane
+    (`GET /v1/file/view`). The pane is read-only until Edit. Save is
+    `PUT /v1/file` with the sha256 and mtime from the read; a mismatch is
+    409 and does not write. Plan mode and an edit/write deny rule reject
+    the save. Symlinks, binaries, oversize files, and paths outside the
+    work root (or an explicit allowed-root ceiling) are rejected. Markdown
+    can preview. Find-in-file is local. Agent diff reuses
+    `GET /v1/changed-files` for the open path. Transcript `path:line` and
+    `strike-file:path#Lline` open the same pane.
+  - The Tasks view is the task runner: a plan checklist, one child per
+    ready section, and a checkpoint from that child's handoff and
+    verification report. See [webui-planned.md](webui-planned.md).
+  - Goals (`/v1/goals`, the Goals view) define a verification command,
+    budgets, and an autopilot posture. Deny rules still apply. See
+    [goal.md](goal.md).
+  - Side chat is a read-only drawer (Activity, an Activity row, the composer,
+    or Alt+S). `POST /v1/sidechat/ask` answers from the session transcript
+    with a separate model call and no tools. `POST /v1/sidechat/ops` refuses
+    `permission.reply` and `user.input`. Turns are not written to the session
+    JSONL.
+  - Schedule and a multi-gateway hub are
+    documented in [webui-planned.md](webui-planned.md), not drawn as empty
+    panels. Memory, knowledge, and artifacts are drawn from the live routes.
+    The gateway switcher is the Gateways control in the header and on the
+    Daemon view; see [gateway.md](gateway.md).
+  - First-run and Settings are in the client. `GET /v1/local-files` is the
+    path list the card shows. The first-run card reuses the Providers page.
 - Server serves `/sw.js` and `/manifest.webmanifest` at the origin root and
   the bundle under `/assets/` (WASM-aware CSP and content types).
 
@@ -95,23 +174,53 @@ Status: walking skeleton on branch `worktree-rust-webui-daemon`. Not merged.
 ```sh
 nix develop -c make webui-build   # flake provides Go + Rust (fenix, wasm32) + trunk
 nix develop -c make build
-./strike daemon install     # or --addr <tailnet-ip>:8787 --allow-private-bind
-systemctl --user enable --now strike-daemon
+./strike daemon install --start   # or --addr <tailnet-ip>:8787 --allow-private-bind
+# Linux, without --start:
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now strike-daemon
+# macOS, without --start:
+#   launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ca.jonathanung.strike-daemon.plist
+#   launchctl kickstart -k gui/$(id -u)/ca.jonathanung.strike-daemon
 ./strike daemon token       # paste into the UI
 # open http://127.0.0.1:8787/ (or the tailnet URL) on desktop or phone
 ```
 
-Foreground instead of systemd: `./strike serve --auth --token-file ~/.strike/daemon.token`.
+Foreground instead of a service manager: `./strike serve --auth --token-file ~/.strike/daemon.token`.
+
+## Several workspaces, one daemon
+
+One `strike serve` process can hold several live roots at once. Each root
+keeps its own engine, transcript, and working directory. Creating a root
+from the web client uses the active workspace: that directory is the engine
+working directory, the rules file is appended to that session's prompt
+(capped at 64KiB), and the stored permission mode is the starting posture.
+Switching the active root points file listings and diffs at that root's
+directory. Children spawned from a bound session must stay inside the
+workspace directory or an extra root; a symlink out is rejected. Worktrees
+remain the existing opt-in and are rejected when they land outside those
+roots.
+
+Isolated per workspace: the session's directory, its rules text, its
+starting permission mode, and the child working-directory allowlist.
+
+Shared by every workspace in the process: the bearer token, provider
+credentials, the session log directory, MCP and LSP processes started from
+the launch tree, and project memory, history, plans, artifacts, and the
+ledger (still keyed by the launch project). An empty registry changes
+none of this: the engine stays in the process directory and child
+directories are not checked.
+
+The picker is not a session-folder tree. Session folders, when they exist,
+only organise chats. They do not select a directory.
 
 ## Not yet done (next slices, in order)
 
-1. Engine root per workspace: opening a workspace currently records it as
-   active; spawning/attaching a live engine rooted at that directory (today
-   roots spawn in the daemon's cwd) is the next engine-plumbing slice.
-2. Permission asks in the transcript. The composer can set the mode;
-   an in-flight ask is still only the protocol event.
-3. Session list and resume follow the active workspace. Files and diffs
-   follow the daemon working directory, which is not the workspace path.
-4. Per-remote tokens in the UI (today one token field for the selected
-   daemon), daemon discovery on the tailnet.
-5. Tauri shell (optional), TUI removal decision, `docs/web.md` rewrite.
+1. Permission asks render as cards from `permission.asked`. What is
+   still open is a transcript history of asks after they resolve,
+   beyond the audit list.
+2. Session folders that organise chats, separate from workspace
+   directories. The list already shows which workspace a chat is bound
+   to. It does not hide chats from other workspaces.
+3. Daemon discovery on the tailnet. Per-gateway tokens are in the switcher
+   (`sessionStorage`); the page does not open SSH itself.
+4. Tauri shell (optional), TUI removal decision, `docs/web.md` rewrite.

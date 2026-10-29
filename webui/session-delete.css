@@ -1,0 +1,70 @@
+/* feature:session-delete begin */
+/* Session delete (#1358): row affordance + confirm / force-confirm
+   dialog. Tokens only; the danger colour is the theme's --signal. */
+
+/* The Delete action sits in the session panel's row actions
+   (.ss-actions), revealed on hover/focus like Open, Fork, and Pin, and
+   always shown on touch devices by the panel's own rules. */
+.session-delete-action:hover {
+  color: var(--signal);
+}
+
+.session-delete-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  background: color-mix(in srgb, var(--overlay) 45%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4);
+}
+
+.session-delete-dialog {
+  width: min(440px, 92vw);
+  max-height: 88vh;
+  overflow: auto;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.session-delete-dialog h2 {
+  margin: 0;
+  font-size: var(--type-lg);
+  overflow-wrap: anywhere;
+}
+
+.session-delete-dialog p {
+  margin: 0;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.session-delete-daemon,
+.session-delete-error {
+  color: var(--signal);
+  border: 1px solid color-mix(in srgb, var(--signal) 45%, var(--rule));
+  background: color-mix(in srgb, var(--signal) 10%, var(--surface));
+  border-radius: var(--radius-sm);
+  padding: var(--space-2);
+}
+
+.session-delete-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.session-delete-actions button.danger {
+  background: var(--signal);
+  color: var(--on-accent);
+  border-color: transparent;
+}
+/* feature:session-delete end */

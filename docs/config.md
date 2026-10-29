@@ -982,7 +982,9 @@ shared ownership map. When two **active** agents claim the same path:
 ### Session log durability and retention
 
 Session transcripts are JSONL under `~/.strike/sessions/<id>.jsonl` with a
-sidecar `<id>.meta.json`. New logs start with a `session.header` line carrying
+sidecar `<id>.meta.json`. The on-disk contract (envelope, `session.header`,
+event types, sidecar fields) is [session-format.md](session-format.md). New
+logs start with a `session.header` line carrying
 `schemaVersion` (currently `1`). Each event append writes a full JSON line and
 `fsync`s so a crash cannot leave an unreadable half-record; resume skips a
 trailing torn line and fails with an actionable error on interior corruption or

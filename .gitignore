@@ -6,7 +6,13 @@ coverage.out
 /.nix-go/
 */worktrees
 webui/target/
+webui/protocol-schema/target/
+desktop/target/
+desktop/app/gen/
 webui/dist/
+/webui-uat-artifacts/
+/webui-chat-mode-artifacts/
+/usage-audit-uat/
 /.nix-rust/
 
 # Generated flatten of internal/frontend/tui/app/_src/ (go generate ./internal/frontend/tui/app).
@@ -21,3 +27,7 @@ webui/dist/
 .direnv/
 .envrc
 .strike/config
+
+# Phase 0 spike nix build symlink (throwaway; see spike/sandbox/README.md).
+/spike/sandbox/result
+/spike/sandbox/result-*

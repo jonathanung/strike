@@ -1,0 +1,44 @@
+/* feature:transcript-find begin */
+/* Find in transcript (#1342): the find bar sits between the session
+   header and the transcript scroller; marks reuse the token ladder. */
+.tf-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  padding: 6px 8px;
+  margin-bottom: var(--space-2);
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-sm);
+}
+.tf-search {
+  flex: 1 1 140px;
+  min-width: 0;
+  height: var(--control);
+  background: var(--ground);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--space-2);
+  color: var(--ink);
+}
+.tf-search:focus { border-color: var(--border-focus); outline: none; }
+.tf-count {
+  color: var(--muted);
+  font-size: var(--type-sm);
+  font-variant-numeric: tabular-nums;
+  min-width: 3.5em;
+  white-space: nowrap;
+}
+.tf-mark {
+  background: var(--raised);
+  color: var(--ink);
+  border-radius: 2px;
+  outline: 1px solid var(--overlay);
+}
+.tf-mark.tf-current {
+  background: var(--warning);
+  color: var(--ground);
+  outline: 1px solid var(--warning);
+}
+/* feature:transcript-find end */

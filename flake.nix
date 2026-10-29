@@ -30,7 +30,7 @@
 
           src = self;
           proxyVendor = true;
-          vendorHash = "sha256-kEJmV3MQt8k5KuXBjYoUy7+ZZrD3aTljpBziaRndJcU=";
+          vendorHash = "sha256-V/niLEpvI8jqpq9VXiLamvrwL3wppCS61KWadAugaJA=";
 
           subPackages = [ "cmd/strike" ];
           preBuild = ''

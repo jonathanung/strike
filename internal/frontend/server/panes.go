@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jonathanung/strike/internal/frontend/host"
+	"github.com/jonathanung/strike/internal/trust/usageaudit"
 )
 
 // Web-safe pane DTOs. No TUI types, no PluginRoot, no env secret values.
@@ -358,6 +359,9 @@ func (s *Server) handlePaneInput(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
 		return
 	}
+	// Keystrokes stay out of the chain. #1279 can append a richer terminal
+	// entry through POST /v1/audit when the real PTY exists.
+	s.noteAudit(usageaudit.ActionTerminal, "", "pane input", map[string]any{"paneId": id, "fields": len(body.Event)})
 	writeJSON(w, http.StatusOK, opOKResponse{OK: true})
 }
 

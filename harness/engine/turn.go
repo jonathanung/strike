@@ -36,15 +36,19 @@ func (e *Engine) turnActive() bool {
 }
 
 // pendingUserInput is one mid-turn buffered prompt (text + optional images).
+// id is stable for InputQueued and the edit/cancel/reorder ops.
 type pendingUserInput struct {
-	text   string
-	images []protocol.ImageAttachment
+	id      string
+	text    string
+	display string
+	images  []protocol.ImageAttachment
 }
 
 // pendingSteer is one active-turn redirect awaiting a safe request boundary.
 type pendingSteer struct {
-	text   string
-	images []protocol.ImageAttachment
+	text    string
+	display string
+	images  []protocol.ImageAttachment
 	// targetTurnID captured at accept time for durable TurnSteered events.
 	targetTurnID string
 }
@@ -223,9 +227,17 @@ func (e *Engine) providerAcceptsImages() bool {
 
 // handleSteer accepts an active-turn redirect. Distinct from UserInput (queue)
 // and Interrupt (cancel). Targets the live session/turn when ids are set.
-func (e *Engine) handleSteer(op protocol.Steer) {
+// Composer triggers (! / /command / $skill / @file) are expanded first.
+func (e *Engine) handleSteer(ctx context.Context, op protocol.Steer) {
 	if strings.TrimSpace(op.Text) == "" && len(op.Images) == 0 {
 		return
+	}
+	model, display, handled := e.consumeComposer(ctx, op.Text)
+	if handled {
+		return
+	}
+	if strings.TrimSpace(model) != "" {
+		op.Text = model
 	}
 	if !e.turnActive() {
 		e.emit(protocol.EngineError{
@@ -256,6 +268,7 @@ func (e *Engine) handleSteer(op protocol.Steer) {
 	e.pendingSteerMu.Lock()
 	e.pendingSteer = &pendingSteer{
 		text:         op.Text,
+		display:      display,
 		images:       append([]protocol.ImageAttachment(nil), op.Images...),
 		targetTurnID: e.activeTurnID,
 	}
@@ -291,7 +304,11 @@ func (e *Engine) applyPendingSteer(turnID, mode string) {
 	corr.TurnID = turnID
 	// Durable user.message so resume sees the guidance in the transcript.
 	persisted := e.persistImages(ps.images)
-	e.emit(protocol.UserMessage{Correlation: corr, Text: ps.text, Images: persisted})
+	shown := ps.text
+	if strings.TrimSpace(ps.display) != "" {
+		shown = ps.display
+	}
+	e.emit(protocol.UserMessage{Correlation: corr, Text: shown, Images: persisted})
 	e.messages = append(e.messages, provider.Message{
 		Role:   provider.RoleUser,
 		Text:   ps.text,
@@ -299,7 +316,7 @@ func (e *Engine) applyPendingSteer(turnID, mode string) {
 	})
 	e.emit(protocol.TurnSteered{
 		Correlation:  corr,
-		Text:         ps.text,
+		Text:         shown,
 		Mode:         mode,
 		TargetTurnID: ps.targetTurnID,
 	})
@@ -318,16 +335,21 @@ func (e *Engine) fallbackSteerToQueue(turnID string) {
 	}
 	corr := e.baseCorr()
 	corr.TurnID = turnID
+	shown := ps.text
+	if strings.TrimSpace(ps.display) != "" {
+		shown = ps.display
+	}
 	e.emit(protocol.TurnSteered{
 		Correlation:  corr,
-		Text:         ps.text,
+		Text:         shown,
 		Mode:         protocol.SteerModeQueuedFallback,
 		TargetTurnID: ps.targetTurnID,
 	})
 	e.pendingSteerMu.Lock()
 	e.steerQueueFallback = &pendingUserInput{
-		text:   ps.text,
-		images: append([]protocol.ImageAttachment(nil), ps.images...),
+		text:    ps.text,
+		display: ps.display,
+		images:  append([]protocol.ImageAttachment(nil), ps.images...),
 	}
 	e.pendingSteerMu.Unlock()
 }
@@ -346,6 +368,10 @@ func (e *Engine) takeSteerQueueFallback() *pendingUserInput {
 // When full (maxPendingUserInputs), rejects with EngineError code queue_full
 // rather than blocking the Ops sender (explicit backpressure).
 func (e *Engine) enqueueUserInput(op protocol.UserInput) {
+	e.enqueuePrepared(op, "")
+}
+
+func (e *Engine) enqueuePrepared(op protocol.UserInput, display string) {
 	if strings.TrimSpace(op.Text) == "" && len(op.Images) == 0 {
 		return
 	}
@@ -358,9 +384,174 @@ func (e *Engine) enqueueUserInput(op protocol.UserInput) {
 		return
 	}
 	e.pendingUserInputs = append(e.pendingUserInputs, pendingUserInput{
-		text:   op.Text,
-		images: append([]protocol.ImageAttachment(nil), op.Images...),
+		id:      newInputQueueID(),
+		text:    op.Text,
+		display: display,
+		images:  append([]protocol.ImageAttachment(nil), op.Images...),
 	})
+	e.emitInputQueued()
+}
+
+func newInputQueueID() string {
+	return rand.Text()
+}
+
+func (e *Engine) emitInputQueued() {
+	items := make([]protocol.InputQueueItem, 0, len(e.pendingUserInputs))
+	for _, it := range e.pendingUserInputs {
+		items = append(items, protocol.InputQueueItem{ID: it.id, Text: it.text})
+	}
+	e.emit(protocol.InputQueued{Correlation: e.sessionCorr(), Items: items})
+}
+
+func (e *Engine) emitQueueError(msg string) {
+	e.emit(protocol.EngineError{
+		Correlation: e.sessionCorr(),
+		Message:     msg,
+		Code:        protocol.ErrorCodeInvalidArgs,
+	})
+}
+
+// handleInputQueueEdit replaces one queued item's text. Images stay.
+func (e *Engine) handleInputQueueEdit(op protocol.InputQueueEdit) {
+	id := strings.TrimSpace(op.ID)
+	if id == "" {
+		e.emitQueueError("queue edit needs an id")
+		return
+	}
+	for i := range e.pendingUserInputs {
+		if e.pendingUserInputs[i].id != id {
+			continue
+		}
+		if strings.TrimSpace(op.Text) == "" && len(e.pendingUserInputs[i].images) == 0 {
+			e.emitQueueError("queue edit needs text; cancel the item to remove it")
+			return
+		}
+		e.pendingUserInputs[i].text = op.Text
+		e.emitInputQueued()
+		return
+	}
+	e.emitQueueError(fmt.Sprintf("queued item %q is not in the queue", id))
+}
+
+// handleInputQueueCancel removes one queued item.
+func (e *Engine) handleInputQueueCancel(op protocol.InputQueueCancel) {
+	id := strings.TrimSpace(op.ID)
+	if id == "" {
+		e.emitQueueError("queue cancel needs an id")
+		return
+	}
+	for i := range e.pendingUserInputs {
+		if e.pendingUserInputs[i].id != id {
+			continue
+		}
+		e.pendingUserInputs = append(e.pendingUserInputs[:i], e.pendingUserInputs[i+1:]...)
+		if len(e.pendingUserInputs) == 0 {
+			e.pendingUserInputs = nil
+		}
+		e.emitInputQueued()
+		return
+	}
+	e.emitQueueError(fmt.Sprintf("queued item %q is not in the queue", id))
+}
+
+// handleInputQueueReorder replaces the FIFO order. ids must be a permutation.
+func (e *Engine) handleInputQueueReorder(op protocol.InputQueueReorder) {
+	if len(op.IDs) != len(e.pendingUserInputs) {
+		e.emitQueueError("queue reorder must list every queued item once")
+		return
+	}
+	byID := make(map[string]pendingUserInput, len(e.pendingUserInputs))
+	for _, it := range e.pendingUserInputs {
+		byID[it.id] = it
+	}
+	next := make([]pendingUserInput, 0, len(op.IDs))
+	seen := make(map[string]struct{}, len(op.IDs))
+	for _, raw := range op.IDs {
+		id := strings.TrimSpace(raw)
+		if _, dup := seen[id]; dup {
+			e.emitQueueError("queue reorder lists an item more than once")
+			return
+		}
+		it, ok := byID[id]
+		if !ok {
+			e.emitQueueError(fmt.Sprintf("queued item %q is not in the queue", id))
+			return
+		}
+		seen[id] = struct{}{}
+		next = append(next, it)
+	}
+	e.pendingUserInputs = next
+	e.emitInputQueued()
+}
+
+// handleInputQueueSendNow promotes one queued item out of the FIFO.
+//
+// Busy: the item takes the pending-steer slot handleSteer fills, so it
+// lands at the next safe boundary with the usual TurnSteered
+// acknowledgement — or, if the turn ends first, falls back to the next
+// turn via fallbackSteerToQueue. A composer steer already waiting keeps
+// the slot: replacing it would drop that steer silently, so the op fails
+// in place and the item keeps its queue position.
+//
+// Idle: the item starts as a turn now, under the same guards as the FIFO
+// drain (startNextPendingUserInput).
+//
+// Removing the item from pendingUserInputs is the claim. Ops and the FIFO
+// drain are serialized on Run, so whichever runs first owns the item; a
+// send-now for an id that already left the queue is an error, never a
+// second delivery.
+func (e *Engine) handleInputQueueSendNow(ctx context.Context, op protocol.InputQueueSendNow) {
+	id := strings.TrimSpace(op.ID)
+	if id == "" {
+		e.emitQueueError("queue send now needs an id")
+		return
+	}
+	idx := -1
+	for i := range e.pendingUserInputs {
+		if e.pendingUserInputs[i].id == id {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		e.emitQueueError(fmt.Sprintf("queued item %q is not in the queue", id))
+		return
+	}
+	item := e.pendingUserInputs[idx]
+	if e.turnActive() {
+		if e.hasPendingSteer() {
+			e.emitQueueError("a steer is already waiting for this turn; try Send now again once it lands")
+			return
+		}
+		e.pendingUserInputs = append(e.pendingUserInputs[:idx], e.pendingUserInputs[idx+1:]...)
+		if len(e.pendingUserInputs) == 0 {
+			e.pendingUserInputs = nil
+		}
+		e.pendingSteerMu.Lock()
+		e.pendingSteer = &pendingSteer{
+			text:         item.text,
+			display:      item.display,
+			images:       append([]protocol.ImageAttachment(nil), item.images...),
+			targetTurnID: e.activeTurnID,
+		}
+		e.pendingSteerMu.Unlock()
+		e.emitInputQueued()
+		return
+	}
+	if e.prov == nil {
+		e.emitQueueError("no model selected — use /provider <anthropic|openai|xai|google|kimi|deepseek|echo> [model]")
+		return
+	}
+	if e.rejectUserInputIfBudgetExhausted() {
+		return
+	}
+	e.pendingUserInputs = append(e.pendingUserInputs[:idx], e.pendingUserInputs[idx+1:]...)
+	if len(e.pendingUserInputs) == 0 {
+		e.pendingUserInputs = nil
+	}
+	e.emitInputQueued()
+	e.startTurnShown(ctx, item.text, item.display, item.images)
 }
 
 // drainIdleFollowups starts at most one follow-up turn when idle: preferred
@@ -369,7 +560,7 @@ func (e *Engine) enqueueUserInput(op protocol.UserInput) {
 func (e *Engine) drainIdleFollowups(ctx context.Context) {
 	// Promote deferred steer→queue items before draining the user-input FIFO.
 	if item := e.takeSteerQueueFallback(); item != nil {
-		e.enqueueUserInput(protocol.UserInput{Text: item.text, Images: item.images})
+		e.enqueuePrepared(protocol.UserInput{Text: item.text, Images: item.images}, item.display)
 	}
 	if e.startNextPendingUserInput(ctx) {
 		return
@@ -393,7 +584,11 @@ func (e *Engine) startNextPendingUserInput(ctx context.Context) bool {
 	}
 	if e.sessionBudget != nil && e.sessionBudget.Exhausted() {
 		// Drop queued input; surface the envelope stop once.
+		had := len(e.pendingUserInputs) > 0
 		e.pendingUserInputs = nil
+		if had {
+			e.emitInputQueued()
+		}
 		_ = e.rejectUserInputIfBudgetExhausted()
 		return false
 	}
@@ -402,11 +597,16 @@ func (e *Engine) startNextPendingUserInput(ctx context.Context) bool {
 	if len(e.pendingUserInputs) == 0 {
 		e.pendingUserInputs = nil
 	}
-	e.startTurn(ctx, item.text, item.images)
+	e.emitInputQueued()
+	e.startTurnShown(ctx, item.text, item.display, item.images)
 	return true
 }
 
 func (e *Engine) startTurn(ctx context.Context, text string, images []protocol.ImageAttachment) {
+	e.startTurnShown(ctx, text, "", images)
+}
+
+func (e *Engine) startTurnShown(ctx context.Context, text, display string, images []protocol.ImageAttachment) {
 	// Mint turn ID only after input acceptance (provider present, no active turn).
 	turnID := rand.Text()
 	var turnCtx context.Context
@@ -425,20 +625,25 @@ func (e *Engine) startTurn(ctx context.Context, text string, images []protocol.I
 	go func() {
 		defer close(done)
 		defer cancel()
-		e.runTurn(turnCtx, text, images, turnID, finishing)
+		e.runTurn(turnCtx, text, display, images, turnID, finishing)
 	}()
 }
 
 // maybeTitleSession emits SessionTitled once from the first non-empty user text.
+// titleMu covers the titled read/write: a composer shell on the Run goroutine
+// and a model turn on the turn worker can both title the first prompt.
 func (e *Engine) maybeTitleSession(text string) {
-	if e.titled {
-		return
-	}
 	title := sessionTitleFromText(text)
 	if title == "" {
 		return
 	}
+	e.titleMu.Lock()
+	if e.titled {
+		e.titleMu.Unlock()
+		return
+	}
 	e.titled = true
+	e.titleMu.Unlock()
 	e.emit(protocol.SessionTitled{Correlation: e.sessionCorr(), Title: title})
 }
 
@@ -484,7 +689,7 @@ func sessionTitleFromText(text string) string {
 // provider-request ID and attempt number (retries included). finishing is
 // closed exactly once immediately before the terminal TurnCompleted emission
 // so Run can join the worker before the next op.
-func (e *Engine) runTurn(ctx context.Context, text string, images []protocol.ImageAttachment, turnID string, finishing chan struct{}) {
+func (e *Engine) runTurn(ctx context.Context, text, display string, images []protocol.ImageAttachment, turnID string, finishing chan struct{}) {
 	turnCorr := e.baseCorr()
 	turnCorr.TurnID = turnID
 	e.checkpoints.BeginTurn(turnID)
@@ -507,8 +712,12 @@ func (e *Engine) runTurn(ctx context.Context, text string, images []protocol.Ima
 	e.sessionBudgetStopKind = ""
 	e.sessionBudgetStopMsg = ""
 	persisted := e.persistImages(images)
-	e.emit(protocol.UserMessage{Correlation: turnCorr, Text: text, Images: persisted})
-	e.maybeTitleSession(text)
+	shown := text
+	if strings.TrimSpace(display) != "" {
+		shown = display
+	}
+	e.emit(protocol.UserMessage{Correlation: turnCorr, Text: shown, Images: persisted})
+	e.maybeTitleSession(shown)
 	e.emit(protocol.TurnStarted{Correlation: turnCorr})
 	e.fireLifecycle(turnCorr, permission.HookEventTurnStart, "", "", "start", "")
 	e.messages = append(e.messages, provider.Message{
@@ -1182,6 +1391,7 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 			Files:         e.files,
 			SessionID:     e.opts.SessionID,
 			RootSessionID: e.rootSessionID(),
+			MemoryMode:    e.MemoryMode(),
 			NotifyArtifact: func(op string, payload any) {
 				if e.opts.ProjectArtifact == nil {
 					return
@@ -1939,13 +2149,30 @@ func (e *Engine) toolNames() string {
 // (shared with webfetch). Bash OS network stays all-or-nothing via NetworkEnabled;
 // per-host filtering is application-layer preflight only.
 func (e *Engine) bashSandboxPolicy() sandbox.Policy {
+	if e == nil {
+		return sandbox.Policy{}
+	}
+	return e.BashSandboxPolicy(e.opts.WorkDir)
+}
+
+// BashSandboxPolicy compiles the live permission layers for an interactive
+// shell whose workspace root is workDir. An empty workDir uses the engine
+// workdir. Deny paths expand under that directory, and plan/phase hard-denies
+// are included. Bash and the web terminal both use this helper.
+func (e *Engine) BashSandboxPolicy(workDir string) sandbox.Policy {
+	if e == nil {
+		return sandbox.Policy{}
+	}
+	if strings.TrimSpace(workDir) == "" {
+		workDir = e.opts.WorkDir
+	}
 	mode := sandbox.ResolveMode(e.opts.SandboxMode)
 	var p sandbox.Policy
 	if e.perms == nil {
 		// No permission service: host networking on (Policy.NoNetwork zero value).
-		p = sandbox.Policy{Mode: mode, WorkDir: e.opts.WorkDir}
+		p = sandbox.Policy{Mode: mode, WorkDir: workDir}
 	} else {
-		p = e.perms.CompileSandbox(mode, e.opts.WorkDir)
+		p = e.perms.CompileSandbox(mode, workDir)
 	}
 	p.NetworkAllow = sandbox.CloneNetworkAllow(e.opts.NetworkAllow)
 	p.AllowDegrade = e.opts.SandboxAllowDegrade

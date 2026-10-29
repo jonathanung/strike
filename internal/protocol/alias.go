@@ -138,6 +138,10 @@ type (
 	QuestionReply           = pub.QuestionReply
 	Interrupt               = pub.Interrupt
 	Steer                   = pub.Steer
+	InputQueueEdit          = pub.InputQueueEdit
+	InputQueueCancel        = pub.InputQueueCancel
+	InputQueueReorder       = pub.InputQueueReorder
+	InputQueueSendNow       = pub.InputQueueSendNow
 	SelectModel             = pub.SelectModel
 	SelectAgent             = pub.SelectAgent
 	SetEffort               = pub.SetEffort
@@ -185,6 +189,8 @@ type (
 	QuestionAsked           = pub.QuestionAsked
 	QuestionResolved        = pub.QuestionResolved
 	TurnSteered             = pub.TurnSteered
+	InputQueueItem          = pub.InputQueueItem
+	InputQueued             = pub.InputQueued
 	TurnCompleted           = pub.TurnCompleted
 	TurnFileChange          = pub.TurnFileChange
 	VerificationStarted     = pub.VerificationStarted
@@ -442,7 +448,51 @@ const (
 	SteerModeBoundary       = pub.SteerModeBoundary
 	SteerModeCancelRestart  = pub.SteerModeCancelRestart
 	SteerModeQueuedFallback = pub.SteerModeQueuedFallback
+
+	// Session status vocabulary (web UI #1263). Not transcript events.
+	StatusIdle         = pub.StatusIdle
+	StatusRunning      = pub.StatusRunning
+	StatusWaiting      = pub.StatusWaiting
+	StatusBlocked      = pub.StatusBlocked
+	StatusFailed       = pub.StatusFailed
+	StatusDone         = pub.StatusDone
+	StatusStopped      = pub.StatusStopped
+	StatusDisconnected = pub.StatusDisconnected
+
+	HeartbeatIntervalMs = pub.HeartbeatIntervalMs
+	HeartbeatStaleMs    = pub.HeartbeatStaleMs
+	StatusChipIdleTone  = pub.StatusChipIdleTone
 )
+
+// Session status board (#1263).
+type (
+	SessionStatus   = pub.SessionStatus
+	LiveStatusInput = pub.LiveStatusInput
+)
+
+// NormalizeStatus maps a wire or UI string onto a canonical status id.
+func NormalizeStatus(raw string) string { return pub.NormalizeStatus(raw) }
+
+// KnownStatus reports whether raw is a canonical id or a documented alias.
+func KnownStatus(raw string) (string, bool) { return pub.KnownStatus(raw) }
+
+// ClassifyLive maps one live root onto a status id.
+func ClassifyLive(in LiveStatusInput) string { return pub.ClassifyLive(in) }
+
+// NormalizeStop maps a turn stopReason onto failed, stopped, or "".
+func NormalizeStop(reason string) string { return pub.NormalizeStop(reason) }
+
+// AggregateGateway folds session rows into the gateway chip id.
+func AggregateGateway(rows []SessionStatus) string { return pub.AggregateGateway(rows) }
+
+// StatusIDs is the canonical status id list.
+func StatusIDs() []string { return pub.StatusIDs() }
+
+// StatusLabel is the short word for a status id.
+func StatusLabel(id string) string { return pub.StatusLabel(id) }
+
+// StatusTone is the CSS variable for a status id.
+func StatusTone(id string) string { return pub.StatusTone(id) }
 
 // Session lifecycle contract types (#1038).
 type (
