@@ -28,13 +28,13 @@ pub fn decisions() -> &'static [DecisionChoice] {
             id: "always",
             label: "Allow session",
             key: "2",
-            detail: "Wire value always. Remembered for this session only.",
+            detail: "Remembered for this session only.",
         },
         DecisionChoice {
             id: "project",
             label: "Allow project",
             key: "3",
-            detail: "Appends an allow rule to the project config.",
+            detail: "Remembered for future sessions in this workspace.",
         },
         DecisionChoice {
             id: "reject",
@@ -233,6 +233,62 @@ pub struct Ask {
     pub patterns: Vec<String>,
     pub always: Vec<String>,
     pub preview: Preview,
+    /// Working directory the tool call runs in, stamped by the daemon on
+    /// the ask payload (#1507). Empty when the daemon did not send it —
+    /// the card then hides the line instead of guessing.
+    pub work_dir: String,
+    /// File a project grant appends its rule to, stamped by the daemon
+    /// (#1507). Empty when project grants are not persisted to disk.
+    pub project_rule_path: String,
+}
+
+impl Ask {
+    /// The pattern set a session or project grant will remember. Matches
+    /// the permission service: Always when non-empty, otherwise Patterns.
+    pub fn remembered_patterns(&self) -> Vec<String> {
+        if self.always.is_empty() {
+            self.patterns.clone()
+        } else {
+            self.always.clone()
+        }
+    }
+
+    /// The remembered rules in the shape they are stored: one
+    /// "permission pattern" entry per remembered pattern.
+    pub fn remembered_rules(&self) -> String {
+        self.remembered_patterns()
+            .iter()
+            .map(|pattern| format!("{} {}", self.permission, pattern))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
+    /// One-line plain-language consequence for a decision id, built only
+    /// from facts the daemon stamped on this ask (#1507). Shown on the
+    /// card next to the scope buttons, before the person chooses.
+    pub fn consequence(&self, decision: &str) -> String {
+        let rules = self.remembered_rules();
+        match decision {
+            "once" => "Runs this one call now. Nothing is remembered.".into(),
+            "always" => format!(
+                "Remembers {rules} for this session only. Not written to the project config."
+            ),
+            "project" => {
+                if self.project_rule_path.is_empty() {
+                    format!(
+                        "Remembers {rules} for future sessions in this workspace. This gateway does not save project rules to a file."
+                    )
+                } else {
+                    format!(
+                        "Remembers {rules} for future sessions in this workspace. Stored in {} — remove it any time under Rules and audit.",
+                        self.project_rule_path
+                    )
+                }
+            }
+            "reject" => "Stops this call. Nothing runs and nothing is remembered.".into(),
+            _ => String::new(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -305,6 +361,8 @@ fn parse_ask(data: &Value) -> Option<Ask> {
         patterns,
         always,
         preview,
+        work_dir: text(data, "workDir").unwrap_or_default(),
+        project_rule_path: text(data, "projectRulePath").unwrap_or_default(),
     })
 }
 
@@ -563,6 +621,109 @@ mod tests {
         assert!(matches!(notes_from_envelope(mode).as_slice(), [PermNote::Mode(m)] if m == "yolo"));
         assert!(notes_from_envelope(r#"{"type":"permission.mode","data":{"mode":"trust"}}"#).is_empty());
         assert!(notes_from_envelope("not-json").is_empty());
+    }
+
+    #[test]
+    fn ask_facts_parse_from_the_payload() {
+        let raw = r#"{"type":"permission.asked","data":{"requestId":"p9","permission":"bash","patterns":["ls -la"],"always":["ls *"],"workDir":"/work/project","projectRulePath":"/work/project/.strike/config"}}"#;
+        let notes = notes_from_envelope(raw);
+        let PermNote::Ask(ask) = &notes[0] else {
+            panic!("notes = {notes:?}");
+        };
+        assert_eq!(ask.work_dir, "/work/project");
+        assert_eq!(ask.project_rule_path, "/work/project/.strike/config");
+
+        // Older daemons send neither field: both stay empty and the card
+        // hides the lines rather than guessing.
+        let bare = r#"{"type":"permission.asked","data":{"requestId":"p10","permission":"bash","patterns":["ls"]}}"#;
+        let notes = notes_from_envelope(bare);
+        let PermNote::Ask(ask) = &notes[0] else {
+            panic!("notes = {notes:?}");
+        };
+        assert_eq!(ask.work_dir, "");
+        assert_eq!(ask.project_rule_path, "");
+    }
+
+    #[test]
+    fn remembered_patterns_prefer_always_then_patterns() {
+        let mut ask = Ask {
+            request_id: "p1".into(),
+            permission: "bash".into(),
+            patterns: vec!["ls -la".into()],
+            always: vec!["ls *".into()],
+            preview: Preview {
+                heading: String::new(),
+                command: String::new(),
+                removed: Vec::new(),
+                added: Vec::new(),
+                truncated: false,
+            },
+            work_dir: "/work/project".into(),
+            project_rule_path: "/work/project/.strike/config".into(),
+        };
+        assert_eq!(ask.remembered_patterns(), vec!["ls *".to_string()]);
+        assert_eq!(ask.remembered_rules(), "bash ls *");
+        ask.always.clear();
+        assert_eq!(ask.remembered_patterns(), vec!["ls -la".to_string()]);
+        assert_eq!(ask.remembered_rules(), "bash ls -la");
+    }
+
+    #[test]
+    fn consequence_lines_state_scope_pattern_and_store() {
+        let ask = Ask {
+            request_id: "p1".into(),
+            permission: "bash".into(),
+            patterns: vec!["ls -la".into()],
+            always: vec!["ls *".into()],
+            preview: Preview {
+                heading: String::new(),
+                command: String::new(),
+                removed: Vec::new(),
+                added: Vec::new(),
+                truncated: false,
+            },
+            work_dir: "/work/project".into(),
+            project_rule_path: "/work/project/.strike/config".into(),
+        };
+        assert_eq!(
+            ask.consequence("once"),
+            "Runs this one call now. Nothing is remembered."
+        );
+        assert_eq!(
+            ask.consequence("always"),
+            "Remembers bash ls * for this session only. Not written to the project config."
+        );
+        assert_eq!(
+            ask.consequence("project"),
+            "Remembers bash ls * for future sessions in this workspace. Stored in /work/project/.strike/config — remove it any time under Rules and audit."
+        );
+        assert_eq!(
+            ask.consequence("reject"),
+            "Stops this call. Nothing runs and nothing is remembered."
+        );
+        assert_eq!(ask.consequence("bogus"), "");
+    }
+
+    #[test]
+    fn project_consequence_without_a_store_path_says_so() {
+        let ask = Ask {
+            request_id: "p1".into(),
+            permission: "edit".into(),
+            patterns: vec!["a.go".into()],
+            always: vec!["*".into()],
+            preview: Preview {
+                heading: String::new(),
+                command: String::new(),
+                removed: Vec::new(),
+                added: Vec::new(),
+                truncated: false,
+            },
+            work_dir: "/work/project".into(),
+            project_rule_path: String::new(),
+        };
+        let line = ask.consequence("project");
+        assert!(line.contains("edit *"), "{line}");
+        assert!(line.contains("does not save project rules to a file"), "{line}");
     }
 
     #[test]

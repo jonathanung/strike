@@ -206,6 +206,7 @@ func (e *Engine) resumeChild(ctx context.Context, req tool.TaskResumeRequest) (t
 		Hooks:                      e.opts.Hooks,
 		HookRules:                  e.opts.HookRules,
 		PersistProjectRule:         e.opts.PersistProjectRule,
+		ProjectRulePath:            e.opts.ProjectRulePath,
 		DangerouslySkipPermissions: e.opts.DangerouslySkipPermissions,
 		DefaultChildBudget:         e.opts.DefaultChildBudget,
 		DelegationPolicy:           e.opts.DelegationPolicy,

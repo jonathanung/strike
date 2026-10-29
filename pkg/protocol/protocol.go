@@ -1273,6 +1273,14 @@ type PermissionAsked struct {
 	// Empty means the grant uses Patterns. Recorded for session resume.
 	Always   []string        `json:"always,omitempty"`
 	Metadata json.RawMessage `json:"metadata,omitempty"`
+	// WorkDir is the resolved working directory the tool call runs in,
+	// stamped by the permission service from the owning engine so the
+	// decider can see where the action happens. Empty when unknown.
+	WorkDir string `json:"workDir,omitempty"`
+	// ProjectRulePath is the file a DecisionProject grant appends the
+	// remembered rule to. Empty when this gateway does not persist
+	// project grants to disk.
+	ProjectRulePath string `json:"projectRulePath,omitempty"`
 }
 
 type PermissionResolved struct {

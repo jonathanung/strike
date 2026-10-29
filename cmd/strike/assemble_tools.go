@@ -969,6 +969,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			PersistProjectRule: func(rule permission.Rule) error {
 				return config.AppendProjectPermission(launchDir, rule)
 			},
+			ProjectRulePath: config.ProjectPath(launchDir),
 			PersistSessionMeta: func(m protocol.SessionMeta) error {
 				_, err := session.UpdateMeta(sessionDir, sid, func(meta *session.Meta) {
 					if m.PRURL != "" {
