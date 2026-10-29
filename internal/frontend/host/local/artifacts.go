@@ -112,6 +112,7 @@ func toHostArtifact(a artifact.Artifact) host.Artifact {
 		OwnerRoot:    a.OwnerRoot,
 		CreatedAt:    a.CreatedAt,
 		UpdatedAt:    a.UpdatedAt,
+		Versions:     append([]int(nil), a.VersionList()...),
 	}
 	if a.ExpiresAt != nil {
 		t := *a.ExpiresAt

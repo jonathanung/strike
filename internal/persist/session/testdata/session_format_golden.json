@@ -1,0 +1,5569 @@
+{
+  "logSchemaVersion": 1,
+  "headerType": "session.header",
+  "envelope": [
+    {
+      "name": "type",
+      "type": "string"
+    },
+    {
+      "name": "time",
+      "type": "time"
+    },
+    {
+      "name": "v",
+      "type": "string",
+      "omitEmpty": true
+    },
+    {
+      "name": "data",
+      "type": "raw"
+    }
+  ],
+  "header": [
+    {
+      "name": "type",
+      "type": "string"
+    },
+    {
+      "name": "schemaVersion",
+      "type": "number"
+    },
+    {
+      "name": "time",
+      "type": "time"
+    }
+  ],
+  "sidecar": [
+    {
+      "name": "projectKey",
+      "type": "string",
+      "omitEmpty": true
+    },
+    {
+      "name": "sessionId",
+      "type": "string",
+      "omitEmpty": true
+    },
+    {
+      "name": "model",
+      "type": "string",
+      "omitEmpty": true
+    },
+    {
+      "name": "title",
+      "type": "string",
+      "omitEmpty": true
+    },
+    {
+      "name": "parentSessionId",
+      "type": "string",
+      "omitEmpty": true
+    },
+    {
+      "name": "leadSessionId",
+      "type": "string",
+      "omitEmpty": true
+    },
+    {
+      "name": "forkedFrom",
+      "type": "string",
+      "omitEmpty": true
+    },
+    {
+      "name": "workspaceId",
+      "type": "string",
+      "omitEmpty": true
+    },
+    {
+      "name": "worktreePath",
+      "type": "string",
+      "omitEmpty": true
+    },
+    {
+      "name": "worktreeBranch",
+      "type": "string",
+      "omitEmpty": true
+    },
+    {
+      "name": "createdAt",
+      "type": "string",
+      "omitEmpty": true
+    },
+    {
+      "name": "prUrl",
+      "type": "string",
+      "omitEmpty": true
+    },
+    {
+      "name": "prNumber",
+      "type": "number",
+      "omitEmpty": true
+    },
+    {
+      "name": "prState",
+      "type": "string",
+      "omitEmpty": true
+    },
+    {
+      "name": "prUpdatedAt",
+      "type": "string",
+      "omitEmpty": true
+    },
+    {
+      "name": "memoryMode",
+      "type": "string",
+      "omitEmpty": true
+    }
+  ],
+  "events": [
+    {
+      "type": "user.message",
+      "go": "UserMessage",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "text",
+          "type": "string"
+        },
+        {
+          "name": "images",
+          "type": "array",
+          "omitEmpty": true,
+          "elem": "object",
+          "fields": [
+            {
+              "name": "mime",
+              "type": "string"
+            },
+            {
+              "name": "data",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "ref",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "sha256",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "bytes",
+              "type": "number",
+              "omitEmpty": true
+            },
+            {
+              "name": "kind",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "name",
+              "type": "string",
+              "omitEmpty": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "session.titled",
+      "go": "SessionTitled",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "title",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "type": "turn.started",
+      "go": "TurnStarted",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        }
+      ]
+    },
+    {
+      "type": "text.delta",
+      "go": "TextDelta",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "text",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "type": "reasoning.delta",
+      "go": "ReasoningDelta",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "text",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "type": "tool.begin",
+      "go": "ToolCallBegin",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "callId",
+          "type": "string"
+        },
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "args",
+          "type": "raw"
+        }
+      ]
+    },
+    {
+      "type": "tool.end",
+      "go": "ToolCallEnd",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "callId",
+          "type": "string"
+        },
+        {
+          "name": "title",
+          "type": "string"
+        },
+        {
+          "name": "output",
+          "type": "string"
+        },
+        {
+          "name": "isError",
+          "type": "bool",
+          "omitEmpty": true
+        },
+        {
+          "name": "errorCode",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "metadata",
+          "type": "raw",
+          "omitEmpty": true
+        }
+      ]
+    },
+    {
+      "type": "tool.output",
+      "go": "ToolCallOutput",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "callId",
+          "type": "string"
+        },
+        {
+          "name": "data",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "type": "process.started",
+      "go": "ProcessStarted",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "processId",
+          "type": "string"
+        },
+        {
+          "name": "callId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "argv",
+          "type": "array",
+          "elem": "string"
+        },
+        {
+          "name": "cwd",
+          "type": "string",
+          "omitEmpty": true
+        }
+      ]
+    },
+    {
+      "type": "process.output",
+      "go": "ProcessOutput",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "processId",
+          "type": "string"
+        },
+        {
+          "name": "stream",
+          "type": "string"
+        },
+        {
+          "name": "data",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "type": "process.exited",
+      "go": "ProcessExited",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "processId",
+          "type": "string"
+        },
+        {
+          "name": "exitCode",
+          "type": "number"
+        },
+        {
+          "name": "status",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "type": "permission.asked",
+      "go": "PermissionAsked",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "requestId",
+          "type": "string"
+        },
+        {
+          "name": "permission",
+          "type": "string"
+        },
+        {
+          "name": "patterns",
+          "type": "array",
+          "elem": "string"
+        },
+        {
+          "name": "always",
+          "type": "array",
+          "omitEmpty": true,
+          "elem": "string"
+        },
+        {
+          "name": "metadata",
+          "type": "raw",
+          "omitEmpty": true
+        },
+        {
+          "name": "workDir",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "projectRulePath",
+          "type": "string",
+          "omitEmpty": true
+        }
+      ]
+    },
+    {
+      "type": "permission.resolved",
+      "go": "PermissionResolved",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "requestId",
+          "type": "string"
+        },
+        {
+          "name": "decision",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "type": "permission.decided",
+      "go": "PermissionDecided",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "requestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "permission",
+          "type": "string"
+        },
+        {
+          "name": "patterns",
+          "type": "array",
+          "omitEmpty": true,
+          "elem": "string"
+        },
+        {
+          "name": "action",
+          "type": "string"
+        },
+        {
+          "name": "decision",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "layer",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "rulePermission",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "rulePattern",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "ruleAction",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "evalPath",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "factSummary",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "chainId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "chainRule",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "chainSummary",
+          "type": "string",
+          "omitEmpty": true
+        }
+      ]
+    },
+    {
+      "type": "admission.decided",
+      "go": "AdmissionDecided",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "surface",
+          "type": "string"
+        },
+        {
+          "name": "target",
+          "type": "string"
+        },
+        {
+          "name": "action",
+          "type": "string"
+        },
+        {
+          "name": "reason",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "preset",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "findings",
+          "type": "array",
+          "omitEmpty": true,
+          "elem": "string"
+        }
+      ]
+    },
+    {
+      "type": "question.asked",
+      "go": "QuestionAsked",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "requestId",
+          "type": "string"
+        },
+        {
+          "name": "questions",
+          "type": "array",
+          "elem": "object",
+          "fields": [
+            {
+              "name": "id",
+              "type": "string"
+            },
+            {
+              "name": "header",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "question",
+              "type": "string"
+            },
+            {
+              "name": "options",
+              "type": "array",
+              "omitEmpty": true,
+              "elem": "object",
+              "fields": [
+                {
+                  "name": "label",
+                  "type": "string"
+                },
+                {
+                  "name": "description",
+                  "type": "string",
+                  "omitEmpty": true
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "question.resolved",
+      "go": "QuestionResolved",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "requestId",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "type": "turn.steered",
+      "go": "TurnSteered",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "text",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "mode",
+          "type": "string"
+        },
+        {
+          "name": "targetTurnId",
+          "type": "string",
+          "omitEmpty": true
+        }
+      ]
+    },
+    {
+      "type": "input.queued",
+      "go": "InputQueued",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "items",
+          "type": "array",
+          "elem": "object",
+          "fields": [
+            {
+              "name": "id",
+              "type": "string"
+            },
+            {
+              "name": "text",
+              "type": "string",
+              "omitEmpty": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "turn.completed",
+      "go": "TurnCompleted",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "stopReason",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "files",
+          "type": "array",
+          "omitEmpty": true,
+          "elem": "object",
+          "fields": [
+            {
+              "name": "path",
+              "type": "string"
+            },
+            {
+              "name": "kind",
+              "type": "string"
+            }
+          ]
+        },
+        {
+          "name": "checkpointSkipped",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "uncovered",
+          "type": "array",
+          "omitEmpty": true,
+          "elem": "string"
+        },
+        {
+          "name": "verification",
+          "type": "object",
+          "omitEmpty": true,
+          "fields": [
+            {
+              "name": "passed",
+              "type": "bool"
+            },
+            {
+              "name": "claimed",
+              "type": "bool"
+            },
+            {
+              "name": "verified",
+              "type": "bool"
+            },
+            {
+              "name": "checks",
+              "type": "array",
+              "elem": "object",
+              "fields": [
+                {
+                  "name": "name",
+                  "type": "string",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "kind",
+                  "type": "string"
+                },
+                {
+                  "name": "value",
+                  "type": "string",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "passed",
+                  "type": "bool"
+                },
+                {
+                  "name": "exitCode",
+                  "type": "number",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "output",
+                  "type": "string",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "error",
+                  "type": "string",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "durationMs",
+                  "type": "number",
+                  "omitEmpty": true
+                }
+              ]
+            },
+            {
+              "name": "env",
+              "type": "object",
+              "fields": [
+                {
+                  "name": "workDir",
+                  "type": "string",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "sessionId",
+                  "type": "string",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "worktreeId",
+                  "type": "string",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "modelId",
+                  "type": "string",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "startedAt",
+                  "type": "string",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "finishedAt",
+                  "type": "string",
+                  "omitEmpty": true
+                }
+              ]
+            },
+            {
+              "name": "summary",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "durationMs",
+              "type": "number",
+              "omitEmpty": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "verification.started",
+      "go": "VerificationStarted",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "scope",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "gateCount",
+          "type": "number",
+          "omitEmpty": true
+        }
+      ]
+    },
+    {
+      "type": "verification.completed",
+      "go": "VerificationCompleted",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "scope",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "report",
+          "type": "object",
+          "fields": [
+            {
+              "name": "passed",
+              "type": "bool"
+            },
+            {
+              "name": "claimed",
+              "type": "bool"
+            },
+            {
+              "name": "verified",
+              "type": "bool"
+            },
+            {
+              "name": "checks",
+              "type": "array",
+              "elem": "object",
+              "fields": [
+                {
+                  "name": "name",
+                  "type": "string",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "kind",
+                  "type": "string"
+                },
+                {
+                  "name": "value",
+                  "type": "string",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "passed",
+                  "type": "bool"
+                },
+                {
+                  "name": "exitCode",
+                  "type": "number",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "output",
+                  "type": "string",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "error",
+                  "type": "string",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "durationMs",
+                  "type": "number",
+                  "omitEmpty": true
+                }
+              ]
+            },
+            {
+              "name": "env",
+              "type": "object",
+              "fields": [
+                {
+                  "name": "workDir",
+                  "type": "string",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "sessionId",
+                  "type": "string",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "worktreeId",
+                  "type": "string",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "modelId",
+                  "type": "string",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "startedAt",
+                  "type": "string",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "finishedAt",
+                  "type": "string",
+                  "omitEmpty": true
+                }
+              ]
+            },
+            {
+              "name": "summary",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "durationMs",
+              "type": "number",
+              "omitEmpty": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "harness.progress",
+      "go": "HarnessProgress",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "payload",
+          "type": "raw"
+        }
+      ]
+    },
+    {
+      "type": "model.selected",
+      "go": "ModelSelected",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "provider",
+          "type": "string"
+        },
+        {
+          "name": "model",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "type": "agent.selected",
+      "go": "AgentSelected",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "name",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "type": "phase.changed",
+      "go": "PhaseChanged",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "workflow",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "phase",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "index",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "gate",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "source",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "fingerprint",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "status",
+          "type": "string",
+          "omitEmpty": true
+        }
+      ]
+    },
+    {
+      "type": "plan.handoff",
+      "go": "PlanHandoff",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "planId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "planVersion",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "approvalSource",
+          "type": "string"
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "agent",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "legacyText",
+          "type": "string",
+          "omitEmpty": true
+        }
+      ]
+    },
+    {
+      "type": "artifact.updated",
+      "go": "ArtifactUpdated",
+      "fields": [
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "id",
+          "type": "string"
+        },
+        {
+          "name": "type",
+          "type": "string"
+        },
+        {
+          "name": "version",
+          "type": "number"
+        },
+        {
+          "name": "scope",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "op",
+          "type": "string"
+        },
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        }
+      ],
+      "shadowed": [
+        "sessionId"
+      ]
+    },
+    {
+      "type": "ledger.updated",
+      "go": "LedgerUpdated",
+      "fields": [
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "id",
+          "type": "string"
+        },
+        {
+          "name": "kind",
+          "type": "string"
+        },
+        {
+          "name": "status",
+          "type": "string"
+        },
+        {
+          "name": "op",
+          "type": "string"
+        },
+        {
+          "name": "statement",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "reason",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "supersedes",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "supersededBy",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "authorSession",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        }
+      ],
+      "shadowed": [
+        "sessionId"
+      ]
+    },
+    {
+      "type": "phase.grant_approved",
+      "go": "PhaseGrantApproved",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "workflow",
+          "type": "string"
+        },
+        {
+          "name": "phase",
+          "type": "string"
+        },
+        {
+          "name": "index",
+          "type": "number"
+        },
+        {
+          "name": "fingerprint",
+          "type": "string"
+        },
+        {
+          "name": "grants",
+          "type": "array",
+          "elem": "object",
+          "fields": [
+            {
+              "name": "permission",
+              "type": "string"
+            },
+            {
+              "name": "pattern",
+              "type": "string"
+            },
+            {
+              "name": "action",
+              "type": "string"
+            }
+          ]
+        },
+        {
+          "name": "auto",
+          "type": "bool",
+          "omitEmpty": true
+        }
+      ]
+    },
+    {
+      "type": "effort.selected",
+      "go": "EffortSelected",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "level",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "type": "autonomy.selected",
+      "go": "AutonomySelected",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "mode",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "type": "permission.mode",
+      "go": "PermissionModeSelected",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "mode",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "type": "fast.selected",
+      "go": "FastSelected",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "enabled",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "type": "files.invalidated",
+      "go": "FilesInvalidated",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "paths",
+          "type": "array",
+          "elem": "string"
+        },
+        {
+          "name": "reason",
+          "type": "string",
+          "omitEmpty": true
+        }
+      ]
+    },
+    {
+      "type": "path.overlap",
+      "go": "PathOverlap",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "path",
+          "type": "string"
+        },
+        {
+          "name": "policy",
+          "type": "string"
+        },
+        {
+          "name": "blocked",
+          "type": "bool",
+          "omitEmpty": true
+        },
+        {
+          "name": "holders",
+          "type": "array",
+          "omitEmpty": true,
+          "elem": "object",
+          "fields": [
+            {
+              "name": "sessionId",
+              "type": "string"
+            },
+            {
+              "name": "name",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "source",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "mode",
+              "type": "string",
+              "omitEmpty": true
+            }
+          ]
+        },
+        {
+          "name": "warning",
+          "type": "string",
+          "omitEmpty": true
+        }
+      ]
+    },
+    {
+      "type": "engine.error",
+      "go": "EngineError",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "message",
+          "type": "string"
+        },
+        {
+          "name": "code",
+          "type": "string",
+          "omitEmpty": true
+        }
+      ]
+    },
+    {
+      "type": "child.started",
+      "go": "ChildStarted",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "agent",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "prompt",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "routeReason",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "policyReason",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "contextBundle",
+          "type": "object",
+          "omitEmpty": true,
+          "fields": [
+            {
+              "name": "goal",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "acceptance",
+              "type": "array",
+              "omitEmpty": true,
+              "elem": "string"
+            },
+            {
+              "name": "allowedPaths",
+              "type": "array",
+              "omitEmpty": true,
+              "elem": "string"
+            },
+            {
+              "name": "requiredPaths",
+              "type": "array",
+              "omitEmpty": true,
+              "elem": "string"
+            },
+            {
+              "name": "artifacts",
+              "type": "array",
+              "omitEmpty": true,
+              "elem": "object",
+              "fields": [
+                {
+                  "name": "id",
+                  "type": "string"
+                },
+                {
+                  "name": "version",
+                  "type": "number",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "type",
+                  "type": "string",
+                  "omitEmpty": true
+                }
+              ]
+            },
+            {
+              "name": "constraints",
+              "type": "array",
+              "omitEmpty": true,
+              "elem": "string"
+            },
+            {
+              "name": "items",
+              "type": "array",
+              "omitEmpty": true,
+              "elem": "object",
+              "fields": [
+                {
+                  "name": "id",
+                  "type": "string"
+                },
+                {
+                  "name": "kind",
+                  "type": "string",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "title",
+                  "type": "string",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "text",
+                  "type": "string",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "path",
+                  "type": "string",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "artifact",
+                  "type": "object",
+                  "omitEmpty": true,
+                  "fields": [
+                    {
+                      "name": "id",
+                      "type": "string"
+                    },
+                    {
+                      "name": "version",
+                      "type": "number",
+                      "omitEmpty": true
+                    },
+                    {
+                      "name": "type",
+                      "type": "string",
+                      "omitEmpty": true
+                    }
+                  ]
+                },
+                {
+                  "name": "hash",
+                  "type": "string",
+                  "omitEmpty": true
+                }
+              ]
+            },
+            {
+              "name": "filePins",
+              "type": "array",
+              "omitEmpty": true,
+              "elem": "object",
+              "fields": [
+                {
+                  "name": "path",
+                  "type": "string"
+                },
+                {
+                  "name": "hash",
+                  "type": "string",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "text",
+                  "type": "string",
+                  "omitEmpty": true
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "provider",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "model",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "isolation",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "worktreePath",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "baseRevision",
+          "type": "string",
+          "omitEmpty": true
+        }
+      ]
+    },
+    {
+      "type": "child.completed",
+      "go": "ChildCompleted",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "status",
+          "type": "string"
+        },
+        {
+          "name": "summary",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "handoff",
+          "type": "object",
+          "fields": [
+            {
+              "name": "summary",
+              "type": "string"
+            },
+            {
+              "name": "filesChanged",
+              "type": "array",
+              "elem": "string"
+            },
+            {
+              "name": "verification",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "findings",
+              "type": "array",
+              "omitEmpty": true,
+              "elem": "string"
+            },
+            {
+              "name": "blockers",
+              "type": "array",
+              "omitEmpty": true,
+              "elem": "string"
+            },
+            {
+              "name": "recommendedNextAction",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "artifactRefs",
+              "type": "array",
+              "omitEmpty": true,
+              "elem": "object",
+              "fields": [
+                {
+                  "name": "id",
+                  "type": "string"
+                },
+                {
+                  "name": "version",
+                  "type": "number",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "type",
+                  "type": "string",
+                  "omitEmpty": true
+                }
+              ]
+            },
+            {
+              "name": "isolation",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "patch",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "baseRevision",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "worktreePath",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "missingContext",
+              "type": "array",
+              "omitEmpty": true,
+              "elem": "object",
+              "fields": [
+                {
+                  "name": "kind",
+                  "type": "string"
+                },
+                {
+                  "name": "path",
+                  "type": "string",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "question",
+                  "type": "string",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "artifactId",
+                  "type": "string",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "itemId",
+                  "type": "string",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "detail",
+                  "type": "string",
+                  "omitEmpty": true
+                }
+              ]
+            },
+            {
+              "name": "provenance",
+              "type": "array",
+              "omitEmpty": true,
+              "elem": "string"
+            },
+            {
+              "name": "incomplete",
+              "type": "bool",
+              "omitEmpty": true
+            },
+            {
+              "name": "quality",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "sectionTitle",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "sectionBody",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "sectionBodySet",
+              "type": "bool",
+              "omitEmpty": true
+            }
+          ]
+        },
+        {
+          "name": "delegationId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "verification",
+          "type": "object",
+          "omitEmpty": true,
+          "fields": [
+            {
+              "name": "passed",
+              "type": "bool"
+            },
+            {
+              "name": "claimed",
+              "type": "bool"
+            },
+            {
+              "name": "verified",
+              "type": "bool"
+            },
+            {
+              "name": "checks",
+              "type": "array",
+              "elem": "object",
+              "fields": [
+                {
+                  "name": "name",
+                  "type": "string",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "kind",
+                  "type": "string"
+                },
+                {
+                  "name": "value",
+                  "type": "string",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "passed",
+                  "type": "bool"
+                },
+                {
+                  "name": "exitCode",
+                  "type": "number",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "output",
+                  "type": "string",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "error",
+                  "type": "string",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "durationMs",
+                  "type": "number",
+                  "omitEmpty": true
+                }
+              ]
+            },
+            {
+              "name": "env",
+              "type": "object",
+              "fields": [
+                {
+                  "name": "workDir",
+                  "type": "string",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "sessionId",
+                  "type": "string",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "worktreeId",
+                  "type": "string",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "modelId",
+                  "type": "string",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "startedAt",
+                  "type": "string",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "finishedAt",
+                  "type": "string",
+                  "omitEmpty": true
+                }
+              ]
+            },
+            {
+              "name": "summary",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "durationMs",
+              "type": "number",
+              "omitEmpty": true
+            }
+          ]
+        },
+        {
+          "name": "budgetKind",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "finalization",
+          "type": "string",
+          "omitEmpty": true
+        }
+      ]
+    },
+    {
+      "type": "child.escalated",
+      "go": "ChildEscalated",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "kind",
+          "type": "string"
+        },
+        {
+          "name": "reason",
+          "type": "string"
+        },
+        {
+          "name": "action",
+          "type": "string"
+        },
+        {
+          "name": "terminalStatus",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "budget",
+          "type": "object",
+          "omitEmpty": true,
+          "fields": [
+            {
+              "name": "maxWallClockS",
+              "type": "number",
+              "omitEmpty": true
+            },
+            {
+              "name": "maxTokens",
+              "type": "number",
+              "omitEmpty": true
+            },
+            {
+              "name": "maxCostUsd",
+              "type": "float",
+              "omitEmpty": true
+            },
+            {
+              "name": "maxToolCalls",
+              "type": "number",
+              "omitEmpty": true
+            },
+            {
+              "name": "maxDangerousTools",
+              "type": "number",
+              "omitEmpty": true
+            },
+            {
+              "name": "stallAfterS",
+              "type": "number",
+              "omitEmpty": true
+            },
+            {
+              "name": "loopDetectN",
+              "type": "number",
+              "omitEmpty": true
+            },
+            {
+              "name": "elapsedS",
+              "type": "number",
+              "omitEmpty": true
+            },
+            {
+              "name": "tokensUsed",
+              "type": "number",
+              "omitEmpty": true
+            },
+            {
+              "name": "costUsdUsed",
+              "type": "float",
+              "omitEmpty": true
+            },
+            {
+              "name": "toolCalls",
+              "type": "number",
+              "omitEmpty": true
+            },
+            {
+              "name": "dangerousTools",
+              "type": "number",
+              "omitEmpty": true
+            },
+            {
+              "name": "wallClockRemainingS",
+              "type": "number",
+              "omitEmpty": true
+            },
+            {
+              "name": "tokensRemaining",
+              "type": "number",
+              "omitEmpty": true
+            },
+            {
+              "name": "toolCallsRemaining",
+              "type": "number",
+              "omitEmpty": true
+            },
+            {
+              "name": "dangerousRemaining",
+              "type": "number",
+              "omitEmpty": true
+            },
+            {
+              "name": "costUsdRemaining",
+              "type": "float",
+              "omitEmpty": true
+            },
+            {
+              "name": "stall",
+              "type": "bool",
+              "omitEmpty": true
+            },
+            {
+              "name": "idleS",
+              "type": "number",
+              "omitEmpty": true
+            },
+            {
+              "name": "lastProgressAt",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "stallAfterSEffective",
+              "type": "number",
+              "omitEmpty": true
+            },
+            {
+              "name": "loop",
+              "type": "bool",
+              "omitEmpty": true
+            },
+            {
+              "name": "escalated",
+              "type": "bool",
+              "omitEmpty": true
+            },
+            {
+              "name": "escalateKind",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "escalateReason",
+              "type": "string",
+              "omitEmpty": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "delegation.changed",
+      "go": "DelegationChanged",
+      "fields": [
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "id",
+          "type": "string"
+        },
+        {
+          "name": "state",
+          "type": "string"
+        },
+        {
+          "name": "prev",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "version",
+          "type": "number"
+        },
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "reason",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "ownerSessionId",
+          "type": "string",
+          "omitEmpty": true
+        }
+      ],
+      "shadowed": [
+        "sessionId"
+      ]
+    },
+    {
+      "type": "wait.started",
+      "go": "WaitStarted",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "waitId",
+          "type": "string"
+        },
+        {
+          "name": "events",
+          "type": "array",
+          "elem": "string"
+        },
+        {
+          "name": "targetSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "timeoutMs",
+          "type": "number",
+          "omitEmpty": true
+        }
+      ]
+    },
+    {
+      "type": "wait.resolved",
+      "go": "WaitResolved",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "waitId",
+          "type": "string"
+        },
+        {
+          "name": "outcome",
+          "type": "string"
+        },
+        {
+          "name": "event",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "targetSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "targetName",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "status",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "summary",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "handoff",
+          "type": "object",
+          "omitEmpty": true,
+          "fields": [
+            {
+              "name": "summary",
+              "type": "string"
+            },
+            {
+              "name": "filesChanged",
+              "type": "array",
+              "elem": "string"
+            },
+            {
+              "name": "verification",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "findings",
+              "type": "array",
+              "omitEmpty": true,
+              "elem": "string"
+            },
+            {
+              "name": "blockers",
+              "type": "array",
+              "omitEmpty": true,
+              "elem": "string"
+            },
+            {
+              "name": "recommendedNextAction",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "artifactRefs",
+              "type": "array",
+              "omitEmpty": true,
+              "elem": "object",
+              "fields": [
+                {
+                  "name": "id",
+                  "type": "string"
+                },
+                {
+                  "name": "version",
+                  "type": "number",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "type",
+                  "type": "string",
+                  "omitEmpty": true
+                }
+              ]
+            },
+            {
+              "name": "isolation",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "patch",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "baseRevision",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "worktreePath",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "missingContext",
+              "type": "array",
+              "omitEmpty": true,
+              "elem": "object",
+              "fields": [
+                {
+                  "name": "kind",
+                  "type": "string"
+                },
+                {
+                  "name": "path",
+                  "type": "string",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "question",
+                  "type": "string",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "artifactId",
+                  "type": "string",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "itemId",
+                  "type": "string",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "detail",
+                  "type": "string",
+                  "omitEmpty": true
+                }
+              ]
+            },
+            {
+              "name": "provenance",
+              "type": "array",
+              "omitEmpty": true,
+              "elem": "string"
+            },
+            {
+              "name": "incomplete",
+              "type": "bool",
+              "omitEmpty": true
+            },
+            {
+              "name": "quality",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "sectionTitle",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "sectionBody",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "sectionBodySet",
+              "type": "bool",
+              "omitEmpty": true
+            }
+          ]
+        },
+        {
+          "name": "hasHandoff",
+          "type": "bool",
+          "omitEmpty": true
+        }
+      ]
+    },
+    {
+      "type": "agent.message",
+      "go": "AgentMessage",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "from",
+          "type": "string"
+        },
+        {
+          "name": "to",
+          "type": "string"
+        },
+        {
+          "name": "body",
+          "type": "string"
+        },
+        {
+          "name": "summary",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "teamId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "messageId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "taskId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "urgency",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "kind",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "requireAck",
+          "type": "bool",
+          "omitEmpty": true
+        },
+        {
+          "name": "inReplyTo",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "escalateTo",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "ackStatus",
+          "type": "string",
+          "omitEmpty": true
+        }
+      ]
+    },
+    {
+      "type": "agent.contract.timeout",
+      "go": "AgentContractTimeout",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "messageId",
+          "type": "string"
+        },
+        {
+          "name": "from",
+          "type": "string"
+        },
+        {
+          "name": "to",
+          "type": "string"
+        },
+        {
+          "name": "taskId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "teamId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "urgency",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "escalateTo",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "detail",
+          "type": "string",
+          "omitEmpty": true
+        }
+      ]
+    },
+    {
+      "type": "team.roster",
+      "go": "TeamRoster",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "leadId",
+          "type": "string"
+        },
+        {
+          "name": "members",
+          "type": "array",
+          "elem": "object",
+          "fields": [
+            {
+              "name": "sessionId",
+              "type": "string"
+            },
+            {
+              "name": "name",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "agent",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "state",
+              "type": "string"
+            },
+            {
+              "name": "parentSessionId",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "depth",
+              "type": "number",
+              "omitEmpty": true
+            },
+            {
+              "name": "startedAt",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "terminalSummary",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "role",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "queuePools",
+              "type": "array",
+              "omitEmpty": true,
+              "elem": "string"
+            },
+            {
+              "name": "queueLabel",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "objective",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "lastAction",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "blockReason",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "filesTouched",
+              "type": "array",
+              "omitEmpty": true,
+              "elem": "string"
+            },
+            {
+              "name": "budget",
+              "type": "object",
+              "omitEmpty": true,
+              "fields": [
+                {
+                  "name": "maxWallClockS",
+                  "type": "number",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "maxTokens",
+                  "type": "number",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "maxCostUsd",
+                  "type": "float",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "maxToolCalls",
+                  "type": "number",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "maxDangerousTools",
+                  "type": "number",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "stallAfterS",
+                  "type": "number",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "loopDetectN",
+                  "type": "number",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "elapsedS",
+                  "type": "number",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "tokensUsed",
+                  "type": "number",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "costUsdUsed",
+                  "type": "float",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "toolCalls",
+                  "type": "number",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "dangerousTools",
+                  "type": "number",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "wallClockRemainingS",
+                  "type": "number",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "tokensRemaining",
+                  "type": "number",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "toolCallsRemaining",
+                  "type": "number",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "dangerousRemaining",
+                  "type": "number",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "costUsdRemaining",
+                  "type": "float",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "stall",
+                  "type": "bool",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "idleS",
+                  "type": "number",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "lastProgressAt",
+                  "type": "string",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "stallAfterSEffective",
+                  "type": "number",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "loop",
+                  "type": "bool",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "escalated",
+                  "type": "bool",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "escalateKind",
+                  "type": "string",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "escalateReason",
+                  "type": "string",
+                  "omitEmpty": true
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "usage.reported",
+      "go": "UsageReported",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "input",
+          "type": "object",
+          "fields": [
+            {
+              "name": "n",
+              "type": "number",
+              "omitEmpty": true
+            },
+            {
+              "name": "known",
+              "type": "bool"
+            }
+          ]
+        },
+        {
+          "name": "output",
+          "type": "object",
+          "fields": [
+            {
+              "name": "n",
+              "type": "number",
+              "omitEmpty": true
+            },
+            {
+              "name": "known",
+              "type": "bool"
+            }
+          ]
+        },
+        {
+          "name": "cacheRead",
+          "type": "object",
+          "fields": [
+            {
+              "name": "n",
+              "type": "number",
+              "omitEmpty": true
+            },
+            {
+              "name": "known",
+              "type": "bool"
+            }
+          ]
+        },
+        {
+          "name": "cacheCreation",
+          "type": "object",
+          "fields": [
+            {
+              "name": "n",
+              "type": "number",
+              "omitEmpty": true
+            },
+            {
+              "name": "known",
+              "type": "bool"
+            }
+          ]
+        },
+        {
+          "name": "used",
+          "type": "object",
+          "fields": [
+            {
+              "name": "n",
+              "type": "number",
+              "omitEmpty": true
+            },
+            {
+              "name": "known",
+              "type": "bool"
+            }
+          ]
+        },
+        {
+          "name": "source",
+          "type": "string",
+          "omitEmpty": true
+        }
+      ]
+    },
+    {
+      "type": "provider.retrying",
+      "go": "ProviderRetrying",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "nextAttempt",
+          "type": "number"
+        },
+        {
+          "name": "delayMs",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "fromProvider",
+          "type": "bool",
+          "omitEmpty": true
+        },
+        {
+          "name": "message",
+          "type": "string",
+          "omitEmpty": true
+        }
+      ]
+    },
+    {
+      "type": "tool.retrying",
+      "go": "ToolRetrying",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "callId",
+          "type": "string"
+        },
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "nextAttempt",
+          "type": "number"
+        },
+        {
+          "name": "delayMs",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "errorCode",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "message",
+          "type": "string",
+          "omitEmpty": true
+        }
+      ]
+    },
+    {
+      "type": "tool.loop_detected",
+      "go": "ToolLoopDetected",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "reason",
+          "type": "string"
+        },
+        {
+          "name": "toolName",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "count",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "message",
+          "type": "string",
+          "omitEmpty": true
+        }
+      ]
+    },
+    {
+      "type": "scheduler.queued",
+      "go": "SchedulerQueued",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "requestId",
+          "type": "string"
+        },
+        {
+          "name": "pools",
+          "type": "array",
+          "elem": "string"
+        },
+        {
+          "name": "label",
+          "type": "string",
+          "omitEmpty": true
+        }
+      ]
+    },
+    {
+      "type": "scheduler.admitted",
+      "go": "SchedulerAdmitted",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "requestId",
+          "type": "string"
+        },
+        {
+          "name": "pools",
+          "type": "array",
+          "elem": "string"
+        },
+        {
+          "name": "label",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "waitMs",
+          "type": "number",
+          "omitEmpty": true
+        }
+      ]
+    },
+    {
+      "type": "scheduler.canceled",
+      "go": "SchedulerCanceled",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "requestId",
+          "type": "string"
+        },
+        {
+          "name": "pools",
+          "type": "array",
+          "elem": "string"
+        },
+        {
+          "name": "label",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "waitMs",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "reason",
+          "type": "string",
+          "omitEmpty": true
+        }
+      ]
+    },
+    {
+      "type": "compaction.started",
+      "go": "CompactionStarted",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "reason",
+          "type": "string"
+        },
+        {
+          "name": "strategy",
+          "type": "string",
+          "omitEmpty": true
+        }
+      ]
+    },
+    {
+      "type": "compaction.completed",
+      "go": "CompactionCompleted",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "reason",
+          "type": "string"
+        },
+        {
+          "name": "strategy",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "removed",
+          "type": "number"
+        },
+        {
+          "name": "kept",
+          "type": "number"
+        },
+        {
+          "name": "summary",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "residue",
+          "type": "object",
+          "omitEmpty": true,
+          "fields": [
+            {
+              "name": "schemaVersion",
+              "type": "string"
+            },
+            {
+              "name": "strategy",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "reason",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "removed",
+              "type": "number",
+              "omitEmpty": true
+            },
+            {
+              "name": "facts",
+              "type": "array",
+              "omitEmpty": true,
+              "elem": "object",
+              "fields": [
+                {
+                  "name": "id",
+                  "type": "string"
+                },
+                {
+                  "name": "kind",
+                  "type": "string"
+                },
+                {
+                  "name": "text",
+                  "type": "string"
+                },
+                {
+                  "name": "confidence",
+                  "type": "string",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "freshness",
+                  "type": "string",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "sourceIds",
+                  "type": "array",
+                  "omitEmpty": true,
+                  "elem": "string"
+                },
+                {
+                  "name": "fileRefs",
+                  "type": "array",
+                  "omitEmpty": true,
+                  "elem": "string"
+                },
+                {
+                  "name": "ledgerId",
+                  "type": "string",
+                  "omitEmpty": true
+                }
+              ]
+            },
+            {
+              "name": "decisions",
+              "type": "array",
+              "omitEmpty": true,
+              "elem": "object",
+              "fields": [
+                {
+                  "name": "id",
+                  "type": "string"
+                },
+                {
+                  "name": "kind",
+                  "type": "string"
+                },
+                {
+                  "name": "text",
+                  "type": "string"
+                },
+                {
+                  "name": "confidence",
+                  "type": "string",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "freshness",
+                  "type": "string",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "sourceIds",
+                  "type": "array",
+                  "omitEmpty": true,
+                  "elem": "string"
+                },
+                {
+                  "name": "fileRefs",
+                  "type": "array",
+                  "omitEmpty": true,
+                  "elem": "string"
+                },
+                {
+                  "name": "ledgerId",
+                  "type": "string",
+                  "omitEmpty": true
+                }
+              ]
+            },
+            {
+              "name": "openQuestions",
+              "type": "array",
+              "omitEmpty": true,
+              "elem": "object",
+              "fields": [
+                {
+                  "name": "id",
+                  "type": "string"
+                },
+                {
+                  "name": "kind",
+                  "type": "string"
+                },
+                {
+                  "name": "text",
+                  "type": "string"
+                },
+                {
+                  "name": "confidence",
+                  "type": "string",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "freshness",
+                  "type": "string",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "sourceIds",
+                  "type": "array",
+                  "omitEmpty": true,
+                  "elem": "string"
+                },
+                {
+                  "name": "fileRefs",
+                  "type": "array",
+                  "omitEmpty": true,
+                  "elem": "string"
+                },
+                {
+                  "name": "ledgerId",
+                  "type": "string",
+                  "omitEmpty": true
+                }
+              ]
+            },
+            {
+              "name": "pinnedKinds",
+              "type": "array",
+              "omitEmpty": true,
+              "elem": "string"
+            },
+            {
+              "name": "summary",
+              "type": "string",
+              "omitEmpty": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "session.meta",
+      "go": "SessionMeta",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "prUrl",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "prNumber",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "prState",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "isolation",
+          "type": "string",
+          "omitEmpty": true
+        }
+      ]
+    },
+    {
+      "type": "session.rewound",
+      "go": "SessionRewound",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "removed",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "restoreFiles",
+          "type": "bool",
+          "omitEmpty": true
+        },
+        {
+          "name": "filesRestored",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "filesSkipped",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "files",
+          "type": "array",
+          "omitEmpty": true,
+          "elem": "string"
+        },
+        {
+          "name": "uncovered",
+          "type": "array",
+          "omitEmpty": true,
+          "elem": "string"
+        }
+      ],
+      "shadowed": [
+        "turnId"
+      ]
+    },
+    {
+      "type": "hook.matched",
+      "go": "HookMatched",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "event",
+          "type": "string"
+        },
+        {
+          "name": "action",
+          "type": "string"
+        },
+        {
+          "name": "matcher",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "tool",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "message",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "callId",
+          "type": "string",
+          "omitEmpty": true
+        }
+      ]
+    },
+    {
+      "type": "prompt.effective",
+      "go": "EffectivePrompt",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "layers",
+          "type": "array",
+          "elem": "object",
+          "fields": [
+            {
+              "name": "kind",
+              "type": "string"
+            },
+            {
+              "name": "source",
+              "type": "string"
+            },
+            {
+              "name": "mode",
+              "type": "string"
+            },
+            {
+              "name": "chars",
+              "type": "number"
+            },
+            {
+              "name": "estTokens",
+              "type": "number",
+              "omitEmpty": true
+            },
+            {
+              "name": "pinned",
+              "type": "bool",
+              "omitEmpty": true
+            },
+            {
+              "name": "preview",
+              "type": "string",
+              "omitEmpty": true
+            }
+          ]
+        },
+        {
+          "name": "systemChars",
+          "type": "number"
+        },
+        {
+          "name": "messageCount",
+          "type": "number"
+        },
+        {
+          "name": "fromLastStream",
+          "type": "bool",
+          "omitEmpty": true
+        },
+        {
+          "name": "attribution",
+          "type": "object",
+          "fields": [
+            {
+              "name": "system",
+              "type": "object",
+              "fields": [
+                {
+                  "name": "n",
+                  "type": "number",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "known",
+                  "type": "bool"
+                }
+              ]
+            },
+            {
+              "name": "tools",
+              "type": "object",
+              "fields": [
+                {
+                  "name": "n",
+                  "type": "number",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "known",
+                  "type": "bool"
+                }
+              ]
+            },
+            {
+              "name": "messages",
+              "type": "object",
+              "fields": [
+                {
+                  "name": "n",
+                  "type": "number",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "known",
+                  "type": "bool"
+                }
+              ]
+            },
+            {
+              "name": "toolResults",
+              "type": "object",
+              "fields": [
+                {
+                  "name": "n",
+                  "type": "number",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "known",
+                  "type": "bool"
+                }
+              ]
+            },
+            {
+              "name": "total",
+              "type": "object",
+              "fields": [
+                {
+                  "name": "n",
+                  "type": "number",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "known",
+                  "type": "bool"
+                }
+              ]
+            },
+            {
+              "name": "source",
+              "type": "string",
+              "omitEmpty": true
+            }
+          ]
+        },
+        {
+          "name": "excludedKinds",
+          "type": "array",
+          "omitEmpty": true,
+          "elem": "string"
+        },
+        {
+          "name": "pinnedKinds",
+          "type": "array",
+          "omitEmpty": true,
+          "elem": "string"
+        },
+        {
+          "name": "shedKinds",
+          "type": "array",
+          "omitEmpty": true,
+          "elem": "string"
+        }
+      ]
+    },
+    {
+      "type": "diagnostic.bundle",
+      "go": "DiagnosticBundle",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "schemaVersion",
+          "type": "string"
+        },
+        {
+          "name": "protocolVersion",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "strikeVersion",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "exportedAt",
+          "type": "time"
+        },
+        {
+          "name": "redacted",
+          "type": "bool"
+        },
+        {
+          "name": "note",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "session",
+          "type": "object",
+          "fields": [
+            {
+              "name": "sessionId",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "parentSessionId",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "rootSessionId",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "depth",
+              "type": "number"
+            },
+            {
+              "name": "isChild",
+              "type": "bool",
+              "omitEmpty": true
+            }
+          ]
+        },
+        {
+          "name": "prompt",
+          "type": "object",
+          "fields": [
+            {
+              "name": "precedence",
+              "type": "array",
+              "elem": "string"
+            },
+            {
+              "name": "layers",
+              "type": "array",
+              "elem": "object",
+              "fields": [
+                {
+                  "name": "kind",
+                  "type": "string"
+                },
+                {
+                  "name": "source",
+                  "type": "string"
+                },
+                {
+                  "name": "mode",
+                  "type": "string"
+                },
+                {
+                  "name": "chars",
+                  "type": "number"
+                },
+                {
+                  "name": "estTokens",
+                  "type": "number",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "pinned",
+                  "type": "bool",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "preview",
+                  "type": "string",
+                  "omitEmpty": true
+                }
+              ]
+            },
+            {
+              "name": "layerCount",
+              "type": "number"
+            },
+            {
+              "name": "systemChars",
+              "type": "number"
+            },
+            {
+              "name": "messageCount",
+              "type": "number"
+            },
+            {
+              "name": "fromLastStream",
+              "type": "bool",
+              "omitEmpty": true
+            },
+            {
+              "name": "attribution",
+              "type": "object",
+              "fields": [
+                {
+                  "name": "system",
+                  "type": "object",
+                  "fields": [
+                    {
+                      "name": "n",
+                      "type": "number",
+                      "omitEmpty": true
+                    },
+                    {
+                      "name": "known",
+                      "type": "bool"
+                    }
+                  ]
+                },
+                {
+                  "name": "tools",
+                  "type": "object",
+                  "fields": [
+                    {
+                      "name": "n",
+                      "type": "number",
+                      "omitEmpty": true
+                    },
+                    {
+                      "name": "known",
+                      "type": "bool"
+                    }
+                  ]
+                },
+                {
+                  "name": "messages",
+                  "type": "object",
+                  "fields": [
+                    {
+                      "name": "n",
+                      "type": "number",
+                      "omitEmpty": true
+                    },
+                    {
+                      "name": "known",
+                      "type": "bool"
+                    }
+                  ]
+                },
+                {
+                  "name": "toolResults",
+                  "type": "object",
+                  "fields": [
+                    {
+                      "name": "n",
+                      "type": "number",
+                      "omitEmpty": true
+                    },
+                    {
+                      "name": "known",
+                      "type": "bool"
+                    }
+                  ]
+                },
+                {
+                  "name": "total",
+                  "type": "object",
+                  "fields": [
+                    {
+                      "name": "n",
+                      "type": "number",
+                      "omitEmpty": true
+                    },
+                    {
+                      "name": "known",
+                      "type": "bool"
+                    }
+                  ]
+                },
+                {
+                  "name": "source",
+                  "type": "string",
+                  "omitEmpty": true
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "config",
+          "type": "object",
+          "fields": [
+            {
+              "name": "provider",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "model",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "agent",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "effort",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "autonomy",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "permissionMode",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "sandbox",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "leanCode",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "fast",
+              "type": "bool",
+              "omitEmpty": true
+            },
+            {
+              "name": "maxTokens",
+              "type": "number",
+              "omitEmpty": true
+            },
+            {
+              "name": "maxChildDepth",
+              "type": "number",
+              "omitEmpty": true
+            },
+            {
+              "name": "contextWindow",
+              "type": "number",
+              "omitEmpty": true
+            },
+            {
+              "name": "turnTimeoutS",
+              "type": "number",
+              "omitEmpty": true
+            },
+            {
+              "name": "workDir",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "projectRoot",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "compaction",
+              "type": "object",
+              "fields": [
+                {
+                  "name": "strategy",
+                  "type": "string",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "model",
+                  "type": "string",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "threshold",
+                  "type": "float",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "buffer",
+                  "type": "number",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "keepUserTurns",
+                  "type": "number",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "pruneProtectTokens",
+                  "type": "number",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "pruneMinimumTokens",
+                  "type": "number",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "pruneKeepUserTurns",
+                  "type": "number",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "pruneProtectTools",
+                  "type": "array",
+                  "omitEmpty": true,
+                  "elem": "string"
+                }
+              ]
+            },
+            {
+              "name": "scheduler",
+              "type": "object",
+              "fields": [
+                {
+                  "name": "limits",
+                  "type": "map",
+                  "omitEmpty": true,
+                  "elem": "number"
+                }
+              ]
+            },
+            {
+              "name": "digests",
+              "type": "map",
+              "omitEmpty": true,
+              "elem": "string"
+            }
+          ]
+        },
+        {
+          "name": "warnings",
+          "type": "array",
+          "omitEmpty": true,
+          "elem": "string"
+        }
+      ]
+    },
+    {
+      "type": "context.fit_warning",
+      "go": "ContextFitWarning",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "estimatedTokens",
+          "type": "number"
+        },
+        {
+          "name": "contextLimit",
+          "type": "number"
+        },
+        {
+          "name": "level",
+          "type": "string"
+        },
+        {
+          "name": "message",
+          "type": "string"
+        },
+        {
+          "name": "source",
+          "type": "string",
+          "omitEmpty": true
+        }
+      ]
+    },
+    {
+      "type": "session.budget_warning",
+      "go": "SessionBudgetWarning",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "level",
+          "type": "string"
+        },
+        {
+          "name": "kind",
+          "type": "string"
+        },
+        {
+          "name": "exhausted",
+          "type": "bool",
+          "omitEmpty": true
+        },
+        {
+          "name": "costUsd",
+          "type": "float",
+          "omitEmpty": true
+        },
+        {
+          "name": "maxCostUsd",
+          "type": "float",
+          "omitEmpty": true
+        },
+        {
+          "name": "tokensUsed",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "maxTokens",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "ratio",
+          "type": "float",
+          "omitEmpty": true
+        },
+        {
+          "name": "message",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "type": "context.controls",
+      "go": "ContextControlsSelected",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "excludedKinds",
+          "type": "array",
+          "omitEmpty": true,
+          "elem": "string"
+        },
+        {
+          "name": "pinnedKinds",
+          "type": "array",
+          "omitEmpty": true,
+          "elem": "string"
+        }
+      ]
+    }
+  ]
+}

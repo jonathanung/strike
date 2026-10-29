@@ -17,14 +17,15 @@ import (
 	"time"
 )
 
-// Workspace is one registered directory. It is not a session folder: sessions
-// do not yet store a workspace id, and activating one does not move the
-// engine's working directory.
+// Workspace is one registered directory. It is not a session folder: a
+// session may record this id, and the engine for that session uses Path.
+// Session folders, when a client has them, only organise chats.
 //
 // Rules is an optional project-rules file inside Path (absolute, after
-// symlink resolution). PermissionMode is an optional session posture name
-// (default, plan, soft-approve, accept-edits, yolo). Neither field is applied
-// to a live engine; they are configuration the host keeps with the directory.
+// symlink resolution). PermissionMode is the starting posture for a new
+// session in this workspace (default, plan, soft-approve, accept-edits,
+// yolo). ExtraRoots are additional directories a delegated child may use
+// as its working directory. The filesystem root is rejected.
 type Workspace struct {
 	ID             string    `json:"id"`
 	Name           string    `json:"name"`
@@ -33,6 +34,7 @@ type Workspace struct {
 	LastOpened     time.Time `json:"lastOpened,omitempty"`
 	Rules          string    `json:"rules,omitempty"`
 	PermissionMode string    `json:"permissionMode,omitempty"`
+	ExtraRoots     []string  `json:"extraRoots,omitempty"`
 }
 
 type state struct {
@@ -46,6 +48,11 @@ type Store struct {
 	path string
 	st   state
 	now  func() time.Time
+	// browse is the picker allowlist (home and the process directory).
+	// Empty and constrainBrowse false keeps Add on "any real directory",
+	// which is what tests and a store opened without ConfigureBrowse need.
+	browse          []string
+	constrainBrowse bool
 }
 
 // DefaultDir returns ~/.strike, the daemon state directory.
@@ -80,6 +87,14 @@ func Open(dir string) (*Store, error) {
 func IDForPath(path string) string {
 	sum := sha256.Sum256([]byte(path))
 	return hex.EncodeToString(sum[:6])
+}
+
+// Path is the registry file. The handler that lists daemon files reports
+// this path and does not read the document into the response.
+func (s *Store) Path() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.path
 }
 
 // List returns workspaces sorted by name, plus the active id.
@@ -119,10 +134,14 @@ func (s *Store) Add(dir, name string) (Workspace, error) {
 			return w, nil
 		}
 	}
+	if s.constrainBrowse && !s.insideBrowseLocked(abs) {
+		return Workspace{}, fmt.Errorf("workspace: %s is outside the allowed roots", abs)
+	}
 	if strings.TrimSpace(name) == "" {
 		name = filepath.Base(abs)
 	}
-	w := Workspace{ID: id, Name: name, Path: abs, AddedAt: s.now().UTC()}
+	now := s.now().UTC()
+	w := Workspace{ID: id, Name: name, Path: abs, AddedAt: now, LastOpened: now}
 	s.st.Workspaces = append(s.st.Workspaces, w)
 	if s.st.ActiveID == "" {
 		s.st.ActiveID = id

@@ -804,6 +804,9 @@ func AppendProjectPermission(workDir string, rule permission.Rule) error {
 	if rule.Pattern == "" {
 		rule.Pattern = "*"
 	}
+	if err := permission.ValidatePattern(rule.Pattern); err != nil {
+		return err
+	}
 	path := ProjectPath(workDir)
 	var cfg Config
 	data, err := os.ReadFile(path)

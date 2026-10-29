@@ -4,13 +4,17 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-leptos = { version = "0.7", features = ["csr"] }
+leptos = { version = "0.8.22", features = ["csr"] }
 gloo-net = "0.6"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+protocol-schema = { path = "protocol-schema" }
 js-sys = "0.3"
+send_wrapper = "0.6"
 wasm-bindgen = "0.2"
-web-sys = { version = "0.3", features = ["DataTransfer", "DragEvent", "Event", "EventSource", "KeyboardEvent", "Location", "MessageEvent", "MouseEvent", "Storage", "SubmitEvent", "Window"] }
+wasm-bindgen-futures = "0.4"
+qrcode = { version = "0.14.1", default-features = false, features = ["svg"] }
+web-sys = { version = "0.3", features = ["Blob", "BlobPropertyBag", "Clipboard", "ClipboardEvent", "CloseEvent", "CssStyleDeclaration", "CustomEvent", "CustomEventInit", "DataTransfer", "Document", "DomRect", "DomRectReadOnly", "DragEvent", "Element", "Event", "EventSource", "EventTarget", "File", "FileList", "FileReader", "History", "HtmlAnchorElement", "HtmlButtonElement", "HtmlElement", "HtmlHeadElement", "HtmlInputElement", "HtmlTextAreaElement", "HtmlVideoElement", "KeyboardEvent", "Location", "MediaDevices", "MediaQueryList", "MediaStream", "MediaStreamConstraints", "MediaStreamTrack", "MessageEvent", "MouseEvent", "Navigator", "Node", "NodeList", "Notification", "NotificationOptions", "NotificationPermission", "RequestCredentials", "ResizeObserver", "ResizeObserverEntry", "ServiceWorker", "ServiceWorkerContainer", "Storage", "SubmitEvent", "Touch", "TouchEvent", "TouchList", "Url", "VisualViewport", "WebSocket", "Window"] }
 
 [profile.release]
 opt-level = 2

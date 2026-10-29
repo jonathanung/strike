@@ -463,6 +463,29 @@ func TestEmbeddedAssetAndSecurityHeaders(t *testing.T) {
 	}
 }
 
+func TestPNGAssetContentType(t *testing.T) {
+	// PWA manifest icons are PNG files under /assets/; browsers refuse a
+	// manifest icon served with a missing or wrong Content-Type.
+	srv, err := New(Options{
+		SessionDir: t.TempDir(),
+		Static: fstest.MapFS{
+			"index.html":          {Data: []byte(`<title>Strike</title>`)},
+			"assets/icon-192.png": {Data: []byte{0x89, 'P', 'N', 'G'}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/assets/icon-192.png", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET icon = %d", rec.Code)
+	}
+	if got := rec.Header().Get("Content-Type"); got != "image/png" {
+		t.Fatalf("Content-Type = %q, want image/png", got)
+	}
+}
+
 func TestUnauthenticatedLoopbackAPIRoutes(t *testing.T) {
 	srv := testServer(t, t.TempDir(), "")
 	for _, path := range []string{"/v1/bootstrap", "/v1/sessions"} {

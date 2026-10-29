@@ -49,6 +49,34 @@ func TestLiveStatusTracksUsageAndFitWarning(t *testing.T) {
 	if st.ContextUsed != 1500 {
 		t.Fatalf("ContextUsed = %d, want 1500 (keep measured)", st.ContextUsed)
 	}
+	if st.ContextFit != protocol.ContextFitWarn {
+		t.Fatalf("ContextFit = %q, want warn", st.ContextFit)
+	}
+
+	// Measured occupancy back under 80% of the limit retires the warning.
+	live.Publish(protocol.UsageReported{Used: protocol.KnownTokens(1000), Source: protocol.UsageSourceActual})
+	st = live.Status()
+	if st.ContextUsed != 1000 || st.ContextFit != "" {
+		t.Fatalf("after cool usage: used=%d fit=%q, want 1000 and empty fit", st.ContextUsed, st.ContextFit)
+	}
+
+	live.Publish(protocol.ContextFitWarning{
+		EstimatedTokens: 190_000,
+		ContextLimit:    200_000,
+		Level:           protocol.ContextFitCritical,
+		Message:         "full",
+	})
+	live.Publish(protocol.UsageReported{Used: protocol.KnownTokens(190_000), Source: protocol.UsageSourceActual})
+	st = live.Status()
+	if st.ContextFit != protocol.ContextFitCritical || st.ContextUsed != 190_000 {
+		t.Fatalf("critical kept: used=%d fit=%q", st.ContextUsed, st.ContextFit)
+	}
+
+	live.Publish(protocol.CompactionCompleted{Reason: "manual"})
+	st = live.Status()
+	if st.ContextUsed != 0 || st.ContextFit != "" || st.ContextLimit != 200_000 {
+		t.Fatalf("after compact: used=%d fit=%q limit=%d", st.ContextUsed, st.ContextFit, st.ContextLimit)
+	}
 }
 
 func TestLiveOpsPOSTAndStatus(t *testing.T) {
@@ -716,6 +744,27 @@ func TestLiveHubList(t *testing.T) {
 	}
 }
 
+func TestLiveClosedFiresOnClose(t *testing.T) {
+	live := NewLive("r1", "/a", nil, make(chan protocol.Op))
+	select {
+	case <-live.Closed():
+		t.Fatal("Closed() fired before Close")
+	default:
+	}
+	live.Close()
+	select {
+	case <-live.Closed():
+	default:
+		t.Fatal("Closed() did not fire after Close")
+	}
+	live.Close()
+	select {
+	case <-live.Closed():
+	default:
+		t.Fatal("second Close dropped the Closed signal")
+	}
+}
+
 func TestLiveHubClose(t *testing.T) {
 	live := NewLive("r1", "/a", nil, make(chan protocol.Op))
 	hub := NewLiveHub(nil, nil)
@@ -761,6 +810,23 @@ func TestLiveHubCreateAndRemove(t *testing.T) {
 	list := hub.List()
 	if len(list) != 1 || list[0].ID != "r2" {
 		t.Fatalf("list after remove = %v", list)
+	}
+}
+
+func TestLiveHubRemoveInvokesOnRemove(t *testing.T) {
+	live := NewLive("r1", "/a", nil, make(chan protocol.Op))
+	defer live.Close()
+	hub := NewLiveHub(nil, nil)
+	var removed []string
+	hub.SetOnRemove(func(id string) { removed = append(removed, id) })
+	hub.Add("r1", live)
+	hub.Remove("missing")
+	if len(removed) != 0 {
+		t.Fatalf("onRemove fired for a root that was not in the hub: %v", removed)
+	}
+	hub.Remove("r1")
+	if len(removed) != 1 || removed[0] != "r1" {
+		t.Fatalf("onRemove after Remove = %v, want [r1]", removed)
 	}
 }
 
@@ -826,5 +892,20 @@ func TestLiveHubListExposesAttentionFlags(t *testing.T) {
 	}
 	if !list[0].PermissionPending || !list[0].Busy {
 		t.Fatalf("summary = %+v, want permissionPending+busy", list[0])
+	}
+}
+
+func TestLiveDoneUnblocksOnClose(t *testing.T) {
+	live := NewLive("s", "/tmp", nil, make(chan protocol.Op, 1))
+	select {
+	case <-live.Done():
+		t.Fatal("Done closed before Close")
+	default:
+	}
+	live.Close()
+	select {
+	case <-live.Done():
+	case <-time.After(time.Second):
+		t.Fatal("Done still open after Close")
 	}
 }
