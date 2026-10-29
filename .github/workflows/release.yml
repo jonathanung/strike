@@ -12,6 +12,12 @@ on:
         description: Build desktop bundles as artifacts and do not publish a GitHub Release
         type: boolean
         default: true
+  # Same dry-run as workflow_dispatch, limited to edits of this file so a
+  # pull request can prove the bundle jobs without publishing. Tag pushes
+  # are a separate event and are not filtered by these paths.
+  pull_request:
+    paths:
+      - ".github/workflows/release.yml"
 
 permissions:
   contents: write
@@ -21,11 +27,11 @@ permissions:
 
 jobs:
   release:
-    # Tag pushes only. workflow_dispatch must not create a release from a
-    # branch name. The CLI archive step below is the stable asset set
-    # (strike_<tag>_<os>_<arch>.tar.gz + checksums.txt). Desktop bundles
-    # are attached later and never replace these names.
-    if: github.event_name == 'push'
+    # Tag pushes only. workflow_dispatch and pull_request must not create a
+    # release from a branch name. The CLI archive step below is the stable
+    # asset set (strike_<tag>_<os>_<arch>.tar.gz + checksums.txt). Desktop
+    # bundles are attached later and never replace these names.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -134,9 +140,15 @@ jobs:
   # Stable tags (v0.5.3, v0.11.0, v1.0.0) do not build or attach bundles.
   desktop:
     name: Desktop (${{ matrix.label }})
+    # A follow-up push to a PR cancels the previous dry-run. Tag releases
+    # are not cancelled.
+    concurrency:
+      group: desktop-bundles-${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: ${{ github.event_name != 'push' }}
     if: >-
+      github.event_name == 'pull_request' ||
       (github.event_name == 'workflow_dispatch' && inputs.dry_run) ||
-      (github.event_name == 'push' &&
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') &&
         (startsWith(github.ref_name, 'v0.10.') || contains(github.ref_name, '-')))
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
@@ -238,7 +250,7 @@ jobs:
           TAURI_LINUX_AYATANA_APPINDICATOR: "1"
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.event_name }}" = "pull_request" ]; then
             VERSION="0.0.0-dryrun"
             ASSET_VERSION="dryrun"
           else

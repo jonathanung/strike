@@ -125,6 +125,9 @@ gh run list --workflow=release.yml --limit 3
 
 `dry_run=false` fails the workflow. It is not a publish switch.
 
+A pull request that changes `.github/workflows/release.yml` runs the same
+dry-run (artifacts only, no release). Tag pushes are unchanged.
+
 ## Hard rules
 
 1. No force tag move; no secrets in notes.

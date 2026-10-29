@@ -208,3 +208,6 @@ set, and `desktop-checksums.txt` covers only the desktop files. See
 ```sh
 gh workflow run release.yml --ref <branch> -f dry_run=true
 ```
+
+A pull request that edits `.github/workflows/release.yml` runs that same
+dry-run. It uploads workflow artifacts and does not create a release.
