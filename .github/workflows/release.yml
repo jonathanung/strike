@@ -67,13 +67,29 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          awk -v heading="## [${TAG}]" '
-            $0 == heading || index($0, heading " - ") == 1 { found = 1; next }
-            found && /^## \[/ { exit }
-            found && /^\[[^]]+\]: / { exit }
-            found { print }
-            END { if (!found) exit 1 }
-          ' CHANGELOG.md > changelog-entry.md
+          extract_section() {
+            awk -v heading="## [$1]" '
+              $0 == heading || index($0, heading " - ") == 1 { found = 1; next }
+              found && /^## \[/ { exit }
+              found && /^\[[^]]+\]: / { exit }
+              found { print }
+              END { if (!found) exit 1 }
+            ' CHANGELOG.md
+          }
+          # -rc.N tags (e.g. v0.10.0-rc.1) fall back to the base version's
+          # section (## [v0.10.0]) when they have no section of their own.
+          # Fail hard only when neither section exists.
+          if ! extract_section "${TAG}" > changelog-entry.md; then
+            BASE_TAG="${TAG}"
+            if [[ "${TAG}" =~ ^(.+)-rc\.[0-9]+$ ]]; then
+              BASE_TAG="${BASH_REMATCH[1]}"
+            fi
+            if [ "${BASE_TAG}" = "${TAG}" ] || ! extract_section "${BASE_TAG}" > changelog-entry.md; then
+              echo "::error::CHANGELOG.md has no ${TAG} entry"
+              exit 1
+            fi
+            echo "No [${TAG}] section in CHANGELOG.md; using base [${BASE_TAG}] section."
+          fi
           if ! grep -q '[^[:space:]]' changelog-entry.md; then
             echo "::error::CHANGELOG.md has no non-empty ${TAG} entry"
             exit 1
@@ -94,8 +110,19 @@ jobs:
         run: |
           set -euo pipefail
           TAG="${{ github.ref_name }}"
+          # The 0.10.x line is pre-release only: publish it with
+          # --prerelease and --latest=false so it never becomes
+          # /releases/latest. install.sh and the self-updater resolve
+          # latest, so a 0.10.x release must not be offered to existing
+          # users as a stable update. Other tags keep the default
+          # (regular, latest-eligible) behaviour.
+          PRERELEASE_ARGS=()
+          case "${TAG}" in
+            v0.10.*) PRERELEASE_ARGS=(--prerelease --latest=false) ;;
+          esac
           gh release create "${TAG}" \
             --title "strike ${TAG}" \
             --notes-file release-notes.md \
+            "${PRERELEASE_ARGS[@]}" \
             dist/strike_*.tar.gz \
             dist/checksums.txt
