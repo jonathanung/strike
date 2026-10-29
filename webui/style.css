@@ -2511,6 +2511,9 @@ button.linkish:disabled { color: var(--muted); cursor: default; text-decoration:
   justify-content: center;
   padding: var(--space-4);
 }
+.approvals-confirm {
+  z-index: 40;
+}
 .approvals-dialog,
 .approvals-panel {
   width: min(560px, 100%);

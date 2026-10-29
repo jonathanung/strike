@@ -1755,7 +1755,11 @@ fn App() -> impl IntoView {
                 *d = chat_mode::merge_failed_send(d, &failed_text);
             });
             pending_files.update(|rows| {
-                *rows = chat_mode::merge_failed_files(failed.clone(), rows.clone());
+                let (merged, dropped) = chat_mode::merge_failed_files(failed.clone(), rows.clone());
+                *rows = merged;
+                if let Some(msg) = chat_mode::restore_cap_status(dropped) {
+                    status.set(msg);
+                }
             });
             sending.set(false);
         };

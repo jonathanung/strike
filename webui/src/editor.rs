@@ -95,10 +95,16 @@ pub fn find_hits(text: &str, query: &str) -> Vec<Hit> {
     }
     let q_lower = query.to_lowercase();
     let q_bytes = q_lower.as_bytes();
+    let query_ascii = query.is_ascii();
     let mut hits = Vec::new();
     for (idx, line) in lines_of(text).into_iter().enumerate() {
-        let folded = line.to_lowercase();
-        if folded.len() != line.len() || q_lower.len() != query.len() {
+        // Greek and Cyrillic fold without changing the byte length, so a
+        // length check never left the ASCII fast path and missed them.
+        // The fast path is only for pure ASCII. Anything else is a
+        // whole-line hit: one match per line, start and end left at 0
+        // (`marked_pieces` already treats that as the whole line).
+        if !query_ascii || !line.is_ascii() {
+            let folded = line.to_lowercase();
             if folded.contains(&q_lower) {
                 hits.push(Hit {
                     line: (idx as u32) + 1,
@@ -1593,6 +1599,38 @@ mod tests {
         assert!(hits[1].start > 0);
         assert!(find_hits("abc", "").is_empty());
         assert!(find_hits("abc", "z").is_empty());
+        // Byte positions on the ASCII path stay per-occurrence.
+        assert_eq!(hits[0].start, 0);
+        assert_eq!(hits[0].end, 5);
+    }
+
+    #[test]
+    fn search_folds_greek_cyrillic_and_length_changing_latin() {
+        for (line, query) in [
+            ("Σ\n", "σ"),
+            ("σ\n", "Σ"),
+            ("Α\n", "α"),
+            ("α\n", "Α"),
+            ("А\n", "а"),
+            ("а\n", "А"),
+        ] {
+            let hits = find_hits(line, query);
+            assert_eq!(hits.len(), 1, "line {line:?} query {query:?}");
+            assert_eq!(hits[0].line, 1);
+            assert_eq!(hits[0].start, 0);
+            assert_eq!(hits[0].end, 0);
+        }
+        // Capital sharp S (U+1E9E) folds to ß and changes the byte length.
+        for (line, query) in [("ẞ\n", "ß"), ("ß\n", "ẞ")] {
+            let hits = find_hits(line, query);
+            assert_eq!(hits.len(), 1, "line {line:?} query {query:?}");
+            assert_eq!(hits[0].end, 0);
+        }
+        // İ folds to i + combining dot. The query and the line both fold.
+        let hits = find_hits("İstanbul\n", "İ");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].end, 0);
+        assert!(find_hits("plain ascii\n", "Σ").is_empty());
     }
 
     #[test]

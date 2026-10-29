@@ -781,13 +781,27 @@ pub struct ChildCard {
     pub at_ms: f64,
 }
 
+/// Exact identity, ignoring ASCII case. A prefix is a different child:
+/// `scribe` and `scribe-2` must not share a card. No in-repo producer
+/// truncates the key, so a short prefix is never a stand-in for the full id.
 pub fn child_keys_match(a: &str, b: &str) -> bool {
     if a.is_empty() || b.is_empty() {
         return false;
     }
-    let a = a.to_ascii_lowercase();
-    let b = b.to_ascii_lowercase();
-    a == b || a.starts_with(&b) || b.starts_with(&a)
+    a.eq_ignore_ascii_case(b)
+}
+
+/// Summary text worth merging onto an existing card. The bare status word
+/// is not one: the badge already shows it, and treating it as a summary
+/// replaces the handoff with `completed`.
+pub fn summary_for_merge(summary: &str, status: &str) -> String {
+    let summary = summary.trim();
+    let status = status.trim();
+    if summary.is_empty() || (!status.is_empty() && summary.eq_ignore_ascii_case(status)) {
+        String::new()
+    } else {
+        summary.to_string()
+    }
 }
 
 pub fn child_card_from_parts(
@@ -1025,7 +1039,12 @@ pub fn activity_panel(
     }
     let mut rows = Vec::new();
     for child in kids {
-        if !child.parent_id.is_empty() && child.parent_id != active {
+        // An empty parent id cannot be attributed. The children list is
+        // loaded for one root, but this fallback is also called with a
+        // captured root that may no longer be that list, so a parentless
+        // row would show up under every session. Rows that name their
+        // parent still appear for that root only.
+        if child.parent_id.is_empty() || child.parent_id != active {
             continue;
         }
         let name = if child.title.is_empty() {
@@ -1236,7 +1255,9 @@ mod tests {
         assert!(!card.summary.starts_with("You said:"));
         assert!(card.details.contains("verification"));
         assert!(child_keys_match(&card.key, "Scribe"));
-        assert!(child_keys_match("abcd1234", "abcd"));
+        assert!(!child_keys_match("abcd1234", "abcd"));
+        assert!(!child_keys_match("scribe", "scribe-2"));
+        assert!(!child_keys_match("a", "alice"));
 
         let echoed = format!("You said: {raw}\n\nTip: start a message with `run <command>` to exercise the bash tool and the permission prompt.");
         let stripped = strip_echo_tip(&echoed);
@@ -1283,6 +1304,64 @@ mod tests {
         assert_eq!(rows[0].name, "scribe");
         assert_eq!(rows[0].state, "blocked");
         assert_eq!(rows[0].task, "schema: handoff missing");
+
+        let siblings = vec![
+            ChildSession {
+                id: "id-scribe".into(),
+                title: "scribe".into(),
+                parent_id: "root".into(),
+            },
+            ChildSession {
+                id: "id-scribe-2".into(),
+                title: "scribe-2".into(),
+                parent_id: "root".into(),
+            },
+            ChildSession {
+                id: "orphan".into(),
+                title: "orphan".into(),
+                parent_id: String::new(),
+            },
+        ];
+        let sibling_cards = vec![
+            ChatLine {
+                id: 1,
+                role: "child".into(),
+                title: "scribe".into(),
+                body: "wrote the index".into(),
+                badge: "done".into(),
+                detail: String::new(),
+                key: "scribe".into(),
+                at_ms: 0.0,
+            },
+            ChatLine {
+                id: 2,
+                role: "child".into(),
+                title: "scribe-2".into(),
+                body: "still reading".into(),
+                badge: "blocked".into(),
+                detail: String::new(),
+                key: "scribe-2".into(),
+                at_ms: 0.0,
+            },
+        ];
+        let rows = activity_panel(&[], &siblings, &sibling_cards, "root");
+        assert_eq!(
+            rows.len(),
+            2,
+            "parentless child must not leak into the panel"
+        );
+        assert_eq!(rows[0].name, "scribe");
+        assert_eq!(rows[0].task, "wrote the index");
+        assert_eq!(rows[0].state, "done");
+        assert_eq!(rows[1].name, "scribe-2");
+        assert_eq!(rows[1].task, "still reading");
+        assert_eq!(rows[1].state, "blocked");
+        assert!(activity_panel(&[], &siblings, &sibling_cards, "other").is_empty());
+        assert_eq!(summary_for_merge("completed", "completed"), "");
+        assert_eq!(
+            summary_for_merge("wrote the migration", "completed"),
+            "wrote the migration"
+        );
     }
 
     #[test]
@@ -1290,10 +1369,7 @@ mod tests {
         // 2026-10-26T12:51:31Z, verified against `date -u`.
         assert_eq!(rfc3339_to_ms("2026-10-26T12:51:31Z"), 1_793_019_091_000.0);
         // Fractional seconds (Go RFC3339Nano) keep millisecond precision.
-        assert_eq!(
-            rfc3339_to_ms("2026-10-26T12:51:31.5Z"),
-            1_793_019_091_500.0
-        );
+        assert_eq!(rfc3339_to_ms("2026-10-26T12:51:31.5Z"), 1_793_019_091_500.0);
         assert_eq!(
             rfc3339_to_ms("2026-10-26T12:51:31.123456789Z"),
             1_793_019_091_123.0
