@@ -1,0 +1,77 @@
+/* feature:usage-audit begin */
+.usage-audit {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--space-4);
+  background: var(--ground);
+}
+.usage-audit .ua-wrap { max-width: 1100px; margin: 0 auto; }
+.usage-audit .ua-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: var(--space-3);
+  margin: var(--space-3) 0;
+}
+.usage-audit .ua-alert {
+  border: 1px solid var(--warning);
+  background: var(--surface);
+  color: var(--ink);
+  border-radius: var(--radius);
+  padding: var(--space-3);
+  margin: var(--space-2) 0;
+}
+.usage-audit .ua-alert.bad { border-color: var(--signal); }
+.usage-audit .ua-form {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  flex-wrap: wrap;
+  margin: var(--space-3) 0;
+}
+.usage-audit .ua-form label { color: var(--muted); font-size: var(--type-sm); }
+.usage-audit input {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+  min-width: 120px;
+}
+.usage-audit .ua-table { margin-top: var(--space-2); }
+.usage-audit .ua-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 1.6fr) 110px repeat(5, minmax(72px, 0.7fr));
+  gap: var(--space-2);
+  align-items: baseline;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-muted);
+  font-size: var(--type-sm);
+}
+.usage-audit .ua-row.ua-head { color: var(--muted); font-size: var(--type-sm); }
+.usage-audit .ua-row.ua-audit {
+  grid-template-columns: 180px 110px minmax(0, 1fr) 90px;
+}
+.usage-audit .panel-title { color: var(--ink); font-size: var(--type-lg); }
+@media (max-width: 1180px) {
+  .page-header {
+    flex-wrap: wrap;
+    height: auto;
+    padding: 8px 10px;
+    row-gap: 8px;
+  }
+  .header-actions { order: 2; }
+  .command-pill {
+    position: static;
+    transform: none;
+    width: 100%;
+    order: 3;
+  }
+}
+@media (max-width: 720px) {
+  .usage-audit .ua-row,
+  .usage-audit .ua-row.ua-audit {
+    grid-template-columns: 1fr 1fr;
+  }
+  .usage-audit .ua-row.ua-head { display: none; }
+}
+/* feature:usage-audit end */

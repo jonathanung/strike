@@ -94,6 +94,11 @@ type Options struct {
 	Select    SelectFunc
 	Registry  *tool.Registry
 	WorkDir   string
+	// WorkspaceRoots are the directories a delegated child's working directory
+	// must stay inside (the workspace plus its extra roots). Empty means the
+	// session is unbound: child cwd is not checked, so plain strike serve
+	// with an empty registry is unchanged.
+	WorkspaceRoots []string
 	// CheckpointDir is the durable per-session checkpoint stack directory
 	// (#573). Empty disables disk persistence (tests). cmd/strike sets
 	// tool.DefaultCheckpointDir(sessionID). Set to "-" for an explicit off.
@@ -240,6 +245,10 @@ type Options struct {
 	// nil disables auto-load. Refreshed every turn so memory_write is visible
 	// without restart.
 	Memory MemorySource
+	// InitialMemoryMode is normal, incognito, or temporary. Empty is normal.
+	// Temporary skips this Memory layer. Incognito still loads it; product
+	// tools refuse writes. SetMemoryMode changes it for a live session.
+	InitialMemoryMode string
 	// Ledger, when set, supplies the decision/assumption ledger for the
 	// auto-loaded decision_ledger system layer (active entries, path-scoped
 	// to WorkDir). nil disables. Shared with child spawns so specialists see
@@ -296,6 +305,14 @@ type Options struct {
 	// PersistProjectRule, when set, is invoked after a DecisionProject grant
 	// so the rule can be written to project config. Optional.
 	PersistProjectRule func(permission.Rule) error
+	// ProjectRulePath is the file PersistProjectRule appends to, stamped
+	// onto permission asks so frontends can state where a project grant is
+	// stored before the user chooses it. Display only; optional.
+	ProjectRulePath string
+	// PrepareInput, when set, expands composer text (!shell, /command,
+	// $skill, @file) before a user.input or steer turn. nil leaves the
+	// text unchanged. workDir is this engine's working directory.
+	PrepareInput func(text, workDir string) InputPrep
 	// MaxChildDepth bounds foreground task nesting. Zero defaults to 1 in New
 	// (root depth 0 may spawn one child; that child may not spawn further).
 	// Values above absoluteMaxChildDepth are clamped.
@@ -486,7 +503,10 @@ type Engine struct {
 	autonomy protocol.Autonomy
 	// permMode is the session tool-permission posture dial.
 	permMode protocol.PermissionMode
-	agent    Agent
+	// memMode is normal, incognito, or temporary. Empty is treated as normal.
+	memMode   string
+	memModeMu sync.RWMutex
+	agent     Agent
 	// taskHarness is attached only by spawnChild for the selected child agent.
 	taskHarness     fn.Func
 	taskHarnessName string
@@ -620,6 +640,9 @@ type Engine struct {
 	mutatedMu    sync.Mutex
 	mutatedFiles map[string]struct{}
 
+	// titleMu guards titled. Composer shells title on the Run goroutine and
+	// model turns title on the turn worker.
+	titleMu sync.Mutex
 	// titled is set after the first SessionTitled emit so auto-titling runs once.
 	titled bool
 
@@ -860,6 +883,7 @@ func New(opts Options) *Engine {
 		contextWindowTokens: opts.ContextWindow,
 		priority:            opts.InitialPriority,
 		titled:              opts.InitialTitled,
+		memMode:             "normal",
 		phaseIndex:          -1,
 		sessionBudget:       sb,
 	}
@@ -870,6 +894,7 @@ func New(opts Options) *Engine {
 		e.messages = append([]provider.Message(nil), opts.InitialMessages...)
 		e.hydrateMessageImages()
 	}
+	_ = e.SetMemoryMode(opts.InitialMemoryMode)
 	e.perms = permission.New(e.emitPermission, opts.Rules...)
 	if len(opts.RuleLayerNames) > 0 {
 		e.perms.SetBaseLayerNames(opts.RuleLayerNames...)
@@ -880,6 +905,7 @@ func New(opts Options) *Engine {
 	if opts.PersistProjectRule != nil {
 		e.perms.SetProjectPersister(opts.PersistProjectRule)
 	}
+	e.perms.SetAskFacts(opts.WorkDir, opts.ProjectRulePath)
 	e.questions = question.New(e.emit)
 	return e
 }

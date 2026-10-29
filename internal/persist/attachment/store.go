@@ -97,7 +97,7 @@ func (s *Store) Put(raw []byte, in PutInput) (Meta, error) {
 		SHA256:    hexSum,
 		Kind:      kind,
 		MIME:      mime,
-		Name:      strings.TrimSpace(in.Name),
+		Name:      RedactName(strings.TrimSpace(in.Name)),
 		Bytes:     int64(len(raw)),
 		CreatedAt: s.now().UTC(),
 		SessionID: strings.TrimSpace(in.SessionID),
@@ -105,13 +105,25 @@ func (s *Store) Put(raw []byte, in PutInput) (Meta, error) {
 	}
 	blobPath := s.blobPathLocked(hexSum)
 	if st, err := os.Stat(blobPath); err == nil && st.Size() > 0 {
-		if existing, lerr := s.loadMetaLocked(hexSum); lerr == nil {
-			return existing, nil
+		existingBytes, rerr := os.ReadFile(blobPath)
+		if rerr == nil && SumHex(existingBytes) == hexSum {
+			if existing, lerr := s.loadMetaLocked(hexSum); lerr == nil {
+				redacted := RedactName(existing.Name)
+				if redacted != existing.Name {
+					existing.Name = redacted
+					if werr := s.writeMetaLocked(existing); werr != nil {
+						return Meta{}, werr
+					}
+				}
+				return existing, nil
+			}
+			if werr := s.writeMetaLocked(meta); werr != nil {
+				return Meta{}, werr
+			}
+			return meta, nil
 		}
-		if werr := s.writeMetaLocked(meta); werr != nil {
-			return Meta{}, werr
-		}
-		return meta, nil
+		// A non-empty file that is not these bytes is replaced below.
+		// Two stores used to share hash.tmp; one Store mutex covers this write.
 	}
 	if err := os.MkdirAll(filepath.Dir(blobPath), 0o700); err != nil {
 		return Meta{}, fmt.Errorf("attachment: create shard: %w", err)

@@ -1,0 +1,623 @@
+//! Triggers page. The daemon registry is the source of truth; this module
+//! only renders it. Secrets are shown once, when the daemon mints them.
+
+use std::rc::Rc;
+
+use leptos::prelude::*;
+use leptos::task::spawn_local;
+use serde::Deserialize;
+use serde_json::{json, Value};
+use wasm_bindgen::JsCast;
+
+use crate::api::{api, auth_header, get_json, now_ms, post_json_value};
+
+#[derive(Clone, Deserialize)]
+struct TriggerList {
+    triggers: Vec<TriggerRow>,
+}
+
+#[derive(Clone, Deserialize)]
+struct TriggerRow {
+    id: String,
+    name: String,
+    kind: String,
+    enabled: bool,
+    #[serde(rename = "secretSet")]
+    secret_set: bool,
+    prompt: String,
+    #[serde(rename = "permissionMode")]
+    permission_mode: String,
+    #[serde(rename = "resolvedPermissionMode")]
+    resolved_permission_mode: String,
+    #[serde(default, rename = "continueSessionId")]
+    continue_session_id: String,
+    #[serde(rename = "ratePerMinute")]
+    rate_per_minute: i32,
+    #[serde(rename = "dedupeSeconds")]
+    dedupe_seconds: i32,
+    #[serde(default)]
+    events: Vec<String>,
+    #[serde(default)]
+    adapter: String,
+    #[serde(default)]
+    channel: String,
+    #[serde(rename = "hookPath")]
+    hook_path: String,
+}
+
+#[derive(Clone, Deserialize)]
+struct DeliveryList {
+    deliveries: Vec<DeliveryRow>,
+}
+
+#[derive(Clone, Deserialize)]
+struct DeliveryRow {
+    id: String,
+    at: String,
+    outcome: String,
+    #[serde(default, rename = "sessionId")]
+    session_id: String,
+    #[serde(default)]
+    event: String,
+    #[serde(default)]
+    reason: String,
+}
+
+#[derive(Copy, Clone)]
+struct Form {
+    selected: RwSignal<String>,
+    name: RwSignal<String>,
+    kind: RwSignal<String>,
+    prompt: RwSignal<String>,
+    perm: RwSignal<String>,
+    continue_id: RwSignal<String>,
+    rate_text: RwSignal<String>,
+    dedupe_text: RwSignal<String>,
+    events_text: RwSignal<String>,
+    adapter: RwSignal<String>,
+    channel: RwSignal<String>,
+    enabled: RwSignal<bool>,
+    secret_input: RwSignal<String>,
+    hook_path: RwSignal<String>,
+    notice: RwSignal<String>,
+}
+
+impl Form {
+    fn new() -> Self {
+        Self {
+            selected: RwSignal::new(String::new()),
+            name: RwSignal::new(String::new()),
+            kind: RwSignal::new("webhook".to_string()),
+            prompt: RwSignal::new(String::new()),
+            perm: RwSignal::new(String::new()),
+            continue_id: RwSignal::new(String::new()),
+            rate_text: RwSignal::new("6".to_string()),
+            dedupe_text: RwSignal::new("600".to_string()),
+            events_text: RwSignal::new(String::new()),
+            adapter: RwSignal::new(String::new()),
+            channel: RwSignal::new(String::new()),
+            enabled: RwSignal::new(true),
+            secret_input: RwSignal::new(String::new()),
+            hook_path: RwSignal::new(String::new()),
+            notice: RwSignal::new(String::new()),
+        }
+    }
+
+    fn fill(self, row: &TriggerRow) {
+        self.selected.set(row.id.clone());
+        self.name.set(row.name.clone());
+        self.kind.set(row.kind.clone());
+        self.prompt.set(row.prompt.clone());
+        self.perm.set(row.permission_mode.clone());
+        self.continue_id.set(row.continue_session_id.clone());
+        self.rate_text.set(row.rate_per_minute.to_string());
+        self.dedupe_text.set(row.dedupe_seconds.to_string());
+        self.events_text.set(row.events.join(", "));
+        self.adapter.set(row.adapter.clone());
+        self.channel.set(row.channel.clone());
+        self.enabled.set(row.enabled);
+        self.secret_input.set(String::new());
+        self.hook_path.set(row.hook_path.clone());
+        self.notice.set(String::new());
+    }
+
+    fn clear(self) {
+        self.selected.set(String::new());
+        self.name.set(String::new());
+        self.kind.set("webhook".into());
+        self.prompt.set(String::new());
+        self.perm.set(String::new());
+        self.continue_id.set(String::new());
+        self.rate_text.set("6".into());
+        self.dedupe_text.set("600".into());
+        self.events_text.set(String::new());
+        self.adapter.set(String::new());
+        self.channel.set(String::new());
+        self.enabled.set(true);
+        self.secret_input.set(String::new());
+        self.hook_path.set(String::new());
+        self.notice.set(String::new());
+    }
+}
+
+fn refresh(
+    base: RwSignal<String>,
+    token: RwSignal<String>,
+    rows: RwSignal<Vec<TriggerRow>>,
+    notice: RwSignal<String>,
+) {
+    let (b, t) = (base.get(), token.get());
+    spawn_local(async move {
+        match get_json::<TriggerList>(&b, &t, "/v1/triggers").await {
+            Ok(list) => rows.set(list.triggers),
+            Err(e) => notice.set(e),
+        }
+    });
+}
+
+fn load_deliveries(
+    base: RwSignal<String>,
+    token: RwSignal<String>,
+    id: String,
+    rows: RwSignal<Vec<DeliveryRow>>,
+    notice: RwSignal<String>,
+) {
+    if id.is_empty() {
+        rows.set(Vec::new());
+        return;
+    }
+    let (b, t) = (base.get(), token.get());
+    spawn_local(async move {
+        match get_json::<DeliveryList>(&b, &t, &format!("/v1/triggers/{id}/deliveries")).await {
+            Ok(list) => rows.set(list.deliveries),
+            Err(e) => notice.set(e),
+        }
+    });
+}
+
+async fn send_json(
+    method: &str,
+    base: &str,
+    token: &str,
+    path: &str,
+    body: Value,
+) -> Result<Value, String> {
+    let req = match method {
+        "PATCH" => gloo_net::http::Request::patch(&api(base, path)),
+        "DELETE" => gloo_net::http::Request::delete(&api(base, path)),
+        _ => gloo_net::http::Request::post(&api(base, path)),
+    };
+    let resp = req
+        .header("Authorization", &auth_header(token))
+        .header("Content-Type", "application/json")
+        .body(body.to_string())
+        .map_err(|e| e.to_string())?
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let status = resp.status();
+    let text = resp.text().await.unwrap_or_default();
+    if !(200..300).contains(&status) {
+        return Err(format!("HTTP {status} {text}"));
+    }
+    if text.trim().is_empty() {
+        return Ok(Value::Null);
+    }
+    serde_json::from_str(&text).map_err(|e| e.to_string())
+}
+
+#[component]
+pub fn TriggersPage(
+    base: RwSignal<String>,
+    token: RwSignal<String>,
+    status: RwSignal<String>,
+) -> impl IntoView {
+    let rows = RwSignal::new(Vec::<TriggerRow>::new());
+    let deliveries = RwSignal::new(Vec::<DeliveryRow>::new());
+    let secret_once = RwSignal::new(String::new());
+    let secret_revealed = RwSignal::new(false);
+    let form = Form::new();
+
+    refresh(base, token, rows, form.notice);
+    Effect::new(move |_| {
+        load_deliveries(base, token, form.selected.get(), deliveries, form.notice);
+    });
+
+    let save = move || {
+        let name_v = form.name.get().trim().to_string();
+        if name_v.is_empty() {
+            form.notice.set("Name is required.".into());
+            return;
+        }
+        let Ok(rate) = form.rate_text.get().trim().parse::<i32>() else {
+            form.notice
+                .set("Rate must be a number from 1 to 120.".into());
+            return;
+        };
+        if !(1..=120).contains(&rate) {
+            form.notice
+                .set("Rate must be a number from 1 to 120.".into());
+            return;
+        }
+        let Ok(dedupe) = form.dedupe_text.get().trim().parse::<i32>() else {
+            form.notice
+                .set("Dedupe window must be 0 to 86400 seconds.".into());
+            return;
+        };
+        if !(0..=86400).contains(&dedupe) {
+            form.notice
+                .set("Dedupe window must be 0 to 86400 seconds.".into());
+            return;
+        }
+        let events: Vec<String> = form
+            .events_text
+            .get()
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        let mut body = json!({
+            "name": name_v,
+            "kind": form.kind.get(),
+            "prompt": form.prompt.get(),
+            "permissionMode": form.perm.get(),
+            "continueSessionId": form.continue_id.get().trim(),
+            "ratePerMinute": rate,
+            "dedupeSeconds": dedupe,
+            "events": events,
+            "adapter": form.adapter.get().trim(),
+            "channel": form.channel.get().trim(),
+            "enabled": form.enabled.get(),
+        });
+        let typed = form.secret_input.get().trim().to_string();
+        if !typed.is_empty() {
+            body["secret"] = json!(typed);
+        }
+        let id = form.selected.get();
+        let (b, t) = (base.get(), token.get());
+        spawn_local(async move {
+            let result = if id.is_empty() {
+                post_json_value(&b, &t, "/v1/triggers", body).await
+            } else {
+                send_json("PATCH", &b, &t, &format!("/v1/triggers/{id}"), body).await
+            };
+            match result {
+                Ok(v) => {
+                    if let Some(sec) = v.get("secret").and_then(|s| s.as_str()) {
+                        if !sec.is_empty() {
+                            secret_revealed.set(false);
+                            secret_once.set(sec.to_string());
+                        }
+                    }
+                    if let Some(new_id) = v.get("id").and_then(|s| s.as_str()) {
+                        form.selected.set(new_id.to_string());
+                        if let Some(path) = v.get("hookPath").and_then(|s| s.as_str()) {
+                            form.hook_path.set(path.to_string());
+                        }
+                    }
+                    form.secret_input.set(String::new());
+                    form.notice.set("Saved.".into());
+                    status.set("Trigger saved".into());
+                    refresh(base, token, rows, form.notice);
+                }
+                Err(e) => form.notice.set(e),
+            }
+        });
+    };
+
+    let send_test = move || {
+        let id = form.selected.get();
+        if id.is_empty() {
+            form.notice
+                .set("Save the trigger before sending a test.".into());
+            return;
+        }
+        let kind_v = form.kind.get();
+        let delivery = format!("ui{}", now_ms() as i64);
+        let body = if kind_v == "github" {
+            json!({
+                "event": "issues",
+                "deliveryId": delivery,
+                "body": {
+                    "action": "opened",
+                    "repository": {"full_name": "example/repo"},
+                    "issue": {"number": 1, "title": "Test issue", "body": "Synthetic payload from the Triggers page."},
+                    "sender": {"login": "strike"}
+                }
+            })
+        } else if kind_v == "channel" {
+            json!({
+                "deliveryId": delivery,
+                "text": "Synthetic message from the Triggers page.",
+                "sender": "you",
+                "channel": form.channel.get()
+            })
+        } else {
+            json!({
+                "event": "test",
+                "deliveryId": delivery,
+                "body": "{\"hello\":\"strike\"}"
+            })
+        };
+        let (b, t) = (base.get(), token.get());
+        spawn_local(async move {
+            match post_json_value(&b, &t, &format!("/v1/triggers/{id}/test"), body).await {
+                Ok(v) => {
+                    let outcome = v.get("outcome").and_then(|s| s.as_str()).unwrap_or("sent");
+                    form.notice.set(format!("Test {outcome}."));
+                    status.set(format!("Trigger test {outcome}"));
+                    load_deliveries(base, token, id, deliveries, form.notice);
+                }
+                Err(e) => form.notice.set(e),
+            }
+        });
+    };
+
+    let reject_sig = move || {
+        let id = form.selected.get();
+        if id.is_empty() {
+            form.notice
+                .set("Save the trigger before trying a bad signature.".into());
+            return;
+        }
+        let kind_v = form.kind.get();
+        let b = base.get();
+        spawn_local(async move {
+            let ts = ((now_ms() / 1000.0) as i64).to_string();
+            let delivery = format!("bad{}", now_ms() as i64);
+            let req = gloo_net::http::Request::post(&api(&b, &format!("/hooks/{id}")))
+                .header("Content-Type", "application/json");
+            let req = if kind_v == "github" {
+                req.header("X-GitHub-Delivery", &delivery)
+                    .header("X-GitHub-Event", "issues")
+                    .header(
+                        "X-Hub-Signature-256",
+                        "sha256=0000000000000000000000000000000000000000000000000000000000000000",
+                    )
+            } else {
+                req.header("X-Strike-Delivery", &delivery)
+                    .header("X-Strike-Timestamp", &ts)
+                    .header("X-Strike-Event", "test")
+                    .header(
+                        "X-Strike-Signature",
+                        "sha256=0000000000000000000000000000000000000000000000000000000000000000",
+                    )
+            };
+            match req.body("{}") {
+                Ok(built) => match built.send().await {
+                    Ok(resp) => {
+                        let status_code = resp.status();
+                        let text = resp.text().await.unwrap_or_default();
+                        form.notice
+                            .set(format!("Hook returned {status_code}. {text}"));
+                        load_deliveries(base, token, id, deliveries, form.notice);
+                    }
+                    Err(e) => form.notice.set(e.to_string()),
+                },
+                Err(e) => form.notice.set(e.to_string()),
+            }
+        });
+    };
+
+    let delete_one = move |id: String| {
+        if id.is_empty() {
+            form.notice.set("Select a trigger first.".into());
+            return;
+        }
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            match send_json("DELETE", &b, &t, &format!("/v1/triggers/{id}"), Value::Null).await {
+                Ok(_) => {
+                    form.clear();
+                    form.notice.set("Deleted.".into());
+                    refresh(base, token, rows, form.notice);
+                }
+                Err(e) => form.notice.set(e),
+            }
+        });
+    };
+    crate::shell::bind(
+        "trigger.delete",
+        Rc::new(move |id| {
+            let id = id.trim().to_string();
+            if id.is_empty() {
+                return Err("Type a trigger id.".into());
+            }
+            delete_one(id);
+            Ok(())
+        }),
+    );
+
+    view! {
+        <main class="triggers">
+            <section class="triggers-list" aria-label="Triggers">
+                <div class="section-head">
+                    <h2 class="panel-title">"Triggers"</h2>
+                    <button type="button" class="secondary" on:click=move |_| form.clear()>"New"</button>
+                </div>
+                <Show when=move || rows.get().is_empty()>
+                    <p class="hint">"No triggers yet. Save one on the right. An empty permission mode stays plan, which denies writes."</p>
+                </Show>
+                <ul class="plain">
+                    {move || rows.get().into_iter().map(|row| {
+                        let pick = row.clone();
+                        let id = row.id.clone();
+                        let label = row.name.clone();
+                        let meta = format!("{} · {}", row.kind, if row.enabled { "on" } else { "off" });
+                        view! {
+                            <li>
+                                <button type="button" class=move || if form.selected.get() == id { "row card on" } else { "row card" } on:click=move |_| form.fill(&pick)>
+                                    <span class="name">{label}</span>
+                                    <span class="path">{meta}</span>
+                                </button>
+                            </li>
+                        }
+                    }).collect_view()}
+                </ul>
+            </section>
+            <section class="triggers-detail">
+                <form on:submit=move |ev: web_sys::SubmitEvent| {
+                    ev.prevent_default();
+                    save();
+                } on:keydown=move |ev: web_sys::KeyboardEvent| {
+                    if ev.key() != "Enter" {
+                        return;
+                    }
+                    let Some(target) = ev.target() else { return };
+                    if target.dyn_ref::<web_sys::HtmlTextAreaElement>().is_some() {
+                        return;
+                    }
+                    ev.prevent_default();
+                    save();
+                }>
+                    <h2 class="panel-title">{move || if form.selected.get().is_empty() { "New trigger".to_string() } else { "Edit trigger".to_string() }}</h2>
+                    <Show when=move || !form.notice.get().is_empty()>
+                        <p class="notice" role="alert">{move || form.notice.get()}</p>
+                    </Show>
+                    <Show when=move || !secret_once.get().is_empty()>
+                        <div class="secret-once" role="status">
+                            <p>"Copy this signing secret now. Strike will not show it again."</p>
+                            <Show when=move || secret_revealed.get() fallback=move || view! {
+                                <input type="password" readonly autocomplete="off" prop:value=move || secret_once.get() />
+                            }>
+                                <input type="text" readonly autocomplete="off" prop:value=move || secret_once.get() />
+                            </Show>
+                            <button type="button" class="secondary" on:click=move |_| secret_revealed.set(!secret_revealed.get())>
+                                {move || if secret_revealed.get() { "Mask secret" } else { "Reveal secret" }}
+                            </button>
+                            <button type="button" class="secondary" on:click=move |_| { secret_revealed.set(false); secret_once.set(String::new()); }>"Dismiss secret"</button>
+                        </div>
+                    </Show>
+                    <label for="trigger-name">"Name"</label>
+                    <input id="trigger-name" prop:value=move || form.name.get() on:input=move |ev| form.name.set(event_target_value(&ev)) />
+                    <label for="trigger-kind">"Kind"</label>
+                    <select id="trigger-kind" prop:value=move || form.kind.get() on:change=move |ev| form.kind.set(event_target_value(&ev))>
+                        <option value="webhook">"Webhook"</option>
+                        <option value="github">"GitHub"</option>
+                        <option value="channel">"Channel"</option>
+                    </select>
+                    <label for="trigger-perm">"Permission mode"</label>
+                    <select id="trigger-perm" prop:value=move || form.perm.get() on:change=move |ev| form.perm.set(event_target_value(&ev))>
+                        <option value="">"Plan when unset (safest)"</option>
+                        <option value="plan">"Plan"</option>
+                        <option value="default">"Default"</option>
+                        <option value="soft-approve">"Soft approve"</option>
+                        <option value="accept-edits">"Accept edits"</option>
+                        <option value="yolo">"Yolo"</option>
+                    </select>
+                    <Show when=move || matches!(form.perm.get().as_str(), "yolo" | "accept-edits" | "soft-approve")>
+                        <p class="hint warn">"This posture is looser than plan. Unattended triggers start in plan unless you set one here."</p>
+                    </Show>
+                    <p class="hint">{move || format!("Resolved at fire time: {}", if form.perm.get().is_empty() { "plan".to_string() } else { form.perm.get() })}</p>
+                    <label for="trigger-prompt">"Prompt template"</label>
+                    <textarea id="trigger-prompt" rows="5" prop:value=move || form.prompt.get() on:input=move |ev| form.prompt.set(event_target_value(&ev)) placeholder="Leave blank for the built-in template. Placeholders: {{event}} {{action}} {{repo}} {{number}} {{title}} {{body}} {{url}} {{sender}} {{text}}"></textarea>
+                    <Show when=move || form.kind.get() != "channel">
+                        <label for="trigger-secret">"Signing secret"</label>
+                        <input id="trigger-secret" type="password" autocomplete="off" prop:value=move || form.secret_input.get() on:input=move |ev| form.secret_input.set(event_target_value(&ev)) placeholder="Blank keeps the current secret" />
+                    </Show>
+                    <Show when=move || form.kind.get() == "github">
+                        <label for="trigger-events">"GitHub events"</label>
+                        <input id="trigger-events" prop:value=move || form.events_text.get() on:input=move |ev| form.events_text.set(event_target_value(&ev)) placeholder="issues, pull_request, issue_comment" />
+                    </Show>
+                    <Show when=move || form.kind.get() == "channel">
+                        <label for="trigger-adapter">"Adapter name"</label>
+                        <input id="trigger-adapter" prop:value=move || form.adapter.get() on:input=move |ev| form.adapter.set(event_target_value(&ev)) placeholder="slack" />
+                        <label for="trigger-channel">"Channel filter"</label>
+                        <input id="trigger-channel" prop:value=move || form.channel.get() on:input=move |ev| form.channel.set(event_target_value(&ev)) placeholder="Blank matches every channel on that adapter" />
+                        <p class="hint">"No chat listener is running. The adapter interface is registered in the daemon; Send test injects one message."</p>
+                    </Show>
+                    <label for="trigger-continue">"Continue session"</label>
+                    <input id="trigger-continue" prop:value=move || form.continue_id.get() on:input=move |ev| form.continue_id.set(event_target_value(&ev)) placeholder="Blank starts a new root" />
+                    <div class="row">
+                        <label>"Per minute"<input prop:value=move || form.rate_text.get() on:input=move |ev| form.rate_text.set(event_target_value(&ev)) /></label>
+                        <label>"Dedupe seconds"<input prop:value=move || form.dedupe_text.get() on:input=move |ev| form.dedupe_text.set(event_target_value(&ev)) /></label>
+                    </div>
+                    <div class="row triggers-actions">
+                        <button type="button" class=move || if form.enabled.get() { "secondary on" } else { "secondary" } on:click=move |_| form.enabled.set(!form.enabled.get())>
+                            {move || if form.enabled.get() { "Enabled" } else { "Disabled" }}
+                        </button>
+                        <button type="submit" class="primary">"Save"</button>
+                        <button type="button" class="secondary" on:click=move |_| send_test()>"Send test"</button>
+                        <button type="button" class="secondary" on:click=move |_| reject_sig()>"Reject signature"</button>
+                        <Show when=move || !form.selected.get().is_empty()>
+                            <button type="button" class="secondary" data-action="delete-trigger" on:click=move |_| {
+                                let id = form.selected.get();
+                                let name = form.name.get();
+                                crate::confirm::ask(
+                                    crate::confirm::ConfirmRequest {
+                                        title: "Delete this trigger?".into(),
+                                        body: format!("Delete {name}. The hook stops accepting events, and a replacement trigger gets a new secret."),
+                                        confirm_label: "Delete trigger".into(),
+                                    },
+                                    Rc::new(move || delete_one(id.clone())),
+                                );
+                            }>"Delete"</button>
+                        </Show>
+                    </div>
+                    <p class="hint keys">"Enter saves. Tab moves through the form. Ctrl+K, then Triggers, opens this page."</p>
+                    <Show when=move || !form.hook_path.get().is_empty() && form.kind.get() != "channel">
+                        <p class="hint">{move || format!("Hook {}{} · secret {}", origin_prefix(&base.get()), form.hook_path.get(), if rows.get().iter().any(|r| r.id == form.selected.get() && r.secret_set) { "is set" } else { "is not set" })}</p>
+                    </Show>
+                    <p class="hint">{move || {
+                        let mode = rows.get().into_iter().find(|r| r.id == form.selected.get()).map(|r| r.resolved_permission_mode).unwrap_or_else(|| "plan".into());
+                        format!("Unattended runs use {mode} unless this form names another mode.")
+                    }}</p>
+                </form>
+            </section>
+            <section class="triggers-log" aria-label="Delivery log">
+                    <h2 class="panel-title">"Delivery log"</h2>
+                    <Show when=move || deliveries.get().is_empty()>
+                        <p class="hint">"Accepted, rejected, duplicate, and rate-limited deliveries show up here. The log does not store the signing secret."</p>
+                    </Show>
+                    <ul class="plain">
+                        {move || deliveries.get().into_iter().map(|row| {
+                            let replay_id = row.id.clone();
+                            let headline = format!("{} · {}", row.outcome, row.event);
+                            let detail = if row.reason.is_empty() { row.session_id.clone() } else { row.reason.clone() };
+                            let when = row.at.clone();
+                            let can_replay = row.outcome == "accepted" || row.outcome == "replayed";
+                            view! {
+                                <li class="row card">
+                                    <span>
+                                        <span class="name">{headline}</span>
+                                        <span class="path">{detail}</span>
+                                        <span class="path">{when}</span>
+                                    </span>
+                                    {can_replay.then(|| {
+                                        let delivery_id = replay_id.clone();
+                                        view! {
+                                            <button type="button" class="secondary" on:click=move |_| {
+                                                let trigger_id = form.selected.get();
+                                                let delivery = delivery_id.clone();
+                                                let (b, t) = (base.get(), token.get());
+                                                spawn_local(async move {
+                                                    match post_json_value(&b, &t, &format!("/v1/triggers/{trigger_id}/replay"), json!({"deliveryId": delivery})).await {
+                                                        Ok(v) => {
+                                                            let outcome = v.get("outcome").and_then(|s| s.as_str()).unwrap_or("replayed");
+                                                            form.notice.set(format!("Replay {outcome}."));
+                                                            load_deliveries(base, token, trigger_id, deliveries, form.notice);
+                                                        }
+                                                        Err(e) => form.notice.set(e),
+                                                    }
+                                                });
+                                            }>"Replay"</button>
+                                        }
+                                    })}
+                                </li>
+                            }
+                        }).collect_view()}
+                    </ul>
+            </section>
+        </main>
+    }
+}
+
+fn origin_prefix(base: &str) -> String {
+    let base = base.trim().trim_end_matches('/').to_string();
+    if !base.is_empty() {
+        return base;
+    }
+    web_sys::window()
+        .and_then(|w| w.location().origin().ok())
+        .unwrap_or_default()
+}

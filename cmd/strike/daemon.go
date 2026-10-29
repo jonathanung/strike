@@ -1,33 +1,48 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/jonathanung/strike/internal/frontend/server"
 	"github.com/jonathanung/strike/internal/persist/workspace"
+	"github.com/jonathanung/strike/internal/trust/usageaudit"
 )
 
-const daemonUsage = `Run strike as a per-user background daemon (systemd user service).
+const daemonUsage = `Run strike as a per-user background daemon.
 
 Usage:
-  strike daemon install [--addr <host:port>] [--allow-private-bind]
+  strike daemon install [--addr <host:port>] [--allow-private-bind] [--start]
   strike daemon uninstall
   strike daemon status
   strike daemon token
   strike daemon logout
+  strike daemon grant [--ttl 15m] [--base http://127.0.0.1:8787]
+  strike daemon revoke [--base http://127.0.0.1:8787]
 
-install writes ~/.config/systemd/user/strike-daemon.service and a stable
-0600 API token at ~/.strike/daemon.token, then prints the systemctl
-commands to enable it. The daemon is "strike serve --auth --token-file";
-the web UI connects with the token ("strike daemon token" prints it).
-logout replaces that file with a new token. A daemon started with
---token-file loads the new value on the next /v1 request; one started
-with --token keeps the old value until it is restarted.
+install writes a service definition and a stable 0600 API token at
+~/.strike/daemon.token. Linux writes
+$XDG_CONFIG_HOME/systemd/user/strike-daemon.service, or
+~/.config/systemd/user/strike-daemon.service when XDG_CONFIG_HOME is unset.
+macOS writes ~/Library/LaunchAgents/ca.jonathanung.strike-daemon.plist
+(launchd). Windows and other systems are unsupported; run strike serve
+manually (WSL2 is supported). --start enables and starts the service.
+Without --start, install prints the platform commands and recommends
+--start. The daemon is "strike serve --auth --token-file"; the web UI
+connects with the token ("strike daemon token" prints it).
+logout replaces that file with a new token, drops short-lived grants, and
+revokes paired browsers on the next /v1 request. A daemon started with
+--token-file loads the new value without a restart; one started with
+--token keeps the old value until it is restarted.
+grant asks the running daemon for a short-lived bearer and prints that
+bearer on stdout only. revoke drops those grants and does not rotate the
+host token. Neither command prints the host token.
 Default bind is loopback. For phone access over Tailscale, install with
 --addr <tailnet-ip>:8787 --allow-private-bind.`
 
@@ -75,30 +90,6 @@ func rotateDaemonToken(path string) (string, error) {
 	return tok, nil
 }
 
-func systemdUserUnitPath() (string, error) {
-	cfg, err := os.UserConfigDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(cfg, "systemd", "user", "strike-daemon.service"), nil
-}
-
-// renderSystemdUnit builds the user unit. exe is the absolute strike path.
-func renderSystemdUnit(exe, addr string, allowPrivateBind bool) string {
-	exec := fmt.Sprintf("%s serve --auth --token-file %s --addr %s", exe, daemonTokenPath(), addr)
-	if allowPrivateBind {
-		exec += " --allow-private-bind"
-	}
-	return "[Unit]\n" +
-		"Description=Strike daemon (web UI + engine API)\n" +
-		"After=network.target\n\n" +
-		"[Service]\n" +
-		"ExecStart=" + exec + "\n" +
-		"Restart=on-failure\n\n" +
-		"[Install]\n" +
-		"WantedBy=default.target\n"
-}
-
 func runDaemonCLI(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		fmt.Fprintln(stdout, daemonUsage)
@@ -108,29 +99,9 @@ func runDaemonCLI(args []string, stdout, stderr io.Writer) int {
 	case "install":
 		return daemonInstall(args[1:], stdout, stderr)
 	case "uninstall":
-		unit, err := systemdUserUnitPath()
-		if err != nil {
-			fmt.Fprintln(stderr, "strike:", err)
-			return 1
-		}
-		if err := os.Remove(unit); err != nil && !errors.Is(err, os.ErrNotExist) {
-			fmt.Fprintln(stderr, "strike:", err)
-			return 1
-		}
-		fmt.Fprintf(stdout, "Removed %s\nRun: systemctl --user daemon-reload\n", unit)
-		return 0
+		return daemonUninstall(stdout, stderr)
 	case "status":
-		unit, err := systemdUserUnitPath()
-		if err != nil {
-			fmt.Fprintln(stderr, "strike:", err)
-			return 1
-		}
-		if _, err := os.Stat(unit); errors.Is(err, os.ErrNotExist) {
-			fmt.Fprintln(stdout, "not installed (run: strike daemon install)")
-			return 0
-		}
-		fmt.Fprintf(stdout, "installed: %s\nCheck: systemctl --user status strike-daemon\n", unit)
-		return 0
+		return daemonStatus(stdout, stderr)
 	case "token":
 		tok, _, err := loadOrMintTokenFile(daemonTokenPath())
 		if err != nil {
@@ -145,8 +116,18 @@ func runDaemonCLI(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, "strike:", err)
 			return 1
 		}
-		fmt.Fprintf(stdout, "Rotated %s\n%s\nA serve process started with --token-file uses this token on the next /v1 request. A process started with --token keeps the previous value until restart.\n", daemonTokenPath(), tok)
+		if log, err := usageaudit.Open(usageaudit.DefaultDir()); err != nil {
+			fmt.Fprintf(stderr, "strike: usage audit log: %v\n", err)
+		} else {
+			_, _ = log.Append(usageaudit.Input{Action: usageaudit.ActionToken, Summary: "daemon token file rotated"})
+			_ = log.Close()
+		}
+		fmt.Fprintf(stdout, "Rotated %s\n%s\nA serve process started with --token-file uses this token on the next /v1 request, drops short-lived grants, and revokes paired browsers. A process started with --token keeps the previous value until restart.\n", daemonTokenPath(), tok)
 		return 0
+	case "grant":
+		return daemonGrant(args[1:], stdout, stderr)
+	case "revoke":
+		return daemonRevoke(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "strike: unknown daemon command %q\n%s\n", args[0], daemonUsage)
 		return 2
@@ -154,51 +135,103 @@ func runDaemonCLI(args []string, stdout, stderr io.Writer) int {
 }
 
 func daemonInstall(args []string, stdout, stderr io.Writer) int {
-	addr := "127.0.0.1:8787"
-	allowPrivate := false
+	opts, code, err := parseDaemonInstallArgs(args)
+	if err != nil {
+		fmt.Fprintln(stderr, "strike:", err)
+		return code
+	}
+	host, err := currentDaemonHost()
+	if err != nil {
+		fmt.Fprintln(stderr, "strike:", err)
+		return 1
+	}
+	return installDaemon(host, opts, nil, stdout, stderr)
+}
+
+func daemonGrant(args []string, stdout, stderr io.Writer) int {
+	base := "http://127.0.0.1:8787"
+	ttlRaw := "15m"
 	for i := 0; i < len(args); i++ {
 		switch {
-		case args[i] == "--allow-private-bind":
-			allowPrivate = true
-		case args[i] == "--addr" && i+1 < len(args):
+		case args[i] == "--base" && i+1 < len(args):
 			i++
-			addr = args[i]
-		case strings.HasPrefix(args[i], "--addr="):
-			addr = strings.TrimPrefix(args[i], "--addr=")
+			base = args[i]
+		case strings.HasPrefix(args[i], "--base="):
+			base = strings.TrimPrefix(args[i], "--base=")
+		case args[i] == "--ttl" && i+1 < len(args):
+			i++
+			ttlRaw = args[i]
+		case strings.HasPrefix(args[i], "--ttl="):
+			ttlRaw = strings.TrimPrefix(args[i], "--ttl=")
 		default:
-			fmt.Fprintf(stderr, "strike: unknown daemon install flag %q\n", args[i])
+			fmt.Fprintf(stderr, "strike: unknown daemon grant flag %q\n", args[i])
 			return 2
 		}
 	}
-	if _, err := server.ResolveDaemonBindAddr(addr, allowPrivate); err != nil {
+	ttl, err := parseGrantTTL(ttlRaw)
+	if err != nil {
 		fmt.Fprintln(stderr, "strike:", err)
 		return 2
 	}
-	exe, err := os.Executable()
+	base = daemonBaseURL(base)
+	hostToken, _, err := loadOrMintTokenFile(daemonTokenPath())
 	if err != nil {
 		fmt.Fprintln(stderr, "strike:", err)
 		return 1
 	}
-	if abs, err := filepath.Abs(exe); err == nil {
-		exe = abs
-	}
-	if _, _, err := loadOrMintTokenFile(daemonTokenPath()); err != nil {
-		fmt.Fprintln(stderr, "strike:", err)
+	status, body, err := daemonAuthedJSON(http.MethodPost, base+"/v1/gateway/grants", hostToken, map[string]any{
+		"ttlSeconds": int(ttl.Seconds()),
+	})
+	if err != nil {
+		fmt.Fprintln(stderr, "strike:", redactSecrets(err.Error(), hostToken))
 		return 1
 	}
-	unit, err := systemdUserUnitPath()
+	if status != http.StatusCreated {
+		fmt.Fprintf(stderr, "strike: grant failed: %s\n", redactSecrets(string(body), hostToken))
+		return 1
+	}
+	var out struct {
+		Token     string `json:"token"`
+		ExpiresAt string `json:"expiresAt"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil || !validDaemonToken(out.Token) {
+		fmt.Fprintln(stderr, "strike: grant response was not a token")
+		return 1
+	}
+	fmt.Fprintln(stdout, out.Token)
+	fmt.Fprintf(stderr, "Grant expires %s. The secret is on stdout; do not log that stream.\n", out.ExpiresAt)
+	return 0
+}
+
+func daemonRevoke(args []string, stdout, stderr io.Writer) int {
+	base := "http://127.0.0.1:8787"
+	for i := 0; i < len(args); i++ {
+		switch {
+		case args[i] == "--base" && i+1 < len(args):
+			i++
+			base = args[i]
+		case strings.HasPrefix(args[i], "--base="):
+			base = strings.TrimPrefix(args[i], "--base=")
+		default:
+			fmt.Fprintf(stderr, "strike: unknown daemon revoke flag %q\n", args[i])
+			return 2
+		}
+	}
+	base = daemonBaseURL(base)
+	hostToken, _, err := loadOrMintTokenFile(daemonTokenPath())
 	if err != nil {
 		fmt.Fprintln(stderr, "strike:", err)
 		return 1
 	}
-	if err := os.MkdirAll(filepath.Dir(unit), 0o755); err != nil {
-		fmt.Fprintln(stderr, "strike:", err)
+	status, body, err := daemonAuthedJSON(http.MethodDelete, base+"/v1/gateway/grants", hostToken, nil)
+	if err != nil {
+		fmt.Fprintln(stderr, "strike:", redactSecrets(err.Error(), hostToken))
 		return 1
 	}
-	if err := os.WriteFile(unit, []byte(renderSystemdUnit(exe, addr, allowPrivate)), 0o644); err != nil {
-		fmt.Fprintln(stderr, "strike:", err)
+	if status != http.StatusOK {
+		fmt.Fprintf(stderr, "strike: revoke failed: %s\n", redactSecrets(string(body), hostToken))
 		return 1
 	}
-	fmt.Fprintf(stdout, "Wrote %s\nToken: %s (0600; print with: strike daemon token)\nEnable:\n  systemctl --user daemon-reload\n  systemctl --user enable --now strike-daemon\nThen open http://%s/ in a browser.\n", unit, daemonTokenPath(), addr)
+	fmt.Fprintf(stdout, "Revoked short-lived grants on %s\nThe host token file was not changed. strike daemon logout rotates it.\n", base)
 	return 0
 }

@@ -1,6 +1,7 @@
 package session
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -30,7 +31,7 @@ func TestManagerCreateAppendReplayList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if meta.Title != "root work" || meta.CreatedAt == "" {
+	if meta.Title != "root work" || meta.CreatedAt == "" || meta.SessionID != root.ID {
 		t.Fatalf("meta = %+v", meta)
 	}
 
@@ -551,6 +552,12 @@ func TestManagerForkCopiesPrefixAndMeta(t *testing.T) {
 	}
 	if meta.Title != "fork of original work" {
 		t.Fatalf("meta title = %q", meta.Title)
+	}
+	if meta.SessionID != fork.ID {
+		t.Fatalf("fork sessionId = %q, want %q", meta.SessionID, fork.ID)
+	}
+	if meta.Model != "echo" || fork.Model != "echo" {
+		t.Fatalf("fork model meta=%q info=%q, want echo", meta.Model, fork.Model)
 	}
 
 	parentEvents, err := m.Replay(root.ID)
@@ -1205,5 +1212,234 @@ func TestListCacheConcurrentAccess(t *testing.T) {
 	close(errs)
 	for err := range errs {
 		t.Error(err)
+	}
+}
+
+func TestAppendPersistsLastModel(t *testing.T) {
+	dir := t.TempDir()
+	m := NewManager(dir)
+	info, err := m.Create(CreateOptions{Title: "synthetic"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Append(info.ID, protocol.ModelSelected{
+		Correlation: protocol.Correlation{SessionID: info.ID},
+		Provider:    "echo",
+		Model:       "echo-1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	meta, err := ReadMeta(dir, info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.SessionID != info.ID || meta.Model != "echo-1" || meta.Title != "synthetic" {
+		t.Fatalf("meta = %+v", meta)
+	}
+	raw, err := os.ReadFile(MetaPath(dir, info.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(raw, []byte(`"provider"`)) {
+		t.Fatalf("sidecar stored provider:\n%s", raw)
+	}
+
+	// Same model does not rewrite the sidecar.
+	if err := m.Append(info.ID, protocol.ModelSelected{
+		Provider: "echo",
+		Model:    "echo-1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	again, err := os.ReadFile(MetaPath(dir, info.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(raw, again) {
+		t.Fatalf("sidecar rewritten for unchanged model:\n%s", again)
+	}
+
+	// Another session's selection does not replace this sidecar's model.
+	if err := m.Append(info.ID, protocol.ModelSelected{
+		Correlation: protocol.Correlation{SessionID: "sess-other"},
+		Provider:    "echo",
+		Model:       "echo-2",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	meta, err = ReadMeta(dir, info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.Model != "echo-1" {
+		t.Fatalf("model = %q, want echo-1", meta.Model)
+	}
+
+	// Empty model does not clear a previous selection.
+	if err := m.Append(info.ID, protocol.ModelSelected{
+		Correlation: protocol.Correlation{SessionID: info.ID},
+		Provider:    "echo",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	meta, err = ReadMeta(dir, info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.Model != "echo-1" {
+		t.Fatalf("empty selection cleared model: %+v", meta)
+	}
+
+	if err := m.Append(info.ID, protocol.ModelSelected{
+		Correlation: protocol.Correlation{SessionID: info.ID},
+		Provider:    "echo",
+		Model:       "echo-3",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Close(info.ID); err != nil {
+		t.Fatal(err)
+	}
+	got, err := m.Get(info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Model != "echo-3" {
+		t.Fatalf("Get model = %q", got.Model)
+	}
+}
+
+func TestForkAtModelFollowsKeptPrefix(t *testing.T) {
+	dir := t.TempDir()
+	m := NewManager(dir)
+	root, err := m.Create(CreateOptions{Title: "work"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	corr1 := protocol.Correlation{SessionID: root.ID, TurnID: "t1"}
+	corr2 := protocol.Correlation{SessionID: root.ID, TurnID: "t2"}
+	evs := []protocol.Event{
+		protocol.ModelSelected{Correlation: protocol.Correlation{SessionID: root.ID}, Provider: "echo", Model: "echo-1"},
+		protocol.UserMessage{Correlation: corr1, Text: "first"},
+		protocol.TurnStarted{Correlation: corr1},
+		protocol.TextDelta{Correlation: corr1, Text: "one"},
+		protocol.TurnCompleted{Correlation: corr1, StopReason: "end_turn"},
+		protocol.ModelSelected{Correlation: protocol.Correlation{SessionID: root.ID}, Provider: "echo", Model: "echo-2"},
+		protocol.UserMessage{Correlation: corr2, Text: "second"},
+		protocol.TurnStarted{Correlation: corr2},
+		protocol.TextDelta{Correlation: corr2, Text: "two"},
+		protocol.TurnCompleted{Correlation: corr2, StopReason: "end_turn"},
+	}
+	for _, ev := range evs {
+		if err := m.Append(root.ID, ev); err != nil {
+			t.Fatal(err)
+		}
+	}
+	points := protocol.RewindPoints(evs)
+	if len(points) != 2 {
+		t.Fatalf("RewindPoints = %+v", points)
+	}
+
+	fork, err := m.ForkAt(root.ID, points[0].KeepEvents)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fork.Model != "echo-1" {
+		t.Fatalf("prefix fork model = %q, want echo-1", fork.Model)
+	}
+	meta, err := ReadMeta(dir, fork.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.Model != "echo-1" || meta.SessionID != fork.ID {
+		t.Fatalf("prefix fork meta = %+v", meta)
+	}
+	src, err := m.Get(root.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if src.Model != "echo-2" {
+		t.Fatalf("source model = %q, want echo-2", src.Model)
+	}
+
+	empty, err := m.ForkAt(root.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if empty.Model != "" {
+		t.Fatalf("empty fork model = %q", empty.Model)
+	}
+	emptyMeta, err := ReadMeta(dir, empty.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if emptyMeta.Model != "" {
+		t.Fatalf("empty fork sidecar model = %q", emptyMeta.Model)
+	}
+}
+
+func TestAppendKeepsModelWhenSidecarWriteFails(t *testing.T) {
+	dir := t.TempDir()
+	m := NewManager(dir)
+	info, err := m.Create(CreateOptions{Title: "synthetic"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Append(info.ID, protocol.ModelSelected{
+		Correlation: protocol.Correlation{SessionID: info.ID},
+		Provider:    "echo",
+		Model:       "echo-1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	metaPath := MetaPath(dir, info.ID)
+	bak := metaPath + ".bak"
+	if err := os.Rename(metaPath, bak); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(metaPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Append(info.ID, protocol.ModelSelected{
+		Correlation: protocol.Correlation{SessionID: info.ID},
+		Provider:    "echo",
+		Model:       "echo-9",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := m.Get(info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Model != "echo-1" {
+		t.Fatalf("memory model = %q, want echo-1 after sidecar write failure", got.Model)
+	}
+	events, err := m.Replay(info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lastSelectedModel(events) != "echo-9" {
+		t.Fatalf("log model = %q, want echo-9", lastSelectedModel(events))
+	}
+
+	if err := os.Remove(metaPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(bak, metaPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Append(info.ID, protocol.ModelSelected{
+		Correlation: protocol.Correlation{SessionID: info.ID},
+		Provider:    "echo",
+		Model:       "echo-9",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err = m.Get(info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Model != "echo-9" {
+		t.Fatalf("model after retry = %q", got.Model)
 	}
 }

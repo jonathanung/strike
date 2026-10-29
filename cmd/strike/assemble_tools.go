@@ -28,10 +28,13 @@ import (
 	"github.com/jonathanung/strike/internal/persist/attachment"
 	"github.com/jonathanung/strike/internal/persist/history"
 	"github.com/jonathanung/strike/internal/persist/issue"
+	"github.com/jonathanung/strike/internal/persist/knowledge"
 	"github.com/jonathanung/strike/internal/persist/ledger"
 	"github.com/jonathanung/strike/internal/persist/memory"
 	"github.com/jonathanung/strike/internal/persist/plan"
 	"github.com/jonathanung/strike/internal/persist/session"
+	"github.com/jonathanung/strike/internal/persist/taskrun"
+	"github.com/jonathanung/strike/internal/persist/workspace"
 	"github.com/jonathanung/strike/internal/product/auth"
 	"github.com/jonathanung/strike/internal/product/config"
 	"github.com/jonathanung/strike/internal/product/goal"
@@ -59,12 +62,17 @@ type assembled struct {
 	sandboxMode string
 	// sandboxExplain is the multi-line /sandbox explain text (config layers).
 	sandboxExplain string
-	services       host.Services
-	historyClose   func() error
-	memoryClose    func() error
-	issuesClose    func() error
-	goalsClose     func() error
-	plansClose     func() error
+	// sandboxPolicy is the compiled OS sandbox dial for bash and the web terminal.
+	sandboxPolicy sandbox.Policy
+	services      host.Services
+	historyClose  func() error
+	memoryClose   func() error
+	issuesClose   func() error
+	goalsClose    func() error
+	plansClose    func() error
+	// taskRuns is the plan-run board opened for strike serve. plansClose
+	// closes it so every frontend that already closes plans releases the file.
+	taskRuns       *taskrun.Store
 	artifactsClose func() error
 	ledgerClose    func() error
 	// worktreeClose removes a strike-managed worktree when cleanup=delete.
@@ -82,10 +90,24 @@ type assembled struct {
 	// spawnRoot creates additional concurrent root engines (interactive multi-root).
 	// resumeID empty = new session; non-empty opens that durable root.
 	spawnRoot rootSpawner
+	// spawnUnattended is the same spawn without the process --auto /
+	// --dangerously-skip-permissions allow-all layer. Schedules and triggers
+	// use it. The request's permission mode is applied on that engine.
+	spawnUnattended rootSpawner
 	// firstSlot is the initial live root for multiRootHub (same as eng/store).
 	firstSlot *rootSlot
 	// frameStore holds the last painted TUI frame for tui_snapshot (#1183).
 	frameStore *tool.TUIFrameStore
+	// attachments is the one content-addressed store for every engine in
+	// this process. HTTP ingest uses the same pointer so two mutexes cannot
+	// interleave a blob write.
+	attachments *attachment.Store
+	// sideProvider is a separate provider instance for read-only side chat.
+	// It is not the engine, and side chat must not submit ops through it.
+	// sideSelect rebuilds that instance when the live root's provider changes.
+	sideProvider provider.Provider
+	sideModel    string
+	sideSelect   func(string) (provider.Provider, string, error)
 }
 
 // assemble resolves project/config/auth, builds the engine and session store,
@@ -118,16 +140,58 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		_ = historyStore.Close()
 		return nil, fmt.Errorf("opening project memory: %w", err)
 	}
+	globalMemory, err := memory.Open(globalRoot, memory.GlobalKey)
+	if err != nil {
+		err = fmt.Errorf("opening global memory: %w", err)
+		_ = memoryStore.Close()
+		_ = historyStore.Close()
+		return nil, err
+	}
+	projectKnowledge, err := knowledge.Open(globalRoot, projectIdentity.Key)
+	if err != nil {
+		err = fmt.Errorf("opening project knowledge: %w", err)
+		_ = globalMemory.Close()
+		_ = memoryStore.Close()
+		_ = historyStore.Close()
+		return nil, err
+	}
+	globalKnowledge, err := knowledge.Open(globalRoot, knowledge.GlobalKey)
+	if err != nil {
+		err = fmt.Errorf("opening global knowledge: %w", err)
+		_ = projectKnowledge.Close()
+		_ = globalMemory.Close()
+		_ = memoryStore.Close()
+		_ = historyStore.Close()
+		return nil, err
+	}
+	closeMemory := func() {
+		if memoryStore != nil {
+			err := memoryStore.Close()
+			_ = err
+		}
+		if globalMemory != nil {
+			err := globalMemory.Close()
+			_ = err
+		}
+		if projectKnowledge != nil {
+			err := projectKnowledge.Close()
+			_ = err
+		}
+		if globalKnowledge != nil {
+			err := globalKnowledge.Close()
+			_ = err
+		}
+	}
 	issueStore, err := issue.Open(globalRoot, projectIdentity.Key)
 	if err != nil {
-		_ = memoryStore.Close()
+		closeMemory()
 		_ = historyStore.Close()
 		return nil, fmt.Errorf("opening project issues: %w", err)
 	}
 	goalStore, err := goal.Open(globalRoot, projectIdentity.Key)
 	if err != nil {
 		_ = issueStore.Close()
-		_ = memoryStore.Close()
+		closeMemory()
 		_ = historyStore.Close()
 		return nil, fmt.Errorf("opening project goals: %w", err)
 	}
@@ -135,7 +199,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	if err != nil {
 		_ = goalStore.Close()
 		_ = issueStore.Close()
-		_ = memoryStore.Close()
+		closeMemory()
 		_ = historyStore.Close()
 		return nil, fmt.Errorf("opening project plans: %w", err)
 	}
@@ -144,7 +208,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		_ = planStore.Close()
 		_ = goalStore.Close()
 		_ = issueStore.Close()
-		_ = memoryStore.Close()
+		closeMemory()
 		_ = historyStore.Close()
 		return nil, fmt.Errorf("opening project artifacts: %w", err)
 	}
@@ -154,7 +218,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		_ = planStore.Close()
 		_ = goalStore.Close()
 		_ = issueStore.Close()
-		_ = memoryStore.Close()
+		closeMemory()
 		_ = historyStore.Close()
 		return nil, fmt.Errorf("opening project ledger: %w", err)
 	}
@@ -165,7 +229,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		_ = planStore.Close()
 		_ = goalStore.Close()
 		_ = issueStore.Close()
-		_ = memoryStore.Close()
+		closeMemory()
 		_ = historyStore.Close()
 		return nil, fmt.Errorf("loading config: %w", err)
 	}
@@ -197,7 +261,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		_ = planStore.Close()
 		_ = goalStore.Close()
 		_ = issueStore.Close()
-		_ = memoryStore.Close()
+		closeMemory()
 		_ = historyStore.Close()
 		return nil, err
 	}
@@ -218,7 +282,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			_ = planStore.Close()
 			_ = goalStore.Close()
 			_ = issueStore.Close()
-			_ = memoryStore.Close()
+			closeMemory()
 			_ = historyStore.Close()
 			return nil, fmt.Errorf("unknown effort %q (want off, low, medium, high, xhigh, or max)", opts.effort)
 		}
@@ -232,7 +296,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		_ = planStore.Close()
 		_ = goalStore.Close()
 		_ = issueStore.Close()
-		_ = memoryStore.Close()
+		closeMemory()
 		_ = historyStore.Close()
 		return nil, fmt.Errorf("opening auth store: %w", err)
 	}
@@ -250,6 +314,9 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	// An explicit --provider must work or fail loudly; the config default is
 	// only a silent best-effort initial selection (pick one in-app with
 	// /provider otherwise). Headless exec always requires a usable provider.
+	var sideProvider provider.Provider
+	var sideModel string
+	var sideSelect func(string) (provider.Provider, string, error)
 	if requireProvider || (opts.providerSet && opts.provider != "") {
 		if cfg.Provider == "" {
 			_ = ledgerStore.Close()
@@ -257,19 +324,26 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			_ = planStore.Close()
 			_ = goalStore.Close()
 			_ = issueStore.Close()
-			_ = memoryStore.Close()
+			closeMemory()
 			_ = historyStore.Close()
 			return nil, fmt.Errorf("no provider configured (pass --provider or set provider in config)")
 		}
-		if _, _, err := selectProvider(cfg.Provider); err != nil {
+		p, model, err := selectProvider(cfg.Provider)
+		if err != nil {
 			_ = ledgerStore.Close()
 			_ = artifactStore.Close()
 			_ = planStore.Close()
 			_ = goalStore.Close()
 			_ = issueStore.Close()
-			_ = memoryStore.Close()
+			closeMemory()
 			_ = historyStore.Close()
 			return nil, err
+		}
+		sideProvider = p
+		sideModel = model
+		sideSelect = selectProvider
+		if strings.TrimSpace(cfg.Model) != "" {
+			sideModel = cfg.Model
 		}
 	}
 
@@ -283,7 +357,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		_ = planStore.Close()
 		_ = goalStore.Close()
 		_ = issueStore.Close()
-		_ = memoryStore.Close()
+		closeMemory()
 		_ = historyStore.Close()
 		return nil, fmt.Errorf("admission policy: %w", err)
 	}
@@ -299,7 +373,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		_ = planStore.Close()
 		_ = goalStore.Close()
 		_ = issueStore.Close()
-		_ = memoryStore.Close()
+		closeMemory()
 		_ = historyStore.Close()
 		return nil, fmt.Errorf("loading skills: %w", err)
 	}
@@ -347,8 +421,9 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		tool.NewBrowser(),
 		tool.NewTodoWrite(todoStore),
 		tool.NewTodoRead(todoStore),
-		tools.NewMemoryWrite(memoryStore),
-		tools.NewMemoryRead(memoryStore),
+		tools.NewMemoryWriteScoped(memoryStore, globalMemory),
+		tools.NewMemoryReadScoped(memoryStore, globalMemory),
+		tools.NewKnowledge(projectKnowledge, globalKnowledge),
 		tools.NewIssueWrite(issueStore),
 		tools.NewIssueRead(issueStore),
 		tools.NewPlanWrite(planStore),
@@ -385,7 +460,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		_ = planStore.Close()
 		_ = goalStore.Close()
 		_ = issueStore.Close()
-		_ = memoryStore.Close()
+		closeMemory()
 		_ = historyStore.Close()
 		return nil, fmt.Errorf("loading agents: %w", err)
 	}
@@ -445,7 +520,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		_ = planStore.Close()
 		_ = goalStore.Close()
 		_ = issueStore.Close()
-		_ = memoryStore.Close()
+		closeMemory()
 		_ = historyStore.Close()
 		return nil, fmt.Errorf("loading workflows: %w", err)
 	}
@@ -561,7 +636,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		_ = planStore.Close()
 		_ = goalStore.Close()
 		_ = issueStore.Close()
-		_ = memoryStore.Close()
+		closeMemory()
 		_ = historyStore.Close()
 		return nil, fmt.Errorf("scheduler policy: %w", err)
 	}
@@ -572,7 +647,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		_ = planStore.Close()
 		_ = goalStore.Close()
 		_ = issueStore.Close()
-		_ = memoryStore.Close()
+		closeMemory()
 		_ = historyStore.Close()
 		return nil, fmt.Errorf("scheduler: %w", err)
 	}
@@ -591,11 +666,28 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	registry.Register(tools.NewRenamePreview(lspMgr))
 	registry.Register(tools.NewImpact(lspMgr))
 
+	// One store for every root in this process. Opened before the first
+	// openRoot call; the closure reads it at call time.
+	var sharedAttachments *attachment.Store
+
 	// openRoot builds one live root engine. resumeID empty creates a fresh
 	// session; non-empty opens that durable root (subagents rejected).
 	// applyCLI pins: only the process's first root applies --provider/--model/--effort.
-	openRoot := func(resumeID string, applyCLI bool) (*rootSlot, []protocol.Event, error) {
+	// unattended strips the process permission bypass and starts in plan
+	// unless managed config locks the dial.
+	openRoot := func(resumeID string, applyCLI bool, unattended bool) (*rootSlot, []protocol.Event, error) {
 		resumeID = strings.TrimSpace(resumeID)
+		preferActive := !applyCLI && resumeID == ""
+		var binding workspace.SessionBinding
+		if resumeID != "" {
+			meta, err := session.ReadMeta(sessionDir, resumeID)
+			if err != nil {
+				return nil, nil, err
+			}
+			binding = workspace.ForResume(opts.workspaces, meta.WorkspaceID, launchDir)
+		} else {
+			binding = workspace.ForNew(opts.workspaces, launchDir, preferActive)
+		}
 		var (
 			sessionID          string
 			bound              session.Bound
@@ -616,6 +708,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			initialPhaseGrant  engine.PhaseGrantApproval
 			initialAlways      permission.Ruleset
 			initialPlanHandoff engine.PlanHandoffState
+			initialMemoryMode  string
 			quietStartup       bool
 			resuming           bool
 			openRootsBefore    int
@@ -662,7 +755,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			quietStartup = !(applyCLI && (opts.providerSet || opts.model != "" || opts.effort != ""))
 		} else {
 			openRootsBefore = sessions.CountOpenRoots()
-			info, err := sessions.Create(session.CreateOptions{ProjectKey: projectIdentity.Key})
+			info, err := sessions.Create(session.CreateOptions{ProjectKey: projectIdentity.Key, WorkspaceID: binding.ID})
 			if err != nil {
 				return nil, nil, fmt.Errorf("creating session: %w", err)
 			}
@@ -677,7 +770,11 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		// Bind tool CWD to a per-session git worktree when configured / forced.
 		// Project-scoped state stays on projectIdentity.Key (launch repo).
 		// Non-git cwd soft-fails (launchDir + notice) so the app still starts.
-		toolDir, wtClose, wtNotice, err := bindSessionWorktree(sessions, sessionID, launchDir, cfg, opts.worktree, resuming, openRootsBefore)
+		baseDir := launchDir
+		if binding.Bound && strings.TrimSpace(binding.Dir) != "" {
+			baseDir = binding.Dir
+		}
+		toolDir, wtClose, wtNotice, err := bindSessionWorktree(sessions, sessionID, baseDir, cfg, opts.worktree, resuming, openRootsBefore)
 		if err != nil {
 			if !resuming {
 				_ = sessions.Destroy(sessionID)
@@ -687,7 +784,29 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			return nil, nil, err
 		}
 
+		// A clock or trigger must not inherit --auto / --dangerously-skip-permissions.
+		// Those flags append an allow-all layer and auto-accept phase widening.
+		// SetPermissionMode cannot remove that layer, so plan would still allow bash.
+		bypass := processBypassEnabled(opts.skipPermissionAsks(), unattended)
+		if unattended && strings.TrimSpace(resumeID) == "" && !cfg.Managed.PermissionMode {
+			initialPermMode = protocol.PermissionModePlan
+		}
 		// Refuse yolo + sandbox off without --i-know (startup gate).
+		if !resuming && binding.Bound && binding.PermissionMode != "" && !cfg.Managed.PermissionMode {
+			if mode, ok := protocol.ParsePermissionMode(binding.PermissionMode); ok {
+				initialPermMode = mode
+			}
+		}
+		sessionInstructions := instructions
+		projectRoot := projectIdentity.Root
+		if binding.Bound {
+			projectRoot = binding.Root
+			sessionInstructions = config.LoadInstructions(binding.Dir, binding.Root)
+			if binding.RulesBlock != "" && !workspace.InstructionCovers(sessionInstructions, binding.RulesPath) {
+				sessionInstructions = append(sessionInstructions, binding.RulesBlock)
+			}
+		}
+
 		if err := sandbox.CheckYoloSandbox(string(initialPermMode.Normalize()), sandboxMode, opts.iKnow); err != nil {
 			if !resuming {
 				_ = sessions.Destroy(sessionID)
@@ -708,8 +827,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		} else {
 			auditSink = s
 		}
-		attStore, attErr := attachment.Open(globalRoot)
-		if attErr != nil {
+		if sharedAttachments == nil {
 			if !resuming {
 				_ = sessions.Destroy(sessionID)
 			} else {
@@ -718,31 +836,44 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			if wtClose != nil {
 				_ = wtClose()
 			}
-			return nil, nil, fmt.Errorf("opening attachments: %w", attErr)
+			return nil, nil, fmt.Errorf("opening attachments: store is not open")
+		}
+		if meta, metaErr := session.ReadMeta(sessions.Dir(), sessionID); metaErr == nil {
+			initialMemoryMode = meta.MemoryMode
 		}
 		eng := engine.New(engine.Options{
-			SessionID:        sid,
-			Select:           selectProvider,
-			Registry:         registry,
-			WorkDir:          toolDir,
-			Audit:            auditSink,
-			CheckpointDir:    tool.DefaultCheckpointDir(sid),
-			ProjectRoot:      projectIdentity.Root,
-			Instructions:     instructions,
-			Memory:           enginebind.Memory(memoryStore),
-			Ledger:           enginebind.Ledger(ledgerStore),
-			Attachments:      enginebind.Attachments(attStore),
-			ProjectArtifact:  enginebind.ProjectArtifact,
-			ProjectLedger:    enginebind.ProjectLedger,
-			Worktrees:        enginebind.Worktrees(),
-			Version:          version.Version,
-			BuildDiagnostic:  enginebind.Diagnostic(),
-			SystemPrompt:     cfg.SystemPrompt,
-			SystemPromptMode: cfg.SystemPromptMode,
-			LeanCode:         cfg.LeanCode,
-			HarnessRegistry:  harnessRegistry,
-			Scheduler:        sched,
-			SchedulerPolicy:  schedEff,
+			SessionID: sid,
+			Select:    selectProvider,
+			PrepareInput: func(text, dir string) engine.InputPrep {
+				return composerPrepare(text, dir, skills)
+			},
+			Registry:       registry,
+			WorkDir:        toolDir,
+			WorkspaceRoots: append([]string(nil), binding.Roots...),
+			Audit:          auditSink,
+			CheckpointDir:  tool.DefaultCheckpointDir(sid),
+			ProjectRoot:    projectRoot,
+			Instructions:   sessionInstructions,
+			Memory: enginebind.CombineMemory(
+				enginebind.Memory(memoryStore),
+				enginebind.Memory(globalMemory),
+				enginebind.Knowledge(projectKnowledge),
+				enginebind.Knowledge(globalKnowledge),
+			),
+			InitialMemoryMode: initialMemoryMode,
+			Ledger:            enginebind.Ledger(ledgerStore),
+			Attachments:       enginebind.Attachments(sharedAttachments),
+			ProjectArtifact:   enginebind.ProjectArtifact,
+			ProjectLedger:     enginebind.ProjectLedger,
+			Worktrees:         enginebind.Worktrees(),
+			Version:           version.Version,
+			BuildDiagnostic:   enginebind.Diagnostic(),
+			SystemPrompt:      cfg.SystemPrompt,
+			SystemPromptMode:  cfg.SystemPromptMode,
+			LeanCode:          cfg.LeanCode,
+			HarnessRegistry:   harnessRegistry,
+			Scheduler:         sched,
+			SchedulerPolicy:   schedEff,
 			FileSync: func(absPath, content string, deleted bool) {
 				// Background context: document sync must not be canceled with the tool call.
 				lspMgr.NotifyFile(context.Background(), absPath, content, deleted)
@@ -788,7 +919,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			InitialPermissionMode: initialPermMode,
 			SandboxMode:           sandboxMode,
 			SandboxAllowDegrade:   cfg.SandboxAllowDegrade,
-			NetworkAllow:          sessionNetworkAllow(cfg.Network.Allow, opts.skipNetworkAllow()),
+			NetworkAllow:          sessionNetworkAllow(cfg.Network.Allow, opts.skipNetworkAllow() && !unattended),
 			BashSecrets:           cloneBashSecrets(cfg.BashSecrets),
 			ContentGuard: tool.ContentGuardSettings{
 				Mode:       cfg.ContentGuard.Mode,
@@ -815,10 +946,10 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			InitialPlanHandoff:         initialPlanHandoff,
 			PlanStore:                  enginebind.Plan(planStore),
 			QuietStartup:               quietStartup,
-			DangerouslySkipPermissions: opts.skipPermissionAsks(),
+			DangerouslySkipPermissions: bypass,
 			Workflows:                  enginebind.Workflows(workflows),
-			Rules:                      permissionLayersWithPreset(cfg.Permissions, cfg.PermissionPreset, opts.skipPermissionAsks()),
-			RuleLayerNames:             permissionLayerNames(cfg.PermissionPreset, opts.skipPermissionAsks()),
+			Rules:                      permissionLayersWithPreset(cfg.Permissions, cfg.PermissionPreset, bypass),
+			RuleLayerNames:             permissionLayerNames(cfg.PermissionPreset, bypass),
 			ManagedRules:               append(permission.Ruleset(nil), cfg.Managed.DenyRules...),
 			LockPermissionMode:         cfg.Managed.PermissionMode,
 			Hooks:                      hookDefs,
@@ -838,6 +969,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			PersistProjectRule: func(rule permission.Rule) error {
 				return config.AppendProjectPermission(launchDir, rule)
 			},
+			ProjectRulePath: config.ProjectPath(launchDir),
 			PersistSessionMeta: func(m protocol.SessionMeta) error {
 				_, err := session.UpdateMeta(sessionDir, sid, func(meta *session.Meta) {
 					if m.PRURL != "" {
@@ -870,7 +1002,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 				return info.ID, nil
 			},
 			AppendChildEvent: func(childID string, ev protocol.Event) error {
-				return sessions.Append(childID, ev)
+				return appendChildEvent(sessions.Append, childID, ev)
 			},
 			CloseChildSession: func(childID string) error {
 				return sessions.Close(childID)
@@ -918,23 +1050,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		}, replay, nil
 	}
 
-	resumeID := strings.TrimSpace(opts.sessionID)
-	if opts.continueSession {
-		info, err := sessions.LatestRoot(projectIdentity.Key)
-		if err != nil {
-			sched.Close()
-			_ = ledgerStore.Close()
-			_ = artifactStore.Close()
-			_ = planStore.Close()
-			_ = goalStore.Close()
-			_ = issueStore.Close()
-			_ = memoryStore.Close()
-			_ = historyStore.Close()
-			return nil, fmt.Errorf("continue: %w", err)
-		}
-		resumeID = info.ID
-	}
-	first, replay, err := openRoot(resumeID, true)
+	sharedAttachments, err = attachment.Open(globalRoot)
 	if err != nil {
 		sched.Close()
 		_ = ledgerStore.Close()
@@ -943,6 +1059,42 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		_ = goalStore.Close()
 		_ = issueStore.Close()
 		_ = memoryStore.Close()
+		_ = historyStore.Close()
+		return nil, fmt.Errorf("opening attachments: %w", err)
+	}
+	closeAttachments := func() {
+		if sharedAttachments != nil {
+			_ = sharedAttachments.Close()
+		}
+	}
+
+	resumeID := strings.TrimSpace(opts.sessionID)
+	if opts.continueSession {
+		info, err := sessions.LatestRoot(projectIdentity.Key)
+		if err != nil {
+			closeAttachments()
+			sched.Close()
+			_ = ledgerStore.Close()
+			_ = artifactStore.Close()
+			_ = planStore.Close()
+			_ = goalStore.Close()
+			_ = issueStore.Close()
+			closeMemory()
+			_ = historyStore.Close()
+			return nil, fmt.Errorf("continue: %w", err)
+		}
+		resumeID = info.ID
+	}
+	first, replay, err := openRoot(resumeID, true, false)
+	if err != nil {
+		closeAttachments()
+		sched.Close()
+		_ = ledgerStore.Close()
+		_ = artifactStore.Close()
+		_ = planStore.Close()
+		_ = goalStore.Close()
+		_ = issueStore.Close()
+		closeMemory()
 		_ = historyStore.Close()
 		return nil, err
 	}
@@ -1027,6 +1179,8 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	// local.New wraps the real backend stores in the host.Services contract;
 	// the TUI never sees auth/config/models/history/memory/issues directly.
 	services := local.New(authStore, historyStore, memoryStore, issueStore, agentNames, skills, customStore, workDir)
+	services.Memory = local.ScopeMemory(services.Memory, globalMemory)
+	services.Knowledge = local.NewKnowledge(projectKnowledge, globalKnowledge)
 	services.Files = local.NewFiles(workDir)
 	// Compile base sandbox profile from defaults + config (+ optional dangerous
 	// allow-all). Engine recompiles per bash call with live agent/phase layers.
@@ -1071,8 +1225,34 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	services.WorkflowDrafts = local.NewWorkflowDrafts(workDir)
 	services.Themes = themesAdapter{}
 
+	taskStore, err := taskrun.Open(globalRoot, projectIdentity.Key)
+	if err != nil {
+		sched.Close()
+		_ = ledgerStore.Close()
+		_ = artifactStore.Close()
+		_ = planStore.Close()
+		_ = goalStore.Close()
+		_ = issueStore.Close()
+		_ = memoryStore.Close()
+		_ = historyStore.Close()
+		if mcpMgr != nil {
+			_ = mcpMgr.Close()
+		}
+		if lspMgr != nil {
+			_ = lspMgr.Close()
+		}
+		if first != nil && first.wtClose != nil {
+			_ = first.wtClose()
+		}
+		return nil, fmt.Errorf("opening task runs: %w", err)
+	}
+
 	spawn := rootSpawner(func(id string) (*rootSlot, error) {
-		slot, _, err := openRoot(id, false)
+		slot, _, err := openRoot(id, false, false)
+		return slot, err
+	})
+	spawnUnattended := rootSpawner(func(id string) (*rootSlot, error) {
+		slot, _, err := openRoot(id, false, true)
 		return slot, err
 	})
 
@@ -1086,12 +1266,17 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		cfg:            cfg,
 		sandboxMode:    sandboxMode,
 		sandboxExplain: sandboxExplain,
+		sandboxPolicy:  sandboxPolicy,
 		services:       services,
 		historyClose: func() error {
 			return historyStore.Close()
 		},
 		memoryClose: func() error {
-			return memoryStore.Close()
+			err := memoryStore.Close()
+			_ = globalMemory.Close()
+			_ = projectKnowledge.Close()
+			_ = globalKnowledge.Close()
+			return err
 		},
 		issuesClose: func() error {
 			return issueStore.Close()
@@ -1100,8 +1285,16 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			return goalStore.Close()
 		},
 		plansClose: func() error {
-			return planStore.Close()
+			var err error
+			if taskStore != nil {
+				err = taskStore.Close()
+			}
+			if err2 := planStore.Close(); err == nil {
+				err = err2
+			}
+			return err
 		},
+		taskRuns: taskStore,
 		artifactsClose: func() error {
 			return artifactStore.Close()
 		},
@@ -1125,10 +1318,15 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			}
 			return first
 		},
-		schedulerClose: sched.Close,
-		spawnRoot:      spawn,
-		firstSlot:      first,
-		frameStore:     frameStore,
+		schedulerClose:  sched.Close,
+		spawnRoot:       spawn,
+		spawnUnattended: spawnUnattended,
+		firstSlot:       first,
+		frameStore:      frameStore,
+		attachments:     sharedAttachments,
+		sideProvider:    sideProvider,
+		sideModel:       sideModel,
+		sideSelect:      sideSelect,
 	}, nil
 }
 

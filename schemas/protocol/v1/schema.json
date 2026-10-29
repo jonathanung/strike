@@ -1,0 +1,6943 @@
+{
+  "$defs": {
+    "AdmissionDecided": {
+      "additionalProperties": true,
+      "description": "AdmissionDecided is a non-blocking audit event when MCP/skill/plugin admission finishes for one subject (allow|warn|block|quarantine). Emitted at register/load time before tools bind. Reasons and evidence are redacted by timeline export.",
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "attempt": {
+          "type": "integer"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "findings": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "preset": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "surface": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "surface",
+        "target",
+        "action"
+      ],
+      "type": "object"
+    },
+    "AgentBudgetView": {
+      "additionalProperties": true,
+      "description": "AgentBudgetView is the protocol wire shape for per-agent budget remaining. Nested under TeamRosterMember and ChildEscalated. Zero limits mean unlimited. Session-level maxSessionCostUSD (#577) is the outer envelope when configured; per-agent maxCostUSD nests inside it.",
+      "properties": {
+        "costUsdRemaining": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "x-strike-go-pointer": true
+        },
+        "costUsdUsed": {
+          "type": "number"
+        },
+        "dangerousRemaining": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "x-strike-go-pointer": true
+        },
+        "dangerousTools": {
+          "type": "integer"
+        },
+        "elapsedS": {
+          "type": "integer"
+        },
+        "escalateKind": {
+          "type": "string"
+        },
+        "escalateReason": {
+          "type": "string"
+        },
+        "escalated": {
+          "type": "boolean"
+        },
+        "idleS": {
+          "type": "integer"
+        },
+        "lastProgressAt": {
+          "type": "string"
+        },
+        "loop": {
+          "type": "boolean"
+        },
+        "loopDetectN": {
+          "type": "integer"
+        },
+        "maxCostUsd": {
+          "type": "number"
+        },
+        "maxDangerousTools": {
+          "type": "integer"
+        },
+        "maxTokens": {
+          "type": "integer"
+        },
+        "maxToolCalls": {
+          "type": "integer"
+        },
+        "maxWallClockS": {
+          "type": "integer"
+        },
+        "stall": {
+          "type": "boolean"
+        },
+        "stallAfterS": {
+          "type": "integer"
+        },
+        "stallAfterSEffective": {
+          "type": "integer"
+        },
+        "tokensRemaining": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "x-strike-go-pointer": true
+        },
+        "tokensUsed": {
+          "type": "integer"
+        },
+        "toolCalls": {
+          "type": "integer"
+        },
+        "toolCallsRemaining": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "x-strike-go-pointer": true
+        },
+        "wallClockRemainingS": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "x-strike-go-pointer": true
+        }
+      },
+      "type": "object"
+    },
+    "AgentContractTimeout": {
+      "additionalProperties": true,
+      "description": "AgentContractTimeout reports that a require-ack peer message was not acked before its TTL. Correlation is the original sender session. An escalation mailbox delivery to EscalateTo (default lead) is also enqueued when live.",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "escalateTo": {
+          "type": "string"
+        },
+        "from": {
+          "type": "string"
+        },
+        "messageId": {
+          "type": "string"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "taskId": {
+          "type": "string"
+        },
+        "teamId": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        },
+        "urgency": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "messageId",
+        "from",
+        "to"
+      ],
+      "type": "object"
+    },
+    "AgentMessage": {
+      "additionalProperties": true,
+      "description": "AgentMessage records a peer/team mailbox delivery for UI and debugging. Correlation is the recipient session. Body is the message text; From/To are session ids; TeamID is the lead session id (team identity). Emitted on the recipient engine at boundary injection (tool-round / idle nudge), never mid-tool-call.",
+      "properties": {
+        "ackStatus": {
+          "type": "string"
+        },
+        "attempt": {
+          "type": "integer"
+        },
+        "body": {
+          "type": "string"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "escalateTo": {
+          "type": "string"
+        },
+        "from": {
+          "type": "string"
+        },
+        "inReplyTo": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "messageId": {
+          "type": "string"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "requireAck": {
+          "type": "boolean"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "taskId": {
+          "type": "string"
+        },
+        "teamId": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        },
+        "urgency": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "to",
+        "body"
+      ],
+      "type": "object"
+    },
+    "AgentSelected": {
+      "additionalProperties": true,
+      "description": "AgentSelected confirms the active agent.",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "ArtifactRef": {
+      "additionalProperties": true,
+      "description": "ArtifactRef points at a shared typed artifact (id + optional CAS version/type). Used on completion handoffs and task/agent messages so peers can fetch \"findings:v3\" without inlining prose. See internal/persist/artifact.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "ArtifactUpdated": {
+      "additionalProperties": true,
+      "description": "ArtifactUpdated is emitted after a successful artifact_write create/update so session JSONL and attach clients observe shared typed artifact mutations. Content is omitted (fetch via tools); id+version+type identify the object.",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "op": {
+          "type": "string"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "scope": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "version",
+        "op"
+      ],
+      "type": "object"
+    },
+    "Autonomy": {
+      "description": "Open string. Writers use x-strike-known-values. Readers must accept other strings.",
+      "type": "string",
+      "x-strike-enum-open": true,
+      "x-strike-known-values": [
+        "supervised",
+        "agent",
+        "checks",
+        "skip-all"
+      ]
+    },
+    "AutonomySelected": {
+      "additionalProperties": true,
+      "description": "AutonomySelected confirms the session exit-gate policy, at startup and after each SetAutonomy.",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "mode": {
+          "$ref": "#/$defs/Autonomy"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "type": "object"
+    },
+    "ChildCompleted": {
+      "additionalProperties": true,
+      "description": "ChildCompleted marks the end of a foreground child/subagent session. Emitted by the parent engine with the child's correlation.",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "budgetKind": {
+          "type": "string"
+        },
+        "delegationId": {
+          "type": "string"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "finalization": {
+          "type": "string"
+        },
+        "handoff": {
+          "$ref": "#/$defs/CompletionHandoff"
+        },
+        "name": {
+          "type": "string"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/ChildStatus"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        },
+        "verification": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/VerificationReport"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "x-strike-go-pointer": true
+        }
+      },
+      "required": [
+        "status",
+        "handoff"
+      ],
+      "type": "object"
+    },
+    "ChildEscalated": {
+      "additionalProperties": true,
+      "description": "ChildEscalated reports a per-child budget/stall/loop trip (#774 / #879). Emitted on the parent stream before interrupt or finalization. Action is \"finalizing\" (soft budget: one reserved structured-handoff turn), \"interrupted\" (hard kill in flight), or \"signaled\" (soft observability only — unused in hard path). Kind is wall_clock|tokens|cost_usd|tool_calls| dangerous_tools|stall|loop. Correlation is the child session.",
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "attempt": {
+          "type": "integer"
+        },
+        "budget": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentBudgetView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "x-strike-go-pointer": true
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "terminalStatus": {
+          "$ref": "#/$defs/ChildStatus"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "reason",
+        "action"
+      ],
+      "type": "object"
+    },
+    "ChildStarted": {
+      "additionalProperties": true,
+      "description": "ChildStarted marks the beginning of a foreground child/subagent session. Emitted by the parent engine with the child's correlation.",
+      "properties": {
+        "agent": {
+          "type": "string"
+        },
+        "attempt": {
+          "type": "integer"
+        },
+        "baseRevision": {
+          "type": "string"
+        },
+        "contextBundle": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ContextBundle"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "x-strike-go-pointer": true
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "isolation": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "policyReason": {
+          "type": "string"
+        },
+        "prompt": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "routeReason": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        },
+        "worktreePath": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "ChildStatus": {
+      "description": "Open string. Writers use x-strike-known-values. Readers must accept other strings.",
+      "type": "string",
+      "x-strike-enum-open": true,
+      "x-strike-known-values": [
+        "completed",
+        "failed",
+        "canceled",
+        "blocked"
+      ]
+    },
+    "Compact": {
+      "additionalProperties": true,
+      "description": "Compact requests model-history compaction. Rejected while a turn is running. Strategy selects trim (drop older turns, default) or summarize (model-authored summary). Empty uses the engine/config default.",
+      "properties": {
+        "strategy": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "CompactionCompleted": {
+      "additionalProperties": true,
+      "description": "CompactionCompleted records that model-facing history was replaced. Removed/Kept count provider messages (not transcript events). Strategy is the strategy actually applied (may fall back from summarize to trim). Summary is the model-authored text when Strategy is summarize (for restore). Residue is the structured provenance document when extraction found items (or pins/summary); nil when empty.",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "kept": {
+          "type": "integer"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "removed": {
+          "type": "integer"
+        },
+        "residue": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CompactionResidue"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "x-strike-go-pointer": true
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "strategy": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "reason",
+        "removed",
+        "kept"
+      ],
+      "type": "object"
+    },
+    "CompactionResidue": {
+      "additionalProperties": true,
+      "description": "CompactionResidue is a schema-versioned structured residual produced by history compaction. It is not lossless; rebuild yields a usable prompt skeleton for continue, not the full dropped transcript.",
+      "properties": {
+        "decisions": {
+          "items": {
+            "$ref": "#/$defs/ResidueItem"
+          },
+          "type": "array"
+        },
+        "facts": {
+          "items": {
+            "$ref": "#/$defs/ResidueItem"
+          },
+          "type": "array"
+        },
+        "openQuestions": {
+          "items": {
+            "$ref": "#/$defs/ResidueItem"
+          },
+          "type": "array"
+        },
+        "pinnedKinds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "removed": {
+          "type": "integer"
+        },
+        "schemaVersion": {
+          "type": "string"
+        },
+        "strategy": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "schemaVersion"
+      ],
+      "type": "object"
+    },
+    "CompactionStarted": {
+      "additionalProperties": true,
+      "description": "CompactionStarted announces that model-facing history compaction is about to replace older messages. Emitted before the history mutation.",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "strategy": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "reason"
+      ],
+      "type": "object"
+    },
+    "CompletionHandoff": {
+      "additionalProperties": true,
+      "description": "CompletionHandoff is the structured work product for a delegated child at terminal status. Always present on ChildCompleted (empty slices/strings are honest). Success fills the full schema; failure/cancel may leave verification/findings empty. filesChanged may be engine-tracked and/or model-supplied (merged, de-duplicated).",
+      "properties": {
+        "artifactRefs": {
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          },
+          "type": "array"
+        },
+        "baseRevision": {
+          "type": "string"
+        },
+        "blockers": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "filesChanged": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "findings": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "incomplete": {
+          "type": "boolean"
+        },
+        "isolation": {
+          "type": "string"
+        },
+        "missingContext": {
+          "items": {
+            "$ref": "#/$defs/MissingContextEntry"
+          },
+          "type": "array"
+        },
+        "patch": {
+          "type": "string"
+        },
+        "provenance": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "quality": {
+          "type": "string"
+        },
+        "recommendedNextAction": {
+          "type": "string"
+        },
+        "sectionBody": {
+          "type": "string"
+        },
+        "sectionBodySet": {
+          "type": "boolean"
+        },
+        "sectionTitle": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "verification": {
+          "type": "string"
+        },
+        "worktreePath": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "summary",
+        "filesChanged"
+      ],
+      "type": "object"
+    },
+    "ContextBundle": {
+      "additionalProperties": true,
+      "description": "ContextBundle is a sealed context package attached at task/delegate spawn. Children read it via the context_bundle tool and a system-prompt layer; leads attach goal, paths, artifact refs, constraints, and optional file pins so work is not \"prompt-only by convention.\"",
+      "properties": {
+        "acceptance": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "allowedPaths": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "artifacts": {
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          },
+          "type": "array"
+        },
+        "constraints": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "filePins": {
+          "items": {
+            "$ref": "#/$defs/ContextFilePin"
+          },
+          "type": "array"
+        },
+        "goal": {
+          "type": "string"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/ContextBundleItem"
+          },
+          "type": "array"
+        },
+        "requiredPaths": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "ContextBundleItem": {
+      "additionalProperties": true,
+      "description": "ContextBundleItem is one addressable entry inside a ContextBundle. Kind is goal|acceptance|path|artifact|constraint|note|file_pin|other.",
+      "properties": {
+        "artifact": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ArtifactRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "x-strike-go-pointer": true
+        },
+        "hash": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "ContextControlsSelected": {
+      "additionalProperties": true,
+      "description": "ContextControlsSelected confirms the session pin/exclude sets after SetContextControls (and is echoed on EffectivePrompt for inspect).",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "excludedKinds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "pinnedKinds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "ContextFilePin": {
+      "additionalProperties": true,
+      "description": "ContextFilePin seals a workspace path (optional hash and/or snapshot text).",
+      "properties": {
+        "hash": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "ContextFitWarning": {
+      "additionalProperties": true,
+      "description": "ContextFitWarning signals projected prompt occupancy is approaching or exceeding the model context window (soft budget). Emitted before Stream when possible so UIs can warn ahead of hard provider failure. Estimates use the local ~4 chars/token heuristic unless Source says otherwise.",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "contextLimit": {
+          "type": "integer"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "estimatedTokens": {
+          "type": "integer"
+        },
+        "level": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "estimatedTokens",
+        "contextLimit",
+        "level",
+        "message"
+      ],
+      "type": "object"
+    },
+    "Correlation": {
+      "additionalProperties": true,
+      "description": "Correlation identifies the session, turn, and provider request that produced an event. Embedded anonymously so JSON stays flat; omitempty keeps legacy envelopes without IDs decodable and re-encodable as `{}`. ParentSessionID and Depth record immutable child-session lineage when a foreground subagent is running (root sessions leave both zero-valued).",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "Decision": {
+      "description": "Open string. Writers use x-strike-known-values. Readers must accept other strings.",
+      "type": "string",
+      "x-strike-enum-open": true,
+      "x-strike-known-values": [
+        "once",
+        "always",
+        "project",
+        "reject"
+      ]
+    },
+    "DelegationChanged": {
+      "additionalProperties": true,
+      "description": "DelegationChanged reports a lifecycle transition on a delegation object. Correlation is the owner (creator) session. Emitted for UI/debug and for event-wait consumers (#775). Subscribe hooks on create may also notify the lead via mailbox when State matches a subscribed kind.",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "ownerSessionId": {
+          "type": "string"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "prev": {
+          "$ref": "#/$defs/DelegationState"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/DelegationState"
+        },
+        "turnId": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "state",
+        "version"
+      ],
+      "type": "object"
+    },
+    "DelegationState": {
+      "description": "Open string. Writers use x-strike-known-values. Readers must accept other strings.",
+      "type": "string",
+      "x-strike-enum-open": true,
+      "x-strike-known-values": [
+        "queued",
+        "working",
+        "blocked",
+        "review",
+        "done",
+        "failed",
+        "canceled"
+      ]
+    },
+    "DiagnosticBundle": {
+      "additionalProperties": true,
+      "description": "DiagnosticBundle is the inspectable prompt/config diagnostic document for the last Stream (or current composition). Field layout matches pkg/diag.Bundle JSON so frontends can export the event payload directly. Never carries raw API keys — engine redacts previews and paths before emit.",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "config": {
+          "$ref": "#/$defs/DiagnosticConfig"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "exportedAt": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "note": {
+          "type": "string"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "prompt": {
+          "$ref": "#/$defs/DiagnosticPrompt"
+        },
+        "protocolVersion": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "redacted": {
+          "type": "boolean"
+        },
+        "schemaVersion": {
+          "type": "string"
+        },
+        "session": {
+          "$ref": "#/$defs/DiagnosticSession"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "strikeVersion": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "exportedAt",
+        "redacted",
+        "session",
+        "prompt",
+        "config"
+      ],
+      "type": "object"
+    },
+    "DiagnosticCompaction": {
+      "additionalProperties": true,
+      "description": "DiagnosticCompaction holds effective compaction/prune dials on a bundle.",
+      "properties": {
+        "buffer": {
+          "type": "integer"
+        },
+        "keepUserTurns": {
+          "type": "integer"
+        },
+        "model": {
+          "type": "string"
+        },
+        "pruneKeepUserTurns": {
+          "type": "integer"
+        },
+        "pruneMinimumTokens": {
+          "type": "integer"
+        },
+        "pruneProtectTokens": {
+          "type": "integer"
+        },
+        "pruneProtectTools": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "strategy": {
+          "type": "string"
+        },
+        "threshold": {
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "DiagnosticConfig": {
+      "additionalProperties": true,
+      "description": "DiagnosticConfig is the effective dial snapshot + digests (no secrets).",
+      "properties": {
+        "agent": {
+          "type": "string"
+        },
+        "autonomy": {
+          "type": "string"
+        },
+        "compaction": {
+          "$ref": "#/$defs/DiagnosticCompaction"
+        },
+        "contextWindow": {
+          "type": "integer"
+        },
+        "digests": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "effort": {
+          "type": "string"
+        },
+        "fast": {
+          "type": "boolean"
+        },
+        "leanCode": {
+          "type": "string"
+        },
+        "maxChildDepth": {
+          "type": "integer"
+        },
+        "maxTokens": {
+          "type": "integer"
+        },
+        "model": {
+          "type": "string"
+        },
+        "permissionMode": {
+          "type": "string"
+        },
+        "projectRoot": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "sandbox": {
+          "type": "string"
+        },
+        "scheduler": {
+          "$ref": "#/$defs/DiagnosticScheduler"
+        },
+        "turnTimeoutS": {
+          "type": "integer"
+        },
+        "workDir": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "compaction",
+        "scheduler"
+      ],
+      "type": "object"
+    },
+    "DiagnosticPrompt": {
+      "additionalProperties": true,
+      "description": "DiagnosticPrompt is the ordered layer map section of a DiagnosticBundle.",
+      "properties": {
+        "attribution": {
+          "$ref": "#/$defs/RequestTokenAttribution"
+        },
+        "fromLastStream": {
+          "type": "boolean"
+        },
+        "layerCount": {
+          "type": "integer"
+        },
+        "layers": {
+          "items": {
+            "$ref": "#/$defs/PromptLayerInfo"
+          },
+          "type": "array"
+        },
+        "messageCount": {
+          "type": "integer"
+        },
+        "precedence": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "systemChars": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "precedence",
+        "layers",
+        "layerCount",
+        "systemChars",
+        "messageCount",
+        "attribution"
+      ],
+      "type": "object"
+    },
+    "DiagnosticScheduler": {
+      "additionalProperties": true,
+      "description": "DiagnosticScheduler holds scheduler pool limits on a bundle.",
+      "properties": {
+        "limits": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "DiagnosticSession": {
+      "additionalProperties": true,
+      "description": "DiagnosticSession is session lineage on a DiagnosticBundle (solo + child).",
+      "properties": {
+        "depth": {
+          "type": "integer"
+        },
+        "isChild": {
+          "type": "boolean"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "rootSessionId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "depth"
+      ],
+      "type": "object"
+    },
+    "EffectivePrompt": {
+      "additionalProperties": true,
+      "description": "EffectivePrompt is the inspectable composition of the system prompt for the last Stream (or the current composition when no stream has run yet).",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "attribution": {
+          "$ref": "#/$defs/RequestTokenAttribution"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "excludedKinds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "fromLastStream": {
+          "type": "boolean"
+        },
+        "layers": {
+          "items": {
+            "$ref": "#/$defs/PromptLayerInfo"
+          },
+          "type": "array"
+        },
+        "messageCount": {
+          "type": "integer"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "pinnedKinds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "shedKinds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "systemChars": {
+          "type": "integer"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "layers",
+        "systemChars",
+        "messageCount",
+        "attribution"
+      ],
+      "type": "object"
+    },
+    "Effort": {
+      "description": "Open string. Writers use x-strike-known-values. Readers must accept other strings.",
+      "type": "string",
+      "x-strike-enum-open": true,
+      "x-strike-known-values": [
+        "",
+        "off",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ]
+    },
+    "EffortSelected": {
+      "additionalProperties": true,
+      "description": "EffortSelected confirms the active reasoning level, at startup and after each SetEffort.",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "level": {
+          "$ref": "#/$defs/Effort"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "level"
+      ],
+      "type": "object"
+    },
+    "EngineError": {
+      "additionalProperties": true,
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "code": {
+          "type": "string"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "message": {
+          "type": "string"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "message"
+      ],
+      "type": "object"
+    },
+    "Envelope": {
+      "additionalProperties": true,
+      "description": "Envelope wraps an Event with a type tag and timestamp for JSONL persistence and replay.",
+      "properties": {
+        "data": {
+          "description": "Any JSON value (Go json.RawMessage)."
+        },
+        "time": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "type": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "v": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "time",
+        "data"
+      ],
+      "type": "object"
+    },
+    "FastSelected": {
+      "additionalProperties": true,
+      "description": "FastSelected confirms the session priority-tier preference after SetFast.",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "type": "object"
+    },
+    "FilesChanged": {
+      "additionalProperties": true,
+      "description": "FilesChanged reports paths the user edited outside the agent (for example via /vim). The engine invalidates any prior read snapshots for those paths so a subsequent edit/write fails until the model re-reads.",
+      "properties": {
+        "paths": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "paths"
+      ],
+      "type": "object"
+    },
+    "FilesInvalidated": {
+      "additionalProperties": true,
+      "description": "FilesInvalidated confirms the engine dropped read snapshots for paths reported by a FilesChanged op (external editor, post-edit review, …).",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "paths": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "paths"
+      ],
+      "type": "object"
+    },
+    "HarnessProgress": {
+      "additionalProperties": true,
+      "description": "HarnessProgress is emitted by a custom harness to report intermediate state (search tree, scores, iteration count, etc.) during a turn. The Name identifies the harness; Payload is harness-specific JSON.",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "payload": {
+          "description": "Any JSON value (Go json.RawMessage)."
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "payload"
+      ],
+      "type": "object"
+    },
+    "HookMatched": {
+      "additionalProperties": true,
+      "description": "HookMatched records that a declarative config hook rule fired (log/block/ notify). Persisted in the session JSONL for review and notify sinks.",
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "attempt": {
+          "type": "integer"
+        },
+        "callId": {
+          "type": "string"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "event": {
+          "type": "string"
+        },
+        "matcher": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "tool": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "event",
+        "action"
+      ],
+      "type": "object"
+    },
+    "ImageAttachment": {
+      "additionalProperties": true,
+      "description": "ImageAttachment is one typed attachment on a user message (paste/drop). Data is standard base64 (no data: URI prefix) and is omitted from persisted history when Ref is set. MIME is a full media type such as image/png. Ref is att:sha256:<hex> for content-addressed storage.",
+      "properties": {
+        "bytes": {
+          "type": "integer"
+        },
+        "data": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "mime": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "ref": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "mime"
+      ],
+      "type": "object"
+    },
+    "InputQueueCancel": {
+      "additionalProperties": true,
+      "description": "InputQueueCancel removes one pending user-input item.",
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "InputQueueEdit": {
+      "additionalProperties": true,
+      "description": "InputQueueEdit replaces the text of one pending user-input item. The id comes from InputQueued. Empty text is rejected when the item has no images; cancel the item to remove it. Images already on the item are kept.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "text"
+      ],
+      "type": "object"
+    },
+    "InputQueueItem": {
+      "additionalProperties": true,
+      "description": "InputQueueItem is one user.input waiting for the active turn to finish.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "InputQueueReorder": {
+      "additionalProperties": true,
+      "description": "InputQueueReorder sets the pending FIFO. IDs must list every current item once. The engine does not fill in a position the client omitted.",
+      "properties": {
+        "ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "ids"
+      ],
+      "type": "object"
+    },
+    "InputQueueSendNow": {
+      "additionalProperties": true,
+      "description": "InputQueueSendNow promotes one pending user-input item out of the FIFO. While a turn is active the item becomes a steer into that turn: it is delivered at the next safe boundary with a TurnSteered acknowledgement, or falls back to the next turn if the turn ends first, like any steer. While idle the item starts as a turn immediately. Removing the item from the queue is the claim, so an id that already left the queue (drained, cancelled, or promoted) is rejected instead of delivered twice.",
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "InputQueued": {
+      "additionalProperties": true,
+      "description": "InputQueued is the full pending user-input FIFO after a change: enqueue, drain, edit, cancel, reorder, steer queued-fallback, or a budget drop. Items is empty when the queue is clear. Replay uses the latest snapshot.",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/InputQueueItem"
+          },
+          "type": "array"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "type": "object"
+    },
+    "InspectDiagnosticBundle": {
+      "additionalProperties": true,
+      "description": "InspectDiagnosticBundle requests a versioned prompt/config diagnostic bundle (layer map + effective dials + digests). Prefer the last Stream composition when one exists; otherwise the current composition. Never carries raw API keys — previews and paths are redacted by the engine. See pkg/diag for the export document schema.",
+      "properties": {},
+      "type": "object"
+    },
+    "InspectEffectivePrompt": {
+      "additionalProperties": true,
+      "description": "InspectEffectivePrompt requests a snapshot of the composed system-prompt layers (provenance + sizes). Prefer the last Stream composition when one exists; otherwise the current composition for the next request. Never carries raw API keys — previews are redacted by the engine.",
+      "properties": {},
+      "type": "object"
+    },
+    "Interrupt": {
+      "additionalProperties": true,
+      "description": "Interrupt cancels the running turn, if any.",
+      "properties": {},
+      "type": "object"
+    },
+    "KnownEvent": {
+      "description": "Event envelopes this version writes. Consumers that must tolerate newer type strings should validate the root schema instead of this oneOf.",
+      "oneOf": [
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/AdmissionDecided"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "admission.decided"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/AgentContractTimeout"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "agent.contract.timeout"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/AgentMessage"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "agent.message"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/AgentSelected"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "agent.selected"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/ArtifactUpdated"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "artifact.updated"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/AutonomySelected"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "autonomy.selected"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/ChildCompleted"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "child.completed"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/ChildEscalated"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "child.escalated"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/ChildStarted"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "child.started"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/CompactionCompleted"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "compaction.completed"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/CompactionStarted"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "compaction.started"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/ContextControlsSelected"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "context.controls"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/ContextFitWarning"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "context.fit_warning"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/DelegationChanged"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "delegation.changed"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/DiagnosticBundle"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "diagnostic.bundle"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/EffortSelected"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "effort.selected"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/EngineError"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "engine.error"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/FastSelected"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "fast.selected"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/FilesInvalidated"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "files.invalidated"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/HarnessProgress"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "harness.progress"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/HookMatched"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "hook.matched"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/InputQueued"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "input.queued"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/LedgerUpdated"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "ledger.updated"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/ModelSelected"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "model.selected"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/PathOverlap"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "path.overlap"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/PermissionAsked"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "permission.asked"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/PermissionDecided"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "permission.decided"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/PermissionModeSelected"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "permission.mode"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/PermissionResolved"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "permission.resolved"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/PhaseChanged"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "phase.changed"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/PhaseGrantApproved"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "phase.grant_approved"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/PlanHandoff"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "plan.handoff"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/ProcessExited"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "process.exited"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/ProcessOutput"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "process.output"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/ProcessStarted"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "process.started"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/EffectivePrompt"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "prompt.effective"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/ProviderRetrying"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "provider.retrying"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/QuestionAsked"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "question.asked"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/QuestionResolved"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "question.resolved"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/ReasoningDelta"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "reasoning.delta"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/SchedulerAdmitted"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "scheduler.admitted"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/SchedulerCanceled"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "scheduler.canceled"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/SchedulerQueued"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "scheduler.queued"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/SessionBudgetWarning"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "session.budget_warning"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/SessionMeta"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "session.meta"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/SessionRewound"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "session.rewound"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/SessionTitled"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "session.titled"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/TeamRoster"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "team.roster"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/TextDelta"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "text.delta"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/ToolCallBegin"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "tool.begin"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/ToolCallEnd"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "tool.end"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/ToolLoopDetected"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "tool.loop_detected"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/ToolCallOutput"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "tool.output"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/ToolRetrying"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "tool.retrying"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/TurnCompleted"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "turn.completed"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/TurnStarted"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "turn.started"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/TurnSteered"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "turn.steered"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/UsageReported"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "usage.reported"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/UserMessage"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "user.message"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/VerificationCompleted"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "verification.completed"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/VerificationStarted"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "verification.started"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/WaitResolved"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "wait.resolved"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/WaitStarted"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "wait.started"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "KnownOp": {
+      "description": "Op envelopes this version accepts. Unknown op type strings are invalid.",
+      "oneOf": [
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/Compact"
+            },
+            "type": {
+              "const": "compact"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/SetContextControls"
+            },
+            "type": {
+              "const": "context.controls"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/FilesChanged"
+            },
+            "type": {
+              "const": "files.changed"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/InputQueueCancel"
+            },
+            "type": {
+              "const": "input.queue_cancel"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/InputQueueEdit"
+            },
+            "type": {
+              "const": "input.queue_edit"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/InputQueueReorder"
+            },
+            "type": {
+              "const": "input.queue_reorder"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/InputQueueSendNow"
+            },
+            "type": {
+              "const": "input.queue_send_now"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/InspectDiagnosticBundle"
+            },
+            "type": {
+              "const": "inspect.diagnostic"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/InspectEffectivePrompt"
+            },
+            "type": {
+              "const": "inspect.prompt"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/Interrupt"
+            },
+            "type": {
+              "const": "interrupt"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/PermissionReply"
+            },
+            "type": {
+              "const": "permission.reply"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/QuestionReply"
+            },
+            "type": {
+              "const": "question.reply"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/Rewind"
+            },
+            "type": {
+              "const": "rewind"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/SelectAgent"
+            },
+            "type": {
+              "const": "select.agent"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/SelectModel"
+            },
+            "type": {
+              "const": "select.model"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/SetAutonomy"
+            },
+            "type": {
+              "const": "set.autonomy"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/SetEffort"
+            },
+            "type": {
+              "const": "set.effort"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/SetFast"
+            },
+            "type": {
+              "const": "set.fast"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/SetPermissionMode"
+            },
+            "type": {
+              "const": "set.permission_mode"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/Steer"
+            },
+            "type": {
+              "const": "steer"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/TeamBoardClaim"
+            },
+            "type": {
+              "const": "team.board_claim"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/TeamBoardComplete"
+            },
+            "type": {
+              "const": "team.board_complete"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/TeamBoardCreate"
+            },
+            "type": {
+              "const": "team.board_create"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/TeamBroadcast"
+            },
+            "type": {
+              "const": "team.broadcast"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/TeamChildInterrupt"
+            },
+            "type": {
+              "const": "team.child_interrupt"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/TeamMessage"
+            },
+            "type": {
+              "const": "team.message"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/TeamSpawn"
+            },
+            "type": {
+              "const": "team.spawn"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/TeamTaskTransition"
+            },
+            "type": {
+              "const": "team.task_transition"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/UserInput"
+            },
+            "type": {
+              "const": "user.input"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/StartWorkflow"
+            },
+            "type": {
+              "const": "workflow.start"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/StopWorkflow"
+            },
+            "type": {
+              "const": "workflow.stop"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "LedgerUpdated": {
+      "additionalProperties": true,
+      "description": "LedgerUpdated is emitted after a successful ledger_write append/invalidate/ supersede so session JSONL and wait/subscribe consumers observe decision trail mutations. Full statement is included (redacted on persist); tools remain the source of truth for history queries.",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "authorSession": {
+          "type": "string"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "op": {
+          "type": "string"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "statement": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "supersededBy": {
+          "type": "string"
+        },
+        "supersedes": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "status",
+        "op"
+      ],
+      "type": "object"
+    },
+    "LifecycleCapabilities": {
+      "additionalProperties": true,
+      "description": "LifecycleCapabilities advertises which host-level session operations a frontend supports. Engine-level Rewind remains a protocol op (\"rewind\") and is listed separately under EngineRewind when the live session accepts ops.",
+      "properties": {
+        "activeSessionId": {
+          "type": "string"
+        },
+        "engineRewind": {
+          "type": "boolean"
+        },
+        "fork": {
+          "type": "boolean"
+        },
+        "forkAt": {
+          "type": "boolean"
+        },
+        "get": {
+          "type": "boolean"
+        },
+        "list": {
+          "type": "boolean"
+        },
+        "load": {
+          "type": "boolean"
+        },
+        "replay": {
+          "type": "boolean"
+        },
+        "rewindPoints": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "list",
+        "get",
+        "fork",
+        "forkAt",
+        "load",
+        "rewindPoints",
+        "replay",
+        "engineRewind"
+      ],
+      "type": "object"
+    },
+    "LifecycleError": {
+      "additionalProperties": true,
+      "description": "LifecycleError is a structured host-level session lifecycle failure. Frontends should surface Code to automation and Message to humans.",
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "type": "object"
+    },
+    "MissingContextEntry": {
+      "additionalProperties": true,
+      "description": "MissingContextEntry reports context the child needed but did not have. Used on blocked completions so the lead can supply paths, answers, or artifact ids instead of the child hallucinating.",
+      "properties": {
+        "artifactId": {
+          "type": "string"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "itemId": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "question": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "ModelSelected": {
+      "additionalProperties": true,
+      "description": "ModelSelected confirms the active provider/model, at startup (if an initial selection succeeded) and after each SelectModel.",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "model": {
+          "type": "string"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider",
+        "model"
+      ],
+      "type": "object"
+    },
+    "OpEnvelope": {
+      "additionalProperties": true,
+      "description": "OpEnvelope wraps an Op with a type tag for WebSocket/HTTP JSON transport.",
+      "properties": {
+        "data": {
+          "description": "Any JSON value (Go json.RawMessage)."
+        },
+        "type": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "v": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    "PathOverlap": {
+      "additionalProperties": true,
+      "description": "PathOverlap reports concurrent multi-agent claims on the same path. Emitted when a write touch or lease hits another active holder under session.overlapPolicy warn|block. Correlation is the claiming session.",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "blocked": {
+          "type": "boolean"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "holders": {
+          "items": {
+            "$ref": "#/$defs/PathOverlapHolder"
+          },
+          "type": "array"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "policy": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        },
+        "warning": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "policy"
+      ],
+      "type": "object"
+    },
+    "PathOverlapHolder": {
+      "additionalProperties": true,
+      "description": "PathOverlapHolder is one other active claimant on a PathOverlap event.",
+      "properties": {
+        "mode": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId"
+      ],
+      "type": "object"
+    },
+    "PermissionAsked": {
+      "additionalProperties": true,
+      "description": "PermissionAsked suspends a tool call until a PermissionReply arrives.",
+      "properties": {
+        "always": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "attempt": {
+          "type": "integer"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "metadata": {
+          "description": "Any JSON value (Go json.RawMessage)."
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "patterns": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "permission": {
+          "type": "string"
+        },
+        "projectRulePath": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "requestId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        },
+        "workDir": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "requestId",
+        "permission",
+        "patterns"
+      ],
+      "type": "object"
+    },
+    "PermissionDecided": {
+      "additionalProperties": true,
+      "description": "PermissionDecided is a non-blocking audit event for every permission evaluation outcome (auto-allow, auto-deny, ask suspended, or user reply). Patterns and rule fields are redacted by timeline export; session JSONL consumers should treat them as potentially sensitive paths/commands.",
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "attempt": {
+          "type": "integer"
+        },
+        "chainId": {
+          "type": "string"
+        },
+        "chainRule": {
+          "type": "string"
+        },
+        "chainSummary": {
+          "type": "string"
+        },
+        "decision": {
+          "$ref": "#/$defs/Decision"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "evalPath": {
+          "type": "string"
+        },
+        "factSummary": {
+          "type": "string"
+        },
+        "layer": {
+          "type": "string"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "patterns": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "permission": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "requestId": {
+          "type": "string"
+        },
+        "ruleAction": {
+          "type": "string"
+        },
+        "rulePattern": {
+          "type": "string"
+        },
+        "rulePermission": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "permission",
+        "action"
+      ],
+      "type": "object"
+    },
+    "PermissionMode": {
+      "description": "Open string. Writers use x-strike-known-values. Readers must accept other strings.",
+      "type": "string",
+      "x-strike-enum-open": true,
+      "x-strike-known-values": [
+        "default",
+        "plan",
+        "soft-approve",
+        "accept-edits",
+        "yolo"
+      ]
+    },
+    "PermissionModeSelected": {
+      "additionalProperties": true,
+      "description": "PermissionModeSelected confirms the session tool-permission posture, at startup and after each SetPermissionMode.",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "mode": {
+          "$ref": "#/$defs/PermissionMode"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "type": "object"
+    },
+    "PermissionReply": {
+      "additionalProperties": true,
+      "description": "PermissionReply resolves a pending PermissionAsked event.",
+      "properties": {
+        "decision": {
+          "$ref": "#/$defs/Decision"
+        },
+        "message": {
+          "type": "string"
+        },
+        "requestId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "requestId",
+        "decision"
+      ],
+      "type": "object"
+    },
+    "PermissionResolved": {
+      "additionalProperties": true,
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "decision": {
+          "$ref": "#/$defs/Decision"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "requestId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "requestId",
+        "decision"
+      ],
+      "type": "object"
+    },
+    "PhaseChanged": {
+      "additionalProperties": true,
+      "description": "PhaseChanged reports the active workflow phase (permission profile + context). Empty Phase means no workflow phase is active.",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "fingerprint": {
+          "type": "string"
+        },
+        "gate": {
+          "type": "string"
+        },
+        "index": {
+          "type": "integer"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "phase": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        },
+        "workflow": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "PhaseGrantApproved": {
+      "additionalProperties": true,
+      "description": "PhaseGrantApproved records acceptance of workflow phase permission widenings (user review or --auto / --dangerously-skip-permissions). Resume skips re-prompt when Fingerprint and Grants still match.",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "auto": {
+          "type": "boolean"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "fingerprint": {
+          "type": "string"
+        },
+        "grants": {
+          "items": {
+            "$ref": "#/$defs/PhaseGrantRule"
+          },
+          "type": "array"
+        },
+        "index": {
+          "type": "integer"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "phase": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        },
+        "workflow": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workflow",
+        "phase",
+        "index",
+        "fingerprint",
+        "grants"
+      ],
+      "type": "object"
+    },
+    "PhaseGrantRule": {
+      "additionalProperties": true,
+      "description": "PhaseGrantRule is one effective permission widening approved for a phase.",
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "pattern": {
+          "type": "string"
+        },
+        "permission": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "permission",
+        "pattern",
+        "action"
+      ],
+      "type": "object"
+    },
+    "PlanHandoff": {
+      "additionalProperties": true,
+      "description": "PlanHandoff records that plan mode handed an exact plan identity (or a bounded legacy text plan) to the implementer. Emitted once per successful unified approval+handoff. Resume restores this so the implementer still sees the approved artifact after --continue.",
+      "properties": {
+        "agent": {
+          "type": "string"
+        },
+        "approvalSource": {
+          "type": "string"
+        },
+        "attempt": {
+          "type": "integer"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "legacyText": {
+          "type": "string"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "planId": {
+          "type": "string"
+        },
+        "planVersion": {
+          "type": "integer"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "approvalSource"
+      ],
+      "type": "object"
+    },
+    "ProcessExited": {
+      "additionalProperties": true,
+      "description": "ProcessExited marks the end of a managed subprocess.",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "exitCode": {
+          "type": "integer"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "processId": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/ProcessStatus"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "processId",
+        "exitCode",
+        "status"
+      ],
+      "type": "object"
+    },
+    "ProcessOutput": {
+      "additionalProperties": true,
+      "description": "ProcessOutput is a chunk of subprocess stdout or stderr.",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "data": {
+          "type": "string"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "processId": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "stream": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "processId",
+        "stream",
+        "data"
+      ],
+      "type": "object"
+    },
+    "ProcessStarted": {
+      "additionalProperties": true,
+      "description": "ProcessStarted marks the beginning of a managed subprocess (bash, hooks, …). CallID is set when the process belongs to a tool call.",
+      "properties": {
+        "argv": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "attempt": {
+          "type": "integer"
+        },
+        "callId": {
+          "type": "string"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "processId": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "processId",
+        "argv"
+      ],
+      "type": "object"
+    },
+    "ProcessStatus": {
+      "description": "Open string. Writers use x-strike-known-values. Readers must accept other strings.",
+      "type": "string",
+      "x-strike-enum-open": true,
+      "x-strike-known-values": [
+        "exited",
+        "timeout",
+        "canceled",
+        "error"
+      ]
+    },
+    "PromptLayerInfo": {
+      "additionalProperties": true,
+      "description": "PromptLayerInfo is one ordered system-prompt segment with provenance. Text content is not included — only kind/source/mode/size and an optional redacted preview suitable for logs and the TUI.",
+      "properties": {
+        "chars": {
+          "type": "integer"
+        },
+        "estTokens": {
+          "type": "integer"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "pinned": {
+          "type": "boolean"
+        },
+        "preview": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "source",
+        "mode",
+        "chars"
+      ],
+      "type": "object"
+    },
+    "ProviderRetrying": {
+      "additionalProperties": true,
+      "description": "ProviderRetrying announces that a transient provider stream failure will be retried with a new attempt identity. Correlation identifies the failed attempt; NextAttempt is the 1-based number of the upcoming Stream call. Retries only happen at the model boundary — never after tool side effects from the failed attempt have committed. FromProvider is true when DelayMs came from a valid provider Retry-After header rather than local backoff.",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "delayMs": {
+          "type": "integer"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "fromProvider": {
+          "type": "boolean"
+        },
+        "message": {
+          "type": "string"
+        },
+        "nextAttempt": {
+          "type": "integer"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "nextAttempt"
+      ],
+      "type": "object"
+    },
+    "QuestionAsked": {
+      "additionalProperties": true,
+      "description": "QuestionAsked suspends a tool call until a QuestionReply arrives.",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "questions": {
+          "items": {
+            "$ref": "#/$defs/QuestionPrompt"
+          },
+          "type": "array"
+        },
+        "requestId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "requestId",
+        "questions"
+      ],
+      "type": "object"
+    },
+    "QuestionOption": {
+      "additionalProperties": true,
+      "description": "QuestionOption is one selectable choice on a QuestionPrompt.",
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "label"
+      ],
+      "type": "object"
+    },
+    "QuestionPrompt": {
+      "additionalProperties": true,
+      "description": "QuestionPrompt is one question in a QuestionAsked batch.",
+      "properties": {
+        "header": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "options": {
+          "items": {
+            "$ref": "#/$defs/QuestionOption"
+          },
+          "type": "array"
+        },
+        "question": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "question"
+      ],
+      "type": "object"
+    },
+    "QuestionReply": {
+      "additionalProperties": true,
+      "description": "QuestionReply resolves a pending QuestionAsked event with one answer string per prompt (same order as Questions).",
+      "properties": {
+        "answers": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "requestId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "requestId",
+        "answers"
+      ],
+      "type": "object"
+    },
+    "QuestionResolved": {
+      "additionalProperties": true,
+      "description": "QuestionResolved closes a pending QuestionAsked (answer, reject, or cancel).",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "requestId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "requestId"
+      ],
+      "type": "object"
+    },
+    "ReasoningDelta": {
+      "additionalProperties": true,
+      "description": "ReasoningDelta is a chunk of model chain-of-thought / reasoning text. Distinct from TextDelta (the final answer). Frontends may hide it behind a toggle; it must never be treated as assistant reply content.",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "type": "object"
+    },
+    "RequestTokenAttribution": {
+      "additionalProperties": true,
+      "description": "RequestTokenAttribution breaks model-facing input into slices for one stream request (or the composition that would be sent next).",
+      "properties": {
+        "messages": {
+          "$ref": "#/$defs/TokenCount"
+        },
+        "source": {
+          "type": "string"
+        },
+        "system": {
+          "$ref": "#/$defs/TokenCount"
+        },
+        "toolResults": {
+          "$ref": "#/$defs/TokenCount"
+        },
+        "tools": {
+          "$ref": "#/$defs/TokenCount"
+        },
+        "total": {
+          "$ref": "#/$defs/TokenCount"
+        }
+      },
+      "required": [
+        "system",
+        "tools",
+        "messages",
+        "toolResults",
+        "total"
+      ],
+      "type": "object"
+    },
+    "ResidueItem": {
+      "additionalProperties": true,
+      "description": "ResidueItem is one structured residual fact, decision, or open question retained when older history is compacted. SourceIDs cite pre-compaction history indices (hist:N), tool call ids (tool:ID), ledger entry ids (ledger:ID), or file paths (file:path).",
+      "properties": {
+        "confidence": {
+          "type": "string"
+        },
+        "fileRefs": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "freshness": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "ledgerId": {
+          "type": "string"
+        },
+        "sourceIds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "text"
+      ],
+      "type": "object"
+    },
+    "Rewind": {
+      "additionalProperties": true,
+      "description": "Rewind removes the last completed user↔assistant turn from model-facing history. When RestoreFiles is true, also restores per-file checkpoints captured before mutating tools in that turn (never git reset --hard). Rejected while a turn is running.",
+      "properties": {
+        "restoreFiles": {
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "RewindPoint": {
+      "additionalProperties": true,
+      "description": "RewindPoint is a fork-at-turn candidate: keep the first KeepEvents of the source log (0-based exclusive end index = keep count).",
+      "properties": {
+        "KeepEvents": {
+          "type": "integer"
+        },
+        "Preview": {
+          "type": "string"
+        },
+        "Turn": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "KeepEvents",
+        "Turn",
+        "Preview"
+      ],
+      "type": "object"
+    },
+    "SchedulerAdmitted": {
+      "additionalProperties": true,
+      "description": "SchedulerAdmitted marks that capacity was granted after a SchedulerQueued wait. WaitMs is time spent waiting. Engine emitters skip admitted when the acquire never blocked (unlimited/free capacity). After SchedulerCanceled for the same RequestID, Admitted must not appear.",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "label": {
+          "type": "string"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "pools": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "requestId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        },
+        "waitMs": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "requestId",
+        "pools"
+      ],
+      "type": "object"
+    },
+    "SchedulerCanceled": {
+      "additionalProperties": true,
+      "description": "SchedulerCanceled marks that a waiter left without capacity (context cancel or scheduler Close). Clears any queued UI state for RequestID.",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "label": {
+          "type": "string"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "pools": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "requestId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        },
+        "waitMs": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "requestId",
+        "pools"
+      ],
+      "type": "object"
+    },
+    "SchedulerQueued": {
+      "additionalProperties": true,
+      "description": "SchedulerQueued marks that work is waiting for named pool capacity inside this Strike process. RequestID correlates queued → admitted|canceled. Pools lists the constrained pool names (no exact queue position — FIFO order is internal and not a stable wire guarantee). Label is a short human tag (e.g. \"model\", \"bash\", \"bash:build\").",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "label": {
+          "type": "string"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "pools": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "requestId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "requestId",
+        "pools"
+      ],
+      "type": "object"
+    },
+    "SelectAgent": {
+      "additionalProperties": true,
+      "description": "SelectAgent switches the active agent (system prompt + optional provider/model pins). Rejected while a turn is running.",
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "SelectModel": {
+      "additionalProperties": true,
+      "description": "SelectModel switches the active provider (and optionally model). An empty Model selects the provider's default. Rejected while a turn is running.",
+      "properties": {
+        "model": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider"
+      ],
+      "type": "object"
+    },
+    "SessionBudgetWarning": {
+      "additionalProperties": true,
+      "description": "SessionBudgetWarning reports session cost / per-turn token envelope progress at 50% / 80% / 100% thresholds (#577 / #542). Level 100 with Exhausted=true is the hard stop signal frontends render (paired with EngineError code budget_exhausted and TurnCompleted stopReason budget_exhausted).",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "costUsd": {
+          "type": "number"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "exhausted": {
+          "type": "boolean"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "level": {
+          "type": "string"
+        },
+        "maxCostUsd": {
+          "type": "number"
+        },
+        "maxTokens": {
+          "type": "integer"
+        },
+        "message": {
+          "type": "string"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "ratio": {
+          "type": "number"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "tokensUsed": {
+          "type": "integer"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "level",
+        "kind",
+        "message"
+      ],
+      "type": "object"
+    },
+    "SessionForkAtParams": {
+      "additionalProperties": true,
+      "description": "SessionForkAtParams forks a prefix of a session log.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "keepEvents": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "keepEvents"
+      ],
+      "type": "object"
+    },
+    "SessionIDParams": {
+      "additionalProperties": true,
+      "description": "SessionIDParams is a single-id request (get/load/replay/fork).",
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "SessionListParams": {
+      "additionalProperties": true,
+      "description": "SessionListParams is the body for session.list.",
+      "properties": {
+        "rootsOnly": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "rootsOnly"
+      ],
+      "type": "object"
+    },
+    "SessionListResult": {
+      "additionalProperties": true,
+      "description": "SessionListResult is the body for session.list.",
+      "properties": {
+        "sessions": {
+          "items": {
+            "$ref": "#/$defs/SessionSummary"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "sessions"
+      ],
+      "type": "object"
+    },
+    "SessionLoadResult": {
+      "additionalProperties": true,
+      "description": "SessionLoadResult confirms a load/resume binding.",
+      "properties": {
+        "active": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "note": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "active"
+      ],
+      "type": "object"
+    },
+    "SessionMeta": {
+      "additionalProperties": true,
+      "description": "SessionMeta records durable session-level metadata (e.g. a PR opened while shipping). Also written to the session sidecar by the host; the event keeps the JSONL transcript self-describing.",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "isolation": {
+          "type": "string"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "prNumber": {
+          "type": "integer"
+        },
+        "prState": {
+          "type": "string"
+        },
+        "prUrl": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "SessionReplayResult": {
+      "additionalProperties": true,
+      "description": "SessionReplayResult returns the raw JSONL event log.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "jsonl": {
+          "contentEncoding": "base64",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "jsonl"
+      ],
+      "type": "object"
+    },
+    "SessionRewindPointsResult": {
+      "additionalProperties": true,
+      "description": "SessionRewindPointsResult lists fork-at-turn candidates for a session.",
+      "properties": {
+        "points": {
+          "items": {
+            "$ref": "#/$defs/RewindPoint"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "points"
+      ],
+      "type": "object"
+    },
+    "SessionRewound": {
+      "additionalProperties": true,
+      "description": "SessionRewound records that the last completed user↔assistant turn was dropped from model-facing history. Restore applies the same drop so --continue stays consistent. File restore is best-effort per path and is recorded here; it is not re-applied on JSONL resume (disk already changed).",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "files": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "filesRestored": {
+          "type": "integer"
+        },
+        "filesSkipped": {
+          "type": "integer"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "removed": {
+          "type": "integer"
+        },
+        "restoreFiles": {
+          "type": "boolean"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        },
+        "uncovered": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "SessionSummary": {
+      "additionalProperties": true,
+      "description": "SessionSummary is the public inspect/list row for one durable session. Mirrors host.Session / HTTP session payloads without importing internal/.",
+      "properties": {
+        "eventCount": {
+          "type": "integer"
+        },
+        "forkedFrom": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "open": {
+          "type": "boolean"
+        },
+        "parentId": {
+          "type": "string"
+        },
+        "projectKey": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "SessionTitled": {
+      "additionalProperties": true,
+      "description": "SessionTitled records the human-readable session title. Emitted once when the first user message is accepted (derived from that text). Later emits may rename; consumers should take the last title in the log.",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "title"
+      ],
+      "type": "object"
+    },
+    "SetAutonomy": {
+      "additionalProperties": true,
+      "description": "SetAutonomy changes the session exit-gate policy. Rejected while a turn is running, like the other selection ops.",
+      "properties": {
+        "mode": {
+          "$ref": "#/$defs/Autonomy"
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "type": "object"
+    },
+    "SetContextControls": {
+      "additionalProperties": true,
+      "description": "SetContextControls updates session pin/exclude sets for system-prompt layer kinds. Empty slices clear that set when the corresponding Clear* flag is set; otherwise empty means no change for that set.",
+      "properties": {
+        "excludeKinds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "pinKinds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "setExclude": {
+          "type": "boolean"
+        },
+        "setPin": {
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "SetEffort": {
+      "additionalProperties": true,
+      "description": "SetEffort changes the reasoning dial for subsequent turns. Rejected while a turn is running, like the other selection ops.",
+      "properties": {
+        "level": {
+          "$ref": "#/$defs/Effort"
+        }
+      },
+      "required": [
+        "level"
+      ],
+      "type": "object"
+    },
+    "SetFast": {
+      "additionalProperties": true,
+      "description": "SetFast toggles OpenAI priority (fast) service tier for subsequent turns. Rejected while a turn is running. Providers and models that do not support priority tier ignore the flag silently.",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "type": "object"
+    },
+    "SetPermissionMode": {
+      "additionalProperties": true,
+      "description": "SetPermissionMode changes the session tool-permission posture. Accepted while a turn is running so Shift+Tab / /mode can tighten or loosen asks mid-turn; the permission service applies the new posture to subsequent tool checks and rejects any in-flight permission asks.",
+      "properties": {
+        "mode": {
+          "$ref": "#/$defs/PermissionMode"
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "type": "object"
+    },
+    "StartWorkflow": {
+      "additionalProperties": true,
+      "description": "StartWorkflow activates a loaded workflow at phase index 0. Exactly one workflow may be active per root session; starting replaces any prior active workflow after the target is validated. Rejected while a turn is running.",
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "Steer": {
+      "additionalProperties": true,
+      "description": "Steer redirects an active root turn with additional user guidance at the next safe request boundary (before the next Provider.Stream). Distinct from UserInput (which queues a later turn) and Interrupt (which cancels).",
+      "properties": {
+        "images": {
+          "items": {
+            "$ref": "#/$defs/ImageAttachment"
+          },
+          "type": "array"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "type": "object"
+    },
+    "StopWorkflow": {
+      "additionalProperties": true,
+      "description": "StopWorkflow clears the active workflow phase, context, and phase permission profile. No-op when none is active. Rejected while a turn is running.",
+      "properties": {},
+      "type": "object"
+    },
+    "TeamBoardClaim": {
+      "additionalProperties": true,
+      "description": "TeamBoardClaim claims a board task with CAS.",
+      "properties": {
+        "clientMutationId": {
+          "type": "string"
+        },
+        "expectedVersion": {
+          "type": "integer"
+        },
+        "idempotencyKey": {
+          "type": "string"
+        },
+        "rootSessionId": {
+          "type": "string"
+        },
+        "taskId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "idempotencyKey",
+        "taskId",
+        "expectedVersion"
+      ],
+      "type": "object"
+    },
+    "TeamBoardComplete": {
+      "additionalProperties": true,
+      "description": "TeamBoardComplete completes a board task with CAS.",
+      "properties": {
+        "clientMutationId": {
+          "type": "string"
+        },
+        "expectedVersion": {
+          "type": "integer"
+        },
+        "idempotencyKey": {
+          "type": "string"
+        },
+        "rootSessionId": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "taskId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "idempotencyKey",
+        "taskId",
+        "expectedVersion"
+      ],
+      "type": "object"
+    },
+    "TeamBoardCreate": {
+      "additionalProperties": true,
+      "description": "TeamBoardCreate adds a shared board task (team_task create).",
+      "properties": {
+        "assignee": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        },
+        "clientMutationId": {
+          "type": "string"
+        },
+        "idempotencyKey": {
+          "type": "string"
+        },
+        "rootSessionId": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "idempotencyKey",
+        "title"
+      ],
+      "type": "object"
+    },
+    "TeamBroadcast": {
+      "additionalProperties": true,
+      "description": "TeamBroadcast delivers lead broadcast mail (agent_broadcast semantics).",
+      "properties": {
+        "body": {
+          "type": "string"
+        },
+        "clientMutationId": {
+          "type": "string"
+        },
+        "idempotencyKey": {
+          "type": "string"
+        },
+        "rootSessionId": {
+          "type": "string"
+        },
+        "taskId": {
+          "type": "string"
+        },
+        "urgency": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "idempotencyKey",
+        "body"
+      ],
+      "type": "object"
+    },
+    "TeamChildInterrupt": {
+      "additionalProperties": true,
+      "description": "TeamChildInterrupt cancels an owned child (task_interrupt path).",
+      "properties": {
+        "childSessionId": {
+          "type": "string"
+        },
+        "clientMutationId": {
+          "type": "string"
+        },
+        "idempotencyKey": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "rootSessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "idempotencyKey",
+        "childSessionId"
+      ],
+      "type": "object"
+    },
+    "TeamMemberState": {
+      "description": "Open string. Writers use x-strike-known-values. Readers must accept other strings.",
+      "type": "string",
+      "x-strike-enum-open": true,
+      "x-strike-known-values": [
+        "running",
+        "completed",
+        "failed",
+        "canceled",
+        "blocked"
+      ]
+    },
+    "TeamMessage": {
+      "additionalProperties": true,
+      "description": "TeamMessage delivers one peer mailbox message (agent_message semantics).",
+      "properties": {
+        "body": {
+          "type": "string"
+        },
+        "clientMutationId": {
+          "type": "string"
+        },
+        "idempotencyKey": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "rootSessionId": {
+          "type": "string"
+        },
+        "taskId": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        },
+        "urgency": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "idempotencyKey",
+        "to",
+        "body"
+      ],
+      "type": "object"
+    },
+    "TeamOpOutcome": {
+      "additionalProperties": true,
+      "description": "TeamOpOutcome is the in-process result of a team-control Op (serve HTTP). Not an Event — never written to session JSONL.",
+      "properties": {
+        "alreadyTerminal": {
+          "type": "boolean"
+        },
+        "childSessionId": {
+          "type": "string"
+        },
+        "code": {
+          "type": "string"
+        },
+        "currentVersion": {
+          "type": "integer"
+        },
+        "delegationId": {
+          "type": "string"
+        },
+        "error": {
+          "type": "string"
+        },
+        "messageId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "taskId": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "ok"
+      ],
+      "type": "object"
+    },
+    "TeamRoster": {
+      "additionalProperties": true,
+      "description": "TeamRoster is a full snapshot of the implicit session team roster. Emitted when membership or member state changes so UIs can render without calling the agent_roster tool. Correlation.SessionID is the lead id.",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "leadId": {
+          "type": "string"
+        },
+        "members": {
+          "items": {
+            "$ref": "#/$defs/TeamRosterMember"
+          },
+          "type": "array"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "leadId",
+        "members"
+      ],
+      "type": "object"
+    },
+    "TeamRosterMember": {
+      "additionalProperties": true,
+      "description": "TeamRosterMember is one entry in a TeamRoster snapshot event. State prefers task_status vocabulary (starting|working|needs_attention| completed|failed|canceled|unknown) when the emitter has live detail; otherwise terminal TeamMemberState values are used. QueuePools/QueueLabel identify a constrained pool while waiting on admission (no exact queue-position guarantee).",
+      "properties": {
+        "agent": {
+          "type": "string"
+        },
+        "blockReason": {
+          "type": "string"
+        },
+        "budget": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentBudgetView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "x-strike-go-pointer": true
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "filesTouched": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "lastAction": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "objective": {
+          "type": "string"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "queueLabel": {
+          "type": "string"
+        },
+        "queuePools": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "role": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "startedAt": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "terminalSummary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId",
+        "state"
+      ],
+      "type": "object"
+    },
+    "TeamSpawn": {
+      "additionalProperties": true,
+      "description": "TeamSpawn starts a child agent (task/delegate semantics) as the human lead.",
+      "properties": {
+        "agent": {
+          "type": "string"
+        },
+        "budget": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TeamSpawnBudget"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "x-strike-go-pointer": true
+        },
+        "clientMutationId": {
+          "type": "string"
+        },
+        "delegationId": {
+          "type": "string"
+        },
+        "idempotencyKey": {
+          "type": "string"
+        },
+        "isolation": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "objective": {
+          "type": "string"
+        },
+        "rootSessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "idempotencyKey",
+        "objective"
+      ],
+      "type": "object"
+    },
+    "TeamSpawnBudget": {
+      "additionalProperties": true,
+      "description": "TeamSpawnBudget is optional spawn resource bounds (wire subset).",
+      "properties": {
+        "maxTokens": {
+          "type": "integer"
+        },
+        "maxToolCalls": {
+          "type": "integer"
+        },
+        "maxTurns": {
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "TeamTaskTransition": {
+      "additionalProperties": true,
+      "description": "TeamTaskTransition applies a delegation lifecycle CAS transition.",
+      "properties": {
+        "clientMutationId": {
+          "type": "string"
+        },
+        "delegationId": {
+          "type": "string"
+        },
+        "expectedVersion": {
+          "type": "integer"
+        },
+        "idempotencyKey": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "rootSessionId": {
+          "type": "string"
+        },
+        "toState": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "idempotencyKey",
+        "delegationId",
+        "expectedVersion",
+        "toState"
+      ],
+      "type": "object"
+    },
+    "TextDelta": {
+      "additionalProperties": true,
+      "description": "TextDelta is a chunk of streaming assistant text.",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "type": "object"
+    },
+    "TokenCount": {
+      "additionalProperties": true,
+      "description": "TokenCount distinguishes unknown from zero: Known=false means the count was not reported; Known=true with N=0 means the vendor reported zero.",
+      "properties": {
+        "known": {
+          "type": "boolean"
+        },
+        "n": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "known"
+      ],
+      "type": "object"
+    },
+    "ToolCallBegin": {
+      "additionalProperties": true,
+      "properties": {
+        "args": {
+          "description": "Any JSON value (Go json.RawMessage)."
+        },
+        "attempt": {
+          "type": "integer"
+        },
+        "callId": {
+          "type": "string"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "callId",
+        "name",
+        "args"
+      ],
+      "type": "object"
+    },
+    "ToolCallEnd": {
+      "additionalProperties": true,
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "callId": {
+          "type": "string"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "errorCode": {
+          "type": "string"
+        },
+        "isError": {
+          "type": "boolean"
+        },
+        "metadata": {
+          "description": "Any JSON value (Go json.RawMessage)."
+        },
+        "output": {
+          "type": "string"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "callId",
+        "title",
+        "output"
+      ],
+      "type": "object"
+    },
+    "ToolCallOutput": {
+      "additionalProperties": true,
+      "description": "ToolCallOutput is a chunk of streaming tool stdout/stderr while a call runs. Frontends append Data in order for a live tail; ToolCallEnd still carries the final model-facing Output (including truncation/exit suffixes).",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "callId": {
+          "type": "string"
+        },
+        "data": {
+          "type": "string"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "callId",
+        "data"
+      ],
+      "type": "object"
+    },
+    "ToolLoopDetected": {
+      "additionalProperties": true,
+      "description": "ToolLoopDetected marks that the harness stopped the turn/agent path because the model repeated identical failing tool+args or oscillated between two failing calls. Reason is identical_calls | oscillating_failures.",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "count": {
+          "type": "integer"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "message": {
+          "type": "string"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "toolName": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "reason"
+      ],
+      "type": "object"
+    },
+    "ToolRetrying": {
+      "additionalProperties": true,
+      "description": "ToolRetrying announces that a transient tool failure will be retried under the harness retry policy (safe-retry + transient/timeout only). Correlation and CallID identify the in-flight tool call; NextAttempt is 1-based. Mutative/unsafe tools never emit this event for auto-retry.",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "callId": {
+          "type": "string"
+        },
+        "delayMs": {
+          "type": "integer"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "errorCode": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "nextAttempt": {
+          "type": "integer"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "callId",
+        "name",
+        "nextAttempt"
+      ],
+      "type": "object"
+    },
+    "TurnCompleted": {
+      "additionalProperties": true,
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "checkpointSkipped": {
+          "type": "integer"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "files": {
+          "items": {
+            "$ref": "#/$defs/TurnFileChange"
+          },
+          "type": "array"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "stopReason": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        },
+        "uncovered": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "verification": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/VerificationReport"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "x-strike-go-pointer": true
+        }
+      },
+      "type": "object"
+    },
+    "TurnFileChange": {
+      "additionalProperties": true,
+      "description": "TurnFileChange is one harness-touched path in a completed turn (create / update / delete). Populated on TurnCompleted for timeline/UI; empty when the turn made no file tool mutations.",
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "TurnStarted": {
+      "additionalProperties": true,
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "TurnSteered": {
+      "additionalProperties": true,
+      "description": "TurnSteered records that active-turn steering was accepted and how it was applied. Emitted into the session log so resume/replay can observe decisions.",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "targetTurnId": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "type": "object"
+    },
+    "UsageReported": {
+      "additionalProperties": true,
+      "description": "UsageReported carries token accounting for one completed provider stream. Emitted on every EventDone that has usage (including tool-loop intermediate streams), correlated to the provider request.",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "cacheCreation": {
+          "$ref": "#/$defs/TokenCount"
+        },
+        "cacheRead": {
+          "$ref": "#/$defs/TokenCount"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "input": {
+          "$ref": "#/$defs/TokenCount"
+        },
+        "output": {
+          "$ref": "#/$defs/TokenCount"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        },
+        "used": {
+          "$ref": "#/$defs/TokenCount"
+        }
+      },
+      "required": [
+        "input",
+        "output",
+        "cacheRead",
+        "cacheCreation",
+        "used"
+      ],
+      "type": "object"
+    },
+    "UserInput": {
+      "additionalProperties": true,
+      "description": "UserInput submits a user message, starting a turn.",
+      "properties": {
+        "images": {
+          "items": {
+            "$ref": "#/$defs/ImageAttachment"
+          },
+          "type": "array"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "type": "object"
+    },
+    "UserMessage": {
+      "additionalProperties": true,
+      "description": "UserMessage echoes accepted user input into the event stream so the transcript is fully reconstructable from events alone.",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "images": {
+          "items": {
+            "$ref": "#/$defs/ImageAttachment"
+          },
+          "type": "array"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "type": "object"
+    },
+    "VerificationCheck": {
+      "additionalProperties": true,
+      "description": "VerificationCheck is one independent gate outcome inside a VerificationReport.",
+      "properties": {
+        "durationMs": {
+          "type": "integer"
+        },
+        "error": {
+          "type": "string"
+        },
+        "exitCode": {
+          "type": "integer"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "output": {
+          "type": "string"
+        },
+        "passed": {
+          "type": "boolean"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "passed"
+      ],
+      "type": "object"
+    },
+    "VerificationCompleted": {
+      "additionalProperties": true,
+      "description": "VerificationCompleted is the harness-owned outcome of independent gates. Report.Claimed vs Report.Verified is the wire distinction between claimed_done and verified_done; model self-report text is never evidence.",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "report": {
+          "$ref": "#/$defs/VerificationReport"
+        },
+        "scope": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "report"
+      ],
+      "type": "object"
+    },
+    "VerificationEnv": {
+      "additionalProperties": true,
+      "description": "VerificationEnv is audit metadata for a verification run (cwd, session, models).",
+      "properties": {
+        "finishedAt": {
+          "type": "string"
+        },
+        "modelId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "startedAt": {
+          "type": "string"
+        },
+        "workDir": {
+          "type": "string"
+        },
+        "worktreeId": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "VerificationReport": {
+      "additionalProperties": true,
+      "description": "VerificationReport is the harness-owned outcome of independent completion gates. Distinct from CompletionHandoff.Verification (model self-report text): implementer-done is Claimed; harness-verified is Verified/Passed. Present on ChildCompleted when gates were configured at spawn (or when a solo/harness path attaches verification — shared schema with #806).",
+      "properties": {
+        "checks": {
+          "items": {
+            "$ref": "#/$defs/VerificationCheck"
+          },
+          "type": "array"
+        },
+        "claimed": {
+          "type": "boolean"
+        },
+        "durationMs": {
+          "type": "integer"
+        },
+        "env": {
+          "$ref": "#/$defs/VerificationEnv"
+        },
+        "passed": {
+          "type": "boolean"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "verified": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "passed",
+        "claimed",
+        "verified",
+        "checks",
+        "env"
+      ],
+      "type": "object"
+    },
+    "VerificationStarted": {
+      "additionalProperties": true,
+      "description": "VerificationStarted marks the beginning of independent completion gates. Emitted before gates run so timeline/session audit can span start→end (#790). Scope is VerificationScopeTurn or VerificationScopeChild.",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "gateCount": {
+          "type": "integer"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "scope": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "WaitResolved": {
+      "additionalProperties": true,
+      "description": "WaitResolved is the outcome of a wait subscription. Outcome is matched|timeout|canceled. On matched, Event is the canonical kind and TargetSessionID/Status identify the child; Handoff is set for terminal task.* outcomes when available.",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "event": {
+          "type": "string"
+        },
+        "handoff": {
+          "$ref": "#/$defs/CompletionHandoff"
+        },
+        "hasHandoff": {
+          "type": "boolean"
+        },
+        "outcome": {
+          "type": "string"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "targetName": {
+          "type": "string"
+        },
+        "targetSessionId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        },
+        "waitId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "waitId",
+        "outcome"
+      ],
+      "type": "object"
+    },
+    "WaitStarted": {
+      "additionalProperties": true,
+      "description": "WaitStarted marks an orchestration wait subscription (wait tool). Correlation is the waiting agent. TargetSessionID is an optional filter (empty = any owned child). Events lists canonical kinds (task.done|task.failed|task.canceled|task.blocked).",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "events": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "targetSessionId": {
+          "type": "string"
+        },
+        "timeoutMs": {
+          "type": "integer"
+        },
+        "turnId": {
+          "type": "string"
+        },
+        "waitId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "waitId",
+        "events"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://raw.githubusercontent.com/jonathanung/strike/main/schemas/protocol/v1/schema.json",
+  "$ref": "#/$defs/Envelope",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Forward-compatible Op/Event wire schema generated from pkg/protocol. The root schema is one event envelope: unknown type strings and unknown fields are valid. $defs/KnownEvent lists types this version writes. $defs/KnownOp is fail-closed: unknown op type strings are not valid. required is the writer contract; readers treat missing fields as zero values. See schemas/protocol/v1/COMPAT.md.",
+  "title": "Strike event envelope",
+  "x-strike-event-count": 63,
+  "x-strike-legacy-version": "1.0.0",
+  "x-strike-op-count": 31,
+  "x-strike-protocol-version": "1.21.0",
+  "x-strike-unknown-event": "valid",
+  "x-strike-unknown-field": "ignore",
+  "x-strike-unknown-op": "reject"
+}

@@ -1,0 +1,10 @@
+[Unit]
+Description=Strike daemon (web UI + engine API)
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/strike serve --auth --token-file /home/tester/.strike/daemon.token --addr 100.64.0.5:8787 --allow-private-bind
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

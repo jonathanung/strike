@@ -44,7 +44,25 @@ and run:
 ```sh
 strike version
 strike
+strike daemon install --start
 ```
+
+### Per-user daemon
+
+`strike daemon install` writes a service definition and a 0600 token at
+`~/.strike/daemon.token`. It prints the commands for this OS and recommends
+`strike daemon install --start`, which runs them.
+
+| OS | Definition | Start |
+|---|---|---|
+| Linux | `$XDG_CONFIG_HOME/systemd/user/strike-daemon.service`, or `~/.config/systemd/user/strike-daemon.service` | `systemctl --user daemon-reload` then `systemctl --user enable --now strike-daemon` |
+| macOS | `~/Library/LaunchAgents/ca.jonathanung.strike-daemon.plist` | `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ca.jonathanung.strike-daemon.plist` then `launchctl kickstart -k gui/$(id -u)/ca.jonathanung.strike-daemon` |
+| Windows | unsupported | run `strike serve` inside WSL2 |
+
+`strike daemon status` and `strike daemon uninstall` use the same service
+manager (`systemctl --user` or `launchctl bootout` / `launchctl print`).
+Logs for the LaunchAgent are under `~/.strike/logs/`. The web UI is
+http://127.0.0.1:8787/ unless you pass `--addr`.
 
 ### Uninstall
 

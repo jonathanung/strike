@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>ca.jonathanung.strike-daemon</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/usr/local/bin/strike</string>
+		<string>serve</string>
+		<string>--auth</string>
+		<string>--token-file</string>
+		<string>/Users/tester/.strike/daemon.token</string>
+		<string>--addr</string>
+		<string>127.0.0.1:8787</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<true/>
+	<key>StandardOutPath</key>
+	<string>/Users/tester/.strike/logs/strike-daemon.out.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Users/tester/.strike/logs/strike-daemon.err.log</string>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key>
+		<string>/Users/tester/.strike/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+	</dict>
+	<key>WorkingDirectory</key>
+	<string>/Users/tester</string>
+</dict>
+</plist>
