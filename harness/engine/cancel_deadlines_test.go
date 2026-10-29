@@ -76,8 +76,8 @@ func TestInterruptPreservesPartialToolOutputAndCanceledCode(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("tool never started")
 	}
-	// Let ReportOutput land.
-	time.Sleep(20 * time.Millisecond)
+	// ReportOutput runs before started is closed, so the partial bytes are
+	// already in the event buffer. Interrupt immediately.
 	eng.Ops() <- protocol.Interrupt{}
 
 	completed, events := collectThroughTurnCompleted(t, eng.Events())
@@ -438,8 +438,8 @@ func TestTurnTimeoutResumeAppliesConfiguredPostureNotExpiredDeadline(t *testing.
 	ctx2, cancel2 := context.WithCancel(context.Background())
 	defer cancel2()
 	go eng2.Run(ctx2)
-	// Allow quiet startup to settle.
-	time.Sleep(20 * time.Millisecond)
+	// Quiet startup emits nothing. The input sits on Ops until Run reaches
+	// the loop, so the turn (and its deadline) start after startup.
 	eng2.Ops() <- protocol.UserInput{Text: "second after resume"}
 	_ = receiveRequest(t, prov2.requests)
 	completed2, _ := collectThroughTurnCompleted(t, eng2.Events())

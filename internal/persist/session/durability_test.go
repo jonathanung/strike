@@ -283,6 +283,96 @@ func TestExportImportRoundTrip(t *testing.T) {
 	}
 }
 
+func TestExportImportCopiesLastModel(t *testing.T) {
+	dir := t.TempDir()
+	m := NewManager(dir)
+	info, err := m.Create(CreateOptions{Title: "model bundle", ProjectKey: "proj-synthetic"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, model := range []string{"echo-1", "echo-2"} {
+		if err := m.Append(info.ID, protocol.ModelSelected{
+			Correlation: protocol.Correlation{SessionID: info.ID},
+			Provider:    "echo",
+			Model:       model,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := m.Close(info.ID); err != nil {
+		t.Fatal(err)
+	}
+	exportPath := filepath.Join(t.TempDir(), "bundle.json")
+	if err := m.Export(info.ID, exportPath); err != nil {
+		t.Fatal(err)
+	}
+	pkg, err := ReadPackage(exportPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pkg.Meta.Model != "echo-2" {
+		t.Fatalf("package model = %q", pkg.Meta.Model)
+	}
+
+	imported, err := m.Import(exportPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if imported.ID == info.ID {
+		t.Fatal("import must mint a new session id")
+	}
+	if imported.Model != "echo-2" {
+		t.Fatalf("imported model = %q", imported.Model)
+	}
+	meta, err := ReadMeta(dir, imported.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.Model != "echo-2" || meta.SessionID != imported.ID {
+		t.Fatalf("imported meta = %+v", meta)
+	}
+}
+
+func TestImportUsesSidecarModelWhenLogHasNone(t *testing.T) {
+	dir := t.TempDir()
+	m := NewManager(dir)
+	info, err := m.Create(CreateOptions{Title: "sidecar only"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := UpdateMeta(dir, info.ID, func(meta *Meta) {
+		meta.Model = "echo-1"
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Append(info.ID, protocol.UserMessage{Text: "hello"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Close(info.ID); err != nil {
+		t.Fatal(err)
+	}
+	exportPath := filepath.Join(t.TempDir(), "bundle.json")
+	if err := m.Export(info.ID, exportPath); err != nil {
+		t.Fatal(err)
+	}
+	pkg, err := ReadPackage(exportPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, env := range pkg.Events {
+		if env.Type == "model.selected" {
+			t.Fatalf("package log has model.selected: %+v", env)
+		}
+	}
+	imported, err := m.Import(exportPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if imported.Model != "echo-1" {
+		t.Fatalf("imported model = %q, want echo-1", imported.Model)
+	}
+}
+
 func TestImportRejectsUnknownPackageVersion(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "bad.json")
 	body := `{"format":"strike.session","version":99,"schemaVersion":1,"events":[]}`

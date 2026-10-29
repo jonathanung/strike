@@ -63,6 +63,7 @@ func TestLoopNoProgressTrips(t *testing.T) {
 	spec, _ := ParseCheckSpec("cmd: false")
 	g, err := s.Create("never", []Criterion{{Description: "x", Check: spec}}, Constraints{
 		MaxIterations: 10, MaxCostUSD: 10, MaxWallClockS: 600, MaxNoProgressIters: 3,
+		MaxVerifyFailures: 99,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -80,8 +81,8 @@ func TestLoopNoProgressTrips(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Status != StatusFailed {
-		t.Fatalf("status=%s reason=%s", got.Status, got.FailReason)
+	if got.Status != StatusBlocked || got.Escalation != "human" {
+		t.Fatalf("status=%s escalation=%s reason=%s", got.Status, got.Escalation, got.FailReason)
 	}
 	if got.LastIteration < 3 {
 		t.Fatalf("iters=%d", got.LastIteration)
@@ -360,6 +361,56 @@ func TestLoopPause(t *testing.T) {
 	}
 	if got.Status != StatusPaused {
 		t.Fatalf("want paused after mid-loop pause, got %s (iters=%d reason=%s)", got.Status, got.LastIteration, got.FailReason)
+	}
+}
+
+// A run whose context is already cancelled (a pause/abort that landed
+// during start) must not activate a pending or paused goal: the stop
+// stands and no iteration runs.
+func TestLoopCancelledContextDoesNotActivate(t *testing.T) {
+	for _, start := range []string{"pending", "paused"} {
+		t.Run(start, func(t *testing.T) {
+			s, err := Open(t.TempDir(), "cancelstart")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer s.Close()
+			spec, _ := ParseCheckSpec("cmd: true")
+			g, err := s.Create("do not start", []Criterion{{Check: spec}}, DefaultConstraints())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if start == "paused" {
+				if _, err := s.SetStatus(g.ID, StatusActive, ""); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := s.SetStatus(g.ID, StatusPaused, ""); err != nil {
+					t.Fatal(err)
+				}
+			}
+			loop := &Loop{
+				Store:   s,
+				Planner: EvaluateOnlyPlanner{},
+				Critic: &DefaultCritic{
+					CmdRunner: func(context.Context, string, string) (int, string, error) {
+						return 0, "", nil
+					},
+				},
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			got, err := loop.Run(ctx, g.ID)
+			if err == nil {
+				t.Fatal("expected context error")
+			}
+			if got.Status != Status(start) {
+				t.Fatalf("status=%s, want %s", got.Status, start)
+			}
+			cur, ok, err := s.Get(g.ID)
+			if err != nil || !ok || cur.Status != Status(start) || cur.LastIteration != 0 {
+				t.Fatalf("stored=%+v ok=%v err=%v", cur, ok, err)
+			}
+		})
 	}
 }
 

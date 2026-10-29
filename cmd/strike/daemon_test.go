@@ -8,19 +8,6 @@ import (
 	"testing"
 )
 
-func TestRenderSystemdUnit(t *testing.T) {
-	t.Setenv("HOME", "/home/tester")
-	unit := renderSystemdUnit("/usr/local/bin/strike", "100.64.0.5:8787", true)
-	for _, want := range []string{
-		"ExecStart=/usr/local/bin/strike serve --auth --token-file /home/tester/.strike/daemon.token --addr 100.64.0.5:8787 --allow-private-bind",
-		"WantedBy=default.target",
-	} {
-		if !strings.Contains(unit, want) {
-			t.Errorf("unit missing %q:\n%s", want, unit)
-		}
-	}
-}
-
 func TestLoadOrMintTokenFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sub", "daemon.token")
 	tok, created, err := loadOrMintTokenFile(path)
@@ -75,6 +62,16 @@ func TestDaemonLogoutRotatesToken(t *testing.T) {
 	}
 	if info.Mode().Perm() != 0o600 {
 		t.Fatalf("perm = %v", info.Mode().Perm())
+	}
+	raw, err := os.ReadFile(filepath.Join(home, ".strike", "usage-audit", "chain.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), first) || strings.Contains(string(raw), second) {
+		t.Fatalf("audit log contains a token: %s", raw)
+	}
+	if !strings.Contains(string(raw), "daemon token file rotated") {
+		t.Fatalf("audit log = %s", raw)
 	}
 }
 

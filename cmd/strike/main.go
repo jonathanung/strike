@@ -16,6 +16,7 @@ import (
 
 	"github.com/jonathanung/strike/harness/permission"
 	"github.com/jonathanung/strike/harness/sandbox"
+	"github.com/jonathanung/strike/internal/persist/workspace"
 	"github.com/jonathanung/strike/internal/product/update"
 	"github.com/jonathanung/strike/internal/product/version"
 )
@@ -43,6 +44,9 @@ type cliOptions struct {
 	maxCostSet                 bool
 	upgrade                    bool
 	version                    bool
+	// workspaces is set by strike serve so new roots bind the registry.
+	// Nil for the TUI and headless exec, which keep the process directory.
+	workspaces *workspace.Store
 }
 
 type optionSpec struct {
@@ -218,10 +222,11 @@ const tuiDeprecationNotice = "notice: the strike TUI is deprecated; the web UI i
 
 const bareStrikeHint = `Strike now runs as a daemon with a web UI.
 
-  strike daemon install   install the per-user systemd service
-  strike serve            run the daemon in the foreground
-  strike tui              open the deprecated terminal UI
-  strike --help           all commands and options`
+  strike daemon install --start   install and start the per-user daemon
+  strike serve                    run the daemon in the foreground
+  strike gateway url --qr         one-time phone pairing QR (not the daemon token)
+  strike tui                      open the deprecated terminal UI
+  strike --help                   all commands and options`
 
 func main() {
 	os.Exit(runCLI(os.Args[1:], os.Stdout, os.Stderr))
@@ -249,6 +254,12 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 	}
 	if len(args) > 0 && args[0] == "daemon" {
 		return runDaemonCLI(args[1:], stdout, stderr)
+	}
+	if len(args) > 0 && args[0] == "connect" {
+		return runConnectCLI(args[1:], stdout, stderr)
+	}
+	if len(args) > 0 && args[0] == "gateway" {
+		return runGatewayCLI(args[1:], stdout, stderr)
 	}
 	if len(args) == 0 {
 		fmt.Fprintln(stdout, bareStrikeHint)
@@ -484,7 +495,9 @@ func writeUsage(w io.Writer) {
 	fmt.Fprintln(w, "  strike rpc [options]")
 	fmt.Fprintln(w, "  strike acp [options]")
 	fmt.Fprintln(w, "  strike serve [options]")
-	fmt.Fprintln(w, "  strike daemon <install|uninstall|status|token>")
+	fmt.Fprintln(w, "  strike daemon <install|uninstall|status|token|grant|revoke|logout>")
+	fmt.Fprintln(w, "  strike connect [options] <user@host|profile>")
+	fmt.Fprintln(w, "  strike gateway <url|devices|revoke>")
 	fmt.Fprintln(w, "  strike tui [options] (deprecated)")
 	fmt.Fprintln(w, "  strike mcp-serve [options]")
 	fmt.Fprintln(w, "  strike auth <command> [arguments]")

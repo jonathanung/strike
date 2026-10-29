@@ -1,7 +1,7 @@
 // Pure helpers for the web UI UAT harness. No browser, no daemon.
 
 export const SHELL_LABELS = [
-  "Run a command",
+  "Menu",
   "Strike",
   "Sessions",
   "Activity",
@@ -16,6 +16,18 @@ export const SHELL_LABELS = [
 
 export const DARK_TOKENS = { acid: "#7c3aed", ground: "#14131c" };
 export const LIGHT_TOKENS = { acid: "#5b21b6", ground: "#ffffff" };
+
+// Phone width used by the shell's one-column break (max-width: 960px).
+// Tag stays "mobile" so shot names match the existing shell-empty-mobile.png.
+export const PHONE = { width: 390, height: 844, tag: "mobile" };
+
+export function phoneShotName(name) {
+  const slug = String(name || "");
+  if (!/^[a-z][a-z0-9-]*$/.test(slug)) {
+    throw new Error(`phone shot name must be a slug, got ${name}`);
+  }
+  return `${slug}-${PHONE.tag}`;
+}
 
 // Coarse palette check. Headlines rotate and session times move, so a
 // full-frame pixel match is not stable across hosts. This threshold is only
@@ -34,6 +46,37 @@ export function parseViewport(spec) {
 export function missingLabels(text, labels) {
   const body = String(text || "");
   return labels.filter((label) => !body.includes(label));
+}
+
+// Poll getText() until every label appears in the page text or the
+// deadline passes, and report the last text seen plus whatever is still
+// missing. The shell renders in stages — the boot stub satisfies a
+// "Run a command" probe before the live session has spawned and the
+// shell has painted states like "Connected" — so a one-shot snapshot
+// taken right after boot races that render and intermittently reports
+// labels missing on a healthy build. This waiter never weakens the
+// check: if the labels genuinely never appear it returns them in
+// `missing` after the full deadline, with the final page text for
+// diagnostics. `sleep`/`now` are injectable for tests.
+export async function waitForLabels(
+  getText,
+  labels,
+  { timeoutMs = 30000, intervalMs = 200, sleep, now } = {},
+) {
+  const pause =
+    sleep || ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+  const clock = now || Date.now;
+  const deadline = clock() + timeoutMs;
+  let text = "";
+  let missing = [...labels];
+  for (;;) {
+    text = String((await getText()) || "");
+    missing = missingLabels(text, labels);
+    if (missing.length === 0) return { text, missing };
+    const remaining = deadline - clock();
+    if (remaining <= 0) return { text, missing };
+    await pause(Math.min(intervalMs, remaining));
+  }
 }
 
 export function tokenMismatch(actual, expected) {
@@ -126,18 +169,20 @@ export function parseArgs(argv) {
         throw new Error(`unknown argument ${a}`);
     }
   }
-  if (opt.suite !== "full" && opt.suite !== "smoke") {
-    throw new Error(`--suite must be full or smoke, got ${opt.suite}`);
+  if (!/^[a-z][a-z0-9-]*$/.test(opt.suite)) {
+    throw new Error(`--suite must be full, smoke, or a scenario slug, got ${opt.suite}`);
   }
   return opt;
 }
 
 export const HELP = `webui-uat — boot strike serve --provider echo and drive the cockpit
 
-  node scripts/webui-uat.mjs [--out dir] [--suite full|smoke] [--no-video]
+  node scripts/webui-uat.mjs [--out dir] [--suite full|smoke|<slug>] [--no-video]
   node scripts/webui-uat.mjs --compare-only --left kiro.png --right strike.png --compare-out out.png
 
 Screenshots land in <out>/screenshots. A video of the scripted pass lands in
-<out>/uat.mp4 unless --no-video. The process exits non-zero when an assertion
-fails. See docs/webui-uat.md.
+<out>/uat.mp4 unless --no-video. --suite full (the default) runs the cockpit
+pass, then every scripts/webui-uat/scenarios/<slug>.mjs. --suite <slug> runs
+only that file. --suite smoke is the cockpit pass and what CI runs. The
+process exits non-zero when an assertion fails. See docs/webui-uat.md.
 `;

@@ -701,6 +701,16 @@ type memoryAdapter struct {
 	workDir string
 }
 
+func memoryEntryFrom(e memory.Entry) host.MemoryEntry {
+	return host.MemoryEntry{
+		Key:       e.Key,
+		Value:     e.Value,
+		Tags:      append([]string(nil), e.Tags...),
+		Author:    e.Author,
+		UpdatedAt: e.UpdatedAt,
+	}
+}
+
 func (m memoryAdapter) List(tag string) ([]host.MemoryEntry, error) {
 	entries, err := m.store.List(tag)
 	if err != nil {
@@ -708,17 +718,20 @@ func (m memoryAdapter) List(tag string) ([]host.MemoryEntry, error) {
 	}
 	out := make([]host.MemoryEntry, len(entries))
 	for i, e := range entries {
-		out[i] = host.MemoryEntry{Key: e.Key, Value: e.Value, Tags: append([]string(nil), e.Tags...)}
+		out[i] = memoryEntryFrom(e)
 	}
 	return out, nil
 }
 
 func (m memoryAdapter) Get(key string) (host.MemoryEntry, bool, error) {
 	e, ok, err := m.store.Get(key)
+	if err == nil && !ok {
+		e, ok, err = m.store.Get(memory.ScrubKey(key))
+	}
 	if err != nil || !ok {
 		return host.MemoryEntry{}, ok, err
 	}
-	return host.MemoryEntry{Key: e.Key, Value: e.Value, Tags: append([]string(nil), e.Tags...)}, true, nil
+	return memoryEntryFrom(e), true, nil
 }
 
 func (m memoryAdapter) Put(key, value string, tags []string) error {
