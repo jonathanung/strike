@@ -123,14 +123,17 @@ pub fn Chrome() -> impl IntoView {
             let perform = cmd.run.clone();
             let remembered = id.clone();
             let payload = args.clone();
-            crate::confirm::ask(
+            if !crate::confirm::ask(
                 spec.into(),
                 Rc::new(move || {
                     if perform(&payload).is_ok() {
                         remember_command(&remembered);
                     }
                 }),
-            );
+            ) {
+                error.set(crate::confirm::BUSY.into());
+                return;
+            }
             close_palette();
             return;
         }

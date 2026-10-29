@@ -149,6 +149,73 @@ fn move_id(items: &[QueueItem], current: &str, delta: i32) -> String {
     items[step_index(items.len(), idx, delta)].id.clone()
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Reading {
+    Skeleton,
+    Error,
+    Empty,
+    Item,
+}
+
+/// The previous item stays hidden for the whole load, including when its
+/// detail is still sitting in the signal.
+fn reading_phase(loading: bool, detail_id: Option<&str>, selected: &str, error: bool) -> Reading {
+    let matches = matches!(detail_id, Some(id) if !id.is_empty() && id == selected);
+    if loading || (detail_id.is_some() && !matches) {
+        return Reading::Skeleton;
+    }
+    if error {
+        return Reading::Error;
+    }
+    if !matches {
+        return Reading::Empty;
+    }
+    Reading::Item
+}
+
+/// Confirm copy and the POST share this id. A stale detail does not name
+/// one item while the request hits another.
+fn action_target<'a>(detail_id: Option<&'a str>, selected: &'a str) -> Option<&'a str> {
+    let id = detail_id?;
+    if id.is_empty() || id != selected {
+        None
+    } else {
+        Some(selected)
+    }
+}
+
+struct ClosePlan {
+    post_id: String,
+    heading: String,
+    noun: String,
+    title: String,
+}
+
+fn plan_close(item: &QueueItem, selected: &str) -> Option<ClosePlan> {
+    let post_id = action_target(Some(item.id.as_str()), selected)?.to_string();
+    let noun = if item.kind == "pr" {
+        "pull request"
+    } else {
+        "issue"
+    };
+    let title = if item.title.is_empty() {
+        "this item".into()
+    } else {
+        item.title.clone()
+    };
+    let heading = if item.number > 0 {
+        format!("Close #{} on GitHub?", item.number)
+    } else {
+        "Close on GitHub?".into()
+    };
+    Some(ClosePlan {
+        post_id,
+        heading,
+        noun: noun.into(),
+        title,
+    })
+}
+
 fn short_when(iso: &str) -> String {
     if iso.len() < 16 {
         return iso.to_string();
@@ -333,6 +400,7 @@ pub fn AppsPane(
             return;
         }
         detail_loading.set(true);
+        detail.set(None);
         detail_error.set(String::new());
         let gen = detail_gen.get_untracked().wrapping_add(1);
         detail_gen.set(gen);
@@ -362,54 +430,69 @@ pub fn AppsPane(
     });
 
     let close_go = RwSignal::new(false);
+    let close_target = RwSignal::new(String::new());
     let run_action = move |action: String| {
-        if action == "close" && !close_go.get_untracked() {
-            let (title, number, kind) = detail
-                .get_untracked()
-                .map(|row| {
-                    (
-                        row.item.title.clone(),
-                        row.item.number,
-                        row.item.kind.clone(),
-                    )
-                })
-                .filter(|(title, _, _)| !title.is_empty())
-                .unwrap_or_else(|| ("this item".into(), 0, String::new()));
-            let noun = if kind == "pr" {
-                "pull request"
-            } else {
-                "issue"
+        let posting_close = action == "close" && close_go.get_untracked();
+        if posting_close {
+            close_go.set(false);
+        }
+        let selected_id = selected.get_untracked();
+        let loaded = detail.get_untracked();
+        let bound = loaded.as_ref().and_then(|row| {
+            action_target(Some(row.item.id.as_str()), &selected_id).map(|id| id.to_string())
+        });
+        let post_id = if posting_close {
+            let id = close_target.get_untracked();
+            if bound.as_deref() != Some(id.as_str()) {
+                action_error.set("That item is no longer open.".into());
+                return;
+            }
+            id
+        } else {
+            let Some(id) = bound else {
+                action_error.set("That item is no longer open.".into());
+                return;
             };
-            let heading = if number > 0 {
-                format!("Close #{number} on GitHub?")
-            } else {
-                "Close on GitHub?".into()
+            id
+        };
+        if action == "close" && !posting_close {
+            let Some(row) = loaded else {
+                action_error.set("That item is no longer open.".into());
+                return;
             };
-            crate::confirm::ask(
+            let Some(plan) = plan_close(&row.item, &selected_id) else {
+                action_error.set("That item is no longer open.".into());
+                return;
+            };
+            let remembered = plan.post_id.clone();
+            let opened = crate::confirm::ask(
                 crate::confirm::ConfirmRequest {
-                    title: heading,
+                    title: plan.heading,
                     body: format!(
-                        "This closes the {noun} \u{201c}{title}\u{201d} on GitHub itself. Watchers are notified, and it leaves the open queue. To undo it, switch the queue filter to Closed and choose Reopen."
+                        "This closes the {} \u{201c}{}\u{201d} on GitHub itself. Watchers are notified, and it leaves the open queue. To undo it, switch the queue filter to Closed and choose Reopen.",
+                        plan.noun, plan.title
                     ),
                     confirm_label: "Close on GitHub".into(),
                 },
-                Rc::new(move || close_go.set(true)),
+                Rc::new(move || {
+                    close_target.set(remembered.clone());
+                    close_go.set(true);
+                }),
             );
+            if !opened {
+                action_error.set(crate::confirm::BUSY.into());
+            }
             return;
-        }
-        if action == "close" {
-            close_go.set(false);
         }
         if busy.get_untracked() {
             return;
         }
         let app = open_id.get_untracked();
-        let id = selected.get_untracked();
-        if app.is_empty() || id.is_empty() {
+        if app.is_empty() || post_id.is_empty() {
             return;
         }
-        let needs_body = detail
-            .get_untracked()
+        let needs_body = loaded
+            .as_ref()
             .map(|d| d.actions.iter().any(|a| a.id == action && a.needs_body))
             .unwrap_or(false);
         let text = comment.get_untracked().trim().to_string();
@@ -424,8 +507,9 @@ pub fn AppsPane(
         let path = format!(
             "/v1/apps/{}/items/{}/act",
             api::js_encode(&app),
-            api::js_encode(&id)
+            api::js_encode(&post_id)
         );
+        let paint = post_id.clone();
         spawn_local(async move {
             let result = post_json_value(
                 &b,
@@ -435,6 +519,20 @@ pub fn AppsPane(
             )
             .await;
             busy.set(false);
+            if selected.get_untracked() != paint {
+                match &result {
+                    Ok(_) if is_close => {
+                        status.set(format!("Closed {paint} on GitHub."));
+                        reload.update(|n| *n = n.wrapping_add(1));
+                    }
+                    Ok(_) => {
+                        status.set(format!("Triage action sent for {paint}."));
+                        reload.update(|n| *n = n.wrapping_add(1));
+                    }
+                    Err(e) => status.set(format!("{paint}: {e}")),
+                }
+                return;
+            }
             match result {
                 Ok(_) => {
                     comment.set(String::new());
@@ -461,7 +559,14 @@ pub fn AppsPane(
             return;
         }
         let app = open_id.get_untracked();
-        let id = selected.get_untracked();
+        let selected_id = selected.get_untracked();
+        let loaded = detail.get_untracked();
+        let Some(id) = loaded.as_ref().and_then(|row| {
+            action_target(Some(row.item.id.as_str()), &selected_id).map(|item| item.to_string())
+        }) else {
+            action_error.set("That item is no longer open.".into());
+            return;
+        };
         if app.is_empty() || id.is_empty() {
             return;
         }
@@ -473,9 +578,11 @@ pub fn AppsPane(
             api::js_encode(&app),
             api::js_encode(&id)
         );
+        let paint = id.clone();
         spawn_local(async move {
             let result = post_json_value(&b, &t, &path, serde_json::json!({})).await;
             busy.set(false);
+            let here = selected.get_untracked() == paint;
             match result {
                 Ok(v) => {
                     let root = v
@@ -484,13 +591,27 @@ pub fn AppsPane(
                         .unwrap_or("")
                         .to_string();
                     if root.is_empty() {
-                        action_error.set("The daemon did not start a session.".into());
+                        if here {
+                            action_error.set("The daemon did not start a session.".into());
+                        } else {
+                            status.set(format!("{paint} did not start a session."));
+                        }
                         return;
                     }
-                    status.set("Handed off. The new session has this item.".into());
+                    status.set(if here {
+                        "Handed off. The new session has this item.".into()
+                    } else {
+                        format!("Handed off {paint}.")
+                    });
                     open_session(root);
                 }
-                Err(e) => action_error.set(e),
+                Err(e) => {
+                    if here {
+                        action_error.set(e);
+                    } else {
+                        status.set(format!("{paint}: {e}"));
+                    }
+                }
             }
         });
     };
@@ -748,7 +869,15 @@ pub fn AppsPane(
                         </section>
                         <section class="apps-read" aria-label="Reading pane">
                             {move || {
-                                if detail_loading.get() && detail.get().is_none() {
+                                let loaded = detail.get();
+                                let selected_id = selected.get();
+                                let phase = reading_phase(
+                                    detail_loading.get(),
+                                    loaded.as_ref().map(|row| row.item.id.as_str()),
+                                    &selected_id,
+                                    !detail_error.get().is_empty(),
+                                );
+                                if phase == Reading::Skeleton {
                                     return view! {
                                         <div class="skeleton" aria-hidden="true">
                                             <div class="skeleton-line"></div>
@@ -756,13 +885,21 @@ pub fn AppsPane(
                                         </div>
                                     }.into_any();
                                 }
-                                let derr = detail_error.get();
-                                if !derr.is_empty() && detail.get().is_none() {
+                                if phase == Reading::Error {
+                                    let derr = detail_error.get();
                                     return view! {
                                         <div class="notice" role="alert"><span>{derr}</span></div>
                                     }.into_any();
                                 }
-                                let Some(found) = detail.get() else {
+                                if phase == Reading::Empty {
+                                    return view! {
+                                        <div class="empty-state">
+                                            <strong>"Select an item"</strong>
+                                            <p>"The reading pane shows the issue or pull request gh returned."</p>
+                                        </div>
+                                    }.into_any();
+                                }
+                                let Some(found) = loaded else {
                                     return view! {
                                         <div class="empty-state">
                                             <strong>"Select an item"</strong>
@@ -810,7 +947,7 @@ pub fn AppsPane(
                                     let klass = if action.id == "close" { "secondary apps-close" } else { "secondary" };
                                     let run = run_action;
                                     view! {
-                                        <button class=klass disabled=move || busy.get() on:click=move |_| run(id.clone())>{label}</button>
+                                        <button class=klass disabled=move || busy.get() || detail_loading.get() on:click=move |_| run(id.clone())>{label}</button>
                                     }
                                 }).collect_view();
                                 view! {
@@ -927,5 +1064,37 @@ mod tests {
         assert_eq!(detail.body, "hello");
         assert_eq!(detail.comments.len(), 1);
         assert!(detail.actions[0].needs_body);
+    }
+
+    #[test]
+    fn stale_detail_is_not_shown_and_cannot_close_the_new_item() {
+        assert_eq!(
+            reading_phase(true, Some("issue-a"), "issue-b", false),
+            Reading::Skeleton
+        );
+        assert_eq!(
+            reading_phase(true, None, "issue-b", false),
+            Reading::Skeleton
+        );
+        assert_eq!(
+            reading_phase(false, Some("issue-a"), "issue-b", false),
+            Reading::Skeleton
+        );
+        assert_eq!(
+            reading_phase(false, Some("issue-b"), "issue-b", false),
+            Reading::Item
+        );
+        assert!(action_target(Some("issue-a"), "issue-b").is_none());
+        assert_eq!(action_target(Some("issue-b"), "issue-b"), Some("issue-b"));
+        let stale = item("issue-a", "Old title", "ada");
+        assert!(plan_close(&stale, "issue-b").is_none());
+        let mut current = item("issue-b", "New title", "grace");
+        current.number = 12;
+        current.kind = "pr".into();
+        let plan = plan_close(&current, "issue-b").unwrap();
+        assert_eq!(plan.post_id, "issue-b");
+        assert_eq!(plan.heading, "Close #12 on GitHub?");
+        assert_eq!(plan.title, "New title");
+        assert_eq!(plan.noun, "pull request");
     }
 }

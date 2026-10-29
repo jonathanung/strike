@@ -20,7 +20,7 @@ use crate::transcript::{
 #[derive(Clone, Copy)]
 pub struct TranscriptHandlers {
     pub send: Callback<(String,)>,
-    pub rename: Callback<(String,)>,
+    pub rename: Callback<(String, String)>,
     pub regenerate: Callback<()>,
     pub export_timeline: Callback<()>,
     pub export_markdown: Callback<()>,
@@ -43,6 +43,7 @@ pub struct FindView {
 #[component]
 pub fn TranscriptPane(
     transcript: RwSignal<Transcript>,
+    session: RwSignal<String>,
     loading: RwSignal<bool>,
     load_error: RwSignal<String>,
     tick: RwSignal<u32>,
@@ -54,6 +55,26 @@ pub fn TranscriptPane(
     let draft = RwSignal::new(String::new());
     let pinned = RwSignal::new(true);
     let cursor = RwSignal::new(None::<u32>);
+    let cursor_session = RwSignal::new(String::new());
+    let rename_for = RwSignal::new(String::new());
+    let seen_session = RwSignal::new(None::<String>);
+    Effect::new(move |_| {
+        let next = session.get();
+        let prev = seen_session.get_untracked();
+        if prev.as_deref() == Some(next.as_str()) {
+            return;
+        }
+        let switched = prev.is_some();
+        seen_session.set(Some(next));
+        if !switched {
+            return;
+        }
+        editing.set(false);
+        draft.set(String::new());
+        cursor.set(None);
+        cursor_session.set(String::new());
+        rename_for.set(String::new());
+    });
     let scroller = NodeRef::<leptos::html::Div>::new();
     let scroller_fx = scroller;
 
@@ -174,13 +195,21 @@ pub fn TranscriptPane(
 
     let start_rename = move |_| {
         let current = transcript.with_untracked(|t| t.title.clone());
+        rename_for.set(session.get_untracked());
         draft.set(current);
         editing.set(true);
     };
     let cancel_rename = move |_| editing.set(false);
     let commit_rename = move || {
+        let started = rename_for.get_untracked();
+        let active = session.get_untracked();
+        if !rename_applies(&started, &active) {
+            editing.set(false);
+            note.set("That rename was for another session.".into());
+            return;
+        }
         editing.set(false);
-        rename.run((draft.get(),));
+        rename.run((started, draft.get()));
     };
     let on_key = move |ev: web_sys::KeyboardEvent| {
         if ev.alt_key() || ev.ctrl_key() || ev.meta_key() {
@@ -216,6 +245,7 @@ pub fn TranscriptPane(
                 }
             };
             cursor.set(Some(next));
+            cursor_session.set(session.get_untracked());
             pinned.set(false);
             scroll_message(next);
         };
@@ -232,6 +262,7 @@ pub fn TranscriptPane(
                 ev.prevent_default();
                 if let Some(id) = ids.first().copied() {
                     cursor.set(Some(id));
+                    cursor_session.set(session.get_untracked());
                     scroll_message(id);
                 }
             }
@@ -239,6 +270,7 @@ pub fn TranscriptPane(
                 ev.prevent_default();
                 if let Some(id) = ids.last().copied() {
                     cursor.set(Some(id));
+                    cursor_session.set(session.get_untracked());
                     pinned.set(true);
                     scroll_message(id);
                 }
@@ -251,19 +283,30 @@ pub fn TranscriptPane(
             }
             "t" => {
                 ev.prevent_default();
-                if let Some(text) = current_retry(&transcript, cursor.get_untracked()) {
+                let bind = cursor.get_untracked().map(|id| CursorBind {
+                    session: cursor_session.get_untracked(),
+                    id,
+                });
+                let msgs = cursor_messages(&transcript);
+                if let Some(text) = resolve_retry(&session.get_untracked(), bind.as_ref(), &msgs) {
                     retry.run((text,));
                 }
             }
             "f" => {
                 ev.prevent_default();
-                if let Some(keep) = current_keep(&transcript, cursor.get_untracked()) {
+                let bind = cursor.get_untracked().map(|id| CursorBind {
+                    session: cursor_session.get_untracked(),
+                    id,
+                });
+                let msgs = cursor_messages(&transcript);
+                if let Some(keep) = resolve_fork(&session.get_untracked(), bind.as_ref(), &msgs) {
                     fork.run((keep,));
                 }
             }
             "r" => {
                 ev.prevent_default();
                 let current = transcript.with_untracked(|t| t.title.clone());
+                rename_for.set(session.get_untracked());
                 draft.set(current);
                 editing.set(true);
             }
@@ -461,28 +504,65 @@ fn current_copy(transcript: &RwSignal<Transcript>, id: Option<u32>) -> Option<St
     })
 }
 
-fn current_retry(transcript: &RwSignal<Transcript>, id: Option<u32>) -> Option<String> {
+struct CursorMsg {
+    id: u32,
+    retry_text: String,
+    keep_events: i32,
+}
+
+struct CursorBind {
+    session: String,
+    id: u32,
+}
+
+fn cursor_messages(transcript: &RwSignal<Transcript>) -> Vec<CursorMsg> {
     transcript.with_untracked(|t| {
-        let msg = id
-            .and_then(|id| t.messages.iter().find(|m| m.id == id))
-            .or_else(|| t.messages.iter().rev().find(|m| !m.retry_text.is_empty()))?;
-        if msg.retry_text.trim().is_empty() {
-            None
-        } else {
-            Some(msg.retry_text.clone())
-        }
+        t.messages
+            .iter()
+            .map(|m| CursorMsg {
+                id: m.id,
+                retry_text: m.retry_text.clone(),
+                keep_events: m.keep_events,
+            })
+            .collect()
     })
 }
 
-fn current_keep(transcript: &RwSignal<Transcript>, id: Option<u32>) -> Option<i32> {
-    transcript.with_untracked(|t| {
-        let msg = id.and_then(|id| t.messages.iter().find(|m| m.id == id))?;
-        if msg.keep_events < 0 {
-            None
-        } else {
-            Some(msg.keep_events)
-        }
-    })
+/// Retry only the message the cursor was set on, in that session.
+/// A missing id does not fall through to the newest prompt.
+fn resolve_retry(
+    active: &str,
+    cursor: Option<&CursorBind>,
+    messages: &[CursorMsg],
+) -> Option<String> {
+    let cursor = cursor?;
+    if cursor.session != active {
+        return None;
+    }
+    let msg = messages.iter().find(|m| m.id == cursor.id)?;
+    let text = msg.retry_text.trim();
+    if text.is_empty() {
+        None
+    } else {
+        Some(text.to_string())
+    }
+}
+
+fn resolve_fork(active: &str, cursor: Option<&CursorBind>, messages: &[CursorMsg]) -> Option<i32> {
+    let cursor = cursor?;
+    if cursor.session != active {
+        return None;
+    }
+    let msg = messages.iter().find(|m| m.id == cursor.id)?;
+    if msg.keep_events < 0 {
+        None
+    } else {
+        Some(msg.keep_events)
+    }
+}
+
+fn rename_applies(started: &str, active: &str) -> bool {
+    !started.is_empty() && started == active
 }
 
 fn scroll_message(id: u32) {
@@ -856,4 +936,47 @@ fn line_day_label(at_ms: f64) -> String {
         d.get_date() as u32,
         d.get_full_year() as u32
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn row(id: u32, retry: &str, keep: i32) -> CursorMsg {
+        CursorMsg {
+            id,
+            retry_text: retry.into(),
+            keep_events: keep,
+        }
+    }
+
+    #[test]
+    fn rename_and_keys_stay_on_the_session_they_started_on() {
+        assert!(rename_applies("sess-a", "sess-a"));
+        assert!(!rename_applies("sess-a", "sess-b"));
+        assert!(!rename_applies("", "sess-b"));
+        let b = vec![row(1, "prompt b", 9)];
+        let from_a = CursorBind {
+            session: "sess-a".into(),
+            id: 1,
+        };
+        assert!(resolve_retry("sess-b", Some(&from_a), &b).is_none());
+        assert!(resolve_fork("sess-b", Some(&from_a), &b).is_none());
+        let missing = CursorBind {
+            session: "sess-a".into(),
+            id: 9,
+        };
+        let a = vec![row(2, "newest prompt", 4)];
+        assert!(resolve_retry("sess-a", Some(&missing), &a).is_none());
+        assert!(resolve_retry("sess-a", None, &a).is_none());
+        let hit = CursorBind {
+            session: "sess-a".into(),
+            id: 2,
+        };
+        assert_eq!(
+            resolve_retry("sess-a", Some(&hit), &a).as_deref(),
+            Some("newest prompt")
+        );
+        assert_eq!(resolve_fork("sess-a", Some(&hit), &a), Some(4));
+    }
 }

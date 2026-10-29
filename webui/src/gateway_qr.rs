@@ -254,14 +254,16 @@ pub(crate) fn GatewayQR(
                         <button class="secondary gq-install" type="button" on:click=move |_| call_install_prompt()>"Install"</button>
                     </Show>
                     <button class="secondary gq-revoke-self" type="button" on:click=move |_| {
-                        crate::confirm::ask(
+                        if !crate::confirm::ask(
                             crate::confirm::ConfirmRequest {
                                 title: "Revoke this browser?".into(),
                                 body: "This browser's grant stops working. Pair again to come back.".into(),
                                 confirm_label: "Revoke this browser".into(),
                             },
                             Rc::new(move || revoke_self(base, token, status, landed, refresh)),
-                        );
+                        ) {
+                            status.set(crate::confirm::BUSY.into());
+                        }
                     }>"Revoke this browser"</button>
                 </div>
             </div>
@@ -305,14 +307,16 @@ pub(crate) fn GatewayQR(
                                         disabled=revoked
                                         on:click=move |_| {
                                             let id = id.clone();
-                                            crate::confirm::ask(
+                                            if !crate::confirm::ask(
                                                 crate::confirm::ConfirmRequest {
                                                     title: format!("Revoke {ask_label}?"),
                                                     body: format!("{ask_label} loses its grant and has to pair again to come back."),
                                                     confirm_label: "Revoke".into(),
                                                 },
                                                 Rc::new(move || revoke_device(base, token, id.clone(), devices, device_note)),
-                                            );
+                                            ) {
+                                                device_note.set(crate::confirm::BUSY.into());
+                                            }
                                         }
                                     >"Revoke"</button>
                                 </li>
@@ -326,14 +330,16 @@ pub(crate) fn GatewayQR(
                             1 => "The one paired browser loses its grant. Pairing again mints a new code.".to_string(),
                             n => format!("All {n} paired browsers lose their grants. Pairing again mints a new code."),
                         };
-                        crate::confirm::ask(
+                        if !crate::confirm::ask(
                             crate::confirm::ConfirmRequest {
                                 title: "Revoke paired browsers?".into(),
                                 body,
                                 confirm_label: "Revoke all".into(),
                             },
                             Rc::new(move || revoke_all(base, token, devices, device_note)),
-                        );
+                        ) {
+                            device_note.set(crate::confirm::BUSY.into());
+                        }
                     }>"Revoke all"</button>
                     <h3 class="gq-sub">"Scan a gateway QR"</h3>
                     <p class="hint">"Add another daemon. The phone camera can open a Strike QR in the browser."</p>

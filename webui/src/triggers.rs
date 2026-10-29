@@ -80,6 +80,8 @@ struct Form {
     secret_input: RwSignal<String>,
     hook_path: RwSignal<String>,
     notice: RwSignal<String>,
+    generation: RwSignal<u64>,
+    secret_once: RwSignal<Option<SecretOnce>>,
 }
 
 impl Form {
@@ -100,6 +102,8 @@ impl Form {
             secret_input: RwSignal::new(String::new()),
             hook_path: RwSignal::new(String::new()),
             notice: RwSignal::new(String::new()),
+            generation: RwSignal::new(0),
+            secret_once: RwSignal::new(None),
         }
     }
 
@@ -119,6 +123,8 @@ impl Form {
         self.secret_input.set(String::new());
         self.hook_path.set(row.hook_path.clone());
         self.notice.set(String::new());
+        self.secret_once.set(None);
+        self.generation.update(|n| *n = n.wrapping_add(1));
     }
 
     fn clear(self) {
@@ -137,6 +143,101 @@ impl Form {
         self.secret_input.set(String::new());
         self.hook_path.set(String::new());
         self.notice.set(String::new());
+        self.secret_once.set(None);
+        self.generation.update(|n| *n = n.wrapping_add(1));
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SecretOnce {
+    trigger_id: String,
+    name: String,
+    secret: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SaveStamp {
+    generation: u64,
+    selected: String,
+    submitted_secret: String,
+    name: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SaveResponse {
+    id: String,
+    hook_path: String,
+    secret: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum SaveCommit {
+    Here {
+        id: String,
+        hook_path: String,
+        secret: Option<SecretOnce>,
+        clear_secret_input: bool,
+        notice: String,
+    },
+    Elsewhere {
+        notice: String,
+    },
+}
+
+fn shown_secret(secret: Option<&SecretOnce>, selected: &str) -> Option<SecretOnce> {
+    let secret = secret?;
+    if secret.secret.is_empty() || secret.trigger_id != selected {
+        None
+    } else {
+        Some(secret.clone())
+    }
+}
+
+fn secret_banner_text(name: &str) -> String {
+    let name = name.trim();
+    if name.is_empty() {
+        "Copy this signing secret now. Strike will not show it again.".into()
+    } else {
+        format!("Copy the signing secret for {name} now. Strike will not show it again.")
+    }
+}
+
+fn commit_save(
+    stamp: &SaveStamp,
+    generation_now: u64,
+    selected_now: &str,
+    secret_input_now: &str,
+    response: &SaveResponse,
+) -> SaveCommit {
+    if stamp.generation != generation_now || stamp.selected != selected_now {
+        let name = stamp.name.trim();
+        let notice = if name.is_empty() {
+            "Saved.".into()
+        } else {
+            format!("Saved {name}.")
+        };
+        return SaveCommit::Elsewhere { notice };
+    }
+    let id = if response.id.is_empty() {
+        stamp.selected.clone()
+    } else {
+        response.id.clone()
+    };
+    let secret = if response.secret.is_empty() {
+        None
+    } else {
+        Some(SecretOnce {
+            trigger_id: id.clone(),
+            name: stamp.name.clone(),
+            secret: response.secret.clone(),
+        })
+    };
+    SaveCommit::Here {
+        id,
+        hook_path: response.hook_path.clone(),
+        secret,
+        clear_secret_input: secret_input_now == stamp.submitted_secret,
+        notice: "Saved.".into(),
     }
 }
 
@@ -214,7 +315,6 @@ pub fn TriggersPage(
 ) -> impl IntoView {
     let rows = RwSignal::new(Vec::<TriggerRow>::new());
     let deliveries = RwSignal::new(Vec::<DeliveryRow>::new());
-    let secret_once = RwSignal::new(String::new());
     let secret_revealed = RwSignal::new(false);
     let form = Form::new();
 
@@ -274,6 +374,13 @@ pub fn TriggersPage(
             body["secret"] = json!(typed);
         }
         let id = form.selected.get();
+        form.generation.update(|n| *n = n.wrapping_add(1));
+        let stamp = SaveStamp {
+            generation: form.generation.get_untracked(),
+            selected: id.clone(),
+            submitted_secret: typed,
+            name: name_v,
+        };
         let (b, t) = (base.get(), token.get());
         spawn_local(async move {
             let result = if id.is_empty() {
@@ -283,24 +390,69 @@ pub fn TriggersPage(
             };
             match result {
                 Ok(v) => {
-                    if let Some(sec) = v.get("secret").and_then(|s| s.as_str()) {
-                        if !sec.is_empty() {
-                            secret_revealed.set(false);
-                            secret_once.set(sec.to_string());
+                    let response = SaveResponse {
+                        id: v
+                            .get("id")
+                            .and_then(|s| s.as_str())
+                            .unwrap_or("")
+                            .to_string(),
+                        hook_path: v
+                            .get("hookPath")
+                            .and_then(|s| s.as_str())
+                            .unwrap_or("")
+                            .to_string(),
+                        secret: v
+                            .get("secret")
+                            .and_then(|s| s.as_str())
+                            .unwrap_or("")
+                            .to_string(),
+                    };
+                    match commit_save(
+                        &stamp,
+                        form.generation.get_untracked(),
+                        &form.selected.get_untracked(),
+                        form.secret_input.get_untracked().trim(),
+                        &response,
+                    ) {
+                        SaveCommit::Here {
+                            id,
+                            hook_path,
+                            secret,
+                            clear_secret_input,
+                            notice,
+                        } => {
+                            if secret.is_some() {
+                                secret_revealed.set(false);
+                            }
+                            form.secret_once.set(secret);
+                            if !id.is_empty() {
+                                form.selected.set(id);
+                            }
+                            if !hook_path.is_empty() {
+                                form.hook_path.set(hook_path);
+                            }
+                            if clear_secret_input {
+                                form.secret_input.set(String::new());
+                            }
+                            form.notice.set(notice);
+                            status.set("Trigger saved".into());
+                            refresh(base, token, rows, form.notice);
+                        }
+                        SaveCommit::Elsewhere { notice } => {
+                            form.notice.set(notice);
+                            refresh(base, token, rows, form.notice);
                         }
                     }
-                    if let Some(new_id) = v.get("id").and_then(|s| s.as_str()) {
-                        form.selected.set(new_id.to_string());
-                        if let Some(path) = v.get("hookPath").and_then(|s| s.as_str()) {
-                            form.hook_path.set(path.to_string());
-                        }
-                    }
-                    form.secret_input.set(String::new());
-                    form.notice.set("Saved.".into());
-                    status.set("Trigger saved".into());
-                    refresh(base, token, rows, form.notice);
                 }
-                Err(e) => form.notice.set(e),
+                Err(e) => {
+                    if form.generation.get_untracked() == stamp.generation
+                        && form.selected.get_untracked() == stamp.selected
+                    {
+                        form.notice.set(e);
+                    } else {
+                        form.notice.set(format!("Save failed for {}.", stamp.name));
+                    }
+                }
             }
         });
     };
@@ -474,18 +626,18 @@ pub fn TriggersPage(
                     <Show when=move || !form.notice.get().is_empty()>
                         <p class="notice" role="alert">{move || form.notice.get()}</p>
                     </Show>
-                    <Show when=move || !secret_once.get().is_empty()>
+                    <Show when=move || shown_secret(form.secret_once.get().as_ref(), &form.selected.get()).is_some()>
                         <div class="secret-once" role="status">
-                            <p>"Copy this signing secret now. Strike will not show it again."</p>
+                            <p>{move || secret_banner_text(&form.secret_once.get().map(|row| row.name).unwrap_or_default())}</p>
                             <Show when=move || secret_revealed.get() fallback=move || view! {
-                                <input type="password" readonly autocomplete="off" prop:value=move || secret_once.get() />
+                                <input type="password" readonly autocomplete="off" prop:value=move || form.secret_once.get().map(|row| row.secret).unwrap_or_default() />
                             }>
-                                <input type="text" readonly autocomplete="off" prop:value=move || secret_once.get() />
+                                <input type="text" readonly autocomplete="off" prop:value=move || form.secret_once.get().map(|row| row.secret).unwrap_or_default() />
                             </Show>
                             <button type="button" class="secondary" on:click=move |_| secret_revealed.set(!secret_revealed.get())>
                                 {move || if secret_revealed.get() { "Mask secret" } else { "Reveal secret" }}
                             </button>
-                            <button type="button" class="secondary" on:click=move |_| { secret_revealed.set(false); secret_once.set(String::new()); }>"Dismiss secret"</button>
+                            <button type="button" class="secondary" on:click=move |_| { secret_revealed.set(false); form.secret_once.set(None); }>"Dismiss secret"</button>
                         </div>
                     </Show>
                     <label for="trigger-name">"Name"</label>
@@ -549,14 +701,16 @@ pub fn TriggersPage(
                                 } else {
                                     format!("Delete {name}. {}{hook} stops accepting events, and anything sending to it has to be reconfigured with a new secret.", origin_prefix(&base.get_untracked()))
                                 };
-                                crate::confirm::ask(
+                                if !crate::confirm::ask(
                                     crate::confirm::ConfirmRequest {
                                         title: "Delete this trigger?".into(),
                                         body,
                                         confirm_label: "Delete trigger".into(),
                                     },
                                     Rc::new(move || delete_one(id.clone())),
-                                );
+                                ) {
+                                    form.notice.set(crate::confirm::BUSY.into());
+                                }
                             }>"Delete"</button>
                         </Show>
                     </div>
@@ -615,6 +769,67 @@ pub fn TriggersPage(
                     </ul>
             </section>
         </main>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn secret_banner_is_tied_to_its_trigger() {
+        let banner = SecretOnce {
+            trigger_id: "trig-a".into(),
+            name: "Alpha".into(),
+            secret: "sek-a".into(),
+        };
+        let shown = shown_secret(Some(&banner), "trig-a").unwrap();
+        assert_eq!(shown.secret, "sek-a");
+        assert!(shown_secret(Some(&banner), "trig-b").is_none());
+        assert!(shown_secret(None, "trig-a").is_none());
+        assert!(secret_banner_text("Alpha").contains("Alpha"));
+        assert!(!secret_banner_text("Alpha").contains("sek-a"));
+    }
+
+    #[test]
+    fn save_completion_does_not_hybridize_another_trigger() {
+        let stamp = SaveStamp {
+            generation: 2,
+            selected: "trig-a".into(),
+            submitted_secret: "old".into(),
+            name: "Alpha".into(),
+        };
+        let response = SaveResponse {
+            id: "trig-a".into(),
+            hook_path: "/hooks/a".into(),
+            secret: "sek-a".into(),
+        };
+        match commit_save(&stamp, 3, "trig-b", "beta-secret", &response) {
+            SaveCommit::Elsewhere { notice } => assert_eq!(notice, "Saved Alpha."),
+            SaveCommit::Here { .. } => panic!("applied A's identity onto B"),
+        }
+        match commit_save(&stamp, 2, "trig-a", "old", &response) {
+            SaveCommit::Here {
+                id,
+                hook_path,
+                secret,
+                clear_secret_input,
+                notice,
+            } => {
+                assert_eq!(id, "trig-a");
+                assert_eq!(hook_path, "/hooks/a");
+                assert_eq!(secret.unwrap().trigger_id, "trig-a");
+                assert!(clear_secret_input);
+                assert_eq!(notice, "Saved.");
+            }
+            SaveCommit::Elsewhere { .. } => panic!("same form should commit in place"),
+        }
+        match commit_save(&stamp, 2, "trig-a", "typed-during-flight", &response) {
+            SaveCommit::Here {
+                clear_secret_input, ..
+            } => assert!(!clear_secret_input),
+            SaveCommit::Elsewhere { .. } => panic!("same form should commit in place"),
+        }
     }
 }
 
