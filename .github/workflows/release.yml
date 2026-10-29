@@ -116,10 +116,18 @@ jobs:
             echo "::error::CHANGELOG.md has no non-empty ${TAG} entry"
             exit 1
           fi
+          # 0.10.x releases are pre-releases, so /releases/latest never
+          # points at them and the plain install command would install the
+          # stable line instead. Pin the install to this tag (install.sh
+          # accepts --version=<tag>). Other tags keep the plain command.
+          INSTALL_CMD='curl -fsSL https://strike.jonathanung.ca/install | bash'
+          case "${TAG}" in
+            v0.10.*) INSTALL_CMD="curl -fsSL https://strike.jonathanung.ca/install | bash -s -- --version=${TAG}" ;;
+          esac
           {
             printf '## Install\n\n'
             printf '```sh\n'
-            printf 'curl -fsSL https://strike.jonathanung.ca/install | bash\n'
+            printf '%s\n' "${INSTALL_CMD}"
             printf '```\n\n'
             printf 'Or download an archive below, verify `checksums.txt`, and place `strike` on your PATH.\n\n'
             printf '## Changelog\n'
@@ -458,6 +466,12 @@ jobs:
       needs.desktop.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      # This job has no checkout (it only downloads artifacts), so gh
+      # cannot infer the repository from a git remote and dies with
+      # "fatal: not a git repository" (#1616). GH_REPO gives every gh
+      # call in the job an explicit repo.
+      GH_REPO: ${{ github.repository }}
     steps:
       - name: Download bundles
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
