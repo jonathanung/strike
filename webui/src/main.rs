@@ -877,6 +877,27 @@ fn memory_mode_label(mode: &str) -> &'static str {
     }
 }
 
+/// Chip text for the memory mode (#1585). The chip is a privacy control:
+/// it may only name a mode the daemon has confirmed. Before a successful
+/// load (or after a failed one with nothing confirmed) it asserts
+/// "Unknown" instead of the invented default "Normal".
+fn memory_chip_text(known: bool, mode: &str) -> String {
+    if known {
+        format!("Memory · {}", memory_mode_label(mode))
+    } else {
+        "Memory · Unknown".to_string()
+    }
+}
+
+/// The mode to show after a rejected change (#1585): the last confirmed
+/// mode, or unknown when nothing was ever confirmed.
+fn revert_memory_mode(previous: Option<String>) -> (bool, String) {
+    match previous {
+        Some(mode) => (true, mode),
+        None => (false, String::new()),
+    }
+}
+
 pub(crate) fn load_string_list(key: &str) -> Vec<String> {
     serde_json::from_str(&load(key)).unwrap_or_default()
 }
@@ -1177,6 +1198,9 @@ fn App() -> impl IntoView {
     let live_busy_root = RwSignal::new(String::new());
     let side_tab = RwSignal::new("activity".to_string());
     let memory_mode = RwSignal::new("normal".to_string());
+    // False until the daemon confirms a mode (#1585): the chip must not
+    // assert the invented "normal" default before a successful load.
+    let memory_mode_known = RwSignal::new(false);
     let memory_menu = RwSignal::new(false);
     let storage_rev = RwSignal::new(0u32);
     // Find in transcript (#1342): bar visibility, query, current match,
@@ -2568,26 +2592,56 @@ fn App() -> impl IntoView {
 
     let set_memory = move |mode: String| {
         memory_menu.set(false);
-        memory_mode.set(mode.clone());
+        // Snapshot the confirmed mode before any optimistic update so a
+        // rejected change can revert the chip (#1585). The optimistic set
+        // happens only after the live-session check passes.
+        let previous = if memory_mode_known.get_untracked() {
+            Some(memory_mode.get_untracked())
+        } else {
+            None
+        };
         let root = active_root.get_untracked();
         if root.is_empty() {
             status.set("no live session yet".into());
             return;
         }
+        memory_mode.set(mode.clone());
         let (b, t) = (base.get_untracked(), token.get_untracked());
         spawn_local(async move {
             let path = format!("/v1/memory/mode?root={}", api::js_encode(&root));
             match put_json(&b, &t, &path, serde_json::json!({"mode": mode})).await {
                 Ok(text) => {
-                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
-                        if let Some(saved) = v.get("mode").and_then(|m| m.as_str()) {
-                            if !saved.is_empty() {
-                                memory_mode.set(saved.to_string());
+                    let saved = serde_json::from_str::<serde_json::Value>(&text)
+                        .ok()
+                        .and_then(|v| {
+                            v.get("mode")
+                                .and_then(|m| m.as_str())
+                                .map(str::to_string)
+                        })
+                        .filter(|saved| !saved.is_empty());
+                    match saved {
+                        Some(saved) => {
+                            memory_mode.set(saved);
+                            memory_mode_known.set(true);
+                        }
+                        None => {
+                            let (known, mode) = revert_memory_mode(previous);
+                            memory_mode_known.set(known);
+                            if known {
+                                memory_mode.set(mode);
                             }
+                            status.set("memory mode was not confirmed by the daemon".into());
                         }
                     }
                 }
-                Err(e) => status.set(format!("memory mode failed: {e}")),
+                Err(e) => {
+                    let (known, mode) = revert_memory_mode(previous);
+                    memory_mode_known.set(known);
+                    if known {
+                        memory_mode.set(mode);
+                    }
+                    status.set(format!("memory mode failed: {e}"));
+                }
             }
         });
     };
@@ -2829,10 +2883,25 @@ fn App() -> impl IntoView {
         let (b, t) = (base.get(), token.get());
         spawn_local(async move {
             let path = format!("/v1/memory/mode?root={}", api::js_encode(&root));
-            if let Ok(v) = get_json::<serde_json::Value>(&b, &t, &path).await {
-                if let Some(mode) = v.get("mode").and_then(|m| m.as_str()) {
-                    if !mode.is_empty() {
-                        memory_mode.set(mode.to_string());
+            // A failed or empty load must not leave the chip asserting the
+            // invented default (#1585): mark the mode unknown and say so.
+            let loaded = match get_json::<serde_json::Value>(&b, &t, &path).await {
+                Ok(v) => v
+                    .get("mode")
+                    .and_then(|m| m.as_str())
+                    .filter(|mode| !mode.is_empty())
+                    .map(str::to_string),
+                Err(_) => None,
+            };
+            match loaded {
+                Some(mode) => {
+                    memory_mode.set(mode);
+                    memory_mode_known.set(true);
+                }
+                None => {
+                    memory_mode_known.set(false);
+                    if !root.is_empty() {
+                        status.set("memory mode could not be loaded".into());
                     }
                 }
             }
@@ -4682,7 +4751,7 @@ fn App() -> impl IntoView {
                                         _ => "Reads and writes memory.",
                                     };
                                     let set = set_memory;
-                                    let on = memory_mode.get() == id;
+                                    let on = memory_mode_known.get() && memory_mode.get() == id;
                                     let klass = if on { "palette-row on" } else { "palette-row" };
                                     let id = id.to_string();
                                     view! {
@@ -5085,15 +5154,17 @@ fn App() -> impl IntoView {
                         </Show>
                         <p class="hint composer-statusline" data-composer-triggers="status">{
                             let memory_mode = memory_mode;
+                            let memory_mode_known = memory_mode_known;
                             move || {
                             let note = transcript.with(|t| t.trigger_note.clone());
                             let pending = transcript.with(|t| t.asks.len());
                             let custom = trigger_status(&note, pending);
                             let mode = memory_mode.get();
-                            let memory = if mode == "normal" || mode.is_empty() {
+                            let known = memory_mode_known.get();
+                            let memory = if known && (mode == "normal" || mode.is_empty()) {
                                 String::new()
                             } else {
-                                format!("Memory · {}", memory_mode_label(&mode))
+                                memory_chip_text(known, &mode)
                             };
                             let ctx = active_context(&catalog.get(), &provider_name.get(), &model_name.get());
                             let meter = {
@@ -5544,5 +5615,28 @@ fn main() {
         if let Some(el) = doc.query_selector(".boot-shell").ok().flatten() {
             el.remove();
         }
+    }
+}
+
+#[cfg(test)]
+mod memory_mode_tests {
+    use super::*;
+
+    #[test]
+    fn chip_asserts_only_confirmed_modes() {
+        assert_eq!(memory_chip_text(true, "incognito"), "Memory · Incognito");
+        assert_eq!(memory_chip_text(true, "temporary"), "Memory · Temporary");
+        assert_eq!(memory_chip_text(true, "normal"), "Memory · Normal");
+        assert_eq!(memory_chip_text(false, "normal"), "Memory · Unknown");
+        assert_eq!(memory_chip_text(false, "incognito"), "Memory · Unknown");
+    }
+
+    #[test]
+    fn revert_restores_the_confirmed_mode_or_unknown() {
+        assert_eq!(
+            revert_memory_mode(Some("incognito".to_string())),
+            (true, "incognito".to_string())
+        );
+        assert_eq!(revert_memory_mode(None), (false, String::new()));
     }
 }
