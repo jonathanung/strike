@@ -12,6 +12,7 @@ mod apps;
 mod approvals;
 mod approvals_ui;
 mod chat_mode;
+mod confirm;
 mod composer_triggers;
 mod editor;
 mod localfiles;
@@ -1856,6 +1857,23 @@ fn App() -> impl IntoView {
             Ok(())
         }),
     );
+    shell::bind(
+        "queue.clear",
+        Rc::new(move |_args: &str| {
+            let ids: Vec<String> = queue_items
+                .get_untracked()
+                .into_iter()
+                .map(|item| item.id)
+                .collect();
+            if ids.is_empty() {
+                return Err("The queue is empty.".into());
+            }
+            for id in ids {
+                post_queue("input.queue_cancel", serde_json::json!({"id": id}));
+            }
+            Ok(())
+        }),
+    );
 
     let insert_mention = move |path: String| {
         draft.update(|d| {
@@ -2330,6 +2348,28 @@ fn App() -> impl IntoView {
                 model_note_after.set(0);
             }
         });
+    });
+    {
+        let pick = on_select_model.clone();
+        shell::set_model_picker(Rc::new(move |provider, id| {
+            pick.run((provider.to_string(), id.to_string()));
+        }));
+    }
+    Effect::new(move |_| {
+        let rows = catalog
+            .get()
+            .into_iter()
+            .map(|model| shell::Choice {
+                id: format!("{}\t{}", model.provider, model.id),
+                label: if model.name.is_empty() {
+                    model.id.clone()
+                } else {
+                    model.name.clone()
+                },
+                detail: model.provider.clone(),
+            })
+            .collect();
+        shell::set_model_choices(rows);
     });
     let on_default_model = Callback::new(move |(provider, id): (String, String)| {
         let (b, t) = (base.get_untracked(), token.get_untracked());
@@ -3021,6 +3061,7 @@ fn App() -> impl IntoView {
         });
     })
     .into();
+    let rename_for_palette = apply_title.clone();
     let handlers = TranscriptHandlers {
         send: (move |text: String| {
             send_text(text);
@@ -3116,6 +3157,90 @@ fn App() -> impl IntoView {
         })
         .into(),
     };
+    shell::bind(
+        "session.rename",
+        Rc::new(move |title| {
+            let title = title.trim().to_string();
+            if title.is_empty() {
+                return Err("A title needs at least one character.".into());
+            }
+            rename_for_palette.run((title,));
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "session.export",
+        Rc::new(move |_| {
+            let id = active_root.get_untracked();
+            if id.is_empty() {
+                return Err("No session to export.".into());
+            }
+            let (b, t) = (base.get_untracked(), token.get_untracked());
+            spawn_local(async move {
+                let path = format!(
+                    "/v1/sessions/{}/timeline/export?format=json",
+                    api::js_encode(&id)
+                );
+                match get_text(&b, &t, &path).await {
+                    Ok(text) => {
+                        save_download(
+                            &format!("strike-timeline-{}.json", file_stem(&id)),
+                            "application/json",
+                            &text,
+                        );
+                        ux_note.set("Exported the redacted timeline.".into());
+                    }
+                    Err(e) => ux_note.set(format!("Export failed: {e}")),
+                }
+            });
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "session.export-md",
+        Rc::new(move |_| {
+            let md = transcript.with_untracked(|t| t.to_markdown());
+            let id = active_root.get_untracked();
+            let name = if id.is_empty() {
+                "strike-session.md".into()
+            } else {
+                format!("strike-session-{}.md", file_stem(&id))
+            };
+            save_download(&name, "text/markdown;charset=utf-8", &md);
+            ux_note.set("Downloaded the visible transcript.".into());
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "session.fork",
+        Rc::new(move |_| {
+            let id = active_root.get_untracked();
+            if id.is_empty() {
+                return Err("No session to fork.".into());
+            }
+            let (b, t) = (base.get_untracked(), token.get_untracked());
+            spawn_local(async move {
+                let path = format!("/v1/sessions/{}/fork", api::js_encode(&id));
+                match post_json_value(&b, &t, &path, serde_json::json!({})).await {
+                    Ok(created) => {
+                        let new_id = created
+                            .get("id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        if new_id.is_empty() {
+                            ux_note.set("Fork did not return a session.".into());
+                            return;
+                        }
+                        ux_note.set("Forked this session.".into());
+                        resume_session(new_id);
+                    }
+                    Err(e) => ux_note.set(format!("Fork failed: {e}")),
+                }
+            });
+            Ok(())
+        }),
+    );
 
     let ui = TriggerSignals {
         ac_force,
@@ -3704,8 +3829,6 @@ fn App() -> impl IntoView {
                                         let id_for_when = id.clone();
                                         let id_for_fallback = id.clone();
                                         let id_cancel = id.clone();
-                                        let id_cancel_class = id.clone();
-                                        let id_cancel_label = id.clone();
                                         let id_up = id.clone();
                                         let id_down = id.clone();
                                         let text_for_edit = item.text.clone();
@@ -3753,16 +3876,22 @@ fn App() -> impl IntoView {
                                                             post_queue("input.queue_reorder", serde_json::json!({"ids": ids}));
                                                         }
                                                     }>"Down"</button>
-                                                    <button type="button" class=move || if confirm_cancel.get() == id_cancel_class { "secondary confirming" } else { "secondary" } title="Removes this queued message. Click again to confirm." on:click=move |_| {
+                                                    <button type="button" class="secondary" title="Removes this queued message" on:click=move |_| {
                                                         let id = id_cancel.clone();
-                                                        if confirm_cancel.get_untracked() == id {
-                                                            confirm_cancel.set(String::new());
-                                                            post_queue("input.queue_cancel", serde_json::json!({"id": id}));
-                                                        } else {
-                                                            confirm_stop.set(false);
-                                                            confirm_cancel.set(id);
-                                                        }
-                                                    }>{move || if confirm_cancel.get() == id_cancel_label { "Confirm" } else { "Cancel" }}</button>
+                                                        crate::confirm::ask(
+                                                            crate::confirm::ConfirmRequest {
+                                                                title: "Remove queued message?".into(),
+                                                                body: "This drops the message from the queue. It is not sent.".into(),
+                                                                confirm_label: "Remove".into(),
+                                                            },
+                                                            Rc::new(move || {
+                                                                post_queue(
+                                                                    "input.queue_cancel",
+                                                                    serde_json::json!({"id": id.clone()}),
+                                                                );
+                                                            }),
+                                                        );
+                                                    }>"Cancel"</button>
                                                 </span>
                                             </li>
                                         }

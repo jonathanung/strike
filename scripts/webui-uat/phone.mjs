@@ -157,8 +157,7 @@ export async function runPhoneScreens({ page, outDir, video, check, shots }) {
 
   // Phone header (#1490 slice 2): one compact row (<=56px), a >=44px
   // overflow button, and no floating action buttons left in the bar.
-  // The sheet holds Run a command / Gateways / Phone and closes on a
-  // backdrop tap.
+  // The phone header button opens the command palette as a full-height sheet.
   const header = await page.evaluate(`(() => {
     const el = document.querySelector(".page-header");
     if (!el) return null;
@@ -175,24 +174,29 @@ export async function runPhoneScreens({ page, outDir, video, check, shots }) {
   check(header && header.moreH >= 44 && header.moreW >= 44, `phone overflow button ${header && header.moreW}x${header && header.moreH} under 44px`);
   check(header && !header.floating, "phone header still renders floating action buttons inline");
   await page.evaluate(`document.querySelector("[data-nav='phone-more']")?.click()`);
-  await delay(150);
+  await delay(200);
   const sheet = await page.evaluate(`(() => {
-    const el = document.querySelector("[data-nav='phone-menu']");
-    return el ? (el.innerText || "") : "";
+    const el = document.querySelector("[data-nav='palette-dialog']");
+    if (!el) return null;
+    const row = el.querySelector(".palette-row");
+    const box = el.getBoundingClientRect();
+    const rowBox = row ? row.getBoundingClientRect() : null;
+    return {
+      text: el.innerText || "",
+      height: box.height,
+      row: rowBox ? rowBox.height : 0,
+    };
   })()`);
-  check(sheet.includes("Run a command"), "phone overflow sheet is missing Run a command");
-  check(sheet.includes("Gateways"), "phone overflow sheet is missing Gateways");
-  check(sheet.includes("Phone"), "phone overflow sheet is missing Phone");
+  check(sheet && sheet.text.includes("Open session"), "phone palette is missing Open session");
+  check(sheet && sheet.height >= 600, `phone palette is not full height (${sheet && sheet.height})`);
+  check(sheet && sheet.row >= 44, `phone palette row is under 44px (${sheet && sheet.row})`);
   await shot(page, recorder, shotDir, shots, "phone-header-menu-390");
-  await page.evaluate(`document.querySelector("[data-nav='phone-menu-backdrop']")?.click()`);
+  await page.evaluate(`document.querySelector(".palette-backdrop")?.click()`);
   await delay(120);
-  // The sheet stays mounted (data-open toggles visibility, like the
-  // desktop menu), so closed means hidden, not absent from the DOM.
-  const sheetClosed = await page.evaluate(`(() => {
-    const el = document.querySelector("[data-nav='phone-menu']");
-    return Boolean(el) && el.dataset.open === "0" && getComputedStyle(el).display === "none";
-  })()`);
-  check(sheetClosed, "phone overflow sheet did not close on backdrop tap");
+  const sheetClosed = await page.evaluate(
+    `!document.querySelector("[data-nav='palette-dialog']")`,
+  );
+  check(sheetClosed, "phone palette did not close on backdrop tap");
   await shot(page, recorder, shotDir, shots, "phone-chat-390");
 
   // Sheet slot lifecycle (#1527): the sheet must hold the ONLY gateway
@@ -227,7 +231,7 @@ export async function runPhoneScreens({ page, outDir, video, check, shots }) {
       openCounts.bells === 1 && openCounts.gwBtns === 1,
       `sheet open ${i + 1}: expected 1 bell and 1 Gateways button, got ${openCounts.bells}/${openCounts.gwBtns}`,
     );
-    await page.evaluate(`document.querySelector("[data-nav='phone-menu-backdrop']")?.click()`);
+    await page.evaluate(`document.querySelector(".palette-backdrop")?.click()`);
     await delay(120);
   }
   // Alt+W parity: each press must toggle the switcher exactly once.
@@ -257,7 +261,7 @@ export async function runPhoneScreens({ page, outDir, video, check, shots }) {
     `document.querySelector(".gw-btn")?.getAttribute("aria-expanded") || "missing"`,
   );
   check(expanded2 === expanded0, `second Alt+W did not toggle back (${expanded1} -> ${expanded2})`);
-  await page.evaluate(`document.querySelector("[data-nav='phone-menu-backdrop']")?.click()`);
+  await page.evaluate(`document.querySelector(".palette-backdrop")?.click()`);
   await delay(120);
 
   // The palette's Notifications command must still reach the live bell

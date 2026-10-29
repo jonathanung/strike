@@ -6,13 +6,12 @@
 
 use std::rc::Rc;
 
-use crate::shell::{Command, ShellHook, Shortcut, TopRegion, TopSlot};
+use crate::shell::{Group, Command, ShellHook, Shortcut, TopRegion, TopSlot};
 
 pub fn install(reg: &mut ShellHook) {
     reg.command(Command {
         id: "notifications.open",
-        section: "Apps",
-        section_order: 10,
+        group: Group::Session,
         label: "Notifications",
         detail: "Approvals, finished work, and the gateway",
         shortcut: "Alt+N",
@@ -20,6 +19,10 @@ pub fn install(reg: &mut ShellHook) {
         argument: None,
         order: 30,
         run: Rc::new(|args| crate::shell::dispatch("notifications.open", args)),
+        visible: None,
+        enabled: None,
+        confirm: None,
+        choices: None,
     });
     reg.slot(TopSlot {
         id: "notifications",

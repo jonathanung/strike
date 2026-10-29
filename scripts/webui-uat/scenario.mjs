@@ -54,16 +54,16 @@ async function headerAt(page, check, viewport, grab) {
 }
 
 async function providerFlow(page, check, waitUntil, grab) {
-  const opened = await page.evaluate(`(() => {
-    const more = document.querySelector('[data-nav="more"]');
-    if (!more) return false;
-    more.click();
-    const item = document.querySelector('[data-nav="providers"]');
-    if (!item) return false;
-    item.click();
-    return true;
-  })()`);
-  check(opened, "Menu did not expose Providers");
+  await page.evaluate(`document.querySelector('[data-nav="palette"]')?.click()`);
+  const opened = await waitUntil(
+    `Boolean(document.querySelector('[data-command-id="providers"]'))`,
+    4000,
+    "providers command",
+  );
+  if (opened) {
+    await page.evaluate(`document.querySelector('[data-command-id="providers"]')?.click()`);
+  }
+  check(Boolean(opened), "palette did not expose Providers");
   const listed = await waitUntil(
     `(() => {
       const root = document.querySelector("[data-providers-root]");
@@ -363,7 +363,7 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
         })()`);
       }
       check(filtered, "palette query did not accept plan");
-      await shoot("shell-palette", ["desk1024", "desk1440"]);
+      await shoot("shell-palette", ["mobile", "desk768", "desk1024", "desk1440"]);
       await page.evaluate(`document.querySelector(".palette input")?.focus()`);
       await press("Enter");
       const planned = await waitUntil(
@@ -372,6 +372,58 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
         "approval mode Plan",
       );
       check(Boolean(planned), "keyboard palette did not set Approval · Plan");
+      await press("k", 2);
+      const again = await waitUntil(
+        `Boolean(document.querySelector("[data-nav='palette-dialog']"))`,
+        4000,
+        "palette reopened",
+      );
+      if (again) {
+        await page.evaluate(`(() => {
+          const input = document.querySelector("[data-nav='palette-dialog'] input");
+          if (!input) return;
+          const proto = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
+          proto.set.call(input, "zzzz-no-command");
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+        })()`);
+        await delay(150);
+        const empty = await page.evaluate(
+          `Boolean(document.querySelector(".palette-empty"))`,
+        );
+        check(empty, "palette empty state did not render");
+        await press("Escape");
+        await delay(120);
+        const closed = await page.evaluate(
+          `!document.querySelector("[data-nav='palette-dialog']")`,
+        );
+        check(closed, "Escape did not close the palette");
+      }
+      await press("k", 2);
+      const rotateOpen = await waitUntil(
+        `Boolean(document.querySelector("[data-nav='palette-dialog']"))`,
+        4000,
+        "palette for confirm",
+      );
+      if (rotateOpen) {
+        await page.evaluate(`(() => {
+          const input = document.querySelector("[data-nav='palette-dialog'] input");
+          if (!input) return;
+          const proto = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
+          proto.set.call(input, "rotate");
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+        })()`);
+        await delay(200);
+        await page.evaluate(`document.querySelector('[data-command-id="gateway.rotate"]')?.click()`);
+        await delay(200);
+        const confirm = await page.evaluate(
+          `Boolean(document.querySelector("[data-confirm='dialog']"))`,
+        );
+        check(confirm, "rotate token did not open the confirm dialog");
+        if (confirm) {
+          await shoot("palette-confirm", ["mobile", "desk768", "desk1024", "desk1440"]);
+          await page.evaluate(`document.querySelector("[data-confirm='cancel']")?.click()`);
+        }
+      }
     }
 
     await click("button.chip", "Approval");

@@ -1,11 +1,13 @@
 //! Triggers page. The daemon registry is the source of truth; this module
 //! only renders it. Secrets are shown once, when the daemon mints them.
 
+use std::rc::Rc;
+
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use serde::Deserialize;
-use wasm_bindgen::JsCast;
 use serde_json::{json, Value};
+use wasm_bindgen::JsCast;
 
 use crate::api::{api, auth_header, get_json, now_ms, post_json_value};
 
@@ -228,11 +230,13 @@ pub fn TriggersPage(
             return;
         }
         let Ok(rate) = form.rate_text.get().trim().parse::<i32>() else {
-            form.notice.set("Rate must be a number from 1 to 120.".into());
+            form.notice
+                .set("Rate must be a number from 1 to 120.".into());
             return;
         };
         if !(1..=120).contains(&rate) {
-            form.notice.set("Rate must be a number from 1 to 120.".into());
+            form.notice
+                .set("Rate must be a number from 1 to 120.".into());
             return;
         }
         let Ok(dedupe) = form.dedupe_text.get().trim().parse::<i32>() else {
@@ -395,6 +399,35 @@ pub fn TriggersPage(
         });
     };
 
+    let delete_one = move |id: String| {
+        if id.is_empty() {
+            form.notice.set("Select a trigger first.".into());
+            return;
+        }
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            match send_json("DELETE", &b, &t, &format!("/v1/triggers/{id}"), Value::Null).await {
+                Ok(_) => {
+                    form.clear();
+                    form.notice.set("Deleted.".into());
+                    refresh(base, token, rows, form.notice);
+                }
+                Err(e) => form.notice.set(e),
+            }
+        });
+    };
+    crate::shell::bind(
+        "trigger.delete",
+        Rc::new(move |id| {
+            let id = id.trim().to_string();
+            if id.is_empty() {
+                return Err("Type a trigger id.".into());
+            }
+            delete_one(id);
+            Ok(())
+        }),
+    );
+
     view! {
         <main class="triggers">
             <section class="triggers-list" aria-label="Triggers">
@@ -507,19 +540,17 @@ pub fn TriggersPage(
                         <button type="button" class="secondary" on:click=move |_| send_test()>"Send test"</button>
                         <button type="button" class="secondary" on:click=move |_| reject_sig()>"Reject signature"</button>
                         <Show when=move || !form.selected.get().is_empty()>
-                            <button type="button" class="secondary" on:click=move |_| {
+                            <button type="button" class="secondary" data-action="delete-trigger" on:click=move |_| {
                                 let id = form.selected.get();
-                                let (b, t) = (base.get(), token.get());
-                                spawn_local(async move {
-                                    match send_json("DELETE", &b, &t, &format!("/v1/triggers/{id}"), Value::Null).await {
-                                        Ok(_) => {
-                                            form.clear();
-                                            form.notice.set("Deleted.".into());
-                                            refresh(base, token, rows, form.notice);
-                                        }
-                                        Err(e) => form.notice.set(e),
-                                    }
-                                });
+                                let name = form.name.get();
+                                crate::confirm::ask(
+                                    crate::confirm::ConfirmRequest {
+                                        title: "Delete this trigger?".into(),
+                                        body: format!("Delete {name}. The hook stops accepting events, and a replacement trigger gets a new secret."),
+                                        confirm_label: "Delete trigger".into(),
+                                    },
+                                    Rc::new(move || delete_one(id.clone())),
+                                );
                             }>"Delete"</button>
                         </Show>
                     </div>

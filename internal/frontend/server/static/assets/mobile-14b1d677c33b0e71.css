@@ -225,8 +225,7 @@
     min-height: 44px;
   }
 
-  body[data-phone="1"] .composer .menu,
-  body[data-phone="1"] .palette {
+  body[data-phone="1"] .composer .menu {
     position: fixed;
     left: max(8px, env(safe-area-inset-left));
     right: max(8px, env(safe-area-inset-right));
@@ -236,15 +235,32 @@
     max-height: min(60vh, var(--vv-height, 60vh));
     z-index: 30;
     background: var(--surface);
-    border: 1px solid var(--rule);
-    border-radius: var(--radius);
+    border: 2px solid var(--ink);
+    border-radius: 0;
     overflow: auto;
   }
 
   body[data-phone="1"] .palette-backdrop {
-    align-items: flex-end;
-    padding-top: 0;
-    padding-bottom: calc(52px + env(safe-area-inset-bottom));
+    align-items: stretch;
+    padding: 0;
+  }
+
+  body[data-phone="1"] .palette {
+    position: fixed;
+    top: var(--vv-top, 0px);
+    left: 0;
+    right: 0;
+    width: 100%;
+    height: var(--vv-height, 100dvh);
+    max-height: var(--vv-height, 100dvh);
+    border-radius: 0;
+    border-width: 2px;
+    z-index: 45;
+    box-shadow: none;
+  }
+
+  body[data-phone="1"] .palette .palette-row {
+    min-height: 44px;
   }
 
   /* Overlays as bottom sheets (#1490 slice 3; #1475, #1476). The

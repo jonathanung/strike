@@ -3,6 +3,7 @@
 //! file does not invent apps.
 
 use std::cell::Cell;
+use std::rc::Rc;
 
 use gloo_net::http::Request;
 use leptos::prelude::*;
@@ -360,7 +361,29 @@ pub fn AppsPane(
         });
     });
 
+    let close_go = RwSignal::new(false);
     let run_action = move |action: String| {
+        if action == "close" && !close_go.get_untracked() {
+            let title = detail
+                .get_untracked()
+                .map(|row| row.item.title.clone())
+                .filter(|title| !title.is_empty())
+                .unwrap_or_else(|| "this item".into());
+            crate::confirm::ask(
+                crate::confirm::ConfirmRequest {
+                    title: "Close this issue?".into(),
+                    body: format!(
+                        "This closes {title} on GitHub. Watchers are notified. Reopening means finding it under the closed filter."
+                    ),
+                    confirm_label: "Close issue".into(),
+                },
+                Rc::new(move || close_go.set(true)),
+            );
+            return;
+        }
+        if action == "close" {
+            close_go.set(false);
+        }
         if busy.get_untracked() {
             return;
         }
@@ -406,6 +429,11 @@ pub fn AppsPane(
             }
         });
     };
+    Effect::new(move |_| {
+        if close_go.get() {
+            run_action("close".into());
+        }
+    });
 
     let run_handoff = move || {
         if busy.get_untracked() || !open_handoff.get_untracked() {

@@ -914,7 +914,12 @@ button.link { text-align: left; width: 100%; }
   height: auto;
   min-height: 36px;
 }
-.palette-row.on, .palette-row:hover { background: var(--raised); }
+.palette-row.on, .palette-row:hover {
+  background: var(--sharp);
+  color: var(--on-sharp);
+  border: 2px solid var(--ink);
+}
+.palette-row.on .path, .palette-row:hover .path { color: var(--on-sharp); }
 .palette-backdrop {
   position: fixed;
   inset: 0;
@@ -927,13 +932,82 @@ button.link { text-align: left; width: 100%; }
 .palette {
   width: min(560px, 92vw);
   background: var(--surface);
-  border: 1px solid var(--rule);
-  border-radius: 12px;
+  border: 2px solid var(--ink);
+  border-radius: 0;
+  box-shadow: 4px 4px 0 var(--ink);
   padding: 10px;
   max-height: 70vh;
   overflow: hidden;
   display: flex;
   flex-direction: column;
+}
+.palette-row.on {
+  background: var(--sharp);
+  color: var(--on-sharp);
+  border: 2px solid var(--ink);
+}
+.palette-empty {
+  margin: 12px 4px;
+  font-weight: 650;
+}
+.confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--ground) 72%, transparent);
+}
+.confirm-dialog {
+  width: min(440px, calc(100vw - 32px));
+  background: var(--surface);
+  color: var(--ink);
+  border: 2px solid var(--ink);
+  border-radius: 0;
+  box-shadow: 4px 4px 0 var(--ink);
+  padding: 16px;
+}
+.confirm-dialog h2 { margin: 0 0 8px; }
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+.shell-alive {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  overflow: visible;
+  z-index: 30;
+}
+.shell-alive .gw-btn,
+.shell-alive .notify-bell,
+.shell-alive .gq-open,
+.shell-alive .nav-menu-item,
+.shell-alive .segmented,
+.shell-alive [data-layout] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  border: 0;
+  box-shadow: none;
+}
+.shell-alive .gw-pop {
+  position: fixed;
+  top: 56px;
+  right: 12px;
+  width: min(420px, calc(100vw - 24px));
+  height: auto;
+  clip: auto;
+  overflow: auto;
 }
 .palette-list { overflow: auto; min-height: 0; }
 .palette-section { margin: 10px 4px 4px; }

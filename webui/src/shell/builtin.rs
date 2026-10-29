@@ -9,7 +9,9 @@ use crate::model::permission_modes;
 
 use super::host;
 use super::rank::unique_match;
-use super::registry::{Argument, Command, CommandRun, ShellHook, Shortcut, TopRegion, TopSlot};
+use super::registry::{
+    Argument, Choice, Command, CommandRun, Group, ShellHook, Shortcut, TopRegion, TopSlot,
+};
 
 fn run(f: impl Fn(&str) -> Result<(), String> + 'static) -> CommandRun {
     Rc::new(f)
@@ -17,8 +19,7 @@ fn run(f: impl Fn(&str) -> Result<(), String> + 'static) -> CommandRun {
 
 fn command(
     id: &'static str,
-    section: &'static str,
-    section_order: i32,
+    group: Group,
     label: &'static str,
     detail: &'static str,
     shortcut: &'static str,
@@ -27,18 +28,32 @@ fn command(
     argument: Option<Argument>,
     perform: CommandRun,
 ) -> Command {
-    Command {
-        id,
-        section,
-        section_order,
-        label,
-        detail,
-        shortcut,
-        keywords,
-        argument,
-        order,
-        run: perform,
+    let cmd = Command::new(id, group, label, detail, perform)
+        .shortcut(shortcut)
+        .keywords(keywords)
+        .order(order);
+    match argument {
+        Some(argument) => cmd.argument(argument),
+        None => cmd,
     }
+}
+
+fn choices_from(items: Vec<(String, String)>) -> Vec<Choice> {
+    items
+        .into_iter()
+        .map(|(id, label)| Choice {
+            id,
+            label,
+            detail: String::new(),
+        })
+        .collect()
+}
+
+fn resolve_id(items: &[(String, String)], args: &str) -> Result<String, String> {
+    if items.iter().any(|(id, _)| id == args) {
+        return Ok(args.to_string());
+    }
+    unique_match(items, args)
 }
 
 pub fn install(reg: &mut ShellHook) {
@@ -48,6 +63,14 @@ pub fn install(reg: &mut ShellHook) {
         group: "Palette",
         group_order: 0,
         label: "Open or close the command palette",
+        order: 0,
+    });
+    reg.shortcut(Shortcut {
+        id: "palette-slash",
+        keys: "/",
+        group: "Palette",
+        group_order: 0,
+        label: "Open the command palette when you are not typing",
         order: 0,
     });
     reg.shortcut(Shortcut {
@@ -117,8 +140,7 @@ pub fn install(reg: &mut ShellHook) {
 
     reg.command(command(
         "new",
-        "Commands",
-        0,
+        Group::Session,
         "New session",
         "Open another live root",
         "",
@@ -127,80 +149,89 @@ pub fn install(reg: &mut ShellHook) {
         None,
         run(|_| host::new_session()),
     ));
-    reg.command(command(
-        "open-session",
-        "Commands",
-        0,
-        "Open session…",
-        "Jump to a live or saved session by title or id",
-        "",
-        &["switch", "resume", "goto"],
-        20,
-        Some(Argument {
-            placeholder: "Session title or id",
-            required: true,
-        }),
-        run(|args| {
-            let id = unique_match(&host::sessions()?, args)?;
-            host::open_session(&id)
-        }),
-    ));
-    reg.command(command(
-        "activate-workspace",
-        "Commands",
-        0,
-        "Activate workspace…",
-        "Record a workspace as active. It does not move the live engine",
-        "",
-        &["folder", "project"],
-        30,
-        Some(Argument {
-            placeholder: "Workspace name",
-            required: true,
-        }),
-        run(|args| {
-            let id = unique_match(&host::workspaces()?, args)?;
-            host::activate_workspace(&id)
-        }),
-    ));
-    reg.command(command(
-        "back",
-        "Commands",
-        0,
-        "Back",
-        "Return to the previous session",
-        "Alt+Left",
-        &[],
-        40,
-        None,
-        run(|_| {
-            if !host::can_back() {
-                return Err("Nothing to go back to.".into());
-            }
-            host::travel(true)
-        }),
-    ));
-    reg.command(command(
-        "forward",
-        "Commands",
-        0,
-        "Forward",
-        "Return to the session you left with Back",
-        "Alt+Right",
-        &[],
-        50,
-        None,
-        run(|_| {
-            if !host::can_forward() {
-                return Err("Nothing to go forward to.".into());
-            }
-            host::travel(false)
-        }),
-    ));
+    reg.command(
+        command(
+            "open-session",
+            Group::Session,
+            "Open session…",
+            "Jump to a live or saved session by title or id",
+            "",
+            &["switch", "resume", "goto"],
+            20,
+            Some(Argument {
+                placeholder: "Filter sessions",
+                required: true,
+            }),
+            run(|args| {
+                let sessions = host::sessions()?;
+                let id = resolve_id(&sessions, args)?;
+                host::open_session(&id)
+            }),
+        )
+        .choices(|| choices_from(host::sessions().unwrap_or_default())),
+    );
+    reg.command(
+        command(
+            "activate-workspace",
+            Group::Navigate,
+            "Switch workspace…",
+            "Record a workspace as active. It does not move the live engine",
+            "",
+            &["folder", "project", "switch"],
+            30,
+            Some(Argument {
+                placeholder: "Filter workspaces",
+                required: true,
+            }),
+            run(|args| {
+                let workspaces = host::workspaces()?;
+                let id = resolve_id(&workspaces, args)?;
+                host::activate_workspace(&id)
+            }),
+        )
+        .choices(|| choices_from(host::workspaces().unwrap_or_default())),
+    );
+    reg.command(
+        command(
+            "back",
+            Group::Navigate,
+            "Back",
+            "Return to the previous session",
+            "Alt+Left",
+            &[],
+            40,
+            None,
+            run(|_| {
+                if !host::can_back() {
+                    return Err("Nothing to go back to.".into());
+                }
+                host::travel(true)
+            }),
+        )
+        .enabled(|| host::can_back()),
+    );
+    reg.command(
+        command(
+            "forward",
+            Group::Navigate,
+            "Forward",
+            "Return to the session you left with Back",
+            "Alt+Right",
+            &[],
+            50,
+            None,
+            run(|_| {
+                if !host::can_forward() {
+                    return Err("Nothing to go forward to.".into());
+                }
+                host::travel(false)
+            }),
+        )
+        .enabled(|| host::can_forward()),
+    );
     reg.command(command(
         "focus",
-        "Commands",
-        0,
+        Group::Navigate,
         "Toggle focus mode",
         "Hide the session list and the side panel",
         "Alt+\\",
@@ -211,8 +242,7 @@ pub fn install(reg: &mut ShellHook) {
     ));
     reg.command(command(
         "stop-all",
-        "Commands",
-        0,
+        Group::Session,
         "Stop all",
         "Interrupt running delegated children in this session",
         "",
@@ -223,8 +253,7 @@ pub fn install(reg: &mut ShellHook) {
     ));
     reg.command(command(
         "side-chat",
-        "Commands",
-        0,
+        Group::Session,
         "Side chat",
         "Ask about this session without steering it or approving a tool",
         "Alt+S",
@@ -235,8 +264,7 @@ pub fn install(reg: &mut ShellHook) {
     ));
     reg.command(command(
         "shortcuts",
-        "Commands",
-        0,
+        Group::Debug,
         "Keyboard shortcuts",
         "Show the shortcut overlay",
         "?",
@@ -250,8 +278,7 @@ pub fn install(reg: &mut ShellHook) {
     ));
     reg.command(command(
         "chat",
-        "Apps",
-        10,
+        Group::Navigate,
         "Chat",
         "Sessions and the transcript",
         "",
@@ -262,8 +289,7 @@ pub fn install(reg: &mut ShellHook) {
     ));
     reg.command(command(
         "daemon",
-        "Apps",
-        10,
+        Group::Navigate,
         "Daemon",
         "This gateway, its token, and workspaces",
         "",
@@ -274,8 +300,7 @@ pub fn install(reg: &mut ShellHook) {
     ));
     reg.command(command(
         "steer",
-        "Settings",
-        20,
+        Group::Settings,
         "Steer",
         "Enter adds your message to the current turn without stopping it",
         "",
@@ -286,8 +311,7 @@ pub fn install(reg: &mut ShellHook) {
     ));
     reg.command(command(
         "queue",
-        "Settings",
-        20,
+        Group::Settings,
         "Queue",
         "Enter waits until the turn finishes",
         "",
@@ -301,8 +325,7 @@ pub fn install(reg: &mut ShellHook) {
         let wire = mode.id;
         reg.command(command(
             id,
-            "Settings",
-            20,
+            Group::Settings,
             mode_label(mode.id),
             mode.detail,
             "",
@@ -316,8 +339,7 @@ pub fn install(reg: &mut ShellHook) {
         let theme = id;
         reg.command(command(
             theme_command_id(id),
-            "Theme",
-            30,
+            Group::Theme,
             label,
             detail,
             "",
@@ -329,8 +351,7 @@ pub fn install(reg: &mut ShellHook) {
     }
     reg.command(command(
         "scheme-dark",
-        "Theme",
-        30,
+        Group::Theme,
         "Scheme: Dark",
         "Dark hexes from the TUI token pair",
         "",
@@ -341,8 +362,7 @@ pub fn install(reg: &mut ShellHook) {
     ));
     reg.command(command(
         "scheme-light",
-        "Theme",
-        30,
+        Group::Theme,
         "Scheme: Light",
         "Light hexes from the TUI token pair",
         "",
@@ -350,6 +370,103 @@ pub fn install(reg: &mut ShellHook) {
         21,
         None,
         run(|_| host::set_scheme("light")),
+    ));
+    reg.command(command(
+        "density-compact",
+        Group::Theme,
+        "Density: Compact",
+        "Tighter rows and padding",
+        "",
+        &["density", "compact"],
+        30,
+        None,
+        run(|_| {
+            crate::appearance::set_density("compact");
+            Ok(())
+        }),
+    ));
+    reg.command(command(
+        "density-comfortable",
+        Group::Theme,
+        "Density: Comfortable",
+        "The default row height",
+        "",
+        &["density", "comfortable"],
+        31,
+        None,
+        run(|_| {
+            crate::appearance::set_density("comfortable");
+            Ok(())
+        }),
+    ));
+    reg.command(command(
+        "session-rename",
+        Group::Session,
+        "Rename session…",
+        "Set the title of the open session",
+        "",
+        &["title", "rename"],
+        80,
+        Some(Argument {
+            placeholder: "New title",
+            required: true,
+        }),
+        run(|args| crate::shell::dispatch("session.rename", args)),
+    ));
+    reg.command(command(
+        "session-fork",
+        Group::Session,
+        "Fork session",
+        "Branch the open session into a new root",
+        "",
+        &["fork", "branch"],
+        81,
+        None,
+        run(|_| crate::shell::dispatch("session.fork", "")),
+    ));
+    reg.command(command(
+        "session-export",
+        Group::Session,
+        "Export session",
+        "Download the redacted timeline JSON",
+        "",
+        &["export", "timeline", "download"],
+        82,
+        None,
+        run(|_| crate::shell::dispatch("session.export", "")),
+    ));
+    reg.command(command(
+        "session-export-md",
+        Group::Session,
+        "Export session markdown",
+        "Download the visible transcript as markdown",
+        "",
+        &["export", "markdown"],
+        83,
+        None,
+        run(|_| crate::shell::dispatch("session.export-md", "")),
+    ));
+    reg.command(command(
+        "diagnostics",
+        Group::Debug,
+        "Diagnostics",
+        "Copy version, gateway, and session into the clipboard",
+        "",
+        &["debug", "version", "copy"],
+        10,
+        None,
+        run(|_| {
+            let text = format!(
+                "strike {}\ngateway {}\nsession {}",
+                host::version_label(),
+                host::gateway(),
+                host::session_name()
+            );
+            if let Some(win) = web_sys::window() {
+                let _ = win.navigator().clipboard().write_text(&text);
+            }
+            Ok(())
+        }),
     ));
 
     reg.slot(TopSlot {

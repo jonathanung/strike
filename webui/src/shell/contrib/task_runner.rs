@@ -7,13 +7,12 @@ use std::rc::Rc;
 
 use leptos::prelude::*;
 
-use crate::shell::{Command, ShellHook, TopRegion, TopSlot};
+use crate::shell::{Group, Command, ShellHook, TopRegion, TopSlot};
 
 pub fn install(reg: &mut ShellHook) {
     reg.command(Command {
         id: "tasks",
-        section: "Apps",
-        section_order: 10,
+        group: Group::Navigate,
         label: "Task runner",
         detail: "Open a checklist, run each section, review the checkpoint",
         shortcut: "",
@@ -25,6 +24,10 @@ pub fn install(reg: &mut ShellHook) {
         argument: None,
         order: 35,
         run: Rc::new(|_| crate::shell::host::set_view("tasks")),
+        visible: None,
+        enabled: None,
+        confirm: None,
+        choices: None,
     });
     reg.slot(TopSlot {
         id: "task-runner",
