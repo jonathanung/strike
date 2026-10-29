@@ -140,10 +140,11 @@ jobs:
   # Stable tags (v0.5.3, v0.11.0, v1.0.0) do not build or attach bundles.
   desktop:
     name: Desktop (${{ matrix.label }})
-    # A follow-up push to a PR cancels the previous dry-run. Tag releases
-    # are not cancelled.
+    # Per-label so the linux and macOS legs do not cancel each other.
+    # A follow-up push to a PR cancels that leg's previous dry-run.
+    # Tag releases are not cancelled.
     concurrency:
-      group: desktop-bundles-${{ github.workflow }}-${{ github.ref }}
+      group: desktop-bundles-${{ github.workflow }}-${{ github.ref }}-${{ matrix.label }}
       cancel-in-progress: ${{ github.event_name != 'push' }}
     if: >-
       github.event_name == 'pull_request' ||
