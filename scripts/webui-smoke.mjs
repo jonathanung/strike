@@ -982,6 +982,100 @@ try {
     },
     { timeout: WAIT_MS, interval: 250 },
   );
+  // Folder Remove confirm (#1556): folder removal now lives behind the
+  // palette (declutter #1669), and its bind must open the shared confirm
+  // dialog stating both halves — sessions stay (unfiled, not deleted) and
+  // the grouping cannot be restored. Cancelling leaves the folder;
+  // confirming removes it while its sessions stay in the list.
+  const smokeFolder = await call("POST", "/v1/session-list/folders", { name: "Smoke folder" });
+  if (smokeFolder.status !== 201) {
+    throw new Error(`smoke folder create ${smokeFolder.status} ${smokeFolder.text}`);
+  }
+  const folderRowProbe = async () => {
+    const raw = await evaluate(`(() => {
+      const row = [...document.querySelectorAll(".ss-folder-row")].find((r) => r.textContent.includes("Smoke folder"));
+      return JSON.stringify({ row: !!row });
+    })()`);
+    return JSON.parse(raw || "{}");
+  };
+  await waitFor(
+    "smoke folder row to render",
+    async () => {
+      const p = await folderRowProbe();
+      return { ok: p.row, ...p };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  const runFolderRemove = async () => {
+    await runPalette("Remove folder");
+    await waitFor(
+      "palette folder choices (Smoke folder)",
+      async () => {
+        const text = String(
+          (await evaluate(`(document.querySelector('[data-nav="palette-dialog"]') || {}).innerText || ""`)) || "",
+        );
+        return { ok: text.includes("Smoke folder"), text: text.slice(0, 240) };
+      },
+      { timeout: STEP_MS, interval: 100 },
+    );
+    await evaluate(`(() => {
+      const input = document.querySelector('[data-nav="palette-dialog"] input');
+      const proto = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value");
+      proto.set.call(input, "Smoke folder");
+      input.dispatchEvent(new InputEvent("input", { bubbles: true, data: "Smoke folder" }));
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+      return true;
+    })()`);
+  };
+  await runFolderRemove();
+  const folderDialog = await waitFor(
+    "folder remove confirm dialog (sessions stay, grouping cannot be restored)",
+    async () => {
+      const raw = await evaluate(`(() => {
+        const dialog = document.querySelector("[data-confirm='dialog']");
+        return JSON.stringify({ ok: !!dialog, text: dialog ? dialog.innerText : "" });
+      })()`);
+      const p = JSON.parse(raw || "{}");
+      return {
+        ok: p.ok && p.text.includes("Sessions stay") && p.text.includes("cannot be restored"),
+        ...p,
+      };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  if (!folderDialog.text.includes("Remove folder")) {
+    throw new Error(`folder confirm copy wrong: ${String(folderDialog.text).slice(0, 300)}`);
+  }
+  await evaluate(`document.querySelector("[data-confirm='cancel']").click()`);
+  await waitFor(
+    "folder confirm to close on cancel, folder intact",
+    async () => {
+      const p = await folderRowProbe();
+      return {
+        ok: p.row && (await evaluate(`!!document.querySelector("[data-confirm='dialog']")`)) === false,
+        ...p,
+      };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await runFolderRemove();
+  await waitFor(
+    "folder remove confirm dialog to reopen",
+    async () => ({
+      ok: (await evaluate(`!!document.querySelector("[data-confirm='dialog']")`)) === true,
+    }),
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await evaluate(`document.querySelector("[data-confirm='accept']").click()`);
+  await waitFor(
+    "folder removed after confirm, sessions still listed",
+    async () => {
+      const p = await folderRowProbe();
+      const body = (await evaluate(`document.body.innerText`)) || "";
+      return { ok: !p.row && body.includes("Alpha session"), folder: p };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
   const before = await send("Runtime.evaluate", {
     expression: `(() => {
       const panel = document.querySelector(".ss-panel");
@@ -1470,6 +1564,78 @@ try {
     { timeout: WAIT_MS, interval: 250 },
   );
 
+  // Memory Delete confirm (#1554): Delete must open the shared confirm
+  // dialog naming the entry; cancelling leaves the entry, confirming
+  // removes it. Runs last in this section — later checks do not use
+  // smoke-pref.
+  const memRowProbe = async () => {
+    const raw = await evaluate(`(() => {
+      const row = [...document.querySelectorAll(".storage-row")].find((r) => r.textContent.includes("smoke-pref"));
+      return JSON.stringify({ row: !!row, del: !!(row && row.querySelector("[data-action='delete-memory']")) });
+    })()`);
+    return JSON.parse(raw || "{}");
+  };
+  const clickMemoryDelete = async () =>
+    evaluate(`(() => {
+      const row = [...document.querySelectorAll(".storage-row")].find((r) => r.textContent.includes("smoke-pref"));
+      const btn = row && row.querySelector("[data-action='delete-memory']");
+      if (!btn) return "missing";
+      btn.click();
+      return "clicked";
+    })()`);
+  if ((await clickMemoryDelete()) !== "clicked") {
+    throw new Error("memory Delete button click failed");
+  }
+  const memDialog = await waitFor(
+    "memory delete confirm dialog (entry named, cannot be undone)",
+    async () => {
+      const raw = await evaluate(`(() => {
+        const dialog = document.querySelector("[data-confirm='dialog']");
+        return JSON.stringify({ ok: !!dialog, text: dialog ? dialog.innerText : "" });
+      })()`);
+      const p = JSON.parse(raw || "{}");
+      return {
+        ok: p.ok && p.text.includes("smoke-pref") && p.text.includes("cannot be undone"),
+        ...p,
+      };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  if (!memDialog.text.includes("Delete memory")) {
+    throw new Error(`memory confirm copy wrong: ${String(memDialog.text).slice(0, 300)}`);
+  }
+  await evaluate(`document.querySelector("[data-confirm='cancel']").click()`);
+  await waitFor(
+    "memory delete confirm to close on cancel, entry intact",
+    async () => {
+      const p = await memRowProbe();
+      return {
+        ok: p.row && (await evaluate(`!!document.querySelector("[data-confirm='dialog']")`)) === false,
+        ...p,
+      };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  if ((await clickMemoryDelete()) !== "clicked") {
+    throw new Error("memory Delete button click (confirm path) failed");
+  }
+  await waitFor(
+    "memory delete confirm dialog to reopen",
+    async () => ({
+      ok: (await evaluate(`!!document.querySelector("[data-confirm='dialog']")`)) === true,
+    }),
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await evaluate(`document.querySelector("[data-confirm='accept']").click()`);
+  await waitFor(
+    "memory entry gone after confirmed delete",
+    async () => {
+      const p = await memRowProbe();
+      return { ok: !p.row, ...p };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+
   // Goals + Autopilot (#1300, #1593). The view is palette-only. A bundle
   // that predates Goals has no palette command and fails here.
   await runPalette("Goals");
@@ -1569,6 +1735,66 @@ try {
   await waitFor(
     "failing goal run to surface Needs you / verification failed",
     textProbe((body) => body.includes("Needs you") && body.includes("verification failed")),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  // Goal Abort confirm (#1559): Abort is terminal, so it must open the
+  // shared confirm dialog; cancelling leaves the goal in Needs you,
+  // confirming moves it to Aborted.
+  const clickGoalAbort = async () =>
+    evaluate(`(() => {
+      const btn = document.querySelector("[data-action='abort-goal']");
+      if (!btn) return "missing";
+      btn.click();
+      return "clicked";
+    })()`);
+  if ((await clickGoalAbort()) !== "clicked") {
+    throw new Error("goal Abort button click failed");
+  }
+  const goalDialog = await waitFor(
+    "goal abort confirm dialog (cannot be resumed)",
+    async () => {
+      const raw = await evaluate(`(() => {
+        const dialog = document.querySelector("[data-confirm='dialog']");
+        return JSON.stringify({ ok: !!dialog, text: dialog ? dialog.innerText : "" });
+      })()`);
+      const p = JSON.parse(raw || "{}");
+      return {
+        ok: p.ok && p.text.includes("cannot be resumed or run again"),
+        ...p,
+      };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  if (!goalDialog.text.includes("Abort goal")) {
+    throw new Error(`goal abort confirm copy wrong: ${String(goalDialog.text).slice(0, 300)}`);
+  }
+  await evaluate(`document.querySelector("[data-confirm='cancel']").click()`);
+  await waitFor(
+    "goal abort confirm to close on cancel, goal still Needs you",
+    async () => {
+      const body = (await evaluate(`document.body.innerText`)) || "";
+      return {
+        ok:
+          (await evaluate(`!!document.querySelector("[data-confirm='dialog']")`)) === false &&
+          body.includes("Needs you"),
+      };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  if ((await clickGoalAbort()) !== "clicked") {
+    throw new Error("goal Abort button click (confirm path) failed");
+  }
+  await waitFor(
+    "goal abort confirm dialog to reopen",
+    async () => ({
+      ok: (await evaluate(`!!document.querySelector("[data-confirm='dialog']")`)) === true,
+    }),
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await evaluate(`document.querySelector("[data-confirm='accept']").click()`);
+  await waitFor(
+    "goal in Aborted state after confirmed abort",
+    textProbe((body) => body.includes("Aborted")),
     { timeout: WAIT_MS, interval: 250 },
   );
 
