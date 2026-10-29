@@ -291,16 +291,35 @@ fn load_deliveries(
     id: String,
     rows: RwSignal<Vec<DeliveryRow>>,
     notice: RwSignal<String>,
+    for_id: RwSignal<String>,
+    load_error: RwSignal<String>,
 ) {
     if id.is_empty() {
         rows.set(Vec::new());
+        for_id.set(String::new());
+        load_error.set(String::new());
         return;
     }
+    // Clear first: the previous trigger's deliveries must never render
+    // under this selection, even while this load is in flight (#1623).
+    rows.set(Vec::new());
+    for_id.set(id.clone());
+    load_error.set(String::new());
     let (b, t) = (base.get(), token.get());
     spawn_local(async move {
         match get_json::<DeliveryList>(&b, &t, &format!("/v1/triggers/{id}/deliveries")).await {
-            Ok(list) => rows.set(list.deliveries),
-            Err(e) => notice.set(e),
+            Ok(list) => {
+                // Drop a completion a newer selection superseded.
+                if for_id.get_untracked() == id {
+                    rows.set(list.deliveries);
+                }
+            }
+            Err(e) => {
+                if for_id.get_untracked() == id {
+                    load_error.set("Deliveries failed to load for this trigger.".into());
+                    notice.set(e);
+                }
+            }
         }
     });
 }
@@ -344,12 +363,24 @@ pub fn TriggersPage(
 ) -> impl IntoView {
     let rows = RwSignal::new(Vec::<TriggerRow>::new());
     let deliveries = RwSignal::new(Vec::<DeliveryRow>::new());
+    // The trigger id `deliveries` was loaded for, and a log-local failure
+    // line (#1623).
+    let deliveries_for = RwSignal::new(String::new());
+    let deliveries_error = RwSignal::new(String::new());
     let secret_revealed = RwSignal::new(false);
     let form = Form::new();
 
     refresh(base, token, rows, form.notice);
     Effect::new(move |_| {
-        load_deliveries(base, token, form.selected.get(), deliveries, form.notice);
+        load_deliveries(
+            base,
+            token,
+            form.selected.get(),
+            deliveries,
+            form.notice,
+            deliveries_for,
+            deliveries_error,
+        );
     });
 
     let save = move || {
@@ -527,7 +558,7 @@ pub fn TriggersPage(
                     let outcome = v.get("outcome").and_then(|s| s.as_str()).unwrap_or("sent");
                     form.notice.set(format!("Test {outcome}."));
                     status.set(format!("Trigger test {outcome}"));
-                    load_deliveries(base, token, id, deliveries, form.notice);
+                    load_deliveries(base, token, id, deliveries, form.notice, deliveries_for, deliveries_error);
                 }
                 Err(e) => form.notice.set(e),
             }
@@ -571,7 +602,7 @@ pub fn TriggersPage(
                         let text = resp.text().await.unwrap_or_default();
                         form.notice
                             .set(format!("Hook returned {status_code}. {text}"));
-                        load_deliveries(base, token, id, deliveries, form.notice);
+                        load_deliveries(base, token, id, deliveries, form.notice, deliveries_for, deliveries_error);
                     }
                     Err(e) => form.notice.set(e.to_string()),
                 },
@@ -676,7 +707,7 @@ pub fn TriggersPage(
                     Ok(v) => {
                         let outcome = v.get("outcome").and_then(|s| s.as_str()).unwrap_or("replayed");
                         form.notice.set(format!("Replay {outcome}."));
-                        load_deliveries(base, token, id, deliveries, form.notice);
+                        load_deliveries(base, token, id, deliveries, form.notice, deliveries_for, deliveries_error);
                     }
                     Err(e) => form.notice.set(e),
                 }
@@ -847,11 +878,24 @@ pub fn TriggersPage(
             </section>
             <section class="triggers-log" aria-label="Delivery log">
                     <h2 class="panel-title">"Delivery log"</h2>
-                    <Show when=move || deliveries.get().is_empty()>
+                    <Show when=move || !deliveries_error.get().is_empty()>
+                        <p class="notice" role="alert">{move || deliveries_error.get()}</p>
+                    </Show>
+                    <Show when=move || deliveries.get().is_empty() && deliveries_error.get().is_empty()>
                         <p class="hint">"Accepted, rejected, duplicate, and rate-limited deliveries show up here. The log does not store the signing secret."</p>
                     </Show>
                     <ul class="plain">
-                        {move || deliveries.get().into_iter().map(|row| {
+                        {move || {
+                        // Render only rows loaded for the selected trigger:
+                        // a failed or superseded load must not leave the
+                        // previous trigger's deliveries on screen (#1623).
+                        let owner = deliveries_for.get();
+                        let rows_now = if !owner.is_empty() && owner == form.selected.get() {
+                            deliveries.get()
+                        } else {
+                            Vec::new()
+                        };
+                        rows_now.into_iter().map(|row| {
                             let headline = format!("{} · {}", row.outcome, row.event);
                             let detail = if row.reason.is_empty() { row.session_id.clone() } else { row.reason.clone() };
                             let when = row.at.clone();
@@ -866,7 +910,7 @@ pub fn TriggersPage(
                                     {can_replay.then(|| view! { <span class="path">"Replay from the command palette."</span> })}
                                 </li>
                             }
-                        }).collect_view()}
+                        }).collect_view() }}
                     </ul>
             </section>
         </main>

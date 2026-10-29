@@ -1911,13 +1911,21 @@ fn App() -> impl IntoView {
                             back_stack.update(|s| s.push(cur));
                             forward_stack.set(Vec::new());
                         }
-                        let _ = post_json(
+                        if let Err(e) = post_json(
                             &b,
                             &t,
                             &format!("/v1/roots/{id}/activate"),
                             serde_json::json!({}),
                         )
-                        .await;
+                        .await
+                        {
+                            // The root exists; only its activation failed.
+                            // Say so instead of silently presenting it as
+                            // the live session (#1612).
+                            status.set(format!(
+                                "new session created but activation failed: {e}"
+                            ));
+                        }
                         active_root.set(id);
                     }
                     refresh_meta();
@@ -3195,6 +3203,17 @@ fn App() -> impl IntoView {
             ux_note.set("A title needs at least one character.".into());
             return;
         }
+        // Capture the pre-rename state so a rejected PATCH can be rolled
+        // back everywhere the optimistic title was applied (#1618). The
+        // pin matters: left behind, it would block the listed title from
+        // ever healing the transcript header.
+        let prev_transcript = transcript.with_untracked(|t| (t.title.clone(), t.title_pin.clone()));
+        let prev_session = sessions.with_untracked(|list| {
+            list.iter().find(|s| s.id == id).map(|s| s.title.clone())
+        });
+        let prev_root = roots.with_untracked(|list| {
+            list.iter().find(|r| r.id == id).map(|r| r.title.clone())
+        });
         transcript.update(|t| t.pin_title(title.clone()));
         sessions.update(|list| {
             if let Some(s) = list.iter_mut().find(|s| s.id == id) {
@@ -3211,7 +3230,24 @@ fn App() -> impl IntoView {
             let path = format!("/v1/sessions/{}", api::js_encode(&id));
             match patch_json(&b, &t, &path, serde_json::json!({"title": title})).await {
                 Ok(()) => ux_note.set(String::new()),
-                Err(e) => ux_note.set(format!("Rename failed: {e}")),
+                Err(e) => {
+                    transcript.update(|t| t.restore_title(prev_transcript.0, prev_transcript.1));
+                    if let Some(prev) = prev_session {
+                        sessions.update(|list| {
+                            if let Some(s) = list.iter_mut().find(|s| s.id == id) {
+                                s.title = prev;
+                            }
+                        });
+                    }
+                    if let Some(prev) = prev_root {
+                        roots.update(|list| {
+                            if let Some(r) = list.iter_mut().find(|r| r.id == id) {
+                                r.title = prev;
+                            }
+                        });
+                    }
+                    ux_note.set(format!("Rename failed: {e}"));
+                }
             }
         });
     })
