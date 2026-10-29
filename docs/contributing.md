@@ -198,3 +198,16 @@ GitHub release titles use `strike vX.Y.Z`. Their bodies contain the standard
 install block followed by the matching changelog entry verbatim. The release
 workflow enforces this by failing when the tagged version has no non-empty
 entry in `CHANGELOG.md`.
+
+Pre-release tags (`v0.10.*`, and any other `v*` tag with a hyphen in the
+semver pre-release suffix) also attach unsigned desktop installers. Those assets are
+additive: `strike_<tag>_<os>_<arch>.tar.gz` and `checksums.txt` stay the CLI
+set, and `desktop-checksums.txt` covers only the desktop files. See
+[install.md](install.md). A branch can build the bundles without publishing:
+
+```sh
+gh workflow run release.yml --ref <branch> -f dry_run=true
+```
+
+A pull request that edits `.github/workflows/release.yml` runs that same
+dry-run. It uploads workflow artifacts and does not create a release.

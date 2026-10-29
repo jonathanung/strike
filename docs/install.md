@@ -213,7 +213,44 @@ re-run `strike auth login …`.
 ```
 
 Release CI (`.github/workflows/release.yml`) builds linux/darwin amd64+arm64
-tarballs and `checksums.txt` on `v*` tags.
+tarballs and `checksums.txt` on `v*` tags. `install.sh` and `strike --upgrade`
+read those names only.
+
+### Desktop installers (pre-release)
+
+Pre-release tags also attach desktop bundles. That is `v0.10.*` (including
+`v0.10.0` and `v0.10.0-rc.N`) and any other `v*` tag with a semver
+pre-release suffix such as `-rc.1`. Stable tags do not get these files.
+The CLI archives and `checksums.txt` are unchanged. `desktop-checksums.txt`
+is the sha256 list for the desktop files only.
+
+| Asset | Platform |
+|---|---|
+| `strike-desktop_<tag>_linux_amd64.deb` | Linux amd64 |
+| `strike-desktop_<tag>_linux_amd64.AppImage` | Linux amd64 |
+| `strike-desktop_<tag>_darwin_universal.dmg` | macOS (arm64 and x64) |
+
+```sh
+sudo dpkg -i strike-desktop_<tag>_linux_amd64.deb
+chmod +x strike-desktop_<tag>_linux_amd64.AppImage
+```
+
+Native Windows installers are not published. On Windows, use WSL2 or the CLI.
+
+#### Unsigned macOS builds
+
+The DMG is not signed with an Apple Developer ID and is not notarized. The
+app has an ad-hoc signature so Apple Silicon can launch it. Gatekeeper still
+treats a download as an unidentified developer and blocks a normal double-click.
+
+1. Open the DMG and drag Strike to Applications.
+2. Control-click `Strike.app` and choose Open, then Open again.
+3. Or open System Settings → Privacy & Security and choose Open Anyway.
+4. If macOS still refuses the app:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/Strike.app
+```
 
 ## Launch
 
