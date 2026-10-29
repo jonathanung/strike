@@ -464,6 +464,46 @@ try {
     }
   };
 
+  // Open a palette command by its visible label. Enter runs the first hit.
+  const runPalette = async (query) => {
+    await evaluate(`(() => {
+      if (!document.querySelector('[data-nav="palette-dialog"]')) {
+        document.querySelector('[data-nav="palette"]')?.click();
+      }
+      return true;
+    })()`);
+    await waitFor(
+      `palette open (${query})`,
+      async () => ({
+        ok: (await evaluate(`!!document.querySelector('[data-nav="palette-dialog"] input')`)) === true,
+      }),
+      { timeout: STEP_MS, interval: 100 },
+    );
+    const quoted = JSON.stringify(query);
+    await evaluate(`(() => {
+      const input = document.querySelector('[data-nav="palette-dialog"] input');
+      const proto = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value");
+      proto.set.call(input, ${quoted});
+      input.dispatchEvent(new InputEvent("input", { bubbles: true, data: ${quoted} }));
+      return input.value;
+    })()`);
+    await waitFor(
+      `palette row (${query})`,
+      async () => {
+        const text = String(
+          (await evaluate(`(document.querySelector('[data-nav="palette-dialog"]') || {}).innerText || ""`)) || "",
+        );
+        return { ok: text.toLowerCase().includes(String(query).toLowerCase()), text: text.slice(0, 240) };
+      },
+      { timeout: STEP_MS, interval: 80 },
+    );
+    await evaluate(`(() => {
+      const input = document.querySelector('[data-nav="palette-dialog"] input');
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+      return true;
+    })()`);
+  };
+
   // Probe on the whole body text.
   const textProbe = (ready) => async () => {
     const body = (await evaluate(`document.body ? document.body.innerText : ""`)) || "";
@@ -529,7 +569,7 @@ try {
   const title = boot.title || "";
   const statusId = boot.status || "";
   const chip = !!boot.chip;
-  const want = ["Menu", "Strike", "Activity", "Files", "Changes", "Git", "Worktrees", "Memory", "Knowledge", "Artifacts", "Terminal", "Approval", "Connected"];
+  const want = ["Menu", "Strike", "Activity", "Files", "Changes", "Git", "Worktrees", "Terminal", "Approval", "Connected"];
   const missingText = want.filter((s) => !text.includes(s));
   if (missingText.length || acid !== "#7c3aed" || ground !== "#14131c" || !chip || !statusIds.includes(statusId) || !title.includes("Strike")) {
     throw new Error(
@@ -772,11 +812,12 @@ try {
   }
 
 
-  // Model menu: filter, honest "not reported" capabilities, keyboard, and a
-  // real select.model error from the daemon (unknown provider).
-  await send("Runtime.evaluate", {
-    expression: `document.querySelector("[data-model-chip]")?.click()`,
-  });
+  // Model menu: the chip is status text. Alt+M opens the panel.
+  const modelStatus = await evaluate(`document.querySelector("[data-model-chip]")?.textContent || ""`);
+  if (!String(modelStatus).includes("Model")) {
+    throw new Error(`model status missing the word Model text=${modelStatus}`);
+  }
+  await evaluate(`document.dispatchEvent(new KeyboardEvent("keydown", { key: "m", altKey: true, bubbles: true, cancelable: true }))`);
   let menu = "";
   for (let i = 0; i < 40; i++) {
     menu = await bodyText();
@@ -858,14 +899,16 @@ try {
     el.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     return "ok";
   })()`);
-  let failed = "";
-  for (let i = 0; i < 40; i++) {
-    failed = await bodyText();
-    if (failed.includes("unknown provider")) break;
-    await delay(250);
-  }
-  if (!failed.includes("unknown provider")) {
-    throw new Error(`model error path missing daemon message: ${failed.slice(0, 500)}`);
+  await delay(400);
+  const freeform = await evalValue(`(() => {
+    const chip = document.querySelector("[data-model-chip]");
+    const text = chip ? chip.textContent : "";
+    const hint = document.body.innerText.includes("Enter uses");
+    return JSON.stringify({ text, hint, menu: !!document.querySelector("[data-model-menu]") });
+  })()`);
+  const freeformParsed = JSON.parse(freeform || "{}");
+  if (String(freeformParsed.text || "").includes("nope/missing") || freeformParsed.hint) {
+    throw new Error(`freeform model enter was accepted: ${freeform}`);
   }
 
   // Close the model menu (and any error note) before the navbar pass.
@@ -1040,9 +1083,10 @@ try {
     `document.querySelector('[data-action="telemetry-note"]') == null`,
     "onboarding did not dismiss",
   );
+  await evaluate(`document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
   await evaluate(`document.querySelector('[data-action="open-settings"]').click()`);
   await waitUntil(
-    `document.body.innerText.includes("Keyboard") && document.body.innerText.includes(".strike") && document.body.innerText.includes("Open model menu")`,
+    `document.body.innerText.includes("Appearance") && document.body.innerText.includes("Type size") && document.body.innerText.includes("Density") && !!document.querySelector('input[data-choice="lg"]')`,
     "settings page",
   );
   await evaluate(`document.querySelector('input[data-choice="lg"]').click()`);
@@ -1062,6 +1106,7 @@ try {
     return true;
   })()`);
   await evaluate(`document.querySelector('[data-action="open-settings"]').click()`);
+  await runPalette("Data locations");
   await waitUntil(
     `document.body.innerText.includes("Could not read the file list") && document.querySelector('[data-action="reload-files"]') != null`,
     "settings error path",
@@ -1081,8 +1126,9 @@ try {
     return true;
   })()`);
   await evaluate(`document.querySelector('[data-action="open-settings"]').click()`);
+  await runPalette("Data locations");
   await waitUntil(
-    `document.body.innerText.includes(".strike") && !document.body.innerText.includes("Could not read the file list")`,
+    `document.body.innerText.includes(".strike") && !document.body.innerText.includes("Could not read the file list") && !!document.querySelector('input[data-choice="lg"]')`,
     "settings recovered",
   );
   await editorBrowserCheck({
@@ -1222,7 +1268,7 @@ try {
   await send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
   await waitFor(
     "cockpit reload after attachment checks (Menu, Memory)",
-    textProbe((t) => t.includes("Menu") && t.includes("Memory")),
+    textProbe((t) => t.includes("Menu") && t.includes("Terminal")),
     { timeout: WAIT_MS, interval: 250 },
   );
 
@@ -1232,15 +1278,7 @@ try {
   // and waitFor()/textProbe() poll on condition with diagnostics on
   // timeout instead of the old fixed-iteration body scrape.
   const openView = async (label, needles) => {
-    const clicked = await evaluate(`(() => {
-      const btn = [...document.querySelectorAll("button")].find((b) => b.textContent.trim() === ${JSON.stringify(label)});
-      if (!btn) return "missing";
-      btn.click();
-      return "clicked";
-    })()`);
-    if (clicked !== "clicked") {
-      throw new Error(`${label} nav button not found\n${await diagnostics()}`);
-    }
+    await runPalette(label);
     await waitFor(
       `${label} view (${needles.join(", ")})`,
       textProbe((t) => needles.every((s) => t.includes(s))),
@@ -1248,7 +1286,7 @@ try {
     );
   };
   await openView("Usage", ["Input tokens", "Daily budget (USD)"]);
-  await openView("Audit", ["Verify chain", "Export"]);
+  await openView("Audit", ["Verify chain", "Append-only hash chain"]);
   const auditProbe = await waitFor(
     "audit chain state (Chain intact / No audit entries / Not configured)",
     textProbe(
@@ -1276,22 +1314,14 @@ try {
       const parsed = await readCockpit();
       const body = parsed.body || "";
       return {
-        ok: body.includes("Menu") && body.includes("Memory"),
+        ok: body.includes("Menu") && body.includes("Terminal"),
         body: body.slice(0, 300),
       };
     },
     { timeout: WAIT_MS, interval: 250 },
   );
 
-  const memClick = await evaluate(`(() => {
-    const btn = [...document.querySelectorAll("button")].find((b) => b.textContent.trim() === "Memory");
-    if (!btn) return "missing";
-    btn.click();
-    return "clicked";
-  })()`);
-  if (memClick !== "clicked") {
-    throw new Error(`memory nav button not found after reload\n${await diagnostics()}`);
-  }
+  await runPalette("Memory");
   const memoryText = (
     await waitFor(
       "memory panel to show the seeded entry",
@@ -1317,24 +1347,9 @@ try {
     throw new Error(`memory row key cell too narrow width=${memKeyWidthPx}`);
   }
 
-  // Goals + Autopilot (#1300). Require the real Goals nav button in the
-  // DOM — not a body-text scrape. A bundle that predates the Goals
-  // feature has no such button and fails here with diagnostics, however
-  // long the wait; that is the point of the check.
-  await waitFor(
-    "goals nav button + command pill",
-    async () => {
-      const raw = await evaluate(`(() => JSON.stringify({
-        goalsBtn: !!document.querySelector('button[data-view="goals"]'),
-        pill: !!document.querySelector('[data-nav="palette"]'),
-        views: [...document.querySelectorAll("[data-view]")].map((e) => e.getAttribute("data-view")),
-      }))()`);
-      const p = JSON.parse(raw || "{}");
-      return { ok: !!(p.goalsBtn && p.pill), ...p };
-    },
-    { timeout: WAIT_MS, interval: 250 },
-  );
-  await evaluate(`document.querySelector('button[data-view="goals"]').click()`);
+  // Goals + Autopilot (#1300, #1593). The view is palette-only. A bundle
+  // that predates Goals has no palette command and fails here.
+  await runPalette("Goals");
   await waitFor(
     "goals pane (root, form, verification field, autopilot) after opening Goals",
     async () => {
@@ -2039,18 +2054,20 @@ try {
       url: "http://127.0.0.1:" + port + "/?token=" + token,
     });
     await waitFor(
+      "cockpit after task restart",
+      textProbe((body) => body.includes("Menu") && body.includes("Terminal")),
+      { timeout: WAIT_MS, interval: 250 },
+    );
+    await runPalette("Task runner");
+    await waitFor(
       "task runner board after restart (Failed and Blocked rows)",
       async () => {
-        const clicked = await evaluate(
-          `(() => { const btn = document.querySelector('button[data-view="tasks"]'); if (!btn) return false; btn.click(); return true; })()`,
-        );
         const boardText =
           (await evaluate(
             `(() => { const b = document.querySelector("#task-runner"); return b ? b.innerText : ""; })()`,
           )) || "";
         return {
           ok:
-            clicked === true &&
             boardText.includes("First step") &&
             boardText.includes("Second step") &&
             boardText.includes("Failed") &&
@@ -2137,7 +2154,7 @@ try {
   // empty state shows; the daemon token is already in localStorage from
   // the boot script, so no reload is needed (the original PR's reload
   // loop is replaced by the shared waitFor/textProbe helpers).
-  await evaluate(`document.querySelector('button[data-view="schedule"]').click()`);
+  await runPalette("Schedule");
   await waitFor(
     "schedule page (empty state)",
     textProbe((body) => body.includes("Nothing is scheduled") && !body.includes("unauthorized")),
@@ -2225,15 +2242,7 @@ try {
   if (!composerSuggest.includes("/stop") && !composerSuggest.includes("/mode")) {
     throw new Error(`composer slash popup missing: ${composerSuggest.slice(0, 500)}`);
   }
-  await send("Runtime.evaluate", {
-    expression: `(() => {
-      const b = [...document.querySelectorAll("button")].find((el) => (el.textContent || "").trim() === "Triggers");
-      if (!b) return "missing";
-      b.click();
-      return "ok";
-    })()`,
-    returnByValue: true,
-  });
+  await runPalette("Triggers");
   let triggersText = "";
   for (let i = 0; i < 25; i++) {
     const ev = await send("Runtime.evaluate", {
@@ -2254,21 +2263,11 @@ try {
   });
   await send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
   await waitFor(
-    "apps nav button",
-    async () => {
-      const raw = await evaluate(`(() => {
-        const btn = document.querySelector('button[data-view="apps"]');
-        return JSON.stringify({
-          btn: !!btn,
-          label: btn ? btn.textContent.trim() : "",
-        });
-      })()`);
-      const p = JSON.parse(raw || "{}");
-      return { ok: !!(p.btn && p.label === "Apps"), ...p };
-    },
+    "apps palette entry",
+    textProbe((body) => body.includes("Menu")),
     { timeout: WAIT_MS, interval: 250 },
   );
-  await evaluate(`document.querySelector('button[data-view="apps"]').click()`);
+  await runPalette("Apps");
   await waitFor(
     "apps launcher GitHub triage",
     textProbe((body) => body.includes("GitHub triage")),

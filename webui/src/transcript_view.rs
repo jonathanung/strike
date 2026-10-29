@@ -382,16 +382,6 @@ pub fn TranscriptPane(
                     <div class="sx-empty">
                         <strong>{move || empty_headline(tick.get())}</strong>
                         <p>"Start with a card. The line under each one is what gets sent."</p>
-                        <button
-                            type="button"
-                            class="secondary"
-                            data-add-provider="true"
-                            on:click=move |_| {
-                                let _ = crate::shell::set_view("providers");
-                            }
-                        >
-                            "Add provider"
-                        </button>
                         <div class="sx-cards">
                             {suggestions().iter().map(|s| {
                                 let prompt = s.prompt.to_string();

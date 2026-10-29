@@ -173,9 +173,38 @@ async function providerFlow(page, check, waitUntil, grab) {
     screenWidth: 1440,
     screenHeight: 900,
   });
-  await page.evaluate(
-    `document.querySelector('[data-provider="openai"] [data-remove-key]')?.click()`,
+  await page.evaluate(`document.querySelector('[data-nav="palette"]')?.click()`);
+  await waitUntil(`Boolean(document.querySelector('[data-nav="palette-dialog"] input'))`, 4000, "remove-key palette");
+  await page.evaluate(`(() => {
+    const input = document.querySelector('[data-nav="palette-dialog"] input');
+    const proto = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value");
+    proto.set.call(input, "Remove stored key");
+    input.dispatchEvent(new InputEvent("input", { bubbles: true, data: "Remove stored key" }));
+    return true;
+  })()`);
+  await waitUntil(
+    `[...document.querySelectorAll("[data-command-id='providers.remove-key']")].some((el) => (el.innerText || "").includes("Remove stored key…"))`,
+    4000,
+    "remove-key command",
   );
+  await page.evaluate(`(() => {
+    const row = [...document.querySelectorAll("[data-command-id='providers.remove-key']")].find((el) => (el.innerText || "").includes("Remove stored key…"));
+    if (row) row.click();
+    return true;
+  })()`);
+  await waitUntil(
+    `Boolean(document.querySelector('[data-choice-id="openai"]'))`,
+    4000,
+    "remove-key choices",
+  );
+  await page.evaluate(`document.querySelector('[data-choice-id="openai"]')?.click()`);
+  const armed = await waitUntil(
+    `Boolean(document.querySelector('[data-confirm="accept"]'))`,
+    4000,
+    "remove-key confirm",
+  );
+  check(Boolean(armed), "Remove stored key did not ask for confirmation");
+  await page.evaluate(`document.querySelector('[data-confirm="accept"]')?.click()`);
   const removed = await waitUntil(
     `(() => {
       const card = document.querySelector('[data-provider="openai"]');
@@ -196,21 +225,41 @@ async function providerFlow(page, check, waitUntil, grab) {
     "model chip after leaving providers",
   );
   check(Boolean(chip), "model chip missing after returning to chat");
-  await page.evaluate(`document.querySelector("[data-model-chip]")?.click()`);
+  const modelText = await page.evaluate(`document.querySelector("[data-model-chip]")?.textContent || ""`);
+  check(String(modelText).includes("Model"), "model status does not say Model");
+  await page.evaluate(`document.dispatchEvent(new KeyboardEvent("keydown", { key: "m", altKey: true, bubbles: true, cancelable: true }))`);
   const menu = await waitUntil(
-    `Boolean(document.querySelector("[data-model-menu] [data-add-provider]"))`,
+    `Boolean(document.querySelector("[data-model-menu]"))`,
     4000,
-    "model menu add provider",
+    "model menu",
   );
-  check(Boolean(menu), "model menu is missing Add provider");
+  check(Boolean(menu), "model menu did not open from Alt+M");
+  const addCount = await page.evaluate(`(() => {
+    const menu = document.querySelector("[data-model-menu]");
+    if (!menu) return -1;
+    const rows = menu.querySelectorAll("[data-model-row]").length;
+    const adds = menu.querySelectorAll("[data-add-provider]").length;
+    return rows > 0 ? adds : (adds === 1 ? 0 : -1);
+  })()`);
+  check(addCount === 0, "model menu footer still duplicates Add provider, or the empty catalog lost its one button");
   await grab("model-menu-add-provider-1440");
-  await page.evaluate(`document.querySelector("[data-model-menu] [data-add-provider]")?.click()`);
+  await page.evaluate(`document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
+  await page.evaluate(`document.querySelector('[data-nav="palette"]')?.click()`);
+  await page.evaluate(`(() => {
+    const input = document.querySelector('[data-nav="palette-dialog"] input');
+    if (!input) return false;
+    const proto = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value");
+    proto.set.call(input, "key");
+    input.dispatchEvent(new InputEvent("input", { bubbles: true, data: "key" }));
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    return true;
+  })()`);
   const back = await waitUntil(
     `Boolean(document.querySelector("[data-providers-root]"))`,
     4000,
-    "add provider from the model menu",
+    "providers from palette key",
   );
-  check(Boolean(back), "Add provider in the model menu did not open Providers");
+  check(Boolean(back), "palette query key did not open Providers");
   await page.evaluate(`document.querySelector('[data-nav="primary"] [data-view="chat"]')?.click()`);
 }
 const CHILD_OBJECTIVE = "Summarize the working directory";
@@ -317,7 +366,7 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
     }
     await page.evaluate(`document.querySelector('[data-action="open-settings"]')?.click()`);
     const settingsUp = await waitUntil(
-      `document.body && document.body.innerText.includes("Keyboard")`,
+      `document.body && document.body.innerText.includes("Appearance") && document.body.innerText.includes("Type size")`,
       8000,
       "settings page",
     );
@@ -327,10 +376,15 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
     await page.evaluate(`document.querySelector('[data-nav="primary"] button')?.click()`);
 
     await shoot("shell-empty", ["desk1024", "desk1440", "mobile"]);
-    const emptyAdd = await page.evaluate(
-      `Boolean(document.querySelector(".sx-empty [data-add-provider]"))`,
-    );
-    check(emptyAdd, "empty transcript is missing Add provider");
+    const emptyState = await page.evaluate(`(() => {
+      const root = document.querySelector(".sx-empty");
+      return {
+        cta: Boolean(root && root.querySelector("[data-add-provider]")),
+        cards: Boolean(root && root.querySelector(".sx-cards")),
+      };
+    })()`);
+    check(emptyState.cards, "empty transcript is missing suggestion cards");
+    check(!emptyState.cta, "empty transcript still shows a duplicate Add provider");
     await headerAt(page, check, viewport, async (name) => {
       const png = await page.send("Page.captureScreenshot", { format: "png" });
       await writeFile(join(outDir, "screenshots", `${name}.png`), Buffer.from(png.data, "base64"));

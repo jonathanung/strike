@@ -209,7 +209,7 @@ pub fn chip_label(model: &str) -> String {
     if model.is_empty() {
         "Model".into()
     } else {
-        model.to_string()
+        format!("Model · {model}")
     }
 }
 
@@ -742,6 +742,13 @@ fn days_from_civil(mut y: i64, m: i64, d: i64) -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chip_label_names_the_model() {
+        assert_eq!(chip_label(""), "Model");
+        assert_eq!(chip_label("  "), "Model");
+        assert_eq!(chip_label("echo"), "Model · echo");
+    }
 
     fn info(id: &str, provider: &str, name: &str) -> ModelInfo {
         ModelInfo {

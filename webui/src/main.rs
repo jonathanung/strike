@@ -26,6 +26,7 @@ mod schedule;
 mod model;
 mod notify;
 mod onboarding;
+mod park;
 mod steer_queue;
 mod model_menu;
 mod model_menu_view;
@@ -2098,6 +2099,54 @@ fn App() -> impl IntoView {
         enter_mode.set("queue".into());
         save("strike.enterMode", "queue");
     };
+    shell::bind(
+        "settings.font",
+        Rc::new(move |value| {
+            set_font(value.to_string());
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "settings.density",
+        Rc::new(move |value| {
+            set_density(value.to_string());
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "settings.export-browser",
+        Rc::new(move |_| {
+            appearance::download("strike-browser.json", &appearance::export_browser_json());
+            status.set("Downloaded browser settings. The token was left out.".into());
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "settings.export-daemon",
+        Rc::new(move |_| {
+            let (b, t) = (base.get_untracked(), token.get_untracked());
+            spawn_local(async move {
+                match get_json::<serde_json::Value>(&b, &t, "/v1/settings").await {
+                    Ok(v) => {
+                        let body = serde_json::to_string_pretty(&v).unwrap_or_else(|_| "{}".into());
+                        appearance::download("strike-daemon-settings.json", &body);
+                        status.set("Downloaded the daemon settings dials.".into());
+                    }
+                    Err(e) => status.set(format!("Could not export daemon settings: {e}")),
+                }
+            });
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "settings.clear",
+        Rc::new(move |_| {
+            appearance::clear_strike_keys();
+            on_cleared();
+            status.set("Cleared Strike keys in this browser. Daemon files were left in place.".into());
+            Ok(())
+        }),
+    );
 
     let set_memory = move |mode: String| {
         memory_menu.set(false);
@@ -2361,15 +2410,31 @@ fn App() -> impl IntoView {
             .into_iter()
             .map(|model| shell::Choice {
                 id: format!("{}\t{}", model.provider, model.id),
-                label: if model.name.is_empty() {
-                    model.id.clone()
-                } else {
-                    model.name.clone()
+                label: {
+                    let provider = if model.provider.is_empty() {
+                        "model".to_string()
+                    } else {
+                        model.provider.clone()
+                    };
+                    let id = if model.name.is_empty() {
+                        model.id.clone()
+                    } else {
+                        model.name.clone()
+                    };
+                    format!("Switch model: {provider}/{id}")
                 },
                 detail: model.provider.clone(),
             })
             .collect();
         shell::set_model_choices(rows);
+    });
+    Effect::new(move |_| {
+        let rows = skills
+            .get()
+            .into_iter()
+            .map(|skill| (skill.name, skill.description))
+            .collect();
+        composer_triggers::set_palette_skills(rows);
     });
     let on_default_model = Callback::new(move |(provider, id): (String, String)| {
         let (b, t) = (base.get_untracked(), token.get_untracked());
@@ -2431,6 +2496,23 @@ fn App() -> impl IntoView {
             }
         });
     });
+    {
+        let pick = on_default_model.clone();
+        shell::set_default_model_picker(Rc::new(move |provider, id| {
+            pick.run((provider.to_string(), id.to_string()));
+        }));
+        let effort = on_effort.clone();
+        shell::set_effort_setter(Rc::new(move |level| {
+            effort.run(level.to_string());
+        }));
+        let save = on_default_effort.clone();
+        shell::set_effort_default_setter(Rc::new(move || {
+            let level = effort_level.get_untracked();
+            if !level.trim().is_empty() {
+                save.run(level);
+            }
+        }));
+    }
 
     // #1267 navbar hosts this bell. The component owns its panel and settings.
     let on_notify = Callback::new(move |target: notify::FocusTarget| {
@@ -2683,6 +2765,47 @@ fn App() -> impl IntoView {
             Ok(())
         }),
     );
+    shell::bind(
+        "panel-terminal",
+        Rc::new(move |_args: &str| {
+            side_tab.set("terminal".into());
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "permissions.rules",
+        Rc::new(move |_args: &str| {
+            mode.set("chat".into());
+            panel_open.set(true);
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "skill.use",
+        Rc::new(move |name| {
+            let name = name.trim().trim_start_matches('$');
+            if name.is_empty() {
+                return Err("Pick a skill.".into());
+            }
+            let mut text = draft.get_untracked();
+            if !text.is_empty() && !text.ends_with(' ') {
+                text.push(' ');
+            }
+            text.push('$');
+            text.push_str(name);
+            text.push(' ');
+            draft.set(text);
+            mode.set("chat".into());
+            Ok(())
+        }),
+    );
+    if let Some(name) = park::take("skill.use") {
+        let _ = shell::dispatch("skill.use", &name);
+    }
+    if let Some(_) = park::take("permissions.rules") {
+        mode.set("chat".into());
+        panel_open.set(true);
+    }
     // Git / Worktrees palette performers (#1270). Registered at boot by
     // src/shell/contrib/git_worktree.rs; only the page owns side_tab.
     shell::bind(
@@ -3364,11 +3487,8 @@ fn App() -> impl IntoView {
                 open_picker=move || picker_open.set(true)
             />
         </Show>
-        <Show when=move || mode.get() == "usage" fallback=move || ()>
-            <usage_audit::UsagePage base=base token=token status=status />
-        </Show>
-        <Show when=move || mode.get() == "audit" fallback=move || ()>
-            <usage_audit::AuditPage base=base token=token status=status />
+        <Show when=move || mode.get() == "usage" || mode.get() == "audit" fallback=move || ()>
+            <usage_audit::UsageAuditPages mode=mode base=base token=token status=status />
         </Show>
         <Show when=move || mode.get() == "goals" fallback=move || ()>
             <goals::GoalsPane base=base token=token />
@@ -4199,9 +4319,6 @@ fn App() -> impl IntoView {
                         <button class=move || if side_tab.get() == "changes" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("changes".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("changes")></span>"Changes"</button>
                         <button class=move || if side_tab.get() == "git" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("git".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("git")></span>"Git"</button>
                         <button class=move || if side_tab.get() == "worktrees" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("worktrees".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("worktrees")></span>"Worktrees"</button>
-                        <button class=move || if side_tab.get() == "memory" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("memory".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("memory")></span>"Memory"</button>
-                        <button class=move || if side_tab.get() == "knowledge" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("knowledge".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("knowledge")></span>"Knowledge"</button>
-                        <button class=move || if side_tab.get() == "artifacts" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("artifacts".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("artifacts")></span>"Artifacts"</button>
                         <button class=move || if side_tab.get() == "terminal" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("terminal".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("terminal")></span>"Terminal"</button>
                     </div>
                     <Show when=move || side_tab.get() == "activity">

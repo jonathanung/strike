@@ -92,16 +92,21 @@ pub fn Chrome() -> impl IntoView {
         help_open.set(true);
     }));
 
-    let flat_ids = move || -> Vec<String> {
+    let flat_ids = move || -> Vec<(String, String)> {
         if !arg_id.get_untracked().is_empty() {
             return choice_rows(&arg_id.get_untracked(), &arg_text.get_untracked())
                 .into_iter()
-                .map(|choice| choice.id)
+                .map(|choice| (choice.id, String::new()))
                 .collect();
         }
         registry::palette(&query.get_untracked(), &load_usage())
             .into_iter()
-            .flat_map(|group| group.hits.into_iter().map(|hit| hit.id))
+            .flat_map(|group| {
+                group
+                    .hits
+                    .into_iter()
+                    .map(|hit| (hit.id, hit.args))
+            })
             .collect()
     };
     let run_ready = move |id: String, args: String| {
@@ -395,6 +400,18 @@ pub fn Chrome() -> impl IntoView {
                 <span class="name">"Run a command"</span>
                 <kbd>"Ctrl+K"</kbd>
             </button>
+            <button
+                type="button"
+                class="nav-menu-item"
+                data-action="open-providers"
+                aria-label="Providers"
+                on:click=move |_| {
+                    more_open.set(false);
+                    let _ = host::set_view("providers");
+                }
+            >
+                <span class="name">"Providers"</span>
+            </button>
         </div>
         <div class="shell-alive" data-nav="alive-tray">
             {move || alive_slots().into_iter().map(slot_view).collect_view()}
@@ -474,8 +491,12 @@ pub fn Chrome() -> impl IntoView {
                                     return;
                                 }
                                 let ids = flat_ids();
-                                if let Some(id) = ids.get(cursor.get_untracked()) {
-                                    activate(id.clone());
+                                if let Some((id, args)) = ids.get(cursor.get_untracked()) {
+                                    if args.is_empty() {
+                                        activate(id.clone());
+                                    } else {
+                                        run_ready(id.clone(), args.clone());
+                                    }
                                 }
                             }
                         }
@@ -550,7 +571,9 @@ pub fn Chrome() -> impl IntoView {
                                     let class = if on { "palette-row on" } else { "palette-row" };
                                     let enabled = hit.enabled;
                                     let activate_id = id.clone();
+                                    let args = hit.args.clone();
                                     let run = activate;
+                                    let run_now = run_ready;
                                     blocks.push(view! {
                                         <button
                                             type="button"
@@ -561,7 +584,13 @@ pub fn Chrome() -> impl IntoView {
                                             aria-disabled=(!enabled).to_string()
                                             disabled=!enabled
                                             data-command-id=id
-                                            on:click=move |_| run(activate_id.clone())
+                                            on:click=move |_| {
+                                                if args.is_empty() {
+                                                    run(activate_id.clone());
+                                                } else {
+                                                    run_now(activate_id.clone(), args.clone());
+                                                }
+                                            }
                                         >
                                             <span class="palette-copy">
                                                 <span class="name">{label}</span>

@@ -121,6 +121,23 @@
     display: none;
   }
 
+  /* Settings appearance and the Usage/Audit segment stay tappable.
+     The bar-level .segmented hide is the phone menu collision (#1551);
+     these in-page controls are the settings themselves. */
+  body[data-phone="1"] .settings-page .segmented,
+  body[data-phone="1"] .usage-audit-shell .segmented {
+    display: flex;
+    height: auto;
+    min-height: 44px;
+  }
+
+  body[data-phone="1"] .settings-page .seg-choice,
+  body[data-phone="1"] .settings-page .seg-choice span,
+  body[data-phone="1"] .usage-audit-shell .segmented .seg {
+    min-height: 44px;
+    height: auto;
+  }
+
   body[data-phone="1"] .command-pill kbd {
     display: none;
   }
@@ -395,6 +412,19 @@
      clipped mid-word reads as "more this way" instead of a defect.
      End padding keeps the last chip clear of the fade once the row is
      scrolled fully across. */
+  body[data-phone="1"] .composer-chips .model-menu {
+    order: -1;
+    position: sticky;
+    left: 0;
+    z-index: 3;
+    flex: 0 0 auto;
+    background: var(--bg);
+  }
+
+  body[data-phone="1"] .composer-chips [data-model-chip] {
+    max-width: none;
+  }
+
   body[data-phone="1"] .composer-chips {
     padding-right: 24px;
     -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);

@@ -2,12 +2,66 @@
 //! creates, pauses, runs, edits, and deletes those entries and shows the
 //! session each run wrote.
 
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::api::{self, get_json, patch_json, post_json_value};
+use crate::shell::Choice;
+
+thread_local! {
+    static RUN_CHOICES: RefCell<Vec<Choice>> = RefCell::new(Vec::new());
+    static HOLD_CHOICES: RefCell<Vec<Choice>> = RefCell::new(Vec::new());
+}
+
+pub fn run_choices() -> Vec<Choice> {
+    RUN_CHOICES.with(|rows| rows.borrow().clone())
+}
+
+pub fn hold_choices() -> Vec<Choice> {
+    HOLD_CHOICES.with(|rows| rows.borrow().clone())
+}
+
+fn publish_schedules(items: &[ScheduleItem]) {
+    let run = items
+        .iter()
+        .map(|item| Choice {
+            id: item.id.clone(),
+            label: if item.name.is_empty() {
+                item.id.clone()
+            } else {
+                item.name.clone()
+            },
+            detail: item.kind.clone(),
+        })
+        .collect();
+    let hold = items
+        .iter()
+        .map(|item| {
+            let name = if item.name.is_empty() {
+                item.id.clone()
+            } else {
+                item.name.clone()
+            };
+            let (verb, op) = if item.enabled {
+                ("Pause", "pause")
+            } else {
+                ("Resume", "resume")
+            };
+            Choice {
+                id: format!("{op}\t{}", item.id),
+                label: format!("{verb} {name}"),
+                detail: item.kind.clone(),
+            }
+        })
+        .collect();
+    RUN_CHOICES.with(|rows| *rows.borrow_mut() = run);
+    HOLD_CHOICES.with(|rows| *rows.borrow_mut() = hold);
+}
 
 #[derive(Clone, Default, Deserialize)]
 struct ScheduleItem {
@@ -196,6 +250,7 @@ pub fn SchedulePage(
         spawn_local(async move {
             match get_json::<ScheduleList>(&b, &t, "/v1/schedules").await {
                 Ok(list) => {
+                    publish_schedules(&list.schedules);
                     items.set(list.schedules);
                     error.set(String::new());
                 }
@@ -214,6 +269,96 @@ pub fn SchedulePage(
     };
 
     refresh();
+
+    let run_saved = {
+        let base = base;
+        let token = token;
+        Rc::new(move |id: String| {
+            if id.is_empty() {
+                error.set("Save the schedule before running it.".into());
+                return;
+            }
+            let (b, t) = (base.get_untracked(), token.get_untracked());
+            spawn_local(async move {
+                match post_json_value(&b, &t, &format!("/v1/schedules/{id}/run"), json!({})).await {
+                    Ok(v) => {
+                        error.set(String::new());
+                        let sid = v
+                            .get("sessionId")
+                            .and_then(|s| s.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        if sid.is_empty() {
+                            notice.set("Run recorded.".into());
+                        } else {
+                            notice.set(format!("Started session {sid}."));
+                        }
+                        status.set(format!("Schedule {id} fired."));
+                        refresh();
+                    }
+                    Err(e) => {
+                        notice.set(String::new());
+                        error.set(e);
+                    }
+                }
+            });
+        })
+    };
+    let hold_saved = {
+        let base = base;
+        let token = token;
+        Rc::new(move |args: String| {
+            let (op, id) = args.split_once('\t').unwrap_or(("pause", args.as_str()));
+            let id = id.to_string();
+            if id.is_empty() {
+                return;
+            }
+            let path = format!("/v1/schedules/{id}/{op}");
+            let (b, t) = (base.get_untracked(), token.get_untracked());
+            let resumed = op == "resume";
+            spawn_local(async move {
+                match post_json_value(&b, &t, &path, json!({})).await {
+                    Ok(_) => {
+                        error.set(String::new());
+                        notice.set(
+                            if resumed {
+                                "Resumed. Missed fires stay missed.".into()
+                            } else {
+                                "Paused.".into()
+                            },
+                        );
+                        enabled.set(resumed);
+                        refresh();
+                    }
+                    Err(e) => error.set(e),
+                }
+            });
+        })
+    };
+    {
+        let run_bind = run_saved.clone();
+        let hold_bind = hold_saved.clone();
+        crate::shell::bind(
+            "schedule.run",
+            Rc::new(move |id| {
+                run_bind(id.to_string());
+                Ok(())
+            }),
+        );
+        crate::shell::bind(
+            "schedule.hold",
+            Rc::new(move |args| {
+                hold_bind(args.to_string());
+                Ok(())
+            }),
+        );
+        if let Some(id) = crate::park::take("schedule.run") {
+            run_saved(id);
+        }
+        if let Some(args) = crate::park::take("schedule.hold") {
+            hold_saved(args);
+        }
+    }
 
     let clear_form = move || {
         editing.set(String::new());
@@ -313,60 +458,6 @@ pub fn SchedulePage(
                     notice.set(String::new());
                     error.set(e);
                 }
-            }
-        });
-    };
-
-    let run_now = move || {
-        let id = editing.get_untracked();
-        if id.is_empty() {
-            error.set("Save the schedule before running it.".into());
-            return;
-        }
-        let (b, t) = (base.get_untracked(), token.get_untracked());
-        spawn_local(async move {
-            match post_json_value(&b, &t, &format!("/v1/schedules/{id}/run"), json!({})).await {
-                Ok(v) => {
-                    error.set(String::new());
-                    let sid = v.get("sessionId").and_then(|s| s.as_str()).unwrap_or("").to_string();
-                    if sid.is_empty() {
-                        notice.set("Run recorded.".into());
-                    } else {
-                        notice.set(format!("Started session {sid}."));
-                    }
-                    refresh();
-                    load_history(id);
-                }
-                Err(e) => {
-                    notice.set(String::new());
-                    error.set(e);
-                    refresh();
-                }
-            }
-        });
-    };
-
-    let set_enabled = move |on: bool| {
-        let id = editing.get_untracked();
-        if id.is_empty() {
-            enabled.set(on);
-            return;
-        }
-        let (b, t) = (base.get_untracked(), token.get_untracked());
-        let path = if on {
-            format!("/v1/schedules/{id}/resume")
-        } else {
-            format!("/v1/schedules/{id}/pause")
-        };
-        spawn_local(async move {
-            match post_json_value(&b, &t, &path, json!({})).await {
-                Ok(_) => {
-                    enabled.set(on);
-                    error.set(String::new());
-                    notice.set(if on { "Resumed. Missed fires stay missed.".into() } else { "Paused.".into() });
-                    refresh();
-                }
-                Err(e) => error.set(e),
             }
         });
     };
@@ -547,10 +638,6 @@ pub fn SchedulePage(
                     </label>
                     <div class="sched-actions">
                         <button type="submit" class="primary">{move || if editing.get().is_empty() { "Create" } else { "Save" }}</button>
-                        <button type="button" class="secondary" on:click=move |_| run_now()>"Run now"</button>
-                        <button type="button" class="secondary" on:click=move |_| set_enabled(!enabled.get_untracked())>
-                            {move || if enabled.get() { "Pause" } else { "Resume" }}
-                        </button>
                         <button type="button" class="secondary" on:click=move |_| remove()>
                             {move || if confirm_delete.get() == editing.get() && !editing.get().is_empty() { "Confirm delete" } else { "Delete" }}
                         </button>

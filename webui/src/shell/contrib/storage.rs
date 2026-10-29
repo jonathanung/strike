@@ -19,7 +19,7 @@ pub fn install(reg: &mut ShellHook) {
         shortcut: "",
         keywords: &["storage", "remember"],
         argument: None,
-        order: 70,
+        order: 40,
         run: Rc::new(|args| crate::shell::dispatch("panel-memory", args)),
         visible: None,
         enabled: None,
@@ -51,6 +51,39 @@ pub fn install(reg: &mut ShellHook) {
         argument: None,
         order: 90,
         run: Rc::new(|args| crate::shell::dispatch("panel-artifacts", args)),
+        visible: None,
+        enabled: None,
+        confirm: None,
+        choices: None,
+    });
+    reg.command(Command {
+        id: "panel-terminal",
+        group: Group::Session,
+        label: "Terminal",
+        detail: "Open the shell panel",
+        shortcut: "",
+        keywords: &["shell", "pty", "console"],
+        argument: None,
+        order: 95,
+        run: Rc::new(|args| crate::shell::dispatch("panel-terminal", args)),
+        visible: None,
+        enabled: None,
+        confirm: None,
+        choices: None,
+    });
+    reg.command(Command {
+        id: "terminal.kill-on-end",
+        group: Group::Session,
+        label: "Close new shells when the session ends",
+        detail: "Toggle whether a new shell dies with the session",
+        shortcut: "",
+        keywords: &["terminal", "pty", "shell", "preference"],
+        argument: None,
+        order: 96,
+        run: Rc::new(|args| {
+            let _ = crate::shell::dispatch("panel-terminal", "");
+            crate::park::dispatch_or_park("terminal.kill-on-end", args)
+        }),
         visible: None,
         enabled: None,
         confirm: None,
