@@ -170,9 +170,20 @@ func TestFinishingTurnJoinsBeforeProcessingNextOp(t *testing.T) {
 	}
 }
 
+// orderingWait bounds the anti-hang waits in this file. It is not a
+// timeliness assertion: the tests assert that the expected event/request
+// arrives and that history is exact, never how fast. The budget must absorb
+// -race overhead on loaded CI VMs — TestUserInputImmediatelyAfterTurnCompletedStartsNextTurn
+// deliberately allocates 500k held cancels to slow first-turn cleanup, and a
+// flat 2s budget lost that race in 13 of 20 -race repetitions on a 2-CPU VM
+// (flake-hunter 2026-10-29). 30s matches the webui-smoke WAIT_MS convention:
+// long enough never to fire on slow scheduling, short enough that a genuine
+// deadlock still fails inside the package timeout.
+const orderingWait = 30 * time.Second
+
 func receiveEngineEvent(t *testing.T, events <-chan protocol.Event, match func(protocol.Event) bool) protocol.Event {
 	t.Helper()
-	deadline := time.NewTimer(2 * time.Second)
+	deadline := time.NewTimer(orderingWait)
 	defer deadline.Stop()
 	for {
 		select {
@@ -202,7 +213,7 @@ func receiveProviderRequest(t *testing.T, requests <-chan provider.Request) prov
 
 func receiveProviderRequestWhileDrainingEvents(t *testing.T, requests <-chan provider.Request, events <-chan protocol.Event) provider.Request {
 	t.Helper()
-	deadline := time.NewTimer(2 * time.Second)
+	deadline := time.NewTimer(orderingWait)
 	defer deadline.Stop()
 	for {
 		select {
