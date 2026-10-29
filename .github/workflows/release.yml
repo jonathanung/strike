@@ -280,46 +280,6 @@ jobs:
           fi
           ( cd desktop/app && "${cmd[@]}" )
 
-          if [ "$(uname -s)" = "Darwin" ]; then
-            app=""
-            while IFS= read -r -d '' candidate; do
-              app="${candidate}"
-              break
-            done < <(find desktop -type d -name 'Strike.app' -path '*/bundle/*' -print0)
-            if [ -z "${app}" ]; then
-              echo "::error::Strike.app was not produced"
-              exit 1
-            fi
-            bin=""
-            while IFS= read -r -d '' candidate; do
-              bin="${candidate}"
-              break
-            done < <(find "${app}/Contents/MacOS" -maxdepth 1 -type f -print0)
-            if [ -z "${bin}" ]; then
-              echo "::error::no executable inside ${app}"
-              exit 1
-            fi
-            info="$(lipo -info "${bin}")"
-            echo "${info}"
-            case "${info}" in
-              *x86_64*arm64*|*arm64*x86_64*) ;;
-              *)
-                echo "::error::expected a universal binary, got: ${info}"
-                exit 1
-                ;;
-            esac
-            codesign -dv "${app}" > /tmp/codesign.txt 2>&1 || true
-            cat /tmp/codesign.txt
-            if grep -q 'Developer ID' /tmp/codesign.txt; then
-              echo "::error::refusing a Developer ID signature; macOS bundles stay unsigned"
-              exit 1
-            fi
-            if ! grep -Eq 'Signature=adhoc|flags=0x2\(adhoc\)' /tmp/codesign.txt; then
-              echo "::error::expected an ad-hoc signature (unsigned for Gatekeeper, launchable on Apple Silicon)"
-              exit 1
-            fi
-          fi
-
           mkdir -p dist/desktop
           copied=0
           while IFS= read -r -d '' f; do
@@ -373,6 +333,58 @@ jobs:
             echo "::error::expected ${expect} bundles for ${ASSET_LABEL}, copied ${copied}"
             find desktop -path '*/bundle/*' -type f -print
             exit 1
+          fi
+          # Tauri removes the loose Strike.app after it packs the dmg.
+          # Check the app inside the disk image we actually upload.
+          if [ "$(uname -s)" = "Darwin" ]; then
+            dmg="dist/desktop/strike-desktop_${ASSET_VERSION}_darwin_universal.dmg"
+            if [ ! -f "${dmg}" ]; then
+              echo "::error::universal dmg was not produced"
+              exit 1
+            fi
+            mnt="$(mktemp -d)"
+            hdiutil attach "${dmg}" -nobrowse -readonly -mountpoint "${mnt}"
+            app=""
+            while IFS= read -r -d '' candidate; do
+              app="${candidate}"
+              break
+            done < <(find "${mnt}" -type d -name 'Strike.app' -print0)
+            if [ -z "${app}" ]; then
+              hdiutil detach "${mnt}" || true
+              echo "::error::Strike.app was not inside ${dmg}"
+              exit 1
+            fi
+            bin=""
+            while IFS= read -r -d '' candidate; do
+              bin="${candidate}"
+              break
+            done < <(find "${app}/Contents/MacOS" -maxdepth 1 -type f -print0)
+            if [ -z "${bin}" ]; then
+              hdiutil detach "${mnt}" || true
+              echo "::error::no executable inside ${app}"
+              exit 1
+            fi
+            info="$(lipo -info "${bin}")"
+            echo "${info}"
+            case "${info}" in
+              *x86_64*arm64*|*arm64*x86_64*) ;;
+              *)
+                hdiutil detach "${mnt}" || true
+                echo "::error::expected a universal binary, got: ${info}"
+                exit 1
+                ;;
+            esac
+            codesign -dv "${app}" > /tmp/codesign.txt 2>&1 || true
+            cat /tmp/codesign.txt
+            hdiutil detach "${mnt}" || hdiutil detach -force "${mnt}"
+            if grep -q 'Developer ID' /tmp/codesign.txt; then
+              echo "::error::refusing a Developer ID signature; macOS bundles stay unsigned"
+              exit 1
+            fi
+            if ! grep -Eq 'Signature=adhoc|flags=0x2\(adhoc\)' /tmp/codesign.txt; then
+              echo "::error::expected an ad-hoc signature (unsigned for Gatekeeper, launchable on Apple Silicon)"
+              exit 1
+            fi
           fi
           python3 - <<'PY'
           import pathlib, sys
