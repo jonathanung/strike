@@ -5,7 +5,7 @@ description: Cut a strike-cli GitHub release from main — preflight, notes, ann
 
 # Release (strike-cli)
 
-Ship a version tag that triggers `.github/workflows/release.yml` (multi-arch archives + GitHub Release).
+Ship a version tag that triggers `.github/workflows/release.yml` (multi-arch CLI archives + GitHub Release). Pre-release tags also attach unsigned desktop installers.
 
 ## Preconditions
 
@@ -71,6 +71,8 @@ gh release view "$VERSION"
 
 Confirm assets: linux/darwin × amd64/arm64 tarballs + `checksums.txt`.
 
+Pre-release tags also attach desktop installers (see below). Stable tags do not. `checksums.txt` stays the CLI archive checksums; desktop files have their own `desktop-checksums.txt`.
+
 ## Verify GitHub release body
 
 `release.yml` creates the install block and copies the matching changelog entry.
@@ -94,9 +96,40 @@ gh release view "$VERSION" --json tagName,assets,url
 - Asset names
 - Whether the body matches the versioned changelog entry
 
+## Desktop bundles
+
+Attached only for pre-release tags:
+
+- `v0.10.*` (the 0.10 line, including `v0.10.0` and `v0.10.0-rc.N`)
+- any other `v*` tag with a semver pre-release suffix (`v1.0.0-rc.1`)
+
+Stable tags (`v0.5.3`, `v0.11.0`, `v1.0.0`) keep today's CLI asset set only.
+
+Additive names (they do not replace `strike_<tag>_<os>_<arch>.tar.gz` or `checksums.txt`):
+
+| Asset | What it is |
+|---|---|
+| `strike-desktop_<tag>_linux_amd64.deb` | Linux amd64 Debian package |
+| `strike-desktop_<tag>_linux_amd64.AppImage` | Linux amd64 AppImage |
+| `strike-desktop_<tag>_darwin_universal.dmg` | macOS arm64+x64 disk image |
+| `desktop-checksums.txt` | sha256 of those installers only |
+
+macOS bundles are unsigned: ad-hoc signature only, no Apple Developer ID, no notarization. Gatekeeper blocks a normal double-click. Open the DMG, then Control-click `Strike.app` and choose Open, or use System Settings → Privacy & Security → Open Anyway. If it still refuses: `xattr -dr com.apple.quarantine /Applications/Strike.app`. Native Windows installers are not built.
+
+Dry-run on a branch (builds bundles, uploads workflow artifacts, does not create or edit a release):
+
+```sh
+gh workflow run release.yml --ref <branch> -f dry_run=true
+gh run list --workflow=release.yml --limit 3
+```
+
+`dry_run=false` fails the workflow. It is not a publish switch.
+
 ## Hard rules
 
 1. No force tag move; no secrets in notes.
 2. No release while main CI is failing unless user overrides in writing.
 3. Annotated tags only (`-a`).
 4. Prefer patch/minor policy the user stated; default to their explicit version string.
+5. Do not attach desktop bundles to stable tags, and do not replace `checksums.txt` or the CLI tarball names.
+6. macOS desktop bundles stay unsigned (no Developer ID, no notarization) until a signing change says otherwise.

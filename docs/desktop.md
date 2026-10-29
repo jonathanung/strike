@@ -74,12 +74,20 @@ the proxy, so a browser pointed straight at `strike serve` does not grow it.
 - The shell does not pass `--allow-private-bind` and does not change the
   daemon's bind or CORS.
 
+## Release bundles
+
+Pre-release GitHub Releases attach unsigned Linux and macOS installers next
+to the CLI tarballs. Asset names, the Gatekeeper steps, and which tags get
+them are in [install.md](install.md). Stable tags do not attach them. Native
+Windows bundles are not built.
+
 ## What is not built
 
-- **Auto-update.** Do not ship a release pipeline in this change. When one
-  exists, the recommended path is the Tauri updater with a minisign key,
-  GitHub Releases as the endpoint, a check on launch, and an explicit
-  confirm. No silent install, and no phone-home in this shell today.
+- **Auto-update.** The release pipeline uploads the installers as plain
+  assets. It does not publish a Tauri updater manifest or a minisign key.
+  When an updater exists, the path is still the Tauri updater with a
+  minisign key, GitHub Releases as the endpoint, a check on launch, and an
+  explicit confirm. No silent install, and no phone-home in this shell today.
 - **In-app QR camera.** Paste the link. Scanning waits on #1289, and the
   phone's own camera can open a URL without this shell.
 - **A second gateway switcher.** The page already has one. This list is
@@ -90,10 +98,12 @@ the proxy, so a browser pointed straight at `strike serve` does not grow it.
 - **Protocol field on `/health`.** `version` there is the product version.
   This shell compares `protocol` or `protocolVersion` to `1.19.0` only
   when that field is present.
-- **Windows and macOS bundles.** Not measured here. On Windows the same
-  Linux build can run under WSL2; a native WebView2 shell is a `tauri build`
-  on Windows, with the keychain crate's Windows credential store. macOS uses
-  the Keychain when built on macOS.
+- **Signed macOS builds and native Windows bundles.** Release DMGs are
+  ad-hoc signed only (see [install.md](install.md)). A Developer ID signature
+  and notarization are not part of this pipeline. On Windows the Linux build
+  can run under WSL2; a native WebView2 shell is a `tauri build` on Windows,
+  with the keychain crate's Windows credential store. macOS uses the Keychain
+  when the shell is built on macOS.
 
 ## Second machine
 

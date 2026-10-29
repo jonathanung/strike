@@ -4,12 +4,28 @@ on:
   push:
     tags:
       - "v*"
+  # Dry-run: build desktop bundles on a branch and upload them as workflow
+  # artifacts. This path never creates or edits a GitHub Release.
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Build desktop bundles as artifacts and do not publish a GitHub Release
+        type: boolean
+        default: true
 
 permissions:
   contents: write
+  # upload-artifact / download-artifact. Scoped so the desktop jobs can
+  # publish build outputs without widening contents beyond this workflow.
+  actions: write
 
 jobs:
   release:
+    # Tag pushes only. workflow_dispatch must not create a release from a
+    # branch name. The CLI archive step below is the stable asset set
+    # (strike_<tag>_<os>_<arch>.tar.gz + checksums.txt). Desktop bundles
+    # are attached later and never replace these names.
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -99,3 +115,406 @@ jobs:
             --notes-file release-notes.md \
             dist/strike_*.tar.gz \
             dist/checksums.txt
+
+  # workflow_dispatch is a dry-run. Refusing dry_run=false keeps this
+  # trigger from ever becoming a publish path.
+  desktop-dry-run-guard:
+    if: github.event_name == 'workflow_dispatch' && inputs.dry_run == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Refuse a publishing dispatch
+        run: |
+          echo "::error::workflow_dispatch only dry-runs desktop bundles (artifacts, no GitHub Release). Re-run with dry_run=true."
+          exit 1
+
+  # Pre-release tags only, plus the dry-run dispatch.
+  # v0.10.* is the pre-release line (v0.10.0 and v0.10.0-rc.N included).
+  # Any other v* tag with a hyphen is a semver pre-release (v1.0.0-rc.1).
+  # Stable tags (v0.5.3, v0.11.0, v1.0.0) do not build or attach bundles.
+  desktop:
+    name: Desktop (${{ matrix.label }})
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.dry_run) ||
+      (github.event_name == 'push' &&
+        (startsWith(github.ref_name, 'v0.10.') || contains(github.ref_name, '-')))
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Pin 24.04 while ubuntu-latest migrates to 26.04 (Nov 2026).
+          # WebKitGTK 4.1 is the Tauri 2 system webview on both.
+          - os: ubuntu-24.04
+            label: linux-amd64
+            bundles: deb,appimage
+            target: host
+          - os: macos-latest
+            label: darwin-universal
+            bundles: dmg
+            target: universal-apple-darwin
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8
+        with:
+          toolchain: "1.90.0"
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31
+        with:
+          workspaces: desktop
+
+      - name: Install Linux bundle dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            file \
+            pkg-config \
+            patchelf \
+            librsvg2-dev \
+            libssl-dev \
+            libdbus-1-dev \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            libxdo-dev
+
+      - name: Add macOS universal targets
+        if: runner.os == 'macOS'
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
+      # Prebuilt CLI matching the desktop/ crate's Tauri 2.12 line.
+      # Digests are the GitHub release asset sha256 values for tauri-cli-v2.12.4.
+      - name: Install tauri-cli 2.12.4
+        run: |
+          set -euo pipefail
+          case "$(uname -s)-$(uname -m)" in
+            Linux-x86_64)
+              asset=cargo-tauri-x86_64-unknown-linux-gnu.tgz
+              digest=820ae3c7580ca637cad15f65638960ee2a96e5a491e224691c86d6f25e6c9e8a
+              ;;
+            Darwin-arm64)
+              asset=cargo-tauri-aarch64-apple-darwin.zip
+              digest=f71a34ada728ca2d1a51c28d6d21639e1e080898ec69ec8d49c5da3b7e8bc1be
+              ;;
+            Darwin-x86_64)
+              asset=cargo-tauri-x86_64-apple-darwin.zip
+              digest=164d184c0e50800dcae7bb31f0815066ebd27efc3e3bb73117974bcd2e982192
+              ;;
+            *)
+              echo "::error::no pinned tauri-cli build for $(uname -s)-$(uname -m)"
+              exit 1
+              ;;
+          esac
+          url="https://github.com/tauri-apps/tauri/releases/download/tauri-cli-v2.12.4/${asset}"
+          curl -fsSL -o "${asset}" "${url}"
+          python3 - "${asset}" "${digest}" <<'PY'
+          import hashlib, pathlib, sys
+          path, want = sys.argv[1], sys.argv[2]
+          got = hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest()
+          if got != want:
+              sys.exit(f"checksum mismatch for {path}: {got} != {want}")
+          PY
+          mkdir -p "$HOME/.local/bin"
+          case "${asset}" in
+            *.tgz) tar -C "$HOME/.local/bin" -xzf "${asset}" ;;
+            *.zip) unzip -o -d "$HOME/.local/bin" "${asset}" ;;
+          esac
+          chmod +x "$HOME/.local/bin/cargo-tauri"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/cargo-tauri" --version
+
+      - name: Build desktop bundles
+        env:
+          BUNDLES: ${{ matrix.bundles }}
+          TAURI_TARGET: ${{ matrix.target }}
+          ASSET_LABEL: ${{ matrix.label }}
+          TAURI_LINUX_AYATANA_APPINDICATOR: "1"
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="0.0.0-dryrun"
+            ASSET_VERSION="dryrun"
+          else
+            TAG="${GITHUB_REF_NAME}"
+            if ! [[ "${TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+              echo "::error::refusing desktop bundle for unexpected tag ${TAG}"
+              exit 1
+            fi
+            VERSION="${TAG#v}"
+            ASSET_VERSION="${TAG}"
+          fi
+          cfg="$(jq -nc --arg version "${VERSION}" '{version:$version}')"
+          cmd=(cargo tauri build --ci --bundles "${BUNDLES}" --config "${cfg}")
+          if [ "${TAURI_TARGET}" != "host" ]; then
+            cmd+=(--target "${TAURI_TARGET}")
+          fi
+          # --ignore-version-mismatches: CLI 2.12.4 against the locked
+          # tauri crate 2.12.5 (same minor). --locked keeps Cargo.lock.
+          cmd+=(--ignore-version-mismatches -- --locked)
+          if [ "$(uname -s)" = "Darwin" ]; then
+            # Ad-hoc signature only. No Developer ID and no notarization.
+            # APPLE_SIGNING_IDENTITY overwrites tauri.conf.json.
+            unset APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_ID APPLE_PASSWORD \
+              APPLE_TEAM_ID APPLE_API_KEY APPLE_API_ISSUER APPLE_API_KEY_PATH || true
+            export APPLE_SIGNING_IDENTITY="-"
+          fi
+          ( cd desktop/app && "${cmd[@]}" )
+
+          if [ "$(uname -s)" = "Darwin" ]; then
+            app=""
+            while IFS= read -r -d '' candidate; do
+              app="${candidate}"
+              break
+            done < <(find desktop -type d -name 'Strike.app' -path '*/bundle/*' -print0)
+            if [ -z "${app}" ]; then
+              echo "::error::Strike.app was not produced"
+              exit 1
+            fi
+            bin=""
+            while IFS= read -r -d '' candidate; do
+              bin="${candidate}"
+              break
+            done < <(find "${app}/Contents/MacOS" -maxdepth 1 -type f -print0)
+            if [ -z "${bin}" ]; then
+              echo "::error::no executable inside ${app}"
+              exit 1
+            fi
+            info="$(lipo -info "${bin}")"
+            echo "${info}"
+            case "${info}" in
+              *x86_64*arm64*|*arm64*x86_64*) ;;
+              *)
+                echo "::error::expected a universal binary, got: ${info}"
+                exit 1
+                ;;
+            esac
+            codesign -dv "${app}" > /tmp/codesign.txt 2>&1 || true
+            cat /tmp/codesign.txt
+            if grep -q 'Developer ID' /tmp/codesign.txt; then
+              echo "::error::refusing a Developer ID signature; macOS bundles stay unsigned"
+              exit 1
+            fi
+            if ! grep -Eq 'Signature=adhoc|flags=0x2\(adhoc\)' /tmp/codesign.txt; then
+              echo "::error::expected an ad-hoc signature (unsigned for Gatekeeper, launchable on Apple Silicon)"
+              exit 1
+            fi
+          fi
+
+          mkdir -p dist/desktop
+          copied=0
+          while IFS= read -r -d '' f; do
+            base="$(basename "${f}")"
+            case "${base}" in
+              *.deb)
+                [[ "${base}" == *.ddeb ]] && continue
+                arch="$(uname -m)"
+                case "${arch}" in
+                  x86_64) asset_arch=amd64 ;;
+                  aarch64|arm64) asset_arch=arm64 ;;
+                  *)
+                    echo "::error::unsupported linux arch ${arch}"
+                    exit 1
+                    ;;
+                esac
+                dest="dist/desktop/strike-desktop_${ASSET_VERSION}_linux_${asset_arch}.deb"
+                ;;
+              *.AppImage)
+                arch="$(uname -m)"
+                case "${arch}" in
+                  x86_64) asset_arch=amd64 ;;
+                  aarch64|arm64) asset_arch=arm64 ;;
+                  *)
+                    echo "::error::unsupported linux arch ${arch}"
+                    exit 1
+                    ;;
+                esac
+                dest="dist/desktop/strike-desktop_${ASSET_VERSION}_linux_${asset_arch}.AppImage"
+                ;;
+              *.dmg)
+                dest="dist/desktop/strike-desktop_${ASSET_VERSION}_darwin_universal.dmg"
+                ;;
+              *)
+                continue
+                ;;
+            esac
+            if [ -e "${dest}" ]; then
+              echo "::error::duplicate bundle for ${dest} (from ${f})"
+              exit 1
+            fi
+            cp -p "${f}" "${dest}"
+            copied=$((copied + 1))
+          done < <(find desktop -type f -path '*/bundle/*' \( -name '*.deb' -o -name '*.AppImage' -o -name '*.dmg' \) -print0)
+
+          expect=1
+          if [ "${ASSET_LABEL}" = "linux-amd64" ]; then
+            expect=2
+          fi
+          if [ "${copied}" -ne "${expect}" ]; then
+            echo "::error::expected ${expect} bundles for ${ASSET_LABEL}, copied ${copied}"
+            find desktop -path '*/bundle/*' -type f -print
+            exit 1
+          fi
+          python3 - <<'PY'
+          import pathlib, sys
+          root = pathlib.Path("dist/desktop")
+          files = [p for p in root.iterdir() if p.is_file()]
+          if not files:
+              sys.exit("no desktop bundles")
+          for path in files:
+              size = path.stat().st_size
+              if size < 1_000_000:
+                  sys.exit(f"{path} is unexpectedly small ({size} bytes)")
+              print(f"{path.name} {size}")
+          PY
+          python3 - <<PY
+          import hashlib, pathlib
+          lines = []
+          for path in sorted(pathlib.Path("dist/desktop").iterdir()):
+              if not path.is_file():
+                  continue
+              digest = hashlib.sha256(path.read_bytes()).hexdigest()
+              lines.append(f"{digest}  {path.name}")
+          pathlib.Path("dist/desktop/SHA256SUMS-${ASSET_LABEL}").write_text("\n".join(lines) + "\n")
+          PY
+          ls -la dist/desktop
+
+      - name: Upload desktop bundles
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: desktop-bundles-${{ matrix.label }}
+          path: dist/desktop/
+          if-no-files-found: error
+          retention-days: 14
+
+  # Additive upload. Runs only when the CLI release exists and both
+  # bundle jobs succeeded, which is a pre-release tag push. Does not
+  # rebuild checksums.txt or replace CLI tarballs.
+  attach-desktop:
+    name: Attach desktop bundles
+    needs: [release, desktop]
+    if: >-
+      !cancelled() &&
+      github.event_name == 'push' &&
+      needs.release.result == 'success' &&
+      needs.desktop.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Download bundles
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: desktop-bundles-*
+          path: dist/desktop
+          merge-multiple: true
+
+      - name: Upload bundles to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if ! [[ "${TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::refusing to attach desktop bundles to ${TAG}"
+            exit 1
+          fi
+          if ! [[ "${TAG}" == v0.10.* || "${TAG}" == *-* ]]; then
+            echo "::error::desktop bundles attach to pre-release tags only, not ${TAG}"
+            exit 1
+          fi
+          shopt -s nullglob
+          files=(dist/desktop/strike-desktop_*)
+          if [ "${#files[@]}" -ne 3 ]; then
+            echo "::error::expected 3 desktop installers, found ${#files[@]}"
+            ls -la dist/desktop
+            exit 1
+          fi
+          have_deb=0
+          have_appimage=0
+          have_dmg=0
+          for f in "${files[@]}"; do
+            base="$(basename "${f}")"
+            case "${base}" in
+              strike-desktop_*_linux_*.deb) have_deb=1 ;;
+              strike-desktop_*_linux_*.AppImage) have_appimage=1 ;;
+              strike-desktop_*_darwin_universal.dmg) have_dmg=1 ;;
+              *)
+                echo "::error::unexpected desktop asset ${base}"
+                exit 1
+                ;;
+            esac
+            case "${base}" in
+              checksums.txt|strike_*.tar.gz|desktop-checksums.txt)
+                echo "::error::refusing CLI asset name ${base}"
+                exit 1
+                ;;
+            esac
+          done
+          if [ "${have_deb}" -ne 1 ] || [ "${have_appimage}" -ne 1 ] || [ "${have_dmg}" -ne 1 ]; then
+            echo "::error::missing deb, AppImage, or universal dmg"
+            printf '%s\n' "${files[@]}"
+            exit 1
+          fi
+          if compgen -G 'dist/desktop/checksums.txt' > /dev/null || compgen -G 'dist/desktop/strike_*.tar.gz' > /dev/null; then
+            echo "::error::desktop artifacts must not include CLI tarballs or checksums.txt"
+            exit 1
+          fi
+          (
+            cd dist/desktop
+            sha256sum strike-desktop_* | sort -k2 > desktop-checksums.txt
+          )
+          # --clobber overwrites only these filenames on a re-run.
+          # It does not remove the CLI tarballs or checksums.txt.
+          gh release upload "${TAG}" "${files[@]}" dist/desktop/desktop-checksums.txt --clobber
+          gh release view "${TAG}" --json assets --jq '.assets[].name' | sort > /tmp/asset-names.txt
+          cat /tmp/asset-names.txt
+          for required in \
+            "strike_${TAG}_linux_amd64.tar.gz" \
+            "strike_${TAG}_linux_arm64.tar.gz" \
+            "strike_${TAG}_darwin_amd64.tar.gz" \
+            "strike_${TAG}_darwin_arm64.tar.gz" \
+            "checksums.txt" \
+            "desktop-checksums.txt"
+          do
+            if ! grep -Fxq "${required}" /tmp/asset-names.txt; then
+              echo "::error::release is missing ${required}"
+              exit 1
+            fi
+          done
+
+      - name: Append unsigned-macOS notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" > release.json
+          id="$(jq -r .id release.json)"
+          jq -r '.body // ""' release.json > release-body.md
+          if grep -q '^## Desktop$' release-body.md; then
+            echo "desktop section already present; leaving release flags untouched"
+            exit 0
+          fi
+          cat >> release-body.md <<EOF
+
+          ## Desktop
+
+          Pre-release desktop installers. These are additive: \`install.sh\` and \`strike --upgrade\` still use the \`strike_${TAG}_<os>_<arch>.tar.gz\` archives and \`checksums.txt\`. \`desktop-checksums.txt\` covers only the desktop files.
+
+          - \`strike-desktop_${TAG}_linux_amd64.deb\`
+          - \`strike-desktop_${TAG}_linux_amd64.AppImage\`
+          - \`strike-desktop_${TAG}_darwin_universal.dmg\`
+
+          The macOS app is not signed with an Apple Developer ID and is not notarized. It has an ad-hoc signature so Apple Silicon can launch it. Gatekeeper will block a normal double-click. Open the DMG, drag Strike to Applications, then Control-click \`Strike.app\` and choose Open. Or use System Settings → Privacy & Security → Open Anyway. If macOS still refuses the app: \`xattr -dr com.apple.quarantine /Applications/Strike.app\`.
+
+          Native Windows installers are not published. On Windows, run the Linux build under WSL2 or use the CLI.
+          EOF
+          # PATCH body only. prerelease and latest are left as the create step set them.
+          jq -n --rawfile body release-body.md '{body:$body}' > release-patch.json
+          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${id}" --input release-patch.json --jq '{id,prerelease,make_latest}'
