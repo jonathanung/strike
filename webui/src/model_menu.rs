@@ -186,12 +186,18 @@ pub fn toggle_pin(pins: &mut Vec<String>, key: &str) {
 }
 
 /// "This session only" when the live pair differs from the saved default.
+/// `defaults_known` is true only after GET /v1/settings succeeded. A failed
+/// or not-yet-finished load must not be described as "no default saved".
 pub fn scope_label(
     provider: &str,
     model: &str,
     default_provider: &str,
     default_model: &str,
+    defaults_known: bool,
 ) -> &'static str {
+    if !defaults_known {
+        return "Global default unknown";
+    }
     let dp = default_provider.trim();
     let dm = default_model.trim();
     if dp.is_empty() && dm.is_empty() {
@@ -797,9 +803,24 @@ mod tests {
         assert_eq!(capability_line(&bare), "Capabilities not reported");
         assert_eq!(parse_freeform("nope/missing", "echo"), ("nope".into(), "missing".into()));
         assert_eq!(parse_freeform("custom-id", "echo"), ("echo".into(), "custom-id".into()));
-        assert_eq!(scope_label("echo", "echo", "", ""), "No global default saved");
-        assert_eq!(scope_label("echo", "echo", "echo", "echo"), "Matches the global default");
-        assert_eq!(scope_label("echo", "other", "echo", "echo"), "This session only");
+        assert_eq!(scope_label("echo", "echo", "", "", true), "No global default saved");
+        assert_eq!(
+            scope_label("echo", "echo", "echo", "echo", true),
+            "Matches the global default"
+        );
+        assert_eq!(scope_label("echo", "other", "echo", "echo", true), "This session only");
+        assert_eq!(
+            scope_label("echo", "echo", "", "", false),
+            "Global default unknown"
+        );
+        assert_ne!(
+            scope_label("echo", "echo", "", "", false),
+            "No global default saved"
+        );
+        assert_eq!(
+            scope_label("echo", "echo", "echo", "echo", false),
+            "Global default unknown"
+        );
     }
 
     #[test]

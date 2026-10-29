@@ -201,6 +201,11 @@ pub fn rule_remove_confirm(scope: &str, index: i32, action: &str) -> Option<Pend
 /// Visible countdown. A positive config value wins. Otherwise soft-approve
 /// uses 15 seconds. Excluded permission names never count down.
 pub fn countdown_seconds(mode: &str, configured: i32, permission: &str, exclude: &[String]) -> i32 {
+    // Negative means the settings load failed or has not confirmed a value.
+    // A countdown from that state would invent the daemon's auto-approve.
+    if configured < 0 {
+        return 0;
+    }
     if exclude
         .iter()
         .any(|name| name.eq_ignore_ascii_case(permission))
@@ -697,6 +702,10 @@ mod tests {
             countdown_seconds("soft-approve", 15, "bash", &["Bash".into()]),
             0
         );
+        // A failed settings load uses a negative sentinel. Soft-approve must
+        // not fall through to the 15s default.
+        assert_eq!(countdown_seconds("soft-approve", -1, "bash", &[]), 0);
+        assert_eq!(countdown_seconds("default", -1, "bash", &[]), 0);
     }
 
     #[test]

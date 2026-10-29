@@ -255,6 +255,13 @@ pub fn strip_echo_progress(text: &str) -> String {
     strip_echo_tip(text)
 }
 
+/// Title and pin from before an optimistic rename.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TitleSnap {
+    pub title: String,
+    pub pin: Option<String>,
+}
+
 #[derive(Clone, Debug)]
 pub struct Transcript {
     pub messages: Vec<Message>,
@@ -341,6 +348,22 @@ impl Transcript {
     pub fn pin_title(&mut self, title: String) {
         self.title = title.clone();
         self.title_pin = Some(title);
+    }
+
+    /// Title plus pin, captured before an optimistic rename.
+    pub fn snapshot_title(&self) -> TitleSnap {
+        TitleSnap {
+            title: self.title.clone(),
+            pin: self.title_pin.clone(),
+        }
+    }
+
+    /// Put back the snapshot from before a rename the daemon rejected.
+    /// Restores the previous pin too, so an earlier unconfirmed rename
+    /// stays protected and a failed one does not keep blocking listed titles.
+    pub fn restore_title(&mut self, snap: TitleSnap) {
+        self.title = snap.title;
+        self.title_pin = snap.pin;
     }
 
     pub fn regenerated_title(&self) -> String {
@@ -2028,6 +2051,29 @@ mod tests {
         t.set_listed_title("first prompt");
         assert_eq!(t.title, "Renamed");
         t.set_listed_title("Renamed");
+        assert!(t.title_pin.is_none());
+    }
+
+    #[test]
+    fn failed_rename_rolls_the_pin_back() {
+        let mut t = Transcript::new();
+        t.set_listed_title("Saved title");
+        assert!(t.title_pin.is_none());
+        let snap = t.snapshot_title();
+        t.pin_title("Unsaved".into());
+        assert_eq!(t.title, "Unsaved");
+        assert_eq!(t.title_pin.as_deref(), Some("Unsaved"));
+        // A listed title that is not the failed pin is ignored while it is held.
+        t.set_listed_title("Saved title");
+        assert_eq!(t.title, "Unsaved");
+        t.restore_title(snap);
+        assert_eq!(t.title, "Saved title");
+        assert!(t.title_pin.is_none());
+        // After rollback the daemon's title is accepted again.
+        t.set_listed_title("Saved title");
+        assert_eq!(t.title, "Saved title");
+        t.set_listed_title("From daemon");
+        assert_eq!(t.title, "From daemon");
         assert!(t.title_pin.is_none());
     }
 

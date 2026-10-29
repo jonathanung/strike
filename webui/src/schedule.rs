@@ -8,6 +8,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::api::{self, get_json, patch_json, post_json_value};
+use crate::outcome;
 
 #[derive(Clone, Default, Deserialize)]
 struct ScheduleItem {
@@ -157,6 +158,7 @@ pub fn SchedulePage(
     let workflows = RwSignal::new(Vec::<Named>::new());
     let error = RwSignal::new(String::new());
     let notice = RwSignal::new(String::new());
+    let retry_open = RwSignal::new(String::new());
     let editing = RwSignal::new(String::new());
     let confirm_delete = RwSignal::new(String::new());
     let name = RwSignal::new(String::new());
@@ -403,11 +405,23 @@ pub fn SchedulePage(
             return;
         }
         let (b, t) = (base.get_untracked(), token.get_untracked());
-        active_root.set(id.clone());
-        mode.set("chat".into());
-        status.set(format!("Opened {id}"));
+        error.set(String::new());
+        retry_open.set(String::new());
         spawn_local(async move {
-            let _ = post_json_value(&b, &t, &format!("/v1/roots/{id}/activate"), json!({})).await;
+            let result = post_json_value(&b, &t, &format!("/v1/roots/{id}/activate"), json!({}))
+                .await
+                .map(|_| ());
+            let decision = outcome::schedule_open(&id, result);
+            if decision.opened {
+                active_root.set(id);
+                mode.set("chat".into());
+                status.set(decision.status);
+                error.set(String::new());
+                retry_open.set(String::new());
+            } else {
+                error.set(decision.error);
+                retry_open.set(id);
+            }
         });
     };
 
@@ -420,6 +434,9 @@ pub fn SchedulePage(
             <p class="hint">"A clock in the daemon. Unattended runs use the workspace permission mode, or plan when the workspace has none. Plan denies writes."</p>
             <Show when=move || !error.get().is_empty()>
                 <p class="sched-error" role="alert">{move || error.get()}</p>
+            </Show>
+            <Show when=move || !retry_open.get().is_empty()>
+                <button type="button" class="secondary" data-sched-retry="true" on:click=move |_| open_session(retry_open.get())>"Retry"</button>
             </Show>
             <Show when=move || !notice.get().is_empty()>
                 <p class="sched-note" role="status">{move || notice.get()}</p>

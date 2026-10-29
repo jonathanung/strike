@@ -16,6 +16,7 @@ use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 
 use crate::api::{api, auth_header};
+use crate::outcome;
 
 /// Page wiring for the shell slot in `src/shell/contrib/gateway.rs`.
 /// The shell boots before App's signals exist, so App installs them here
@@ -711,12 +712,17 @@ pub fn GatewaySwitcher(
     let logout_browser = move |_| {
         let (b, t, id) = (base.get(), token.get(), selected.get());
         spawn_local(async move {
-            let _ = gateway_fetch("POST", &b, &t, "/v1/gateway/logout", Some(json!({}))).await;
-            token.set(String::new());
-            persist_token(&id, "");
-            forget_persisted_host_token();
-            detail.set("Logged out this browser. The host token file was not changed.".into());
-            gateway.set("unauthorized".into());
+            let result = gateway_fetch("POST", &b, &t, "/v1/gateway/logout", Some(json!({}))).await;
+            match outcome::logout_outcome(result) {
+                Ok(message) => {
+                    token.set(String::new());
+                    persist_token(&id, "");
+                    forget_persisted_host_token();
+                    detail.set(message.into());
+                    gateway.set("unauthorized".into());
+                }
+                Err(message) => detail.set(message),
+            }
         });
     };
 

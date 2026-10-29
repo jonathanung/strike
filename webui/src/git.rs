@@ -12,6 +12,7 @@ use wasm_bindgen::JsCast;
 
 use crate::api::{get_json, post_json_value};
 use crate::model::{ChangedFilesResponse, ChildSession, ChildrenResponse};
+use crate::outcome;
 
 #[derive(Clone, Debug, Deserialize)]
 struct GitFile {
@@ -229,9 +230,12 @@ pub fn GitPanel(
                     ahead.set(st.ahead);
                     behind.set(st.behind);
                     detached.set(st.detached);
-                    let changes = get_json::<ChangedFilesResponse>(&b, &t, "/v1/changed-files")
-                        .await
-                        .unwrap_or(ChangedFilesResponse { files: vec![] });
+                    let changes = outcome::take_ok(
+                        &mut err,
+                        "Changed files",
+                        get_json::<ChangedFilesResponse>(&b, &t, "/v1/changed-files").await,
+                    )
+                    .unwrap_or(ChangedFilesResponse { files: vec![] });
                     let mut seen = HashSet::new();
                     let mut list = Vec::new();
                     for file in st.staged {
@@ -297,28 +301,24 @@ pub fn GitPanel(
                 }
                 Err(e) => err = e,
             }
-            match get_json::<GitBranches>(&b, &t, "/v1/git/branches").await {
-                Ok(body) => {
-                    if switch_to.get_untracked().is_empty() {
-                        if let Some(cur) = body.branches.iter().find(|b| b.current) {
-                            switch_to.set(cur.name.clone());
-                        }
-                    }
-                    branches.set(body.branches);
-                }
-                Err(e) => {
-                    if err.is_empty() {
-                        err = e;
+            if let Some(body) = outcome::take_ok(
+                &mut err,
+                "Branches",
+                get_json::<GitBranches>(&b, &t, "/v1/git/branches").await,
+            ) {
+                if switch_to.get_untracked().is_empty() {
+                    if let Some(cur) = body.branches.iter().find(|b| b.current) {
+                        switch_to.set(cur.name.clone());
                     }
                 }
+                branches.set(body.branches);
             }
-            match get_json::<GitLog>(&b, &t, "/v1/git/log?limit=30").await {
-                Ok(body) => commits.set(body.commits),
-                Err(e) => {
-                    if err.is_empty() {
-                        err = e;
-                    }
-                }
+            if let Some(body) = outcome::take_ok(
+                &mut err,
+                "Log",
+                get_json::<GitLog>(&b, &t, "/v1/git/log?limit=30").await,
+            ) {
+                commits.set(body.commits);
             }
             error.set(err);
         });
@@ -734,22 +734,29 @@ pub fn WorktreePanel(
             active_root.get_untracked(),
         );
         spawn_local(async move {
-            match get_json::<WorktreesBody>(&b, &t, "/v1/git/worktrees").await {
-                Ok(parsed) => {
-                    body.set(Some(parsed));
-                    error.set(String::new());
-                }
-                Err(e) => error.set(e),
+            let mut err = String::new();
+            if let Some(parsed) = outcome::take_ok(
+                &mut err,
+                "Worktrees",
+                get_json::<WorktreesBody>(&b, &t, "/v1/git/worktrees").await,
+            ) {
+                body.set(Some(parsed));
             }
             if root.is_empty() {
                 kids.set(vec![]);
+                error.set(err);
                 return;
             }
             let path = format!("/v1/sessions/{}/children", crate::api::js_encode(&root));
-            match get_json::<ChildrenResponse>(&b, &t, &path).await {
-                Ok(parsed) => kids.set(parsed.sessions),
-                Err(_) => kids.set(vec![]),
+            match outcome::take_ok(
+                &mut err,
+                "Children",
+                get_json::<ChildrenResponse>(&b, &t, &path).await,
+            ) {
+                Some(parsed) => kids.set(parsed.sessions),
+                None => kids.set(vec![]),
             }
+            error.set(err);
         });
     };
 

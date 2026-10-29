@@ -18,6 +18,7 @@ use crate::approvals::{
     PendingConfirm, PermNote, RuleRecord, RulesDocument, SettingsBits,
 };
 use crate::model::{mode_label, permission_modes, Workspace};
+use crate::outcome::{self, AUTO_SECONDS_UNKNOWN};
 
 pub fn commit_session_mode(
     base: RwSignal<String>,
@@ -429,30 +430,39 @@ fn reload_panel(
     stored_audit: RwSignal<AuditDocument>,
     panel_error: RwSignal<String>,
 ) {
+    panel_error.set(String::new());
     let (b, t) = (base.get_untracked(), token.get_untracked());
     spawn_local(async move {
-        match get_json::<SettingsBits>(&b, &t, "/v1/settings").await {
-            Ok(bits) => {
-                auto_seconds.set(bits.auto_seconds);
+        // One slot for the whole reload. A later 200 must not clear an
+        // earlier failure — the rules arm used to do that, which hid a
+        // failed auto-approve settings load.
+        let mut err = String::new();
+        match outcome::take_ok(
+            &mut err,
+            "Settings",
+            get_json::<SettingsBits>(&b, &t, "/v1/settings").await,
+        ) {
+            Some(bits) => {
+                auto_seconds.set(outcome::confirmed_auto_seconds(Some(bits.auto_seconds)));
                 auto_exclude.set(bits.auto_exclude);
             }
-            Err(e) => panel_error.set(e),
+            None => auto_seconds.set(AUTO_SECONDS_UNKNOWN),
         }
-        match get_json::<RulesDocument>(&b, &t, "/v1/permissions/rules").await {
-            Ok(doc) => {
-                rules.set(doc);
-                panel_error.set(String::new());
-            }
-            Err(e) => panel_error.set(e),
+        if let Some(doc) = outcome::take_ok(
+            &mut err,
+            "Rules",
+            get_json::<RulesDocument>(&b, &t, "/v1/permissions/rules").await,
+        ) {
+            rules.set(doc);
         }
-        match get_json::<AuditDocument>(&b, &t, "/v1/permissions/audit?limit=40").await {
-            Ok(doc) => stored_audit.set(doc),
-            Err(e) => {
-                if panel_error.get_untracked().is_empty() {
-                    panel_error.set(e);
-                }
-            }
+        if let Some(doc) = outcome::take_ok(
+            &mut err,
+            "Audit",
+            get_json::<AuditDocument>(&b, &t, "/v1/permissions/audit?limit=40").await,
+        ) {
+            stored_audit.set(doc);
         }
+        panel_error.set(err);
     });
 }
 
