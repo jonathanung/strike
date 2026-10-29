@@ -15,6 +15,7 @@ mod chat_mode;
 mod confirm;
 mod composer_triggers;
 mod editor;
+mod load_epoch;
 mod localfiles;
 mod gateway;
 mod gateway_qr;
@@ -73,10 +74,13 @@ use session_panel::{dispatch_session_key, SessionPanel};
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 
+use load_guard::{commit_load, key_matches, Commit, ErrPolicy, LoadEpoch};
+
 use crate::api::{
     get_json, get_text, idempotency_key, now_ms, patch_json, post_json, post_json_value, post_op,
     put_json,
 };
+use crate::load_epoch::begin;
 use crate::approvals::{begin_session_mode, ModeChange};
 use crate::approvals_ui::{
     apply_perm_notes, commit_session_mode, ApprovalCards, ApprovalHost, ApprovalMenu,
@@ -937,6 +941,11 @@ fn App() -> impl IntoView {
     let files_path = RwSignal::new(String::new());
     let files = RwSignal::new(Vec::<model::DirEntry>::new());
     let files_error = RwSignal::new(String::new());
+    // Sentinel until a listing commits, so the first paint cannot treat an
+    // empty vec as this folder or as the previous folder's rows.
+    let files_for = RwSignal::new("\u{0}".to_string());
+    let files_loading = RwSignal::new(false);
+    let files_epoch = RwSignal::new(LoadEpoch::new());
     let changes = RwSignal::new(Vec::<model::ChangedFile>::new());
     let changes_error = RwSignal::new(String::new());
     let phone_pane = RwSignal::new(mobile::PANE_CHAT.to_string());
@@ -2211,21 +2220,40 @@ fn App() -> impl IntoView {
     });
 
     let load_files = move || {
+        let gen = begin(files_epoch);
         let (b, t, path) = (
             base.get_untracked(),
             token.get_untracked(),
             files_path.get_untracked(),
         );
+        files.set(Vec::new());
+        files_error.set(String::new());
+        files_loading.set(true);
+        let files_epoch = files_epoch;
         spawn_local(async move {
             let q = format!("/v1/files?path={}", api::js_encode(&path));
-            match get_json::<FilesResponse>(&b, &t, &q).await {
+            let fetched = get_json::<FilesResponse>(&b, &t, &q).await;
+            if !key_matches(&path, &files_path.get_untracked()) {
+                return;
+            }
+            let mapped = match fetched {
                 Ok(r) => {
                     let mut entries = r.entries;
                     entries.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then(a.name.cmp(&b.name)));
-                    files.set(entries);
-                    files_error.set(String::new());
+                    Ok(entries)
                 }
-                Err(e) => files_error.set(e),
+                Err(e) => Err(e),
+            };
+            match files_epoch.with_untracked(|epoch| {
+                commit_load(epoch, gen, mapped, Vec::new(), ErrPolicy::Clear)
+            }) {
+                Commit::Drop => return,
+                Commit::Apply { value, error } => {
+                    files.set(value);
+                    files_error.set(error);
+                    files_for.set(path);
+                    files_loading.set(false);
+                }
             }
         });
     };
@@ -4349,7 +4377,12 @@ fn App() -> impl IntoView {
                                 <p class="hint">{move || format!("Open: {}", doc_path.get())}</p>
                             </Show>
                             <ul class="plain">
-                                {move || files.get().into_iter().map(|entry| {
+                                {move || {
+                                    let pending = files_loading.get() || files_for.get() != files_path.get();
+                                    if pending {
+                                        return view! { <li class="hint">"Loading…"</li> }.into_any();
+                                    }
+                                    files.get().into_iter().map(|entry| {
                                     let name = entry.name.clone();
                                     let path = join_path(&files_path.get(), &entry.name);
                                     let path_drag = path.clone();
@@ -4382,7 +4415,8 @@ fn App() -> impl IntoView {
                                             })}
                                         </li>
                                     }
-                                }).collect_view()}
+                                }).collect_view().into_any()
+                                }}
                             </ul>
                             <p class="hint">"Open reads the file. Click or drag inserts @path. Send attaches the file."</p>
                         </div>

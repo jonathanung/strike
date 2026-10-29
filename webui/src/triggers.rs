@@ -9,6 +9,10 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use wasm_bindgen::JsCast;
 
+use load_guard::{commit_load, Commit, ErrPolicy, LoadEpoch};
+
+use crate::load_epoch::begin;
+
 use crate::api::{api, auth_header, get_json, now_ms, post_json_value};
 
 #[derive(Clone, Deserialize)]
@@ -262,16 +266,42 @@ fn load_deliveries(
     id: String,
     rows: RwSignal<Vec<DeliveryRow>>,
     notice: RwSignal<String>,
+    log_error: RwSignal<String>,
+    loading: RwSignal<bool>,
+    epoch: RwSignal<LoadEpoch>,
 ) {
+    let gen = begin(epoch);
+    rows.set(Vec::new());
+    log_error.set(String::new());
     if id.is_empty() {
-        rows.set(Vec::new());
+        loading.set(false);
         return;
     }
+    loading.set(true);
     let (b, t) = (base.get(), token.get());
     spawn_local(async move {
-        match get_json::<DeliveryList>(&b, &t, &format!("/v1/triggers/{id}/deliveries")).await {
-            Ok(list) => rows.set(list.deliveries),
-            Err(e) => notice.set(e),
+        let fetched =
+            get_json::<DeliveryList>(&b, &t, &format!("/v1/triggers/{id}/deliveries")).await;
+        let raw = fetched.as_ref().err().cloned();
+        let mapped = match fetched {
+            Ok(list) => Ok(list.deliveries),
+            Err(_) => Err("Deliveries failed to load for this trigger.".into()),
+        };
+        match epoch
+            .with_untracked(|epoch| commit_load(epoch, gen, mapped, Vec::new(), ErrPolicy::Clear))
+        {
+            Commit::Drop => return,
+            Commit::Apply { value, error } => {
+                let failed = !error.is_empty();
+                rows.set(value);
+                log_error.set(error);
+                loading.set(false);
+                if failed {
+                    if let Some(raw) = raw {
+                        notice.set(raw);
+                    }
+                }
+            }
         }
     });
 }
@@ -315,12 +345,24 @@ pub fn TriggersPage(
 ) -> impl IntoView {
     let rows = RwSignal::new(Vec::<TriggerRow>::new());
     let deliveries = RwSignal::new(Vec::<DeliveryRow>::new());
+    let delivery_error = RwSignal::new(String::new());
+    let delivery_loading = RwSignal::new(false);
+    let delivery_epoch = RwSignal::new(LoadEpoch::new());
     let secret_revealed = RwSignal::new(false);
     let form = Form::new();
 
     refresh(base, token, rows, form.notice);
     Effect::new(move |_| {
-        load_deliveries(base, token, form.selected.get(), deliveries, form.notice);
+        load_deliveries(
+            base,
+            token,
+            form.selected.get(),
+            deliveries,
+            form.notice,
+            delivery_error,
+            delivery_loading,
+            delivery_epoch,
+        );
     });
 
     let save = move || {
@@ -498,7 +540,16 @@ pub fn TriggersPage(
                     let outcome = v.get("outcome").and_then(|s| s.as_str()).unwrap_or("sent");
                     form.notice.set(format!("Test {outcome}."));
                     status.set(format!("Trigger test {outcome}"));
-                    load_deliveries(base, token, id, deliveries, form.notice);
+                    load_deliveries(
+                        base,
+                        token,
+                        id,
+                        deliveries,
+                        form.notice,
+                        delivery_error,
+                        delivery_loading,
+                        delivery_epoch,
+                    );
                 }
                 Err(e) => form.notice.set(e),
             }
@@ -542,7 +593,16 @@ pub fn TriggersPage(
                         let text = resp.text().await.unwrap_or_default();
                         form.notice
                             .set(format!("Hook returned {status_code}. {text}"));
-                        load_deliveries(base, token, id, deliveries, form.notice);
+                        load_deliveries(
+                            base,
+                            token,
+                            id,
+                            deliveries,
+                            form.notice,
+                            delivery_error,
+                            delivery_loading,
+                            delivery_epoch,
+                        );
                     }
                     Err(e) => form.notice.set(e.to_string()),
                 },
@@ -726,7 +786,13 @@ pub fn TriggersPage(
             </section>
             <section class="triggers-log" aria-label="Delivery log">
                     <h2 class="panel-title">"Delivery log"</h2>
-                    <Show when=move || deliveries.get().is_empty()>
+                    <Show when=move || delivery_loading.get()>
+                        <p class="hint">"Loading deliveries…"</p>
+                    </Show>
+                    <Show when=move || !delivery_error.get().is_empty()>
+                        <p class="hint" role="alert">{move || delivery_error.get()}</p>
+                    </Show>
+                    <Show when=move || deliveries.get().is_empty() && delivery_error.get().is_empty() && !delivery_loading.get()>
                         <p class="hint">"Accepted, rejected, duplicate, and rate-limited deliveries show up here. The log does not store the signing secret."</p>
                     </Show>
                     <ul class="plain">
@@ -755,7 +821,16 @@ pub fn TriggersPage(
                                                         Ok(v) => {
                                                             let outcome = v.get("outcome").and_then(|s| s.as_str()).unwrap_or("replayed");
                                                             form.notice.set(format!("Replay {outcome}."));
-                                                            load_deliveries(base, token, trigger_id, deliveries, form.notice);
+                                                            load_deliveries(
+                                                                base,
+                                                                token,
+                                                                trigger_id,
+                                                                deliveries,
+                                                                form.notice,
+                                                                delivery_error,
+                                                                delivery_loading,
+                                                                delivery_epoch,
+                                                            );
                                                         }
                                                         Err(e) => form.notice.set(e),
                                                     }

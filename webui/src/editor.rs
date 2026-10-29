@@ -8,7 +8,10 @@ use serde_json::Value;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 
+use load_guard::{commit_load, Commit, ErrPolicy, LoadEpoch};
+
 use crate::api::{get_json, js_encode, put_json_value};
+use crate::load_epoch::begin;
 
 const MAX_RENDER_LINES: usize = 2000;
 const MAX_HITS: usize = 2000;
@@ -1182,7 +1185,12 @@ pub fn DocumentPane(
     let agent_diff = RwSignal::new(String::new());
     let diff_note = RwSignal::new(String::new());
     let reload_tick = RwSignal::new(0u32);
+    // Save completions key off this. The file-load epoch guards the view
+    // fetch; both bump together so a reload drops a save that started earlier.
     let load_gen = RwSignal::new(0u32);
+    let file_epoch = RwSignal::new(LoadEpoch::new());
+    let diff_epoch = RwSignal::new(LoadEpoch::new());
+    let diff_for = RwSignal::new(String::new());
 
     Effect::new(move |_| {
         let text = if editing.get() { draft.get() } else { content.get() };
@@ -1202,11 +1210,21 @@ pub fn DocumentPane(
         scroll_line_soon(line);
     });
 
+    // Registered before the diff effect so this bump cannot cancel the
+    // fetch that effect starts for the same path change.
     Effect::new(move |_| {
         let _ = reload_tick.get();
         let p = path.get();
-        let gen = load_gen.get_untracked() + 1;
-        load_gen.set(gen);
+        let gen = begin(file_epoch);
+        load_gen.set(load_gen.get_untracked().wrapping_add(1));
+        // Reload of the same path keeps its diff. A different path must not
+        // keep showing the previous file's diff while the new body loads.
+        if diff_for.get_untracked() != p {
+            diff_for.set(p.clone());
+            let _ = begin(diff_epoch);
+            agent_diff.set(String::new());
+            diff_note.set(String::new());
+        }
         editing.set(false);
         conflict.set(false);
         query.set(String::new());
@@ -1217,11 +1235,12 @@ pub fn DocumentPane(
         let (b, t) = (base.get(), token.get());
         loading.set(true);
         status.set(String::new());
+        let file_epoch = file_epoch;
         spawn_local(async move {
             let q = format!("/v1/file/view?path={}", js_encode(&p));
             match get_json::<DocBody>(&b, &t, &q).await {
                 Ok(doc) => {
-                    if load_gen.get_untracked() != gen {
+                    if !file_epoch.with_untracked(|epoch| epoch.accept(gen)) {
                         return;
                     }
                     content.set(doc.content.clone());
@@ -1239,7 +1258,7 @@ pub fn DocumentPane(
                     loading.set(false);
                 }
                 Err(e) => {
-                    if load_gen.get_untracked() != gen {
+                    if !file_epoch.with_untracked(|epoch| epoch.accept(gen)) {
                         return;
                     }
                     content.set(String::new());
@@ -1252,16 +1271,23 @@ pub fn DocumentPane(
     });
 
     Effect::new(move |_| {
+        let p = path.get();
         if !show_diff.get() {
             return;
         }
-        let p = loaded_path.get();
         if p.is_empty() {
+            agent_diff.set(String::new());
+            diff_note.set(String::new());
             return;
         }
+        let gen = begin(diff_epoch);
+        agent_diff.set(String::new());
+        diff_note.set("Loading diff…".into());
         let (b, t) = (base.get(), token.get());
+        let diff_epoch = diff_epoch;
         spawn_local(async move {
-            match get_json::<DiffList>(&b, &t, "/v1/changed-files").await {
+            let fetched = get_json::<DiffList>(&b, &t, "/v1/changed-files").await;
+            let mapped = match fetched {
                 Ok(list) => {
                     let mut diff = list
                         .files
@@ -1273,10 +1299,18 @@ pub fn DocumentPane(
                         diff = diff.chars().take(MAX_DIFF_CHARS).collect();
                         diff.push_str("\n… diff truncated");
                     }
-                    agent_diff.set(diff);
-                    diff_note.set(String::new());
+                    Ok(diff)
                 }
-                Err(e) => diff_note.set(http_message(&e)),
+                Err(e) => Err(http_message(&e)),
+            };
+            match diff_epoch.with_untracked(|epoch| {
+                commit_load(epoch, gen, mapped, String::new(), ErrPolicy::Clear)
+            }) {
+                Commit::Drop => return,
+                Commit::Apply { value, error } => {
+                    agent_diff.set(value);
+                    diff_note.set(error);
+                }
             }
         });
     });
@@ -1496,7 +1530,9 @@ pub fn DocumentPane(
                     <Show when=move || !diff_note.get().is_empty()>
                         <p class="hint">{move || diff_note.get()}</p>
                     </Show>
-                    {move || view! { <DiffView text=agent_diff.get() /> }}
+                    <Show when=move || diff_note.get().is_empty()>
+                        {move || view! { <DiffView text=agent_diff.get() /> }}
+                    </Show>
                 </Show>
             </div>
             <div class="ev-tools">
