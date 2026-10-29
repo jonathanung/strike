@@ -109,6 +109,24 @@ function chipBox(page, label) {
   })()`);
 }
 
+async function assertSteerQueueCommand(page, where, check) {
+  await page.evaluate(`document.querySelector("[data-nav='phone-more']")?.click()`);
+  await delay(200);
+  const row = await page.evaluate(`(() => {
+    const el = document.querySelector('[data-command-id="enter.toggle"]');
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { text: el.innerText || "", height: r.height, right: r.right, inner: window.innerWidth };
+  })()`);
+  check(Boolean(row) && row.text.includes("Steer") && row.text.includes("Queue"), `Toggle Enter behaviour missing at ${where}`);
+  if (row) {
+    check(row.height >= 44, `enter toggle height ${row.height} < 44 at ${where}`);
+    check(row.right <= row.inner + 1, `enter toggle right ${row.right} past viewport ${row.inner} at ${where}`);
+  }
+  await page.evaluate(`document.querySelector(".palette-backdrop")?.click()`);
+  await delay(150);
+}
+
 function onScreen(box, label, check) {
   check(Boolean(box), `${label} is missing`);
   if (!box) return;
@@ -144,9 +162,8 @@ export async function runPhoneScreens({ page, outDir, video, check, shots }) {
   check(manifest.includes("manifest.webmanifest"), "manifest link missing");
   const theme = await page.evaluate(`document.querySelector('meta[name="theme-color"]')?.content || ""`);
   check(theme === "#14131c", `theme-color ${theme} is not the dark ground token #14131c`);
-  for (const label of ["Send", "Steer", "Queue"]) {
-    onScreen(await chipBox(page, label), `${label} at 390`, check);
-  }
+  onScreen(await chipBox(page, "Send"), "Send at 390", check);
+  await assertSteerQueueCommand(page, "390", check);
   const composer = await page.evaluate(`(() => {
     const el = document.querySelector(".composer");
     if (!el) return false;
@@ -313,9 +330,8 @@ export async function runPhoneScreens({ page, outDir, video, check, shots }) {
   await delay(120);
   const narrow = await page.evaluate(`document.body && document.body.dataset.phone === "1"`);
   check(narrow, "360×740 did not set data-phone=1");
-  for (const label of ["Send", "Steer", "Queue"]) {
-    onScreen(await chipBox(page, label), `${label} at 360`, check);
-  }
+  onScreen(await chipBox(page, "Send"), "Send at 360", check);
+  await assertSteerQueueCommand(page, "360", check);
   const header360 = await page.evaluate(`(() => {
     const el = document.querySelector(".page-header");
     return el ? el.getBoundingClientRect().height : 0;

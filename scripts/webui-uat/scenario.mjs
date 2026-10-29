@@ -329,6 +329,20 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
       shellDiag = ` (after polling ${shellWaitMs}ms; shell snapshot: ${snapshot}; page text: ${String(text).slice(0, 600)})`;
     }
     check(missing.length === 0, `shell labels missing: ${missing.join(", ")}${shellDiag}`);
+    // Steer and Queue left the composer bar. The primary button is Send
+    // until a turn is running; both words stay reachable on one command.
+    await page.evaluate(`document.querySelector('[data-nav="palette"]')?.click()`);
+    const steerQueue = await waitUntil(
+      `(() => {
+        const el = document.querySelector('[data-command-id="enter.toggle"]');
+        const text = el ? (el.innerText || "") : "";
+        return text.includes("Steer") && text.includes("Queue");
+      })()`,
+      4000,
+      "steer/queue palette command",
+    );
+    check(Boolean(steerQueue), "palette is missing Toggle Enter behaviour: Steer / Queue");
+    await page.evaluate(`document.querySelector(".palette-backdrop")?.click()`);
     const tok = await tokens();
     const tokenMiss = tokenMismatch(tok, fixture.tokens);
     check(tokenMiss.length === 0, `dark tokens ${tokenMiss.join("; ")}`);
