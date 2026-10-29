@@ -220,30 +220,20 @@ async function providerFlow(page, check, waitUntil, grab) {
 
   await page.evaluate(`document.querySelector('[data-nav="primary"] [data-view="chat"]')?.click()`);
   const chip = await waitUntil(
-    `Boolean(document.querySelector("[data-model-chip]"))`,
+    `document.body && document.body.innerText.includes("Model ·")`,
     4000,
-    "model chip after leaving providers",
+    "model status after leaving providers",
   );
-  check(Boolean(chip), "model chip missing after returning to chat");
-  const modelText = await page.evaluate(`document.querySelector("[data-model-chip]")?.textContent || ""`);
-  check(String(modelText).includes("Model"), "model status does not say Model");
-  await page.evaluate(`document.dispatchEvent(new KeyboardEvent("keydown", { key: "m", altKey: true, bubbles: true, cancelable: true }))`);
+  check(Boolean(chip), "model status missing after returning to chat");
+  await page.evaluate(`document.querySelector('[data-nav="palette"]')?.click()`);
   const menu = await waitUntil(
-    `Boolean(document.querySelector("[data-model-menu]"))`,
+    `Boolean(document.querySelector('[data-command-id="providers.add"]'))`,
     4000,
-    "model menu",
+    "palette add provider",
   );
-  check(Boolean(menu), "model menu did not open from Alt+M");
-  const addCount = await page.evaluate(`(() => {
-    const menu = document.querySelector("[data-model-menu]");
-    if (!menu) return -1;
-    const rows = menu.querySelectorAll("[data-model-row]").length;
-    const adds = menu.querySelectorAll("[data-add-provider]").length;
-    return rows > 0 ? adds : (adds === 1 ? 0 : -1);
-  })()`);
-  check(addCount === 0, "model menu footer still duplicates Add provider, or the empty catalog lost its one button");
+  check(Boolean(menu), "palette is missing Add provider");
   await grab("model-menu-add-provider-1440");
-  await page.evaluate(`document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
+  await page.evaluate(`document.querySelector(".palette-backdrop")?.click()`);
   await page.evaluate(`document.querySelector('[data-nav="palette"]')?.click()`);
   await page.evaluate(`(() => {
     const input = document.querySelector('[data-nav="palette-dialog"] input');
@@ -480,11 +470,11 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
       }
     }
 
-    await click("button.chip", "Approval");
+    await click("[data-nav='palette']", "Commands");
     await waitUntil(
-      `Boolean(document.querySelector(".menu") && document.querySelector(".menu").innerText.includes("Yolo"))`,
+      `Boolean(document.querySelector('[data-command-id="mode-yolo"]'))`,
       4000,
-      "approval menu",
+      "approval commands",
     );
     await shoot("shell-approval", ["desk1024", "desk1440"]);
     await press("Escape");
@@ -627,7 +617,7 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
 
     await click(".segmented button", "Daemon");
     await waitUntil(
-      `document.body && document.body.innerText.includes("This gateway")`,
+      `document.body && document.body.innerText.includes("Daemon")`,
       4000,
       "daemon view",
     );

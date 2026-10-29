@@ -1,6 +1,8 @@
 //! Document viewer and editor. Pure helpers are tested on the host; the
 //! Leptos pane is the center-column surface the shell opens for a path.
 
+use std::rc::Rc;
+
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use serde::Deserialize;
@@ -1399,6 +1401,57 @@ pub fn DocumentPane(
         }
     };
 
+    crate::shell::bind(
+        "file.preview",
+        Rc::new(move |_| {
+            if language_of(&loaded_path.get_untracked()) != "markdown" {
+                return Err("This file is not Markdown.".into());
+            }
+            preview.update(|v| *v = !*v);
+            Ok(())
+        }),
+    );
+    crate::shell::bind(
+        "file.agent-diff",
+        Rc::new(move |_| {
+            show_diff.update(|v| *v = !*v);
+            Ok(())
+        }),
+    );
+    crate::shell::bind(
+        "file.copy-path",
+        Rc::new(move |_| {
+            let path = loaded_path.get_untracked();
+            if path.is_empty() {
+                return Err("Open a file first.".into());
+            }
+            if let Some(win) = web_sys::window() {
+                let _ = win.navigator().clipboard().write_text(&path);
+            }
+            notice.set("Copied the path.".into());
+            Ok(())
+        }),
+    );
+    crate::shell::bind(
+        "file.copy-contents",
+        Rc::new(move |_| {
+            let text = content.get_untracked();
+            if text.is_empty() {
+                return Err("Open a file first.".into());
+            }
+            if let Some(win) = web_sys::window() {
+                let _ = win.navigator().clipboard().write_text(&text);
+            }
+            notice.set("Copied the file.".into());
+            Ok(())
+        }),
+    );
+    on_cleanup(|| {
+        for id in ["file.preview", "file.agent-diff", "file.copy-path", "file.copy-contents"] {
+            crate::shell::unbind(id);
+        }
+    });
+
     view! {
         <div
             class="ev-doc"
@@ -1500,16 +1553,6 @@ pub fn DocumentPane(
                 </Show>
             </div>
             <div class="ev-tools">
-                <Show when=move || language_of(&loaded_path.get()) == "markdown">
-                    <button type="button" class="chip" on:click=move |_| preview.update(|v| *v = !*v)>
-                        {move || if preview.get() { "Source" } else { "Preview" }}
-                    </button>
-                </Show>
-                <button
-                    type="button"
-                    class=move || if show_diff.get() { "chip on" } else { "chip" }
-                    on:click=move |_| show_diff.update(|v| *v = !*v)
-                >"Agent diff"</button>
                 <button
                     type="button"
                     class="secondary"
@@ -1531,15 +1574,6 @@ pub fn DocumentPane(
                     }>"Cancel"</button>
                     <button type="button" class="primary" data-ev-save=true disabled=move || saving.get() on:click=move |_| do_save()>"Save"</button>
                 </Show>
-                <span class="ev-status">{move || {
-                    if editing.get() {
-                        "Editing. Read-only until you opened Edit. Ctrl+S saves. Escape cancels.".into()
-                    } else if !write_block.get().is_empty() {
-                        write_block.get()
-                    } else {
-                        "Read-only. Ctrl+F finds. Enter jumps to the next match.".into()
-                    }
-                }}</span>
             </div>
         </div>
     }

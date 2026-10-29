@@ -163,8 +163,8 @@ pub fn suggestions() -> &'static [Suggestion] {
 pub fn empty_headline(tick: u32) -> &'static str {
     match (tick / 4) % 3 {
         0 => "This session is empty.",
-        1 => "Send a message, or start from a card.",
-        _ => "Each card says what it will ask.",
+        1 => "Send a message to start.",
+        _ => "The transcript shows the turn here.",
     }
 }
 

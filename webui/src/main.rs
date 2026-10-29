@@ -63,12 +63,11 @@ use composer_triggers::{
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use model::{
-    activity_panel, child_card_from_parts, child_card_from_text, child_keys_match, display_state,
-    fmt_ago, fmt_elapsed, is_running, merge_sessions, mode_label, prefer_summary,
-    protocol_dump, rfc3339_to_ms, session_label, status_kind, strip_echo_tip, task_headline,
-    ActivityRow, Bootstrap, ChangedFilesResponse, ChatLine, ChildCard, ChildrenResponse,
-    ComposerCommand, FileSearchResponse, FilesResponse, Health, ModelInfo, ModelList, Remote, RootSummary,
-    SessionItem, SessionsResponse, SkillInfo, StatusBoard, TeamSnapshot, Workspace, WorkspacesResponse,
+    activity_panel, display_state, fmt_elapsed, is_running, merge_sessions, mode_label,
+    session_label, task_headline, ActivityRow, Bootstrap, ChangedFilesResponse, ChatLine,
+    ChildrenResponse, ComposerCommand, FileSearchResponse, FilesResponse, Health, ModelInfo,
+    ModelList, RootSummary, SessionItem, SessionsResponse, SkillInfo, StatusBoard, TeamSnapshot,
+    Workspace, WorkspacesResponse,
 };
 use session_panel::{dispatch_session_key, SessionPanel};
 use wasm_bindgen::closure::Closure;
@@ -92,7 +91,6 @@ use crate::side_chat::SideChatPanel;
 
 use crate::model::{budget_elapsed, can_retry, RootsResponse};
 use crate::model_menu::{active_context, context_view, reduce_envelope, LiveModelState, ModelDefaults};
-use crate::model_menu_view::ModelMenu;
 use crate::status::{
     apply_document_chrome, elapsed_since, session_kind, StatusKind, StatusMark, StatusSlot,
     StatusTab, StatusTabs, HEARTBEAT_STALE_MS,
@@ -879,6 +877,7 @@ fn App() -> impl IntoView {
     let density_id = RwSignal::new(appearance::normalize_density(&load("strike.density")));
     let onboarded = RwSignal::new(load("strike.onboarded") == "1");
     let queue_items = RwSignal::new(Vec::<steer_queue::QueueItem>::new());
+    let queue_focus = RwSignal::new(String::new());
     let editing_id = RwSignal::new(String::new());
     let edit_draft = RwSignal::new(String::new());
     let steer_note = RwSignal::new(String::new());
@@ -2197,10 +2196,6 @@ fn App() -> impl IntoView {
     // Session delete (#1358): arm the confirm dialog for one session.
     // Shared by the row button and the palette command — one code path,
     // and arming the dialog is all either surface does.
-    let request_delete = move |id: String, label: String| {
-        delete_target.set(Some(session_delete::DeleteTarget { id, label }));
-    };
-
     // After the daemon confirms a deletion: drop the session from every
     // local list, forget its pin/seen marks and history entries, and —
     // via `remaining_active` — fall back to the empty/list state when
@@ -2505,6 +2500,16 @@ fn App() -> impl IntoView {
         shell::set_effort_setter(Rc::new(move |level| {
             effort.run(level.to_string());
         }));
+        shell::set_effort_choices(
+            crate::model_menu::effort_levels()
+                .iter()
+                .map(|(id, label)| shell::Choice {
+                    id: (*id).to_string(),
+                    label: format!("Set reasoning effort: {label}"),
+                    detail: String::new(),
+                })
+                .collect(),
+        );
         let save = on_default_effort.clone();
         shell::set_effort_default_setter(Rc::new(move || {
             let level = effort_level.get_untracked();
@@ -2877,27 +2882,58 @@ fn App() -> impl IntoView {
     // row button opens. No request is issued here.
     shell::bind(
         "session-delete",
-        Rc::new(move |id: &str| {
-            let id = id.to_string();
+        Rc::new(move |args: &str| {
+            let cursor = session_panel::cursor_session();
             let active = active_root.get_untracked();
+            let selected = session_panel::selected_ids();
+            let marked = web_sys::window()
+                .and_then(|w| w.document())
+                .and_then(|doc| doc.query_selector("[data-delete-target='1']").ok().flatten())
+                .and_then(|el| el.get_attribute("data-session-id"))
+                .unwrap_or_default();
+            let chosen = if !marked.is_empty() {
+                marked
+            } else if selected.len() == 1 {
+                selected[0].clone()
+            } else {
+                session_delete::resolve_session_target(args, &cursor.id, &active)?.to_string()
+            };
+            let id = chosen;
             let active_running = activity
                 .get_untracked()
                 .iter()
                 .any(|row| is_running(&row.state));
-            let label = merge_sessions(
-                &roots.get_untracked(),
-                &sessions.get_untracked(),
-                &pins.get_untracked(),
-                &seen.get_untracked(),
-                &active,
-                active_running,
-            )
-            .into_iter()
-            .find(|row| row.id == id)
-            .map(|row| session_label(&row.title, &short_id(&row.id)))
-            .unwrap_or_else(|| short_id(&id));
+            let label = if cursor.id == id && !cursor.label.is_empty() {
+                cursor.label
+            } else {
+                merge_sessions(
+                    &roots.get_untracked(),
+                    &sessions.get_untracked(),
+                    &pins.get_untracked(),
+                    &seen.get_untracked(),
+                    &active,
+                    active_running,
+                )
+                .into_iter()
+                .find(|row| row.id == id)
+                .map(|row| session_label(&row.title, &short_id(&row.id)))
+                .unwrap_or_else(|| short_id(&id))
+            };
             mode.set("chat".into());
-            request_delete(id, label);
+            let on_deleted = on_deleted;
+            let status_note = status;
+            if !session_delete::prompt_delete(
+                session_delete::DeleteTarget {
+                    id,
+                    label,
+                },
+                base.get_untracked(),
+                token.get_untracked(),
+                Rc::new(move |id| on_deleted.run(id)),
+                Rc::new(move |err| status_note.set(err)),
+            ) {
+                return Err(crate::confirm::BUSY.into());
+            }
             Ok(())
         }),
     );
@@ -3013,11 +3049,7 @@ fn App() -> impl IntoView {
     shell::bind(
         "model-menu.open",
         Rc::new(move |_args| {
-            mode_menu.set(false);
-            plus_open.set(false);
-            ac_open.set(false);
-            ac_force.set(String::new());
-            model_menu.update(|v| *v = !*v);
+            shell::show_palette();
             Ok(())
         }),
     );
@@ -3033,7 +3065,7 @@ fn App() -> impl IntoView {
                 plus_open.set(false);
                 ac_open.set(false);
                 ac_force.set(String::new());
-                model_menu.update(|v| *v = !*v);
+                shell::show_palette();
             }
         });
     if let Some(w) = web_sys::window() {
@@ -3043,7 +3075,7 @@ fn App() -> impl IntoView {
 
     // Find in transcript (#1342). Opening saves the transcript scroll so
     // closing can restore it; stepping wraps around the match list.
-    let open_find = move || {
+    let _open_find = move || {
         if !tf_open.get_untracked() {
             tf_saved_scroll.set(transcript_find::transcript_scroll());
         }
@@ -3337,7 +3369,12 @@ fn App() -> impl IntoView {
     shell::bind(
         "session.fork",
         Rc::new(move |_| {
-            let id = active_root.get_untracked();
+            let cursor = session_panel::cursor_session();
+            let id = if cursor.id.is_empty() {
+                active_root.get_untracked()
+            } else {
+                cursor.id
+            };
             if id.is_empty() {
                 return Err("No session to fork.".into());
             }
@@ -3365,6 +3402,117 @@ fn App() -> impl IntoView {
         }),
     );
 
+    let queue_step = {
+        let queue_items = queue_items;
+        let queue_focus = queue_focus;
+        let post_queue = post_queue;
+        move |delta: i32| -> Result<(), String> {
+            let items = queue_items.get_untracked();
+            if items.is_empty() {
+                return Err("The queue is empty.".into());
+            }
+            let focus = queue_focus.get_untracked();
+            let id = if items.iter().any(|item| item.id == focus) {
+                focus
+            } else {
+                items.last().map(|item| item.id.clone()).unwrap_or_default()
+            };
+            let Some(ids) = steer_queue::moved_ids(&items, &id, delta) else {
+                return Err("That message cannot move further.".into());
+            };
+            post_queue("input.queue_reorder", serde_json::json!({"ids": ids}));
+            Ok(())
+        }
+    };
+    let queue_step = Rc::new(queue_step);
+    let queue_up = queue_step.clone();
+    let queue_down = queue_step;
+    shell::bind(
+        "queue.move-up",
+        Rc::new(move |_| queue_up(-1)),
+    );
+    shell::bind(
+        "queue.move-down",
+        Rc::new(move |_| queue_down(1)),
+    );
+    shell::bind(
+        "panel-files",
+        Rc::new(move |_| {
+            side_tab.set("files".into());
+            mode.set("chat".into());
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "workspaces.change",
+        Rc::new(move |_| {
+            picker_open.set(true);
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "approvals.rules",
+        Rc::new(move |_| {
+            panel_open.set(true);
+            mode.set("chat".into());
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "enter.toggle",
+        Rc::new(move |_| {
+            let next = if enter_mode.get_untracked() == "steer" {
+                "queue"
+            } else {
+                "steer"
+            };
+            set_enter(next.into());
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "composer.attach",
+        Rc::new(move |_| {
+            if let Some(el) = file_input.get_untracked() {
+                el.click();
+            }
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "composer.voice",
+        Rc::new(move |_| {
+            if !chat_mode::dictation_available() {
+                return Err("This browser has no speech API.".into());
+            }
+            let draft_cb = draft;
+            let status_cb = status;
+            let listen_cb = listening;
+            match chat_mode::toggle_dictation(
+                move |text| {
+                    draft_cb.update(|d| {
+                        if !d.is_empty() && !d.ends_with(' ') && !d.ends_with('\n') {
+                            d.push(' ');
+                        }
+                        d.push_str(&text);
+                    });
+                },
+                move |err| {
+                    listen_cb.set(false);
+                    if !err.is_empty() {
+                        status_cb.set(err);
+                    }
+                },
+            ) {
+                Ok(on) => listen_cb.set(on),
+                Err(err) => {
+                    listen_cb.set(false);
+                    return Err(err);
+                }
+            }
+            Ok(())
+        }),
+    );
     let ui = TriggerSignals {
         ac_force,
         ac_open,
@@ -3383,6 +3531,152 @@ fn App() -> impl IntoView {
         mode_menu,
         model_menu,
     };
+
+    {
+        let ui_mention = TriggerSignals {
+            ac_force: ui.ac_force,
+            ac_open: ui.ac_open,
+            ac_index: ui.ac_index,
+            ac_items: ui.ac_items,
+            ac_replace_all: ui.ac_replace_all,
+            trig_start: ui.trig_start,
+            trig_end: ui.trig_end,
+            skills: ui.skills,
+            commands: ui.commands,
+            search_gen: ui.search_gen,
+            base: ui.base,
+            token: ui.token,
+            draft: ui.draft,
+            plus_open: ui.plus_open,
+            mode_menu: ui.mode_menu,
+            model_menu: ui.model_menu,
+        };
+        let ui_shell = TriggerSignals {
+            ac_force: ui.ac_force,
+            ac_open: ui.ac_open,
+            ac_index: ui.ac_index,
+            ac_items: ui.ac_items,
+            ac_replace_all: ui.ac_replace_all,
+            trig_start: ui.trig_start,
+            trig_end: ui.trig_end,
+            skills: ui.skills,
+            commands: ui.commands,
+            search_gen: ui.search_gen,
+            base: ui.base,
+            token: ui.token,
+            draft: ui.draft,
+            plus_open: ui.plus_open,
+            mode_menu: ui.mode_menu,
+            model_menu: ui.model_menu,
+        };
+        let ui_skill = TriggerSignals {
+            ac_force: ui.ac_force,
+            ac_open: ui.ac_open,
+            ac_index: ui.ac_index,
+            ac_items: ui.ac_items,
+            ac_replace_all: ui.ac_replace_all,
+            trig_start: ui.trig_start,
+            trig_end: ui.trig_end,
+            skills: ui.skills,
+            commands: ui.commands,
+            search_gen: ui.search_gen,
+            base: ui.base,
+            token: ui.token,
+            draft: ui.draft,
+            plus_open: ui.plus_open,
+            mode_menu: ui.mode_menu,
+            model_menu: ui.model_menu,
+        };
+        shell::bind(
+            "composer.mention",
+            Rc::new(move |_| {
+                mention_composer_file(&ui_mention);
+                Ok(())
+            }),
+        );
+        shell::bind(
+            "composer.shell",
+            Rc::new(move |_| {
+                prefix_composer_shell(&ui_shell);
+                Ok(())
+            }),
+        );
+        shell::bind(
+            "composer.skill",
+            Rc::new(move |_| {
+                open_composer_catalog("skills", &ui_skill);
+                Ok(())
+            }),
+        );
+    }
+    shell::bind(
+        "model.effort",
+        Rc::new(move |level| {
+            let level = level.trim().to_string();
+            if level.is_empty() {
+                return Err("Pick an effort.".into());
+            }
+            on_effort.run(level);
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "model.effort-default",
+        Rc::new(move |level| {
+            let level = level.trim().to_string();
+            if level.is_empty() {
+                return Err("Pick an effort.".into());
+            }
+            on_default_effort.run(level);
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "model.default",
+        Rc::new(move |args| {
+            let Some((provider, id)) = args.split_once('\t') else {
+                return Err("Pick a model.".into());
+            };
+            on_default_model.run((provider.to_string(), id.to_string()));
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "model.pin",
+        Rc::new(move |_| {
+            let provider = provider_name.get_untracked();
+            let model = model_name.get_untracked();
+            if provider.is_empty() || model.is_empty() {
+                return Err("No model is selected.".into());
+            }
+            crate::model_menu_view::toggle_stored_pin(&provider, &model);
+            model_note.set("Updated the model pin.".into());
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "composer.context",
+        Rc::new(move |_| {
+            let ctx = active_context(
+                &catalog.get_untracked(),
+                &provider_name.get_untracked(),
+                &model_name.get_untracked(),
+            );
+            let view = context_view(
+                context_used.get_untracked(),
+                context_limit.get_untracked(),
+                ctx,
+                &context_fit.get_untracked(),
+            );
+            model_note.set(if view.summary.is_empty() {
+                "No context window reported.".into()
+            } else {
+                view.summary
+            });
+            Ok(())
+        }),
+    );
+
 
     // Bootstrap can land after the first keystroke. Recompute only when the
     // catalog contents change, and only for the trigger at the real caret.
@@ -3410,6 +3704,9 @@ fn App() -> impl IntoView {
             }
         }
     });
+
+    let git_active = Memo::new(move |_| side_tab.get() == "git");
+    let worktree_active = Memo::new(move |_| side_tab.get() == "worktrees");
 
     view! {
         <ApprovalHost
@@ -3474,18 +3771,7 @@ fn App() -> impl IntoView {
             />
         </Show>
         <Show when=move || mode.get() == "daemon" fallback=move || ()>
-            <DaemonPane
-                base=base
-                token=token
-                status=status
-                gateway=gateway
-                gateway_detail=gateway_detail
-                gateway_open=gateway_open
-                gateway_profiles=gateway_profiles
-                gateway_selected=gateway_selected
-                refresh=refresh_meta
-                open_picker=move || picker_open.set(true)
-            />
+            <DaemonPane gateway_detail=gateway_detail />
         </Show>
         <Show when=move || mode.get() == "usage" || mode.get() == "audit" fallback=move || ()>
             <usage_audit::UsageAuditPages mode=mode base=base token=token status=status />
@@ -3612,7 +3898,6 @@ fn App() -> impl IntoView {
                         on_open=open_session
                         on_new=new_session
                         on_refresh=refresh_meta
-                        on_delete=request_delete
                         nav_order=session_nav
                     />
                     <div class="ws-chip">
@@ -3718,7 +4003,6 @@ fn App() -> impl IntoView {
                             sessions_drawer.set(false);
                             panel_drawer.update(|v| *v = !*v);
                         }>"Panel"</button>
-                        <button type="button" class="chip" data-tf-open="true" title="Find in transcript (Ctrl+F)" on:click=move |_| open_find()>"Find"</button>
                     </div>
                     <Show when=move || !load_error.get().is_empty()>
                         <div class="notice" role="alert">
@@ -3794,30 +4078,6 @@ fn App() -> impl IntoView {
                         handlers=handlers
                         find=find_view
                     />
-                    </Show>
-                    <Show when=move || layout.get() == "conversation" && {
-                        // session_busy reads roots/live_busy untracked, so
-                        // subscribe to them here: without this the Show never
-                        // re-evaluates once the turn that produced the last
-                        // line ends, and the follow-ups stay hidden.
-                        let _ = roots.get();
-                        let _ = live_busy.get();
-                        let _ = live_busy_root.get();
-                        let root = active_root.get();
-                        !root.is_empty()
-                            && !session_busy(&root)
-                            && transcript.with(|t| t.messages.last().map(|m| m.role == crate::transcript::Role::Strike).unwrap_or(false))
-                    }>
-                        <div class="follow-ups" aria-label="Suggestions">
-                            {chat_mode::FOLLOW_UPS.into_iter().map(|text| {
-                                let label = text.to_string();
-                                let send_label = label.clone();
-                                let send = send_text;
-                                view! {
-                                    <button type="button" class="chip" title="Fixed prompt, not a model suggestion" on:click=move |_| { send(send_label.clone()); }>{label}</button>
-                                }
-                            }).collect_view()}
-                        </div>
                     </Show>
                     <ApprovalCards
                         asks=asks
@@ -3909,10 +4169,24 @@ fn App() -> impl IntoView {
                                     <span class="name">"Use a skill"</span>
                                     <span class="path">"Skills loaded for this daemon"</span>
                                 </button>
-                                <button type="button" class="palette-row" on:click=move |_| open_composer_catalog("commands", &ui)>
-                                    <span class="name">"Slash command"</span>
-                                    <span class="path">"Daemon commands from bootstrap"</span>
+                                <button type="button" class="palette-row" data-chat-attach="menu" on:click=move |_| {
+                                    plus_open.set(false);
+                                    if let Some(el) = file_input.get() {
+                                        el.click();
+                                    }
+                                }>
+                                    <span class="name">"Attach files"</span>
+                                    <span class="path">"Images and documents. Drag and paste still work."</span>
                                 </button>
+                                <Show when=move || speech_ok>
+                                    <button type="button" class="palette-row" data-chat-voice="true" on:click=move |_| {
+                                        plus_open.set(false);
+                                        let _ = crate::shell::dispatch("composer.voice", "");
+                                    }>
+                                        <span class="name">"Dictate"</span>
+                                        <span class="path">"Voice input from this browser"</span>
+                                    </button>
+                                </Show>
                             </div>
                         </Show>
                         <Show when=move || ac_open.get()>
@@ -3952,16 +4226,13 @@ fn App() -> impl IntoView {
                                         let id_for_when = id.clone();
                                         let id_for_fallback = id.clone();
                                         let id_cancel = id.clone();
-                                        let id_up = id.clone();
-                                        let id_down = id.clone();
+                                        let id_focus = id.clone();
                                         let id_send_now = id.clone();
                                         let row_busy = busy_now;
                                         let text_for_edit = item.text.clone();
-                                        let can_up = steer_queue::moved_ids(&queue_items.get(), &id, -1).is_some();
-                                        let can_down = steer_queue::moved_ids(&queue_items.get(), &id, 1).is_some();
                                         let preview = steer_queue::preview(&text_for_edit);
                                         view! {
-                                            <li>
+                                            <li on:mouseenter=move |_| queue_focus.set(id_focus.clone())>
                                                 <span class="queue-index">{(i + 1).to_string()}</span>
                                                 <Show when=move || editing_id.get() == id.clone() fallback=move || view! { <span class="queue-text">{preview.clone()}</span> }>
                                                     <input class="queue-edit" prop:value=move || edit_draft.get() on:input=move |ev| edit_draft.set(event_target_value(&ev)) on:keydown=move |ev: web_sys::KeyboardEvent| {
@@ -4001,16 +4272,6 @@ fn App() -> impl IntoView {
                                                             post_queue("input.queue_edit", serde_json::json!({"id": id, "text": text}));
                                                         }>"Save"</button>
                                                     </Show>
-                                                    <button type="button" class="secondary" disabled=move || !can_up on:click=move |_| {
-                                                        if let Some(ids) = steer_queue::moved_ids(&queue_items.get_untracked(), &id_up, -1) {
-                                                            post_queue("input.queue_reorder", serde_json::json!({"ids": ids}));
-                                                        }
-                                                    }>"Up"</button>
-                                                    <button type="button" class="secondary" disabled=move || !can_down on:click=move |_| {
-                                                        if let Some(ids) = steer_queue::moved_ids(&queue_items.get_untracked(), &id_down, 1) {
-                                                            post_queue("input.queue_reorder", serde_json::json!({"ids": ids}));
-                                                        }
-                                                    }>"Down"</button>
                                                     <button type="button" class="secondary" title="Removes this queued message" on:click=move |_| {
                                                         let id = id_cancel.clone();
                                                         if !crate::confirm::ask(
@@ -4074,7 +4335,7 @@ fn App() -> impl IntoView {
                                     }).collect_view()}
                                 </div>
                             </Show>
-                            <input class="file-pick" type="file" data-chat-file="true" node_ref=file_input multiple=true
+                            <input class="file-pick" type="file" data-chat-file="true" data-chat-attach="true" node_ref=file_input multiple=true
                                 accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,image/svg+xml,text/plain,application/zip,application/gzip"
                                 on:change=move |_| {
                                     if let Some(el) = file_input.get() {
@@ -4198,87 +4459,20 @@ fn App() -> impl IntoView {
                                     ac_force.set(String::new());
                                     plus_open.update(|v| *v = !*v);
                                 }>"+"</button>
-                                <button type="button" class="chip" data-chat-attach="true" on:click=move |_| {
-                                    if let Some(el) = file_input.get() {
-                                        el.click();
-                                    }
-                                }>"Attach"</button>
-                                <Show when=move || speech_ok>
-                                    <button type="button" data-chat-voice="true" title="Dictate with the browser speech API. Audio may be sent to the browser vendor." class=move || if listening.get() { "chip listening" } else { "chip" } on:click=move |_| {
-                                        let draft_cb = draft;
-                                        let status_cb = status;
-                                        let listen_cb = listening;
-                                        match chat_mode::toggle_dictation(
-                                            move |text| {
-                                                draft_cb.update(|d| {
-                                                    if !d.is_empty() && !d.ends_with(' ') && !d.ends_with('\n') {
-                                                        d.push(' ');
-                                                    }
-                                                    d.push_str(&text);
-                                                });
-                                            },
-                                            move |err| {
-                                                listen_cb.set(false);
-                                                if !err.is_empty() {
-                                                    status_cb.set(err);
-                                                }
-                                            },
-                                        ) {
-                                            Ok(on) => listen_cb.set(on),
-                                            Err(err) => {
-                                                listen_cb.set(false);
-                                                status_cb.set(err);
-                                            }
-                                        }
-                                    }>{move || if listening.get() { "Stop" } else { "Voice" }}</button>
-                                </Show>
-                                <button type="button" class=move || {
+                                <span class=move || {
                                     if approvals::is_dangerous(&perm_mode.get()) {
-                                        "chip approvals-mode-chip danger"
+                                        "composer-glance approvals-mode-chip danger"
                                     } else {
-                                        "chip approvals-mode-chip"
+                                        "composer-glance approvals-mode-chip"
                                     }
-                                } aria-haspopup="menu" aria-expanded=move || mode_menu.get() on:click=move |_| {
-                                    model_menu.set(false);
-                                    memory_menu.set(false);
-                                    plus_open.set(false);
-                                    ac_open.set(false);
-                                    ac_force.set(String::new());
-                                    mode_menu.update(|v| *v = !*v);
-                                }>{move || format!("Approval · {}", mode_label(&perm_mode.get()))}</button>
-                                <ModelMenu
-                                    open=model_menu
-                                    provider=provider_name
-                                    model=model_name
-                                    effort=effort_level
-                                    context_used=context_used
-                                    context_limit=context_limit
-                                    context_fit=context_fit
-                                    catalog=catalog
-                                    catalog_note=catalog_note
-                                    model_note=model_note
-                                    defaults=model_defaults
-                                    busy=session_busy_now
-                                    on_select=on_select_model
-                                    on_default_model=on_default_model
-                                    on_effort=on_effort
-                                    on_default_effort=on_default_effort
-                                />
-                                <button type="button" class="chip" aria-label="Memory mode" on:click=move |_| {
-                                    mode_menu.set(false);
-                                    model_menu.set(false);
-                                    memory_menu.update(|v| *v = !*v);
-                                }>{move || format!("Memory · {}", memory_mode_label(&memory_mode.get()))}</button>
-                                <button type="button" class=move || if side_open.get() { "chip on side-chat-open-composer" } else { "chip side-chat-open-composer" } on:click=move |_| open_side(String::new(), String::new())>"Side chat"</button>
-                                <span class="context-meter">{move || {
-                                    let ctx = active_context(&catalog.get(), &provider_name.get(), &model_name.get());
-                                    let view = context_view(context_used.get(), context_limit.get(), ctx, &context_fit.get());
-                                    if view.limit <= 0 { String::new() } else { view.summary }
+                                } data-approval-status="true">{move || format!("Approval · {}", mode_label(&perm_mode.get()))}</span>
+                                <span class="composer-glance" data-model-status="true">{move || {
+                                    let model = model_name.get();
+                                    let name = if model.is_empty() { provider_name.get() } else { model };
+                                    if name.is_empty() { "Model · none".into() } else { format!("Model · {name}") }
                                 }}</span>
                                 </div>
                                 <div class="steer-actions">
-                                    <button type="button" title="While a turn is running, the send button steers that turn" aria-pressed=move || if enter_mode.get() == "steer" { "true" } else { "false" } class=move || if enter_mode.get() == "steer" { "chip on" } else { "chip" } on:click=move |_| set_enter("steer".into())>"Steer"</button>
-                                    <button type="button" title="While a turn is running, the send button waits until the turn finishes" aria-pressed=move || if enter_mode.get() == "queue" { "true" } else { "false" } class=move || if enter_mode.get() == "queue" { "chip on" } else { "chip" } on:click=move |_| set_enter("queue".into())>"Queue"</button>
                                     <Show when=move || session_busy_now.get()>
                                         <button type="button" id="stop-turn" class=move || if confirm_stop.get() { "secondary confirming" } else { "secondary" } title="Stops the running turn. Click again to confirm. Escape still stops immediately." on:click=move |_| {
                                             if confirm_stop.get_untracked() {
@@ -4300,14 +4494,26 @@ fn App() -> impl IntoView {
                         <Show when=move || !model_note.get().is_empty() && !model_menu.get()>
                             <p class="hint" data-model-note="true">{move || model_note.get()}</p>
                         </Show>
-                        <p class="hint" data-composer-triggers="status">{move || {
+                        <p class="hint composer-statusline" data-composer-triggers="status">{
+                            let memory_mode = memory_mode;
+                            move || {
                             let note = transcript.with(|t| t.trigger_note.clone());
                             let pending = transcript.with(|t| t.asks.len());
                             let custom = trigger_status(&note, pending);
-                            if custom.is_empty() {
-                                "Enter follows Steer or Queue while a turn runs. Ctrl+Enter does the other one. Escape stops the turn when the draft is empty. On a phone, Enter inserts a line and the button sends. ! runs a shell after approval. @file, /command, and $skill expand on send.".into()
+                            let mode = memory_mode.get();
+                            let memory = if mode == "normal" || mode.is_empty() {
+                                String::new()
                             } else {
-                                custom
+                                format!("Memory · {}", memory_mode_label(&mode))
+                            };
+                            let ctx = active_context(&catalog.get(), &provider_name.get(), &model_name.get());
+                            let meter = {
+                                let view = context_view(context_used.get(), context_limit.get(), ctx, &context_fit.get());
+                                if view.limit <= 0 { String::new() } else { view.summary }
+                            };
+                            view! {
+                                <span>{if custom.is_empty() { memory } else { custom }}</span>
+                                <span class="context-meter">{meter}</span>
                             }
                         }}</p>
                     </div>
@@ -4318,7 +4524,6 @@ fn App() -> impl IntoView {
                         <button class=move || if side_tab.get() == "files" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("files".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("files")></span>"Files"</button>
                         <button class=move || if side_tab.get() == "changes" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("changes".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("changes")></span>"Changes"</button>
                         <button class=move || if side_tab.get() == "git" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("git".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("git")></span>"Git"</button>
-                        <button class=move || if side_tab.get() == "worktrees" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("worktrees".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("worktrees")></span>"Worktrees"</button>
                         <button class=move || if side_tab.get() == "terminal" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("terminal".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("terminal")></span>"Terminal"</button>
                     </div>
                     <Show when=move || side_tab.get() == "activity">
@@ -4462,46 +4667,33 @@ fn App() -> impl IntoView {
                             <Show when=move || !files_path.get().is_empty()>
                                 <button class="secondary" on:click=move |_| files_path.set(parent_path(&files_path.get()))>"Up"</button>
                             </Show>
-                            <Show when=move || !doc_path.get().is_empty()>
-                                <p class="hint">{move || format!("Open: {}", doc_path.get())}</p>
-                            </Show>
                             <ul class="plain">
                                 {move || files.get().into_iter().map(|entry| {
                                     let name = entry.name.clone();
                                     let path = join_path(&files_path.get(), &entry.name);
                                     let path_drag = path.clone();
                                     let path_click = path.clone();
-                                    let path_open = path.clone();
                                     let is_dir = entry.is_dir;
                                     let label = if is_dir { format!("{name}/") } else { name.clone() };
+                                    let open_attr = if is_dir { String::new() } else { path.clone() };
                                     view! {
                                         <li class="ev-fileline">
-                                            <button class="link file-row" draggable="true"
+                                            <button class="link file-row" draggable="true" data-ev-open=open_attr
                                                 on:dragstart=move |ev: web_sys::DragEvent| set_drag(&ev, &path_drag)
                                                 on:click=move |_| {
                                                     if is_dir {
                                                         files_path.set(path_click.clone());
                                                     } else {
-                                                        insert_mention(path_click.clone());
+                                                        doc_line.set(0);
+                                                        doc_diff.set(false);
+                                                        doc_path.set(path_click.clone());
                                                     }
                                                 }
                                             >{label}</button>
-                                            {(!is_dir).then(|| {
-                                                let path_attr = path_open.clone();
-                                                let path_set = path_open.clone();
-                                                view! {
-                                                    <button type="button" class="secondary ev-open" data-ev-open=path_attr on:click=move |_| {
-                                                        doc_line.set(0);
-                                                        doc_diff.set(false);
-                                                        doc_path.set(path_set.clone());
-                                                    }>"Open"</button>
-                                                }
-                                            })}
                                         </li>
                                     }
                                 }).collect_view()}
                             </ul>
-                            <p class="hint">"Open reads the file. Click or drag inserts @path. Send attaches the file."</p>
                         </div>
                     </Show>
                     <Show when=move || side_tab.get() == "changes">
@@ -4520,36 +4712,34 @@ fn App() -> impl IntoView {
                                     let path = file.path.clone();
                                     let path_drag = path.clone();
                                     let path_click = path.clone();
-                                    let path_open = path.clone();
                                     let added = file.added;
                                     let deleted = file.deleted;
                                     view! {
                                         <li class="ev-fileline">
-                                            <button class="link file-row" draggable="true"
+                                            <button class="link file-row" draggable="true" data-ev-open=path.clone()
                                                 on:dragstart=move |ev: web_sys::DragEvent| set_drag(&ev, &path_drag)
-                                                on:click=move |_| insert_mention(path_click.clone())
+                                                on:click=move |_| {
+                                                    doc_line.set(0);
+                                                    doc_diff.set(true);
+                                                    doc_path.set(path_click.clone());
+                                                }
                                             >
                                                 <span class="name">{path.clone()}</span>
                                                 <span class="diff-add">{format!("+{added}")}</span>
                                                 <span class="diff-del">{format!("-{deleted}")}</span>
                                             </button>
-                                            <button type="button" class="secondary ev-open" data-ev-open=path_open.clone() on:click=move |_| {
-                                                doc_line.set(0);
-                                                doc_diff.set(true);
-                                                doc_path.set(path_open.clone());
-                                            }>"Open"</button>
                                         </li>
                                     }
                                 }).collect_view()}
                             </ul>
                         </div>
                     </Show>
-                    <Show when=move || side_tab.get() == "git">
-                        <git::GitPanel base=base token=token status_line=status />
-                    </Show>
-                    <Show when=move || side_tab.get() == "worktrees">
-                        <git::WorktreePanel base=base token=token status_line=status active_root=active_root />
-                    </Show>
+                    <div hidden=move || !git_active.get()>
+                        <git::GitPanel base=base token=token status_line=status active=git_active />
+                    </div>
+                    <div hidden=move || !worktree_active.get()>
+                        <git::WorktreePanel base=base token=token status_line=status active_root=active_root active=worktree_active />
+                    </div>
                     <Show when=move || {
                         let tab = side_tab.get();
                         tab == "memory" || tab == "knowledge" || tab == "artifacts"
@@ -4601,57 +4791,19 @@ fn App() -> impl IntoView {
 }
 
 #[component]
-fn DaemonPane(
-    base: RwSignal<String>,
-    token: RwSignal<String>,
-    status: RwSignal<String>,
-    gateway: RwSignal<String>,
-    gateway_detail: RwSignal<String>,
-    gateway_open: RwSignal<bool>,
-    gateway_profiles: RwSignal<Vec<gateway::Profile>>,
-    gateway_selected: RwSignal<String>,
-    refresh: impl Fn() + Copy + Send + Sync + 'static,
-    open_picker: impl Fn() + Copy + 'static,
-) -> impl IntoView {
-    let _ = status;
-    let connect = move |_: web_sys::MouseEvent| {
-        save("strike.base", &base.get());
-        gateway::persist_token("this", &token.get());
-        gateway::forget_persisted_host_token();
-        refresh();
-    };
-
+fn DaemonPane(gateway_detail: RwSignal<String>) -> impl IntoView {
     view! {
         <main class="daemon">
             <section class="card">
                 <h2 class="panel-title"><span class="icon-slot" aria-hidden="true" inner_html=icon("status")></span>"Daemon"</h2>
-                <label>"Base URL (blank = this daemon)"</label>
-                <input placeholder="http://100.64.0.5:8787"
-                    prop:value=move || base.get()
-                    on:input=move |ev| base.set(event_target_value(&ev)) />
-                <label>"Token"</label>
-                <input type="password" autocomplete="off"
-                    prop:value=move || token.get()
-                    on:input=move |ev| token.set(event_target_value(&ev)) />
-                <button class="primary" on:click=connect>"Connect"</button>
-                <p class="hint">"Same-origin live transcript uses the daemon cookie. strike connect keeps a short-lived grant in a local proxy so the URL has no token."</p>
-            </section>
-            <gateway::GatewaySwitcher
-                inline=true
-                primary=false
-                base=base
-                token=token
-                gateway=gateway
-                detail=gateway_detail
-                open=gateway_open
-                profiles=gateway_profiles
-                selected=gateway_selected
-                refresh=refresh
-            />
-            <section class="card">
-                <h2 class="panel-title">"Workspaces"</h2>
-                <p class="hint">"A workspace is a directory. Session lists are not folders."</p>
-                <button class="primary ws-open" on:click=move |_| open_picker()>"Change workspace"</button>
+                <p class="hint gw-detail">{move || {
+                    let detail = gateway_detail.get();
+                    if detail.is_empty() {
+                        "Gateway actions are in the command palette.".into()
+                    } else {
+                        detail
+                    }
+                }}</p>
             </section>
         </main>
     }

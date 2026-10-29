@@ -84,6 +84,7 @@ pub fn Chrome() -> impl IntoView {
         error.set(String::new());
     };
 
+    host::set_show_palette(Rc::new(open_palette));
     host::set_open_help(Rc::new(move || {
         palette_open.set(false);
         arg_id.set(String::new());

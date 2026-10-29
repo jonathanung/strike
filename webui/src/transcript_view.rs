@@ -2,7 +2,7 @@
 //! Composer send and queue stay in the shell. File tabs stay in the editor
 //! stream; this pane only emits `path:line` links.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use leptos::callback::{Callable, Callback};
@@ -11,10 +11,19 @@ use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
 
+use crate::shell::Choice;
 use crate::status::{StatusKind, StatusMark, StatusSlot};
+
+thread_local! {
+    static MESSAGES: RefCell<Vec<Choice>> = RefCell::new(Vec::new());
+}
+
+pub fn message_choices() -> Vec<Choice> {
+    MESSAGES.with(|slot| slot.borrow().clone())
+}
 use crate::transcript::{
-    anchored_scroll_top, empty_headline, parse_markdown, show_minimap, stick_to_bottom,
-    suggestions, Block, Chip, ChipKind, Inline, Message, Role, Transcript,
+    anchored_scroll_top, empty_headline, parse_markdown, stick_to_bottom, Block, Chip, ChipKind,
+    Inline, Message, Role, Transcript,
 };
 
 #[derive(Clone, Copy)]
@@ -189,16 +198,9 @@ pub fn TranscriptPane(
     let retry = handlers.retry;
     let fork = handlers.fork;
     let export_timeline = handlers.export_timeline;
-    let export_markdown = handlers.export_markdown;
+    let _ = (handlers.export_markdown, handlers.send);
     let regenerate = handlers.regenerate;
-    let send = handlers.send;
 
-    let start_rename = move |_| {
-        let current = transcript.with_untracked(|t| t.title.clone());
-        rename_for.set(session.get_untracked());
-        draft.set(current);
-        editing.set(true);
-    };
     let cancel_rename = move |_| editing.set(false);
     let commit_rename = move || {
         let started = rename_for.get_untracked();
@@ -322,6 +324,87 @@ pub fn TranscriptPane(
         }
     };
 
+    Effect::new(move |_| {
+        let rows = transcript.with(|t| {
+            t.messages
+                .iter()
+                .map(|msg| {
+                    let preview: String = msg.body.chars().take(72).collect();
+                    Choice {
+                        id: msg.id.to_string(),
+                        label: if msg.title.is_empty() {
+                            preview.clone()
+                        } else {
+                            msg.title.clone()
+                        },
+                        detail: preview,
+                    }
+                })
+                .collect()
+        });
+        MESSAGES.with(|slot| *slot.borrow_mut() = rows);
+    });
+    crate::shell::bind(
+        "transcript.regenerate",
+        Rc::new(move |_| {
+            regenerate.run(());
+            Ok(())
+        }),
+    );
+    crate::shell::bind(
+        "transcript.retry",
+        Rc::new(move |_| {
+            let active = session.get_untracked();
+            let bound = cursor.get_untracked().map(|id| CursorBind {
+                session: cursor_session.get_untracked(),
+                id,
+            });
+            let text = palette_retry(&active, bound.as_ref(), &cursor_messages(&transcript))
+                .ok_or_else(|| "No message to retry.".to_string())?;
+            retry.run((text,));
+            Ok(())
+        }),
+    );
+    crate::shell::bind(
+        "transcript.fork-message",
+        Rc::new(move |_| {
+            let active = session.get_untracked();
+            let bound = cursor.get_untracked().map(|id| CursorBind {
+                session: cursor_session.get_untracked(),
+                id,
+            });
+            let keep = palette_fork(&active, bound.as_ref(), &cursor_messages(&transcript))
+                .ok_or_else(|| "No message to fork from.".to_string())?;
+            fork.run((keep,));
+            Ok(())
+        }),
+    );
+    crate::shell::bind(
+        "transcript.jump",
+        Rc::new(move |args| {
+            let id: u32 = args
+                .trim()
+                .parse()
+                .map_err(|_| "Pick a message.".to_string())?;
+            cursor.set(Some(id));
+            cursor_session.set(session.get_untracked());
+            pinned.set(false);
+            scroll_message(id);
+            Ok(())
+        }),
+    );
+    on_cleanup(|| {
+        for id in [
+            "transcript.regenerate",
+            "transcript.retry",
+            "transcript.fork-message",
+            "transcript.jump",
+        ] {
+            crate::shell::unbind(id);
+        }
+        MESSAGES.with(|slot| slot.borrow_mut().clear());
+    });
+
     view! {
         <div class="sx-head">
             <div class="sx-title-row">
@@ -351,13 +434,6 @@ pub fn TranscriptPane(
                     <button type="button" class="sx-quiet" on:click=cancel_rename>"Cancel"</button>
                 </Show>
             </div>
-            <div class="sx-toolbar">
-                <button type="button" class="sx-quiet" on:click=start_rename>"Rename"</button>
-                <button type="button" class="sx-quiet" on:click=move |_| regenerate.run(())>"Regenerate"</button>
-                <button type="button" class="sx-quiet" on:click=move |_| export_timeline.run(())>"Export"</button>
-                <button type="button" class="sx-quiet" on:click=move |_| export_markdown.run(())>"Markdown"</button>
-            </div>
-            <p class="sx-keys">"j and k move. c copies. t retries. f forks after the turn. r renames. g regenerates. e exports."</p>
             <Show when=move || !note.get().is_empty()>
                 <p class="sx-note" role="alert">{move || note.get()}</p>
             </Show>
@@ -381,22 +457,17 @@ pub fn TranscriptPane(
                 <Show when=move || !loading.get() && transcript.with(|t| t.messages.is_empty()) && load_error.get().is_empty()>
                     <div class="sx-empty">
                         <strong>{move || empty_headline(tick.get())}</strong>
-                        <p>"Start with a card. The line under each one is what gets sent."</p>
-                        <div class="sx-cards">
-                            {suggestions().iter().map(|s| {
-                                let prompt = s.prompt.to_string();
-                                let shown = prompt.clone();
-                                let attr = prompt.clone();
-                                let title = s.title;
-                                let detail = s.detail;
-                                view! {
-                                    <button type="button" class="sx-card" title=detail data-prompt=attr on:click=move |_| send.run((prompt.clone(),))>
-                                        <span class="sx-card-title">{title}</span>
-                                        <span class="sx-card-detail">{shown}</span>
-                                    </button>
-                                }
-                            }).collect_view()}
-                        </div>
+                        <p>"Send a message to start."</p>
+                        <button
+                            type="button"
+                            class="secondary"
+                            data-add-provider="true"
+                            on:click=move |_| {
+                                let _ = crate::shell::set_view("providers");
+                            }
+                        >
+                            "Add provider"
+                        </button>
                     </div>
                 </Show>
                 {move || {
@@ -443,22 +514,6 @@ pub fn TranscriptPane(
                         .collect_view()
                 }}
             </div>
-            <Show when=move || show_minimap(transcript.with(|t| t.messages.len()))>
-                <div class="sx-map" aria-label="Transcript map">
-                    {move || transcript.get().messages.into_iter().map(|msg| {
-                        let id = msg.id;
-                        let label = format!("{} {}", msg.title, msg.body.chars().take(48).collect::<String>());
-                        let class = format!("sx-tick sx-tick-{}", msg.role.class());
-                        view! {
-                            <button type="button" class=class aria-label=label on:click=move |_| {
-                                cursor.set(Some(id));
-                                pinned.set(false);
-                                scroll_message(id);
-                            }></button>
-                        }
-                    }).collect_view()}
-                </div>
-            </Show>
             <Show when=move || !pinned.get() && transcript.with(|t| !t.messages.is_empty())>
                 <button type="button" class="sx-jump" on:click=jump>"Latest"</button>
             </Show>
@@ -555,6 +610,39 @@ fn rename_applies(started: &str, active: &str) -> bool {
     !started.is_empty() && started == active
 }
 
+/// Palette retry: the cursor message when it belongs to this session,
+/// otherwise the latest retryable turn in the transcript on screen.
+fn palette_retry(
+    active: &str,
+    cursor: Option<&CursorBind>,
+    messages: &[CursorMsg],
+) -> Option<String> {
+    if cursor.is_some_and(|c| c.session == active) {
+        return resolve_retry(active, cursor, messages);
+    }
+    messages.iter().rev().find_map(|m| {
+        let text = m.retry_text.trim();
+        if text.is_empty() {
+            None
+        } else {
+            Some(text.to_string())
+        }
+    })
+}
+
+fn palette_fork(active: &str, cursor: Option<&CursorBind>, messages: &[CursorMsg]) -> Option<i32> {
+    if cursor.is_some_and(|c| c.session == active) {
+        return resolve_fork(active, cursor, messages);
+    }
+    messages.iter().rev().find_map(|m| {
+        if m.keep_events < 0 {
+            None
+        } else {
+            Some(m.keep_events)
+        }
+    })
+}
+
 fn scroll_message(id: u32) {
     if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
         // Articles carry their find-in-transcript id (`tf-line-<idx>`) as
@@ -634,8 +722,8 @@ fn message_view(
     idx: usize,
     cursor: RwSignal<Option<u32>>,
     open_file: Callback<(String, u32)>,
-    retry: Callback<(String,)>,
-    fork: Callback<(i32,)>,
+    _retry: Callback<(String,)>,
+    _fork: Callback<(i32,)>,
     find_hits: Vec<crate::transcript_find::TMatch>,
     find_current: Option<crate::transcript_find::TMatch>,
     turn_elapsed: Option<String>,
@@ -682,14 +770,12 @@ fn message_view(
         .map(|h| (h.start, h.end));
     let find_body = !body_ranges.is_empty();
     let find_title = !title_ranges.is_empty();
-    let show_retry = prose && !retry_text.trim().is_empty();
-    let show_fork = prose && keep >= 0;
+    let _ = (prose, retry_text, keep);
     let class = move || {
         let on = cursor.get() == Some(id);
         format!("sx-msg sx-{role}{}", if on { " sx-on" } else { "" })
     };
     let copy_btn = copy_text.clone();
-    let retry_btn = retry_text.clone();
     view! {
         <article id=format!("tf-line-{idx}") data-msg=id class=class data-role=role>
             <header>
@@ -717,15 +803,6 @@ fn message_view(
                 })}
                 <span class="sx-actions">
                     <button type="button" class="sx-quiet" on:click=move |_| { let _ = write_clipboard(&copy_btn); }>"Copy"</button>
-                    <Show when=move || show_retry>
-                        <button type="button" class="sx-quiet" on:click={
-                            let text = retry_btn.clone();
-                            move |_| retry.run((text.clone(),))
-                        }>"Retry"</button>
-                    </Show>
-                    <Show when=move || show_fork>
-                        <button type="button" class="sx-quiet" on:click=move |_| fork.run((keep,))>"Fork"</button>
-                    </Show>
                 </span>
             </header>
             {if find_body {
@@ -968,5 +1045,35 @@ mod tests {
             Some("newest prompt")
         );
         assert_eq!(resolve_fork("sess-a", Some(&hit), &a), Some(4));
+    }
+
+    #[test]
+    fn palette_message_commands_prefer_this_session_cursor() {
+        let a = vec![row(1, "older", 1), row(2, "newest", 4)];
+        assert_eq!(palette_retry("sess-a", None, &a).as_deref(), Some("newest"));
+        assert_eq!(palette_fork("sess-a", None, &a), Some(4));
+        let stale = CursorBind {
+            session: "sess-b".into(),
+            id: 1,
+        };
+        assert_eq!(
+            palette_retry("sess-a", Some(&stale), &a).as_deref(),
+            Some("newest")
+        );
+        let hit = CursorBind {
+            session: "sess-a".into(),
+            id: 1,
+        };
+        assert_eq!(
+            palette_retry("sess-a", Some(&hit), &a).as_deref(),
+            Some("older")
+        );
+        assert_eq!(palette_fork("sess-a", Some(&hit), &a), Some(1));
+        let missing = CursorBind {
+            session: "sess-a".into(),
+            id: 9,
+        };
+        assert!(palette_retry("sess-a", Some(&missing), &a).is_none());
+        assert!(palette_fork("sess-a", Some(&missing), &a).is_none());
     }
 }

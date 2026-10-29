@@ -168,6 +168,18 @@ fn store_prompt(ev: JsValue) {
     SCAN.with(|slot| slot.borrow_mut().prompt = Some(ev));
 }
 
+thread_local! {
+    static INSTALL_READY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+pub fn install_ready() -> bool {
+    INSTALL_READY.with(|slot| slot.get())
+}
+
+fn set_install_ready(ready: bool) {
+    INSTALL_READY.with(|slot| slot.set(ready));
+}
+
 fn call_install_prompt() {
     let ev = SCAN.with(|slot| slot.borrow().prompt.clone());
     let Some(ev) = ev else {
@@ -195,6 +207,16 @@ pub(crate) fn GatewayQR(
     let devices = RwSignal::new(Vec::<DeviceRow>::new());
     let device_note = RwSignal::new(String::new());
     crate::shell::bind(
+        "app.install",
+        Rc::new(|_| {
+            if !install_ready() {
+                return Err("This browser has not offered to install Strike.".into());
+            }
+            call_install_prompt();
+            Ok(())
+        }),
+    );
+    crate::shell::bind(
         "pair.revoke-all",
         Rc::new(move |_| {
             revoke_all(base, token, devices, device_note);
@@ -210,6 +232,7 @@ pub(crate) fn GatewayQR(
             ev.prevent_default();
             store_prompt(ev.into());
             install_ready.set(true);
+            set_install_ready(true);
         });
         let _ = win
             .add_event_listener_with_callback("beforeinstallprompt", cb.as_ref().unchecked_ref());
@@ -250,9 +273,6 @@ pub(crate) fn GatewayQR(
             <div class="gq-landing" role="status">
                 <p>"Paired with this gateway. Add Strike to the home screen to open it again."</p>
                 <div class="gq-actions">
-                    <Show when=move || install_ready.get()>
-                        <button class="secondary gq-install" type="button" on:click=move |_| call_install_prompt()>"Install"</button>
-                    </Show>
                     <button class="secondary gq-revoke-self" type="button" on:click=move |_| {
                         if !crate::confirm::ask(
                             crate::confirm::ConfirmRequest {
@@ -283,7 +303,6 @@ pub(crate) fn GatewayQR(
                     </div>
                     <p class="gq-note">{move || note.get()}</p>
                     <div class="gq-qr" inner_html=move || svg.get()></div>
-                    <p class="gq-url">{move || url.get()}</p>
                     <input id="gq-url" readonly aria-label="Pairing URL" prop:value=move || url.get() />
                     <div class="gq-actions">
                         <button class="secondary" type="button" on:click=copy_url>"Copy URL"</button>

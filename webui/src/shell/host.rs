@@ -334,6 +334,23 @@ pub fn set_open_help(open: Rc<dyn Fn()>) {
     OPEN_HELP.with(|slot| *slot.borrow_mut() = Some(open));
 }
 
+thread_local! {
+    static OPEN_PALETTE: RefCell<Option<Rc<dyn Fn()>>> = const { RefCell::new(None) };
+}
+
+pub fn set_show_palette(open: Rc<dyn Fn()>) {
+    OPEN_PALETTE.with(|slot| *slot.borrow_mut() = Some(open));
+}
+
+/// Open the command palette. Chrome installs the performer at mount.
+pub fn show_palette() {
+    OPEN_PALETTE.with(|slot| {
+        if let Some(open) = slot.borrow().clone() {
+            open();
+        }
+    });
+}
+
 pub fn open_help() {
     OPEN_HELP.with(|slot| {
         if let Some(open) = slot.borrow().clone() {
