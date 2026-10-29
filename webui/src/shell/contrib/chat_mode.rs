@@ -7,13 +7,12 @@
 
 use std::rc::Rc;
 
-use crate::shell::{Command, ShellHook, TopRegion, TopSlot};
+use crate::shell::{Group, Command, ShellHook, TopRegion, TopSlot};
 
 pub fn install(reg: &mut ShellHook) {
     reg.command(Command {
         id: "layout-cockpit",
-        section: "Apps",
-        section_order: 10,
+        group: Group::Settings,
         label: "Layout: Cockpit",
         detail: "Sessions, transcript, and the side panel",
         shortcut: "",
@@ -21,11 +20,14 @@ pub fn install(reg: &mut ShellHook) {
         argument: None,
         order: 40,
         run: Rc::new(|_| crate::chat_mode::host_set_layout("cockpit")),
+        visible: None,
+        enabled: None,
+        confirm: None,
+        choices: None,
     });
     reg.command(Command {
         id: "layout-conversation",
-        section: "Apps",
-        section_order: 10,
+        group: Group::Settings,
         label: "Layout: Conversation",
         detail: "One column. Sessions and the side panel open as drawers",
         shortcut: "",
@@ -33,6 +35,10 @@ pub fn install(reg: &mut ShellHook) {
         argument: None,
         order: 41,
         run: Rc::new(|_| crate::chat_mode::host_set_layout("conversation")),
+        visible: None,
+        enabled: None,
+        confirm: None,
+        choices: None,
     });
     reg.slot(TopSlot {
         id: "layout",

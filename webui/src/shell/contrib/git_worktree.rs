@@ -12,13 +12,12 @@
 
 use std::rc::Rc;
 
-use crate::shell::{Command, ShellHook, Shortcut};
+use crate::shell::{Group, Command, ShellHook, Shortcut};
 
 pub fn install(reg: &mut ShellHook) {
     reg.command(Command {
         id: "panel-git",
-        section: "Commands",
-        section_order: 0,
+        group: Group::Git,
         label: "Git",
         detail: "Status, diff, commit, and branches",
         shortcut: "",
@@ -26,11 +25,14 @@ pub fn install(reg: &mut ShellHook) {
         argument: None,
         order: 100,
         run: Rc::new(|args| crate::shell::dispatch("panel-git", args)),
+        visible: None,
+        enabled: None,
+        confirm: None,
+        choices: None,
     });
     reg.command(Command {
         id: "panel-worktrees",
-        section: "Commands",
-        section_order: 0,
+        group: Group::Git,
         label: "Worktrees",
         detail: "Session worktrees and child isolation",
         shortcut: "Alt+T",
@@ -38,6 +40,10 @@ pub fn install(reg: &mut ShellHook) {
         argument: None,
         order: 110,
         run: Rc::new(|args| crate::shell::dispatch("panel-worktrees", args)),
+        visible: None,
+        enabled: None,
+        confirm: None,
+        choices: None,
     });
     reg.shortcut(Shortcut {
         id: "panel-worktrees",

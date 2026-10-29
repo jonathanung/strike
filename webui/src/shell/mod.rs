@@ -15,10 +15,15 @@ use std::cell::Cell;
 
 pub use chrome::Chrome;
 #[allow(unused_imports)]
-pub use host::{bind, dispatch, set_host, set_view, unbind, HostBridge};
+pub use host::{
+    bind, dispatch, set_host, set_model_choices, set_model_picker, set_view, unbind, HostBridge,
+};
 pub use icon::icon;
 #[allow(unused_imports)]
-pub use registry::{Argument, Command, ShellHook, Shortcut, TopRegion, TopSlot};
+pub use registry::{
+    Argument, Choice, Command, ConfirmSpec, Group, PaletteUsage, ShellHook, Shortcut, TopRegion,
+    TopSlot,
+};
 
 mod contrib {
     include!(concat!(env!("OUT_DIR"), "/shell_contrib.rs"));

@@ -9,13 +9,12 @@ use std::rc::Rc;
 
 use leptos::prelude::*;
 
-use crate::shell::{Command, ShellHook, Shortcut, TopRegion, TopSlot};
+use crate::shell::{Group, Command, ShellHook, Shortcut, TopRegion, TopSlot};
 
 pub fn install(reg: &mut ShellHook) {
     reg.command(Command {
         id: "goals",
-        section: "Apps",
-        section_order: 10,
+        group: Group::Navigate,
         label: "Goals",
         detail: "Run a goal until its check passes or a guard stops it",
         shortcut: "Alt+G",
@@ -23,6 +22,10 @@ pub fn install(reg: &mut ShellHook) {
         argument: None,
         order: 30,
         run: Rc::new(|_| crate::shell::host::set_view("goals")),
+        visible: None,
+        enabled: None,
+        confirm: None,
+        choices: None,
     });
     reg.slot(TopSlot {
         id: "goals",

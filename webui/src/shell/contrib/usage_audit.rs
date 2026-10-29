@@ -10,13 +10,12 @@ use std::rc::Rc;
 
 use leptos::prelude::*;
 
-use crate::shell::{Command, ShellHook, Shortcut, TopRegion, TopSlot};
+use crate::shell::{Group, Command, ShellHook, Shortcut, TopRegion, TopSlot};
 
 pub fn install(reg: &mut ShellHook) {
     reg.command(Command {
         id: "usage",
-        section: "Apps",
-        section_order: 10,
+        group: Group::Navigate,
         label: "Usage",
         detail: "Tokens and cost from provider usage events",
         shortcut: "Alt+U",
@@ -24,11 +23,14 @@ pub fn install(reg: &mut ShellHook) {
         argument: None,
         order: 40,
         run: Rc::new(|_| crate::shell::host::set_view("usage")),
+        visible: None,
+        enabled: None,
+        confirm: None,
+        choices: None,
     });
     reg.command(Command {
         id: "audit",
-        section: "Apps",
-        section_order: 10,
+        group: Group::Debug,
         label: "Audit",
         detail: "Hash-chained log of sensitive actions",
         shortcut: "Alt+A",
@@ -36,6 +38,10 @@ pub fn install(reg: &mut ShellHook) {
         argument: None,
         order: 50,
         run: Rc::new(|_| crate::shell::host::set_view("audit")),
+        visible: None,
+        enabled: None,
+        confirm: None,
+        choices: None,
     });
     reg.slot(TopSlot {
         id: "usage-audit",
