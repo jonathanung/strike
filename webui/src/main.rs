@@ -1346,7 +1346,7 @@ fn App() -> impl IntoView {
                         steer_queue::LiveNote::Usage { .. } | steer_queue::LiveNote::Fit { .. } => {}
                         steer_queue::LiveNote::EngineError { message, .. } => {
                             queue_note.set(message.clone());
-                            if message.contains("no active turn") {
+                            if message.contains("no active turn") || message.contains("already waiting") {
                                 steer_note.set(String::new());
                                 steer_mode.set(String::new());
                             }
@@ -3699,7 +3699,9 @@ fn App() -> impl IntoView {
                             </Show>
                             <Show when=move || !queue_items.get().is_empty()>
                                 <ol class="queue-list" aria-label="Queued messages">
-                                    {move || queue_items.get().into_iter().enumerate().map(|(i, item)| {
+                                    {move || {
+                                        let busy_now = session_busy_now.get();
+                                        queue_items.get().into_iter().enumerate().map(|(i, item)| {
                                         let id = item.id.clone();
                                         let id_for_when = id.clone();
                                         let id_for_fallback = id.clone();
@@ -3708,6 +3710,8 @@ fn App() -> impl IntoView {
                                         let id_cancel_label = id.clone();
                                         let id_up = id.clone();
                                         let id_down = id.clone();
+                                        let id_send_now = id.clone();
+                                        let row_busy = busy_now;
                                         let text_for_edit = item.text.clone();
                                         let can_up = steer_queue::moved_ids(&queue_items.get(), &id, -1).is_some();
                                         let can_down = steer_queue::moved_ids(&queue_items.get(), &id, 1).is_some();
@@ -3731,6 +3735,16 @@ fn App() -> impl IntoView {
                                                     } />
                                                 </Show>
                                                 <span class="queue-actions">
+                                                    <Show when=move || row_busy>
+                                                        {let id_click = id_send_now.clone();
+                                                        view! {
+                                                            <button type="button" class="secondary" title="Send this message into the running turn now. The messages it jumps stay queued, in order." on:click=move |_| {
+                                                                steer_note.set(steer_queue::STEER_WAITING.into());
+                                                                steer_mode.set(String::new());
+                                                                post_queue("input.queue_send_now", serde_json::json!({"id": id_click.clone()}));
+                                                            }>"Send now"</button>
+                                                        }}
+                                                    </Show>
                                                     <Show when=move || editing_id.get() == id_for_when.clone() fallback=move || {
                                                         let id_edit = id_for_fallback.clone();
                                                         let text = text_for_edit.clone();
@@ -3766,8 +3780,12 @@ fn App() -> impl IntoView {
                                                 </span>
                                             </li>
                                         }
-                                    }).collect_view()}
+                                        }).collect_view()
+                                    }}
                                 </ol>
+                            </Show>
+                            <Show when=move || !queue_items.get().is_empty() && !session_busy_now.get()>
+                                <p class="queue-note">"No turn is running — queued messages send on their own, in order."</p>
                             </Show>
                         </div>
                         <form on:submit=move |ev| { ev.prevent_default(); send(steer_queue::SendWhich::Primary); }>

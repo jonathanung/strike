@@ -2513,6 +2513,29 @@ try {
     { timeout: STEP_MS, interval: 200 },
   );
 
+  // Send now (#1571): the remaining queued message promotes into the
+  // running turn as a steer — it leaves the FIFO at once and the steer
+  // note takes over. Runs after the cancel step so the cancel coverage
+  // keeps its two-item queue.
+  await evaluate(`(() => {
+    const row = [...document.querySelectorAll(".queue-list li")].find((r) => r.innerText.includes("beta edited"));
+    const sendNow = row && [...row.querySelectorAll("button")].find((b) => b.textContent === "Send now");
+    if (sendNow) sendNow.click();
+    return "ok";
+  })()`);
+  await waitFor(
+    "send now promoted queued message",
+    async () => {
+      const raw = await evaluate(`(() => {
+        const texts = [...document.querySelectorAll(".queue-text")].map((n) => n.textContent);
+        const note = document.querySelector(".steer-note")?.textContent || "";
+        return JSON.stringify({ ok: texts.length === 0 && /steer/i.test(note), texts, note });
+      })()`);
+      return JSON.parse(raw || "{}");
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+
   await setDraft("steer left");
   await evaluate(`(() => {
     const mode = [...document.querySelectorAll(".steer-actions .chip")].find((b) => (b.textContent || "").trim() === "Steer");

@@ -1,6 +1,6 @@
-{"type":"user.message","time":"2026-01-02T03:04:05Z","v":"1.20.0","data":{"text":"hello","futureField":1}}
-{"type":"text.delta","time":"2026-01-02T03:04:05Z","v":"1.20.0","data":{"text":"hi"}}
-{"type":"tool.begin","time":"2026-01-02T03:04:05Z","v":"1.20.0","data":{"callId":"c1","name":"bash","args":{"command":"echo"}}}
-{"type":"turn.completed","time":"2026-01-02T03:04:05Z","v":"1.20.0","data":{"stopReason":"end_turn"}}
-{"type":"child.completed","time":"2026-01-02T03:04:05Z","v":"1.20.0","data":{"status":"completed","summary":"done","handoff":{"summary":"done","filesChanged":null}}}
-{"type":"future.extension","time":"2026-01-02T03:04:05Z","v":"1.20.0","data":{"ok":true,"span":"gate"}}
+{"type":"user.message","time":"2026-01-02T03:04:05Z","v":"1.21.0","data":{"text":"hello","futureField":1}}
+{"type":"text.delta","time":"2026-01-02T03:04:05Z","v":"1.21.0","data":{"text":"hi"}}
+{"type":"tool.begin","time":"2026-01-02T03:04:05Z","v":"1.21.0","data":{"callId":"c1","name":"bash","args":{"command":"echo"}}}
+{"type":"turn.completed","time":"2026-01-02T03:04:05Z","v":"1.21.0","data":{"stopReason":"end_turn"}}
+{"type":"child.completed","time":"2026-01-02T03:04:05Z","v":"1.21.0","data":{"status":"completed","summary":"done","handoff":{"summary":"done","filesChanged":null}}}
+{"type":"future.extension","time":"2026-01-02T03:04:05Z","v":"1.21.0","data":{"ok":true,"span":"gate"}}

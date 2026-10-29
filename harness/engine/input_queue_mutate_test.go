@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -61,6 +62,95 @@ func TestInputQueueEditRejectsEmptyTextWithoutImages(t *testing.T) {
 	}
 	if e.pendingUserInputs[0].text != "keep" {
 		t.Fatalf("text changed to %q", e.pendingUserInputs[0].text)
+	}
+}
+
+func TestInputQueueSendNowPromotesToPendingSteer(t *testing.T) {
+	e := testQueueEngine()
+	e.turnDone = make(chan struct{})
+	e.activeTurnID = "turn-1"
+	e.enqueueUserInput(protocol.UserInput{Text: "first"})
+	e.enqueueUserInput(protocol.UserInput{Text: "second"})
+	_ = drainQueueEvent(t, e)
+	snap, ok := drainQueueEvent(t, e).(protocol.InputQueued)
+	if !ok || len(snap.Items) != 2 {
+		t.Fatalf("items = %#v", snap)
+	}
+
+	e.handleInputQueueSendNow(context.Background(), protocol.InputQueueSendNow{ID: snap.Items[1].ID})
+	left, ok := drainQueueEvent(t, e).(protocol.InputQueued)
+	if !ok || len(left.Items) != 1 || left.Items[0].Text != "first" {
+		t.Fatalf("after send now = %#v", left)
+	}
+	ps := e.takePendingSteer()
+	if ps == nil || ps.text != "second" || ps.targetTurnID != "turn-1" {
+		t.Fatalf("pending steer = %#v", ps)
+	}
+
+	// The promoted id is claimed: a repeat send-now is an error, never a
+	// second delivery, and the rest of the queue is untouched.
+	e.handleInputQueueSendNow(context.Background(), protocol.InputQueueSendNow{ID: snap.Items[1].ID})
+	errEv, ok := drainQueueEvent(t, e).(protocol.EngineError)
+	if !ok || !strings.Contains(errEv.Message, "not in the queue") {
+		t.Fatalf("repeat send now = %#v", errEv)
+	}
+	if len(e.pendingUserInputs) != 1 || e.pendingUserInputs[0].text != "first" {
+		t.Fatalf("queue = %#v", e.pendingUserInputs)
+	}
+}
+
+func TestInputQueueSendNowSteerSlotBusyFailsInPlace(t *testing.T) {
+	e := testQueueEngine()
+	e.turnDone = make(chan struct{})
+	e.activeTurnID = "turn-1"
+	e.enqueueUserInput(protocol.UserInput{Text: "queued"})
+	snap, ok := drainQueueEvent(t, e).(protocol.InputQueued)
+	if !ok || len(snap.Items) != 1 {
+		t.Fatalf("items = %#v", snap)
+	}
+	e.pendingSteerMu.Lock()
+	e.pendingSteer = &pendingSteer{text: "composer steer", targetTurnID: "turn-1"}
+	e.pendingSteerMu.Unlock()
+
+	e.handleInputQueueSendNow(context.Background(), protocol.InputQueueSendNow{ID: snap.Items[0].ID})
+	errEv, ok := drainQueueEvent(t, e).(protocol.EngineError)
+	if !ok || !strings.Contains(errEv.Message, "already waiting") {
+		t.Fatalf("send now over pending steer = %#v", errEv)
+	}
+	if len(e.pendingUserInputs) != 1 || e.pendingUserInputs[0].text != "queued" {
+		t.Fatalf("item moved: %#v", e.pendingUserInputs)
+	}
+	if ps := e.takePendingSteer(); ps == nil || ps.text != "composer steer" {
+		t.Fatalf("pending steer replaced: %#v", ps)
+	}
+}
+
+func TestInputQueueSendNowIdleNeedsProviderAndKeepsItem(t *testing.T) {
+	e := testQueueEngine()
+	e.enqueueUserInput(protocol.UserInput{Text: "later"})
+	snap, ok := drainQueueEvent(t, e).(protocol.InputQueued)
+	if !ok || len(snap.Items) != 1 {
+		t.Fatalf("items = %#v", snap)
+	}
+
+	e.handleInputQueueSendNow(context.Background(), protocol.InputQueueSendNow{ID: snap.Items[0].ID})
+	errEv, ok := drainQueueEvent(t, e).(protocol.EngineError)
+	if !ok || !strings.Contains(errEv.Message, "no model selected") {
+		t.Fatalf("idle send now = %#v", errEv)
+	}
+	if len(e.pendingUserInputs) != 1 {
+		t.Fatalf("item dropped: %#v", e.pendingUserInputs)
+	}
+
+	e.handleInputQueueSendNow(context.Background(), protocol.InputQueueSendNow{ID: "  "})
+	errEv, ok = drainQueueEvent(t, e).(protocol.EngineError)
+	if !ok || !strings.Contains(errEv.Message, "needs an id") {
+		t.Fatalf("empty id = %#v", errEv)
+	}
+	e.handleInputQueueSendNow(context.Background(), protocol.InputQueueSendNow{ID: "missing"})
+	errEv, ok = drainQueueEvent(t, e).(protocol.EngineError)
+	if !ok || !strings.Contains(errEv.Message, "not in the queue") {
+		t.Fatalf("missing id = %#v", errEv)
 	}
 }
 

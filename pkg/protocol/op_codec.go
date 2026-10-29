@@ -33,6 +33,8 @@ func opType(op Op) string {
 		return "input.queue_cancel"
 	case InputQueueReorder:
 		return "input.queue_reorder"
+	case InputQueueSendNow:
+		return "input.queue_send_now"
 	case SelectModel:
 		return "select.model"
 	case SelectAgent:
@@ -128,6 +130,8 @@ func (e OpEnvelope) Decode() (Op, error) {
 		op = &InputQueueCancel{}
 	case "input.queue_reorder":
 		op = &InputQueueReorder{}
+	case "input.queue_send_now":
+		op = &InputQueueSendNow{}
 	case "select.model":
 		op = &SelectModel{}
 	case "select.agent":
@@ -199,6 +203,8 @@ func derefOp(op Op) Op {
 	case *InputQueueCancel:
 		return *v
 	case *InputQueueReorder:
+		return *v
+	case *InputQueueSendNow:
 		return *v
 	case *SelectModel:
 		return *v

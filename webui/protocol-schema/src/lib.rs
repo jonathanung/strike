@@ -4,7 +4,7 @@
 // Unknown event type strings become Event::Unknown.
 // Unknown JSON fields are ignored. Missing fields are defaults.
 // Unknown op type strings return Err.
-// protocol.Version 1.20.0
+// protocol.Version 1.21.0
 
 use std::collections::HashMap;
 
@@ -12,7 +12,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
-pub const PROTOCOL_VERSION: &str = "1.20.0";
+pub const PROTOCOL_VERSION: &str = "1.21.0";
 pub const LEGACY_VERSION: &str = "1.0.0";
 
 /// Open string. Known writer values live in the JSON Schema.
@@ -1037,6 +1037,13 @@ pub struct InputQueueItem {
 pub struct InputQueueReorder {
     #[serde(default, rename = "ids", deserialize_with = "null_as_default")]
     pub ids: Vec<String>,
+}
+
+/// InputQueueSendNow promotes one pending user-input item out of the FIFO. While a turn is active the item becomes a steer into that turn: it is delivered at the next safe boundary with a TurnSteered acknowledgement, or falls back to the next turn if the turn ends first, like any steer. While idle the item starts as a turn immediately. Removing the item from the queue is the claim, so an id that already left the queue (drained, cancelled, or promoted) is rejected instead of delivered twice.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+pub struct InputQueueSendNow {
+    #[serde(default, rename = "id")]
+    pub id: String,
 }
 
 /// InputQueued is the full pending user-input FIFO after a change: enqueue, drain, edit, cancel, reorder, steer queued-fallback, or a budget drop. Items is empty when the queue is clear. Replay uses the latest snapshot.
@@ -2818,6 +2825,7 @@ pub enum Op {
     InputQueueCancel(InputQueueCancel),
     InputQueueEdit(InputQueueEdit),
     InputQueueReorder(InputQueueReorder),
+    InputQueueSendNow(InputQueueSendNow),
     InspectDiagnosticBundle(InspectDiagnosticBundle),
     InspectEffectivePrompt(InspectEffectivePrompt),
     Interrupt(Interrupt),
@@ -2986,6 +2994,7 @@ pub fn decode_op(raw: &str) -> Result<Op, DecodeError> {
         "input.queue_cancel" => map_op::<InputQueueCancel>("input.queue_cancel", data.clone(), Op::InputQueueCancel),
         "input.queue_edit" => map_op::<InputQueueEdit>("input.queue_edit", data.clone(), Op::InputQueueEdit),
         "input.queue_reorder" => map_op::<InputQueueReorder>("input.queue_reorder", data.clone(), Op::InputQueueReorder),
+        "input.queue_send_now" => map_op::<InputQueueSendNow>("input.queue_send_now", data.clone(), Op::InputQueueSendNow),
         "inspect.diagnostic" => map_op::<InspectDiagnosticBundle>("inspect.diagnostic", data.clone(), Op::InspectDiagnosticBundle),
         "inspect.prompt" => map_op::<InspectEffectivePrompt>("inspect.prompt", data.clone(), Op::InspectEffectivePrompt),
         "interrupt" => map_op::<Interrupt>("interrupt", data.clone(), Op::Interrupt),

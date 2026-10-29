@@ -141,6 +141,7 @@ type (
 	InputQueueEdit          = pub.InputQueueEdit
 	InputQueueCancel        = pub.InputQueueCancel
 	InputQueueReorder       = pub.InputQueueReorder
+	InputQueueSendNow       = pub.InputQueueSendNow
 	SelectModel             = pub.SelectModel
 	SelectAgent             = pub.SelectAgent
 	SetEffort               = pub.SetEffort

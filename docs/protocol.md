@@ -91,7 +91,7 @@ additive fields on all of them.
 | `hook.matched` | `HookMatched` | Lifecycle hook fired (event/action/matcher/tool) |
 | `diagnostic.bundle` | `DiagnosticBundle` | Prompt/config diagnostic export payload |
 | `context.fit_warning` | `ContextFitWarning` | Context budget warn/critical |
-| `input.queued` | `InputQueued` | Pending `user.input` FIFO snapshot (`items` empty when clear). Wire 1.20+. Ops `input.queue_edit`, `input.queue_cancel`, `input.queue_reorder` mutate that FIFO |
+| `input.queued` | `InputQueued` | Pending `user.input` FIFO snapshot (`items` empty when clear). Wire 1.20+. Ops `input.queue_edit`, `input.queue_cancel`, `input.queue_reorder` mutate that FIFO; `input.queue_send_now` (wire 1.21+) promotes one item out of it — as a steer into the running turn, or as an immediate turn when idle. Leaving the FIFO is the claim, so a promoted item is never delivered twice |
 | `context.controls` | `ContextControlsSelected` | Exclude/pin context kinds |
 | `scheduler.queued` / `admitted` / `canceled` | `Scheduler*` | Admission pool wait/admit/cancel |
 | `tool.loop_detected` / `tool.retrying` | `ToolLoopDetected` / `ToolRetrying` | Tool reliability signals |

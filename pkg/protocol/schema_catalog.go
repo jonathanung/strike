@@ -82,6 +82,7 @@ func opPrototypes() []Op {
 		InputQueueEdit{},
 		InputQueueCancel{},
 		InputQueueReorder{},
+		InputQueueSendNow{},
 		SelectModel{},
 		SelectAgent{},
 		SetEffort{},
