@@ -4261,6 +4261,9 @@
         "permission": {
           "type": "string"
         },
+        "projectRulePath": {
+          "type": "string"
+        },
         "providerRequestId": {
           "type": "string"
         },
@@ -4271,6 +4274,9 @@
           "type": "string"
         },
         "turnId": {
+          "type": "string"
+        },
+        "workDir": {
           "type": "string"
         }
       },

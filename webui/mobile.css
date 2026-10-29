@@ -204,7 +204,8 @@
   body[data-phone="1"] .side-tabs .chip,
   body[data-phone="1"] .notice button,
   body[data-phone="1"] button.primary,
-  body[data-phone="1"] button.secondary {
+  body[data-phone="1"] button.secondary,
+  body[data-phone="1"] .approvals-actions button {
     min-height: 44px;
   }
 

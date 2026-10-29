@@ -2398,6 +2398,24 @@ button.linkish:disabled { color: var(--muted); cursor: default; text-decoration:
 .approvals-diff .add { color: var(--diff-add); }
 .approvals-diff .del { color: var(--diff-del); }
 .approvals-count { color: var(--warning); margin: var(--space-2) 0 0; }
+.approvals-fact {
+  margin: var(--space-2) 0 0;
+  color: var(--ink);
+  font-size: var(--type-sm);
+  overflow-wrap: anywhere;
+}
+.approvals-scopes {
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  color: var(--ink);
+  font-size: var(--type-sm);
+  line-height: 1.4;
+}
+.approvals-scopes li { overflow-wrap: anywhere; }
 .approvals-actions {
   display: flex;
   flex-wrap: wrap;

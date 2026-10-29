@@ -1256,6 +1256,10 @@ pub struct PermissionAsked {
     pub always: Vec<String>,
     #[serde(default, rename = "metadata")]
     pub metadata: Value,
+    #[serde(default, rename = "workDir")]
+    pub work_dir: String,
+    #[serde(default, rename = "projectRulePath")]
+    pub project_rule_path: String,
 }
 
 /// PermissionDecided is a non-blocking audit event for every permission evaluation outcome (auto-allow, auto-deny, ask suspended, or user reply). Patterns and rule fields are redacted by timeline export; session JSONL consumers should treat them as potentially sensitive paths/commands.

@@ -305,6 +305,10 @@ type Options struct {
 	// PersistProjectRule, when set, is invoked after a DecisionProject grant
 	// so the rule can be written to project config. Optional.
 	PersistProjectRule func(permission.Rule) error
+	// ProjectRulePath is the file PersistProjectRule appends to, stamped
+	// onto permission asks so frontends can state where a project grant is
+	// stored before the user chooses it. Display only; optional.
+	ProjectRulePath string
 	// PrepareInput, when set, expands composer text (!shell, /command,
 	// $skill, @file) before a user.input or steer turn. nil leaves the
 	// text unchanged. workDir is this engine's working directory.
@@ -901,6 +905,7 @@ func New(opts Options) *Engine {
 	if opts.PersistProjectRule != nil {
 		e.perms.SetProjectPersister(opts.PersistProjectRule)
 	}
+	e.perms.SetAskFacts(opts.WorkDir, opts.ProjectRulePath)
 	e.questions = question.New(e.emit)
 	return e
 }
