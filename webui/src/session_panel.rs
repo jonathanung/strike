@@ -760,11 +760,7 @@ pub(crate) fn SessionPanel(
                 .unwrap_or_else(|| id.clone());
             let remove = remove_folder;
             if !crate::confirm::ask(
-                crate::confirm::ConfirmRequest {
-                    title: format!("Remove folder {name}?"),
-                    body: "Sessions in the folder stay. A folder only groups them. It is not a directory on disk.".into(),
-                    confirm_label: "Remove folder".into(),
-                },
+                folder_remove_confirm(&name),
                 Rc::new(move || remove(id.clone())),
             ) {
                 return Err(crate::confirm::BUSY.into());
@@ -1268,5 +1264,32 @@ fn render_rows(
             </Show>
             {rows}
         </div>
+    }
+}
+
+/// Confirm copy for folder Remove (#1556). Removal is benign to the
+/// sessions but destructive to the grouping: the shared confirm dialog
+/// (`crate::confirm`) gates it and states both halves — sessions stay
+/// (unfiled), the grouping cannot be restored.
+pub fn folder_remove_confirm(name: &str) -> crate::confirm::ConfirmRequest {
+    crate::confirm::ConfirmRequest {
+        title: format!("Remove folder \u{201c}{name}\u{201d}?"),
+        body: "Sessions stay: they are not deleted, they become unfiled. The grouping itself cannot be restored.".into(),
+        confirm_label: "Remove folder".into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn folder_remove_confirm_states_sessions_survive_and_grouping_does_not() {
+        let req = folder_remove_confirm("Reviews");
+        assert_eq!(req.confirm_label, "Remove folder");
+        assert!(req.title.contains("Reviews"));
+        assert!(req.body.contains("Sessions stay"));
+        assert!(req.body.contains("not deleted"));
+        assert!(req.body.contains("cannot be restored"));
     }
 }
