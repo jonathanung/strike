@@ -212,7 +212,7 @@ the keys.
 gateway chip (`Connected`, `Checking`, or `Unreachable`), then Commands,
 then Menu. No active workspace is the literal label “No workspace”. The
 full workspace name is the first line of the Menu. The Menu’s only action
-is “Run a command”. The daemon version stays on the wordmark tooltip.
+is “Run a command”. The header also shows the daemon reachability line (`Connected · version`). The wordmark tooltip repeats it. It hides below 1200px.
 Providers, theme, density, layout, notifications, gateway pairing, git,
 session rename/fork/export, and the other secondary actions are palette
 commands. Customize pages are not in this tree yet; register them under
