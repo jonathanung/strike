@@ -23,13 +23,13 @@
 <link rel="stylesheet" href="/assets/editor-b94eee6c774248b5.css" integrity="sha384-+9ZqewFDkMigo7FvJP5c3fz6AHPgvKtu9jHfIAjeW7Qtx7wW3GCJSZM+LHcEeR4D"/>
 <link rel="stylesheet" href="/assets/chat-mode-c0a49864a0dd5243.css" integrity="sha384-McpfSccRV3saRSz8h4ulV3CS05un9+FK6ngy762vr2Ue/+x8ZumcRBVB0/5OG7Ao"/>
 <link rel="stylesheet" href="/assets/notify-750498e8d7d87548.css" integrity="sha384-l/TrTY1ETPTYhTEtEfPovdv2nck2zscWIo3mhOCEkb/RLhrZYW/bwgXX5qn68bAv"/>
-<link rel="stylesheet" href="/assets/usage-audit-4109f37a4c3f020.css" integrity="sha384-PG57uHfAoOyYrJLu5TZtnb1s2Ud6PPolTjB9IeCoVZ1qF7Qgrtsh0+5YiMBYYV9Z"/>
+<link rel="stylesheet" href="/assets/usage-audit-04109f37a4c3f020.css" integrity="sha384-PG57uHfAoOyYrJLu5TZtnb1s2Ud6PPolTjB9IeCoVZ1qF7Qgrtsh0+5YiMBYYV9Z"/>
 <link rel="stylesheet" href="/assets/goals-5b895e22909a0f66.css" integrity="sha384-liP/FQF4QvouM0zc8WO7nxC1u3CzbFF/GBmvuED6zZS8f0rmPG1QWhWJitxfpRm1"/>
 <link rel="stylesheet" href="/assets/apps-32329f32112c52dd.css" integrity="sha384-rCCpU/cjOEazPrATYy2QJ1olCZ4Ih2WiMxjcWWnsPOiSjeG0byQYwjUtjWjTijRu"/>
 <link rel="stylesheet" href="/assets/transcript-find-48ee7e8c29e3a7d5.css" integrity="sha384-eIxmvHVn9OZAgklNBggZLjZIuZ7orLHMdtsudrUHcg7zclIcXuQlOhMOgAMN1VtF"/>
 <link rel="stylesheet" href="/assets/turn-elapsed-f4f0358258cee9df.css" integrity="sha384-PW9+AyyJlSzqXRvg7I4U6848KUSH7uEgIt4HLxhzf05rs01hAbUaWUSxPQV+borE"/>
 <link rel="stylesheet" href="/assets/session-delete-c180251d14f9221e.css" integrity="sha384-wojH/ANHPCyXiTF3rSVVPn9SXyjSMXEyQy9axftq5nuQenRNd2m/wfUw0ySVQwhr"/>
-<link rel="stylesheet" href="/assets/mobile-14b1d677c33b0e71.css" integrity="sha384-/1qcZ36bJn7+daCEcUzLcuaA3jOFcMLS4L6nq7G125V/jp38AV2ELqJHqaZwE3U0"/>
+<link rel="stylesheet" href="/assets/mobile-78e4a468da846f34.css" integrity="sha384-x2e7MFinqk4yjGlazGPbTgfrCMI1AiDlLhU80KgqLGiihMJooGmg/xaaO5vqzsgs"/>
 <link rel="stylesheet" href="/assets/providers-66160360080cd4d4.css" integrity="sha384-JV7BBuCGnThJQfQ3IsWVLe6ZXWmo+SeZBQElL4B3+2IvmAEsWDShl3UboyqA1dEf"/>
 <link rel="stylesheet" href="/assets/steer-queue-51c161a10d024bb7.css" integrity="sha384-7dBJ5xCDRc6fz4noRzFnUxmdPMhJQJ7IDtB3jv9FePiTGbLZtdLFZyAcG1aai7Mu"/>
 <link rel="stylesheet" href="/assets/theme-efea0ce89feb3e7d.css" integrity="sha384-1nY0g2lmMhIJOk8s5SVRLmjJ9VKMczQPllFffQIW+yDlR7ZZGIcUerVEbGqr9xRS"/>
@@ -42,8 +42,8 @@
 
 
 <script type="module">
-import init, * as bindings from '/assets/strike-webui-69079bf6bddb9e5d.js';
-const wasm = await init({ module_or_path: '/assets/strike-webui-69079bf6bddb9e5d_bg.wasm' });
+import init, * as bindings from '/assets/strike-webui-767e438d6bec709e.js';
+const wasm = await init({ module_or_path: '/assets/strike-webui-34602e5c1bc422c1_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -54,7 +54,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 </script>
 <script src="/assets/register.js" defer></script>
 
-<link rel="modulepreload" href="/assets/strike-webui-69079bf6bddb9e5d.js" crossorigin="anonymous" integrity="sha384-XhBgr6G4UMHlQ0HQdh6v4r37CC1L1NDOmzJeWwq3eKDtxpc32gSewUdBwYj+3ATt"><link rel="preload" href="/assets/strike-webui-69079bf6bddb9e5d_bg.wasm" crossorigin="anonymous" integrity="sha384-RH/O0Xwg6jrim+wM1xYXg7CyV+qoc2PMk8NIFAYp5hoOqhVmRfUrawjSVame30f5" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/assets/strike-webui-767e438d6bec709e.js" crossorigin="anonymous" integrity="sha384-yRDXmKVyWsXkvBqOX1FlE56vtIgE/MQuujwXSLiC67otBxQS2USuUavTHhoCOaoe"><link rel="preload" href="/assets/strike-webui-34602e5c1bc422c1_bg.wasm" crossorigin="anonymous" integrity="sha384-h6E5put04Z2X7hseQR5X1QYy8LsXnK219l2FpaAUG0dec3jqTv6a3KYZ5NcKGcc0" as="fetch" type="application/wasm"></head>
 <body>
 <!-- Boot shell: shown until the cockpit mounts (main.rs removes it on
      mount). If the gateway is unreachable and only the cached shell

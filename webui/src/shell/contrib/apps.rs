@@ -1,53 +1,49 @@
-//! Apps (#1283): a top-bar switch and a palette command. The pane lives in
-//! `crate::apps` and is rendered by `main.rs` when the view is `apps`.
+//! Apps (#1283, #1593). Palette-only view. Queue deep links are their
+//! own commands so "issues" and "pull requests" land on that filter.
 
 use std::rc::Rc;
 
-use leptos::prelude::*;
+use crate::shell::{Command, Group, ShellHook};
 
-use crate::shell::{Group, Command, ShellHook, TopRegion, TopSlot};
-
-pub fn install(reg: &mut ShellHook) {
-    reg.command(Command {
-        id: "apps",
-        group: Group::Navigate,
-        label: "Apps",
-        detail: "Queues such as GitHub triage",
-        shortcut: "",
-        keywords: &["github", "triage", "issues"],
-        argument: None,
-        order: 20,
-        run: Rc::new(|_| crate::shell::host::set_view("apps")),
-        visible: None,
-        enabled: None,
-        confirm: None,
-        choices: None,
-    });
-    reg.slot(TopSlot {
-        id: "apps",
-        region: TopRegion::Trailing,
-        order: 84,
-        title: "Apps",
-        overflow_label: "Apps",
-        // 0: the view switch stays in the bar at every width. Smoke clicks it.
-        collapse_below_px: 0,
-        render: Rc::new(apps_switch),
-    });
+fn queue(filter: &'static str) -> crate::shell::CommandRun {
+    Rc::new(move |_| {
+        crate::shell::host::set_view("apps")?;
+        crate::park::dispatch_or_park("apps.queue", filter)
+    })
 }
 
-fn apps_switch() -> AnyView {
-    view! {
-        <div class="segmented" role="tablist" aria-label="Apps">
-            <button
-                data-view="apps"
-                class=move || if crate::shell::host::view() == "apps" { "seg on" } else { "seg" }
-                on:click=move |_| {
-                    let _ = crate::shell::host::set_view("apps");
-                }
-            >
-                "Apps"
-            </button>
-        </div>
-    }
-    .into_any()
+pub fn install(reg: &mut ShellHook) {
+    reg.command(
+        Command::new(
+            "apps",
+            Group::Navigate,
+            "Apps",
+            "Queues such as GitHub triage",
+            Rc::new(|_| crate::shell::host::set_view("apps")),
+        )
+        .keywords(&["github", "triage", "issues"])
+        .order(20),
+    );
+    reg.command(
+        Command::new(
+            "apps.issues",
+            Group::Navigate,
+            "Apps: issues queue",
+            "Open the issues filter",
+            queue("open-issues"),
+        )
+        .keywords(&["triage", "issues", "queue"])
+        .order(21),
+    );
+    reg.command(
+        Command::new(
+            "apps.prs",
+            Group::Navigate,
+            "Apps: pull requests queue",
+            "Open the pull requests filter",
+            queue("open-prs"),
+        )
+        .keywords(&["triage", "pull requests", "queue"])
+        .order(22),
+    );
 }

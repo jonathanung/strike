@@ -8,7 +8,25 @@
 
 use std::rc::Rc;
 
-use crate::shell::{Argument, Command, Group, ShellHook, Shortcut};
+use crate::shell::{Argument, Choice, Command, Group, ShellHook, Shortcut};
+
+fn default_model_choices() -> Vec<Choice> {
+    crate::shell::host::model_choices()
+        .into_iter()
+        .map(|choice| {
+            let name = choice
+                .label
+                .strip_prefix("Switch model: ")
+                .unwrap_or(choice.label.as_str())
+                .to_string();
+            Choice {
+                id: choice.id,
+                label: format!("Set default model: {name}"),
+                detail: choice.detail,
+            }
+        })
+        .collect()
+}
 
 pub fn install(reg: &mut ShellHook) {
     reg.command(Command {
@@ -44,6 +62,50 @@ pub fn install(reg: &mut ShellHook) {
         confirm: None,
         choices: None,
     });
+    reg.command(
+        Command::new(
+            "model.effort",
+            Group::Model,
+            "Set reasoning effort…",
+            "Set the effort for this session",
+            Rc::new(|args| crate::shell::host::set_effort(args)),
+        )
+        .keywords(&["effort", "reasoning", "thinking", "fast"])
+        .order(20)
+        .argument(Argument {
+            placeholder: "Effort",
+            required: true,
+        })
+        .choices(crate::shell::host::effort_choices),
+    );
+    reg.command(
+        Command::new(
+            "model.effort-default",
+            Group::Model,
+            "Save effort as default",
+            "Store the current effort as the global default",
+            Rc::new(|_| crate::shell::host::save_effort_default()),
+        )
+        .keywords(&["effort", "default", "reasoning"])
+        .order(21),
+    );
+    reg.command(
+        Command::new(
+            "model.default",
+            Group::Model,
+            "Set default model…",
+            "Save a catalog model as the global default",
+            Rc::new(|args| crate::shell::host::set_default_model(args)),
+        )
+        .shortcut("Ctrl+D")
+        .keywords(&["default", "model", "save", "global"])
+        .order(22)
+        .argument(Argument {
+            placeholder: "Model",
+            required: true,
+        })
+        .choices(default_model_choices),
+    );
     reg.shortcut(Shortcut {
         id: "model-menu",
         keys: "Alt+M",

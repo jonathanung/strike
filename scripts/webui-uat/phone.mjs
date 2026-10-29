@@ -355,17 +355,18 @@ export async function runPhoneScreens({ page, outDir, video, check, shots }) {
   await delay(100);
 
   const model = await page.evaluate(`(() => {
-    const btn = document.querySelector("[data-model-chip]");
-    if (!btn) return false;
-    btn.click();
-    return true;
+    const el = document.querySelector("[data-model-chip]");
+    if (!el) return { ok: false, text: "", h: 0 };
+    const rect = el.getBoundingClientRect();
+    return { ok: rect.width > 0 && rect.height > 0 && (el.textContent || "").includes("Model"), text: el.textContent || "", h: rect.height };
   })()`);
-  check(model, "model chip missing on the phone composer");
+  check(model && model.ok, `model status missing on the phone composer (${JSON.stringify(model)})`);
+  await page.evaluate(`document.dispatchEvent(new KeyboardEvent("keydown", { key: "m", altKey: true, bubbles: true, cancelable: true }))`);
   await delay(250);
   const modelOpen = await page.evaluate(`Boolean(document.querySelector("[data-model-menu]"))`);
   check(modelOpen, "model menu did not open on the phone");
   await shot(page, recorder, shotDir, shots, "phone-model-390");
-  await page.evaluate(`document.querySelector("[data-model-chip]")?.click()`);
+  await page.evaluate(`document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
 
   // Keyboard path: shrink the visual viewport the way iOS does when the
   // keyboard opens. Headless Chrome has no software keyboard.
