@@ -61,6 +61,12 @@ git push origin "$VERSION"
 
 Never force-push tags. Never tag a dirty tree or a commit not on `origin/main` unless the user explicitly requests a pre-release from a branch.
 
+0.10.x tags are a pre-release line: `release.yml` publishes them with
+`--prerelease --latest=false`, so they never become `/releases/latest`
+(`install.sh` and the self-updater resolve latest). Do not edit a 0.10.x
+release to latest. A `-rc.N` tag reuses the base version's changelog
+section (e.g. `## [v0.10.0]`) when it has no section of its own.
+
 ## Watch workflow
 
 ```sh

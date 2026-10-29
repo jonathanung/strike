@@ -14,8 +14,28 @@ materially affect the shipped product.
 
 ## [Unreleased]
 
+## [v0.10.0] - 2026-10-29
+
+Pre-release line. v0.10.0 deliberately jumps far ahead of v0.5.2 to mark the
+scale of what has landed since: the Rust web cockpit grew from a session
+shell into a full workspace — command palette, providers, scheduler,
+triggers, task runner, goals, terminal, git and worktree panels, a desktop
+shell, and a phone cockpit you can install as a PWA. Every 0.10.x release
+is published as a GitHub **pre-release** only: it is never marked latest,
+so `install.sh` and the self-updater keep resolving the current stable
+release until a later stable line replaces it. Expect rough edges.
+
 ### Added
 
+- **Command palette** — a first-class palette (Ctrl/Cmd+K) is the cockpit's
+  command registry: fuzzy search over views, actions, sessions, and models,
+  a full-height sheet on phone, and one shared confirmation dialog for
+  destructive actions (trigger delete, pairing revoke, gateway rotate,
+  app close) that names what will happen before it fires
+  ([#1598](https://github.com/jonathanung/strike/pull/1598)).
+- **Providers and API keys** — a first-class Providers page for adding and
+  managing provider credentials, instead of hunting through Settings
+  ([#1526](https://github.com/jonathanung/strike/pull/1526)).
 - **Web first-run and Settings** — the cockpit states that telemetry is off and lists the paths `strike serve` reads (`GET /v1/local-files`). Settings picks a bundled theme, type size, and density, and links to the model, approval, notification, and gateway controls. Theme id is the daemon config; scheme, type size, and density stay in the browser.
 - **Phone cockpit** — at phone width the web client shows one pane at a
   time (sessions, chat, activity, files, daemon) with a bottom nav, 44px
@@ -24,18 +44,96 @@ materially affect the shipped product.
   row scrolls. A phone resume keeps the transcript and continues the live
   stream from the last SSE id. See [docs/mobile.md](docs/mobile.md)
   ([#1311](https://github.com/jonathanung/strike/issues/1311)).
+- **Phone overlays, reading, and install** — dialogs open as dismissible
+  sheets on phone, the header collapses to one row with an overflow sheet,
+  code scrolls in its own box, edge-swipe switches sessions, transcript
+  scroll stays anchored across keyboard resizes, and the cockpit installs
+  as a PWA with an offline boot shell and 44px pairing targets
+  ([#1494](https://github.com/jonathanung/strike/pull/1494),
+  [#1497](https://github.com/jonathanung/strike/pull/1497),
+  [#1498](https://github.com/jonathanung/strike/pull/1498),
+  [#1499](https://github.com/jonathanung/strike/pull/1499),
+  [#1503](https://github.com/jonathanung/strike/pull/1503)).
 - **Web terminal** — the side panel opens a daemon PTY in the active
   workspace. The stream is an authenticated websocket (cookie or a
   single-use ticket) and stays on loopback unless
   `strike serve --terminal-remote` is set with `--auth`. Plan mode
-  refuses a new shell. See [docs/gateway.md](docs/gateway.md).
+  refuses a new shell. See [docs/gateway.md](docs/gateway.md)
+  ([#1482](https://github.com/jonathanung/strike/pull/1482)).
 - **Apps** — the web client opens a launcher of daemon queues. GitHub triage
   lists issues and pull requests for the repository in the serve working
   directory, with comment, close, reopen, and a handoff that starts a live
   session. The browser never sees a GitHub token. See
   [docs/webui-apps.md](docs/webui-apps.md)
   ([#1283](https://github.com/jonathanung/strike/issues/1283)).
+- **Schedules** — a daemon scheduler and Schedule page run sessions on a
+  recurring schedule, driven by the daemon rather than an open browser tab
+  ([#1418](https://github.com/jonathanung/strike/pull/1418)).
+- **Inbound triggers** — HMAC-signed webhooks start a root session on the
+  daemon; the cockpit manages the hooks. See
+  [docs/gateway.md](docs/gateway.md)
+  ([#1467](https://github.com/jonathanung/strike/pull/1467)).
+- **Task runner** — spec to plan to run to checkpoint, tracked in the
+  cockpit from the daemon's task records
+  ([#1429](https://github.com/jonathanung/strike/pull/1429)).
+- **Goals and Autopilot** — goals run against the engine with guardrails,
+  visible and controllable from the cockpit
+  ([#1300](https://github.com/jonathanung/strike/pull/1300)).
+- **Usage dashboard and audit log** — a usage dashboard plus a hash-chained
+  audit log you can inspect from the cockpit
+  ([#1304](https://github.com/jonathanung/strike/pull/1304)).
+- **Durable memory, knowledge, and artifacts** — daemon-backed panels for
+  project memory, knowledge, and shared artifacts, replacing browser-only
+  state ([#1305](https://github.com/jonathanung/strike/pull/1305)).
+- **Git and worktrees** — git status, diff, and worktree panels in the
+  cockpit, with a branch switcher that shows the current branch
+  ([#1314](https://github.com/jonathanung/strike/pull/1314)).
+- **Gateways and pairing** — connect to gateways over SSH with short-lived
+  grants, switch gateways from the cockpit, and pair a phone by scanning a
+  QR code or following the browser handoff from the Gateway page
+  ([#1308](https://github.com/jonathanung/strike/pull/1308),
+  [#1468](https://github.com/jonathanung/strike/pull/1468)).
+- **Desktop shell** — a Rust desktop app that connects to local and remote
+  gateways ([#1448](https://github.com/jonathanung/strike/pull/1448)).
+- **Side chat** — a read-only second chat pinned to a running session, for
+  watching a delegated run without disturbing it
+  ([#1292](https://github.com/jonathanung/strike/pull/1292)).
+- **Document viewer and editor** — read and edit workspace documents in an
+  embedded viewer/editor without leaving the cockpit
+  ([#1299](https://github.com/jonathanung/strike/pull/1299)).
+- **Readable transcript** — the session transcript gains per-message
+  timestamps, turn elapsed time, rendered markdown tables, child results
+  as cards, and find-in-transcript with a match count, next/previous, and
+  highlighting
+  ([#1413](https://github.com/jonathanung/strike/pull/1413),
+  [#1351](https://github.com/jonathanung/strike/pull/1351),
+  [#1422](https://github.com/jonathanung/strike/pull/1422),
+  [#1360](https://github.com/jonathanung/strike/pull/1360),
+  [#1398](https://github.com/jonathanung/strike/pull/1398)).
+- **Notification centre** — a redacted in-app notification centre for
+  needs-you events; OS banners stay generic and never name sessions
+  ([#1316](https://github.com/jonathanung/strike/pull/1316)).
+- **Session management** — a session selection list, and session delete
+  from the cockpit with a confirmation (plus a force-confirm for running
+  sessions) ([#1309](https://github.com/jonathanung/strike/pull/1309),
+  [#1400](https://github.com/jonathanung/strike/pull/1400)).
+- **Composer triggers and model controls** — the composer expands
+  `/command`, `@file`, `$skill`, and `!shell` from a `+` menu, and the
+  model menu sets model, effort, and a context hold
+  ([#1424](https://github.com/jonathanung/strike/pull/1424),
+  [#1303](https://github.com/jonathanung/strike/pull/1303)).
+- **Approvals you can decide from** — the cockpit manages approval modes,
+  asks, and permission rules, and the approval card itself now shows the
+  working directory, that approving runs on the gateway host, and a
+  plain-language consequence for each choice (Allow once / session /
+  project / Deny)
+  ([#1423](https://github.com/jonathanung/strike/pull/1423),
+  [#1603](https://github.com/jonathanung/strike/pull/1603)).
 - **Session log contract for external ingesters** — `docs/session-format.md` specifies the JSONL envelope, `session.header`, every event type, and the sidecar. New sidecars repeat `sessionId` (the filename) and record the last selected `model`. Fork and import copy that model from the kept log (import falls back to the package sidecar when the log has no selection). Older sidecars still load. A golden fixture fails if a field or event type is renamed or removed ([#1274](https://github.com/jonathanung/strike/issues/1274)).
+- **Protocol JSON Schema** — the wire protocol ships a generated JSON
+  Schema and generated Rust wire types, so external clients can validate
+  against the same schema the daemon speaks
+  ([#1333](https://github.com/jonathanung/strike/pull/1333)).
 - **Session status** — one vocabulary (`idle`, `running`, `waiting`,
   `blocked`, `failed`, `done`, `stopped`, `disconnected`) on the daemon and
   in the web client. Unread is a daemon field, not only browser storage.
@@ -62,21 +160,26 @@ materially affect the shipped product.
   See [docs/webui-daemon.md](docs/webui-daemon.md). Panels the daemon cannot
   drive stay in [docs/webui-planned.md](docs/webui-planned.md).
 - **Workspace policy** — a registered workspace can store a rules file
-  inside its directory and a permission mode (`PATCH /v1/workspaces/{id}`).
-  Sessions do not point at that record yet, and activating it does not move
-  the engine. See [docs/webui-daemon.md](docs/webui-daemon.md).
+  inside its directory and a permission mode (`PATCH /v1/workspaces/{id}`),
+  and sessions can be bound to a workspace from the picker. See
+  [docs/webui-daemon.md](docs/webui-daemon.md)
+  ([#1313](https://github.com/jonathanung/strike/pull/1313)).
 - **Gateway token rotation** — `strike daemon logout` replaces
   `~/.strike/daemon.token`. A `strike serve --token-file` process reads that
   file on every `/v1` check, so the previous bearer stops working without a
   restart. See [docs/gateway.md](docs/gateway.md).
 - **Web client sessions and activity** — the Rust UI opens tabbed live
   sessions and an Activity list of delegated children (status, elapsed time,
-  stop, retry, expand), including blocked handoffs. Schedule, memory,
-  knowledge, artifacts, and the task runner stay out of the UI until the
-  daemon can drive them ([docs/webui-planned.md](docs/webui-planned.md)).
+  stop, retry, expand), including blocked handoffs.
 
 ### Changed
 
+- **Blocky theme and three-zone header** — the cockpit header is a calmer
+  three-zone layout and the theme goes blocky and retro: square corners,
+  2px borders, hard shadows, flat colour blocks, and the original Strike
+  purple — with more white and one sharp accent. Theme residuals are
+  tracked on the theme issue
+  ([#1526](https://github.com/jonathanung/strike/pull/1526)).
 - **Web client uses the TUI palette** — `webui/style.css` takes its colors from
   `schemas/ui-tokens.json` (Strike dark by default, Strike light, and the
   bundled Nord, Dracula, Gruvbox, Monokai, Tokyo Night, and Catppuccin themes).
@@ -99,6 +202,40 @@ materially affect the shipped product.
   to `github.com/jonathanung/strike/...`; the old import path no longer
   resolves for new versions. Built binaries, config, and session formats
   are unchanged.
+
+### Fixed
+
+- **Phone sheets no longer lose their contents** — phone sheet slots stay
+  mounted across opens, and duplicate gateway/notification instances are
+  gone ([#1536](https://github.com/jonathanung/strike/pull/1536)).
+- **macOS daemon install** — `strike daemon install` now installs a
+  LaunchAgent on macOS, so the daemon survives login like it should
+  ([#1525](https://github.com/jonathanung/strike/pull/1525)).
+- **Deleting a session deregisters its live root** — a deleted session no
+  longer leaves a live root behind on the daemon
+  ([#1459](https://github.com/jonathanung/strike/pull/1459)).
+- **One ask, one UI** — the duplicate composer asks bar is removed, so a
+  pending approval appears exactly once
+  ([#1460](https://github.com/jonathanung/strike/pull/1460)).
+- **Branch switcher and model menu** — the branch switcher displays the
+  current branch, and the model menu positions its panel in a CSP-safe way
+  ([#1443](https://github.com/jonathanung/strike/pull/1443),
+  [#1382](https://github.com/jonathanung/strike/pull/1382)).
+- **Trigger sessions outlive the hook request** — a session started by a
+  trigger keeps running after the webhook request returns
+  ([#1478](https://github.com/jonathanung/strike/pull/1478)).
+- **Goals restored to the shipped cockpit** — a stale embedded web bundle
+  had silently dropped Goals from the served UI; the bundle is regenerated
+  from current sources ([#1377](https://github.com/jonathanung/strike/pull/1377)).
+
+### Security
+
+- **Invalid permission-rule globs are rejected** — a permission rule with
+  an invalid glob pattern fails validation instead of being silently
+  stored and never matching
+  ([#1436](https://github.com/jonathanung/strike/pull/1436)).
+
+**Full changelog:** [v0.5.2...v0.10.0](https://github.com/jonathanung/strike/compare/v0.5.2...v0.10.0)
 
 ## [v0.5.2] - 2026-08-19
 
@@ -944,7 +1081,8 @@ Initial public release.
 
 **Full changelog:** [commits through v0.0.1](https://github.com/jonathanung/strike/commits/v0.0.1)
 
-[Unreleased]: https://github.com/jonathanung/strike/compare/v0.5.2...HEAD
+[Unreleased]: https://github.com/jonathanung/strike/compare/v0.10.0...HEAD
+[v0.10.0]: https://github.com/jonathanung/strike/compare/v0.5.2...v0.10.0
 [v0.5.2]: https://github.com/jonathanung/strike/compare/v0.5.1...v0.5.2
 [v0.5.1]: https://github.com/jonathanung/strike/compare/v0.5.0...v0.5.1
 [v0.5.0]: https://github.com/jonathanung/strike/compare/v0.4.0...v0.5.0
