@@ -387,8 +387,8 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
         cards: Boolean(root && root.querySelector(".sx-cards")),
       };
     })()`);
-    check(emptyState.cards, "empty transcript is missing suggestion cards");
-    check(!emptyState.cta, "empty transcript still shows a duplicate Add provider");
+    check(!emptyState.cards, "empty transcript still shows suggestion cards");
+    check(emptyState.cta, "empty transcript is missing Add provider");
     await headerAt(page, check, viewport, async (name) => {
       const png = await page.send("Page.captureScreenshot", { format: "png" });
       await writeFile(join(outDir, "screenshots", `${name}.png`), Buffer.from(png.data, "base64"));
