@@ -7,13 +7,12 @@ use std::rc::Rc;
 
 use leptos::prelude::*;
 
-use crate::shell::{Command, ShellHook, Shortcut, TopRegion, TopSlot};
+use crate::shell::{Group, Command, ShellHook, Shortcut, TopRegion, TopSlot};
 
 pub fn install(reg: &mut ShellHook) {
     reg.command(Command {
         id: "settings",
-        section: "Settings",
-        section_order: 20,
+        group: Group::Settings,
         label: "Settings",
         detail: "Theme, type size, shortcuts, and the files this daemon reads",
         shortcut: "Ctrl+,",
@@ -21,6 +20,10 @@ pub fn install(reg: &mut ShellHook) {
         argument: None,
         order: 10,
         run: Rc::new(|_| crate::shell::host::set_view("settings")),
+        visible: None,
+        enabled: None,
+        confirm: None,
+        choices: None,
     });
     reg.slot(TopSlot {
         id: "settings",

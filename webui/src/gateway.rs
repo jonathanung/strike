@@ -269,10 +269,14 @@ pub fn classify_base(raw: &str) -> Result<bool, String> {
         if is_loopback_or_private_v4(v4) {
             return Ok(false);
         }
-        return Err("Public addresses are refused. Forward the daemon with strike connect or SSH.".into());
+        return Err(
+            "Public addresses are refused. Forward the daemon with strike connect or SSH.".into(),
+        );
     }
     if host.contains(':') {
-        let h = host.trim_matches(|c| c == '[' || c == ']').to_ascii_lowercase();
+        let h = host
+            .trim_matches(|c| c == '[' || c == ']')
+            .to_ascii_lowercase();
         if h == "::1" || h.starts_with("fc") || h.starts_with("fd") || h.starts_with("fe80:") {
             return Ok(false);
         }
@@ -570,8 +574,8 @@ pub fn GatewaySwitcher(
             // If registration failed the closure drops here and never fires.
         }
 
-        let on_key = Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(
-            move |ev: web_sys::KeyboardEvent| {
+        let on_key =
+            Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |ev: web_sys::KeyboardEvent| {
                 if ev.alt_key()
                     && !ev.ctrl_key()
                     && !ev.meta_key()
@@ -580,8 +584,7 @@ pub fn GatewaySwitcher(
                     ev.prevent_default();
                     open.update(|v| *v = !*v);
                 }
-            },
-        );
+            });
         if let Some(w) = web_sys::window() {
             let _ = w.add_event_listener_with_callback("keydown", on_key.as_ref().unchecked_ref());
         }
@@ -635,8 +638,12 @@ pub fn GatewaySwitcher(
         probe();
     };
 
-    let rotate = move |_| {
-        let (b, t, id) = (base.get(), token.get(), selected.get());
+    let rotate = move || {
+        let (b, t, id) = (
+            base.get_untracked(),
+            token.get_untracked(),
+            selected.get_untracked(),
+        );
         spawn_local(async move {
             match gateway_fetch("POST", &b, &t, "/v1/gateway/rotate", Some(json!({}))).await {
                 Ok((200, body)) => {
@@ -661,20 +668,45 @@ pub fn GatewaySwitcher(
         });
     };
 
-    let revoke = move |_| {
-        let (b, t) = (base.get(), token.get());
+    let revoke = move || {
+        let (b, t) = (base.get_untracked(), token.get_untracked());
         spawn_local(async move {
             match gateway_fetch("DELETE", &b, &t, "/v1/gateway/grants", None).await {
                 Ok((200, _)) => {
-                    detail.set("Revoked short-lived grants. The host token file was not changed.".into());
+                    detail.set(
+                        "Revoked short-lived grants. The host token file was not changed.".into(),
+                    );
                     probe();
                 }
-                Ok((403, _)) => detail.set("Revoking every grant needs the host token, not a short-lived grant.".into()),
-                Ok((code, body)) => detail.set(redact_display(&format!("Revoke failed: HTTP {code} {}", error_text(&body)))),
+                Ok((403, _)) => detail.set(
+                    "Revoking every grant needs the host token, not a short-lived grant.".into(),
+                ),
+                Ok((code, body)) => detail.set(redact_display(&format!(
+                    "Revoke failed: HTTP {code} {}",
+                    error_text(&body)
+                ))),
                 Err(_) => detail.set("Could not reach the daemon to revoke grants.".into()),
             }
         });
     };
+    {
+        let rotate = rotate;
+        let revoke = revoke;
+        crate::shell::bind(
+            "gateway.rotate",
+            Rc::new(move |_| {
+                rotate();
+                Ok(())
+            }),
+        );
+        crate::shell::bind(
+            "gateway.revoke",
+            Rc::new(move |_| {
+                revoke();
+                Ok(())
+            }),
+        );
+    }
 
     let logout_browser = move |_| {
         let (b, t, id) = (base.get(), token.get(), selected.get());
@@ -782,8 +814,28 @@ pub fn GatewaySwitcher(
             <p class="hint gw-detail" aria-live="polite">{move || detail.get()}</p>
             <div class="gw-actions">
                 <button class="secondary" on:click=reconnect>"Reconnect"</button>
-                <button class="secondary" on:click=rotate>"Rotate token"</button>
-                <button class="secondary" on:click=revoke>"Revoke grants"</button>
+                <button class="secondary" data-action="rotate-token" on:click=move |_| {
+                    let rotate = rotate;
+                    crate::confirm::ask(
+                        crate::confirm::ConfirmRequest {
+                            title: "Rotate gateway token?".into(),
+                            body: "The current token stops working everywhere it was copied. This browser stores the new one.".into(),
+                            confirm_label: "Rotate token".into(),
+                        },
+                        Rc::new(move || rotate()),
+                    );
+                }>"Rotate token"</button>
+                <button class="secondary" data-action="revoke-grants" on:click=move |_| {
+                    let revoke = revoke;
+                    crate::confirm::ask(
+                        crate::confirm::ConfirmRequest {
+                            title: "Revoke gateway grants?".into(),
+                            body: "Every short-lived grant stops working. The host token file is not changed.".into(),
+                            confirm_label: "Revoke grants".into(),
+                        },
+                        Rc::new(move || revoke()),
+                    );
+                }>"Revoke grants"</button>
                 <button class="secondary" on:click=logout_browser>"Log out browser"</button>
             </div>
             <ul class="plain gw-list">

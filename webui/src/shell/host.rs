@@ -9,7 +9,37 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use super::registry::CommandRun;
+use super::registry::{Choice, CommandRun};
+
+thread_local! {
+    static MODEL_CHOICES: RefCell<Vec<Choice>> = RefCell::new(Vec::new());
+    static PICK_MODEL: RefCell<Option<Rc<dyn Fn(&str, &str)>>> = RefCell::new(None);
+}
+
+pub fn set_model_choices(rows: Vec<Choice>) {
+    MODEL_CHOICES.with(|choices| *choices.borrow_mut() = rows);
+}
+
+pub fn model_choices() -> Vec<Choice> {
+    MODEL_CHOICES.with(|choices| choices.borrow().clone())
+}
+
+pub fn set_model_picker(pick: Rc<dyn Fn(&str, &str)>) {
+    PICK_MODEL.with(|slot| *slot.borrow_mut() = Some(pick));
+}
+
+/// `encoded` is `provider` + tab + model id, the choice id the palette stores.
+pub fn pick_model(encoded: &str) -> Result<(), String> {
+    let (provider, id) = encoded.split_once('\t').unwrap_or(("", encoded));
+    if id.is_empty() {
+        return Err("Pick a model.".into());
+    }
+    let pick = PICK_MODEL
+        .with(|slot| slot.borrow().clone())
+        .ok_or_else(|| "Model picker is not ready.".to_string())?;
+    pick(provider, id);
+    Ok(())
+}
 
 pub struct HostBridge {
     pub new_session: Rc<dyn Fn()>,

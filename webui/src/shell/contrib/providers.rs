@@ -4,13 +4,12 @@
 
 use std::rc::Rc;
 
-use crate::shell::{Command, ShellHook};
+use crate::shell::{Group, Command, ShellHook};
 
 pub fn install(reg: &mut ShellHook) {
     reg.command(Command {
         id: "providers",
-        section: "Settings",
-        section_order: 20,
+        group: Group::Providers,
         label: "Providers",
         detail: "API keys and OpenAI-compatible hosts",
         shortcut: "",
@@ -18,5 +17,9 @@ pub fn install(reg: &mut ShellHook) {
         argument: None,
         order: 5,
         run: Rc::new(|_| crate::shell::host::set_view("providers")),
+        visible: None,
+        enabled: None,
+        confirm: None,
+        choices: None,
     });
 }

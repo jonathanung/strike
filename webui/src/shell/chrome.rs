@@ -10,7 +10,7 @@ use wasm_bindgen::JsCast;
 use super::host::{self, status_badge_class, status_label};
 use super::icon::icon;
 use super::registry::{self, TopRegion};
-use super::storage::{load_recents, remember_command};
+use super::storage::{load_usage, remember_command};
 
 /// Centre-zone pages. Cap is 5. Secondary pages stay in the menu.
 const PRIMARY: &[(&str, &str)] = &[("chat", "Chat"), ("daemon", "Daemon")];
@@ -43,66 +43,6 @@ fn editable_target() -> bool {
 }
 
 #[component]
-fn HistoryButton(back: bool, labeled: bool) -> impl IntoView {
-    let label = if back { "Back" } else { "Forward" };
-    let keys = if back { "Alt+Left" } else { "Alt+Right" };
-    let mark = icon(if back { "back" } else { "forward" });
-    let which = if back { "back" } else { "forward" };
-    let class = if labeled { "nav-menu-item" } else { "nav-icon" };
-    view! {
-        <button
-            type="button"
-            class=class
-            title=format!("{label} ({keys})")
-            aria-label=label
-            data-nav=which
-            prop:disabled=move || if back { !host::can_back() } else { !host::can_forward() }
-            on:click=move |_| {
-                let _ = host::travel(back);
-            }
-        >
-            <span class="icon-slot" aria-hidden="true" inner_html=mark></span>
-            {labeled.then(|| view! { <span class="name">{label}</span> <kbd>{keys}</kbd> })}
-        </button>
-    }
-}
-
-#[component]
-fn FocusButton(labeled: bool) -> impl IntoView {
-    let mark = icon("focus");
-    let class = move || {
-        let on = host::focus_on();
-        if labeled {
-            if on {
-                "nav-menu-item on"
-            } else {
-                "nav-menu-item"
-            }
-        } else if on {
-            "nav-icon on"
-        } else {
-            "nav-icon"
-        }
-    };
-    view! {
-        <button
-            type="button"
-            class=class
-            title="Focus mode (Alt+\\)"
-            aria-label="Focus mode"
-            aria-pressed=move || if host::focus_on() { "true" } else { "false" }
-            data-nav="focus"
-            on:click=move |_| {
-                let _ = host::toggle_focus();
-            }
-        >
-            <span class="icon-slot" aria-hidden="true" inner_html=mark></span>
-            {labeled.then(|| view! { <span class="name">"Focus mode"</span> <kbd>"Alt+\\"</kbd> })}
-        </button>
-    }
-}
-
-#[component]
 fn SessionChip() -> impl IntoView {
     view! {
         <span
@@ -120,7 +60,6 @@ pub fn Chrome() -> impl IntoView {
     let palette_open = RwSignal::new(false);
     let help_open = RwSignal::new(false);
     let more_open = RwSignal::new(false);
-    let phone_open = RwSignal::new(false);
     let query = RwSignal::new(String::new());
     let arg_id = RwSignal::new(String::new());
     let arg_text = RwSignal::new(String::new());
@@ -136,7 +75,6 @@ pub fn Chrome() -> impl IntoView {
         error.set(String::new());
         cursor.set(0);
         more_open.set(false);
-        phone_open.set(false);
         help_open.set(false);
         palette_open.set(true);
     };
@@ -151,22 +89,69 @@ pub fn Chrome() -> impl IntoView {
         arg_id.set(String::new());
         error.set(String::new());
         more_open.set(false);
-        phone_open.set(false);
         help_open.set(true);
     }));
 
     let flat_ids = move || -> Vec<String> {
-        registry::palette(&query.get_untracked(), &load_recents())
+        if !arg_id.get_untracked().is_empty() {
+            return choice_rows(&arg_id.get_untracked(), &arg_text.get_untracked())
+                .into_iter()
+                .map(|choice| choice.id)
+                .collect();
+        }
+        registry::palette(&query.get_untracked(), &load_usage())
             .into_iter()
             .flat_map(|group| group.hits.into_iter().map(|hit| hit.id))
             .collect()
+    };
+    let run_ready = move |id: String, args: String| {
+        let Some(cmd) = registry::command(&id) else {
+            return;
+        };
+        if !cmd.is_enabled() {
+            error.set("That command is unavailable.".into());
+            return;
+        }
+        if let Some(argument) = cmd.argument {
+            let choosing = cmd.choices.is_some() && !args.trim().is_empty();
+            if argument.required && args.trim().is_empty() && !choosing {
+                error.set("This command needs an argument.".into());
+                return;
+            }
+        }
+        if let Some(spec) = cmd.confirm {
+            let perform = cmd.run.clone();
+            let remembered = id.clone();
+            let payload = args.clone();
+            crate::confirm::ask(
+                spec.into(),
+                Rc::new(move || {
+                    if perform(&payload).is_ok() {
+                        remember_command(&remembered);
+                    }
+                }),
+            );
+            close_palette();
+            return;
+        }
+        match (cmd.run)(&args) {
+            Ok(()) => {
+                remember_command(&id);
+                close_palette();
+            }
+            Err(message) => error.set(message),
+        }
     };
     let activate = move |id: String| {
         let Some(cmd) = registry::command(&id) else {
             return;
         };
+        if !cmd.is_enabled() {
+            error.set("That command is unavailable.".into());
+            return;
+        }
         let in_arg = arg_id.get_untracked() == id;
-        if cmd.argument.is_some() && !in_arg {
+        if cmd.needs_prompt() && !in_arg {
             arg_id.set(id);
             arg_text.set(String::new());
             error.set(String::new());
@@ -174,33 +159,20 @@ pub fn Chrome() -> impl IntoView {
             cursor.set(0);
             return;
         }
-        let args = if cmd.argument.is_some() {
+        let mut args = if in_arg {
             arg_text.get_untracked()
         } else {
             String::new()
         };
-        if let Some(argument) = cmd.argument {
-            if argument.required && args.trim().is_empty() {
-                error.set("This command needs an argument.".into());
-                return;
-            }
-        }
-        match (cmd.run)(&args) {
-            Ok(()) => {
-                remember_command(&id);
-                if phone.get_untracked()
-                    && matches!(id.as_str(), "notifications.open" | "gateways.open")
-                {
-                    // On phone widths the single bell/switcher instances
-                    // live in the overflow sheet and their panels render
-                    // inside it; open the sheet so the panel the command
-                    // just opened is on screen (#1527).
-                    phone_open.set(true);
+        if in_arg {
+            if let Some(load) = cmd.choices.clone() {
+                let rows = registry::filter_choices(&args, &load());
+                if let Some(choice) = rows.get(cursor.get_untracked()) {
+                    args = choice.id.clone();
                 }
-                close_palette();
             }
-            Err(message) => error.set(message),
         }
+        run_ready(id, args);
     };
 
     Effect::new(move |_| {
@@ -216,18 +188,28 @@ pub fn Chrome() -> impl IntoView {
             }
         }
     });
-    Effect::new(move |_| {
-        if !phone.get() {
-            phone_open.set(false);
-        }
-    });
-
     let on_resize = Closure::<dyn FnMut()>::new(move || {
         phone.set(phone_layout());
     });
     let on_key =
         Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |ev: web_sys::KeyboardEvent| {
             let key = ev.key();
+            if key == "/"
+                && !ev.meta_key()
+                && !ev.ctrl_key()
+                && !ev.alt_key()
+                && !palette_open.get_untracked()
+                && !editable_target()
+            {
+                ev.prevent_default();
+                open_palette();
+                return;
+            }
+            if palette_open.get_untracked() && key == "Tab" {
+                ev.prevent_default();
+                trap_palette_focus(ev.shift_key());
+                return;
+            }
             if (ev.meta_key() || ev.ctrl_key()) && key.eq_ignore_ascii_case("k") && !ev.alt_key() {
                 ev.prevent_default();
                 if palette_open.get_untracked() {
@@ -253,36 +235,8 @@ pub fn Chrome() -> impl IntoView {
                 help_open.set(false);
                 return;
             }
-            if ev.alt_key()
-                && !ev.meta_key()
-                && !ev.ctrl_key()
-                && key.eq_ignore_ascii_case("n")
-            {
-                // The bell lives in the menu on desktop and in the phone
-                // sheet on phone widths. Opening that container in the
-                // same turn as the notification toggle keeps the panel
-                // on screen.
-                if phone.get_untracked() {
-                    phone_open.set(true);
-                } else {
-                    more_open.set(true);
-                    phone_open.set(true);
-                }
-            }
-            if ev.alt_key()
-                && !ev.meta_key()
-                && !ev.ctrl_key()
-                && key.eq_ignore_ascii_case("w")
-                && phone.get_untracked()
-            {
-                // The switcher lives in the phone sheet; its own Alt+W
-                // listener performs the toggle, this only makes sure the
-                // sheet holding it is open (#1527).
-                phone_open.set(true);
-            }
             if key == "Escape" {
                 more_open.set(false);
-                phone_open.set(false);
                 host::dismiss_popups();
                 return;
             }
@@ -328,12 +282,11 @@ pub fn Chrome() -> impl IntoView {
     on_key.forget();
 
     let command_mark = icon("command");
-    let more_mark = icon("more");
 
     view! {
         <header class="page-header nav-bar" data-nav="header">
             {move || if phone.get() {
-                phone_bar(phone_open, more_mark)
+                phone_bar(open_palette, command_mark)
             } else {
                 view! {
             <div class="nav-zone nav-left">
@@ -382,7 +335,17 @@ pub fn Chrome() -> impl IntoView {
                         status.into_iter().map(slot_view).collect_view().into_any()
                     }
                 }}
-                <span class="brand-status nav-version">{move || host::version_label()}</span>
+                <button
+                    type="button"
+                    class="nav-menu-btn nav-palette-btn"
+                    data-nav="palette"
+                    aria-keyshortcuts="Control+K Meta+K"
+                    title="Commands (Ctrl+K)"
+                    on:click=move |_| open_palette()
+                >
+                    "Commands"
+                    <kbd>"Ctrl+K"</kbd>
+                </button>
                 <button
                     type="button"
                     class="nav-menu-btn"
@@ -402,11 +365,6 @@ pub fn Chrome() -> impl IntoView {
                 .into_any()
             }}
         </header>
-        {move || if phone.get() {
-            phone_sheet(open_palette, phone_open, command_mark)
-        } else {
-            view! {}.into_any()
-        }}
         <button
             type="button"
             class="nav-backdrop"
@@ -427,65 +385,21 @@ pub fn Chrome() -> impl IntoView {
             <button
                 type="button"
                 class="nav-menu-item"
-                data-nav="palette"
+                data-nav="palette-menu"
                 on:click=move |_| open_palette()
             >
                 <span class="name">"Run a command"</span>
                 <kbd>"Ctrl+K"</kbd>
             </button>
-            <button
-                type="button"
-                class="nav-menu-item"
-                data-nav="providers"
-                on:click=move |_| {
-                    more_open.set(false);
-                    let _ = host::set_view("providers");
-                }
-            >
-                <span class="name">"Providers"</span>
-            </button>
-            <HistoryButton back=true labeled=true />
-            <HistoryButton back=false labeled=true />
-            <FocusButton labeled=true />
-            <button
-                type="button"
-                class="nav-menu-item"
-                on:click=move |_| {
-                    more_open.set(false);
-                    help_open.set(true);
-                }
-            >
-                <span class="name">"Keyboard shortcuts"</span>
-                <kbd>"?"</kbd>
-            </button>
-            {move || {
-                // On phone widths the gateway switcher and the
-                // notification bell render in the phone sheet instead
-                // (see phone_sheet), so each has exactly one live instance:
-                // a second mount leaks the switcher's probe timer and
-                // Alt+W listener, and strands the bell's palette handle
-                // on a disposed signal (#1527).
-                let on_phone = phone.get();
-                menu_slots()
-                    .into_iter()
-                    .filter(|slot| {
-                        !(on_phone && matches!(slot.id, "gateway-switcher" | "notifications"))
-                    })
-                    .map(|slot| {
-                        // overflow_label is the accessible name when the slot
-                        // control is an icon. collapse_below_px no longer
-                        // moves slots; the menu holds them at every width.
-                        let title = slot.overflow_label.to_string();
-                        let body = (slot.render)();
-                        view! { <div class="nav-menu-slot" title=title>{body}</div> }
-                    })
-                    .collect_view()
-            }}
         </div>
+        <div class="shell-alive" data-nav="alive-tray">
+            {move || alive_slots().into_iter().map(slot_view).collect_view()}
+        </div>
+        <crate::confirm::ConfirmDialog />
         <Show when=move || palette_open.get()>
             <div class="palette-backdrop" on:click=move |_| close_palette()>
                 <div
-                    class="palette"
+                    class=move || if phone.get() { "palette palette-sheet" } else { "palette" }
                     role="dialog"
                     aria-modal="true"
                     aria-label="Command palette"
@@ -516,6 +430,10 @@ pub fn Chrome() -> impl IntoView {
                         prop:value=move || if arg_id.get().is_empty() { query.get() } else { arg_text.get() }
                         autocomplete="off"
                         spellcheck="false"
+                        role="combobox"
+                        aria-autocomplete="list"
+                        aria-expanded="true"
+                        aria-controls="palette-list"
                         aria-label="Command"
                         on:input=move |ev| {
                             let value = event_target_value(&ev);
@@ -529,9 +447,6 @@ pub fn Chrome() -> impl IntoView {
                         on:keydown=move |ev: web_sys::KeyboardEvent| {
                             let key = ev.key();
                             if key == "ArrowDown" || key == "ArrowUp" {
-                                if !arg_id.get_untracked().is_empty() {
-                                    return;
-                                }
                                 ev.prevent_default();
                                 let ids = flat_ids();
                                 if ids.is_empty() {
@@ -564,17 +479,55 @@ pub fn Chrome() -> impl IntoView {
                     <Show when=move || !error.get().is_empty()>
                         <p class="notice palette-error" role="alert">{move || error.get()}</p>
                     </Show>
-                    <div class="palette-list" role="listbox">
+                    <div id="palette-list" class="palette-list" role="listbox" aria-label="Commands">
                         {move || {
                             if !arg_id.get().is_empty() {
-                                let detail = registry::command(&arg_id.get())
-                                    .map(|cmd| cmd.detail.to_string())
-                                    .unwrap_or_default();
-                                return view! { <p class="hint">{detail}</p> }.into_any();
+                                let rows = choice_rows(&arg_id.get(), &arg_text.get());
+                                if rows.is_empty() {
+                                    let detail = registry::command(&arg_id.get())
+                                        .map(|cmd| cmd.detail.to_string())
+                                        .unwrap_or_default();
+                                    return view! {
+                                        <p class="palette-empty" role="status">"Nothing matches."</p>
+                                        <p class="hint">{detail}</p>
+                                    }.into_any();
+                                }
+                                let selected = cursor.get();
+                                let mut blocks = Vec::new();
+                                for (index, choice) in rows.into_iter().enumerate() {
+                                    let on = index == selected;
+                                    let class = if on { "palette-row on" } else { "palette-row" };
+                                    let option_id = format!("palette-opt-{index}");
+                                    let label = choice.label.clone();
+                                    let detail = choice.detail.clone();
+                                    let picked = arg_id.get_untracked();
+                                    let choice_id = choice.id.clone();
+                                    let run = run_ready;
+                                    blocks.push(view! {
+                                        <button
+                                            type="button"
+                                            id=option_id
+                                            class=class
+                                            role="option"
+                                            aria-selected=on.to_string()
+                                            data-choice-id=choice.id
+                                            on:click=move |_| run(picked.clone(), choice_id.clone())
+                                        >
+                                            <span class="palette-copy">
+                                                <span class="name">{label}</span>
+                                                <span class="path">{detail}</span>
+                                            </span>
+                                        </button>
+                                    }.into_any());
+                                }
+                                return blocks.into_any();
                             }
-                            let groups = registry::palette(&query.get(), &load_recents());
+                            let groups = registry::palette(&query.get(), &load_usage());
                             if groups.is_empty() {
-                                return view! { <p class="hint">"No matching commands."</p> }.into_any();
+                                return view! {
+                                    <p class="palette-empty" role="status">"No matching commands."</p>
+                                    <p class="hint">"Try a page name, a shortcut, or part of a command."</p>
+                                }.into_any();
                             }
                             let mut blocks = Vec::new();
                             let mut index = 0usize;
@@ -588,16 +541,21 @@ pub fn Chrome() -> impl IntoView {
                                     let detail = hit.detail.clone();
                                     let shortcut = hit.shortcut.clone();
                                     let on = index == selected;
+                                    let option_id = format!("palette-opt-{index}");
                                     index += 1;
                                     let class = if on { "palette-row on" } else { "palette-row" };
+                                    let enabled = hit.enabled;
                                     let activate_id = id.clone();
                                     let run = activate;
                                     blocks.push(view! {
                                         <button
                                             type="button"
+                                            id=option_id
                                             class=class
                                             role="option"
                                             aria-selected=on.to_string()
+                                            aria-disabled=(!enabled).to_string()
+                                            disabled=!enabled
                                             data-command-id=id
                                             on:click=move |_| run(activate_id.clone())
                                         >
@@ -640,13 +598,9 @@ pub fn Chrome() -> impl IntoView {
     }
 }
 
-/// Phone header (#1490 slice 2): one compact row — workspace name and
-/// session status on the left, a single overflow button on the right.
-/// Everything the desktop bar shows inline (Gateways, Phone, layout,
-/// view, notifications, the gateway chip) moves into the overflow
-/// sheet (see `phone_sheet`), next to Run a command, Back/Forward, and
-/// Focus mode.
-fn phone_bar(phone_open: RwSignal<bool>, more_mark: &'static str) -> AnyView {
+/// Phone header: workspace and status, plus a 44px control that opens
+/// the palette as a full-height sheet.
+fn phone_bar(open_palette: impl Fn() + Copy + 'static, command_mark: &'static str) -> AnyView {
     view! {
         <div class="nav-leading phone-leading">
             <span
@@ -669,132 +623,20 @@ fn phone_bar(phone_open: RwSignal<bool>, more_mark: &'static str) -> AnyView {
             <button
                 type="button"
                 class="nav-icon phone-more-btn"
-                aria-label="More actions"
-                aria-haspopup="menu"
-                aria-expanded=move || if phone_open.get() { "true" } else { "false" }
+                aria-label="Commands"
+                aria-haspopup="dialog"
+                aria-keyshortcuts="Control+K Meta+K"
                 data-nav="phone-more"
                 on:click=move |ev: web_sys::MouseEvent| {
                     ev.stop_propagation();
-                    phone_open.update(|open| *open = !*open);
+                    open_palette();
                 }
-            >
-                <span class="icon-slot" aria-hidden="true" inner_html=more_mark></span>
-            </button>
-        </div>
-    }
-    .into_any()
-}
-
-/// Phone overflow sheet: rendered next to the desktop menu, outside
-/// the header, so the bar itself never contains the sheet's action
-/// buttons. The sheet closes on a selection, on Escape, and on a
-/// backdrop tap — except clicks inside slots that own a popover
-/// (gateway panel, notification centre): those panels render inside
-/// the slot subtree and manage their own lifetime, so a click there is
-/// not a sheet selection.
-///
-/// Like the desktop menu, the sheet stays mounted while the phone
-/// layout is active; `data-open` decides visibility (mobile.css hides
-/// `[data-open="0"]`), so opening and closing it never remounts a slot.
-/// On phone widths the sheet is also the only place the gateway
-/// switcher and the notification bell are rendered — the desktop menu
-/// skips them there — because a second live copy of either leaks
-/// window registrations and strands shell handles (#1527).
-fn phone_sheet(
-    open_palette: impl Fn() + Copy + Send + Sync + 'static,
-    phone_open: RwSignal<bool>,
-    command_mark: &'static str,
-) -> AnyView {
-    view! {
-        <div
-            class="phone-menu-backdrop"
-            data-nav="phone-menu-backdrop"
-            data-open=move || if phone_open.get() { "1" } else { "0" }
-            on:click=move |_| phone_open.set(false)
-        ></div>
-        <div
-            class="menu phone-menu"
-            role="menu"
-            data-nav="phone-menu"
-            data-open=move || if phone_open.get() { "1" } else { "0" }
-            on:click=move |ev: web_sys::MouseEvent| {
-                if !in_popover_slot(&ev) {
-                    phone_open.set(false);
-                }
-            }
-        >
-            <button
-                type="button"
-                class="nav-menu-item"
-                data-nav="phone-run-command"
-                on:click=move |_| open_palette()
             >
                 <span class="icon-slot" aria-hidden="true" inner_html=command_mark></span>
-                <span class="name">"Run a command"</span>
-                <kbd>"Ctrl+K"</kbd>
             </button>
-            <button
-                type="button"
-                class="nav-menu-item"
-                data-nav="providers"
-                on:click=move |_| {
-                    phone_open.set(false);
-                    let _ = host::set_view("providers");
-                }
-            >
-                <span class="name">"Providers"</span>
-            </button>
-            <HistoryButton back=true labeled=true />
-            <HistoryButton back=false labeled=true />
-            <FocusButton labeled=true />
-            {move || {
-                phone_slots()
-                    .into_iter()
-                    .map(|slot| {
-                        let label = slot.overflow_label.to_string();
-                        let id = slot.id;
-                        let body = (slot.render)();
-                        view! {
-                            <div class="nav-overflow-slot" data-slot=id>
-                                <span class="path">{label}</span>
-                                {body}
-                            </div>
-                        }
-                    })
-                    .collect_view()
-            }}
         </div>
     }
     .into_any()
-}
-
-/// Slots that live in the phone overflow sheet: everything the desktop
-/// bar renders inline except the session status, which stays in the bar.
-/// On phone widths this list is the only render of each slot — the
-/// desktop menu skips `gateway-switcher` and `notifications` there —
-/// so components with window-level side effects mount exactly once
-/// at any viewport (#1527).
-fn phone_slots() -> Vec<super::registry::TopSlot> {
-    [TopRegion::Leading, TopRegion::Trailing]
-        .into_iter()
-        .flat_map(registry::slots)
-        .collect()
-}
-
-/// True when a click inside the phone sheet landed in a slot that owns
-/// a popover (the gateway panel, the notification centre). Those panels
-/// render inside the slot subtree, so closing the sheet would hide the
-/// panel the click just opened.
-fn in_popover_slot(ev: &web_sys::MouseEvent) -> bool {
-    let Some(target) = ev.target() else {
-        return false;
-    };
-    let Ok(el) = target.dyn_into::<web_sys::Element>() else {
-        return false;
-    };
-    el.closest("[data-slot=\"gateway-switcher\"], [data-slot=\"notifications\"]")
-        .map(|found| found.is_some())
-        .unwrap_or(false)
 }
 
 fn slot_view(slot: super::registry::TopSlot) -> AnyView {
@@ -808,7 +650,11 @@ fn arg_placeholder(id: &str) -> String {
         return "Type a command".into();
     }
     registry::command(id)
-        .and_then(|cmd| cmd.argument.map(|arg| arg.placeholder.to_string()))
+        .map(|cmd| {
+            cmd.argument
+                .map(|arg| arg.placeholder.to_string())
+                .unwrap_or_else(|| "Filter".into())
+        })
         .unwrap_or_else(|| "Argument".into())
 }
 
@@ -818,12 +664,72 @@ fn arg_placeholder(id: &str) -> String {
 /// `Chrome` additionally skips `gateway-switcher` and `notifications`
 /// at phone widths, where the phone sheet renders the only copies
 /// (#1527).
-fn menu_slots() -> Vec<super::registry::TopSlot> {
+fn alive_slots() -> Vec<super::registry::TopSlot> {
     [TopRegion::Leading, TopRegion::Trailing]
         .into_iter()
         .flat_map(registry::slots)
         .filter(|slot| slot.id != "view" && slot.id != "gateway")
         .collect()
+}
+
+fn choice_rows(id: &str, query: &str) -> Vec<super::registry::Choice> {
+    let Some(cmd) = registry::command(id) else {
+        return Vec::new();
+    };
+    let Some(load) = cmd.choices else {
+        return Vec::new();
+    };
+    registry::filter_choices(query, &load())
+}
+
+fn trap_palette_focus(shift: bool) {
+    let Some(doc) = web_sys::window().and_then(|window| window.document()) else {
+        return;
+    };
+    let Some(root) = doc
+        .query_selector("[data-nav='palette-dialog']")
+        .ok()
+        .flatten()
+    else {
+        return;
+    };
+    let Ok(list) =
+        root.query_selector_all("button, input, [href], [tabindex]:not([tabindex='-1'])")
+    else {
+        return;
+    };
+    let count = list.length();
+    if count == 0 {
+        return;
+    }
+    let active = doc.active_element();
+    let mut index = 0i32;
+    for i in 0..count {
+        let Some(node) = list.item(i) else { continue };
+        let same = active
+            .as_ref()
+            .and_then(|el| el.dyn_ref::<web_sys::Node>())
+            .map(|el| el.is_same_node(Some(&node)))
+            .unwrap_or(false);
+        if same {
+            index = i as i32;
+            break;
+        }
+    }
+    let next = if shift {
+        if index == 0 {
+            count - 1
+        } else {
+            (index as u32) - 1
+        }
+    } else {
+        ((index as u32) + 1) % count
+    };
+    if let Some(node) = list.item(next) {
+        if let Some(el) = node.dyn_ref::<web_sys::HtmlElement>() {
+            let _ = el.focus();
+        }
+    }
 }
 
 #[cfg(test)]
