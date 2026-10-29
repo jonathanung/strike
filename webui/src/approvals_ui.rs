@@ -162,6 +162,7 @@ pub fn ApprovalHost(
     reply_n: RwSignal<u32>,
     reply_id: RwSignal<String>,
     reply_decision: RwSignal<String>,
+    open_session: impl Fn(String) + Copy + Send + Sync + 'static,
 ) -> impl IntoView {
     let audit_limit = RwSignal::new(AUDIT_INITIAL_LIMIT);
     let seen_reply = Rc::new(Cell::new(0u32));
@@ -471,13 +472,40 @@ pub fn ApprovalHost(
                             }
                         }}</p>
                         <ul class="plain approvals-audit">
-                            {move || live_audit.get().into_iter().map(|row| audit_row(row.permission, row.action, row.decision, row.detail, "this session".into())).collect_view()}
+                            {move || live_audit.get().into_iter().map(|row| audit_row(row.permission, row.action, row.decision, row.detail, "this session".to_string())).collect_view()}
                             {move || stored_audit.get().records.into_iter().map(|row| {
                                 let mut detail = if row.patterns.is_empty() { row.layer.clone() } else { row.patterns.join(" ") };
                                 if !row.rule_action.is_empty() {
                                     detail = format!("{detail} rule {}", row.rule_action);
                                 }
-                                let when = if row.session_id.is_empty() { row.time.clone() } else { format!("{} · {}", row.time, row.session_id) };
+                                // #1540: a stored row's session id is a
+                                // link, not dead text. Truncated label,
+                                // full id in the title; activation goes
+                                // through the existing open_session path,
+                                // which reports a deleted session on the
+                                // status line. Live rows above stay plain
+                                // "this session" text — they are here.
+                                let sid = row.session_id.clone();
+                                let when = if sid.is_empty() {
+                                    view! { <span>{row.time.clone()}</span> }.into_any()
+                                } else {
+                                    let label = crate::usage_audit::short_id(&sid);
+                                    let title = sid.clone();
+                                    let aria = format!("Open session {sid}");
+                                    let time = row.time.clone();
+                                    view! {
+                                        <span>
+                                            {time}" · "
+                                            <button
+                                                type="button"
+                                                class="linkish session-link"
+                                                title=title
+                                                aria-label=aria
+                                                on:click=move |_| open_session(sid.clone())
+                                            >{label}</button>
+                                        </span>
+                                    }.into_any()
+                                };
                                 audit_row(row.permission, row.action, row.decision, detail, when)
                             }).collect_view()}
                         </ul>
@@ -766,7 +794,7 @@ fn workspace_block(
     }.into_any()
 }
 
-fn audit_row(permission: String, action: String, decision: String, detail: String, when: String) -> impl IntoView {
+fn audit_row(permission: String, action: String, decision: String, detail: String, when: impl IntoView) -> impl IntoView {
     let label = if permission.is_empty() { action.clone() } else { format!("{permission} · {action}") };
     let extra = if decision.is_empty() { detail } else { format!("{decision} {detail}") };
     view! {
