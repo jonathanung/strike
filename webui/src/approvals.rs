@@ -240,6 +240,10 @@ pub struct Ask {
     /// File a project grant appends its rule to, stamped by the daemon
     /// (#1507). Empty when project grants are not persisted to disk.
     pub project_rule_path: String,
+    /// True when the ask metadata marks the target as a directory (the
+    /// delete tool), so the folder scope is the named folder itself
+    /// rather than the parent of a file.
+    pub target_directory: bool,
 }
 
 impl Ask {
@@ -285,10 +289,111 @@ impl Ask {
                     )
                 }
             }
+            "folder" => match self.folder_scope() {
+                Some(folder) => format!(
+                    "Remembers {} in the folder {} and its subfolders for this session only. Not written to the project config. Remove it any time under Rules and audit.",
+                    self.permission, folder
+                ),
+                None => String::new(),
+            },
             "reject" => "Stops this call. Nothing runs and nothing is remembered.".into(),
             _ => String::new(),
         }
     }
+
+    /// The folder a folder grant would cover, as an absolute display path
+    /// when the daemon stamped a working directory, else the
+    /// workspace-relative folder. Mirrors the daemon's derivation
+    /// (permission.DeriveFolderGrant) for display only — the grant itself
+    /// is always derived daemon-side from the same patterns. None when
+    /// the ask has no folder scope: non-write/edit permissions, glob or
+    /// escaping patterns, patterns spanning several folders, and targets
+    /// at the workspace root (a bare name is ambiguous between a root
+    /// file and the folder itself, so v1 offers no folder scope there).
+    pub fn folder_scope(&self) -> Option<String> {
+        if self.permission != "write" && self.permission != "edit" {
+            return None;
+        }
+        if self.patterns.is_empty() {
+            return None;
+        }
+        let cleaned: Option<Vec<String>> = self.patterns.iter().map(|p| clean_rel(p)).collect();
+        let cleaned = cleaned?;
+        let rel = if self.target_directory {
+            if cleaned.len() != 1 {
+                return None;
+            }
+            cleaned[0].clone()
+        } else {
+            let mut folder: Option<String> = None;
+            for clean in &cleaned {
+                let parent = clean.rsplit_once('/').map(|(head, _)| head.to_string())?;
+                match &folder {
+                    None => folder = Some(parent),
+                    Some(f) if *f != parent => return None,
+                    _ => {}
+                }
+            }
+            folder?
+        };
+        if self.work_dir.is_empty() {
+            Some(rel)
+        } else {
+            Some(format!("{}/{}", self.work_dir.trim_end_matches('/'), rel))
+        }
+    }
+}
+
+/// Cleans a workspace-relative pattern the way the daemon's path.Clean
+/// does for the shapes the tools emit; None for absolute, escaping, or
+/// glob-shaped patterns (a whole "*" or "**" segment).
+fn clean_rel(pat: &str) -> Option<String> {
+    if pat.is_empty() || pat.starts_with('/') {
+        return None;
+    }
+    let mut segs: Vec<&str> = Vec::new();
+    for seg in pat.split('/') {
+        match seg {
+            "" | "." => {}
+            ".." | "*" | "**" => return None,
+            s => segs.push(s),
+        }
+    }
+    if segs.is_empty() {
+        return None;
+    }
+    Some(segs.join("/"))
+}
+
+/// The choices for one ask's card: the base decisions, plus "Allow in
+/// this folder" (key 4, Deny becomes 5) when the ask has a folder scope.
+pub fn decision_choices(ask: &Ask) -> Vec<DecisionChoice> {
+    let mut out: Vec<DecisionChoice> = decisions().to_vec();
+    if ask.folder_scope().is_some() {
+        let mut reject = out.pop().expect("decisions always ends with reject");
+        out.push(DecisionChoice {
+            id: "folder",
+            label: "Allow in this folder",
+            key: "4",
+            detail: "This folder and its subfolders, this session only.",
+        });
+        reject.key = "5";
+        out.push(reject);
+    }
+    out
+}
+
+/// The card's key hint, e.g. "1 allow once, 2 allow session, 3 allow
+/// project, 4 or Escape denies." — the numbering extends honestly when a
+/// folder choice is present.
+pub fn hint_line(choices: &[DecisionChoice]) -> String {
+    let mut parts: Vec<String> = choices[..choices.len().saturating_sub(1)]
+        .iter()
+        .enumerate()
+        .map(|(i, c)| format!("{} {}", i + 1, c.label.to_lowercase()))
+        .collect();
+    parts.push(format!("{} or Escape denies.", choices.len()));
+    parts.join(", ")
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -355,6 +460,11 @@ fn parse_ask(data: &Value) -> Option<Ask> {
     let patterns = string_list(data, "patterns");
     let always = string_list(data, "always");
     let preview = preview_of(&permission, &patterns, data.get("metadata").unwrap_or(&Value::Null));
+    let target_directory = data
+        .get("metadata")
+        .and_then(|m| m.get("directory"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     Some(Ask {
         request_id,
         permission,
@@ -363,6 +473,7 @@ fn parse_ask(data: &Value) -> Option<Ask> {
         preview,
         work_dir: text(data, "workDir").unwrap_or_default(),
         project_rule_path: text(data, "projectRulePath").unwrap_or_default(),
+        target_directory,
     })
 }
 
@@ -660,6 +771,7 @@ mod tests {
             },
             work_dir: "/work/project".into(),
             project_rule_path: "/work/project/.strike/config".into(),
+            target_directory: false,
         };
         assert_eq!(ask.remembered_patterns(), vec!["ls *".to_string()]);
         assert_eq!(ask.remembered_rules(), "bash ls *");
@@ -684,6 +796,7 @@ mod tests {
             },
             work_dir: "/work/project".into(),
             project_rule_path: "/work/project/.strike/config".into(),
+            target_directory: false,
         };
         assert_eq!(
             ask.consequence("once"),
@@ -720,10 +833,82 @@ mod tests {
             },
             work_dir: "/work/project".into(),
             project_rule_path: String::new(),
+            target_directory: false,
         };
         let line = ask.consequence("project");
         assert!(line.contains("edit *"), "{line}");
         assert!(line.contains("does not save project rules to a file"), "{line}");
+    }
+
+    fn ask_with(permission: &str, patterns: &[&str]) -> Ask {
+        Ask {
+            request_id: "p1".into(),
+            permission: permission.into(),
+            patterns: patterns.iter().map(|s| s.to_string()).collect(),
+            always: vec!["*".into()],
+            preview: Preview {
+                heading: String::new(),
+                command: String::new(),
+                removed: Vec::new(),
+                added: Vec::new(),
+                truncated: false,
+            },
+            work_dir: "/work/project".into(),
+            project_rule_path: "/work/project/.strike/config".into(),
+            target_directory: false,
+        }
+    }
+
+    #[test]
+    fn folder_scope_and_choice_for_write_and_edit_asks() {
+        let ask = ask_with("write", &["docs/guide.md"]);
+        assert_eq!(ask.folder_scope().as_deref(), Some("/work/project/docs"));
+        let choices = decision_choices(&ask);
+        let ids: Vec<&str> = choices.iter().map(|c| c.id).collect();
+        assert_eq!(ids, ["once", "always", "project", "folder", "reject"]);
+        let keys: Vec<&str> = choices.iter().map(|c| c.key).collect();
+        assert_eq!(keys, ["1", "2", "3", "4", "5"]);
+        assert_eq!(
+            hint_line(&choices),
+            "1 allow once, 2 allow session, 3 allow project, 4 allow in this folder, 5 or Escape denies."
+        );
+        let line = ask.consequence("folder");
+        assert!(line.contains("/work/project/docs"), "{line}");
+        assert!(line.contains("and its subfolders"), "{line}");
+        assert!(line.contains("this session only"), "{line}");
+        assert!(line.contains("Not written to the project config"), "{line}");
+        assert!(line.contains("Rules and audit"), "{line}");
+
+        // Directory targets grant the named folder itself.
+        let mut del = ask_with("edit", &["docs/old"]);
+        del.target_directory = true;
+        assert_eq!(del.folder_scope().as_deref(), Some("/work/project/docs/old"));
+
+        // Without a stamped working directory the folder stays relative.
+        let mut bare = ask_with("edit", &["src/api/x.go"]);
+        bare.work_dir = String::new();
+        assert_eq!(bare.folder_scope().as_deref(), Some("src/api"));
+    }
+
+    #[test]
+    fn folder_choice_absent_without_a_folder_scope() {
+        for ask in [
+            ask_with("bash", &["ls docs"]),
+            ask_with("write", &["main.go"]),            // workspace root: no v1 folder scope
+            ask_with("edit", &["a/x.md", "b/y.md"]),    // spans two folders
+            ask_with("write", &["docs/**"]),            // glob, not a file path
+            ask_with("write", &["../outside.md"]),     // escapes the workspace
+        ] {
+            assert_eq!(ask.folder_scope(), None, "{ask:?}");
+            let choices = decision_choices(&ask);
+            assert_eq!(choices.len(), 4, "{ask:?}");
+            assert_eq!(choices[3].id, "reject");
+            assert_eq!(choices[3].key, "4");
+        }
+        assert_eq!(
+            hint_line(&decision_choices(&ask_with("bash", &["ls"]))),
+            "1 allow once, 2 allow session, 3 allow project, 4 or Escape denies."
+        );
     }
 
     #[test]

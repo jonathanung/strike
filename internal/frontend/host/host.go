@@ -1119,6 +1119,16 @@ type PermissionDiff struct {
 	Summary    string // multi-line human text
 }
 
+// PermissionFolderGrant is one live session folder grant (a
+// DecisionFolder reply the user made this session), host-safe for display
+// in the permissions panel. Pattern is the display glob (folder + "/**").
+type PermissionFolderGrant struct {
+	Index      int    `json:"index"`
+	Permission string `json:"permission"`
+	Folder     string `json:"folder"`
+	Pattern    string `json:"pattern"`
+}
+
 // Permissions is the explain/preset/diff surface for /permission. Nil when unsupported.
 type Permissions interface {
 	// Explain returns last-match-wins detail for permission + pattern.
@@ -1133,6 +1143,13 @@ type Permissions interface {
 	DiffPresets(leftID, rightID string) (PermissionDiff, error)
 	// Presets lists shipped named rulesets.
 	Presets() []PermissionPresetInfo
+	// SessionFolderGrants lists the live session's folder grants in
+	// recording order. Empty when no live session is bound.
+	SessionFolderGrants() []PermissionFolderGrant
+	// RevokeSessionFolderGrant removes the folder grant at index from the
+	// live session, so later asks in that folder prompt again. It reports
+	// whether a grant was removed.
+	RevokeSessionFolderGrant(index int) bool
 }
 
 // ColorPair is a light/dark hex pair for one portable semantic color role.

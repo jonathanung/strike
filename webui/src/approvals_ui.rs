@@ -12,8 +12,8 @@ use wasm_bindgen::JsCast;
 
 use crate::api::{get_json, patch_json, post_json, post_op};
 use crate::approvals::{
-    begin_session_mode, countdown_seconds, decisions, global_confirm, is_dangerous,
-    notes_from_envelope, rule_add_confirm, rule_remove_confirm, session_confirm,
+    begin_session_mode, countdown_seconds, decision_choices, global_confirm, hint_line,
+    is_dangerous, notes_from_envelope, rule_add_confirm, rule_remove_confirm, session_confirm,
     validate_rule_draft, workspace_confirm, Ask, AuditDocument, AuditLine, ConfirmKind, ModeChange,
     PendingConfirm, PermNote, RuleRecord, RulesDocument, SettingsBits,
 };
@@ -165,17 +165,20 @@ pub fn ApprovalHost(
                     return;
                 }
                 if !typing_target(&ev) {
-                    let decision = match key.as_str() {
-                        "1" => Some("once"),
-                        "2" => Some("always"),
-                        "3" => Some("project"),
-                        "4" => Some("reject"),
-                        _ => None,
-                    };
-                    if let Some(decision) = decision {
-                        ev.prevent_default();
-                        ev.stop_propagation();
-                        if let Some(ask) = asks.get_untracked().first() {
+                    // Digits pick the first ask's choices in order; the
+                    // list is per-ask because a folder choice appears only
+                    // on write/edit asks with a folder scope.
+                    if let Some(ask) = asks.get_untracked().first() {
+                        let choices = decision_choices(ask);
+                        let decision = key
+                            .parse::<usize>()
+                            .ok()
+                            .and_then(|n| n.checked_sub(1))
+                            .and_then(|i| choices.get(i))
+                            .map(|choice| choice.id);
+                        if let Some(decision) = decision {
+                            ev.prevent_default();
+                            ev.stop_propagation();
                             reply_id.set(ask.request_id.clone());
                             reply_decision.set(decision.into());
                             reply_n.update(|n| *n += 1);
@@ -829,7 +832,9 @@ fn ApprovalCard(
         format!("Working directory: {}", ask.work_dir)
     };
     let show_work_dir = !work_dir_line.is_empty();
-    let consequences: Vec<(&'static str, String)> = decisions()
+    let choices = decision_choices(&ask);
+    let hint = hint_line(&choices);
+    let consequences: Vec<(&'static str, String)> = choices
         .iter()
         .map(|choice| (choice.label, ask.consequence(choice.id)))
         .collect();
@@ -860,14 +865,14 @@ fn ApprovalCard(
             <Show when=move || { seconds.get() > 0 }>
                 <p class="approvals-count">{move || format!("Allows once in {}s unless you choose.", left.get())}</p>
             </Show>
-            <p class="hint">"1 allow once, 2 allow session, 3 allow project, 4 or Escape denies."</p>
+            <p class="hint">{hint}</p>
             <ul class="approvals-scopes">
                 {consequences.into_iter().map(|(label, line)| view! {
                     <li><strong>{label}</strong>{" — "}{line}</li>
                 }).collect_view()}
             </ul>
             <div class="approvals-actions">
-                {decisions().iter().map(|choice| {
+                {choices.iter().map(|choice| {
                     let id = choice.id.to_string();
                     let label = format!("{} ({})", choice.label, choice.key);
                     let class = if choice.id == "reject" { "danger" } else { "secondary" };

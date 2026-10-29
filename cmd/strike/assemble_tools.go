@@ -707,6 +707,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			initialPhaseFP     string
 			initialPhaseGrant  engine.PhaseGrantApproval
 			initialAlways      permission.Ruleset
+			initialFolder      []permission.FolderGrant
 			initialPlanHandoff engine.PlanHandoffState
 			initialMemoryMode  string
 			quietStartup       bool
@@ -737,6 +738,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			initialPhaseFP = restored.PhaseFingerprint
 			initialPhaseGrant = restored.PhaseGrant
 			initialAlways = restored.AlwaysGrants
+			initialFolder = restored.FolderGrants
 			initialPlanHandoff = restored.PlanHandoff
 			if !(applyCLI && opts.providerSet) && restored.Provider != "" {
 				initialProvider = restored.Provider
@@ -943,6 +945,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			InitialPhaseFingerprint:    initialPhaseFP,
 			InitialPhaseGrantApproval:  initialPhaseGrant,
 			InitialAlwaysGrants:        initialAlways,
+			InitialFolderGrants:        initialFolder,
 			InitialPlanHandoff:         initialPlanHandoff,
 			PlanStore:                  enginebind.Plan(planStore),
 			QuietStartup:               quietStartup,
@@ -1204,6 +1207,11 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		eng := first.eng
 		permHost.SetLive(func(perm, pat string) permission.DetailedExplanation {
 			return eng.ExplainPermission(perm, pat)
+		})
+		permHost.SetFolderGrants(func() []permission.FolderGrant {
+			return eng.PermissionService().FolderGrants()
+		}, func(index int) bool {
+			return eng.PermissionService().RevokeFolderGrant(index)
 		})
 	}
 	services.Permissions = permHost

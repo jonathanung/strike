@@ -2,7 +2,7 @@
 
 Generated from `pkg/protocol`. Do not edit by hand. Regenerate with `make protocol-schema`.
 
-- Protocol version: `1.21.0`
+- Protocol version: `1.22.0`
 - Legacy version when an envelope omits `v`: `1.0.0`
 - JSON Schema: [`schema.json`](schema.json) (`https://raw.githubusercontent.com/jonathanung/strike/main/schemas/protocol/v1/schema.json`)
 - Rust types: `webui/protocol-schema` (crate `protocol-schema`)

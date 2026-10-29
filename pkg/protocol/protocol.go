@@ -308,7 +308,13 @@ const (
 	// DecisionProject remembers the grant for this session and appends it to
 	// the project config so future sessions in the same workdir inherit it.
 	DecisionProject Decision = "project"
-	DecisionReject  Decision = "reject"
+	// DecisionFolder remembers a session-only grant for the folder the
+	// asked file lives in (write/edit asks only). The folder pattern is
+	// derived by the daemon from the ask's own patterns — the reply never
+	// carries client-supplied patterns — and covers the folder subtree.
+	// Older daemons treat it as an approve-once reply and record nothing.
+	DecisionFolder Decision = "folder"
+	DecisionReject Decision = "reject"
 )
 
 // Op is a client -> engine submission.

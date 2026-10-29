@@ -271,6 +271,62 @@ func TestRestoreAlwaysGrantsClearedOnAgentSwitch(t *testing.T) {
 	}
 }
 
+func TestRestoreFolderGrants(t *testing.T) {
+	corr := protocol.Correlation{SessionID: "s1"}
+	events := []protocol.Event{
+		protocol.AgentSelected{Correlation: corr, Name: "build"},
+		protocol.PermissionAsked{
+			Correlation: corr, RequestID: "p1", Permission: "write",
+			Patterns: []string{"docs/a.md"}, Always: []string{"*"},
+		},
+		protocol.PermissionResolved{Correlation: corr, RequestID: "p1", Decision: protocol.DecisionFolder},
+		// A bash folder resolution derives nothing and records nothing.
+		protocol.PermissionAsked{
+			Correlation: corr, RequestID: "p2", Permission: "bash",
+			Patterns: []string{"ls docs"}, Always: []string{"ls *"},
+		},
+		protocol.PermissionResolved{Correlation: corr, RequestID: "p2", Decision: protocol.DecisionFolder},
+		// A directory delete grants the named folder itself.
+		protocol.PermissionAsked{
+			Correlation: corr, RequestID: "p3", Permission: "edit",
+			Patterns: []string{"old"}, Always: []string{"*"},
+			Metadata: json.RawMessage(`{"path":"old","directory":true}`),
+		},
+		protocol.PermissionResolved{Correlation: corr, RequestID: "p3", Decision: protocol.DecisionFolder},
+	}
+	got := engine.Restore(events)
+	if len(got.FolderGrants) != 2 {
+		t.Fatalf("FolderGrants = %#v, want two grants", got.FolderGrants)
+	}
+	if g := got.FolderGrants[0]; g.Permission != "write" || g.Folder != "docs" {
+		t.Fatalf("grant[0] = %#v, want write/docs", g)
+	}
+	if g := got.FolderGrants[1]; g.Permission != "edit" || g.Folder != "old" {
+		t.Fatalf("grant[1] = %#v, want edit/old", g)
+	}
+	// Folder rules are not part of AlwaysGrants; they seed separately.
+	if len(got.AlwaysGrants) != 0 {
+		t.Fatalf("AlwaysGrants = %#v, want empty", got.AlwaysGrants)
+	}
+}
+
+func TestRestoreFolderGrantsClearedOnAgentSwitch(t *testing.T) {
+	corr := protocol.Correlation{SessionID: "s1"}
+	events := []protocol.Event{
+		protocol.AgentSelected{Correlation: corr, Name: "build"},
+		protocol.PermissionAsked{
+			Correlation: corr, RequestID: "p1", Permission: "write",
+			Patterns: []string{"docs/a.md"}, Always: []string{"*"},
+		},
+		protocol.PermissionResolved{Correlation: corr, RequestID: "p1", Decision: protocol.DecisionFolder},
+		protocol.AgentSelected{Correlation: corr, Name: "plan"},
+	}
+	got := engine.Restore(events)
+	if len(got.FolderGrants) != 0 {
+		t.Fatalf("FolderGrants after agent switch = %#v, want empty", got.FolderGrants)
+	}
+}
+
 func TestRestoreClearedPhase(t *testing.T) {
 	corr := protocol.Correlation{SessionID: "s1"}
 	events := []protocol.Event{
