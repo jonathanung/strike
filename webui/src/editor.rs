@@ -1087,6 +1087,15 @@ fn DiffView(text: String) -> impl IntoView {
     .into_any()
 }
 
+/// Whether an Agent-diff completion may still commit: it was started
+/// for the file still open (`started_path` vs `open_path`) at a
+/// generation that is still the latest (`started_gen` vs
+/// `current_gen`). The generation half also rejects a completion for
+/// the *same* path when a newer fetch started in between.
+fn diff_current(started_gen: u32, current_gen: u32, open_path: &str, started_path: &str) -> bool {
+    started_gen == current_gen && open_path == started_path
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SaveLanding {
     Commit,
@@ -1185,6 +1194,7 @@ pub fn DocumentPane(
     let diff_note = RwSignal::new(String::new());
     let reload_tick = RwSignal::new(0u32);
     let load_gen = RwSignal::new(0u32);
+    let diff_gen = RwSignal::new(0u32);
 
     Effect::new(move |_| {
         let text = if editing.get() { draft.get() } else { content.get() };
@@ -1212,6 +1222,11 @@ pub fn DocumentPane(
         editing.set(false);
         conflict.set(false);
         query.set(String::new());
+        // The diff belongs to the file it was fetched for (#1626): a
+        // previous file's diff must never render under the new one,
+        // not even while the new fetch is in flight or after it fails.
+        agent_diff.set(String::new());
+        diff_note.set(String::new());
         if p.is_empty() {
             return;
         }
@@ -1261,10 +1276,21 @@ pub fn DocumentPane(
         if p.is_empty() {
             return;
         }
+        // Generation-guard the completion like the load effect above
+        // (#1626): clear up front so nothing stale renders while this
+        // fetch is in flight, and drop the completion if a newer diff
+        // fetch started or the open file moved on.
+        let gen = diff_gen.get_untracked().wrapping_add(1);
+        diff_gen.set(gen);
+        agent_diff.set(String::new());
+        diff_note.set(String::new());
         let (b, t) = (base.get(), token.get());
         spawn_local(async move {
             match get_json::<DiffList>(&b, &t, "/v1/changed-files").await {
                 Ok(list) => {
+                    if !diff_current(gen, diff_gen.get_untracked(), &loaded_path.get_untracked(), &p) {
+                        return;
+                    }
                     let mut diff = list
                         .files
                         .into_iter()
@@ -1278,7 +1304,14 @@ pub fn DocumentPane(
                     agent_diff.set(diff);
                     diff_note.set(String::new());
                 }
-                Err(e) => diff_note.set(http_message(&e)),
+                Err(e) => {
+                    if !diff_current(gen, diff_gen.get_untracked(), &loaded_path.get_untracked(), &p) {
+                        return;
+                    }
+                    // The pane stays empty beside the note — agent_diff
+                    // was cleared when this fetch started.
+                    diff_note.set(http_message(&e));
+                }
             }
         });
     });
@@ -1771,6 +1804,18 @@ mod tests {
         }
         assert!(matches!(blocks[3], MdBlock::Paragraph(ref t) if t.contains("**now**")));
         assert!(has_markdown_table(src));
+    }
+
+    #[test]
+    fn diff_current_scopes_to_file_and_generation() {
+        // The normal case: same file, no newer fetch — commit.
+        assert!(diff_current(3, 3, "a.rs", "a.rs"));
+        // File switched while the fetch was in flight (#1626).
+        assert!(!diff_current(3, 3, "b.rs", "a.rs"));
+        // Same file, but a newer fetch started — stale completion.
+        assert!(!diff_current(3, 4, "a.rs", "a.rs"));
+        // A newer fetch for the new file supersedes on both axes.
+        assert!(!diff_current(3, 4, "b.rs", "a.rs"));
     }
 
     #[test]

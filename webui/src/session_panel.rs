@@ -282,12 +282,30 @@ pub(crate) fn SessionPanel(
     let action_note = RwSignal::new(String::new());
     let migrated = RwSignal::new(false);
     let search_gen = RwSignal::new(0u32);
+    let reload_gen = RwSignal::new(0u32);
 
     let reload = move || {
+        // Reloads commit in start order, not arrival order (#1641): a
+        // superseded snapshot must never paint over a newer list, and
+        // only the newest snapshot may drive the one-time pin
+        // migration — a stale one would POST its own pin verdict and
+        // then wipe the local pin store for good.
+        let n = reload_gen.get_untracked().wrapping_add(1);
+        reload_gen.set(n);
         let (b, t) = (base.get_untracked(), token.get_untracked());
         spawn_local(async move {
+            // Still current only while no newer reload has started and
+            // the panel still points at the gateway this reload was
+            // issued against (a gateway switch must not be painted with
+            // the old gateway's sessions).
+            let b_check = b.clone();
+            let current =
+                move || reload_gen.get_untracked() == n && base.get_untracked() == b_check;
             match get_json::<Snapshot>(&b, &t, "/v1/session-list").await {
                 Ok(snap) => {
+                    if !current() {
+                        return;
+                    }
                     let local = load_string_list("strike.pins");
                     let any_pin = snap.sessions.values().any(|org| org.pinned);
                     snapshot.set(snap);
@@ -307,17 +325,28 @@ pub(crate) fn SessionPanel(
                                 .await
                                 .is_ok()
                             {
+                                // A newer reload may have started while
+                                // the POST was in flight; only a still
+                                // current one may wipe the local pins.
+                                if !current() {
+                                    return;
+                                }
                                 save("strike.pins", "[]");
                                 if let Ok(again) =
                                     get_json::<Snapshot>(&b, &t, "/v1/session-list").await
                                 {
-                                    snapshot.set(again);
+                                    if current() {
+                                        snapshot.set(again);
+                                    }
                                 }
                             }
                         }
                     }
                 }
                 Err(e) => {
+                    if !current() {
+                        return;
+                    }
                     load_failed.set(true);
                     list_error.set(friendly(&e));
                 }
@@ -357,11 +386,23 @@ pub(crate) fn SessionPanel(
             spawn_local(async move {
                 let path = format!("/v1/session-list/search?q={}", js_encode(&trimmed));
                 match get_json::<SearchResponse>(&b, &t, &path).await {
+                    // Re-check the generation after the await, like the
+                    // op_gen completions below (#1624): a slower earlier
+                    // search must not overwrite the current query's hits
+                    // or clear its error (nor paint its own stale error).
                     Ok(found) => {
+                        if search_gen.get_untracked() != n {
+                            return;
+                        }
                         hits.set(found.hits);
                         search_error.set(String::new());
                     }
-                    Err(e) => search_error.set(friendly(&e)),
+                    Err(e) => {
+                        if search_gen.get_untracked() != n {
+                            return;
+                        }
+                        search_error.set(friendly(&e));
+                    }
                 }
             });
         });
