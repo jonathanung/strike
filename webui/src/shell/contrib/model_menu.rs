@@ -8,13 +8,30 @@
 
 use std::rc::Rc;
 
-use crate::shell::{Command, ShellHook, Shortcut};
+use crate::shell::{Argument, Command, Group, ShellHook, Shortcut};
 
 pub fn install(reg: &mut ShellHook) {
     reg.command(Command {
+        id: "switch-model",
+        group: Group::Model,
+        label: "Switch model…",
+        detail: "Set the model for the open session",
+        shortcut: "",
+        keywords: &["model", "switch", "provider"],
+        argument: Some(Argument {
+            placeholder: "Filter models",
+            required: true,
+        }),
+        order: 10,
+        run: Rc::new(|args| crate::shell::host::pick_model(args)),
+        visible: None,
+        enabled: None,
+        confirm: None,
+        choices: Some(Rc::new(crate::shell::host::model_choices)),
+    });
+    reg.command(Command {
         id: "model-menu.open",
-        section: "Apps",
-        section_order: 10,
+        group: Group::Model,
         label: "Model menu",
         detail: "Pick the session model and effort, see the context window",
         shortcut: "Alt+M",
@@ -22,6 +39,10 @@ pub fn install(reg: &mut ShellHook) {
         argument: None,
         order: 50,
         run: Rc::new(|args| crate::shell::dispatch("model-menu.open", args)),
+        visible: None,
+        enabled: None,
+        confirm: None,
+        choices: None,
     });
     reg.shortcut(Shortcut {
         id: "model-menu",

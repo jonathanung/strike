@@ -15,21 +15,20 @@ use std::rc::Rc;
 
 use leptos::prelude::*;
 
-use crate::shell::{Argument, Command, ShellHook, Shortcut, TopRegion, TopSlot};
+use crate::shell::{Command, Group, ShellHook, Shortcut, TopRegion, TopSlot};
 
 pub fn install(reg: &mut ShellHook) {
-    reg.command(Command {
-        id: "notifications.open",
-        section: "Apps",
-        section_order: 10,
-        label: "Notifications",
-        detail: "Approval requests and finished sessions",
-        shortcut: "",
-        keywords: &["bell", "inbox"],
-        argument: None,
-        order: 40,
-        run: Rc::new(|args| crate::shell::dispatch("notifications.open", args)),
-    });
+    reg.command(
+        Command::new(
+            "notifications.open",
+            Group::Session,
+            "Notifications",
+            "Approval requests and finished sessions",
+            Rc::new(|args| crate::shell::dispatch("notifications.open", args)),
+        )
+        .keywords(&["bell", "inbox"])
+        .order(40),
+    );
     reg.slot(TopSlot {
         id: "notifications",
         region: TopRegion::Trailing,
@@ -61,16 +60,47 @@ A slot `render` closure runs during the view, so it may read context and signals
 
 ## Commands
 
+Register with `Command::new(id, group, label, detail, run)` and the builder
+methods. `label` is the title the palette shows and searches. The same `id`
+replaces a command, including a builtin.
+
 | Field | Meaning |
 |---|---|
 | `id` | Stable id. Replacing this id replaces the command. |
-| `section` / `section_order` | Palette heading. Lower `section_order` wins when the query is empty. |
+| `group` | One of `Group::Navigate`, `Session`, `Providers`, `Model`, `Git`, `Settings`, `Customize`, `Gateway`, `Theme`, `Debug`. Empty-query order is that list. |
 | `label` / `detail` | Row title and secondary line. |
 | `shortcut` | Shown on the row. The shell does not bind it. Bind keys in your own listener, or use a builtin chord. |
-| `keywords` | Extra fuzzy terms. |
-| `order` | Order inside a section when the query is empty. |
+| `keywords` | Extra fuzzy terms, weighted with the shortcut above the detail. |
+| `order` | Order inside a group when the query is empty. |
 | `argument` | `Some` asks for a free-text argument before `run`. `required` rejects an empty string with “This command needs an argument.” |
-| `run` | `Fn(&str) -> Result<(), String>`. `Err` stays in the palette as an alert. `Ok` closes it and records a recent. |
+| `choices` | Second step. A closure returns rows (`id`, `label`, `detail`). The palette lists them, the field filters them, and `run` receives the chosen id. Use this for “Switch model…”, “Switch workspace…”, and “Open session…”. |
+| `visible` | `None` lists the command. `Some` hides it when the predicate is false, including from Recent. |
+| `enabled` | `None` can run. `Some` keeps the row and refuses to run when the predicate is false. |
+| `confirm` | `Some(ConfirmSpec { title, body, confirm_label })` opens the shared dialog in `webui/src/confirm.rs` before `run`. Use it for destructive work. The button that performs the same work should call `confirm::ask` too, and `run` should not ask a second time. |
+| `run` | `Fn(&str) -> Result<(), String>`. `Err` stays in the palette as an alert. `Ok` closes it and records a recent and a use count. |
+
+### Moving a control behind the palette
+
+1. Add `reg.command(...)` in `webui/src/shell/contrib/<feature>.rs`. Pick the group above. Do not add a second id for a command that already exists.
+2. If the action needs signals from the page, `run` should `dispatch` an id and the page should `bind` that id while the owner is mounted.
+3. Delete the visible header or Menu control. If the widget must stay mounted (a bell, a switcher, a dialog host), leave the slot and the shell parks it in `.shell-alive`, which is not part of the visible header.
+4. If the command destroys something, set `confirm` and call `crate::confirm::ask` from the in-page button as well.
+5. Add a keyword the operator would type. Do not reuse a keyword that is the whole label of another command (`plan` is Approval: Plan).
+
+Fuzzy match is a subsequence score over label (weight 3), keywords and
+shortcut (weight 2), and detail (weight 1). A hit has to score at least
+eight points per query character, so a scattered match through a long
+detail does not appear. An empty query lists Recent (last five), then
+Frequent (next five by use count, skipping recents), then the groups.
+Storage keys are `strike.paletteRecents` and `strike.paletteFreq`. A
+non-empty query drops those two headings and leads with the best match.
+
+The palette opens with Ctrl/Cmd-K, with `/` when focus is not in a field,
+from the Commands button, from the Menu row “Run a command”, and from the
+phone header button. On a phone it is a full-height sheet pinned to the
+visual viewport (`--vv-height`, `--vv-top`) with 44px rows. Esc closes it.
+A command with an argument or choices takes a second step; Esc there
+returns to the list.
 
 Fuzzy match is a subsequence score over label (weight 3), keywords and
 shortcut (weight 2), and detail (weight 1). A hit has to score at least
@@ -100,8 +130,11 @@ Built-in command ids:
 ## Slots
 
 The header is three zones and does not wrap: brand + workspace, at most five
-primary views (Chat, Daemon), and status plus one Menu. `collapse_below_px`
-no longer decides what sits in the bar.
+primary views (Chat, Daemon), and status, the Commands button, and one Menu.
+Secondary actions live in the palette. `collapse_below_px` no longer decides
+what sits in the bar. Slots other than status and the gateway chip stay
+mounted in a visually hidden tray (`.shell-alive`) so a bell or switcher
+still has one live instance.
 
 | Region | Where it renders |
 |---|---|
@@ -161,6 +194,7 @@ the palette is open.
 | Keys | Action |
 |---|---|
 | `Ctrl+K` / `Cmd+K` | Open or close the palette. |
+| `/` | Open the palette when focus is not in a field. |
 | `Up` / `Down` | Move the palette highlight. |
 | `Enter` | Run the highlight. On a command with an argument, the first Enter asks for it. The next Enter runs it. |
 | `Esc` | Leave argument mode, or close the palette, the shortcut overlay, and open menus. |
@@ -175,8 +209,11 @@ the keys.
 ## What the bar shows
 
 `Strike > workspace`, then Chat and Daemon, then the session chip and the
-gateway chip (`Connected`, `Checking`, or `Unreachable`), then Menu.
-No active workspace is the literal label “No workspace”. The full workspace
-name is also the first line of the Menu. The daemon version stays on the
-wordmark tooltip. Providers, theme, layout, and the other slots are in
-the Menu or the command palette.
+gateway chip (`Connected`, `Checking`, or `Unreachable`), then Commands,
+then Menu. No active workspace is the literal label “No workspace”. The
+full workspace name is the first line of the Menu. The Menu’s only action
+is “Run a command”. The header also shows the daemon reachability line (`Connected · version`). The wordmark tooltip repeats it. It hides below 1200px.
+Providers, theme, density, layout, notifications, gateway pairing, git,
+session rename/fork/export, and the other secondary actions are palette
+commands. Customize pages are not in this tree yet; register them under
+`Group::Customize` when they land.

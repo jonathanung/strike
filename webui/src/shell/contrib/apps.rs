@@ -5,13 +5,12 @@ use std::rc::Rc;
 
 use leptos::prelude::*;
 
-use crate::shell::{Command, ShellHook, TopRegion, TopSlot};
+use crate::shell::{Group, Command, ShellHook, TopRegion, TopSlot};
 
 pub fn install(reg: &mut ShellHook) {
     reg.command(Command {
         id: "apps",
-        section: "Apps",
-        section_order: 10,
+        group: Group::Navigate,
         label: "Apps",
         detail: "Queues such as GitHub triage",
         shortcut: "",
@@ -19,6 +18,10 @@ pub fn install(reg: &mut ShellHook) {
         argument: None,
         order: 20,
         run: Rc::new(|_| crate::shell::host::set_view("apps")),
+        visible: None,
+        enabled: None,
+        confirm: None,
+        choices: None,
     });
     reg.slot(TopSlot {
         id: "apps",

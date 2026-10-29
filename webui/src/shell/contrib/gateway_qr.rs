@@ -7,13 +7,31 @@ use std::rc::Rc;
 
 use leptos::prelude::*;
 
-use crate::shell::{Command, ShellHook, TopRegion, TopSlot};
+use crate::shell::{Command, ConfirmSpec, Group, ShellHook, TopRegion, TopSlot};
 
 pub fn install(reg: &mut ShellHook) {
     reg.command(Command {
+        id: "pair.revoke-all",
+        group: Group::Gateway,
+        label: "Revoke paired browsers",
+        detail: "Sign out every browser paired with this gateway",
+        shortcut: "",
+        keywords: &["revoke", "pair", "phone", "browser"],
+        argument: None,
+        order: 90,
+        run: Rc::new(|_| crate::shell::dispatch("pair.revoke-all", "")),
+        visible: None,
+        enabled: None,
+        confirm: Some(ConfirmSpec {
+            title: "Revoke paired browsers?",
+            body: "Every paired browser loses its grant. Pairing again mints a new code.",
+            confirm_label: "Revoke all",
+        }),
+        choices: None,
+    });
+    reg.command(Command {
         id: "phone.open",
-        section: "Apps",
-        section_order: 10,
+        group: Group::Gateway,
         label: "Open on phone",
         detail: "QR and a one-time link for another browser",
         shortcut: "",
@@ -21,6 +39,10 @@ pub fn install(reg: &mut ShellHook) {
         argument: None,
         order: 55,
         run: Rc::new(|args| crate::shell::dispatch("phone.open", args)),
+        visible: None,
+        enabled: None,
+        confirm: None,
+        choices: None,
     });
     reg.slot(TopSlot {
         id: "phone",

@@ -6,13 +6,34 @@ use std::rc::Rc;
 
 use leptos::prelude::*;
 
-use crate::shell::{Command, ShellHook, TopRegion, TopSlot};
+use crate::shell::{Argument, Command, ConfirmSpec, Group, ShellHook, TopRegion, TopSlot};
 
 pub fn install(reg: &mut ShellHook) {
     reg.command(Command {
+        id: "trigger.delete",
+        group: Group::Gateway,
+        label: "Delete trigger…",
+        detail: "Remove an inbound trigger and its hook secret",
+        shortcut: "",
+        keywords: &["delete", "webhook", "trigger"],
+        argument: Some(Argument {
+            placeholder: "Trigger id",
+            required: true,
+        }),
+        order: 70,
+        run: Rc::new(|args| crate::shell::dispatch("trigger.delete", args)),
+        visible: None,
+        enabled: None,
+        confirm: Some(ConfirmSpec {
+            title: "Delete this trigger?",
+            body: "The hook path stops accepting events. A new trigger gets a new secret, so the sender has to be updated.",
+            confirm_label: "Delete trigger",
+        }),
+        choices: None,
+    });
+    reg.command(Command {
         id: "triggers",
-        section: "Apps",
-        section_order: 10,
+        group: Group::Navigate,
         label: "Triggers",
         detail: "Webhooks, GitHub events, and channel messages",
         shortcut: "",
@@ -20,6 +41,10 @@ pub fn install(reg: &mut ShellHook) {
         argument: None,
         order: 35,
         run: Rc::new(|_| crate::shell::host::set_view("triggers")),
+        visible: None,
+        enabled: None,
+        confirm: None,
+        choices: None,
     });
     reg.slot(TopSlot {
         id: "triggers",

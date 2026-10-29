@@ -1,16 +1,94 @@
 //! Command palette and top-bar slot registry.
 //!
-//! Streams add entries by dropping a file in `src/shell/contrib/` (see
-//! `docs/webui-shell.md`). They do not edit this module.
+//! One [`Command`] type is the list the palette searches. Streams add
+//! entries from `src/shell/contrib/` (see `docs/webui-shell.md`). They do
+//! not edit this module.
+//!
+//! Groups are fixed: Navigate, Session, Providers, Model, Git, Settings,
+//! Customize, Gateway, Theme, Debug. An empty query shows Recent, then
+//! Frequent, then those groups. A typed query fuzzy-matches the title
+//! (`label`), keywords, shortcut, and detail.
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use leptos::prelude::AnyView;
 
-use super::rank::command_score;
+use super::rank::{best_score, command_score};
 
 pub type CommandRun = Rc<dyn Fn(&str) -> Result<(), String>>;
+pub type Predicate = Rc<dyn Fn() -> bool>;
+pub type ChoiceList = Rc<dyn Fn() -> Vec<Choice>>;
+
+/// Palette heading. Order is the empty-query order after Recent and Frequent.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Group {
+    Navigate,
+    Session,
+    Providers,
+    Model,
+    Git,
+    Settings,
+    Customize,
+    Gateway,
+    Theme,
+    Debug,
+}
+
+impl Group {
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::Navigate => "Navigate",
+            Self::Session => "Session",
+            Self::Providers => "Providers",
+            Self::Model => "Model",
+            Self::Git => "Git",
+            Self::Settings => "Settings",
+            Self::Customize => "Customize",
+            Self::Gateway => "Gateway",
+            Self::Theme => "Theme",
+            Self::Debug => "Debug",
+        }
+    }
+
+    pub fn order(self) -> i32 {
+        match self {
+            Self::Navigate => 0,
+            Self::Session => 1,
+            Self::Providers => 2,
+            Self::Model => 3,
+            Self::Git => 4,
+            Self::Settings => 5,
+            Self::Customize => 6,
+            Self::Gateway => 7,
+            Self::Theme => 8,
+            Self::Debug => 9,
+        }
+    }
+}
+
+/// Copy the shared confirm dialog shows before a destructive command runs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ConfirmSpec {
+    pub title: &'static str,
+    pub body: &'static str,
+    pub confirm_label: &'static str,
+}
+
+/// One row in a command's second step (Switch model, Open session, …).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Choice {
+    pub id: String,
+    pub label: String,
+    pub detail: String,
+}
+
+/// Recents are most-recent-first. Frequent ids are highest-count-first.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PaletteUsage {
+    pub recents: Vec<String>,
+    pub frequent: Vec<String>,
+}
 
 #[derive(Clone, Copy)]
 pub struct Argument {
@@ -21,8 +99,8 @@ pub struct Argument {
 #[derive(Clone)]
 pub struct Command {
     pub id: &'static str,
-    pub section: &'static str,
-    pub section_order: i32,
+    pub group: Group,
+    /// Row title. Fuzzy search weights this above keywords.
     pub label: &'static str,
     pub detail: &'static str,
     pub shortcut: &'static str,
@@ -30,6 +108,92 @@ pub struct Command {
     pub argument: Option<Argument>,
     pub order: i32,
     pub run: CommandRun,
+    /// `None` means the command is listed. `Some` hides it when false.
+    pub visible: Option<Predicate>,
+    /// `None` means the command can run. `Some` keeps the row and blocks it when false.
+    pub enabled: Option<Predicate>,
+    /// When set, the palette asks with the shared confirm dialog before `run`.
+    pub confirm: Option<ConfirmSpec>,
+    /// Second-step rows. Selecting one calls `run` with that choice id.
+    pub choices: Option<ChoiceList>,
+}
+
+impl Command {
+    pub fn new(
+        id: &'static str,
+        group: Group,
+        label: &'static str,
+        detail: &'static str,
+        run: CommandRun,
+    ) -> Self {
+        Self {
+            id,
+            group,
+            label,
+            detail,
+            shortcut: "",
+            keywords: &[],
+            argument: None,
+            order: 0,
+            run,
+            visible: None,
+            enabled: None,
+            confirm: None,
+            choices: None,
+        }
+    }
+
+    pub fn shortcut(mut self, shortcut: &'static str) -> Self {
+        self.shortcut = shortcut;
+        self
+    }
+
+    pub fn keywords(mut self, keywords: &'static [&'static str]) -> Self {
+        self.keywords = keywords;
+        self
+    }
+
+    pub fn order(mut self, order: i32) -> Self {
+        self.order = order;
+        self
+    }
+
+    pub fn argument(mut self, argument: Argument) -> Self {
+        self.argument = Some(argument);
+        self
+    }
+
+    pub fn visible(mut self, pred: impl Fn() -> bool + 'static) -> Self {
+        self.visible = Some(Rc::new(pred));
+        self
+    }
+
+    pub fn enabled(mut self, pred: impl Fn() -> bool + 'static) -> Self {
+        self.enabled = Some(Rc::new(pred));
+        self
+    }
+
+    pub fn confirm(mut self, spec: ConfirmSpec) -> Self {
+        self.confirm = Some(spec);
+        self
+    }
+
+    pub fn choices(mut self, list: impl Fn() -> Vec<Choice> + 'static) -> Self {
+        self.choices = Some(Rc::new(list));
+        self
+    }
+
+    pub fn is_visible(&self) -> bool {
+        self.visible.as_ref().map(|pred| pred()).unwrap_or(true)
+    }
+
+    pub fn is_enabled(&self) -> bool {
+        self.enabled.as_ref().map(|pred| pred()).unwrap_or(true)
+    }
+
+    pub fn needs_prompt(&self) -> bool {
+        self.argument.is_some() || self.choices.is_some()
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -75,6 +239,7 @@ pub struct PaletteHit {
     pub detail: String,
     pub shortcut: String,
     pub needs_argument: bool,
+    pub enabled: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -115,20 +280,38 @@ impl Registry {
         }
     }
 
-    fn query(&self, raw: &str, recents: &[String]) -> Vec<PaletteGroup> {
+    fn visible(&self) -> Vec<&Command> {
+        self.commands
+            .iter()
+            .filter(|cmd| cmd.is_visible())
+            .collect()
+    }
+
+    fn query(&self, raw: &str, usage: &PaletteUsage) -> Vec<PaletteGroup> {
         let query = raw.trim();
         let mut matched: Vec<&Command> = self
-            .commands
-            .iter()
+            .visible()
+            .into_iter()
             .filter(|cmd| {
                 command_score(query, cmd.label, cmd.detail, cmd.shortcut, cmd.keywords).is_some()
             })
             .collect();
         if query.is_empty() {
-            let recent_ids: Vec<&str> = recents
+            let recent_ids: Vec<&str> = usage
+                .recents
                 .iter()
                 .filter(|id| matched.iter().any(|cmd| cmd.id == id.as_str()))
-                .take(8)
+                .take(5)
+                .map(|id| id.as_str())
+                .collect();
+            let frequent_ids: Vec<&str> = usage
+                .frequent
+                .iter()
+                .filter(|id| {
+                    !recent_ids.contains(&id.as_str())
+                        && matched.iter().any(|cmd| cmd.id == id.as_str())
+                })
+                .take(5)
                 .map(|id| id.as_str())
                 .collect();
             let mut groups = Vec::new();
@@ -143,10 +326,23 @@ impl Registry {
                     hits,
                 });
             }
-            matched.retain(|cmd| !recent_ids.contains(&cmd.id));
+            if !frequent_ids.is_empty() {
+                let hits = frequent_ids
+                    .iter()
+                    .filter_map(|id| self.commands.iter().find(|cmd| cmd.id == *id))
+                    .map(hit)
+                    .collect();
+                groups.push(PaletteGroup {
+                    section: "Frequent".into(),
+                    hits,
+                });
+            }
+            let pinned: Vec<&str> = recent_ids.into_iter().chain(frequent_ids).collect();
+            matched.retain(|cmd| !pinned.contains(&cmd.id));
             matched.sort_by(|a, b| {
-                a.section_order
-                    .cmp(&b.section_order)
+                a.group
+                    .order()
+                    .cmp(&b.group.order())
                     .then(a.order.cmp(&b.order))
                     .then(a.label.cmp(b.label))
             });
@@ -162,8 +358,9 @@ impl Registry {
         });
         let mut order = Vec::new();
         for cmd in &matched {
-            if !order.iter().any(|section| *section == cmd.section) {
-                order.push(cmd.section);
+            let section = cmd.group.title();
+            if !order.iter().any(|name| *name == section) {
+                order.push(section);
             }
         }
         order
@@ -172,7 +369,7 @@ impl Registry {
                 section: section.to_string(),
                 hits: matched
                     .iter()
-                    .filter(|cmd| cmd.section == section)
+                    .filter(|cmd| cmd.group.title() == section)
                     .map(|cmd| hit(cmd))
                     .collect(),
             })
@@ -186,25 +383,59 @@ fn hit(cmd: &Command) -> PaletteHit {
         label: cmd.label.to_string(),
         detail: cmd.detail.to_string(),
         shortcut: cmd.shortcut.to_string(),
-        needs_argument: cmd.argument.is_some(),
+        needs_argument: cmd.needs_prompt(),
+        enabled: cmd.is_enabled(),
     }
 }
 
 fn group_contiguous(cmds: &[&Command]) -> Vec<PaletteGroup> {
     let mut groups: Vec<PaletteGroup> = Vec::new();
     for cmd in cmds {
+        let section = cmd.group.title();
         if let Some(last) = groups.last_mut() {
-            if last.section == cmd.section {
+            if last.section == section {
                 last.hits.push(hit(cmd));
                 continue;
             }
         }
         groups.push(PaletteGroup {
-            section: cmd.section.to_string(),
+            section: section.to_string(),
             hits: vec![hit(cmd)],
         });
     }
     groups
+}
+
+/// Filter a second-step list. An empty query keeps the source order.
+pub fn filter_choices(query: &str, choices: &[Choice]) -> Vec<Choice> {
+    let query = query.trim();
+    if query.is_empty() {
+        return choices.to_vec();
+    }
+    let floor = (query.chars().count() as i32).saturating_mul(8);
+    let mut scored: Vec<(i32, &Choice)> = choices
+        .iter()
+        .filter_map(|choice| {
+            let score = best_score(
+                query,
+                &[
+                    (choice.label.as_str(), 3),
+                    (choice.detail.as_str(), 1),
+                    (choice.id.as_str(), 2),
+                ],
+            )?;
+            if score >= floor {
+                Some((score, choice))
+            } else {
+                None
+            }
+        })
+        .collect();
+    scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.label.cmp(&b.1.label)));
+    scored
+        .into_iter()
+        .map(|(_, choice)| choice.clone())
+        .collect()
 }
 
 /// Mutable handle passed to each `install` function.
@@ -236,8 +467,8 @@ impl ShellHook {
     }
 
     #[allow(dead_code)]
-    pub fn query(&self, raw: &str, recents: &[String]) -> Vec<PaletteGroup> {
-        self.registry.query(raw, recents)
+    pub fn query(&self, raw: &str, usage: &PaletteUsage) -> Vec<PaletteGroup> {
+        self.registry.query(raw, usage)
     }
 
     pub(crate) fn install_global(self) {
@@ -249,8 +480,8 @@ thread_local! {
     static REG: RefCell<Registry> = RefCell::new(Registry::default());
 }
 
-pub fn palette(raw: &str, recents: &[String]) -> Vec<PaletteGroup> {
-    REG.with(|reg| reg.borrow().query(raw, recents))
+pub fn palette(raw: &str, usage: &PaletteUsage) -> Vec<PaletteGroup> {
+    REG.with(|reg| reg.borrow().query(raw, usage))
 }
 
 pub fn command(id: &str) -> Option<Command> {
@@ -303,34 +534,24 @@ mod tests {
     use super::*;
     use leptos::prelude::*;
 
-    fn cmd(
-        id: &'static str,
-        section: &'static str,
-        section_order: i32,
-        label: &'static str,
-        order: i32,
-    ) -> Command {
-        Command {
-            id,
-            section,
-            section_order,
-            label,
-            detail: "detail",
-            shortcut: "",
-            keywords: &[],
-            argument: None,
-            order,
-            run: Rc::new(|_| Ok(())),
+    fn cmd(id: &'static str, group: Group, label: &'static str, order: i32) -> Command {
+        Command::new(id, group, label, "detail", Rc::new(|_| Ok(()))).order(order)
+    }
+
+    fn usage(recents: &[&str], frequent: &[&str]) -> PaletteUsage {
+        PaletteUsage {
+            recents: recents.iter().map(|id| (*id).to_string()).collect(),
+            frequent: frequent.iter().map(|id| (*id).to_string()).collect(),
         }
     }
 
     #[test]
     fn same_id_replaces_command_slot_and_shortcut() {
         let mut hook = ShellHook::new();
-        hook.command(cmd("new", "Commands", 0, "New session", 1));
+        hook.command(cmd("new", Group::Session, "New session", 1));
         hook.command(Command {
             label: "New root",
-            ..cmd("new", "Commands", 0, "New session", 1)
+            ..cmd("new", Group::Session, "New session", 1)
         });
         hook.slot(TopSlot {
             id: "gateway",
@@ -339,7 +560,7 @@ mod tests {
             title: "Gateway",
             overflow_label: "Gateway",
             collapse_below_px: 0,
-            render: Rc::new(|| leptos::prelude::view! { <span>"a"</span> }.into_any()),
+            render: Rc::new(|| view! { <span>"a"</span> }.into_any()),
         });
         hook.slot(TopSlot {
             id: "gateway",
@@ -348,7 +569,7 @@ mod tests {
             title: "Gateway",
             overflow_label: "Replaced",
             collapse_below_px: 400,
-            render: Rc::new(|| leptos::prelude::view! { <span>"b"</span> }.into_any()),
+            render: Rc::new(|| view! { <span>"b"</span> }.into_any()),
         });
         hook.shortcut(Shortcut {
             id: "palette",
@@ -366,7 +587,7 @@ mod tests {
             label: "Command palette",
             order: 1,
         });
-        let groups = hook.query("", &[]);
+        let groups = hook.query("", &PaletteUsage::default());
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].hits[0].label, "New root");
         assert_eq!(hook.registry.slots.len(), 1);
@@ -376,50 +597,73 @@ mod tests {
     }
 
     #[test]
-    fn empty_query_lifts_recents_out_of_their_section() {
+    fn empty_query_lifts_recents_and_frequent_out_of_their_group() {
         let mut hook = ShellHook::new();
-        hook.command(cmd("new", "Commands", 0, "New session", 1));
-        hook.command(cmd("focus", "Commands", 0, "Focus mode", 2));
-        hook.command(cmd("chat", "Apps", 1, "Chat", 1));
-        let groups = hook.query("", &["chat".into(), "missing".into()]);
-        assert_eq!(groups.len(), 2);
+        hook.command(cmd("new", Group::Session, "New session", 1));
+        hook.command(cmd("focus", Group::Navigate, "Focus mode", 2));
+        hook.command(cmd("chat", Group::Navigate, "Chat", 1));
+        hook.command(cmd("git", Group::Git, "Git", 1));
+        let groups = hook.query("", &usage(&["chat", "missing"], &["git", "chat"]));
         assert_eq!(groups[0].section, "Recent");
         assert_eq!(groups[0].hits[0].id, "chat");
-        assert_eq!(groups[1].section, "Commands");
+        assert_eq!(groups[1].section, "Frequent");
+        assert_eq!(groups[1].hits[0].id, "git");
         let flat: Vec<_> = groups
             .iter()
             .flat_map(|g| g.hits.iter().map(|h| h.id.as_str()))
             .collect();
         assert_eq!(flat.iter().filter(|id| **id == "chat").count(), 1);
+        assert_eq!(flat.iter().filter(|id| **id == "git").count(), 1);
+        assert_eq!(groups.last().unwrap().section, "Session");
     }
 
     #[test]
-    fn fuzzy_query_drops_misses_and_leads_with_the_best_section() {
+    fn hidden_commands_drop_out_and_disabled_commands_stay() {
         let mut hook = ShellHook::new();
-        hook.command(cmd("new", "Commands", 0, "New session", 1));
-        hook.command(Command {
-            detail: "Bundled theme",
-            keywords: &["nord"],
-            ..cmd("theme-nord", "Theme", 3, "Theme: Nord", 1)
-        });
-        let groups = hook.query("nord", &[]);
+        hook.command(cmd("shown", Group::Navigate, "Shown", 1));
+        hook.command(cmd("secret", Group::Debug, "Secret", 1).visible(|| false));
+        hook.command(cmd("locked", Group::Settings, "Locked", 1).enabled(|| false));
+        let groups = hook.query("", &PaletteUsage::default());
+        let flat: Vec<_> = groups
+            .iter()
+            .flat_map(|g| g.hits.iter().map(|h| (h.id.as_str(), h.enabled)))
+            .collect();
+        assert!(flat.iter().all(|(id, _)| *id != "secret"));
+        assert!(flat.contains(&("locked", false)));
+        assert!(flat.contains(&("shown", true)));
+        assert!(hook.query("secret", &PaletteUsage::default()).is_empty());
+    }
+
+    #[test]
+    fn fuzzy_query_drops_misses_and_leads_with_the_best_group() {
+        let mut hook = ShellHook::new();
+        hook.command(cmd("new", Group::Session, "New session", 1));
+        hook.command(
+            cmd("theme-nord", Group::Theme, "Theme: Nord", 1)
+                .keywords(&["nord"])
+                .order(1),
+        );
+        let nord = hook
+            .registry
+            .commands
+            .iter_mut()
+            .find(|c| c.id == "theme-nord")
+            .unwrap();
+        nord.detail = "Bundled theme";
+        let groups = hook.query("nord", &PaletteUsage::default());
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].section, "Theme");
         assert_eq!(groups[0].hits[0].id, "theme-nord");
-        let none = hook.query("zzzz-not-a-command", &[]);
+        let none = hook.query("zzzz-not-a-command", &PaletteUsage::default());
         assert!(none.is_empty());
     }
 
     #[test]
     fn plan_query_leads_with_approval_plan_not_the_task_runner() {
-        // Regression for #1429's webui-smoke failure: the task runner
-        // registered the exact keyword "plan", which outranked the fuzzy
-        // label match for "Approval: Plan" — Enter on a "plan" query
-        // opened the Tasks view and every later cockpit assertion failed.
         let mut hook = ShellHook::new();
         crate::shell::builtin::install(&mut hook);
         crate::shell::contrib::install(&mut hook);
-        let groups = hook.query("plan", &[]);
+        let groups = hook.query("plan", &PaletteUsage::default());
         let first = groups
             .first()
             .and_then(|g| g.hits.first())
@@ -428,16 +672,57 @@ mod tests {
     }
 
     #[test]
-    fn argument_flag_is_visible_on_the_hit() {
+    fn argument_and_choices_flag_the_hit() {
         let mut hook = ShellHook::new();
-        hook.command(Command {
-            argument: Some(Argument {
+        hook.command(
+            cmd("open-session", Group::Session, "Open session…", 1).argument(Argument {
                 placeholder: "Name",
                 required: true,
             }),
-            ..cmd("open-session", "Commands", 0, "Open session…", 1)
-        });
-        let groups = hook.query("open", &[]);
+        );
+        hook.command(
+            cmd("switch-model", Group::Model, "Switch model…", 1).choices(|| {
+                vec![Choice {
+                    id: "echo\thaiku".into(),
+                    label: "Haiku".into(),
+                    detail: "echo".into(),
+                }]
+            }),
+        );
+        let groups = hook.query("open", &PaletteUsage::default());
         assert!(groups[0].hits[0].needs_argument);
+        let models = hook.query("model", &PaletteUsage::default());
+        assert!(models[0].hits[0].needs_argument);
+    }
+
+    #[test]
+    fn choice_filter_ranks_the_title_and_drops_misses() {
+        let choices = vec![
+            Choice {
+                id: "a".into(),
+                label: "Alpine".into(),
+                detail: "workspace".into(),
+            },
+            Choice {
+                id: "b".into(),
+                label: "Beta".into(),
+                detail: "session".into(),
+            },
+        ];
+        assert_eq!(filter_choices("", &choices).len(), 2);
+        let hit = filter_choices("alp", &choices);
+        assert_eq!(hit.len(), 1);
+        assert_eq!(hit[0].id, "a");
+        assert!(filter_choices("zzzz", &choices).is_empty());
+    }
+
+    #[test]
+    fn confirm_spec_round_trips_on_the_command() {
+        let cmd = cmd("rotate", Group::Gateway, "Rotate gateway token", 1).confirm(ConfirmSpec {
+            title: "Rotate gateway token?",
+            body: "The current token stops working.",
+            confirm_label: "Rotate token",
+        });
+        assert_eq!(cmd.confirm.unwrap().confirm_label, "Rotate token");
     }
 }

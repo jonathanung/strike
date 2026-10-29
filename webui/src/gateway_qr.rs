@@ -194,6 +194,13 @@ pub(crate) fn GatewayQR(
     let warning = RwSignal::new(String::new());
     let devices = RwSignal::new(Vec::<DeviceRow>::new());
     let device_note = RwSignal::new(String::new());
+    crate::shell::bind(
+        "pair.revoke-all",
+        Rc::new(move |_| {
+            revoke_all(base, token, devices, device_note);
+            Ok(())
+        }),
+    );
     let scan_note = RwSignal::new(String::new());
     let landed = RwSignal::new(false);
     let install_ready = RwSignal::new(false);
@@ -246,7 +253,16 @@ pub(crate) fn GatewayQR(
                     <Show when=move || install_ready.get()>
                         <button class="secondary gq-install" type="button" on:click=move |_| call_install_prompt()>"Install"</button>
                     </Show>
-                    <button class="secondary gq-revoke-self" type="button" on:click=move |_| revoke_self(base, token, status, landed, refresh)>"Revoke this browser"</button>
+                    <button class="secondary gq-revoke-self" type="button" on:click=move |_| {
+                        crate::confirm::ask(
+                            crate::confirm::ConfirmRequest {
+                                title: "Revoke this browser?".into(),
+                                body: "This browser's grant stops working. Pair again to come back.".into(),
+                                confirm_label: "Revoke this browser".into(),
+                            },
+                            Rc::new(move || revoke_self(base, token, status, landed, refresh)),
+                        );
+                    }>"Revoke this browser"</button>
                 </div>
             </div>
         </Show>
@@ -286,13 +302,32 @@ pub(crate) fn GatewayQR(
                                         class="secondary"
                                         type="button"
                                         disabled=revoked
-                                        on:click=move |_| revoke_device(base, token, id.clone(), devices, device_note)
+                                        on:click=move |_| {
+                                            let id = id.clone();
+                                            crate::confirm::ask(
+                                                crate::confirm::ConfirmRequest {
+                                                    title: "Revoke this browser?".into(),
+                                                    body: "That paired browser loses its grant.".into(),
+                                                    confirm_label: "Revoke".into(),
+                                                },
+                                                Rc::new(move || revoke_device(base, token, id.clone(), devices, device_note)),
+                                            );
+                                        }
                                     >"Revoke"</button>
                                 </li>
                             }
                         }).collect_view()}
                     </ul>
-                    <button class="secondary" type="button" on:click=move |_| revoke_all(base, token, devices, device_note)>"Revoke all"</button>
+                    <button class="secondary" type="button" on:click=move |_| {
+                        crate::confirm::ask(
+                            crate::confirm::ConfirmRequest {
+                                title: "Revoke paired browsers?".into(),
+                                body: "Every paired browser loses its grant. Pairing again mints a new code.".into(),
+                                confirm_label: "Revoke all".into(),
+                            },
+                            Rc::new(move || revoke_all(base, token, devices, device_note)),
+                        );
+                    }>"Revoke all"</button>
                     <h3 class="gq-sub">"Scan a gateway QR"</h3>
                     <p class="hint">"Add another daemon. The phone camera can open a Strike QR in the browser."</p>
                     <video id="gq-cam" class="gq-video" autoplay=true muted=true playsinline=true></video>

@@ -2487,17 +2487,18 @@ try {
     "cancel confirm",
     async () => {
       const raw = await evaluate(`(() => {
-        const row = [...document.querySelectorAll(".queue-list li")].find((r) => r.innerText.includes("alpha later"));
-        const confirm = row && [...row.querySelectorAll("button")].find((b) => b.textContent === "Confirm");
-        return JSON.stringify({ ok: !!confirm });
+        const dialog = document.querySelector("[data-confirm='dialog']");
+        const text = dialog ? dialog.innerText : "";
+        return JSON.stringify({
+          ok: !!dialog && text.includes("Remove queued message") && !!dialog.querySelector("[data-confirm='accept']"),
+        });
       })()`);
       return JSON.parse(raw || "{}");
     },
     { timeout: STEP_MS, interval: 150 },
   );
   await evaluate(`(() => {
-    const row = [...document.querySelectorAll(".queue-list li")].find((r) => r.innerText.includes("alpha later"));
-    const confirm = row && [...row.querySelectorAll("button")].find((b) => b.textContent === "Confirm");
+    const confirm = document.querySelector("[data-confirm='accept']");
     if (confirm) confirm.click();
     return "ok";
   })()`);

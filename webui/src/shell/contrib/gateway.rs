@@ -15,13 +15,50 @@
 
 use std::rc::Rc;
 
-use crate::shell::{Command, ShellHook, Shortcut, TopRegion, TopSlot};
+use crate::shell::{Command, ConfirmSpec, Group, ShellHook, Shortcut, TopRegion, TopSlot};
 
 pub fn install(reg: &mut ShellHook) {
     reg.command(Command {
+        id: "gateway.rotate",
+        group: Group::Gateway,
+        label: "Rotate gateway token",
+        detail: "Invalidate the host token and store a new one in this browser",
+        shortcut: "",
+        keywords: &["token", "rotate", "secret"],
+        argument: None,
+        order: 80,
+        run: Rc::new(|_| crate::shell::dispatch("gateway.rotate", "")),
+        visible: None,
+        enabled: None,
+        confirm: Some(ConfirmSpec {
+            title: "Rotate gateway token?",
+            body: "The current token stops working everywhere it was copied. This browser stores the new one.",
+            confirm_label: "Rotate token",
+        }),
+        choices: None,
+    });
+    reg.command(Command {
+        id: "gateway.revoke",
+        group: Group::Gateway,
+        label: "Revoke gateway grants",
+        detail: "Drop every short-lived grant. The host token file stays",
+        shortcut: "",
+        keywords: &["revoke", "grants"],
+        argument: None,
+        order: 81,
+        run: Rc::new(|_| crate::shell::dispatch("gateway.revoke", "")),
+        visible: None,
+        enabled: None,
+        confirm: Some(ConfirmSpec {
+            title: "Revoke gateway grants?",
+            body: "Every short-lived grant stops working. The host token file is not changed.",
+            confirm_label: "Revoke grants",
+        }),
+        choices: None,
+    });
+    reg.command(Command {
         id: "gateways.open",
-        section: "Apps",
-        section_order: 10,
+        group: Group::Gateway,
         label: "Gateways",
         detail: "Switch between this daemon and saved gateways",
         shortcut: "Alt+W",
@@ -29,6 +66,10 @@ pub fn install(reg: &mut ShellHook) {
         argument: None,
         order: 50,
         run: Rc::new(|args| crate::shell::dispatch("gateways.open", args)),
+        visible: None,
+        enabled: None,
+        confirm: None,
+        choices: None,
     });
     reg.slot(TopSlot {
         id: "gateway-switcher",
