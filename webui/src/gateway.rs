@@ -863,12 +863,32 @@ pub fn GatewaySwitcher(
     let logout_browser = move || {
         let (b, t, id) = (base.get(), token.get(), selected.get());
         spawn_local(async move {
-            let _ = gateway_fetch("POST", &b, &t, "/v1/gateway/logout", Some(json!({}))).await;
-            token.set(String::new());
-            persist_token(&id, "");
-            forget_persisted_host_token();
-            detail.set("Logged out this browser. The host token file was not changed.".into());
-            gateway.set("unauthorized".into());
+            // The POST is what makes logout real: it revokes this
+            // browser's grant and clears the auth cookie daemon-side.
+            // Only present the logged-out state when it actually
+            // happened; on failure keep the local token so the logout
+            // can be retried (#1613).
+            match gateway_fetch("POST", &b, &t, "/v1/gateway/logout", Some(json!({}))).await {
+                Ok((status, _)) if (200..300).contains(&status) => {
+                    token.set(String::new());
+                    persist_token(&id, "");
+                    forget_persisted_host_token();
+                    detail.set(
+                        "Logged out this browser. The host token file was not changed.".into(),
+                    );
+                    gateway.set("unauthorized".into());
+                }
+                Ok((status, _)) => {
+                    detail.set(format!(
+                        "Logout failed: the gateway did not revoke this browser's grant (HTTP {status}). You are still logged in, and the auth cookie may still authenticate a reload. Retry when the gateway responds."
+                    ));
+                }
+                Err(e) => {
+                    detail.set(format!(
+                        "Logout failed: the gateway is {e}, so this browser's grant was not revoked. You are still logged in, and the auth cookie may still authenticate a reload. Retry when the gateway responds."
+                    ));
+                }
+            }
         });
     };
     crate::shell::bind(

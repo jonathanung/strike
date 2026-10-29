@@ -343,6 +343,16 @@ impl Transcript {
         self.title_pin = Some(title);
     }
 
+    /// Roll back an optimistic rename the daemon rejected (#1618):
+    /// restore the title and pin captured before `pin_title` ran. A pin
+    /// left behind by a failed rename would otherwise block
+    /// `set_listed_title` from ever healing the header, since the daemon
+    /// will never report the title it refused to save.
+    pub fn restore_title(&mut self, title: String, pin: Option<String>) {
+        self.title = title;
+        self.title_pin = pin;
+    }
+
     pub fn regenerated_title(&self) -> String {
         self.messages
             .iter()
@@ -2028,6 +2038,41 @@ mod tests {
         t.set_listed_title("first prompt");
         assert_eq!(t.title, "Renamed");
         t.set_listed_title("Renamed");
+        assert!(t.title_pin.is_none());
+    }
+
+    #[test]
+    fn failed_rename_rollback_restores_title_and_healing() {
+        let mut t = Transcript::new();
+        t.set_listed_title("Original");
+        assert_eq!(t.title, "Original");
+        // The state apply_title captures before its optimistic update.
+        let prev = (t.title.clone(), t.title_pin.clone());
+        t.pin_title("Unsaved".into());
+        assert_eq!(t.title, "Unsaved");
+        // While the failed pin stands, the daemon's real title is ignored.
+        t.set_listed_title("Original");
+        assert_eq!(t.title, "Unsaved");
+        t.restore_title(prev.0, prev.1);
+        assert_eq!(t.title, "Original");
+        assert!(t.title_pin.is_none());
+        // After the rollback the listed title heals the header again.
+        t.set_listed_title("Daemon retitle");
+        assert_eq!(t.title, "Daemon retitle");
+    }
+
+    #[test]
+    fn failed_rename_rollback_keeps_an_earlier_pin() {
+        let mut t = Transcript::new();
+        // An earlier rename saved but not yet echoed by the daemon: its
+        // pin is live and must survive a later attempt's rollback.
+        t.pin_title("First rename".into());
+        let prev = (t.title.clone(), t.title_pin.clone());
+        t.pin_title("Second rename".into());
+        t.restore_title(prev.0, prev.1);
+        assert_eq!(t.title, "First rename");
+        assert_eq!(t.title_pin.as_deref(), Some("First rename"));
+        t.set_listed_title("First rename");
         assert!(t.title_pin.is_none());
     }
 

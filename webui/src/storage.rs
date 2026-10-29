@@ -113,8 +113,16 @@ pub fn StoragePanel(
     let path_in = RwSignal::new(String::new());
     let note_in = RwSignal::new(String::new());
     let selected = RwSignal::new(String::new());
+    // Generation counters: a completion applies only while it is still
+    // the newest request for its pane, so a slow earlier load can never
+    // paint over a newer selection (#1627).
+    let reload_gen = RwSignal::new(0u64);
+    let pin_gen = RwSignal::new(0u64);
+    let art_gen = RwSignal::new(0u64);
 
     let reload = move || {
+        let gen = reload_gen.get_untracked().wrapping_add(1);
+        reload_gen.set(gen);
         let tab = tab.get_untracked();
         let (b, t, root, scope) = (
             base.get_untracked(),
@@ -132,6 +140,9 @@ pub fn StoragePanel(
             } else {
                 return;
             };
+            if reload_gen.get_untracked() != gen {
+                return;
+            }
             match result {
                 Ok(loaded) => {
                     error.set(String::new());
@@ -245,10 +256,20 @@ pub fn StoragePanel(
 
     let open_pin = move |path: String| {
         selected.set(path.clone());
+        // Clear at click: the previous pin's content must never sit under
+        // a new selection, and on failure the pane shows the error and no
+        // body (#1627).
+        preview.set(String::new());
+        let gen = pin_gen.get_untracked().wrapping_add(1);
+        pin_gen.set(gen);
         let (b, t) = (base.get_untracked(), token.get_untracked());
         spawn_local(async move {
             let q = format!("/v1/file?path={}", crate::api::js_encode(&path));
-            match get_json::<FileBody>(&b, &t, &q).await {
+            let result = get_json::<FileBody>(&b, &t, &q).await;
+            if pin_gen.get_untracked() != gen {
+                return;
+            }
+            match result {
                 Ok(file) => {
                     if file.skip {
                         preview.set(if file.notice.is_empty() {
@@ -267,6 +288,12 @@ pub fn StoragePanel(
     };
 
     let open_artifact = move |id: String, version: i64| {
+        // Clear at click, same rule as open_pin: a failed fetch for a new
+        // item or version must not leave the previous body on screen,
+        // where its version chips would claim it is current (#1627).
+        detail.set(None);
+        let gen = art_gen.get_untracked().wrapping_add(1);
+        art_gen.set(gen);
         let (b, t, root) = (base.get_untracked(), token.get_untracked(), root.get_untracked());
         spawn_local(async move {
             let mut q = format!(
@@ -278,7 +305,11 @@ pub fn StoragePanel(
             if version > 0 {
                 q.push_str(&format!("&version={version}"));
             }
-            match get_json::<ArtifactDetail>(&b, &t, &q).await {
+            let result = get_json::<ArtifactDetail>(&b, &t, &q).await;
+            if art_gen.get_untracked() != gen {
+                return;
+            }
+            match result {
                 Ok(art) => {
                     detail.set(Some(art));
                     error.set(String::new());
@@ -427,6 +458,7 @@ pub fn StoragePanel(
                     }).collect_view()}
                 </ul>
                 <Show when=move || !preview.get().is_empty()>
+                    <p class="hint storage-path">{move || selected.get()}</p>
                     <pre class="storage-preview">{move || preview.get()}</pre>
                 </Show>
             </Show>
@@ -458,11 +490,13 @@ pub fn StoragePanel(
                 {move || detail.get().map(|art| {
                     let versions = if art.versions.is_empty() { vec![art.version] } else { art.versions.clone() };
                     let id = art.id.clone();
+                    let id_label = format!("{} · v{}", art.id, art.version);
                     let body = art.content.clone();
                     let heading = if art.title.is_empty() { art.kind.clone() } else { art.title.clone() };
                     view! {
                         <div class="storage-detail">
                             <strong>{heading}</strong>
+                            <span class="hint">{id_label}</span>
                             <div class="chips">
                                 {versions.into_iter().map(|v| {
                                     let id_v = id.clone();

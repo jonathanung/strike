@@ -207,6 +207,11 @@ pub fn SchedulePage(
 ) -> impl IntoView {
     let items = RwSignal::new(Vec::<ScheduleItem>::new());
     let runs = RwSignal::new(Vec::<RunItem>::new());
+    // The schedule id `runs` was loaded for, and a History-local failure
+    // line. Together they keep one schedule's runs from ever rendering
+    // under another schedule (#1619).
+    let runs_for = RwSignal::new(String::new());
+    let history_error = RwSignal::new(String::new());
     let goals = RwSignal::new(Vec::<Named>::new());
     let workflows = RwSignal::new(Vec::<Named>::new());
     let error = RwSignal::new(String::new());
@@ -232,14 +237,32 @@ pub fn SchedulePage(
     let load_history = move |id: String| {
         if id.is_empty() {
             runs.set(Vec::new());
+            runs_for.set(String::new());
+            history_error.set(String::new());
             return;
         }
+        // Clear first: the previous schedule's runs must never render
+        // under this selection, even while this load is in flight (#1619).
+        runs.set(Vec::new());
+        runs_for.set(id.clone());
+        history_error.set(String::new());
         let (b, t) = (base.get_untracked(), token.get_untracked());
         spawn_local(async move {
             let path = format!("/v1/schedules/{}/history", api::js_encode(&id));
             match get_json::<RunList>(&b, &t, &path).await {
-                Ok(list) => runs.set(list.runs),
-                Err(e) => error.set(e),
+                Ok(list) => {
+                    // Drop a completion a newer selection superseded.
+                    if runs_for.get_untracked() == id {
+                        runs.set(list.runs);
+                    }
+                }
+                Err(e) => {
+                    if runs_for.get_untracked() == id {
+                        history_error
+                            .set("History failed to load for this schedule.".into());
+                        error.set(e);
+                    }
+                }
             }
         });
     };
@@ -378,6 +401,8 @@ pub fn SchedulePage(
         missed.set("skip".into());
         enabled.set(true);
         runs.set(Vec::new());
+        runs_for.set(String::new());
+        history_error.set(String::new());
         notice.set(String::new());
     };
 
@@ -494,11 +519,18 @@ pub fn SchedulePage(
             return;
         }
         let (b, t) = (base.get_untracked(), token.get_untracked());
-        active_root.set(id.clone());
-        mode.set("chat".into());
-        status.set(format!("Opened {id}"));
         spawn_local(async move {
-            let _ = post_json_value(&b, &t, &format!("/v1/roots/{id}/activate"), json!({})).await;
+            // Await the activation and present the session as opened only
+            // when the daemon accepted it; on failure stay here with the
+            // error, like the delete path in this file (#1612).
+            match post_json_value(&b, &t, &format!("/v1/roots/{id}/activate"), json!({})).await {
+                Ok(_) => {
+                    active_root.set(id.clone());
+                    mode.set("chat".into());
+                    status.set(format!("Opened {id}"));
+                }
+                Err(e) => error.set(format!("Open session failed: {e}")),
+            }
         });
     };
 
@@ -658,10 +690,19 @@ pub fn SchedulePage(
                     <div class="sched-history">
                         <h3>"History"</h3>
                         {move || {
-                            let rows = runs.get();
                             if editing.get().is_empty() {
                                 return view! { <p class="hint">"History appears after you select a schedule."</p> }.into_any();
                             }
+                            let herr = history_error.get();
+                            if !herr.is_empty() {
+                                return view! { <p class="hint" role="alert">{herr}</p> }.into_any();
+                            }
+                            // Only render runs loaded for this selection.
+                            let rows = if runs_for.get() == editing.get() {
+                                runs.get()
+                            } else {
+                                Vec::new()
+                            };
                             if rows.is_empty() {
                                 return view! { <p class="hint">"No runs yet."</p> }.into_any();
                             }
