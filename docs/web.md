@@ -989,6 +989,38 @@ budgets). **Run / pause / resume / abort** require a live session
 Default host run path is evaluate-only (empty tool allowlist) — same safety
 default as `/goal run` in the TUI. Wire JSON is camelCase host-safe DTOs only.
 
+### Schedules
+
+`~/.strike/schedules.json` (mode `0600`) is the clock. The daemon ticks
+about every 20 seconds and starts a background root session; it does not
+switch the cockpit's active session.
+
+| Method | Path | Body |
+|---|---|---|
+| `GET` | `/v1/schedules` | `{schedules:[...]}` |
+| `POST` | `/v1/schedules` | spec below; `201` the stored schedule |
+| `GET` | `/v1/schedules/{id}` | one schedule |
+| `PATCH` | `/v1/schedules/{id}` | full spec; history is kept |
+| `DELETE` | `/v1/schedules/{id}` | |
+| `POST` | `/v1/schedules/{id}/pause` | |
+| `POST` | `/v1/schedules/{id}/resume` | arms the next future slot; does not catch up |
+| `POST` | `/v1/schedules/{id}/run` | one session now; `409` when overlap is skip and the last session is busy |
+| `GET` | `/v1/schedules/{id}/history` | `{runs:[...]}` newest first |
+
+Spec fields: `name`, `kind` (`cron` \| `interval` \| `once` \| `heartbeat`),
+`cron` (5 fields, timezone-aware), `every` (Go duration, minimum `1m`),
+`at` (RFC3339), `timezone` (IANA, default `UTC`), `source` (`prompt` \|
+`goal` \| `workflow`), `prompt`, `goalId`, `workflow`, `workspaceId`,
+`permissionMode` (used only when the workspace has no mode; empty means
+`plan`), `overlap` (`skip` \| `queue` \| `allow`, default `skip`),
+`missed` (`skip` \| `once`, default `skip`), `enabled`.
+
+A workspace permission mode wins over `permissionMode`. Heartbeat fires
+compare a fingerprint of the workspace (git HEAD and status, otherwise a
+walk). An unchanged tree records `quiet` and does not start a session.
+Cron slots that fall in a DST gap are skipped. A repeated DST hour fires
+once, at the earlier offset.
+
 Events use the same envelopes as session JSONL (`type` + `time` + `data`).
 
 Example — full echo turn via HTTP:
@@ -1010,8 +1042,14 @@ Permission asks appear as `permission.asked` events; resolve with
 
 ### Memory & issues write/export
 
-| `PUT` | `/v1/memory/{key}` | **yes** | Put/replace entry (`{value,tags?}`); blocked in attach-only |
-| `DELETE` | `/v1/memory/{key}` | **yes** | Delete entry; blocked in attach-only |
+| `GET` | `/v1/memory` | mode | List entries. `?scope=project` (default) or `global`. Response adds `markdownFile` and `auditFile` when the store is the file projection. |
+| `PUT` | `/v1/memory/{key}` | **yes** | Put/replace entry (`{value,tags?,author?,scope?}`); query `scope` is the fallback. Values, keys, and tags are credential-scrubbed. Blocked in attach-only. |
+| `DELETE` | `/v1/memory/{key}` | **yes** | Delete entry (`?scope=`); blocked in attach-only |
+| `GET` | `/v1/memory/mode` | mode | Session memory mode (`normal`, `incognito`, `temporary`) for `?root=`. `wired:false` when no live engine is bound. |
+| `PUT` | `/v1/memory/mode` | **yes** | Set that mode (`{mode}`) for `?root=`. Persists on the session meta sidecar. |
+| `GET` | `/v1/knowledge` | mode | Pinned paths for `?scope=project` or `global`. |
+| `PUT` | `/v1/knowledge` | **yes** | Pin (`{path,note?,author?,scope?}`). Notes are scrubbed. Blocked in attach-only. |
+| `DELETE` | `/v1/knowledge` | **yes** | Unpin (`{path,scope?}`). Blocked in attach-only. |
 | `GET` | `/v1/memory/export` | mode | Download portable `strike-memory.json` (TUI format) |
 | `POST` | `/v1/memory/import` | **yes** | Import (`{path}` or `{data}`, `replace?`); blocked in attach-only |
 | `POST` | `/v1/issues` | **yes** | Create issue (`{title,body?}`); blocked in attach-only |
@@ -1029,7 +1067,7 @@ Attach-only may read authorized rows; missing capability returns **501**.
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | `GET` | `/v1/artifacts` | mode | Bounded list (`type`, `scope`, `sessionId`, `includeExpired`, `limit`≤200, `offset`). Visibility uses `actorSession` + `actorRoot` (default: live/`?root=` session). Owner-access rows require matching owner session; team-access requires matching owner root. |
-| `GET` | `/v1/artifacts/{id}` | mode | Full artifact (`?version=` optional). **404** when missing or not visible. Content/title are credential-scrubbed. |
+| `GET` | `/v1/artifacts/{id}` | mode | Full artifact (`?version=` optional). Retained snapshots (last 20) replay through `?version=`. **404** when missing, not visible, or the version was dropped. Content/title are credential-scrubbed on write. |
 | `GET` | `/v1/ledger` | mode | History list (`status`, `kind`, `path`, `taskId`, `authorSession`, `limit`, `offset`) or active slice (`active=1` + optional `path`/`taskId`). Includes invalidated/superseded provenance fields. |
 | `GET` | `/v1/ledger/{id}` | mode | One ledger entry (any status). **404** when missing. Statements/evidence scrubbed. |
 
@@ -1042,6 +1080,8 @@ writes remain coherent via the underlying stores; browser reads are race-safe.
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | `GET` | `/v1/files/search` | mode | Workspace file search (`q`, `limit`≤50) for `@file` completion; root-scoped via `host.Files.SearchFiles` |
+| `GET` | `/v1/file/view` | mode | Document read (`path`). JSON: content, sha256, mtimeUnixNano, binary, truncated, writable, writeBlock. Work-root confined; symlinks rejected. An explicit allowed-root ceiling (workspace `AllowedRoots`, when the registry grows one) also rejects paths outside that list. |
+| `PUT` | `/v1/file` | **yes** | Save one existing text file (`path`, `content`, `sha256`, `mtimeUnixNano`). 409 `conflict` when the hash or mtime moved; the body has the new revision, not the file text. Plan mode and edit/write deny rules return 403. Does not create files. Attach-only and read-only reject. |
 | `POST` | `/v1/history` | **yes** | Enqueue one prompt (`{prompt}`) into project history; blocked in attach-only. Web client calls once per accepted `user.input` (not on replay). |
 
 Composer: Ctrl/Cmd+K opens the command palette (modes, surfaces, slash, skills). Arrow Up/Down on an empty eligible composer walks prompt history. `@` triggers file search (not email-like tokens). Quiet first-run tip teaches palette / slash / `@file`.

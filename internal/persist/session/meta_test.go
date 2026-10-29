@@ -11,6 +11,7 @@ func TestMetaRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	want := Meta{
 		ProjectKey:  "/repos/acme",
+		SessionID:   "sess-1",
 		PRURL:       "https://github.com/acme/repo/pull/42",
 		PRNumber:    42,
 		PRState:     PRStateMerged,
@@ -108,6 +109,7 @@ func TestMetaLeadSessionIDRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	want := Meta{
 		ProjectKey:      "/repos/acme",
+		SessionID:       "child-1",
 		ParentSessionID: "lead-1",
 		LeadSessionID:   "lead-1",
 		Title:           "explore abc",
@@ -156,5 +158,37 @@ func TestUpdateMetaMerges(t *testing.T) {
 	}
 	if _, err := ReadMeta(dir, "bad"); err == nil {
 		t.Fatal("expected error for malformed meta")
+	}
+}
+
+func TestReadMetaLegacySidecarOmitsNewFields(t *testing.T) {
+	dir := t.TempDir()
+	body := []byte("{\n  \"projectKey\": \"proj-synthetic\",\n  \"title\": \"synthetic\",\n  \"parentSessionId\": \"sess-parent\"\n}\n")
+	if err := os.WriteFile(MetaPath(dir, "sess-legacy"), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadMeta(dir, "sess-legacy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.SessionID != "" || got.Model != "" {
+		t.Fatalf("legacy sidecar gained fields: %+v", got)
+	}
+	if got.ProjectKey != "proj-synthetic" || got.Title != "synthetic" || got.ParentSessionID != "sess-parent" {
+		t.Fatalf("legacy sidecar = %+v", got)
+	}
+}
+
+func TestWriteMetaStampsSessionIDFromFilename(t *testing.T) {
+	dir := t.TempDir()
+	if err := WriteMeta(dir, "sess-1", Meta{SessionID: "other", Title: "t"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadMeta(dir, "sess-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.SessionID != "sess-1" || got.Title != "t" {
+		t.Fatalf("got %+v", got)
 	}
 }

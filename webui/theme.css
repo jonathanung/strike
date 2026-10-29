@@ -1,0 +1,88 @@
+/* Block language, loaded last so it wins over feature stylesheets.
+   Tokens live on :root in style.css (one source of truth).
+
+   peasantlabs.org: near-black ground, paper text, 1–2px solid borders,
+   flat panels, monospace display, no blur.
+   vetool.jonathanung.ca: 2–4px radius, IBM Plex body, display headings,
+   one sharp accent against a blue secondary. Strike keeps its purple
+   (--acid) and cyan (--accent-alt) and uses --sharp (#FFD400) for
+   the primary fill. On light, the focus ring stays purple: #FFD400 on
+   white is below the 3:1 non-text contrast bar. */
+
+body {
+  font-family: var(--font-body);
+}
+
+h1,
+h2,
+h3,
+.brand-mark,
+.panel-title,
+.nav-center .seg {
+  font-family: var(--font-display);
+  letter-spacing: 0.04em;
+}
+
+.providers-card h2 {
+  letter-spacing: 0.06em;
+}
+
+button,
+input,
+textarea,
+select,
+.chip,
+.seg,
+.command-pill,
+.badge,
+.menu,
+.palette,
+.panel,
+.card,
+.bubble,
+.notice,
+.row,
+.nav-pop,
+.providers-card,
+kbd {
+  border-radius: var(--radius-sm) !important;
+}
+
+button.primary,
+button.send,
+.nav-center .seg.on,
+.chip.on,
+.seg.on {
+  background: var(--sharp) !important;
+  color: var(--on-sharp) !important;
+  border-color: var(--ink) !important;
+}
+
+button.primary,
+button.send {
+  border-width: var(--border-width) !important;
+  border-style: solid !important;
+  box-shadow: 3px 3px 0 var(--ink) !important;
+}
+
+.palette,
+.menu,
+.nav-pop,
+.providers-card,
+.daemon section,
+.gw-pop,
+.notice {
+  border: var(--border-width) solid var(--rule) !important;
+  box-shadow: var(--shadow) !important;
+}
+
+.skeleton-line {
+  border-radius: 0 !important;
+  background: var(--raised) !important;
+  animation: none !important;
+}
+
+:focus-visible {
+  outline: 2px solid var(--border-focus) !important;
+  outline-offset: 2px;
+}

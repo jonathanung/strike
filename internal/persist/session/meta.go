@@ -26,7 +26,16 @@ type Meta struct {
 	// history/memory), typically the canonical git root or cwd. Empty on
 	// legacy sidecars. Written first so session meta embeds the folder path
 	// at the top of the JSON.
-	ProjectKey      string `json:"projectKey,omitempty"`
+	ProjectKey string `json:"projectKey,omitempty"`
+	// SessionID repeats the JSONL filename stem so external readers can take
+	// the id from the sidecar. WriteMeta sets it from the path. Empty on
+	// sidecars that have not been written since this field existed. The
+	// filename remains the id if the two ever disagree.
+	SessionID string `json:"sessionId,omitempty"`
+	// Model is the last non-empty model id from a model.selected event
+	// appended to this session. Empty until a selection is persisted.
+	// Provider stays on the event; the log is the history.
+	Model           string `json:"model,omitempty"`
 	Title           string `json:"title,omitempty"`
 	ParentSessionID string `json:"parentSessionId,omitempty"`
 	// LeadSessionID is the implicit agent-team lead for this session. Empty on
@@ -39,6 +48,10 @@ type Meta struct {
 	// Fork. Empty for ordinary roots and subagent children. Forks remain root
 	// sessions (ParentSessionID empty) so --continue / pickers still work.
 	ForkedFrom string `json:"forkedFrom,omitempty"`
+	// WorkspaceID is the registry id of the directory this session runs in.
+	// Empty means the session is not bound (plain strike serve, or a launch
+	// directory that matched no workspace). It is not a session-folder id.
+	WorkspaceID string `json:"workspaceId,omitempty"`
 	// WorktreePath is the absolute path of a strike-managed git worktree bound
 	// to this session (tool CWD). Empty when the session uses the launch cwd.
 	WorktreePath string `json:"worktreePath,omitempty"`
@@ -49,6 +62,9 @@ type Meta struct {
 	PRNumber       int    `json:"prNumber,omitempty"`
 	PRState        string `json:"prState,omitempty"`     // open|merged|closed
 	PRUpdatedAt    string `json:"prUpdatedAt,omitempty"` // RFC3339 UTC when PR fields last written
+	// MemoryMode is normal, incognito, or temporary for this root session.
+	// Empty means normal. The engine enforces it; the sidecar restores it.
+	MemoryMode string `json:"memoryMode,omitempty"`
 }
 
 // NormalizePRState maps forge state strings to open|merged|closed, or "".
@@ -120,6 +136,10 @@ func ReadMeta(dir, id string) (Meta, error) {
 func WriteMeta(dir, id string, m Meta) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
+	}
+	// Filename stem wins over a stale or empty sessionId.
+	if id != "" {
+		m.SessionID = id
 	}
 	data, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {

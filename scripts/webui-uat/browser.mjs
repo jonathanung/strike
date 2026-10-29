@@ -52,10 +52,10 @@ export async function waitDown(url, tries = 50) {
   throw new Error(`daemon still answering ${url}`);
 }
 
-export function startStrike({ bin, port, home, cwd }) {
+export function startStrike({ bin, port, home, cwd, extraArgs = [] }) {
   const proc = spawn(
     bin,
-    ["serve", "--addr", `127.0.0.1:${port}`, "--provider", "echo"],
+    ["serve", "--addr", `127.0.0.1:${port}`, "--provider", "echo", ...extraArgs],
     { cwd, env: { ...process.env, HOME: home }, stdio: ["ignore", "pipe", "pipe"] },
   );
   let log = "";
@@ -194,7 +194,8 @@ export function attachCDP(wsUrl) {
       awaitPromise: true,
     });
     if (result.exceptionDetails) {
-      const text = result.exceptionDetails.text || JSON.stringify(result.exceptionDetails);
+      const details = result.exceptionDetails;
+      const text = details.exception?.description || details.text || JSON.stringify(details);
       throw new Error(text);
     }
     return result.result?.value;

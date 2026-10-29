@@ -27,7 +27,16 @@ PATH, upgrade, and uninstall: [docs/install.md](docs/install.md).
 ```sh
 strike version
 strike --upgrade    # or /upgrade in the TUI
+strike daemon install --start
 ```
+
+`strike daemon install` registers a per-user daemon and prints the matching
+start commands. `--start` runs them. Linux writes a systemd user unit under
+`~/.config/systemd/user/` (`$XDG_CONFIG_HOME` when set). macOS writes
+`~/Library/LaunchAgents/ca.jonathanung.strike-daemon.plist` and uses
+`launchctl`. Native Windows is unsupported; run `strike serve` inside WSL2.
+The API token is `~/.strike/daemon.token` (mode 0600). Then open
+http://127.0.0.1:8787/.
 
 ## Quickstart (from source)
 
@@ -82,7 +91,8 @@ bundle. The old JavaScript `web/` app is gone. Bind stays loopback unless
 
 ```sh
 make serve
-# or: ./strike daemon install
+# or install the per-user daemon (systemd on Linux, launchd on macOS):
+./strike daemon install --start
 curl -s http://127.0.0.1:8787/health
 ```
 
@@ -101,6 +111,7 @@ curl -s http://127.0.0.1:8787/health
 | [Agents & skills](docs/agents-skills.md) | personas, skills, workflows / autonomy |
 | [Plugins](docs/plugins.md) | Agent Plugins 1.0.0 contract (skills, MCP, `com.strike.cli`, trust) |
 | [Web UI](docs/webui-daemon.md) | Rust client + `strike serve` daemon |
+| [Phone](docs/mobile.md) | tailnet reachability and the phone layout |
 | [Web cockpit contract](docs/web-cockpit-contract.md) | progressive modes, parity matrix, attach-only (#1069) |
 | [Go SDK](docs/sdk.md) | `pkg/sdk` client over `pkg/protocol` |
 | [Architecture](docs/ARCHITECTURE.md) | packages, seams, recipes |

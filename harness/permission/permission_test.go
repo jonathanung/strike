@@ -1319,6 +1319,32 @@ func TestValidateRuleset(t *testing.T) {
 			name: "empty pattern ok",
 			rs:   Ruleset{{Permission: "write", Pattern: "", Action: Deny}},
 		},
+		{
+			name:    "invalid glob unclosed class",
+			rs:      Ruleset{{Permission: "bash", Pattern: "[r*", Action: Deny}},
+			wantErr: true,
+		},
+		{
+			name:    "invalid glob unclosed class range",
+			rs:      Ruleset{{Permission: "bash", Pattern: "[a-", Action: Deny}},
+			wantErr: true,
+		},
+		{
+			name:    "invalid glob unclosed brace",
+			rs:      Ruleset{{Permission: "bash", Pattern: "{unclosed", Action: Allow}},
+			wantErr: true,
+		},
+		{
+			name: "valid character class",
+			rs:   Ruleset{{Permission: "bash", Pattern: "[r]*", Action: Deny}},
+		},
+		{
+			name: "valid doublestar and closed braces",
+			rs: Ruleset{
+				{Permission: "write", Pattern: "**/*.go", Action: Deny},
+				{Permission: "bash", Pattern: "{rm,git} *", Action: Deny},
+			},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1333,6 +1359,26 @@ func TestValidateRuleset(t *testing.T) {
 				t.Fatalf("ValidateRuleset(%#v) = %v, want nil", tc.rs, err)
 			}
 		})
+	}
+}
+
+func TestValidatePatternRejectsInvalidGlobSyntax(t *testing.T) {
+	for _, pattern := range []string{"[r*", "[a-", "{unclosed", `trailing\`} {
+		err := ValidatePattern(pattern)
+		if err == nil {
+			t.Fatalf("ValidatePattern(%q) = nil, want error", pattern)
+		}
+		if !strings.Contains(err.Error(), pattern) || !strings.Contains(err.Error(), "invalid glob syntax") {
+			t.Fatalf("ValidatePattern(%q) error = %q, want it to name the pattern and the invalid glob syntax", pattern, err)
+		}
+		if err := ValidateRuleset(Ruleset{{Permission: "bash", Pattern: pattern, Action: Deny}}); err == nil || !strings.Contains(err.Error(), pattern) {
+			t.Fatalf("ValidateRuleset with pattern %q = %v, want error naming the pattern", pattern, err)
+		}
+	}
+	for _, pattern := range []string{"", "*", "**", "[r]*", "[a-z]*", "{rm,git} *", "**/*.go", "rm *"} {
+		if err := ValidatePattern(pattern); err != nil {
+			t.Fatalf("ValidatePattern(%q) = %v, want nil", pattern, err)
+		}
 	}
 }
 

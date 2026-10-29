@@ -18,8 +18,15 @@ func (e *Engine) handleOp(ctx context.Context, op protocol.Op) {
 	e.joinFinishingTurn()
 	switch op := op.(type) {
 	case protocol.UserInput:
+		model, display, handled := e.consumeComposer(ctx, op.Text)
+		if handled {
+			return
+		}
+		if strings.TrimSpace(model) != "" {
+			op.Text = model
+		}
 		if e.turnActive() {
-			e.enqueueUserInput(op)
+			e.enqueuePrepared(op, display)
 			return
 		}
 		if e.prov == nil {
@@ -32,7 +39,7 @@ func (e *Engine) handleOp(ctx context.Context, op protocol.Op) {
 		if e.rejectUserInputIfBudgetExhausted() {
 			return
 		}
-		e.startTurn(ctx, op.Text, op.Images)
+		e.startTurnShown(ctx, op.Text, display, op.Images)
 	case protocol.SelectModel:
 		e.handleSelect(op)
 	case protocol.SelectAgent:
@@ -109,7 +116,15 @@ func (e *Engine) handleOp(ctx context.Context, op protocol.Op) {
 			e.turnCancel()
 		}
 	case protocol.Steer:
-		e.handleSteer(op)
+		e.handleSteer(ctx, op)
+	case protocol.InputQueueEdit:
+		e.handleInputQueueEdit(op)
+	case protocol.InputQueueCancel:
+		e.handleInputQueueCancel(op)
+	case protocol.InputQueueReorder:
+		e.handleInputQueueReorder(op)
+	case protocol.InputQueueSendNow:
+		e.handleInputQueueSendNow(ctx, op)
 	case protocol.FilesChanged:
 		e.handleFilesChanged(op)
 	case protocol.Compact:

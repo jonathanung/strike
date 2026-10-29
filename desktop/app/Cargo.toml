@@ -1,0 +1,20 @@
+[package]
+name = "strike-desktop-app"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+description = "Tauri shell around the Strike web UI"
+
+[build-dependencies]
+tauri-build = { version = "=2.7.4", features = [] }
+
+[dependencies]
+serde_json = "1"
+# rust-ini 0.21.3 added ParseOption fields that tauri-plugin-deep-link 2.6.2
+# still constructs by name. Keep the last compatible release.
+rust-ini = "=0.21.1"
+strike-desktop-core = { path = "../core" }
+tauri = { version = "=2.12.5", features = ["tray-icon", "image-png"] }
+tauri-plugin-deep-link = "=2.6.2"
+tauri-plugin-notification = "=2.7.0"
+tokio = { version = "1", features = ["rt-multi-thread"] }

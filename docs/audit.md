@@ -58,3 +58,4 @@ overrides that axis only.
 - Timeline: `pkg/timeline` / `/timeline`
 - Telemetry families: `docs/telemetry.md`
 - Secrets scrubbing: `docs/secrets.md`
+- Web usage dashboard and hash-chained audit log: [usage-audit.md](usage-audit.md) (`~/.strike/usage-audit/`). That chain is not pruned by the retention settings above.

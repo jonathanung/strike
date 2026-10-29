@@ -406,6 +406,9 @@ func (e *Engine) composeSystemLayers() []promptLayer {
 // projectMemoryLayer builds the auto-loaded tagged memory segment. Empty when
 // Memory is nil, list fails, or no eligible entries fit the cap.
 func (e *Engine) projectMemoryLayer() (text, source string) {
+	if e.MemoryMode() == "temporary" {
+		return "", ""
+	}
 	if e.opts.Memory == nil {
 		return "", ""
 	}

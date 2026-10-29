@@ -1,0 +1,6 @@
+{"type":"session.header","schemaVersion":1,"time":"2026-01-01T00:00:00Z"}
+{"type":"user.message","time":"2026-01-01T00:00:01Z","data":{"text":"ping"}}
+{"type":"model.selected","time":"2026-01-01T00:00:02Z","v":"1.18.0","data":{"provider":"echo","model":"echo-1"}}
+{"type":"text.delta","time":"2026-01-01T00:00:03Z","v":"1.18.0","data":{"text":"pong"}}
+{"type":"usage.reported","time":"2026-01-01T00:00:04Z","v":"1.18.0","data":{"input":{"n":1,"known":true},"output":{"n":2,"known":true}}}
+{"type":"turn.completed","time":"2026-01-01T00:00:05Z","v":"1.18.0","data":{"stopReason":"end_turn"}}

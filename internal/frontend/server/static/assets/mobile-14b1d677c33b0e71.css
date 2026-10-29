@@ -1,0 +1,409 @@
+/* feature:mobile-first begin
+   Phone and short-landscape cockpit. Tokens stay the variables in style.css
+   (schemas/ui-tokens.json). Desktop widths do not match data-phone=1.
+   1024×594 and 1440×900 keep the three-column shell. */
+
+@media (hover: none) {
+  .pin { opacity: 1; }
+}
+
+@media (max-width: 720px), (max-height: 500px) and (max-width: 1024px) {
+  body[data-phone="1"] {
+    height: var(--vv-height, 100dvh);
+    max-height: var(--vv-height, 100dvh);
+    overflow: hidden;
+    transform: translateY(var(--vv-top, 0px));
+    -webkit-text-size-adjust: 100%;
+    touch-action: manipulation;
+  }
+
+  body[data-phone="1"] .page-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    flex-wrap: nowrap;
+    height: calc(44px + env(safe-area-inset-top));
+    min-height: calc(44px + env(safe-area-inset-top));
+    max-height: calc(44px + env(safe-area-inset-top));
+    padding: env(safe-area-inset-top) max(10px, env(safe-area-inset-right)) 0 max(10px, env(safe-area-inset-left));
+    row-gap: 0;
+    overflow: hidden;
+  }
+
+  /* Phone header (#1490 slice 2): one row, workspace + status left,
+     a single overflow button right; the sheet holds the rest. */
+  body[data-phone="1"] .phone-leading {
+    flex: 1 1 auto;
+    max-width: none;
+    gap: 8px;
+  }
+
+  body[data-phone="1"] .phone-ws {
+    max-width: 42vw;
+    font-size: 14px;
+  }
+
+  body[data-phone="1"] .phone-more {
+    flex: 0 0 auto;
+    margin-left: auto;
+  }
+
+  body[data-phone="1"] .phone-more-btn {
+    width: 44px;
+    height: 44px;
+    min-height: 44px;
+  }
+
+  body[data-phone="1"] .phone-menu-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 38;
+    background: rgba(10, 9, 16, 0.36);
+  }
+
+  body[data-phone="1"] .phone-menu {
+    position: fixed;
+    top: calc(48px + env(safe-area-inset-top));
+    right: max(8px, env(safe-area-inset-right));
+    left: max(8px, env(safe-area-inset-left));
+    bottom: auto;
+    z-index: 40;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    max-width: none;
+    max-height: calc(var(--vv-height, 100dvh) - 116px);
+    overflow: auto;
+    padding: 6px;
+  }
+
+  /* The sheet stays mounted like the desktop menu (.nav-pop);
+     data-open decides visibility so open/close never remounts a
+     slot (#1527). */
+  body[data-phone="1"] .phone-menu[data-open="0"] {
+    display: none;
+  }
+
+  body[data-phone="1"] .phone-menu-backdrop[data-open="0"] {
+    display: none;
+  }
+
+  body[data-phone="1"] .phone-menu .nav-menu-item {
+    min-height: 44px;
+    height: auto;
+  }
+
+  /* The layout/view segmented switches are hidden in the bar on phone;
+     inside the sheet they are the controls, so show them there. The
+     track grows from 28px to 44px or the taller segs clip. */
+  body[data-phone="1"] .phone-menu .segmented {
+    display: flex;
+    height: 44px;
+  }
+
+  body[data-phone="1"] .phone-menu button {
+    min-height: 44px;
+  }
+
+  /* The gateway chip is a small pill; do not stretch it across the
+     sheet (its mark would float in the middle of an empty row). */
+  body[data-phone="1"] .phone-menu .status-chip-hit {
+    align-self: flex-start;
+  }
+
+  body[data-phone="1"] .command-pill,
+  body[data-phone="1"] .header-actions .chip,
+  body[data-phone="1"] .segmented .seg {
+    min-height: 44px;
+  }
+
+  body[data-phone="1"] .segmented {
+    display: none;
+  }
+
+  body[data-phone="1"] .command-pill kbd {
+    display: none;
+  }
+
+  body[data-phone="1"] .shell,
+  body[data-phone="1"] .shell.focus {
+    display: flex;
+    flex-direction: column;
+    grid-template-columns: none;
+    flex: 1 1 auto;
+    min-height: 0;
+    height: auto;
+    padding: 0 8px;
+  }
+
+  body[data-phone="1"] .rail,
+  body[data-phone="1"] .side,
+  body[data-phone="1"] .chat {
+    max-height: none;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  body[data-phone="1"] .phone-pane-chat .rail,
+  body[data-phone="1"] .phone-pane-chat .side,
+  body[data-phone="1"] .phone-pane-sessions .chat,
+  body[data-phone="1"] .phone-pane-sessions .side,
+  body[data-phone="1"] .phone-pane-activity .rail,
+  body[data-phone="1"] .phone-pane-activity .chat,
+  body[data-phone="1"] .phone-pane-files .rail,
+  body[data-phone="1"] .phone-pane-files .chat {
+    display: none;
+  }
+
+  body[data-phone="1"] .daemon {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-width: none;
+    margin: 0;
+    padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+  }
+
+  body[data-phone="1"] .transcript,
+  body[data-phone="1"] .rail,
+  body[data-phone="1"] .side,
+  body[data-phone="1"] .daemon {
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  body[data-phone="1"] .composer {
+    position: sticky;
+    bottom: 0;
+    margin: 0;
+    border-radius: var(--radius) var(--radius) 0 0;
+    padding-bottom: max(8px, env(safe-area-inset-bottom));
+  }
+
+  body[data-phone="1"] .composer textarea {
+    font-size: 16px;
+    min-height: 44px;
+  }
+
+  body[data-phone="1"] .composer-bar {
+    flex-wrap: nowrap;
+    overflow: visible;
+    padding-bottom: 2px;
+  }
+
+  body[data-phone="1"] .composer-bar .chip,
+  body[data-phone="1"] .composer-bar .send,
+  body[data-phone="1"] .ss-chips .chip,
+  body[data-phone="1"] .chips .chip,
+  body[data-phone="1"] .phone-nav button,
+  body[data-phone="1"] .session-row,
+  body[data-phone="1"] .session-main,
+  body[data-phone="1"] .suggestion,
+  body[data-phone="1"] .palette-row,
+  body[data-phone="1"] .file-row,
+  body[data-phone="1"] .ev-open,
+  body[data-phone="1"] .side-tabs .chip,
+  body[data-phone="1"] .notice button,
+  body[data-phone="1"] button.primary,
+  body[data-phone="1"] button.secondary,
+  body[data-phone="1"] .approvals-actions button {
+    min-height: 44px;
+  }
+
+  body[data-phone="1"] .ss-chips .chip,
+  body[data-phone="1"] .chips .chip,
+  body[data-phone="1"] .search,
+  body[data-phone="1"] .ss-search,
+  body[data-phone="1"] .daemon input {
+    height: 44px;
+    min-height: 44px;
+    font-size: 16px;
+  }
+
+  body[data-phone="1"] .pin {
+    opacity: 1;
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  body[data-phone="1"] .composer .menu {
+    position: fixed;
+    left: max(8px, env(safe-area-inset-left));
+    right: max(8px, env(safe-area-inset-right));
+    bottom: calc(52px + env(safe-area-inset-bottom));
+    top: auto;
+    width: auto;
+    max-height: min(60vh, var(--vv-height, 60vh));
+    z-index: 30;
+    background: var(--surface);
+    border: 2px solid var(--ink);
+    border-radius: 0;
+    overflow: auto;
+  }
+
+  body[data-phone="1"] .palette-backdrop {
+    align-items: stretch;
+    padding: 0;
+  }
+
+  body[data-phone="1"] .palette {
+    position: fixed;
+    top: var(--vv-top, 0px);
+    left: 0;
+    right: 0;
+    width: 100%;
+    height: var(--vv-height, 100dvh);
+    max-height: var(--vv-height, 100dvh);
+    border-radius: 0;
+    border-width: 2px;
+    z-index: 45;
+    box-shadow: none;
+  }
+
+  body[data-phone="1"] .palette .palette-row {
+    min-height: 44px;
+  }
+
+  /* Overlays as bottom sheets (#1490 slice 3; #1475, #1476). The
+     Workspaces dialog and the Gateways popover anchor to the bottom of
+     the visible viewport at full width, over a dimmed backdrop, and
+     grow to near full-screen when their content is tall. Dismissal
+     (Escape, navigation, backdrop tap, Close) is wired in the
+     components; these rules are only the sheet rendering. */
+  body[data-phone="1"] .gw-back {
+    background: color-mix(in srgb, var(--overlay) 45%, transparent);
+  }
+
+  body[data-phone="1"] .gw-pop {
+    top: auto;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    width: auto;
+    max-height: calc(var(--vv-height, 100dvh) * 0.92);
+    border-left: 0;
+    border-right: 0;
+    border-bottom: 0;
+    border-radius: var(--radius) var(--radius) 0 0;
+    padding-bottom: calc(var(--space-3) + env(safe-area-inset-bottom));
+    z-index: 31;
+  }
+
+  body[data-phone="1"] .ws-back {
+    padding: 0;
+    align-items: flex-end;
+  }
+
+  body[data-phone="1"] .ws-dialog {
+    width: 100%;
+    max-height: calc(var(--vv-height, 100dvh) * 0.96);
+    border-left: 0;
+    border-right: 0;
+    border-bottom: 0;
+    border-radius: var(--radius) var(--radius) 0 0;
+    padding-bottom: calc(var(--space-3) + env(safe-area-inset-bottom));
+  }
+
+  body[data-phone="1"] .gw-pop .gw-use,
+  body[data-phone="1"] .gw-pop input,
+  body[data-phone="1"] .ws-dialog .ws-row,
+  body[data-phone="1"] .ws-dialog input,
+  body[data-phone="1"] .ws-dialog select {
+    min-height: 44px;
+  }
+
+  body[data-phone="1"] .gw-pop input,
+  body[data-phone="1"] .ws-dialog input,
+  body[data-phone="1"] .ws-dialog select,
+  body[data-phone="1"] .ws-dialog textarea {
+    font-size: 16px;
+  }
+
+  body[data-phone="1"] .phone-nav {
+    display: flex;
+    flex: 0 0 auto;
+    gap: 2px;
+    padding: 4px max(4px, env(safe-area-inset-right)) calc(4px + env(safe-area-inset-bottom)) max(4px, env(safe-area-inset-left));
+    background: var(--surface);
+    border-top: 1px solid var(--rule);
+    z-index: 5;
+  }
+
+  body[data-phone="1"] .phone-nav button {
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 44px;
+    height: auto;
+    padding: 4px 2px;
+    font-size: 12px;
+    line-height: 1.2;
+    white-space: nowrap;
+    background: transparent;
+    color: var(--muted);
+    border: 0;
+    border-radius: var(--radius-sm);
+  }
+
+  body[data-phone="1"] .phone-nav button.on {
+    background: var(--raised);
+    color: var(--acid);
+  }
+
+  body[data-phone="1"] .ev-doc {
+    min-height: 0;
+    flex: 1 1 auto;
+  }
+
+  body[data-phone="1"] .side-tabs {
+    flex-wrap: wrap;
+  }
+
+  body[data-phone="1"] .side-tabs .chip {
+    height: 44px;
+  }
+
+  body[data-phone="1"] .ev-bar,
+  body[data-phone="1"] .ev-tools {
+    flex-wrap: wrap;
+  }
+
+  body[data-phone="1"] .ev-search {
+    width: 100%;
+  }
+
+  body[data-phone="1"][data-pull="1"] .page-header::after {
+    content: "Release to reconnect";
+    margin-left: auto;
+    color: var(--acid);
+    font-size: var(--type-sm);
+    font-weight: 650;
+  }
+}
+
+/* Send stays a sibling of this scroller so a long chip row cannot
+   push it past the viewport. Desktop and phone both use it. */
+.composer-chips {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: var(--space-2);
+  align-items: center;
+  overflow-x: auto;
+}
+
+@media (max-width: 720px), (max-height: 500px) and (max-width: 1024px) {
+  /* The chip row scrolls on a phone; fade its right edge so a chip
+     clipped mid-word reads as "more this way" instead of a defect.
+     End padding keeps the last chip clear of the fade once the row is
+     scrolled fully across. */
+  body[data-phone="1"] .composer-chips {
+    padding-right: 24px;
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
+  }
+}
+
+.phone-nav {
+  display: none;
+}
+
+/* feature:mobile-first end */
