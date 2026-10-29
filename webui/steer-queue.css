@@ -69,6 +69,12 @@
 }
 .queue-actions { display: flex; gap: 4px; flex: 0 0 auto; }
 .queue-actions button { height: 28px; padding: 0 8px; font-size: var(--type-sm); }
+.queue-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--type-sm);
+  line-height: 1.4;
+}
 .queue-edit {
   flex: 1;
   min-width: 0;

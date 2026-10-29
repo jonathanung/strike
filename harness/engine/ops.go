@@ -123,6 +123,8 @@ func (e *Engine) handleOp(ctx context.Context, op protocol.Op) {
 		e.handleInputQueueCancel(op)
 	case protocol.InputQueueReorder:
 		e.handleInputQueueReorder(op)
+	case protocol.InputQueueSendNow:
+		e.handleInputQueueSendNow(ctx, op)
 	case protocol.FilesChanged:
 		e.handleFilesChanged(op)
 	case protocol.Compact:

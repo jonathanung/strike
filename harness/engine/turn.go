@@ -485,6 +485,75 @@ func (e *Engine) handleInputQueueReorder(op protocol.InputQueueReorder) {
 	e.emitInputQueued()
 }
 
+// handleInputQueueSendNow promotes one queued item out of the FIFO.
+//
+// Busy: the item takes the pending-steer slot handleSteer fills, so it
+// lands at the next safe boundary with the usual TurnSteered
+// acknowledgement — or, if the turn ends first, falls back to the next
+// turn via fallbackSteerToQueue. A composer steer already waiting keeps
+// the slot: replacing it would drop that steer silently, so the op fails
+// in place and the item keeps its queue position.
+//
+// Idle: the item starts as a turn now, under the same guards as the FIFO
+// drain (startNextPendingUserInput).
+//
+// Removing the item from pendingUserInputs is the claim. Ops and the FIFO
+// drain are serialized on Run, so whichever runs first owns the item; a
+// send-now for an id that already left the queue is an error, never a
+// second delivery.
+func (e *Engine) handleInputQueueSendNow(ctx context.Context, op protocol.InputQueueSendNow) {
+	id := strings.TrimSpace(op.ID)
+	if id == "" {
+		e.emitQueueError("queue send now needs an id")
+		return
+	}
+	idx := -1
+	for i := range e.pendingUserInputs {
+		if e.pendingUserInputs[i].id == id {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		e.emitQueueError(fmt.Sprintf("queued item %q is not in the queue", id))
+		return
+	}
+	item := e.pendingUserInputs[idx]
+	if e.turnActive() {
+		if e.hasPendingSteer() {
+			e.emitQueueError("a steer is already waiting for this turn; try Send now again once it lands")
+			return
+		}
+		e.pendingUserInputs = append(e.pendingUserInputs[:idx], e.pendingUserInputs[idx+1:]...)
+		if len(e.pendingUserInputs) == 0 {
+			e.pendingUserInputs = nil
+		}
+		e.pendingSteerMu.Lock()
+		e.pendingSteer = &pendingSteer{
+			text:         item.text,
+			display:      item.display,
+			images:       append([]protocol.ImageAttachment(nil), item.images...),
+			targetTurnID: e.activeTurnID,
+		}
+		e.pendingSteerMu.Unlock()
+		e.emitInputQueued()
+		return
+	}
+	if e.prov == nil {
+		e.emitQueueError("no model selected — use /provider <anthropic|openai|xai|google|kimi|deepseek|echo> [model]")
+		return
+	}
+	if e.rejectUserInputIfBudgetExhausted() {
+		return
+	}
+	e.pendingUserInputs = append(e.pendingUserInputs[:idx], e.pendingUserInputs[idx+1:]...)
+	if len(e.pendingUserInputs) == 0 {
+		e.pendingUserInputs = nil
+	}
+	e.emitInputQueued()
+	e.startTurnShown(ctx, item.text, item.display, item.images)
+}
+
 // drainIdleFollowups starts at most one follow-up turn when idle: preferred
 // user-queued input, otherwise pending child-completion notices, otherwise
 // peer mailbox messages.

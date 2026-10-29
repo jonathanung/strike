@@ -1842,6 +1842,19 @@
       ],
       "type": "object"
     },
+    "InputQueueSendNow": {
+      "additionalProperties": true,
+      "description": "InputQueueSendNow promotes one pending user-input item out of the FIFO. While a turn is active the item becomes a steer into that turn: it is delivered at the next safe boundary with a TurnSteered acknowledgement, or falls back to the next turn if the turn ends first, like any steer. While idle the item starts as a turn immediately. Removing the item from the queue is the claim, so an id that already left the queue (drained, cancelled, or promoted) is rejected instead of delivered twice.",
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
     "InputQueued": {
       "additionalProperties": true,
       "description": "InputQueued is the full pending user-input FIFO after a change: enqueue, drain, edit, cancel, reorder, steer queued-fallback, or a budget drop. Items is empty when the queue is clear. Replay uses the latest snapshot.",
@@ -3512,6 +3525,24 @@
             },
             "type": {
               "const": "input.queue_reorder"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/InputQueueSendNow"
+            },
+            "type": {
+              "const": "input.queue_send_now"
             },
             "v": {
               "type": "string"
@@ -6904,8 +6935,8 @@
   "title": "Strike event envelope",
   "x-strike-event-count": 63,
   "x-strike-legacy-version": "1.0.0",
-  "x-strike-op-count": 30,
-  "x-strike-protocol-version": "1.20.0",
+  "x-strike-op-count": 31,
+  "x-strike-protocol-version": "1.21.0",
   "x-strike-unknown-event": "valid",
   "x-strike-unknown-field": "ignore",
   "x-strike-unknown-op": "reject"

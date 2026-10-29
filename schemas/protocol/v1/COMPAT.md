@@ -2,7 +2,7 @@
 
 Generated from `pkg/protocol`. Do not edit by hand. Regenerate with `make protocol-schema`.
 
-- Protocol version: `1.20.0`
+- Protocol version: `1.21.0`
 - Legacy version when an envelope omits `v`: `1.0.0`
 - JSON Schema: [`schema.json`](schema.json) (`https://raw.githubusercontent.com/jonathanung/strike/main/schemas/protocol/v1/schema.json`)
 - Rust types: `webui/protocol-schema` (crate `protocol-schema`)
@@ -83,7 +83,7 @@ Generated from `pkg/protocol`. Do not edit by hand. Regenerate with `make protoc
 - `wait.resolved` → `WaitResolved`
 - `wait.started` → `WaitStarted`
 
-## Op types (30)
+## Op types (31)
 
 - `compact` → `Compact`
 - `context.controls` → `SetContextControls`
@@ -91,6 +91,7 @@ Generated from `pkg/protocol`. Do not edit by hand. Regenerate with `make protoc
 - `input.queue_cancel` → `InputQueueCancel`
 - `input.queue_edit` → `InputQueueEdit`
 - `input.queue_reorder` → `InputQueueReorder`
+- `input.queue_send_now` → `InputQueueSendNow`
 - `inspect.diagnostic` → `InspectDiagnosticBundle`
 - `inspect.prompt` → `InspectEffectivePrompt`
 - `interrupt` → `Interrupt`

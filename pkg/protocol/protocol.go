@@ -401,6 +401,17 @@ type InputQueueReorder struct {
 	IDs []string `json:"ids"`
 }
 
+// InputQueueSendNow promotes one pending user-input item out of the FIFO.
+// While a turn is active the item becomes a steer into that turn: it is
+// delivered at the next safe boundary with a TurnSteered acknowledgement,
+// or falls back to the next turn if the turn ends first, like any steer.
+// While idle the item starts as a turn immediately. Removing the item from
+// the queue is the claim, so an id that already left the queue (drained,
+// cancelled, or promoted) is rejected instead of delivered twice.
+type InputQueueSendNow struct {
+	ID string `json:"id"`
+}
+
 // SelectModel switches the active provider (and optionally model). An empty
 // Model selects the provider's default. Rejected while a turn is running.
 type SelectModel struct {
@@ -513,6 +524,7 @@ func (Steer) isOp()                   {}
 func (InputQueueEdit) isOp()          {}
 func (InputQueueCancel) isOp()        {}
 func (InputQueueReorder) isOp()       {}
+func (InputQueueSendNow) isOp()       {}
 func (SelectModel) isOp()             {}
 func (SelectAgent) isOp()             {}
 func (SetEffort) isOp()               {}
