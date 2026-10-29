@@ -26,7 +26,16 @@ import (
 	"github.com/jonathanung/strike/internal/frontend/tui/theme"
 )
 
-const appCmdTimeout = 2 * time.Second
+// appCmdTimeout bounds the anti-hang waits for tea.Cmd completion in this
+// package's tests (runAppCmd and the modal helpers). It is not a timeliness
+// assertion: the tests assert which message a command produces, never how
+// fast. A flat 2s lost under full-suite load on a busy 2-CPU VM — the
+// terminal listen command drives a real subprocess + PTY and starved past
+// the budget while the package took 120-160s (#1604; same family as #1417
+// and the engine helpers fixed in #1650). 30s matches the convention set
+// there: long enough never to fire on slow scheduling, short enough that a
+// genuine hang still fails inside the package timeout.
+const appCmdTimeout = 30 * time.Second
 
 func rowsContaining(view, text string) []string {
 
