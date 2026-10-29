@@ -49,6 +49,13 @@ materially affect the shipped product.
   and reorder). A steer is marked on the transcript when it lands. Send is
   held when the daemon says the next turn would not fit. Wire schema
   `1.20.0`.
+- **Send now for queued web messages** — every queued row gains a Send now
+  action: the message leaves the FIFO and lands in the running turn as a
+  steer, acknowledged like any steer, while the messages it jumps stay
+  queued in order. Leaving the queue is the claim, so a promoted message
+  is never delivered twice; with no turn running the queued messages send
+  on their own and the action steps aside. Wire schema `1.21.0`
+  ([#1571](https://github.com/jonathanung/strike/issues/1571)).
 - **Web client shell** — session list with status, unread, in-progress,
   and pinned filters; command field (Ctrl+K); gateway chip; approval mode,
   model, and Steer/Queue on the composer; Activity, Files, and Changes.

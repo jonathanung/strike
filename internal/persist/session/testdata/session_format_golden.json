@@ -718,6 +718,16 @@
           "name": "metadata",
           "type": "raw",
           "omitEmpty": true
+        },
+        {
+          "name": "workDir",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "projectRulePath",
+          "type": "string",
+          "omitEmpty": true
         }
       ]
     },

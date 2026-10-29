@@ -819,10 +819,20 @@ fn ApprovalCard(
     let removed = ask.preview.removed.clone();
     let added = ask.preview.added.clone();
     let truncated = ask.preview.truncated;
-    let always = ask.always.join(", ");
     let show_command = !command.is_empty();
     let show_diff = !removed.is_empty() || !added.is_empty();
-    let show_always = !always.is_empty();
+    // Decision facts (#1507): the daemon-stamped working directory and one
+    // consequence line per scope, computed from the ask payload only.
+    let work_dir_line = if ask.work_dir.is_empty() {
+        String::new()
+    } else {
+        format!("Working directory: {}", ask.work_dir)
+    };
+    let show_work_dir = !work_dir_line.is_empty();
+    let consequences: Vec<(&'static str, String)> = decisions()
+        .iter()
+        .map(|choice| (choice.label, ask.consequence(choice.id)))
+        .collect();
 
     view! {
         <article class="approvals-card" aria-live="polite">
@@ -843,13 +853,19 @@ fn ApprovalCard(
             <Show when=move || truncated>
                 <p class="hint">"Diff preview is shortened."</p>
             </Show>
-            <Show when=move || show_always>
-                <p class="hint">{format!("Allow session remembers {always}.")}</p>
+            <Show when=move || show_work_dir>
+                <p class="approvals-fact">{work_dir_line.clone()}</p>
             </Show>
+            <p class="approvals-fact">"Approving runs this on the gateway host, with the daemon's privileges."</p>
             <Show when=move || { seconds.get() > 0 }>
                 <p class="approvals-count">{move || format!("Allows once in {}s unless you choose.", left.get())}</p>
             </Show>
             <p class="hint">"1 allow once, 2 allow session, 3 allow project, 4 or Escape denies."</p>
+            <ul class="approvals-scopes">
+                {consequences.into_iter().map(|(label, line)| view! {
+                    <li><strong>{label}</strong>{" — "}{line}</li>
+                }).collect_view()}
+            </ul>
             <div class="approvals-actions">
                 {decisions().iter().map(|choice| {
                     let id = choice.id.to_string();

@@ -455,6 +455,13 @@ type Service struct {
 	// grant still applies; the caller may log them.
 	persistProject func(Rule) error
 
+	// askWorkDir / askProjectRulePath are display facts stamped onto every
+	// PermissionAsked this service emits: where the tool call runs, and the
+	// file a project grant appends its rule to (empty when project grants
+	// are not persisted). Set once by the owning engine; read under mu.
+	askWorkDir         string
+	askProjectRulePath string
+
 	// chain is content-free multi-step correlation within a turn (#891).
 	// Never nil after New.
 	chain *Correlator
@@ -512,6 +519,23 @@ func (s *Service) SetBaseLayerNames(names ...string) {
 func (s *Service) SetProjectPersister(fn func(Rule) error) {
 	s.mu.Lock()
 	s.persistProject = fn
+	s.mu.Unlock()
+}
+
+// SetAskFacts records the facts stamped onto every PermissionAsked this
+// service emits: the working directory the owning engine's tool calls run
+// in, and the file a DecisionProject grant appends its rule to (empty when
+// project grants are not persisted to disk). The values describe the
+// engine's real execution context and persistence target — frontends show
+// them verbatim on the ask card and must not invent them. Safe to call at
+// any time; concurrent with Ask/Reply.
+func (s *Service) SetAskFacts(workDir, projectRulePath string) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.askWorkDir = workDir
+	s.askProjectRulePath = projectRulePath
 	s.mu.Unlock()
 }
 
@@ -785,15 +809,18 @@ func (s *Service) ask(ctx context.Context, req tool.AskRequest, corr protocol.Co
 		chainHit:    chainHit,
 	}
 	s.pending[id] = p
+	workDir, projectRulePath := s.askWorkDir, s.askProjectRulePath
 	s.mu.Unlock()
 
 	s.emit(protocol.PermissionAsked{
-		Correlation: corr,
-		RequestID:   id,
-		Permission:  req.Permission,
-		Patterns:    req.Patterns,
-		Always:      req.Always,
-		Metadata:    req.Metadata,
+		Correlation:     corr,
+		RequestID:       id,
+		Permission:      req.Permission,
+		Patterns:        req.Patterns,
+		Always:          req.Always,
+		Metadata:        req.Metadata,
+		WorkDir:         workDir,
+		ProjectRulePath: projectRulePath,
 	})
 	// Audit: ask suspended (timeline KindPermission waiting).
 	s.emitDecided(corr, req, Ask, id, "", det, chainHit)
