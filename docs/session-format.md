@@ -407,6 +407,8 @@ Go `PermissionAsked`.
 | `patterns` | array of string |  |
 | `always` | array of string | yes |
 | `metadata` | raw | yes |
+| `workDir` | string | yes |
+| `projectRulePath` | string | yes |
 
 #### `permission.resolved`
 
