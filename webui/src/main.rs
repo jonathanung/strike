@@ -4509,6 +4509,11 @@ fn App() -> impl IntoView {
             reply_n=reply_n
             reply_id=reply_id
             reply_decision=reply_decision
+            open_session=move |id: String| {
+                mode.set("chat".into());
+                let live = roots.get_untracked().iter().any(|r| r.id == id);
+                open_session(id, live);
+            }
         />
         <shell::Chrome />
         {gateway_qr::phone_view()}
@@ -4555,7 +4560,17 @@ fn App() -> impl IntoView {
             <DaemonPane gateway_detail=gateway_detail />
         </Show>
         <Show when=move || mode.get() == "usage" || mode.get() == "audit" fallback=move || ()>
-            <usage_audit::UsageAuditPages mode=mode base=base token=token status=status />
+            <usage_audit::UsageAuditPages
+                mode=mode
+                base=base
+                token=token
+                status=status
+                open_session=move |id: String| {
+                    mode.set("chat".into());
+                    let live = roots.get_untracked().iter().any(|r| r.id == id);
+                    open_session(id, live);
+                }
+            />
         </Show>
         <Show when=move || mode.get() == "goals" fallback=move || ()>
             <goals::GoalsPane base=base token=token />
@@ -4566,6 +4581,7 @@ fn App() -> impl IntoView {
                 token=token
                 active_root=active_root
                 status=status
+                mode=mode
             />
         </Show>
         <Show when=move || mode.get() == "schedule" fallback=move || ()>
