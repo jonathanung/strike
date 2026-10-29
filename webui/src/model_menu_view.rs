@@ -9,7 +9,7 @@ use wasm_bindgen::JsCast;
 
 use crate::model::ModelInfo;
 use crate::model_menu::{
-    build_menu, chip_label, context_view, effort_section, scope_label, toggle_pin,
+    build_menu, chip_label, context_view, effort_section, pin_key, scope_label, toggle_pin,
     ContextView, MenuRow, ModelDefaults,
 };
 
@@ -32,6 +32,15 @@ fn save_pins(pins: &[String]) {
             let _ = s.set_item(PIN_STORAGE, &raw);
         }
     }
+}
+
+pub fn toggle_stored_pin(provider: &str, model: &str) {
+    if provider.is_empty() || model.is_empty() {
+        return;
+    }
+    let mut pins = load_pins();
+    toggle_pin(&mut pins, &pin_key(provider, model));
+    save_pins(&pins);
 }
 
 fn place_panel(chip_ref: NodeRef<Span>, panel_pos: RwSignal<(f64, f64, f64)>) {

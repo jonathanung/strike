@@ -10,6 +10,7 @@
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -18,7 +19,7 @@ use serde::Serialize;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 
-use crate::api::{delete_json, get_json, js_encode, now_ms, post_json, post_json_value};
+use crate::api::{delete_json, get_json, js_encode, now_ms, post_json_value};
 use crate::model::{is_running, merge_sessions, ActivityRow, RootSummary, SessionItem, Workspace};
 use crate::session_list::{
     alt_digit, assemble, human_title, select_range, stamp_times, step_index, title_is_raw_id,
@@ -30,6 +31,41 @@ use crate::{load, load_string_list, save};
 thread_local! {
     static KEY_HANDLER: RefCell<Option<Box<dyn FnMut(&web_sys::KeyboardEvent) -> bool>>> =
         RefCell::new(None);
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct CursorSession {
+    pub id: String,
+    pub label: String,
+    pub pinned: bool,
+}
+
+impl Default for CursorSession {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            label: String::new(),
+            pinned: false,
+        }
+    }
+}
+
+thread_local! {
+    static CURSOR: RefCell<CursorSession> = RefCell::new(CursorSession::default());
+    static FOLDERS: RefCell<Vec<(String, String)>> = RefCell::new(Vec::new());
+    static SELECTED: RefCell<Vec<String>> = RefCell::new(Vec::new());
+}
+
+pub(crate) fn cursor_session() -> CursorSession {
+    CURSOR.with(|slot| slot.borrow().clone())
+}
+
+pub(crate) fn folder_pairs() -> Vec<(String, String)> {
+    FOLDERS.with(|slot| slot.borrow().clone())
+}
+
+pub(crate) fn selected_ids() -> Vec<String> {
+    SELECTED.with(|slot| slot.borrow().clone())
 }
 
 pub(crate) fn dispatch_session_key(ev: &web_sys::KeyboardEvent) -> bool {
@@ -201,7 +237,6 @@ fn is_typing(el: &web_sys::Element) -> bool {
     false
 }
 
-
 /// True while the shell's command palette dialog is mounted.
 fn palette_is_open() -> bool {
     web_sys::window()
@@ -227,7 +262,6 @@ pub(crate) fn SessionPanel(
     on_open: impl Fn(String, bool) + Copy + Send + 'static,
     on_new: impl Fn() + Copy + Send + 'static,
     on_refresh: impl Fn() + Copy + Send + 'static,
-    on_delete: impl Fn(String, String) + Copy + Send + 'static,
     nav_order: RwSignal<Vec<(String, bool)>>,
 ) -> impl IntoView {
     let prefs = load_prefs();
@@ -245,7 +279,7 @@ pub(crate) fn SessionPanel(
     let cursor = RwSignal::new(0usize);
     let selected = RwSignal::new(Vec::<String>::new());
     let anchor = RwSignal::new(String::new());
-    let folder_draft = RwSignal::new(String::new());
+    let action_note = RwSignal::new(String::new());
     let migrated = RwSignal::new(false);
     let search_gen = RwSignal::new(0u32);
 
@@ -460,8 +494,8 @@ pub(crate) fn SessionPanel(
         });
     };
 
-    let add_folder = move || {
-        let name = folder_draft.get_untracked().trim().to_string();
+    let add_folder = move |name: String| {
+        let name = name.trim().to_string();
         if name.is_empty() {
             list_error.set("Folder name is empty".into());
             return;
@@ -477,10 +511,7 @@ pub(crate) fn SessionPanel(
             )
             .await
             {
-                Ok(_) => {
-                    folder_draft.set(String::new());
-                    finish_op(n, String::new());
-                }
+                Ok(_) => finish_op(n, String::new()),
                 Err(e) => finish_op(n, e),
             }
             reload();
@@ -495,38 +526,6 @@ pub(crate) fn SessionPanel(
             match delete_json(&b, &t, &path, None).await {
                 Ok(()) => finish_op(n, String::new()),
                 Err(e) => finish_op(n, e),
-            }
-            reload();
-        });
-    };
-
-    let fork_session = move |id: String| {
-        let (b, t) = (base.get_untracked(), token.get_untracked());
-        let n = start_op();
-        spawn_local(async move {
-            let path = format!("/v1/sessions/{}/fork", js_encode(&id));
-            match post_json_value(&b, &t, &path, serde_json::json!({})).await {
-                Ok(created) => {
-                    let new_id = created
-                        .get("id")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string();
-                    if new_id.is_empty() {
-                        finish_op(n, "Fork did not return a session".into());
-                        return;
-                    }
-                    let resume = format!("/v1/roots/{}/resume", js_encode(&new_id));
-                    match post_json(&b, &t, &resume, serde_json::json!({})).await {
-                        Ok(()) => {
-                            active_root.set(new_id);
-                            finish_op(n, String::new());
-                            on_refresh();
-                        }
-                        Err(e) => finish_op(n, format!("Forked, but resume failed: {e}")),
-                    }
-                }
-                Err(e) => finish_op(n, friendly(&format!("Fork failed: {e}"))),
             }
             reload();
         });
@@ -651,6 +650,249 @@ pub(crate) fn SessionPanel(
         on_cleanup(|| set_key_handler(None));
     }
 
+    Effect::new(move |_| {
+        let layout = layout.get();
+        let index = cursor.get();
+        let active = active_root.get();
+        let at_cursor = layout
+            .items
+            .iter()
+            .filter(|item| item.nav.is_some())
+            .nth(index);
+        let picked = at_cursor
+            .filter(|item| item.kind == LayoutKind::Session)
+            .or_else(|| {
+                layout.items.iter().find(|item| {
+                    item.kind == LayoutKind::Session
+                        && (item.id == active || item.open_id == active)
+                })
+            });
+        let next = match picked {
+            Some(item) => CursorSession {
+                id: item.id.clone(),
+                label: item.label.clone(),
+                pinned: item.pinned,
+            },
+            None => CursorSession::default(),
+        };
+        CURSOR.with(|slot| *slot.borrow_mut() = next);
+        let folders: Vec<(String, String)> = snapshot
+            .get()
+            .folders
+            .iter()
+            .map(|folder| (folder.id.clone(), folder.name.clone()))
+            .collect();
+        FOLDERS.with(|slot| *slot.borrow_mut() = folders);
+        SELECTED.with(|slot| *slot.borrow_mut() = selected.get());
+    });
+
+    let target_id = move || {
+        let cursor = cursor_session();
+        if !cursor.id.is_empty() {
+            cursor.id
+        } else {
+            active_root.get_untracked()
+        }
+    };
+    let note = action_note;
+    crate::shell::bind(
+        "session.conductor",
+        Rc::new(move |_| {
+            conductor.update(|v| *v = !*v);
+            Ok(())
+        }),
+    );
+    crate::shell::bind(
+        "session.filter.progress",
+        Rc::new(move |_| {
+            filter.set("progress".into());
+            Ok(())
+        }),
+    );
+    crate::shell::bind(
+        "session.filter.pinned",
+        Rc::new(move |_| {
+            filter.set("pinned".into());
+            Ok(())
+        }),
+    );
+    crate::shell::bind(
+        "session.filter.archived",
+        Rc::new(move |_| {
+            filter.set("archived".into());
+            Ok(())
+        }),
+    );
+    crate::shell::bind(
+        "session.fold",
+        Rc::new(move |args| {
+            let days: i64 = args.trim().parse().unwrap_or(7);
+            if !matches!(days, 0 | 1 | 7 | 14 | 30) {
+                return Err("Fold is 1, 7, 14, 30 days, or Never.".into());
+            }
+            older_days.set(days);
+            show_older.set(false);
+            Ok(())
+        }),
+    );
+    crate::shell::bind(
+        "session.folder.new",
+        Rc::new(move |args| {
+            let name = args.trim().to_string();
+            if name.is_empty() {
+                return Err("Folder name is empty.".into());
+            }
+            add_folder(name);
+            Ok(())
+        }),
+    );
+    crate::shell::bind(
+        "session.folder.remove",
+        Rc::new(move |id| {
+            let id = id.trim().to_string();
+            if id.is_empty() {
+                return Err("Pick a folder.".into());
+            }
+            let name = folder_pairs()
+                .into_iter()
+                .find(|(fid, _)| fid == &id)
+                .map(|(_, name)| name)
+                .unwrap_or_else(|| id.clone());
+            let remove = remove_folder;
+            if !crate::confirm::ask(
+                crate::confirm::ConfirmRequest {
+                    title: format!("Remove folder {name}?"),
+                    body: "Sessions in the folder stay. A folder only groups them. It is not a directory on disk.".into(),
+                    confirm_label: "Remove folder".into(),
+                },
+                Rc::new(move || remove(id.clone())),
+            ) {
+                return Err(crate::confirm::BUSY.into());
+            }
+            Ok(())
+        }),
+    );
+    let bulk = Rc::new(move |op: &'static str| -> Result<(), String> {
+        let ids = selected_ids();
+        if ids.is_empty() {
+            return Err("Select one or more sessions first.".into());
+        }
+        run_bulk(ids, op, "");
+        Ok(())
+    });
+    let bulk_pin = bulk.clone();
+    let bulk_unpin = bulk.clone();
+    let bulk_archive = bulk.clone();
+    let bulk_unarchive = bulk.clone();
+    crate::shell::bind("session.bulk.pin", Rc::new(move |_| bulk_pin("pin")));
+    crate::shell::bind("session.bulk.unpin", Rc::new(move |_| bulk_unpin("unpin")));
+    crate::shell::bind(
+        "session.bulk.archive",
+        Rc::new(move |_| bulk_archive("archive")),
+    );
+    crate::shell::bind(
+        "session.bulk.unarchive",
+        Rc::new(move |_| bulk_unarchive("unarchive")),
+    );
+    crate::shell::bind(
+        "session.bulk.move",
+        Rc::new(move |folder| {
+            let ids = selected_ids();
+            if ids.is_empty() {
+                return Err("Select one or more sessions first.".into());
+            }
+            let folder = folder.trim();
+            if folder.is_empty() {
+                return Err("Pick a folder.".into());
+            }
+            let folder_id = if folder == "__unfiled" { "" } else { folder };
+            run_bulk(ids, "move", folder_id);
+            selected.set(Vec::new());
+            Ok(())
+        }),
+    );
+    crate::shell::bind(
+        "session.pin",
+        Rc::new(move |_| {
+            let id = target_id();
+            if id.is_empty() {
+                return Err("No session to pin.".into());
+            }
+            patch_session(id, serde_json::json!({"pinned": true}));
+            Ok(())
+        }),
+    );
+    crate::shell::bind(
+        "session.unpin",
+        Rc::new(move |_| {
+            let id = target_id();
+            if id.is_empty() {
+                return Err("No session to unpin.".into());
+            }
+            patch_session(id, serde_json::json!({"pinned": false}));
+            Ok(())
+        }),
+    );
+    crate::shell::bind(
+        "session.copy-id",
+        Rc::new(move |_| {
+            let id = target_id();
+            if id.is_empty() {
+                return Err("No session to copy.".into());
+            }
+            if let Some(win) = web_sys::window() {
+                let _ = win.navigator().clipboard().write_text(&id);
+            }
+            note.set(format!("Copied {id}"));
+            Ok(())
+        }),
+    );
+    crate::shell::bind(
+        "session.unread",
+        Rc::new(move |_| {
+            let id = target_id();
+            if id.is_empty() {
+                return Err("No session to mark unread.".into());
+            }
+            let (b, t) = (base.get_untracked(), token.get_untracked());
+            let note = note;
+            spawn_local(async move {
+                let path = format!("/v1/sessions/{}/seen", js_encode(&id));
+                match delete_json(&b, &t, &path, None).await {
+                    Ok(()) => {
+                        note.set("Marked unread.".into());
+                        reload();
+                        on_refresh();
+                    }
+                    Err(e) => list_error.set(e),
+                }
+            });
+            Ok(())
+        }),
+    );
+    on_cleanup(|| {
+        for id in [
+            "session.conductor",
+            "session.filter.progress",
+            "session.filter.pinned",
+            "session.filter.archived",
+            "session.fold",
+            "session.folder.new",
+            "session.folder.remove",
+            "session.bulk.pin",
+            "session.bulk.unpin",
+            "session.bulk.archive",
+            "session.bulk.unarchive",
+            "session.bulk.move",
+            "session.pin",
+            "session.unpin",
+            "session.copy-id",
+            "session.unread",
+        ] {
+            crate::shell::unbind(id);
+        }
+    });
+
     let chip = |id: &'static str, label: &'static str| {
         view! {
             <button type="button" class=move || if filter.get() == id { "chip on" } else { "chip" } on:click=move |_| filter.set(id.into())>{label}</button>
@@ -658,27 +900,29 @@ pub(crate) fn SessionPanel(
     };
 
     view! {
-        <div class="ss-panel" tabindex="0">
+        <div class="ss-panel" tabindex="0" data-selected-count=move || selected.get().len().to_string()>
             <div class="section-head">
                 <h2 class="panel-title">
                     <span class="icon-slot" aria-hidden="true" inner_html=icon("sessions")></span>
                     "Sessions"
                 </h2>
-                <button
-                    type="button"
-                    class=move || if conductor.get() { "chip on" } else { "chip" }
-                    title="Nest delegated children under their parent"
-                    on:click=move |_| conductor.update(|v| *v = !*v)
-                >"Conductor"</button>
                 <button type="button" class="secondary" on:click=move |_| on_new()>"New"</button>
             </div>
+            <Show when=move || conductor.get()>
+                <p class="hint">"Conductor view"</p>
+            </Show>
             <div class="ss-chips" role="tablist" aria-label="Session filter">
                 {chip("all", "All")}
                 {chip("unread", "Unread")}
-                {chip("progress", "In progress")}
-                {chip("pinned", "Pinned")}
-                {chip("archived", "Archived")}
             </div>
+            <Show when=move || !matches!(filter.get().as_str(), "all" | "unread")>
+                <p class="hint">{move || match filter.get().as_str() {
+                    "progress" => "Showing in progress".into(),
+                    "pinned" => "Showing pinned".into(),
+                    "archived" => "Showing archived".into(),
+                    other => format!("Showing {other}"),
+                }}</p>
+            </Show>
             <input
                 class="search ss-search"
                 placeholder="Search titles and recent messages"
@@ -686,37 +930,9 @@ pub(crate) fn SessionPanel(
                 prop:value=move || query.get()
                 on:input=move |ev| query.set(event_target_value(&ev))
             />
-            <div class="ss-tools">
-                <label class="ss-fold">
-                    "Fold after"
-                    <select
-                        class="ss-select"
-                        aria-label="Older session threshold"
-                        prop:value=move || older_days.get().to_string()
-                        on:change=move |ev| {
-                            older_days.set(event_target_value(&ev).parse().unwrap_or(7));
-                            show_older.set(false);
-                        }
-                    >
-                        <option value="1">"1 day"</option>
-                        <option value="7">"7 days"</option>
-                        <option value="14">"14 days"</option>
-                        <option value="30">"30 days"</option>
-                        <option value="0">"Never"</option>
-                    </select>
-                </label>
-                <form class="ss-folder-add" on:submit=move |ev| { ev.prevent_default(); add_folder(); }>
-                    <input
-                        class="search ss-folder-name"
-                        placeholder="New folder"
-                        aria-label="New folder name"
-                        prop:value=move || folder_draft.get()
-                        on:input=move |ev| folder_draft.set(event_target_value(&ev))
-                    />
-                    <button type="submit" class="secondary">"Add"</button>
-                </form>
-            </div>
-            <p class="hint ss-folder-note">"Folders group sessions. They are not directories on disk."</p>
+            <Show when=move || !action_note.get().is_empty()>
+                <p class="hint">{move || action_note.get()}</p>
+            </Show>
             <Show when=move || !list_error.get().is_empty()>
                 <div class="ss-notice" role="alert">
                     <span>{move || list_error.get()}</span>
@@ -729,44 +945,6 @@ pub(crate) fn SessionPanel(
             <Show when=move || !selected.get().is_empty()>
                 <div class="ss-bulk" aria-label="Bulk actions">
                     <span class="ss-bulk-count">{move || format!("{} selected", selected.get().len())}</span>
-                    <button type="button" class="secondary" on:click=move |_| {
-                        let ids = selected.get_untracked();
-                        run_bulk(ids, "pin", "");
-                    }>"Pin"</button>
-                    <button type="button" class="secondary" on:click=move |_| {
-                        let ids = selected.get_untracked();
-                        run_bulk(ids, "unpin", "");
-                    }>"Unpin"</button>
-                    <button type="button" class="secondary" on:click=move |_| {
-                        let ids = selected.get_untracked();
-                        run_bulk(ids, "archive", "");
-                    }>"Archive"</button>
-                    <button type="button" class="secondary" on:click=move |_| {
-                        let ids = selected.get_untracked();
-                        run_bulk(ids, "unarchive", "");
-                    }>"Unarchive"</button>
-                    <select
-                        class="ss-select"
-                        aria-label="Move selected sessions to a folder"
-                        on:change=move |ev| {
-                            let fid = event_target_value(&ev);
-                            if fid.is_empty() {
-                                return;
-                            }
-                            let folder_id = if fid == "__unfiled" { "" } else { &fid };
-                            let ids = selected.get_untracked();
-                            run_bulk(ids, "move", folder_id);
-                            selected.set(Vec::new());
-                        }
-                    >
-                        <option value="">"Move to…"</option>
-                        <option value="__unfiled">"Sessions"</option>
-                        {move || snapshot.get().folders.into_iter().map(|folder| {
-                            let id = folder.id.clone();
-                            let name = folder.name.clone();
-                            view! { <option value=id>{name}</option> }
-                        }).collect_view()}
-                    </select>
                     <button type="button" class="secondary" on:click=move |_| selected.set(Vec::new())>"Clear"</button>
                 </div>
             </Show>
@@ -776,8 +954,6 @@ pub(crate) fn SessionPanel(
                 selected.get(),
                 active_root.get(),
                 on_open,
-                move |id| fork_session(id),
-                move |id, pinned| patch_session(id, serde_json::json!({"pinned": !pinned})),
                 move |id| {
                     collapsed.update(|list| {
                         if let Some(i) = list.iter().position(|item| item == &id) {
@@ -787,7 +963,6 @@ pub(crate) fn SessionPanel(
                         }
                     });
                 },
-                remove_folder,
                 move |id, shift| {
                     let order: Vec<String> = layout
                         .get_untracked()
@@ -804,7 +979,6 @@ pub(crate) fn SessionPanel(
                     }
                 },
                 move |index| cursor.set(index),
-                on_delete,
             )}
             {move || {
                 let hidden = layout.get().hidden_older;
@@ -820,7 +994,6 @@ pub(crate) fn SessionPanel(
                     </div>
                 }
             }}
-            <p class="hint keys">"j and k move. Enter opens. Alt+1 through Alt+9 jump. x selects."</p>
         </div>
     }
 }
@@ -888,7 +1061,13 @@ fn build_layout(
                 workspace: workspaces
                     .iter()
                     .find(|w| w.id == row.workspace_id)
-                    .map(|w| if w.name.is_empty() { w.path.clone() } else { w.name.clone() })
+                    .map(|w| {
+                        if w.name.is_empty() {
+                            w.path.clone()
+                        } else {
+                            w.name.clone()
+                        }
+                    })
                     .unwrap_or_default(),
                 id: row.id,
             }
@@ -975,13 +1154,9 @@ fn render_rows(
     selected: Vec<String>,
     active: String,
     on_open: impl Fn(String, bool) + Copy + 'static,
-    on_fork: impl Fn(String) + Copy + 'static,
-    on_pin: impl Fn(String, bool) + Copy + 'static,
     on_toggle_folder: impl Fn(String) + Copy + 'static,
-    on_remove_folder: impl Fn(String) + Copy + 'static,
     on_check: impl Fn(String, bool) + Copy + 'static,
     on_cursor: impl Fn(usize) + Copy + 'static,
-    on_delete: impl Fn(String, String) + Copy + 'static,
 ) -> impl IntoView {
     let nav_len = layout
         .items
@@ -1004,7 +1179,6 @@ fn render_rows(
                 let label = item.label.clone();
                 let count = item.count;
                 let collapsed = item.collapsed;
-                let removable = !id.is_empty();
                 view! {
                     <div class="ss-folder-row">
                         <button type="button" class="ss-folder" aria-expanded=(!collapsed).to_string() on:click=move |_| {
@@ -1015,12 +1189,6 @@ fn render_rows(
                             <span class="ss-folder-name">{label}</span>
                             <span class="ss-count">{count}</span>
                         </button>
-                        {removable.then(|| {
-                            let id = item.id.clone();
-                            view! {
-                                <button type="button" class="ss-quiet" on:click=move |_| on_remove_folder(id.clone())>"Remove"</button>
-                            }
-                        })}
                     </div>
                 }
                 .into_any()
@@ -1032,7 +1200,6 @@ fn render_rows(
                 let label = item.label.clone();
                 let subtitle = item.subtitle.clone();
                 let when = item.when.clone();
-                let pinned = item.pinned;
                 let kind = item.status_kind.clone();
                 let is_session = item.kind == LayoutKind::Session;
                 let checked = selected.iter().any(|sid| sid == &id);
@@ -1053,12 +1220,8 @@ fn render_rows(
                     class.push_str(" ss-cursor");
                 }
                 let gutter = format!("ss-gutter ss-gutter-{kind}");
-                let open_label = if live { "Open" } else { "Resume" };
-                let pin_label = if pinned { "Unpin" } else { "Pin" };
-                let label_del = label.clone();
                 let tip = format!("{label} ({id})");
                 let open_main = open_id.clone();
-                let open_action = open_id.clone();
                 let id_attr = id.clone();
                 view! {
                     <div class=class role="option" aria-selected=on.to_string() data-session-id=id_attr>
@@ -1092,39 +1255,6 @@ fn render_rows(
                                 <span class="ss-sub">{subtitle}</span>
                             </span>
                         </button>
-                        <div class="ss-actions">
-                            <button type="button" class="ss-quiet" on:click=move |_| {
-                                on_cursor(nav);
-                                on_open(open_action.clone(), live);
-                            }>{open_label}</button>
-                            {is_session.then(|| {
-                                let id = id.clone();
-                                view! {
-                                    <button type="button" class="ss-quiet" on:click=move |_| on_fork(id.clone())>"Fork"</button>
-                                }
-                            })}
-                            {is_session.then(|| {
-                                let id = id.clone();
-                                view! {
-                                    <button type="button" class="ss-quiet" on:click=move |_| on_pin(id.clone(), pinned)>{pin_label}</button>
-                                }
-                            })}
-                            {is_session.then(|| {
-                                let id = id.clone();
-                                let label = label_del.clone();
-                                view! {
-                                    <button
-                                        type="button"
-                                        class="ss-quiet session-delete-action"
-                                        data-session-delete=id.clone()
-                                        title="Delete this session permanently"
-                                        on:click=move |_| on_delete(id.clone(), label.clone())
-                                    >
-                                        "Delete"
-                                    </button>
-                                }
-                            })}
-                        </div>
                     </div>
                 }
                 .into_any()

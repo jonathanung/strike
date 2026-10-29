@@ -111,6 +111,10 @@ const EFFORTS: &[(&str, &str)] = &[
     ("max", "maximum reasoning when correctness beats cost"),
 ];
 
+pub fn effort_levels() -> &'static [(&'static str, &'static str)] {
+    EFFORTS
+}
+
 pub fn parse_effort(value: &str) -> Option<String> {
     let normalized = value.trim().to_ascii_lowercase();
     if normalized.is_empty() {

@@ -550,6 +550,18 @@ pub fn palette(raw: &str, usage: &PaletteUsage) -> Vec<PaletteGroup> {
     REG.with(|reg| reg.borrow().query(raw, usage))
 }
 
+/// Drop every command whose id starts with `prefix`, then insert `cmds`.
+/// Gateway names are not known at boot, so the switcher refreshes its rows.
+pub fn replace_prefixed(prefix: &str, cmds: Vec<Command>) {
+    REG.with(|reg| {
+        let mut reg = reg.borrow_mut();
+        reg.commands.retain(|cmd| !cmd.id.starts_with(prefix));
+        for cmd in cmds {
+            reg.upsert_command(cmd);
+        }
+    });
+}
+
 pub fn command(id: &str) -> Option<Command> {
     REG.with(|reg| {
         reg.borrow()

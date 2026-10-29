@@ -207,7 +207,7 @@ pub fn slash_suggestions(
             replace_all: false,
         });
     }
-    out.truncate(40);
+    out.truncate(8);
     out
 }
 
@@ -234,7 +234,7 @@ pub fn skill_suggestions(skills: &[SkillInfo], query: &str) -> Vec<Suggestion> {
             });
         }
     }
-    out.truncate(40);
+    out.truncate(8);
     out
 }
 

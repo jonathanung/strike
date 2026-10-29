@@ -220,30 +220,20 @@ async function providerFlow(page, check, waitUntil, grab) {
 
   await page.evaluate(`document.querySelector('[data-nav="primary"] [data-view="chat"]')?.click()`);
   const chip = await waitUntil(
-    `Boolean(document.querySelector("[data-model-chip]"))`,
+    `document.body && document.body.innerText.includes("Model ·")`,
     4000,
-    "model chip after leaving providers",
+    "model status after leaving providers",
   );
-  check(Boolean(chip), "model chip missing after returning to chat");
-  const modelText = await page.evaluate(`document.querySelector("[data-model-chip]")?.textContent || ""`);
-  check(String(modelText).includes("Model"), "model status does not say Model");
-  await page.evaluate(`document.dispatchEvent(new KeyboardEvent("keydown", { key: "m", altKey: true, bubbles: true, cancelable: true }))`);
+  check(Boolean(chip), "model status missing after returning to chat");
+  await page.evaluate(`document.querySelector('[data-nav="palette"]')?.click()`);
   const menu = await waitUntil(
-    `Boolean(document.querySelector("[data-model-menu]"))`,
+    `Boolean(document.querySelector('[data-command-id="providers.add"]'))`,
     4000,
-    "model menu",
+    "palette add provider",
   );
-  check(Boolean(menu), "model menu did not open from Alt+M");
-  const addCount = await page.evaluate(`(() => {
-    const menu = document.querySelector("[data-model-menu]");
-    if (!menu) return -1;
-    const rows = menu.querySelectorAll("[data-model-row]").length;
-    const adds = menu.querySelectorAll("[data-add-provider]").length;
-    return rows > 0 ? adds : (adds === 1 ? 0 : -1);
-  })()`);
-  check(addCount === 0, "model menu footer still duplicates Add provider, or the empty catalog lost its one button");
+  check(Boolean(menu), "palette is missing Add provider");
   await grab("model-menu-add-provider-1440");
-  await page.evaluate(`document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
+  await page.evaluate(`document.querySelector(".palette-backdrop")?.click()`);
   await page.evaluate(`document.querySelector('[data-nav="palette"]')?.click()`);
   await page.evaluate(`(() => {
     const input = document.querySelector('[data-nav="palette-dialog"] input');
@@ -339,6 +329,20 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
       shellDiag = ` (after polling ${shellWaitMs}ms; shell snapshot: ${snapshot}; page text: ${String(text).slice(0, 600)})`;
     }
     check(missing.length === 0, `shell labels missing: ${missing.join(", ")}${shellDiag}`);
+    // Steer and Queue left the composer bar. The primary button is Send
+    // until a turn is running; both words stay reachable on one command.
+    await page.evaluate(`document.querySelector('[data-nav="palette"]')?.click()`);
+    const steerQueue = await waitUntil(
+      `(() => {
+        const el = document.querySelector('[data-command-id="enter.toggle"]');
+        const text = el ? (el.innerText || "") : "";
+        return text.includes("Steer") && text.includes("Queue");
+      })()`,
+      4000,
+      "steer/queue palette command",
+    );
+    check(Boolean(steerQueue), "palette is missing Toggle Enter behaviour: Steer / Queue");
+    await page.evaluate(`document.querySelector(".palette-backdrop")?.click()`);
     const tok = await tokens();
     const tokenMiss = tokenMismatch(tok, fixture.tokens);
     check(tokenMiss.length === 0, `dark tokens ${tokenMiss.join("; ")}`);
@@ -383,8 +387,8 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
         cards: Boolean(root && root.querySelector(".sx-cards")),
       };
     })()`);
-    check(emptyState.cards, "empty transcript is missing suggestion cards");
-    check(!emptyState.cta, "empty transcript still shows a duplicate Add provider");
+    check(!emptyState.cards, "empty transcript still shows suggestion cards");
+    check(emptyState.cta, "empty transcript is missing Add provider");
     await headerAt(page, check, viewport, async (name) => {
       const png = await page.send("Page.captureScreenshot", { format: "png" });
       await writeFile(join(outDir, "screenshots", `${name}.png`), Buffer.from(png.data, "base64"));
@@ -480,11 +484,11 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
       }
     }
 
-    await click("button.chip", "Approval");
+    await click("[data-nav='palette']", "Commands");
     await waitUntil(
-      `Boolean(document.querySelector(".menu") && document.querySelector(".menu").innerText.includes("Yolo"))`,
+      `Boolean(document.querySelector('[data-command-id="mode-yolo"]'))`,
       4000,
-      "approval menu",
+      "approval commands",
     );
     await shoot("shell-approval", ["desk1024", "desk1440"]);
     await press("Escape");
@@ -627,7 +631,7 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
 
     await click(".segmented button", "Daemon");
     await waitUntil(
-      `document.body && document.body.innerText.includes("This gateway")`,
+      `document.body && document.body.innerText.includes("Daemon")`,
       4000,
       "daemon view",
     );

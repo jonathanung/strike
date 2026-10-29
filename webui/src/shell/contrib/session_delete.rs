@@ -7,26 +7,19 @@
 
 use std::rc::Rc;
 
-use crate::shell::rank::unique_match;
-use crate::shell::{Group, Argument, Command, ShellHook};
+use crate::shell::{Command, Group, ShellHook};
 
 pub fn install(reg: &mut ShellHook) {
     reg.command(Command {
         id: "session-delete",
         group: Group::Session,
-        label: "Delete session\u{2026}",
-        detail: "Permanently delete a session and its durable log",
+        label: "Delete session…",
+        detail: "Permanently delete the cursor session, or the open one",
         shortcut: "",
-        keywords: &["remove", "erase", "trash"],
-        argument: Some(Argument {
-            placeholder: "Session title or id",
-            required: true,
-        }),
+        keywords: &["delete", "remove", "destroy"],
+        argument: None,
         order: 85,
-        run: Rc::new(|args| {
-            let id = unique_match(&crate::shell::host::sessions()?, args)?;
-            crate::shell::dispatch("session-delete", &id)
-        }),
+        run: Rc::new(|args| crate::shell::dispatch("session-delete", args)),
         visible: None,
         enabled: None,
         confirm: None,

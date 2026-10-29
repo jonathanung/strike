@@ -32,10 +32,10 @@ pub fn install(reg: &mut ShellHook) {
     reg.command(Command {
         id: "switch-model",
         group: Group::Model,
-        label: "Switch model…",
+        label: "Switch model",
         detail: "Set the model for the open session",
         shortcut: "",
-        keywords: &["model", "switch", "provider"],
+        keywords: &["model", "switch", "provider", "llm"],
         argument: Some(Argument {
             placeholder: "Filter models",
             required: true,

@@ -207,6 +207,14 @@
     padding-bottom: 2px;
   }
 
+  body[data-phone="1"] .composer-glance,
+  body[data-phone="1"] .sx-quiet,
+  body[data-phone="1"] .sx-jump,
+  body[data-phone="1"] .git-file,
+  body[data-phone="1"] .git-actions button,
+  body[data-phone="1"] .ev-bar button,
+  body[data-phone="1"] .ev-tools button,
+  body[data-phone="1"] .composer-plus .palette-row,
   body[data-phone="1"] .composer-bar .chip,
   body[data-phone="1"] .composer-bar .send,
   body[data-phone="1"] .ss-chips .chip,
