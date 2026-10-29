@@ -975,6 +975,7 @@ button.link { text-align: left; width: 100%; }
   gap: 8px;
   margin-top: 16px;
 }
+.confirm-actions button { min-height: 44px; }
 .shell-alive {
   position: fixed;
   top: 0;

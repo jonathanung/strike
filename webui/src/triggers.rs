@@ -543,10 +543,16 @@ pub fn TriggersPage(
                             <button type="button" class="secondary" data-action="delete-trigger" on:click=move |_| {
                                 let id = form.selected.get();
                                 let name = form.name.get();
+                                let hook = form.hook_path.get();
+                                let body = if hook.is_empty() {
+                                    format!("Delete {name}. The hook stops accepting events, and a replacement trigger gets a new secret.")
+                                } else {
+                                    format!("Delete {name}. {}{hook} stops accepting events, and anything sending to it has to be reconfigured with a new secret.", origin_prefix(&base.get_untracked()))
+                                };
                                 crate::confirm::ask(
                                     crate::confirm::ConfirmRequest {
                                         title: "Delete this trigger?".into(),
-                                        body: format!("Delete {name}. The hook stops accepting events, and a replacement trigger gets a new secret."),
+                                        body,
                                         confirm_label: "Delete trigger".into(),
                                     },
                                     Rc::new(move || delete_one(id.clone())),
