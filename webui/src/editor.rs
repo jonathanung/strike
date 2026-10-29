@@ -1085,6 +1085,72 @@ fn DiffView(text: String) -> impl IntoView {
     .into_any()
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SaveLanding {
+    Commit,
+    Ignore,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SaveOutcome {
+    Ok,
+    Conflict,
+    Error,
+}
+
+struct SaveEffects {
+    clear_saving: bool,
+    write_body: bool,
+    conflict: bool,
+    report_error: bool,
+    status_saved: bool,
+}
+
+/// Commit only while this is still the file and generation the save started
+/// for. Reopening the same path bumps the generation, so a late completion
+/// does not overwrite the reload.
+fn save_landing(saved_path: &str, saved_gen: u32, path_now: &str, gen_now: u32) -> SaveLanding {
+    if !saved_path.is_empty() && saved_path == path_now && saved_gen == gen_now {
+        SaveLanding::Commit
+    } else {
+        SaveLanding::Ignore
+    }
+}
+
+fn save_effects(landing: SaveLanding, outcome: SaveOutcome) -> SaveEffects {
+    let clear_saving = true;
+    match (landing, outcome) {
+        (SaveLanding::Ignore, _) => SaveEffects {
+            clear_saving,
+            write_body: false,
+            conflict: false,
+            report_error: false,
+            status_saved: false,
+        },
+        (SaveLanding::Commit, SaveOutcome::Ok) => SaveEffects {
+            clear_saving,
+            write_body: true,
+            conflict: false,
+            report_error: false,
+            status_saved: true,
+        },
+        (SaveLanding::Commit, SaveOutcome::Conflict) => SaveEffects {
+            clear_saving,
+            write_body: false,
+            conflict: true,
+            report_error: false,
+            status_saved: false,
+        },
+        (SaveLanding::Commit, SaveOutcome::Error) => SaveEffects {
+            clear_saving,
+            write_body: false,
+            conflict: false,
+            report_error: true,
+            status_saved: false,
+        },
+    }
+}
+
 #[component]
 pub fn DocumentPane(
     base: RwSignal<String>,
@@ -1233,6 +1299,7 @@ pub fn DocumentPane(
         let body = draft.get_untracked();
         let expect = sha.get_untracked();
         let stamp = mtime.get_untracked();
+        let saved_gen = load_gen.get_untracked();
         let (b, t) = (base.get_untracked(), token.get_untracked());
         saving.set(true);
         status.set(String::new());
@@ -1243,34 +1310,65 @@ pub fn DocumentPane(
                 "sha256": expect,
                 "mtimeUnixNano": stamp,
             });
-            match put_json_value(&b, &t, "/v1/file", payload).await {
+            let outcome = match put_json_value(&b, &t, "/v1/file", payload).await {
                 Ok(v) => {
-                    sha.set(v.get("sha256").and_then(|x| x.as_str()).unwrap_or("").into());
-                    mtime.set(
-                        v.get("mtimeUnixNano")
-                            .and_then(|x| x.as_str())
-                            .unwrap_or("")
-                            .into(),
+                    let effects = save_effects(
+                        save_landing(
+                            &p,
+                            saved_gen,
+                            &loaded_path.get_untracked(),
+                            load_gen.get_untracked(),
+                        ),
+                        SaveOutcome::Ok,
                     );
-                    content.set(body.clone());
-                    draft.set(body);
-                    editing.set(false);
-                    conflict.set(false);
-                    status.set("Saved.".into());
+                    if effects.write_body {
+                        sha.set(v.get("sha256").and_then(|x| x.as_str()).unwrap_or("").into());
+                        mtime.set(
+                            v.get("mtimeUnixNano")
+                                .and_then(|x| x.as_str())
+                                .unwrap_or("")
+                                .into(),
+                        );
+                        content.set(body.clone());
+                        draft.set(body);
+                        editing.set(false);
+                        conflict.set(false);
+                    }
+                    if effects.status_saved {
+                        status.set("Saved.".into());
+                    }
+                    effects
                 }
                 Err(e) => {
-                    if conflict_token(&e).is_some() {
+                    let kind = if conflict_token(&e).is_some() {
+                        SaveOutcome::Conflict
+                    } else {
+                        SaveOutcome::Error
+                    };
+                    let effects = save_effects(
+                        save_landing(
+                            &p,
+                            saved_gen,
+                            &loaded_path.get_untracked(),
+                            load_gen.get_untracked(),
+                        ),
+                        kind,
+                    );
+                    if effects.conflict {
                         conflict.set(true);
                         status.set(
                             "This file changed on disk. Reload to see that version. Your edits stay in the box."
                                 .into(),
                         );
-                    } else {
+                    } else if effects.report_error {
                         status.set(http_message(&e));
                     }
+                    effects
                 }
+            };
+            if outcome.clear_saving {
+                saving.set(false);
             }
-            saving.set(false);
         });
     };
 
@@ -1649,5 +1747,25 @@ mod tests {
         assert_eq!(sha, "abc");
         assert_eq!(mt, "5");
         assert!(conflict_token("HTTP 400 {\"error\":\"nope\"}").is_none());
+    }
+
+    #[test]
+    fn late_save_does_not_paint_the_next_file() {
+        assert_eq!(save_landing("a.rs", 1, "a.rs", 1), SaveLanding::Commit);
+        assert_eq!(save_landing("a.rs", 1, "b.rs", 2), SaveLanding::Ignore);
+        assert_eq!(save_landing("a.rs", 1, "a.rs", 2), SaveLanding::Ignore);
+        let ignored = save_effects(SaveLanding::Ignore, SaveOutcome::Ok);
+        assert!(ignored.clear_saving);
+        assert!(!ignored.write_body);
+        assert!(!ignored.status_saved);
+        assert!(!ignored.conflict);
+        let late_conflict = save_effects(SaveLanding::Ignore, SaveOutcome::Conflict);
+        assert!(!late_conflict.conflict);
+        assert!(!late_conflict.report_error);
+        assert!(late_conflict.clear_saving);
+        let committed = save_effects(SaveLanding::Commit, SaveOutcome::Ok);
+        assert!(committed.write_body && committed.status_saved && !committed.conflict);
+        let conflict = save_effects(SaveLanding::Commit, SaveOutcome::Conflict);
+        assert!(conflict.conflict && !conflict.write_body);
     }
 }

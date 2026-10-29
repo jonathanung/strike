@@ -3029,10 +3029,10 @@ fn App() -> impl IntoView {
         find_view.set(crate::transcript_view::FindView { hits, current });
     });
 
-    let apply_title: Callback<(String,)> = (move |title: String| {
+    let apply_title: Callback<(String, String)> = (move |session_id: String, title: String| {
         let id = active_root.get_untracked();
-        if id.is_empty() {
-            ux_note.set("No session to rename.".into());
+        if id.is_empty() || id != session_id {
+            ux_note.set("That rename was for another session.".into());
             return;
         }
         let title = title.trim().to_string();
@@ -3074,7 +3074,7 @@ fn App() -> impl IntoView {
                 ux_note.set("No message to title from yet.".into());
                 return;
             }
-            apply_title.run((title,));
+            apply_title.run((active_root.get_untracked(), title));
         })
         .into(),
         export_timeline: (move || {
@@ -3164,7 +3164,7 @@ fn App() -> impl IntoView {
             if title.is_empty() {
                 return Err("A title needs at least one character.".into());
             }
-            rename_for_palette.run((title,));
+            rename_for_palette.run((active_root.get_untracked(), title));
             Ok(())
         }),
     );
@@ -3666,6 +3666,7 @@ fn App() -> impl IntoView {
                     <Show when=move || doc_path.get().is_empty()>
                     <TranscriptPane
                         transcript=transcript
+                        session=active_root
                         loading=loading
                         load_error=load_error
                         tick=tick
@@ -3892,7 +3893,7 @@ fn App() -> impl IntoView {
                                                     }>"Down"</button>
                                                     <button type="button" class="secondary" title="Removes this queued message" on:click=move |_| {
                                                         let id = id_cancel.clone();
-                                                        crate::confirm::ask(
+                                                        if !crate::confirm::ask(
                                                             crate::confirm::ConfirmRequest {
                                                                 title: "Remove queued message?".into(),
                                                                 body: "This drops the message from the queue. It is not sent.".into(),
@@ -3904,7 +3905,9 @@ fn App() -> impl IntoView {
                                                                     serde_json::json!({"id": id.clone()}),
                                                                 );
                                                             }),
-                                                        );
+                                                        ) {
+                                                            steer_note.set(crate::confirm::BUSY.into());
+                                                        }
                                                     }>"Cancel"</button>
                                                 </span>
                                             </li>

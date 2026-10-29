@@ -445,16 +445,34 @@ impl TermCtl {
         let b = self.base.get_untracked();
         let t = self.token.get_untracked();
         spawn_local(async move {
-            if let Err(err) = delete_term(&b, &t, &id).await {
-                self.note.set(explain(err));
-                return;
+            match delete_term(&b, &t, &id).await {
+                Ok(()) => {
+                    self.sessions.update(|list| {
+                        let ids: Vec<String> = list.iter().map(|item| item.id.clone()).collect();
+                        let kept = retain_session_ids(&ids, &id);
+                        list.retain(|item| kept.iter().any(|keep| keep == &item.id));
+                    });
+                    let effects = close_ok_effects(close_landing(&id, &self.active.get_untracked()));
+                    if effects.stop_live {
+                        self.stop();
+                    }
+                    if effects.clear_active {
+                        self.active.set(String::new());
+                        self.alive.set(false);
+                        self.exit_reason.set(String::new());
+                    }
+                    if let Some(note) = effects.notice {
+                        self.note.set(note);
+                    }
+                }
+                Err(err) => {
+                    if let Some(note) =
+                        close_err_notice(close_landing(&id, &self.active.get_untracked()), &explain(err))
+                    {
+                        self.note.set(note);
+                    }
+                }
             }
-            self.stop();
-            self.active.set(String::new());
-            self.alive.set(false);
-            self.exit_reason.set(String::new());
-            self.sessions.update(|list| list.retain(|item| item.id != id));
-            self.note.set("Shell closed.".into());
         });
     }
 }
@@ -759,4 +777,75 @@ async fn delete_term(base: &str, token: &str, id: &str) -> Result<(), String> {
         return Err(format!("HTTP {} {text}", resp.status()));
     }
     Ok(())
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CloseLanding {
+    Active,
+    Superseded,
+}
+
+struct CloseEffects {
+    stop_live: bool,
+    clear_active: bool,
+    notice: Option<String>,
+}
+
+fn close_landing(closed_id: &str, active_now: &str) -> CloseLanding {
+    if !closed_id.is_empty() && closed_id == active_now {
+        CloseLanding::Active
+    } else {
+        CloseLanding::Superseded
+    }
+}
+
+fn close_ok_effects(landing: CloseLanding) -> CloseEffects {
+    match landing {
+        CloseLanding::Active => CloseEffects {
+            stop_live: true,
+            clear_active: true,
+            notice: Some("Shell closed.".into()),
+        },
+        CloseLanding::Superseded => CloseEffects {
+            stop_live: false,
+            clear_active: false,
+            notice: None,
+        },
+    }
+}
+
+fn close_err_notice(landing: CloseLanding, message: &str) -> Option<String> {
+    match landing {
+        CloseLanding::Active => Some(message.to_string()),
+        CloseLanding::Superseded => None,
+    }
+}
+
+fn retain_session_ids(ids: &[String], closed_id: &str) -> Vec<String> {
+    ids.iter().filter(|id| id.as_str() != closed_id).cloned().collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn close_of_a_does_not_stop_shell_b() {
+        assert_eq!(close_landing("shell-a", "shell-b"), CloseLanding::Superseded);
+        let moved = close_ok_effects(CloseLanding::Superseded);
+        assert!(!moved.stop_live);
+        assert!(!moved.clear_active);
+        assert!(moved.notice.is_none());
+        assert!(close_err_notice(CloseLanding::Superseded, "HTTP 500").is_none());
+        let chips = retain_session_ids(&["shell-a".into(), "shell-b".into()], "shell-a");
+        assert_eq!(chips, vec!["shell-b".to_string()]);
+        let stayed = close_ok_effects(close_landing("shell-a", "shell-a"));
+        assert!(stayed.stop_live);
+        assert!(stayed.clear_active);
+        assert_eq!(stayed.notice.as_deref(), Some("Shell closed."));
+        assert_eq!(
+            close_err_notice(CloseLanding::Active, "HTTP 500").as_deref(),
+            Some("HTTP 500")
+        );
+    }
 }

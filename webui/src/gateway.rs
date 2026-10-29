@@ -827,25 +827,29 @@ pub fn GatewaySwitcher(
                             .map(|p| p.name.clone())
                             .unwrap_or_else(|| "the selected gateway".to_string())
                     };
-                    crate::confirm::ask(
+                    if !crate::confirm::ask(
                         crate::confirm::ConfirmRequest {
                             title: format!("Rotate token for {who}?"),
                             body: "This invalidates the current token everywhere it was copied and drops all pairing grants. This browser stores the new one.".into(),
                             confirm_label: "Rotate token".into(),
                         },
                         Rc::new(move || rotate()),
-                    );
+                    ) {
+                        detail.set(crate::confirm::BUSY.into());
+                    }
                 }>"Rotate token"</button>
                 <button class="secondary" data-action="revoke-grants" on:click=move |_| {
                     let revoke = revoke;
-                    crate::confirm::ask(
+                    if !crate::confirm::ask(
                         crate::confirm::ConfirmRequest {
                             title: "Revoke gateway grants?".into(),
                             body: "Every short-lived grant stops working. The host token file is not changed.".into(),
                             confirm_label: "Revoke grants".into(),
                         },
                         Rc::new(move || revoke()),
-                    );
+                    ) {
+                        detail.set(crate::confirm::BUSY.into());
+                    }
                 }>"Revoke grants"</button>
                 <button class="secondary" on:click=logout_browser>"Log out browser"</button>
             </div>

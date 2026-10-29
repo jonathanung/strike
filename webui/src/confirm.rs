@@ -43,14 +43,82 @@ pub enum ConfirmAction {
 }
 
 /// Advance the dialog. `true` means the operator confirmed an open prompt.
+/// A second [`ConfirmAction::Open`] leaves the first request in place.
 pub fn step(phase: ConfirmPhase, action: ConfirmAction) -> (ConfirmPhase, bool) {
     match action {
-        ConfirmAction::Open(request) => (ConfirmPhase::Open(request), false),
+        ConfirmAction::Open(request) => match phase {
+            ConfirmPhase::Open(_) => (phase, false),
+            ConfirmPhase::Idle => (ConfirmPhase::Open(request), false),
+        },
         ConfirmAction::Cancel => (ConfirmPhase::Idle, false),
         ConfirmAction::Accept => match phase {
             ConfirmPhase::Open(_) => (ConfirmPhase::Idle, true),
             ConfirmPhase::Idle => (ConfirmPhase::Idle, false),
         },
+    }
+}
+
+/// Callers show this when [`ask`] does not open (busy or not mounted).
+pub const BUSY: &str = "Another confirmation is open.";
+
+/// What the dialog does with a key. `stop` keeps the shell's window
+/// listener from also dismissing the view underneath.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ConfirmKey {
+    pub stop: bool,
+    pub prevent_default: bool,
+    pub dismiss: bool,
+    pub trap_tab: bool,
+}
+
+pub fn confirm_key(key: &str) -> ConfirmKey {
+    match key {
+        "Escape" => ConfirmKey {
+            stop: true,
+            prevent_default: true,
+            dismiss: true,
+            trap_tab: false,
+        },
+        "Tab" => ConfirmKey {
+            stop: true,
+            prevent_default: true,
+            dismiss: false,
+            trap_tab: true,
+        },
+        _ => ConfirmKey {
+            stop: false,
+            prevent_default: false,
+            dismiss: false,
+            trap_tab: false,
+        },
+    }
+}
+
+/// Reject-and-keep. An open prompt stays authoritative, and an uninstalled
+/// dialog does not drop the request without a `false` result.
+pub fn admit_prompt<T>(
+    installed: bool,
+    current: Option<(ConfirmRequest, T)>,
+    incoming: (ConfirmRequest, T),
+) -> (Option<(ConfirmRequest, T)>, bool) {
+    if !installed || current.is_some() {
+        return (current, false);
+    }
+    (Some(incoming), true)
+}
+
+/// Accept runs the callback stored with the open prompt. Cancel runs none.
+pub fn settle_prompt<T>(
+    current: Option<(ConfirmRequest, T)>,
+    accept: bool,
+) -> (Option<(ConfirmRequest, T)>, Option<T>) {
+    let Some((_, callback)) = current else {
+        return (None, None);
+    };
+    if accept {
+        (None, Some(callback))
+    } else {
+        (None, None)
     }
 }
 
@@ -79,22 +147,30 @@ pub fn install() -> RwSignal<Option<ConfirmRequest>> {
     request
 }
 
-pub fn ask(request: ConfirmRequest, on_yes: Rc<dyn Fn()>) {
-    let (phase, accepted) = step(ConfirmPhase::Idle, ConfirmAction::Open(request.clone()));
-    if accepted {
-        return;
-    }
-    let ConfirmPhase::Open(request) = phase else {
-        return;
-    };
+#[must_use = "false means the prompt was not opened"]
+pub fn ask(request: ConfirmRequest, on_yes: Rc<dyn Fn()>) -> bool {
     GATE.with(|gate| {
         let mut gate = gate.borrow_mut();
+        let installed = gate.is_some();
+        let current = gate
+            .as_ref()
+            .and_then(|g| g.request.get_untracked().map(|open| (open, ())));
+        let already = current.is_some();
+        let (_kept, accepted) = admit_prompt(installed, current, (request.clone(), ()));
+        if !accepted || already {
+            return false;
+        }
+        let (phase, _) = step(ConfirmPhase::Idle, ConfirmAction::Open(request));
+        let ConfirmPhase::Open(request) = phase else {
+            return false;
+        };
         let Some(gate) = gate.as_mut() else {
-            return;
+            return false;
         };
         gate.on_yes = on_yes;
         gate.request.set(Some(request));
-    });
+        true
+    })
 }
 
 fn dismiss(accept: bool) {
@@ -112,7 +188,12 @@ fn dismiss(accept: bool) {
         } else {
             ConfirmAction::Cancel
         };
-        let (next, accepted) = step(phase, action);
+        let (next, accepted) = step(phase.clone(), action);
+        let current = match phase {
+            ConfirmPhase::Open(request) => Some((request, gate.on_yes.clone())),
+            ConfirmPhase::Idle => None,
+        };
+        let (_settled, callback) = settle_prompt(current, accept && accepted);
         gate.request.set(match next {
             ConfirmPhase::Open(request) => Some(request),
             ConfirmPhase::Idle => None,
@@ -120,9 +201,8 @@ fn dismiss(accept: bool) {
         if !accepted {
             return None;
         }
-        let run = gate.on_yes.clone();
         gate.on_yes = placeholder();
-        Some(run)
+        callback
     });
     if let Some(run) = run {
         run();
@@ -163,14 +243,18 @@ pub fn ConfirmDialog() -> impl IntoView {
                     data-confirm="dialog"
                     on:click=move |ev: web_sys::MouseEvent| ev.stop_propagation()
                     on:keydown=move |ev: web_sys::KeyboardEvent| {
-                        let key = ev.key();
-                        if key == "Escape" {
+                        let plan = confirm_key(&ev.key());
+                        if plan.stop {
+                            ev.stop_propagation();
+                        }
+                        if plan.prevent_default {
                             ev.prevent_default();
+                        }
+                        if plan.dismiss {
                             dismiss(false);
                             return;
                         }
-                        if key == "Tab" {
-                            ev.prevent_default();
+                        if plan.trap_tab {
                             let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
                                 return;
                             };
@@ -252,13 +336,49 @@ mod tests {
     }
 
     #[test]
-    fn a_second_prompt_replaces_the_open_one() {
+    fn a_second_prompt_keeps_the_open_one() {
         let (first, _) = step(ConfirmPhase::Idle, ConfirmAction::Open(req("Rotate")));
-        let (second, accepted) = step(first, ConfirmAction::Open(req("Revoke")));
+        let (second, accepted) = step(first.clone(), ConfirmAction::Open(req("Revoke")));
         assert!(!accepted);
-        match second {
-            ConfirmPhase::Open(request) => assert_eq!(request.title, "Revoke"),
-            ConfirmPhase::Idle => panic!("prompt closed"),
-        }
+        assert_eq!(second, first);
+    }
+
+    #[test]
+    fn escape_stops_so_the_view_underneath_stays() {
+        let escape = confirm_key("Escape");
+        assert!(escape.stop);
+        assert!(escape.prevent_default);
+        assert!(escape.dismiss);
+        let tab = confirm_key("Tab");
+        assert!(tab.stop);
+        assert!(tab.trap_tab);
+        assert!(!tab.dismiss);
+        assert!(!confirm_key("Enter").stop);
+    }
+
+    #[test]
+    fn a_second_ask_keeps_the_first_callback() {
+        let first = (req("Rotate"), 1u8);
+        let (open, ok) = admit_prompt(true, None, first.clone());
+        assert!(ok);
+        let (kept, ok) = admit_prompt(true, open.clone(), (req("Revoke"), 2));
+        assert!(!ok);
+        assert_eq!(kept.as_ref().map(|(_, id)| *id), Some(1));
+        let (after, ran) = settle_prompt(kept, true);
+        assert!(after.is_none());
+        assert_eq!(ran, Some(1));
+        let (_idle, ran) = settle_prompt(open, false);
+        assert_eq!(ran, None);
+    }
+
+    #[test]
+    fn ask_when_uninstalled_does_not_open() {
+        let (slot, ok) = admit_prompt(false, None, (req("Rotate"), 1u8));
+        assert!(!ok);
+        assert!(slot.is_none());
+        let open = Some((req("Rotate"), 1u8));
+        let (kept, ok) = admit_prompt(false, open.clone(), (req("Revoke"), 2));
+        assert!(!ok);
+        assert_eq!(kept, open);
     }
 }
