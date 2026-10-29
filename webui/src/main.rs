@@ -16,6 +16,7 @@ mod clipboard;
 mod confirm;
 mod composer_triggers;
 mod diag;
+mod draft_size;
 mod editor;
 mod load_epoch;
 mod localfiles;
@@ -1169,6 +1170,9 @@ fn App() -> impl IntoView {
     let steer_mode = RwSignal::new(String::new());
     let queue_note = RwSignal::new(String::new());
     let hold_bypass = RwSignal::new(false);
+    // Draft-size second-press arm (#1542): the exact draft text whose
+    // first Send press was held at projected-critical. Empty = unarmed.
+    let draft_armed = RwSignal::new(String::new());
     // Cancel and Stop drop work. The first click arms the button; the
     // second click is the confirm. Escape still stops immediately.
     let confirm_cancel = RwSignal::new(String::new());
@@ -1629,6 +1633,7 @@ fn App() -> impl IntoView {
             steer_mode.set(String::new());
             queue_note.set(String::new());
             hold_bypass.set(false);
+            draft_armed.set(String::new());
             confirm_cancel.set(String::new());
             confirm_stop.set(false);
         } else if mobile::resume_after(cursor_fx.get(), false).is_some() {
@@ -2136,6 +2141,35 @@ fn App() -> impl IntoView {
         if root.is_empty() {
             status.set("no live session yet".into());
             return;
+        }
+        // Draft-size gate (#1542): when the draft itself projects the
+        // session to critical, the first press arms the warning —
+        // nothing is dispatched and the draft is kept. A second press
+        // on the same draft sends anyway. Below critical this never
+        // blocks, and an active session hold defers (no double gate).
+        {
+            let ctx = active_context(
+                &catalog.get_untracked(),
+                &provider_name.get_untracked(),
+                &model_name.get_untracked(),
+            );
+            let base_view = context_view(
+                context_used.get_untracked(),
+                context_limit.get_untracked(),
+                ctx,
+                &context_fit.get_untracked(),
+            );
+            let dview = draft_size::draft_size_view(
+                base_view.used,
+                base_view.limit,
+                base_view.held,
+                &text,
+            );
+            if draft_size::send_held(&dview, &draft_armed.get_untracked(), &text) {
+                draft_armed.set(text.clone());
+                return;
+            }
+            draft_armed.set(String::new());
         }
         let op = steer_queue::send_op(session_busy(&root), &enter_mode.get_untracked(), which);
         queue_note.set(String::new());
@@ -4671,6 +4705,33 @@ fn App() -> impl IntoView {
                                     send(steer_queue::SendWhich::Primary);
                                 }>"Send anyway"</button>
                             </div>
+                        </Show>
+                        <Show when=move || {
+                            let ctx = active_context(&catalog.get(), &provider_name.get(), &model_name.get());
+                            let base_view = context_view(context_used.get(), context_limit.get(), ctx, &context_fit.get());
+                            draft_size::draft_size_view(base_view.used, base_view.limit, base_view.held, &draft.get()).level != draft_size::DraftSizeLevel::None
+                        }>
+                            <p class=move || {
+                                let ctx = active_context(&catalog.get(), &provider_name.get(), &model_name.get());
+                                let base_view = context_view(context_used.get(), context_limit.get(), ctx, &context_fit.get());
+                                let view = draft_size::draft_size_view(base_view.used, base_view.limit, base_view.held, &draft.get());
+                                if view.level == draft_size::DraftSizeLevel::Critical { "hint draft-size-warn critical" } else { "hint draft-size-warn" }
+                            } role="status" data-draft-size=move || {
+                                let ctx = active_context(&catalog.get(), &provider_name.get(), &model_name.get());
+                                let base_view = context_view(context_used.get(), context_limit.get(), ctx, &context_fit.get());
+                                let view = draft_size::draft_size_view(base_view.used, base_view.limit, base_view.held, &draft.get());
+                                match view.level { draft_size::DraftSizeLevel::Critical => "critical", draft_size::DraftSizeLevel::Warn => "warn", draft_size::DraftSizeLevel::None => "none" }
+                            }>{move || {
+                                let ctx = active_context(&catalog.get(), &provider_name.get(), &model_name.get());
+                                let base_view = context_view(context_used.get(), context_limit.get(), ctx, &context_fit.get());
+                                let text = draft.get();
+                                let view = draft_size::draft_size_view(base_view.used, base_view.limit, base_view.held, &text);
+                                if view.level == draft_size::DraftSizeLevel::Critical && draft_armed.get() == text.trim() && !text.trim().is_empty() {
+                                    draft_size::armed_message(&view)
+                                } else {
+                                    view.message
+                                }
+                            }}</p>
                         </Show>
                         <Show when=move || memory_menu.get()>
                             <div class="menu" role="menu" aria-label="Memory mode">
