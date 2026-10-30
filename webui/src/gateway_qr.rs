@@ -880,8 +880,11 @@ fn unreachable_note(info: &GatewayInfo, shown: &str, lead: &str) -> String {
     } else {
         parts.push(info.opt_in.clone());
     }
+    // Name the origin only: the full URL carries the one-time code, and the
+    // blocked dialog must not become a second surface that leaks it.
+    let target = http_origin(shown).unwrap_or_else(|| shown.to_string());
     parts.push(format!(
-        "No QR is shown on purpose: it would point at {shown}, and a phone cannot open a loopback address — on the phone, that address is the phone itself. A pairing QR only works if the address in it is one your phone can reach."
+        "No QR is shown on purpose: it would point at {target}, and a phone cannot open a loopback address — on the phone, that address is the phone itself. A pairing QR only works if the address in it is one your phone can reach."
     ));
     parts.join("\n\n")
 }
@@ -1469,6 +1472,11 @@ mod tests {
             "no scannable QR for a loopback target"
         );
         assert!(paint.url.is_empty(), "no copyable loopback URL");
+        assert!(
+            !paint.note.contains("#pair="),
+            "blocked note must not carry the pairing code: {}",
+            paint.note
+        );
         assert!(
             paint.note.contains("cannot open this gateway"),
             "{}",
