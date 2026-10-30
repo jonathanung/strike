@@ -889,10 +889,7 @@ mod tests {
 
     #[test]
     fn utc_when_keeps_the_old_rendering() {
-        assert_eq!(
-            utc_when("2026-10-28T16:00:00Z"),
-            "2026-10-28 16:00:00 UTC"
-        );
+        assert_eq!(utc_when("2026-10-28T16:00:00Z"), "2026-10-28 16:00:00 UTC");
         assert_eq!(
             fmt_when_title("2026-10-28T16:00:00Z"),
             "2026-10-28 16:00:00 UTC"
@@ -908,10 +905,7 @@ mod tests {
         assert_eq!(pick_zone("", "Europe/London"), "Europe/London");
         assert_eq!(pick_zone("  ", "Europe/London"), "Europe/London");
         assert_eq!(pick_zone("", ""), "UTC");
-        assert_eq!(
-            pick_zone(" America/Vancouver ", "UTC"),
-            "America/Vancouver"
-        );
+        assert_eq!(pick_zone(" America/Vancouver ", "UTC"), "America/Vancouver");
     }
 
     #[test]
