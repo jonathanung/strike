@@ -1,6 +1,8 @@
 //! Document viewer and editor. Pure helpers are tested on the host; the
 //! Leptos pane is the center-column surface the shell opens for a path.
 
+use std::rc::Rc;
+
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use serde::Deserialize;
@@ -95,10 +97,16 @@ pub fn find_hits(text: &str, query: &str) -> Vec<Hit> {
     }
     let q_lower = query.to_lowercase();
     let q_bytes = q_lower.as_bytes();
+    let query_ascii = query.is_ascii();
     let mut hits = Vec::new();
     for (idx, line) in lines_of(text).into_iter().enumerate() {
-        let folded = line.to_lowercase();
-        if folded.len() != line.len() || q_lower.len() != query.len() {
+        // Greek and Cyrillic fold without changing the byte length, so a
+        // length check never left the ASCII fast path and missed them.
+        // The fast path is only for pure ASCII. Anything else is a
+        // whole-line hit: one match per line, start and end left at 0
+        // (`marked_pieces` already treats that as the whole line).
+        if !query_ascii || !line.is_ascii() {
+            let folded = line.to_lowercase();
             if folded.contains(&q_lower) {
                 hits.push(Hit {
                     line: (idx as u32) + 1,
@@ -1085,6 +1093,15 @@ fn DiffView(text: String) -> impl IntoView {
     .into_any()
 }
 
+/// Whether an Agent-diff completion may still commit: it was started
+/// for the file still open (`started_path` vs `open_path`) at a
+/// generation that is still the latest (`started_gen` vs
+/// `current_gen`). The generation half also rejects a completion for
+/// the *same* path when a newer fetch started in between.
+fn diff_current(started_gen: u32, current_gen: u32, open_path: &str, started_path: &str) -> bool {
+    started_gen == current_gen && open_path == started_path
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SaveLanding {
     Commit,
@@ -1183,6 +1200,7 @@ pub fn DocumentPane(
     let diff_note = RwSignal::new(String::new());
     let reload_tick = RwSignal::new(0u32);
     let load_gen = RwSignal::new(0u32);
+    let diff_gen = RwSignal::new(0u32);
 
     Effect::new(move |_| {
         let text = if editing.get() { draft.get() } else { content.get() };
@@ -1210,6 +1228,11 @@ pub fn DocumentPane(
         editing.set(false);
         conflict.set(false);
         query.set(String::new());
+        // The diff belongs to the file it was fetched for (#1626): a
+        // previous file's diff must never render under the new one,
+        // not even while the new fetch is in flight or after it fails.
+        agent_diff.set(String::new());
+        diff_note.set(String::new());
         if p.is_empty() {
             return;
         }
@@ -1259,10 +1282,21 @@ pub fn DocumentPane(
         if p.is_empty() {
             return;
         }
+        // Generation-guard the completion like the load effect above
+        // (#1626): clear up front so nothing stale renders while this
+        // fetch is in flight, and drop the completion if a newer diff
+        // fetch started or the open file moved on.
+        let gen = diff_gen.get_untracked().wrapping_add(1);
+        diff_gen.set(gen);
+        agent_diff.set(String::new());
+        diff_note.set(String::new());
         let (b, t) = (base.get(), token.get());
         spawn_local(async move {
             match get_json::<DiffList>(&b, &t, "/v1/changed-files").await {
                 Ok(list) => {
+                    if !diff_current(gen, diff_gen.get_untracked(), &loaded_path.get_untracked(), &p) {
+                        return;
+                    }
                     let mut diff = list
                         .files
                         .into_iter()
@@ -1276,7 +1310,14 @@ pub fn DocumentPane(
                     agent_diff.set(diff);
                     diff_note.set(String::new());
                 }
-                Err(e) => diff_note.set(http_message(&e)),
+                Err(e) => {
+                    if !diff_current(gen, diff_gen.get_untracked(), &loaded_path.get_untracked(), &p) {
+                        return;
+                    }
+                    // The pane stays empty beside the note — agent_diff
+                    // was cleared when this fetch started.
+                    diff_note.set(http_message(&e));
+                }
             }
         });
     });
@@ -1399,6 +1440,57 @@ pub fn DocumentPane(
         }
     };
 
+    crate::shell::bind(
+        "file.preview",
+        Rc::new(move |_| {
+            if language_of(&loaded_path.get_untracked()) != "markdown" {
+                return Err("This file is not Markdown.".into());
+            }
+            preview.update(|v| *v = !*v);
+            Ok(())
+        }),
+    );
+    crate::shell::bind(
+        "file.agent-diff",
+        Rc::new(move |_| {
+            show_diff.update(|v| *v = !*v);
+            Ok(())
+        }),
+    );
+    crate::shell::bind(
+        "file.copy-path",
+        Rc::new(move |_| {
+            let path = loaded_path.get_untracked();
+            if path.is_empty() {
+                return Err("Open a file first.".into());
+            }
+            if let Some(win) = web_sys::window() {
+                let _ = win.navigator().clipboard().write_text(&path);
+            }
+            notice.set("Copied the path.".into());
+            Ok(())
+        }),
+    );
+    crate::shell::bind(
+        "file.copy-contents",
+        Rc::new(move |_| {
+            let text = content.get_untracked();
+            if text.is_empty() {
+                return Err("Open a file first.".into());
+            }
+            if let Some(win) = web_sys::window() {
+                let _ = win.navigator().clipboard().write_text(&text);
+            }
+            notice.set("Copied the file.".into());
+            Ok(())
+        }),
+    );
+    on_cleanup(|| {
+        for id in ["file.preview", "file.agent-diff", "file.copy-path", "file.copy-contents"] {
+            crate::shell::unbind(id);
+        }
+    });
+
     view! {
         <div
             class="ev-doc"
@@ -1500,16 +1592,6 @@ pub fn DocumentPane(
                 </Show>
             </div>
             <div class="ev-tools">
-                <Show when=move || language_of(&loaded_path.get()) == "markdown">
-                    <button type="button" class="chip" on:click=move |_| preview.update(|v| *v = !*v)>
-                        {move || if preview.get() { "Source" } else { "Preview" }}
-                    </button>
-                </Show>
-                <button
-                    type="button"
-                    class=move || if show_diff.get() { "chip on" } else { "chip" }
-                    on:click=move |_| show_diff.update(|v| *v = !*v)
-                >"Agent diff"</button>
                 <button
                     type="button"
                     class="secondary"
@@ -1531,15 +1613,6 @@ pub fn DocumentPane(
                     }>"Cancel"</button>
                     <button type="button" class="primary" data-ev-save=true disabled=move || saving.get() on:click=move |_| do_save()>"Save"</button>
                 </Show>
-                <span class="ev-status">{move || {
-                    if editing.get() {
-                        "Editing. Read-only until you opened Edit. Ctrl+S saves. Escape cancels.".into()
-                    } else if !write_block.get().is_empty() {
-                        write_block.get()
-                    } else {
-                        "Read-only. Ctrl+F finds. Enter jumps to the next match.".into()
-                    }
-                }}</span>
             </div>
         </div>
     }
@@ -1593,6 +1666,38 @@ mod tests {
         assert!(hits[1].start > 0);
         assert!(find_hits("abc", "").is_empty());
         assert!(find_hits("abc", "z").is_empty());
+        // Byte positions on the ASCII path stay per-occurrence.
+        assert_eq!(hits[0].start, 0);
+        assert_eq!(hits[0].end, 5);
+    }
+
+    #[test]
+    fn search_folds_greek_cyrillic_and_length_changing_latin() {
+        for (line, query) in [
+            ("Σ\n", "σ"),
+            ("σ\n", "Σ"),
+            ("Α\n", "α"),
+            ("α\n", "Α"),
+            ("А\n", "а"),
+            ("а\n", "А"),
+        ] {
+            let hits = find_hits(line, query);
+            assert_eq!(hits.len(), 1, "line {line:?} query {query:?}");
+            assert_eq!(hits[0].line, 1);
+            assert_eq!(hits[0].start, 0);
+            assert_eq!(hits[0].end, 0);
+        }
+        // Capital sharp S (U+1E9E) folds to ß and changes the byte length.
+        for (line, query) in [("ẞ\n", "ß"), ("ß\n", "ẞ")] {
+            let hits = find_hits(line, query);
+            assert_eq!(hits.len(), 1, "line {line:?} query {query:?}");
+            assert_eq!(hits[0].end, 0);
+        }
+        // İ folds to i + combining dot. The query and the line both fold.
+        let hits = find_hits("İstanbul\n", "İ");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].end, 0);
+        assert!(find_hits("plain ascii\n", "Σ").is_empty());
     }
 
     #[test]
@@ -1737,6 +1842,18 @@ mod tests {
         }
         assert!(matches!(blocks[3], MdBlock::Paragraph(ref t) if t.contains("**now**")));
         assert!(has_markdown_table(src));
+    }
+
+    #[test]
+    fn diff_current_scopes_to_file_and_generation() {
+        // The normal case: same file, no newer fetch — commit.
+        assert!(diff_current(3, 3, "a.rs", "a.rs"));
+        // File switched while the fetch was in flight (#1626).
+        assert!(!diff_current(3, 3, "b.rs", "a.rs"));
+        // Same file, but a newer fetch started — stale completion.
+        assert!(!diff_current(3, 4, "a.rs", "a.rs"));
+        // A newer fetch for the new file supersedes on both axes.
+        assert!(!diff_current(3, 4, "b.rs", "a.rs"));
     }
 
     #[test]

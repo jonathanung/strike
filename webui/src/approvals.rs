@@ -59,6 +59,8 @@ pub fn known_mode(mode: &str) -> bool {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ConfirmKind {
     Session { mode: String },
+    /// Autonomy (#1572): only ever armed for `skip-all`.
+    Autonomy { mode: String },
     Global { mode: String },
     Workspace { id: String, mode: String },
     RuleAdd {
@@ -67,7 +69,13 @@ pub enum ConfirmKind {
         pattern: String,
         action: String,
     },
-    RuleRemove { scope: String, index: i32 },
+    RuleRemove {
+        scope: String,
+        index: i32,
+        permission: String,
+        pattern: String,
+        action: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -121,6 +129,45 @@ pub fn session_confirm(mode: &str) -> PendingConfirm {
         body: body.into(),
         confirm_label: label.into(),
         kind: ConfirmKind::Session {
+            mode: mode.into(),
+        },
+    }
+}
+
+/// Autonomy (#1572) is a separate dial from permission mode: the four
+/// protocol exit-gate values. Unknown ids are ignored, never rendered.
+pub fn known_autonomy(mode: &str) -> bool {
+    matches!(mode, "supervised" | "agent" | "checks" | "skip-all")
+}
+
+/// Only `skip-all` removes a gate entirely, so only it confirms — the
+/// other modes still gate every phase exit, just with a different
+/// clearer (issue #1572 Q1, recommended default).
+pub fn autonomy_needs_confirm(mode: &str) -> bool {
+    mode == "skip-all"
+}
+
+/// Autonomy changes, mirroring [`begin_session_mode`]: same mode or an
+/// unknown id is a no-op, `skip-all` confirms first, everything else
+/// applies immediately. Applying only posts the op — the displayed
+/// state still waits for the daemon's `autonomy.selected`.
+pub fn begin_autonomy_change(current: &str, next: &str) -> ModeChange {
+    if !known_autonomy(next) || current == next {
+        return ModeChange::Same;
+    }
+    if autonomy_needs_confirm(next) {
+        ModeChange::Confirm(autonomy_confirm(next))
+    } else {
+        ModeChange::Apply(next.to_string())
+    }
+}
+
+pub fn autonomy_confirm(mode: &str) -> PendingConfirm {
+    PendingConfirm {
+        title: "Advance without exit gates?".into(),
+        body: "Skip-all advances workflow phases without exit gates: no one approves a phase exit and no check commands run. Tool permissions are unchanged — permission asks and deny rules still apply. Other sessions stay as they are.".into(),
+        confirm_label: "Use skip-all".into(),
+        kind: ConfirmKind::Autonomy {
             mode: mode.into(),
         },
     }
@@ -183,18 +230,42 @@ pub fn rule_add_confirm(scope: &str, permission: &str, pattern: &str, action: &s
     })
 }
 
-pub fn rule_remove_confirm(scope: &str, index: i32, action: &str) -> Option<PendingConfirm> {
+pub fn rule_remove_confirm(
+    scope: &str,
+    index: i32,
+    permission: &str,
+    pattern: &str,
+    action: &str,
+) -> Option<PendingConfirm> {
     if action != "deny" {
         return None;
     }
     Some(PendingConfirm {
         title: "Remove this deny rule?".into(),
-        body: "Removing a deny weakens that file. Yolo and Edits still honor every deny that remains, and managed denies are not in this list.".into(),
+        body: format!(
+            "{scope} · {permission} · {pattern} · {action}\n\nRemoving a deny weakens that file. Yolo and Edits still honor every deny that remains, and managed denies are not in this list."
+        ),
         confirm_label: "Remove deny".into(),
         kind: ConfirmKind::RuleRemove {
             scope: scope.into(),
             index,
+            permission: permission.into(),
+            pattern: pattern.into(),
+            action: action.into(),
         },
+    })
+}
+
+/// Body for POST /v1/permissions/rules/remove. Identity travels with the
+/// index so a shifted list cannot delete a different rule.
+pub fn rule_remove_body(rule: &RuleRecord, confirm: bool) -> serde_json::Value {
+    serde_json::json!({
+        "scope": rule.scope,
+        "index": rule.index,
+        "permission": rule.permission,
+        "pattern": rule.pattern,
+        "action": rule.action,
+        "confirm": confirm,
     })
 }
 
@@ -688,8 +759,70 @@ mod tests {
         assert!(rule_add_confirm("global", "bash", "rm *", "deny").is_none());
         let add = rule_add_confirm("global", "bash", "*", "allow").unwrap();
         assert!(add.body.contains("last matching rule"));
-        assert!(rule_remove_confirm("global", 1, "allow").is_none());
-        assert!(rule_remove_confirm("global", 1, "deny").is_some());
+        assert!(rule_remove_confirm("global", 1, "bash", "rm *", "allow").is_none());
+        let remove = rule_remove_confirm("global", 1, "bash", "rm *", "deny").unwrap();
+        assert!(remove.body.contains("global · bash · rm * · deny"), "{}", remove.body);
+        match remove.kind {
+            ConfirmKind::RuleRemove {
+                permission,
+                pattern,
+                action,
+                ..
+            } => {
+                assert_eq!(permission, "bash");
+                assert_eq!(pattern, "rm *");
+                assert_eq!(action, "deny");
+            }
+            other => panic!("{other:?}"),
+        }
+        let body = rule_remove_body(
+            &RuleRecord {
+                scope: "global".into(),
+                index: 1,
+                permission: "bash".into(),
+                pattern: "rm *".into(),
+                action: "deny".into(),
+            },
+            true,
+        );
+        assert_eq!(body["permission"], "bash");
+        assert_eq!(body["pattern"], "rm *");
+        assert_eq!(body["action"], "deny");
+        assert_eq!(body["index"], 1);
+        assert_eq!(body["confirm"], true);
+    }
+
+    #[test]
+    fn autonomy_change_confirms_only_skip_all() {
+        assert!(matches!(
+            begin_autonomy_change("supervised", "supervised"),
+            ModeChange::Same
+        ));
+        assert!(matches!(
+            begin_autonomy_change("supervised", "bogus"),
+            ModeChange::Same
+        ));
+        for mode in ["supervised", "agent", "checks"] {
+            assert!(matches!(
+                begin_autonomy_change("skip-all", mode),
+                ModeChange::Apply(ref m) if m == mode
+            ));
+        }
+        match begin_autonomy_change("supervised", "skip-all") {
+            ModeChange::Confirm(c) => {
+                assert!(c.title.contains("without exit gates"), "{}", c.title);
+                assert!(c.body.contains("Tool permissions are unchanged"));
+                assert_eq!(
+                    c.kind,
+                    ConfirmKind::Autonomy {
+                        mode: "skip-all".into()
+                    }
+                );
+            }
+            other => panic!("skip-all did not confirm: {other:?}"),
+        }
+        assert!(known_autonomy("checks"));
+        assert!(!known_autonomy("yolo"));
     }
 
     #[test]

@@ -168,6 +168,18 @@ fn store_prompt(ev: JsValue) {
     SCAN.with(|slot| slot.borrow_mut().prompt = Some(ev));
 }
 
+thread_local! {
+    static INSTALL_READY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+pub fn install_ready() -> bool {
+    INSTALL_READY.with(|slot| slot.get())
+}
+
+fn set_install_ready(ready: bool) {
+    INSTALL_READY.with(|slot| slot.set(ready));
+}
+
 fn call_install_prompt() {
     let ev = SCAN.with(|slot| slot.borrow().prompt.clone());
     let Some(ev) = ev else {
@@ -195,6 +207,16 @@ pub(crate) fn GatewayQR(
     let devices = RwSignal::new(Vec::<DeviceRow>::new());
     let device_note = RwSignal::new(String::new());
     crate::shell::bind(
+        "app.install",
+        Rc::new(|_| {
+            if !install_ready() {
+                return Err("This browser has not offered to install Strike.".into());
+            }
+            call_install_prompt();
+            Ok(())
+        }),
+    );
+    crate::shell::bind(
         "pair.revoke-all",
         Rc::new(move |_| {
             revoke_all(base, token, devices, device_note);
@@ -210,6 +232,7 @@ pub(crate) fn GatewayQR(
             ev.prevent_default();
             store_prompt(ev.into());
             install_ready.set(true);
+            set_install_ready(true);
         });
         let _ = win
             .add_event_listener_with_callback("beforeinstallprompt", cb.as_ref().unchecked_ref());
@@ -234,15 +257,23 @@ pub(crate) fn GatewayQR(
     });
     on_cleanup(halt_scan);
 
+    // Set when a Copy URL attempt was rejected by the browser (#1582):
+    // the dialog then shows the manual-copy fallback instead of the old
+    // unconditional "Pairing URL copied." claim.
+    let copy_failed = RwSignal::new(false);
     let copy_url = move |_| {
         let text = url.get_untracked();
         if text.is_empty() {
             return;
         }
-        if let Some(win) = web_sys::window() {
-            let _ = win.navigator().clipboard().write_text(&text);
-        }
-        status.set("Pairing URL copied.".into());
+        spawn_local(async move {
+            let ok = crate::clipboard::copy_text(&text).await.is_ok();
+            copy_failed.set(!ok);
+            status.set(crate::clipboard::pairing_copy_feedback(ok).into());
+            if !ok {
+                select_pairing_url();
+            }
+        });
     };
 
     view! {
@@ -250,9 +281,6 @@ pub(crate) fn GatewayQR(
             <div class="gq-landing" role="status">
                 <p>"Paired with this gateway. Add Strike to the home screen to open it again."</p>
                 <div class="gq-actions">
-                    <Show when=move || install_ready.get()>
-                        <button class="secondary gq-install" type="button" on:click=move |_| call_install_prompt()>"Install"</button>
-                    </Show>
                     <button class="secondary gq-revoke-self" type="button" on:click=move |_| {
                         if !crate::confirm::ask(
                             crate::confirm::ConfirmRequest {
@@ -283,12 +311,16 @@ pub(crate) fn GatewayQR(
                     </div>
                     <p class="gq-note">{move || note.get()}</p>
                     <div class="gq-qr" inner_html=move || svg.get()></div>
-                    <p class="gq-url">{move || url.get()}</p>
                     <input id="gq-url" readonly aria-label="Pairing URL" prop:value=move || url.get() />
                     <div class="gq-actions">
                         <button class="secondary" type="button" on:click=copy_url>"Copy URL"</button>
-                        <button class="secondary gq-new" type="button" on:click=move |_| queue_pair(base, token, note, url, svg, warning, devices, device_note)>"New code"</button>
+                        <button class="secondary gq-new" type="button" on:click=move |_| { copy_failed.set(false); queue_pair(base, token, note, url, svg, warning, devices, device_note); }>"New code"</button>
                     </div>
+                    <Show when=move || copy_failed.get()>
+                        <p class="gq-copy-fallback" role="alert">
+                            "Copy didn't work in this browser. The pairing URL above is selected — copy it manually, then open it on your phone to pair."
+                        </p>
+                    </Show>
                     <p class="gq-warn">{move || warning.get()}</p>
                     <h3 class="gq-sub">"Paired browsers"</h3>
                     <p class="hint">{move || device_note.get()}</p>
@@ -351,6 +383,20 @@ pub(crate) fn GatewayQR(
                 </div>
             </div>
         </Show>
+    }
+}
+
+/// Select the pairing URL field so a user whose clipboard write was
+/// rejected can copy it manually with one keystroke (#1582).
+fn select_pairing_url() {
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    let Some(el) = doc.get_element_by_id("gq-url") else {
+        return;
+    };
+    if let Ok(input) = el.dyn_into::<web_sys::HtmlInputElement>() {
+        input.select();
     }
 }
 

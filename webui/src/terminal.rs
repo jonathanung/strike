@@ -2,6 +2,8 @@
 //! over a same-origin websocket, replays scrollback, and sends keystrokes.
 //! Leaving the tab closes the socket and leaves the process running.
 
+use std::rc::Rc;
+
 use gloo_net::http::Request;
 use leptos::html::Pre;
 use leptos::prelude::*;
@@ -613,6 +615,16 @@ pub fn TerminalPanel(
     let agent_busy = ctl.agent_busy;
     let policy = ctl.policy;
     let kill_on_end = ctl.kill_on_end;
+    crate::shell::bind(
+        "terminal.kill-on-end",
+        Rc::new(move |_| {
+            kill_on_end.set(!kill_on_end.get_untracked());
+            Ok(())
+        }),
+    );
+    if crate::park::take("terminal.kill-on-end").is_some() {
+        kill_on_end.set(!kill_on_end.get_untracked());
+    }
     let workspace_id = ctl.workspace_id;
     let screen_ref = ctl.screen_ref;
 
@@ -640,18 +652,6 @@ pub fn TerminalPanel(
                 <button class="chip" on:click=move |_| ctl.open_new()>"New"</button>
                 <button class="chip" disabled=move || active.get().is_empty() on:click=move |_| ctl.close_active()>"Close"</button>
             </div>
-            <label class="term-check">
-                <input
-                    type="checkbox"
-                    prop:checked=move || kill_on_end.get()
-                    on:change=move |ev| {
-                        let Some(target) = ev.target() else { return };
-                        let Ok(input) = target.dyn_into::<web_sys::HtmlInputElement>() else { return };
-                        kill_on_end.set(input.checked());
-                    }
-                />
-                "Close new shells when the session ends"
-            </label>
             <Show when=move || shared.get() && agent_busy.get()>
                 <p class="term-banner" role="status">"You and the agent share this directory. This shell is yours — the agent does not type here."</p>
             </Show>

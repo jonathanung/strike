@@ -63,23 +63,63 @@ export const scenario = async (ctx) => {
   ctx.check(Boolean(saved), "Enter did not save the trigger");
   if (saved) {
     await ctx.page.evaluate(`(() => {
-      const btn = [...document.querySelectorAll("button")].find((b) => (b.innerText || "").includes("Dismiss secret"));
+      const btn = [...document.querySelectorAll("button")].find((b) => (b.innerText || "").trim() === "Reveal secret");
+      if (btn) btn.click();
+    })()`);
+    const revealed = await ctx.waitUntil(
+      `Boolean(document.querySelector(".secret-once input[type='text']"))`,
+      4000,
+      "secret revealed",
+    );
+    ctx.check(Boolean(revealed), "Reveal secret did not show the signing secret");
+    await ctx.page.evaluate(`(() => {
+      const btn = [...document.querySelectorAll("button")].find((b) => (b.innerText || "").trim() === "Mask secret");
       if (btn) btn.click();
     })()`);
     await ctx.waitUntil(
-      `document.body && !document.body.innerText.includes("Copy this signing secret now")`,
+      `Boolean(document.querySelector(".secret-once input[type='password']")) && !document.querySelector(".secret-once input[type='text']")`,
       4000,
-      "secret dismissed",
+      "secret masked",
     );
   }
-  await ctx.click("button", "Send test");
+  await ctx.press("k", 2);
+  await ctx.page.evaluate(`(() => {
+    const input = document.querySelector(".palette input");
+    if (!input) return false;
+    const proto = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
+    proto.set.call(input, "Send test event");
+    input.dispatchEvent(new InputEvent("input", { bubbles: true, data: "Send test event" }));
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    return true;
+  })()`);
+  await ctx.waitUntil(
+    `Boolean(document.querySelector("[data-choice-id]"))`,
+    4000,
+    "trigger test choices",
+  );
+  await ctx.page.evaluate(`document.querySelector("[data-choice-id]")?.click()`);
   const accepted = await ctx.waitUntil(
     `document.body && document.body.innerText.includes("Test accepted")`,
     10000,
     "trigger test accepted",
   );
   ctx.check(Boolean(accepted), "synthetic delivery was not accepted");
-  await ctx.click("button", "Reject signature");
+  await ctx.press("k", 2);
+  await ctx.page.evaluate(`(() => {
+    const input = document.querySelector(".palette input");
+    if (!input) return false;
+    const proto = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
+    proto.set.call(input, "bad signature");
+    input.dispatchEvent(new InputEvent("input", { bubbles: true, data: "bad signature" }));
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    return true;
+  })()`);
+  await ctx.waitUntil(
+    `Boolean(document.querySelector("[data-choice-id]"))`,
+    4000,
+    "bad signature choices",
+  );
+  await ctx.page.evaluate(`document.querySelector("[data-choice-id]")?.click()`);
   const rejected = await ctx.waitUntil(
     `document.body && document.body.innerText.includes("Hook returned 401")`,
     10000,

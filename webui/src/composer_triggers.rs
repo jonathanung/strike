@@ -7,7 +7,21 @@
 //! `trigger_status` is the one-line stand-in for the status component.
 //! Call it from that component when it lands.
 
+use std::cell::RefCell;
+
 use crate::model::{ComposerCommand, SkillInfo};
+
+thread_local! {
+    static PALETTE_SKILLS: RefCell<Vec<(String, String)>> = RefCell::new(Vec::new());
+}
+
+pub fn set_palette_skills(rows: Vec<(String, String)>) {
+    PALETTE_SKILLS.with(|slot| *slot.borrow_mut() = rows);
+}
+
+pub fn palette_skills() -> Vec<(String, String)> {
+    PALETTE_SKILLS.with(|slot| slot.borrow().clone())
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
@@ -193,7 +207,7 @@ pub fn slash_suggestions(
             replace_all: false,
         });
     }
-    out.truncate(40);
+    out.truncate(8);
     out
 }
 
@@ -220,7 +234,7 @@ pub fn skill_suggestions(skills: &[SkillInfo], query: &str) -> Vec<Suggestion> {
             });
         }
     }
-    out.truncate(40);
+    out.truncate(8);
     out
 }
 

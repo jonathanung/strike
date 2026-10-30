@@ -98,6 +98,7 @@ jobs:
             . "$HOME/.cargo/env"
           fi
           cargo test --manifest-path webui/protocol-schema/Cargo.toml --locked
+          cargo test --manifest-path webui/load-guard/Cargo.toml --locked
 
       # E3.2 prompt regression: verbose report of tool/turn/token deltas.
       # Non-blocking for now (test itself soft-fails metric drift unless

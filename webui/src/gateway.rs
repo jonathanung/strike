@@ -442,6 +442,151 @@ async fn gateway_fetch(
     Ok((status, text))
 }
 
+thread_local! {
+    static ACTIVATE: RefCell<Option<Rc<dyn Fn(String, String)>>> = const { RefCell::new(None) };
+    static SAVED: RefCell<Vec<Profile>> = RefCell::new(Vec::new());
+    static GATEWAY_ROWS: RefCell<String> = RefCell::new(String::new());
+    static GATEWAY_SYNCED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+fn leak_str(text: String) -> &'static str {
+    Box::leak(text.into_boxed_str())
+}
+
+fn leak_words(fixed: &[&'static str], extra: &str) -> &'static [&'static str] {
+    let mut words: Vec<&'static str> = fixed.to_vec();
+    if !extra.is_empty() {
+        words.push(leak_str(extra.to_string()));
+    }
+    Box::leak(words.into_boxed_slice())
+}
+
+fn activate_gateway(id: &str) -> Result<(), String> {
+    let base = if id == "this" {
+        String::new()
+    } else {
+        SAVED.with(|slot| {
+            slot.borrow()
+                .iter()
+                .find(|row| row.id == id)
+                .map(|row| row.base.clone())
+                .unwrap_or_default()
+        })
+    };
+    let run = ACTIVATE.with(|slot| slot.borrow().clone());
+    let Some(run) = run else {
+        return Err("Gateways are not ready.".into());
+    };
+    run(id.to_string(), base);
+    Ok(())
+}
+
+fn forget_gateway(id: &str) -> Result<(), String> {
+    if id == "this" || id.is_empty() {
+        return Err("This gateway stays.".into());
+    }
+    persist_token(id, "");
+    let Some(run) = FORGET.with(|slot| slot.borrow().clone()) else {
+        return Err("Gateways are not ready.".into());
+    };
+    run(id.to_string());
+    Ok(())
+}
+
+thread_local! {
+    static FORGET: RefCell<Option<Rc<dyn Fn(String)>>> = const { RefCell::new(None) };
+}
+
+fn sync_gateway_rows() {
+    let profiles = SAVED.with(|slot| slot.borrow().clone());
+    let key = profiles
+        .iter()
+        .map(|row| format!("{}:{}", row.id, row.name))
+        .collect::<Vec<_>>()
+        .join("|");
+    let changed = GATEWAY_ROWS.with(|slot| {
+        if *slot.borrow() == key {
+            false
+        } else {
+            *slot.borrow_mut() = key;
+            true
+        }
+    });
+    let first = GATEWAY_SYNCED.with(|slot| {
+        let first = !slot.get();
+        slot.set(true);
+        first
+    });
+    if !changed && !first {
+        return;
+    }
+    let mut rows = vec![Profile {
+        id: "this".into(),
+        name: "This gateway".into(),
+        base: String::new(),
+        ssh: String::new(),
+        warn: false,
+    }];
+    rows.extend(profiles);
+    let mut switch = Vec::new();
+    let mut forget = Vec::new();
+    for row in rows {
+        let id = row.id.clone();
+        let name = row.name.clone();
+        let switch_id = leak_str(format!("gw.switch.{id}"));
+        let label = leak_str(format!("Switch to gateway: {name}"));
+        let words = leak_words(&["switch", "gateway", "remote"], &name);
+        let picked = id.clone();
+        switch.push(
+            crate::shell::Command::new(
+                switch_id,
+                crate::shell::Group::Gateway,
+                label,
+                "Use this gateway in the tab",
+                Rc::new(move |_| activate_gateway(&picked)),
+            )
+            .keywords(words)
+            .order(60),
+        );
+        if id != "this" {
+            let forget_id = leak_str(format!("gw.remove.{id}"));
+            let label = leak_str(format!("Gateways: Remove {name}"));
+            let words = leak_words(&["remove", "delete", "profile", "forget"], &name);
+            let picked = id.clone();
+            let named = name.clone();
+            forget.push(
+                crate::shell::Command::new(
+                    forget_id,
+                    crate::shell::Group::Gateway,
+                    label,
+                    "Forget this saved gateway",
+                    Rc::new(move |_| {
+                        let picked = picked.clone();
+                        let named = named.clone();
+                        if !crate::confirm::ask(
+                            crate::confirm::ConfirmRequest {
+                                title: format!("Remove {named}?"),
+                                body: "This browser forgets the gateway. Its token is dropped from this tab.".into(),
+                                confirm_label: "Remove".into(),
+                            },
+                            Rc::new(move || {
+                                let _ = forget_gateway(&picked);
+                            }),
+                        ) {
+                            return Err(crate::confirm::BUSY.into());
+                        }
+                        Ok(())
+                    }),
+                )
+                .keywords(words)
+                .order(70),
+            );
+        }
+    }
+    crate::shell::replace_prefixed("gw.switch.", switch);
+    crate::shell::replace_prefixed("gw.remove.", forget);
+}
+
 #[component]
 pub fn GatewaySwitcher(
     inline: bool,
@@ -632,7 +777,7 @@ pub fn GatewaySwitcher(
         });
     };
 
-    let reconnect = move |_| {
+    let reconnect = move || {
         gateway.set("reconnecting".into());
         detail.set("Reconnecting…".into());
         refresh();
@@ -707,9 +852,16 @@ pub fn GatewaySwitcher(
                 Ok(())
             }),
         );
+        crate::shell::bind(
+            "gateway.reconnect",
+            Rc::new(move |_| {
+                reconnect();
+                Ok(())
+            }),
+        );
     }
 
-    let logout_browser = move |_| {
+    let logout_browser = move || {
         let (b, t, id) = (base.get(), token.get(), selected.get());
         spawn_local(async move {
             let result = gateway_fetch("POST", &b, &t, "/v1/gateway/logout", Some(json!({}))).await;
@@ -725,6 +877,20 @@ pub fn GatewaySwitcher(
             }
         });
     };
+    crate::shell::bind(
+        "gateway.logout",
+        Rc::new(move |_| {
+            logout_browser();
+            Ok(())
+        }),
+    );
+    crate::shell::bind(
+        "gateway.add",
+        Rc::new(move |_| {
+            open.set(true);
+            Ok(())
+        }),
+    );
 
     let add_profile = move |_| {
         let (n, u, s) = (name.get(), url.get(), ssh.get());
@@ -763,12 +929,31 @@ pub fn GatewaySwitcher(
     };
 
     let remove_profile = move |id: String| {
+        persist_token(&id, "");
         profiles.update(|list| list.retain(|p| p.id != id));
         save_profiles(&profiles.get());
         if selected.get_untracked() == id {
             selected.set("this".into());
+            base.set(String::new());
         }
     };
+    {
+        let pick = pick;
+        ACTIVATE.with(|slot| {
+            *slot.borrow_mut() = Some(Rc::new(move |id, profile_base| {
+                pick.update(|(gen, cur, dest)| {
+                    *gen = gen.wrapping_add(1);
+                    *cur = id;
+                    *dest = profile_base;
+                });
+            }));
+        });
+        FORGET.with(|slot| *slot.borrow_mut() = Some(Rc::new(remove_profile)));
+    }
+    Effect::new(move |_| {
+        SAVED.with(|slot| *slot.borrow_mut() = profiles.get());
+        sync_gateway_rows();
+    });
 
     let on_token = move |ev| {
         let value = event_target_value(&ev);
@@ -777,121 +962,18 @@ pub fn GatewaySwitcher(
         forget_persisted_host_token();
     };
 
-    let state_label = move || match gateway.get().as_str() {
-        "connected" => "Connected",
-        "unauthorized" => "Unauthorized",
-        "unreachable" => "Unreachable",
-        "reconnecting" => "Reconnecting",
-        _ => "Checking",
-    };
-    let state_class = move || match gateway.get().as_str() {
-        "connected" => "chip ok",
-        "unauthorized" | "unreachable" => "chip bad",
-        _ => "chip",
-    };
-
     let panel = move || {
         let _open = open.get();
-        let rows = {
-            let mut rows = vec![Profile {
-                id: "this".into(),
-                name: "This gateway".into(),
-                base: String::new(),
-                ssh: String::new(),
-                warn: false,
-            }];
-            rows.extend(profiles.get());
-            rows
-        };
-        let row_count = rows.len();
-        let cur = cursor.get().min(row_count.saturating_sub(1));
-        let select = choose;
-        let remove = remove_profile;
         view! {
             <div class="gw-head">
                 <h2 class="panel-title">"Gateways"</h2>
                 <span class="gw-head-end">
-                    <span class=state_class>{state_label}</span>
                     {(!inline).then(|| view! {
                         <button class="secondary" on:click=move |_| open.set(false)>"Close"</button>
                     })}
                 </span>
             </div>
             <p class="hint gw-detail" aria-live="polite">{move || detail.get()}</p>
-            <div class="gw-actions">
-                <button class="secondary" on:click=reconnect>"Reconnect"</button>
-                <button class="secondary" data-action="rotate-token" on:click=move |_| {
-                    let rotate = rotate;
-                    let id = selected.get_untracked();
-                    let who = if id == "this" {
-                        "this gateway".to_string()
-                    } else {
-                        profiles
-                            .get_untracked()
-                            .iter()
-                            .find(|p| p.id == id)
-                            .map(|p| p.name.clone())
-                            .unwrap_or_else(|| "the selected gateway".to_string())
-                    };
-                    if !crate::confirm::ask(
-                        crate::confirm::ConfirmRequest {
-                            title: format!("Rotate token for {who}?"),
-                            body: "This invalidates the current token everywhere it was copied and drops all pairing grants. This browser stores the new one.".into(),
-                            confirm_label: "Rotate token".into(),
-                        },
-                        Rc::new(move || rotate()),
-                    ) {
-                        detail.set(crate::confirm::BUSY.into());
-                    }
-                }>"Rotate token"</button>
-                <button class="secondary" data-action="revoke-grants" on:click=move |_| {
-                    let revoke = revoke;
-                    if !crate::confirm::ask(
-                        crate::confirm::ConfirmRequest {
-                            title: "Revoke gateway grants?".into(),
-                            body: "Every short-lived grant stops working. The host token file is not changed.".into(),
-                            confirm_label: "Revoke grants".into(),
-                        },
-                        Rc::new(move || revoke()),
-                    ) {
-                        detail.set(crate::confirm::BUSY.into());
-                    }
-                }>"Revoke grants"</button>
-                <button class="secondary" on:click=logout_browser>"Log out browser"</button>
-            </div>
-            <ul class="plain gw-list">
-                {rows.into_iter().enumerate().map(|(i, row)| {
-                    let id = row.id.clone();
-                    let profile_base = row.base.clone();
-                    let select_id = id.clone();
-                    let select_base = profile_base.clone();
-                    let remove_id = id.clone();
-                    let label = row.name.clone();
-                    let meta = if row.base.is_empty() { "This page's daemon".to_string() } else { row.base.clone() };
-                    let ssh_hint = row.ssh.clone();
-                    let warn = row.warn;
-                    let on = selected.get() == id;
-                    let at_cursor = i == cur;
-                    view! {
-                        <li class=if on { "gw-row on" } else if at_cursor { "gw-row cursor" } else { "gw-row" }>
-                            <button class="gw-use" on:click=move |_| select(select_id.clone(), select_base.clone())>
-                                <span class="name">{label}</span>
-                                <span class="path">{meta}</span>
-                                {(!ssh_hint.is_empty()).then(|| {
-                                    let hint = ssh_hint.clone();
-                                    view! { <span class="path">{format!("strike connect {hint}")}</span> }
-                                })}
-                                {warn.then(|| view! { <span class="path">"Hostname is not a literal private address."</span> })}
-                            </button>
-                            {if id != "this" {
-                                view! { <button class="secondary" on:click=move |_| remove(remove_id.clone())>"Remove"</button> }.into_any()
-                            } else {
-                                ().into_any()
-                            }}
-                        </li>
-                    }
-                }).collect_view()}
-            </ul>
             <label>"Token for this gateway"</label>
             <input type="password" autocomplete="off" spellcheck="false" aria-label="Gateway token"
                 prop:value=move || token.get()
@@ -909,7 +991,6 @@ pub fn GatewaySwitcher(
                 <button class="secondary" on:click=add_profile>"Save"</button>
             </div>
             <p class="hint">{move || form_note.get()}</p>
-            <p class="hint keys">"Alt+W opens this list. Arrow keys move. Enter selects. Esc closes."</p>
         }
     };
 
@@ -953,11 +1034,7 @@ pub fn GatewaySwitcher(
     let body_class = if inline { "gw-body" } else { "gw-pop" };
     let body_role = if inline { "region" } else { "dialog" };
     view! {
-        <div class=wrap>
-            <Show when=move || !inline>
-                <button class="gw-btn" title="Alt+W" aria-haspopup="dialog" aria-expanded=move || open.get().to_string()
-                    on:click=move |_| open.update(|v| *v = !*v)>"Gateways"</button>
-            </Show>
+        <div class=wrap data-gateway-host="true" data-open=move || if open.get() { "1" } else { "0" }>
             <Show when=move || !inline && open.get()>
                 <div class="gw-back" aria-hidden="true" on:click=move |_| open.set(false)></div>
             </Show>

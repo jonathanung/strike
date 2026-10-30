@@ -594,12 +594,6 @@ pub fn GoalsPane(base: RwSignal<String>, token: RwSignal<String>) -> impl IntoVi
                                 </Show>
                                 <div class="goals-actions">
                                     <button id="goals-run" class="primary" type="submit" disabled=move || busy.get()>"Run goal"</button>
-                                    <button type="button" class="secondary" on:click=move |_| {
-                                        description.set("Prove the failing check stops the loop".into());
-                                        verification.set("false".into());
-                                        verify_fails.set("3".into());
-                                        turns.set("20".into());
-                                    }>"Fill a failing check"</button>
                                 </div>
                                 <p class="hint keys">"Tab through the fields. Enter runs the goal. Ctrl+K then Goals, or Alt+G, opens this view."</p>
                             </form>

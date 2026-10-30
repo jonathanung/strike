@@ -223,6 +223,57 @@ func parseServeArgs(args []string) (serveOptions, error) {
 	return opts, nil
 }
 
+// serveShutdownTimeout bounds every stage of a Ctrl-C / SIGTERM shutdown:
+// the HTTP graceful drain and the wait for live roots to stop. A stage
+// that misses the bound is abandoned (the second-signal watcher below is
+// the other escape hatch) so `strike serve` can never hang on shutdown
+// the way #1678 reported.
+const serveShutdownTimeout = 5 * time.Second
+
+// exitOnSecondSignal calls exit(130) when a second signal arrives on
+// signals. The first signal is the graceful one (it cancels the serve
+// context via signal.NotifyContext); a second Ctrl-C / SIGTERM means
+// the operator wants the process gone now, and signal.Notify would
+// otherwise swallow it and leave a stuck shutdown unkillable except
+// by SIGKILL. stop ends the watcher when serve returns on its own.
+func exitOnSecondSignal(signals <-chan os.Signal, stop <-chan struct{}, exit func(int)) {
+	for n := 0; n < 2; {
+		select {
+		case <-stop:
+			return
+		case _, ok := <-signals:
+			if !ok {
+				return
+			}
+			n++
+		}
+	}
+	exit(130)
+}
+
+// waitForServeRoots reports whether every done channel closed within
+// timeout. It replaces an unbounded `<-done` per root in cleanup: an
+// engine whose turn ignores cancellation (a stuck tool or provider
+// call) must not pin the whole process shutdown forever (#1678).
+func waitForServeRoots(done []<-chan struct{}, timeout time.Duration) bool {
+	if len(done) == 0 {
+		return true
+	}
+	all := make(chan struct{})
+	go func() {
+		for _, ch := range done {
+			<-ch
+		}
+		close(all)
+	}()
+	select {
+	case <-all:
+		return true
+	case <-time.After(timeout):
+		return false
+	}
+}
+
 func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 	bindAddr, err := server.ResolveDaemonBindAddr(opts.addr, opts.allowPrivateBind)
 	if err != nil {
@@ -250,6 +301,16 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// A second Ctrl-C / SIGTERM forces an immediate exit. Without this,
+	// signal.Notify keeps delivering to channels nobody drains once the
+	// graceful path stalls, and the terminal user is stuck (#1678).
+	forceCh := make(chan os.Signal, 2)
+	signal.Notify(forceCh, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(forceCh)
+	forceStop := make(chan struct{})
+	defer close(forceStop)
+	go exitOnSecondSignal(forceCh, forceStop, os.Exit)
 
 	usageDir := usageaudit.DefaultDir()
 	if usageLog, err := usageaudit.Open(usageDir); err != nil {
@@ -546,9 +607,23 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 					sr.cancel()
 				}
 			}
-			// Wait for all engines to finish.
+			// Wait for all engines to finish — bounded. A root whose
+			// engine ignores cancellation must not hang shutdown
+			// forever (#1678); on timeout the remaining closes are
+			// skipped too (they may touch the stuck root) and the
+			// process exits, letting the OS reclaim the rest.
+			done := make([]<-chan struct{}, 0, len(refs))
 			for _, sr := range refs {
-				<-sr.done
+				if sr.done != nil {
+					done = append(done, sr.done)
+				}
+			}
+			if !waitForServeRoots(done, serveShutdownTimeout) {
+				fmt.Fprintln(stderr, "strike: shutdown timed out waiting for sessions to stop; exiting anyway")
+				if out == nil {
+					out = fmt.Errorf("shutdown: sessions did not stop within %s", serveShutdownTimeout)
+				}
+				return out
 			}
 			// Close all binds, worktrees, and shared services.
 			for _, sr := range refs {
@@ -720,7 +795,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 
 	select {
 	case <-ctx.Done():
-		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		shutCtx, cancel := context.WithTimeout(context.Background(), serveShutdownTimeout)
 		defer cancel()
 		_ = srv.Shutdown(shutCtx)
 		err := <-errCh
