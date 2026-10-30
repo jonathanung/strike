@@ -141,6 +141,178 @@ pub fn find_hits(text: &str, query: &str) -> Vec<Hit> {
     hits
 }
 
+/// Byte index of the start of the line containing `byte` (clamped).
+fn line_start_of(text: &str, byte: usize) -> usize {
+    let byte = floor_boundary(text, byte);
+    text[..byte].rfind('\n').map(|i| i + 1).unwrap_or(0)
+}
+
+fn floor_boundary(text: &str, byte: usize) -> usize {
+    let mut byte = byte.min(text.len());
+    while byte > 0 && !text.is_char_boundary(byte) {
+        byte -= 1;
+    }
+    byte
+}
+
+/// Number of UTF-16 code units in `text[..byte]` — the offset space a
+/// textarea's `selectionStart`/`setSelectionRange` uses.
+pub fn byte_to_utf16(text: &str, byte: usize) -> usize {
+    let byte = floor_boundary(text, byte);
+    text[..byte].chars().map(|c| c.len_utf16()).sum()
+}
+
+/// 1-based (line, character column) for a byte offset in `text`.
+/// Column counts characters (not bytes or display cells), matching how
+/// users and agents quote positions (#1416 Q1 default).
+pub fn caret_ln_col(text: &str, byte: usize) -> (u32, u32) {
+    let byte = floor_boundary(text, byte);
+    let head = &text[..byte];
+    let line = head.matches('\n').count() as u32 + 1;
+    let col = head
+        .rsplit('\n')
+        .next()
+        .map(|tail| tail.chars().count() as u32 + 1)
+        .unwrap_or(1);
+    (line, col)
+}
+
+/// Indent unit detected from the file: a tab when indented lines use
+/// tabs, otherwise the smallest positive leading-space run (so a file
+/// nested four deep still yields its one-level unit). Fallback: two
+/// spaces (#1408 Q1 default).
+pub fn detect_indent_unit(text: &str) -> String {
+    let mut best: Option<usize> = None;
+    for line in lines_of(text) {
+        if line.starts_with('\t') {
+            return "\t".to_string();
+        }
+        let spaces = line.len() - line.trim_start_matches(' ').len();
+        if spaces > 0 && !line.trim().is_empty() {
+            best = Some(match best {
+                None => spaces,
+                Some(b) => b.min(spaces),
+            });
+        }
+    }
+    match best {
+        Some(n) => " ".repeat(n.clamp(1, 8)),
+        None => "  ".to_string(),
+    }
+}
+
+/// Apply Tab (`shift == false`) or Shift+Tab to `text` for the byte
+/// selection `start..end`. Returns the new text and byte selection, or
+/// `None` for an outdent that would change nothing (#1408).
+/// No selection + Tab inserts the unit at the caret (Q2 default); a
+/// selection, or any Shift+Tab, indents/outdents every line it spans.
+/// A selection ending exactly at a line start does not touch that line.
+pub fn apply_tab(
+    text: &str,
+    start: usize,
+    end: usize,
+    shift: bool,
+) -> Option<(String, usize, usize)> {
+    let start = floor_boundary(text, start);
+    let end = floor_boundary(text, end.max(start));
+    let unit = detect_indent_unit(text);
+    if !shift && start == end {
+        let mut out = String::with_capacity(text.len() + unit.len());
+        out.push_str(&text[..start]);
+        out.push_str(&unit);
+        out.push_str(&text[start..]);
+        let caret = start + unit.len();
+        return Some((out, caret, caret));
+    }
+    let first = line_start_of(text, start);
+    // Last spanned line: selection end, excluding a trailing line the
+    // selection only touches at its first byte.
+    let last_probe = if end > start && end > 0 && text.as_bytes()[end - 1] == b'\n' {
+        end - 1
+    } else {
+        end
+    };
+    let last = line_start_of(text, last_probe);
+    let spanned_end = text[last..]
+        .find('\n')
+        .map(|i| last + i)
+        .unwrap_or(text.len());
+    let mut new_start = start;
+    let mut new_end = end;
+    let mut out = String::with_capacity(text.len() + unit.len() * 4);
+    out.push_str(&text[..first]);
+    for (idx, line) in text[first..spanned_end].split('\n').enumerate() {
+        if idx > 0 {
+            out.push('\n');
+        }
+        if shift {
+            let removed = if line.starts_with('\t') {
+                1
+            } else if line.starts_with(' ') {
+                let spaces = line.len() - line.trim_start_matches(' ').len();
+                spaces.min(unit.len())
+            } else {
+                0
+            };
+            out.push_str(&line[removed..]);
+            if idx == 0 {
+                new_start = new_start.saturating_sub(removed).max(first);
+            }
+            new_end = new_end.saturating_sub(removed);
+        } else {
+            out.push_str(&unit);
+            out.push_str(line);
+            if idx == 0 {
+                new_start += unit.len();
+            }
+            new_end += unit.len();
+        }
+    }
+    out.push_str(&text[spanned_end..]);
+    if out == text {
+        return None;
+    }
+    new_start = new_start.min(out.len());
+    new_end = new_end.max(new_start).min(out.len());
+    Some((out, new_start, new_end))
+}
+
+/// Parse a go-to-line request against the loaded line count.
+/// Returns `(line, clamped)`; `None` for empty/non-numeric input or an
+/// empty file. Line 0 clamps to 1 (#1403).
+pub fn clamp_goto(input: &str, total_lines: usize) -> Option<(u32, bool)> {
+    if total_lines == 0 {
+        return None;
+    }
+    let parsed: u32 = input.trim().parse().ok()?;
+    if parsed == 0 {
+        return Some((1, true));
+    }
+    let total = total_lines as u32;
+    if parsed > total {
+        Some((total, true))
+    } else {
+        Some((parsed, false))
+    }
+}
+
+/// Byte offset of the start of 1-based `line` (clamped to the last line).
+pub fn line_start_byte(text: &str, line: u32) -> usize {
+    if line <= 1 {
+        return 0;
+    }
+    let mut seen = 1u32;
+    for (i, b) in text.bytes().enumerate() {
+        if b == b'\n' {
+            seen += 1;
+            if seen == line {
+                return i + 1;
+            }
+        }
+    }
+    text.len()
+}
+
 pub fn highlight_line(lang: &str, line: &str) -> Vec<Tok> {
     let marker = comment_marker(lang);
     let keys = keywords(lang);
@@ -814,15 +986,49 @@ fn scroll_line_soon(line: u32) {
 }
 
 fn focus_search() {
+    focus_by_id("ev-search");
+}
+
+fn focus_goto() {
+    focus_by_id("ev-goto");
+}
+
+fn focus_by_id(id: &str) {
     let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
         return;
     };
-    let Some(el) = doc.get_element_by_id("ev-search") else {
+    let Some(el) = doc.get_element_by_id(id) else {
         return;
     };
     if let Some(html) = el.dyn_ref::<web_sys::HtmlElement>() {
         let _ = html.focus();
     }
+    if let Some(input) = el.dyn_ref::<web_sys::HtmlInputElement>() {
+        input.select();
+    }
+}
+
+fn editor_textarea() -> Option<web_sys::HtmlTextAreaElement> {
+    let doc = web_sys::window()?.document()?;
+    doc.get_element_by_id("ev-editor")?.dyn_into::<web_sys::HtmlTextAreaElement>().ok()
+}
+
+/// Restore a byte selection on the editor textarea after Leptos has
+/// painted the new draft (deferred one tick, like `scroll_line_soon`).
+fn restore_selection_soon(text: String, start: usize, end: usize) {
+    let Some(w) = web_sys::window() else {
+        return;
+    };
+    let cb = Closure::<dyn FnMut()>::new(move || {
+        if let Some(ta) = editor_textarea() {
+            let _ = ta.focus();
+            let s = byte_to_utf16(&text, start) as u32;
+            let e = byte_to_utf16(&text, end) as u32;
+            let _ = ta.set_selection_range(s, e);
+        }
+    });
+    let _ = w.set_timeout_with_callback_and_timeout_and_arguments_0(cb.as_ref().unchecked_ref(), 0);
+    cb.forget();
 }
 
 #[derive(Deserialize)]
@@ -1185,6 +1391,9 @@ pub fn DocumentPane(
     let diff_note = RwSignal::new(String::new());
     let reload_tick = RwSignal::new(0u32);
     let load_gen = RwSignal::new(0u32);
+    let cursor_pos = RwSignal::new((1u32, 1u32));
+    let goto_text = RwSignal::new(String::new());
+    let goto_note = RwSignal::new(String::new());
 
     Effect::new(move |_| {
         let text = if editing.get() { draft.get() } else { content.get() };
@@ -1212,6 +1421,9 @@ pub fn DocumentPane(
         editing.set(false);
         conflict.set(false);
         query.set(String::new());
+        cursor_pos.set((1, 1));
+        goto_text.set(String::new());
+        goto_note.set(String::new());
         if p.is_empty() {
             return;
         }
@@ -1374,6 +1586,65 @@ pub fn DocumentPane(
         });
     };
 
+    let do_goto = move || {
+        let raw = goto_text.get_untracked();
+        let is_editing = editing.get_untracked();
+        let text = if is_editing { draft.get_untracked() } else { content.get_untracked() };
+        let total = lines_of(&text).len();
+        let Some((line, clamped)) = clamp_goto(&raw, total) else {
+            goto_note.set("Enter a line number.".into());
+            return;
+        };
+        let suffix = if clamped { " (clamped)" } else { "" };
+        if is_editing {
+            let byte = line_start_byte(&text, line);
+            goto_note.set(format!("Line {line} of {total}{suffix}"));
+            cursor_pos.set(caret_ln_col(&text, byte));
+            restore_selection_soon(text, byte, byte);
+            return;
+        }
+        if line as usize > MAX_RENDER_LINES {
+            // Slice 1 scope (#1403): SourceView renders only the first
+            // MAX_RENDER_LINES lines, so a jump there would silently
+            // no-op. Say so instead; a windowed renderer is a follow-up.
+            goto_note.set(format!("Line {line} is beyond the first {MAX_RENDER_LINES} rendered lines of {total}."));
+            return;
+        }
+        goto_note.set(format!("Line {line} of {total}{suffix}"));
+        jump_line.set(line);
+    };
+
+    let sync_cursor = move || {
+        if let Some(ta) = editor_textarea() {
+            if let Ok(Some(end16)) = ta.selection_end() {
+                let text = draft.get_untracked();
+                let byte = crate::composer_triggers::utf16_to_byte(&text, end16 as usize);
+                cursor_pos.set(caret_ln_col(&text, byte));
+            }
+        }
+    };
+
+    let on_editor_keydown = move |ev: web_sys::KeyboardEvent| {
+        if ev.key() != "Tab" {
+            return;
+        }
+        ev.prevent_default();
+        ev.stop_propagation();
+        let Some(ta) = editor_textarea() else {
+            return;
+        };
+        let start16 = ta.selection_start().ok().flatten().unwrap_or(0) as usize;
+        let end16 = ta.selection_end().ok().flatten().unwrap_or(start16 as u32) as usize;
+        let text = draft.get_untracked();
+        let start = crate::composer_triggers::utf16_to_byte(&text, start16);
+        let end = crate::composer_triggers::utf16_to_byte(&text, end16);
+        if let Some((new_text, new_start, new_end)) = apply_tab(&text, start, end, ev.shift_key()) {
+            cursor_pos.set(caret_ln_col(&new_text, new_end));
+            draft.set(new_text.clone());
+            restore_selection_soon(new_text, new_start, new_end);
+        }
+    };
+
     let on_key = move |ev: web_sys::KeyboardEvent| {
         let key = ev.key();
         let cmd = ev.meta_key() || ev.ctrl_key();
@@ -1395,6 +1666,9 @@ pub fn DocumentPane(
         if cmd && key.eq_ignore_ascii_case("f") {
             ev.prevent_default();
             focus_search();
+        } else if cmd && key.eq_ignore_ascii_case("g") {
+            ev.prevent_default();
+            focus_goto();
         } else if cmd && key.eq_ignore_ascii_case("s") {
             ev.prevent_default();
             do_save();
@@ -1498,6 +1772,25 @@ pub fn DocumentPane(
                         format!("{}/{}", hit_idx.get() + 1, n)
                     }
                 }}</span>
+                <input
+                    id="ev-goto"
+                    class="ev-goto"
+                    type="text"
+                    inputmode="numeric"
+                    placeholder="Line"
+                    aria-label="Go to line"
+                    prop:value=move || goto_text.get()
+                    on:input=move |ev| goto_text.set(event_target_value(&ev))
+                    on:keydown=move |ev: web_sys::KeyboardEvent| {
+                        if ev.key() == "Enter" {
+                            ev.prevent_default();
+                            ev.stop_propagation();
+                            do_goto();
+                        }
+                    }
+                />
+                <button type="button" class="secondary" data-ev-goto-go=true on:click=move |_| do_goto()>"Go"</button>
+                <span class="ev-goto-note" data-ev-goto-note="">{move || goto_note.get()}</span>
                 <button type="button" class="secondary" on:click=move |_| step(-1)>"Prev"</button>
                 <button type="button" class="secondary" on:click=move |_| step(1)>"Next"</button>
                 <button type="button" class="secondary" on:click=move |_| path.set(String::new())>"Back to chat"</button>
@@ -1538,11 +1831,18 @@ pub fn DocumentPane(
                 </Show>
                 <Show when=move || editing.get()>
                     <textarea
+                        id="ev-editor"
                         class="ev-editor"
                         aria-label="File editor"
                         spellcheck="false"
                         prop:value=move || draft.get()
-                        on:input=move |ev| draft.set(event_target_value(&ev))
+                        on:input=move |ev| {
+                            draft.set(event_target_value(&ev));
+                            sync_cursor();
+                        }
+                        on:keydown=on_editor_keydown
+                        on:keyup=move |_| sync_cursor()
+                        on:click=move |_| sync_cursor()
                     ></textarea>
                 </Show>
                 <Show when=move || show_diff.get()>
@@ -1553,6 +1853,14 @@ pub fn DocumentPane(
                 </Show>
             </div>
             <div class="ev-tools">
+                <span class="ev-status" data-ev-cursor="">{move || {
+                    if editing.get() {
+                        let (ln, col) = cursor_pos.get();
+                        format!("Ln {ln}, Col {col} · Ctrl+S saves · Esc cancels · Tab indents")
+                    } else {
+                        "Read-only. Ctrl+F finds · Ctrl+G goes to line · Enter jumps to the next match.".into()
+                    }
+                }}</span>
                 <button
                     type="button"
                     class="secondary"
@@ -1563,6 +1871,7 @@ pub fn DocumentPane(
                         draft.set(content.get());
                         conflict.set(false);
                         preview.set(false);
+                        cursor_pos.set((1, 1));
                         editing.set(true);
                     }
                 >"Edit"</button>
@@ -1781,6 +2090,77 @@ mod tests {
         assert_eq!(sha, "abc");
         assert_eq!(mt, "5");
         assert!(conflict_token("HTTP 400 {\"error\":\"nope\"}").is_none());
+    }
+
+    #[test]
+    fn tab_inserts_detected_unit_at_caret() {
+        // No indented lines yet: fallback is two spaces, inserted at caret.
+        let (out, s, e) = apply_tab("ab\ncd", 1, 1, false).unwrap();
+        assert_eq!(out, "a  b\ncd");
+        assert_eq!((s, e), (3, 3));
+        // File indented with four spaces: unit follows the file.
+        let (out, s, _) = apply_tab("x\n    y\nz", 0, 0, false).unwrap();
+        assert_eq!(out, "    x\n    y\nz");
+        assert_eq!(s, 4);
+        // Tab-indented file: unit is a literal tab (caret at line 2 start).
+        let (out, _, _) = apply_tab("\tx\ny", 3, 3, false).unwrap();
+        assert_eq!(out, "\tx\n\ty");
+    }
+
+    #[test]
+    fn tab_indents_selection_and_shift_tab_outdents() {
+        let text = "one\ntwo\nthree\n";
+        // Select all of lines 2-3 ("two\nthree", bytes 4..13).
+        let (out, s, e) = apply_tab(text, 4, 13, false).unwrap();
+        assert_eq!(out, "one\n  two\n  three\n");
+        assert_eq!(&out[s..e], "two\n  three");
+        let (back, _, _) = apply_tab(&out, s, e, true).unwrap();
+        assert_eq!(back, text);
+        // Selection ending at a line start does not indent that line.
+        let (out, _, _) = apply_tab(text, 0, 4, false).unwrap();
+        assert_eq!(out, "  one\ntwo\nthree\n");
+        // Shift+Tab with no selection outdents only the caret line.
+        let (out, s, _) = apply_tab("  one\n  two\n", 8, 8, true).unwrap();
+        assert_eq!(out, "  one\ntwo\n");
+        assert_eq!(s, 6);
+        // Outdent at line start is a no-op.
+        assert!(apply_tab("one\ntwo", 0, 0, true).is_none());
+        assert!(apply_tab("one\ntwo", 4, 7, true).is_none());
+    }
+
+    #[test]
+    fn caret_ln_col_counts_characters() {
+        assert_eq!(caret_ln_col("", 0), (1, 1));
+        assert_eq!(caret_ln_col("abc", 0), (1, 1));
+        assert_eq!(caret_ln_col("abc", 3), (1, 4));
+        assert_eq!(caret_ln_col("ab\ncd", 3), (2, 1));
+        assert_eq!(caret_ln_col("ab\ncd", 5), (2, 3));
+        assert_eq!(caret_ln_col("ab\n", 3), (2, 1));
+        // Multi-byte: column and offsets are characters, not bytes.
+        let text = "éé\nx";
+        assert_eq!(caret_ln_col(text, 4), (1, 3));
+        assert_eq!(caret_ln_col(text, text.len()), (2, 2));
+        // Out-of-range offsets clamp.
+        assert_eq!(caret_ln_col("ab", 99), (1, 3));
+        assert_eq!(byte_to_utf16("éx", 2), 1);
+        assert_eq!(byte_to_utf16("éx", 3), 2);
+    }
+
+    #[test]
+    fn goto_clamps_and_line_starts() {
+        assert_eq!(clamp_goto("3", 5), Some((3, false)));
+        assert_eq!(clamp_goto(" 42 ", 5), Some((5, true)));
+        assert_eq!(clamp_goto("0", 5), Some((1, true)));
+        assert_eq!(clamp_goto("", 5), None);
+        assert_eq!(clamp_goto("x", 5), None);
+        assert_eq!(clamp_goto("3", 0), None);
+        let text = "a\nbb\nccc";
+        assert_eq!(line_start_byte(text, 1), 0);
+        assert_eq!(line_start_byte(text, 2), 2);
+        assert_eq!(line_start_byte(text, 3), 5);
+        assert_eq!(line_start_byte(text, 99), text.len());
+        assert_eq!(detect_indent_unit("a\n  b\n    c"), "  ");
+        assert_eq!(detect_indent_unit("plain"), "  ");
     }
 
     #[test]

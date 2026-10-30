@@ -135,6 +135,20 @@
   .ev-path { flex: 1 0 100%; }
 }
 /* feature:editor-viewer end */
+/* feature:editor-goto-line begin */
+.ev-goto {
+  width: 64px;
+  height: 26px;
+  background: var(--surface-muted);
+  color: var(--ink);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-sm);
+  padding: 0 6px;
+  font: 12px/1.4 ui-monospace, monospace;
+}
+.ev-goto:focus { border-color: var(--border-focus); outline: none; }
+.ev-goto-note { color: var(--muted); font-size: var(--type-sm); white-space: nowrap; }
+/* feature:editor-goto-line end */
 /* feature:markdown-tables begin */
 .ev-md .md-table-wrap {
   overflow-x: auto;

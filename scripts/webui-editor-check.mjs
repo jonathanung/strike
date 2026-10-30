@@ -25,7 +25,7 @@ async function waitFor(send, expression, label) {
 
 export async function editorBrowserCheck({ send, port, token, repoDir }) {
   const sample = join(repoDir, "editor-smoke.txt");
-  await writeFile(sample, "alpha beta\n");
+  await writeFile(sample, "alpha beta\nsecond line\nthird line\nfourth line\nfifth line\n");
   try {
     const trav = await fetch(
       `http://127.0.0.1:${port}/v1/file/view?path=${encodeURIComponent("../secret.txt")}`,
@@ -92,6 +92,59 @@ export async function editorBrowserCheck({ send, port, token, repoDir }) {
       "document pane",
     );
 
+    // Go-to-line (#1403): Enter in the line input jumps and reports the
+    // clamped position; an out-of-range entry clamps to the last line.
+    await evalValue(
+      send,
+      `(() => {
+        const input = document.getElementById("ev-goto");
+        if (!input) return "no goto";
+        input.value = "3";
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+        return "ok";
+      })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        const n = document.querySelector("[data-ev-goto-note]");
+        return n && n.textContent.includes("Line 3 of 5") ? "ok" : (n ? n.textContent : "no goto note");
+      })()`,
+      "goto line 3",
+    );
+    await evalValue(
+      send,
+      `(() => {
+        const input = document.getElementById("ev-goto");
+        input.value = "999";
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+        return "ok";
+      })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        const n = document.querySelector("[data-ev-goto-note]");
+        return n && n.textContent.includes("Line 5 of 5") && n.textContent.includes("clamped") ? "ok" : (n ? n.textContent : "no goto note");
+      })()`,
+      "goto clamp",
+    );
+    // Ctrl+G focuses the go-to-line input, like Ctrl+F focuses search.
+    const gotoFocused = await evalValue(
+      send,
+      `(() => {
+        const pane = document.querySelector(".ev-doc");
+        pane.focus();
+        pane.dispatchEvent(new KeyboardEvent("keydown", { key: "g", ctrlKey: true, bubbles: true, cancelable: true }));
+        return document.activeElement && document.activeElement.id;
+      })()`,
+    );
+    if (gotoFocused !== "ev-goto") {
+      throw new Error(`ctrl+g focus = ${gotoFocused}`);
+    }
+
     const focused = await evalValue(
       send,
       `(() => {
@@ -125,6 +178,70 @@ export async function editorBrowserCheck({ send, port, token, repoDir }) {
     await evalValue(
       send,
       `(() => { const b = document.querySelector("[data-ev-edit]"); if (!b || b.disabled) return "edit disabled"; b.click(); return "ok"; })()`,
+    );
+    // Cursor readout (#1416) + Tab indent / Shift+Tab outdent (#1408).
+    await waitFor(
+      send,
+      `(() => document.querySelector(".ev-editor") ? "ok" : "no editor")()`,
+      "editor textarea",
+    );
+    await evalValue(
+      send,
+      `(() => {
+        const ta = document.querySelector(".ev-editor");
+        ta.focus();
+        // Caret at line 2, column 3 ("se|cond line").
+        ta.setSelectionRange(13, 13);
+        ta.dispatchEvent(new KeyboardEvent("keyup", { key: "ArrowRight", bubbles: true }));
+        return "ok";
+      })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        const n = document.querySelector("[data-ev-cursor]");
+        return n && n.textContent.includes("Ln 2, Col 3") ? "ok" : (n ? n.textContent : "no cursor readout");
+      })()`,
+      "cursor readout",
+    );
+    const tabbed = await evalValue(
+      send,
+      `(() => {
+        const ta = document.querySelector(".ev-editor");
+        ta.focus();
+        // Select lines 2-3 and Tab: both indent, focus stays in the editor.
+        ta.setSelectionRange(11, 27);
+        ta.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }));
+        return ta.value;
+      })()`,
+    );
+    // The draft updates asynchronously through Leptos; poll for the value.
+    await waitFor(
+      send,
+      `(() => {
+        const ta = document.querySelector(".ev-editor");
+        return ta && ta.value.includes("  second line") && ta.value.includes("  third line") ? "ok" : (ta ? ta.value : "no editor");
+      })()`,
+      "tab indent selection",
+    );
+    if (String(tabbed).length === 0) throw new Error("tab dispatch returned empty");
+    await evalValue(
+      send,
+      `(() => {
+        const ta = document.querySelector(".ev-editor");
+        ta.focus();
+        ta.setSelectionRange(0, ta.value.length);
+        ta.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true, cancelable: true }));
+        return "ok";
+      })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        const ta = document.querySelector(".ev-editor");
+        return ta && ta.value.startsWith("alpha beta") && !ta.value.includes("  second line") ? "ok" : (ta ? ta.value : "no editor");
+      })()`,
+      "shift+tab outdent",
     );
     await writeFile(sample, "agent\n");
     await evalValue(
