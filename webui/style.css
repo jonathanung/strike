@@ -1202,6 +1202,23 @@ select.mode, .daemon select {
   justify-content: center;
 }
 .gq-qr svg { width: 220px; height: 220px; display: block; }
+/* Unreachable (loopback) pairing: the QR area is replaced by the fix. */
+.gq-blocked {
+  border: 2px solid var(--warning);
+  padding: var(--space-3);
+  margin: var(--space-3) 0;
+}
+.gq-blocked-title { font-weight: 650; margin-top: 0; }
+.gq-cmd {
+  display: block;
+  font-family: var(--mono, monospace);
+  font-size: var(--type-sm);
+  word-break: break-all;
+  background: var(--ground);
+  border: 1px solid var(--rule);
+  padding: var(--space-2);
+  margin: var(--space-2) 0;
+}
 .gq-video {
   width: 100%;
   max-height: 180px;
