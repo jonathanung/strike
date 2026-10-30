@@ -5,10 +5,29 @@ import (
 	"testing"
 
 	"github.com/jonathanung/strike/harness/provider"
-	"github.com/jonathanung/strike/harness/provider/echo"
 	"github.com/jonathanung/strike/harness/tool"
 	"github.com/jonathanung/strike/pkg/protocol"
 )
+
+// diagBlockingProvider never emits: its Stream blocks until the stream
+// context is cancelled. The test below uses it so the spawned child cannot
+// finish its first turn — and retire from Engine.children into
+// childHistory — before the test inspects the live child map. With the
+// instant echo provider the child could complete and retire first under
+// -race scheduling, leaving "no child engine" even though the spawn
+// succeeded (~1/20 under -race, 0/20 without, on main e9cd5a63).
+type diagBlockingProvider struct{}
+
+func (diagBlockingProvider) Name() string { return "diag-blocking" }
+
+func (diagBlockingProvider) Stream(ctx context.Context, _ provider.Request) (<-chan provider.StreamEvent, error) {
+	stream := make(chan provider.StreamEvent)
+	go func() {
+		defer close(stream)
+		<-ctx.Done()
+	}()
+	return stream, nil
+}
 
 func TestSpawnedChildInheritsBuildDiagnostic(t *testing.T) {
 	builder := DiagnosticBuilder(func(DiagnosticBuildInput) protocol.DiagnosticBundle {
@@ -22,9 +41,9 @@ func TestSpawnedChildInheritsBuildDiagnostic(t *testing.T) {
 		Agents:          []Agent{{Name: "build"}},
 		InitialAgent:    "build",
 		Select: func(string) (provider.Provider, string, error) {
-			return echo.New(), "echo", nil
+			return diagBlockingProvider{}, "diag-blocking", nil
 		},
-		InitialProvider: "echo",
+		InitialProvider: "diag-blocking",
 	})
 	_, err := e.spawnChildInner(context.Background(), tool.TaskRequest{
 		Prompt:        "child inspect",
