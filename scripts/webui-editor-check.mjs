@@ -78,6 +78,38 @@ export async function editorBrowserCheck({ send, port, token, repoDir }) {
       })()`,
       "open button for editor-smoke.txt",
     );
+    // #1521: the explicit @ mention button inserts into the composer and
+    // must not open the viewer.
+    await waitFor(
+      send,
+      `(() => document.querySelector('[data-ev-mention="editor-smoke.txt"]') ? "ok" : "no mention button")()`,
+      "mention button for editor-smoke.txt",
+    );
+    await evalValue(
+      send,
+      `(() => { document.querySelector('[data-ev-mention="editor-smoke.txt"]').click(); return "ok"; })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        const ta = document.querySelector(".composer textarea");
+        if (!ta) return "no composer";
+        if (document.querySelector(".ev-doc")) return "mention opened the viewer";
+        return ta.value.includes("@editor-smoke.txt") ? "ok" : "composer=" + ta.value.slice(0, 120);
+      })()`,
+      "mention inserts @path without opening",
+    );
+    await evalValue(
+      send,
+      `(() => {
+        const ta = document.querySelector(".composer textarea");
+        ta.value = "";
+        ta.dispatchEvent(new Event("input", { bubbles: true }));
+        return "ok";
+      })()`,
+    );
+    // #1521: clicking the file name itself opens the viewer and leaves the
+    // composer untouched.
     await evalValue(
       send,
       `(() => { document.querySelector('[data-ev-open="editor-smoke.txt"]').click(); return "ok"; })()`,
@@ -91,6 +123,13 @@ export async function editorBrowserCheck({ send, port, token, repoDir }) {
       })()`,
       "document pane",
     );
+    const composerAfterOpen = await evalValue(
+      send,
+      `(() => { const ta = document.querySelector(".composer textarea"); return ta ? ta.value : "no composer"; })()`,
+    );
+    if (String(composerAfterOpen).includes("@editor-smoke.txt")) {
+      throw new Error(`name click polluted the composer: ${composerAfterOpen}`);
+    }
 
     const focused = await evalValue(
       send,
