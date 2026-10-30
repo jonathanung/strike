@@ -3952,7 +3952,17 @@ fn App() -> impl IntoView {
             <DaemonPane gateway_detail=gateway_detail />
         </Show>
         <Show when=move || mode.get() == "usage" || mode.get() == "audit" fallback=move || ()>
-            <usage_audit::UsageAuditPages mode=mode base=base token=token status=status />
+            <usage_audit::UsageAuditPages
+                mode=mode
+                base=base
+                token=token
+                status=status
+                open_session=move |id: String| {
+                    mode.set("chat".into());
+                    let live = roots.get_untracked().iter().any(|r| r.id == id);
+                    open_session(id, live);
+                }
+            />
         </Show>
         <Show when=move || mode.get() == "goals" fallback=move || ()>
             <goals::GoalsPane base=base token=token />

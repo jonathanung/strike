@@ -120,10 +120,38 @@ type DayUsage struct {
 	CostNote         string  `json:"costNote,omitempty"`
 }
 
+// ModelUsage is every usage.reported event grouped by the provider+model
+// that was selected when the event was reported (#1470). Aggregation is
+// per event, never per session: a session's label is only its latest
+// model, so grouping sessions would attribute a multi-model session's
+// whole spend to that one model.
+type ModelUsage struct {
+	Provider         string  `json:"provider,omitempty"`
+	Model            string  `json:"model,omitempty"`
+	FirstDay         string  `json:"firstDay,omitempty"`
+	LastDay          string  `json:"lastDay,omitempty"`
+	Sessions         int     `json:"sessions"`
+	Input            int     `json:"input"`
+	Output           int     `json:"output"`
+	CacheRead        int     `json:"cacheRead"`
+	CacheCreation    int     `json:"cacheCreation"`
+	InputKnown       bool    `json:"inputKnown"`
+	OutputKnown      bool    `json:"outputKnown"`
+	CacheReadKnown   bool    `json:"cacheReadKnown"`
+	CacheCreateKnown bool    `json:"cacheCreationKnown"`
+	Reports          int     `json:"reports"`
+	CostUSD          float64 `json:"costUsd,omitempty"`
+	CostKnown        bool    `json:"costKnown"`
+	CostPartial      bool    `json:"costPartial"`
+	UnpricedEvents   int     `json:"unpricedEvents"`
+	CostNote         string  `json:"costNote,omitempty"`
+}
+
 // Report is the dashboard payload before the daily budget is applied.
 type Report struct {
 	Sessions     []SessionUsage `json:"sessions"`
 	Days         []DayUsage     `json:"days"`
+	Models       []ModelUsage   `json:"models"`
 	Totals       TokenTotals    `json:"totals"`
 	CostUSD      float64        `json:"costUsd,omitempty"`
 	CostKnown    bool           `json:"costKnown"`
@@ -200,6 +228,7 @@ func Aggregate(dir string, price Pricer) (Report, error) {
 		return report, err
 	}
 	dayIndex := map[string]*dayAcc{}
+	modelIndex := map[modelKey]*modelAcc{}
 	var sessions []SessionUsage
 	for _, ent := range entries {
 		name := ent.Name()
@@ -210,7 +239,7 @@ func Aggregate(dir string, price Pricer) (Report, error) {
 		if id == "" || strings.Contains(id, string(filepath.Separator)) {
 			continue
 		}
-		su, days, alerts, skipped, err := scanSession(filepath.Join(dir, name), id, price)
+		su, days, models, alerts, skipped, err := scanSession(filepath.Join(dir, name), id, price)
 		report.SkippedLines += skipped
 		if err != nil {
 			return report, err
@@ -226,6 +255,14 @@ func Aggregate(dir string, price Pricer) (Report, error) {
 				if bucket == nil {
 					bucket = &dayAcc{day: day, seen: map[string]struct{}{}}
 					dayIndex[day] = bucket
+				}
+				bucket.add(id, part)
+			}
+			for key, part := range models {
+				bucket := modelIndex[key]
+				if bucket == nil {
+					bucket = &modelAcc{key: key, seen: map[string]struct{}{}}
+					modelIndex[key] = bucket
 				}
 				bucket.add(id, part)
 			}
@@ -275,13 +312,125 @@ func Aggregate(dir string, price Pricer) (Report, error) {
 	}
 	sort.Slice(days, func(i, j int) bool { return days[i].Day > days[j].Day })
 	report.Days = days
+	models := make([]ModelUsage, 0, len(modelIndex))
+	for _, bucket := range modelIndex {
+		models = append(models, bucket.usage())
+	}
+	// Biggest line first: cost descending, tokens descending where cost
+	// ties or is unknown (unpriced rows carry CostUSD 0), then the pair
+	// itself so the order is deterministic.
+	sort.Slice(models, func(i, j int) bool {
+		if models[i].CostUSD != models[j].CostUSD {
+			return models[i].CostUSD > models[j].CostUSD
+		}
+		ti := models[i].Input + models[i].Output + models[i].CacheRead + models[i].CacheCreation
+		tj := models[j].Input + models[j].Output + models[j].CacheRead + models[j].CacheCreation
+		if ti != tj {
+			return ti > tj
+		}
+		if models[i].Provider != models[j].Provider {
+			return models[i].Provider < models[j].Provider
+		}
+		return models[i].Model < models[j].Model
+	})
+	report.Models = models
 	if report.Sessions == nil {
 		report.Sessions = []SessionUsage{}
 	}
 	if report.Days == nil {
 		report.Days = []DayUsage{}
 	}
+	if report.Models == nil {
+		report.Models = []ModelUsage{}
+	}
 	return report, nil
+}
+
+type modelKey struct {
+	provider string
+	model    string
+}
+
+type modelPart struct {
+	tokens   TokenTotals
+	cost     float64
+	known    bool
+	partial  bool
+	unpriced int
+	note     string
+	firstDay string
+	lastDay  string
+}
+
+type modelAcc struct {
+	key      modelKey
+	seen     map[string]struct{}
+	tokens   TokenTotals
+	cost     float64
+	known    bool
+	partial  bool
+	unpriced int
+	notes    map[string]struct{}
+	firstDay string
+	lastDay  string
+}
+
+func (m *modelAcc) add(sessionID string, part modelPart) {
+	m.seen[sessionID] = struct{}{}
+	m.tokens.Reports += part.tokens.Reports
+	addKnown(&m.tokens.InputKnown, &m.tokens.Input, part.tokens.InputKnown, part.tokens.Input)
+	addKnown(&m.tokens.OutputKnown, &m.tokens.Output, part.tokens.OutputKnown, part.tokens.Output)
+	addKnown(&m.tokens.CacheReadKnown, &m.tokens.CacheRead, part.tokens.CacheReadKnown, part.tokens.CacheRead)
+	addKnown(&m.tokens.CacheCreateKnown, &m.tokens.CacheCreation, part.tokens.CacheCreateKnown, part.tokens.CacheCreation)
+	if part.known {
+		m.cost += part.cost
+		m.known = true
+	}
+	m.unpriced += part.unpriced
+	if part.partial || part.unpriced > 0 {
+		m.partial = true
+	}
+	if part.note != "" {
+		if m.notes == nil {
+			m.notes = map[string]struct{}{}
+		}
+		m.notes[part.note] = struct{}{}
+	}
+	if part.firstDay != "" && (m.firstDay == "" || part.firstDay < m.firstDay) {
+		m.firstDay = part.firstDay
+	}
+	if part.lastDay > m.lastDay {
+		m.lastDay = part.lastDay
+	}
+}
+
+func (m *modelAcc) usage() ModelUsage {
+	notes := make([]string, 0, len(m.notes))
+	for n := range m.notes {
+		notes = append(notes, n)
+	}
+	sort.Strings(notes)
+	return ModelUsage{
+		Provider:         m.key.provider,
+		Model:            m.key.model,
+		FirstDay:         m.firstDay,
+		LastDay:          m.lastDay,
+		Sessions:         len(m.seen),
+		Input:            m.tokens.Input,
+		Output:           m.tokens.Output,
+		CacheRead:        m.tokens.CacheRead,
+		CacheCreation:    m.tokens.CacheCreation,
+		InputKnown:       m.tokens.InputKnown,
+		OutputKnown:      m.tokens.OutputKnown,
+		CacheReadKnown:   m.tokens.CacheReadKnown,
+		CacheCreateKnown: m.tokens.CacheCreateKnown,
+		Reports:          m.tokens.Reports,
+		CostUSD:          m.cost,
+		CostKnown:        m.known,
+		CostPartial:      m.partial,
+		UnpricedEvents:   m.unpriced,
+		CostNote:         strings.Join(notes, "; "),
+	}
 }
 
 func addKnown(ok *bool, sum *int, partOK bool, part int) {
@@ -365,10 +514,10 @@ func (d *dayAcc) usage() DayUsage {
 	}
 }
 
-func scanSession(path, id string, price Pricer) (SessionUsage, map[string]dayPart, []Alert, int, error) {
+func scanSession(path, id string, price Pricer) (SessionUsage, map[string]dayPart, map[modelKey]modelPart, []Alert, int, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return SessionUsage{}, nil, nil, 0, err
+		return SessionUsage{}, nil, nil, nil, 0, err
 	}
 	defer f.Close()
 	meta := readMeta(filepath.Dir(path), id)
@@ -377,6 +526,7 @@ func scanSession(path, id string, price Pricer) (SessionUsage, map[string]dayPar
 		provider string
 		model    string
 		days     = map[string]dayPart{}
+		models   = map[modelKey]modelPart{}
 		alerts   []Alert
 		skipped  int
 	)
@@ -393,13 +543,13 @@ func scanSession(path, id string, price Pricer) (SessionUsage, map[string]dayPar
 		if err == io.EOF {
 			if !tooLong {
 				if line := strings.TrimSpace(raw); line != "" {
-					skipped += applyUsageLine(line, id, price, &acc, &provider, &model, days, &alerts)
+					skipped += applyUsageLine(line, id, price, &acc, &provider, &model, days, models, &alerts)
 				}
 			}
 			break
 		}
 		if err != nil {
-			return SessionUsage{}, nil, nil, skipped, err
+			return SessionUsage{}, nil, nil, nil, skipped, err
 		}
 		if tooLong {
 			continue
@@ -408,14 +558,14 @@ func scanSession(path, id string, price Pricer) (SessionUsage, map[string]dayPar
 		if line == "" {
 			continue
 		}
-		skipped += applyUsageLine(line, id, price, &acc, &provider, &model, days, &alerts)
+		skipped += applyUsageLine(line, id, price, &acc, &provider, &model, days, models, &alerts)
 	}
 	if len(acc.seenModel) > 1 {
 		acc.note("priced across more than one model; the label is the latest")
 		acc.partial = true
 	}
 	if acc.tokens.Reports == 0 {
-		return SessionUsage{ID: id, Title: acc.title, ParentID: acc.parent}, nil, alerts, skipped, nil
+		return SessionUsage{ID: id, Title: acc.title, ParentID: acc.parent}, nil, nil, alerts, skipped, nil
 	}
 	su := SessionUsage{
 		ID:               id,
@@ -440,13 +590,13 @@ func scanSession(path, id string, price Pricer) (SessionUsage, map[string]dayPar
 		CostPartial:      acc.partial,
 		CostNote:         acc.noteJoin(),
 	}
-	return su, days, alerts, skipped, nil
+	return su, days, models, alerts, skipped, nil
 }
 
 // sessionLineLimit matches session.readLogLines. Tests lower it.
 var sessionLineLimit = 32 << 20
 
-func applyUsageLine(line, id string, price Pricer, acc *acc, provider, model *string, days map[string]dayPart, alerts *[]Alert) int {
+func applyUsageLine(line, id string, price Pricer, acc *acc, provider, model *string, days map[string]dayPart, models map[modelKey]modelPart, alerts *[]Alert) int {
 	var env protocol.Envelope
 	if err := json.Unmarshal([]byte(line), &env); err != nil {
 		return 1
@@ -535,6 +685,33 @@ func applyUsageLine(line, id string, price Pricer, acc *acc, provider, model *st
 			part.note = note
 		}
 		days[day] = part
+		// Per-event By-model bucket (#1470): keyed by the provider/model
+		// selected for THIS event, so a session that switched models
+		// splits its spend across both rows.
+		mkey := modelKey{provider: *provider, model: *model}
+		mpart := models[mkey]
+		mpart.tokens.add(ev)
+		if known {
+			mpart.cost += usd
+			mpart.known = true
+		} else {
+			mpart.unpriced++
+		}
+		if partial || !known {
+			mpart.partial = true
+		}
+		if note != "" {
+			mpart.note = note
+		}
+		if day != "" {
+			if mpart.firstDay == "" || day < mpart.firstDay {
+				mpart.firstDay = day
+			}
+			if day > mpart.lastDay {
+				mpart.lastDay = day
+			}
+		}
+		models[mkey] = mpart
 	default:
 	}
 	return 0

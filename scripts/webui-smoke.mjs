@@ -1343,7 +1343,9 @@ try {
       { timeout: WAIT_MS, interval: 250 },
     );
   };
-  await openView("Usage", ["Input tokens", "Daily budget (USD)"]);
+  // Usage export (#1481): the client-side Export controls render beside
+  // the report even before any usage is seeded.
+  await openView("Usage", ["Input tokens", "Daily budget (USD)", "Export JSON", "Export CSV (by day)"]);
   await openView("Audit", ["Verify chain", "Append-only hash chain"]);
   const auditProbe = await waitFor(
     "audit chain state (Chain intact / No audit entries / Not configured)",
