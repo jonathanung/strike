@@ -219,6 +219,91 @@ fn shown_secret(secret: Option<&SecretOnce>, selected: &str) -> Option<SecretOnc
     }
 }
 
+/// Full hook URL as displayed on the page (#1486): the origin prefix plus
+/// the daemon-issued hook path, with no decoration, so the Copy button
+/// copies exactly what the hint line shows.
+fn hook_url(origin: &str, hook_path: &str) -> String {
+    format!("{origin}{hook_path}")
+}
+
+/// Copy-outcome notices (#1486). The success wording follows the gateway
+/// QR page's "Pairing URL copied." idiom; a failure names the manual
+/// fallback instead of failing silently. Neither string ever carries the
+/// copied value — in particular the signing secret is never put in a
+/// notice, a log, storage, or a URL.
+fn secret_copy_notice(copied: bool) -> &'static str {
+    if copied {
+        "Signing secret copied."
+    } else {
+        "Copy failed — select the signing secret and copy it manually."
+    }
+}
+
+fn hook_copy_notice(copied: bool) -> &'static str {
+    if copied {
+        "Hook URL copied."
+    } else {
+        "Copy failed — select the hook URL and copy it manually."
+    }
+}
+
+/// Write `text` to the clipboard, but only from an explicit click handler
+/// (never automatically). Unlike the fire-and-forget idiom elsewhere in
+/// the crate, the write's promise is awaited so a rejection (permission
+/// denied, non-secure context) surfaces as the failure notice.
+fn copy_text(
+    text: String,
+    notice: RwSignal<String>,
+    status: RwSignal<String>,
+    copied_notice: &'static str,
+    failed_notice: &'static str,
+) {
+    if text.is_empty() {
+        notice.set(failed_notice.into());
+        return;
+    }
+    spawn_local(async move {
+        let copied: Option<()> = async {
+            let win = web_sys::window()?;
+            let promise = win.navigator().clipboard().write_text(&text);
+            wasm_bindgen_futures::JsFuture::from(promise).await.ok()?;
+            Some(())
+        }
+        .await;
+        match copied {
+            Some(()) => {
+                notice.set(copied_notice.into());
+                status.set(copied_notice.into());
+            }
+            None => notice.set(failed_notice.into()),
+        }
+    });
+}
+
+/// What a delivery row renders besides its headline (#1492): the reason
+/// and the spawned session id are independent — a row can carry both, and
+/// neither hides the other. An empty field renders nothing extra.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct DeliveryDetail {
+    reason: Option<String>,
+    session_id: Option<String>,
+}
+
+fn delivery_detail(row: &DeliveryRow) -> DeliveryDetail {
+    DeliveryDetail {
+        reason: if row.reason.is_empty() {
+            None
+        } else {
+            Some(row.reason.clone())
+        },
+        session_id: if row.session_id.is_empty() {
+            None
+        } else {
+            Some(row.session_id.clone())
+        },
+    }
+}
+
 fn secret_banner_text(name: &str) -> String {
     let name = name.trim();
     if name.is_empty() {
@@ -341,6 +426,10 @@ pub fn TriggersPage(
     base: RwSignal<String>,
     token: RwSignal<String>,
     status: RwSignal<String>,
+    // #1492: the shell's session opener, wired in main.rs exactly as for
+    // the session-links pages — it switches to chat and reports a failed
+    // activation/resume on the status line instead of failing silently.
+    open_session: impl Fn(String) + Copy + Send + Sync + 'static,
 ) -> impl IntoView {
     let rows = RwSignal::new(Vec::<TriggerRow>::new());
     let deliveries = RwSignal::new(Vec::<DeliveryRow>::new());
@@ -761,6 +850,13 @@ pub fn TriggersPage(
                             <button type="button" class="secondary" on:click=move |_| secret_revealed.set(!secret_revealed.get())>
                                 {move || if secret_revealed.get() { "Mask secret" } else { "Reveal secret" }}
                             </button>
+                            <button type="button" class="secondary triggers-copy-secret" on:click=move |_| {
+                                // #1486: copy the in-memory show-once value on
+                                // explicit click only, masked or revealed; the
+                                // value itself never reaches the notice/status.
+                                let secret = form.secret_once.get_untracked().map(|row| row.secret).unwrap_or_default();
+                                copy_text(secret, form.notice, status, secret_copy_notice(true), secret_copy_notice(false));
+                            }>"Copy secret"</button>
                         </div>
                     </Show>
                     <label for="trigger-name">"Name"</label>
@@ -837,7 +933,14 @@ pub fn TriggersPage(
                     </div>
                     <p class="hint keys">"Enter saves. Tab moves through the form. Ctrl+K, then Triggers, opens this page."</p>
                     <Show when=move || !form.hook_path.get().is_empty() && form.kind.get() != "channel">
-                        <p class="hint">{move || format!("Hook {}{} · secret {}", origin_prefix(&base.get()), form.hook_path.get(), if rows.get().iter().any(|r| r.id == form.selected.get() && r.secret_set) { "is set" } else { "is not set" })}</p>
+                        <div class="triggers-hook-row">
+                            <p class="hint">{move || format!("Hook {}{} · secret {}", origin_prefix(&base.get()), form.hook_path.get(), if rows.get().iter().any(|r| r.id == form.selected.get() && r.secret_set) { "is set" } else { "is not set" })}</p>
+                            <button type="button" class="secondary triggers-copy-hook" on:click=move |_| {
+                                // #1486: copy the full hook URL exactly as displayed.
+                                let url = hook_url(&origin_prefix(&base.get_untracked()), &form.hook_path.get_untracked());
+                                copy_text(url, form.notice, status, hook_copy_notice(true), hook_copy_notice(false));
+                            }>"Copy hook URL"</button>
+                        </div>
                     </Show>
                     <p class="hint">{move || {
                         let mode = rows.get().into_iter().find(|r| r.id == form.selected.get()).map(|r| r.resolved_permission_mode).unwrap_or_else(|| "plan".into());
@@ -853,14 +956,34 @@ pub fn TriggersPage(
                     <ul class="plain">
                         {move || deliveries.get().into_iter().map(|row| {
                             let headline = format!("{} · {}", row.outcome, row.event);
-                            let detail = if row.reason.is_empty() { row.session_id.clone() } else { row.reason.clone() };
+                            // #1492: reason and session id both render; the
+                            // session id is a linkish button on its own line
+                            // (phone-sized target), opening the session the
+                            // delivery record itself carries.
+                            let detail = delivery_detail(&row);
+                            let reason = detail.reason.clone();
+                            let session = detail.session_id.clone();
                             let when = row.at.clone();
                             let can_replay = row.outcome == "accepted" || row.outcome == "replayed";
                             view! {
                                 <li class="row card">
                                     <span>
                                         <span class="name">{headline}</span>
-                                        <span class="path">{detail}</span>
+                                        {reason.map(|reason| view! { <span class="path">{reason}</span> })}
+                                        {session.map(|sid| {
+                                            let sid_for_click = sid.clone();
+                                            let sid_title = sid.clone();
+                                            let sid_aria = format!("Open session {sid}");
+                                            view! {
+                                                <button
+                                                    type="button"
+                                                    class="linkish session-link"
+                                                    title=sid_title
+                                                    aria-label=sid_aria
+                                                    on:click=move |_| open_session(sid_for_click.clone())
+                                                >{sid}</button>
+                                            }
+                                        })}
                                         <span class="path">{when}</span>
                                     </span>
                                     {can_replay.then(|| view! { <span class="path">"Replay from the command palette."</span> })}
@@ -890,6 +1013,57 @@ mod tests {
         assert!(shown_secret(None, "trig-a").is_none());
         assert!(secret_banner_text("Alpha").contains("Alpha"));
         assert!(!secret_banner_text("Alpha").contains("sek-a"));
+    }
+
+    #[test]
+    fn hook_url_is_origin_plus_path_exactly_as_displayed() {
+        assert_eq!(
+            hook_url("http://127.0.0.1:8371", "/hooks/trig-a"),
+            "http://127.0.0.1:8371/hooks/trig-a"
+        );
+        assert_eq!(hook_url("", "/hooks/trig-a"), "/hooks/trig-a");
+    }
+
+    #[test]
+    fn copy_notices_confirm_or_name_the_manual_fallback() {
+        // #1486: success confirms; failure is never silent and never
+        // carries the copied value (the secret must not leak via a notice).
+        assert_eq!(secret_copy_notice(true), "Signing secret copied.");
+        assert!(secret_copy_notice(false).contains("manually"));
+        assert!(!secret_copy_notice(false).contains("sek-a"));
+        assert_eq!(hook_copy_notice(true), "Hook URL copied.");
+        assert!(hook_copy_notice(false).contains("manually"));
+    }
+
+    #[test]
+    fn delivery_detail_keeps_reason_and_session_id_together() {
+        // #1492: a row with both fields shows both; empty fields render
+        // nothing extra (rejected deliveries keep today's layout).
+        let row = |session_id: &str, reason: &str| DeliveryRow {
+            id: "d1".into(),
+            at: "2026-10-29T00:00:00Z".into(),
+            outcome: "accepted".into(),
+            session_id: session_id.into(),
+            event: "test".into(),
+            reason: reason.into(),
+        };
+        let both = delivery_detail(&row("sess-1", "duplicate window"));
+        assert_eq!(both.reason.as_deref(), Some("duplicate window"));
+        assert_eq!(both.session_id.as_deref(), Some("sess-1"));
+        let session_only = delivery_detail(&row("sess-1", ""));
+        assert_eq!(session_only.reason, None);
+        assert_eq!(session_only.session_id.as_deref(), Some("sess-1"));
+        let reason_only = delivery_detail(&row("", "bad signature"));
+        assert_eq!(reason_only.reason.as_deref(), Some("bad signature"));
+        assert_eq!(reason_only.session_id, None);
+        let neither = delivery_detail(&row("", ""));
+        assert_eq!(
+            neither,
+            DeliveryDetail {
+                reason: None,
+                session_id: None
+            }
+        );
     }
 
     #[test]
