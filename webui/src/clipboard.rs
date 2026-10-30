@@ -63,6 +63,26 @@ pub fn pairing_copy_feedback(ok: bool) -> &'static str {
     }
 }
 
+/// Status line for a document-viewer Copy path attempt (#1410).
+/// Success may only be claimed when the write resolved.
+pub fn path_copy_feedback(ok: bool) -> &'static str {
+    if ok {
+        "Path copied."
+    } else {
+        COPY_FAILED
+    }
+}
+
+/// Status line for a document-viewer copy-contents attempt. Success
+/// may only be claimed when the write resolved.
+pub fn file_copy_feedback(ok: bool) -> &'static str {
+    if ok {
+        "File contents copied."
+    } else {
+        COPY_FAILED
+    }
+}
+
 /// Page-note line for a transcript copy attempt (keyboard path).
 pub fn transcript_copy_feedback(ok: bool) -> &'static str {
     if ok {
@@ -100,6 +120,14 @@ mod tests {
             assert!(!msg.contains("NotAllowedError"), "{msg}");
             assert!(!msg.contains("DOMException"), "{msg}");
         }
+    }
+
+    #[test]
+    fn viewer_copy_feedback_claims_copied_only_on_success() {
+        assert_eq!(path_copy_feedback(true), "Path copied.");
+        assert_eq!(path_copy_feedback(false), COPY_FAILED);
+        assert_eq!(file_copy_feedback(true), "File contents copied.");
+        assert_eq!(file_copy_feedback(false), COPY_FAILED);
     }
 
     #[test]

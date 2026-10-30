@@ -26,7 +26,54 @@ async function waitFor(send, expression, label) {
 export async function editorBrowserCheck({ send, port, token, repoDir }) {
   const sample = join(repoDir, "editor-smoke.txt");
   const long = join(repoDir, "editor-long.txt");
+  const md = join(repoDir, "editor-md.md");
   await writeFile(sample, "alpha beta\n");
+  await writeFile(
+    md,
+    "# Notes\n\n```rust\nfn greet() { println!(\"hi\"); }\n```\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n",
+  );
+  // Capture the next Blob download the page triggers (#1420):
+  // save_download builds an object URL and clicks a transient anchor,
+  // so record the blob and the anchor's download filename, then read
+  // the blob text back for an exact-content assertion.
+  const captureDownload = async (expectedName) => {
+    const started = await evalValue(
+      send,
+      `(() => {
+        window.__dlName = "";
+        window.__dlText = null;
+        const orig = URL.createObjectURL.bind(URL);
+        URL.createObjectURL = (blob) => {
+          blob.text().then((t) => { window.__dlText = t; });
+          return orig(blob);
+        };
+        window.__dlMo = new MutationObserver((recs) => {
+          for (const r of recs) for (const n of r.addedNodes) {
+            if (n.tagName === "A" && n.getAttribute("download")) window.__dlName = n.getAttribute("download");
+          }
+        });
+        window.__dlMo.observe(document.body, { childList: true });
+        const b = document.querySelector("[data-ev-download]");
+        if (!b || b.disabled) return "no download chip";
+        b.click();
+        return "ok";
+      })()`,
+    );
+    if (started !== "ok") {
+      throw new Error(`download start: ${started}`);
+    }
+    await waitFor(
+      send,
+      `(() => (window.__dlName === ${JSON.stringify(expectedName)} && typeof window.__dlText === "string" ? "ok" : "name=" + window.__dlName))()`,
+      `download of ${expectedName}`,
+    );
+    const text = await evalValue(send, `window.__dlText`);
+    await evalValue(
+      send,
+      `(() => { window.__dlMo && window.__dlMo.disconnect(); return "ok"; })()`,
+    );
+    return text;
+  };
   try {
     const trav = await fetch(
       `http://127.0.0.1:${port}/v1/file/view?path=${encodeURIComponent("../secret.txt")}`,
@@ -149,6 +196,69 @@ export async function editorBrowserCheck({ send, port, token, repoDir }) {
       })()`,
       "conflict notice",
     );
+    // Copy path (#1410): the chip must surface its outcome in the
+    // status line — "Path copied." only when the write resolved, the
+    // generic failure line otherwise, never silence. The find for
+    // "beta" is still active, so the copied text takes path:line form.
+    try {
+      await send("Browser.grantPermissions", {
+        permissions: ["clipboardReadWrite", "clipboardSanitizedWrite"],
+        origin: `http://127.0.0.1:${port}`,
+      });
+    } catch {
+      // Older Chrome: the status-line assertion below still holds.
+    }
+    await evalValue(
+      send,
+      `(() => { const b = document.querySelector("[data-ev-copy-path]"); if (!b || b.disabled) return "no copy path chip"; b.click(); return "ok"; })()`,
+    );
+    const copyStatus = await waitFor(
+      send,
+      `(() => {
+        const s = document.querySelector("[data-ev-status]");
+        const t = s ? s.innerText : "";
+        return t.includes("Path copied.") || t.includes("Copy didn't work") ? "ok" : t.slice(0, 120);
+      })()`,
+      "copy path status",
+    );
+    if (copyStatus === "ok") {
+      const st = await evalValue(
+        send,
+        `(() => document.querySelector("[data-ev-status]").innerText)()`,
+      );
+      if (st.includes("Path copied.")) {
+        await evalValue(
+          send,
+          `(() => { window.__clip = "pending"; navigator.clipboard.readText().then((t) => { window.__clip = t; }).catch(() => { window.__clip = "unreadable"; }); return "ok"; })()`,
+        );
+        let clip = "pending";
+        for (let i = 0; i < 10 && clip === "pending"; i++) {
+          await delay(200);
+          clip = await evalValue(send, `window.__clip`);
+        }
+        // readText needs a focused document; assert only when it works.
+        if (typeof clip === "string" && clip !== "pending" && clip !== "unreadable" && clip !== "" && clip !== "editor-smoke.txt:1") {
+          throw new Error(`clipboard holds ${JSON.stringify(clip)}, want editor-smoke.txt:1`);
+        }
+      }
+    }
+
+    // Download in Edit mode (#1420 Q1): the saved copy is the current
+    // buffer ("alpha edited"), not the on-disk "agent" version, and
+    // the status line says unsaved changes were included.
+    const editDl = await captureDownload("editor-smoke.txt");
+    if (editDl !== "alpha edited\n") {
+      throw new Error(`edit-mode download = ${JSON.stringify(editDl)}`);
+    }
+    await waitFor(
+      send,
+      `(() => {
+        const s = document.querySelector("[data-ev-status]");
+        return s && s.innerText.includes("unsaved changes") ? "ok" : (s ? s.innerText.slice(0, 120) : "no status");
+      })()`,
+      "download unsaved note",
+    );
+
     const disk = await fetch(
       `http://127.0.0.1:${port}/v1/file/view?path=editor-smoke.txt`,
       { headers: { Authorization: `Bearer ${token}` } },
@@ -254,6 +364,69 @@ export async function editorBrowserCheck({ send, port, token, repoDir }) {
       "long file hit row auto-raised",
     );
 
+    // Download (#1420): the saved copy is the whole file, past the
+    // 2,000-line render cap — select-all on the read view cannot do
+    // this, the Blob download must.
+    const longDl = await captureDownload("editor-long.txt");
+    if (longDl !== `${longLines.join("\n")}\n`) {
+      throw new Error(
+        `long download has ${longDl.split("\n").length} lines, want 5001 segments (5000 lines + trailing newline)`,
+      );
+    }
+
+    // Markdown view (#1421): a fenced block renders with the fence bar
+    // — language label plus a Copy button whose label reports the
+    // outcome — instead of the old bare <pre>.
+    await writeFile(md, "# Notes\n\n```rust\nfn greet() { println!(\"hi\"); }\n```\n");
+    await evalValue(
+      send,
+      `(() => { const b = [...document.querySelectorAll("button")].find(el => el.textContent.trim() === "Back to chat"); if (b) b.click(); return "ok"; })()`,
+    );
+    await waitFor(
+      send,
+      `(() => document.querySelector("textarea") ? "ok" : "no composer")()`,
+      "composer before md file",
+    );
+    const mdTab = await evalValue(
+      send,
+      `(() => { const b = [...document.querySelectorAll("button")].find(el => el.textContent.trim() === "Files"); if (!b) return "no files tab"; b.click(); return "ok"; })()`,
+    );
+    if (mdTab !== "ok") {
+      throw new Error(`files tab click (md): ${mdTab}`);
+    }
+    await waitFor(
+      send,
+      `(() => document.querySelector('[data-ev-open="editor-md.md"]') ? "ok" : "no md file row")()`,
+      "open button for editor-md.md",
+    );
+    await evalValue(
+      send,
+      `(() => { document.querySelector('[data-ev-open="editor-md.md"]').click(); return "ok"; })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        const b = document.querySelector("[data-ev-copy-code]");
+        if (!b) return "no copy-code button";
+        const bar = b.closest(".sx-fence-bar");
+        return bar && bar.innerText.includes("rust") ? "ok" : "no lang label: " + (bar ? bar.innerText : "no bar");
+      })()`,
+      "md fence bar with lang and copy",
+    );
+    await evalValue(
+      send,
+      `(() => { document.querySelector("[data-ev-copy-code]").click(); return "ok"; })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        const b = document.querySelector("[data-ev-copy-code]");
+        const t = b ? b.textContent.trim() : "gone";
+        return t === "Copied" || t === "Copy failed" ? "ok" : "label=" + t;
+      })()`,
+      "md fence copy feedback",
+    );
+
     await evalValue(
       send,
       `(() => { const b = [...document.querySelectorAll("button")].find(el => el.textContent.trim() === "Back to chat"); if (b) b.click(); return "ok"; })()`,
@@ -298,5 +471,6 @@ export async function editorBrowserCheck({ send, port, token, repoDir }) {
   } finally {
     await rm(sample, { force: true });
     await rm(long, { force: true });
+    await rm(md, { force: true });
   }
 }
