@@ -59,6 +59,8 @@ pub fn known_mode(mode: &str) -> bool {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ConfirmKind {
     Session { mode: String },
+    /// Autonomy (#1572): only ever armed for `skip-all`.
+    Autonomy { mode: String },
     Global { mode: String },
     Workspace { id: String, mode: String },
     RuleAdd {
@@ -121,6 +123,45 @@ pub fn session_confirm(mode: &str) -> PendingConfirm {
         body: body.into(),
         confirm_label: label.into(),
         kind: ConfirmKind::Session {
+            mode: mode.into(),
+        },
+    }
+}
+
+/// Autonomy (#1572) is a separate dial from permission mode: the four
+/// protocol exit-gate values. Unknown ids are ignored, never rendered.
+pub fn known_autonomy(mode: &str) -> bool {
+    matches!(mode, "supervised" | "agent" | "checks" | "skip-all")
+}
+
+/// Only `skip-all` removes a gate entirely, so only it confirms — the
+/// other modes still gate every phase exit, just with a different
+/// clearer (issue #1572 Q1, recommended default).
+pub fn autonomy_needs_confirm(mode: &str) -> bool {
+    mode == "skip-all"
+}
+
+/// Autonomy changes, mirroring [`begin_session_mode`]: same mode or an
+/// unknown id is a no-op, `skip-all` confirms first, everything else
+/// applies immediately. Applying only posts the op — the displayed
+/// state still waits for the daemon's `autonomy.selected`.
+pub fn begin_autonomy_change(current: &str, next: &str) -> ModeChange {
+    if !known_autonomy(next) || current == next {
+        return ModeChange::Same;
+    }
+    if autonomy_needs_confirm(next) {
+        ModeChange::Confirm(autonomy_confirm(next))
+    } else {
+        ModeChange::Apply(next.to_string())
+    }
+}
+
+pub fn autonomy_confirm(mode: &str) -> PendingConfirm {
+    PendingConfirm {
+        title: "Advance without exit gates?".into(),
+        body: "Skip-all advances workflow phases without exit gates: no one approves a phase exit and no check commands run. Tool permissions are unchanged — permission asks and deny rules still apply. Other sessions stay as they are.".into(),
+        confirm_label: "Use skip-all".into(),
+        kind: ConfirmKind::Autonomy {
             mode: mode.into(),
         },
     }
@@ -685,6 +726,39 @@ mod tests {
         assert!(add.body.contains("last matching rule"));
         assert!(rule_remove_confirm("global", 1, "allow").is_none());
         assert!(rule_remove_confirm("global", 1, "deny").is_some());
+    }
+
+    #[test]
+    fn autonomy_change_confirms_only_skip_all() {
+        assert!(matches!(
+            begin_autonomy_change("supervised", "supervised"),
+            ModeChange::Same
+        ));
+        assert!(matches!(
+            begin_autonomy_change("supervised", "bogus"),
+            ModeChange::Same
+        ));
+        for mode in ["supervised", "agent", "checks"] {
+            assert!(matches!(
+                begin_autonomy_change("skip-all", mode),
+                ModeChange::Apply(ref m) if m == mode
+            ));
+        }
+        match begin_autonomy_change("supervised", "skip-all") {
+            ModeChange::Confirm(c) => {
+                assert!(c.title.contains("without exit gates"), "{}", c.title);
+                assert!(c.body.contains("Tool permissions are unchanged"));
+                assert_eq!(
+                    c.kind,
+                    ConfirmKind::Autonomy {
+                        mode: "skip-all".into()
+                    }
+                );
+            }
+            other => panic!("skip-all did not confirm: {other:?}"),
+        }
+        assert!(known_autonomy("checks"));
+        assert!(!known_autonomy("yolo"));
     }
 
     #[test]

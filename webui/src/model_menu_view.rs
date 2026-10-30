@@ -123,6 +123,8 @@ pub fn ModelMenu(
     on_default_model: Callback<(String, String)>,
     on_effort: Callback<String>,
     on_default_effort: Callback<String>,
+    fast: RwSignal<bool>,
+    on_fast: Callback<bool>,
 ) -> impl IntoView {
     let filter = RwSignal::new(String::new());
     let cursor = RwSignal::new(0usize);
@@ -328,6 +330,41 @@ pub fn ModelMenu(
                                     </div>
                                 </div>
                             }.into_any()
+                        }
+                    }}
+                    {move || {
+                        // Fast (#1569): shown for every provider with honest
+                        // copy — the daemon does not advertise per-provider
+                        // priority-tier support, and unsupported providers
+                        // ignore the flag silently. The button only posts
+                        // `set.fast` via on_fast; `fast` flips solely when
+                        // the daemon's fast.selected confirmation lands.
+                        let on = fast.get();
+                        let klass = if on { "chip on" } else { "chip" };
+                        view! {
+                            <div class="model-effort" data-fast="shown">
+                                <div class="model-effort-head">
+                                    <span class="hint">"Fast"</span>
+                                    <button
+                                        type="button"
+                                        class=klass
+                                        data-fast-toggle="true"
+                                        data-fast-on=on.to_string()
+                                        disabled=move || busy.get()
+                                        on:click=move |_| {
+                                            if busy.get_untracked() {
+                                                model_note.set("This turn is still running. Session model and effort changes wait until it finishes.".into());
+                                                return;
+                                            }
+                                            on_fast.run(!fast.get_untracked());
+                                        }
+                                    >{if on { "Fast on" } else { "Fast off" }}</button>
+                                </div>
+                                <p class="hint">"Priority service tier for later turns. The current provider may not support priority tier — unsupported providers ignore Fast silently, so on is the session's preference, not a speed guarantee."</p>
+                                <Show when=move || busy.get()>
+                                    <p class="hint" data-fast-busy="true">"This turn is still running. Fast changes wait until it finishes."</p>
+                                </Show>
+                            </div>
                         }
                     }}
                     <label class="model-filter-label">

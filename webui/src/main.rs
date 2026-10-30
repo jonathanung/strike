@@ -77,9 +77,10 @@ use crate::api::{
     get_json, get_text, idempotency_key, now_ms, patch_json, post_json, post_json_value, post_op,
     put_json,
 };
-use crate::approvals::{begin_session_mode, ModeChange};
+use crate::approvals::{begin_autonomy_change, begin_session_mode, ModeChange};
 use crate::approvals_ui::{
-    apply_perm_notes, commit_session_mode, ApprovalCards, ApprovalHost, ApprovalMenu,
+    apply_perm_notes, commit_autonomy, commit_session_mode, ApprovalCards, ApprovalHost,
+    ApprovalMenu, AutonomyMenu,
 };
 use crate::transcript::Transcript;
 use crate::transcript_view::{save_download, TranscriptHandlers, TranscriptPane};
@@ -818,6 +819,13 @@ fn App() -> impl IntoView {
     let seen = RwSignal::new(load_seen());
     let children = RwSignal::new(Vec::<model::ChildSession>::new());
     let perm_mode = RwSignal::new("default".to_string());
+    // Session dials (#1569 Fast, #1572 autonomy). Both signals hold only
+    // daemon-reported state: autonomy is seeded from bootstrap/status and
+    // afterwards changes solely on `autonomy.selected`; fast changes
+    // solely on `fast.selected`. Neither is set optimistically on click.
+    let autonomy = RwSignal::new("supervised".to_string());
+    let autonomy_menu = RwSignal::new(false);
+    let fast_on = RwSignal::new(false);
     let asks = RwSignal::new(Vec::<approvals::Ask>::new());
     let live_audit = RwSignal::new(Vec::<approvals::AuditLine>::new());
     let confirm = RwSignal::new(None::<approvals::PendingConfirm>);
@@ -1143,6 +1151,11 @@ fn App() -> impl IntoView {
                             if !st.permission_mode.is_empty() {
                                 perm_mode.set(st.permission_mode);
                             }
+                            if !st.autonomy.is_empty() {
+                                autonomy.set(
+                                    crate::model::autonomy_or_default(&st.autonomy).to_string(),
+                                );
+                            }
                             session_cwd.set(st.cwd);
                             live_busy.set(st.busy);
                             live_busy_root.set(root);
@@ -1252,6 +1265,12 @@ fn App() -> impl IntoView {
             wipe_on_replay.set(true);
         }
         effort_level.set(String::new());
+        // A new session's dials are unknown until its bootstrap/status or
+        // its replayed confirmations land — never carry the previous
+        // session's Fast/autonomy across the switch.
+        fast_on.set(false);
+        autonomy.set("supervised".to_string());
+        autonomy_menu.set(false);
         context_used.set(0);
         context_limit.set(0);
         context_fit.set(String::new());
@@ -1366,6 +1385,8 @@ fn App() -> impl IntoView {
                         provider: provider_name.get_untracked(),
                         model: model_name.get_untracked(),
                         effort: effort_level.get_untracked(),
+                        fast: fast_on.get_untracked(),
+                        autonomy: autonomy.get_untracked(),
                         context_used: context_used.get_untracked(),
                         context_limit: context_limit.get_untracked(),
                         context_fit: context_fit.get_untracked(),
@@ -1376,6 +1397,10 @@ fn App() -> impl IntoView {
                     provider_name.set(next.provider);
                     model_name.set(next.model);
                     effort_level.set(next.effort);
+                    fast_on.set(next.fast);
+                    if !next.autonomy.is_empty() {
+                        autonomy.set(next.autonomy);
+                    }
                     context_used.set(next.context_used);
                     context_limit.set(next.context_limit);
                     context_fit.set(next.context_fit);
@@ -2192,6 +2217,29 @@ fn App() -> impl IntoView {
         }
     };
 
+    // Autonomy (#1572), cloned from set_perm with two deliberate
+    // differences: a running turn refuses up front with the reason on
+    // the status line (the daemon rejects the op mid-turn), and applying
+    // never touches the autonomy signal — only the daemon's
+    // `autonomy.selected` confirmation does.
+    let set_autonomy = move |mode: String| {
+        autonomy_menu.set(false);
+        let root = active_root.get_untracked();
+        if !root.is_empty() && session_busy(&root) {
+            status.set(
+                "This turn is still running. Autonomy changes wait until it finishes.".into(),
+            );
+            return;
+        }
+        match begin_autonomy_change(&autonomy.get_untracked(), &mode) {
+            ModeChange::Same => {}
+            ModeChange::Apply(mode) => {
+                commit_autonomy(base, token, active_root, status, mode);
+            }
+            ModeChange::Confirm(pending) => confirm.set(Some(pending)),
+        }
+    };
+
 
     // Session delete (#1358): arm the confirm dialog for one session.
     // Shared by the row button and the palette command — one code path,
@@ -2472,6 +2520,37 @@ fn App() -> impl IntoView {
             }
         });
     });
+    // Fast (#1569), cloned from on_effort: post the real `set.fast` op
+    // and nothing else. `fast_on` is never set here — it flips only when
+    // the daemon's `fast.selected` confirmation reduces in the SSE path
+    // above. A running turn refuses up front with the reason surfaced,
+    // matching the model menu's disabled state.
+    let on_fast = Callback::new(move |enabled: bool| {
+        let root = active_root.get_untracked();
+        if !root.is_empty() && session_busy(&root) {
+            model_note.set(
+                "This turn is still running. Fast changes wait until it finishes.".into(),
+            );
+            return;
+        }
+        model_note_after.set(now_ms() as i64);
+        model_note.set(String::new());
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            if let Err(e) = post_op(
+                &b,
+                &t,
+                &root,
+                "set.fast",
+                serde_json::json!({"enabled": enabled}),
+            )
+            .await
+            {
+                model_note.set(format!("fast change failed: {e}"));
+                model_note_after.set(0);
+            }
+        });
+    });
     let on_default_effort = Callback::new(move |level: String| {
         let (b, t) = (base.get_untracked(), token.get_untracked());
         spawn_local(async move {
@@ -2516,6 +2595,10 @@ fn App() -> impl IntoView {
             if !level.trim().is_empty() {
                 save.run(level);
             }
+        }));
+        let fast = on_fast.clone();
+        shell::set_fast_setter(Rc::new(move |enabled| {
+            fast.run(enabled);
         }));
     }
 
@@ -2572,6 +2655,7 @@ fn App() -> impl IntoView {
         view: Rc::new(move || mode.get()),
         set_enter: Rc::new(move |next: &str| set_enter(next.to_string())),
         set_perm: Rc::new(move |next: &str| set_perm(next.to_string())),
+        set_autonomy: Rc::new(move |next: &str| set_autonomy(next.to_string())),
         set_theme: Rc::new(move |next: &str| set_theme(next.to_string())),
         set_scheme: Rc::new(move |next: &str| set_scheme(next.to_string())),
         travel: Rc::new(move |back: bool| travel(back)),
@@ -4118,6 +4202,16 @@ fn App() -> impl IntoView {
                             root=active_root
                             status=status
                         />
+                        <AutonomyMenu
+                            menu_open=autonomy_menu
+                            autonomy=autonomy
+                            confirm=confirm
+                            busy=session_busy_now
+                            base=base
+                            token=token
+                            root=active_root
+                            status=status
+                        />
                         <Show when=move || {
                             let ctx = active_context(&catalog.get(), &provider_name.get(), &model_name.get());
                             context_view(context_used.get(), context_limit.get(), ctx, &context_fit.get()).held
@@ -4466,6 +4560,24 @@ fn App() -> impl IntoView {
                                         "composer-glance approvals-mode-chip"
                                     }
                                 } data-approval-status="true">{move || format!("Approval · {}", mode_label(&perm_mode.get()))}</span>
+                                <button type="button" class=move || {
+                                    // Non-default autonomy is safety-relevant
+                                    // state (#1572): a session not on the
+                                    // supervised default must read that way at
+                                    // a glance, phone included.
+                                    if crate::model::autonomy_or_default(&autonomy.get()) != "supervised" {
+                                        "composer-glance approvals-mode-chip danger"
+                                    } else {
+                                        "composer-glance approvals-mode-chip"
+                                    }
+                                } data-autonomy-status="true" title="Autonomy — who clears a workflow phase exit. Opens the autonomy picker." on:click=move |_| {
+                                    mode_menu.set(false);
+                                    model_menu.set(false);
+                                    autonomy_menu.update(|v| *v = !*v);
+                                }>{move || format!("Autonomy · {}", crate::model::autonomy_label(&autonomy.get()))}</button>
+                                <Show when=move || fast_on.get()>
+                                    <span class="composer-glance" data-fast-status="true" title="Fast (priority service tier) is on for this session, as confirmed by the daemon. The current provider may not support priority tier.">"Fast · on"</span>
+                                </Show>
                                 <span class="composer-glance" data-model-status="true">{move || {
                                     let model = model_name.get();
                                     let name = if model.is_empty() { provider_name.get() } else { model };
