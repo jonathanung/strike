@@ -152,6 +152,7 @@ struct WorkflowList {
     workflows: Vec<Named>,
 }
 
+#[cfg(target_arch = "wasm32")]
 fn browser_tz() -> String {
     js_sys::eval("Intl.DateTimeFormat().resolvedOptions().timeZone")
         .ok()
@@ -160,11 +161,96 @@ fn browser_tz() -> String {
         .unwrap_or_else(|| "UTC".into())
 }
 
-fn fmt_when(iso: &str) -> String {
+#[cfg(not(target_arch = "wasm32"))]
+fn browser_tz() -> String {
+    "UTC".into()
+}
+
+/// The pre-#1465 rendering: the raw instant labelled UTC. Kept as the
+/// final fallback and as the exact instant shown in the title tooltip.
+fn utc_when(iso: &str) -> String {
+    iso.trim_end_matches('Z').replace('T', " ") + " UTC"
+}
+
+/// Whose zone wins: the schedule's own `timezone` when non-empty, then
+/// the browser's zone, then UTC. Pure so the fallback chain is testable
+/// off-wasm.
+fn pick_zone<'a>(schedule_tz: &'a str, browser_tz: &'a str) -> &'a str {
+    let schedule = schedule_tz.trim();
+    if !schedule.is_empty() {
+        return schedule;
+    }
+    let browser = browser_tz.trim();
+    if !browser.is_empty() {
+        return browser;
+    }
+    "UTC"
+}
+
+/// Format `iso` in `tz` via `Intl.DateTimeFormat`, including the zone
+/// abbreviation (e.g. `Oct 28, 2026, 09:00 PDT`). Returns `None` when
+/// the timestamp is unparseable or the zone is invalid so the caller
+/// can fall back. Off-wasm there is no `Intl`, so it always falls back.
+#[cfg(target_arch = "wasm32")]
+fn format_in_zone(iso: &str, tz: &str) -> Option<String> {
+    let iso_json = serde_json::to_string(iso).ok()?;
+    let tz_json = serde_json::to_string(tz).ok()?;
+    let script = format!(
+        "(function(){{try{{var d=new Date({iso_json});\
+         if(isNaN(d.getTime()))return null;\
+         var f=new Intl.DateTimeFormat('en-US',{{timeZone:{tz_json},\
+         year:'numeric',month:'short',day:'numeric',hour:'2-digit',\
+         minute:'2-digit',hourCycle:'h23',timeZoneName:'short'}});\
+         return f.format(d);}}catch(e){{return null;}}}})()"
+    );
+    js_sys::eval(&script)
+        .ok()
+        .and_then(|v| v.as_string())
+        .filter(|s| !s.is_empty())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn format_in_zone(_iso: &str, _tz: &str) -> Option<String> {
+    None
+}
+
+fn fmt_when_with_browser(iso: &str, schedule_tz: &str, browser: &str) -> String {
     if iso.is_empty() {
         return "not scheduled".into();
     }
-    iso.trim_end_matches('Z').replace('T', " ") + " UTC"
+    let zone = pick_zone(schedule_tz, browser);
+    if let Some(formatted) = format_in_zone(iso, zone) {
+        return formatted;
+    }
+    // The schedule's zone was invalid (or unformattable): retry in the
+    // browser's zone before giving up to the UTC rendering.
+    let browser = browser.trim();
+    if zone != browser && !browser.is_empty() {
+        if let Some(formatted) = format_in_zone(iso, browser) {
+            return formatted;
+        }
+    }
+    // Unparseable timestamps keep the old behaviour: print what the
+    // server sent, labelled UTC, rather than rendering blank.
+    utc_when(iso)
+}
+
+/// Single formatter for every schedule time (next fire + run history).
+/// Renders in the schedule's own timezone when set, then the browser's
+/// zone, then the raw UTC rendering.
+fn fmt_when(iso: &str, schedule_tz: &str) -> String {
+    if iso.is_empty() {
+        return "not scheduled".into();
+    }
+    fmt_when_with_browser(iso, schedule_tz, &browser_tz())
+}
+
+/// Exact UTC instant for the `title` tooltip next to a `fmt_when` time.
+fn fmt_when_title(iso: &str) -> String {
+    if iso.is_empty() {
+        return String::new();
+    }
+    utc_when(iso)
 }
 
 fn status_label(status: &str) -> &'static str {
@@ -620,19 +706,16 @@ pub fn SchedulePage(
                             } else {
                                 format!(" · {}", item.last_error)
                             };
-                            let meta = format!(
-                                "{} · {}{}",
-                                kind_label(&item.kind),
-                                fmt_when(&item.next_fire),
-                                err_bit
-                            );
+                            let when = fmt_when(&item.next_fire, &item.timezone);
+                            let when_title = fmt_when_title(&item.next_fire);
+                            let meta_prefix = format!("{} · ", kind_label(&item.kind));
                             let badge = status_badge(&item.last_status).to_string();
                             let state = if !item.enabled { "Paused".to_string() } else { status_label(&item.last_status).to_string() };
                             let item_for_click = item.clone();
                             view! {
                                 <button type="button" class=if selected { "sched-row on" } else { "sched-row" } on:click=move |_| fill(item_for_click.clone())>
                                     <span class="name">{label}</span>
-                                    <span class="meta">{meta}</span>
+                                    <span class="meta">{meta_prefix}<span title=when_title>{when}</span>{err_bit}</span>
                                     <span class=badge>{state}</span>
                                 </button>
                             }
@@ -754,8 +837,10 @@ pub fn SchedulePage(
                             if rows.is_empty() {
                                 return view! { <p class="hint">"No runs yet."</p> }.into_any();
                             }
+                            let hist_tz = timezone.get();
                             let rows = rows.into_iter().map(|run| {
-                                let when = fmt_when(&run.fired_at);
+                                let when = fmt_when(&run.fired_at, &hist_tz);
+                                let when_title = fmt_when_title(&run.fired_at);
                                 let badge = status_badge(&run.status).to_string();
                                 let label = status_label(&run.status).to_string();
                                 let sid = run.session_id.clone();
@@ -771,7 +856,7 @@ pub fn SchedulePage(
                                 };
                                 view! {
                                     <div class="sched-run">
-                                        <span class="meta">{when}</span>
+                                        <span class="meta" title=when_title>{when}</span>
                                         <span class=badge>{label}</span>
                                         <button type="button" class="linkish" disabled=empty on:click=move |_| open_session(sid_for_click.clone())>{sid_label}</button>
                                         <span class="meta">{detail}</span>
@@ -784,5 +869,63 @@ pub fn SchedulePage(
                 </form>
             </div>
         </div>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_timestamp_is_not_scheduled_in_any_zone() {
+        assert_eq!(fmt_when("", "America/Vancouver"), "not scheduled");
+        assert_eq!(fmt_when("", ""), "not scheduled");
+        assert_eq!(
+            fmt_when_with_browser("", "Bogus/Zone", "America/Vancouver"),
+            "not scheduled"
+        );
+        assert_eq!(fmt_when_title(""), "");
+    }
+
+    #[test]
+    fn utc_when_keeps_the_old_rendering() {
+        assert_eq!(
+            utc_when("2026-10-28T16:00:00Z"),
+            "2026-10-28 16:00:00 UTC"
+        );
+        assert_eq!(
+            fmt_when_title("2026-10-28T16:00:00Z"),
+            "2026-10-28 16:00:00 UTC"
+        );
+    }
+
+    #[test]
+    fn pick_zone_prefers_schedule_then_browser_then_utc() {
+        assert_eq!(
+            pick_zone("America/Vancouver", "Europe/London"),
+            "America/Vancouver"
+        );
+        assert_eq!(pick_zone("", "Europe/London"), "Europe/London");
+        assert_eq!(pick_zone("  ", "Europe/London"), "Europe/London");
+        assert_eq!(pick_zone("", ""), "UTC");
+        assert_eq!(
+            pick_zone(" America/Vancouver ", "UTC"),
+            "America/Vancouver"
+        );
+    }
+
+    #[test]
+    fn unparseable_timestamp_keeps_the_old_rendering() {
+        // A garbage instant is invalid in every zone, so both the
+        // schedule-zone and browser-zone attempts fail and the raw
+        // server string (labelled UTC) is what renders — never blank.
+        assert_eq!(
+            fmt_when_with_browser("not-a-date", "America/Vancouver", "Europe/London"),
+            utc_when("not-a-date")
+        );
+        assert_eq!(
+            fmt_when_with_browser("not-a-date", "Bogus/Zone", "Also/Bogus"),
+            utc_when("not-a-date")
+        );
     }
 }
