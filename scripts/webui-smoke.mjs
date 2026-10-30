@@ -1614,7 +1614,8 @@ try {
     async () => {
       const raw = await evaluate(`(() => {
         const dialog = document.querySelector("[data-confirm='dialog']");
-        return JSON.stringify({ ok: !!dialog, text: dialog ? dialog.innerText : "" });
+        const err = document.querySelector(".storage-error");
+        return JSON.stringify({ ok: !!dialog, text: dialog ? dialog.innerText : "", err: err ? err.textContent : "" });
       })()`);
       const p = JSON.parse(raw || "{}");
       return {
