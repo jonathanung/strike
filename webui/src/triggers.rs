@@ -736,7 +736,16 @@ pub fn TriggersPage(
                     Ok(v) => {
                         let outcome = v.get("outcome").and_then(|s| s.as_str()).unwrap_or("replayed");
                         form.notice.set(format!("Replay {outcome}."));
-                        load_deliveries(base, token, id, deliveries, form.notice);
+                        load_deliveries(
+                            base,
+                            token,
+                            id,
+                            deliveries,
+                            form.notice,
+                            delivery_error,
+                            delivery_loading,
+                            delivery_epoch,
+                        );
                     }
                     Err(e) => form.notice.set(e),
                 }
