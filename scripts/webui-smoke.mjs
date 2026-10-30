@@ -2670,6 +2670,89 @@ try {
     { timeout: STEP_MS, interval: 200 },
   );
 
+  // Phone Settings (#1551): the blanket phone rule
+  // `body[data-phone="1"] .segmented { display:none }` was written for the
+  // header bar, but the Settings ChoiceRows reuse .segmented, so Scheme /
+  // Type size / Density measured 0x0 on phone. The desktop settings block
+  // above cannot catch that — it clicks the inputs through JS, which fires
+  // even on display:none controls. Switch to a phone viewport, measure the
+  // real geometry, and tap one option at its on-screen centre.
+  await send("Emulation.setDeviceMetricsOverride", {
+    width: 390,
+    height: 844,
+    deviceScaleFactor: 2,
+    mobile: true,
+  });
+  await waitFor(
+    "phone layout engages for the settings check",
+    async () => ({
+      ok: (await evaluate(`document.body.getAttribute("data-phone")`)) === "1",
+    }),
+    { timeout: STEP_MS, interval: 150 },
+  );
+  await evaluate(`document.querySelector('[data-action="open-settings"]')?.click()`);
+  await waitFor(
+    "phone settings choice rows are visible",
+    async () => {
+      const raw = await evaluate(`(() => {
+        const rows = [...document.querySelectorAll(".settings-page .choice-row .segmented")].map((seg) => {
+          const r = seg.getBoundingClientRect();
+          return { display: getComputedStyle(seg).display, w: r.width, h: r.height };
+        });
+        return JSON.stringify({
+          ok: rows.length === 3 && rows.every((r) => r.display !== "none" && r.w >= 200 && r.h >= 40),
+          rows,
+        });
+      })()`);
+      return JSON.parse(raw || "{}");
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  const phoneTapPoint = JSON.parse(
+    (await evaluate(`(() => {
+      const input = document.querySelector('.settings-page input[data-choice="light"]');
+      const span = input ? input.closest("label").querySelector("span") : null;
+      if (!span) return "{}";
+      span.scrollIntoView({ block: "center" });
+      const r = span.getBoundingClientRect();
+      const cx = r.x + r.width / 2;
+      const cy = r.y + r.height / 2;
+      const hit = document.elementFromPoint(cx, cy);
+      return JSON.stringify({ cx, cy, hitOk: !!hit && (hit === span || span.contains(hit)) });
+    })()`)) || "{}",
+  );
+  if (!phoneTapPoint.hitOk) {
+    throw new Error(`phone settings Light choice is covered: ${JSON.stringify(phoneTapPoint)}`);
+  }
+  await send("Input.dispatchMouseEvent", {
+    type: "mousePressed",
+    x: phoneTapPoint.cx,
+    y: phoneTapPoint.cy,
+    button: "left",
+    clickCount: 1,
+  });
+  await send("Input.dispatchMouseEvent", {
+    type: "mouseReleased",
+    x: phoneTapPoint.cx,
+    y: phoneTapPoint.cy,
+    button: "left",
+    clickCount: 1,
+  });
+  await waitFor(
+    "phone tap changes the scheme",
+    async () => ({
+      ok: (await evaluate(`document.documentElement.getAttribute("data-scheme")`)) === "light",
+    }),
+    { timeout: STEP_MS, interval: 150 },
+  );
+  await send("Emulation.setDeviceMetricsOverride", {
+    width: 1440,
+    height: 900,
+    deviceScaleFactor: 1,
+    mobile: false,
+  });
+  await evaluate(`document.querySelector('[data-view="chat"]')?.click()`);
+
   console.log("webui-smoke ok");
 } catch (err) {
   console.error(String(err));
