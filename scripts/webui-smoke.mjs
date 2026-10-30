@@ -1123,6 +1123,18 @@ try {
     `document.body.innerText.includes("Appearance") && document.body.innerText.includes("Type size") && document.body.innerText.includes("Density") && !!document.querySelector('input[data-choice="lg"]')`,
     "settings page",
   );
+  // #1489: Download diagnostics lives in Settings, enabled on a live
+  // (echo) host, and a click produces the success confirmation. The
+  // server-chosen filename is covered by the UAT download capture.
+  await waitUntil(
+    `!!document.querySelector('[data-action="download-diagnostics"]') && !document.querySelector('[data-action="download-diagnostics"]').disabled`,
+    "diag download control enabled on a live host",
+  );
+  await evaluate(`document.querySelector('[data-action="download-diagnostics"]').click()`);
+  await waitUntil(
+    `document.body.innerText.includes("diagnostic bundle downloaded")`,
+    "diag download success confirmation",
+  );
   await evaluate(`document.querySelector('input[data-choice="lg"]').click()`);
   await evaluate(`document.querySelector('input[data-choice="compact"]').click()`);
   await waitUntil(
