@@ -114,6 +114,52 @@ fn picker_rows(recents: &[Workspace], all: &[Workspace]) -> Vec<Workspace> {
     out
 }
 
+/// Case-insensitive substring match on the fields a picker row renders:
+/// name and path. An empty (or whitespace-only) query matches everything.
+/// Path matching is what tells identically-named checkouts apart (#1437 Q1).
+pub fn workspace_matches(w: &Workspace, query: &str) -> bool {
+    let q = query.trim().to_lowercase();
+    q.is_empty() || w.name.to_lowercase().contains(&q) || w.path.to_lowercase().contains(&q)
+}
+
+/// The one filtered list render and keyboard navigation share (#1437):
+/// `picker_rows` deduped (recents first), then filtered by the query.
+pub fn picker_rows_matching(
+    recents: &[Workspace],
+    all: &[Workspace],
+    query: &str,
+) -> Vec<Workspace> {
+    picker_rows(recents, all)
+        .into_iter()
+        .filter(|w| workspace_matches(w, query))
+        .collect()
+}
+
+/// Filter one rendered section (Recents or All) by the same rule.
+pub fn filtered_workspaces(list: &[Workspace], query: &str) -> Vec<Workspace> {
+    list.iter()
+        .filter(|w| workspace_matches(w, query))
+        .cloned()
+        .collect()
+}
+
+/// Browse rows render only the entry name; match that plus the path the
+/// click would navigate to (optional slice 2 of #1437).
+pub fn browse_matches(e: &crate::model::BrowseEntry, query: &str) -> bool {
+    let q = query.trim().to_lowercase();
+    q.is_empty() || e.name.to_lowercase().contains(&q) || e.path.to_lowercase().contains(&q)
+}
+
+pub fn filtered_browse_entries(
+    list: &[crate::model::BrowseEntry],
+    query: &str,
+) -> Vec<crate::model::BrowseEntry> {
+    list.iter()
+        .filter(|e| browse_matches(e, query))
+        .cloned()
+        .collect()
+}
+
 fn fetch_browse(
     base: String,
     token: String,
@@ -175,6 +221,8 @@ pub fn WorkspacePicker(
     let browse_error = RwSignal::new(String::new());
     let new_folder = RwSignal::new(String::new());
     let jump = RwSignal::new(String::new());
+    let filter = RwSignal::new(String::new());
+    let browse_filter = RwSignal::new(String::new());
     let cursor = RwSignal::new(0usize);
     let renaming = RwSignal::new(String::new());
     let rename_value = RwSignal::new(String::new());
@@ -189,6 +237,11 @@ pub fn WorkspacePicker(
         if !open.get() {
             return;
         }
+        // No persistence (#1437 slice 1): every open starts unfiltered,
+        // with the cursor back on the first row.
+        filter.set(String::new());
+        browse_filter.set(String::new());
+        cursor.set(0);
         fetch_browse(
             base.get(),
             token.get(),
@@ -216,6 +269,9 @@ pub fn WorkspacePicker(
     });
 
     let go = move |path: String| {
+        // A filter typed for one directory must not hide the next one's
+        // entries; navigation starts each folder unfiltered.
+        browse_filter.set(String::new());
         fetch_browse(
             base.get(),
             token.get(),
@@ -469,7 +525,7 @@ pub fn WorkspacePicker(
                             }
                             return;
                         }
-                        let rows = picker_rows(&recents.get(), &workspaces.get());
+                        let rows = picker_rows_matching(&recents.get(), &workspaces.get(), &filter.get());
                         match ev.key().as_str() {
                             "Escape" => {
                                 ev.prevent_default();
@@ -509,14 +565,61 @@ pub fn WorkspacePicker(
                     <Show when=move || !note.get().is_empty()>
                         <p class="notice" role="status">{move || note.get()}</p>
                     </Show>
+                    <input
+                        data-workspace-filter=""
+                        placeholder="Filter workspaces by name or path"
+                        aria-label="Filter workspaces"
+                        prop:value=move || filter.get()
+                        on:input=move |ev| {
+                            filter.set(event_target_value(&ev));
+                            // Q2 (#1437): the cursor resets to the first
+                            // filtered row whenever the query changes.
+                            cursor.set(0);
+                        }
+                        on:keydown=move |ev: web_sys::KeyboardEvent| {
+                            // The dialog handler returns early for input
+                            // targets, so the filter handles its own
+                            // Arrow/Enter over the same filtered list.
+                            // Handled keys stop here so the dialog does not
+                            // also act; Escape is left to bubble to the
+                            // dialog's input-target Escape close.
+                            let rows = picker_rows_matching(&recents.get(), &workspaces.get(), &filter.get());
+                            match ev.key().as_str() {
+                                "ArrowDown" => {
+                                    ev.prevent_default();
+                                    ev.stop_propagation();
+                                    if !rows.is_empty() {
+                                        cursor.update(|i| *i = (*i + 1) % rows.len());
+                                    }
+                                }
+                                "ArrowUp" => {
+                                    ev.prevent_default();
+                                    ev.stop_propagation();
+                                    if !rows.is_empty() {
+                                        cursor.update(|i| {
+                                            if *i == 0 { *i = rows.len() - 1; } else { *i -= 1; }
+                                        });
+                                    }
+                                }
+                                "Enter" => {
+                                    ev.prevent_default();
+                                    ev.stop_propagation();
+                                    if let Some(w) = rows.get(cursor.get()) {
+                                        activate(w.id.clone());
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                    />
                     <div class="ws-cols">
                         <section>
                             <h3 class="ws-kicker">"Recent"</h3>
-                            <Show when=move || recents.get().is_empty()>
+                            <Show when=move || recents.get().is_empty() && filter.get().trim().is_empty()>
                                 <p class="hint">"Opened workspaces show up here."</p>
                             </Show>
                             <ul class="plain">
-                                {move || recents.get().into_iter().map(|w| {
+                                {move || filtered_workspaces(&recents.get(), &filter.get()).into_iter().map(|w| {
                                     let id = w.id.clone();
                                     let name = w.name.clone();
                                     let path = w.path.clone();
@@ -531,14 +634,17 @@ pub fn WorkspacePicker(
                                 }).collect_view()}
                             </ul>
                             <h3 class="ws-kicker">"All workspaces"</h3>
-                            <Show when=move || workspaces.get().is_empty()>
+                            <Show when=move || workspaces.get().is_empty() && filter.get().trim().is_empty()>
                                 <p class="hint">"None yet. Browse on the right and use the folder."</p>
+                            </Show>
+                            <Show when=move || !filter.get().trim().is_empty() && picker_rows_matching(&recents.get(), &workspaces.get(), &filter.get()).is_empty()>
+                                <p class="hint" data-workspace-filter-empty="">{move || format!("No workspaces match \"{}\".", filter.get().trim())}</p>
                             </Show>
                             <ul class="plain">
                                 {move || {
-                                    let rows = picker_rows(&recents.get(), &workspaces.get());
+                                    let rows = picker_rows_matching(&recents.get(), &workspaces.get(), &filter.get());
                                     let cur = cursor.get();
-                                    workspaces.get().into_iter().enumerate().map(|(i, w)| {
+                                    filtered_workspaces(&workspaces.get(), &filter.get()).into_iter().enumerate().map(|(i, w)| {
                                         let id = w.id.clone();
                                         let id_open = id.clone();
                                         let id_save = id.clone();
@@ -611,8 +717,18 @@ pub fn WorkspacePicker(
                                 <button class="secondary" disabled=move || browse_parent.get().is_empty() && browse_path.get().is_empty() on:click=move |_| go(browse_parent.get())>"Up"</button>
                                 <button class="primary" disabled=move || browse_path.get().is_empty() on:click=move |_| use_folder(browse_path.get())>"Use this folder"</button>
                             </div>
+                            <input
+                                data-workspace-browse-filter=""
+                                placeholder="Filter folders in this directory"
+                                aria-label="Filter folders"
+                                prop:value=move || browse_filter.get()
+                                on:input=move |ev| browse_filter.set(event_target_value(&ev))
+                            />
+                            <Show when=move || !browse_filter.get().trim().is_empty() && filtered_browse_entries(&browse_entries.get(), &browse_filter.get()).is_empty()>
+                                <p class="hint" data-workspace-browse-filter-empty="">{move || format!("No folders match \"{}\".", browse_filter.get().trim())}</p>
+                            </Show>
                             <ul class="plain">
-                                {move || browse_entries.get().into_iter().map(|e| {
+                                {move || filtered_browse_entries(&browse_entries.get(), &browse_filter.get()).into_iter().map(|e| {
                                     let path = e.path.clone();
                                     let name = e.name.clone();
                                     view! {
@@ -742,5 +858,85 @@ mod tests {
             .contains("Yolo"));
         assert!(policy_change_message("plan", "default").is_none());
         assert!(policy_change_message("yolo", "yolo").is_none());
+    }
+
+    fn named(id: &str, name: &str, path: &str) -> Workspace {
+        Workspace {
+            name: name.into(),
+            path: path.into(),
+            ..ws(id, "", "", &[])
+        }
+    }
+
+    #[test]
+    fn filter_empty_query_restores_deduped_picker_rows() {
+        let recents = vec![named("a", "Alpha", "/p/alpha")];
+        let all = vec![
+            named("a", "Alpha", "/p/alpha"),
+            named("b", "Beta", "/p/beta"),
+        ];
+        for q in ["", "  "] {
+            let rows = picker_rows_matching(&recents, &all, q);
+            assert_eq!(rows.len(), 2);
+            assert_eq!(rows[0].id, "a");
+            assert_eq!(rows[1].id, "b");
+        }
+    }
+
+    #[test]
+    fn filter_matches_name_and_path_case_insensitively() {
+        let all = vec![
+            named("a", "Strike", "/home/u/projects/strike"),
+            named("b", "strike", "/home/u/checkouts/strike-2"),
+            named("c", "Peasant", "/home/u/projects/peasant"),
+        ];
+        // Name match, upper-case query.
+        let rows = picker_rows_matching(&[], &all, "PEASANT");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, "c");
+        // Path match tells identically-named checkouts apart.
+        let rows = picker_rows_matching(&[], &all, "checkouts/STRIKE-2");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, "b");
+        // No match yields the empty list behind the named empty state.
+        assert!(picker_rows_matching(&[], &all, "zzz").is_empty());
+    }
+
+    #[test]
+    fn filtered_cursor_row_is_the_intended_workspace() {
+        // The load-bearing property (#1437): keyboard activation reads
+        // index `cursor` of this same filtered list the render shows.
+        // Unfiltered, index 0 is Alpha; filtered to "beta", index 0 is Beta.
+        let recents = vec![named("a", "Alpha", "/p/alpha")];
+        let all = vec![
+            named("a", "Alpha", "/p/alpha"),
+            named("b", "Beta", "/p/beta"),
+            named("g", "Gamma", "/p/gamma"),
+        ];
+        assert_eq!(picker_rows_matching(&recents, &all, "")[0].id, "a");
+        let rows = picker_rows_matching(&recents, &all, "beta");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, "b");
+        // Sections filter by the identical rule.
+        assert_eq!(filtered_workspaces(&all, "beta")[0].id, "b");
+        assert_eq!(filtered_workspaces(&recents, "beta").len(), 0);
+        assert_eq!(filtered_workspaces(&recents, "alp").len(), 1);
+    }
+
+    #[test]
+    fn browse_filter_matches_name_and_path() {
+        let entries = vec![
+            crate::model::BrowseEntry {
+                name: "src".into(),
+                path: "/p/src".into(),
+            },
+            crate::model::BrowseEntry {
+                name: "Docs".into(),
+                path: "/p/docs".into(),
+            },
+        ];
+        assert_eq!(filtered_browse_entries(&entries, "").len(), 2);
+        assert_eq!(filtered_browse_entries(&entries, "DOC")[0].name, "Docs");
+        assert!(filtered_browse_entries(&entries, "zzz").is_empty());
     }
 }
