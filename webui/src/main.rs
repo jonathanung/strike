@@ -838,6 +838,10 @@ fn App() -> impl IntoView {
     let context_used = RwSignal::new(0i64);
     let context_limit = RwSignal::new(0i64);
     let context_fit = RwSignal::new(String::new());
+    // Compact now (#1567): true from sending the `compact` op until the
+    // daemon's own `compaction.completed` event lands — the meter only
+    // ever moves from daemon events, never optimistically.
+    let compacting = RwSignal::new(false);
     let model_defaults = RwSignal::new(ModelDefaults::default());
     let catalog = RwSignal::new(Vec::<ModelInfo>::new());
     let catalog_note = RwSignal::new(String::new());
@@ -1255,6 +1259,7 @@ fn App() -> impl IntoView {
         context_used.set(0);
         context_limit.set(0);
         context_fit.set(String::new());
+        compacting.set(false);
         if root.is_empty() {
             stream_note.set(String::new());
             return;
@@ -1380,7 +1385,11 @@ fn App() -> impl IntoView {
                     context_limit.set(next.context_limit);
                     context_fit.set(next.context_fit);
                     model_note.set(next.note);
-                    model_note_after.set(next.note_after);                }
+                    model_note_after.set(next.note_after);
+                    if data.contains("\"compaction.completed\"") {
+                        compacting.set(false);
+                    }
+                }
             });
         es.set_onmessage(Some(on_msg.as_ref().unchecked_ref()));
         on_msg.forget();
@@ -2472,6 +2481,35 @@ fn App() -> impl IntoView {
             }
         });
     });
+    // Compact now (#1567): send the daemon-certified `compact` op on
+    // the same path as effort. No optimistic meter change — the UI
+    // waits for `compaction.completed`; a refusal surfaces as-is.
+    let on_compact = Callback::new(move |_: ()| {
+        let root = active_root.get_untracked();
+        if root.is_empty() {
+            return;
+        }
+        let busy = roots
+            .get_untracked()
+            .iter()
+            .any(|row| row.id == root && row.busy)
+            || (live_busy.get_untracked() && live_busy_root.get_untracked() == root);
+        if let Some(reason) =
+            crate::model_menu::compact_disabled(busy, compacting.get_untracked())
+        {
+            model_note.set(reason.into());
+            return;
+        }
+        compacting.set(true);
+        model_note.set(String::new());
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            if let Err(e) = post_op(&b, &t, &root, "compact", serde_json::json!({})).await {
+                compacting.set(false);
+                model_note.set(format!("compact failed: {e}"));
+            }
+        });
+    });
     let on_default_effort = Callback::new(move |level: String| {
         let (b, t) = (base.get_untracked(), token.get_untracked());
         spawn_local(async move {
@@ -2717,6 +2755,31 @@ fn App() -> impl IntoView {
         roots,
         active_root,
         refresh: Rc::new(move || refresh_meta()),
+        // Waiting chip (#1543): jump to the pending ask card, or say
+        // plainly in the status line when it already resolved — the
+        // flags and the ask list are re-read at click time, not from
+        // the render that painted the chip.
+        go_to_ask: Rc::new(move || {
+            mode.set("chat".into());
+            let root = active_root.get_untracked();
+            let flagged = roots.get_untracked().iter().any(|row| {
+                row.id == root && (row.permission_pending || row.question_pending)
+            });
+            if asks.get_untracked().is_empty() && !flagged {
+                status.set("That ask is already resolved — nothing is waiting.".into());
+                return;
+            }
+            if !crate::status::scroll_to_pending_ask_soon() {
+                // A question can be pending without an approval card;
+                // it waits in the latest transcript content.
+                if let Some(el) = web_sys::window()
+                    .and_then(|w| w.document())
+                    .and_then(|doc| doc.get_element_by_id("tf-transcript"))
+                {
+                    el.set_scroll_top(el.scroll_height());
+                }
+            }
+        }),
     });
     // Gateway switcher page wiring (#1265). The slot is registered at
     // boot by src/shell/contrib/gateway.rs and renders through this
@@ -3617,6 +3680,13 @@ fn App() -> impl IntoView {
                 return Err("Pick an effort.".into());
             }
             on_effort.run(level);
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "model.compact",
+        Rc::new(move |_| {
+            on_compact.run(());
             Ok(())
         }),
     );
