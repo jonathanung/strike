@@ -23,7 +23,8 @@ use crate::api::{delete_json, get_json, js_encode, now_ms, post_json_value};
 use crate::model::{is_running, merge_sessions, ActivityRow, RootSummary, SessionItem, Workspace};
 use crate::session_list::{
     alt_digit, assemble, human_title, select_range, stamp_times, step_index, title_is_raw_id,
-    toggle_id, unread_flag, AssembleArgs, ChildIn, FolderIn, Layout, LayoutKind, SourceSession,
+    toggle_id, unread_flag, AssembleArgs, ChildIn, FolderIn, Layout, LayoutKind, SortOrder,
+    SourceSession,
 };
 use crate::shell::icon;
 use crate::{load, load_string_list, save};
@@ -270,6 +271,9 @@ pub(crate) fn SessionPanel(
     let conductor = RwSignal::new(prefs.conductor);
     let collapsed = RwSignal::new(prefs.collapsed);
     let show_older = RwSignal::new(prefs.show_older);
+    // Sort order (#1458): session-local only, not persisted — the list
+    // opens on Recent every time, per the issue's recommended default.
+    let sort = RwSignal::new(SortOrder::Recent);
     let query = RwSignal::new(String::new());
     let snapshot = RwSignal::new(Snapshot::default());
     let hits = RwSignal::new(Vec::<SearchHit>::new());
@@ -460,6 +464,7 @@ pub(crate) fn SessionPanel(
             conductor.get(),
             older_days.get(),
             show_older.get(),
+            sort.get(),
         )
     });
 
@@ -881,10 +886,12 @@ pub(crate) fn SessionPanel(
             if id.is_empty() {
                 return Err("No session to copy.".into());
             }
-            if let Some(win) = web_sys::window() {
-                let _ = win.navigator().clipboard().write_text(&id);
-            }
-            note.set(format!("Copied {id}"));
+            // Await the write (#1414): never claim a copy that the
+            // browser rejected.
+            spawn_local(async move {
+                let ok = crate::clipboard::copy_text(&id).await.is_ok();
+                note.set(crate::clipboard::session_copy_feedback(ok).into());
+            });
             Ok(())
         }),
     );
@@ -971,6 +978,22 @@ pub(crate) fn SessionPanel(
                 prop:value=move || query.get()
                 on:input=move |ev| query.set(event_target_value(&ev))
             />
+            <div class="ss-tools">
+                <label class="ss-fold">
+                    "Sort"
+                    <select
+                        class="ss-select"
+                        data-ss-sort="true"
+                        aria-label="Sort sessions"
+                        prop:value=move || sort.get().as_str()
+                        on:change=move |ev| sort.set(SortOrder::parse(&event_target_value(&ev)))
+                    >
+                        <option value="recent">"Recent"</option>
+                        <option value="oldest">"Oldest"</option>
+                        <option value="title">"Title"</option>
+                    </select>
+                </label>
+            </div>
             <Show when=move || !action_note.get().is_empty()>
                 <p class="hint">{move || action_note.get()}</p>
             </Show>
@@ -1020,6 +1043,24 @@ pub(crate) fn SessionPanel(
                     }
                 },
                 move |index| cursor.set(index),
+                move |id: String| {
+                    // Copy ID (#1414): await the shared clipboard helper
+                    // and report through the panel's status line — never
+                    // silent on failure.
+                    spawn_local(async move {
+                        let ok = crate::clipboard::copy_text(&id).await.is_ok();
+                        action_note.set(crate::clipboard::session_copy_feedback(ok).into());
+                    });
+                },
+                move |id: String, archived: bool| {
+                    // Per-row Archive / Unarchive (#1454): the existing
+                    // single-id bulk path; no confirm (reversible).
+                    if archived {
+                        run_bulk(vec![id], "unarchive", "");
+                    } else {
+                        run_bulk(vec![id], "archive", "");
+                    }
+                },
             )}
             {move || {
                 let hidden = layout.get().hidden_older;
@@ -1054,6 +1095,7 @@ fn build_layout(
     conductor: bool,
     older_days: i64,
     show_older: bool,
+    sort: SortOrder,
 ) -> Layout {
     let active_running = activity.iter().any(|row| is_running(&row.state));
     let pins: Vec<String> = snap
@@ -1184,6 +1226,7 @@ fn build_layout(
         now_s,
         older_days,
         show_older,
+        sort,
     });
     stamp_times(&mut layout.items, &mtimes, now_s);
     layout
@@ -1198,6 +1241,8 @@ fn render_rows(
     on_toggle_folder: impl Fn(String) + Copy + 'static,
     on_check: impl Fn(String, bool) + Copy + 'static,
     on_cursor: impl Fn(usize) + Copy + 'static,
+    on_copy_id: impl Fn(String) + Copy + 'static,
+    on_archive_row: impl Fn(String, bool) + Copy + 'static,
 ) -> impl IntoView {
     let nav_len = layout
         .items
@@ -1264,6 +1309,7 @@ fn render_rows(
                 let tip = format!("{label} ({id})");
                 let open_main = open_id.clone();
                 let id_attr = id.clone();
+                let archived_row = item.archived;
                 view! {
                     <div class=class role="option" aria-selected=on.to_string() data-session-id=id_attr>
                         {is_session.then(|| {
@@ -1296,6 +1342,33 @@ fn render_rows(
                                 <span class="ss-sub">{subtitle}</span>
                             </span>
                         </button>
+                        {is_session.then(|| {
+                            let copy_id = id.clone();
+                            let copy_hook = id.clone();
+                            let archive_id = id.clone();
+                            view! {
+                                <div class="ss-actions">
+                                    <button
+                                        type="button"
+                                        class="ss-quiet"
+                                        data-ss-copy-id=copy_hook
+                                        on:click=move |ev: web_sys::MouseEvent| {
+                                            ev.stop_propagation();
+                                            on_copy_id(copy_id.clone());
+                                        }
+                                    >"Copy ID"</button>
+                                    <button
+                                        type="button"
+                                        class="ss-quiet"
+                                        data-ss-archive-id=archive_id.clone()
+                                        on:click=move |ev: web_sys::MouseEvent| {
+                                            ev.stop_propagation();
+                                            on_archive_row(archive_id.clone(), archived_row);
+                                        }
+                                    >{if archived_row { "Unarchive" } else { "Archive" }}</button>
+                                </div>
+                            }
+                        })}
                     </div>
                 }
                 .into_any()
