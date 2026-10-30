@@ -187,13 +187,13 @@ fn short_hash(hash: &str) -> String {
 
 /// Initial Git log page (#1432) and the daemon's hard cap
 /// (`gitLogMax` in internal/frontend/server/git.go).
-pub(crate) const LOG_LIMIT_INITIAL: usize = 30;
-pub(crate) const LOG_LIMIT_MAX: usize = 100;
+const LOG_LIMIT_INITIAL: usize = 30;
+const LOG_LIMIT_MAX: usize = 100;
 
 /// Next log limit to request, or `None` when no More control should
 /// show: a short page (`returned < current`) means history is
 /// exhausted, and at [`LOG_LIMIT_MAX`] the daemon clamps anyway.
-pub(crate) fn next_log_limit(current: usize, returned: usize) -> Option<usize> {
+fn next_log_limit(current: usize, returned: usize) -> Option<usize> {
     if returned < current || current >= LOG_LIMIT_MAX {
         return None;
     }
@@ -202,7 +202,7 @@ pub(crate) fn next_log_limit(current: usize, returned: usize) -> Option<usize> {
 
 /// Honest end-of-log note shown whenever the More control disappears
 /// (#1432 Q2), so a missing button is never ambiguous.
-pub(crate) fn log_end_note(current: usize, returned: usize) -> Option<String> {
+fn log_end_note(current: usize, returned: usize) -> Option<String> {
     if returned == 0 || next_log_limit(current, returned).is_some() {
         return None;
     }
@@ -215,7 +215,7 @@ pub(crate) fn log_end_note(current: usize, returned: usize) -> Option<String> {
 
 /// Case-insensitive substring match on the full path (#1435 Q1).
 /// An empty/blank query matches everything.
-pub(crate) fn path_matches_query(path: &str, query: &str) -> bool {
+fn path_matches_query(path: &str, query: &str) -> bool {
     let query = query.trim().to_lowercase();
     query.is_empty() || path.to_lowercase().contains(&query)
 }
@@ -223,7 +223,7 @@ pub(crate) fn path_matches_query(path: &str, query: &str) -> bool {
 /// Original indices of the rows visible under `query`, in row order
 /// (#1435). Cursor, Enter, Stage/Unstage and Discard keep acting on
 /// these original indices, never on visible positions.
-pub(crate) fn filtered_row_indices(rows: &[GitRow], query: &str) -> Vec<usize> {
+fn filtered_row_indices(rows: &[GitRow], query: &str) -> Vec<usize> {
     rows.iter()
         .enumerate()
         .filter(|(_, row)| path_matches_query(&row.path, query))
@@ -234,7 +234,7 @@ pub(crate) fn filtered_row_indices(rows: &[GitRow], query: &str) -> Vec<usize> {
 /// Step from `cursor` by `delta` through the visible (filtered)
 /// original indices. With no query this is the plain clamp over all
 /// rows, preserving today's behaviour exactly.
-pub(crate) fn filtered_cursor_step(
+fn filtered_cursor_step(
     rows: &[GitRow],
     query: &str,
     cursor: usize,
