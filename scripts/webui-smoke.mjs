@@ -2862,6 +2862,37 @@ try {
     throw new Error(`triggers page missing: ${triggersText.slice(0, 400)}`);
   }
 
+  // #1486: create a trigger so the show-once secret and the hook URL
+  // render, then Copy secret must produce a visible outcome — the copied
+  // confirmation, or the manual-fallback notice when the harness denies
+  // clipboard permission. A silent click is the failure this guards.
+  await evaluate(`(() => {
+    const el = document.querySelector("#trigger-name");
+    if (!el) return false;
+    const proto = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value");
+    proto.set.call(el, "smoke-copy");
+    el.dispatchEvent(new InputEvent("input", { bubbles: true, data: "smoke-copy" }));
+    return el.value === "smoke-copy";
+  })()`);
+  await evaluate(`(() => {
+    document.querySelector(".triggers-detail form button.primary")?.click();
+    return true;
+  })()`);
+  await waitFor(
+    "trigger copy buttons",
+    textProbe((t) => t.includes("Copy secret") && t.includes("Copy hook URL")),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await evaluate(`(() => {
+    [...document.querySelectorAll("button")].find((b) => b.innerText.trim() === "Copy secret")?.click();
+    return true;
+  })()`);
+  await waitFor(
+    "trigger copy outcome",
+    textProbe((t) => t.includes("Signing secret copied.") || t.includes("Copy failed")),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+
   await send("Runtime.evaluate", {
     expression: `localStorage.setItem("strike.token", ${JSON.stringify(token)})`,
     returnByValue: true,

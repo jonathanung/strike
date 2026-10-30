@@ -215,6 +215,27 @@ fn kind_label(kind: &str) -> &'static str {
     }
 }
 
+/// The daemon's run-history cap (#1491): `maxRuns` in
+/// `internal/schedule/model.go`. The history response carries no total or
+/// dropped count, so the client can only be honest at the cap itself —
+/// keep this constant pointed at the daemon's value; if the daemon ever
+/// exposes the cap in the response, prefer that over this constant.
+const HISTORY_CAP: usize = 50;
+
+/// The honesty label for the History panel (#1491): shown only when the
+/// loaded list is at the daemon cap. Below the cap the panel is complete
+/// and gets no extra chrome; there is no Show-more, because runs past the
+/// cap are discarded daemon-side, not merely unloaded.
+fn history_cap_notice(run_count: usize) -> Option<String> {
+    if run_count == HISTORY_CAP {
+        Some(format!(
+            "Showing the newest {HISTORY_CAP} runs — older runs are not kept."
+        ))
+    } else {
+        None
+    }
+}
+
 #[component]
 pub fn SchedulePage(
     base: RwSignal<String>,
@@ -798,6 +819,7 @@ pub fn SchedulePage(
                     </datalist>
                     <div class="sched-history">
                         <h3>"History"</h3>
+                        {move || history_cap_notice(runs.get().len()).map(|label| view! { <p class="hint">{label}</p> })}
                         {move || {
                             let rows = runs.get();
                             if editing.get().is_empty() {
@@ -855,5 +877,24 @@ mod tests {
         assert_eq!(duplicate_schedule_name("Morning (copy)"), "Morning (copy)");
         assert_eq!(duplicate_schedule_name(""), "(copy)");
         assert_eq!(duplicate_schedule_name("  Standup  "), "Standup (copy)");
+    }
+
+    #[test]
+    fn history_cap_notice_only_at_the_daemon_cap() {
+        // #1491: below the cap the panel is complete — no label, no count.
+        assert_eq!(history_cap_notice(0), None);
+        assert_eq!(history_cap_notice(1), None);
+        assert_eq!(history_cap_notice(49), None);
+        // At the cap the label states the limit and the consequence,
+        // without inventing a total of dropped runs.
+        let label = history_cap_notice(50).expect("label at the cap");
+        assert_eq!(
+            label,
+            "Showing the newest 50 runs — older runs are not kept."
+        );
+        // Past the cap cannot happen (the daemon truncates to 50); if a
+        // future daemon raises it, the row-count check stays silent
+        // rather than mislabelling a complete list.
+        assert_eq!(history_cap_notice(51), None);
     }
 }
