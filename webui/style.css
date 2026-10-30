@@ -1165,6 +1165,9 @@ select.mode, .daemon select {
   word-break: break-all;
 }
 .gq-dialog input { width: 100%; }
+/* feature:clipboard-honesty begin */
+.gq-copy-fallback { color: var(--warning); white-space: pre-wrap; }
+/* feature:clipboard-honesty end */
 /* White plate so a camera can read the modules on a dark theme. */
 .gq-qr {
   background: #ffffff;
