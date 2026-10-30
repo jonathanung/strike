@@ -185,3 +185,30 @@ func TestOnboardingExplicitUnackedFileReopens(t *testing.T) {
 	}
 	_ = svc
 }
+
+func TestOnboardingAcknowledgedIsPureRead(t *testing.T) {
+	svc, store := newTestServices(t)
+	if svc.Onboarding.Acknowledged() {
+		t.Fatal("clean install must report Acknowledged=false")
+	}
+	// The read must not write the record or run the migration: the file
+	// stays absent and a later TUI ShouldAutoOpen still fires.
+	if _, err := os.Stat(config.OnboardingPath()); !os.IsNotExist(err) {
+		t.Fatalf("Acknowledged wrote onboarding.json: %v", err)
+	}
+	if !svc.Onboarding.ShouldAutoOpen() {
+		t.Fatal("Acknowledged must not consume first-run state")
+	}
+	if err := svc.Onboarding.Acknowledge(); err != nil {
+		t.Fatal(err)
+	}
+	if !svc.Onboarding.Acknowledged() {
+		t.Fatal("Acknowledged must be true after Acknowledge")
+	}
+	// A fresh service (a new browser/process against the same daemon
+	// HOME) sees the same daemon-side record.
+	svc2 := New(store, nil, nil, nil, nil, nil, nil, "")
+	if !svc2.Onboarding.Acknowledged() {
+		t.Fatal("fresh service must see the daemon-side acknowledgement")
+	}
+}
