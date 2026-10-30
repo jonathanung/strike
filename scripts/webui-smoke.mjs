@@ -184,6 +184,20 @@ try {
   if (!listedText.includes("markdownFile") || !listedText.includes(".md")) {
     throw new Error(`memory list missing plain-file path body=${listedText.slice(0, 500)}`);
   }
+  // Seed one knowledge pin for the Knowledge search check (#1469).
+  const putPin = await fetch(`http://127.0.0.1:${port}/v1/knowledge`, {
+    method: "PUT",
+    headers: auth,
+    body: JSON.stringify({
+      path: "docs/smoke-pin.md",
+      note: "smoke pin note",
+      author: "operator",
+      scope: "project",
+    }),
+  });
+  if (!putPin.ok) {
+    throw new Error(`knowledge pin put failed ${putPin.status} ${await putPin.text()}`);
+  }
 
   const authz = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
   const call = async (method, path, body) => {
@@ -1404,6 +1418,78 @@ try {
   if (!(memKeyWidthPx > 100)) {
     throw new Error(`memory row key cell too narrow width=${memKeyWidthPx}`);
   }
+
+  // Memory search/filter (#1461): value fragment narrows to a visible-vs-
+  // total count, a no-match query shows the distinct filtered-empty state
+  // without hiding the Save form, and clearing restores every row.
+  const setSearch = async (selector, value) => {
+    const raw = await evaluate(
+      `(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return "missing"; el.value = ${JSON.stringify(value)}; el.dispatchEvent(new Event("input", { bubbles: true })); return "set"; })()`,
+    );
+    if (raw !== "set") throw new Error(`storage search input ${selector} not found`);
+  };
+  await setSearch(".storage-search-memory", "smoke likes");
+  await waitFor(
+    "memory search by value fragment to narrow to 1 of 2",
+    textProbe((t) => t.includes("1 of 2 entries") && t.includes("smoke-pref")),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await setSearch(".storage-search-memory", "zzz-no-memory-match");
+  await waitFor(
+    "memory filtered-empty state with the Save form still present",
+    async () => {
+      const raw = await evaluate(`(() => JSON.stringify({
+        empty: !!document.querySelector("[data-memory-filtered-empty]"),
+        form: !!document.querySelector(".storage-form"),
+        body: document.body.innerText.includes("No memory entries match"),
+        count: document.body.innerText.includes("0 of 2 entries"),
+      }))()`);
+      const p = JSON.parse(raw || "{}");
+      return { ok: !!(p.empty && p.form && p.body && p.count), ...p };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await setSearch(".storage-search-memory", "");
+  await waitFor(
+    "memory search cleared to restore all rows",
+    textProbe((t) => t.includes("2 of 2 entries") && t.includes("smoke-pref")),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+
+  // Knowledge search/filter (#1469): same shape over path/note/author.
+  await runPalette("Knowledge");
+  await waitFor(
+    "knowledge panel to show the seeded pin",
+    textProbe((t) => t.includes("docs/smoke-pin.md") && t.includes("smoke pin note")),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await setSearch(".storage-search-knowledge", "pin note");
+  await waitFor(
+    "knowledge search by note fragment to narrow to 1 of 1",
+    textProbe((t) => t.includes("1 of 1 pins") && t.includes("docs/smoke-pin.md")),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await setSearch(".storage-search-knowledge", "zzz-no-pin-match");
+  await waitFor(
+    "knowledge filtered-empty state with the Pin form still present",
+    async () => {
+      const raw = await evaluate(`(() => JSON.stringify({
+        empty: !!document.querySelector("[data-knowledge-filtered-empty]"),
+        form: !!document.querySelector(".storage-form"),
+        body: document.body.innerText.includes("No pins match"),
+        count: document.body.innerText.includes("0 of 1 pins"),
+      }))()`);
+      const p = JSON.parse(raw || "{}");
+      return { ok: !!(p.empty && p.form && p.body && p.count), ...p };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await setSearch(".storage-search-knowledge", "");
+  await waitFor(
+    "knowledge search cleared to restore the pin",
+    textProbe((t) => t.includes("1 of 1 pins") && t.includes("docs/smoke-pin.md")),
+    { timeout: WAIT_MS, interval: 250 },
+  );
 
   // Goals + Autopilot (#1300, #1593). The view is palette-only. A bundle
   // that predates Goals has no palette command and fails here.
