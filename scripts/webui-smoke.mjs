@@ -2265,6 +2265,35 @@ try {
   if (!picker.includes("A workspace is a directory")) {
     throw new Error(`workspace picker did not open: ${picker.slice(0, 400)}`);
   }
+  // Workspace filter (#1437): a query with no matches shows the named
+  // empty state (not the generic "None yet" hint); clearing restores it.
+  const wsFilterSet = await evaluate(`(() => {
+    const el = document.querySelector("[data-workspace-filter]");
+    if (!el) return "missing";
+    el.focus();
+    el.value = "zzz-no-such-workspace";
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    return "ok";
+  })()`);
+  if (wsFilterSet !== "ok") {
+    throw new Error(`workspace filter input missing (${wsFilterSet})`);
+  }
+  await waitFor(
+    "workspace filter no-match empty state",
+    textProbe((body) => body.includes('No workspaces match "zzz-no-such-workspace"')),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await evaluate(`(() => {
+    const el = document.querySelector("[data-workspace-filter]");
+    el.value = "";
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    return "ok";
+  })()`);
+  await waitFor(
+    "workspace filter cleared restores the list",
+    textProbe((body) => !body.includes("No workspaces match")),
+    { timeout: WAIT_MS, interval: 250 },
+  );
   // Schedule page (#1276): the top-bar switch (data-view="schedule",
   // registered by src/shell/contrib/scheduler.rs) opens the page and the
   // empty state shows; the daemon token is already in localStorage from
