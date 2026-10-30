@@ -297,9 +297,7 @@ mod tests {
             .collect()
     }
 
-    fn lines_with_detail<'a>(
-        rows: &[(&'a str, &'a str, &'a str)],
-    ) -> Vec<SearchLine<'a>> {
+    fn lines_with_detail<'a>(rows: &[(&'a str, &'a str, &'a str)]) -> Vec<SearchLine<'a>> {
         rows.iter()
             .map(|&(title, body, detail)| SearchLine {
                 title,
@@ -396,7 +394,11 @@ mod tests {
         // field it is in so the UI can expand that line's fold.
         let rows = lines_with_detail(&[
             ("You", "run the tests", ""),
-            ("test-tool", "tests ran", "FAIL needle-test panicked at src/lib.rs"),
+            (
+                "test-tool",
+                "tests ran",
+                "FAIL needle-test panicked at src/lib.rs",
+            ),
             ("Strike", "done", ""),
         ]);
         let hits = matches_for_lines(&rows, "needle-test");
