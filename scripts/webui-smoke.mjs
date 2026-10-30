@@ -57,6 +57,22 @@ async function waitHealth(url) {
   throw new Error(`daemon did not answer ${url}`);
 }
 
+// SIGTERM a spawned child and wait for it to actually exit, escalating
+// to SIGKILL after a grace period (same pattern as the daemon restart
+// below). Cleanup must not rm a child's files while it is still running:
+// Chrome keeps writing its profile for well over a fixed sleep, and the
+// rm then races it and fails ENOTEMPTY (#1477).
+async function stopChild(child) {
+  if (!child || child.exitCode != null || child.signalCode) return;
+  const exited = new Promise((resolve) => child.once("exit", resolve));
+  child.kill("SIGTERM");
+  await Promise.race([exited, delay(5000)]);
+  if (child.exitCode == null && !child.signalCode) {
+    child.kill("SIGKILL");
+    await Promise.race([exited, delay(2000)]);
+  }
+}
+
 async function status(path, headers) {
   const res = await fetch(`http://127.0.0.1:${port}${path}`, { headers });
   return res.status;
@@ -2170,13 +2186,32 @@ try {
   // the label from the fixture above — exactly one "took 4:12", on the
   // long turn's final line; the short turn and the untimed-line turn
   // render nothing.
-  const elapsedClicked = await evaluate(`(() => {
-    const row = document.querySelector('[data-session-id="elapsed-session"]');
-    const btn = row && row.querySelector(".ss-main");
-    if (!btn) return "missing";
-    btn.click();
-    return "clicked";
-  })()`);
+  // The seeded session row renders from the session-list fetch; right
+  // after the daemon restart above that fetch can still be in flight (or
+  // refused mid-restart), so the row is not always in the DOM yet. Poll
+  // for it with the file's condition-based waitFor — clicking as soon as
+  // the row appears — instead of a single shot that flakes as "missing"
+  // (#1477). A row that never appears still fails with the same error.
+  let elapsedClicked = "missing";
+  try {
+    await waitFor(
+      "turn-elapsed resume row",
+      async () => {
+        elapsedClicked = await evaluate(`(() => {
+          const row = document.querySelector('[data-session-id="elapsed-session"]');
+          const btn = row && row.querySelector(".ss-main");
+          if (!btn) return "missing";
+          btn.click();
+          return "clicked";
+        })()`);
+        return { ok: elapsedClicked === "clicked", clicked: elapsedClicked };
+      },
+      { timeout: STEP_MS, interval: 250 },
+    );
+  } catch {
+    // waitFor's timeout carries diagnostics; the outer catch appends a
+    // fresh dump to the original "missing" failure thrown below.
+  }
   if (elapsedClicked !== "clicked") {
     throw new Error(`turn-elapsed resume click -> ${elapsedClicked}`);
   }
@@ -2786,9 +2821,13 @@ try {
   if (strikeLog) console.error(strikeLog.slice(-2000));
   process.exitCode = 1;
 } finally {
-  if (chrome) chrome.kill("SIGTERM");
-  strike.kill("SIGTERM");
-  await delay(200);
-  await rm(home, { recursive: true, force: true });
-  await rm(chromeData, { recursive: true, force: true });
+  // Wait for both children to actually exit before removing their files
+  // (Chrome profile, daemon HOME): the old fixed 200ms sleep raced a
+  // still-shutting-down Chrome and crashed with ENOTEMPTY after every
+  // assertion had passed (#1477). maxRetries is the belt-and-braces for
+  // a file released a beat after exit — rm retries ENOTEMPTY/EBUSY
+  // instead of failing the run.
+  await Promise.all([stopChild(chrome), stopChild(strike)]);
+  await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+  await rm(chromeData, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 }
