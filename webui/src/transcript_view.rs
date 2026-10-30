@@ -3,6 +3,7 @@
 //! stream; this pane only emits `path:line` links.
 
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use leptos::callback::{Callable, Callback};
@@ -62,6 +63,12 @@ pub fn TranscriptPane(
     find: RwSignal<FindView>,
 ) -> impl IntoView {
     let editing = RwSignal::new(false);
+    // Controlled fold open-state (#1441): message id -> open override.
+    // Absent = collapsed (today's default). Bulk actions are a snapshot:
+    // they only write entries for folds present at click time, so a fold
+    // streamed in afterwards has no entry and starts collapsed. Cleared
+    // on session switch below (bulk state does not survive sessions).
+    let folds = RwSignal::new(HashMap::<u32, bool>::new());
     let draft = RwSignal::new(String::new());
     let pinned = RwSignal::new(true);
     let cursor = RwSignal::new(None::<u32>);
@@ -84,6 +91,7 @@ pub fn TranscriptPane(
         cursor.set(None);
         cursor_session.set(String::new());
         rename_for.set(String::new());
+        folds.set(HashMap::new());
     });
     let scroller = NodeRef::<leptos::html::Div>::new();
     let scroller_fx = scroller;
@@ -193,6 +201,15 @@ pub fn TranscriptPane(
             });
         }
     });
+
+    let expand_all_folds = move |_| {
+        let ids = transcript.with_untracked(|t| fold_ids(&t.messages));
+        folds.update(|map| apply_bulk_fold(map, &ids, true));
+    };
+    let collapse_all_folds = move |_| {
+        let ids = transcript.with_untracked(|t| fold_ids(&t.messages));
+        folds.update(|map| apply_bulk_fold(map, &ids, false));
+    };
 
     let rename = handlers.rename;
     let open_file = handlers.open_file;
@@ -441,6 +458,21 @@ pub fn TranscriptPane(
             <Show when=move || !note.get().is_empty()>
                 <p class="sx-note" role="alert">{move || note.get()}</p>
             </Show>
+            {move || {
+                let count = transcript.with(|t| fold_ids(&t.messages).len());
+                let open_count = folds.with(|map| map.values().filter(|v| **v).count());
+                if count == 0 {
+                    view! { <span></span> }.into_any()
+                } else {
+                    view! {
+                        <div class="sx-toolbar sx-fold-toolbar" data-fold-all="true" data-fold-count=count.to_string() data-fold-open-count=open_count.to_string()>
+                            <button type="button" class="sx-quiet" data-fold-expand-all="true" on:click=expand_all_folds>"Expand all"</button>
+                            <button type="button" class="sx-quiet" data-fold-collapse-all="true" on:click=collapse_all_folds>"Collapse all"</button>
+                            <span class="sx-fold-count">{format!("{open_count}/{count} folds open")}</span>
+                        </div>
+                    }.into_any()
+                }
+            }}
         </div>
         <div class="sx-stage">
             <div
@@ -476,6 +508,7 @@ pub fn TranscriptPane(
                 </Show>
                 {move || {
                     let fv = find.get();
+                    let fold_map = folds.get();
                     let snap = transcript.get();
                     let msgs = snap.messages.clone();
                     // A day separator precedes the first timed message of
@@ -510,9 +543,10 @@ pub fn TranscriptPane(
                                 .collect();
                             let msg_current = fv.current.filter(|h| h.line == idx);
                             let msg_elapsed = snap.elapsed_for(msg.id).map(str::to_owned);
+                            let msg_fold_open = fold_is_open(&fold_map, msg.id);
                             view! {
                                 {sep.map(|label| view! { <div class="day-sep" role="separator">{label}</div> })}
-                                {message_view(msg, idx, cursor, open_file, retry, fork, msg_hits, msg_current, msg_elapsed)}
+                                {message_view(msg, idx, cursor, open_file, retry, fork, msg_hits, msg_current, msg_elapsed, msg_fold_open, folds)}
                             }
                         })
                         .collect_view()
@@ -715,6 +749,42 @@ pub fn save_download(filename: &str, mime: &str, text: &str) {
     let _ = web_sys::Url::revoke_object_url(&url);
 }
 
+/// Ids of messages that actually render a fold (#1441): only a
+/// non-empty `detail` produces a `<details class="sx-fold">`.
+fn fold_ids(messages: &[Message]) -> Vec<u32> {
+    messages
+        .iter()
+        .filter(|m| !m.detail.is_empty())
+        .map(|m| m.id)
+        .collect()
+}
+
+/// A fold is open only when a bulk action or a per-fold toggle wrote
+/// an explicit `true` for it. No entry = collapsed, which is both
+/// today's default and the state a fold streamed in after a bulk
+/// Expand all starts in (bulk actions are a snapshot, not a mode).
+fn fold_is_open(overrides: &HashMap<u32, bool>, id: u32) -> bool {
+    overrides.get(&id).copied().unwrap_or(false)
+}
+
+/// Apply a bulk Expand/Collapse to exactly the folds that exist at
+/// click time. Entries for other ids are untouched; ids created
+/// later get no entry and therefore stay collapsed.
+fn apply_bulk_fold(overrides: &mut HashMap<u32, bool>, ids: &[u32], open: bool) {
+    for id in ids {
+        overrides.insert(*id, open);
+    }
+}
+
+/// Record a single fold's native toggle. Returns without writing
+/// when the state already matches, so the `toggle` event fired by
+/// our own controlled re-render does not loop.
+fn record_fold_toggle(overrides: &mut HashMap<u32, bool>, id: u32, open: bool) {
+    if fold_is_open(overrides, id) != open {
+        overrides.insert(id, open);
+    }
+}
+
 fn message_view(
     msg: Message,
     idx: usize,
@@ -725,6 +795,8 @@ fn message_view(
     find_hits: Vec<crate::transcript_find::TMatch>,
     find_current: Option<crate::transcript_find::TMatch>,
     turn_elapsed: Option<String>,
+    fold_open: bool,
+    folds: RwSignal<HashMap<u32, bool>>,
 ) -> impl IntoView {
     let id = msg.id;
     let role = msg.role.class();
@@ -839,7 +911,21 @@ fn message_view(
             {if !detail.is_empty() {
                 let summary = if diff.is_some() { "Diff" } else { "Output" };
                 view! {
-                    <details class="sx-fold">
+                    <details
+                        class="sx-fold"
+                        open=fold_open
+                        data-fold-open=if fold_open { "true" } else { "false" }
+                        data-fold-id=id.to_string()
+                        on:toggle=move |ev: web_sys::Event| {
+                            let Some(target) = ev.target() else { return };
+                            let Ok(el) = target.dyn_into::<web_sys::Element>() else { return };
+                            let open = js_sys::Reflect::get(&el, &JsValue::from_str("open"))
+                                .ok()
+                                .and_then(|v| v.as_bool())
+                                .unwrap_or(fold_open);
+                            folds.update(|map| record_fold_toggle(map, id, open));
+                        }
+                    >
                         <summary>{summary}</summary>
                         <pre>{detail}</pre>
                     </details>
@@ -1064,6 +1150,56 @@ mod tests {
             Some("newest prompt")
         );
         assert_eq!(resolve_fork("sess-a", Some(&hit), &a), Some(4));
+    }
+
+    #[test]
+    fn fold_bulk_is_a_snapshot_and_per_fold_toggle_still_works() {
+        // Default: no entry = collapsed, as before #1441.
+        let mut map: HashMap<u32, bool> = HashMap::new();
+        assert!(!fold_is_open(&map, 1));
+        // Expand all over the folds present at click time.
+        apply_bulk_fold(&mut map, &[1, 2, 3], true);
+        assert!(fold_is_open(&map, 1) && fold_is_open(&map, 2) && fold_is_open(&map, 3));
+        // A fold streamed in after Expand all has no entry: collapsed,
+        // not force-opened (bulk is a snapshot, not a mode).
+        assert!(!fold_is_open(&map, 4));
+        // Per-fold toggle after a bulk action.
+        record_fold_toggle(&mut map, 2, false);
+        assert!(!fold_is_open(&map, 2));
+        assert!(fold_is_open(&map, 1));
+        // Recording the same state is a no-op (own re-render's toggle).
+        record_fold_toggle(&mut map, 1, true);
+        assert!(fold_is_open(&map, 1));
+        // Collapse all hides every present fold; the streamed-in fold
+        // stays collapsed too.
+        apply_bulk_fold(&mut map, &[1, 2, 3, 4], false);
+        assert!(!fold_is_open(&map, 1) && !fold_is_open(&map, 4));
+        // Session switch resets by clearing the map.
+        map.clear();
+        assert!(!fold_is_open(&map, 1));
+    }
+
+    #[test]
+    fn fold_ids_only_count_messages_with_detail() {
+        let msg = |id: u32, detail: &str| Message {
+            id,
+            role: Role::Tool,
+            title: String::new(),
+            body: String::new(),
+            badge: String::new(),
+            detail: detail.into(),
+            key: String::new(),
+            call_id: String::new(),
+            diff: None,
+            chips: Vec::new(),
+            keep_events: -1,
+            retry_text: String::new(),
+            copy_text: String::new(),
+            at_ms: 0.0,
+        };
+        let msgs = vec![msg(1, "out"), msg(2, ""), msg(3, "diff")];
+        assert_eq!(fold_ids(&msgs), vec![1, 3]);
+        assert!(fold_ids(&[]).is_empty());
     }
 
     #[test]

@@ -2112,6 +2112,13 @@ select.mode, .daemon select {
   font-size: var(--type-sm);
   font-weight: 650;
 }
+/* feature:transcript-expand-all begin */
+.sx-fold-toolbar { margin-top: 2px; }
+.sx-fold-count {
+  color: var(--muted);
+  font-size: var(--type-sm);
+}
+/* feature:transcript-expand-all end */
 .sx-actions {
   margin-left: auto;
   display: flex;
