@@ -19,6 +19,13 @@ pub const MINIMAP_MIN: usize = 8;
 const ECHO_TIP: &str = "Tip: start a message with `run <command>` to exercise the bash tool and the permission prompt.";
 const ECHO_MARK: &str = "Tip: start a message with";
 
+/// Terminal badge for a tool or child row whose end never arrived (#1506).
+/// States the fact — no result was recorded — without claiming the call
+/// failed or was cancelled, neither of which the cockpit can know.
+pub const NO_RESULT_BADGE: &str = "no result";
+const NO_RESULT_TOOL_DETAIL: &str = "Turn ended before this call returned.";
+const NO_RESULT_CHILD_DETAIL: &str = "Turn ended before this delegation returned.";
+
 const EXTS: &[&str] = &[
     "rs", "go", "md", "css", "js", "mjs", "ts", "tsx", "json", "toml", "yml", "yaml", "py", "rb",
     "sh", "html", "svg", "txt", "nix",
@@ -89,6 +96,10 @@ pub struct Message {
     /// Envelope time of the event that created this message, epoch ms.
     /// 0 means unknown (old log line without a parseable `time`).
     pub at_ms: f64,
+    /// `turnId` correlation of the event that created this message, when
+    /// the envelope carried one. Empty for legacy log lines. Used by the
+    /// orphan sweep (#1506) to scope a `turn.completed` to its own turn.
+    pub turn_id: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -475,12 +486,21 @@ impl Transcript {
                     retry_text: text,
                     copy_text: shown,
                     at_ms,
+                    turn_id: field_str(&data, "turnId"),
                 });
                 self.turn_start = Some(id);
                 self.absorb();
             }
             "session.titled" => self.note_titled(&field_str(&data, "title")),
-            "turn.started" => self.assistant_open = false,
+            "turn.started" => {
+                self.assistant_open = false;
+                // A new turn starting means every earlier turn has ended:
+                // any row from an earlier turn still marked running is an
+                // orphan (its turn died without a turn.completed reaching
+                // this consumer, e.g. a replayed log). Rows carrying the
+                // new turn's own id are untouched.
+                self.sweep_orphaned_before_turn(&field_str(&data, "turnId"));
+            }
             "reasoning.delta" => {}
             "text.delta" => {
                 let chunk = field_str(&data, "text");
@@ -516,10 +536,12 @@ impl Transcript {
                     retry_text: retry,
                     copy_text: body,
                     at_ms,
+                    turn_id: String::new(),
                 });
             }
             "turn.completed" => {
                 self.assistant_open = false;
+                self.sweep_orphaned_at_turn_end(&field_str(&data, "turnId"));
                 self.absorb();
                 self.stamp_turn(at_ms);
             }
@@ -553,6 +575,7 @@ impl Transcript {
                     retry_text: String::new(),
                     copy_text: copy,
                     at_ms,
+                    turn_id: field_str(&data, "turnId"),
                 });
             }
             "tool.end" => {
@@ -608,6 +631,7 @@ impl Transcript {
                         retry_text: String::new(),
                         copy_text: face.copy,
                         at_ms,
+                        turn_id: field_str(&data, "turnId"),
                     });
                 }
             }
@@ -660,6 +684,7 @@ impl Transcript {
                     retry_text: String::new(),
                     copy_text: String::new(),
                     at_ms,
+                    turn_id: String::new(),
                 });
             }
             "permission.asked" => {
@@ -696,6 +721,7 @@ impl Transcript {
                     retry_text: String::new(),
                     copy_text: permission,
                     at_ms,
+                    turn_id: String::new(),
                 });
             }
             "permission.resolved" => {
@@ -770,6 +796,89 @@ impl Transcript {
         // card in the caller. Guessing the newest running tool writes one
         // call's output onto another and leaves the real one spinning.
         None
+    }
+
+    /// Index of the first message of the turn `turn.completed` is closing:
+    /// the live turn's start when one is tracked, else the whole
+    /// transcript (a completion for a turn this consumer never saw open,
+    /// e.g. a replay that begins mid-turn).
+    fn turn_range_start(&self) -> usize {
+        match self.turn_start {
+            Some(id) => self
+                .messages
+                .iter()
+                .position(|m| m.id == id)
+                .unwrap_or(0),
+            None => 0,
+        }
+    }
+
+    /// Give one still-running tool/child row its honest terminal state.
+    fn settle_row(msg: &mut Message) {
+        let note = if msg.role == Role::Child {
+            NO_RESULT_CHILD_DETAIL
+        } else {
+            NO_RESULT_TOOL_DETAIL
+        };
+        msg.badge = NO_RESULT_BADGE.into();
+        if msg.detail.is_empty() {
+            msg.detail = note.into();
+        } else if !msg.detail.contains(note) {
+            msg.detail = format!("{}\n{note}", msg.detail);
+        }
+    }
+
+    /// Sweep on `turn.completed`: rows in the completing turn still
+    /// marked `running` never got their `tool.end` / `child.end`, so
+    /// they settle as `no result`. Rows that received an end keep their
+    /// `done`/`failed` badge. A row carrying a *different* turnId than
+    /// the completing turn is left alone — it belongs to another (live)
+    /// turn, not to the turn that just ended.
+    fn sweep_orphaned_at_turn_end(&mut self, completed_turn_id: &str) {
+        let start = self.turn_range_start();
+        for msg in self.messages.iter_mut().skip(start) {
+            if msg.badge != "running" || !matches!(msg.role, Role::Tool | Role::Child) {
+                continue;
+            }
+            if !completed_turn_id.is_empty()
+                && !msg.turn_id.is_empty()
+                && msg.turn_id != completed_turn_id
+            {
+                continue;
+            }
+            Self::settle_row(msg);
+        }
+    }
+
+    /// Sweep when a new turn starts: rows from earlier turns still
+    /// marked `running` are orphans of turns that ended without this
+    /// consumer seeing their completion (dead engine, restarted
+    /// gateway, replayed log). A row carrying the new turn's own id
+    /// (replayed out of order) is left running.
+    fn sweep_orphaned_before_turn(&mut self, new_turn_id: &str) {
+        for msg in self.messages.iter_mut() {
+            if msg.badge != "running" || !matches!(msg.role, Role::Tool | Role::Child) {
+                continue;
+            }
+            if !new_turn_id.is_empty() && msg.turn_id == new_turn_id {
+                continue;
+            }
+            Self::settle_row(msg);
+        }
+    }
+
+    /// Settle every still-running tool/child row. Load/replay entry
+    /// point (#1506): call after a stored transcript has been fully
+    /// applied for a session that is NOT in a live turn, so a log that
+    /// ends mid-tool does not render a forever-running row in an idle
+    /// session. Never call this for a live turn — use the turn-boundary
+    /// sweeps, which key off turn state, not age or timers.
+    pub fn settle_orphaned_tools(&mut self) {
+        for msg in self.messages.iter_mut() {
+            if msg.badge == "running" && matches!(msg.role, Role::Tool | Role::Child) {
+                Self::settle_row(msg);
+            }
+        }
     }
 
     fn stamp_turn(&mut self, completed_ms: f64) {
@@ -903,6 +1012,7 @@ impl Transcript {
             retry_text: String::new(),
             copy_text: summary,
             at_ms,
+            turn_id: String::new(),
         });
     }
 }
@@ -1925,6 +2035,255 @@ mod tests {
         let diff = msg.diff.clone().expect("diff");
         assert!(diff.deleted >= 1 && diff.added >= 1);
         assert!(msg.chips.iter().any(|c| c.path == "webui/src/main.rs"));
+    }
+
+    #[test]
+    fn orphan_tool_swept_at_turn_end() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env(
+            "user.message",
+            serde_json::json!({"text": "hi", "turnId": "t1"}),
+        ));
+        t.apply_envelope(&env(
+            "tool.begin",
+            serde_json::json!({"callId": "a", "name": "bash", "turnId": "t1", "args": {"command": "sleep 9"}}),
+        ));
+        t.apply_envelope(&env(
+            "tool.begin",
+            serde_json::json!({"callId": "b", "name": "read", "turnId": "t1", "args": {"filePath": "a.go"}}),
+        ));
+        t.apply_envelope(&env(
+            "tool.end",
+            serde_json::json!({"callId": "b", "name": "read", "output": "contents"}),
+        ));
+        t.apply_envelope(&env(
+            "turn.completed",
+            serde_json::json!({"turnId": "t1"}),
+        ));
+        let orphan = t
+            .messages
+            .iter()
+            .find(|m| m.call_id == "a")
+            .expect("orphan row");
+        assert_eq!(orphan.badge, NO_RESULT_BADGE);
+        assert_eq!(orphan.badge, "no result");
+        assert!(
+            orphan.detail.contains("Turn ended before this call returned."),
+            "{}",
+            orphan.detail
+        );
+        let done = t
+            .messages
+            .iter()
+            .find(|m| m.call_id == "b")
+            .expect("done row");
+        assert_eq!(done.badge, "done");
+    }
+
+    #[test]
+    fn orphan_tool_failed_row_untouched_at_turn_end() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env(
+            "user.message",
+            serde_json::json!({"text": "hi", "turnId": "t1"}),
+        ));
+        t.apply_envelope(&env(
+            "tool.begin",
+            serde_json::json!({"callId": "a", "name": "bash", "turnId": "t1", "args": {"command": "false"}}),
+        ));
+        t.apply_envelope(&env(
+            "tool.end",
+            serde_json::json!({"callId": "a", "name": "bash", "output": "boom", "isError": true}),
+        ));
+        t.apply_envelope(&env(
+            "turn.completed",
+            serde_json::json!({"turnId": "t1"}),
+        ));
+        let row = t
+            .messages
+            .iter()
+            .find(|m| m.call_id == "a")
+            .expect("failed row");
+        assert_eq!(row.badge, "failed");
+        assert!(!row.detail.contains("Turn ended before this call returned."));
+    }
+
+    #[test]
+    fn orphan_swept_only_for_the_completing_turn() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env(
+            "user.message",
+            serde_json::json!({"text": "hi", "turnId": "t1"}),
+        ));
+        // A running row correlated to a different (live) turn must not be
+        // swept by t1's completion.
+        t.apply_envelope(&env(
+            "tool.begin",
+            serde_json::json!({"callId": "a", "name": "bash", "turnId": "t2", "args": {"command": "sleep 9"}}),
+        ));
+        t.apply_envelope(&env(
+            "turn.completed",
+            serde_json::json!({"turnId": "t1"}),
+        ));
+        let row = t
+            .messages
+            .iter()
+            .find(|m| m.call_id == "a")
+            .expect("other-turn row");
+        assert_eq!(row.badge, "running");
+        // Its own turn completing does sweep it.
+        t.apply_envelope(&env(
+            "turn.completed",
+            serde_json::json!({"turnId": "t2"}),
+        ));
+        let row = t
+            .messages
+            .iter()
+            .find(|m| m.call_id == "a")
+            .expect("other-turn row");
+        assert_eq!(row.badge, "no result");
+    }
+
+    #[test]
+    fn replay_ending_mid_tool_settles_on_load() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env(
+            "user.message",
+            serde_json::json!({"text": "hi", "turnId": "t1"}),
+        ));
+        t.apply_envelope(&env(
+            "tool.begin",
+            serde_json::json!({"callId": "a", "name": "bash", "turnId": "t1", "args": {"command": "sleep 9"}}),
+        ));
+        t.apply_envelope(&env(
+            "tool.begin",
+            serde_json::json!({"callId": "b", "name": "read", "turnId": "t1", "args": {"filePath": "a.go"}}),
+        ));
+        t.apply_envelope(&env(
+            "tool.end",
+            serde_json::json!({"callId": "b", "name": "read", "output": "contents"}),
+        ));
+        // The stored log ends here: no tool.end for `a`, no turn.completed.
+        let row = t
+            .messages
+            .iter()
+            .find(|m| m.call_id == "a")
+            .expect("orphan row");
+        assert_eq!(row.badge, "running");
+        t.settle_orphaned_tools();
+        let row = t
+            .messages
+            .iter()
+            .find(|m| m.call_id == "a")
+            .expect("orphan row");
+        assert_eq!(row.badge, "no result");
+        assert!(row.detail.contains("Turn ended before this call returned."));
+        let done = t
+            .messages
+            .iter()
+            .find(|m| m.call_id == "b")
+            .expect("done row");
+        assert_eq!(done.badge, "done");
+        // Settling is idempotent: the note is not appended twice.
+        t.settle_orphaned_tools();
+        let row = t
+            .messages
+            .iter()
+            .find(|m| m.call_id == "a")
+            .expect("orphan row");
+        assert_eq!(
+            row.detail
+                .matches("Turn ended before this call returned.")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn replay_orphan_swept_when_next_turn_starts_and_live_row_survives() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env(
+            "user.message",
+            serde_json::json!({"text": "first", "turnId": "t1"}),
+        ));
+        t.apply_envelope(&env(
+            "tool.begin",
+            serde_json::json!({"callId": "a", "name": "bash", "turnId": "t1", "args": {"command": "sleep 9"}}),
+        ));
+        // No turn.completed for t1 in the log; the next turn starting is
+        // the evidence t1 ended, so its orphan settles here.
+        t.apply_envelope(&env(
+            "turn.started",
+            serde_json::json!({"turnId": "t2"}),
+        ));
+        let orphan = t
+            .messages
+            .iter()
+            .find(|m| m.call_id == "a")
+            .expect("orphan row");
+        assert_eq!(orphan.badge, "no result");
+        // A tool in the live turn keeps running until its own turn ends.
+        t.apply_envelope(&env(
+            "tool.begin",
+            serde_json::json!({"callId": "b", "name": "bash", "turnId": "t2", "args": {"command": "sleep 9"}}),
+        ));
+        let live = t
+            .messages
+            .iter()
+            .find(|m| m.call_id == "b")
+            .expect("live row");
+        assert_eq!(live.badge, "running");
+        t.apply_envelope(&env(
+            "turn.completed",
+            serde_json::json!({"turnId": "t2"}),
+        ));
+        let live = t
+            .messages
+            .iter()
+            .find(|m| m.call_id == "b")
+            .expect("live row");
+        assert_eq!(live.badge, "no result");
+    }
+
+    #[test]
+    fn orphan_child_row_swept_at_turn_end() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env(
+            "user.message",
+            serde_json::json!({"text": "hi", "turnId": "t1"}),
+        ));
+        t.apply_envelope(&env(
+            "child.completed",
+            serde_json::json!({
+                "name": "scribe",
+                "sessionId": "abcd1234",
+                "status": "running",
+                "summary": "working on the subtask"
+            }),
+        ));
+        let child = t
+            .messages
+            .iter()
+            .find(|m| m.role == Role::Child)
+            .expect("child row");
+        assert_eq!(child.badge, "running");
+        t.apply_envelope(&env(
+            "turn.completed",
+            serde_json::json!({"turnId": "t1"}),
+        ));
+        let child = t
+            .messages
+            .iter()
+            .find(|m| m.role == Role::Child)
+            .expect("child row");
+        assert_eq!(child.badge, "no result");
+        assert!(
+            child
+                .detail
+                .contains("Turn ended before this delegation returned."),
+            "{}",
+            child.detail
+        );
     }
 
     #[test]
