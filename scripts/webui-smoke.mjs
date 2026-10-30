@@ -1731,6 +1731,70 @@ try {
     );
   };
   await clickSideTab("Git", "Staged");
+  // Git panel small wins (#1427/#1432/#1435): the path filter exists,
+  // an active no-match query flips every section's empty text to
+  // "No files match.", and the log rows carry full-hash copy hooks.
+  await waitFor(
+    "git path filter input (data-git-filter)",
+    async () => {
+      const n = await evaluate(`document.querySelectorAll("[data-git-filter]").length`);
+      return { ok: n === 1, n };
+    },
+    { timeout: STEP_MS, interval: 250 },
+  );
+  await evaluate(`(() => {
+    const el = document.querySelector("[data-git-filter]");
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    setter.call(el, "zz-no-match-zz");
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    return true;
+  })()`);
+  await waitFor(
+    "active git filter shows No files match",
+    textProbe((t) => t.includes("No files match.")),
+    { timeout: STEP_MS, interval: 250 },
+  );
+  await evaluate(`(() => {
+    const el = document.querySelector("[data-git-filter]");
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    setter.call(el, "");
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    return true;
+  })()`);
+  const logRes = await fetch(`http://127.0.0.1:${port}/v1/git/log?limit=30`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (logRes.ok) {
+    const logBody = await logRes.json();
+    const commitCount = (logBody.commits || []).length;
+    if (commitCount > 0) {
+      await evaluate(`(() => {
+        const panel = document.getElementById("git-panel");
+        panel.focus();
+        panel.dispatchEvent(new KeyboardEvent("keydown", { key: "l", bubbles: true, cancelable: true }));
+        return true;
+      })()`);
+      await waitFor(
+        "git log copy-hash hooks carry full 40-char hashes",
+        async () => {
+          const raw = await evaluate(`JSON.stringify([...document.querySelectorAll("[data-git-copy-hash]")].map((b) => b.getAttribute("data-git-copy-hash") || ""))`);
+          const hashes = JSON.parse(raw || "[]");
+          return { ok: hashes.length > 0 && hashes.every((h) => h.length === 40), count: hashes.length };
+        },
+        { timeout: STEP_MS, interval: 250 },
+      );
+      if (commitCount === 30) {
+        await waitFor(
+          "git log Show more hook at a full 30 page",
+          async () => {
+            const n = await evaluate(`document.querySelectorAll("[data-git-log-more]").length`);
+            return { ok: n === 1, n };
+          },
+          { timeout: STEP_MS, interval: 250 },
+        );
+      }
+    }
+  }
   // Branch switcher regression (#1314): the rendered <select> value must
   // equal the daemon's current branch once the options exist. The defect
   // was prop:value being applied before the options rendered, so the

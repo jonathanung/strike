@@ -185,6 +185,93 @@ fn short_hash(hash: &str) -> String {
     hash.chars().take(7).collect()
 }
 
+/// Initial Git log page (#1432) and the daemon's hard cap
+/// (`gitLogMax` in internal/frontend/server/git.go).
+const LOG_LIMIT_INITIAL: usize = 30;
+const LOG_LIMIT_MAX: usize = 100;
+
+/// Next log limit to request, or `None` when no More control should
+/// show: a short page (`returned < current`) means history is
+/// exhausted, and at [`LOG_LIMIT_MAX`] the daemon clamps anyway.
+fn next_log_limit(current: usize, returned: usize) -> Option<usize> {
+    if returned < current || current >= LOG_LIMIT_MAX {
+        return None;
+    }
+    Some(LOG_LIMIT_MAX)
+}
+
+/// Honest end-of-log note shown whenever the More control disappears
+/// (#1432 Q2), so a missing button is never ambiguous.
+fn log_end_note(current: usize, returned: usize) -> Option<String> {
+    if returned == 0 || next_log_limit(current, returned).is_some() {
+        return None;
+    }
+    if returned < current {
+        Some(format!("End of history — showing all {returned} commits."))
+    } else {
+        Some(format!("Showing the last {returned} commits."))
+    }
+}
+
+/// Case-insensitive substring match on the full path (#1435 Q1).
+/// An empty/blank query matches everything.
+fn path_matches_query(path: &str, query: &str) -> bool {
+    let query = query.trim().to_lowercase();
+    query.is_empty() || path.to_lowercase().contains(&query)
+}
+
+/// Original indices of the rows visible under `query`, in row order
+/// (#1435). Cursor, Enter, Stage/Unstage and Discard keep acting on
+/// these original indices, never on visible positions.
+fn filtered_row_indices(rows: &[GitRow], query: &str) -> Vec<usize> {
+    rows.iter()
+        .enumerate()
+        .filter(|(_, row)| path_matches_query(&row.path, query))
+        .map(|(i, _)| i)
+        .collect()
+}
+
+/// Step from `cursor` by `delta` through the visible (filtered)
+/// original indices. With no query this is the plain clamp over all
+/// rows, preserving today's behaviour exactly.
+fn filtered_cursor_step(
+    rows: &[GitRow],
+    query: &str,
+    cursor: usize,
+    delta: i32,
+) -> Option<usize> {
+    let visible = filtered_row_indices(rows, query);
+    if visible.is_empty() {
+        return None;
+    }
+    // Position of the cursor inside the visible list; if the cursor
+    // sits on a hidden row, start from just before the first visible
+    // row at/after it so Down lands on that row.
+    let pos = visible.iter().position(|&i| i == cursor);
+    let next_pos = match pos {
+        Some(p) => (p as i32 + delta).clamp(0, visible.len() as i32 - 1) as usize,
+        None if delta < 0 => visible
+            .iter()
+            .rposition(|&i| i < cursor)
+            .unwrap_or(0),
+        None => visible
+            .iter()
+            .position(|&i| i > cursor)
+            .unwrap_or(visible.len() - 1),
+    };
+    Some(visible[next_pos])
+}
+
+/// Clipboard write using the idiom already in this file (and in
+/// transcript_view::write_clipboard). PR #1676 introduces a shared
+/// `webui/src/clipboard.rs`; this call should migrate to it when that
+/// lands — do not fork another helper here (#1427).
+fn write_clipboard(text: &str) {
+    if let Some(win) = web_sys::window() {
+        let _ = win.navigator().clipboard().write_text(text);
+    }
+}
+
 fn short_path(path: &str) -> String {
     if let Some(i) = path.find(".strike/worktrees/") {
         return path[i..].to_string();
@@ -232,6 +319,9 @@ pub fn GitPanel(
     let diff_note = RwSignal::new(String::new());
     let diff_req = RwSignal::new(0u32);
     let show_log = RwSignal::new(false);
+    let log_limit = RwSignal::new(LOG_LIMIT_INITIAL);
+    let copied_hash = RwSignal::new(String::new());
+    let file_filter = RwSignal::new(String::new());
     let message = RwSignal::new(String::new());
     let switch_to = RwSignal::new(String::new());
 
@@ -328,7 +418,8 @@ pub fn GitPanel(
                     }
                 }
             }
-            match get_json::<GitLog>(&b, &t, "/v1/git/log?limit=30").await {
+            let log_path = format!("/v1/git/log?limit={}", log_limit.get_untracked());
+            match get_json::<GitLog>(&b, &t, &log_path).await {
                 Ok(body) => commits.set(body.commits),
                 Err(e) => {
                     if err.is_empty() {
@@ -340,12 +431,20 @@ pub fn GitPanel(
         });
     };
 
-    Effect::new(move |_| {
-        let _ = (base.get(), token.get());
+    Effect::new(move |prev: Option<(String, String)>| {
+        let cur = (base.get(), token.get());
+        if prev.as_ref() != Some(&cur) {
+            // Per-repo view state resets when the repo changes
+            // (#1432 Q3, #1435 Q3), not on panel re-activation.
+            log_limit.set(LOG_LIMIT_INITIAL);
+            file_filter.set(String::new());
+            copied_hash.set(String::new());
+        }
         load();
         if active.get() {
             focus_id("git-panel");
         }
+        cur
     });
     Effect::new(move |_| {
         let rows: Vec<(String, bool)> = branches
@@ -400,14 +499,30 @@ pub fn GitPanel(
     });
 
     let move_cursor = move |delta: i32| {
-        let n = rows.get_untracked().len() as i32;
-        if n == 0 {
+        let all = rows.get_untracked();
+        // Under an active filter, step through visible original
+        // indices only (#1435); unfiltered this is today's clamp.
+        let Some(next) = filtered_cursor_step(
+            &all,
+            &file_filter.get_untracked(),
+            cursor.get_untracked(),
+            delta,
+        ) else {
             return;
-        }
-        let next = (cursor.get_untracked() as i32 + delta).clamp(0, n - 1) as usize;
+        };
         cursor.set(next);
         open_diff.set(false);
         diff_text.set(String::new());
+    };
+
+    let show_more_log = move |_| {
+        let Some(next) =
+            next_log_limit(log_limit.get_untracked(), commits.get_untracked().len())
+        else {
+            return;
+        };
+        log_limit.set(next);
+        load();
     };
 
     let open_selected = move || {
@@ -672,9 +787,7 @@ pub fn GitPanel(
             if text.trim().is_empty() {
                 return Err("Open a diff first.".into());
             }
-            if let Some(win) = web_sys::window() {
-                let _ = win.navigator().clipboard().write_text(&text);
-            }
+            write_clipboard(&text);
             status_line.set("Copied the diff.".into());
             Ok(())
         }),
@@ -719,10 +832,18 @@ pub fn GitPanel(
                         let hash = short_hash(&c.hash);
                         let subject = c.subject.clone();
                         let meta = format!("{} · {}", c.author, c.date);
+                        let full = c.hash.clone();
+                        let full_for_click = c.hash.clone();
+                        let full_for_label = c.hash.clone();
                         view! {
                             <li class="wt-card">
                                 <span class="name">{subject}</span>
-                                <span class="path">{hash} " · " {meta}</span>
+                                <span class="path" title=full>{hash} " · " {meta}</span>
+                                <button type="button" class="secondary git-copy-hash" data-git-copy-hash=full_for_click.clone() on:click=move |_| {
+                                    write_clipboard(&full_for_click);
+                                    copied_hash.set(full_for_click.clone());
+                                    status_line.set("Copied commit hash.".into());
+                                }>{move || if copied_hash.get() == full_for_label { "Copied" } else { "Copy" }}</button>
                             </li>
                         }
                     }).collect_view()}
@@ -730,20 +851,47 @@ pub fn GitPanel(
                 <Show when=move || commits.get().is_empty()>
                     <p class="hint">"No commits yet."</p>
                 </Show>
+                <Show when=move || next_log_limit(log_limit.get(), commits.get().len()).is_some()>
+                    <div class="git-actions">
+                        <button type="button" class="secondary" data-git-log-more on:click=show_more_log>"Show more commits"</button>
+                    </div>
+                </Show>
+                <Show when=move || log_end_note(log_limit.get(), commits.get().len()).is_some()>
+                    <p class="hint">{move || log_end_note(log_limit.get(), commits.get().len()).unwrap_or_default()}</p>
+                </Show>
             </Show>
+            <input class="git-field git-filter" data-git-filter type="text" aria-label="Filter changed files by path" placeholder="Filter changed files by path…" prop:value=move || file_filter.get() on:input=move |ev| {
+                let query = event_target_value(&ev);
+                file_filter.set(query.clone());
+                // Keep the cursor on a visible original index (#1435).
+                if let Some(first) = filtered_row_indices(&rows.get_untracked(), &query).first().copied() {
+                    cursor.set(first);
+                }
+            }/>
             {move || {
                 let rows = rows.get();
                 let cur = cursor.get();
+                let query = file_filter.get();
+                let filtering = !query.trim().is_empty();
                 let mut views = Vec::new();
                 for section in ["Staged", "Unstaged", "Untracked"] {
-                    let heading = section.to_string();
+                    let total = rows.iter().filter(|row| row.section == section).count();
+                    let matched: Vec<_> = rows.iter().enumerate().filter(|(_, row)| row.section == section && path_matches_query(&row.path, &query)).collect();
+                    let heading = if filtering {
+                        format!("{section} ({} of {total})", matched.len())
+                    } else {
+                        section.to_string()
+                    };
                     views.push(view! { <h3 class="git-section">{heading}</h3> }.into_any());
-                    let matched: Vec<_> = rows.iter().enumerate().filter(|(_, row)| row.section == section).collect();
                     if matched.is_empty() {
-                        let empty = match section {
-                            "Staged" => "No staged files.",
-                            "Unstaged" => "No unstaged changes.",
-                            _ => "No untracked files.",
+                        let empty = if filtering {
+                            "No files match."
+                        } else {
+                            match section {
+                                "Staged" => "No staged files.",
+                                "Unstaged" => "No unstaged changes.",
+                                _ => "No untracked files.",
+                            }
                         };
                         views.push(view! { <p class="hint">{empty}</p> }.into_any());
                         continue;
@@ -991,5 +1139,104 @@ pub fn WorktreePanel(
                 <p class="hint">"No worktrees."</p>
             </Show>
         </div>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn row(path: &str, section: &str) -> GitRow {
+        GitRow {
+            section: section.into(),
+            path: path.into(),
+            status: "M".into(),
+            added: 0,
+            deleted: 0,
+            staged: false,
+            inline_diff: String::new(),
+        }
+    }
+
+    fn sample_rows() -> Vec<GitRow> {
+        vec![
+            row("webui/src/git.rs", "Unstaged"),
+            row("README.md", "Unstaged"),
+            row("webui/src/main.rs", "Staged"),
+            row("docs/guide.md", "Untracked"),
+        ]
+    }
+
+    #[test]
+    fn next_log_limit_full_page_below_max_steps_to_max() {
+        assert_eq!(next_log_limit(30, 30), Some(LOG_LIMIT_MAX));
+    }
+
+    #[test]
+    fn next_log_limit_at_max_is_none() {
+        assert_eq!(next_log_limit(LOG_LIMIT_MAX, LOG_LIMIT_MAX), None);
+    }
+
+    #[test]
+    fn next_log_limit_short_page_is_none() {
+        assert_eq!(next_log_limit(30, 12), None);
+        assert_eq!(next_log_limit(LOG_LIMIT_MAX, 87), None);
+    }
+
+    #[test]
+    fn log_end_note_states_ceiling_and_short_page() {
+        assert_eq!(log_end_note(30, 30), None);
+        assert_eq!(
+            log_end_note(LOG_LIMIT_MAX, LOG_LIMIT_MAX).as_deref(),
+            Some("Showing the last 100 commits.")
+        );
+        assert_eq!(
+            log_end_note(30, 12).as_deref(),
+            Some("End of history — showing all 12 commits.")
+        );
+        assert_eq!(log_end_note(30, 0), None);
+    }
+
+    #[test]
+    fn path_filter_is_case_insensitive_full_path_substring() {
+        assert!(path_matches_query("WebUI/src/Git.rs", "webui/"));
+        assert!(path_matches_query("webui/src/git.rs", "GIT.RS"));
+        assert!(path_matches_query("anything", "  "));
+        assert!(!path_matches_query("README.md", "webui/"));
+    }
+
+    #[test]
+    fn filtered_indices_preserve_original_indices() {
+        let rows = sample_rows();
+        // The load-bearing #1435 property: staging from the filtered
+        // list must act on original index 2, not visible position 0.
+        assert_eq!(filtered_row_indices(&rows, "main.rs"), vec![2]);
+        assert_eq!(filtered_row_indices(&rows, "webui/"), vec![0, 2]);
+        assert_eq!(filtered_row_indices(&rows, ""), vec![0, 1, 2, 3]);
+        assert!(filtered_row_indices(&rows, "zz-none").is_empty());
+    }
+
+    #[test]
+    fn filtered_cursor_steps_through_visible_original_indices() {
+        let rows = sample_rows();
+        assert_eq!(filtered_cursor_step(&rows, "webui/", 0, 1), Some(2));
+        assert_eq!(filtered_cursor_step(&rows, "webui/", 2, 1), Some(2));
+        assert_eq!(filtered_cursor_step(&rows, "webui/", 2, -1), Some(0));
+        // Cursor on a hidden row: Down lands on the next visible row.
+        assert_eq!(filtered_cursor_step(&rows, "webui/", 1, 1), Some(2));
+        // Cursor past the last visible row clamps, never wraps to 0.
+        assert_eq!(filtered_cursor_step(&rows, "webui/", 3, 1), Some(2));
+        assert_eq!(filtered_cursor_step(&rows, "webui/", 3, -1), Some(2));
+        assert_eq!(filtered_cursor_step(&rows, "zz-none", 0, 1), None);
+        // Unfiltered behaviour is the old clamp.
+        assert_eq!(filtered_cursor_step(&rows, "", 0, 1), Some(1));
+        assert_eq!(filtered_cursor_step(&rows, "", 3, 1), Some(3));
+    }
+
+    #[test]
+    fn short_hash_still_seven_chars_full_hash_untouched() {
+        let full = "0123456789abcdef0123456789abcdef01234567";
+        assert_eq!(short_hash(full), "0123456");
+        assert_eq!(full.len(), 40);
     }
 }
