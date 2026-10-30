@@ -57,6 +57,9 @@ func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
 	if resp.Days == nil {
 		resp.Days = []usageaudit.DayUsage{}
 	}
+	if resp.Models == nil {
+		resp.Models = []usageaudit.ModelUsage{}
+	}
 	if resp.Alerts == nil {
 		resp.Alerts = []usageaudit.Alert{}
 	}
