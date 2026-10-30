@@ -326,33 +326,27 @@ fn csv_cost(known: bool, usd: f64) -> String {
 /// (first, last) day covered by the report, from the day rows when there
 /// are any, else from session/model ranges. ("", "") when nothing is dated.
 fn usage_range(rep: &UsageReport) -> (String, String) {
-    let mut first = String::new();
-    let mut last = String::new();
-    let mut take = |day: &str| {
-        if day.is_empty() {
-            return;
-        }
-        if first.is_empty() || day < first.as_str() {
-            first = day.to_string();
-        }
-        if day > last.as_str() {
-            last = day.to_string();
-        }
-    };
-    for d in &rep.days {
-        take(&d.day);
-    }
-    if first.is_empty() {
+    let mut cand: Vec<&str> = rep
+        .days
+        .iter()
+        .map(|d| d.day.as_str())
+        .filter(|d| !d.is_empty())
+        .collect();
+    if cand.is_empty() {
         for s in &rep.sessions {
-            take(&s.first_day);
-            take(&s.last_day);
+            cand.push(s.first_day.as_str());
+            cand.push(s.last_day.as_str());
         }
         for m in &rep.models {
-            take(&m.first_day);
-            take(&m.last_day);
+            cand.push(m.first_day.as_str());
+            cand.push(m.last_day.as_str());
         }
+        cand.retain(|d| !d.is_empty());
     }
-    (first, last)
+    match (cand.iter().min(), cand.iter().max()) {
+        (Some(first), Some(last)) => (first.to_string(), last.to_string()),
+        _ => (String::new(), String::new()),
+    }
 }
 
 /// `strike-usage[-kind]-YYYYMMDD-YYYYMMDD.ext`; the range segment is
