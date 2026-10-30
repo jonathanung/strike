@@ -117,6 +117,40 @@ pub fn needs_human(status: &str, escalation: &str) -> bool {
     status == "blocked" || escalation == "human"
 }
 
+/// Status-filter vocabulary for the Goals list (#1455). The filter keys are
+/// the raw goal statuses; their labels are exactly what
+/// [`goal_status_label`] renders for that status — never invented names.
+/// `"all"` is the only extra key, labelled "All".
+pub const GOAL_FILTER_ALL: &str = "all";
+pub const GOAL_STATUS_FILTERS: &[&str] = &[
+    "pending", "active", "paused", "done", "failed", "aborted", "blocked",
+];
+
+pub fn goal_filter_label(filter: &str) -> &'static str {
+    if filter == GOAL_FILTER_ALL {
+        "All"
+    } else {
+        goal_status_label(filter)
+    }
+}
+
+/// One row against the status filter AND the description search (#1455).
+/// Search matches the description (row title) only, case-insensitively;
+/// status text is deliberately not searched — status has its own control.
+pub fn goal_matches_filter(goal: &GoalView, filter: &str, search: &str) -> bool {
+    let status_ok = filter == GOAL_FILTER_ALL || goal.status == filter;
+    let query = search.trim().to_ascii_lowercase();
+    let search_ok = query.is_empty() || goal.description.to_ascii_lowercase().contains(&query);
+    status_ok && search_ok
+}
+
+pub fn visible_goals<'a>(goals: &'a [GoalView], filter: &str, search: &str) -> Vec<&'a GoalView> {
+    goals
+        .iter()
+        .filter(|g| goal_matches_filter(g, filter, search))
+        .collect()
+}
+
 pub fn split_tools(raw: &str) -> Vec<String> {
     let mut out = Vec::new();
     for part in raw.split(',') {
@@ -378,6 +412,10 @@ pub fn GoalsPane(base: RwSignal<String>, token: RwSignal<String>) -> impl IntoVi
     let allow = RwSignal::new(String::new());
     let deny = RwSignal::new(String::new());
     let watch_gen = RwSignal::new(0u32);
+    // #1455: client-only list narrowing. Default "all" (Q1) — hiding goals
+    // on first open would read as data loss. Not persisted (see PR notes).
+    let status_filter = RwSignal::new(GOAL_FILTER_ALL.to_string());
+    let goal_search = RwSignal::new(String::new());
 
     {
         let base = base;
@@ -496,10 +534,45 @@ pub fn GoalsPane(base: RwSignal<String>, token: RwSignal<String>) -> impl IntoVi
                     }>"New"</button>
                 </div>
                 <p class="goals-aside-note">"A goal loops until its check passes or a guard stops it."</p>
+                <div class="ss-chips goals-filter-chips" role="tablist" aria-label="Goal status filter">
+                    {std::iter::once(GOAL_FILTER_ALL).chain(GOAL_STATUS_FILTERS.iter().copied()).map(|f| {
+                        let label = goal_filter_label(f);
+                        view! {
+                            <button type="button" data-goal-filter=f class=move || if status_filter.get() == f { "chip on" } else { "chip" } on:click=move |_| status_filter.set(f.to_string())>{label}</button>
+                        }
+                    }).collect_view()}
+                </div>
+                <input
+                    id="goals-search"
+                    class="search goals-search"
+                    placeholder="Search goals"
+                    aria-label="Search goals"
+                    prop:value=move || goal_search.get()
+                    on:input=move |ev| goal_search.set(event_target_value(&ev))
+                />
+                <p class="hint goals-count" data-goals-count="true">
+                    {move || {
+                        let all = goals.get();
+                        let visible = visible_goals(&all, &status_filter.get(), &goal_search.get()).len();
+                        format!("Showing {visible} of {} goals", all.len())
+                    }}
+                </p>
                 {move || {
-                    let rows = goals.get();
-                    if rows.is_empty() {
+                    let all = goals.get();
+                    if all.is_empty() {
                         return view! { <p class="hint">"No goals yet."</p> }.into_any();
+                    }
+                    let rows = visible_goals(&all, &status_filter.get(), &goal_search.get());
+                    if rows.is_empty() {
+                        return view! {
+                            <div class="goals-no-match">
+                                <p class="hint">"No goals match — clear filters"</p>
+                                <button type="button" class="secondary" data-goals-clear="true" on:click=move |_| {
+                                    status_filter.set(GOAL_FILTER_ALL.to_string());
+                                    goal_search.set(String::new());
+                                }>"Clear filters"</button>
+                            </div>
+                        }.into_any();
                     }
                     let open = open_goal.clone();
                     let current = selected.get();
@@ -810,6 +883,57 @@ mod tests {
     fn budgets_reject_zero_and_junk() {
         assert!(draft_goal("x", "true", "", "0", "30", "10", "3", "3", false, "", "").is_err());
         assert!(draft_goal("x", "true", "", "8", "nope", "10", "3", "3", false, "", "").is_err());
+    }
+
+    fn goal(status: &str, description: &str) -> GoalView {
+        GoalView {
+            status: status.to_string(),
+            description: description.to_string(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn filter_labels_are_exactly_goal_status_labels() {
+        assert_eq!(goal_filter_label(GOAL_FILTER_ALL), "All");
+        for f in GOAL_STATUS_FILTERS {
+            assert_eq!(goal_filter_label(f), goal_status_label(f), "filter {f}");
+        }
+        // The rendered vocabulary, pinned: no invented "Active"/"Completed".
+        assert_eq!(goal_filter_label("active"), "Running");
+        assert_eq!(goal_filter_label("done"), "Done");
+        assert_eq!(goal_filter_label("paused"), "Paused");
+    }
+
+    #[test]
+    fn status_filter_and_search_combine_with_and() {
+        let goals = vec![
+            goal("active", "Fix the Parser"),
+            goal("active", "Ship the release"),
+            goal("paused", "Parser cleanup"),
+            goal("done", "Parser docs"),
+        ];
+        let names = |filter: &str, search: &str| {
+            visible_goals(&goals, filter, search)
+                .iter()
+                .map(|g| g.description.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(names("all", "").len(), 4);
+        assert_eq!(names("active", ""), vec!["Fix the Parser", "Ship the release"]);
+        assert_eq!(names("paused", ""), vec!["Parser cleanup"]);
+        assert_eq!(names("done", ""), vec!["Parser docs"]);
+        // Search is case-insensitive and description-only.
+        assert_eq!(names("all", "parser").len(), 3);
+        assert_eq!(names("all", "PARSER").len(), 3);
+        assert_eq!(names("all", "  parser  ").len(), 3);
+        // AND semantics: both must match.
+        assert_eq!(names("active", "parser"), vec!["Fix the Parser"]);
+        assert!(names("done", "release").is_empty());
+        // Status text is not searched (Q3): "paused" as a query matches no
+        // description, even though a paused goal exists.
+        assert!(names("all", "paused").is_empty());
+        assert!(names("all", "no-such-goal").is_empty());
     }
 
     #[test]
