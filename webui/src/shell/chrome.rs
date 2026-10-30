@@ -12,8 +12,10 @@ use super::icon::icon;
 use super::registry::{self, TopRegion};
 use super::storage::{load_usage, remember_command};
 
-/// Centre-zone pages. Cap is 5. Secondary pages stay in the menu.
-const PRIMARY: &[(&str, &str)] = &[("chat", "Chat"), ("daemon", "Daemon")];
+/// Centre-zone pages. Cap is 5. Chat is the only primary page: Daemon
+/// and every other destination live behind the command palette (#1590);
+/// on phone the Daemon view stays reachable from the bottom nav.
+const PRIMARY: &[(&str, &str)] = &[("chat", "Chat")];
 
 /// Phone layout, keyed on the same media query that sets `data-phone`
 /// (mobile.rs), so the Rust header and the phone CSS never disagree.
@@ -59,7 +61,6 @@ fn SessionChip() -> impl IntoView {
 pub fn Chrome() -> impl IntoView {
     let palette_open = RwSignal::new(false);
     let help_open = RwSignal::new(false);
-    let more_open = RwSignal::new(false);
     let query = RwSignal::new(String::new());
     let arg_id = RwSignal::new(String::new());
     let arg_text = RwSignal::new(String::new());
@@ -74,7 +75,6 @@ pub fn Chrome() -> impl IntoView {
         arg_text.set(String::new());
         error.set(String::new());
         cursor.set(0);
-        more_open.set(false);
         help_open.set(false);
         palette_open.set(true);
     };
@@ -88,7 +88,6 @@ pub fn Chrome() -> impl IntoView {
         palette_open.set(false);
         arg_id.set(String::new());
         error.set(String::new());
-        more_open.set(false);
         help_open.set(true);
     }));
 
@@ -236,7 +235,6 @@ pub fn Chrome() -> impl IntoView {
                 return;
             }
             if key == "Escape" {
-                more_open.set(false);
                 host::dismiss_popups();
                 return;
             }
@@ -270,7 +268,6 @@ pub fn Chrome() -> impl IntoView {
                 }
                 ev.prevent_default();
                 help_open.update(|open| *open = !*open);
-                more_open.set(false);
             }
         });
     if let Some(window) = web_sys::window() {
@@ -323,76 +320,30 @@ pub fn Chrome() -> impl IntoView {
             </div>
             <div class="nav-zone nav-right">
                 {move || {
-                    let mut status = registry::slots(TopRegion::Status);
-                    status.extend(
-                        registry::slots(TopRegion::Trailing)
-                            .into_iter()
-                            .filter(|slot| slot.id == "gateway"),
-                    );
+                    let status = registry::slots(TopRegion::Status);
                     if status.is_empty() {
                         view! { <SessionChip /> }.into_any()
                     } else {
                         status.into_iter().map(slot_view).collect_view().into_any()
                     }
                 }}
-                <span class="brand-status nav-version">{move || host::version_label()}</span>
+                {move || bell_slot()}
                 <button
                     type="button"
                     class="nav-menu-btn nav-palette-btn"
                     data-nav="palette"
                     aria-keyshortcuts="Control+K Meta+K"
-                    title="Commands (Ctrl+K)"
+                    title="Run a command (Ctrl+K)"
                     on:click=move |_| open_palette()
                 >
-                    "Commands"
+                    "Run a command"
                     <kbd>"Ctrl+K"</kbd>
-                </button>
-                <button
-                    type="button"
-                    class="nav-menu-btn"
-                    data-nav="more"
-                    aria-haspopup="menu"
-                    aria-expanded=move || if more_open.get() { "true" } else { "false" }
-                    aria-controls="nav-menu"
-                    on:click=move |ev: web_sys::MouseEvent| {
-                        ev.stop_propagation();
-                        more_open.update(|open| *open = !*open);
-                    }
-                >
-                    "Menu"
                 </button>
             </div>
                 }
                 .into_any()
             }}
         </header>
-        <button
-            type="button"
-            class="nav-backdrop"
-            data-open=move || if more_open.get() { "1" } else { "0" }
-            aria-label="Close menu"
-            tabindex="-1"
-            on:click=move |_| more_open.set(false)
-        ></button>
-        <div
-            id="nav-menu"
-            class="nav-pop"
-            role="menu"
-            data-nav="more-menu"
-            data-open=move || if more_open.get() { "1" } else { "0" }
-        >
-            <p class="nav-menu-workspace">{move || host::workspace_name()}</p>
-            <p class="hint">{move || host::session_name()}</p>
-            <button
-                type="button"
-                class="nav-menu-item"
-                data-nav="palette-menu"
-                on:click=move |_| open_palette()
-            >
-                <span class="name">"Run a command"</span>
-                <kbd>"Ctrl+K"</kbd>
-            </button>
-        </div>
         <div class="shell-alive" data-nav="alive-tray">
             {move || alive_slots().into_iter().map(slot_view).collect_view()}
         </div>
@@ -621,6 +572,7 @@ fn phone_bar(open_palette: impl Fn() + Copy + 'static, command_mark: &'static st
             }}
         </div>
         <div class="nav-more phone-more">
+            {bell_slot()}
             <button
                 type="button"
                 class="nav-icon phone-more-btn"
@@ -659,17 +611,34 @@ fn arg_placeholder(id: &str) -> String {
         .unwrap_or_else(|| "Argument".into())
 }
 
-/// Everything that is not the gateway status chip or the Chat/Daemon
-/// switch (the centre zone owns that). The menu stays in the DOM so
-/// existing `data-view` clicks still find their buttons. The render in
-/// `Chrome` additionally skips `gateway-switcher` and `notifications`
-/// at phone widths, where the phone sheet renders the only copies
-/// (#1527).
+/// The notifications bell's single live mount (#1590 B9/D6): the header
+/// right zone on desktop, the phone bar on phone — the bar is always on
+/// screen, so waiting approvals stay visible without opening anything,
+/// and the component (which owns the banner poll and the
+/// `notifications.open` binding) is never mounted twice (#1527/#1536).
+fn bell_slot() -> AnyView {
+    match registry::slots(TopRegion::Trailing)
+        .into_iter()
+        .find(|slot| slot.id == "notifications")
+    {
+        Some(slot) => slot_view(slot),
+        None => view! { <span class="nav-slot nav-slot-empty"></span> }.into_any(),
+    }
+}
+
+/// Popover-owning slots stay mounted (visually clipped) so their panels
+/// can still open from palette commands — there is no menu any more
+/// (#1590), the palette is the only launcher. Excluded: `view` (the
+/// Chat/Daemon switcher; the centre zone, the palette and the phone
+/// bottom nav own view switching), `gateway` (the gateway status chip
+/// is not rendered in the header any more — gateway health lives in the
+/// Daemon view and the Gateways panel), and `notifications` (the bell's
+/// one live mount is `bell_slot`, above).
 fn alive_slots() -> Vec<super::registry::TopSlot> {
     [TopRegion::Leading, TopRegion::Trailing]
         .into_iter()
         .flat_map(registry::slots)
-        .filter(|slot| slot.id != "view" && slot.id != "gateway")
+        .filter(|slot| slot.id != "view" && slot.id != "gateway" && slot.id != "notifications")
         .collect()
 }
 
@@ -742,7 +711,10 @@ mod tests {
         assert!(PRIMARY.len() <= 5);
         assert!(PRIMARY.len() >= 1);
         assert!(PRIMARY.iter().any(|(id, _)| *id == "chat"));
-        assert!(PRIMARY.iter().any(|(id, _)| *id == "daemon"));
+        // #1590 A4: Daemon is palette-only on desktop (the phone bottom
+        // nav keeps its Daemon tab); it must not return to the centre
+        // segmented control.
+        assert!(!PRIMARY.iter().any(|(id, _)| *id == "daemon"));
     }
 }
 

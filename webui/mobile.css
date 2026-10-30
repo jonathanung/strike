@@ -30,7 +30,9 @@
   }
 
   /* Phone header (#1490 slice 2): one row, workspace + status left,
-     a single overflow button right; the sheet holds the rest. */
+     the notifications bell and the palette button right (#1590 D6:
+     the bell stays visible here instead of inside the palette sheet,
+     so waiting approvals never hide behind search). */
   body[data-phone="1"] .phone-leading {
     flex: 1 1 auto;
     max-width: none;
@@ -45,6 +47,15 @@
   body[data-phone="1"] .phone-more {
     flex: 0 0 auto;
     margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  body[data-phone="1"] .phone-more .notify-bell {
+    width: 44px;
+    height: 44px;
+    min-height: 44px;
   }
 
   body[data-phone="1"] .phone-more-btn {

@@ -13,7 +13,7 @@ pub fn install(reg: &mut ShellHook) {
         label: "Providers",
         detail: "API keys and OpenAI-compatible hosts",
         shortcut: "",
-        keywords: &["provider", "api", "key", "openai", "auth", "model"],
+        keywords: &["provider", "api", "key", "api key", "openai", "auth", "model"],
         argument: None,
         order: 5,
         run: Rc::new(|_| crate::shell::host::set_view("providers")),
