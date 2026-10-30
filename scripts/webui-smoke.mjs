@@ -1469,6 +1469,33 @@ try {
     },
     { timeout: WAIT_MS, interval: 250 },
   );
+  // Memory export (#1534): the panel must offer the Export action with
+  // its honest label, and the daemon route must return the seeded
+  // entry as a strike-memory.json download.
+  if (!memoryText.includes("Export memory") || !memoryText.includes("unencrypted")) {
+    throw new Error(`memory panel missing export action/label text=${memoryText.slice(0, 1500)}`);
+  }
+  const exportBtnFound = await evaluate(`(() => {
+    const btn = document.querySelector('[data-action="memory-export"]');
+    return !!btn && btn.textContent.includes("Export memory");
+  })()`);
+  if (!exportBtnFound) {
+    throw new Error("memory panel export button not found in DOM");
+  }
+  const exportRes = await fetch(`http://127.0.0.1:${port}/v1/memory/export`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const exportBody = await exportRes.text();
+  const exportDisposition = exportRes.headers.get("content-disposition") || "";
+  if (
+    !exportRes.ok ||
+    !exportDisposition.includes("strike-memory.json") ||
+    !exportBody.includes("smoke-pref")
+  ) {
+    throw new Error(
+      `memory export route failed status=${exportRes.status} disposition=${exportDisposition} body=${exportBody.slice(0, 500)}`,
+    );
+  }
 
   // Goals + Autopilot (#1300, #1593). The view is palette-only. A bundle
   // that predates Goals has no palette command and fails here.
