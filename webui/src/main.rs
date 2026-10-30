@@ -12,6 +12,7 @@ mod apps;
 mod approvals;
 mod approvals_ui;
 mod chat_mode;
+mod clipboard;
 mod confirm;
 mod composer_triggers;
 mod editor;
