@@ -2,7 +2,7 @@
 //! The transcript and composer stay the shell's; this module only decides
 //! layout class names, file limits, and the speech/upload helpers.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use leptos::prelude::*;
@@ -130,18 +130,78 @@ pub fn merge_failed_send(current: &str, failed: &str) -> String {
 }
 
 /// Keeps files added while a send was in flight, and puts the failed batch
-/// back in front of them.
+/// back in front of them. The merged list is capped at [`MAX_ATTACHMENTS`].
+/// The `usize` is how many distinct files the cap dropped (deduped ids are
+/// not counted). Failed files are kept first: those are the ones the user
+/// already tried to send.
 pub fn merge_failed_files(
     failed: Vec<PendingAttachment>,
     current: Vec<PendingAttachment>,
-) -> Vec<PendingAttachment> {
-    let mut merged = failed;
-    for row in current {
-        if !merged.iter().any(|f| f.id == row.id) {
-            merged.push(row);
+) -> (Vec<PendingAttachment>, usize) {
+    let mut merged: Vec<PendingAttachment> = Vec::new();
+    let mut dropped = 0usize;
+    for row in failed.into_iter().chain(current) {
+        if merged.iter().any(|f| f.id == row.id) {
+            continue;
         }
+        if merged.len() >= MAX_ATTACHMENTS {
+            dropped += 1;
+            continue;
+        }
+        merged.push(row);
     }
-    merged
+    (merged, dropped)
+}
+
+/// Status when a restore had to drop files to honour the per-message cap.
+/// The leading clause matches [`accept_local`].
+pub fn restore_cap_status(dropped: usize) -> Option<String> {
+    if dropped == 0 {
+        None
+    } else {
+        Some(format!(
+            "only {MAX_ATTACHMENTS} attachments per message — {dropped} were not restored"
+        ))
+    }
+}
+
+thread_local! {
+    static ATTACHMENT_SEQ: Cell<u32> = const { Cell::new(0) };
+}
+
+/// Page-lifetime attachment id.
+///
+/// `seq` is a counter that starts at 1 and never repeats for the life of
+/// the page (it skips 0 on wrap). The id is that counter. Folding
+/// `now_ms` into the same `u32` is not injective: `now*16 + batch index`
+/// collided for two batches in one millisecond and again every ~3.1 days
+/// after the truncation. Mint order is the time order. `now_ms` is part
+/// of the signature so a test can show two batches at one clock still
+/// differ, and so the clock stays visible at the call.
+pub fn mint_attachment_id(now_ms: u64, seq: u32) -> u32 {
+    let _ = now_ms;
+    seq
+}
+
+fn next_attachment_seq() -> u32 {
+    ATTACHMENT_SEQ.with(|slot| {
+        let mut next = slot.get().wrapping_add(1);
+        if next == 0 {
+            next = 1;
+        }
+        slot.set(next);
+        next
+    })
+}
+
+/// Ids for one enqueue batch. Same `now_ms` and the same batch length as a
+/// previous call still returns disjoint ids, because each id takes the
+/// next sequence value rather than the index inside the batch.
+#[cfg(test)]
+pub fn mint_attachment_ids(now_ms: u64, count: usize) -> Vec<u32> {
+    (0..count)
+        .map(|_| mint_attachment_id(now_ms, next_attachment_seq()))
+        .collect()
 }
 
 pub fn data_url_payload(url: &str) -> Result<(String, String), String> {
@@ -207,9 +267,7 @@ pub fn enqueue_file_list(
         };
         let already =
             pending.with_untracked(|rows| rows.iter().filter(|p| p.error.is_empty()).count());
-        let id = (js_sys::Date::now() as u64)
-            .wrapping_mul(16)
-            .wrapping_add(i as u64) as u32;
+        let id = mint_attachment_id(js_sys::Date::now() as u64, next_attachment_seq());
         if let Err(msg) = accept_local(already, size_u) {
             pending.update(|rows| {
                 rows.push(PendingAttachment {
@@ -435,10 +493,69 @@ mod tests {
             name: "b.png".into(),
             ..PendingAttachment::default()
         }];
-        let merged = merge_failed_files(failed, added);
+        let (merged, dropped) = merge_failed_files(failed, added);
+        assert_eq!(dropped, 0);
         assert_eq!(merged.len(), 2);
         assert_eq!(merged[0].id, 1);
         assert_eq!(merged[1].id, 2);
+    }
+
+    fn file(id: u32) -> PendingAttachment {
+        PendingAttachment {
+            id,
+            name: format!("f{id}"),
+            ..PendingAttachment::default()
+        }
+    }
+
+    #[test]
+    fn failed_restore_keeps_eight_and_reports_the_rest() {
+        let failed: Vec<_> = (1..=8).map(file).collect();
+        let current: Vec<_> = (9..=16).map(file).collect();
+        let (merged, dropped) = merge_failed_files(failed, current);
+        assert_eq!(dropped, 8);
+        assert_eq!(merged.len(), 8);
+        assert_eq!(
+            merged.iter().map(|f| f.id).collect::<Vec<_>>(),
+            (1..=8).collect::<Vec<_>>()
+        );
+        let status = restore_cap_status(dropped).unwrap();
+        assert!(
+            status.contains("only 8 attachments per message"),
+            "{status}"
+        );
+        assert!(status.contains("8 were not restored"), "{status}");
+        assert!(restore_cap_status(0).is_none());
+        // Dedup still wins over the cap: a current file with a failed id
+        // is not a drop.
+        let failed = vec![file(1), file(2)];
+        let current = vec![file(2), file(3)];
+        let (merged, dropped) = merge_failed_files(failed, current);
+        assert_eq!(dropped, 0);
+        assert_eq!(
+            merged.iter().map(|f| f.id).collect::<Vec<_>>(),
+            vec![1, 2, 3]
+        );
+    }
+
+    #[test]
+    fn same_millisecond_batches_do_not_share_ids() {
+        let now = 1_700_000_000_000u64;
+        let old = |index: u64| now.wrapping_mul(16).wrapping_add(index) as u32;
+        assert_eq!(old(0), old(0));
+        let first = mint_attachment_ids(now, 3);
+        let second = mint_attachment_ids(now, 3);
+        assert_eq!(first.len(), 3);
+        assert_eq!(second.len(), 3);
+        for id in &first {
+            assert!(!second.contains(id), "{first:?} vs {second:?}");
+        }
+        let mut all = first.clone();
+        all.extend(second);
+        let mut uniq = all.clone();
+        uniq.sort();
+        uniq.dedup();
+        assert_eq!(uniq.len(), all.len());
     }
 
     #[test]

@@ -69,7 +69,13 @@ pub enum ConfirmKind {
         pattern: String,
         action: String,
     },
-    RuleRemove { scope: String, index: i32 },
+    RuleRemove {
+        scope: String,
+        index: i32,
+        permission: String,
+        pattern: String,
+        action: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -224,24 +230,53 @@ pub fn rule_add_confirm(scope: &str, permission: &str, pattern: &str, action: &s
     })
 }
 
-pub fn rule_remove_confirm(scope: &str, index: i32, action: &str) -> Option<PendingConfirm> {
+pub fn rule_remove_confirm(
+    scope: &str,
+    index: i32,
+    permission: &str,
+    pattern: &str,
+    action: &str,
+) -> Option<PendingConfirm> {
     if action != "deny" {
         return None;
     }
     Some(PendingConfirm {
         title: "Remove this deny rule?".into(),
-        body: "Removing a deny weakens that file. Yolo and Edits still honor every deny that remains, and managed denies are not in this list.".into(),
+        body: format!(
+            "{scope} · {permission} · {pattern} · {action}\n\nRemoving a deny weakens that file. Yolo and Edits still honor every deny that remains, and managed denies are not in this list."
+        ),
         confirm_label: "Remove deny".into(),
         kind: ConfirmKind::RuleRemove {
             scope: scope.into(),
             index,
+            permission: permission.into(),
+            pattern: pattern.into(),
+            action: action.into(),
         },
+    })
+}
+
+/// Body for POST /v1/permissions/rules/remove. Identity travels with the
+/// index so a shifted list cannot delete a different rule.
+pub fn rule_remove_body(rule: &RuleRecord, confirm: bool) -> serde_json::Value {
+    serde_json::json!({
+        "scope": rule.scope,
+        "index": rule.index,
+        "permission": rule.permission,
+        "pattern": rule.pattern,
+        "action": rule.action,
+        "confirm": confirm,
     })
 }
 
 /// Visible countdown. A positive config value wins. Otherwise soft-approve
 /// uses 15 seconds. Excluded permission names never count down.
 pub fn countdown_seconds(mode: &str, configured: i32, permission: &str, exclude: &[String]) -> i32 {
+    // Negative means the settings load failed or has not confirmed a value.
+    // A countdown from that state would invent the daemon's auto-approve.
+    if configured < 0 {
+        return 0;
+    }
     if exclude
         .iter()
         .any(|name| name.eq_ignore_ascii_case(permission))
@@ -724,8 +759,37 @@ mod tests {
         assert!(rule_add_confirm("global", "bash", "rm *", "deny").is_none());
         let add = rule_add_confirm("global", "bash", "*", "allow").unwrap();
         assert!(add.body.contains("last matching rule"));
-        assert!(rule_remove_confirm("global", 1, "allow").is_none());
-        assert!(rule_remove_confirm("global", 1, "deny").is_some());
+        assert!(rule_remove_confirm("global", 1, "bash", "rm *", "allow").is_none());
+        let remove = rule_remove_confirm("global", 1, "bash", "rm *", "deny").unwrap();
+        assert!(remove.body.contains("global · bash · rm * · deny"), "{}", remove.body);
+        match remove.kind {
+            ConfirmKind::RuleRemove {
+                permission,
+                pattern,
+                action,
+                ..
+            } => {
+                assert_eq!(permission, "bash");
+                assert_eq!(pattern, "rm *");
+                assert_eq!(action, "deny");
+            }
+            other => panic!("{other:?}"),
+        }
+        let body = rule_remove_body(
+            &RuleRecord {
+                scope: "global".into(),
+                index: 1,
+                permission: "bash".into(),
+                pattern: "rm *".into(),
+                action: "deny".into(),
+            },
+            true,
+        );
+        assert_eq!(body["permission"], "bash");
+        assert_eq!(body["pattern"], "rm *");
+        assert_eq!(body["action"], "deny");
+        assert_eq!(body["index"], 1);
+        assert_eq!(body["confirm"], true);
     }
 
     #[test]
@@ -771,6 +835,10 @@ mod tests {
             countdown_seconds("soft-approve", 15, "bash", &["Bash".into()]),
             0
         );
+        // A failed settings load uses a negative sentinel. Soft-approve must
+        // not fall through to the 15s default.
+        assert_eq!(countdown_seconds("soft-approve", -1, "bash", &[]), 0);
+        assert_eq!(countdown_seconds("default", -1, "bash", &[]), 0);
     }
 
     #[test]

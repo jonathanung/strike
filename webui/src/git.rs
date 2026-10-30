@@ -12,8 +12,13 @@ use leptos::task::spawn_local;
 use serde::Deserialize;
 use wasm_bindgen::JsCast;
 
+use load_guard::LoadEpoch;
+
+use crate::load_epoch::begin;
+
 use crate::api::{get_json, post_json_value};
 use crate::model::{ChangedFilesResponse, ChildSession, ChildrenResponse};
+use crate::outcome;
 
 thread_local! {
     static BRANCHES: RefCell<Vec<(String, bool)>> = RefCell::new(Vec::new());
@@ -234,20 +239,39 @@ pub fn GitPanel(
     let show_log = RwSignal::new(false);
     let message = RwSignal::new(String::new());
     let switch_to = RwSignal::new(String::new());
+    let load_epoch = RwSignal::new(LoadEpoch::new());
+
 
     let load = move || {
+        let gen = begin(load_epoch);
+        // Rows are what Stage / Discard act on. Drop them before the new
+        // status arrives so the previous branch's files are not clickable
+        // under a checkout that has already moved on.
+        rows.set(Vec::new());
+        commits.set(Vec::new());
         let (b, t) = (base.get_untracked(), token.get_untracked());
+        let load_epoch = load_epoch;
         spawn_local(async move {
+            let live = move || load_epoch.with_untracked(|epoch| epoch.accept(gen));
             let mut err = String::new();
             match get_json::<GitStatus>(&b, &t, "/v1/git/status").await {
                 Ok(st) => {
+                    if !live() {
+                        return;
+                    }
                     branch.set(st.branch);
                     ahead.set(st.ahead);
                     behind.set(st.behind);
                     detached.set(st.detached);
-                    let changes = get_json::<ChangedFilesResponse>(&b, &t, "/v1/changed-files")
-                        .await
-                        .unwrap_or(ChangedFilesResponse { files: vec![] });
+                    let changes = outcome::take_ok(
+                        &mut err,
+                        "Changed files",
+                        get_json::<ChangedFilesResponse>(&b, &t, "/v1/changed-files").await,
+                    )
+                    .unwrap_or(ChangedFilesResponse { files: vec![] });
+                    if !live() {
+                        return;
+                    }
                     let mut seen = HashSet::new();
                     let mut list = Vec::new();
                     for file in st.staged {
@@ -311,32 +335,44 @@ pub fn GitPanel(
                         cursor.set(0);
                     }
                 }
-                Err(e) => err = e,
-            }
-            match get_json::<GitBranches>(&b, &t, "/v1/git/branches").await {
-                Ok(body) => {
-                    if switch_to.get_untracked().is_empty() {
-                        if let Some(cur) = body.branches.iter().find(|b| b.current) {
-                            switch_to.set(cur.name.clone());
-                        }
-                    }
-                    branches.set(body.branches);
-                }
                 Err(e) => {
-                    if err.is_empty() {
-                        err = e;
+                    if !live() {
+                        return;
                     }
+                    err = e;
                 }
             }
-            match get_json::<GitLog>(&b, &t, "/v1/git/log?limit=30").await {
-                Ok(body) => commits.set(body.commits),
-                Err(e) => {
-                    if err.is_empty() {
-                        err = e;
+            if !live() {
+                return;
+            }
+            if !live() {
+                return;
+            }
+            if let Some(body) = outcome::take_ok(
+                &mut err,
+                "Branches",
+                get_json::<GitBranches>(&b, &t, "/v1/git/branches").await,
+            ) {
+                if switch_to.get_untracked().is_empty() {
+                    if let Some(cur) = body.branches.iter().find(|b| b.current) {
+                        switch_to.set(cur.name.clone());
                     }
                 }
+                branches.set(body.branches);
             }
-            error.set(err);
+            if !live() {
+                return;
+            }
+            if let Some(body) = outcome::take_ok(
+                &mut err,
+                "Log",
+                get_json::<GitLog>(&b, &t, "/v1/git/log?limit=30").await,
+            ) {
+                commits.set(body.commits);
+            }
+            if live() {
+                error.set(err);
+            }
         });
     };
 
@@ -813,30 +849,59 @@ pub fn WorktreePanel(
     let pending = RwSignal::new(String::new());
     let remove_phrase = RwSignal::new(String::new());
     let prune_phrase = RwSignal::new(String::new());
+    let kids_note = RwSignal::new(String::new());
+    let load_epoch = RwSignal::new(LoadEpoch::new());
 
     let load = move || {
+        let gen = begin(load_epoch);
+        kids.set(vec![]);
+        kids_note.set(String::new());
         let (b, t, root) = (
             base.get_untracked(),
             token.get_untracked(),
             active_root.get_untracked(),
         );
+        let load_epoch = load_epoch;
         spawn_local(async move {
-            match get_json::<WorktreesBody>(&b, &t, "/v1/git/worktrees").await {
-                Ok(parsed) => {
-                    body.set(Some(parsed));
-                    error.set(String::new());
-                }
-                Err(e) => error.set(e),
+            let live = move || load_epoch.with_untracked(|epoch| epoch.accept(gen));
+            let mut err = String::new();
+            let worktrees = outcome::take_ok(
+                &mut err,
+                "Worktrees",
+                get_json::<WorktreesBody>(&b, &t, "/v1/git/worktrees").await,
+            );
+            if !live() {
+                return;
+            }
+            if let Some(parsed) = worktrees {
+                body.set(Some(parsed));
             }
             if root.is_empty() {
                 kids.set(vec![]);
+                kids_note.set(String::new());
+                error.set(err);
                 return;
             }
             let path = format!("/v1/sessions/{}/children", crate::api::js_encode(&root));
-            match get_json::<ChildrenResponse>(&b, &t, &path).await {
-                Ok(parsed) => kids.set(parsed.sessions),
-                Err(_) => kids.set(vec![]),
+            let children = outcome::take_ok(
+                &mut err,
+                "Children",
+                get_json::<ChildrenResponse>(&b, &t, &path).await,
+            );
+            if !live() {
+                return;
             }
+            match children {
+                Some(parsed) => {
+                    kids.set(parsed.sessions);
+                    kids_note.set(String::new());
+                }
+                None => {
+                    kids.set(vec![]);
+                    kids_note.set("Could not load child sessions.".into());
+                }
+            }
+            error.set(err);
         });
     };
 
@@ -931,6 +996,9 @@ pub fn WorktreePanel(
                     <span>{move || error.get()}</span>
                     <button type="button" class="secondary" on:click=move |_| load()>"Retry"</button>
                 </div>
+            </Show>
+            <Show when=move || !kids_note.get().is_empty()>
+                <p class="hint" role="status">{move || kids_note.get()}</p>
             </Show>
             {move || body.get().map(|info| {
                 let isolation = info.child_isolation.clone();

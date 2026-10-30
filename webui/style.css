@@ -2514,6 +2514,9 @@ button.linkish:disabled { color: var(--muted); cursor: default; text-decoration:
   justify-content: center;
   padding: var(--space-4);
 }
+.approvals-confirm {
+  z-index: 40;
+}
 .approvals-dialog,
 .approvals-panel {
   width: min(560px, 100%);
@@ -2854,3 +2857,13 @@ button.linkish:disabled { color: var(--muted); cursor: default; text-decoration:
   .settings-page { padding-bottom: calc(28px + env(safe-area-inset-bottom, 0px)); }
 }
 /* feature:onboarding-settings end */
+/* feature:files-refresh begin */
+.files-head, .changes-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+.files-head .hint, .changes-head .hint { margin: 0; }
+/* feature:files-refresh end */

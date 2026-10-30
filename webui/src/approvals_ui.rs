@@ -19,6 +19,7 @@ use crate::approvals::{
     RulesDocument, SettingsBits,
 };
 use crate::model::{autonomies, autonomy_label, mode_label, permission_modes, Workspace};
+use crate::outcome::{self, AUTO_SECONDS_UNKNOWN};
 
 pub fn commit_session_mode(
     base: RwSignal<String>,
@@ -295,7 +296,7 @@ pub fn ApprovalHost(
             let body = pending.body.clone();
             let label = pending.confirm_label.clone();
             view! {
-                <div class="approvals-backdrop" role="presentation">
+                <div class="approvals-backdrop approvals-confirm" role="presentation">
                     <div class="approvals-dialog" role="dialog" aria-modal="true" aria-labelledby="approvals-confirm-title">
                         <h2 id="approvals-confirm-title">{title}</h2>
                         <p class="approvals-copy">{body}</p>
@@ -458,30 +459,39 @@ fn reload_panel(
     stored_audit: RwSignal<AuditDocument>,
     panel_error: RwSignal<String>,
 ) {
+    panel_error.set(String::new());
     let (b, t) = (base.get_untracked(), token.get_untracked());
     spawn_local(async move {
-        match get_json::<SettingsBits>(&b, &t, "/v1/settings").await {
-            Ok(bits) => {
-                auto_seconds.set(bits.auto_seconds);
+        // One slot for the whole reload. A later 200 must not clear an
+        // earlier failure — the rules arm used to do that, which hid a
+        // failed auto-approve settings load.
+        let mut err = String::new();
+        match outcome::take_ok(
+            &mut err,
+            "Settings",
+            get_json::<SettingsBits>(&b, &t, "/v1/settings").await,
+        ) {
+            Some(bits) => {
+                auto_seconds.set(outcome::confirmed_auto_seconds(Some(bits.auto_seconds)));
                 auto_exclude.set(bits.auto_exclude);
             }
-            Err(e) => panel_error.set(e),
+            None => auto_seconds.set(AUTO_SECONDS_UNKNOWN),
         }
-        match get_json::<RulesDocument>(&b, &t, "/v1/permissions/rules").await {
-            Ok(doc) => {
-                rules.set(doc);
-                panel_error.set(String::new());
-            }
-            Err(e) => panel_error.set(e),
+        if let Some(doc) = outcome::take_ok(
+            &mut err,
+            "Rules",
+            get_json::<RulesDocument>(&b, &t, "/v1/permissions/rules").await,
+        ) {
+            rules.set(doc);
         }
-        match get_json::<AuditDocument>(&b, &t, "/v1/permissions/audit?limit=40").await {
-            Ok(doc) => stored_audit.set(doc),
-            Err(e) => {
-                if panel_error.get_untracked().is_empty() {
-                    panel_error.set(e);
-                }
-            }
+        if let Some(doc) = outcome::take_ok(
+            &mut err,
+            "Audit",
+            get_json::<AuditDocument>(&b, &t, "/v1/permissions/audit?limit=40").await,
+        ) {
+            stored_audit.set(doc);
         }
+        panel_error.set(err);
     });
 }
 
@@ -550,13 +560,26 @@ fn accept_pending(
             }),
             "/v1/permissions/rules",
         ),
-        ConfirmKind::RuleRemove { scope, index } => post_rule(
+        ConfirmKind::RuleRemove {
+            scope,
+            index,
+            permission,
+            pattern,
+            action,
+        } => post_rule(
             base,
             token,
             status,
             panel_error,
             rules,
-            json!({"scope": scope, "index": index, "confirm": true}),
+            json!({
+                "scope": scope,
+                "index": index,
+                "permission": permission,
+                "pattern": pattern,
+                "action": action,
+                "confirm": true,
+            }),
             "/v1/permissions/rules/remove",
         ),
     }
@@ -584,6 +607,13 @@ fn post_rule(
             Err(e) => {
                 panel_error.set(e.clone());
                 status.set(format!("rule change failed: {e}"));
+                // A shifted list refuses the delete. Reload so the next
+                // click names a rule that is still there, and keep the error.
+                if path == "/v1/permissions/rules/remove" {
+                    if let Ok(doc) = get_json::<RulesDocument>(&b, &t, "/v1/permissions/rules").await {
+                        rules.set(doc);
+                    }
+                }
             }
         }
     });
@@ -598,7 +628,13 @@ fn remove_rule(
     panel_error: RwSignal<String>,
     rules: RwSignal<RulesDocument>,
 ) {
-    if let Some(pending) = rule_remove_confirm(&rule.scope, rule.index, &rule.action) {
+    if let Some(pending) = rule_remove_confirm(
+        &rule.scope,
+        rule.index,
+        &rule.permission,
+        &rule.pattern,
+        &rule.action,
+    ) {
         confirm.set(Some(pending));
         return;
     }
@@ -608,7 +644,7 @@ fn remove_rule(
         status,
         panel_error,
         rules,
-        json!({"scope": rule.scope, "index": rule.index, "confirm": false}),
+        crate::approvals::rule_remove_body(&rule, false),
         "/v1/permissions/rules/remove",
     );
 }
