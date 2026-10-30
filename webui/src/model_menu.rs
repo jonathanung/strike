@@ -394,6 +394,20 @@ pub fn context_view(used: i64, daemon_limit: i64, catalog_context: i64, fit: &st
     }
 }
 
+/// Why "Compact now" (#1567) cannot run, or `None` when it can. The
+/// daemon rejects compaction while a turn runs, and a second send while
+/// one is in flight would race the first — both states disable the
+/// action with the reason visible instead of letting the click fail.
+pub fn compact_disabled(busy: bool, in_flight: bool) -> Option<&'static str> {
+    if in_flight {
+        return Some("Compaction is already running.");
+    }
+    if busy {
+        return Some("Unavailable while a turn is running.");
+    }
+    None
+}
+
 pub fn effort_section(info: Option<&ModelInfo>, current: &str) -> EffortSection {
     let current = current.trim();
     let reasoning = info.map(|i| i.reasoning).unwrap_or(false);
@@ -877,6 +891,24 @@ mod tests {
         assert_eq!(
             scope_label("echo", "echo", "echo", "echo", false),
             "Global default unknown"
+        );
+    }
+
+    #[test]
+    fn compact_now_disabled_only_while_busy_or_in_flight() {
+        assert_eq!(compact_disabled(false, false), None);
+        assert_eq!(
+            compact_disabled(true, false),
+            Some("Unavailable while a turn is running.")
+        );
+        assert_eq!(
+            compact_disabled(false, true),
+            Some("Compaction is already running.")
+        );
+        // In flight wins: it is the more specific reason.
+        assert_eq!(
+            compact_disabled(true, true),
+            Some("Compaction is already running.")
         );
     }
 

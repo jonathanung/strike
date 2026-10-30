@@ -64,6 +64,17 @@ pub fn install(reg: &mut ShellHook) {
     });
     reg.command(
         Command::new(
+            "model.compact",
+            Group::Model,
+            "Compact now",
+            "Compact the open session's context now",
+            Rc::new(|args| crate::shell::dispatch("model.compact", args)),
+        )
+        .keywords(&["compact", "context", "summarize", "shrink"])
+        .order(24),
+    );
+    reg.command(
+        Command::new(
             "model.effort",
             Group::Model,
             "Set reasoning effort…",

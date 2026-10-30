@@ -218,6 +218,88 @@ pub fn fmt_ago(mtime: i64, now_s: i64) -> String {
     format!("{}d", delta / 86_400)
 }
 
+/// What the active session is waiting on, without inventing a count:
+/// the client only knows the pending flags, not how many asks are open.
+pub fn waiting_cause(permission: bool, question: bool) -> &'static str {
+    match (permission, question) {
+        (true, true) => "an approval or a question",
+        (true, false) => "an approval",
+        (false, true) => "a question from the agent",
+        (false, false) => "the pending ask",
+    }
+}
+
+/// Whether the chip has somewhere to go: only Waiting/Blocked (#1543).
+/// Idle, Running, Stopped and the rest stay plain status marks.
+pub fn is_actionable(kind: StatusKind) -> bool {
+    matches!(kind, StatusKind::Waiting | StatusKind::Blocked)
+}
+
+/// The button label/title for an actionable chip, or `None` when the
+/// chip must stay inert. Never fabricates a pending count.
+pub fn chip_action_label(
+    kind: StatusKind,
+    permission: bool,
+    question: bool,
+) -> Option<String> {
+    if !is_actionable(kind) {
+        return None;
+    }
+    Some(format!(
+        "{}: {} — go to it",
+        kind.label(),
+        waiting_cause(permission, question)
+    ))
+}
+
+/// Scroll the open chat to the first pending-ask card (`ApprovalCards`
+/// renders each with `data-pending-ask`), focus that card and flash its
+/// outline, without stealing the composer: focus lands on the card
+/// container (`tabindex="-1"`), whose decision buttons are next in tab
+/// order. Returns `false` when no pending-ask card is in the DOM, so
+/// the caller can say so plainly instead of scrolling nowhere.
+pub fn scroll_to_pending_ask_soon() -> bool {
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return false;
+    };
+    let Some(el) = doc
+        .query_selector("[data-pending-ask=\"true\"]")
+        .ok()
+        .flatten()
+    else {
+        return false;
+    };
+    use wasm_bindgen::closure::Closure;
+    use wasm_bindgen::JsCast;
+    let flash = el.clone();
+    let cb = Closure::once(move || {
+        flash.scroll_into_view();
+        if let Some(html) = flash.dyn_ref::<web_sys::HtmlElement>() {
+            let _ = html.focus();
+            let _ = html.class_list().add_1("ask-flash");
+            let unflash = flash.clone();
+            let off = Closure::once(move || {
+                let _ = unflash.class_list().remove_1("ask-flash");
+            });
+            if let Some(w) = web_sys::window() {
+                let _ = w.set_timeout_with_callback_and_timeout_and_arguments_0(
+                    off.as_ref().unchecked_ref(),
+                    2000,
+                );
+            }
+            off.forget();
+        }
+    });
+    if let Some(w) = web_sys::window() {
+        let _ = w.set_timeout_with_callback_and_timeout_and_arguments_0(
+            cb.as_ref().unchecked_ref(),
+            0,
+        );
+    }
+    cb.forget();
+    true
+}
+
 /// Page wiring for the shell slots in `src/shell/contrib/status.rs`.
 /// The shell boots before App's signals exist, so App installs them here
 /// (same late-bind shape as `shell::HostBridge` and the notifications
@@ -229,6 +311,11 @@ pub struct StatusHost {
     pub roots: RwSignal<Vec<RootSummary>>,
     pub active_root: RwSignal<String>,
     pub refresh: Rc<dyn Fn()>,
+    /// Installed by App (#1543): switch to chat and jump to the pending
+    /// ask, or report that it already resolved. The chip itself only
+    /// renders a button when `chip_action_label` says it has somewhere
+    /// to go, so this is never called for an inert chip.
+    pub go_to_ask: Rc<dyn Fn()>,
 }
 
 thread_local! {
@@ -283,12 +370,16 @@ pub fn session_view() -> AnyView {
     };
     let roots = host.roots;
     let active_root = host.active_root;
+    let go_to_ask = host.go_to_ask.clone();
     view! {
         {move || {
-            let kind = roots
+            let row = roots
                 .get()
                 .iter()
                 .find(|row| row.id == active_root.get())
+                .cloned();
+            let kind = row
+                .as_ref()
                 .map(|row| {
                     session_kind(
                         &row.status,
@@ -298,7 +389,28 @@ pub fn session_view() -> AnyView {
                     )
                 })
                 .unwrap_or(StatusKind::Idle);
-            view! { <StatusMark kind=kind place=StatusSlot::Chip /> }
+            let action = row.as_ref().and_then(|row| {
+                chip_action_label(kind, row.permission_pending, row.question_pending)
+            });
+            match action {
+                Some(label) => {
+                    let go = go_to_ask.clone();
+                    view! {
+                        <button
+                            type="button"
+                            class="status-chip-hit status-chip-action"
+                            data-session-status-action="true"
+                            aria-label=label.clone()
+                            title=label
+                            on:click=move |_| (*go)()
+                        >
+                            <StatusMark kind=kind place=StatusSlot::Chip />
+                        </button>
+                    }
+                    .into_any()
+                }
+                None => view! { <StatusMark kind=kind place=StatusSlot::Chip /> }.into_any(),
+            }
         }}
     }
     .into_any()
@@ -584,6 +696,41 @@ mod tests {
         assert_eq!(session_kind("", true, true, false), StatusKind::Waiting);
         assert_eq!(session_kind("", true, false, false), StatusKind::Running);
         assert_eq!(session_kind("nope", false, false, false), StatusKind::Idle);
+    }
+
+    #[test]
+    fn chip_is_a_button_only_when_waiting_or_blocked() {
+        assert!(is_actionable(StatusKind::Waiting));
+        assert!(is_actionable(StatusKind::Blocked));
+        for kind in [
+            StatusKind::Idle,
+            StatusKind::Running,
+            StatusKind::Stopped,
+            StatusKind::Done,
+            StatusKind::Failed,
+            StatusKind::Disconnected,
+        ] {
+            assert!(!is_actionable(kind), "{kind:?}");
+            assert_eq!(chip_action_label(kind, true, false), None);
+        }
+        assert_eq!(
+            chip_action_label(StatusKind::Waiting, true, false).as_deref(),
+            Some("Waiting: an approval — go to it")
+        );
+        assert_eq!(
+            chip_action_label(StatusKind::Waiting, false, true).as_deref(),
+            Some("Waiting: a question from the agent — go to it")
+        );
+        assert_eq!(
+            chip_action_label(StatusKind::Blocked, true, true).as_deref(),
+            Some("Blocked: an approval or a question — go to it")
+        );
+        // Blocked by explicit daemon status, no pending flags: the label
+        // stays honest and names no invented cause or count.
+        assert_eq!(
+            chip_action_label(StatusKind::Blocked, false, false).as_deref(),
+            Some("Blocked: the pending ask — go to it")
+        );
     }
 
     #[test]
