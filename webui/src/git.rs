@@ -12,6 +12,10 @@ use leptos::task::spawn_local;
 use serde::Deserialize;
 use wasm_bindgen::JsCast;
 
+use load_guard::LoadEpoch;
+
+use crate::load_epoch::begin;
+
 use crate::api::{get_json, post_json_value};
 use crate::model::{ChangedFilesResponse, ChildSession, ChildrenResponse};
 
@@ -234,13 +238,26 @@ pub fn GitPanel(
     let show_log = RwSignal::new(false);
     let message = RwSignal::new(String::new());
     let switch_to = RwSignal::new(String::new());
+    let load_epoch = RwSignal::new(LoadEpoch::new());
+
 
     let load = move || {
+        let gen = begin(load_epoch);
+        // Rows are what Stage / Discard act on. Drop them before the new
+        // status arrives so the previous branch's files are not clickable
+        // under a checkout that has already moved on.
+        rows.set(Vec::new());
+        commits.set(Vec::new());
         let (b, t) = (base.get_untracked(), token.get_untracked());
+        let load_epoch = load_epoch;
         spawn_local(async move {
+            let live = move || load_epoch.with_untracked(|epoch| epoch.accept(gen));
             let mut err = String::new();
             match get_json::<GitStatus>(&b, &t, "/v1/git/status").await {
                 Ok(st) => {
+                    if !live() {
+                        return;
+                    }
                     branch.set(st.branch);
                     ahead.set(st.ahead);
                     behind.set(st.behind);
@@ -248,6 +265,9 @@ pub fn GitPanel(
                     let changes = get_json::<ChangedFilesResponse>(&b, &t, "/v1/changed-files")
                         .await
                         .unwrap_or(ChangedFilesResponse { files: vec![] });
+                    if !live() {
+                        return;
+                    }
                     let mut seen = HashSet::new();
                     let mut list = Vec::new();
                     for file in st.staged {
@@ -311,10 +331,21 @@ pub fn GitPanel(
                         cursor.set(0);
                     }
                 }
-                Err(e) => err = e,
+                Err(e) => {
+                    if !live() {
+                        return;
+                    }
+                    err = e;
+                }
+            }
+            if !live() {
+                return;
             }
             match get_json::<GitBranches>(&b, &t, "/v1/git/branches").await {
                 Ok(body) => {
+                    if !live() {
+                        return;
+                    }
                     if switch_to.get_untracked().is_empty() {
                         if let Some(cur) = body.branches.iter().find(|b| b.current) {
                             switch_to.set(cur.name.clone());
@@ -323,20 +354,36 @@ pub fn GitPanel(
                     branches.set(body.branches);
                 }
                 Err(e) => {
+                    if !live() {
+                        return;
+                    }
                     if err.is_empty() {
                         err = e;
                     }
                 }
+            }
+            if !live() {
+                return;
             }
             match get_json::<GitLog>(&b, &t, "/v1/git/log?limit=30").await {
-                Ok(body) => commits.set(body.commits),
+                Ok(body) => {
+                    if !live() {
+                        return;
+                    }
+                    commits.set(body.commits);
+                }
                 Err(e) => {
+                    if !live() {
+                        return;
+                    }
                     if err.is_empty() {
                         err = e;
                     }
                 }
             }
-            error.set(err);
+            if live() {
+                error.set(err);
+            }
         });
     };
 
@@ -813,29 +860,60 @@ pub fn WorktreePanel(
     let pending = RwSignal::new(String::new());
     let remove_phrase = RwSignal::new(String::new());
     let prune_phrase = RwSignal::new(String::new());
+    let kids_note = RwSignal::new(String::new());
+    let load_epoch = RwSignal::new(LoadEpoch::new());
 
     let load = move || {
+        let gen = begin(load_epoch);
+        kids.set(vec![]);
+        kids_note.set(String::new());
         let (b, t, root) = (
             base.get_untracked(),
             token.get_untracked(),
             active_root.get_untracked(),
         );
+        let load_epoch = load_epoch;
         spawn_local(async move {
+            let live = move || load_epoch.with_untracked(|epoch| epoch.accept(gen));
             match get_json::<WorktreesBody>(&b, &t, "/v1/git/worktrees").await {
                 Ok(parsed) => {
+                    if !live() {
+                        return;
+                    }
                     body.set(Some(parsed));
                     error.set(String::new());
                 }
-                Err(e) => error.set(e),
+                Err(e) => {
+                    if !live() {
+                        return;
+                    }
+                    error.set(e);
+                }
+            }
+            if !live() {
+                return;
             }
             if root.is_empty() {
                 kids.set(vec![]);
+                kids_note.set(String::new());
                 return;
             }
             let path = format!("/v1/sessions/{}/children", crate::api::js_encode(&root));
             match get_json::<ChildrenResponse>(&b, &t, &path).await {
-                Ok(parsed) => kids.set(parsed.sessions),
-                Err(_) => kids.set(vec![]),
+                Ok(parsed) => {
+                    if !live() {
+                        return;
+                    }
+                    kids.set(parsed.sessions);
+                    kids_note.set(String::new());
+                }
+                Err(_) => {
+                    if !live() {
+                        return;
+                    }
+                    kids.set(vec![]);
+                    kids_note.set("Could not load child sessions.".into());
+                }
             }
         });
     };
@@ -931,6 +1009,9 @@ pub fn WorktreePanel(
                     <span>{move || error.get()}</span>
                     <button type="button" class="secondary" on:click=move |_| load()>"Retry"</button>
                 </div>
+            </Show>
+            <Show when=move || !kids_note.get().is_empty()>
+                <p class="hint" role="status">{move || kids_note.get()}</p>
             </Show>
             {move || body.get().map(|info| {
                 let isolation = info.child_isolation.clone();

@@ -10,6 +10,10 @@ use leptos::task::spawn_local;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
+use load_guard::{commit_load, Commit, ErrPolicy, LoadEpoch};
+
+use crate::load_epoch::begin;
+
 use crate::api::{self, get_json, patch_json, post_json_value};
 use crate::shell::Choice;
 
@@ -228,40 +232,106 @@ pub fn SchedulePage(
     let overlap = RwSignal::new("skip".to_string());
     let missed = RwSignal::new("skip".to_string());
     let enabled = RwSignal::new(true);
+    // List refresh and history write different signals, so each has its own
+    // epoch. One counter would drop a list commit when history starts.
+    let list_epoch = RwSignal::new(LoadEpoch::new());
+    let history_epoch = RwSignal::new(LoadEpoch::new());
+    let history_error = RwSignal::new(String::new());
+    let history_loading = RwSignal::new(false);
+    let picker_note = RwSignal::new(String::new());
 
     let load_history = move |id: String| {
+        let gen = begin(history_epoch);
+        runs.set(Vec::new());
+        history_error.set(String::new());
         if id.is_empty() {
-            runs.set(Vec::new());
+            history_loading.set(false);
             return;
         }
+        history_loading.set(true);
         let (b, t) = (base.get_untracked(), token.get_untracked());
+        let history_epoch = history_epoch;
         spawn_local(async move {
             let path = format!("/v1/schedules/{}/history", api::js_encode(&id));
-            match get_json::<RunList>(&b, &t, &path).await {
-                Ok(list) => runs.set(list.runs),
-                Err(e) => error.set(e),
+            let fetched = get_json::<RunList>(&b, &t, &path).await;
+            let raw = fetched.as_ref().err().cloned();
+            let mapped = match fetched {
+                Ok(list) => Ok(list.runs),
+                Err(_) => Err("History failed to load for this schedule.".into()),
+            };
+            match history_epoch.with_untracked(|epoch| {
+                commit_load(epoch, gen, mapped, Vec::new(), ErrPolicy::Clear)
+            }) {
+                Commit::Drop => return,
+                Commit::Apply { value, error: hist } => {
+                    let failed = !hist.is_empty();
+                    runs.set(value);
+                    history_error.set(hist);
+                    history_loading.set(false);
+                    if failed {
+                        if let Some(raw) = raw {
+                            error.set(raw);
+                        }
+                    }
+                }
             }
         });
     };
 
     let refresh = move || {
+        let gen = begin(list_epoch);
         let (b, t) = (base.get_untracked(), token.get_untracked());
         let keep = editing.get_untracked();
+        let list_epoch = list_epoch;
+        let previous = items.get_untracked();
         spawn_local(async move {
-            match get_json::<ScheduleList>(&b, &t, "/v1/schedules").await {
-                Ok(list) => {
-                    publish_schedules(&list.schedules);
-                    items.set(list.schedules);
-                    error.set(String::new());
+            let schedules = get_json::<ScheduleList>(&b, &t, "/v1/schedules").await;
+            let mapped = schedules.map(|list| list.schedules);
+            match list_epoch
+                .with_untracked(|epoch| commit_load(epoch, gen, mapped, previous, ErrPolicy::Keep))
+            {
+                Commit::Drop => return,
+                Commit::Apply {
+                    value,
+                    error: list_error,
+                } => {
+                    if list_error.is_empty() {
+                        publish_schedules(&value);
+                    }
+                    items.set(value);
+                    error.set(list_error);
                 }
-                Err(e) => error.set(e),
             }
-            if let Ok(list) = get_json::<GoalList>(&b, &t, "/v1/goals").await {
-                goals.set(list.goals);
+            let goals_res = get_json::<GoalList>(&b, &t, "/v1/goals").await;
+            if !list_epoch.with_untracked(|epoch| epoch.accept(gen)) {
+                return;
             }
-            if let Ok(list) = get_json::<WorkflowList>(&b, &t, "/v1/workflows").await {
-                workflows.set(list.workflows);
+            let goals_failed = match goals_res {
+                Ok(list) => {
+                    goals.set(list.goals);
+                    false
+                }
+                Err(_) => true,
+            };
+            let workflows_res = get_json::<WorkflowList>(&b, &t, "/v1/workflows").await;
+            if !list_epoch.with_untracked(|epoch| epoch.accept(gen)) {
+                return;
             }
+            let workflows_failed = match workflows_res {
+                Ok(list) => {
+                    workflows.set(list.workflows);
+                    false
+                }
+                Err(_) => true,
+            };
+            let mut notes = Vec::new();
+            if goals_failed {
+                notes.push("Could not load goals — the picker may be incomplete.");
+            }
+            if workflows_failed {
+                notes.push("Could not load workflows — the picker may be incomplete.");
+            }
+            picker_note.set(notes.join(" "));
         });
         if !keep.is_empty() {
             load_history(keep);
@@ -377,7 +447,10 @@ pub fn SchedulePage(
         overlap.set("skip".into());
         missed.set("skip".into());
         enabled.set(true);
+        let _ = begin(history_epoch);
         runs.set(Vec::new());
+        history_error.set(String::new());
+        history_loading.set(false);
         notice.set(String::new());
     };
 
@@ -429,7 +502,11 @@ pub fn SchedulePage(
             "missed": missed.get_untracked(),
             "enabled": enabled.get_untracked(),
         });
-        let (b, t, id) = (base.get_untracked(), token.get_untracked(), editing.get_untracked());
+        let (b, t, id) = (
+            base.get_untracked(),
+            token.get_untracked(),
+            editing.get_untracked(),
+        );
         spawn_local(async move {
             let result = if id.is_empty() {
                 post_json_value(&b, &t, "/v1/schedules", body).await
@@ -442,7 +519,9 @@ pub fn SchedulePage(
                 Ok(v) => {
                     error.set(String::new());
                     if id.is_empty() {
-                        if let Some(new_id) = v.get("id").and_then(|s| s.as_str()).map(str::to_string) {
+                        if let Some(new_id) =
+                            v.get("id").and_then(|s| s.as_str()).map(str::to_string)
+                        {
                             if !new_id.is_empty() {
                                 editing.set(new_id.clone());
                                 load_history(new_id);
@@ -473,10 +552,11 @@ pub fn SchedulePage(
         }
         let (b, t) = (base.get_untracked(), token.get_untracked());
         spawn_local(async move {
-            let resp = gloo_net::http::Request::delete(&api::api(&b, &format!("/v1/schedules/{id}")))
-                .header("Authorization", &api::auth_header(&t))
-                .send()
-                .await;
+            let resp =
+                gloo_net::http::Request::delete(&api::api(&b, &format!("/v1/schedules/{id}")))
+                    .header("Authorization", &api::auth_header(&t))
+                    .send()
+                    .await;
             match resp {
                 Ok(resp) if resp.ok() => {
                     clear_form();
@@ -514,6 +594,9 @@ pub fn SchedulePage(
             </Show>
             <Show when=move || !notice.get().is_empty()>
                 <p class="sched-note" role="status">{move || notice.get()}</p>
+            </Show>
+            <Show when=move || !picker_note.get().is_empty()>
+                <p class="hint" role="status">{move || picker_note.get()}</p>
             </Show>
             <div class="sched-layout">
                 <div class="sched-list">
@@ -661,6 +744,12 @@ pub fn SchedulePage(
                             let rows = runs.get();
                             if editing.get().is_empty() {
                                 return view! { <p class="hint">"History appears after you select a schedule."</p> }.into_any();
+                            }
+                            if history_loading.get() {
+                                return view! { <p class="hint">"Loading history…"</p> }.into_any();
+                            }
+                            if !history_error.get().is_empty() {
+                                return view! { <p class="hint" role="alert">{history_error.get()}</p> }.into_any();
                             }
                             if rows.is_empty() {
                                 return view! { <p class="hint">"No runs yet."</p> }.into_any();
