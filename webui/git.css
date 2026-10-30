@@ -100,3 +100,7 @@
   .side:has(.git-panel), .side:has(.worktree-panel) { max-height: 70vh; }
 }
 /* feature:git-worktree end */
+/* feature:git-panel-small begin */
+.git-copy-hash { align-self: flex-start; }
+.git-filter { flex: none; }
+/* feature:git-panel-small end */
