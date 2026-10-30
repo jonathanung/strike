@@ -1754,9 +1754,23 @@ fn App() -> impl IntoView {
             draft.update(|d| {
                 *d = chat_mode::merge_failed_send(d, &failed_text);
             });
-            pending_files.update(|rows| {
-                *rows = chat_mode::merge_failed_files(failed.clone(), rows.clone());
-            });
+            // #1652: the restore merge is capped at MAX_ATTACHMENTS; say
+            // so when it drops files, or the resend fails on the daemon's
+            // own cap with no hint that the count is the problem.
+            let current = pending_files.get_untracked();
+            let (merged, dropped) = chat_mode::merge_failed_files_capped(failed, current);
+            pending_files.set(merged);
+            if dropped > 0 {
+                // Both callers set the failure status right before
+                // restoring; append rather than overwrite it.
+                let notice = chat_mode::restore_drop_notice(dropped);
+                let prior = status.get_untracked();
+                if prior.is_empty() {
+                    status.set(notice);
+                } else {
+                    status.set(format!("{prior} {notice}"));
+                }
+            }
             sending.set(false);
         };
         spawn_local(async move {

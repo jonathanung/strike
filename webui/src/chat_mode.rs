@@ -135,13 +135,89 @@ pub fn merge_failed_files(
     failed: Vec<PendingAttachment>,
     current: Vec<PendingAttachment>,
 ) -> Vec<PendingAttachment> {
+    merge_failed_files_capped(failed, current).0
+}
+
+/// `merge_failed_files` with the per-message cap enforced (#1652): the
+/// failed batch stays in front, current files follow, and the merged list
+/// is truncated to `MAX_ATTACHMENTS`. Returns the merged rows plus how
+/// many rows the cap dropped, so the caller can tell the user instead of
+/// silently losing files (an over-cap restore used to resend >8 files,
+/// get a daemon 400, and loop forever). Rows removed by the id dedupe
+/// are not counted as dropped — they are the same file, not a lost one.
+pub fn merge_failed_files_capped(
+    failed: Vec<PendingAttachment>,
+    current: Vec<PendingAttachment>,
+) -> (Vec<PendingAttachment>, usize) {
     let mut merged = failed;
     for row in current {
         if !merged.iter().any(|f| f.id == row.id) {
             merged.push(row);
         }
     }
-    merged
+    let dropped = merged.len().saturating_sub(MAX_ATTACHMENTS);
+    merged.truncate(MAX_ATTACHMENTS);
+    (merged, dropped)
+}
+
+/// Status line for a failed-send restore that dropped rows at the cap.
+/// Reuses the `accept_local` cap wording so the limit reads the same
+/// everywhere it is enforced.
+pub fn restore_drop_notice(dropped: usize) -> String {
+    let noun = if dropped == 1 {
+        "attachment was"
+    } else {
+        "attachments were"
+    };
+    format!("{dropped} {noun} not restored: only {MAX_ATTACHMENTS} attachments per message")
+}
+
+/// Mints attachment row ids (#1658). The old mint derived the id from the
+/// wall clock alone — `(Date::now() as u64) * 16 + index-in-batch` as
+/// `u32` — so two batches landing in the same millisecond minted identical
+/// ids for distinct files, and every consumer (FileReader completion,
+/// `mark_error`, Remove, restore dedupe) keys on the id alone, first match
+/// wins. This mint is seeded from the clock once and then simply counts
+/// up: ids are unique by construction for the life of the page, no matter
+/// how batches interleave, and stay roughly time-ordered (the seed) for
+/// debugging. The id space repeats only after 2^32 mints in one page
+/// session — the old truncation repeated every 2^28 ms (≈3.1 days) even
+/// with no collision in a single batch.
+#[derive(Debug, Clone)]
+pub struct AttachmentIdMint {
+    next: u32,
+}
+
+impl AttachmentIdMint {
+    /// Seeds the counter from a millisecond timestamp. Only the seed
+    /// comes from the clock; later ids never re-read it, which is what
+    /// makes same-millisecond batches disjoint.
+    pub fn new(now_ms: u64) -> Self {
+        Self {
+            next: now_ms as u32,
+        }
+    }
+
+    pub fn next_id(&mut self) -> u32 {
+        let id = self.next;
+        self.next = self.next.wrapping_add(1);
+        id
+    }
+}
+
+thread_local! {
+    static ATTACHMENT_ID_MINT: RefCell<Option<AttachmentIdMint>> =
+        const { RefCell::new(None) };
+}
+
+/// Next page-unique attachment id. One mint per page (thread local),
+/// seeded from `Date::now()` on first use.
+fn next_attachment_id() -> u32 {
+    ATTACHMENT_ID_MINT.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        let mint = slot.get_or_insert_with(|| AttachmentIdMint::new(js_sys::Date::now() as u64));
+        mint.next_id()
+    })
 }
 
 pub fn data_url_payload(url: &str) -> Result<(String, String), String> {
@@ -207,9 +283,7 @@ pub fn enqueue_file_list(
         };
         let already =
             pending.with_untracked(|rows| rows.iter().filter(|p| p.error.is_empty()).count());
-        let id = (js_sys::Date::now() as u64)
-            .wrapping_mul(16)
-            .wrapping_add(i as u64) as u32;
+        let id = next_attachment_id();
         if let Err(msg) = accept_local(already, size_u) {
             pending.update(|rows| {
                 rows.push(PendingAttachment {
@@ -439,6 +513,84 @@ mod tests {
         assert_eq!(merged.len(), 2);
         assert_eq!(merged[0].id, 1);
         assert_eq!(merged[1].id, 2);
+    }
+
+    fn rows(ids: std::ops::RangeInclusive<u32>) -> Vec<PendingAttachment> {
+        ids.map(|id| PendingAttachment {
+            id,
+            name: format!("f{id}.png"),
+            ..PendingAttachment::default()
+        })
+        .collect()
+    }
+
+    #[test]
+    fn attachment_ids_are_disjoint_across_same_millisecond_batches() {
+        // One mint seeded at a fixed millisecond, as in the page. Two
+        // batches enqueued "in the same millisecond" — the second batch's
+        // indices restart at 0, which is exactly what collided when the
+        // id was Date::now()*16+index.
+        let mut mint = AttachmentIdMint::new(1_700_000_000_123);
+        let batch1: Vec<u32> = (0..3).map(|_| mint.next_id()).collect();
+        let batch2: Vec<u32> = (0..3).map(|_| mint.next_id()).collect();
+        for id in &batch2 {
+            assert!(!batch1.contains(id), "id {id} minted twice");
+        }
+        // Seeded from the clock, then strictly counting up.
+        assert_eq!(batch1[0], 1_700_000_000_123u64 as u32);
+        assert!(batch1.windows(2).all(|w| w[1] == w[0] + 1));
+        assert_eq!(batch2[0], batch1[2] + 1);
+    }
+
+    #[test]
+    fn attachment_id_mint_wraps_without_repeating_early_ids() {
+        let mut mint = AttachmentIdMint::new(u64::from(u32::MAX) - 1);
+        let ids: Vec<u32> = (0..4).map(|_| mint.next_id()).collect();
+        assert_eq!(ids, vec![u32::MAX - 1, u32::MAX, 0, 1]);
+    }
+
+    #[test]
+    fn merge_failed_files_caps_at_max_and_reports_dropped() {
+        // #1652: failed 8 + current 8 used to restore all 16.
+        let (merged, dropped) = merge_failed_files_capped(rows(1..=8), rows(101..=108));
+        assert_eq!(merged.len(), MAX_ATTACHMENTS);
+        assert_eq!(dropped, 8);
+        // Failed batch retained, in order, at the front.
+        assert_eq!(
+            merged.iter().map(|r| r.id).collect::<Vec<_>>(),
+            (1..=8).collect::<Vec<_>>()
+        );
+        // The plain wrapper enforces the same cap.
+        assert_eq!(
+            merge_failed_files(rows(1..=8), rows(101..=108)).len(),
+            MAX_ATTACHMENTS
+        );
+        assert_eq!(
+            restore_drop_notice(8),
+            "8 attachments were not restored: only 8 attachments per message"
+        );
+        assert_eq!(
+            restore_drop_notice(1),
+            "1 attachment was not restored: only 8 attachments per message"
+        );
+    }
+
+    #[test]
+    fn merge_failed_files_under_cap_and_dedupe_unchanged() {
+        // Under the cap nothing is dropped and order is failed-first.
+        let (merged, dropped) = merge_failed_files_capped(rows(1..=3), rows(4..=5));
+        assert_eq!(merged.len(), 5);
+        assert_eq!(dropped, 0);
+        // Exactly at the cap is not a drop.
+        let (merged, dropped) = merge_failed_files_capped(rows(1..=5), rows(6..=8));
+        assert_eq!(merged.len(), MAX_ATTACHMENTS);
+        assert_eq!(dropped, 0);
+        // Deduped rows are the same file, not a cap drop: 8 failed, 8
+        // current, 4 of them duplicates of the failed batch -> 12
+        // distinct, 4 dropped by the cap, not 8.
+        let (merged, dropped) = merge_failed_files_capped(rows(1..=8), rows(5..=12));
+        assert_eq!(merged.len(), MAX_ATTACHMENTS);
+        assert_eq!(dropped, 4);
     }
 
     #[test]
