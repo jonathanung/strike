@@ -1490,7 +1490,10 @@ try {
   const clickMemoryDeleteOnce = async () =>
     evaluate(`(() => {
       const row = [...document.querySelectorAll(".storage-row")].find((r) => r.textContent.includes("smoke-pref"));
-      const btn = row && row.querySelector("[data-action='delete-memory']");
+      const btn =
+        row &&
+        (row.querySelector("[data-action='delete-memory']") ||
+          [...row.querySelectorAll("button")].find((b) => b.textContent.trim() === "Delete"));
       if (!btn) return "missing";
       btn.click();
       return "clicked";
@@ -1507,7 +1510,16 @@ try {
     return "missing";
   };
   if ((await clickMemoryDelete()) !== "clicked") {
-    throw new Error("memory Delete button click failed");
+    const diag = await evaluate(`(() => {
+      const rows = [...document.querySelectorAll(".storage-row")];
+      const row = rows.find((r) => r.textContent.includes("smoke-pref"));
+      return JSON.stringify({
+        rows: rows.length,
+        globalBtn: !!document.querySelector("[data-action='delete-memory']"),
+        rowHtml: row ? row.outerHTML.slice(0, 400) : null,
+      });
+    })()`).catch((e) => `diag failed: ${e}`);
+    throw new Error(`memory Delete button click failed diag=${diag}`);
   }
   const memDialog = await waitFor(
     "memory delete confirm dialog (entry named, cannot be undone)",
