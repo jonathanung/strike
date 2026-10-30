@@ -175,3 +175,12 @@
 /* feature:agent-diff-expand begin */
 .ev-diff > button.secondary { margin: 0 0 8px 8px; }
 /* feature:agent-diff-expand end */
+/* feature:find-match-case begin */
+/* Find toggles (#1409 Aa match-case, #1419 ab| whole-word): compact
+   chips in the editor find bar; `.on` (from the shared chip style)
+   carries the pressed look, aria-pressed carries it for AT. */
+.ev-find-toggle { flex: 0 0 auto; font-family: ui-monospace, monospace; }
+/* feature:find-match-case end */
+/* feature:whole-word-find begin */
+.ev-find-toggle[aria-pressed="true"] { font-weight: 700; }
+/* feature:whole-word-find end */
