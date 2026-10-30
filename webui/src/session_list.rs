@@ -681,7 +681,9 @@ mod tests {
         assert!(!can_mark_unread(false, true), "open session re-marks seen");
         assert!(!can_mark_unread(true, true));
         // The layout carries the source row's unread flag for the panel.
-        let mut row = session("x", 100);
+        // Fresh mtime: an old one would be folded into hidden-older
+        // (args() pins now_s and show_older=false) and never appear.
+        let mut row = session("x", 1_700_000_000 - 100);
         row.unread = true;
         let folders = Vec::new();
         let collapsed = HashSet::new();
