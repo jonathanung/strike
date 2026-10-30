@@ -100,7 +100,16 @@ pub fn find_hits(text: &str, query: &str) -> Vec<Hit> {
     let mut hits = Vec::new();
     for (idx, line) in lines_of(text).into_iter().enumerate() {
         let folded = line.to_lowercase();
-        if folded.len() != line.len() || q_lower.len() != query.len() {
+        // The byte-wise fast path below is only case-insensitive for
+        // ASCII: it lowercases with `to_ascii_lowercase`, which leaves
+        // every non-ASCII byte unchanged. Greek and Cyrillic case folds
+        // are length-preserving (e.g. Σ U+03A3 -> σ U+03C3, both two
+        // bytes), so a byte-length gate never routed them to the
+        // Unicode path and uppercase Greek/Cyrillic text was
+        // unfindable in either query direction (#1656). Take the fast
+        // path only when both sides are pure ASCII; anything else uses
+        // the folded `contains` path and records one whole-line hit.
+        if !line.is_ascii() || !query.is_ascii() {
             if folded.contains(&q_lower) {
                 hits.push(Hit {
                     line: (idx as u32) + 1,
@@ -1660,6 +1669,47 @@ mod tests {
         assert!(hits[1].start > 0);
         assert!(find_hits("abc", "").is_empty());
         assert!(find_hits("abc", "z").is_empty());
+    }
+
+    #[test]
+    fn search_matches_uppercase_greek_and_cyrillic() {
+        // Regression for #1656: Greek/Cyrillic folds are length-
+        // preserving (2 bytes -> 2 bytes), so the old byte-length gate
+        // never took the Unicode path and these were unfindable in
+        // either query direction — even an identical-case query.
+        // Greek Sigma: Σ U+03A3 / σ U+03C3.
+        assert_eq!(find_hits("\u{03A3}\n", "\u{03C3}").len(), 1);
+        assert_eq!(find_hits("\u{03C3}\n", "\u{03A3}").len(), 1);
+        assert_eq!(find_hits("\u{03A3}\n", "\u{03A3}").len(), 1);
+        // Greek Alpha: Α U+0391 / α U+03B1.
+        assert_eq!(find_hits("\u{0391}\n", "\u{03B1}").len(), 1);
+        assert_eq!(find_hits("\u{03B1}\n", "\u{0391}").len(), 1);
+        // Cyrillic A: А U+0410 / а U+0430 (not Latin A/a).
+        assert_eq!(find_hits("\u{0410}\n", "\u{0430}").len(), 1);
+        assert_eq!(find_hits("\u{0430}\n", "\u{0410}").len(), 1);
+        // A non-ASCII hit inside a mixed line is found, numbered with
+        // its line, and recorded as a whole-line hit (start == end == 0).
+        let hits = find_hits("plain\nsee \u{03A3} here\n", "\u{03C3}");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].line, 2);
+        assert_eq!(hits[0].start, 0);
+        assert_eq!(hits[0].end, 0);
+        // Non-ASCII queries do not invent hits on unrelated lines.
+        assert!(find_hits("plain ascii\n", "\u{03C3}").is_empty());
+        assert!(find_hits("\u{03A3}\n", "\u{03B1}").is_empty());
+    }
+
+    #[test]
+    fn search_matches_length_changing_folds() {
+        // Folds that change byte length already took the Unicode path
+        // before #1656; pin that branch so the ASCII gate keeps it.
+        // İ U+0130 (2 bytes) folds to i + combining dot above U+0307
+        // (3 bytes, two chars).
+        assert_eq!(find_hits("\u{0130}\n", "i\u{0307}").len(), 1);
+        assert_eq!(find_hits("i\u{0307}\n", "\u{0130}").len(), 1);
+        // ẞ U+1E9E (3 bytes) folds to ß U+00DF (2 bytes).
+        assert_eq!(find_hits("\u{1E9E}\n", "\u{00DF}").len(), 1);
+        assert_eq!(find_hits("\u{00DF}\n", "\u{1E9E}").len(), 1);
     }
 
     #[test]
