@@ -453,6 +453,33 @@ fn connect_auth_error(target: &str) -> String {
     )
 }
 
+fn connect_cross_origin_error(target: &str) -> String {
+    format!(
+        "That gateway at {target} answers, but this browser tab cannot use a different \
+         origin directly — the cockpit's calls are credentialed and that gateway does not \
+         allow credentialed cross-origin calls, so nothing would load from it. Add it by \
+         scanning its QR code from the Phone dialog, or use strike connect on its host. \
+         Nothing changed — the current gateway is still selected."
+    )
+}
+
+/// The cockpit's data calls (crate::api) always send credentials, and
+/// the daemon does not answer credentialed cross-origin requests
+/// (no Access-Control-Allow-Credentials), so a target on another
+/// origin would strand the tab even though the plain probe above
+/// answers: verified in-browser — fetch with credentials "omit" to a
+/// second loopback gateway returns 200, with "include" it fails.
+/// A switch is only committed when this credentialed health check
+/// also passes for a cross-origin target.
+async fn credentialed_health_ok(base: &str, token: &str) -> bool {
+    let sent = gloo_net::http::Request::get(&api(base, "/health"))
+        .credentials(web_sys::RequestCredentials::Include)
+        .header("Authorization", &auth_header(token))
+        .send()
+        .await;
+    matches!(sent, Ok(resp) if resp.status() == 200)
+}
+
 fn connect_http_error(target: &str, code: u16, body: &str) -> String {
     let detail = error_text(body);
     if detail.is_empty() {
@@ -485,15 +512,27 @@ async fn probe_target(base: &str, token: &str) -> Result<String, String> {
         Ok((code, body)) if code != 200 => return Err(connect_http_error(target, code, &body)),
         Ok(_) => {}
     }
-    match gateway_fetch("GET", base, token, "/v1/gateway", None).await {
-        Err(_) => Err(format!(
-            "{target} answered health, then the gateway check failed. \
-             Nothing changed — the current gateway is still selected."
-        )),
-        Ok((401, _)) | Ok((403, _)) => Err(connect_auth_error(target)),
-        Ok((200, body)) => Ok(body),
-        Ok((code, body)) => Err(connect_http_error(target, code, &body)),
+    let body = match gateway_fetch("GET", base, token, "/v1/gateway", None).await {
+        Err(_) => {
+            return Err(format!(
+                "{target} answered health, then the gateway check failed. \
+                 Nothing changed — the current gateway is still selected."
+            ))
+        }
+        Ok((401, _)) | Ok((403, _)) => return Err(connect_auth_error(target)),
+        Ok((200, body)) => body,
+        Ok((code, body)) => return Err(connect_http_error(target, code, &body)),
+    };
+    // Cross-origin targets must also pass the credentialed check the
+    // cockpit's real data calls depend on (see credentialed_health_ok).
+    let dest = base.trim().trim_end_matches('/');
+    let origin = page_origin();
+    if !dest.is_empty() && dest != origin.trim_end_matches('/') {
+        if !credentialed_health_ok(base, token).await {
+            return Err(connect_cross_origin_error(target));
+        }
     }
+    Ok(body)
 }
 
 async fn gateway_fetch(
@@ -1286,6 +1325,16 @@ mod tests {
         assert!(msg.contains("Phone dialog"), "{msg}");
         assert!(msg.contains("strike connect"), "{msg}");
         assert!(msg.contains("does not transfer"), "{msg}");
+    }
+
+    #[test]
+    fn cross_origin_error_explains_and_directs() {
+        let msg = connect_cross_origin_error("http://127.0.0.1:9999");
+        assert!(msg.contains("cannot use a different"), "{msg}");
+        assert!(msg.contains("credentialed cross-origin"), "{msg}");
+        assert!(msg.contains("QR code"), "{msg}");
+        assert!(msg.contains("strike connect"), "{msg}");
+        assert!(msg.contains("Nothing changed"), "{msg}");
     }
 
     #[test]
