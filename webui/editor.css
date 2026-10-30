@@ -169,6 +169,10 @@
 .ev-md .md-table .md-center { text-align: center; }
 .ev-md .md-table .md-right { text-align: right; }
 /* feature:markdown-tables end */
+/* feature:md-code-copy begin */
+.ev-md .ev-fence { margin: 0.5em 0; }
+.ev-md .ev-fence .ev-copy-code { margin-left: auto; }
+/* feature:md-code-copy end */
 /* feature:editor-render-window begin */
 .ev-codeview > button.secondary { margin: 0 0 8px 8px; }
 /* feature:editor-render-window end */
