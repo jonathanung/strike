@@ -8,12 +8,14 @@
 //! this module maps its per-line hits back to byte ranges in the whole
 //! field (title or body) it was given.
 //!
-//! Scope, per the issue's recommended defaults: the search covers the
-//! rendered/visible transcript text — message bodies and tool-card
-//! titles. Collapsed detail (child-card details, long tool dumps the
-//! transcript folds into a <details>) is not searched, and find does not
-//! expand collapsed cards; that is a follow-up. Case-insensitive only,
-//! like the editor; no case toggle in this slice.
+//! Scope (#1576): the search covers the whole open transcript —
+//! titles, bodies (long and JSON-ish tool bodies included), and the
+//! collapsed `detail` text the transcript folds into a <details>.
+//! A hit inside a fold is returned as `Field::Detail`, so the pane can
+//! expand that fold, scroll to it, and highlight it in place through
+//! `MarkedText`; the corpus is complete, so the find bar needs no
+//! scope note. Case-insensitive only, like the editor; no case toggle
+//! in this slice.
 
 use leptos::prelude::*;
 use wasm_bindgen::closure::Closure;
@@ -22,14 +24,18 @@ use wasm_bindgen::JsCast;
 use crate::editor::find_hits;
 
 /// Which rendered field of a transcript line a match sits in.
+/// `Detail` is the collapsed fold (`Message::detail` / `ChatLine::detail`):
+/// a match there is invisible until the fold is expanded, so the UI
+/// treats it specially (see `TMatch::in_fold`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Field {
     Title,
     Body,
+    Detail,
 }
 
 /// One match: `line` indexes the transcript's line list, `start..end`
-/// are byte ranges inside that line's title or body text.
+/// are byte ranges inside that line's title, body, or detail text.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TMatch {
     pub line: usize,
@@ -38,12 +44,23 @@ pub struct TMatch {
     pub end: usize,
 }
 
-/// The searchable text of one transcript line. `body` is empty for lines
-/// whose body the transcript renders collapsed (see module docs).
+impl TMatch {
+    /// True when this match sits inside a collapsed fold, so landing
+    /// on it must expand the fold first (#1576) — a count that includes
+    /// folded hits is only honest if the user can be shown each one.
+    pub fn in_fold(&self) -> bool {
+        self.field == Field::Detail
+    }
+}
+
+/// The searchable text of one transcript line: the whole line, with
+/// no class excluded (#1576). `detail` is the collapsed fold body;
+/// it is searched exactly like the visible fields.
 #[derive(Clone, Copy, Debug)]
 pub struct SearchLine<'a> {
     pub title: &'a str,
     pub body: &'a str,
+    pub detail: &'a str,
 }
 
 /// Byte ranges of every case-insensitive occurrence of `query` in
@@ -69,8 +86,8 @@ pub fn ranges_in(text: &str, query: &str) -> Vec<(usize, usize)> {
     out
 }
 
-/// All matches in transcript order: line by line, title before body,
-/// left to right inside each field.
+/// All matches in transcript order: line by line, title before body
+/// before detail, left to right inside each field.
 pub fn matches_for_lines(lines: &[SearchLine<'_>], query: &str) -> Vec<TMatch> {
     if query.is_empty() {
         return Vec::new();
@@ -89,6 +106,14 @@ pub fn matches_for_lines(lines: &[SearchLine<'_>], query: &str) -> Vec<TMatch> {
             out.push(TMatch {
                 line: idx,
                 field: Field::Body,
+                start,
+                end,
+            });
+        }
+        for (start, end) in ranges_in(line.detail, query) {
+            out.push(TMatch {
+                line: idx,
+                field: Field::Detail,
                 start,
                 end,
             });
@@ -264,7 +289,23 @@ mod tests {
 
     fn lines<'a>(rows: &[(&'a str, &'a str)]) -> Vec<SearchLine<'a>> {
         rows.iter()
-            .map(|&(title, body)| SearchLine { title, body })
+            .map(|&(title, body)| SearchLine {
+                title,
+                body,
+                detail: "",
+            })
+            .collect()
+    }
+
+    fn lines_with_detail<'a>(
+        rows: &[(&'a str, &'a str, &'a str)],
+    ) -> Vec<SearchLine<'a>> {
+        rows.iter()
+            .map(|&(title, body, detail)| SearchLine {
+                title,
+                body,
+                detail,
+            })
             .collect()
     }
 
@@ -346,6 +387,66 @@ mod tests {
         assert_eq!(pieces[3], ("tf-mark tf-current".into(), "alpha".into()));
         let plain = marked_pieces("plain", &[], None);
         assert_eq!(plain, vec![(String::new(), "plain".into())]);
+    }
+
+    #[test]
+    fn folded_detail_is_searched_with_its_line_identity() {
+        // #1576: a string that exists only inside a collapsed fold
+        // must be found, and the hit must say which line and which
+        // field it is in so the UI can expand that line's fold.
+        let rows = lines_with_detail(&[
+            ("You", "run the tests", ""),
+            ("test-tool", "tests ran", "FAIL needle-test panicked at src/lib.rs"),
+            ("Strike", "done", ""),
+        ]);
+        let hits = matches_for_lines(&rows, "needle-test");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(
+            hits[0],
+            TMatch {
+                line: 1,
+                field: Field::Detail,
+                start: 5,
+                end: 16
+            }
+        );
+        assert!(hits[0].in_fold());
+        // Visible-field hits are not fold hits.
+        let visible = matches_for_lines(&rows, "tests ran");
+        assert_eq!(visible.len(), 1);
+        assert!(!visible[0].in_fold());
+    }
+
+    #[test]
+    fn detail_hits_come_after_title_and_body_hits_on_the_same_line() {
+        let rows = lines_with_detail(&[("alpha title", "alpha body", "alpha detail")]);
+        let hits = matches_for_lines(&rows, "alpha");
+        assert_eq!(hits.len(), 3);
+        assert_eq!(hits[0].field, Field::Title);
+        assert_eq!(hits[1].field, Field::Body);
+        assert_eq!(hits[2].field, Field::Detail);
+    }
+
+    #[test]
+    fn long_and_json_detail_bodies_are_searched_in_full() {
+        // The old corpus dropped bodies over 240 chars and bodies
+        // starting with `{`/`[`; a needle at the very end of either
+        // shape must still be hit, with detail-wide offsets.
+        let long = format!("{}needle", "x".repeat(300));
+        let rows = lines_with_detail(&[("tool", "ran", &long)]);
+        let hits = matches_for_lines(&rows, "needle");
+        assert_eq!(hits.len(), 1);
+        assert_eq!((hits[0].start, hits[0].end), (300, 306));
+        assert_eq!(hits[0].field, Field::Detail);
+
+        let rows = lines_with_detail(&[(
+            "tool",
+            "ran",
+            "{\"path\": \"/tmp/needle.json\", \"ok\": false}",
+        )]);
+        let hits = matches_for_lines(&rows, "needle.json");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].field, Field::Detail);
     }
 
     #[test]
