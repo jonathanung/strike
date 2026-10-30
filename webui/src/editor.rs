@@ -2,6 +2,7 @@
 //! Leptos pane is the center-column surface the shell opens for a path.
 
 use std::rc::Rc;
+use std::sync::Arc;
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -1044,10 +1045,11 @@ fn SourceView(
     // hit / jump target so those rows exist in the DOM. A fresh
     // SourceView is built per file/query/hit change, so the window
     // resets on file switch.
-    let lines: Rc<Vec<String>> =
-        Rc::new(lines_of(&text).iter().map(|s| s.to_string()).collect());
+    // Arc, not Rc: Leptos reactive closures in this crate must be Send.
+    let lines: Arc<Vec<String>> =
+        Arc::new(lines_of(&text).iter().map(|s| s.to_string()).collect());
     let total = lines.len();
-    let hits: Rc<Vec<Hit>> = Rc::new(hits);
+    let hits: Arc<Vec<Hit>> = Arc::new(hits);
     let current_hit = hits.get(current).cloned();
     let target = if query.is_empty() {
         target_line
@@ -1198,7 +1200,8 @@ fn DiffView(text: String) -> impl IntoView {
     // Keep the full diff and render a capped window by default (#1434):
     // expanding renders more of the text already held here, never a
     // re-fetch. The cap counts characters; cuts land on line ends.
-    let full: Rc<String> = Rc::new(text);
+    let full: Arc<String> = Arc::new(text);
+    let full_footer = full.clone();
     let shown = RwSignal::new(MAX_DIFF_CHARS);
     view! {
         <div class="ev-diff">
@@ -1223,7 +1226,7 @@ fn DiffView(text: String) -> impl IntoView {
                 }
             }}
             {move || {
-                let (hidden_chars, hidden_lines) = diff_hidden(&full, shown.get());
+                let (hidden_chars, hidden_lines) = diff_hidden(&full_footer, shown.get());
                 let expanded = shown.get() > MAX_DIFF_CHARS;
                 if hidden_chars == 0 && !expanded {
                     return ().into_any();
