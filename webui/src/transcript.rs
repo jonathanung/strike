@@ -8,8 +8,8 @@ use serde_json::Value;
 
 use crate::composer_triggers::{display_user_text, PermAsk};
 use crate::model::{
-    child_card_from_parts, child_card_from_text, child_keys_match, protocol_dump, status_kind,
-    strip_echo_tip, ChatLine, ChildCard,
+    child_card_from_parts, child_card_from_text, child_keys_match, prefer_summary, protocol_dump,
+    status_kind, strip_echo_tip, summary_for_merge, ChatLine, ChildCard,
 };
 
 const TITLE_MAX: usize = 32;
@@ -163,8 +163,8 @@ pub fn suggestions() -> &'static [Suggestion] {
 pub fn empty_headline(tick: u32) -> &'static str {
     match (tick / 4) % 3 {
         0 => "This session is empty.",
-        1 => "Send a message, or start from a card.",
-        _ => "Each card says what it will ask.",
+        1 => "Send a message to start.",
+        _ => "The transcript shows the turn here.",
     }
 }
 
@@ -612,9 +612,7 @@ impl Transcript {
                 card.at_ms = at_ms;
                 self.upsert_child(card);
             }
-            "artifact.updated" => {
-                self.artifact_updates = self.artifact_updates.wrapping_add(1)
-            }
+            "artifact.updated" => self.artifact_updates = self.artifact_updates.wrapping_add(1),
             "engine.error" => {
                 let message = field_str(&data, "message");
                 if message.is_empty() {
@@ -745,9 +743,10 @@ impl Transcript {
                 return Some(i);
             }
         }
-        self.messages
-            .iter()
-            .rposition(|m| m.role == Role::Tool && m.badge == "running")
+        // No identity-free fallback. An unmatched tool.end gets its own
+        // card in the caller. Guessing the newest running tool writes one
+        // call's output onto another and leaves the real one spinning.
+        None
     }
 
     fn stamp_turn(&mut self, completed_ms: f64) {
@@ -773,16 +772,9 @@ impl Transcript {
         // line only. Any untimed line in the turn suppresses the label
         // (see turn_elapsed.rs). Computed here, once — a turn still in
         // progress never reaches this point, so nothing ticks live.
-        if let (Some(first), Some(last)) = (
-            self.messages.get(start),
-            self.messages.last(),
-        ) {
+        if let (Some(first), Some(last)) = (self.messages.get(start), self.messages.last()) {
             let (first_ms, last_id) = (first.at_ms, last.id);
-            let all_timed = self
-                .messages
-                .iter()
-                .skip(start)
-                .all(|m| m.at_ms > 0.0);
+            let all_timed = self.messages.iter().skip(start).all(|m| m.at_ms > 0.0);
             if let Some(label) =
                 crate::turn_elapsed::turn_elapsed_label(first_ms, completed_ms, all_timed)
             {
@@ -851,10 +843,12 @@ impl Transcript {
             if !card.name.is_empty() {
                 existing.title = card.name;
             }
-            if !card.summary.is_empty() {
-                existing.body = card.summary.clone();
-                existing.copy_text = card.summary;
-            }
+            let merged = prefer_summary(
+                &existing.body,
+                &summary_for_merge(&card.summary, &card.status),
+            );
+            existing.body = merged.clone();
+            existing.copy_text = merged;
             if !card.details.is_empty() {
                 existing.detail = card.details;
             }
@@ -1908,6 +1902,114 @@ mod tests {
         let diff = msg.diff.clone().expect("diff");
         assert!(diff.deleted >= 1 && diff.added >= 1);
         assert!(msg.chips.iter().any(|c| c.path == "webui/src/main.rs"));
+    }
+
+    #[test]
+    fn unmatched_tool_end_gets_its_own_card() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env(
+            "tool.begin",
+            serde_json::json!({"callId": "x", "name": "bash", "args": {"command": "ls"}}),
+        ));
+        t.apply_envelope(&env(
+            "tool.begin",
+            serde_json::json!({"callId": "y", "name": "edit", "args": {"filePath": "a.go"}}),
+        ));
+        t.apply_envelope(&env(
+            "tool.end",
+            serde_json::json!({
+                "callId": "missing",
+                "name": "webfetch",
+                "output": "unmatched body",
+            }),
+        ));
+        assert_eq!(t.messages.len(), 3);
+        assert_eq!(t.messages[0].badge, "running");
+        assert_eq!(t.messages[0].call_id, "x");
+        assert_eq!(t.messages[1].badge, "running");
+        assert_eq!(t.messages[1].call_id, "y");
+        assert_eq!(t.messages[2].call_id, "missing");
+        assert_eq!(t.messages[2].key, "webfetch");
+        assert_eq!(t.messages[2].badge, "done");
+        assert!(
+            t.messages[2].body.contains("unmatched")
+                || t.messages[2].copy_text.contains("unmatched")
+                || t.messages[2].detail.contains("unmatched"),
+            "{:?}",
+            t.messages[2]
+        );
+        // Same-name running match still completes that card.
+        t.apply_envelope(&env(
+            "tool.end",
+            serde_json::json!({"callId": "", "name": "bash", "output": "listed"}),
+        ));
+        assert_eq!(t.messages[0].badge, "done");
+        assert_eq!(t.messages[1].badge, "running");
+        // Known call id still wins over the name.
+        t.apply_envelope(&env(
+            "tool.end",
+            serde_json::json!({"callId": "y", "name": "edit", "output": "edited"}),
+        ));
+        assert_eq!(t.messages[1].badge, "done");
+        assert_eq!(t.messages[1].call_id, "y");
+    }
+
+    #[test]
+    fn status_only_child_update_keeps_the_richer_summary() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env(
+            "child.completed",
+            serde_json::json!({
+                "name": "scribe",
+                "sessionId": "abcd",
+                "status": "completed",
+                "summary": "wrote the migration and the tests",
+            }),
+        ));
+        t.apply_envelope(&env(
+            "child.completed",
+            serde_json::json!({
+                "name": "scribe-2",
+                "sessionId": "efgh",
+                "status": "blocked",
+                "summary": "scribe-2 is still reading the schema",
+            }),
+        ));
+        assert_eq!(t.messages.len(), 2);
+        assert_eq!(t.messages[0].body, "wrote the migration and the tests");
+        assert!(t.messages[1].body.contains("still reading"));
+        t.apply_envelope(&env(
+            "child.completed",
+            serde_json::json!({
+                "name": "scribe",
+                "sessionId": "abcd",
+                "status": "completed",
+            }),
+        ));
+        assert_eq!(t.messages[0].body, "wrote the migration and the tests");
+        assert_eq!(t.messages[0].copy_text, t.messages[0].body);
+        assert_eq!(t.messages[1].body.contains("still reading"), true);
+        t.apply_envelope(&env(
+            "child.completed",
+            serde_json::json!({
+                "name": "scribe",
+                "status": "completed",
+                "summary": "wrote the migration, the tests, and the rollback notes",
+            }),
+        ));
+        assert!(t.messages[0].body.contains("rollback"));
+        assert_eq!(t.messages[0].copy_text, t.messages[0].body);
+        t.apply_envelope(&env(
+            "child.completed",
+            serde_json::json!({"name": "lonely", "status": "blocked"}),
+        ));
+        let lonely = t
+            .messages
+            .iter()
+            .find(|m| m.title == "lonely")
+            .expect("status-only card");
+        assert_eq!(lonely.badge, "blocked");
+        assert_eq!(lonely.body, "blocked");
     }
 
     #[test]

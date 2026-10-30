@@ -2,14 +2,14 @@
 //! steer chips stay in the shell. Pins live in this browser
 //! (`strike.modelPins`), same idea as session pins.
 
-use leptos::html::{Button, Input};
+use leptos::html::{Input, Span};
 use leptos::prelude::*;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 
 use crate::model::ModelInfo;
 use crate::model_menu::{
-    build_menu, chip_label, context_view, effort_section, parse_freeform, scope_label, toggle_pin,
+    build_menu, chip_label, context_view, effort_section, pin_key, scope_label, toggle_pin,
     ContextView, MenuRow, ModelDefaults,
 };
 
@@ -34,7 +34,16 @@ fn save_pins(pins: &[String]) {
     }
 }
 
-fn place_panel(chip_ref: NodeRef<Button>, panel_pos: RwSignal<(f64, f64, f64)>) {
+pub fn toggle_stored_pin(provider: &str, model: &str) {
+    if provider.is_empty() || model.is_empty() {
+        return;
+    }
+    let mut pins = load_pins();
+    toggle_pin(&mut pins, &pin_key(provider, model));
+    save_pins(&pins);
+}
+
+fn place_panel(chip_ref: NodeRef<Span>, panel_pos: RwSignal<(f64, f64, f64)>) {
     let Some(btn) = chip_ref.get_untracked() else {
         return;
     };
@@ -114,12 +123,14 @@ pub fn ModelMenu(
     on_default_model: Callback<(String, String)>,
     on_effort: Callback<String>,
     on_default_effort: Callback<String>,
+    fast: RwSignal<bool>,
+    on_fast: Callback<bool>,
 ) -> impl IntoView {
     let filter = RwSignal::new(String::new());
     let cursor = RwSignal::new(0usize);
     let pins = RwSignal::new(load_pins());
     let filter_ref = NodeRef::<Input>::new();
-    let chip_ref = NodeRef::<Button>::new();
+    let chip_ref = NodeRef::<Span>::new();
     let panel_pos = RwSignal::new((8.0_f64, 8.0_f64, 360.0_f64));
 
     {
@@ -137,6 +148,35 @@ pub fn ModelMenu(
         }
         on_resize.forget();
     }
+    Effect::new(move |_| {
+        let models = catalog.get();
+        let current = model.get();
+        let info = models.iter().find(|row| row.id == current);
+        let section = effort_section(info, &effort.get());
+        let rows = section
+            .choices
+            .into_iter()
+            .filter(|choice| !choice.level.is_empty())
+            .map(|choice| crate::shell::Choice {
+                id: choice.level.clone(),
+                label: format!("Set reasoning effort: {}", choice.label),
+                detail: choice.detail,
+            })
+            .collect::<Vec<_>>();
+        let rows = if rows.is_empty() {
+            ["low", "medium", "high"]
+                .into_iter()
+                .map(|level| crate::shell::Choice {
+                    id: level.to_string(),
+                    label: format!("Set reasoning effort: {level}"),
+                    detail: String::new(),
+                })
+                .collect()
+        } else {
+            rows
+        };
+        crate::shell::set_effort_choices(rows);
+    });
 
     Effect::new(move |_| {
         if open.get() {
@@ -292,6 +332,41 @@ pub fn ModelMenu(
                             }.into_any()
                         }
                     }}
+                    {move || {
+                        // Fast (#1569): shown for every provider with honest
+                        // copy — the daemon does not advertise per-provider
+                        // priority-tier support, and unsupported providers
+                        // ignore the flag silently. The button only posts
+                        // `set.fast` via on_fast; `fast` flips solely when
+                        // the daemon's fast.selected confirmation lands.
+                        let on = fast.get();
+                        let klass = if on { "chip on" } else { "chip" };
+                        view! {
+                            <div class="model-effort" data-fast="shown">
+                                <div class="model-effort-head">
+                                    <span class="hint">"Fast"</span>
+                                    <button
+                                        type="button"
+                                        class=klass
+                                        data-fast-toggle="true"
+                                        data-fast-on=on.to_string()
+                                        disabled=move || busy.get()
+                                        on:click=move |_| {
+                                            if busy.get_untracked() {
+                                                model_note.set("This turn is still running. Session model and effort changes wait until it finishes.".into());
+                                                return;
+                                            }
+                                            on_fast.run(!fast.get_untracked());
+                                        }
+                                    >{if on { "Fast on" } else { "Fast off" }}</button>
+                                </div>
+                                <p class="hint">"Priority service tier for later turns. The current provider may not support priority tier — unsupported providers ignore Fast silently, so on is the session's preference, not a speed guarantee."</p>
+                                <Show when=move || busy.get()>
+                                    <p class="hint" data-fast-busy="true">"This turn is still running. Fast changes wait until it finishes."</p>
+                                </Show>
+                            </div>
+                        }
+                    }}
                     <label class="model-filter-label">
                         "Filter models"
                     <input
@@ -338,23 +413,7 @@ pub fn ModelMenu(
                             } else if key == "Enter" {
                                 ev.prevent_default();
                                 ev.stop_propagation();
-                                if len == 0 {
-                                    let raw = filter.get_untracked();
-                                    if raw.trim().is_empty() {
-                                        return;
-                                    }
-                                    let (p, m) = parse_freeform(&raw, &provider.get_untracked());
-                                    select_row(MenuRow {
-                                        provider: p,
-                                        id: m.clone(),
-                                        label: m.clone(),
-                                        detail: String::new(),
-                                        caps: String::new(),
-                                        current: false,
-                                        pinned: false,
-                                        key: String::new(),
-                                    });
-                                } else if let Some(row) = menu.flat.get(idx) {
+                                if let Some(row) = menu.flat.get(idx) {
                                     select_row(row.clone());
                                 }
                             }
@@ -375,12 +434,12 @@ pub fn ModelMenu(
                             let idx = if len == 0 { 0 } else { cursor.get().min(len - 1) };
                             if menu.sections.is_empty() {
                                 let raw = filter.get();
-                                let message = if catalog.get().is_empty() && catalog_note.get().is_empty() && raw.trim().is_empty() {
+                                let message: String = if catalog.get().is_empty() && catalog_note.get().is_empty() && raw.trim().is_empty() {
                                     "Loading models.".into()
                                 } else if raw.trim().is_empty() {
                                     "No models in the catalog.".into()
                                 } else {
-                                    format!("No models match. Enter uses \"{}\" for this session.", raw.trim())
+                                    "No models match.".into()
                                 };
                                 return view! {
                                     <div>
@@ -454,17 +513,6 @@ pub fn ModelMenu(
                                     {blocks}
                                     <button
                                         type="button"
-                                        class="secondary"
-                                        data-add-provider="true"
-                                        on:click=move |_| {
-                                            open.set(false);
-                                            let _ = crate::shell::set_view("providers");
-                                        }
-                                    >
-                                        "Add provider"
-                                    </button>
-                                    <button
-                                        type="button"
                                         class="secondary model-text"
                                         on:click=move |_| {
                                             let models = catalog.get_untracked();
@@ -489,11 +537,9 @@ pub fn ModelMenu(
                             }.into_any()
                         }}
                     </div>
-                    <p class="hint keys">"Arrow keys move. Enter uses the model for this session. Ctrl+D saves the global default. Esc closes. Alt+M opens this menu."</p>
                 </div>
             </Show>
-            <button
-                type="button"
+            <span
                 class=move || {
                     let scope = {
                         let d = defaults.get();
@@ -512,16 +558,13 @@ pub fn ModelMenu(
                 }
                 node_ref=chip_ref
                 data-model-chip="true"
-                aria-haspopup="dialog"
-                aria-expanded=move || if open.get() { "true" } else { "false" }
                 title=move || {
                     let d = defaults.get();
                     let scope = scope_label(&provider.get(), &model.get(), &d.provider, &d.model);
                     let live = view_now();
-                    format!("{scope}. {}. Alt+M.", live.summary)
+                    format!("Model. {scope}. {}. Alt+M opens the model menu.", live.summary)
                 }
-                on:click=move |_| open.update(|v| *v = !*v)
-            >{move || chip_label(&model.get())}</button>
+            >{move || chip_label(&model.get())}</span>
         </span>
     }
 }

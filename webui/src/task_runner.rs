@@ -6,6 +6,8 @@
 //! shared status component from #1263 has since landed on main; swapping
 //! `status_class` for it is a follow-on, not part of this re-land.
 
+use std::rc::Rc;
+
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use serde::Deserialize;
@@ -233,6 +235,16 @@ pub fn TaskRunner(
             }
         });
     };
+    crate::shell::bind(
+        "tasks.refresh",
+        Rc::new(move |_| {
+            refresh_plans();
+            Ok(())
+        }),
+    );
+    if let Some(_) = crate::park::take("tasks.refresh") {
+        refresh_plans();
+    }
 
     let open_selected = move || {
         let gen = begin(run_epoch);
@@ -498,7 +510,6 @@ pub fn TaskRunner(
             <aside class="task-col">
                 <div class="section-head">
                     <h2 class="panel-title">"Task runner"</h2>
-                    <button class="secondary" on:click=move |_| refresh_plans()>"Refresh"</button>
                 </div>
                 <div class="task-plan-list" role="listbox" aria-label="Plans">
                     {move || {

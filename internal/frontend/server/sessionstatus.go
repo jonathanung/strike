@@ -203,6 +203,8 @@ func (s *Server) handleSessionStatusEvents(w http.ResponseWriter, r *http.Reques
 		select {
 		case <-r.Context().Done():
 			return
+		case <-s.streamDone():
+			return
 		case <-ticker.C:
 			beats++
 			now := time.Now()
