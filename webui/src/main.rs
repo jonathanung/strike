@@ -4802,7 +4802,10 @@ fn App() -> impl IntoView {
                     </Show>
                     <Show when=move || side_tab.get() == "files">
                         <div class="files">
-                            <p class="hint">{move || if files_path.get().is_empty() { "Working directory".into() } else { files_path.get() }}</p>
+                            <div class="files-head">
+                                <p class="hint">{move || if files_path.get().is_empty() { "Working directory".into() } else { files_path.get() }}</p>
+                                <button class="secondary" on:click=move |_| load_files()>"Refresh"</button>
+                            </div>
                             <Show when=move || !files_error.get().is_empty()>
                                 <div class="notice" role="alert">
                                     <span>{move || files_error.get()}</span>
@@ -4849,6 +4852,10 @@ fn App() -> impl IntoView {
                     </Show>
                     <Show when=move || side_tab.get() == "changes">
                         <div class="changes">
+                            <div class="changes-head">
+                                <p class="hint">"Changed files"</p>
+                                <button class="secondary" on:click=move |_| load_changes()>"Refresh"</button>
+                            </div>
                             <Show when=move || !changes_error.get().is_empty()>
                                 <div class="notice" role="alert">
                                     <span>{move || changes_error.get()}</span>
