@@ -405,8 +405,11 @@ pub fn session_view() -> AnyView {
                             aria-label=label.clone()
                             title=label
                             on:click=move |_| {
-                                if let Some(host) = host() {
-                                    (*host.go_to_ask)()
+                                // Fully qualified: this function's own
+                                // `let Some(host) = host()` binding shadows
+                                // the bare `host()` call (E0618).
+                                if let Some(h) = crate::status::host() {
+                                    (*h.go_to_ask)()
                                 }
                             }
                         >
