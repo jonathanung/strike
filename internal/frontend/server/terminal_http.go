@@ -424,6 +424,8 @@ func (s *Server) handleTerminalStream(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-ctx.Done():
 			return
+		case <-s.streamDone():
+			return
 		case <-errCh:
 			return
 		case <-ticker.C:
