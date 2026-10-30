@@ -79,4 +79,36 @@
   .storage-row { flex-wrap: wrap; }
   .storage-form { flex-direction: column; align-items: stretch; }
 }
+/* feature:memory-search begin */
+.storage-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+.storage-search {
+  flex: 1 1 180px;
+  min-width: 0;
+  background: var(--ground);
+  color: var(--ink);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 6px 8px;
+  font: inherit;
+}
+.storage-count { margin: 0; }
+/* feature:memory-search end */
+/* feature:knowledge-filter begin */
+/* Knowledge reuses the .storage-filter / .storage-search / .storage-count
+   rules from the memory-search block above (same file, same idiom —
+   #1469: reuse the input/count idioms #1461 establishes). */
+/* feature:knowledge-filter end */
+/* feature:artifact-detail-actions begin */
+.storage-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+/* feature:artifact-detail-actions end */
 /* feature:storage end */

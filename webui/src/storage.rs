@@ -92,6 +92,108 @@ struct FileBody {
     skip: bool,
 }
 
+/// Lower-cased, trimmed query shared by the storage list filters
+/// (#1461/#1469). An empty query matches everything.
+fn norm_query(raw: &str) -> String {
+    raw.trim().to_lowercase()
+}
+
+/// The author a memory row displays: the stored value, or "unknown"
+/// when the store left it blank (same fallback the row rendering uses).
+fn entry_author(entry: &MemoryEntry) -> &str {
+    if entry.author.is_empty() {
+        "unknown"
+    } else {
+        &entry.author
+    }
+}
+
+/// Memory filter (#1461): case-insensitive substring over key, value
+/// and tags, plus an exact author filter ("all" = no author filter).
+/// Pure over the already-loaded list — no server query is implied.
+fn memory_matches(entry: &MemoryEntry, query: &str, author: &str) -> bool {
+    if author != "all" && entry_author(entry) != author {
+        return false;
+    }
+    if query.is_empty() {
+        return true;
+    }
+    entry.key.to_lowercase().contains(query)
+        || entry.value.to_lowercase().contains(query)
+        || entry.tags.iter().any(|t| t.to_lowercase().contains(query))
+}
+
+fn filtered_memory(
+    entries: &[MemoryEntry],
+    raw_query: &str,
+    author: &str,
+) -> Vec<MemoryEntry> {
+    let query = norm_query(raw_query);
+    entries
+        .iter()
+        .filter(|e| memory_matches(e, &query, author))
+        .cloned()
+        .collect()
+}
+
+/// Knowledge filter (#1469): case-insensitive substring over the fields
+/// each pin row already renders — path, note and author.
+fn pin_matches(pin: &KnowledgePin, query: &str) -> bool {
+    query.is_empty()
+        || pin.path.to_lowercase().contains(query)
+        || pin.note.to_lowercase().contains(query)
+        || pin.author.to_lowercase().contains(query)
+}
+
+fn filtered_pins(pins: &[KnowledgePin], raw_query: &str) -> Vec<KnowledgePin> {
+    let query = norm_query(raw_query);
+    pins.iter()
+        .filter(|p| pin_matches(p, &query))
+        .cloned()
+        .collect()
+}
+
+/// Download extension + MIME for an artifact kind (#1453): Markdown
+/// kinds get `.md`, patches get `.patch`, everything else `.txt`.
+fn artifact_extension(kind: &str) -> (&'static str, &'static str) {
+    match kind.trim().to_lowercase().as_str() {
+        "markdown" | "md" | "plan" | "findings" | "test_report" | "contract" | "report"
+        | "session_report" => ("md", "text/markdown"),
+        "patch" | "diff" => ("patch", "text/plain"),
+        _ => ("txt", "text/plain"),
+    }
+}
+
+/// Filename stem from free text: keep alphanumerics, `-` and `_`,
+/// collapse every other run to one `-`, trim edge dashes, cap length.
+fn sanitize_filename_stem(raw: &str) -> String {
+    let mut stem = String::new();
+    for ch in raw.chars() {
+        if ch.is_alphanumeric() || ch == '-' || ch == '_' {
+            stem.push(ch);
+        } else if !stem.is_empty() && !stem.ends_with('-') {
+            stem.push('-');
+        }
+    }
+    let stem = stem.trim_matches('-');
+    stem.chars().take(80).collect::<String>().trim_matches('-').to_string()
+}
+
+/// Download filename for the displayed artifact version (#1453):
+/// sanitised title, falling back to kind + id when the title yields
+/// nothing usable — never a bare artifact id alone.
+fn artifact_download_name(title: &str, kind: &str, id: &str) -> String {
+    let mut stem = sanitize_filename_stem(title);
+    if stem.is_empty() {
+        stem = sanitize_filename_stem(&format!("{kind}-{id}"));
+    }
+    if stem.is_empty() {
+        stem = "artifact".to_string();
+    }
+    let (ext, _) = artifact_extension(kind);
+    format!("{stem}.{ext}")
+}
+
 #[component]
 pub fn StoragePanel(
     tab: RwSignal<String>,
@@ -125,6 +227,15 @@ pub fn StoragePanel(
     let pin_epoch = RwSignal::new(LoadEpoch::new());
     let artifact_epoch = RwSignal::new(LoadEpoch::new());
     let list_key = RwSignal::new(String::new());
+    // Client-only list filters (#1461/#1469): never persisted, so a
+    // returning visit never starts with entries silently hidden.
+    let memory_query = RwSignal::new(String::new());
+    let memory_author = RwSignal::new("all".to_string());
+    let knowledge_query = RwSignal::new(String::new());
+    // Copy feedback for the artifact detail actions (#1453), using the
+    // transcript copy-label idiom: None = "Copy", Some(true) = "Copied",
+    // Some(false) = "Copy failed".
+    let artifact_copy_state = RwSignal::new(None::<bool>);
 
     let reload = move || {
         let tab_now = tab.get_untracked();
@@ -342,6 +453,7 @@ pub fn StoragePanel(
         };
         artifact_label.set(label);
         detail.set(None);
+        artifact_copy_state.set(None);
         artifact_loading.set(true);
         error.set(String::new());
         let (b, t, root) = (
@@ -394,6 +506,7 @@ pub fn StoragePanel(
                     artifact_label.set(String::new());
                     pin_loading.set(false);
                     artifact_loading.set(false);
+                    artifact_copy_state.set(None);
                     key_in.set(String::new());
                     value_in.set(String::new());
                 }
@@ -433,14 +546,62 @@ pub fn StoragePanel(
                 <Show when=move || !audit.get().is_empty()>
                     <p class="hint storage-path">"Audit " {move || audit.get()}</p>
                 </Show>
+                <div class="storage-filter">
+                    <input
+                        class="search storage-search storage-search-memory"
+                        type="search"
+                        placeholder="Search key, value, or tags"
+                        aria-label="Search memory entries"
+                        prop:value=move || memory_query.get()
+                        on:input=move |ev| memory_query.set(event_target_value(&ev))
+                    />
+                    <p class="hint storage-count" aria-live="polite">
+                        {move || {
+                            let all = entries.get();
+                            let visible = filtered_memory(&all, &memory_query.get(), &memory_author.get()).len();
+                            format!("{visible} of {} entries", all.len())
+                        }}
+                    </p>
+                </div>
+                {move || {
+                    let mut authors: Vec<String> = entries.get().iter().map(|e| entry_author(e).to_string()).collect();
+                    authors.sort();
+                    authors.dedup();
+                    if authors.is_empty() {
+                        // No rows yet: no author filter to offer (the
+                        // "Nothing stored" empty state below covers it).
+                        return view! { <span></span> }.into_any();
+                    }
+                    view! {
+                        <div class="chips" role="group" aria-label="Memory author filter">
+                            <button type="button" class=move || if memory_author.get() == "all" { "chip on" } else { "chip" }
+                                on:click=move |_| memory_author.set("all".into())>"All"</button>
+                            {authors.into_iter().map(|author| {
+                                let click_author = author.clone();
+                                let class_author = author.clone();
+                                view! {
+                                    <button type="button" class=move || if memory_author.get() == class_author { "chip on" } else { "chip" }
+                                        on:click=move |_| memory_author.set(click_author.clone())>{author.clone()}</button>
+                                }
+                            }).collect_view()}
+                        </div>
+                    }.into_any()
+                }}
                 <Show when=move || entries.get().is_empty() && error.get().is_empty() && !list_loading.get()>
                     <div class="empty-state">
                         <strong>"Nothing stored in this scope"</strong>
                         <p>"Save a key here. Tagged entries survive restarts and are read when a session starts."</p>
                     </div>
                 </Show>
+                <Show when=move || !entries.get().is_empty() && filtered_memory(&entries.get(), &memory_query.get(), &memory_author.get()).is_empty()>
+                    <div class="empty-state" data-memory-filtered-empty="true">
+                        <strong>"No memory entries match — clear search"</strong>
+                        <p>"No stored entry matches the current search and author filter. The Save form above still works."</p>
+                        <button type="button" class="secondary" on:click=move |_| { memory_query.set(String::new()); memory_author.set("all".into()); }>"Clear search"</button>
+                    </div>
+                </Show>
                 <ul class="plain">
-                    {move || entries.get().into_iter().map(|entry| {
+                    {move || filtered_memory(&entries.get(), &memory_query.get(), &memory_author.get()).into_iter().map(|entry| {
                         let key = entry.key.clone();
                         let key_fill = key.clone();
                         let value = entry.value.clone();
@@ -500,14 +661,38 @@ pub fn StoragePanel(
                 <Show when=move || !markdown.get().is_empty()>
                     <p class="hint storage-path">"Plain file " {move || markdown.get()}</p>
                 </Show>
+                <div class="storage-filter">
+                    <input
+                        class="search storage-search storage-search-knowledge"
+                        type="search"
+                        placeholder="Search path, note, or author"
+                        aria-label="Search knowledge pins"
+                        prop:value=move || knowledge_query.get()
+                        on:input=move |ev| knowledge_query.set(event_target_value(&ev))
+                    />
+                    <p class="hint storage-count" aria-live="polite">
+                        {move || {
+                            let all = pins.get();
+                            let visible = filtered_pins(&all, &knowledge_query.get()).len();
+                            format!("{visible} of {} pins", all.len())
+                        }}
+                    </p>
+                </div>
                 <Show when=move || pins.get().is_empty() && error.get().is_empty() && !list_loading.get()>
                     <div class="empty-state">
                         <strong>"No pinned paths"</strong>
                         <p>"Pin a doc or path the agent should know about across sessions."</p>
                     </div>
                 </Show>
+                <Show when=move || !pins.get().is_empty() && filtered_pins(&pins.get(), &knowledge_query.get()).is_empty()>
+                    <div class="empty-state" data-knowledge-filtered-empty="true">
+                        <strong>"No pins match — clear search"</strong>
+                        <p>"No pinned path matches the current search. The Pin form above still works."</p>
+                        <button type="button" class="secondary" on:click=move |_| knowledge_query.set(String::new())>"Clear search"</button>
+                    </div>
+                </Show>
                 <ul class="plain">
-                    {move || pins.get().into_iter().map(|pin| {
+                    {move || filtered_pins(&pins.get(), &knowledge_query.get()).into_iter().map(|pin| {
                         let path = pin.path.clone();
                         let path_open = path.clone();
                         let path_del = path.clone();
@@ -571,6 +756,10 @@ pub fn StoragePanel(
                     let body = art.content.clone();
                     let heading = if art.title.is_empty() { art.kind.clone() } else { art.title.clone() };
                     let ident = format!("{} · v{}", art.id, art.version);
+                    let copy_body = body.clone();
+                    let dl_body = body.clone();
+                    let dl_name = artifact_download_name(&art.title, &art.kind, &art.id);
+                    let dl_mime = artifact_extension(&art.kind).1;
                     view! {
                         <div class="storage-detail">
                             <strong>{heading}</strong>
@@ -582,6 +771,25 @@ pub fn StoragePanel(
                                     let klass = if on { "chip on" } else { "chip" };
                                     view! { <button type="button" class=klass on:click=move |_| open_artifact(id_v.clone(), v)>{format!("v{v}")}</button> }
                                 }).collect_view()}
+                            </div>
+                            <div class="storage-detail-actions">
+                                <button type="button" class="secondary" title="Copy the displayed version's content"
+                                    on:click=move |_| {
+                                        let text = copy_body.clone();
+                                        spawn_local(async move {
+                                            let ok = crate::clipboard::copy_text(&text).await.is_ok();
+                                            artifact_copy_state.set(Some(ok));
+                                            crate::clipboard::after_ms(2_000, move || artifact_copy_state.set(None));
+                                        });
+                                    }>
+                                    {move || crate::clipboard::transcript_copy_label(artifact_copy_state.get())}
+                                </button>
+                                <button type="button" class="secondary" title="Download the displayed version's content"
+                                    on:click=move |_| {
+                                        crate::transcript_view::save_download(&dl_name, dl_mime, &dl_body);
+                                    }>
+                                    "Download"
+                                </button>
                             </div>
                             <pre class="storage-preview">{body}</pre>
                         </div>
@@ -646,5 +854,95 @@ impl Default for Loaded {
             markdown: String::new(),
             audit: String::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(key: &str, value: &str, tags: &[&str], author: &str) -> MemoryEntry {
+        MemoryEntry {
+            key: key.into(),
+            value: value.into(),
+            tags: tags.iter().map(|t| t.to_string()).collect(),
+            author: author.into(),
+            updated_at: String::new(),
+        }
+    }
+
+    fn pin(path: &str, note: &str, author: &str) -> KnowledgePin {
+        KnowledgePin {
+            path: path.into(),
+            note: note.into(),
+            author: author.into(),
+        }
+    }
+
+    #[test]
+    fn memory_filter_matches_key_value_and_tags_case_insensitively() {
+        let entries = vec![
+            entry("theme", "Uses plain files", &["preference"], "operator"),
+            entry("deploy", "Ship on Fridays", &["project-convention"], "agent"),
+        ];
+        assert_eq!(filtered_memory(&entries, "THE", "all").len(), 1);
+        assert_eq!(filtered_memory(&entries, "fridays", "all").len(), 1);
+        assert_eq!(filtered_memory(&entries, "Preference", "all").len(), 1);
+        assert_eq!(filtered_memory(&entries, "  theme  ", "all").len(), 1);
+        assert_eq!(filtered_memory(&entries, "", "all").len(), 2);
+        assert!(filtered_memory(&entries, "nope", "all").is_empty());
+    }
+
+    #[test]
+    fn memory_filter_author_composes_with_search_and_uses_row_values() {
+        let entries = vec![
+            entry("a", "same value", &[], "operator"),
+            entry("b", "same value", &[], "agent"),
+            entry("c", "same value", &[], ""),
+        ];
+        assert_eq!(filtered_memory(&entries, "same", "agent").len(), 1);
+        assert_eq!(filtered_memory(&entries, "same", "operator").len(), 1);
+        // Blank stored authors filter under the displayed "unknown".
+        assert_eq!(filtered_memory(&entries, "same", "unknown").len(), 1);
+        assert_eq!(filtered_memory(&entries, "", "all").len(), 3);
+    }
+
+    #[test]
+    fn pin_filter_matches_path_note_and_author() {
+        let pins = vec![
+            pin("docs/theme.md", "Design source", "operator"),
+            pin("docs/api.md", "", "agent"),
+        ];
+        assert_eq!(filtered_pins(&pins, "THEME").len(), 1);
+        assert_eq!(filtered_pins(&pins, "design").len(), 1);
+        assert_eq!(filtered_pins(&pins, "agent").len(), 1);
+        assert_eq!(filtered_pins(&pins, "").len(), 2);
+        assert!(filtered_pins(&pins, "nope").is_empty());
+    }
+
+    #[test]
+    fn artifact_download_name_sanitises_title_and_picks_extension() {
+        assert_eq!(
+            artifact_download_name("My Plan: v2 / draft!", "plan", "a1"),
+            "My-Plan-v2-draft.md"
+        );
+        assert_eq!(
+            artifact_download_name("Fix thing", "patch", "a2"),
+            "Fix-thing.patch"
+        );
+        assert_eq!(
+            artifact_download_name("Notes", "findings", "a3"),
+            "Notes.md"
+        );
+        assert_eq!(
+            artifact_download_name("Blob", "mystery", "a4"),
+            "Blob.txt"
+        );
+        // Empty / unusable titles fall back to kind + id, never a bare id.
+        assert_eq!(artifact_download_name("", "findings", "a5"), "findings-a5.md");
+        assert_eq!(artifact_download_name("///", "plan", "a6"), "plan-a6.md");
+        assert_eq!(artifact_extension("test_report"), ("md", "text/markdown"));
+        assert_eq!(artifact_extension("patch"), ("patch", "text/plain"));
+        assert_eq!(artifact_extension("other"), ("txt", "text/plain"));
     }
 }
