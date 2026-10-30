@@ -781,13 +781,15 @@ pub struct ChildCard {
     pub at_ms: f64,
 }
 
+/// Child identity is exact (case-insensitive). Prefix matching cross-attached
+/// prefix-named siblings (`scribe` vs `scribe-2`, or a 1-char key vs anything)
+/// to each other's cards (#1653). No in-repo producer emits a truncated key;
+/// if one ever does, it gets its own documented helper — not a guess here.
 pub fn child_keys_match(a: &str, b: &str) -> bool {
     if a.is_empty() || b.is_empty() {
         return false;
     }
-    let a = a.to_ascii_lowercase();
-    let b = b.to_ascii_lowercase();
-    a == b || a.starts_with(&b) || b.starts_with(&a)
+    a.eq_ignore_ascii_case(b)
 }
 
 pub fn child_card_from_parts(
@@ -804,11 +806,16 @@ pub fn child_card_from_parts(
     } else {
         session.to_ascii_lowercase()
     };
+    // No status-as-summary promotion (#1657): the badge already carries the
+    // status alone. Promoting it into `summary` made every summary-less
+    // update look summary-bearing, so the transcript merge overwrote a rich
+    // body with the bare status word. A summary-less card keeps an empty
+    // summary; display and merging treat that as "no summary yet".
     let picked = prefer_summary("", summary);
     let summary = if useful_summary(&picked) {
         picked
     } else {
-        status.trim().to_string()
+        String::new()
     };
     ChildCard {
         key,
@@ -837,9 +844,8 @@ pub fn child_card_from_text(text: &str) -> Option<ChildCard> {
     if !useful_summary(&summary) {
         summary = first_blocker(body).unwrap_or_default();
     }
-    if !useful_summary(&summary) {
-        summary = status.clone();
-    }
+    // Deliberately no `summary = status` fallback (#1657): see
+    // child_card_from_parts. An empty summary renders via the badge.
     Some(child_card_from_parts(
         &name,
         &session,
@@ -1025,7 +1031,12 @@ pub fn activity_panel(
     }
     let mut rows = Vec::new();
     for child in kids {
-        if !child.parent_id.is_empty() && child.parent_id != active {
+        // Parentless children are scoped to NO panel (#1653): `parent_id` is
+        // `#[serde(default)]`, so an omitted `parentId` is indistinguishable
+        // from "belongs to another root", and the old fallback admitted such
+        // children into every session's panel. Attribution must come from the
+        // payload, not from whichever root happens to be active.
+        if child.parent_id.is_empty() || child.parent_id != active {
             continue;
         }
         let name = if child.title.is_empty() {
@@ -1236,7 +1247,12 @@ mod tests {
         assert!(!card.summary.starts_with("You said:"));
         assert!(card.details.contains("verification"));
         assert!(child_keys_match(&card.key, "Scribe"));
-        assert!(child_keys_match("abcd1234", "abcd"));
+        // Exact only (#1653): prefixes — even long ones — are not identity.
+        assert!(!child_keys_match("abcd1234", "abcd"));
+        assert!(!child_keys_match("a", "alice"));
+        assert!(!child_keys_match("scribe", "scribe-2"));
+        assert!(!child_keys_match("", "scribe"));
+        assert!(child_keys_match("ABCD1234", "abcd1234"));
 
         let echoed = format!("You said: {raw}\n\nTip: start a message with `run <command>` to exercise the bash tool and the permission prompt.");
         let stripped = strip_echo_tip(&echoed);
@@ -1283,6 +1299,53 @@ mod tests {
         assert_eq!(rows[0].name, "scribe");
         assert_eq!(rows[0].state, "blocked");
         assert_eq!(rows[0].task, "schema: handoff missing");
+    }
+
+    #[test]
+    fn activity_panel_exact_match_and_parentless_scope() {
+        // #1653: prefix siblings keep their own cards; a parentless child
+        // appears in no session's panel; another root's child stays out.
+        let kid = |id: &str, title: &str, parent: &str| ChildSession {
+            id: id.into(),
+            title: title.into(),
+            parent_id: parent.into(),
+        };
+        let kids = vec![
+            kid("c1", "scribe", "root"),
+            kid("c2", "scribe-2", "root"),
+            kid("c3", "orphan", ""),
+            kid("c4", "elsewhere", "other-root"),
+        ];
+        let line = |key: &str, body: &str| ChatLine {
+            id: 1,
+            role: "child".into(),
+            title: key.into(),
+            body: body.into(),
+            badge: "done".into(),
+            detail: String::new(),
+            key: key.into(),
+            at_ms: 0.0,
+        };
+        let cards = vec![line("scribe", "task one"), line("scribe-2", "task two")];
+        let rows = activity_panel(&[], &kids, &cards, "root");
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].task, "task one");
+        assert_eq!(rows[1].task, "task two");
+    }
+
+    #[test]
+    fn status_is_not_a_summary() {
+        // #1657: a summary-less card keeps an empty summary; the status
+        // lives on the badge/status field alone.
+        let card = child_card_from_parts("solo", "s1", "completed", "", "");
+        assert_eq!(card.status, "completed");
+        assert_eq!(card.summary, "");
+        let from_text = child_card_from_text(
+            "[child.completed session=s9 name=solo status=blocked]\nno handoff here",
+        )
+        .expect("card");
+        assert_eq!(from_text.summary, "");
+        assert_eq!(from_text.status, "blocked");
     }
 
     #[test]

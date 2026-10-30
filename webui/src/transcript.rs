@@ -8,8 +8,8 @@ use serde_json::Value;
 
 use crate::composer_triggers::{display_user_text, PermAsk};
 use crate::model::{
-    child_card_from_parts, child_card_from_text, child_keys_match, protocol_dump, status_kind,
-    strip_echo_tip, ChatLine, ChildCard,
+    child_card_from_parts, child_card_from_text, child_keys_match, prefer_summary, protocol_dump,
+    status_kind, strip_echo_tip, ChatLine, ChildCard,
 };
 
 const TITLE_MAX: usize = 32;
@@ -745,9 +745,12 @@ impl Transcript {
                 return Some(i);
             }
         }
-        self.messages
-            .iter()
-            .rposition(|m| m.role == Role::Tool && m.badge == "running")
+        // No identity-free tier (#1649): the old fallback returned the most
+        // recent running tool regardless of callId/name, so an unmatched
+        // `tool.end` (replay skew, version drift) overwrote a different
+        // tool's card and left the real one running forever. Returning None
+        // lets the caller land the event on its own completed card.
+        None
     }
 
     fn stamp_turn(&mut self, completed_ms: f64) {
@@ -842,6 +845,16 @@ impl Transcript {
             return;
         }
         let kind = status_kind(&card.status);
+        // A summary that is just the status word carries no summary (#1657):
+        // never let it displace — or become — a card body.
+        let incoming_summary = if card.summary.trim().is_empty()
+            || card.summary.trim().eq_ignore_ascii_case(card.status.trim())
+            || card.summary.trim().eq_ignore_ascii_case(&kind)
+        {
+            String::new()
+        } else {
+            card.summary.clone()
+        };
         if let Some(existing) = self
             .messages
             .iter_mut()
@@ -851,10 +864,13 @@ impl Transcript {
             if !card.name.is_empty() {
                 existing.title = card.name;
             }
-            if !card.summary.is_empty() {
-                existing.body = card.summary.clone();
-                existing.copy_text = card.summary;
-            }
+            // Merge by quality, not by arrival order (#1657): a thinner or
+            // status-only update can never overwrite a richer body, while a
+            // genuinely richer summary still replaces a thin one. copy_text
+            // always mirrors the merged body.
+            let merged = prefer_summary(&existing.body, &incoming_summary);
+            existing.body = merged.clone();
+            existing.copy_text = merged;
             if !card.details.is_empty() {
                 existing.detail = card.details;
             }
@@ -870,7 +886,7 @@ impl Transcript {
             card.name
         };
         let at_ms = card.at_ms;
-        let summary = card.summary.clone();
+        let summary = incoming_summary;
         self.push(Message {
             id: 0,
             role: Role::Child,
@@ -1908,6 +1924,134 @@ mod tests {
         let diff = msg.diff.clone().expect("diff");
         assert!(diff.deleted >= 1 && diff.added >= 1);
         assert!(msg.chips.iter().any(|c| c.path == "webui/src/main.rs"));
+    }
+
+    #[test]
+    fn unmatched_tool_end_lands_on_its_own_card() {
+        // #1649: two running tools; an end with an unknown callId and an
+        // unmatched name must complete NEITHER running card.
+        let mut t = Transcript::new();
+        t.apply_envelope(&env(
+            "tool.begin",
+            serde_json::json!({"callId": "c1", "name": "edit", "args": {}}),
+        ));
+        t.apply_envelope(&env(
+            "tool.begin",
+            serde_json::json!({"callId": "c2", "name": "bash", "args": {}}),
+        ));
+        t.apply_envelope(&env(
+            "tool.end",
+            serde_json::json!({"callId": "zz", "name": "webfetch", "output": "fetched the page"}),
+        ));
+        assert_eq!(t.messages.len(), 3);
+        assert_eq!(t.messages[0].badge, "running");
+        assert_eq!(t.messages[1].badge, "running");
+        let own = &t.messages[2];
+        assert_eq!(own.badge, "done");
+        assert_eq!(own.key, "webfetch");
+        assert!(visible(&t).contains("fetched the page"), "{}", visible(&t));
+        // The real completions still land on their own cards.
+        t.apply_envelope(&env(
+            "tool.end",
+            serde_json::json!({"callId": "c1", "name": "edit", "output": "edited it"}),
+        ));
+        t.apply_envelope(&env(
+            "tool.end",
+            serde_json::json!({"callId": "c2", "name": "bash", "output": "ran it"}),
+        ));
+        assert_eq!(t.messages.len(), 3);
+        assert_eq!(t.messages[0].badge, "done");
+        assert_eq!(t.messages[1].badge, "done");
+        // Tier 2 (same-name running tool, unknown callId) is unchanged.
+        let mut t2 = Transcript::new();
+        t2.apply_envelope(&env(
+            "tool.begin",
+            serde_json::json!({"callId": "c9", "name": "edit", "args": {}}),
+        ));
+        t2.apply_envelope(&env(
+            "tool.end",
+            serde_json::json!({"callId": "other", "name": "edit", "output": "same name"}),
+        ));
+        assert_eq!(t2.messages.len(), 1);
+        assert_eq!(t2.messages[0].badge, "done");
+    }
+
+    #[test]
+    fn child_summary_survives_status_only_update() {
+        // #1657: rich summary first, then a summary-less status refresh.
+        let mut t = Transcript::new();
+        t.apply_envelope(&env(
+            "child.completed",
+            serde_json::json!({
+                "name": "scribe", "sessionId": "s1", "status": "completed",
+                "summary": "wrote the full migration guide and verified every link"
+            }),
+        ));
+        t.apply_envelope(&env(
+            "child.completed",
+            serde_json::json!({"name": "scribe", "sessionId": "s1", "status": "completed"}),
+        ));
+        assert_eq!(t.messages.len(), 1);
+        let card = &t.messages[0];
+        assert_eq!(
+            card.body,
+            "wrote the full migration guide and verified every link"
+        );
+        assert_eq!(card.copy_text, card.body);
+        assert_eq!(card.badge, "done");
+        // A genuinely richer summary still replaces a thin one.
+        let mut t2 = Transcript::new();
+        t2.apply_envelope(&env(
+            "child.completed",
+            serde_json::json!({
+                "name": "scribe", "sessionId": "s1", "status": "completed",
+                "summary": "did work"
+            }),
+        ));
+        t2.apply_envelope(&env(
+            "child.completed",
+            serde_json::json!({
+                "name": "scribe", "sessionId": "s1", "status": "completed",
+                "summary": "did the work and also updated all of the docs"
+            }),
+        ));
+        assert_eq!(
+            t2.messages[0].body,
+            "did the work and also updated all of the docs"
+        );
+        // A first-ever status-only card renders via its badge, body empty.
+        let mut t3 = Transcript::new();
+        t3.apply_envelope(&env(
+            "child.completed",
+            serde_json::json!({"name": "solo", "sessionId": "s9", "status": "blocked"}),
+        ));
+        assert_eq!(t3.messages.len(), 1);
+        assert_eq!(t3.messages[0].body, "");
+        assert_eq!(t3.messages[0].badge, "blocked");
+    }
+
+    #[test]
+    fn prefix_named_children_do_not_cross_attach() {
+        // #1653: `scribe` and `scribe-2` are different children.
+        let mut t = Transcript::new();
+        t.apply_envelope(&env(
+            "child.completed",
+            serde_json::json!({
+                "name": "scribe", "sessionId": "s1", "status": "completed",
+                "summary": "first child did the first task"
+            }),
+        ));
+        t.apply_envelope(&env(
+            "child.completed",
+            serde_json::json!({
+                "name": "scribe-2", "sessionId": "s2", "status": "blocked",
+                "summary": "second child did the second task"
+            }),
+        ));
+        assert_eq!(t.messages.len(), 2);
+        assert_eq!(t.messages[0].body, "first child did the first task");
+        assert_eq!(t.messages[1].body, "second child did the second task");
+        assert_eq!(t.messages[1].badge, "blocked");
     }
 
     #[test]
