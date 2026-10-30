@@ -112,10 +112,10 @@ impl TermCtl {
     /// Scroll event on the screen: update the pinned state from the
     /// user's actual position (proximity to the bottom resumes follow).
     fn on_scroll(self, el: &Element) {
-        let away = self.follow.update_value(|follow| {
+        self.follow.update_value(|follow| {
             follow.on_scroll(el.scroll_top(), el.scroll_height(), el.client_height());
-            !follow.following()
         });
+        let away = self.follow.with_value(|follow| !follow.following());
         self.scrolled_away.set(away);
     }
 
