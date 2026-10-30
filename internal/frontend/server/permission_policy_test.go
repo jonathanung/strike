@@ -101,7 +101,22 @@ func TestPermissionRulesRequireConfirm(t *testing.T) {
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "confirmation required") {
 		t.Fatalf("remove deny: %d %s", rec.Code, rec.Body.String())
 	}
-	rec = post("/v1/permissions/rules/remove", map[string]any{"scope": "global", "index": 0, "confirm": true})
+	rec = post("/v1/permissions/rules/remove", map[string]any{
+		"scope": "global", "index": 0, "confirm": true,
+		"permission": "bash", "pattern": "git *", "action": "deny",
+	})
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "rule list changed") {
+		t.Fatalf("mismatched remove: %d %s", rec.Code, rec.Body.String())
+	}
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/permissions/rules", nil))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"pattern":"rm *"`) {
+		t.Fatalf("mismatched remove deleted the deny: %d %s", rec.Code, rec.Body.String())
+	}
+	rec = post("/v1/permissions/rules/remove", map[string]any{
+		"scope": "global", "index": 0, "confirm": true,
+		"permission": "bash", "pattern": "rm *", "action": "deny",
+	})
 	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), `"pattern":"rm *"`) {
 		t.Fatalf("removed deny still present: %d %s", rec.Code, rec.Body.String())
 	}
@@ -195,8 +210,23 @@ func TestPermissionRulesSessionFolderGrants(t *testing.T) {
 		t.Fatalf("grants after bad remove = %d, want 2", len(perms.folderGrants))
 	}
 
+	// A stale index that names a different grant removes nothing.
+	rec = post(map[string]any{
+		"scope": "session folder", "index": 0, "confirm": true,
+		"permission": "edit", "pattern": "src/api/**", "action": "allow",
+	})
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "rule list changed") {
+		t.Fatalf("mismatched session grant: %d %s", rec.Code, rec.Body.String())
+	}
+	if len(perms.folderGrants) != 2 {
+		t.Fatalf("grants after mismatched remove = %+v", perms.folderGrants)
+	}
+
 	// Removing index 0 revokes that grant; the response lists the rest.
-	rec = post(map[string]any{"scope": "session folder", "index": 0})
+	rec = post(map[string]any{
+		"scope": "session folder", "index": 0,
+		"permission": "write", "pattern": "docs/**", "action": "allow",
+	})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("remove: %d %s", rec.Code, rec.Body.String())
 	}

@@ -295,7 +295,7 @@ pub fn ApprovalHost(
             let body = pending.body.clone();
             let label = pending.confirm_label.clone();
             view! {
-                <div class="approvals-backdrop" role="presentation">
+                <div class="approvals-backdrop approvals-confirm" role="presentation">
                     <div class="approvals-dialog" role="dialog" aria-modal="true" aria-labelledby="approvals-confirm-title">
                         <h2 id="approvals-confirm-title">{title}</h2>
                         <p class="approvals-copy">{body}</p>
@@ -550,13 +550,26 @@ fn accept_pending(
             }),
             "/v1/permissions/rules",
         ),
-        ConfirmKind::RuleRemove { scope, index } => post_rule(
+        ConfirmKind::RuleRemove {
+            scope,
+            index,
+            permission,
+            pattern,
+            action,
+        } => post_rule(
             base,
             token,
             status,
             panel_error,
             rules,
-            json!({"scope": scope, "index": index, "confirm": true}),
+            json!({
+                "scope": scope,
+                "index": index,
+                "permission": permission,
+                "pattern": pattern,
+                "action": action,
+                "confirm": true,
+            }),
             "/v1/permissions/rules/remove",
         ),
     }
@@ -584,6 +597,13 @@ fn post_rule(
             Err(e) => {
                 panel_error.set(e.clone());
                 status.set(format!("rule change failed: {e}"));
+                // A shifted list refuses the delete. Reload so the next
+                // click names a rule that is still there, and keep the error.
+                if path == "/v1/permissions/rules/remove" {
+                    if let Ok(doc) = get_json::<RulesDocument>(&b, &t, "/v1/permissions/rules").await {
+                        rules.set(doc);
+                    }
+                }
             }
         }
     });
@@ -598,7 +618,13 @@ fn remove_rule(
     panel_error: RwSignal<String>,
     rules: RwSignal<RulesDocument>,
 ) {
-    if let Some(pending) = rule_remove_confirm(&rule.scope, rule.index, &rule.action) {
+    if let Some(pending) = rule_remove_confirm(
+        &rule.scope,
+        rule.index,
+        &rule.permission,
+        &rule.pattern,
+        &rule.action,
+    ) {
         confirm.set(Some(pending));
         return;
     }
@@ -608,7 +634,7 @@ fn remove_rule(
         status,
         panel_error,
         rules,
-        json!({"scope": rule.scope, "index": rule.index, "confirm": false}),
+        crate::approvals::rule_remove_body(&rule, false),
         "/v1/permissions/rules/remove",
     );
 }

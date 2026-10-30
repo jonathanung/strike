@@ -48,6 +48,10 @@ pub struct LiveModelState {
     pub note: String,
     /// Epoch millis. Engine errors and note clears apply only to events at
     /// or after this instant, so a session replay cannot surface an old error.
+    /// An envelope with no parseable time is not fresh. There is no lookback:
+    /// daemon stamps (`protocol.Wrap` uses `time.Now`) and the browser clock
+    /// (`Date.now` when the change is sent) are the same clock on a local
+    /// gateway, and the event is produced after this instant is armed.
     pub note_after: i64,
 }
 
@@ -587,9 +591,11 @@ pub fn reduce_envelope(mut state: LiveModelState, raw: &str) -> LiveModelState {
         .get("time")
         .and_then(|t| t.as_str())
         .and_then(rfc3339_millis);
+    // `t >= note_after`. A timeless envelope is not fresh: replayed events
+    // that omit `time` must not consume the guard or clear a live note.
     let fresh = match when {
-        Some(t) => state.note_after > 0 && t + 15_000 >= state.note_after,
-        None => state.note_after > 0,
+        Some(t) => state.note_after > 0 && t >= state.note_after,
+        None => false,
     };
     match typ {
         "model.selected" => {
@@ -968,6 +974,48 @@ mod tests {
         );
         assert_eq!(state.model, "echo-2");
         assert!(state.note.is_empty());
+    }
+
+    #[test]
+    fn note_guard_rejects_the_lookback_window_and_timeless_envelopes() {
+        let at = rfc3339_millis("2026-10-26T12:00:00.000Z").unwrap();
+        let mut state = LiveModelState {
+            note_after: at,
+            note: "keep me".into(),
+            ..LiveModelState::default()
+        };
+        let before = r#"{"type":"engine.error","time":"2026-10-26T11:59:59.999Z","data":{"message":"unknown provider \"old\""}}"#;
+        state = reduce_envelope(state, before);
+        assert_eq!(state.note, "keep me");
+        assert_eq!(state.note_after, at, "a pre-change error must not consume the guard");
+
+        let inside_old_window = r#"{"type":"engine.error","time":"2026-10-26T11:59:50.000Z","data":{"message":"unknown provider \"recent\""}}"#;
+        state = reduce_envelope(state, inside_old_window);
+        assert_eq!(state.note, "keep me");
+        assert_eq!(state.note_after, at);
+
+        let timeless = r#"{"type":"engine.error","data":{"message":"unknown provider \"timeless\""}}"#;
+        state = reduce_envelope(state, timeless);
+        assert_eq!(state.note, "keep me");
+        assert_eq!(state.note_after, at);
+
+        let replayed_select = r#"{"type":"model.selected","time":"2026-10-26T11:59:50.000Z","data":{"provider":"echo","model":"replayed"}}"#;
+        state = reduce_envelope(state, replayed_select);
+        assert_eq!(state.model, "replayed");
+        assert_eq!(state.note, "keep me");
+        assert_eq!(state.note_after, at);
+
+        let exact = r#"{"type":"engine.error","time":"2026-10-26T12:00:00.000Z","data":{"message":"unknown provider \"now\""}}"#;
+        state = reduce_envelope(state, exact);
+        assert!(state.note.contains("unknown provider"));
+        assert_eq!(state.note_after, 0);
+
+        state.note_after = at;
+        state.note = "second".into();
+        let after = r#"{"type":"engine.error","time":"2026-10-26T12:00:00.001Z","data":{"message":"unknown model \"next\""}}"#;
+        state = reduce_envelope(state, after);
+        assert!(state.note.contains("unknown model"));
+        assert_eq!(state.note_after, 0);
     }
 
     #[test]
