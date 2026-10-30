@@ -1575,7 +1575,7 @@ try {
     })()`);
     return JSON.parse(raw || "{}");
   };
-  const clickMemoryDelete = async () =>
+  const clickMemoryDeleteOnce = async () =>
     evaluate(`(() => {
       const row = [...document.querySelectorAll(".storage-row")].find((r) => r.textContent.includes("smoke-pref"));
       const btn = row && row.querySelector("[data-action='delete-memory']");
@@ -1583,6 +1583,17 @@ try {
       btn.click();
       return "clicked";
     })()`);
+  // The panel re-renders its rows when the async memory/knowledge loads
+  // settle, so a single-shot click can land in the empty window between
+  // renders (CI run 40971001626 failed exactly there). Retry the click
+  // until the button is present, like every other probe in this harness.
+  const clickMemoryDelete = async () => {
+    for (let attempt = 0; attempt < 50; attempt++) {
+      if ((await clickMemoryDeleteOnce()) === "clicked") return "clicked";
+      await delay(200);
+    }
+    return "missing";
+  };
   if ((await clickMemoryDelete()) !== "clicked") {
     throw new Error("memory Delete button click failed");
   }
@@ -1740,13 +1751,22 @@ try {
   // Goal Abort confirm (#1559): Abort is terminal, so it must open the
   // shared confirm dialog; cancelling leaves the goal in Needs you,
   // confirming moves it to Aborted.
-  const clickGoalAbort = async () =>
+  const clickGoalAbortOnce = async () =>
     evaluate(`(() => {
       const btn = document.querySelector("[data-action='abort-goal']");
       if (!btn) return "missing";
       btn.click();
       return "clicked";
     })()`);
+  // Same re-render race as the Memory Delete click above: retry until
+  // the button is present instead of failing on a single-shot probe.
+  const clickGoalAbort = async () => {
+    for (let attempt = 0; attempt < 50; attempt++) {
+      if ((await clickGoalAbortOnce()) === "clicked") return "clicked";
+      await delay(200);
+    }
+    return "missing";
+  };
   if ((await clickGoalAbort()) !== "clicked") {
     throw new Error("goal Abort button click failed");
   }
