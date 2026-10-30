@@ -404,6 +404,98 @@ fn describe(body: &str) -> String {
     }
 }
 
+fn credential_of(body: &str) -> String {
+    serde_json::from_str::<Value>(body)
+        .ok()
+        .and_then(|v| {
+            v.get("credential")
+                .and_then(|b| b.as_str())
+                .map(|s| s.to_string())
+        })
+        .unwrap_or_default()
+}
+
+fn page_origin() -> String {
+    web_sys::window()
+        .and_then(|w| w.location().origin().ok())
+        .unwrap_or_default()
+}
+
+/// True when `target` names the gateway this tab is already using: a
+/// blank base, the current base, or (when the current base is blank,
+/// i.e. same-origin) the page origin itself.
+pub(crate) fn target_is_current(target: &str, current_base: &str, page_origin: &str) -> bool {
+    let target = target.trim().trim_end_matches('/');
+    if target.is_empty() {
+        return true;
+    }
+    let current = current_base.trim().trim_end_matches('/');
+    if target == current {
+        return true;
+    }
+    current.is_empty() && target == page_origin.trim().trim_end_matches('/')
+}
+
+fn connect_unreachable_error(target: &str) -> String {
+    format!(
+        "Could not reach {target}. Nothing changed — the current gateway is still selected. \
+         Check that the daemon is running and reachable from this browser, or forward it \
+         with strike connect, then try again."
+    )
+}
+
+fn connect_auth_error(target: &str) -> String {
+    format!(
+        "That gateway at {target} refused this browser — it needs its own token or pairing, \
+         and the current gateway's session does not transfer. Scan that gateway's QR code \
+         from the Phone dialog, or use strike connect on its host, to add it. \
+         Nothing changed — the current gateway is still selected."
+    )
+}
+
+fn connect_http_error(target: &str, code: u16, body: &str) -> String {
+    let detail = error_text(body);
+    if detail.is_empty() {
+        format!(
+            "That gateway at {target} answered HTTP {code}, so it was not added. \
+             Nothing changed — the current gateway is still selected."
+        )
+    } else {
+        format!(
+            "That gateway at {target} answered HTTP {code} ({detail}), so it was not added. \
+             Nothing changed — the current gateway is still selected."
+        )
+    }
+}
+
+/// Probe a candidate gateway BEFORE any switch (#1523): `/health` must
+/// answer 200 and `/v1/gateway` must accept the candidate's own token
+/// (never the current gateway's token — `token` is the target profile's
+/// stored token, or empty for a brand-new target). Ok carries the
+/// gateway-info body; Err is a specific, form-ready message and the
+/// caller must leave the current connection untouched.
+async fn probe_target(base: &str, token: &str) -> Result<String, String> {
+    let target = if base.trim().is_empty() {
+        "this gateway"
+    } else {
+        base.trim()
+    };
+    match gateway_fetch("GET", base, token, "/health", None).await {
+        Err(_) => return Err(connect_unreachable_error(target)),
+        Ok((code, body)) if code != 200 => return Err(connect_http_error(target, code, &body)),
+        Ok(_) => {}
+    }
+    match gateway_fetch("GET", base, token, "/v1/gateway", None).await {
+        Err(_) => Err(format!(
+            "{target} answered health, then the gateway check failed. \
+             Nothing changed — the current gateway is still selected."
+        )),
+        Ok((401, _)) | Ok((403, _)) => Err(connect_auth_error(target)),
+        Ok((200, body)) => Ok(body),
+        Ok((code, body)) => Err(connect_http_error(target, code, &body)),
+    }
+}
+
 async fn gateway_fetch(
     method: &str,
     base: &str,
@@ -604,6 +696,11 @@ pub fn GatewaySwitcher(
     let url = RwSignal::new(String::new());
     let ssh = RwSignal::new(String::new());
     let form_note = RwSignal::new(String::new());
+    // True once the current gateway reports this browser's credential
+    // as a paired session (or the selected profile is a paired one):
+    // the panel then says up front that the session does not transfer
+    // to another gateway (#1523).
+    let paired = RwSignal::new(selected.get_untracked().starts_with("paired-"));
     let cursor = RwSignal::new(0usize);
     // Bumps on every probe so a slow response cannot overwrite a newer one.
     let probe_gen = RwSignal::new(0u64);
@@ -647,6 +744,7 @@ pub fn GatewaySwitcher(
                 }
                 Ok((200, body)) => {
                     gateway.set("connected".into());
+                    paired.set(credential_of(&body) == "session");
                     detail.set(describe(&body));
                 }
                 Ok((code, body)) => {
@@ -749,25 +847,68 @@ pub fn GatewaySwitcher(
         }));
     }
 
+    // The one place a switch commits: only ever called after the target
+    // has answered a probe (#1523), or for the gateway already in use.
+    let commit_switch = move |id: String, dest: String, tok: String| {
+        selected.set(id.clone());
+        base.set(dest.clone());
+        token.set(tok);
+        if id == "this" {
+            local_set("strike.base", "");
+        } else {
+            local_set("strike.base", &dest);
+        }
+        forget_persisted_host_token();
+        refresh();
+        probe();
+    };
+
     // (generation, id, base). A shared signal so click and keyboard can both
     // select without moving a closure twice.
     let pick = RwSignal::new((0u64, String::new(), String::new()));
+    // Bumps per switch attempt so a slow failed probe cannot surface an
+    // error (or commit) for a pick the user has already superseded.
+    let switch_seq = RwSignal::new(0u64);
     Effect::new(move |_| {
         let (gen, id, profile_base) = pick.get();
         if gen == 0 || id.is_empty() {
             return;
         }
-        selected.set(id.clone());
-        base.set(profile_base);
-        token.set(session_token(&id));
-        if id == "this" {
-            let _ = local_store().map(|s| s.set_item("strike.base", "").ok());
-        } else {
-            let _ = local_store().map(|s| s.set_item("strike.base", &base.get_untracked()).ok());
+        if id == selected.get_untracked() && profile_base == base.get_untracked() {
+            // Already on this gateway: a re-check, not a switch.
+            refresh();
+            probe();
+            return;
         }
-        forget_persisted_host_token();
-        refresh();
-        probe();
+        let seq = switch_seq.get_untracked().wrapping_add(1);
+        switch_seq.set(seq);
+        // The candidate is probed with its OWN stored token, never the
+        // current gateway's: a paired session or host token for gateway
+        // A must not be sent to gateway B (#1523).
+        let cand = session_token(&id);
+        spawn_local(async move {
+            match probe_target(&profile_base, &cand).await {
+                Ok(_) => {
+                    if switch_seq.get_untracked() != seq {
+                        return;
+                    }
+                    form_note.set(String::new());
+                    commit_switch(id, profile_base, cand);
+                }
+                Err(msg) => {
+                    if switch_seq.get_untracked() != seq {
+                        return;
+                    }
+                    // Failure changes nothing about the current
+                    // connection: base/token/selected/gateway/detail
+                    // all stay as they were. The error goes under the
+                    // form, and the panel opens so a palette-triggered
+                    // switch shows it too.
+                    form_note.set(msg);
+                    open.set(true);
+                }
+            }
+        });
     });
     let choose = move |id: String, profile_base: String| {
         pick.update(|(gen, cur, dest)| {
@@ -928,6 +1069,73 @@ pub fn GatewaySwitcher(
         }
     };
 
+    // Connect (#1523): validate + probe the typed target BEFORE
+    // disturbing the current connection, save it as a gateway profile,
+    // and switch only on success. Failure leaves the working gateway
+    // selected and Connected, with the specific error under the form.
+    let connect_profile = move |_| {
+        let u = url.get().trim().trim_end_matches('/').to_string();
+        if u.is_empty() {
+            form_note.set("Enter the base URL of the gateway to connect to.".into());
+            return;
+        }
+        if target_is_current(&u, &base.get_untracked(), &page_origin()) {
+            form_note.set("That is the gateway this tab is already using.".into());
+            return;
+        }
+        let warn = match classify_base(&u) {
+            Err(e) => {
+                form_note.set(e);
+                return;
+            }
+            Ok(w) => w,
+        };
+        // An existing profile for this base keeps its own stored token
+        // as the probe credential; a new target is probed token-free.
+        // The current gateway's token is never sent to the target.
+        let existing = profiles
+            .get_untracked()
+            .iter()
+            .find(|p| p.base.trim_end_matches('/') == u)
+            .map(|p| p.id.clone());
+        let cand = existing.as_deref().map(session_token).unwrap_or_default();
+        let n = name.get();
+        let s = ssh.get();
+        spawn_local(async move {
+            match probe_target(&u, &cand).await {
+                Ok(_) => {
+                    let id = if let Some(id) = existing {
+                        id
+                    } else {
+                        let id = format!("g{}", js_sys::Date::now() as u64);
+                        let label = if n.trim().is_empty() {
+                            format!("Gateway {}", host_of(&u).unwrap_or_else(|| u.clone()))
+                        } else {
+                            n.trim().to_string()
+                        };
+                        profiles.update(|list| {
+                            list.push(Profile {
+                                id: id.clone(),
+                                name: label,
+                                base: u.clone(),
+                                ssh: s.trim().to_string(),
+                                warn,
+                            });
+                        });
+                        save_profiles(&profiles.get_untracked());
+                        id
+                    };
+                    name.set(String::new());
+                    url.set(String::new());
+                    ssh.set(String::new());
+                    form_note.set(format!("Connected to {u}. It is saved in Gateways."));
+                    commit_switch(id, u, cand);
+                }
+                Err(msg) => form_note.set(msg),
+            }
+        });
+    };
+
     let remove_profile = move |id: String| {
         persist_token(&id, "");
         profiles.update(|list| list.retain(|p| p.id != id));
@@ -979,6 +1187,9 @@ pub fn GatewaySwitcher(
                 prop:value=move || token.get()
                 on:input=on_token />
             <p class="hint">"The token stays in this tab. strike connect injects a short-lived grant on the machine with the browser, so the address bar never contains it."</p>
+            <Show when=move || paired.get()>
+                <p class="hint gw-paired-note">"Paired browser: this session belongs to the current gateway only and does not transfer to another gateway. To add a different gateway, scan its QR code from the Phone dialog or use strike connect on its host. Connect below checks a target first and leaves the current gateway connected if the check fails."</p>
+            </Show>
             <div class="row">
                 <input placeholder="name" aria-label="Gateway name" prop:value=move || name.get()
                     on:input=move |ev| name.set(event_target_value(&ev)) />
@@ -989,8 +1200,9 @@ pub fn GatewaySwitcher(
                 <input placeholder="user@host" aria-label="SSH destination" prop:value=move || ssh.get()
                     on:input=move |ev| ssh.set(event_target_value(&ev)) />
                 <button class="secondary" on:click=add_profile>"Save"</button>
+                <button class="primary" on:click=connect_profile>"Connect"</button>
             </div>
-            <p class="hint">{move || form_note.get()}</p>
+            <p class="hint gw-form-note" role="alert">{move || form_note.get()}</p>
         }
     };
 
@@ -1048,5 +1260,48 @@ pub fn GatewaySwitcher(
                 </div>
             </Show>
         </div>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn connect_errors_name_target_and_keep_current() {
+        let msg = connect_unreachable_error("http://127.0.0.1:9");
+        assert!(msg.contains("http://127.0.0.1:9"), "{msg}");
+        assert!(msg.contains("Nothing changed"), "{msg}");
+        assert!(msg.contains("still selected"), "{msg}");
+        let msg = connect_http_error("http://127.0.0.1:8788", 500, "");
+        assert!(msg.contains("HTTP 500"), "{msg}");
+        assert!(msg.contains("Nothing changed"), "{msg}");
+    }
+
+    #[test]
+    fn auth_error_directs_to_pairing_paths() {
+        let msg = connect_auth_error("http://100.64.0.5:8787");
+        assert!(msg.contains("its own token or pairing"), "{msg}");
+        assert!(msg.contains("QR code"), "{msg}");
+        assert!(msg.contains("Phone dialog"), "{msg}");
+        assert!(msg.contains("strike connect"), "{msg}");
+        assert!(msg.contains("does not transfer"), "{msg}");
+    }
+
+    #[test]
+    fn target_is_current_normalizes_slashes_and_origin() {
+        assert!(target_is_current("", "http://a:1", "http://a:1"));
+        assert!(target_is_current("http://a:1/", "http://a:1", ""));
+        assert!(target_is_current("http://a:1", "", "http://a:1/"));
+        assert!(!target_is_current("http://b:2", "http://a:1", "http://a:1"));
+        assert!(!target_is_current("http://b:2", "", "http://a:1"));
+    }
+
+    #[test]
+    fn credential_parse_reads_gateway_info() {
+        assert_eq!(credential_of(r#"{"credential":"session"}"#), "session");
+        assert_eq!(credential_of(r#"{"credential":"root"}"#), "root");
+        assert_eq!(credential_of("not json"), "");
+        assert_eq!(credential_of("{}"), "");
     }
 }
