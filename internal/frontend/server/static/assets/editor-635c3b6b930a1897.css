@@ -169,3 +169,9 @@
 .ev-md .md-table .md-center { text-align: center; }
 .ev-md .md-table .md-right { text-align: right; }
 /* feature:markdown-tables end */
+/* feature:editor-render-window begin */
+.ev-codeview > button.secondary { margin: 0 0 8px 8px; }
+/* feature:editor-render-window end */
+/* feature:agent-diff-expand begin */
+.ev-diff > button.secondary { margin: 0 0 8px 8px; }
+/* feature:agent-diff-expand end */

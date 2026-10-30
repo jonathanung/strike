@@ -31,6 +31,12 @@ await writeFile(join(home, ".strike", "config"), '{"sandboxAllowDegrade":true}\n
 
 // Render/boot waits get a deadline sized for shared CI runners; shorter
 // interactive steps get a smaller one. Both are overridable for local runs.
+// WAIT_MS is also the budget for anti-hang arrival waits whose predicate
+// depends on a daemon round trip (op POST, engine state change, live
+// event, re-render) rather than a local DOM reaction: those assert that
+// the state arrives, never how fast, so a STEP_MS budget only measures
+// host load. See the "turn stopped" wait below (#1713) and #1650, which
+// adopted this same 30s convention for the engine's anti-hang waits.
 const WAIT_MS = Number(process.env.STRIKE_SMOKE_WAIT_MS || 30000);
 const STEP_MS = Number(process.env.STRIKE_SMOKE_STEP_MS || 15000);
 
@@ -2789,7 +2795,19 @@ try {
     })()`);
     return JSON.parse(raw || "{}");
   };
-  await waitFor("turn stopped", idleProbe, { timeout: STEP_MS, interval: 200 });
+  // "turn stopped" is an anti-hang arrival wait, not a timeliness check:
+  // Escape posts an `interrupt` op, the daemon/engine must cancel the
+  // running `sleep 30` tool, emit the terminal event, and the cockpit
+  // must receive it and re-render before #stop-turn disappears — a full
+  // daemon round trip. The predicate is unchanged (idle = no #stop-turn
+  // and no queue list); only its budget class was wrong. With STEP_MS
+  // (15s) it flaked 1/20 under load (#1713: probe still busy:true at
+  // expiry while the whole smoke ran 54-87s vs 26-31s unloaded, load
+  // ~9.9), so it uses WAIT_MS like the other daemon-backed arrival
+  // waits. A genuine stop hang still fails, just at 30s. The "still
+  // idle" re-check below keeps STEP_MS: its predicate is already true
+  // when it starts, so it is a stability check, not an arrival wait.
+  await waitFor("turn stopped", idleProbe, { timeout: WAIT_MS, interval: 200 });
   await delay(700);
   await waitFor("still idle", idleProbe, { timeout: STEP_MS, interval: 200 });
 
@@ -2807,6 +2825,154 @@ try {
     },
     { timeout: STEP_MS, interval: 200 },
   );
+
+  // Phone Settings (#1551): the blanket phone rule
+  // `body[data-phone="1"] .segmented { display:none }` was written for the
+  // header bar, but the Settings ChoiceRows reuse .segmented, so Scheme /
+  // Type size / Density measured 0x0 on phone. The hide is now scoped to
+  // `.page-header` in mobile.css. The desktop settings block above cannot
+  // catch that — it clicks the inputs through JS, which fires even on
+  // display:none controls. Switch to a phone viewport, measure the real
+  // geometry at 390x844 and again at 360x800, tap one option from each
+  // row at its on-screen centre, and check the header bar itself keeps
+  // no visible segmented switch (the hide's original purpose).
+  await send("Emulation.setDeviceMetricsOverride", {
+    width: 390,
+    height: 844,
+    deviceScaleFactor: 2,
+    mobile: true,
+  });
+  await waitFor(
+    "phone layout engages for the settings check",
+    async () => ({
+      ok: (await evaluate(`document.body.getAttribute("data-phone")`)) === "1",
+    }),
+    { timeout: STEP_MS, interval: 150 },
+  );
+  await evaluate(`document.querySelector('[data-action="open-settings"]')?.click()`);
+  await waitFor(
+    "phone settings choice rows are visible",
+    async () => {
+      const raw = await evaluate(`(() => {
+        const rows = [...document.querySelectorAll(".settings-page .choice-row .segmented")].map((seg) => {
+          const r = seg.getBoundingClientRect();
+          return { display: getComputedStyle(seg).display, w: r.width, h: r.height };
+        });
+        return JSON.stringify({
+          ok: rows.length === 3 && rows.every((r) => r.display !== "none" && r.w >= 200 && r.h >= 40),
+          rows,
+        });
+      })()`);
+      return JSON.parse(raw || "{}");
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await waitFor(
+    "phone header bar keeps no visible segmented switch",
+    async () => {
+      const raw = await evaluate(`(() => {
+        const segs = [...document.querySelectorAll(".page-header .segmented")].map((seg) => {
+          const r = seg.getBoundingClientRect();
+          return { display: getComputedStyle(seg).display, w: r.width, h: r.height };
+        });
+        return JSON.stringify({
+          ok: segs.every((s) => s.display === "none" || s.w === 0 || s.h === 0),
+          segs,
+        });
+      })()`);
+      return JSON.parse(raw || "{}");
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  const tapSettingsChoice = async (choice) => {
+    const point = JSON.parse(
+      (await evaluate(`(() => {
+        const input = document.querySelector('.settings-page input[data-choice="${choice}"]');
+        const span = input ? input.closest("label").querySelector("span") : null;
+        if (!span) return "{}";
+        span.scrollIntoView({ block: "center" });
+        const r = span.getBoundingClientRect();
+        const cx = r.x + r.width / 2;
+        const cy = r.y + r.height / 2;
+        const hit = document.elementFromPoint(cx, cy);
+        return JSON.stringify({ cx, cy, hitOk: !!hit && (hit === span || span.contains(hit)) });
+      })()`)) || "{}",
+    );
+    if (!point.hitOk) {
+      throw new Error(`phone settings ${choice} choice is covered: ${JSON.stringify(point)}`);
+    }
+    await send("Input.dispatchMouseEvent", {
+      type: "mousePressed",
+      x: point.cx,
+      y: point.cy,
+      button: "left",
+      clickCount: 1,
+    });
+    await send("Input.dispatchMouseEvent", {
+      type: "mouseReleased",
+      x: point.cx,
+      y: point.cy,
+      button: "left",
+      clickCount: 1,
+    });
+  };
+  await tapSettingsChoice("light");
+  await waitFor(
+    "phone tap changes the scheme",
+    async () => ({
+      ok: (await evaluate(`document.documentElement.getAttribute("data-scheme")`)) === "light",
+    }),
+    { timeout: STEP_MS, interval: 150 },
+  );
+  // Narrow phone (360x800, the second #1551 evidence width): the same
+  // three rows keep real geometry, and Type size / Density taps — not
+  // just Scheme — take effect.
+  await send("Emulation.setDeviceMetricsOverride", {
+    width: 360,
+    height: 800,
+    deviceScaleFactor: 2,
+    mobile: true,
+  });
+  await waitFor(
+    "phone settings choice rows are visible at 360",
+    async () => {
+      const raw = await evaluate(`(() => {
+        const rows = [...document.querySelectorAll(".settings-page .choice-row .segmented")].map((seg) => {
+          const r = seg.getBoundingClientRect();
+          return { display: getComputedStyle(seg).display, w: r.width, h: r.height };
+        });
+        return JSON.stringify({
+          ok: rows.length === 3 && rows.every((r) => r.display !== "none" && r.w >= 200 && r.h >= 40),
+          rows,
+        });
+      })()`);
+      return JSON.parse(raw || "{}");
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await tapSettingsChoice("lg");
+  await waitFor(
+    "phone tap changes the type size",
+    async () => ({
+      ok: (await evaluate(`document.documentElement.getAttribute("data-font")`)) === "lg",
+    }),
+    { timeout: STEP_MS, interval: 150 },
+  );
+  await tapSettingsChoice("compact");
+  await waitFor(
+    "phone tap changes the density",
+    async () => ({
+      ok: (await evaluate(`document.documentElement.getAttribute("data-density")`)) === "compact",
+    }),
+    { timeout: STEP_MS, interval: 150 },
+  );
+  await send("Emulation.setDeviceMetricsOverride", {
+    width: 1440,
+    height: 900,
+    deviceScaleFactor: 1,
+    mobile: false,
+  });
+  await evaluate(`document.querySelector('[data-view="chat"]')?.click()`);
 
   console.log("webui-smoke ok");
 } catch (err) {

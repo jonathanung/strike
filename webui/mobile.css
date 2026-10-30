@@ -117,13 +117,24 @@
     min-height: 44px;
   }
 
-  body[data-phone="1"] .segmented {
+  /* Only the header bar's segmented switches hide on phone (#1551):
+     the phone bar is one row, and layout/view live in the palette
+     instead. The hide is scoped to the header — a blanket
+     `.segmented { display: none }` here also hid every in-page
+     segmented control reusing the class, including the Settings
+     ChoiceRows (Scheme / Type size / Density), which measured 0x0
+     and could not be changed on a phone at all. In-page segmented
+     controls are content, not chrome, and stay visible by default;
+     a new in-page use of .segmented must not need an exception here. */
+  body[data-phone="1"] .page-header .segmented {
     display: none;
   }
 
-  /* Settings appearance and the Usage/Audit segment stay tappable.
-     The bar-level .segmented hide is the phone menu collision (#1551);
-     these in-page controls are the settings themselves. */
+  /* Segmented controls that are the content stay tappable on phone:
+     the phone sheet's switches (re-shown after the header hide above,
+     so the sheet wins even if its markup sits inside the header),
+     Settings appearance, and the Usage/Audit segment. */
+  body[data-phone="1"] .phone-menu .segmented,
   body[data-phone="1"] .settings-page .segmented,
   body[data-phone="1"] .usage-audit-shell .segmented {
     display: flex;
