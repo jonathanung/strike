@@ -73,16 +73,13 @@ struct ArtifactList {
 /// "Show more" only appears where rows previously vanished silently.
 const ARTIFACT_PAGE_SIZE: usize = 100;
 
-/// Registered built-in artifact types offered by the type filter: the
-/// store's built-ins plus `session_report` (see #1444 / #1456).
-const ARTIFACT_TYPES: &[&str] = &[
-    "plan",
-    "contract",
-    "findings",
-    "patch",
-    "test_report",
-    "session_report",
-];
+/// Registered built-in artifact types offered by the type filter.
+/// This must match the store's `ValidType` set exactly: the server
+/// rejects an unknown `type` filter with an error, so offering a type
+/// that is not registered yet (e.g. `session_report`, mentioned in
+/// #1456 as arriving with #1444 but not registered on this main)
+/// would break the list instead of filtering it.
+const ARTIFACT_TYPES: &[&str] = &["plan", "contract", "findings", "patch", "test_report"];
 
 /// Build the server-filtered artifacts list path. `type` is only sent
 /// when a filter is selected; `limit`/`offset` are always explicit so
@@ -814,16 +811,12 @@ mod tests {
 
     #[test]
     fn filter_offers_all_registered_built_in_types() {
-        for kind in [
-            "plan",
-            "contract",
-            "findings",
-            "patch",
-            "test_report",
-            "session_report",
-        ] {
-            assert!(ARTIFACT_TYPES.contains(&kind), "missing {kind}");
-        }
+        // Exactly the store's ValidType set on this main; the server
+        // errors on an unregistered type filter.
+        assert_eq!(
+            ARTIFACT_TYPES,
+            ["plan", "contract", "findings", "patch", "test_report"]
+        );
         assert_eq!(ARTIFACT_PAGE_SIZE, 100);
     }
 }
