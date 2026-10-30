@@ -345,6 +345,11 @@ fn mark_error(pending: RwSignal<Vec<PendingAttachment>>, id: u32, msg: &str) {
 }
 
 pub fn dictation_available() -> bool {
+    // Host unit tests rank the palette without a JS runtime. Speech
+    // recognition only exists in the browser.
+    if !cfg!(target_arch = "wasm32") {
+        return false;
+    }
     let Some(win) = web_sys::window() else {
         return false;
     };

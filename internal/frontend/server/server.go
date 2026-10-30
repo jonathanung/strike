@@ -203,6 +203,16 @@ type Server struct {
 
 	// pairs holds single-use phone pairing codes and revocable session tokens.
 	pairs *pairStore
+
+	// shutdownCtx is cancelled the moment Shutdown begins. Long-lived
+	// streaming handlers (SSE tails, websockets, terminal streams) select
+	// on it: http.Server.Shutdown does not cancel a request's context
+	// while it waits for the connection to go idle, so without this a
+	// single open cockpit stream made Shutdown block until its timeout
+	// — and `strike serve` appear to hang on Ctrl-C (#1678).
+	shutdownOnce   sync.Once
+	shutdownCtx    context.Context
+	shutdownCancel context.CancelFunc
 }
 
 // New validates options and builds a Server. Does not listen.
@@ -235,6 +245,7 @@ func New(opts Options) (*Server, error) {
 	if static == nil {
 		static = staticFS
 	}
+	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 	s := &Server{
 		opts:            opts,
 		static:          static,
@@ -243,6 +254,8 @@ func New(opts Options) (*Server, error) {
 		scriptCSPHashes: inlineScriptHashes(static),
 		terms:           terminal.NewManager(terminal.ManagerConfig{Sandbox: opts.TerminalSandbox}),
 		pairs:           newPairStore(opts),
+		shutdownCtx:     shutdownCtx,
+		shutdownCancel:  shutdownCancel,
 	}
 	s.terms.SetAgentProbe(func(sessionID string) terminal.AgentView {
 		live := s.liveForTerminal(sessionID)
@@ -284,12 +297,44 @@ func (s *Server) Serve(ln net.Listener) error {
 	return s.http.Serve(ln)
 }
 
-// Shutdown gracefully stops the server.
+// streamDone is closed when Shutdown begins. Streaming handlers select
+// on it alongside the request context so they return promptly instead
+// of pinning http.Server.Shutdown open. A nil channel (a Server built
+// without New) never fires, matching the old behaviour.
+func (s *Server) streamDone() <-chan struct{} {
+	if s == nil || s.shutdownCtx == nil {
+		return nil
+	}
+	return s.shutdownCtx.Done()
+}
+
+// beginShutdown signals every streaming handler to finish.
+func (s *Server) beginShutdown() {
+	if s == nil {
+		return
+	}
+	s.shutdownOnce.Do(func() {
+		if s.shutdownCancel != nil {
+			s.shutdownCancel()
+		}
+	})
+}
+
+// Shutdown gracefully stops the server. Streaming handlers are signalled
+// first so they release their connections; if the graceful wait still
+// expires, the remaining connections are force-closed so Shutdown — and
+// the process calling it, e.g. `strike serve` on Ctrl-C — cannot hang
+// on a stream that ignored the signal (#1678).
 func (s *Server) Shutdown(ctx context.Context) error {
+	s.beginShutdown()
 	if s.terms != nil {
 		s.terms.Close()
 	}
-	return s.http.Shutdown(ctx)
+	if err := s.http.Shutdown(ctx); err != nil {
+		_ = s.http.Close()
+		return err
+	}
+	return nil
 }
 
 // MintToken returns a random 32-byte hex token suitable for --token.
@@ -982,6 +1027,8 @@ func (s *Server) handleSessionEvents(w http.ResponseWriter, r *http.Request) {
 	for {
 		select {
 		case <-ctx.Done():
+			return
+		case <-s.streamDone():
 			return
 		case <-ticker.C:
 			n, err := s.writeEventsFrom(ctx, w, flusher, path, offset)

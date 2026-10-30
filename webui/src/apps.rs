@@ -627,6 +627,32 @@ pub fn AppsPane(
         open_handoff.set(app.handoff);
         open_id.set(app.id);
     };
+    let open_queue = move |filter_id: &str| -> bool {
+        let apps = catalog.get_untracked();
+        let Some(app) = apps.first().cloned() else {
+            return false;
+        };
+        open_app(app);
+        filter.set(filter_id.to_string());
+        true
+    };
+    crate::shell::bind(
+        "apps.queue",
+        Rc::new(move |filter_id| {
+            if !open_queue(filter_id) {
+                crate::park::put("apps.queue", filter_id);
+            }
+            Ok(())
+        }),
+    );
+    Effect::new(move |_| {
+        let _ = catalog.get();
+        if let Some(filter_id) = crate::park::take("apps.queue") {
+            if !open_queue(&filter_id) {
+                crate::park::put("apps.queue", &filter_id);
+            }
+        }
+    });
 
     let epoch = APPS_KEY_EPOCH.with(|cell| {
         let next = cell.get().wrapping_add(1);
@@ -837,7 +863,6 @@ pub fn AppsPane(
                                 <button class="secondary apps-back" on:click=move |_| {
                                     selected.set(String::new());
                                 }>"Queue"</button>
-                                <button class="secondary" on:click=move |_| open_id.set(String::new())>"All apps"</button>
                             </div>
                             <p class="hint">{if repo_name.is_empty() { "Repository comes from the daemon.".into() } else { repo_name.clone() }}</p>
                             <div class="chips" role="tablist" aria-label="Queue filter">
@@ -953,7 +978,6 @@ pub fn AppsPane(
                                 view! {
                                     <article class="apps-article">
                                         <header class="apps-read-head">
-                                            <button class="secondary apps-back" on:click=move |_| selected.set(String::new())>"Queue"</button>
                                             <h2 class="apps-title">{item_title}</h2>
                                             <p class="path">
                                                 <span class=badge_klass>{item_badge}</span>

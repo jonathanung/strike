@@ -1,6 +1,7 @@
 //! Triggers page. The daemon registry is the source of truth; this module
 //! only renders it. Secrets are shown once, when the daemon mints them.
 
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use leptos::prelude::*;
@@ -10,6 +11,31 @@ use serde_json::{json, Value};
 use wasm_bindgen::JsCast;
 
 use crate::api::{api, auth_header, get_json, now_ms, post_json_value};
+use crate::shell::Choice;
+
+thread_local! {
+    static TRIGGER_CHOICES: RefCell<Vec<Choice>> = RefCell::new(Vec::new());
+}
+
+pub fn trigger_choices() -> Vec<Choice> {
+    TRIGGER_CHOICES.with(|rows| rows.borrow().clone())
+}
+
+fn publish_triggers(items: &[TriggerRow]) {
+    let rows = items
+        .iter()
+        .map(|item| Choice {
+            id: item.id.clone(),
+            label: if item.name.is_empty() {
+                item.id.clone()
+            } else {
+                item.name.clone()
+            },
+            detail: item.kind.clone(),
+        })
+        .collect();
+    TRIGGER_CHOICES.with(|slot| *slot.borrow_mut() = rows);
+}
 
 #[derive(Clone, Deserialize)]
 struct TriggerList {
@@ -250,7 +276,10 @@ fn refresh(
     let (b, t) = (base.get(), token.get());
     spawn_local(async move {
         match get_json::<TriggerList>(&b, &t, "/v1/triggers").await {
-            Ok(list) => rows.set(list.triggers),
+            Ok(list) => {
+                publish_triggers(&list.triggers);
+                rows.set(list.triggers);
+            },
             Err(e) => notice.set(e),
         }
     });
@@ -579,6 +608,101 @@ pub fn TriggersPage(
             Ok(())
         }),
     );
+    let pick_row = move |id: &str| -> bool {
+        let list = rows.get_untracked();
+        if let Some(row) = list.iter().find(|row| row.id == id) {
+            form.fill(row);
+            true
+        } else {
+            false
+        }
+    };
+    crate::shell::bind(
+        "trigger.test",
+        Rc::new(move |id| {
+            if pick_row(id) {
+                send_test();
+            } else {
+                crate::park::put("trigger.test", id);
+            }
+            Ok(())
+        }),
+    );
+    crate::shell::bind(
+        "trigger.reject",
+        Rc::new(move |id| {
+            if pick_row(id) {
+                reject_sig();
+            } else {
+                crate::park::put("trigger.reject", id);
+            }
+            Ok(())
+        }),
+    );
+    crate::shell::bind(
+        "trigger.replay",
+        Rc::new(move |id| {
+            if !pick_row(id) {
+                crate::park::put("trigger.replay", id);
+                return Ok(());
+            }
+            let id = id.to_string();
+            let (b, t) = (base.get_untracked(), token.get_untracked());
+            spawn_local(async move {
+                let list = match get_json::<DeliveryList>(&b, &t, &format!("/v1/triggers/{id}/deliveries")).await {
+                    Ok(list) => list,
+                    Err(e) => {
+                        form.notice.set(e);
+                        return;
+                    }
+                };
+                let Some(delivery) = list
+                    .deliveries
+                    .iter()
+                    .find(|row| row.outcome == "accepted" || row.outcome == "replayed")
+                else {
+                    form.notice.set("No accepted delivery to replay.".into());
+                    return;
+                };
+                let delivery_id = delivery.id.clone();
+                match post_json_value(
+                    &b,
+                    &t,
+                    &format!("/v1/triggers/{id}/replay"),
+                    json!({"deliveryId": delivery_id}),
+                )
+                .await
+                {
+                    Ok(v) => {
+                        let outcome = v.get("outcome").and_then(|s| s.as_str()).unwrap_or("replayed");
+                        form.notice.set(format!("Replay {outcome}."));
+                        load_deliveries(base, token, id, deliveries, form.notice);
+                    }
+                    Err(e) => form.notice.set(e),
+                }
+            });
+            Ok(())
+        }),
+    );
+    Effect::new(move |_| {
+        let list = rows.get();
+        if list.is_empty() {
+            return;
+        }
+        if let Some(id) = crate::park::take("trigger.test") {
+            if pick_row(&id) {
+                send_test();
+            }
+        }
+        if let Some(id) = crate::park::take("trigger.reject") {
+            if pick_row(&id) {
+                reject_sig();
+            }
+        }
+        if let Some(id) = crate::park::take("trigger.replay") {
+            let _ = crate::shell::dispatch("trigger.replay", &id);
+        }
+    });
 
     view! {
         <main class="triggers">
@@ -637,7 +761,6 @@ pub fn TriggersPage(
                             <button type="button" class="secondary" on:click=move |_| secret_revealed.set(!secret_revealed.get())>
                                 {move || if secret_revealed.get() { "Mask secret" } else { "Reveal secret" }}
                             </button>
-                            <button type="button" class="secondary" on:click=move |_| { secret_revealed.set(false); form.secret_once.set(None); }>"Dismiss secret"</button>
                         </div>
                     </Show>
                     <label for="trigger-name">"Name"</label>
@@ -689,8 +812,6 @@ pub fn TriggersPage(
                             {move || if form.enabled.get() { "Enabled" } else { "Disabled" }}
                         </button>
                         <button type="submit" class="primary">"Save"</button>
-                        <button type="button" class="secondary" on:click=move |_| send_test()>"Send test"</button>
-                        <button type="button" class="secondary" on:click=move |_| reject_sig()>"Reject signature"</button>
                         <Show when=move || !form.selected.get().is_empty()>
                             <button type="button" class="secondary" data-action="delete-trigger" on:click=move |_| {
                                 let id = form.selected.get();
@@ -731,7 +852,6 @@ pub fn TriggersPage(
                     </Show>
                     <ul class="plain">
                         {move || deliveries.get().into_iter().map(|row| {
-                            let replay_id = row.id.clone();
                             let headline = format!("{} · {}", row.outcome, row.event);
                             let detail = if row.reason.is_empty() { row.session_id.clone() } else { row.reason.clone() };
                             let when = row.at.clone();
@@ -743,26 +863,7 @@ pub fn TriggersPage(
                                         <span class="path">{detail}</span>
                                         <span class="path">{when}</span>
                                     </span>
-                                    {can_replay.then(|| {
-                                        let delivery_id = replay_id.clone();
-                                        view! {
-                                            <button type="button" class="secondary" on:click=move |_| {
-                                                let trigger_id = form.selected.get();
-                                                let delivery = delivery_id.clone();
-                                                let (b, t) = (base.get(), token.get());
-                                                spawn_local(async move {
-                                                    match post_json_value(&b, &t, &format!("/v1/triggers/{trigger_id}/replay"), json!({"deliveryId": delivery})).await {
-                                                        Ok(v) => {
-                                                            let outcome = v.get("outcome").and_then(|s| s.as_str()).unwrap_or("replayed");
-                                                            form.notice.set(format!("Replay {outcome}."));
-                                                            load_deliveries(base, token, trigger_id, deliveries, form.notice);
-                                                        }
-                                                        Err(e) => form.notice.set(e),
-                                                    }
-                                                });
-                                            }>"Replay"</button>
-                                        }
-                                    })}
+                                    {can_replay.then(|| view! { <span class="path">"Replay from the command palette."</span> })}
                                 </li>
                             }
                         }).collect_view()}

@@ -1,6 +1,8 @@
 //! Usage dashboard and tamper-evident audit log.
 //! Dollars are whatever GET /v1/usage reports. This module does not invent a price.
 
+use std::rc::Rc;
+
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use serde::Deserialize;
@@ -254,6 +256,43 @@ fn download_text(filename: &str, text: &str) {
 }
 
 #[component]
+pub fn UsageAuditPages(
+    mode: RwSignal<String>,
+    base: RwSignal<String>,
+    token: RwSignal<String>,
+    status: RwSignal<String>,
+) -> impl IntoView {
+    view! {
+        <div class="usage-audit-shell">
+            <div class="segmented" role="tablist" aria-label="Usage and audit">
+                <button
+                    type="button"
+                    data-view="usage"
+                    class=move || if mode.get() == "audit" { "seg" } else { "seg on" }
+                    on:click=move |_| mode.set("usage".into())
+                >
+                    "Usage"
+                </button>
+                <button
+                    type="button"
+                    data-view="audit"
+                    class=move || if mode.get() == "audit" { "seg on" } else { "seg" }
+                    on:click=move |_| mode.set("audit".into())
+                >
+                    "Audit"
+                </button>
+            </div>
+            <Show when=move || mode.get() != "audit">
+                <UsagePage base=base token=token status=status />
+            </Show>
+            <Show when=move || mode.get() == "audit">
+                <AuditPage base=base token=token status=status />
+            </Show>
+        </div>
+    }
+}
+
+#[component]
 pub fn UsagePage(
     base: RwSignal<String>,
     token: RwSignal<String>,
@@ -484,7 +523,7 @@ pub fn AuditPage(
             }
         });
     };
-    let export = move |_| {
+    let export = move || {
         let (b, t) = (base.get(), token.get());
         spawn_local(async move {
             match get_json::<Value>(&b, &t, "/v1/audit/export").await {
@@ -500,6 +539,16 @@ pub fn AuditPage(
             }
         });
     };
+    crate::shell::bind(
+        "audit.export",
+        Rc::new(move |_| {
+            export();
+            Ok(())
+        }),
+    );
+    if crate::park::take("audit.export").is_some() {
+        export();
+    }
 
     let actions = [
         "all",
@@ -518,7 +567,6 @@ pub fn AuditPage(
                 <p class="hint">"Append-only hash chain of approvals, permission changes, shell and terminal use, config edits, and token rotation. Entries are redacted before they are hashed. Verify fails if a line was edited or the tail was removed."</p>
                 <div class="ua-form">
                     <button on:click=verify>"Verify chain"</button>
-                    <button class="secondary" on:click=export>"Export"</button>
                     <span class=move || if list.get().verified { "chip ok" } else { "chip bad" }>{move || if !list.get().configured { "Not configured".to_string() } else if list.get().verified { "Chain intact".to_string() } else { "Chain broken".to_string() }}</span>
                 </div>
                 <Show when=move || !error.get().is_empty()>

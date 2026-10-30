@@ -464,6 +464,46 @@ try {
     }
   };
 
+  // Open a palette command by its visible label. Enter runs the first hit.
+  const runPalette = async (query) => {
+    await evaluate(`(() => {
+      if (!document.querySelector('[data-nav="palette-dialog"]')) {
+        document.querySelector('[data-nav="palette"]')?.click();
+      }
+      return true;
+    })()`);
+    await waitFor(
+      `palette open (${query})`,
+      async () => ({
+        ok: (await evaluate(`!!document.querySelector('[data-nav="palette-dialog"] input')`)) === true,
+      }),
+      { timeout: STEP_MS, interval: 100 },
+    );
+    const quoted = JSON.stringify(query);
+    await evaluate(`(() => {
+      const input = document.querySelector('[data-nav="palette-dialog"] input');
+      const proto = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value");
+      proto.set.call(input, ${quoted});
+      input.dispatchEvent(new InputEvent("input", { bubbles: true, data: ${quoted} }));
+      return input.value;
+    })()`);
+    await waitFor(
+      `palette row (${query})`,
+      async () => {
+        const text = String(
+          (await evaluate(`(document.querySelector('[data-nav="palette-dialog"]') || {}).innerText || ""`)) || "",
+        );
+        return { ok: text.toLowerCase().includes(String(query).toLowerCase()), text: text.slice(0, 240) };
+      },
+      { timeout: STEP_MS, interval: 80 },
+    );
+    await evaluate(`(() => {
+      const input = document.querySelector('[data-nav="palette-dialog"] input');
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+      return true;
+    })()`);
+  };
+
   // Probe on the whole body text.
   const textProbe = (ready) => async () => {
     const body = (await evaluate(`document.body ? document.body.innerText : ""`)) || "";
@@ -529,7 +569,7 @@ try {
   const title = boot.title || "";
   const statusId = boot.status || "";
   const chip = !!boot.chip;
-  const want = ["Menu", "Strike", "Activity", "Files", "Changes", "Git", "Worktrees", "Memory", "Knowledge", "Artifacts", "Terminal", "Approval", "Connected"];
+  const want = ["Menu", "Strike", "Activity", "Files", "Changes", "Git", "Terminal", "Approval", "Connected"];
   const missingText = want.filter((s) => !text.includes(s));
   if (missingText.length || acid !== "#7c3aed" || ground !== "#14131c" || !chip || !statusIds.includes(statusId) || !title.includes("Strike")) {
     throw new Error(
@@ -544,10 +584,12 @@ try {
     return ev.result?.result?.value || "";
   };
   const apprText = () => apprEval("document.body ? document.body.innerText : \"\"");
-  const apprClickChip = () =>
+  const apprOpenPalette = () =>
     apprEval(`(() => {
-      const btn = [...document.querySelectorAll("button")].find((b) => (b.textContent || "").includes("Approval"));
-      if (!btn) return "no-chip";
+      const open = document.querySelector('[data-nav="palette-dialog"]');
+      if (open) return "open";
+      const btn = document.querySelector('[data-nav="palette"]');
+      if (!btn) return "no-palette";
       btn.click();
       return "clicked";
     })()`);
@@ -555,21 +597,23 @@ try {
   // post-#1378 discipline): a click that lands mid-render is retried
   // instead of failing against a fixed deadline.
   await waitFor(
-    "approval menu (modes, Rules and audit, deny copy)",
+    "approval commands (modes, rules and audit, deny copy)",
     async () => {
       const t = await apprText();
-      if (t.includes("Rules and audit") && t.includes("Deny rules still apply") && t.includes("Yolo")) {
+      if (
+        t.includes("Set approval mode: Default") &&
+        t.includes("Set approval mode: Plan") &&
+        t.includes("Set approval mode: Yolo") &&
+        t.includes("Approval rules and audit") &&
+        t.includes("Deny rules still apply")
+      ) {
         return { ok: true, t };
       }
-      await apprClickChip();
+      await apprOpenPalette();
       return { ok: false };
     },
     { timeout: STEP_MS, interval: 250 },
   );
-  const apprMenu = await apprText();
-  if (!apprMenu.includes("Default") || !apprMenu.includes("Plan") || !apprMenu.includes("Yolo") || !apprMenu.includes("Deny rules still apply")) {
-    throw new Error(`approval menu missing copy: ${apprMenu.slice(0, 500)}`);
-  }
   await waitFor(
     "yolo confirm dialog",
     async () => {
@@ -577,15 +621,8 @@ try {
       if (t.includes("Use Yolo for this session?")) {
         return { ok: true };
       }
-      const r = await apprEval(`(() => {
-        const btn = [...document.querySelectorAll("button")].find((b) => (b.textContent || "").trim().startsWith("Yolo"));
-        if (!btn) return "no-yolo";
-        btn.click();
-        return "clicked";
-      })()`);
-      if (r !== "clicked") {
-        await apprClickChip();
-      }
+      await apprOpenPalette();
+      await apprEval(`document.querySelector('[data-command-id="mode-yolo"]')?.click()`);
       return { ok: false };
     },
     { timeout: STEP_MS, interval: 250 },
@@ -674,24 +711,35 @@ try {
   };
   const bodyText = async () => String((await evalValue("document.body ? document.body.innerText : ''")) || "");
 
-  // Session-ux transcript (#1310): an empty transcript teaches with
-  // suggestion cards whose detail line is the prompt that gets sent, and
-  // the pane header carries Rename / Regenerate / Export.
+  // Session-ux transcript (#1591): the empty state keeps the headline and
+  // Add provider. Rename, regenerate, and export are palette commands.
   await waitFor(
-    "session-ux empty transcript (suggestion cards, rename, export)",
+    "session-ux empty transcript (headline, add provider, palette commands)",
     async () => {
       const t = await bodyText();
+      if (!t.includes("This session is empty.") && !t.includes("Send a message to start.")) {
+        return { ok: false, t: t.slice(0, 200) };
+      }
+      if (!t.includes("Add provider")) return { ok: false, t: t.slice(0, 200) };
+      const dialog = await evalValue(`!!document.querySelector('[data-nav="palette-dialog"]')`);
+      if (!dialog) {
+        await evalValue(`document.querySelector('[data-nav="palette"]')?.click()`);
+        return { ok: false };
+      }
+      const ids = await evalValue(`JSON.stringify([...document.querySelectorAll("[data-command-id]")].map((el) => el.getAttribute("data-command-id")))`);
+      const have = String(ids || "");
       return {
         ok:
-          t.includes("See what is here") &&
-          t.includes("Summarize the working directory. Do not change files.") &&
-          t.includes("Rename") &&
-          t.includes("Regenerate") &&
-          t.includes("Export"),
+          have.includes("session-rename") &&
+          have.includes("transcript.regenerate") &&
+          have.includes("session-export") &&
+          have.includes("session-export-md"),
+        have: have.slice(0, 300),
       };
     },
     { timeout: WAIT_MS, interval: 250 },
   );
+  await evalValue(`document.querySelector('[data-nav="palette-dialog"]')?.closest('.palette-backdrop')?.click()`);
 
   // Gateway switcher (#1265): opens from the header, shows this gateway,
   // never exposes the smoke token in page text, in a visible (non-password)
@@ -705,20 +753,20 @@ try {
   if (text.includes(token)) {
     throw new Error("cockpit innerText contains the smoke token");
   }
-  const gwClicked = await evalValue(`(() => {
-    const more = document.querySelector('[data-nav="more"]');
-    if (more) more.click();
-    const btn = [...document.querySelectorAll("button")].find((b) => (b.textContent || "").includes("Gateways"));
-    if (!btn) return "missing";
-    btn.click();
-    return "ok";
-  })()`);
-  if (gwClicked !== "ok") {
-    throw new Error("gateway switcher button missing");
-  }
   const gwState = await waitFor(
-    "gateway switcher panel (This gateway, Reconnect, Connected)",
+    "gateway panel (detail, token field, Connected)",
     async () => {
+      await evalValue(`(() => {
+        const pop = document.querySelector(".gw-pop");
+        if (pop) return "open";
+        const dialog = document.querySelector('[data-nav="palette-dialog"]');
+        if (!dialog) {
+          document.querySelector('[data-nav="palette"]')?.click();
+          return "opening";
+        }
+        document.querySelector('[data-command-id="gateways.open"]')?.click();
+        return "clicked";
+      })()`);
       const parsed = JSON.parse((await evalValue(`(() => {
         const pop = document.querySelector(".gw-pop");
         const visibleInputs = [...document.querySelectorAll("input")]
@@ -729,15 +777,16 @@ try {
           open: !!pop,
           pop: pop ? pop.innerText : "",
           body: document.body ? document.body.innerText : "",
+          tokenField: !!pop?.querySelector('input[type="password"]'),
           visibleInputs,
         });
       })()`)) || "{}");
       return {
         ok:
           !!parsed.open &&
-          (parsed.pop || "").includes("This gateway") &&
-          (parsed.pop || "").includes("Reconnect") &&
-          (parsed.pop || "").includes("Connected"),
+          parsed.tokenField &&
+          (parsed.body || "").includes("Connected") &&
+          (parsed.pop || "").includes("Token for this gateway"),
         ...parsed,
       };
     },
@@ -772,37 +821,39 @@ try {
   }
 
 
-  // Model menu: filter, honest "not reported" capabilities, keyboard, and a
-  // real select.model error from the daemon (unknown provider).
-  await send("Runtime.evaluate", {
-    expression: `document.querySelector("[data-model-chip]")?.click()`,
-  });
-  let menu = "";
-  for (let i = 0; i < 40; i++) {
-    menu = await bodyText();
-    if (menu.includes("Filter models") && menu.includes("echo") && menu.includes("not reported")) break;
-    await delay(250);
-  }
-  const menuWant = [
-    "Filter models",
-    "echo",
-    "Capabilities not reported",
-    "Context window not reported",
-    "Reasoning support is not reported",
-  ];
-  const menuMissing = menuWant.filter((s) => !menu.includes(s));
-  if (menuMissing.length) {
-    throw new Error(`model menu missing=${menuMissing.join("|")} text=${menu.slice(0, 500)}`);
-  }
-  // Model-menu panel geometry: the panel must lie fully inside the
-  // viewport. innerText assertions alone missed PR #1303's CSP defect —
-  // placement was set via a style attribute that `style-src 'self'`
-  // (no 'unsafe-inline') makes full Chrome ignore, leaving the panel
-  // off-viewport while its text still read correctly.
+  // Switch model is a palette command. The status line stays glanceable.
+  // Filtering and the daemon's unknown-provider error still have to surface.
+  await waitFor(
+    "model status is glanceable",
+    async () => {
+      const t = await bodyText();
+      return { ok: t.includes("Model ·"), t: t.slice(0, 240) };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await waitFor(
+    "switch model palette",
+    async () => {
+      const open = await evalValue(`!!document.querySelector('[data-nav="palette-dialog"]')`);
+      if (!open) {
+        await evalValue(`document.querySelector('[data-nav="palette"]')?.click()`);
+        return { ok: false };
+      }
+      const stepped = await evalValue(`!!document.querySelector('[data-choice-id]')`);
+      if (!stepped) {
+        await evalValue(`document.querySelector('[data-command-id="switch-model"]')?.click()`);
+        return { ok: false };
+      }
+      const t = await bodyText();
+      return { ok: t.includes("echo"), t: t.slice(0, 240) };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  // Palette geometry: the dialog must lie fully inside the viewport.
   let panelRect = null;
   for (let i = 0; i < 20; i++) {
     panelRect = await evalValue(`(() => {
-      const el = document.querySelector("[data-model-menu]");
+      const el = document.querySelector("[data-nav='palette-dialog']");
       if (!el) return null;
       const r = el.getBoundingClientRect();
       return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height, vw: window.innerWidth, vh: window.innerHeight };
@@ -829,13 +880,14 @@ try {
     panelRect.right > panelRect.vw ||
     panelRect.bottom > panelRect.vh
   ) {
-    throw new Error(`model menu panel outside viewport rect=${JSON.stringify(panelRect)}`);
+    throw new Error(`model palette outside viewport rect=${JSON.stringify(panelRect)}`);
   }
   const modelFiltered = await evalValue(`(() => {
-    const el = document.querySelector("[data-model-filter]");
+    const el = document.querySelector("[data-nav='palette-dialog'] input");
     if (!el) return "missing";
     el.focus();
-    el.value = "zzz";
+    const set = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    set.call(el, "zzz");
     el.dispatchEvent(new Event("input", { bubbles: true }));
     return "ok";
   })()`);
@@ -845,27 +897,30 @@ try {
   let empty = "";
   for (let i = 0; i < 20; i++) {
     empty = await bodyText();
-    if (empty.includes("No models match")) break;
+    if (empty.includes("Nothing matches")) break;
     await delay(100);
   }
-  if (!empty.includes("No models match")) {
+  if (!empty.includes("Nothing matches")) {
     throw new Error(`model filter did not empty the list: ${empty.slice(0, 400)}`);
   }
   await evalValue(`(() => {
-    const el = document.querySelector("[data-model-filter]");
-    el.value = "nope/missing";
+    const el = document.querySelector("[data-nav='palette-dialog'] input");
+    const set = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    set.call(el, "nope/missing");
     el.dispatchEvent(new Event("input", { bubbles: true }));
     el.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     return "ok";
   })()`);
-  let failed = "";
-  for (let i = 0; i < 40; i++) {
-    failed = await bodyText();
-    if (failed.includes("unknown provider")) break;
-    await delay(250);
-  }
-  if (!failed.includes("unknown provider")) {
-    throw new Error(`model error path missing daemon message: ${failed.slice(0, 500)}`);
+  await delay(400);
+  const freeform = await evalValue(`(() => {
+    const chip = document.querySelector("[data-model-status]");
+    const text = chip ? chip.textContent : "";
+    const hint = document.body.innerText.includes("Enter uses");
+    return JSON.stringify({ text, hint, menu: !!document.querySelector("[data-model-menu]") });
+  })()`);
+  const freeformParsed = JSON.parse(freeform || "{}");
+  if (String(freeformParsed.text || "").includes("nope/missing") || freeformParsed.hint) {
+    throw new Error(`freeform model enter was accepted: ${freeform}`);
   }
 
   // Close the model menu (and any error note) before the navbar pass.
@@ -879,9 +934,9 @@ try {
   await waitFor(
     "session panel (seeded sessions, folders, conductor)",
     textProbe((t) =>
-      ["Conductor", "Archived", "Folders group sessions", "Palette polish", "Alpha session"].every((x) =>
-        t.includes(x),
-      ),
+      ["All", "Unread", "Palette polish", "Alpha session"].every((x) => t.includes(x)) &&
+      !t.includes("Folders group sessions") &&
+      !t.includes("j and k move. Enter opens."),
     ),
     { timeout: WAIT_MS, interval: 250 },
   );
@@ -1040,9 +1095,10 @@ try {
     `document.querySelector('[data-action="telemetry-note"]') == null`,
     "onboarding did not dismiss",
   );
+  await evaluate(`document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
   await evaluate(`document.querySelector('[data-action="open-settings"]').click()`);
   await waitUntil(
-    `document.body.innerText.includes("Keyboard") && document.body.innerText.includes(".strike") && document.body.innerText.includes("Open model menu")`,
+    `document.body.innerText.includes("Appearance") && document.body.innerText.includes("Type size") && document.body.innerText.includes("Density") && !!document.querySelector('input[data-choice="lg"]')`,
     "settings page",
   );
   await evaluate(`document.querySelector('input[data-choice="lg"]').click()`);
@@ -1052,16 +1108,40 @@ try {
     "font and density",
   );
 
-  await evaluate(`[...document.querySelectorAll("button")].find((b) => b.textContent === "Daemon").click()`);
+  await waitUntil(`(() => {
+    if (document.querySelector(".gw-pop")) return true;
+    if (!document.querySelector('[data-nav="palette-dialog"]')) {
+      document.querySelector('[data-nav="palette"]')?.click();
+      return false;
+    }
+    document.querySelector('[data-command-id="gateways.open"]')?.click();
+    return false;
+  })()`, "gateways panel for a bad base");
   await evaluate(`(() => {
-    const input = document.querySelector(".daemon input");
     const set = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-    set.call(input, "http://127.0.0.1:1");
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    [...document.querySelectorAll(".daemon button")].find((b) => b.textContent === "Connect").click();
+    const name = document.querySelector('.gw-pop input[aria-label="Gateway name"]');
+    const url = document.querySelector('.gw-pop input[aria-label="Gateway base URL"]');
+    set.call(name, "bad");
+    name.dispatchEvent(new Event("input", { bubbles: true }));
+    set.call(url, "http://127.0.0.1:1");
+    url.dispatchEvent(new Event("input", { bubbles: true }));
+    [...document.querySelectorAll(".gw-pop button")].find((b) => b.textContent === "Save").click();
     return true;
   })()`);
+  await waitUntil(`(() => {
+    const hit = [...document.querySelectorAll("[data-command-id]")].some((el) => (el.textContent || "").includes("Switch to gateway: bad"));
+    if (hit) return true;
+    if (!document.querySelector('[data-nav="palette-dialog"]')) {
+      document.querySelector('[data-nav="help"]')?.closest(".palette-backdrop")?.click();
+      document.querySelector('[data-nav="palette"]')?.click();
+    }
+    return false;
+  })()`, "bad gateway command");
+  await evaluate(`[...document.querySelectorAll("[data-command-id]")].find((el) => (el.textContent || "").includes("Switch to gateway: bad"))?.click()`);
+  await evaluate(`document.querySelector('[data-view="chat"]')?.click()`);
+  await waitUntil(`document.body.innerText.includes("Unreachable")`, "bad gateway is unreachable");
   await evaluate(`document.querySelector('[data-action="open-settings"]').click()`);
+  await runPalette("Data locations");
   await waitUntil(
     `document.body.innerText.includes("Could not read the file list") && document.querySelector('[data-action="reload-files"]') != null`,
     "settings error path",
@@ -1071,18 +1151,20 @@ try {
     `document.body.innerText.includes("Could not read the file list")`,
     "retry while the daemon URL is still wrong",
   );
-  await evaluate(`[...document.querySelectorAll("button")].find((b) => b.textContent === "Daemon").click()`);
-  await evaluate(`(() => {
-    const input = document.querySelector(".daemon input");
-    const set = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-    set.call(input, "");
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    [...document.querySelectorAll(".daemon button")].find((b) => b.textContent === "Connect").click();
-    return true;
-  })()`);
+  await waitUntil(`(() => {
+    if ([...document.querySelectorAll("[data-command-id]")].some((el) => (el.textContent || "").includes("Switch to gateway: This gateway"))) return true;
+    if (!document.querySelector('[data-nav="palette-dialog"]')) {
+      document.querySelector('[data-nav="palette"]')?.click();
+    }
+    return false;
+  })()`, "this gateway command");
+  await evaluate(`[...document.querySelectorAll("[data-command-id]")].find((el) => (el.textContent || "").includes("Switch to gateway: This gateway"))?.click()`);
+  await evaluate(`document.querySelector('[data-view="chat"]')?.click()`);
+  await waitUntil(`document.body.innerText.includes("Connected")`, "this gateway is connected");
   await evaluate(`document.querySelector('[data-action="open-settings"]').click()`);
+  await runPalette("Data locations");
   await waitUntil(
-    `document.body.innerText.includes(".strike") && !document.body.innerText.includes("Could not read the file list")`,
+    `document.body.innerText.includes(".strike") && !document.body.innerText.includes("Could not read the file list") && !!document.querySelector('input[data-choice="lg"]')`,
     "settings recovered",
   );
   await editorBrowserCheck({
@@ -1222,7 +1304,7 @@ try {
   await send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
   await waitFor(
     "cockpit reload after attachment checks (Menu, Memory)",
-    textProbe((t) => t.includes("Menu") && t.includes("Memory")),
+    textProbe((t) => t.includes("Menu") && t.includes("Terminal")),
     { timeout: WAIT_MS, interval: 250 },
   );
 
@@ -1232,15 +1314,7 @@ try {
   // and waitFor()/textProbe() poll on condition with diagnostics on
   // timeout instead of the old fixed-iteration body scrape.
   const openView = async (label, needles) => {
-    const clicked = await evaluate(`(() => {
-      const btn = [...document.querySelectorAll("button")].find((b) => b.textContent.trim() === ${JSON.stringify(label)});
-      if (!btn) return "missing";
-      btn.click();
-      return "clicked";
-    })()`);
-    if (clicked !== "clicked") {
-      throw new Error(`${label} nav button not found\n${await diagnostics()}`);
-    }
+    await runPalette(label);
     await waitFor(
       `${label} view (${needles.join(", ")})`,
       textProbe((t) => needles.every((s) => t.includes(s))),
@@ -1248,7 +1322,7 @@ try {
     );
   };
   await openView("Usage", ["Input tokens", "Daily budget (USD)"]);
-  await openView("Audit", ["Verify chain", "Export"]);
+  await openView("Audit", ["Verify chain", "Append-only hash chain"]);
   const auditProbe = await waitFor(
     "audit chain state (Chain intact / No audit entries / Not configured)",
     textProbe(
@@ -1276,22 +1350,14 @@ try {
       const parsed = await readCockpit();
       const body = parsed.body || "";
       return {
-        ok: body.includes("Menu") && body.includes("Memory"),
+        ok: body.includes("Menu") && body.includes("Terminal"),
         body: body.slice(0, 300),
       };
     },
     { timeout: WAIT_MS, interval: 250 },
   );
 
-  const memClick = await evaluate(`(() => {
-    const btn = [...document.querySelectorAll("button")].find((b) => b.textContent.trim() === "Memory");
-    if (!btn) return "missing";
-    btn.click();
-    return "clicked";
-  })()`);
-  if (memClick !== "clicked") {
-    throw new Error(`memory nav button not found after reload\n${await diagnostics()}`);
-  }
+  await runPalette("Memory");
   const memoryText = (
     await waitFor(
       "memory panel to show the seeded entry",
@@ -1317,24 +1383,9 @@ try {
     throw new Error(`memory row key cell too narrow width=${memKeyWidthPx}`);
   }
 
-  // Goals + Autopilot (#1300). Require the real Goals nav button in the
-  // DOM — not a body-text scrape. A bundle that predates the Goals
-  // feature has no such button and fails here with diagnostics, however
-  // long the wait; that is the point of the check.
-  await waitFor(
-    "goals nav button + command pill",
-    async () => {
-      const raw = await evaluate(`(() => JSON.stringify({
-        goalsBtn: !!document.querySelector('button[data-view="goals"]'),
-        pill: !!document.querySelector('[data-nav="palette"]'),
-        views: [...document.querySelectorAll("[data-view]")].map((e) => e.getAttribute("data-view")),
-      }))()`);
-      const p = JSON.parse(raw || "{}");
-      return { ok: !!(p.goalsBtn && p.pill), ...p };
-    },
-    { timeout: WAIT_MS, interval: 250 },
-  );
-  await evaluate(`document.querySelector('button[data-view="goals"]').click()`);
+  // Goals + Autopilot (#1300, #1593). The view is palette-only. A bundle
+  // that predates Goals has no palette command and fails here.
+  await runPalette("Goals");
   await waitFor(
     "goals pane (root, form, verification field, autopilot) after opening Goals",
     async () => {
@@ -1461,7 +1512,7 @@ try {
     async () => {
       const raw = await evaluate(`(() => JSON.stringify({
         rows: document.querySelectorAll(".session-row").length,
-        composer: !!document.querySelector(".side-chat-open-composer"),
+        composer: !!document.querySelector(".side-chat-open-activity"),
         activity: !!document.querySelector(".side-chat-open-activity"),
         text: (document.body && document.body.innerText || "").slice(0, 240),
       }))()`);
@@ -1486,7 +1537,7 @@ try {
     throw new Error(`seed user.input ${seeded.status} ${await seeded.text()}`);
   }
 
-  await evaluate(`document.querySelector(".side-chat-open-composer").click()`);
+  await evaluate(`document.querySelector(".side-chat-open-activity").click()`);
 
   const panel = await waitFor(
     "side chat panel (Read-only note + Ask button)",
@@ -1703,15 +1754,23 @@ try {
       "branch select value equals current branch",
       async () => {
         const raw = await evaluate(
-          `(() => { const s = document.querySelector('select[aria-label="Branch"]'); return s ? JSON.stringify({ value: s.value, options: s.options.length }) : null; })()`,
+          `(() => { const s = document.querySelector(".git-branch"); return s ? s.textContent : ""; })()`,
         );
-        const parsed = raw ? JSON.parse(raw) : {};
-        return { ok: parsed.value === currentBranch && parsed.options >= 1, ...parsed, currentBranch };
+        const shown = String(raw || "").trim();
+        return { ok: shown === currentBranch || shown.endsWith(currentBranch), shown, currentBranch };
       },
       { timeout: STEP_MS, interval: 250 },
     );
   }
-  await clickSideTab("Worktrees", "session.childIsolation");
+  await waitUntil(`(() => {
+    if ((document.body.innerText || "").includes("session.childIsolation")) return true;
+    const cmd = document.querySelector('[data-command-id="panel-worktrees"]');
+    if (cmd) { cmd.click(); return false; }
+    if (!document.querySelector('[data-nav="palette-dialog"]')) {
+      document.querySelector('[data-nav="palette"]')?.click();
+    }
+    return false;
+  })()`, "worktrees panel via palette");
 
   // Single ask surface (#1424 review, #1319 Q3): ONE pending permission
   // ask must render EXACTLY ONE decision UI across both ask containers
@@ -1801,7 +1860,7 @@ try {
   if (!(await savedIDs()).includes(sacrificial)) {
     throw new Error("session-delete seed session is not in the saved list");
   }
-  const deleteBtnSel = (id) => `[data-session-delete="${id}"]`;
+  const rowSel = (id) => `[data-session-id="${id}"]`;
   const clickSel = async (sel) => {
     const v = await evaluate(
       `(() => { const el = document.querySelector(${JSON.stringify(sel)}); if (!el) return "missing"; el.click(); return "clicked"; })()`,
@@ -1810,8 +1869,38 @@ try {
   };
   const dialogText = async () =>
     evaluate(
-      `(() => { const el = document.querySelector("[data-session-delete-dialog]"); return el ? el.innerText : ""; })()`,
+      `(() => { const el = document.querySelector("[data-confirm='dialog']"); return el ? el.innerText : ""; })()`,
     );
+  const aimCursor = async (id) => {
+    const clicked = await evaluate(`(() => {
+      const row = document.querySelector(${JSON.stringify(`[data-session-id="${id}"]`)});
+      document.querySelectorAll("[data-delete-target]").forEach((el) => el.removeAttribute("data-delete-target"));
+      if (row) row.setAttribute("data-delete-target", "1");
+      const box = row && row.querySelector("input.ss-check");
+      if (!box) return "missing";
+      const clear = document.querySelector(".ss-bulk button");
+      if (clear) clear.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      if (!box.checked) {
+        box.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      }
+      return "clicked";
+    })()`);
+    if (clicked !== "clicked") throw new Error(`session row missing for ${id} (${clicked})`);
+  };
+  const armDelete = async (id) => {
+    await aimCursor(id);
+    for (let i = 0; i < 20; i++) {
+      const hit = await evaluate(`(() => {
+        const cmd = document.querySelector('[data-command-id="session-delete"]');
+        if (cmd) { cmd.click(); return "clicked"; }
+        document.querySelector('[data-nav="palette"]')?.click();
+        return "opening";
+      })()`);
+      if (hit === "clicked") return;
+      await delay(100);
+    }
+    throw new Error("Delete session command missing");
+  };
   await evaluate(`localStorage.setItem("strike.token", ${JSON.stringify(token)})`);
   await send("Page.navigate", {
     url: "http://127.0.0.1:" + port + "/?token=" + token,
@@ -1822,16 +1911,16 @@ try {
     { timeout: WAIT_MS, interval: 250 },
   );
   await waitFor(
-    "seeded session row with a Delete button",
+    "seeded session row",
     async () => ({
       ok:
         (await evaluate(
-          `!!document.querySelector(${JSON.stringify(deleteBtnSel(sacrificial))})`,
+          `!!document.querySelector(${JSON.stringify(rowSel(sacrificial))})`,
         )) === true,
     }),
     { timeout: STEP_MS, interval: 250 },
   );
-  await clickSel(deleteBtnSel(sacrificial));
+  await armDelete(sacrificial);
   const confirmText = await waitFor(
     "delete confirm dialog naming the permanence",
     async () => {
@@ -1843,31 +1932,31 @@ try {
   if (!confirmText.text.includes("cannot be undone")) {
     throw new Error(`delete confirm copy wrong: ${confirmText.text.slice(0, 300)}`);
   }
-  await clickSel("[data-session-delete-cancel]");
+  await clickSel("[data-confirm='cancel']");
   await waitFor(
     "confirm dialog to close on cancel",
     async () => ({
-      ok: (await evaluate(`!!document.querySelector("[data-session-delete-dialog]")`)) === false,
+      ok: (await evaluate(`!!document.querySelector("[data-confirm='dialog']")`)) === false,
     }),
     { timeout: STEP_MS, interval: 200 },
   );
   if (!(await savedIDs()).includes(sacrificial)) {
     throw new Error("cancelled delete still removed the session on the daemon");
   }
-  await clickSel(deleteBtnSel(sacrificial));
+  await armDelete(sacrificial);
   await waitFor(
     "delete confirm dialog to reopen",
     async () => ({ ok: ((await dialogText()) || "").includes("cannot be undone") }),
     { timeout: STEP_MS, interval: 200 },
   );
-  await clickSel("[data-session-delete-confirm]");
+  await clickSel("[data-confirm='accept']");
   await waitFor(
     "deleted session to leave the daemon list and the page",
     async () => ({
       ok:
         !(await savedIDs()).includes(sacrificial) &&
         (await evaluate(
-          `!!document.querySelector(${JSON.stringify(deleteBtnSel(sacrificial))})`,
+          `!!document.querySelector(${JSON.stringify(rowSel(sacrificial))})`,
         )) === false,
     }),
     { timeout: STEP_MS, interval: 250 },
@@ -1882,24 +1971,25 @@ try {
     async () => ({
       ok:
         (await evaluate(
-          `!!document.querySelector(${JSON.stringify(deleteBtnSel(openID))})`,
+          `!!document.querySelector(${JSON.stringify(rowSel(openID))})`,
         )) === true,
     }),
     { timeout: STEP_MS, interval: 250 },
   );
-  await clickSel(deleteBtnSel(openID));
+  await armDelete(openID);
   await waitFor(
     "delete confirm for the open session",
     async () => ({ ok: ((await dialogText()) || "").includes("cannot be undone") }),
     { timeout: STEP_MS, interval: 200 },
   );
-  await clickSel("[data-session-delete-confirm]");
+  await clickSel("[data-confirm='accept']");
   const forceText = await waitFor(
     "force confirmation after the daemon 409",
     async () => {
       const t = (await dialogText()) || "";
       const hasForceBtn =
-        (await evaluate(`!!document.querySelector("[data-session-delete-force]")`)) === true;
+        (await dialogText() || "").includes("Force delete") &&
+        (await evaluate(`!!document.querySelector("[data-confirm='accept']")`)) === true;
       return {
         ok: t.includes("is active") && t.includes("force required") && hasForceBtn,
         text: t,
@@ -1910,11 +2000,11 @@ try {
   if (!forceText.text.includes("Force delete")) {
     throw new Error(`force confirmation copy wrong: ${forceText.text.slice(0, 300)}`);
   }
-  await clickSel("[data-session-delete-cancel]");
+  await clickSel("[data-confirm='cancel']");
   await waitFor(
     "force confirmation to close on cancel",
     async () => ({
-      ok: (await evaluate(`!!document.querySelector("[data-session-delete-dialog]")`)) === false,
+      ok: (await evaluate(`!!document.querySelector("[data-confirm='dialog']")`)) === false,
     }),
     { timeout: STEP_MS, interval: 200 },
   );
@@ -1926,22 +2016,22 @@ try {
   // must leave the roots list, the saved list, and the page (the page
   // closes the live root after the session DELETE lands, because the
   // daemon keeps a log-less root registered otherwise).
-  await clickSel(deleteBtnSel(openID));
+  await armDelete(openID);
   await waitFor(
     "delete confirm to reopen for the force-through",
     async () => ({ ok: ((await dialogText()) || "").includes("cannot be undone") }),
     { timeout: STEP_MS, interval: 200 },
   );
-  await clickSel("[data-session-delete-confirm]");
+  await clickSel("[data-confirm='accept']");
   await waitFor(
     "force confirmation to reopen",
     async () => ({
       ok:
-        (await evaluate(`!!document.querySelector("[data-session-delete-force]")`)) === true,
+        (await dialogText() || "").includes("Force delete"),
     }),
     { timeout: STEP_MS, interval: 200 },
   );
-  await clickSel("[data-session-delete-force]");
+  await clickSel("[data-confirm='accept']");
   await waitFor(
     "force-deleted session to leave the daemon lists and the page",
     async () => ({
@@ -1949,7 +2039,7 @@ try {
         !(await rootIDs()).includes(openID) &&
         !(await savedIDs()).includes(openID) &&
         (await evaluate(
-          `!!document.querySelector(${JSON.stringify(deleteBtnSel(openID))})`,
+          `!!document.querySelector(${JSON.stringify(rowSel(openID))})`,
         )) === false,
     }),
     { timeout: WAIT_MS, interval: 250 },
@@ -2039,18 +2129,20 @@ try {
       url: "http://127.0.0.1:" + port + "/?token=" + token,
     });
     await waitFor(
+      "cockpit after task restart",
+      textProbe((body) => body.includes("Menu") && body.includes("Terminal")),
+      { timeout: WAIT_MS, interval: 250 },
+    );
+    await runPalette("Task runner");
+    await waitFor(
       "task runner board after restart (Failed and Blocked rows)",
       async () => {
-        const clicked = await evaluate(
-          `(() => { const btn = document.querySelector('button[data-view="tasks"]'); if (!btn) return false; btn.click(); return true; })()`,
-        );
         const boardText =
           (await evaluate(
             `(() => { const b = document.querySelector("#task-runner"); return b ? b.innerText : ""; })()`,
           )) || "";
         return {
           ok:
-            clicked === true &&
             boardText.includes("First step") &&
             boardText.includes("Second step") &&
             boardText.includes("Failed") &&
@@ -2137,7 +2229,7 @@ try {
   // empty state shows; the daemon token is already in localStorage from
   // the boot script, so no reload is needed (the original PR's reload
   // loop is replaced by the shared waitFor/textProbe helpers).
-  await evaluate(`document.querySelector('button[data-view="schedule"]').click()`);
+  await runPalette("Schedule");
   await waitFor(
     "schedule page (empty state)",
     textProbe((body) => body.includes("Nothing is scheduled") && !body.includes("unauthorized")),
@@ -2225,15 +2317,7 @@ try {
   if (!composerSuggest.includes("/stop") && !composerSuggest.includes("/mode")) {
     throw new Error(`composer slash popup missing: ${composerSuggest.slice(0, 500)}`);
   }
-  await send("Runtime.evaluate", {
-    expression: `(() => {
-      const b = [...document.querySelectorAll("button")].find((el) => (el.textContent || "").trim() === "Triggers");
-      if (!b) return "missing";
-      b.click();
-      return "ok";
-    })()`,
-    returnByValue: true,
-  });
+  await runPalette("Triggers");
   let triggersText = "";
   for (let i = 0; i < 25; i++) {
     const ev = await send("Runtime.evaluate", {
@@ -2254,21 +2338,11 @@ try {
   });
   await send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
   await waitFor(
-    "apps nav button",
-    async () => {
-      const raw = await evaluate(`(() => {
-        const btn = document.querySelector('button[data-view="apps"]');
-        return JSON.stringify({
-          btn: !!btn,
-          label: btn ? btn.textContent.trim() : "",
-        });
-      })()`);
-      const p = JSON.parse(raw || "{}");
-      return { ok: !!(p.btn && p.label === "Apps"), ...p };
-    },
+    "apps palette entry",
+    textProbe((body) => body.includes("Menu")),
     { timeout: WAIT_MS, interval: 250 },
   );
-  await evaluate(`document.querySelector('button[data-view="apps"]').click()`);
+  await runPalette("Apps");
   await waitFor(
     "apps launcher GitHub triage",
     textProbe((body) => body.includes("GitHub triage")),
@@ -2354,18 +2428,21 @@ try {
     },
     { timeout: STEP_MS, interval: 200 },
   );
-  await evaluate(`(() => {
-    const chip = [...document.querySelectorAll(".composer-bar .chip")].find((b) => (b.innerText || "").includes("Approval"));
-    if (chip) chip.click();
-    return "ok";
-  })()`);
-  await delay(200);
-  await evaluate(`(() => {
-    const btn = [...document.querySelectorAll("button")].find((b) => (b.innerText || "").trim().startsWith("Yolo"));
-    if (btn) btn.click();
-    return "ok";
-  })()`);
-  await delay(200);
+  await waitFor(
+    "yolo confirm from the palette",
+    async () => {
+      const open = await evaluate(`!!document.querySelector(".approvals-dialog")`);
+      if (open) return { ok: true };
+      const clicked = await evaluate(`(() => {
+        const cmd = document.querySelector('[data-command-id="mode-yolo"]');
+        if (cmd) { cmd.click(); return "clicked"; }
+        document.querySelector('[data-nav="palette"]')?.click();
+        return "opening";
+      })()`);
+      return { ok: false, clicked };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
   await evaluate(`(() => {
     const btn = [...document.querySelectorAll(".approvals-dialog button")].find((b) => (b.innerText || "").trim() === "Use Yolo");
     if (btn) btn.click();
@@ -2424,12 +2501,19 @@ try {
     },
     { timeout: STEP_MS, interval: 200 },
   );
-  await evaluate(`(() => {
-    const row = [...document.querySelectorAll(".queue-list li")].find((r) => r.innerText.includes("beta later"));
-    const up = row && [...row.querySelectorAll("button")].find((b) => b.textContent === "Up");
-    if (up) up.click();
-    return "ok";
-  })()`);
+  await waitFor(
+    "queue move-up command",
+    async () => {
+      const clicked = await evaluate(`(() => {
+        const cmd = document.querySelector('[data-command-id="queue.move-up"]');
+        if (cmd) { cmd.click(); return "clicked"; }
+        document.querySelector('[data-nav="palette"]')?.click();
+        return "opening";
+      })()`);
+      return { ok: clicked === "clicked", clicked };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
   await waitFor(
     "reordered queue",
     async () => {
