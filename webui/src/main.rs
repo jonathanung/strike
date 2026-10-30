@@ -27,6 +27,7 @@ mod providers;
 mod schedule;
 mod model;
 mod notify;
+mod outcome;
 mod onboarding;
 mod park;
 mod steer_queue;
@@ -804,6 +805,7 @@ fn App() -> impl IntoView {
     let ux_note = RwSignal::new(String::new());
     let activity = RwSignal::new(Vec::<ActivityRow>::new());
     let team_note = RwSignal::new(String::new());
+    let children_note = RwSignal::new(String::new());
     let draft = RwSignal::new(String::new());
     let loading = RwSignal::new(true);
     let tick = RwSignal::new(0u32);
@@ -852,6 +854,8 @@ fn App() -> impl IntoView {
     let context_limit = RwSignal::new(0i64);
     let context_fit = RwSignal::new(String::new());
     let model_defaults = RwSignal::new(ModelDefaults::default());
+    // False until GET /v1/settings succeeds. Empty defaults are not "none saved".
+    let defaults_known = RwSignal::new(false);
     let catalog = RwSignal::new(Vec::<ModelInfo>::new());
     let catalog_note = RwSignal::new(String::new());
     let catalog_once = RwSignal::new(false);
@@ -1053,6 +1057,10 @@ fn App() -> impl IntoView {
         });
     };
 
+    // new_session parks an activation failure here so the meta refresh,
+    // which rewrites the connection status, does not erase it.
+    let activation_hold = RwSignal::new(None::<String>);
+
     let refresh_meta = move || {
         let (b, t) = (base.get_untracked(), token.get_untracked());
         spawn_local(async move {
@@ -1180,11 +1188,30 @@ fn App() -> impl IntoView {
                     Err(e) => model_note.set(format!("Live status unavailable: {e}")),
                 }
             }
-            if let Ok(defaults) = get_json::<ModelDefaults>(&b, &t, "/v1/settings").await {
-                model_defaults.set(defaults);
+            match get_json::<ModelDefaults>(&b, &t, "/v1/settings").await {
+                Ok(defaults) => {
+                    model_defaults.set(defaults);
+                    defaults_known.set(true);
+                    model_note.set(outcome::merge_defaults_note(
+                        &model_note.get_untracked(),
+                        None,
+                    ));
+                }
+                Err(e) => {
+                    defaults_known.set(false);
+                    model_note.set(outcome::merge_defaults_note(
+                        &model_note.get_untracked(),
+                        Some(&e),
+                    ));
+                }
             }
             load_error.set(err);
             loading.set(false);
+            if let Some(msg) = activation_hold.get_untracked() {
+                activation_hold.set(None);
+                status.set(msg.clone());
+                ux_note.set(msg);
+            }
             poll_team();
         });
     };
@@ -1250,6 +1277,7 @@ fn App() -> impl IntoView {
             transcript.set(Transcript::new());
             ux_note.set(String::new());
             children.set(Vec::new());
+            children_note.set(String::new());
             asks.set(Vec::new());
             live_audit.set(Vec::new());
             confirm.set(None);
@@ -1292,8 +1320,12 @@ fn App() -> impl IntoView {
         let (cb, ct, child_root) = (b.clone(), token.get_untracked(), root.clone());
         spawn_local(async move {
             let path = format!("/v1/sessions/{}/children", api::js_encode(&child_root));
-            if let Ok(found) = get_json::<ChildrenResponse>(&cb, &ct, &path).await {
-                children.set(found.sessions);
+            match get_json::<ChildrenResponse>(&cb, &ct, &path).await {
+                Ok(found) => {
+                    children.set(found.sessions);
+                    children_note.set(String::new());
+                }
+                Err(e) => children_note.set(outcome::children_failure_note(&e)),
             }
         });
         poll_team();
@@ -1950,13 +1982,16 @@ fn App() -> impl IntoView {
                             back_stack.update(|s| s.push(cur));
                             forward_stack.set(Vec::new());
                         }
-                        let _ = post_json(
+                        let activated = post_json(
                             &b,
                             &t,
                             &format!("/v1/roots/{id}/activate"),
                             serde_json::json!({}),
                         )
                         .await;
+                        if let Some(msg) = outcome::new_session_activation(activated) {
+                            activation_hold.set(Some(msg));
+                        }
                         active_root.set(id);
                     }
                     refresh_meta();
@@ -2528,6 +2563,7 @@ fn App() -> impl IntoView {
                         d.provider = provider;
                         d.model = id;
                     });
+                    defaults_known.set(true);
                     model_note.set("Saved as the global default. This session stays on its current model until you pick one.".into());
                 }
                 Err(e) => model_note.set(format!("saving the default failed: {e}")),
@@ -2597,6 +2633,7 @@ fn App() -> impl IntoView {
             {
                 Ok(()) => {
                     model_defaults.update(|d| d.effort = level);
+                    defaults_known.set(true);
                     model_note.set("Saved the effort as the global default.".into());
                 }
                 Err(e) => model_note.set(format!("saving the effort default failed: {e}")),
@@ -3312,6 +3349,13 @@ fn App() -> impl IntoView {
             ux_note.set("A title needs at least one character.".into());
             return;
         }
+        let prev_title = transcript.with_untracked(|t| t.snapshot_title());
+        let prev_session = sessions.with_untracked(|list| {
+            list.iter().find(|s| s.id == id).map(|s| s.title.clone())
+        });
+        let prev_root = roots.with_untracked(|list| {
+            list.iter().find(|r| r.id == id).map(|r| r.title.clone())
+        });
         transcript.update(|t| t.pin_title(title.clone()));
         sessions.update(|list| {
             if let Some(s) = list.iter_mut().find(|s| s.id == id) {
@@ -3328,7 +3372,24 @@ fn App() -> impl IntoView {
             let path = format!("/v1/sessions/{}", api::js_encode(&id));
             match patch_json(&b, &t, &path, serde_json::json!({"title": title})).await {
                 Ok(()) => ux_note.set(String::new()),
-                Err(e) => ux_note.set(format!("Rename failed: {e}")),
+                Err(e) => {
+                    transcript.update(|doc| doc.restore_title(prev_title));
+                    if let Some(old) = prev_session {
+                        sessions.update(|list| {
+                            if let Some(s) = list.iter_mut().find(|s| s.id == id) {
+                                s.title = old;
+                            }
+                        });
+                    }
+                    if let Some(old) = prev_root {
+                        roots.update(|list| {
+                            if let Some(r) = list.iter_mut().find(|r| r.id == id) {
+                                r.title = old;
+                            }
+                        });
+                    }
+                    ux_note.set(format!("Rename failed: {e}"));
+                }
             }
         });
     })
@@ -4686,13 +4747,26 @@ fn App() -> impl IntoView {
                         <StatCard label="Tasks".into()>{move || activity.get().len().to_string()}</StatCard>
                     </div>
                     <Show when=move || !team_note.get().is_empty()>
-                        <p class="hint">{move || team_note.get()}</p>
+                        <p class="hint" data-team-note="true">{move || team_note.get()}</p>
+                    </Show>
+                    <Show when=move || !children_note.get().is_empty()>
+                        <p class="hint" data-children-note="true">{move || children_note.get()}</p>
                     </Show>
                     <Show when=move || activity.get().is_empty()>
-                        <EmptyState
-                            title="No live tasks".into()
-                            body="Delegated work for this session shows its status here.".into()
-                        />
+                        {move || {
+                            let failed = !children_note.get().is_empty();
+                            let title = if failed {
+                                "Delegation history unavailable".to_string()
+                            } else {
+                                "No live tasks".to_string()
+                            };
+                            let body = if failed {
+                                "Saved children did not load, so this panel is not a complete delegation history.".to_string()
+                            } else {
+                                "Delegated work for this session shows its status here.".to_string()
+                            };
+                            view! { <EmptyState title=title body=body /> }
+                        }}
                     </Show>
                     <ul class="plain">
                         {move || {
@@ -4802,7 +4876,10 @@ fn App() -> impl IntoView {
                     </Show>
                     <Show when=move || side_tab.get() == "files">
                         <div class="files">
-                            <p class="hint">{move || if files_path.get().is_empty() { "Working directory".into() } else { files_path.get() }}</p>
+                            <div class="files-head">
+                                <p class="hint">{move || if files_path.get().is_empty() { "Working directory".into() } else { files_path.get() }}</p>
+                                <button class="secondary" on:click=move |_| load_files()>"Refresh"</button>
+                            </div>
                             <Show when=move || !files_error.get().is_empty()>
                                 <div class="notice" role="alert">
                                     <span>{move || files_error.get()}</span>
@@ -4849,6 +4926,10 @@ fn App() -> impl IntoView {
                     </Show>
                     <Show when=move || side_tab.get() == "changes">
                         <div class="changes">
+                            <div class="changes-head">
+                                <p class="hint">"Changed files"</p>
+                                <button class="secondary" on:click=move |_| load_changes()>"Refresh"</button>
+                            </div>
                             <Show when=move || !changes_error.get().is_empty()>
                                 <div class="notice" role="alert">
                                     <span>{move || changes_error.get()}</span>
