@@ -100,7 +100,7 @@ fn norm_query(raw: &str) -> String {
 
 /// The author a memory row displays: the stored value, or "unknown"
 /// when the store left it blank (same fallback the row rendering uses).
-fn memory_author(entry: &MemoryEntry) -> &str {
+fn entry_author(entry: &MemoryEntry) -> &str {
     if entry.author.is_empty() {
         "unknown"
     } else {
@@ -112,7 +112,7 @@ fn memory_author(entry: &MemoryEntry) -> &str {
 /// and tags, plus an exact author filter ("all" = no author filter).
 /// Pure over the already-loaded list — no server query is implied.
 fn memory_matches(entry: &MemoryEntry, query: &str, author: &str) -> bool {
-    if author != "all" && memory_author(entry) != author {
+    if author != "all" && entry_author(entry) != author {
         return false;
     }
     if query.is_empty() {
@@ -564,9 +564,14 @@ pub fn StoragePanel(
                     </p>
                 </div>
                 {move || {
-                    let mut authors: Vec<String> = entries.get().iter().map(|e| memory_author(e).to_string()).collect();
+                    let mut authors: Vec<String> = entries.get().iter().map(|e| entry_author(e).to_string()).collect();
                     authors.sort();
                     authors.dedup();
+                    if authors.is_empty() {
+                        // No rows yet: no author filter to offer (the
+                        // "Nothing stored" empty state below covers it).
+                        return view! { <span></span> }.into_any();
+                    }
                     view! {
                         <div class="chips" role="group" aria-label="Memory author filter">
                             <button type="button" class=move || if memory_author.get() == "all" { "chip on" } else { "chip" }
@@ -580,7 +585,7 @@ pub fn StoragePanel(
                                 }
                             }).collect_view()}
                         </div>
-                    }
+                    }.into_any()
                 }}
                 <Show when=move || entries.get().is_empty() && error.get().is_empty() && !list_loading.get()>
                     <div class="empty-state">
