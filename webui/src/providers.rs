@@ -2,18 +2,52 @@
 //! Keys are posted to the daemon and never written to localStorage,
 //! never copied into a status string, and never logged.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::api::{self, delete_json, get_text, patch_json, post_json_value};
-use crate::epoch::{self, LoadEpoch, ProviderView};
+use crate::api::{self, delete_json, get_text, post_json_value};
+use load_guard::{apply_provider_load, prepare_provider_load, LoadEpoch, ProviderView};
+use wasm_bindgen::JsCast;
 
 /// Wire dialects `config.ValidateWireAPI` accepts. Not a provider catalog.
 const WIRE_APIS: [&str; 3] = ["openai", "responses", "anthropic"];
+
+const KEY_PROVIDERS: &[&str] = &[
+    "anthropic",
+    "openai",
+    "xai",
+    "google",
+    "kimi",
+    "deepseek",
+];
+
+thread_local! {
+    static KEY_NAMES: RefCell<Vec<String>> = RefCell::new(
+        KEY_PROVIDERS.iter().map(|name| (*name).to_string()).collect(),
+    );
+}
+
+pub fn key_provider_names() -> Vec<String> {
+    KEY_NAMES.with(|names| names.borrow().clone())
+}
+
+fn publish_key_names(rows: &[ProviderStatus]) {
+    let mut names: Vec<String> = rows
+        .iter()
+        .filter(|row| row.api_key && !row.custom)
+        .map(|row| row.name.clone())
+        .collect();
+    if names.is_empty() {
+        names = KEY_PROVIDERS.iter().map(|name| (*name).to_string()).collect();
+    }
+    KEY_NAMES.with(|slot| *slot.borrow_mut() = names);
+}
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 pub struct ProviderStatus {
@@ -57,14 +91,6 @@ struct CustomProvider {
 struct CustomList {
     #[serde(default)]
     providers: Vec<CustomProvider>,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
-struct SettingsSnap {
-    #[serde(default)]
-    provider: String,
-    #[serde(default)]
-    model: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -145,6 +171,33 @@ fn clock_label() -> String {
     )
 }
 
+fn focus_provider(name: &str) {
+    let Some(doc) = web_sys::window().and_then(|window| window.document()) else {
+        return;
+    };
+    let selector = if name == "custom" {
+        "[data-add-host]".to_string()
+    } else {
+        format!("[data-provider=\"{name}\"]")
+    };
+    let Ok(Some(el)) = doc.query_selector(&selector) else {
+        return;
+    };
+    if let Some(html) = el.dyn_ref::<web_sys::HtmlElement>() {
+        html.scroll_into_view();
+    }
+    let field = if name == "custom" {
+        "[data-new-name]"
+    } else {
+        "[data-provider-key]"
+    };
+    if let Ok(Some(input)) = el.query_selector(field) {
+        if let Some(html) = input.dyn_ref::<web_sys::HtmlElement>() {
+            let _ = html.focus();
+        }
+    }
+}
+
 fn request_reload(bump: RwSignal<u32>) {
     bump.update(|n| *n = n.wrapping_add(1));
 }
@@ -161,8 +214,6 @@ fn ProviderCard(
     customs: RwSignal<Vec<CustomProvider>>,
     drafts: RwSignal<HashMap<String, String>>,
     notes: RwSignal<HashMap<String, String>>,
-    models: RwSignal<HashMap<String, Vec<String>>>,
-    picked: RwSignal<HashMap<String, String>>,
     base_drafts: RwSignal<HashMap<String, String>>,
     base: RwSignal<String>,
     token: RwSignal<String>,
@@ -231,17 +282,7 @@ fn ProviderCard(
             match get_text(&b, &t, &path).await {
                 Ok(body) => match serde_json::from_str::<ModelList>(&body) {
                     Ok(list) => {
-                        let ids: Vec<String> = list.models.into_iter().map(|row| row.id).collect();
-                        let n = ids.len();
-                        if let Some(first) = ids.first() {
-                            let id = first.clone();
-                            picked.update(|map| {
-                                map.entry(name.clone()).or_insert(id);
-                            });
-                        }
-                        models.update(|map| {
-                            map.insert(name.clone(), ids);
-                        });
+                        let n = list.models.len();
                         map_insert(&notes, name, format!("Listed {n} models."));
                     }
                     Err(err) => map_insert(&notes, name, note_from(&err.to_string(), &key)),
@@ -310,35 +351,6 @@ fn ProviderCard(
         }
     };
 
-    let set_default = move |name: String| {
-        let model = picked
-            .get_untracked()
-            .get(&name)
-            .cloned()
-            .unwrap_or_default();
-        if model.trim().is_empty() {
-            map_insert(&notes, name, "Pick a model first.".into());
-            return;
-        }
-        let (b, t) = (base.get_untracked(), token.get_untracked());
-        spawn_local(async move {
-            match patch_json(
-                &b,
-                &t,
-                "/v1/settings",
-                serde_json::json!({ "provider": name, "model": model }),
-            )
-            .await
-            {
-                Ok(()) => {
-                    map_insert(&notes, name, "Default model saved.".into());
-                    request_reload(bump);
-                }
-                Err(err) => map_insert(&notes, name, note_from(&err, "")),
-            }
-        });
-    };
-
     let name_test_key = name.clone();
     let name_test_plain = name.clone();
     let name_remove_key = name.clone();
@@ -354,17 +366,12 @@ fn ProviderCard(
     let base_input = name.clone();
     let seeded = base_url.clone();
     let note_name = name.clone();
-    let model_name = name.clone();
-    let select_name = name.clone();
-    let pick_name = name.clone();
-
     view! {
         <li class="providers-card" data-provider=name_attr>
             <div class="providers-card-head">
                 <h2>{heading}</h2>
                 <span class=badge data-provider-state=state>{state}</span>
             </div>
-            <p class="hint">{detail}</p>
             {env.map(|text| view! { <p class="providers-env" data-env-note="true">{text}</p> })}
             {(!wire.is_empty()).then(|| view! { <p class="hint">"Wire: " {wire}</p> })}
             {(!base_url.is_empty() && !custom).then(|| {
@@ -415,9 +422,12 @@ fn ProviderCard(
                 <div class="providers-actions">
                     <button type="button" class="primary" data-save-key="true" on:click=save_key>"Save key"</button>
                     <button type="button" class="secondary" data-test-provider="true" on:click=move |_| test_provider(name_test_key.clone())>"Test"</button>
-                    <button type="button" class="secondary" data-remove-key="true" on:click=move |_| remove_stored(name_remove_key.clone())>
-                        {if custom { "Remove provider" } else { "Remove stored key" }}
-                    </button>
+                    {custom.then(|| {
+                        let name_remove_key = name_remove_key.clone();
+                        view! {
+                            <button type="button" class="secondary" data-remove-key="true" on:click=move |_| remove_stored(name_remove_key.clone())>"Remove provider"</button>
+                        }
+                    })}
                 </div>
                 </div>
             })}
@@ -429,35 +439,6 @@ fn ProviderCard(
                     })}
                 </div>
             })}
-            {move || {
-                let ids = models.with(|map| map.get(&model_name).cloned().unwrap_or_default());
-                if ids.is_empty() {
-                    return view! { <span></span> }.into_any();
-                }
-                let label = select_name.clone();
-                let pick = pick_name.clone();
-                let default_name = model_name.clone();
-                view! {
-                    <div class="providers-block">
-                    <label>
-                        "Default model"
-                        <select
-                            aria-label=format!("Default model for {label}")
-                            data-default-select="true"
-                            on:change=move |ev| {
-                                map_insert(&picked, pick.clone(), event_target_value(&ev));
-                            }
-                        >
-                            {ids.into_iter().map(|id| {
-                                let attr = id.clone();
-                                view! { <option value=attr>{id}</option> }
-                            }).collect_view()}
-                        </select>
-                    </label>
-                    <button type="button" class="primary" data-set-default="true" on:click=move |_| set_default(default_name.clone())>"Set as default"</button>
-                    </div>
-                }.into_any()
-            }}
             {move || {
                 let text = notes.with(|map| map.get(&note_name).cloned().unwrap_or_default());
                 (!text.is_empty()).then(|| view! {
@@ -474,14 +455,8 @@ pub fn ProvidersPage(base: RwSignal<String>, token: RwSignal<String>) -> impl In
     let customs = RwSignal::new(Vec::<CustomProvider>::new());
     let load_error = RwSignal::new(String::new());
     let loading = RwSignal::new(true);
-    let defaults = RwSignal::new(SettingsSnap {
-        provider: String::new(),
-        model: String::new(),
-    });
     let drafts = RwSignal::new(HashMap::<String, String>::new());
     let notes = RwSignal::new(HashMap::<String, String>::new());
-    let models = RwSignal::new(HashMap::<String, Vec<String>>::new());
-    let picked = RwSignal::new(HashMap::<String, String>::new());
     let base_drafts = RwSignal::new(HashMap::<String, String>::new());
 
     let new_name = RwSignal::new(String::new());
@@ -492,7 +467,7 @@ pub fn ProvidersPage(base: RwSignal<String>, token: RwSignal<String>) -> impl In
     let new_note = RwSignal::new(String::new());
 
     let bump = RwSignal::new(0u32);
-    let load_epoch = RwSignal::new(LoadEpoch::default());
+    let load_epoch = RwSignal::new(LoadEpoch::new());
     let loaded_base = RwSignal::new(String::new());
     let loaded_at = RwSignal::new(String::new());
     let stale_note = RwSignal::new(String::new());
@@ -503,7 +478,6 @@ pub fn ProvidersPage(base: RwSignal<String>, token: RwSignal<String>) -> impl In
         let mut view = ProviderView {
             rows: rows.get_untracked(),
             customs: customs.get_untracked(),
-            defaults: defaults.get_untracked(),
             load_error: load_error.get_untracked(),
             stale_note: stale_note.get_untracked(),
             loading: loading.get_untracked(),
@@ -511,11 +485,10 @@ pub fn ProvidersPage(base: RwSignal<String>, token: RwSignal<String>) -> impl In
             loaded_at: loaded_at.get_untracked(),
         };
         let mut epoch = load_epoch.get_untracked();
-        let ticket = epoch::prepare_provider_load(&mut epoch, &mut view, &b);
+        let ticket = prepare_provider_load(&mut epoch, &mut view, &b);
         load_epoch.set(epoch);
         rows.set(view.rows.clone());
         customs.set(view.customs.clone());
-        defaults.set(view.defaults.clone());
         load_error.set(view.load_error.clone());
         stale_note.set(view.stale_note.clone());
         loading.set(view.loading);
@@ -523,15 +496,11 @@ pub fn ProvidersPage(base: RwSignal<String>, token: RwSignal<String>) -> impl In
         loaded_at.set(view.loaded_at.clone());
         spawn_local(async move {
             let listed = get_text(&b, &t, "/v1/providers").await;
-            if !load_epoch.get_untracked().is_current(ticket) {
+            if !load_epoch.get_untracked().accept(ticket) {
                 return;
             }
             let custom = get_text(&b, &t, "/v1/custom-providers").await;
-            if !load_epoch.get_untracked().is_current(ticket) {
-                return;
-            }
-            let settings = get_text(&b, &t, "/v1/settings").await;
-            if !load_epoch.get_untracked().is_current(ticket) {
+            if !load_epoch.get_untracked().accept(ticket) {
                 return;
             }
             let rows_result = match listed {
@@ -541,6 +510,10 @@ pub fn ProvidersPage(base: RwSignal<String>, token: RwSignal<String>) -> impl In
                 },
                 Err(err) => Err(note_from(&err, "")),
             };
+            let published = match &rows_result {
+                Ok(rows) => Some(rows.clone()),
+                Err(_) => None,
+            };
             let customs_result = match custom {
                 Ok(body) => match serde_json::from_str::<CustomList>(&body) {
                     Ok(list) => Ok(list.providers),
@@ -548,25 +521,19 @@ pub fn ProvidersPage(base: RwSignal<String>, token: RwSignal<String>) -> impl In
                 },
                 Err(err) => Err(err),
             };
-            let defaults_result = match settings {
-                Ok(body) => match serde_json::from_str::<SettingsSnap>(&body) {
-                    Ok(snap) => Ok(snap),
-                    Err(_) => Err("Could not read settings.".into()),
-                },
-                Err(err) => Err(err),
-            };
-            if epoch::apply_provider_load(
+            if apply_provider_load(
                 &load_epoch.get_untracked(),
                 ticket,
                 &mut view,
                 rows_result,
                 customs_result,
-                defaults_result,
                 &clock_label(),
             ) {
+                if let Some(rows) = published {
+                    publish_key_names(&rows);
+                }
                 rows.set(view.rows);
                 customs.set(view.customs);
-                defaults.set(view.defaults);
                 load_error.set(view.load_error);
                 stale_note.set(view.stale_note);
                 loading.set(view.loading);
@@ -622,22 +589,67 @@ pub fn ProvidersPage(base: RwSignal<String>, token: RwSignal<String>) -> impl In
         });
     };
 
+    let remove_named = move |name: String| {
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            let path = format!("/v1/auth/{}", api::js_encode(&name));
+            match delete_json(&b, &t, &path, None).await {
+                Ok(()) => {
+                    map_insert(&notes, name, "Stored credential removed.".into());
+                    request_reload(bump);
+                }
+                Err(err) => map_insert(&notes, name, note_from(&err, "")),
+            }
+        });
+    };
+    crate::shell::bind(
+        "providers.focus",
+        Rc::new(move |name| {
+            if loading.get_untracked() {
+                crate::park::put("providers.focus", name);
+            } else {
+                focus_provider(name);
+            }
+            Ok(())
+        }),
+    );
+    crate::shell::bind(
+        "providers.refresh",
+        Rc::new(move |_| {
+            request_reload(bump);
+            Ok(())
+        }),
+    );
+    crate::shell::bind(
+        "providers.remove-key",
+        Rc::new(move |name| {
+            if name.trim().is_empty() {
+                return Err("Pick a provider.".into());
+            }
+            remove_named(name.to_string());
+            Ok(())
+        }),
+    );
+    Effect::new(move |_| {
+        if loading.get() {
+            return;
+        }
+        if let Some(name) = crate::park::take("providers.focus") {
+            focus_provider(&name);
+        }
+        if crate::park::take("providers.refresh").is_some() {
+            request_reload(bump);
+        }
+        if let Some(name) = crate::park::take("providers.remove-key") {
+            remove_named(name);
+        }
+    });
+
     view! {
         <main class="providers-page" data-providers-root="true">
             <header class="providers-head">
                 <h1 class="panel-title">"Providers"</h1>
                 <p class="hint">"Keys stay on the daemon. This page does not put them in browser storage."</p>
-                <p data-default-model="true">
-                    {move || {
-                        let snap = defaults.get();
-                        if snap.provider.is_empty() && snap.model.is_empty() {
-                            "Default model: none yet.".to_string()
-                        } else {
-                            format!("Default model: {} / {}", snap.provider, snap.model)
-                        }
-                    }}
-                </p>
-                <button type="button" class="secondary" on:click=move |_| request_reload(bump)>"Refresh"</button>
             </header>
             <Show when=move || loading.get()>
                 <p class="hint">"Loading providers from the daemon."</p>
@@ -656,8 +668,6 @@ pub fn ProvidersPage(base: RwSignal<String>, token: RwSignal<String>) -> impl In
                             customs=customs
                             drafts=drafts
                             notes=notes
-                            models=models
-                            picked=picked
                             base_drafts=base_drafts
                             base=base
                             token=token

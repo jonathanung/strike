@@ -36,7 +36,7 @@ pub fn install(reg: &mut ShellHook) {
         label: "Worktrees",
         detail: "Session worktrees and child isolation",
         shortcut: "Alt+T",
-        keywords: &["git", "isolation"],
+        keywords: &["worktree", "git", "isolation"],
         argument: None,
         order: 110,
         run: Rc::new(|args| crate::shell::dispatch("panel-worktrees", args)),

@@ -74,6 +74,13 @@ pub fn command_score(
     if query.trim().is_empty() {
         return best;
     }
+    // An exact label ("Usage") must beat a longer label that merely contains
+    // the same word ("View context usage"). Those two otherwise tie, and the
+    // lower order number wins.
+    if label.eq_ignore_ascii_case(query.trim()) {
+        let bonus = (query.trim().chars().count() as i32).saturating_mul(4);
+        best = Some(best.unwrap_or(0).saturating_add(bonus));
+    }
     for word in keywords {
         if let Some(score) = fuzzy_score(query, word) {
             let score = score.saturating_mul(2);
@@ -137,6 +144,20 @@ mod tests {
         assert!(tight > sparse);
         assert!(fuzzy_score("nord", "Theme: Nord").is_some());
         assert!(fuzzy_score("theme nord", "Theme: Nord").is_some());
+    }
+
+    #[test]
+    fn exact_label_beats_a_longer_label_with_the_same_word() {
+        let exact = command_score("Usage", "Usage", "Tokens and cost", "", &[]).unwrap();
+        let longer = command_score(
+            "Usage",
+            "View context usage",
+            "Show how full the context window is",
+            "",
+            &["context", "tokens"],
+        )
+        .unwrap();
+        assert!(exact > longer);
     }
 
     #[test]

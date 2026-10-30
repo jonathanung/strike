@@ -823,6 +823,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "47d9d19d1d6efa0109d2f65ff4c85cddd50bd572e5a00127ab10987290bcefae"
 
 [[package]]
+name = "load-guard"
+version = "0.1.0"
+
+[[package]]
 name = "manyhow"
 version = "0.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1332,22 +1336,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
-name = "strike-load-guard"
-version = "0.1.0"
-
-[[package]]
 name = "strike-webui"
 version = "0.1.0"
 dependencies = [
  "gloo-net",
  "js-sys",
  "leptos",
+ "load-guard",
  "protocol-schema",
  "qrcode",
  "send_wrapper",
  "serde",
  "serde_json",
- "strike-load-guard",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",

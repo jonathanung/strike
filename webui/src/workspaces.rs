@@ -5,7 +5,7 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::api::{js_encode, patch_json, post_json, post_json_value};
-use crate::epoch::{self, BrowseOutcome, BrowseView, LoadEpoch};
+use load_guard::{apply_browse, BrowseOutcome, BrowseView, LoadEpoch};
 use crate::model::{mode_label, permission_modes, BrowseEntry, BrowseResponse, Workspace};
 
 fn event_tag(ev: &web_sys::KeyboardEvent) -> String {
@@ -30,6 +30,80 @@ pub fn chip_note(ws_path: &str, cwd: &str) -> String {
     format!("Open chat is in {cwd}. New sessions start in the workspace.")
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PolicyFields {
+    pub rules: String,
+    pub mode: String,
+    pub roots: String,
+}
+
+/// What the policy effect should do for the active workspace.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PolicyLoad {
+    /// The form already holds this workspace. Leave the fields alone.
+    Latched,
+    /// The list has the workspace. Copy its stored policy and latch that id.
+    Hit(PolicyFields),
+    /// The list does not have it yet. Do not blank the fields and do not latch,
+    /// so a later list can still fill the form.
+    Miss,
+}
+
+pub fn load_policy(latched_for: &str, id: &str, found: Option<&Workspace>) -> PolicyLoad {
+    if latched_for == id {
+        return PolicyLoad::Latched;
+    }
+    let Some(w) = found else {
+        return PolicyLoad::Miss;
+    };
+    if w.id != id {
+        return PolicyLoad::Miss;
+    }
+    PolicyLoad::Hit(PolicyFields {
+        rules: w.rules.clone(),
+        mode: w.permission_mode.clone(),
+        roots: w.extra_roots.join("\n"),
+    })
+}
+
+/// Save is refused until a hit has latched the active id. An empty id has
+/// no workspace to write. A miss must not PATCH the blank form.
+pub fn policy_save_block(latched_for: &str, id: &str) -> Option<&'static str> {
+    if id.is_empty() {
+        return Some("Open a workspace before saving its rules.");
+    }
+    if latched_for != id {
+        return Some("Workspace rules are still loading.");
+    }
+    None
+}
+
+/// Confirm when the save sets a dangerous mode or leaves a stored one.
+/// Clearing yolo by saving a blank form is the same weakening as turning it on.
+pub fn policy_change_message(submitted: &str, stored: &str) -> Option<String> {
+    if submitted == stored {
+        return None;
+    }
+    let setting = crate::approvals::is_dangerous(submitted);
+    let leaving = crate::approvals::is_dangerous(stored);
+    if !setting && !leaving {
+        return None;
+    }
+    let from = if stored.is_empty() {
+        "Unset"
+    } else {
+        mode_label(stored)
+    };
+    let to = if submitted.is_empty() {
+        "Unset"
+    } else {
+        mode_label(submitted)
+    };
+    Some(format!(
+        "Change this workspace from {from} to {to}? This does not change the live session now. Deny rules still apply. Opening the workspace applies its stored mode to the live session."
+    ))
+}
+
 fn picker_rows(recents: &[Workspace], all: &[Workspace]) -> Vec<Workspace> {
     let mut out = Vec::new();
     let mut seen = std::collections::HashSet::new();
@@ -51,7 +125,7 @@ fn fetch_browse(
     browse_entries: RwSignal<Vec<BrowseEntry>>,
     browse_error: RwSignal<String>,
 ) {
-    let ticket = epoch::issue(epoch);
+    let ticket = crate::load_epoch::begin(epoch);
     spawn_local(async move {
         let url = if path.is_empty() {
             "/v1/workspaces/browse".to_string()
@@ -89,7 +163,7 @@ fn fetch_browse(
             entries: browse_entries.get_untracked(),
             error: browse_error.get_untracked(),
         };
-        if epoch::apply_browse(&epoch.get_untracked(), ticket, &mut view, outcome) {
+        if apply_browse(&epoch.get_untracked(), ticket, &mut view, outcome) {
             browse_path.set(view.path);
             browse_parent.set(view.parent);
             browse_entries.set(view.entries);
@@ -124,7 +198,7 @@ pub fn WorkspacePicker(
     let policy_roots = RwSignal::new(String::new());
     let policy_for = RwSignal::new(String::new());
     let note = RwSignal::new(String::new());
-    let browse_epoch = RwSignal::new(LoadEpoch::default());
+    let browse_epoch = RwSignal::new(LoadEpoch::new());
 
     Effect::new(move |_| {
         if !open.get() {
@@ -145,19 +219,16 @@ pub fn WorkspacePicker(
     Effect::new(move |_| {
         let id = active_workspace.get();
         let list = workspaces.get();
-        if policy_for.get_untracked() == id {
-            return;
+        let found = list.iter().find(|w| w.id == id);
+        match load_policy(&policy_for.get_untracked(), &id, found) {
+            PolicyLoad::Latched | PolicyLoad::Miss => {}
+            PolicyLoad::Hit(fields) => {
+                policy_rules.set(fields.rules);
+                policy_mode.set(fields.mode);
+                policy_roots.set(fields.roots);
+                policy_for.set(id);
+            }
         }
-        if let Some(w) = list.iter().find(|w| w.id == id) {
-            policy_rules.set(w.rules.clone());
-            policy_mode.set(w.permission_mode.clone());
-            policy_roots.set(w.extra_roots.join("\n"));
-        } else {
-            policy_rules.set(String::new());
-            policy_mode.set(String::new());
-            policy_roots.set(String::new());
-        }
-        policy_for.set(id);
     });
 
     let go = move |path: String| {
@@ -291,8 +362,8 @@ pub fn WorkspacePicker(
 
     let save_policy = move |_| {
         let id = active_workspace.get();
-        if id.is_empty() {
-            status.set("Open a workspace before saving its rules.".into());
+        if let Some(msg) = policy_save_block(&policy_for.get(), &id) {
+            status.set(msg.into());
             return;
         }
         let rules = policy_rules.get();
@@ -310,11 +381,7 @@ pub fn WorkspacePicker(
             .find(|w| w.id == id)
             .map(|w| w.permission_mode)
             .unwrap_or_default();
-        if crate::approvals::is_dangerous(&mode) && mode != stored {
-            let label = mode_label(&mode);
-            let msg = format!(
-                "Store {label} on this workspace? This does not change the live session now. Deny rules still apply. Opening the workspace applies its stored mode to the live session."
-            );
+        if let Some(msg) = policy_change_message(&mode, &stored) {
             let ok = web_sys::window()
                 .and_then(|w| w.confirm_with_message(&msg).ok())
                 .unwrap_or(false);
@@ -384,7 +451,10 @@ pub fn WorkspacePicker(
                     if active_workspace.get_untracked() == id {
                         active_workspace.set(String::new());
                     }
-                    status.set("Workspace removed from the registry. The directory is still on disk.".into());
+                    status.set(
+                        "Workspace removed from the registry. The directory is still on disk."
+                            .into(),
+                    );
                     refresh();
                 }
                 Ok(r) => status.set(format!("Could not remove workspace: HTTP {}", r.status())),
@@ -620,11 +690,75 @@ pub fn WorkspacePicker(
                             prop:value=move || policy_roots.get()
                             on:input=move |ev| policy_roots.set(event_target_value(&ev))
                         ></textarea>
-                        <button class="primary" on:click=save_policy>"Save rules"</button>
+                        <Show when=move || {
+                            let id = active_workspace.get();
+                            !id.is_empty() && policy_for.get() != id
+                        }>
+                            <p class="hint">"Workspace rules are still loading."</p>
+                        </Show>
+                        <button
+                            class="primary"
+                            disabled=move || {
+                                let id = active_workspace.get();
+                                id.is_empty() || policy_for.get() != id
+                            }
+                            on:click=save_policy
+                        >"Save rules"</button>
                     </section>
                     <p class="hint keys">"Up and Down move through workspaces. Enter opens the selected one. Escape closes."</p>
                 </div>
             </div>
         </Show>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ws(id: &str, mode: &str, rules: &str, roots: &[&str]) -> Workspace {
+        Workspace {
+            id: id.into(),
+            name: id.into(),
+            path: format!("/{id}"),
+            rules: rules.into(),
+            permission_mode: mode.into(),
+            extra_roots: roots.iter().map(|s| (*s).to_string()).collect(),
+            last_opened: String::new(),
+        }
+    }
+
+    #[test]
+    fn policy_miss_does_not_latch_and_save_waits_for_a_hit() {
+        let stored = ws("ws-1", "yolo", "AGENTS.md", &["/other"]);
+        assert!(matches!(load_policy("", "ws-1", None), PolicyLoad::Miss));
+        // A second look at the same missing id still does not latch.
+        assert!(matches!(load_policy("", "ws-1", None), PolicyLoad::Miss));
+        assert_eq!(
+            policy_save_block("", "ws-1"),
+            Some("Workspace rules are still loading.")
+        );
+        match load_policy("", "ws-1", Some(&stored)) {
+            PolicyLoad::Hit(fields) => {
+                assert_eq!(fields.rules, "AGENTS.md");
+                assert_eq!(fields.mode, "yolo");
+                assert_eq!(fields.roots, "/other");
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(policy_save_block("ws-1", "ws-1"), None);
+        // Already loaded: editing the form must not be overwritten.
+        assert!(matches!(
+            load_policy("ws-1", "ws-1", Some(&stored)),
+            PolicyLoad::Latched
+        ));
+        // Leaving a stored dangerous mode confirms, including a blank save.
+        assert!(policy_change_message("", "yolo").unwrap().contains("Yolo"));
+        assert!(policy_change_message("default", "yolo").is_some());
+        assert!(policy_change_message("yolo", "default")
+            .unwrap()
+            .contains("Yolo"));
+        assert!(policy_change_message("plan", "default").is_none());
+        assert!(policy_change_message("yolo", "yolo").is_none());
     }
 }

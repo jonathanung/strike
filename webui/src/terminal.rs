@@ -2,6 +2,8 @@
 //! over a same-origin websocket, replays scrollback, and sends keystrokes.
 //! Leaving the tab closes the socket and leaves the process running.
 
+use std::rc::Rc;
+
 use gloo_net::http::Request;
 use leptos::html::Pre;
 use leptos::prelude::*;
@@ -13,6 +15,7 @@ use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{Element, MessageEvent, ResizeObserver, WebSocket};
 
 use crate::api::{api, auth_header, get_json, post_json_value};
+use crate::outcome;
 use crate::same_origin;
 use crate::term::{key_bytes, Screen};
 use crate::EmptyState;
@@ -49,6 +52,8 @@ struct Live {
     ws: WebSocket,
     // Closures stay alive for as long as the socket does.
     _on_message: Closure<dyn FnMut(MessageEvent)>,
+    _on_open: Closure<dyn FnMut(JsValue)>,
+    _on_error: Closure<dyn FnMut(JsValue)>,
     _on_close: Closure<dyn FnMut(JsValue)>,
 }
 
@@ -101,6 +106,8 @@ impl TermCtl {
         self.live.update_value(|live| {
             if let Some(cur) = live.take() {
                 cur.ws.set_onmessage(None);
+                cur.ws.set_onopen(None);
+                cur.ws.set_onerror(None);
                 cur.ws.set_onclose(None);
                 let _ = cur.ws.close();
             }
@@ -249,7 +256,14 @@ impl TermCtl {
         let t = self.token.get_untracked();
         self.active.set(id.clone());
         spawn_local(async move {
-            let ticket = mint_ticket(&b, &t, &id).await.unwrap_or_default();
+            let ticket = match outcome::require_ticket(mint_ticket(&b, &t, &id).await) {
+                Ok(ticket) => ticket,
+                Err(note) => {
+                    self.stop();
+                    self.note.set(note);
+                    return;
+                }
+            };
             self.stop();
             let sock = match open_socket(&url, &ticket) {
                 Ok(sock) => sock,
@@ -265,32 +279,36 @@ impl TermCtl {
                 }
             }) as Box<dyn FnMut(MessageEvent)>);
             let ctl = self;
+            let on_open = Closure::wrap(Box::new(move |_| {
+                ctl.connected.set(true);
+                let (cols, rows) = ctl.size.get_untracked();
+                if cols >= 2 && rows >= 2 {
+                    ctl.send_resize(cols, rows, true);
+                }
+            }) as Box<dyn FnMut(JsValue)>);
+            let ctl = self;
+            let on_error = Closure::wrap(Box::new(move |_| {
+                let failed = outcome::socket_failed();
+                ctl.connected.set(failed.connected);
+                ctl.note.set(failed.note);
+            }) as Box<dyn FnMut(JsValue)>);
+            let ctl = self;
             let on_close = Closure::wrap(Box::new(move |_| {
                 ctl.connected.set(false);
             }) as Box<dyn FnMut(JsValue)>);
             sock.set_onmessage(Some(on_message.as_ref().unchecked_ref()));
+            sock.set_onopen(Some(on_open.as_ref().unchecked_ref()));
+            sock.set_onerror(Some(on_error.as_ref().unchecked_ref()));
             sock.set_onclose(Some(on_close.as_ref().unchecked_ref()));
             self.live.update_value(|live| {
                 *live = Some(Live {
                     ws: sock,
                     _on_message: on_message,
+                    _on_open: on_open,
+                    _on_error: on_error,
                     _on_close: on_close,
                 });
             });
-            let open = self.live.with_value(|live| {
-                live.as_ref()
-                    .map(|cur| cur.ws.ready_state() == WebSocket::OPEN)
-                    .unwrap_or(false)
-            });
-            if open {
-                self.connected.set(true);
-                let (cols, rows) = self.size.get_untracked();
-                if cols >= 2 && rows >= 2 {
-                    self.send_resize(cols, rows, true);
-                }
-            } else {
-                self.connected.set(true);
-            }
         });
     }
 
@@ -597,6 +615,16 @@ pub fn TerminalPanel(
     let agent_busy = ctl.agent_busy;
     let policy = ctl.policy;
     let kill_on_end = ctl.kill_on_end;
+    crate::shell::bind(
+        "terminal.kill-on-end",
+        Rc::new(move |_| {
+            kill_on_end.set(!kill_on_end.get_untracked());
+            Ok(())
+        }),
+    );
+    if crate::park::take("terminal.kill-on-end").is_some() {
+        kill_on_end.set(!kill_on_end.get_untracked());
+    }
     let workspace_id = ctl.workspace_id;
     let screen_ref = ctl.screen_ref;
 
@@ -624,18 +652,6 @@ pub fn TerminalPanel(
                 <button class="chip" on:click=move |_| ctl.open_new()>"New"</button>
                 <button class="chip" disabled=move || active.get().is_empty() on:click=move |_| ctl.close_active()>"Close"</button>
             </div>
-            <label class="term-check">
-                <input
-                    type="checkbox"
-                    prop:checked=move || kill_on_end.get()
-                    on:change=move |ev| {
-                        let Some(target) = ev.target() else { return };
-                        let Ok(input) = target.dyn_into::<web_sys::HtmlInputElement>() else { return };
-                        kill_on_end.set(input.checked());
-                    }
-                />
-                "Close new shells when the session ends"
-            </label>
             <Show when=move || shared.get() && agent_busy.get()>
                 <p class="term-banner" role="status">"You and the agent share this directory. This shell is yours — the agent does not type here."</p>
             </Show>

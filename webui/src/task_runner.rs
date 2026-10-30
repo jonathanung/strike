@@ -6,10 +6,16 @@
 //! shared status component from #1263 has since landed on main; swapping
 //! `status_class` for it is a follow-on, not part of this re-land.
 
+use std::rc::Rc;
+
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use serde::Deserialize;
 use wasm_bindgen::JsCast;
+
+use load_guard::LoadEpoch;
+
+use crate::load_epoch::begin;
 
 use crate::api::{get_json, post_json_value};
 
@@ -152,7 +158,12 @@ async fn fetch_plans(base: &str, token: &str) -> Result<Vec<PlanMeta>, String> {
     Ok(list.plans)
 }
 
-async fn post_run(base: &str, token: &str, id: &str, body: serde_json::Value) -> Result<RunBody, String> {
+async fn post_run(
+    base: &str,
+    token: &str,
+    id: &str,
+    body: serde_json::Value,
+) -> Result<RunBody, String> {
     let path = format!("/v1/plans/{}/run", crate::api::js_encode(id));
     let value = post_json_value(base, token, &path, body).await?;
     serde_json::from_value(value).map_err(|e| e.to_string())
@@ -198,6 +209,8 @@ pub fn TaskRunner(
     // Set before refresh so a plan created in this view is selected after the
     // list round-trip. Setting `selected` first races the list and never opens.
     let pending_select = RwSignal::new(String::new());
+    let run_epoch = RwSignal::new(LoadEpoch::new());
+    let run_loading = RwSignal::new(false);
 
     let refresh_plans = move || {
         let (b, t) = (base.get_untracked(), token.get_untracked());
@@ -222,20 +235,45 @@ pub fn TaskRunner(
             }
         });
     };
+    crate::shell::bind(
+        "tasks.refresh",
+        Rc::new(move |_| {
+            refresh_plans();
+            Ok(())
+        }),
+    );
+    if let Some(_) = crate::park::take("tasks.refresh") {
+        refresh_plans();
+    }
 
     let open_selected = move || {
+        let gen = begin(run_epoch);
+        run.set(None);
+        note.set(String::new());
         let id = selected.get_untracked();
         if id.is_empty() {
-            run.set(None);
+            run_loading.set(false);
             return;
         }
         let plan = plans.get_untracked().into_iter().find(|p| p.id == id);
         let Some(plan) = plan else {
+            run_loading.set(false);
+            note.set("That plan is not in the list.".into());
             return;
         };
+        run_loading.set(true);
         let (b, t) = (base.get_untracked(), token.get_untracked());
+        let run_epoch = run_epoch;
         spawn_local(async move {
-            match load_run(&b, &t, &plan).await {
+            let fetched = load_run(&b, &t, &plan).await;
+            if !run_epoch.with_untracked(|epoch| epoch.accept(gen)) {
+                return;
+            }
+            if selected.get_untracked() != id {
+                return;
+            }
+            run_loading.set(false);
+            match fetched {
                 Ok(body) => {
                     if row.get_untracked().is_empty() {
                         if let Some(sec) = body.run.sections.first() {
@@ -248,6 +286,7 @@ pub fn TaskRunner(
                     run.set(Some(body.run));
                 }
                 Err(err) => {
+                    run.set(None);
                     note.set(err.clone());
                     status.set(err);
                 }
@@ -269,36 +308,62 @@ pub fn TaskRunner(
         let Some(current) = run.get_untracked() else {
             return;
         };
+        if current.plan_id != selected.get_untracked() {
+            note.set("That run belongs to a different plan.".into());
+            return;
+        }
+        let gen = run_epoch.with_untracked(|epoch| epoch.token());
+        let selected_id = current.plan_id.clone();
+        let owner_root = current.owner_root.clone();
+        let plan_title = current.plan_title.clone();
+        let plan_status = current.plan_status.clone();
+        let version = current.version;
         let (b, t) = (base.get_untracked(), token.get_untracked());
+        let run_epoch = run_epoch;
         spawn_local(async move {
             let body = serde_json::json!({
                 "action": action,
-                "ownerRoot": current.owner_root,
+                "ownerRoot": owner_root.clone(),
                 "sectionId": section_id,
                 "sectionIds": section_ids,
-                "expectedVersion": current.version,
+                "expectedVersion": version,
             });
-            match post_run(&b, &t, &current.plan_id, body).await {
+            match post_run(&b, &t, &selected_id, body).await {
                 Ok(body) => {
+                    if !run_epoch.with_untracked(|epoch| epoch.accept(gen))
+                        || selected.get_untracked() != selected_id
+                    {
+                        return;
+                    }
                     note.set(body.note);
                     run.set(Some(body.run));
                     status.set(String::new());
                 }
                 Err(err) => {
+                    if !run_epoch.with_untracked(|epoch| epoch.accept(gen))
+                        || selected.get_untracked() != selected_id
+                    {
+                        return;
+                    }
                     note.set(err.clone());
                     status.set(err);
                     if let Ok(again) = load_run(
                         &b,
                         &t,
                         &PlanMeta {
-                            id: current.plan_id,
-                            title: current.plan_title,
-                            status: current.plan_status,
-                            owner_root: current.owner_root,
+                            id: selected_id.clone(),
+                            title: plan_title.clone(),
+                            status: plan_status.clone(),
+                            owner_root: owner_root.clone(),
                         },
                     )
                     .await
                     {
+                        if !run_epoch.with_untracked(|epoch| epoch.accept(gen))
+                            || selected.get_untracked() != selected_id
+                        {
+                            return;
+                        }
                         run.set(Some(again.run));
                     }
                 }
@@ -437,7 +502,7 @@ pub fn TaskRunner(
         ev.prevent_default();
     };
 
-    arm_poll(base, token, plans, selected, run);
+    arm_poll(base, token, plans, selected, run, run_epoch);
 
     view! {
         <div class="task-shell">
@@ -445,7 +510,6 @@ pub fn TaskRunner(
             <aside class="task-col">
                 <div class="section-head">
                     <h2 class="panel-title">"Task runner"</h2>
-                    <button class="secondary" on:click=move |_| refresh_plans()>"Refresh"</button>
                 </div>
                 <div class="task-plan-list" role="listbox" aria-label="Plans">
                     {move || {
@@ -495,6 +559,9 @@ pub fn TaskRunner(
                 {move || {
                     let current = run.get();
                     let Some(current) = current else {
+                        if run_loading.get() {
+                            return view! { <p class="hint">"Loading plan…"</p> }.into_any();
+                        }
                         return view! { <p class="hint">"Open a plan to see its sections."</p> }.into_any();
                     };
                     let title = current.plan_title.clone();
@@ -557,14 +624,23 @@ fn checkpoint_view(
     let Some(run) = run else {
         return view! { <p class="hint">"The checkpoint is the section body, the child handoff, and the verification report."</p> }.into_any();
     };
-    let Some(sec) = run.sections.iter().find(|s| s.id == row).cloned().or_else(|| run.sections.first().cloned()) else {
+    let Some(sec) = run
+        .sections
+        .iter()
+        .find(|s| s.id == row)
+        .cloned()
+        .or_else(|| run.sections.first().cloned())
+    else {
         return view! { <p class="hint">"This plan has no sections."</p> }.into_any();
     };
     let id = sec.id.clone();
     let status = sec.status.clone();
     let can_approve = status == "checkpoint";
     let can_retry = status == "failed" || status == "checkpoint";
-    let can_skip = matches!(status.as_str(), "pending" | "checkpoint" | "failed" | "blocked");
+    let can_skip = matches!(
+        status.as_str(),
+        "pending" | "checkpoint" | "failed" | "blocked"
+    );
     let cp = sec.checkpoint.clone();
     let body = sec.body.clone();
     let title = sec.title.clone();
@@ -670,6 +746,7 @@ fn arm_poll(
     plans: RwSignal<Vec<PlanMeta>>,
     selected: RwSignal<String>,
     run: RwSignal<Option<TaskRun>>,
+    run_epoch: RwSignal<LoadEpoch>,
 ) {
     let cb = wasm_bindgen::closure::Closure::wrap(Box::new(move || {
         let running = run
@@ -683,6 +760,8 @@ fn arm_poll(
         let Some(plan) = plans.get_untracked().into_iter().find(|p| p.id == id) else {
             return;
         };
+        let gen = run_epoch.with_untracked(|epoch| epoch.token());
+        let plan_id = plan.id.clone();
         let (b, t) = (base.get_untracked(), token.get_untracked());
         spawn_local(async move {
             if let Ok(body) = get_json::<RunBody>(
@@ -692,13 +771,21 @@ fn arm_poll(
             )
             .await
             {
+                if !run_epoch.with_untracked(|epoch| epoch.accept(gen))
+                    || selected.get_untracked() != plan_id
+                {
+                    return;
+                }
                 run.set(Some(body.run));
             }
         });
     }) as Box<dyn FnMut()>);
     let handle = web_sys::window().and_then(|window| {
         window
-            .set_interval_with_callback_and_timeout_and_arguments_0(cb.as_ref().unchecked_ref(), 1500)
+            .set_interval_with_callback_and_timeout_and_arguments_0(
+                cb.as_ref().unchecked_ref(),
+                1500,
+            )
             .ok()
     });
     // The callback is not Send. Leak it for the page lifetime and only clear
