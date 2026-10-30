@@ -1810,7 +1810,7 @@ pub fn DocumentPane(
                     data-ev-match-case="true"
                     title="Match case"
                     aria-label="Match case"
-                    attr:aria-pressed=move || if match_case.get() { "true" } else { "false" }
+                    aria-pressed=move || if match_case.get() { "true" } else { "false" }
                     on:click=move |_| match_case.update(|v| *v = !*v)
                 >"Aa"</button>
                 <button
@@ -1819,7 +1819,7 @@ pub fn DocumentPane(
                     data-ev-whole-word="true"
                     title="Whole word"
                     aria-label="Whole word"
-                    attr:aria-pressed=move || if whole_word.get() { "true" } else { "false" }
+                    aria-pressed=move || if whole_word.get() { "true" } else { "false" }
                     on:click=move |_| whole_word.update(|v| *v = !*v)
                 >"ab|"</button>
                 <button type="button" class="secondary" on:click=move |_| step(-1)>"Prev"</button>

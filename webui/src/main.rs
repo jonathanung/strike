@@ -4266,7 +4266,7 @@ fn App() -> impl IntoView {
                                 data-tf-match-case="true"
                                 title="Match case"
                                 aria-label="Match case"
-                                attr:aria-pressed=move || if tf_match_case.get() { "true" } else { "false" }
+                                aria-pressed=move || if tf_match_case.get() { "true" } else { "false" }
                                 on:click=move |_| { tf_match_case.update(|v| *v = !*v); tf_idx.set(0); }
                             >"Aa"</button>
                             <button
@@ -4275,7 +4275,7 @@ fn App() -> impl IntoView {
                                 data-tf-whole-word="true"
                                 title="Whole word"
                                 aria-label="Whole word"
-                                attr:aria-pressed=move || if tf_whole_word.get() { "true" } else { "false" }
+                                aria-pressed=move || if tf_whole_word.get() { "true" } else { "false" }
                                 on:click=move |_| { tf_whole_word.update(|v| *v = !*v); tf_idx.set(0); }
                             >"ab|"</button>
                             <button type="button" class="secondary" data-tf-prev="true" on:click=move |_| tf_step(-1)>"Prev"</button>
