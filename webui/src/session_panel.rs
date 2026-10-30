@@ -38,6 +38,11 @@ pub(crate) struct CursorSession {
     pub id: String,
     pub label: String,
     pub pinned: bool,
+    /// Server unread bit for the row (#1557 visibility gating).
+    pub unread: bool,
+    /// Whether this row is the open session — opening re-marks seen by
+    /// design, so "Mark unread" must not be offered for it (#1557).
+    pub active: bool,
 }
 
 impl Default for CursorSession {
@@ -46,6 +51,8 @@ impl Default for CursorSession {
             id: String::new(),
             label: String::new(),
             pinned: false,
+            unread: false,
+            active: false,
         }
     }
 }
@@ -713,6 +720,8 @@ pub(crate) fn SessionPanel(
                 id: item.id.clone(),
                 label: item.label.clone(),
                 pinned: item.pinned,
+                unread: item.unread,
+                active: item.id == active || item.open_id == active,
             },
             None => CursorSession::default(),
         };
@@ -894,6 +903,16 @@ pub(crate) fn SessionPanel(
             let id = target_id();
             if id.is_empty() {
                 return Err("No session to mark unread.".into());
+            }
+            // State honesty (#1557): the palette hides the command for
+            // the open session, but a dispatch can still land here —
+            // opening re-marks seen by design, so the mark would be
+            // undone at once. Refuse plainly instead of lying.
+            if id == active_root.get_untracked() {
+                return Err(
+                    "The open session is marked seen while it is open. Mark it unread after switching away."
+                        .into(),
+                );
             }
             let (b, t) = (base.get_untracked(), token.get_untracked());
             let note = note;

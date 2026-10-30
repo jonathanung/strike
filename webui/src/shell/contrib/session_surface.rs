@@ -249,7 +249,15 @@ pub fn install(reg: &mut ShellHook) {
             go("session.unread"),
         )
         .keywords(&["unread", "mark", "seen"])
-        .order(55),
+        .order(55)
+        // State-honest visibility (#1557): only a read session that is
+        // not the open one — an already-unread row has nothing to do,
+        // and opening re-marks the open session seen by design.
+        .visible(|| {
+            let cursor = crate::session_panel::cursor_session();
+            !cursor.id.is_empty()
+                && crate::session_list::can_mark_unread(cursor.unread, cursor.active)
+        }),
     );
     reg.command(
         Command::new(

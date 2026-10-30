@@ -840,7 +840,7 @@ fn ApprovalCard(
         .collect();
 
     view! {
-        <article class="approvals-card" aria-live="polite">
+        <article class="approvals-card" aria-live="polite" data-pending-ask="true" tabindex="-1">
             <header>
                 <span class="badge badge-blocked">"Needs you"</span>
                 <span class="who">{permission.clone()}</span>
