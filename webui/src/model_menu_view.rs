@@ -118,6 +118,7 @@ pub fn ModelMenu(
     catalog_note: RwSignal<String>,
     model_note: RwSignal<String>,
     defaults: RwSignal<ModelDefaults>,
+    defaults_known: RwSignal<bool>,
     busy: Memo<bool>,
     on_select: Callback<(String, String)>,
     on_default_model: Callback<(String, String)>,
@@ -248,7 +249,7 @@ pub fn ModelMenu(
                     }}
                     <p class="hint" data-model-scope="true">{move || {
                         let d = defaults.get();
-                        scope_label(&provider.get(), &model.get(), &d.provider, &d.model).to_string()
+                        scope_label(&provider.get(), &model.get(), &d.provider, &d.model, defaults_known.get()).to_string()
                     }}</p>
                     <Show when=move || busy.get()>
                         <p class="hint">"This turn is still running. Session model and effort changes wait until it finishes."</p>
@@ -543,7 +544,13 @@ pub fn ModelMenu(
                 class=move || {
                     let scope = {
                         let d = defaults.get();
-                        scope_label(&provider.get(), &model.get(), &d.provider, &d.model)
+                        scope_label(
+                            &provider.get(),
+                            &model.get(),
+                            &d.provider,
+                            &d.model,
+                            defaults_known.get(),
+                        )
                     };
                     let live = view_now();
                     let mut class = String::from("chip");
@@ -560,7 +567,13 @@ pub fn ModelMenu(
                 data-model-chip="true"
                 title=move || {
                     let d = defaults.get();
-                    let scope = scope_label(&provider.get(), &model.get(), &d.provider, &d.model);
+                    let scope = scope_label(
+                        &provider.get(),
+                        &model.get(),
+                        &d.provider,
+                        &d.model,
+                        defaults_known.get(),
+                    );
                     let live = view_now();
                     format!("Model. {scope}. {}. Alt+M opens the model menu.", live.summary)
                 }
