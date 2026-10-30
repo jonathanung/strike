@@ -1012,6 +1012,33 @@ try {
   if (selected.result?.result?.value !== "yes") {
     throw new Error("keyboard x did not select the cursor session");
   }
+  // Session list actions (#1414/#1454/#1458): every session row carries a
+  // Copy ID button (data-ss-copy-id = the row's session id) and an
+  // Archive/Unarchive button, and the panel exposes the sort select.
+  // Clicking Copy ID must produce honest feedback — "Session ID copied."
+  // only when the browser accepted the write, otherwise the generic
+  // manual-copy failure line; never silence.
+  const rowActions = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const sort = document.querySelector("[data-ss-sort]");
+      const copy = document.querySelector("[data-ss-copy-id]");
+      const arch = document.querySelector("[data-ss-archive-id]");
+      if (!sort || !copy || !arch) return "missing";
+      const row = copy.closest("[data-session-id]");
+      if (!row || row.getAttribute("data-session-id") !== copy.getAttribute("data-ss-copy-id")) return "copy-hook-mismatch";
+      copy.click();
+      return "clicked";
+    })()`,
+    returnByValue: true,
+  });
+  if (rowActions.result?.result?.value !== "clicked") {
+    throw new Error(`session row actions missing (${rowActions.result?.result?.value})`);
+  }
+  await waitFor(
+    "copy ID feedback",
+    textProbe((t) => t.includes("Session ID copied.") || t.includes("Copy didn't work in this browser.")),
+    { timeout: WAIT_MS, interval: 250 },
+  );
   // feature:navbar — palette fuzzy match, argument error, shortcut overlay.
   const navbar = async (expression) => {
     try {
