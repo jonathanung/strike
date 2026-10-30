@@ -32,6 +32,16 @@ pub struct LiveModelState {
     pub provider: String,
     pub model: String,
     pub effort: String,
+    /// Fast (priority-tier) preference (#1569). Only ever set from a
+    /// daemon `fast.selected` confirmation — never optimistically when
+    /// the toggle is clicked. The daemon's status snapshot carries no
+    /// fast field, so a fresh page starts off until a confirmation (the
+    /// daemon replays/emits one for the session) says otherwise.
+    pub fast: bool,
+    /// Session exit-gate policy (#1572), seeded from bootstrap/status in
+    /// `main.rs` and afterwards only from `autonomy.selected`
+    /// confirmations reduced here.
+    pub autonomy: String,
     pub context_used: i64,
     pub context_limit: i64,
     pub context_fit: String,
@@ -552,7 +562,11 @@ pub fn parse_freeform(raw: &str, fallback_provider: &str) -> (String, String) {
 
 fn event_relevant(message: &str) -> bool {
     let m = message.to_ascii_lowercase();
-    m.contains("model") || m.contains("effort") || m.contains("provider")
+    m.contains("model")
+        || m.contains("effort")
+        || m.contains("provider")
+        || m.contains("fast")
+        || m.contains("autonomy")
 }
 
 fn under_warn_ratio(used: i64, limit: i64) -> bool {
@@ -595,6 +609,32 @@ pub fn reduce_envelope(mut state: LiveModelState, raw: &str) -> LiveModelState {
         "effort.selected" => {
             if let Some(level) = text(&data, "level") {
                 state.effort = level;
+            }
+            if fresh {
+                state.note.clear();
+                state.note_after = 0;
+            }
+        }
+        // Fast (#1569): the ONLY place fast state changes. Clicking the
+        // toggle posts `set.fast`; the displayed state waits for this
+        // daemon confirmation, exactly like the TUI.
+        "fast.selected" => {
+            if let Some(enabled) = data.get("enabled").and_then(|v| v.as_bool()) {
+                state.fast = enabled;
+            }
+            if fresh {
+                state.note.clear();
+                state.note_after = 0;
+            }
+        }
+        // Autonomy (#1572): same confirmation-only discipline. Unknown
+        // modes are dropped rather than rendered as a policy the daemon
+        // never reported.
+        "autonomy.selected" => {
+            if let Some(mode) = text(&data, "mode") {
+                if crate::model::autonomies().iter().any(|m| m.id == mode) {
+                    state.autonomy = mode;
+                }
             }
             if fresh {
                 state.note.clear();
@@ -928,6 +968,39 @@ mod tests {
         );
         assert_eq!(state.model, "echo-2");
         assert!(state.note.is_empty());
+    }
+
+    #[test]
+    fn reducer_applies_fast_and_autonomy_only_from_confirmations() {
+        let mut state = LiveModelState::default();
+        assert!(!state.fast);
+        // A click sends the op but is not an envelope: nothing here flips
+        // state until the daemon's fast.selected lands.
+        state = reduce_envelope(
+            state,
+            r#"{"type":"fast.selected","data":{"enabled":true}}"#,
+        );
+        assert!(state.fast);
+        state = reduce_envelope(
+            state,
+            r#"{"type":"fast.selected","data":{"enabled":false}}"#,
+        );
+        assert!(!state.fast);
+        // A malformed confirmation changes nothing.
+        state = reduce_envelope(state, r#"{"type":"fast.selected","data":{}}"#);
+        assert!(!state.fast);
+
+        state = reduce_envelope(
+            state,
+            r#"{"type":"autonomy.selected","data":{"mode":"checks"}}"#,
+        );
+        assert_eq!(state.autonomy, "checks");
+        // Unknown modes never render as a gate policy.
+        state = reduce_envelope(
+            state,
+            r#"{"type":"autonomy.selected","data":{"mode":"yolo"}}"#,
+        );
+        assert_eq!(state.autonomy, "checks");
     }
 
     #[test]

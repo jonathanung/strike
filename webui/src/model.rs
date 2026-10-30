@@ -147,6 +147,11 @@ pub struct LiveStatus {
     pub cwd: String,
     #[serde(default)]
     pub effort: String,
+    /// Session exit-gate policy the daemon reports on every status
+    /// (#1572). Empty until the daemon reports one; the UI normalizes
+    /// empty to the `supervised` default rather than inventing a mode.
+    #[serde(default)]
+    pub autonomy: String,
     #[serde(default)]
     pub busy: bool,
     #[serde(default, rename = "contextUsed")]
@@ -499,6 +504,55 @@ pub fn mode_label(id: &str) -> &'static str {
         .find(|m| m.id == id)
         .map(|m| m.label)
         .unwrap_or("Default")
+}
+
+/// The four protocol autonomy values (#1572), most to least human
+/// oversight — the same order as `protocol.Autonomies()`. Labels are the
+/// protocol values themselves (the TUI picker renders the raw mode), and
+/// each detail is the protocol `Autonomy.Describe()` wording verbatim —
+/// the cockpit does not invent its own description of gate semantics.
+pub fn autonomies() -> &'static [ModeChoice] {
+    &[
+        ModeChoice {
+            id: "supervised",
+            label: "supervised",
+            detail: "you approve phase gates — safest default",
+        },
+        ModeChoice {
+            id: "agent",
+            label: "agent",
+            detail: "agent clears phase gates itself — less interruption",
+        },
+        ModeChoice {
+            id: "checks",
+            label: "checks",
+            detail: "commands must pass before a phase advances",
+        },
+        ModeChoice {
+            id: "skip-all",
+            label: "skip-all",
+            detail: "skip workflow/plan approval — tool perms unchanged",
+        },
+    ]
+}
+
+pub fn autonomy_label(id: &str) -> &'static str {
+    autonomies()
+        .iter()
+        .find(|m| m.id == id)
+        .map(|m| m.label)
+        .unwrap_or("supervised")
+}
+
+/// The autonomy a status line should claim: the daemon's reported value
+/// when it is one of the four protocol modes, otherwise the protocol
+/// default (`supervised` — `Autonomy.Normalize` maps empty there too).
+pub fn autonomy_or_default(id: &str) -> &'static str {
+    autonomies()
+        .iter()
+        .find(|m| m.id == id)
+        .map(|m| m.id)
+        .unwrap_or("supervised")
 }
 
 fn unix_seconds(created_at: i64) -> i64 {
@@ -1211,6 +1265,41 @@ mod tests {
         let wide = "a very long task line without a colon that should be cut down to one row";
         assert!(task_headline(wide).ends_with('…'));
         assert!(task_headline(wide).chars().count() <= 42);
+    }
+
+    #[test]
+    fn autonomies_are_the_real_four() {
+        let ids: Vec<_> = autonomies().iter().map(|m| m.id).collect();
+        assert_eq!(ids, vec!["supervised", "agent", "checks", "skip-all"]);
+        // Details are protocol Autonomy.Describe() verbatim.
+        let details: Vec<_> = autonomies().iter().map(|m| m.detail).collect();
+        assert_eq!(
+            details,
+            vec![
+                "you approve phase gates — safest default",
+                "agent clears phase gates itself — less interruption",
+                "commands must pass before a phase advances",
+                "skip workflow/plan approval — tool perms unchanged",
+            ]
+        );
+        assert_eq!(autonomy_label("checks"), "checks");
+        assert_eq!(autonomy_label("nope"), "supervised");
+        assert_eq!(autonomy_or_default(""), "supervised");
+        assert_eq!(autonomy_or_default("skip-all"), "skip-all");
+        assert_eq!(autonomy_or_default("bogus"), "supervised");
+    }
+
+    #[test]
+    fn live_status_keeps_the_daemons_autonomy() {
+        let st: LiveStatus = serde_json::from_str(
+            r#"{"provider":"echo","model":"echo","autonomy":"skip-all","busy":false}"#,
+        )
+        .unwrap();
+        assert_eq!(st.autonomy, "skip-all");
+        // Older statuses without the field parse as unreported, not as a
+        // mode the daemon never claimed.
+        let st: LiveStatus = serde_json::from_str(r#"{"provider":"echo"}"#).unwrap();
+        assert_eq!(st.autonomy, "");
     }
 
     #[test]

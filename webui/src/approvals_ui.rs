@@ -12,12 +12,13 @@ use wasm_bindgen::JsCast;
 
 use crate::api::{get_json, patch_json, post_json, post_op};
 use crate::approvals::{
-    begin_session_mode, countdown_seconds, decision_choices, global_confirm, hint_line,
-    is_dangerous, notes_from_envelope, rule_add_confirm, rule_remove_confirm, session_confirm,
-    validate_rule_draft, workspace_confirm, Ask, AuditDocument, AuditLine, ConfirmKind, ModeChange,
-    PendingConfirm, PermNote, RuleRecord, RulesDocument, SettingsBits,
+    autonomy_confirm, begin_autonomy_change, begin_session_mode, countdown_seconds,
+    decision_choices, global_confirm, hint_line, is_dangerous, notes_from_envelope,
+    rule_add_confirm, rule_remove_confirm, session_confirm, validate_rule_draft, workspace_confirm,
+    Ask, AuditDocument, AuditLine, ConfirmKind, ModeChange, PendingConfirm, PermNote, RuleRecord,
+    RulesDocument, SettingsBits,
 };
-use crate::model::{mode_label, permission_modes, Workspace};
+use crate::model::{autonomies, autonomy_label, mode_label, permission_modes, Workspace};
 
 pub fn commit_session_mode(
     base: RwSignal<String>,
@@ -50,6 +51,34 @@ pub fn commit_session_mode(
         {
             perm_mode.set(prev);
             status.set(format!("approval mode failed: {e}"));
+        }
+    });
+}
+
+/// Post `set.autonomy` (#1572). Unlike [`commit_session_mode`] this is
+/// deliberately NOT optimistic: the autonomy signal is safety-relevant
+/// gate state, so it changes only when the daemon's `autonomy.selected`
+/// confirmation (or a status refresh) reports the new mode. A failed
+/// post surfaces on `status` and leaves the shown mode untouched.
+pub fn commit_autonomy(
+    base: RwSignal<String>,
+    token: RwSignal<String>,
+    root: RwSignal<String>,
+    status: RwSignal<String>,
+    mode: String,
+) {
+    if root.get_untracked().is_empty() {
+        status.set("no live session yet".into());
+        return;
+    }
+    let (b, t, r) = (
+        base.get_untracked(),
+        token.get_untracked(),
+        root.get_untracked(),
+    );
+    spawn_local(async move {
+        if let Err(e) = post_op(&b, &t, &r, "set.autonomy", json!({"mode": mode})).await {
+            status.set(format!("autonomy change failed: {e}"));
         }
     });
 }
@@ -477,6 +506,9 @@ fn accept_pending(
         ConfirmKind::Session { mode } => {
             commit_session_mode(base, token, root, perm_mode, status, mode);
         }
+        ConfirmKind::Autonomy { mode } => {
+            commit_autonomy(base, token, root, status, mode);
+        }
         ConfirmKind::Global { mode } => {
             let (b, t) = (base.get_untracked(), token.get_untracked());
             spawn_local(async move {
@@ -702,6 +734,67 @@ pub fn ApprovalMenu(
                     <span class="name">"Rules and audit"</span>
                     <span class="path">"Allow and deny patterns. Deny rules still apply in Yolo."</span>
                 </button>
+            </div>
+        </Show>
+    }
+}
+
+/// The autonomy picker (#1572), cloned from [`ApprovalMenu`]: the four
+/// protocol modes with the TUI's `Describe()` wording, the current mode
+/// marked, `skip-all` routed through the shared confirm, and every row
+/// disabled while a turn is running (the daemon rejects the op mid-turn
+/// — the picker surfaces that instead of pretending the click worked).
+/// Selecting a row only posts `set.autonomy`; the shown mode changes
+/// when the daemon confirms it.
+#[component]
+pub fn AutonomyMenu(
+    menu_open: RwSignal<bool>,
+    autonomy: RwSignal<String>,
+    confirm: RwSignal<Option<PendingConfirm>>,
+    busy: Memo<bool>,
+    base: RwSignal<String>,
+    token: RwSignal<String>,
+    root: RwSignal<String>,
+    status: RwSignal<String>,
+) -> impl IntoView {
+    view! {
+        <Show when=move || menu_open.get()>
+            <div class="menu approvals-menu" role="menu" aria-label="Autonomy" data-autonomy-menu="true">
+                <p class="hint">"Autonomy — who clears a workflow phase exit"</p>
+                <Show when=move || busy.get()>
+                    <p class="hint" data-autonomy-busy="true">"This turn is still running. Autonomy changes wait until it finishes."</p>
+                </Show>
+                {autonomies().iter().map(|m| {
+                    let id = m.id.to_string();
+                    let id_class = id.clone();
+                    let id_click = id.clone();
+                    let label = m.label.to_string();
+                    let detail = m.detail.to_string();
+                    let shown = if crate::approvals::autonomy_needs_confirm(m.id) {
+                        format!("{label} · confirms")
+                    } else {
+                        label
+                    };
+                    view! {
+                        <button type="button" class=move || {
+                            if autonomy_label(&autonomy.get()) == id_class { "palette-row on" } else { "palette-row" }
+                        } role="menuitem" data-autonomy-mode=id.clone() disabled=move || busy.get() on:click=move |_| {
+                            if busy.get_untracked() {
+                                status.set("This turn is still running. Autonomy changes wait until it finishes.".into());
+                                return;
+                            }
+                            menu_open.set(false);
+                            match begin_autonomy_change(&autonomy.get_untracked(), &id_click) {
+                                ModeChange::Same => {}
+                                ModeChange::Apply(mode) => commit_autonomy(base, token, root, status, mode),
+                                ModeChange::Confirm(_) => confirm.set(Some(autonomy_confirm(&id_click))),
+                            }
+                        }>
+                            <span class="name">{shown}</span>
+                            <span class="path">{detail}</span>
+                        </button>
+                    }
+                }).collect_view()}
             </div>
         </Show>
     }

@@ -2457,6 +2457,86 @@ try {
     { timeout: STEP_MS, interval: 200 },
   );
 
+  // Session dials (#1572 autonomy, #1569 Fast): both start at the
+  // daemon-reported default, flip only after the daemon confirms the
+  // op, and skip-all goes through its confirm first.
+  await waitFor(
+    "autonomy chip starts supervised",
+    async () => {
+      const chip = await evaluate(`document.querySelector('[data-autonomy-status]')?.textContent || ""`);
+      return { ok: chip.includes("Autonomy · supervised"), chip };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  const palettePick = async (id) => {
+    await evaluate(`document.querySelector('[data-nav="palette"]')?.click()`);
+    await delay(250);
+    await evaluate(`document.querySelector('[data-command-id="${id}"]')?.click()`);
+  };
+  await palettePick("autonomy-checks");
+  await waitFor(
+    "autonomy flips to checks only on daemon confirmation",
+    async () => {
+      const chip = await evaluate(`document.querySelector('[data-autonomy-status]')?.textContent || ""`);
+      return { ok: chip.includes("Autonomy · checks"), chip };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await palettePick("autonomy-skip-all");
+  await waitFor(
+    "skip-all asks for its confirm first",
+    async () => {
+      const open = await evaluate(`!!document.querySelector(".approvals-dialog")`);
+      const body = (await evaluate(`document.body ? document.body.innerText : ""`)) || "";
+      return { ok: open && body.includes("Advance without exit gates?"), open };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await evaluate(`(() => {
+    const btn = [...document.querySelectorAll(".approvals-dialog button")].find((b) => (b.innerText || "").trim() === "Use skip-all");
+    if (btn) btn.click();
+    return "ok";
+  })()`);
+  await waitFor(
+    "skip-all chip after confirm + daemon confirmation",
+    async () => {
+      const chip = await evaluate(`document.querySelector('[data-autonomy-status]')?.textContent || ""`);
+      return { ok: chip.includes("Autonomy · skip-all"), chip };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await palettePick("autonomy-supervised");
+  await waitFor(
+    "autonomy restored to supervised",
+    async () => {
+      const chip = await evaluate(`document.querySelector('[data-autonomy-status]')?.textContent || ""`);
+      return { ok: chip.includes("Autonomy · supervised"), chip };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await palettePick("model.fast");
+  await delay(250);
+  await evaluate(`document.querySelector('[data-choice-id="on"]')?.click()`);
+  await waitFor(
+    "fast chip appears only on daemon confirmation",
+    async () => {
+      const chip = await evaluate(`document.querySelector('[data-fast-status]')?.textContent || ""`);
+      return { ok: chip.includes("Fast · on"), chip };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await palettePick("model.fast");
+  await delay(250);
+  await evaluate(`document.querySelector('[data-choice-id="off"]')?.click()`);
+  await waitFor(
+    "fast chip clears on daemon confirmation",
+    async () => {
+      const chip = await evaluate(`document.querySelector('[data-fast-status]')?.textContent || "none"`);
+      return { ok: chip === "none", chip };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+
   await setDraft("run sleep 30");
   await press("Enter");
   await waitFor(
@@ -2474,6 +2554,29 @@ try {
     },
     { timeout: STEP_MS, interval: 200 },
   );
+
+  // Mid-turn (#1572/#1569): the autonomy picker opens but every row is
+  // disabled with the reason shown — the daemon rejects these ops while
+  // a turn is running, and the cockpit surfaces that instead of faking it.
+  await evaluate(`document.querySelector('[data-autonomy-status]')?.click()`);
+  await waitFor(
+    "autonomy picker disabled mid-turn",
+    async () => {
+      const raw = await evaluate(`(() => {
+        const rows = [...document.querySelectorAll('[data-autonomy-menu] button[data-autonomy-mode]')];
+        return JSON.stringify({
+          menu: !!document.querySelector('[data-autonomy-menu]'),
+          rows: rows.length,
+          allDisabled: rows.length > 0 && rows.every((r) => r.disabled),
+          busyNote: !!document.querySelector('[data-autonomy-busy]'),
+        });
+      })()`);
+      const parsed = JSON.parse(raw || "{}");
+      return { ok: parsed.menu && parsed.allDisabled && parsed.busyNote, ...parsed };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await evaluate(`document.querySelector('[data-autonomy-status]')?.click()`);
 
   await setDraft("alpha later");
   await press("Enter");
