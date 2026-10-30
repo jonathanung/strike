@@ -370,7 +370,10 @@ pub fn session_view() -> AnyView {
     };
     let roots = host.roots;
     let active_root = host.active_root;
-    let go_to_ask = host.go_to_ask.clone();
+    // `go_to_ask` is fetched from the host at click time, not captured
+    // here: reactive closures must be `Send`, and `Rc<dyn Fn()>` is not
+    // (the gateway chip's `refresh` works the same way — its `Rc` lives
+    // only in the click handler).
     view! {
         {move || {
             let row = roots
@@ -394,7 +397,6 @@ pub fn session_view() -> AnyView {
             });
             match action {
                 Some(label) => {
-                    let go = go_to_ask.clone();
                     view! {
                         <button
                             type="button"
@@ -402,7 +404,11 @@ pub fn session_view() -> AnyView {
                             data-session-status-action="true"
                             aria-label=label.clone()
                             title=label
-                            on:click=move |_| (*go)()
+                            on:click=move |_| {
+                                if let Some(host) = host() {
+                                    (*host.go_to_ask)()
+                                }
+                            }
                         >
                             <StatusMark kind=kind place=StatusSlot::Chip />
                         </button>
