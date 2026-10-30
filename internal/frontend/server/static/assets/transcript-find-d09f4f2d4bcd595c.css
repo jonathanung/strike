@@ -42,3 +42,11 @@
   outline: 1px solid var(--warning);
 }
 /* feature:transcript-find end */
+/* feature:find-match-case begin */
+/* Find toggles (#1409 Aa match-case, #1419 ab| whole-word) in the
+   transcript find bar — same chip pattern as the editor bar. */
+.tf-find-toggle { flex: 0 0 auto; font-family: ui-monospace, monospace; }
+/* feature:find-match-case end */
+/* feature:whole-word-find begin */
+.tf-find-toggle[aria-pressed="true"] { font-weight: 700; }
+/* feature:whole-word-find end */

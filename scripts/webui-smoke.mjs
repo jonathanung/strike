@@ -1709,6 +1709,32 @@ try {
       { timeout: STEP_MS, interval: 200 },
     );
   }
+  // Find options (#1409/#1419): both toggle chips exist, start
+  // unpressed, and flip aria-pressed when clicked — in the transcript
+  // bar here; the editor bar carries the same chips (host-tested
+  // matcher, UAT covers its counts).
+  const tfChips = await evaluate(`(() => JSON.stringify({
+    aa: !!document.querySelector("[data-tf-match-case]"),
+    ww: !!document.querySelector("[data-tf-whole-word]"),
+    aaPressed: document.querySelector("[data-tf-match-case]")?.getAttribute("aria-pressed"),
+    wwPressed: document.querySelector("[data-tf-whole-word]")?.getAttribute("aria-pressed"),
+  }))()`);
+  const chips = JSON.parse(tfChips || "{}");
+  if (!chips.aa || !chips.ww || chips.aaPressed !== "false" || chips.wwPressed !== "false") {
+    throw new Error(`find toggle chips missing or not default-off: ${tfChips}`);
+  }
+  await evaluate(`document.querySelector("[data-tf-match-case]").click()`);
+  await evaluate(`document.querySelector("[data-tf-whole-word]").click()`);
+  const tfChipsOn = await evaluate(`(() => JSON.stringify({
+    aaPressed: document.querySelector("[data-tf-match-case]")?.getAttribute("aria-pressed"),
+    wwPressed: document.querySelector("[data-tf-whole-word]")?.getAttribute("aria-pressed"),
+  }))()`);
+  const chipsOn = JSON.parse(tfChipsOn || "{}");
+  if (chipsOn.aaPressed !== "true" || chipsOn.wwPressed !== "true") {
+    throw new Error(`find toggle chips did not press: ${tfChipsOn}`);
+  }
+  await evaluate(`document.querySelector("[data-tf-match-case]").click()`);
+  await evaluate(`document.querySelector("[data-tf-whole-word]").click()`);
   await tfType("zz-no-match-zz");
   await waitFor(
     "zero matches reported plainly, with no marks",

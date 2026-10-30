@@ -146,7 +146,49 @@ pub fn diff_hidden(full: &str, max_chars: usize) -> (usize, usize) {
     (hidden_chars, hidden_lines)
 }
 
-pub fn find_hits(text: &str, query: &str) -> Vec<Hit> {
+/// Options for the shared find matcher (#1409 match-case, #1419
+/// whole-word). Both default off, which is the historical behaviour:
+/// case-insensitive substring matching. One struct threads through the
+/// editor and transcript find (`transcript_find` reuses `find_hits`),
+/// so the two bars can never drift into separate matchers.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct FindOptions {
+    pub case_sensitive: bool,
+    pub whole_word: bool,
+}
+
+impl FindOptions {
+    pub fn new(case_sensitive: bool, whole_word: bool) -> Self {
+        Self {
+            case_sensitive,
+            whole_word,
+        }
+    }
+}
+
+/// A word character for whole-word boundaries (#1419): exactly
+/// `[A-Za-z0-9_]`, nothing wider (punctuation, whitespace, and
+/// non-ASCII letters all count as boundaries).
+pub fn is_word_char(c: char) -> bool {
+    matches!(c, 'A'..='Z' | 'a'..='z' | '0'..='9' | '_')
+}
+
+/// Pure whole-word predicate: the hit at `start..end` in `line` counts
+/// only when the characters immediately before and after it (if any)
+/// are not word characters.
+pub fn is_whole_word_at(line: &str, start: usize, end: usize) -> bool {
+    let before_ok = line[..start.min(line.len())]
+        .chars()
+        .next_back()
+        .map_or(true, |c| !is_word_char(c));
+    let after_ok = line[end.min(line.len())..]
+        .chars()
+        .next()
+        .map_or(true, |c| !is_word_char(c));
+    before_ok && after_ok
+}
+
+pub fn find_hits(text: &str, query: &str, opts: FindOptions) -> Vec<Hit> {
     if query.is_empty() {
         return Vec::new();
     }
@@ -155,6 +197,26 @@ pub fn find_hits(text: &str, query: &str) -> Vec<Hit> {
     let query_ascii = query.is_ascii();
     let mut hits = Vec::new();
     for (idx, line) in lines_of(text).into_iter().enumerate() {
+        // Case-sensitive matching never lowercases, so it never needs
+        // the fold fallback below: `str::find` gives exact byte offsets
+        // for ASCII and non-ASCII alike.
+        if opts.case_sensitive && (!query_ascii || !line.is_ascii()) {
+            for (start, _) in line.match_indices(query) {
+                let end = start + query.len();
+                if opts.whole_word && !is_whole_word_at(line, start, end) {
+                    continue;
+                }
+                hits.push(Hit {
+                    line: (idx as u32) + 1,
+                    start,
+                    end,
+                });
+                if hits.len() >= MAX_HITS {
+                    return hits;
+                }
+            }
+            continue;
+        }
         // Greek and Cyrillic fold without changing the byte length, so a
         // length check never left the ASCII fast path and missed them.
         // The fast path is only for pure ASCII. Anything else is a
@@ -162,7 +224,11 @@ pub fn find_hits(text: &str, query: &str) -> Vec<Hit> {
         // (`marked_pieces` already treats that as the whole line).
         if !query_ascii || !line.is_ascii() {
             let folded = line.to_lowercase();
-            if folded.contains(&q_lower) {
+            // Fold fallback: per-hit offsets cannot be trusted, so in
+            // whole-word mode the hit's boundaries cannot be verified
+            // and it is dropped, not counted (#1419 Q2) — counting it
+            // would make the count a lie.
+            if !opts.whole_word && folded.contains(&q_lower) {
                 hits.push(Hit {
                     line: (idx as u32) + 1,
                     start: 0,
@@ -170,23 +236,41 @@ pub fn find_hits(text: &str, query: &str) -> Vec<Hit> {
                 });
             }
         } else {
+            // Pure-ASCII fast path. Case-sensitive compares the raw
+            // query bytes; case-insensitive compares against the
+            // lowercased query, as before.
+            let needle: &[u8] = if opts.case_sensitive {
+                query.as_bytes()
+            } else {
+                q_bytes
+            };
             let bytes = line.as_bytes();
-            if bytes.len() < q_bytes.len() || q_bytes.is_empty() {
+            if bytes.len() < needle.len() || needle.is_empty() {
                 continue;
             }
             let mut i = 0;
-            while i + q_bytes.len() <= bytes.len() {
-                let same = bytes[i..i + q_bytes.len()]
-                    .iter()
-                    .zip(q_bytes)
-                    .all(|(a, b)| a.to_ascii_lowercase() == *b);
+            while i + needle.len() <= bytes.len() {
+                let same = if opts.case_sensitive {
+                    &bytes[i..i + needle.len()] == needle
+                } else {
+                    bytes[i..i + needle.len()]
+                        .iter()
+                        .zip(needle)
+                        .all(|(a, b)| a.to_ascii_lowercase() == *b)
+                };
                 if same {
+                    if opts.whole_word && !is_whole_word_at(line, i, i + needle.len()) {
+                        // Not a whole word: advance one byte so a
+                        // later whole-word hit on this line is found.
+                        i += 1;
+                        continue;
+                    }
                     hits.push(Hit {
                         line: (idx as u32) + 1,
                         start: i,
-                        end: i + q_bytes.len(),
+                        end: i + needle.len(),
                     });
-                    i += q_bytes.len().max(1);
+                    i += needle.len().max(1);
                     if hits.len() >= MAX_HITS {
                         return hits;
                     }
@@ -1372,6 +1456,10 @@ pub fn DocumentPane(
     let saving = RwSignal::new(false);
     let conflict = RwSignal::new(false);
     let query = RwSignal::new(String::new());
+    // Find options (#1409/#1419): per-bar, in-memory only, both off by
+    // default (today's case-insensitive substring behaviour).
+    let match_case = RwSignal::new(false);
+    let whole_word = RwSignal::new(false);
     let hits = RwSignal::new(Vec::<Hit>::new());
     let hit_idx = RwSignal::new(0usize);
     let preview = RwSignal::new(false);
@@ -1385,7 +1473,8 @@ pub fn DocumentPane(
     Effect::new(move |_| {
         let text = if editing.get() { draft.get() } else { content.get() };
         let q = query.get();
-        hits.set(find_hits(&text, &q));
+        let opts = FindOptions::new(match_case.get(), whole_word.get());
+        hits.set(find_hits(&text, &q, opts));
         hit_idx.set(0);
     });
 
@@ -1715,6 +1804,24 @@ pub fn DocumentPane(
                         format!("{}/{}", hit_idx.get() + 1, n)
                     }
                 }}</span>
+                <button
+                    type="button"
+                    class=move || if match_case.get() { "chip on ev-find-toggle" } else { "chip ev-find-toggle" }
+                    data-ev-match-case="true"
+                    title="Match case"
+                    aria-label="Match case"
+                    aria-pressed=move || if match_case.get() { "true" } else { "false" }
+                    on:click=move |_| match_case.update(|v| *v = !*v)
+                >"Aa"</button>
+                <button
+                    type="button"
+                    class=move || if whole_word.get() { "chip on ev-find-toggle" } else { "chip ev-find-toggle" }
+                    data-ev-whole-word="true"
+                    title="Whole word"
+                    aria-label="Whole word"
+                    aria-pressed=move || if whole_word.get() { "true" } else { "false" }
+                    on:click=move |_| whole_word.update(|v| *v = !*v)
+                >"ab|"</button>
                 <button type="button" class="secondary" on:click=move |_| step(-1)>"Prev"</button>
                 <button type="button" class="secondary" on:click=move |_| step(1)>"Next"</button>
                 <button type="button" class="secondary" on:click=move |_| path.set(String::new())>"Back to chat"</button>
@@ -1838,13 +1945,13 @@ mod tests {
 
     #[test]
     fn search_is_case_insensitive_and_numbered() {
-        let hits = find_hits("Alpha\nbeta alpha\n", "alpha");
+        let hits = find_hits("Alpha\nbeta alpha\n", "alpha", FindOptions::default());
         assert_eq!(hits.len(), 2);
         assert_eq!(hits[0].line, 1);
         assert_eq!(hits[1].line, 2);
         assert!(hits[1].start > 0);
-        assert!(find_hits("abc", "").is_empty());
-        assert!(find_hits("abc", "z").is_empty());
+        assert!(find_hits("abc", "", FindOptions::default()).is_empty());
+        assert!(find_hits("abc", "z", FindOptions::default()).is_empty());
         // Byte positions on the ASCII path stay per-occurrence.
         assert_eq!(hits[0].start, 0);
         assert_eq!(hits[0].end, 5);
@@ -1860,7 +1967,7 @@ mod tests {
             ("А\n", "а"),
             ("а\n", "А"),
         ] {
-            let hits = find_hits(line, query);
+            let hits = find_hits(line, query, FindOptions::default());
             assert_eq!(hits.len(), 1, "line {line:?} query {query:?}");
             assert_eq!(hits[0].line, 1);
             assert_eq!(hits[0].start, 0);
@@ -1868,15 +1975,95 @@ mod tests {
         }
         // Capital sharp S (U+1E9E) folds to ß and changes the byte length.
         for (line, query) in [("ẞ\n", "ß"), ("ß\n", "ẞ")] {
-            let hits = find_hits(line, query);
+            let hits = find_hits(line, query, FindOptions::default());
             assert_eq!(hits.len(), 1, "line {line:?} query {query:?}");
             assert_eq!(hits[0].end, 0);
         }
         // İ folds to i + combining dot. The query and the line both fold.
-        let hits = find_hits("İstanbul\n", "İ");
+        let hits = find_hits("İstanbul\n", "İ", FindOptions::default());
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].end, 0);
-        assert!(find_hits("plain ascii\n", "Σ").is_empty());
+        assert!(find_hits("plain ascii\n", "Σ", FindOptions::default()).is_empty());
+    }
+
+    #[test]
+    fn search_match_case_only_hits_exact_case() {
+        let opts = FindOptions::new(true, false);
+        let hits = find_hits("Token token TOKEN Token\n", "Token", opts);
+        assert_eq!(hits.len(), 2);
+        assert_eq!((hits[0].start, hits[0].end), (0, 5));
+        assert_eq!((hits[1].start, hits[1].end), (18, 23));
+        assert!(find_hits("token\n", "Token", opts).is_empty());
+        // Default (off) still folds case, as before #1409.
+        assert_eq!(
+            find_hits("Token token TOKEN\n", "Token", FindOptions::default()).len(),
+            3
+        );
+    }
+
+    #[test]
+    fn search_match_case_does_not_regress_unicode_fold_path() {
+        let opts = FindOptions::new(true, false);
+        // Exact non-ASCII hits get exact offsets (no fold involved).
+        let hits = find_hits("İstanbul\n", "İ", opts);
+        assert_eq!(hits.len(), 1);
+        assert_eq!((hits[0].start, hits[0].end), (0, "İ".len()));
+        // A differently-cased fold partner is NOT a case-sensitive hit,
+        // while the default matcher still finds it via the fold path.
+        assert!(find_hits("Σ\n", "σ", opts).is_empty());
+        assert!(find_hits("ẞ\n", "ß", opts).is_empty());
+        assert_eq!(find_hits("ẞ\n", "ß", FindOptions::default()).len(), 1);
+        assert_eq!(find_hits("Σ sigma\n", "Σ", opts).len(), 1);
+    }
+
+    #[test]
+    fn whole_word_predicate_boundaries() {
+        assert!(is_whole_word_at("token", 0, 5));
+        assert!(is_whole_word_at("a token here", 2, 7));
+        assert!(is_whole_word_at("(token).", 1, 6));
+        assert!(is_whole_word_at("token,", 0, 5));
+        // Underscore and digits are word chars: not boundaries.
+        assert!(!is_whole_word_at("my_token", 3, 8));
+        assert!(!is_whole_word_at("token2", 0, 5));
+        assert!(!is_whole_word_at("tokens", 0, 5));
+        assert!(!is_whole_word_at("2token", 1, 6));
+        assert!(is_word_char('_') && is_word_char('9') && is_word_char('Z'));
+        assert!(!is_word_char('-') && !is_word_char(' '));
+    }
+
+    #[test]
+    fn search_whole_word_only_hits_whole_words() {
+        let opts = FindOptions::new(false, true);
+        let hits = find_hits("token tokens tokenize mytoken token.\n", "token", opts);
+        assert_eq!(hits.len(), 2);
+        assert_eq!((hits[0].start, hits[0].end), (0, 5));
+        assert_eq!((hits[1].start, hits[1].end), (30, 35));
+        // Whole-word composes with match-case.
+        let both = FindOptions::new(true, true);
+        assert_eq!(
+            find_hits("Token token TOKEN tokens\n", "token", both).len(),
+            1
+        );
+        assert_eq!(
+            find_hits("Token token TOKEN tokens\n", "token", opts).len(),
+            3
+        );
+    }
+
+    #[test]
+    fn search_whole_word_drops_fold_fallback_hits() {
+        // The fold fallback (whole-line marker) cannot verify
+        // boundaries, so whole-word mode drops it (#1419 Q2) while the
+        // default mode keeps counting it.
+        let opts = FindOptions::new(false, true);
+        assert!(find_hits("ẞ\n", "ß", opts).is_empty());
+        assert!(find_hits("İstanbul\n", "İ", opts).is_empty());
+        // Case-sensitive mode never uses the fallback: an exact
+        // whole-word non-ASCII hit is still found with real offsets.
+        let both = FindOptions::new(true, true);
+        let hits = find_hits("say İ now\n", "İ", both);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].start, 4);
     }
 
     #[test]
