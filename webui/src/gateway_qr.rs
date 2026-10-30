@@ -257,15 +257,23 @@ pub(crate) fn GatewayQR(
     });
     on_cleanup(halt_scan);
 
+    // Set when a Copy URL attempt was rejected by the browser (#1582):
+    // the dialog then shows the manual-copy fallback instead of the old
+    // unconditional "Pairing URL copied." claim.
+    let copy_failed = RwSignal::new(false);
     let copy_url = move |_| {
         let text = url.get_untracked();
         if text.is_empty() {
             return;
         }
-        if let Some(win) = web_sys::window() {
-            let _ = win.navigator().clipboard().write_text(&text);
-        }
-        status.set("Pairing URL copied.".into());
+        spawn_local(async move {
+            let ok = crate::clipboard::copy_text(&text).await.is_ok();
+            copy_failed.set(!ok);
+            status.set(crate::clipboard::pairing_copy_feedback(ok).into());
+            if !ok {
+                select_pairing_url();
+            }
+        });
     };
 
     view! {
@@ -306,8 +314,13 @@ pub(crate) fn GatewayQR(
                     <input id="gq-url" readonly aria-label="Pairing URL" prop:value=move || url.get() />
                     <div class="gq-actions">
                         <button class="secondary" type="button" on:click=copy_url>"Copy URL"</button>
-                        <button class="secondary gq-new" type="button" on:click=move |_| queue_pair(base, token, note, url, svg, warning, devices, device_note)>"New code"</button>
+                        <button class="secondary gq-new" type="button" on:click=move |_| { copy_failed.set(false); queue_pair(base, token, note, url, svg, warning, devices, device_note); }>"New code"</button>
                     </div>
+                    <Show when=move || copy_failed.get()>
+                        <p class="gq-copy-fallback" role="alert">
+                            "Copy didn't work in this browser. The pairing URL above is selected — copy it manually, then open it on your phone to pair."
+                        </p>
+                    </Show>
                     <p class="gq-warn">{move || warning.get()}</p>
                     <h3 class="gq-sub">"Paired browsers"</h3>
                     <p class="hint">{move || device_note.get()}</p>
@@ -370,6 +383,20 @@ pub(crate) fn GatewayQR(
                 </div>
             </div>
         </Show>
+    }
+}
+
+/// Select the pairing URL field so a user whose clipboard write was
+/// rejected can copy it manually with one keystroke (#1582).
+fn select_pairing_url() {
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    let Some(el) = doc.get_element_by_id("gq-url") else {
+        return;
+    };
+    if let Ok(input) = el.dyn_into::<web_sys::HtmlInputElement>() {
+        input.select();
     }
 }
 
