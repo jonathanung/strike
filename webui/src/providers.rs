@@ -232,6 +232,17 @@ fn request_reload(bump: RwSignal<u32>) {
     bump.update(|n| *n = n.wrapping_add(1));
 }
 
+/// Note shown when a base-URL edit misses the loaded custom list (#1578).
+/// A miss after a failed custom-providers load must blame the load, not
+/// the host.
+fn edit_host_miss_note(custom_load_failed: bool) -> &'static str {
+    if custom_load_failed {
+        "Custom providers could not be loaded, so this host cannot be checked right now."
+    } else {
+        "This host is not an editable custom provider."
+    }
+}
+
 fn map_insert(map: &RwSignal<HashMap<String, String>>, key: String, value: String) {
     map.update(|found| {
         found.insert(key, value);
@@ -242,6 +253,7 @@ fn map_insert(map: &RwSignal<HashMap<String, String>>, key: String, value: Strin
 fn ProviderCard(
     row: ProviderStatus,
     customs: RwSignal<Vec<CustomProvider>>,
+    custom_error: RwSignal<String>,
     drafts: RwSignal<HashMap<String, String>>,
     notes: RwSignal<HashMap<String, String>>,
     base_drafts: RwSignal<HashMap<String, String>>,
@@ -392,7 +404,7 @@ fn ProviderCard(
                 map_insert(
                     &notes,
                     name.clone(),
-                    "This host is not an editable custom provider.".into(),
+                    edit_host_miss_note(!custom_error.get_untracked().is_empty()).into(),
                 );
                 return;
             };
@@ -518,6 +530,7 @@ fn ProviderCard(
 pub fn ProvidersPage(base: RwSignal<String>, token: RwSignal<String>) -> impl IntoView {
     let rows = RwSignal::new(Vec::<ProviderStatus>::new());
     let customs = RwSignal::new(Vec::<CustomProvider>::new());
+    let custom_error = RwSignal::new(String::new());
     let load_error = RwSignal::new(String::new());
     let loading = RwSignal::new(true);
     let drafts = RwSignal::new(HashMap::<String, String>::new());
@@ -586,6 +599,14 @@ pub fn ProvidersPage(base: RwSignal<String>, token: RwSignal<String>) -> impl In
                 },
                 Err(err) => Err(err),
             };
+            // Main's #1670 surfacing, applied only inside the guarded commit
+            // below: a superseded load must not paint this notice either.
+            let custom_notice = match &customs_result {
+                Ok(_) => String::new(),
+                Err(err) => format!(
+                    "Custom providers could not be loaded — the list below may be incomplete. ({err})"
+                ),
+            };
             if apply_provider_load(
                 &load_epoch.get_untracked(),
                 ticket,
@@ -597,6 +618,7 @@ pub fn ProvidersPage(base: RwSignal<String>, token: RwSignal<String>) -> impl In
                 if let Some(rows) = published {
                     publish_key_names(&rows);
                 }
+                custom_error.set(custom_notice);
                 rows.set(view.rows);
                 customs.set(view.customs);
                 load_error.set(view.load_error);
@@ -725,12 +747,16 @@ pub fn ProvidersPage(base: RwSignal<String>, token: RwSignal<String>) -> impl In
             <Show when=move || !stale_note.get().is_empty()>
                 <p class="hint" data-providers-stale="true">{move || stale_note.get()}</p>
             </Show>
+            <Show when=move || !custom_error.get().is_empty()>
+                <p class="notice" role="alert" data-custom-load-error="true">{move || custom_error.get()}</p>
+            </Show>
             <ul class="providers-list plain">
                 {move || rows.get().into_iter().map(|row| {
                     view! {
                         <ProviderCard
                             row=row
                             customs=customs
+                            custom_error=custom_error
                             drafts=drafts
                             notes=notes
                             base_drafts=base_drafts
@@ -875,6 +901,15 @@ mod tests {
         );
         let oauth = probe_note("unsupported", "signed in with OAuth — there is no API key to test");
         assert!(oauth.starts_with("Nothing to test"));
+    }
+
+    #[test]
+    fn edit_host_miss_blames_the_load_not_the_host() {
+        assert!(edit_host_miss_note(true).contains("could not be loaded"));
+        assert_eq!(
+            edit_host_miss_note(false),
+            "This host is not an editable custom provider."
+        );
     }
 
     #[test]

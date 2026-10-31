@@ -315,6 +315,13 @@ pub fn chrome_title(kind: StatusKind, unread: usize) -> String {
 
 /// Window title and favicon. The favicon color is the computed CSS variable
 /// for the kind, so a named theme does not need its own icon.
+///
+/// Note: the App's tab title is owned by `crate::tab_title` (#1405,
+/// waiting/unread precedence); this helper keeps its original title for
+/// its own tests and any other caller, and the App calls
+/// [`apply_document_favicon`] + `tab_title::apply_title` so the live
+/// title follows #1405 while the favicon behaviour is unchanged.
+#[allow(dead_code)] // Kept for its title tests / non-App callers.
 pub fn apply_document_chrome(kind: StatusKind, unread: usize) {
     let Some(window) = web_sys::window() else {
         return;
@@ -323,6 +330,18 @@ pub fn apply_document_chrome(kind: StatusKind, unread: usize) {
         return;
     };
     doc.set_title(&chrome_title(kind, unread));
+    apply_document_favicon(kind);
+}
+
+/// Favicon only. The favicon color is the computed CSS variable
+/// for the kind, so a named theme does not need its own icon.
+pub fn apply_document_favicon(kind: StatusKind) {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let Some(doc) = window.document() else {
+        return;
+    };
     let tone = if kind == StatusKind::Idle {
         "--success"
     } else {
