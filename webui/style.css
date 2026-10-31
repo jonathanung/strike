@@ -1556,6 +1556,9 @@ select.mode, .daemon select {
   background: var(--border-muted);
 }
 .ss-gutter-running { background: var(--accent-alt); }
+/* feature:needs-you begin */
+.ss-gutter-waiting { background: var(--warning); }
+/* feature:needs-you end */
 .ss-gutter-unread { background: var(--acid); }
 .ss-gutter-blocked { background: var(--warning); }
 .ss-gutter-failed { background: var(--signal); }

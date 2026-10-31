@@ -16,7 +16,7 @@
 (function(){try{var ok={strike:1,nord:1,dracula:1,gruvbox:1,monokai:1,"tokyo-night":1,catppuccin:1};var t=localStorage.getItem("strike.theme")||"strike";var s=localStorage.getItem("strike.scheme")||"dark";var f=localStorage.getItem("strike.font")||"md";var d=localStorage.getItem("strike.density")||"comfortable";if(!ok[t])t="strike";if(s!=="light")s="dark";if(f!=="sm"&&f!=="lg")f="md";if(d!=="compact")d="comfortable";var lay=localStorage.getItem("strike.layout")||"cockpit";if(lay!=="conversation")lay="cockpit";var el=document.documentElement;el.setAttribute("data-theme",t);el.setAttribute("data-scheme",s);el.setAttribute("data-font",f);el.setAttribute("data-density",d);el.setAttribute("data-layout",lay);}catch(e){}})();
 </script>
 <link rel="manifest" href="/manifest.webmanifest">
-<link rel="stylesheet" href="/assets/style-73ba43f3d64fa609.css" integrity="sha384-b9QJA3XTZdn5o4qVRRNtO0OZIosG7+IEIWhg7BtFOi60z+T4t56sm7clAJEGKjqw"/>
+<link rel="stylesheet" href="/assets/style-1817e86a9389435c.css" integrity="sha384-oc7SvWiCQZA7zVZoTDjbakPHLTSCtOBG40lTrfpkhv9ihN/S6TmGfYfSFyuSWRNO"/>
 <link rel="stylesheet" href="/assets/git-af4ae2e5f374027a.css" integrity="sha384-1OJpShiUti6MSw1EBdVZr8rdO3BaibKrfjWpYK9wlxr3choxqacHxbW0nnjS5LDi"/>
 <link rel="stylesheet" href="/assets/storage-c32d584bc182ee77.css" integrity="sha384-XNDaz3yqOR2+uEfPi+eY+9Mzja2F/5vYI647yiPLuy4KvGHAOICyrdh0pqlWr9Wn"/>
 <link rel="stylesheet" href="/assets/navbar-408d344d6d55e463.css" integrity="sha384-JBIkRc3lVcSAEM4WspbZLsQl2FppI8Pqwj9z2ko+Wv1hAX66ZqFQq9J2KiC3zxQA"/>
@@ -42,8 +42,8 @@
 
 
 <script type="module">
-import init, * as bindings from '/assets/strike-webui-89681196f2373932.js';
-const wasm = await init({ module_or_path: '/assets/strike-webui-89681196f2373932_bg.wasm' });
+import init, * as bindings from '/assets/strike-webui-2d97da1b7fb20ba6.js';
+const wasm = await init({ module_or_path: '/assets/strike-webui-2d97da1b7fb20ba6_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -54,7 +54,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 </script>
 <script src="/assets/register.js" defer></script>
 
-<link rel="modulepreload" href="/assets/strike-webui-89681196f2373932.js" crossorigin="anonymous" integrity="sha384-iuREo/lgMIJOzIPwQO3rd9mNRjAO78q4BuE5/AEyRVMbbuP39wvcdhNnSzVymdwa"><link rel="preload" href="/assets/strike-webui-89681196f2373932_bg.wasm" crossorigin="anonymous" integrity="sha384-8r9d2UrF172lTqVjQwb+IyZAPuCHJJ8kaQ9rnguqOpKJTEIpzZN9DxuFmsyj4stO" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/assets/strike-webui-2d97da1b7fb20ba6.js" crossorigin="anonymous" integrity="sha384-Yd0vRodgvBlYqzjMVDgPCXsOQUXaf3EDFmb/ZtD6gcFpNwsz4Vmv2UJ6Zu0hpEJ/"><link rel="preload" href="/assets/strike-webui-2d97da1b7fb20ba6_bg.wasm" crossorigin="anonymous" integrity="sha384-KsQzdItiuHZk960BJVuitbWUlDiljbkZKtdjk+4A4lijs5Jt8+e78Lil8WLYP96Q" as="fetch" type="application/wasm"></head>
 <body>
 <!-- Boot shell: shown until the cockpit mounts (main.rs removes it on
      mount). If the gateway is unreachable and only the cached shell
