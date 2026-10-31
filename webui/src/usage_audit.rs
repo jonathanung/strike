@@ -261,6 +261,7 @@ pub fn UsageAuditPages(
     base: RwSignal<String>,
     token: RwSignal<String>,
     status: RwSignal<String>,
+    open_session: impl Fn(String) + Copy + Send + Sync + 'static,
 ) -> impl IntoView {
     view! {
         <div class="usage-audit-shell">
@@ -286,7 +287,7 @@ pub fn UsageAuditPages(
                 <UsagePage base=base token=token status=status />
             </Show>
             <Show when=move || mode.get() == "audit">
-                <AuditPage base=base token=token status=status />
+                <AuditPage base=base token=token status=status open_session=open_session />
             </Show>
         </div>
     }
@@ -468,7 +469,7 @@ pub fn UsagePage(
     }
 }
 
-fn short_id(id: &str) -> String {
+pub(crate) fn short_id(id: &str) -> String {
     let n = id.chars().count();
     if n <= 10 {
         return id.to_string();
@@ -481,6 +482,7 @@ pub fn AuditPage(
     base: RwSignal<String>,
     token: RwSignal<String>,
     status: RwSignal<String>,
+    open_session: impl Fn(String) + Copy + Send + Sync + 'static,
 ) -> impl IntoView {
     let list = RwSignal::new(AuditList::default());
     let error = RwSignal::new(String::new());
@@ -598,12 +600,35 @@ pub fn AuditPage(
                     {move || {
                         let want = filter.get();
                         list.get().entries.into_iter().rev().filter(|e| want == "all" || e.action == want).map(|e| {
+                            // #1530: the session id is a link, not dead text.
+                            // The full id stays in the payload; the button
+                            // label is the truncated id and the title carries
+                            // the full id. Activation goes through the
+                            // existing open_session path, which reports a
+                            // deleted session on the status line.
+                            let sid = e.session_id.clone();
+                            let sid_view = if sid.is_empty() {
+                                view! { <span class="hint"></span> }.into_any()
+                            } else {
+                                let label = short_id(&sid);
+                                let title = sid.clone();
+                                let aria = format!("Open session {sid}");
+                                view! {
+                                    <button
+                                        type="button"
+                                        class="linkish session-link"
+                                        title=title
+                                        aria-label=aria
+                                        on:click=move |_| open_session(sid.clone())
+                                    >{label}</button>
+                                }.into_any()
+                            };
                             view! {
                                 <div class="ua-row ua-audit" role="row">
                                     <span class="hint">{format!("#{} {}", e.seq, e.time)}</span>
                                     <span class="chip">{e.action}</span>
                                     <span>{e.summary}</span>
-                                    <span class="hint">{if e.session_id.is_empty() { String::new() } else { short_id(&e.session_id) }}</span>
+                                    {sid_view}
                                 </div>
                             }
                         }).collect_view()
@@ -611,5 +636,31 @@ pub fn AuditPage(
                 </div>
             </div>
         </main>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::short_id;
+
+    #[test]
+    fn short_id_keeps_short_ids_whole() {
+        assert_eq!(short_id(""), "");
+        assert_eq!(short_id("abc"), "abc");
+        assert_eq!(short_id("0123456789"), "0123456789");
+    }
+
+    #[test]
+    fn short_id_truncates_long_ids_to_eight_chars() {
+        // The audit row label (#1530) and the permissions stored-audit
+        // label (#1540) share this helper; the full id rides in the
+        // button title, never in the label.
+        assert_eq!(short_id("0123456789abcdef"), "01234567");
+        assert_eq!(short_id("sess-1234567890"), "sess-123");
+    }
+
+    #[test]
+    fn short_id_counts_chars_not_bytes() {
+        assert_eq!(short_id("ééééééééééé"), "éééééééé");
     }
 }
