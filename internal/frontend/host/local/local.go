@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"path/filepath"
 	"strings"
@@ -38,7 +39,7 @@ func New(store *auth.Store, hist *history.Store, mem *memory.Store, issues *issu
 		customs = config.NewCustomStore(nil, workDir)
 	}
 	services := host.Services{
-		Auth:             authAdapter{store: store, customs: customs},
+		Auth:             authAdapter{store: store, customs: customs, probes: newProbeTracker()},
 		Catalog:          NewCatalog(customs),
 		Settings:         settingsAdapter{},
 		ConfigFiles:      configFilesAdapter{},
@@ -88,6 +89,10 @@ var credentialProviders = []host.ProviderStatus{
 type authAdapter struct {
 	store   *auth.Store
 	customs *config.CustomStore
+	// probes records decisive key-probe outcomes (#1531). probeClient is
+	// injectable for tests; nil means a plain http.Client.
+	probes      *probeTracker
+	probeClient *http.Client
 }
 
 func (a authAdapter) Statuses() []host.ProviderStatus {
@@ -99,6 +104,7 @@ func (a authAdapter) Statuses() []host.ProviderStatus {
 		}
 		p.Detail = a.describeProvider(p.Name)
 		p.Authed = p.Detail != "none"
+		p.KeyState = a.keyStateFor(p.Name)
 		if cred, ok := a.store.Get(p.Name); ok && cred.Type == auth.TypeOAuth && !cred.ExpiresAt.IsZero() {
 			p.ExpiresAt = cred.ExpiresAt
 		}
@@ -141,13 +147,14 @@ func (a authAdapter) Statuses() []host.ProviderStatus {
 		// Customs are always selectable once defined; local gateways (ollama)
 		// often need no key. Missing keys still surface in Detail as "none".
 		out = append(out, host.ProviderStatus{
-			Name:    resolved.Name,
-			Detail:  detail,
-			Authed:  true,
-			Custom:  true,
-			APIKey:  true,
-			WireAPI: string(resolved.API),
-			BaseURL: resolved.BaseURL,
+			Name:     resolved.Name,
+			Detail:   detail,
+			Authed:   true,
+			Custom:   true,
+			APIKey:   true,
+			WireAPI:  string(resolved.API),
+			BaseURL:  resolved.BaseURL,
+			KeyState: a.keyStateFor(resolved.Name),
 		})
 	}
 	if a.customs == nil || !a.customs.IsBuiltinDisabled("echo") {
@@ -210,11 +217,17 @@ func (a authAdapter) SetAPIKey(provider, key string) error {
 	if !a.acceptsAPIKey(provider) {
 		return fmt.Errorf("provider %q does not accept an API key", provider)
 	}
-	return a.store.Set(provider, auth.Credential{Type: auth.TypeAPIKey, APIKey: key})
+	if err := a.store.Set(provider, auth.Credential{Type: auth.TypeAPIKey, APIKey: key}); err != nil {
+		return err
+	}
+	// A new key is unverified by definition (#1531).
+	a.probes.clear(provider)
+	return nil
 }
 
 func (a authAdapter) Logout(provider string) error {
 	provider = config.CanonicalProviderID(provider)
+	a.probes.clear(provider)
 	err := a.store.Delete(provider)
 	// Logging out of a custom provider also deletes its definition (config +
 	// providers.jsonc layers). Built-ins only clear credentials.

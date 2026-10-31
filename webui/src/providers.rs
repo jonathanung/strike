@@ -65,6 +65,10 @@ pub struct ProviderStatus {
     pub wire_api: String,
     #[serde(default, rename = "baseURL")]
     pub base_url: String,
+    /// API-key verification state from the daemon (#1531): "", "stored"
+    /// (present, never verified), "verified", or "rejected".
+    #[serde(default, rename = "keyState")]
+    pub key_state: String,
     #[serde(default)]
     pub methods: Vec<String>,
 }
@@ -103,11 +107,37 @@ struct ModelList {
     models: Vec<ModelRow>,
 }
 
-pub fn connection_label(authed: bool) -> &'static str {
-    if authed {
-        "Connected"
-    } else {
-        "Not connected"
+/// The badge text for a provider card. A stored API key is not a
+/// connection (#1531): it reads "Key stored — not tested" until the
+/// daemon's probe has actually presented it to the provider, and
+/// "Key rejected" when the provider refused it. "Connected" is reserved
+/// for credentials that need no key (OAuth, device, builtin) or a key the
+/// provider has accepted.
+pub fn connection_label(authed: bool, key_state: &str) -> &'static str {
+    if !authed {
+        return "Not connected";
+    }
+    match key_state {
+        "verified" => "Connected",
+        "rejected" => "Key rejected",
+        "stored" => "Key stored — not tested",
+        _ => "Connected",
+    }
+}
+
+/// The note shown after a key probe (`POST /v1/auth/probe`). The daemon's
+/// detail strings are written for display and never contain the key.
+pub fn probe_note(status: &str, detail: &str) -> String {
+    match status {
+        "valid" => "Key verified — the provider accepted the stored key.".to_string(),
+        "invalid" => format!(
+            "Key rejected — {detail}. Paste a corrected key and save it."
+        ),
+        "unreachable" => format!("Could not verify the key — {detail}."),
+        "no-key" => "No key stored yet — paste a key and Save key first.".to_string(),
+        "unsupported" => format!("Nothing to test — {detail}."),
+        _ if detail.is_empty() => "Test finished without a verdict.".to_string(),
+        _ => detail.to_string(),
     }
 }
 
@@ -217,8 +247,13 @@ fn ProviderCard(
     let builtin = row.builtin;
     let base_url = row.base_url.clone();
     let wire = row.wire_api.clone();
-    let badge = if authed { "chip ok" } else { "chip" };
-    let state = connection_label(authed);
+    let key_state = row.key_state.clone();
+    let state = connection_label(authed, &key_state);
+    let badge = match state {
+        "Connected" => "chip ok",
+        "Key rejected" => "chip bad",
+        _ => "chip",
+    };
 
     let save_key = {
         let name = name.clone();
@@ -249,7 +284,7 @@ fn ProviderCard(
                         map_insert(
                             &notes,
                             name,
-                            "Key stored on the daemon. It is not shown again.".into(),
+                            "Key stored on the daemon. It is not shown again. It has not been tested yet — Test key checks it against the provider.".into(),
                         );
                         request_reload(bump);
                     }
@@ -267,6 +302,36 @@ fn ProviderCard(
             .cloned()
             .unwrap_or_default();
         spawn_local(async move {
+            if api_key {
+                // Real credential probe (#1531): the daemon presents the
+                // stored key to the provider itself. A catalog listing is
+                // not a test — it never touches the key.
+                let probed = post_json_value(
+                    &b,
+                    &t,
+                    "/v1/auth/probe",
+                    serde_json::json!({ "provider": name }),
+                )
+                .await;
+                match probed {
+                    Ok(value) => {
+                        let status = value
+                            .get("status")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default();
+                        let detail = value
+                            .get("detail")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default();
+                        let note = probe_note(status, detail);
+                        map_insert(&notes, name, note_from(&note, &key));
+                        // Refresh so the badge picks up the new keyState.
+                        request_reload(bump);
+                    }
+                    Err(err) => map_insert(&notes, name, note_from(&err, &key)),
+                }
+                return;
+            }
             let path = format!("/v1/models?provider={}", api::js_encode(&name));
             match get_text(&b, &t, &path).await {
                 Ok(body) => match serde_json::from_str::<ModelList>(&body) {
@@ -410,7 +475,7 @@ fn ProviderCard(
                 </label>
                 <div class="providers-actions">
                     <button type="button" class="primary" data-save-key="true" on:click=save_key>"Save key"</button>
-                    <button type="button" class="secondary" data-test-provider="true" on:click=move |_| test_provider(name_test_key.clone())>"Test"</button>
+                    <button type="button" class="secondary" data-test-provider="true" on:click=move |_| test_provider(name_test_key.clone())>"Test key"</button>
                     {custom.then(|| {
                         let name_remove_key = name_remove_key.clone();
                         view! {
@@ -525,7 +590,7 @@ pub fn ProvidersPage(base: RwSignal<String>, token: RwSignal<String>) -> impl In
             new_name.set(String::new());
             new_url.set(String::new());
             new_model.set(String::new());
-            new_note.set("Host saved. The key, if you pasted one, stays on the daemon.".into());
+            new_note.set("Host saved. The key, if you pasted one, stays on the daemon and has not been tested yet.".into());
             request_reload(bump);
         });
     };
@@ -720,9 +785,34 @@ mod tests {
     }
 
     #[test]
-    fn connection_label_is_the_two_states() {
-        assert_eq!(connection_label(true), "Connected");
-        assert_eq!(connection_label(false), "Not connected");
+    fn connection_label_never_calls_a_stored_key_connected() {
+        assert_eq!(connection_label(false, ""), "Not connected");
+        assert_eq!(connection_label(false, "stored"), "Not connected");
+        // #1531: a pasted key is stored, not connected, until probed.
+        assert_eq!(connection_label(true, "stored"), "Key stored — not tested");
+        assert_eq!(connection_label(true, "rejected"), "Key rejected");
+        assert_eq!(connection_label(true, "verified"), "Connected");
+        // Keyless auth (OAuth, device, builtin) is connected as before.
+        assert_eq!(connection_label(true, ""), "Connected");
+    }
+
+    #[test]
+    fn probe_note_reports_each_verdict_plainly() {
+        assert_eq!(
+            probe_note("valid", "the provider accepted the stored key"),
+            "Key verified — the provider accepted the stored key."
+        );
+        let rejected = probe_note("invalid", "the provider refused the stored key (HTTP 401)");
+        assert!(rejected.starts_with("Key rejected"));
+        assert!(rejected.contains("HTTP 401"));
+        let unreachable = probe_note("unreachable", "could not reach the provider");
+        assert!(unreachable.starts_with("Could not verify the key"));
+        assert_eq!(
+            probe_note("no-key", "no API key is stored for this provider"),
+            "No key stored yet — paste a key and Save key first."
+        );
+        let oauth = probe_note("unsupported", "signed in with OAuth — there is no API key to test");
+        assert!(oauth.starts_with("Nothing to test"));
     }
 
     #[test]

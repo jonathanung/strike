@@ -19,6 +19,7 @@ use wasm_bindgen::{JsCast, JsValue};
 use crate::api::{api, auth_header, get_json};
 
 const SEEN_PREFIX: &str = "strike.notify.seen";
+const DISMISSED_PREFIX: &str = "strike.notify.dismissed";
 const HIGH_PREFIX: &str = "strike.notify.bannerSeq";
 
 /// Storage identity for one gateway. Empty base is this page's daemon.
@@ -184,6 +185,45 @@ fn save_seen_for(gateway: &str, ids: &[String]) {
         &scoped_storage_key(SEEN_PREFIX, gateway),
         &serde_json::to_string(&ids).unwrap_or_else(|_| "[]".into()),
     );
+}
+
+fn load_dismissed_for(gateway: &str) -> Vec<String> {
+    serde_json::from_str(&load_raw(&scoped_storage_key(DISMISSED_PREFIX, gateway)))
+        .unwrap_or_default()
+}
+
+fn save_dismissed_for(gateway: &str, ids: &[String]) {
+    let mut ids = ids.to_vec();
+    if ids.len() > 500 {
+        ids = ids.split_off(ids.len() - 500);
+    }
+    save_raw(
+        &scoped_storage_key(DISMISSED_PREFIX, gateway),
+        &serde_json::to_string(&ids).unwrap_or_else(|_| "[]".into()),
+    );
+}
+
+/// Rows the centre shows: everything not dismissed, in the original
+/// order. Dismissal is a client-side hide over the loaded list (#1464);
+/// the daemon still returns the row on the next poll.
+fn visible_notes(notes: &[Note], dismissed: &[String]) -> Vec<Note> {
+    notes
+        .iter()
+        .filter(|n| !dismissed.iter().any(|id| id == &n.id))
+        .cloned()
+        .collect()
+}
+
+/// Ids "Clear read" should add to the dismissed set: rows that are read
+/// (in the seen set), still visible, and not already dismissed. Unread
+/// rows are never bulk-dismissed.
+fn clear_read_ids(notes: &[Note], seen: &[String], dismissed: &[String]) -> Vec<String> {
+    notes
+        .iter()
+        .filter(|n| seen.iter().any(|id| id == &n.id))
+        .filter(|n| !dismissed.iter().any(|id| id == &n.id))
+        .map(|n| n.id.clone())
+        .collect()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -622,12 +662,14 @@ fn NoteRow(
     muted: bool,
     activate: UnsyncCallback<Note>,
     toggle_mute: UnsyncCallback<String>,
+    dismiss: UnsyncCallback<String>,
 ) -> impl IntoView {
     let title = note.title.clone();
     let body = note.body.clone();
     let when = short_when(&note.at);
     let kind = kind_label(&note.kind).to_string();
     let session = note.session_id.clone();
+    let dismiss_id = note.id.clone();
     let show_body = !body.is_empty();
     let show_when = !when.is_empty();
     let mute_label = if muted { "Unmute" } else { "Mute" };
@@ -657,6 +699,7 @@ fn NoteRow(
                 <Show when=move || show_body><span class="notify-body">{body.clone()}</span></Show>
             </button>
             {mute}
+            <button class="secondary notify-dismiss" aria-label="Dismiss notification" on:click=move |_| dismiss.run(dismiss_id.clone())>"Dismiss"</button>
         </div>
     }
 }
@@ -681,6 +724,7 @@ pub fn NotificationBell(
     let items = RwSignal::new(Vec::<Note>::new());
     let prefs = RwSignal::new(default_prefs());
     let seen = RwSignal::new(load_seen_for(&base.get_untracked()));
+    let dismissed = RwSignal::new(load_dismissed_for(&base.get_untracked()));
     let cursor = RwSignal::new(0usize);
     let load_error = RwSignal::new(String::new());
     let form_error = RwSignal::new(String::new());
@@ -982,6 +1026,7 @@ pub fn NotificationBell(
             high.set(mark.high);
             primed.set(mark.primed);
             seen.set(load_seen_for(&gate));
+            dismissed.set(load_dismissed_for(&gate));
         }
     });
 
@@ -1074,6 +1119,14 @@ pub fn NotificationBell(
         save.run(next);
     });
 
+    let dismiss = UnsyncCallback::new(move |id: String| {
+        if id.is_empty() || dismissed.get_untracked().iter().any(|d| d == &id) {
+            return;
+        }
+        dismissed.update(|list| list.push(id));
+        save_dismissed_for(&base.get_untracked(), &dismissed.get_untracked());
+    });
+
     let on_key =
         Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |ev: web_sys::KeyboardEvent| {
             let key = ev.key();
@@ -1105,7 +1158,7 @@ pub fn NotificationBell(
             if settings.get_untracked() || event_in_field(&ev) || !event_in_centre(&ev) {
                 return;
             }
-            let list = items.get_untracked();
+            let list = visible_notes(&items.get_untracked(), &dismissed.get_untracked());
             if list.is_empty() {
                 return;
             }
@@ -1138,10 +1191,12 @@ pub fn NotificationBell(
 
     let unread = move || {
         let seen = seen.get();
+        let dismissed = dismissed.get();
         items
             .get()
             .iter()
             .filter(|n| !seen.iter().any(|id| id == &n.id))
+            .filter(|n| !dismissed.iter().any(|id| id == &n.id))
             .count()
     };
 
@@ -1202,6 +1257,17 @@ pub fn NotificationBell(
                                                 seen.set(ids.clone());
                                                 save_seen_for(&base.get_untracked(), &ids);
                                             }>"Mark all read"</button>
+                                            <button class="secondary"
+                                                disabled=move || clear_read_ids(&items.get(), &seen.get(), &dismissed.get()).is_empty()
+                                                on:click=move |_| {
+                                                    let mut next = dismissed.get_untracked();
+                                                    for id in clear_read_ids(&items.get_untracked(), &seen.get_untracked(), &next) {
+                                                        next.push(id);
+                                                    }
+                                                    dismissed.set(next.clone());
+                                                    save_dismissed_for(&base.get_untracked(), &next);
+                                                }
+                                            >"Clear read"</button>
                                             <button class="secondary" on:click=move |_| open_settings.run(())>"Settings"</button>
                                         </div>
                                     </div>
@@ -1216,7 +1282,7 @@ pub fn NotificationBell(
                                     </Show>
                                     <div class="notify-list" aria-live="polite">
                                         {move || {
-                                            let list = items.get();
+                                            let list = visible_notes(&items.get(), &dismissed.get());
                                             let muted = prefs.get().muted.clone();
                                             let seen_now = seen.get();
                                             if list.is_empty() && load_error.get().is_empty() {
@@ -1237,6 +1303,7 @@ pub fn NotificationBell(
                                                         muted=is_muted
                                                         activate=activate
                                                         toggle_mute=toggle_mute
+                                                        dismiss=dismiss
                                                     />
                                                 }
                                             }).collect_view().into_any()
@@ -1615,5 +1682,78 @@ mod tests {
         assert_eq!(follow.banner_id.as_deref(), Some("n5"));
         let held = consider_mark(poisoned, &notes, 4);
         assert_ne!(held.mark.high, 500);
+    }
+
+    fn plain_note(id: &str, seq: i64) -> Note {
+        Note {
+            id: id.into(),
+            seq,
+            kind: "session.finished".into(),
+            session_id: String::new(),
+            subject_id: String::new(),
+            title: format!("note {id}"),
+            body: String::new(),
+            href: String::new(),
+            request_id: String::new(),
+            banner: false,
+            at: String::new(),
+        }
+    }
+
+    #[test]
+    fn visible_notes_hides_dismissed_and_keeps_order() {
+        let notes = vec![
+            plain_note("a", 3),
+            plain_note("b", 2),
+            plain_note("c", 1),
+        ];
+        let visible = visible_notes(&notes, &["b".to_string()]);
+        let ids: Vec<&str> = visible.iter().map(|n| n.id.as_str()).collect();
+        assert_eq!(ids, vec!["a", "c"]);
+        // Nothing dismissed shows everything; everything dismissed shows none.
+        assert_eq!(visible_notes(&notes, &[]).len(), 3);
+        let all: Vec<String> = notes.iter().map(|n| n.id.clone()).collect();
+        assert!(visible_notes(&notes, &all).is_empty());
+        // An unknown dismissed id hides nothing.
+        assert_eq!(visible_notes(&notes, &["zzz".to_string()]).len(), 3);
+    }
+
+    #[test]
+    fn clear_read_ids_only_takes_read_visible_rows() {
+        let notes = vec![
+            plain_note("read-1", 3),
+            plain_note("unread", 2),
+            plain_note("read-2", 1),
+        ];
+        let seen = vec!["read-1".to_string(), "read-2".to_string()];
+        // No dismissals yet: both read rows are clearable, unread is not.
+        assert_eq!(
+            clear_read_ids(&notes, &seen, &[]),
+            vec!["read-1".to_string(), "read-2".to_string()]
+        );
+        // An already-dismissed read row is not re-added.
+        assert_eq!(
+            clear_read_ids(&notes, &seen, &["read-1".to_string()]),
+            vec!["read-2".to_string()]
+        );
+        // Nothing read means Clear read has nothing to do (button disabled).
+        assert!(clear_read_ids(&notes, &[], &[]).is_empty());
+    }
+
+    #[test]
+    fn dismissed_key_is_gateway_scoped_and_distinct_from_seen() {
+        let key_a = scoped_storage_key(DISMISSED_PREFIX, "https://gateway-a.example");
+        let key_b = scoped_storage_key(DISMISSED_PREFIX, "https://gateway-b.example/");
+        assert_ne!(key_a, DISMISSED_PREFIX);
+        assert_ne!(key_a, key_b);
+        assert_eq!(
+            scoped_storage_key(DISMISSED_PREFIX, "https://gateway-a.example/"),
+            key_a
+        );
+        assert_ne!(
+            key_a,
+            scoped_storage_key(SEEN_PREFIX, "https://gateway-a.example")
+        );
+        assert!(key_a.starts_with("strike.notify.dismissed."));
     }
 }

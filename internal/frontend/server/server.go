@@ -386,6 +386,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/ledger/{id}", s.handleLedgerGet)
 	s.mux.HandleFunc("GET /v1/providers", s.handleProviders)
 	s.mux.HandleFunc("POST /v1/auth/key", s.handleAuthKey)
+	s.mux.HandleFunc("POST /v1/auth/probe", s.handleAuthProbe)
 	s.mux.HandleFunc("DELETE /v1/auth/{provider}", s.handleAuthLogout)
 	s.mux.HandleFunc("POST /v1/auth/device", s.handleAuthDeviceStart)
 	s.mux.HandleFunc("GET /v1/auth/device/{id}", s.handleAuthDeviceStatus)
