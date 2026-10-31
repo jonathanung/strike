@@ -1,6 +1,7 @@
 //! Document viewer and editor. Pure helpers are tested on the host; the
 //! Leptos pane is the center-column surface the shell opens for a path.
 
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -1348,6 +1349,70 @@ fn save_effects(landing: SaveLanding, outcome: SaveOutcome) -> SaveEffects {
     }
 }
 
+/// A navigation the unsaved-edit guard (#1394) is holding back: the
+/// file (or, with an empty `path`, the chat) the user asked to go to
+/// while a dirty draft is open. Nothing has loaded it yet.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PendingNav {
+    pub path: String,
+    pub line: u32,
+    pub diff: bool,
+}
+
+/// Dirty means an edit is in progress and the draft differs from the
+/// last loaded/saved content. Comparing against content, not counting
+/// keystrokes, means retyping the original text clears the guard, and
+/// read-only/binary documents can never be dirty: they never enter a
+/// writable editing session in the first place.
+pub fn is_dirty(editing: bool, draft: &str, content: &str) -> bool {
+    editing && draft != content
+}
+
+/// A load may not proceed over a dirty draft once a file is loaded.
+/// This also covers re-opening the loaded file itself under a dirty
+/// draft: that reload would discard the draft the same silent way.
+pub fn nav_blocked(dirty: bool, loaded_path: &str) -> bool {
+    dirty && !loaded_path.is_empty()
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GuardChoice {
+    Stay,
+    Discard,
+    Save,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GuardEffects {
+    /// Close the prompt and stay on the current file, draft intact.
+    pub dismiss_prompt: bool,
+    /// Drop the draft and carry out the held navigation now.
+    pub proceed_now: bool,
+    /// Run the existing save flow; navigation proceeds only if the
+    /// save lands (a conflict or error keeps the draft and the prompt).
+    pub save_first: bool,
+}
+
+pub fn guard_effects(choice: GuardChoice) -> GuardEffects {
+    match choice {
+        GuardChoice::Stay => GuardEffects {
+            dismiss_prompt: true,
+            proceed_now: false,
+            save_first: false,
+        },
+        GuardChoice::Discard => GuardEffects {
+            dismiss_prompt: true,
+            proceed_now: true,
+            save_first: false,
+        },
+        GuardChoice::Save => GuardEffects {
+            dismiss_prompt: false,
+            proceed_now: false,
+            save_first: true,
+        },
+    }
+}
+
 #[component]
 pub fn DocumentPane(
     base: RwSignal<String>,
@@ -1381,6 +1446,82 @@ pub fn DocumentPane(
     let reload_tick = RwSignal::new(0u32);
     let load_gen = RwSignal::new(0u32);
     let diff_gen = RwSignal::new(0u32);
+    // Unsaved-edit guard (#1394): the navigation held back while a
+    // dirty draft is open, whether applying it on Discard / after a
+    // successful Save still has to happen, and the one load a Stay
+    // revert must not run (it would reload the file it is staying on).
+    let pending_nav = RwSignal::new(None::<PendingNav>);
+    let save_then_nav = RwSignal::new(false);
+    let reverting = RwSignal::new(false);
+
+    // Carry out a held navigation once leaving is allowed (the draft
+    // was discarded or saved). The target may already be in `path`
+    // (an outside setter put it there and the load effect held it
+    // back), still be to apply (Back to chat holds inside the pane),
+    // or be the empty path that closes the pane.
+    let proceed_nav = move |nav: PendingNav| {
+        pending_nav.set(None);
+        if nav.path.is_empty() {
+            path.set(String::new());
+        } else if nav.path == path.get_untracked() {
+            reload_tick.update(|n| *n += 1);
+        } else {
+            jump_line.set(nav.line);
+            want_diff.set(nav.diff);
+            path.set(nav.path);
+        }
+    };
+
+    // beforeunload (#1394): warn on reload / tab close only while
+    // dirty. The listener is removed on cleanup via the same
+    // disposer pattern as gateway.rs (#1527): a leaked copy would
+    // read disposed signals after a remount.
+    {
+        let disposers: Rc<RefCell<Vec<Box<dyn FnOnce()>>>> = Rc::new(RefCell::new(Vec::new()));
+        let add_disposer = {
+            let disposers = disposers.clone();
+            move |f: Box<dyn FnOnce()>| disposers.borrow_mut().push(f)
+        };
+        on_cleanup({
+            let disposers = disposers.clone();
+            let run = send_wrapper::SendWrapper::new(move || {
+                for f in disposers.borrow_mut().drain(..) {
+                    f();
+                }
+            });
+            move || run.take()()
+        });
+        let on_unload = Closure::<dyn FnMut(web_sys::BeforeUnloadEvent)>::new(
+            move |ev: web_sys::BeforeUnloadEvent| {
+                if is_dirty(
+                    editing.get_untracked(),
+                    &draft.get_untracked(),
+                    &content.get_untracked(),
+                ) {
+                    ev.prevent_default();
+                    ev.set_return_value("");
+                }
+            },
+        );
+        if let Some(w) = web_sys::window() {
+            let _ = w.add_event_listener_with_callback(
+                "beforeunload",
+                on_unload.as_ref().unchecked_ref(),
+            );
+        }
+        let kept = Rc::new(RefCell::new(Some(on_unload)));
+        add_disposer(Box::new(move || {
+            if let Some(cb) = kept.borrow_mut().take() {
+                if let Some(w) = web_sys::window() {
+                    let _ = w.remove_event_listener_with_callback(
+                        "beforeunload",
+                        cb.as_ref().unchecked_ref(),
+                    );
+                }
+                drop(cb);
+            }
+        }));
+    }
 
     Effect::new(move |_| {
         let text = if editing.get() { draft.get() } else { content.get() };
@@ -1403,6 +1544,39 @@ pub fn DocumentPane(
     Effect::new(move |_| {
         let _ = reload_tick.get();
         let p = path.get();
+        // Stay (#1394): the revert back to the loaded file is not a
+        // navigation — running the load would reload it and discard
+        // the draft Stay exists to keep.
+        if reverting.get_untracked() {
+            reverting.set(false);
+            return;
+        }
+        // Unsaved-edit guard (#1394): every path setter (Files pane,
+        // Changes pane, transcript file links) funnels through this
+        // effect, so holding the load here holds them all. The draft,
+        // editing state, and loaded file stay exactly as they were;
+        // only the held target is recorded for the prompt. Back to
+        // chat never reaches here with a dirty draft — the pane's own
+        // button holds it before clearing `path`, because an empty
+        // path would unmount the pane before any guard could render.
+        if nav_blocked(
+            is_dirty(
+                editing.get_untracked(),
+                &draft.get_untracked(),
+                &content.get_untracked(),
+            ),
+            &loaded_path.get_untracked(),
+        ) {
+            let held = PendingNav {
+                path: p.clone(),
+                line: jump_line.get_untracked(),
+                diff: want_diff.get_untracked(),
+            };
+            if pending_nav.get_untracked().as_ref() != Some(&held) {
+                pending_nav.set(Some(held));
+            }
+            return;
+        }
         let gen = load_gen.get_untracked() + 1;
         load_gen.set(gen);
         editing.set(false);
@@ -1591,6 +1765,23 @@ pub fn DocumentPane(
         });
     };
 
+    // Guard Save arm (#1394): after the save flow settles, proceed
+    // only when it actually landed — the draft is no longer dirty.
+    // A conflict or an error leaves the draft dirty, so the held
+    // navigation and its prompt stay in place for Stay / Discard.
+    Effect::new(move |_| {
+        let settled = !saving.get();
+        let dirty_now = is_dirty(editing.get(), &draft.get(), &content.get());
+        if settled && save_then_nav.get_untracked() {
+            save_then_nav.set(false);
+            if !dirty_now {
+                if let Some(nav) = pending_nav.get_untracked() {
+                    proceed_nav(nav);
+                }
+            }
+        }
+    });
+
     let on_key = move |ev: web_sys::KeyboardEvent| {
         let key = ev.key();
         let cmd = ev.meta_key() || ev.ctrl_key();
@@ -1717,13 +1908,43 @@ pub fn DocumentPane(
                 }}</span>
                 <button type="button" class="secondary" on:click=move |_| step(-1)>"Prev"</button>
                 <button type="button" class="secondary" on:click=move |_| step(1)>"Next"</button>
-                <button type="button" class="secondary" on:click=move |_| path.set(String::new())>"Back to chat"</button>
+                <button type="button" class="secondary" data-ev-back=true on:click=move |_| {
+                    // Back to chat (#1394): hold here instead of
+                    // clearing `path` — an empty path unmounts this
+                    // pane in the shell, so no guard could render
+                    // after the fact.
+                    if nav_blocked(
+                        is_dirty(
+                            editing.get_untracked(),
+                            &draft.get_untracked(),
+                            &content.get_untracked(),
+                        ),
+                        &loaded_path.get_untracked(),
+                    ) {
+                        pending_nav.set(Some(PendingNav {
+                            path: String::new(),
+                            line: 0,
+                            diff: false,
+                        }));
+                    } else {
+                        path.set(String::new());
+                    }
+                }>"Back to chat"</button>
             </div>
             <Show when=move || !status.get().is_empty()>
                 <div class="notice" role="alert" data-ev-status=true>
                     <span>{move || status.get()}</span>
                     <Show when=move || conflict.get()>
                         <button type="button" class="secondary" data-ev-reload=true on:click=move |_| {
+                            // Reload in the conflict notice is an
+                            // explicit, labelled discard of the draft
+                            // (the notice says so), not a navigation:
+                            // clear the draft first so the unsaved
+                            // guard (#1394) does not block it.
+                            draft.set(content.get_untracked());
+                            editing.set(false);
+                            conflict.set(false);
+                            pending_nav.set(None);
                             reload_tick.update(|n| *n += 1);
                         }>"Reload file"</button>
                     </Show>
@@ -1731,6 +1952,95 @@ pub fn DocumentPane(
             </Show>
             <Show when=move || !notice.get().is_empty()>
                 <p class="hint">{move || notice.get()}</p>
+            </Show>
+            <Show when=move || pending_nav.get().is_some()>
+                <div
+                    class="notice ev-unsaved-guard"
+                    role="alertdialog"
+                    aria-label="Unsaved changes"
+                    data-ev-unsaved-guard=true
+                >
+                    <span>{move || {
+                        let target = pending_nav
+                            .get()
+                            .map(|nav| {
+                                if nav.path.is_empty() {
+                                    "Back to chat".to_string()
+                                } else {
+                                    nav.path
+                                }
+                            })
+                            .unwrap_or_default();
+                        format!(
+                            "You have unsaved changes in {}. Leave for {target} without saving?",
+                            loaded_path.get()
+                        )
+                    }}</span>
+                    <button
+                        type="button"
+                        class="secondary"
+                        data-ev-guard-stay=true
+                        on:click=move |_| {
+                            // Stay: dismiss and, when an outside
+                            // setter already moved `path`, revert it
+                            // to the loaded file (the load effect
+                            // skips that one revert — see `reverting`).
+                            let effects = guard_effects(GuardChoice::Stay);
+                            if effects.dismiss_prompt {
+                                pending_nav.set(None);
+                            }
+                            let loaded = loaded_path.get_untracked();
+                            if path.get_untracked() != loaded {
+                                reverting.set(true);
+                                path.set(loaded);
+                            }
+                        }
+                    >"Stay"</button>
+                    <button
+                        type="button"
+                        class="secondary"
+                        data-ev-guard-discard=true
+                        on:click=move |_| {
+                            let Some(nav) = pending_nav.get_untracked() else {
+                                return;
+                            };
+                            let effects = guard_effects(GuardChoice::Discard);
+                            if effects.proceed_now {
+                                draft.set(content.get_untracked());
+                                editing.set(false);
+                                conflict.set(false);
+                                proceed_nav(nav);
+                            }
+                        }
+                    >"Discard"</button>
+                    <button
+                        type="button"
+                        class="primary"
+                        data-ev-guard-save=true
+                        disabled=move || saving.get()
+                        on:click=move |_| {
+                            let Some(nav) = pending_nav.get_untracked() else {
+                                return;
+                            };
+                            let effects = guard_effects(GuardChoice::Save);
+                            if effects.save_first {
+                                if is_dirty(
+                                    editing.get_untracked(),
+                                    &draft.get_untracked(),
+                                    &content.get_untracked(),
+                                ) {
+                                    // The save-then-nav effect above
+                                    // proceeds once this lands; a
+                                    // conflict keeps prompt + draft.
+                                    save_then_nav.set(true);
+                                    do_save();
+                                } else {
+                                    proceed_nav(nav);
+                                }
+                            }
+                        }
+                    >"Save"</button>
+                </div>
             </Show>
             <Show when=move || loading.get()>
                 <p class="hint">"Loading…"</p>
@@ -1771,6 +2081,9 @@ pub fn DocumentPane(
                 </Show>
             </div>
             <div class="ev-tools">
+                <Show when=move || is_dirty(editing.get(), &draft.get(), &content.get())>
+                    <span class="ev-dirty" data-ev-dirty=true>"Unsaved changes"</span>
+                </Show>
                 <button
                     type="button"
                     class="secondary"
@@ -2063,6 +2376,37 @@ mod tests {
         assert!(committed.write_body && committed.status_saved && !committed.conflict);
         let conflict = save_effects(SaveLanding::Commit, SaveOutcome::Conflict);
         assert!(conflict.conflict && !conflict.write_body);
+    }
+
+    #[test]
+    fn dirty_is_editing_with_a_draft_that_differs_from_content() {
+        assert!(is_dirty(true, "edited", "original"));
+        // Not editing: a stale draft string alone is not an unsaved edit.
+        assert!(!is_dirty(false, "edited", "original"));
+        // Retyping the original text clears dirty without a save.
+        assert!(!is_dirty(true, "original", "original"));
+        assert!(!is_dirty(false, "same", "same"));
+    }
+
+    #[test]
+    fn nav_is_blocked_only_for_a_dirty_draft_on_a_loaded_file() {
+        assert!(nav_blocked(true, "a.rs"));
+        // Clean drafts and the first load never block.
+        assert!(!nav_blocked(false, "a.rs"));
+        assert!(!nav_blocked(true, ""));
+        assert!(!nav_blocked(false, ""));
+    }
+
+    #[test]
+    fn guard_choices_map_to_stay_discard_and_save_first() {
+        let stay = guard_effects(GuardChoice::Stay);
+        assert!(stay.dismiss_prompt && !stay.proceed_now && !stay.save_first);
+        let discard = guard_effects(GuardChoice::Discard);
+        assert!(discard.dismiss_prompt && discard.proceed_now && !discard.save_first);
+        // Save keeps the prompt (and the held navigation) until the
+        // save lands, so a conflict cannot drop either one.
+        let save = guard_effects(GuardChoice::Save);
+        assert!(!save.dismiss_prompt && !save.proceed_now && save.save_first);
     }
 
     #[test]

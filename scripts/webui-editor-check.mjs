@@ -25,8 +25,10 @@ async function waitFor(send, expression, label) {
 
 export async function editorBrowserCheck({ send, port, token, repoDir }) {
   const sample = join(repoDir, "editor-smoke.txt");
+  const other = join(repoDir, "editor-other.txt");
   const long = join(repoDir, "editor-long.txt");
   await writeFile(sample, "alpha beta\n");
+  await writeFile(other, "other content\n");
   try {
     const trav = await fetch(
       `http://127.0.0.1:${port}/v1/file/view?path=${encodeURIComponent("../secret.txt")}`,
@@ -127,6 +129,188 @@ export async function editorBrowserCheck({ send, port, token, repoDir }) {
       send,
       `(() => { const b = document.querySelector("[data-ev-edit]"); if (!b || b.disabled) return "edit disabled"; b.click(); return "ok"; })()`,
     );
+
+    // Dirty guard (#1394): an unsaved draft must block navigation.
+    // Files-pane switch: Stay keeps the draft, Save writes then
+    // switches, and a later Back to chat offers Discard. A synthetic
+    // beforeunload must be cancelled while dirty.
+    const setDraft = async (text) => {
+      await evalValue(
+        send,
+        `(() => {
+          const ta = document.querySelector(".ev-editor");
+          if (!ta) return "no editor";
+          ta.value = ${JSON.stringify(text)};
+          ta.dispatchEvent(new Event("input", { bubbles: true }));
+          return "ok";
+        })()`,
+      );
+    };
+    await setDraft("alpha edited\n");
+    await waitFor(
+      send,
+      `(() => document.querySelector('[data-ev-open="editor-other.txt"]') ? "ok" : "no other file row")()`,
+      "open button for editor-other.txt",
+    );
+    await evalValue(
+      send,
+      `(() => { document.querySelector('[data-ev-open="editor-other.txt"]').click(); return "ok"; })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        const guard = document.querySelector("[data-ev-unsaved-guard]");
+        if (!guard) return "no guard";
+        const ta = document.querySelector(".ev-editor");
+        return ta && ta.value === "alpha edited\\n" ? "ok" : "draft lost: " + (ta ? ta.value : "no editor");
+      })()`,
+      "dirty guard on files switch (draft kept)",
+    );
+    const unloadBlocked = await evalValue(
+      send,
+      `(() => { const ev = new Event("beforeunload", { cancelable: true }); window.dispatchEvent(ev); return ev.defaultPrevented ? "ok" : "not prevented"; })()`,
+    );
+    if (unloadBlocked !== "ok") {
+      throw new Error(`beforeunload while dirty: ${unloadBlocked}`);
+    }
+    await evalValue(
+      send,
+      `(() => { const b = document.querySelector("[data-ev-guard-stay]"); if (!b) return "no stay"; b.click(); return "ok"; })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        if (document.querySelector("[data-ev-unsaved-guard]")) return "guard still open";
+        const ta = document.querySelector(".ev-editor");
+        return ta && ta.value === "alpha edited\\n" ? "ok" : "draft lost after Stay";
+      })()`,
+      "Stay keeps the draft",
+    );
+    await evalValue(
+      send,
+      `(() => { document.querySelector('[data-ev-open="editor-other.txt"]').click(); return "ok"; })()`,
+    );
+    await waitFor(
+      send,
+      `(() => document.querySelector("[data-ev-unsaved-guard]") ? "ok" : "no guard on second switch")()`,
+      "dirty guard on second files switch",
+    );
+    await evalValue(
+      send,
+      `(() => { const b = document.querySelector("[data-ev-guard-save]"); if (!b) return "no guard save"; b.click(); return "ok"; })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        const root = document.querySelector("[data-ev-root]");
+        if (!root) return "no pane";
+        if (document.querySelector("[data-ev-unsaved-guard]")) return "guard still open";
+        return root.innerText.includes("other content") ? "ok" : root.innerText.slice(0, 180);
+      })()`,
+      "guard Save writes then switches",
+    );
+    const saved = await fetch(
+      `http://127.0.0.1:${port}/v1/file/view?path=editor-smoke.txt`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+    const savedBody = await saved.json();
+    if (savedBody.content !== "alpha edited\n") {
+      throw new Error(`guard Save did not write: ${JSON.stringify(savedBody).slice(0, 200)}`);
+    }
+    // Back to chat with a fresh dirty draft: Discard drops it.
+    await evalValue(
+      send,
+      `(() => { const b = [...document.querySelectorAll("button")].find(el => el.textContent.trim() === "Back to chat"); if (b) b.click(); return "ok"; })()`,
+    );
+    await waitFor(
+      send,
+      `(() => document.querySelector("textarea") ? "ok" : "no composer")()`,
+      "composer before discard case",
+    );
+    await evalValue(
+      send,
+      `(() => { const b = [...document.querySelectorAll("button")].find(el => el.textContent.trim() === "Files"); if (!b) return "no files tab"; b.click(); return "ok"; })()`,
+    );
+    await waitFor(
+      send,
+      `(() => document.querySelector('[data-ev-open="editor-smoke.txt"]') ? "ok" : "no sample row")()`,
+      "open button for editor-smoke.txt (discard case)",
+    );
+    await evalValue(
+      send,
+      `(() => { document.querySelector('[data-ev-open="editor-smoke.txt"]').click(); return "ok"; })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        const root = document.querySelector("[data-ev-root]");
+        return root && root.innerText.includes("alpha edited") ? "ok" : "sample did not reopen";
+      })()`,
+      "sample reopened for discard case",
+    );
+    await evalValue(
+      send,
+      `(() => { const b = document.querySelector("[data-ev-edit]"); if (!b || b.disabled) return "edit disabled"; b.click(); return "ok"; })()`,
+    );
+    await setDraft("discard me\n");
+    await evalValue(
+      send,
+      `(() => { const b = document.querySelector("[data-ev-back]"); if (!b) return "no back"; b.click(); return "ok"; })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        const guard = document.querySelector("[data-ev-unsaved-guard]");
+        if (!guard) return "no guard on Back to chat";
+        return guard.innerText.includes("Back to chat") ? "ok" : guard.innerText.slice(0, 160);
+      })()`,
+      "dirty guard on Back to chat",
+    );
+    await evalValue(
+      send,
+      `(() => { const b = document.querySelector("[data-ev-guard-discard]"); if (!b) return "no discard"; b.click(); return "ok"; })()`,
+    );
+    await waitFor(
+      send,
+      `(() => document.querySelector("textarea") ? "ok" : "no composer after Discard")()`,
+      "Discard leaves to chat",
+    );
+    const afterDiscard = await fetch(
+      `http://127.0.0.1:${port}/v1/file/view?path=editor-smoke.txt`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+    const afterDiscardBody = await afterDiscard.json();
+    if (afterDiscardBody.content !== "alpha edited\n") {
+      throw new Error(`Discard wrote the draft: ${JSON.stringify(afterDiscardBody).slice(0, 200)}`);
+    }
+    // Restore the original content and editing state for the
+    // conflict case below.
+    await writeFile(sample, "alpha beta\n");
+    await evalValue(
+      send,
+      `(() => { const b = [...document.querySelectorAll("button")].find(el => el.textContent.trim() === "Files"); if (!b) return "no files tab"; b.click(); return "ok"; })()`,
+    );
+    await waitFor(
+      send,
+      `(() => document.querySelector('[data-ev-open="editor-smoke.txt"]') ? "ok" : "no sample row")()`,
+      "open button for editor-smoke.txt (conflict restore)",
+    );
+    await evalValue(
+      send,
+      `(() => { document.querySelector('[data-ev-open="editor-smoke.txt"]').click(); return "ok"; })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        const root = document.querySelector("[data-ev-root]");
+        return root && root.innerText.includes("alpha beta") ? "ok" : "sample did not reopen for conflict case";
+      })()`,
+      "sample reopened for conflict case",
+    );
+    await evalValue(
+      send,
+      `(() => { const b = document.querySelector("[data-ev-edit]"); if (!b || b.disabled) return "edit disabled"; b.click(); return "ok"; })()`,
+    );
     await writeFile(sample, "agent\n");
     await evalValue(
       send,
@@ -169,6 +353,12 @@ export async function editorBrowserCheck({ send, port, token, repoDir }) {
       await evalValue(
         send,
         `(() => { const b = [...document.querySelectorAll("button")].find(el => el.textContent.trim() === "Back to chat"); if (b) b.click(); return "ok"; })()`,
+      );
+      // The conflict case above leaves a dirty draft, so Back to
+      // chat is held by the #1394 guard: discard to proceed.
+      await evalValue(
+        send,
+        `(() => { const b = document.querySelector("[data-ev-guard-discard]"); if (b) b.click(); return "ok"; })()`,
       );
       await waitFor(
         send,
@@ -297,6 +487,7 @@ export async function editorBrowserCheck({ send, port, token, repoDir }) {
     console.log("webui-editor-check ok");
   } finally {
     await rm(sample, { force: true });
+    await rm(other, { force: true });
     await rm(long, { force: true });
   }
 }
