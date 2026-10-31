@@ -119,6 +119,12 @@ struct PairPaint {
     warning: String,
     devices: Vec<DeviceRow>,
     device_note: String,
+    /// True when a pairing URL exists but a phone can never open it
+    /// (loopback target, #1522): the dialog must show no QR and no
+    /// copyable URL, only the reachable-path instructions.
+    blocked: bool,
+    /// Copyable restart command for the blocked case; empty otherwise.
+    restart: String,
 }
 
 struct ScanSlot {
@@ -206,6 +212,8 @@ pub(crate) fn GatewayQR(
     let warning = RwSignal::new(String::new());
     let devices = RwSignal::new(Vec::<DeviceRow>::new());
     let device_note = RwSignal::new(String::new());
+    let blocked = RwSignal::new(false);
+    let restart = RwSignal::new(String::new());
     crate::shell::bind(
         "app.install",
         Rc::new(|_| {
@@ -253,7 +261,18 @@ pub(crate) fn GatewayQR(
             halt_scan();
             return;
         }
-        queue_pair(base, token, note, url, svg, warning, devices, device_note);
+        queue_pair(
+            base,
+            token,
+            note,
+            url,
+            svg,
+            warning,
+            devices,
+            device_note,
+            blocked,
+            restart,
+        );
     });
     on_cleanup(halt_scan);
 
@@ -273,6 +292,22 @@ pub(crate) fn GatewayQR(
             if !ok {
                 select_pairing_url();
             }
+        });
+    };
+
+    let copy_restart = move |_| {
+        let text = restart.get_untracked();
+        if text.is_empty() {
+            return;
+        }
+        spawn_local(async move {
+            let ok = crate::clipboard::copy_text(&text).await.is_ok();
+            let msg = if ok {
+                "Restart command copied."
+            } else {
+                "Copy didn't work in this browser. Select the restart command and copy it manually."
+            };
+            status.set(msg.into());
         });
     };
 
@@ -310,16 +345,29 @@ pub(crate) fn GatewayQR(
                         <button class="secondary gq-close" type="button" on:click=move |_| open.set(false)>"Close"</button>
                     </div>
                     <p class="gq-note">{move || note.get()}</p>
-                    <div class="gq-qr" inner_html=move || svg.get()></div>
-                    <input id="gq-url" readonly aria-label="Pairing URL" prop:value=move || url.get() />
-                    <div class="gq-actions">
-                        <button class="secondary" type="button" on:click=copy_url>"Copy URL"</button>
-                        <button class="secondary gq-new" type="button" on:click=move |_| { copy_failed.set(false); queue_pair(base, token, note, url, svg, warning, devices, device_note); }>"New code"</button>
-                    </div>
-                    <Show when=move || copy_failed.get()>
-                        <p class="gq-copy-fallback" role="alert">
-                            "Copy didn't work in this browser. The pairing URL above is selected — copy it manually, then open it on your phone to pair."
-                        </p>
+                    <Show when=move || blocked.get()>
+                        <div class="gq-blocked" role="alert">
+                            <p class="gq-blocked-title">"No QR to scan — a phone cannot open this gateway"</p>
+                            <p>"Restart the gateway on an address your phone can reach, then reopen this dialog:"</p>
+                            <code class="gq-cmd">{move || restart.get()}</code>
+                            <div class="gq-actions">
+                                <button class="secondary" type="button" on:click=copy_restart>"Copy restart command"</button>
+                                <button class="secondary gq-new" type="button" on:click=move |_| { copy_failed.set(false); queue_pair(base, token, note, url, svg, warning, devices, device_note, blocked, restart); }>"Check again"</button>
+                            </div>
+                        </div>
+                    </Show>
+                    <Show when=move || !blocked.get()>
+                        <div class="gq-qr" inner_html=move || svg.get()></div>
+                        <input id="gq-url" readonly aria-label="Pairing URL" prop:value=move || url.get() />
+                        <div class="gq-actions">
+                            <button class="secondary" type="button" on:click=copy_url>"Copy URL"</button>
+                            <button class="secondary gq-new" type="button" on:click=move |_| { copy_failed.set(false); queue_pair(base, token, note, url, svg, warning, devices, device_note, blocked, restart); }>"New code"</button>
+                        </div>
+                        <Show when=move || copy_failed.get()>
+                            <p class="gq-copy-fallback" role="alert">
+                                "Copy didn't work in this browser. The pairing URL above is selected — copy it manually, then open it on your phone to pair."
+                            </p>
+                        </Show>
                     </Show>
                     <p class="gq-warn">{move || warning.get()}</p>
                     <h3 class="gq-sub">"Paired browsers"</h3>
@@ -400,6 +448,7 @@ fn select_pairing_url() {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn queue_pair(
     base: RwSignal<String>,
     token: RwSignal<String>,
@@ -409,6 +458,8 @@ fn queue_pair(
     warning: RwSignal<String>,
     devices: RwSignal<Vec<DeviceRow>>,
     device_note: RwSignal<String>,
+    blocked: RwSignal<bool>,
+    restart: RwSignal<String>,
 ) {
     let (b, t) = (base.get_untracked(), token.get_untracked());
     spawn_local(async move {
@@ -419,6 +470,8 @@ fn queue_pair(
         warning.set(paint.warning);
         devices.set(paint.devices);
         device_note.set(paint.device_note);
+        blocked.set(paint.blocked);
+        restart.set(paint.restart);
     });
 }
 
@@ -685,23 +738,24 @@ async fn fetch_pair(base: &str, token: &str) -> PairPaint {
     {
         Ok(v) => match serde_json::from_value::<PairMint>(v) {
             Ok(mint) => {
-                let shown = shown_pair_url(&mint.url, mint.gateway.phone_reachable, &page);
                 let (devices, device_note) = load_devices(base, token).await;
                 let ttl = if mint.ttl_seconds > 0 {
                     mint.ttl_seconds / 60
                 } else {
                     5
                 };
-                PairPaint {
-                    note: format!(
-                        "This link works once and expires in about {ttl} minutes. The daemon token is not in the URL."
-                    ),
-                    svg: qr_markup(&shown),
-                    url: shown,
-                    warning: warnings(&mint.gateway),
+                let note = format!(
+                    "This link works once and expires in about {ttl} minutes. The daemon token is not in the URL."
+                );
+                pair_paint(
+                    &mint.gateway,
+                    &mint.url,
+                    &page,
+                    note,
+                    "",
                     devices,
                     device_note,
-                }
+                )
             }
             Err(_) => PairPaint {
                 note: "Could not mint a pairing code.".into(),
@@ -710,26 +764,157 @@ async fn fetch_pair(base: &str, token: &str) -> PairPaint {
                 warning: String::new(),
                 devices: Vec::new(),
                 device_note: String::new(),
+                blocked: false,
+                restart: String::new(),
             },
         },
         Err(err) => {
             let (extra, gateway) = public_pair_error(&err);
             let gateway = gateway.unwrap_or_default();
             let plain = plain_gateway_url(&gateway);
-            let shown = if plain.is_empty() {
-                String::new()
-            } else {
-                shown_pair_url(&plain, gateway.phone_reachable, &page)
-            };
-            PairPaint {
-                note: compose_note(&gateway.opt_in, &extra),
-                svg: qr_markup(&shown),
-                url: shown,
-                warning: warnings(&gateway),
-                devices: Vec::new(),
-                device_note: String::new(),
-            }
+            let note = compose_note(&gateway.opt_in, &extra);
+            pair_paint(
+                &gateway,
+                &plain,
+                &page,
+                note,
+                &extra,
+                Vec::new(),
+                String::new(),
+            )
         }
+    }
+}
+
+/// Compose the dialog paint from a gateway snapshot and the URL the daemon
+/// proposes. This is the one place that decides whether a QR may be shown
+/// (#1522). A URL whose host is loopback can never be opened by a phone, so
+/// when the effective target is unreachable the paint carries no QR and no
+/// copyable URL — in both the minted (`--auth`) and the public (no-auth)
+/// variants — and leads with the daemon's reachable-path instructions plus
+/// a copyable restart command instead. When the gateway is reachable the
+/// paint is exactly what the dialog showed before.
+fn pair_paint(
+    info: &GatewayInfo,
+    server_url: &str,
+    page_origin: &str,
+    note: String,
+    blocked_lead: &str,
+    devices: Vec<DeviceRow>,
+    device_note: String,
+) -> PairPaint {
+    let shown = if server_url.is_empty() {
+        String::new()
+    } else {
+        shown_pair_url(server_url, info.phone_reachable, page_origin)
+    };
+    if shown.is_empty() {
+        return PairPaint {
+            note,
+            url: String::new(),
+            svg: String::new(),
+            warning: warnings(info),
+            devices,
+            device_note,
+            blocked: false,
+            restart: String::new(),
+        };
+    }
+    if pair_url_scannable(&shown, info.phone_reachable, page_origin) {
+        return PairPaint {
+            note,
+            svg: qr_markup(&shown),
+            url: shown,
+            warning: warnings(info),
+            devices,
+            device_note,
+            blocked: false,
+            restart: String::new(),
+        };
+    }
+    PairPaint {
+        note: unreachable_note(info, &shown, blocked_lead),
+        url: String::new(),
+        svg: String::new(),
+        // The "other addresses are not the QR target" warning is folded
+        // into the restart command below; as a standalone warning next to
+        // no QR at all it only reads as a riddle.
+        warning: String::new(),
+        devices,
+        device_note,
+        blocked: true,
+        restart: restart_command(&shown, &info.unbound),
+    }
+}
+
+/// Whether the dialog may present `shown` as a scannable QR (and a copyable
+/// pairing URL). A loopback host is never scannable: on a phone it resolves
+/// to the phone itself (#1522). When the daemon reports the gateway as not
+/// phone-reachable, the one scannable case left is the tunnel rewrite in
+/// `shown_pair_url`, where `shown` was rebuilt from the non-loopback origin
+/// the operator used to open this page — that origin is a reachable path
+/// the daemon cannot see.
+pub(crate) fn pair_url_scannable(shown: &str, phone_reachable: bool, page_origin: &str) -> bool {
+    if shown.is_empty() || origin_is_loopback(shown) {
+        return false;
+    }
+    if phone_reachable {
+        return true;
+    }
+    let page = page_origin.trim_end_matches('/');
+    !page.is_empty() && !origin_is_loopback(page) && shown.starts_with(page)
+}
+
+/// The lead text for the unreachable case: the daemon's own reachable-path
+/// instructions (`optIn`), preceded by any mint error lead, and followed by
+/// the plain statement the old dialog never made — no QR is shown, and why.
+fn unreachable_note(info: &GatewayInfo, shown: &str, lead: &str) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if !lead.is_empty() {
+        parts.push(lead.to_string());
+    }
+    if info.opt_in.is_empty() {
+        parts.push(
+            "A phone cannot open this gateway. It is listening on loopback only.".to_string(),
+        );
+    } else {
+        parts.push(info.opt_in.clone());
+    }
+    // Name the origin only: the full URL carries the one-time code, and the
+    // blocked dialog must not become a second surface that leaks it.
+    let target = http_origin(shown).unwrap_or_else(|| shown.to_string());
+    parts.push(format!(
+        "No QR is shown on purpose: it would point at {target}, and a phone cannot open a loopback address — on the phone, that address is the phone itself. A pairing QR only works if the address in it is one your phone can reach."
+    ));
+    parts.join("\n\n")
+}
+
+/// The restart command offered when the gateway is loopback-only. It
+/// mirrors the daemon's own `LoopbackOptIn` instruction (pair.go): bind a
+/// private or Tailscale address the phone can reach. The first address the
+/// daemon reported as not bound is used when there is one; the port
+/// follows the gateway's own URL.
+pub(crate) fn restart_command(shown: &str, unbound: &[String]) -> String {
+    let ip = unbound
+        .iter()
+        .map(|s| s.trim())
+        .find(|s| !s.is_empty())
+        .unwrap_or("<tailnet-or-lan-ip>");
+    let port = url_port(shown).unwrap_or_else(|| "8787".to_string());
+    format!("strike daemon install --addr {ip}:{port} --allow-private-bind")
+}
+
+fn url_port(url: &str) -> Option<String> {
+    let authority = url.split("://").nth(1)?.split(['/', '?', '#']).next()?;
+    let port = if let Some(after) = authority.strip_prefix('[') {
+        after.split_once(']')?.1.strip_prefix(':')?
+    } else {
+        authority.rsplit_once(':')?.1
+    };
+    if !port.is_empty() && port.chars().all(|c| c.is_ascii_digit()) {
+        Some(port.to_string())
+    } else {
+        None
     }
 }
 
@@ -1190,5 +1375,184 @@ mod tests {
         assert!(origin_is_loopback("http://[::1]:8787"));
         assert!(origin_is_loopback("http://localhost"));
         assert!(!origin_is_loopback("https://lab.example"));
+    }
+
+    #[test]
+    fn scannable_requires_a_phone_reachable_target() {
+        let page = "http://127.0.0.1:8787";
+        // A loopback target is never scannable, whatever the flags say:
+        // on a phone it resolves to the phone itself (#1522).
+        assert!(!pair_url_scannable(
+            "http://127.0.0.1:8787/#pair=p1.abc",
+            false,
+            page
+        ));
+        assert!(!pair_url_scannable(
+            "http://127.0.0.1:8787/#pair=p1.abc",
+            true,
+            page
+        ));
+        assert!(!pair_url_scannable("http://localhost:8787/", false, page));
+        assert!(!pair_url_scannable("", true, page));
+        // A reachable bind keeps its QR.
+        assert!(pair_url_scannable(
+            "http://192.168.1.20:8787/#pair=p1.abc",
+            true,
+            page
+        ));
+        assert!(pair_url_scannable(
+            "https://lab.example/#pair=p1.abc",
+            true,
+            page
+        ));
+        // Daemon says unreachable, but the URL was rewritten to the tunnel
+        // origin the operator opened this page through: scannable.
+        assert!(pair_url_scannable(
+            "https://lab.example/#pair=p1.abc",
+            false,
+            "https://lab.example"
+        ));
+        // Daemon says unreachable and the URL is some other non-loopback
+        // host the page did not come from: not scannable.
+        assert!(!pair_url_scannable(
+            "http://192.168.1.20:8787/",
+            false,
+            page
+        ));
+    }
+
+    #[test]
+    fn restart_command_uses_unbound_ip_and_gateway_port() {
+        assert_eq!(
+            restart_command(
+                "http://127.0.0.1:8787/#pair=p1.abc",
+                &["198.19.0.2".to_string()]
+            ),
+            "strike daemon install --addr 198.19.0.2:8787 --allow-private-bind"
+        );
+        assert_eq!(
+            restart_command("http://127.0.0.1:9999/", &[]),
+            "strike daemon install --addr <tailnet-or-lan-ip>:9999 --allow-private-bind"
+        );
+        assert_eq!(
+            restart_command("http://[::1]:8787/", &["  ".to_string()]),
+            "strike daemon install --addr <tailnet-or-lan-ip>:8787 --allow-private-bind"
+        );
+    }
+
+    fn loopback_info() -> GatewayInfo {
+        GatewayInfo {
+            phone_reachable: false,
+            urls: vec![GatewayURL {
+                kind: "bind".into(),
+                url: "http://127.0.0.1:8787/".into(),
+            }],
+            opt_in: "A phone cannot open this gateway. It is listening on loopback only.".into(),
+            unbound: vec!["198.19.0.2".into()],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn loopback_mint_paint_hides_the_qr() {
+        // The --auth variant was the worse half of #1522: it showed the
+        // loopback QR with no warning at all.
+        let paint = pair_paint(
+            &loopback_info(),
+            "http://127.0.0.1:8787/#pair=p1.abc",
+            "http://127.0.0.1:8787",
+            "ttl note".into(),
+            "",
+            Vec::new(),
+            String::new(),
+        );
+        assert!(paint.blocked);
+        assert!(
+            paint.svg.is_empty(),
+            "no scannable QR for a loopback target"
+        );
+        assert!(paint.url.is_empty(), "no copyable loopback URL");
+        assert!(
+            !paint.note.contains("#pair="),
+            "blocked note must not carry the pairing code: {}",
+            paint.note
+        );
+        assert!(
+            paint.note.contains("cannot open this gateway"),
+            "{}",
+            paint.note
+        );
+        assert!(
+            paint
+                .note
+                .contains("only works if the address in it is one your phone can reach"),
+            "{}",
+            paint.note
+        );
+        assert_eq!(
+            paint.restart,
+            "strike daemon install --addr 198.19.0.2:8787 --allow-private-bind"
+        );
+        assert!(
+            paint.warning.is_empty(),
+            "the unbound-address note must not survive as a cryptic warning: {}",
+            paint.warning
+        );
+    }
+
+    #[test]
+    fn loopback_public_paint_hides_the_qr() {
+        // The no-auth variant already said "cannot open" — and then showed
+        // the QR anyway.
+        let paint = pair_paint(
+            &loopback_info(),
+            "http://127.0.0.1:8787/",
+            "http://127.0.0.1:8787",
+            "opt-in plus error".into(),
+            "No pairing code was minted. This gateway is not running with --auth.",
+            Vec::new(),
+            String::new(),
+        );
+        assert!(paint.blocked);
+        assert!(paint.svg.is_empty());
+        assert!(paint.url.is_empty());
+        assert!(
+            paint.note.starts_with("No pairing code was minted."),
+            "{}",
+            paint.note
+        );
+        assert!(
+            paint.note.contains("cannot open this gateway"),
+            "{}",
+            paint.note
+        );
+    }
+
+    #[test]
+    fn reachable_paint_keeps_the_qr() {
+        let info = GatewayInfo {
+            phone_reachable: true,
+            urls: vec![GatewayURL {
+                kind: "bind".into(),
+                url: "http://192.168.1.20:8787/".into(),
+            }],
+            lan_warning: "lan warning".into(),
+            ..Default::default()
+        };
+        let paint = pair_paint(
+            &info,
+            "http://192.168.1.20:8787/#pair=p1.abc",
+            "http://192.168.1.20:8787",
+            "ttl note".into(),
+            "",
+            Vec::new(),
+            String::new(),
+        );
+        assert!(!paint.blocked);
+        assert!(paint.svg.starts_with("<svg"), "reachable QR must render");
+        assert_eq!(paint.url, "http://192.168.1.20:8787/#pair=p1.abc");
+        assert_eq!(paint.note, "ttl note");
+        assert_eq!(paint.warning, "lan warning");
+        assert!(paint.restart.is_empty());
     }
 }
