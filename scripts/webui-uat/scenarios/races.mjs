@@ -102,6 +102,21 @@ async function shootMobile(ctx, name) {
 
 export async function scenario(ctx) {
   const { page, check, waitUntil, click, shoot, log } = ctx;
+  // The first-run onboarding card overlays the cockpit and intercepts the
+  // phone/providers flows below; dismiss it like the other suites do.
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const gone = await page.evaluate(
+      `document.querySelector('[data-action="telemetry-note"]') == null`,
+    );
+    if (gone) break;
+    await page.evaluate(`(() => { const b = document.querySelector('[data-action="onboarding-continue"]'); if (b && !b.disabled) b.click(); return true; })()`);
+    await delay(500);
+  }
+  await waitUntil(
+    `document.querySelector('[data-action="telemetry-note"]') == null`,
+    4000,
+    "onboarding dismissed",
+  );
   const shim = await installShim(page);
   check(shim, "fetch shim did not install");
 
@@ -204,7 +219,7 @@ export async function scenario(ctx) {
 
   log("pairing: New code stays disabled until the latest mint returns");
   await armHold(page, "/v1/pair");
-  const phone = await openCommand(ctx, "phone");
+  const phone = await openCommand(ctx, "Open on phone");
   check(phone, "could not open the phone dialog");
   const disabled = await waitUntil(
     `(() => { const b = document.querySelector("button.gq-new"); return Boolean(b && b.disabled); })()`,
@@ -232,7 +247,8 @@ export async function scenario(ctx) {
   );
   check(Boolean(listed), "providers page did not show echo Connected");
   await armFail(page, "/v1/providers");
-  await click("button", "Refresh");
+  // Refresh providers moved behind the command palette (declutter).
+  await openCommand(ctx, "Refresh providers");
   const stale = await waitUntil(
     `(() => {
       const note = document.querySelector("[data-providers-stale]");
