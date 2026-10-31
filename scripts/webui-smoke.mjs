@@ -2146,7 +2146,12 @@ try {
     `http://127.0.0.1:${port}/v1/roots/${encodeURIComponent(restoreTarget)}`,
     { method: "DELETE", headers: { Authorization: `Bearer ${token}` } },
   );
-  if (!delRoot.ok) {
+  // Since #1399 the session DELETE above also deregisters the live
+  // root, so this follow-up close answering 404 "is not active" is the
+  // documented success case (see handleSessionDelete in api.go) — the
+  // root being gone either way is exactly the state this step needs.
+  // Any other failure is still fatal.
+  if (!delRoot.ok && delRoot.status !== 404) {
     throw new Error(`session-restore root close failed ${delRoot.status} ${await delRoot.text()}`);
   }
   await reloadCockpit("cockpit reload after deleting session B");
