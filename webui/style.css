@@ -2208,6 +2208,9 @@ select.mode, .daemon select {
 .sx-status-done, .sx-status-completed { color: var(--success); }
 .sx-status-failed { color: var(--signal); }
 .sx-status-blocked, .sx-status-stalled { color: var(--warning); }
+/* feature:tool-terminal-state begin */
+.sx-status-no-result { color: var(--warning); }
+/* feature:tool-terminal-state end */
 .sx-map {
   width: 14px;
   flex: 0 0 14px;

@@ -805,7 +805,9 @@ fn message_view(
                     {match StatusKind::parse_known(&badge) {
                         Some(kind) => view! { <StatusMark kind=kind place=StatusSlot::Badge /> }.into_any(),
                         None => {
-                            let class = format!("sx-status sx-status-{badge}");
+                            // Badge text keeps its space ("no result"); the
+                            // class token cannot, so it is dashed (#1506).
+                            let class = format!("sx-status sx-status-{}", badge.replace(' ', "-"));
                             view! { <span class=class data-status=badge.clone()>{badge.clone()}</span> }.into_any()
                         }
                     }}
