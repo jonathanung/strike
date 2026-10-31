@@ -2479,6 +2479,18 @@ button.linkish {
   text-decoration: underline;
 }
 button.linkish:disabled { color: var(--muted); cursor: default; text-decoration: none; }
+/* feature:session-links begin */
+/* Session-id links (#1530 audit, #1540 permissions, #1548 task runner):
+   quiet linkish buttons on desktop, a real touch target on phone widths
+   per #1524's row-action findings. */
+@media (max-width: 800px) {
+  button.session-link {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+  }
+}
+/* feature:session-links end */
 @media (max-width: 800px) {
   .sched { padding: var(--space-3); }
   .sched-layout, .sched-form { grid-template-columns: 1fr; }

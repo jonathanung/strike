@@ -189,12 +189,19 @@ async fn load_run(base: &str, token: &str, plan: &PlanMeta) -> Result<RunBody, S
     }
 }
 
+/// The existing root-activation route, shared with the Schedule page's
+/// session links. Kept as a helper so the path has one spelling (#1548).
+fn activate_path(id: &str) -> String {
+    format!("/v1/roots/{id}/activate")
+}
+
 #[component]
 pub fn TaskRunner(
     base: RwSignal<String>,
     token: RwSignal<String>,
     active_root: RwSignal<String>,
     status: RwSignal<String>,
+    mode: RwSignal<String>,
 ) -> impl IntoView {
     let plans = RwSignal::new(Vec::<PlanMeta>::new());
     let run = RwSignal::new(None::<TaskRun>);
@@ -212,6 +219,28 @@ pub fn TaskRunner(
     let pending_select = RwSignal::new(String::new());
     let run_epoch = RwSignal::new(LoadEpoch::new());
     let run_loading = RwSignal::new(false);
+
+    // #1548: Schedule-style session open, built here because this page
+    // already holds active_root. Deliberate improvement on Schedule's
+    // closure, which discards the activation result: a failed activation
+    // (child pruned, gateway restarted) is reported on the status line
+    // instead of silently landing on an empty chat.
+    let open_child = move |id: String| {
+        if id.is_empty() {
+            return;
+        }
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        active_root.set(id.clone());
+        mode.set("chat".into());
+        status.set(format!("Opened {id}"));
+        spawn_local(async move {
+            if let Err(e) =
+                post_json_value(&b, &t, &activate_path(&id), serde_json::json!({})).await
+            {
+                status.set(format!("open child session failed: {e}"));
+            }
+        });
+    };
 
     let refresh_plans = move || {
         let (b, t) = (base.get_untracked(), token.get_untracked());
@@ -609,7 +638,7 @@ pub fn TaskRunner(
                 }}
             </section>
             <aside class="task-col task-read" aria-label="Checkpoint">
-                {move || checkpoint_view(run.get(), row.get(), act)}
+                {move || checkpoint_view(run.get(), row.get(), act, open_child)}
             </aside>
         </div>
         <p class="task-note" aria-live="polite">{move || note.get()}</p>
@@ -624,6 +653,7 @@ fn checkpoint_view(
     run: Option<TaskRun>,
     row: String,
     act: impl Fn(&'static str, String, Vec<String>) + Copy + 'static,
+    open_child: impl Fn(String) + Copy + Send + Sync + 'static,
 ) -> impl IntoView {
     let Some(run) = run else {
         return view! { <p class="hint">"The checkpoint is the section body, the child handoff, and the verification report."</p> }.into_any();
@@ -650,6 +680,8 @@ fn checkpoint_view(
     let title = sec.title.clone();
     let child = sec.child_id.clone();
     let child_shown = !child.is_empty();
+    let child_for_click = child.clone();
+    let child_aria = format!("Open session {child}");
     let approve_id = id.clone();
     let retry_id = id.clone();
     let skip_id = id.clone();
@@ -736,9 +768,17 @@ fn checkpoint_view(
                 }.into_any()
             }
         }}
-        <Show when=move || child_shown>
-            <p class="hint">"Child "{child.clone()}</p>
-        </Show>
+        {child_shown.then(|| view! {
+            <p class="hint">
+                "Child "
+                <button
+                    type="button"
+                    class="linkish session-link"
+                    aria-label=child_aria.clone()
+                    on:click=move |_| open_child(child_for_click.clone())
+                >{child.clone()}</button>
+            </p>
+        })}
     }.into_any()
 }
 
@@ -832,5 +872,16 @@ mod tests {
         let line = poll_error_line("HTTP 500");
         assert!(line.starts_with("Live update failed: HTTP 500"));
         assert!(line.contains("Refresh to retry"));
+    }
+
+    #[test]
+    fn activate_path_uses_the_existing_roots_route() {
+        // #1548: the checkpoint child link activates through the same
+        // route Schedule's session links use — no new route, no new fetch.
+        assert_eq!(activate_path("abc"), "/v1/roots/abc/activate");
+        assert_eq!(
+            activate_path("sess-1234567890"),
+            "/v1/roots/sess-1234567890/activate"
+        );
     }
 }
