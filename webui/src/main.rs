@@ -5263,6 +5263,7 @@ fn App() -> impl IntoView {
                                 <p class="hint">{move || if files_path.get().is_empty() { "Working directory".into() } else { files_path.get() }}</p>
                                 <button class="secondary" on:click=move |_| load_files()>"Refresh"</button>
                             </div>
+                            <p class="hint">"Click a file to open it. @ mentions it in chat; drag also inserts @path."</p>
                             <Show when=move || !files_error.get().is_empty()>
                                 <div class="notice" role="alert">
                                     <span>{move || files_error.get()}</span>
@@ -5283,6 +5284,9 @@ fn App() -> impl IntoView {
                                     let path = join_path(&files_path.get(), &entry.name);
                                     let path_drag = path.clone();
                                     let path_click = path.clone();
+                                    let mention_attr = path.clone();
+                                    let mention_click = path.clone();
+                                    let mention_label = format!("Mention {path} in chat");
                                     let is_dir = entry.is_dir;
                                     let label = if is_dir { format!("{name}/") } else { name.clone() };
                                     let open_attr = if is_dir { String::new() } else { path.clone() };
@@ -5300,6 +5304,12 @@ fn App() -> impl IntoView {
                                                     }
                                                 }
                                             >{label}</button>
+                                            {(!is_dir).then(move || view! {
+                                                <button type="button" class="secondary ev-mention" data-ev-mention=mention_attr.clone()
+                                                    aria-label=mention_label.clone() title="Mention in chat"
+                                                    on:click=move |_| insert_mention(mention_click.clone())
+                                                >"@"</button>
+                                            })}
                                         </li>
                                     }
                                 }).collect_view().into_any()
@@ -5313,6 +5323,7 @@ fn App() -> impl IntoView {
                                 <p class="hint">"Changed files"</p>
                                 <button class="secondary" on:click=move |_| load_changes()>"Refresh"</button>
                             </div>
+                            <p class="hint">"Click a change to open its diff. @ mentions it in chat; drag also inserts @path."</p>
                             <Show when=move || !changes_error.get().is_empty()>
                                 <div class="notice" role="alert">
                                     <span>{move || changes_error.get()}</span>
@@ -5327,6 +5338,9 @@ fn App() -> impl IntoView {
                                     let path = file.path.clone();
                                     let path_drag = path.clone();
                                     let path_click = path.clone();
+                                    let mention_attr = path.clone();
+                                    let mention_click = path.clone();
+                                    let mention_label = format!("Mention {path} in chat");
                                     let added = file.added;
                                     let deleted = file.deleted;
                                     view! {
@@ -5343,6 +5357,10 @@ fn App() -> impl IntoView {
                                                 <span class="diff-add">{format!("+{added}")}</span>
                                                 <span class="diff-del">{format!("-{deleted}")}</span>
                                             </button>
+                                            <button type="button" class="secondary ev-mention" data-ev-mention=mention_attr.clone()
+                                                aria-label=mention_label.clone() title="Mention in chat"
+                                                on:click=move |_| insert_mention(mention_click.clone())
+                                            >"@"</button>
                                         </li>
                                     }
                                 }).collect_view()}
