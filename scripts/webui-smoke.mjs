@@ -1460,6 +1460,50 @@ try {
     textProbe((body) => body.includes("smoke pass") && body.includes("Done")),
     { timeout: WAIT_MS, interval: 250 },
   );
+  // Duplicate a goal (#1415): the detail Duplicate opens the create form
+  // prefilled from the spec; nothing is created until submit, and the
+  // submitted copy is a fresh goal.
+  const goalsBeforeDup = await (
+    await fetch(`http://127.0.0.1:${port}/v1/goals`, { headers: { Authorization: `Bearer ${token}` } })
+  ).json();
+  await evaluate(`document.getElementById("goals-duplicate").click()`);
+  await waitFor(
+    "duplicate goal form prefilled with the original spec",
+    async () => {
+      const raw = await evaluate(`JSON.stringify({
+        desc: document.getElementById("goals-desc")?.value,
+        verify: document.getElementById("goals-verify")?.value,
+        turns: document.getElementById("goals-turns")?.value,
+      })`);
+      const p = JSON.parse(raw || "{}");
+      return { ok: p.desc === "smoke pass" && p.verify === "cmd: true" && p.turns === "8", ...p };
+    },
+    { timeout: STEP_MS, interval: 250 },
+  );
+  const goalsAfterDupOpen = await (
+    await fetch(`http://127.0.0.1:${port}/v1/goals`, { headers: { Authorization: `Bearer ${token}` } })
+  ).json();
+  if (goalsAfterDupOpen.goals.length !== goalsBeforeDup.goals.length) {
+    throw new Error("duplicate goal was created before submit");
+  }
+  await evaluate(`(() => {
+    const el = document.getElementById("goals-desc");
+    el.value = "smoke pass copy";
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    document.getElementById("goals-run").click();
+    return "sent";
+  })()`);
+  await waitFor(
+    "duplicated goal run to reach Done",
+    textProbe((body) => body.includes("smoke pass copy") && body.includes("Done")),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  const goalsAfterDupSubmit = await (
+    await fetch(`http://127.0.0.1:${port}/v1/goals`, { headers: { Authorization: `Bearer ${token}` } })
+  ).json();
+  if (goalsAfterDupSubmit.goals.length !== goalsBeforeDup.goals.length + 1) {
+    throw new Error(`duplicate goal submit count=${goalsAfterDupSubmit.goals.length} want=${goalsBeforeDup.goals.length + 1}`);
+  }
   await evaluate(`document.querySelector(".goals-list .secondary").click()`);
   await waitFor(
     "goal form to reappear after picking the listed goal",
@@ -2413,6 +2457,86 @@ try {
     textProbe((body) => body.includes("Nothing is scheduled") && !body.includes("unauthorized")),
     { timeout: WAIT_MS, interval: 250 },
   );
+
+  // Duplicate a schedule (#1462): seed one via the API, duplicate it in the
+  // form, assert nothing is saved until Create, then assert the saved copy
+  // exists next to the original and starts disabled.
+  const seedRes = await fetch(`http://127.0.0.1:${port}/v1/schedules`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: "Smoke schedule",
+      kind: "cron",
+      cron: "0 9 * * 1-5",
+      timezone: "UTC",
+      source: "prompt",
+      prompt: "review CI",
+      enabled: true,
+    }),
+  });
+  if (!seedRes.ok) {
+    throw new Error(`seed schedule for duplicate check: HTTP ${seedRes.status}`);
+  }
+  await send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
+  await waitFor(
+    "app after reload for schedule duplicate check",
+    textProbe((body) => body.includes("Menu")),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await runPalette("Schedule");
+  await waitFor(
+    "schedule page with the seeded schedule",
+    textProbe((body) => body.includes("Smoke schedule")),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await evaluate(`(() => {
+    const row = [...document.querySelectorAll(".sched-row")].find((r) => r.textContent.includes("Smoke schedule"));
+    if (row) row.click();
+    return row ? "clicked" : "missing";
+  })()`);
+  await waitFor(
+    "schedule duplicate action enabled after selecting a schedule",
+    async () => ({
+      ok: (await evaluate(`(() => { const b = document.getElementById("schedule-duplicate"); return !!b && !b.disabled; })()`)) === true,
+    }),
+    { timeout: STEP_MS, interval: 250 },
+  );
+  await evaluate(`document.getElementById("schedule-duplicate").click()`);
+  await waitFor(
+    "duplicated schedule form (copy name, disabled notice, Create)",
+    async () => {
+      const raw = await evaluate(`JSON.stringify({
+        name: document.getElementById("schedule-name")?.value,
+        text: document.body ? document.body.innerText : "",
+      })`);
+      const p = JSON.parse(raw || "{}");
+      return {
+        ok: p.name === "Smoke schedule (copy)" && (p.text || "").includes("starts paused/disabled"),
+        name: p.name,
+      };
+    },
+    { timeout: STEP_MS, interval: 250 },
+  );
+  const schedBeforeSave = await (
+    await fetch(`http://127.0.0.1:${port}/v1/schedules`, { headers: { Authorization: `Bearer ${token}` } })
+  ).json();
+  if (schedBeforeSave.schedules.length !== 1) {
+    throw new Error(`duplicate schedule was saved before Create count=${schedBeforeSave.schedules.length}`);
+  }
+  await evaluate(`document.querySelector(".sched-form .primary").click()`);
+  await waitFor(
+    "saved schedule copy in the list next to the original",
+    textProbe((body) => body.includes("Smoke schedule (copy)")),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  const schedAfterSave = await (
+    await fetch(`http://127.0.0.1:${port}/v1/schedules`, { headers: { Authorization: `Bearer ${token}` } })
+  ).json();
+  const schedCopy = schedAfterSave.schedules.find((s) => s.name === "Smoke schedule (copy)");
+  const schedOrig = schedAfterSave.schedules.find((s) => s.name === "Smoke schedule");
+  if (!schedCopy || schedCopy.enabled !== false || !schedOrig || schedOrig.enabled !== true) {
+    throw new Error(`schedule duplicate saved state copy=${JSON.stringify(schedCopy)} orig=${JSON.stringify(schedOrig)}`);
+  }
 
   if (strikeLog.includes(token)) {
     throw new Error("daemon log contains the smoke token");
