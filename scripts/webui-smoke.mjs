@@ -1824,15 +1824,22 @@ try {
     return JSON.parse(raw || "{}");
   };
   const clickSeedRow = async () => {
-    const v = await evaluate(`(() => {
-      const b = [...document.querySelectorAll(".git-file")].find((x) => (x.textContent || "").includes("smoke-git-diff-1428.txt"));
-      if (!b) return "missing";
-      b.click();
-      return "clicked";
-    })()`);
-    if (v !== "clicked") {
-      throw new Error(`git diff expand: seed row ${v}\n${await diagnostics()}`);
-    }
+    // Rows load async after the Git tab opens; poll for the seed row like
+    // every other wait in this script instead of a single-shot query
+    // (a one-shot query raced the status load on CI: "seed row missing").
+    await waitFor(
+      "git diff expand seed row (smoke-git-diff-1428.txt)",
+      async () => {
+        const v = await evaluate(`(() => {
+          const b = [...document.querySelectorAll(".git-file")].find((x) => (x.textContent || "").includes("smoke-git-diff-1428.txt"));
+          if (!b) return "missing";
+          b.click();
+          return "clicked";
+        })()`);
+        return { ok: v === "clicked", v };
+      },
+      { timeout: WAIT_MS, interval: 250 },
+    );
   };
   await clickSeedRow();
   await waitFor(
