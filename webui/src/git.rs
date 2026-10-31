@@ -3,15 +3,40 @@
 //! Mutations go through /v1/git, which refuses force-push and requires a
 //! confirm token for discard, hard reset, branch delete, and worktree removal.
 
+use std::cell::RefCell;
 use std::collections::HashSet;
+use std::rc::Rc;
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use serde::Deserialize;
 use wasm_bindgen::JsCast;
 
+use load_guard::LoadEpoch;
+
+use crate::load_epoch::begin;
+
 use crate::api::{get_json, post_json_value};
 use crate::model::{ChangedFilesResponse, ChildSession, ChildrenResponse};
+use crate::outcome;
+
+thread_local! {
+    static BRANCHES: RefCell<Vec<(String, bool)>> = RefCell::new(Vec::new());
+}
+
+pub fn branch_names() -> Vec<String> {
+    BRANCHES.with(|slot| slot.borrow().iter().map(|(name, _)| name.clone()).collect())
+}
+
+pub fn deletable_branches() -> Vec<String> {
+    BRANCHES.with(|slot| {
+        slot.borrow()
+            .iter()
+            .filter(|(_, current)| !current)
+            .map(|(name, _)| name.clone())
+            .collect()
+    })
+}
 
 #[derive(Clone, Debug, Deserialize)]
 struct GitFile {
@@ -126,6 +151,17 @@ struct GitRow {
     inline_diff: String,
 }
 
+/// Paths of every row whose staged flag equals `staged`, in panel order.
+/// Stage all is `paths_where(rows, false)` — Unstaged and Untracked rows
+/// both carry `staged: false`, so new agent-created files are included,
+/// matching `git add` semantics (#1426 Q3). Unstage all is the staged set.
+fn paths_where(rows: &[GitRow], staged: bool) -> Vec<String> {
+    rows.iter()
+        .filter(|row| row.staged == staged)
+        .map(|row| row.path.clone())
+        .collect()
+}
+
 fn focus_id(id: &str) {
     let Some(el) = web_sys::window()
         .and_then(|w| w.document())
@@ -196,6 +232,7 @@ pub fn GitPanel(
     base: RwSignal<String>,
     token: RwSignal<String>,
     status_line: RwSignal<String>,
+    active: Memo<bool>,
 ) -> impl IntoView {
     let error = RwSignal::new(String::new());
     let branch = RwSignal::new(String::new());
@@ -210,28 +247,46 @@ pub fn GitPanel(
     let diff_text = RwSignal::new(String::new());
     let diff_note = RwSignal::new(String::new());
     let diff_req = RwSignal::new(0u32);
+    // #1428: the diff render is capped at 400 lines by default (wasm DOM
+    // cost); diff_expanded lifts the cap for the currently open diff only.
+    // It resets whenever a diff is (re)loaded — see the diff effect below.
+    let diff_expanded = RwSignal::new(false);
     let show_log = RwSignal::new(false);
     let message = RwSignal::new(String::new());
     let switch_to = RwSignal::new(String::new());
-    let new_branch = RwSignal::new(String::new());
-    let delete_branch = RwSignal::new(String::new());
-    let delete_phrase = RwSignal::new(String::new());
-    let reset_phrase = RwSignal::new(String::new());
-    let discard_armed = RwSignal::new(false);
+    let load_epoch = RwSignal::new(LoadEpoch::new());
+
 
     let load = move || {
+        let gen = begin(load_epoch);
+        // Rows are what Stage / Discard act on. Drop them before the new
+        // status arrives so the previous branch's files are not clickable
+        // under a checkout that has already moved on.
+        rows.set(Vec::new());
+        commits.set(Vec::new());
         let (b, t) = (base.get_untracked(), token.get_untracked());
+        let load_epoch = load_epoch;
         spawn_local(async move {
+            let live = move || load_epoch.with_untracked(|epoch| epoch.accept(gen));
             let mut err = String::new();
             match get_json::<GitStatus>(&b, &t, "/v1/git/status").await {
                 Ok(st) => {
+                    if !live() {
+                        return;
+                    }
                     branch.set(st.branch);
                     ahead.set(st.ahead);
                     behind.set(st.behind);
                     detached.set(st.detached);
-                    let changes = get_json::<ChangedFilesResponse>(&b, &t, "/v1/changed-files")
-                        .await
-                        .unwrap_or(ChangedFilesResponse { files: vec![] });
+                    let changes = outcome::take_ok(
+                        &mut err,
+                        "Changed files",
+                        get_json::<ChangedFilesResponse>(&b, &t, "/v1/changed-files").await,
+                    )
+                    .unwrap_or(ChangedFilesResponse { files: vec![] });
+                    if !live() {
+                        return;
+                    }
                     let mut seen = HashSet::new();
                     let mut list = Vec::new();
                     for file in st.staged {
@@ -295,39 +350,61 @@ pub fn GitPanel(
                         cursor.set(0);
                     }
                 }
-                Err(e) => err = e,
-            }
-            match get_json::<GitBranches>(&b, &t, "/v1/git/branches").await {
-                Ok(body) => {
-                    if switch_to.get_untracked().is_empty() {
-                        if let Some(cur) = body.branches.iter().find(|b| b.current) {
-                            switch_to.set(cur.name.clone());
-                        }
-                    }
-                    branches.set(body.branches);
-                }
                 Err(e) => {
-                    if err.is_empty() {
-                        err = e;
+                    if !live() {
+                        return;
                     }
+                    err = e;
                 }
             }
-            match get_json::<GitLog>(&b, &t, "/v1/git/log?limit=30").await {
-                Ok(body) => commits.set(body.commits),
-                Err(e) => {
-                    if err.is_empty() {
-                        err = e;
+            if !live() {
+                return;
+            }
+            if !live() {
+                return;
+            }
+            if let Some(body) = outcome::take_ok(
+                &mut err,
+                "Branches",
+                get_json::<GitBranches>(&b, &t, "/v1/git/branches").await,
+            ) {
+                if switch_to.get_untracked().is_empty() {
+                    if let Some(cur) = body.branches.iter().find(|b| b.current) {
+                        switch_to.set(cur.name.clone());
                     }
                 }
+                branches.set(body.branches);
             }
-            error.set(err);
+            if !live() {
+                return;
+            }
+            if let Some(body) = outcome::take_ok(
+                &mut err,
+                "Log",
+                get_json::<GitLog>(&b, &t, "/v1/git/log?limit=30").await,
+            ) {
+                commits.set(body.commits);
+            }
+            if live() {
+                error.set(err);
+            }
         });
     };
 
     Effect::new(move |_| {
         let _ = (base.get(), token.get());
         load();
-        focus_id("git-panel");
+        if active.get() {
+            focus_id("git-panel");
+        }
+    });
+    Effect::new(move |_| {
+        let rows: Vec<(String, bool)> = branches
+            .get()
+            .into_iter()
+            .map(|branch| (branch.name, branch.current))
+            .collect();
+        BRANCHES.with(|slot| *slot.borrow_mut() = rows);
     });
 
     Effect::new(move |_| {
@@ -335,6 +412,8 @@ pub fn GitPanel(
         if !open_diff.get_untracked() {
             return;
         }
+        // Per-diff expansion (#1428): every (re)load starts capped again.
+        diff_expanded.set(false);
         let rows = rows.get_untracked();
         let Some(row) = rows.get(cursor.get_untracked()).cloned() else {
             diff_text.set(String::new());
@@ -381,6 +460,7 @@ pub fn GitPanel(
         let next = (cursor.get_untracked() as i32 + delta).clamp(0, n - 1) as usize;
         cursor.set(next);
         open_diff.set(false);
+        diff_expanded.set(false);
         diff_text.set(String::new());
     };
 
@@ -412,7 +492,7 @@ pub fn GitPanel(
             "Escape" => {
                 ev.prevent_default();
                 open_diff.set(false);
-                discard_armed.set(false);
+                diff_expanded.set(false);
                 diff_text.set(String::new());
             }
             "l" if !ev.meta_key() && !ev.ctrl_key() && !ev.alt_key() => {
@@ -437,8 +517,7 @@ pub fn GitPanel(
         });
     };
 
-    let do_switch = move |_| {
-        let branch = switch_to.get();
+    let do_switch = move |branch: String| {
         if branch.is_empty() {
             error.set("Pick a branch.".into());
             return;
@@ -449,14 +528,12 @@ pub fn GitPanel(
             format!("On {branch}"),
         );
     };
-    let do_create = move |_| {
-        let branch = new_branch.get().trim().to_string();
+    let do_create = move |branch: String| {
+        let branch = branch.trim().to_string();
         if branch.is_empty() {
             error.set("Branch name is required.".into());
             return;
         }
-        new_branch.set(String::new());
-        switch_to.set(branch.clone());
         mutate(
             "/v1/git/checkout".into(),
             serde_json::json!({"branch": branch, "create": true}),
@@ -478,7 +555,7 @@ pub fn GitPanel(
         mutate("/v1/git/commit".into(), body, "Committed.".into());
     };
     let commit_staged = move |_| do_commit(vec![]);
-    let commit_selected = move |_| {
+    let commit_selected = move || {
         let rows = rows.get();
         let Some(row) = rows.get(cursor.get()) else {
             error.set("Select a file first.".into());
@@ -512,17 +589,39 @@ pub fn GitPanel(
             "Unstaged.".into(),
         );
     };
-    let discard_selected = move |_| {
-        if !discard_armed.get() {
-            discard_armed.set(true);
+    // Batch variants (#1426): one POST with the whole path list — the
+    // daemon routes already accept `Paths []string` — never N per-file
+    // calls looping `stage_selected` / `unstage_selected`.
+    let stage_all = move |_| {
+        let paths = paths_where(&rows.get(), false);
+        if paths.is_empty() {
+            error.set("No unstaged or untracked files.".into());
             return;
         }
+        mutate(
+            "/v1/git/stage".into(),
+            serde_json::json!({"paths": paths}),
+            "Staged all.".into(),
+        );
+    };
+    let unstage_all = move |_| {
+        let paths = paths_where(&rows.get(), true);
+        if paths.is_empty() {
+            error.set("No staged files.".into());
+            return;
+        }
+        mutate(
+            "/v1/git/unstage".into(),
+            serde_json::json!({"paths": paths}),
+            "Unstaged all.".into(),
+        );
+    };
+    let discard_selected = move || {
         let rows = rows.get();
         let Some(row) = rows.get(cursor.get()) else {
             error.set("Select a file first.".into());
             return;
         };
-        discard_armed.set(false);
         let path = row.path.clone();
         let staged = row.staged;
         mutate(
@@ -531,35 +630,152 @@ pub fn GitPanel(
             "Discarded.".into(),
         );
     };
-    let do_reset = move |_| {
-        if reset_phrase.get().trim() != "reset-hard" {
-            error.set("Type reset-hard to confirm. This does not push.".into());
-            return;
-        }
-        reset_phrase.set(String::new());
+    let do_reset = move || {
         mutate(
             "/v1/git/reset".into(),
             serde_json::json!({"mode": "hard", "confirm": "reset-hard"}),
             "Reset to HEAD.".into(),
         );
     };
-    let do_delete_branch = move |_| {
-        if delete_phrase.get().trim() != "delete-branch" {
-            error.set("Type delete-branch to confirm.".into());
-            return;
-        }
-        let name = delete_branch.get();
+    let do_delete_branch = move |name: String| {
         if name.is_empty() {
             error.set("Pick a branch to delete.".into());
             return;
         }
-        delete_phrase.set(String::new());
         mutate(
             "/v1/git/branch/delete".into(),
             serde_json::json!({"name": name, "confirm": "delete-branch"}),
             "Branch deleted.".into(),
         );
     };
+
+    crate::shell::bind(
+        "git.refresh",
+        Rc::new(move |_| {
+            load();
+            Ok(())
+        }),
+    );
+    crate::shell::bind(
+        "git.log",
+        Rc::new(move |_| {
+            show_log.update(|v| *v = !*v);
+            Ok(())
+        }),
+    );
+    crate::shell::bind(
+        "git.switch",
+        Rc::new(move |name| {
+            let name = name.trim().to_string();
+            if name.is_empty() {
+                return Err("Pick a branch.".into());
+            }
+            do_switch(name);
+            Ok(())
+        }),
+    );
+    crate::shell::bind(
+        "git.create",
+        Rc::new(move |name| {
+            let name = name.trim().to_string();
+            if name.is_empty() {
+                return Err("Branch name is required.".into());
+            }
+            do_create(name);
+            Ok(())
+        }),
+    );
+    crate::shell::bind(
+        "git.stage-commit",
+        Rc::new(move |_| {
+            commit_selected();
+            Ok(())
+        }),
+    );
+    crate::shell::bind(
+        "git.discard",
+        Rc::new(move |_| {
+            let path = rows
+                .get_untracked()
+                .get(cursor.get_untracked())
+                .map(|row| row.path.clone())
+                .unwrap_or_default();
+            if path.is_empty() {
+                return Err("Select a file first.".into());
+            }
+            let run = discard_selected;
+            if !crate::confirm::ask(
+                crate::confirm::ConfirmRequest {
+                    title: format!("Discard changes in {path}?"),
+                    body:
+                        "Uncommitted changes in that file are thrown away. This cannot be undone."
+                            .into(),
+                    confirm_label: "Discard".into(),
+                },
+                Rc::new(move || run()),
+            ) {
+                return Err(crate::confirm::BUSY.into());
+            }
+            Ok(())
+        }),
+    );
+    crate::shell::bind(
+        "git.reset",
+        Rc::new(move |_| {
+            do_reset();
+            Ok(())
+        }),
+    );
+    crate::shell::bind(
+        "git.delete-branch",
+        Rc::new(move |name| {
+            let name = name.trim().to_string();
+            if name.is_empty() {
+                return Err("Pick a branch.".into());
+            }
+            let run_name = name.clone();
+            if !crate::confirm::ask(
+                crate::confirm::ConfirmRequest {
+                    title: format!("Delete branch {name}?"),
+                    body: "The local branch is deleted. This does not push.".into(),
+                    confirm_label: "Delete branch".into(),
+                },
+                Rc::new(move || do_delete_branch(run_name.clone())),
+            ) {
+                return Err(crate::confirm::BUSY.into());
+            }
+            Ok(())
+        }),
+    );
+    crate::shell::bind(
+        "git.copy-diff",
+        Rc::new(move |_| {
+            let text = diff_text.get_untracked();
+            if text.trim().is_empty() {
+                return Err("Open a diff first.".into());
+            }
+            if let Some(win) = web_sys::window() {
+                let _ = win.navigator().clipboard().write_text(&text);
+            }
+            status_line.set("Copied the diff.".into());
+            Ok(())
+        }),
+    );
+    on_cleanup(|| {
+        for id in [
+            "git.refresh",
+            "git.log",
+            "git.switch",
+            "git.create",
+            "git.stage-commit",
+            "git.discard",
+            "git.reset",
+            "git.delete-branch",
+            "git.copy-diff",
+        ] {
+            crate::shell::unbind(id);
+        }
+    });
 
     view! {
         <div id="git-panel" class="git-panel" tabindex="0" role="tabpanel" aria-label="Git" on:keydown=on_key>
@@ -572,10 +788,7 @@ pub fn GitPanel(
                     let (a, b) = (ahead.get(), behind.get());
                     if a == 0 && b == 0 { String::new() } else { format!("ahead {a} · behind {b}") }
                 }}</span>
-                <button type="button" class="secondary" on:click=move |_| load()>"Refresh"</button>
-                <button type="button" class=move || if show_log.get() { "chip on" } else { "chip" } on:click=move |_| show_log.update(|v| *v = !*v)>"Log"</button>
             </div>
-            <p class="hint">"Arrows or j/k move. Enter opens the diff. Esc closes it. l toggles the log."</p>
             <Show when=move || !error.get().is_empty()>
                 <div class="notice" role="alert">
                     <span>{move || error.get()}</span>
@@ -600,35 +813,13 @@ pub fn GitPanel(
                     <p class="hint">"No commits yet."</p>
                 </Show>
             </Show>
-            <div class="git-actions">
-                <select aria-label="Branch" prop:value=move || switch_to.get() on:change=move |ev| switch_to.set(event_target_value(&ev))>
-                    {move || branches.get().into_iter().map(|b| {
-                        let name = b.name.clone();
-                        let label = if b.current { format!("{name} (current)") } else { name.clone() };
-                        // Bind each option's selected state to switch_to:
-                        // prop:value on the <select> is applied before the
-                        // options (re)render, so the browser otherwise falls
-                        // back to the first option and displays the wrong
-                        // branch (#1314). Options created after switch_to is
-                        // set must claim selection themselves.
-                        let sel_name = name.clone();
-                        view! { <option value=name prop:selected=move || switch_to.get() == sel_name>{label}</option> }
-                    }).collect_view()}
-                </select>
-                <button type="button" class="secondary" on:click=do_switch>"Switch"</button>
-            </div>
-            <div class="git-actions">
-                <input class="git-field" aria-label="New branch name" placeholder="New branch name" prop:value=move || new_branch.get() on:input=move |ev| new_branch.set(event_target_value(&ev)) />
-                <button type="button" class="secondary" on:click=do_create>"Create"</button>
-            </div>
             {move || {
                 let rows = rows.get();
                 let cur = cursor.get();
                 let mut views = Vec::new();
                 for section in ["Staged", "Unstaged", "Untracked"] {
                     let heading = section.to_string();
-                    let note = if section == "Unstaged" { "From the Changes tab." } else { "" };
-                    views.push(view! { <h3 class="git-section">{heading} <span class="hint">{note}</span></h3> }.into_any());
+                    views.push(view! { <h3 class="git-section">{heading}</h3> }.into_any());
                     let matched: Vec<_> = rows.iter().enumerate().filter(|(_, row)| row.section == section).collect();
                     if matched.is_empty() {
                         let empty = match section {
@@ -663,19 +854,33 @@ pub fn GitPanel(
                 views.into_iter().collect_view()
             }}
             <Show when=move || open_diff.get() && !diff_text.get().is_empty()>
-                <pre class="git-diff" aria-label="Diff">{move || {
-                    let text = diff_text.get();
-                    let more = text.lines().nth(400).is_some();
-                    let mut lines: Vec<_> = text.lines().take(400).map(|line| {
-                        let kind = diff_kind(line);
-                        let text = line.to_string();
-                        view! { <div class=kind>{text}</div> }.into_any()
-                    }).collect();
-                    if more {
-                        lines.push(view! { <div class="ctx">"… first 400 lines"</div> }.into_any());
-                    }
-                    lines.into_iter().collect_view()
-                }}</pre>
+                <div class="git-diff-wrap">
+                    <pre class="git-diff" aria-label="Diff">{move || {
+                        let text = diff_text.get();
+                        // #1428: render-only cap. The full text is already
+                        // client-side; expansion renders every line with the
+                        // same line-kind classes as the capped render.
+                        let limit = if diff_expanded.get() { usize::MAX } else { 400 };
+                        text.lines().take(limit).map(|line| {
+                            let kind = diff_kind(line);
+                            let text = line.to_string();
+                            view! { <div class=kind>{text}</div> }.into_any()
+                        }).collect_view()
+                    }}</pre>
+                    {move || {
+                        let total = diff_text.get().lines().count();
+                        (total > 400 && !diff_expanded.get()).then(|| view! {
+                            <button
+                                type="button"
+                                class="secondary git-diff-expand"
+                                data-git-diff-expand="true"
+                                on:click=move |_| diff_expanded.set(true)
+                            >
+                                {format!("Show all {total} lines")}
+                            </button>
+                        })
+                    }}
+                </div>
             </Show>
             <Show when=move || !diff_note.get().is_empty()>
                 <p class="hint">{move || diff_note.get()}</p>
@@ -685,30 +890,9 @@ pub fn GitPanel(
                 <button type="button" class="primary" on:click=commit_staged>"Commit staged"</button>
                 <button type="button" class="secondary" on:click=stage_selected>"Stage"</button>
                 <button type="button" class="secondary" on:click=unstage_selected>"Unstage"</button>
-                <button type="button" class="secondary" on:click=commit_selected>"Stage and commit file"</button>
+                <button type="button" class="secondary" data-git-stage-all=true disabled=move || paths_where(&rows.get(), false).is_empty() on:click=stage_all>"Stage all"</button>
+                <button type="button" class="secondary" data-git-unstage-all=true disabled=move || paths_where(&rows.get(), true).is_empty() on:click=unstage_all>"Unstage all"</button>
             </div>
-            <p class="hint">"Commit staged uses the index only. There is no amend and no push."</p>
-            <details class="git-danger">
-                <summary>"Destructive actions"</summary>
-                <p class="hint">"No force push. Hard reset stays on HEAD. Discard and reset need an explicit confirm."</p>
-                <div class="git-actions">
-                    <button type="button" class="secondary" on:click=discard_selected>{move || if discard_armed.get() { "Confirm discard" } else { "Discard file" }}</button>
-                    <Show when=move || discard_armed.get()>
-                        <button type="button" class="secondary" on:click=move |_| discard_armed.set(false)>"Cancel"</button>
-                    </Show>
-                </div>
-                <input class="git-field" aria-label="Type reset-hard to confirm" placeholder="Type reset-hard" prop:value=move || reset_phrase.get() on:input=move |ev| reset_phrase.set(event_target_value(&ev)) />
-                <button type="button" class="secondary" on:click=do_reset>"Reset hard to HEAD"</button>
-                <select aria-label="Branch to delete" on:change=move |ev| delete_branch.set(event_target_value(&ev))>
-                    <option value="">"Branch to delete"</option>
-                    {move || branches.get().into_iter().filter(|b| !b.current).map(|b| {
-                        let name = b.name.clone();
-                        view! { <option value=name.clone()>{name.clone()}</option> }
-                    }).collect_view()}
-                </select>
-                <input class="git-field" aria-label="Type delete-branch to confirm" placeholder="Type delete-branch" prop:value=move || delete_phrase.get() on:input=move |ev| delete_phrase.set(event_target_value(&ev)) />
-                <button type="button" class="secondary" on:click=do_delete_branch>"Delete branch"</button>
-            </details>
         </div>
     }
 }
@@ -719,6 +903,7 @@ pub fn WorktreePanel(
     token: RwSignal<String>,
     status_line: RwSignal<String>,
     active_root: RwSignal<String>,
+    active: Memo<bool>,
 ) -> impl IntoView {
     let error = RwSignal::new(String::new());
     let body = RwSignal::new(None::<WorktreesBody>);
@@ -726,37 +911,68 @@ pub fn WorktreePanel(
     let pending = RwSignal::new(String::new());
     let remove_phrase = RwSignal::new(String::new());
     let prune_phrase = RwSignal::new(String::new());
+    let kids_note = RwSignal::new(String::new());
+    let load_epoch = RwSignal::new(LoadEpoch::new());
 
     let load = move || {
+        let gen = begin(load_epoch);
+        kids.set(vec![]);
+        kids_note.set(String::new());
         let (b, t, root) = (
             base.get_untracked(),
             token.get_untracked(),
             active_root.get_untracked(),
         );
+        let load_epoch = load_epoch;
         spawn_local(async move {
-            match get_json::<WorktreesBody>(&b, &t, "/v1/git/worktrees").await {
-                Ok(parsed) => {
-                    body.set(Some(parsed));
-                    error.set(String::new());
-                }
-                Err(e) => error.set(e),
+            let live = move || load_epoch.with_untracked(|epoch| epoch.accept(gen));
+            let mut err = String::new();
+            let worktrees = outcome::take_ok(
+                &mut err,
+                "Worktrees",
+                get_json::<WorktreesBody>(&b, &t, "/v1/git/worktrees").await,
+            );
+            if !live() {
+                return;
+            }
+            if let Some(parsed) = worktrees {
+                body.set(Some(parsed));
             }
             if root.is_empty() {
                 kids.set(vec![]);
+                kids_note.set(String::new());
+                error.set(err);
                 return;
             }
             let path = format!("/v1/sessions/{}/children", crate::api::js_encode(&root));
-            match get_json::<ChildrenResponse>(&b, &t, &path).await {
-                Ok(parsed) => kids.set(parsed.sessions),
-                Err(_) => kids.set(vec![]),
+            let children = outcome::take_ok(
+                &mut err,
+                "Children",
+                get_json::<ChildrenResponse>(&b, &t, &path).await,
+            );
+            if !live() {
+                return;
             }
+            match children {
+                Some(parsed) => {
+                    kids.set(parsed.sessions);
+                    kids_note.set(String::new());
+                }
+                None => {
+                    kids.set(vec![]);
+                    kids_note.set("Could not load child sessions.".into());
+                }
+            }
+            error.set(err);
         });
     };
 
     Effect::new(move |_| {
         let _ = (base.get(), token.get(), active_root.get());
         load();
-        focus_id("worktree-panel");
+        if active.get() {
+            focus_id("worktree-panel");
+        }
     });
 
     let on_key = move |ev: web_sys::KeyboardEvent| {
@@ -798,12 +1014,7 @@ pub fn WorktreePanel(
             "Worktree created. The live session stays in its current directory.".into(),
         );
     };
-    let remove = move |_| {
-        if remove_phrase.get().trim() != "remove-worktree" {
-            error.set("Type remove-worktree to confirm.".into());
-            return;
-        }
-        let path = pending.get();
+    let remove_now = move |path: String| {
         if path.is_empty() {
             error.set("Choose a strike-managed worktree.".into());
             return;
@@ -814,50 +1025,57 @@ pub fn WorktreePanel(
             "Worktree removed.".into(),
         );
     };
-    let prune = move |_| {
-        if prune_phrase.get().trim() != "prune-stale" {
-            error.set("Type prune-stale to confirm.".into());
-            return;
-        }
+    let prune = move || {
         mutate(
             "/v1/git/worktrees/prune".into(),
             serde_json::json!({"confirm": "prune-stale"}),
             "Stale worktrees removed.".into(),
         );
     };
+    crate::shell::bind(
+        "worktrees.refresh",
+        Rc::new(move |_| {
+            load();
+            Ok(())
+        }),
+    );
+    crate::shell::bind(
+        "worktrees.prune",
+        Rc::new(move |_| {
+            prune();
+            Ok(())
+        }),
+    );
+    on_cleanup(|| {
+        crate::shell::unbind("worktrees.refresh");
+        crate::shell::unbind("worktrees.prune");
+    });
 
     view! {
         <div id="worktree-panel" class="worktree-panel" tabindex="0" role="tabpanel" aria-label="Worktrees" on:keydown=on_key>
-            <p class="hint">"Alt+T opens this panel. Esc clears a pending remove."</p>
             <Show when=move || !error.get().is_empty()>
                 <div class="notice" role="alert">
                     <span>{move || error.get()}</span>
                     <button type="button" class="secondary" on:click=move |_| load()>"Retry"</button>
                 </div>
             </Show>
+            <Show when=move || !kids_note.get().is_empty()>
+                <p class="hint" role="status">{move || kids_note.get()}</p>
+            </Show>
             {move || body.get().map(|info| {
                 let isolation = info.child_isolation.clone();
                 let cleanup = info.worktree_cleanup.clone();
                 let session_mode = info.session_worktree.clone();
-                let isolates = info.isolates_children;
-                let explain = if isolates {
-                    "New delegated children get a worktree under .strike/worktrees/<session>."
-                } else {
-                    "Children share this directory. Set session.childIsolation to worktree to isolate them."
-                };
                 view! {
                     <div class="wt-card">
                         <span class="name">{format!("session.childIsolation: {isolation}")}</span>
                         <span class="path">{format!("cleanup {cleanup} · session.worktree {session_mode}")}</span>
-                        <span class="hint">{explain}</span>
                     </div>
                 }
             })}
             <div class="wt-actions">
                 <button type="button" class="primary" on:click=create>"Create for this session"</button>
-                <button type="button" class="secondary" on:click=move |_| load()>"Refresh"</button>
             </div>
-            <p class="hint">"Create checks out strike/<session> beside the primary tree. It does not move the running session."</p>
             <ul class="plain">
                 {move || {
                     let root = active_root.get();
@@ -868,6 +1086,7 @@ pub fn WorktreePanel(
                         let path = wt.path.clone();
                         let path_rm = path.clone();
                         let shown = short_path(&path);
+                        let shown_ask = shown.clone();
                         let branch = if wt.branch.is_empty() { wt.head.chars().take(7).collect::<String>() } else { wt.branch.clone() };
                         let stale = wt.stale;
                         let klass = if stale { "wt-card stale" } else { "wt-card" };
@@ -877,7 +1096,21 @@ pub fn WorktreePanel(
                                 <span class="name">{label}</span>
                                 <span class="path" title=path>{shown} " · " {branch}</span>
                                 {can_remove.then(|| view! {
-                                    <button type="button" class="secondary" on:click=move |_| pending.set(path_rm.clone())>"Remove"</button>
+                                    <button type="button" class="secondary" on:click=move |_| {
+                                        let path = path_rm.clone();
+                                        let label = shown_ask.clone();
+                                        let run = remove_now;
+                                        if !crate::confirm::ask(
+                                            crate::confirm::ConfirmRequest {
+                                                title: format!("Remove {label}?"),
+                                                body: "This deletes that worktree directory, including uncommitted files there. The primary checkout is never removed.".into(),
+                                                confirm_label: "Remove worktree".into(),
+                                            },
+                                            Rc::new(move || run(path.clone())),
+                                        ) {
+                                            error.set(crate::confirm::BUSY.into());
+                                        }
+                                    }>"Remove"</button>
                                 })}
                             </li>
                         }
@@ -887,22 +1120,47 @@ pub fn WorktreePanel(
             <Show when=move || body.get().map(|b| b.worktrees.is_empty()).unwrap_or(false)>
                 <p class="hint">"No worktrees."</p>
             </Show>
-            <Show when=move || !pending.get().is_empty()>
-                <div class="git-danger">
-                    <p class="hint">{move || format!("Remove {} ? This deletes that worktree directory, including uncommitted files there. The primary checkout is never removed.", short_path(&pending.get()))}</p>
-                    <input class="git-field" aria-label="Type remove-worktree to confirm" placeholder="Type remove-worktree" prop:value=move || remove_phrase.get() on:input=move |ev| remove_phrase.set(event_target_value(&ev)) />
-                    <div class="git-actions">
-                        <button type="button" class="secondary" on:click=remove>"Remove worktree"</button>
-                        <button type="button" class="secondary" on:click=move |_| pending.set(String::new())>"Cancel"</button>
-                    </div>
-                </div>
-            </Show>
-            <details class="git-danger">
-                <summary>"Clean up stale worktrees"</summary>
-                <p class="hint">"Removes strike-managed worktrees whose session is gone, then prunes missing git entries. Owned worktrees stay."</p>
-                <input class="git-field" aria-label="Type prune-stale to confirm" placeholder="Type prune-stale" prop:value=move || prune_phrase.get() on:input=move |ev| prune_phrase.set(event_target_value(&ev)) />
-                <button type="button" class="secondary" on:click=prune>"Clean up stale"</button>
-            </details>
         </div>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn row(section: &str, path: &str, staged: bool) -> GitRow {
+        GitRow {
+            section: section.into(),
+            path: path.into(),
+            status: String::new(),
+            added: 0,
+            deleted: 0,
+            staged,
+            inline_diff: String::new(),
+        }
+    }
+
+    #[test]
+    fn paths_where_splits_mixed_rows_in_panel_order() {
+        let rows = vec![
+            row("Staged", "a.rs", true),
+            row("Unstaged", "b.rs", false),
+            row("Staged", "c.rs", true),
+            row("Untracked", "new.rs", false),
+        ];
+        assert_eq!(paths_where(&rows, true), vec!["a.rs", "c.rs"]);
+        // Stage all includes Untracked rows (#1426 Q3).
+        assert_eq!(paths_where(&rows, false), vec!["b.rs", "new.rs"]);
+    }
+
+    #[test]
+    fn paths_where_empty_sets_disable_the_batch_buttons() {
+        let none: Vec<GitRow> = Vec::new();
+        assert!(paths_where(&none, true).is_empty());
+        assert!(paths_where(&none, false).is_empty());
+        let only_staged = vec![row("Staged", "a.rs", true)];
+        assert!(paths_where(&only_staged, false).is_empty());
+        let only_unstaged = vec![row("Unstaged", "b.rs", false)];
+        assert!(paths_where(&only_unstaged, true).is_empty());
     }
 }

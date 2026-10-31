@@ -18,8 +18,31 @@ use wasm_bindgen::{JsCast, JsValue};
 
 use crate::api::{api, auth_header, get_json};
 
-const SEEN_KEY: &str = "strike.notify.seen";
-const HIGH_KEY: &str = "strike.notify.bannerSeq";
+const SEEN_PREFIX: &str = "strike.notify.seen";
+const DISMISSED_PREFIX: &str = "strike.notify.dismissed";
+const HIGH_PREFIX: &str = "strike.notify.bannerSeq";
+
+/// Storage identity for one gateway. Empty base is this page's daemon.
+/// The legacy global keys are not read: a high-water mark from another
+/// gateway must not silence this one.
+pub fn gateway_scope(gateway: &str) -> String {
+    let raw = gateway.trim().trim_end_matches('/');
+    if raw.is_empty() {
+        return "local".into();
+    }
+    let mut out = String::new();
+    for b in raw.bytes() {
+        match b {
+            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'.' | b'_' => out.push(b as char),
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
+pub fn scoped_storage_key(prefix: &str, gateway: &str) -> String {
+    format!("{prefix}.{}", gateway_scope(gateway))
+}
 
 thread_local! {
     static OPEN_CENTRE: Cell<Option<RwSignal<bool>>> = Cell::new(None);
@@ -149,19 +172,140 @@ fn save_raw(key: &str, value: &str) {
     }
 }
 
-fn load_seen() -> Vec<String> {
-    serde_json::from_str(&load_raw(SEEN_KEY)).unwrap_or_default()
+fn load_seen_for(gateway: &str) -> Vec<String> {
+    serde_json::from_str(&load_raw(&scoped_storage_key(SEEN_PREFIX, gateway))).unwrap_or_default()
 }
 
-fn save_seen(ids: &[String]) {
+fn save_seen_for(gateway: &str, ids: &[String]) {
     let mut ids = ids.to_vec();
     if ids.len() > 500 {
         ids = ids.split_off(ids.len() - 500);
     }
     save_raw(
-        SEEN_KEY,
+        &scoped_storage_key(SEEN_PREFIX, gateway),
         &serde_json::to_string(&ids).unwrap_or_else(|_| "[]".into()),
     );
+}
+
+fn load_dismissed_for(gateway: &str) -> Vec<String> {
+    serde_json::from_str(&load_raw(&scoped_storage_key(DISMISSED_PREFIX, gateway)))
+        .unwrap_or_default()
+}
+
+fn save_dismissed_for(gateway: &str, ids: &[String]) {
+    let mut ids = ids.to_vec();
+    if ids.len() > 500 {
+        ids = ids.split_off(ids.len() - 500);
+    }
+    save_raw(
+        &scoped_storage_key(DISMISSED_PREFIX, gateway),
+        &serde_json::to_string(&ids).unwrap_or_else(|_| "[]".into()),
+    );
+}
+
+/// Rows the centre shows: everything not dismissed, in the original
+/// order. Dismissal is a client-side hide over the loaded list (#1464);
+/// the daemon still returns the row on the next poll.
+fn visible_notes(notes: &[Note], dismissed: &[String]) -> Vec<Note> {
+    notes
+        .iter()
+        .filter(|n| !dismissed.iter().any(|id| id == &n.id))
+        .cloned()
+        .collect()
+}
+
+/// Ids "Clear read" should add to the dismissed set: rows that are read
+/// (in the seen set), still visible, and not already dismissed. Unread
+/// rows are never bulk-dismissed.
+fn clear_read_ids(notes: &[Note], seen: &[String], dismissed: &[String]) -> Vec<String> {
+    notes
+        .iter()
+        .filter(|n| seen.iter().any(|id| id == &n.id))
+        .filter(|n| !dismissed.iter().any(|id| id == &n.id))
+        .map(|n| n.id.clone())
+        .collect()
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct BannerMark {
+    high: i64,
+    primed: bool,
+}
+
+struct Considered {
+    mark: BannerMark,
+    banner_id: Option<String>,
+    reset: bool,
+}
+
+fn parse_mark(raw: &str) -> BannerMark {
+    if raw.is_empty() {
+        return BannerMark {
+            high: 0,
+            primed: false,
+        };
+    }
+    match raw.parse::<i64>() {
+        Ok(n) => BannerMark {
+            high: n,
+            primed: true,
+        },
+        Err(_) => BannerMark {
+            high: 0,
+            primed: false,
+        },
+    }
+}
+
+fn load_mark(gateway: &str) -> BannerMark {
+    parse_mark(&load_raw(&scoped_storage_key(HIGH_PREFIX, gateway)))
+}
+
+/// Banner gate. A `latest` below the stored high is a sequence reset for
+/// this gateway: re-prime silently instead of suppressing every later note.
+fn consider_mark(mark: BannerMark, notes: &[Note], latest: i64) -> Considered {
+    let max_note = notes.iter().map(|n| n.seq).max().unwrap_or(0);
+    let ceiling = latest.max(max_note);
+    if mark.primed && ceiling < mark.high {
+        return Considered {
+            mark: BannerMark {
+                high: ceiling,
+                primed: true,
+            },
+            banner_id: None,
+            reset: true,
+        };
+    }
+    if !mark.primed {
+        return Considered {
+            mark: BannerMark {
+                high: ceiling,
+                primed: true,
+            },
+            banner_id: None,
+            reset: false,
+        };
+    }
+    let mut best: Option<&Note> = None;
+    for note in notes {
+        if note.seq <= mark.high || !note.banner || note.id.starts_with("local-") {
+            continue;
+        }
+        best = Some(match best {
+            None => note,
+            Some(cur) => prefer_banner(cur, note),
+        });
+    }
+    let high = if ceiling > mark.high {
+        ceiling
+    } else {
+        mark.high
+    };
+    Considered {
+        mark: BannerMark { high, primed: true },
+        banner_id: best.map(|note| note.id.clone()),
+        reset: false,
+    }
 }
 
 /// `/#session=<id>&approval=<requestId>`, also a full URL with that hash.
@@ -518,12 +662,14 @@ fn NoteRow(
     muted: bool,
     activate: UnsyncCallback<Note>,
     toggle_mute: UnsyncCallback<String>,
+    dismiss: UnsyncCallback<String>,
 ) -> impl IntoView {
     let title = note.title.clone();
     let body = note.body.clone();
     let when = short_when(&note.at);
     let kind = kind_label(&note.kind).to_string();
     let session = note.session_id.clone();
+    let dismiss_id = note.id.clone();
     let show_body = !body.is_empty();
     let show_when = !when.is_empty();
     let mute_label = if muted { "Unmute" } else { "Mute" };
@@ -553,6 +699,7 @@ fn NoteRow(
                 <Show when=move || show_body><span class="notify-body">{body.clone()}</span></Show>
             </button>
             {mute}
+            <button class="secondary notify-dismiss" aria-label="Dismiss notification" on:click=move |_| dismiss.run(dismiss_id.clone())>"Dismiss"</button>
         </div>
     }
 }
@@ -576,7 +723,8 @@ pub fn NotificationBell(
     let settings = RwSignal::new(false);
     let items = RwSignal::new(Vec::<Note>::new());
     let prefs = RwSignal::new(default_prefs());
-    let seen = RwSignal::new(load_seen());
+    let seen = RwSignal::new(load_seen_for(&base.get_untracked()));
+    let dismissed = RwSignal::new(load_dismissed_for(&base.get_untracked()));
     let cursor = RwSignal::new(0usize);
     let load_error = RwSignal::new(String::new());
     let form_error = RwSignal::new(String::new());
@@ -599,12 +747,9 @@ pub fn NotificationBell(
         }),
     );
 
-    let (stored_high, stored_primed) = match load_raw(HIGH_KEY).parse::<i64>() {
-        Ok(n) if !load_raw(HIGH_KEY).is_empty() => (n, true),
-        _ => (0, false),
-    };
-    let high = Rc::new(Cell::new(stored_high));
-    let primed = Rc::new(Cell::new(stored_primed));
+    let stored = load_mark(&base.get_untracked());
+    let high = Rc::new(Cell::new(stored.high));
+    let primed = Rc::new(Cell::new(stored.primed));
     let save_inflight = Rc::new(Cell::new(false));
     let stream_on = Rc::new(Cell::new(false));
 
@@ -683,7 +828,7 @@ pub fn NotificationBell(
             return;
         }
         seen.update(|list| list.push(id));
-        save_seen(&seen.get_untracked());
+        save_seen_for(&base.get_untracked(), &seen.get_untracked());
     };
 
     let activate = UnsyncCallback::new(move |note: Note| {
@@ -704,31 +849,33 @@ pub fn NotificationBell(
     let consider = UnsyncCallback::new({
         let high = high.clone();
         let primed = primed.clone();
-        move |list: Vec<Note>| {
-            let max = list.iter().map(|n| n.seq).max().unwrap_or(0);
-            if !primed.get() {
-                primed.set(true);
-                high.set(max);
-                save_raw(HIGH_KEY, &max.to_string());
+        move |(list, latest, gate): (Vec<Note>, i64, String)| {
+            if base.get_untracked() != gate {
                 return;
             }
-            let prev = high.get();
-            let mut best: Option<&Note> = None;
-            for note in &list {
-                if note.seq <= prev || !note.banner || note.id.starts_with("local-") {
-                    continue;
+            let outcome = consider_mark(
+                BannerMark {
+                    high: high.get(),
+                    primed: primed.get(),
+                },
+                &list,
+                latest,
+            );
+            if outcome.reset
+                || outcome.mark.high != high.get()
+                || outcome.mark.primed != primed.get()
+            {
+                high.set(outcome.mark.high);
+                primed.set(outcome.mark.primed);
+                save_raw(
+                    &scoped_storage_key(HIGH_PREFIX, &gate),
+                    &outcome.mark.high.to_string(),
+                );
+            }
+            if let Some(id) = outcome.banner_id {
+                if let Some(note) = list.iter().find(|n| n.id == id) {
+                    show_os(&note.kind, &note.href, &note.id);
                 }
-                best = Some(match best {
-                    None => note,
-                    Some(cur) => prefer_banner(cur, note),
-                });
-            }
-            if let Some(note) = best {
-                show_os(&note.kind, &note.href, &note.id);
-            }
-            if max > prev {
-                high.set(max);
-                save_raw(HIGH_KEY, &max.to_string());
             }
         }
     });
@@ -743,19 +890,23 @@ pub fn NotificationBell(
             let save_inflight = save_inflight.clone();
             let stream_on = stream_on.clone();
             let stream = stream.clone();
+            let started = b.clone();
             spawn_local(async move {
                 match get_json::<NotesResponse>(&b, &t, "/v1/notifications").await {
                     Ok(resp) => {
+                        if base.get_untracked() != started {
+                            return;
+                        }
                         if !save_inflight.get() {
                             prefs.set(resp.prefs);
                         }
                         let merged = merge_notes(&items.get_untracked(), &resp.notifications);
-                        consider.run(merged.clone());
+                        consider.run((merged.clone(), resp.latest, started.clone()));
                         items.set(merged);
                         load_error.set(String::new());
                         if !stream_on.get() && page_same_origin(&b) {
                             stream_on.set(true);
-                            start_stream(resp.latest, items, consider, stream);
+                            start_stream(resp.latest, items, consider, stream, started);
                         }
                     }
                     Err(e) => load_error.set(format!("Could not load notifications: {e}")),
@@ -860,6 +1011,25 @@ pub fn NotificationBell(
         }
     }
 
+    let loaded_gate = Rc::new(RefCell::new(base.get_untracked()));
+    Effect::new({
+        let high = high.clone();
+        let primed = primed.clone();
+        let loaded_gate = loaded_gate.clone();
+        move |_| {
+            let gate = base.get();
+            if gate == *loaded_gate.borrow() {
+                return;
+            }
+            *loaded_gate.borrow_mut() = gate.clone();
+            let mark = load_mark(&gate);
+            high.set(mark.high);
+            primed.set(mark.primed);
+            seen.set(load_seen_for(&gate));
+            dismissed.set(load_dismissed_for(&gate));
+        }
+    });
+
     let prev_gate = Rc::new(Cell::new(String::new()));
     let gate_down = Rc::new(Cell::new(false));
     Effect::new(move |_| {
@@ -949,6 +1119,14 @@ pub fn NotificationBell(
         save.run(next);
     });
 
+    let dismiss = UnsyncCallback::new(move |id: String| {
+        if id.is_empty() || dismissed.get_untracked().iter().any(|d| d == &id) {
+            return;
+        }
+        dismissed.update(|list| list.push(id));
+        save_dismissed_for(&base.get_untracked(), &dismissed.get_untracked());
+    });
+
     let on_key =
         Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |ev: web_sys::KeyboardEvent| {
             let key = ev.key();
@@ -980,7 +1158,7 @@ pub fn NotificationBell(
             if settings.get_untracked() || event_in_field(&ev) || !event_in_centre(&ev) {
                 return;
             }
-            let list = items.get_untracked();
+            let list = visible_notes(&items.get_untracked(), &dismissed.get_untracked());
             if list.is_empty() {
                 return;
             }
@@ -1004,10 +1182,8 @@ pub fn NotificationBell(
     add_disposer(Box::new(move || {
         if let Some(cb) = drop_cb.borrow_mut().take() {
             if let Some(w) = web_sys::window() {
-                let _ = w.remove_event_listener_with_callback(
-                    "keydown",
-                    cb.as_ref().unchecked_ref(),
-                );
+                let _ =
+                    w.remove_event_listener_with_callback("keydown", cb.as_ref().unchecked_ref());
             }
             drop(cb);
         }
@@ -1015,10 +1191,12 @@ pub fn NotificationBell(
 
     let unread = move || {
         let seen = seen.get();
+        let dismissed = dismissed.get();
         items
             .get()
             .iter()
             .filter(|n| !seen.iter().any(|id| id == &n.id))
+            .filter(|n| !dismissed.iter().any(|id| id == &n.id))
             .count()
     };
 
@@ -1077,8 +1255,19 @@ pub fn NotificationBell(
                                             <button class="secondary" on:click=move |_| {
                                                 let ids: Vec<String> = items.get_untracked().iter().map(|n| n.id.clone()).collect();
                                                 seen.set(ids.clone());
-                                                save_seen(&ids);
+                                                save_seen_for(&base.get_untracked(), &ids);
                                             }>"Mark all read"</button>
+                                            <button class="secondary"
+                                                disabled=move || clear_read_ids(&items.get(), &seen.get(), &dismissed.get()).is_empty()
+                                                on:click=move |_| {
+                                                    let mut next = dismissed.get_untracked();
+                                                    for id in clear_read_ids(&items.get_untracked(), &seen.get_untracked(), &next) {
+                                                        next.push(id);
+                                                    }
+                                                    dismissed.set(next.clone());
+                                                    save_dismissed_for(&base.get_untracked(), &next);
+                                                }
+                                            >"Clear read"</button>
                                             <button class="secondary" on:click=move |_| open_settings.run(())>"Settings"</button>
                                         </div>
                                     </div>
@@ -1093,7 +1282,7 @@ pub fn NotificationBell(
                                     </Show>
                                     <div class="notify-list" aria-live="polite">
                                         {move || {
-                                            let list = items.get();
+                                            let list = visible_notes(&items.get(), &dismissed.get());
                                             let muted = prefs.get().muted.clone();
                                             let seen_now = seen.get();
                                             if list.is_empty() && load_error.get().is_empty() {
@@ -1114,6 +1303,7 @@ pub fn NotificationBell(
                                                         muted=is_muted
                                                         activate=activate
                                                         toggle_mute=toggle_mute
+                                                        dismiss=dismiss
                                                     />
                                                 }
                                             }).collect_view().into_any()
@@ -1192,8 +1382,9 @@ pub fn NotificationBell(
 fn start_stream(
     since: i64,
     items: RwSignal<Vec<Note>>,
-    consider: UnsyncCallback<Vec<Note>>,
+    consider: UnsyncCallback<(Vec<Note>, i64, String)>,
     stream: Rc<RefCell<Option<Rc<web_sys::EventSource>>>>,
+    gate: String,
 ) {
     let url = format!("/v1/notifications/stream?since={since}");
     let Ok(es) = web_sys::EventSource::new(&url) else {
@@ -1209,7 +1400,8 @@ fn start_stream(
                 return;
             };
             let merged = merge_stream_note(&items.get_untracked(), &note);
-            consider.run(merged.clone());
+            let latest = merged.iter().map(|n| n.seq).max().unwrap_or(0);
+            consider.run((merged.clone(), latest, gate.clone()));
             items.set(merged);
         });
     es.set_onmessage(Some(on_msg.as_ref().unchecked_ref()));
@@ -1408,5 +1600,160 @@ mod tests {
             assert!(!text.contains(&note.body), "banner leaked body: {text}");
         }
         assert_eq!((title, body), ("Strike", "A delegated run finished"));
+    }
+
+    fn banner_note(id: &str, seq: i64, kind: &str) -> Note {
+        Note {
+            id: id.into(),
+            seq,
+            kind: kind.into(),
+            session_id: String::new(),
+            subject_id: String::new(),
+            title: "secret title".into(),
+            body: "secret body".into(),
+            href: String::new(),
+            request_id: String::new(),
+            banner: true,
+            at: String::new(),
+        }
+    }
+
+    #[test]
+    fn watermark_is_per_gateway_and_ignores_the_legacy_global_key() {
+        let key_a = scoped_storage_key(HIGH_PREFIX, "https://gateway-a.example");
+        let key_b = scoped_storage_key(HIGH_PREFIX, "https://gateway-b.example/");
+        assert_ne!(key_a, HIGH_PREFIX);
+        assert_ne!(key_a, key_b);
+        assert_eq!(
+            scoped_storage_key(HIGH_PREFIX, "https://gateway-a.example/"),
+            key_a
+        );
+        assert_ne!(
+            scoped_storage_key(SEEN_PREFIX, "https://gateway-a.example"),
+            scoped_storage_key(SEEN_PREFIX, "https://gateway-b.example")
+        );
+        let legacy = [(HIGH_PREFIX, "500"), (key_a.as_str(), "500")];
+        let raw = legacy
+            .iter()
+            .find(|(key, _)| *key == key_b.as_str())
+            .map(|(_, value)| *value)
+            .unwrap_or("");
+        let mark = parse_mark(raw);
+        assert!(!mark.primed);
+        assert_eq!(mark.high, 0);
+        let primed = consider_mark(mark, &[banner_note("b1", 2, "approval.needed")], 2);
+        assert!(primed.banner_id.is_none());
+        assert_eq!(primed.mark.high, 2);
+        let next = consider_mark(
+            primed.mark,
+            &[
+                banner_note("b1", 2, "approval.needed"),
+                banner_note("b2", 3, "approval.needed"),
+            ],
+            3,
+        );
+        assert_eq!(next.banner_id.as_deref(), Some("b2"));
+        assert!(!next.reset);
+    }
+
+    #[test]
+    fn seq_reset_reprimes_without_a_banner() {
+        let poisoned = BannerMark {
+            high: 500,
+            primed: true,
+        };
+        let notes = vec![
+            banner_note("n2", 2, "approval.needed"),
+            banner_note("n4", 4, "session.finished"),
+        ];
+        let reset = consider_mark(poisoned, &notes, 4);
+        assert!(reset.reset);
+        assert!(reset.banner_id.is_none());
+        assert_eq!(reset.mark.high, 4);
+        let follow = consider_mark(
+            reset.mark,
+            &[
+                banner_note("n4", 4, "session.finished"),
+                banner_note("n5", 5, "approval.needed"),
+            ],
+            5,
+        );
+        assert!(!follow.reset);
+        assert_eq!(follow.banner_id.as_deref(), Some("n5"));
+        let held = consider_mark(poisoned, &notes, 4);
+        assert_ne!(held.mark.high, 500);
+    }
+
+    fn plain_note(id: &str, seq: i64) -> Note {
+        Note {
+            id: id.into(),
+            seq,
+            kind: "session.finished".into(),
+            session_id: String::new(),
+            subject_id: String::new(),
+            title: format!("note {id}"),
+            body: String::new(),
+            href: String::new(),
+            request_id: String::new(),
+            banner: false,
+            at: String::new(),
+        }
+    }
+
+    #[test]
+    fn visible_notes_hides_dismissed_and_keeps_order() {
+        let notes = vec![
+            plain_note("a", 3),
+            plain_note("b", 2),
+            plain_note("c", 1),
+        ];
+        let visible = visible_notes(&notes, &["b".to_string()]);
+        let ids: Vec<&str> = visible.iter().map(|n| n.id.as_str()).collect();
+        assert_eq!(ids, vec!["a", "c"]);
+        // Nothing dismissed shows everything; everything dismissed shows none.
+        assert_eq!(visible_notes(&notes, &[]).len(), 3);
+        let all: Vec<String> = notes.iter().map(|n| n.id.clone()).collect();
+        assert!(visible_notes(&notes, &all).is_empty());
+        // An unknown dismissed id hides nothing.
+        assert_eq!(visible_notes(&notes, &["zzz".to_string()]).len(), 3);
+    }
+
+    #[test]
+    fn clear_read_ids_only_takes_read_visible_rows() {
+        let notes = vec![
+            plain_note("read-1", 3),
+            plain_note("unread", 2),
+            plain_note("read-2", 1),
+        ];
+        let seen = vec!["read-1".to_string(), "read-2".to_string()];
+        // No dismissals yet: both read rows are clearable, unread is not.
+        assert_eq!(
+            clear_read_ids(&notes, &seen, &[]),
+            vec!["read-1".to_string(), "read-2".to_string()]
+        );
+        // An already-dismissed read row is not re-added.
+        assert_eq!(
+            clear_read_ids(&notes, &seen, &["read-1".to_string()]),
+            vec!["read-2".to_string()]
+        );
+        // Nothing read means Clear read has nothing to do (button disabled).
+        assert!(clear_read_ids(&notes, &[], &[]).is_empty());
+    }
+
+    #[test]
+    fn dismissed_key_is_gateway_scoped_and_distinct_from_seen() {
+        let key_a = scoped_storage_key(DISMISSED_PREFIX, "https://gateway-a.example");
+        let key_b = scoped_storage_key(DISMISSED_PREFIX, "https://gateway-b.example/");
+        assert_ne!(key_a, DISMISSED_PREFIX);
+        assert_ne!(key_a, key_b);
+        assert_eq!(
+            scoped_storage_key(DISMISSED_PREFIX, "https://gateway-a.example/"),
+            key_a
+        );
+        assert_ne!(
+            key_a,
+            scoped_storage_key(SEEN_PREFIX, "https://gateway-a.example")
+        );
+        assert!(key_a.starts_with("strike.notify.dismissed."));
     }
 }

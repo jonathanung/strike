@@ -1,76 +1,96 @@
-//! Inbound triggers (#1282): a top-bar switch and a palette command.
-//! The page lives in `crate::triggers` and is rendered by `main.rs` when
-//! the view is `triggers`. This file only registers the shell chrome.
+//! Inbound triggers (#1282, #1593). Palette-only view: no Menu slot.
+//! Delete still confirms. Test, bad signature, and replay are palette
+//! commands with a trigger choice.
 
 use std::rc::Rc;
 
-use leptos::prelude::*;
+use crate::shell::{Argument, Command, ConfirmSpec, Group, ShellHook};
 
-use crate::shell::{Argument, Command, ConfirmSpec, Group, ShellHook, TopRegion, TopSlot};
+fn open(action: &'static str) -> crate::shell::CommandRun {
+    Rc::new(move |args| {
+        crate::shell::host::set_view("triggers")?;
+        crate::park::dispatch_or_park(action, args)
+    })
+}
 
 pub fn install(reg: &mut ShellHook) {
-    reg.command(Command {
-        id: "trigger.delete",
-        group: Group::Gateway,
-        label: "Delete trigger…",
-        detail: "Remove an inbound trigger and its hook secret",
-        shortcut: "",
-        keywords: &["delete", "webhook", "trigger"],
-        argument: Some(Argument {
+    reg.command(
+        Command::new(
+            "trigger.delete",
+            Group::Gateway,
+            "Delete trigger…",
+            "Remove an inbound trigger and its hook secret",
+            Rc::new(|args| crate::shell::dispatch("trigger.delete", args)),
+        )
+        .keywords(&["delete", "webhook", "trigger"])
+        .order(70)
+        .argument(Argument {
             placeholder: "Trigger id",
             required: true,
-        }),
-        order: 70,
-        run: Rc::new(|args| crate::shell::dispatch("trigger.delete", args)),
-        visible: None,
-        enabled: None,
-        confirm: Some(ConfirmSpec {
+        })
+        .confirm(ConfirmSpec {
             title: "Delete this trigger?",
             body: "The hook path stops accepting events. A new trigger gets a new secret, so the sender has to be updated.",
             confirm_label: "Delete trigger",
         }),
-        choices: None,
-    });
-    reg.command(Command {
-        id: "triggers",
-        group: Group::Navigate,
-        label: "Triggers",
-        detail: "Webhooks, GitHub events, and channel messages",
-        shortcut: "",
-        keywords: &["webhook", "github", "hook"],
-        argument: None,
-        order: 35,
-        run: Rc::new(|_| crate::shell::host::set_view("triggers")),
-        visible: None,
-        enabled: None,
-        confirm: None,
-        choices: None,
-    });
-    reg.slot(TopSlot {
-        id: "triggers",
-        region: TopRegion::Trailing,
-        order: 86,
-        title: "Triggers",
-        overflow_label: "Triggers",
-        // Stay in the bar. The smoke test clicks this button by its label.
-        collapse_below_px: 0,
-        render: Rc::new(triggers_switch),
-    });
-}
-
-fn triggers_switch() -> AnyView {
-    view! {
-        <div class="segmented" role="tablist" aria-label="Triggers">
-            <button
-                data-view="triggers"
-                class=move || if crate::shell::host::view() == "triggers" { "seg on" } else { "seg" }
-                on:click=move |_| {
-                    let _ = crate::shell::host::set_view("triggers");
-                }
-            >
-                "Triggers"
-            </button>
-        </div>
-    }
-    .into_any()
+    );
+    reg.command(
+        Command::new(
+            "triggers",
+            Group::Navigate,
+            "Triggers",
+            "Webhooks, GitHub events, and channel messages",
+            Rc::new(|_| crate::shell::host::set_view("triggers")),
+        )
+        .keywords(&["webhook", "github", "hook"])
+        .order(35),
+    );
+    reg.command(
+        Command::new(
+            "trigger.test",
+            Group::Gateway,
+            "Send test event to trigger…",
+            "Deliver a synthetic event to one trigger",
+            open("trigger.test"),
+        )
+        .keywords(&["test", "webhook", "fire"])
+        .order(71)
+        .argument(Argument {
+            placeholder: "Trigger",
+            required: true,
+        })
+        .choices(crate::triggers::trigger_choices),
+    );
+    reg.command(
+        Command::new(
+            "trigger.reject",
+            Group::Gateway,
+            "Test trigger with a bad signature…",
+            "Send a delivery the hook should reject",
+            open("trigger.reject"),
+        )
+        .keywords(&["reject", "signature", "hmac"])
+        .order(72)
+        .argument(Argument {
+            placeholder: "Trigger",
+            required: true,
+        })
+        .choices(crate::triggers::trigger_choices),
+    );
+    reg.command(
+        Command::new(
+            "trigger.replay",
+            Group::Gateway,
+            "Replay trigger delivery…",
+            "Resend the latest accepted delivery",
+            open("trigger.replay"),
+        )
+        .keywords(&["replay", "delivery", "resend"])
+        .order(73)
+        .argument(Argument {
+            placeholder: "Trigger",
+            required: true,
+        })
+        .choices(crate::triggers::trigger_choices),
+    );
 }

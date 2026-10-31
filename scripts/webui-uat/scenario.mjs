@@ -118,15 +118,17 @@ async function providerFlow(page, check, waitUntil, grab) {
     "key stored",
   );
   check(Boolean(stored), "saving the openai key did not confirm");
-  const connected = await waitUntil(
+  // #1531: a stored key is not a connection. The badge must say the key is
+  // stored-but-untested; "Connected" here was the honesty bug.
+  const storedState = await waitUntil(
     `(() => {
       const state = document.querySelector('[data-provider="openai"] [data-provider-state]');
-      return Boolean(state && state.textContent.trim() === "Connected");
+      return Boolean(state && state.textContent.trim() === "Key stored — not tested");
     })()`,
     8000,
-    "openai connected after save",
+    "openai stored-not-tested after save",
   );
-  check(Boolean(connected), "openai did not show Connected after the key was stored");
+  check(Boolean(storedState), "openai did not show 'Key stored — not tested' after the key was stored");
   const leaked = await page.evaluate(`(() => {
     const body = document.body ? document.body.innerText : "";
     let store = "";
@@ -138,16 +140,27 @@ async function providerFlow(page, check, waitUntil, grab) {
   await page.evaluate(
     `document.querySelector('[data-provider="openai"] [data-test-provider]')?.click()`,
   );
+  // #1531: Test key runs a real probe against the vendor. The fake key can
+  // only be rejected (vendor reachable) or unverifiable (offline UAT box);
+  // it must never report a catalog listing or a verified/Connected state.
   const tested = await waitUntil(
     `(() => {
       const note = document.querySelector('[data-provider="openai"] [data-provider-note]');
       const text = note ? note.innerText : "";
-      return text.includes("Listed") && !text.includes(${JSON.stringify(FAKE_KEY)});
+      const honest = text.includes("Key rejected") || text.includes("Could not verify the key");
+      return honest && !text.includes("Listed") && !text.includes(${JSON.stringify(FAKE_KEY)});
     })()`,
-    15000,
-    "provider test",
+    20000,
+    "provider key probe",
   );
-  check(Boolean(tested), "Test did not report a result");
+  check(Boolean(tested), "Test key did not report an honest probe verdict for the fake key");
+  const stillNotConnected = await page.evaluate(
+    `(() => {
+      const state = document.querySelector('[data-provider="openai"] [data-provider-state]');
+      return Boolean(state) && state.textContent.trim() !== "Connected";
+    })()`,
+  );
+  check(Boolean(stillNotConnected), "openai showed Connected after the fake key failed probing");
   for (const [width, height] of [
     [390, 844],
     [768, 1024],
@@ -173,9 +186,38 @@ async function providerFlow(page, check, waitUntil, grab) {
     screenWidth: 1440,
     screenHeight: 900,
   });
-  await page.evaluate(
-    `document.querySelector('[data-provider="openai"] [data-remove-key]')?.click()`,
+  await page.evaluate(`document.querySelector('[data-nav="palette"]')?.click()`);
+  await waitUntil(`Boolean(document.querySelector('[data-nav="palette-dialog"] input'))`, 4000, "remove-key palette");
+  await page.evaluate(`(() => {
+    const input = document.querySelector('[data-nav="palette-dialog"] input');
+    const proto = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value");
+    proto.set.call(input, "Remove stored key");
+    input.dispatchEvent(new InputEvent("input", { bubbles: true, data: "Remove stored key" }));
+    return true;
+  })()`);
+  await waitUntil(
+    `[...document.querySelectorAll("[data-command-id='providers.remove-key']")].some((el) => (el.innerText || "").includes("Remove stored key…"))`,
+    4000,
+    "remove-key command",
   );
+  await page.evaluate(`(() => {
+    const row = [...document.querySelectorAll("[data-command-id='providers.remove-key']")].find((el) => (el.innerText || "").includes("Remove stored key…"));
+    if (row) row.click();
+    return true;
+  })()`);
+  await waitUntil(
+    `Boolean(document.querySelector('[data-choice-id="openai"]'))`,
+    4000,
+    "remove-key choices",
+  );
+  await page.evaluate(`document.querySelector('[data-choice-id="openai"]')?.click()`);
+  const armed = await waitUntil(
+    `Boolean(document.querySelector('[data-confirm="accept"]'))`,
+    4000,
+    "remove-key confirm",
+  );
+  check(Boolean(armed), "Remove stored key did not ask for confirmation");
+  await page.evaluate(`document.querySelector('[data-confirm="accept"]')?.click()`);
   const removed = await waitUntil(
     `(() => {
       const card = document.querySelector('[data-provider="openai"]');
@@ -191,26 +233,36 @@ async function providerFlow(page, check, waitUntil, grab) {
 
   await page.evaluate(`document.querySelector('[data-nav="primary"] [data-view="chat"]')?.click()`);
   const chip = await waitUntil(
-    `Boolean(document.querySelector("[data-model-chip]"))`,
+    `document.body && document.body.innerText.includes("Model ·")`,
     4000,
-    "model chip after leaving providers",
+    "model status after leaving providers",
   );
-  check(Boolean(chip), "model chip missing after returning to chat");
-  await page.evaluate(`document.querySelector("[data-model-chip]")?.click()`);
+  check(Boolean(chip), "model status missing after returning to chat");
+  await page.evaluate(`document.querySelector('[data-nav="palette"]')?.click()`);
   const menu = await waitUntil(
-    `Boolean(document.querySelector("[data-model-menu] [data-add-provider]"))`,
+    `Boolean(document.querySelector('[data-command-id="providers.add"]'))`,
     4000,
-    "model menu add provider",
+    "palette add provider",
   );
-  check(Boolean(menu), "model menu is missing Add provider");
+  check(Boolean(menu), "palette is missing Add provider");
   await grab("model-menu-add-provider-1440");
-  await page.evaluate(`document.querySelector("[data-model-menu] [data-add-provider]")?.click()`);
+  await page.evaluate(`document.querySelector(".palette-backdrop")?.click()`);
+  await page.evaluate(`document.querySelector('[data-nav="palette"]')?.click()`);
+  await page.evaluate(`(() => {
+    const input = document.querySelector('[data-nav="palette-dialog"] input');
+    if (!input) return false;
+    const proto = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value");
+    proto.set.call(input, "key");
+    input.dispatchEvent(new InputEvent("input", { bubbles: true, data: "key" }));
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    return true;
+  })()`);
   const back = await waitUntil(
     `Boolean(document.querySelector("[data-providers-root]"))`,
     4000,
-    "add provider from the model menu",
+    "providers from palette key",
   );
-  check(Boolean(back), "Add provider in the model menu did not open Providers");
+  check(Boolean(back), "palette query key did not open Providers");
   await page.evaluate(`document.querySelector('[data-nav="primary"] [data-view="chat"]')?.click()`);
 }
 const CHILD_OBJECTIVE = "Summarize the working directory";
@@ -290,6 +342,20 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
       shellDiag = ` (after polling ${shellWaitMs}ms; shell snapshot: ${snapshot}; page text: ${String(text).slice(0, 600)})`;
     }
     check(missing.length === 0, `shell labels missing: ${missing.join(", ")}${shellDiag}`);
+    // Steer and Queue left the composer bar. The primary button is Send
+    // until a turn is running; both words stay reachable on one command.
+    await page.evaluate(`document.querySelector('[data-nav="palette"]')?.click()`);
+    const steerQueue = await waitUntil(
+      `(() => {
+        const el = document.querySelector('[data-command-id="enter.toggle"]');
+        const text = el ? (el.innerText || "") : "";
+        return text.includes("Steer") && text.includes("Queue");
+      })()`,
+      4000,
+      "steer/queue palette command",
+    );
+    check(Boolean(steerQueue), "palette is missing Toggle Enter behaviour: Steer / Queue");
+    await page.evaluate(`document.querySelector(".palette-backdrop")?.click()`);
     const tok = await tokens();
     const tokenMiss = tokenMismatch(tok, fixture.tokens);
     check(tokenMiss.length === 0, `dark tokens ${tokenMiss.join("; ")}`);
@@ -317,7 +383,7 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
     }
     await page.evaluate(`document.querySelector('[data-action="open-settings"]')?.click()`);
     const settingsUp = await waitUntil(
-      `document.body && document.body.innerText.includes("Keyboard")`,
+      `document.body && document.body.innerText.includes("Appearance") && document.body.innerText.includes("Type size")`,
       8000,
       "settings page",
     );
@@ -327,10 +393,15 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
     await page.evaluate(`document.querySelector('[data-nav="primary"] button')?.click()`);
 
     await shoot("shell-empty", ["desk1024", "desk1440", "mobile"]);
-    const emptyAdd = await page.evaluate(
-      `Boolean(document.querySelector(".sx-empty [data-add-provider]"))`,
-    );
-    check(emptyAdd, "empty transcript is missing Add provider");
+    const emptyState = await page.evaluate(`(() => {
+      const root = document.querySelector(".sx-empty");
+      return {
+        cta: Boolean(root && root.querySelector("[data-add-provider]")),
+        cards: Boolean(root && root.querySelector(".sx-cards")),
+      };
+    })()`);
+    check(!emptyState.cards, "empty transcript still shows suggestion cards");
+    check(emptyState.cta, "empty transcript is missing Add provider");
     await headerAt(page, check, viewport, async (name) => {
       const png = await page.send("Page.captureScreenshot", { format: "png" });
       await writeFile(join(outDir, "screenshots", `${name}.png`), Buffer.from(png.data, "base64"));
@@ -426,11 +497,11 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
       }
     }
 
-    await click("button.chip", "Approval");
+    await click("[data-nav='palette']", "Commands");
     await waitUntil(
-      `Boolean(document.querySelector(".menu") && document.querySelector(".menu").innerText.includes("Yolo"))`,
+      `Boolean(document.querySelector('[data-command-id="mode-yolo"]'))`,
       4000,
-      "approval menu",
+      "approval commands",
     );
     await shoot("shell-approval", ["desk1024", "desk1440"]);
     await press("Escape");
@@ -581,7 +652,7 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
     );
     await page.evaluate(`document.querySelector('[data-command-id="daemon"]')?.click()`);
     await waitUntil(
-      `document.body && document.body.innerText.includes("This gateway")`,
+      `document.body && document.body.innerText.includes("Daemon")`,
       4000,
       "daemon view",
     );

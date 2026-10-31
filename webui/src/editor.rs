@@ -1,6 +1,9 @@
 //! Document viewer and editor. Pure helpers are tested on the host; the
 //! Leptos pane is the center-column surface the shell opens for a path.
 
+use std::rc::Rc;
+use std::sync::Arc;
+
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use serde::Deserialize;
@@ -89,16 +92,76 @@ pub fn lines_of(text: &str) -> Vec<&str> {
     lines
 }
 
+/// The first rendered window for a source file of `total` lines: the
+/// plain render cap, raised in whole chunks so it also covers
+/// `target_line` (1-based; 0 means no target) — a find hit or a
+/// go-to-line jump past the cap must land on a row that exists.
+pub fn initial_render_limit(total: usize, target_line: u32) -> usize {
+    let base = MAX_RENDER_LINES.min(total);
+    let target = target_line as usize;
+    if target <= base {
+        return base;
+    }
+    let chunks = target.div_ceil(MAX_RENDER_LINES);
+    chunks.saturating_mul(MAX_RENDER_LINES).min(total).max(base)
+}
+
+/// The window after one "show more": one more chunk, never past the
+/// end of the file and never smaller than the current window.
+pub fn render_limit_after_more(current: usize, total: usize) -> usize {
+    let grown = current.saturating_add(MAX_RENDER_LINES).min(total);
+    grown.max(current.min(total))
+}
+
+/// The visible prefix of a diff under a `max_chars` character cap,
+/// extended to the end of the line the cap falls in, so a cut never
+/// lands mid-line. Returns `full` unchanged when it fits the cap.
+pub fn diff_visible<'a>(full: &'a str, max_chars: usize) -> &'a str {
+    let mut seen = 0usize;
+    let mut cut = full.len();
+    for (idx, _) in full.char_indices() {
+        if seen == max_chars {
+            cut = idx;
+            break;
+        }
+        seen += 1;
+    }
+    if cut == full.len() {
+        return full;
+    }
+    if full[..cut].ends_with('\n') {
+        return &full[..cut];
+    }
+    match full[cut..].find('\n') {
+        Some(off) => &full[..cut + off],
+        None => full,
+    }
+}
+
+/// How much of `full` a `max_chars` cap hides: (characters, lines).
+pub fn diff_hidden(full: &str, max_chars: usize) -> (usize, usize) {
+    let visible = diff_visible(full, max_chars);
+    let hidden_chars = full.chars().count() - visible.chars().count();
+    let hidden_lines = lines_of(full).len() - lines_of(visible).len();
+    (hidden_chars, hidden_lines)
+}
+
 pub fn find_hits(text: &str, query: &str) -> Vec<Hit> {
     if query.is_empty() {
         return Vec::new();
     }
     let q_lower = query.to_lowercase();
     let q_bytes = q_lower.as_bytes();
+    let query_ascii = query.is_ascii();
     let mut hits = Vec::new();
     for (idx, line) in lines_of(text).into_iter().enumerate() {
-        let folded = line.to_lowercase();
-        if folded.len() != line.len() || q_lower.len() != query.len() {
+        // Greek and Cyrillic fold without changing the byte length, so a
+        // length check never left the ASCII fast path and missed them.
+        // The fast path is only for pure ASCII. Anything else is a
+        // whole-line hit: one match per line, start and end left at 0
+        // (`marked_pieces` already treats that as the whole line).
+        if !query_ascii || !line.is_ascii() {
+            let folded = line.to_lowercase();
             if folded.contains(&q_lower) {
                 hits.push(Hit {
                     line: (idx as u32) + 1,
@@ -974,44 +1037,115 @@ fn SourceView(
     query: String,
     hits: Vec<Hit>,
     current: usize,
+    target_line: u32,
 ) -> impl IntoView {
-    let lines = lines_of(&text);
-    let hidden = lines.len().saturating_sub(MAX_RENDER_LINES);
-    let shown = lines.into_iter().take(MAX_RENDER_LINES).enumerate();
+    // The whole file is already loaded; only the rendered window is
+    // capped (#1431). The window lives in a signal so "Show more" can
+    // raise it without a re-fetch, and it starts raised past any find
+    // hit / jump target so those rows exist in the DOM. A fresh
+    // SourceView is built per file/query/hit change, so the window
+    // resets on file switch.
+    // Arc, not Rc: Leptos reactive closures in this crate must be Send.
+    let lines: Arc<Vec<String>> =
+        Arc::new(lines_of(&text).iter().map(|s| s.to_string()).collect());
+    let total = lines.len();
+    let hits: Arc<Vec<Hit>> = Arc::new(hits);
     let current_hit = hits.get(current).cloned();
+    let target = if query.is_empty() {
+        target_line
+    } else {
+        current_hit
+            .as_ref()
+            .map(|h| h.line)
+            .unwrap_or(target_line)
+    };
+    let limit = RwSignal::new(initial_render_limit(total, target));
     view! {
         <div class="ev-codeview">
-            {shown.map(|(idx, line)| {
-                let n = (idx as u32) + 1;
-                let line_hits: Vec<&Hit> = hits.iter().filter(|h| h.line == n).collect();
-                let jumped = current_hit.as_ref().map(|h| h.line) == Some(n);
-                let row_class = if jumped { "ev-line ev-jump" } else { "ev-line" };
-                let body = if query.is_empty() {
-                    highlight_line(&lang, line)
-                        .into_iter()
-                        .map(|tok| {
-                            let class = tok.kind.to_string();
-                            view! { <span class=class>{tok.text}</span> }.into_any()
-                        })
-                        .collect_view()
-                        .into_any()
-                } else {
-                    marked_pieces(line, &line_hits, current_hit.as_ref().filter(|h| h.line == n))
-                        .into_iter()
-                        .map(|(class, piece)| view! { <span class=class>{piece}</span> }.into_any())
-                        .collect_view()
-                        .into_any()
-                };
-                view! {
-                    <div class=row_class id=format!("ev-line-{n}")>
-                        <span class="ev-gutter">{n.to_string()}</span>
-                        <span>{body}</span>
-                    </div>
+            {move || {
+                let rows_lines = lines.clone();
+                let rows_hits = hits.clone();
+                let rows_hit = current_hit.clone();
+                let lang = lang.clone();
+                let query = query.clone();
+                rows_lines
+                    .iter()
+                    .take(limit.get())
+                    .enumerate()
+                    .map(|(idx, line)| {
+                        let n = (idx as u32) + 1;
+                        let line_hits: Vec<&Hit> =
+                            rows_hits.iter().filter(|h| h.line == n).collect();
+                        let jumped = rows_hit.as_ref().map(|h| h.line) == Some(n);
+                        let row_class = if jumped { "ev-line ev-jump" } else { "ev-line" };
+                        let body = if query.is_empty() {
+                            highlight_line(&lang, line)
+                                .into_iter()
+                                .map(|tok| {
+                                    let class = tok.kind.to_string();
+                                    view! { <span class=class>{tok.text}</span> }.into_any()
+                                })
+                                .collect_view()
+                                .into_any()
+                        } else {
+                            marked_pieces(
+                                line,
+                                &line_hits,
+                                rows_hit.as_ref().filter(|h| h.line == n),
+                            )
+                                .into_iter()
+                                .map(|(class, piece)| {
+                                    view! { <span class=class>{piece}</span> }.into_any()
+                                })
+                                .collect_view()
+                                .into_any()
+                        };
+                        view! {
+                            <div class=row_class id=format!("ev-line-{n}")>
+                                <span class="ev-gutter">{n.to_string()}</span>
+                                <span>{body}</span>
+                            </div>
+                        }
+                    })
+                    .collect_view()
+            }}
+            {move || {
+                let hidden = total.saturating_sub(limit.get());
+                if hidden == 0 {
+                    if total > MAX_RENDER_LINES {
+                        return view! {
+                            <p class="hint">{format!("Showing all {total} lines.")}</p>
+                        }
+                        .into_any();
+                    }
+                    return ().into_any();
                 }
-            }).collect_view()}
-            <Show when=move || hidden != 0>
-                <p class="hint">{format!("{hidden} more lines are not shown. Search still counts the whole file.")}</p>
-            </Show>
+                let step = hidden.min(MAX_RENDER_LINES);
+                view! {
+                    <p class="hint">
+                        {format!("{hidden} more lines are not shown. Search still counts the whole file.")}
+                    </p>
+                    <button
+                        type="button"
+                        class="secondary"
+                        data-ev-show-more=true
+                        on:click=move |_| {
+                            limit.update(|v| *v = render_limit_after_more(*v, total));
+                        }
+                    >
+                        {format!("Show {step} more lines ({hidden} remaining)")}
+                    </button>
+                    <button
+                        type="button"
+                        class="secondary"
+                        data-ev-show-all=true
+                        on:click=move |_| limit.set(total)
+                    >
+                        "Show all lines"
+                    </button>
+                }
+                .into_any()
+            }}
         </div>
     }
 }
@@ -1063,26 +1197,155 @@ fn DiffView(text: String) -> impl IntoView {
         }
         .into_any();
     }
-    let lines: Vec<String> = text.split('\n').map(|s| s.to_string()).collect();
+    // Keep the full diff and render a capped window by default (#1434):
+    // expanding renders more of the text already held here, never a
+    // re-fetch. The cap counts characters; cuts land on line ends.
+    let full: Arc<String> = Arc::new(text);
+    let full_footer = full.clone();
+    let shown = RwSignal::new(MAX_DIFF_CHARS);
     view! {
         <div class="ev-diff">
-            <pre>
-                {lines.into_iter().map(|line| {
-                    let class = if line.starts_with('+') && !line.starts_with("+++") {
-                        "ev-add"
-                    } else if line.starts_with('-') && !line.starts_with("---") {
-                        "ev-del"
-                    } else if line.starts_with("@@") {
-                        "ev-hunk"
-                    } else {
-                        "ev-ctx"
-                    };
-                    view! { <div class=class>{line}</div> }
-                }).collect_view()}
-            </pre>
+            {move || {
+                let visible = diff_visible(&full, shown.get());
+                let lines: Vec<String> = visible.split('\n').map(|s| s.to_string()).collect();
+                view! {
+                    <pre>
+                        {lines.into_iter().map(|line| {
+                            let class = if line.starts_with('+') && !line.starts_with("+++") {
+                                "ev-add"
+                            } else if line.starts_with('-') && !line.starts_with("---") {
+                                "ev-del"
+                            } else if line.starts_with("@@") {
+                                "ev-hunk"
+                            } else {
+                                "ev-ctx"
+                            };
+                            view! { <div class=class>{line}</div> }
+                        }).collect_view()}
+                    </pre>
+                }
+            }}
+            {move || {
+                let (hidden_chars, hidden_lines) = diff_hidden(&full_footer, shown.get());
+                let expanded = shown.get() > MAX_DIFF_CHARS;
+                if hidden_chars == 0 && !expanded {
+                    return ().into_any();
+                }
+                view! {
+                    <Show when=move || hidden_chars != 0>
+                        <p class="hint">
+                            {format!("{hidden_lines} more diff lines are not shown ({hidden_chars} characters hidden).")}
+                        </p>
+                        <button
+                            type="button"
+                            class="secondary"
+                            data-agent-diff-expand=true
+                            on:click=move |_| {
+                                shown.update(|v| *v = v.saturating_add(MAX_DIFF_CHARS));
+                            }
+                        >
+                            "Show 20,000 more characters"
+                        </button>
+                        <button
+                            type="button"
+                            class="secondary"
+                            data-agent-diff-expand-all=true
+                            on:click=move |_| shown.set(usize::MAX)
+                        >
+                            "Show full diff"
+                        </button>
+                    </Show>
+                    <Show when=move || expanded>
+                        <button
+                            type="button"
+                            class="secondary"
+                            data-agent-diff-collapse=true
+                            on:click=move |_| shown.set(MAX_DIFF_CHARS)
+                        >
+                            "Show less"
+                        </button>
+                    </Show>
+                }
+                .into_any()
+            }}
         </div>
     }
     .into_any()
+}
+
+/// Whether an Agent-diff completion may still commit: it was started
+/// for the file still open (`started_path` vs `open_path`) at a
+/// generation that is still the latest (`started_gen` vs
+/// `current_gen`). The generation half also rejects a completion for
+/// the *same* path when a newer fetch started in between.
+fn diff_current(started_gen: u32, current_gen: u32, open_path: &str, started_path: &str) -> bool {
+    started_gen == current_gen && open_path == started_path
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SaveLanding {
+    Commit,
+    Ignore,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SaveOutcome {
+    Ok,
+    Conflict,
+    Error,
+}
+
+struct SaveEffects {
+    clear_saving: bool,
+    write_body: bool,
+    conflict: bool,
+    report_error: bool,
+    status_saved: bool,
+}
+
+/// Commit only while this is still the file and generation the save started
+/// for. Reopening the same path bumps the generation, so a late completion
+/// does not overwrite the reload.
+fn save_landing(saved_path: &str, saved_gen: u32, path_now: &str, gen_now: u32) -> SaveLanding {
+    if !saved_path.is_empty() && saved_path == path_now && saved_gen == gen_now {
+        SaveLanding::Commit
+    } else {
+        SaveLanding::Ignore
+    }
+}
+
+fn save_effects(landing: SaveLanding, outcome: SaveOutcome) -> SaveEffects {
+    let clear_saving = true;
+    match (landing, outcome) {
+        (SaveLanding::Ignore, _) => SaveEffects {
+            clear_saving,
+            write_body: false,
+            conflict: false,
+            report_error: false,
+            status_saved: false,
+        },
+        (SaveLanding::Commit, SaveOutcome::Ok) => SaveEffects {
+            clear_saving,
+            write_body: true,
+            conflict: false,
+            report_error: false,
+            status_saved: true,
+        },
+        (SaveLanding::Commit, SaveOutcome::Conflict) => SaveEffects {
+            clear_saving,
+            write_body: false,
+            conflict: true,
+            report_error: false,
+            status_saved: false,
+        },
+        (SaveLanding::Commit, SaveOutcome::Error) => SaveEffects {
+            clear_saving,
+            write_body: false,
+            conflict: false,
+            report_error: true,
+            status_saved: false,
+        },
+    }
 }
 
 #[component]
@@ -1117,6 +1380,7 @@ pub fn DocumentPane(
     let diff_note = RwSignal::new(String::new());
     let reload_tick = RwSignal::new(0u32);
     let load_gen = RwSignal::new(0u32);
+    let diff_gen = RwSignal::new(0u32);
 
     Effect::new(move |_| {
         let text = if editing.get() { draft.get() } else { content.get() };
@@ -1144,6 +1408,11 @@ pub fn DocumentPane(
         editing.set(false);
         conflict.set(false);
         query.set(String::new());
+        // The diff belongs to the file it was fetched for (#1626): a
+        // previous file's diff must never render under the new one,
+        // not even while the new fetch is in flight or after it fails.
+        agent_diff.set(String::new());
+        diff_note.set(String::new());
         if p.is_empty() {
             return;
         }
@@ -1193,24 +1462,40 @@ pub fn DocumentPane(
         if p.is_empty() {
             return;
         }
+        // Generation-guard the completion like the load effect above
+        // (#1626): clear up front so nothing stale renders while this
+        // fetch is in flight, and drop the completion if a newer diff
+        // fetch started or the open file moved on.
+        let gen = diff_gen.get_untracked().wrapping_add(1);
+        diff_gen.set(gen);
+        agent_diff.set(String::new());
+        diff_note.set(String::new());
         let (b, t) = (base.get(), token.get());
         spawn_local(async move {
             match get_json::<DiffList>(&b, &t, "/v1/changed-files").await {
                 Ok(list) => {
-                    let mut diff = list
+                    if !diff_current(gen, diff_gen.get_untracked(), &loaded_path.get_untracked(), &p) {
+                        return;
+                    }
+                    // Keep the full diff (#1434): DiffView renders the
+                    // capped window and expands in place from this text.
+                    let diff = list
                         .files
                         .into_iter()
                         .find(|f| f.path == p)
                         .map(|f| f.diff)
                         .unwrap_or_default();
-                    if diff.chars().count() > MAX_DIFF_CHARS {
-                        diff = diff.chars().take(MAX_DIFF_CHARS).collect();
-                        diff.push_str("\n… diff truncated");
-                    }
                     agent_diff.set(diff);
                     diff_note.set(String::new());
                 }
-                Err(e) => diff_note.set(http_message(&e)),
+                Err(e) => {
+                    if !diff_current(gen, diff_gen.get_untracked(), &loaded_path.get_untracked(), &p) {
+                        return;
+                    }
+                    // The pane stays empty beside the note — agent_diff
+                    // was cleared when this fetch started.
+                    diff_note.set(http_message(&e));
+                }
             }
         });
     });
@@ -1233,6 +1518,7 @@ pub fn DocumentPane(
         let body = draft.get_untracked();
         let expect = sha.get_untracked();
         let stamp = mtime.get_untracked();
+        let saved_gen = load_gen.get_untracked();
         let (b, t) = (base.get_untracked(), token.get_untracked());
         saving.set(true);
         status.set(String::new());
@@ -1243,34 +1529,65 @@ pub fn DocumentPane(
                 "sha256": expect,
                 "mtimeUnixNano": stamp,
             });
-            match put_json_value(&b, &t, "/v1/file", payload).await {
+            let outcome = match put_json_value(&b, &t, "/v1/file", payload).await {
                 Ok(v) => {
-                    sha.set(v.get("sha256").and_then(|x| x.as_str()).unwrap_or("").into());
-                    mtime.set(
-                        v.get("mtimeUnixNano")
-                            .and_then(|x| x.as_str())
-                            .unwrap_or("")
-                            .into(),
+                    let effects = save_effects(
+                        save_landing(
+                            &p,
+                            saved_gen,
+                            &loaded_path.get_untracked(),
+                            load_gen.get_untracked(),
+                        ),
+                        SaveOutcome::Ok,
                     );
-                    content.set(body.clone());
-                    draft.set(body);
-                    editing.set(false);
-                    conflict.set(false);
-                    status.set("Saved.".into());
+                    if effects.write_body {
+                        sha.set(v.get("sha256").and_then(|x| x.as_str()).unwrap_or("").into());
+                        mtime.set(
+                            v.get("mtimeUnixNano")
+                                .and_then(|x| x.as_str())
+                                .unwrap_or("")
+                                .into(),
+                        );
+                        content.set(body.clone());
+                        draft.set(body);
+                        editing.set(false);
+                        conflict.set(false);
+                    }
+                    if effects.status_saved {
+                        status.set("Saved.".into());
+                    }
+                    effects
                 }
                 Err(e) => {
-                    if conflict_token(&e).is_some() {
+                    let kind = if conflict_token(&e).is_some() {
+                        SaveOutcome::Conflict
+                    } else {
+                        SaveOutcome::Error
+                    };
+                    let effects = save_effects(
+                        save_landing(
+                            &p,
+                            saved_gen,
+                            &loaded_path.get_untracked(),
+                            load_gen.get_untracked(),
+                        ),
+                        kind,
+                    );
+                    if effects.conflict {
                         conflict.set(true);
                         status.set(
                             "This file changed on disk. Reload to see that version. Your edits stay in the box."
                                 .into(),
                         );
-                    } else {
+                    } else if effects.report_error {
                         status.set(http_message(&e));
                     }
+                    effects
                 }
+            };
+            if outcome.clear_saving {
+                saving.set(false);
             }
-            saving.set(false);
         });
     };
 
@@ -1300,6 +1617,57 @@ pub fn DocumentPane(
             do_save();
         }
     };
+
+    crate::shell::bind(
+        "file.preview",
+        Rc::new(move |_| {
+            if language_of(&loaded_path.get_untracked()) != "markdown" {
+                return Err("This file is not Markdown.".into());
+            }
+            preview.update(|v| *v = !*v);
+            Ok(())
+        }),
+    );
+    crate::shell::bind(
+        "file.agent-diff",
+        Rc::new(move |_| {
+            show_diff.update(|v| *v = !*v);
+            Ok(())
+        }),
+    );
+    crate::shell::bind(
+        "file.copy-path",
+        Rc::new(move |_| {
+            let path = loaded_path.get_untracked();
+            if path.is_empty() {
+                return Err("Open a file first.".into());
+            }
+            if let Some(win) = web_sys::window() {
+                let _ = win.navigator().clipboard().write_text(&path);
+            }
+            notice.set("Copied the path.".into());
+            Ok(())
+        }),
+    );
+    crate::shell::bind(
+        "file.copy-contents",
+        Rc::new(move |_| {
+            let text = content.get_untracked();
+            if text.is_empty() {
+                return Err("Open a file first.".into());
+            }
+            if let Some(win) = web_sys::window() {
+                let _ = win.navigator().clipboard().write_text(&text);
+            }
+            notice.set("Copied the file.".into());
+            Ok(())
+        }),
+    );
+    on_cleanup(|| {
+        for id in ["file.preview", "file.agent-diff", "file.copy-path", "file.copy-contents"] {
+            crate::shell::unbind(id);
+        }
+    });
 
     view! {
         <div
@@ -1382,6 +1750,7 @@ pub fn DocumentPane(
                             query=query.get()
                             hits=hits.get()
                             current=hit_idx.get()
+                            target_line=jump_line.get()
                         />
                     }}
                 </Show>
@@ -1402,16 +1771,6 @@ pub fn DocumentPane(
                 </Show>
             </div>
             <div class="ev-tools">
-                <Show when=move || language_of(&loaded_path.get()) == "markdown">
-                    <button type="button" class="chip" on:click=move |_| preview.update(|v| *v = !*v)>
-                        {move || if preview.get() { "Source" } else { "Preview" }}
-                    </button>
-                </Show>
-                <button
-                    type="button"
-                    class=move || if show_diff.get() { "chip on" } else { "chip" }
-                    on:click=move |_| show_diff.update(|v| *v = !*v)
-                >"Agent diff"</button>
                 <button
                     type="button"
                     class="secondary"
@@ -1433,15 +1792,6 @@ pub fn DocumentPane(
                     }>"Cancel"</button>
                     <button type="button" class="primary" data-ev-save=true disabled=move || saving.get() on:click=move |_| do_save()>"Save"</button>
                 </Show>
-                <span class="ev-status">{move || {
-                    if editing.get() {
-                        "Editing. Read-only until you opened Edit. Ctrl+S saves. Escape cancels.".into()
-                    } else if !write_block.get().is_empty() {
-                        write_block.get()
-                    } else {
-                        "Read-only. Ctrl+F finds. Enter jumps to the next match.".into()
-                    }
-                }}</span>
             </div>
         </div>
     }
@@ -1495,6 +1845,38 @@ mod tests {
         assert!(hits[1].start > 0);
         assert!(find_hits("abc", "").is_empty());
         assert!(find_hits("abc", "z").is_empty());
+        // Byte positions on the ASCII path stay per-occurrence.
+        assert_eq!(hits[0].start, 0);
+        assert_eq!(hits[0].end, 5);
+    }
+
+    #[test]
+    fn search_folds_greek_cyrillic_and_length_changing_latin() {
+        for (line, query) in [
+            ("Σ\n", "σ"),
+            ("σ\n", "Σ"),
+            ("Α\n", "α"),
+            ("α\n", "Α"),
+            ("А\n", "а"),
+            ("а\n", "А"),
+        ] {
+            let hits = find_hits(line, query);
+            assert_eq!(hits.len(), 1, "line {line:?} query {query:?}");
+            assert_eq!(hits[0].line, 1);
+            assert_eq!(hits[0].start, 0);
+            assert_eq!(hits[0].end, 0);
+        }
+        // Capital sharp S (U+1E9E) folds to ß and changes the byte length.
+        for (line, query) in [("ẞ\n", "ß"), ("ß\n", "ẞ")] {
+            let hits = find_hits(line, query);
+            assert_eq!(hits.len(), 1, "line {line:?} query {query:?}");
+            assert_eq!(hits[0].end, 0);
+        }
+        // İ folds to i + combining dot. The query and the line both fold.
+        let hits = find_hits("İstanbul\n", "İ");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].end, 0);
+        assert!(find_hits("plain ascii\n", "Σ").is_empty());
     }
 
     #[test]
@@ -1642,6 +2024,18 @@ mod tests {
     }
 
     #[test]
+    fn diff_current_scopes_to_file_and_generation() {
+        // The normal case: same file, no newer fetch — commit.
+        assert!(diff_current(3, 3, "a.rs", "a.rs"));
+        // File switched while the fetch was in flight (#1626).
+        assert!(!diff_current(3, 3, "b.rs", "a.rs"));
+        // Same file, but a newer fetch started — stale completion.
+        assert!(!diff_current(3, 4, "a.rs", "a.rs"));
+        // A newer fetch for the new file supersedes on both axes.
+        assert!(!diff_current(3, 4, "b.rs", "a.rs"));
+    }
+
+    #[test]
     fn http_conflict_message() {
         let err = r#"HTTP 409 {"error":"conflict: file changed","code":"conflict","sha256":"abc","mtimeUnixNano":"5"}"#;
         assert_eq!(http_message(err), "conflict: file changed");
@@ -1649,5 +2043,95 @@ mod tests {
         assert_eq!(sha, "abc");
         assert_eq!(mt, "5");
         assert!(conflict_token("HTTP 400 {\"error\":\"nope\"}").is_none());
+    }
+
+    #[test]
+    fn late_save_does_not_paint_the_next_file() {
+        assert_eq!(save_landing("a.rs", 1, "a.rs", 1), SaveLanding::Commit);
+        assert_eq!(save_landing("a.rs", 1, "b.rs", 2), SaveLanding::Ignore);
+        assert_eq!(save_landing("a.rs", 1, "a.rs", 2), SaveLanding::Ignore);
+        let ignored = save_effects(SaveLanding::Ignore, SaveOutcome::Ok);
+        assert!(ignored.clear_saving);
+        assert!(!ignored.write_body);
+        assert!(!ignored.status_saved);
+        assert!(!ignored.conflict);
+        let late_conflict = save_effects(SaveLanding::Ignore, SaveOutcome::Conflict);
+        assert!(!late_conflict.conflict);
+        assert!(!late_conflict.report_error);
+        assert!(late_conflict.clear_saving);
+        let committed = save_effects(SaveLanding::Commit, SaveOutcome::Ok);
+        assert!(committed.write_body && committed.status_saved && !committed.conflict);
+        let conflict = save_effects(SaveLanding::Commit, SaveOutcome::Conflict);
+        assert!(conflict.conflict && !conflict.write_body);
+    }
+
+    #[test]
+    fn render_limit_starts_at_cap_and_covers_targets() {
+        assert_eq!(initial_render_limit(0, 0), 0);
+        assert_eq!(initial_render_limit(100, 0), 100);
+        assert_eq!(initial_render_limit(5000, 0), MAX_RENDER_LINES);
+        // A target exactly at the cap needs no raise.
+        assert_eq!(initial_render_limit(5000, 2000), MAX_RENDER_LINES);
+        // One past the cap raises a whole chunk.
+        assert_eq!(initial_render_limit(5000, 2001), 4000);
+        // A deep target raises to the chunk covering it, capped at total.
+        assert_eq!(initial_render_limit(5000, 4999), 5000);
+        assert_eq!(initial_render_limit(3000, 2500), 3000);
+        // A target past the end of file still caps at total.
+        assert_eq!(initial_render_limit(3000, 9999), 3000);
+    }
+
+    #[test]
+    fn render_limit_after_more_grows_by_chunks() {
+        assert_eq!(render_limit_after_more(2000, 5000), 4000);
+        assert_eq!(render_limit_after_more(4000, 5000), 5000);
+        assert_eq!(render_limit_after_more(5000, 5000), 5000);
+        assert_eq!(render_limit_after_more(0, 100), 100);
+        assert_eq!(render_limit_after_more(2000, 2000), 2000);
+    }
+
+    #[test]
+    fn diff_window_under_cap_is_the_full_text() {
+        let diff = "+one\n-two\n@@ hunk @@\n";
+        assert_eq!(diff_visible(diff, MAX_DIFF_CHARS), diff);
+        assert_eq!(diff_hidden(diff, MAX_DIFF_CHARS), (0, 0));
+        assert_eq!(diff_visible(diff, usize::MAX), diff);
+        assert_eq!(diff_hidden(diff, usize::MAX), (0, 0));
+    }
+
+    #[test]
+    fn diff_window_counts_hidden_exactly() {
+        // 300 lines of 99 chars + '\n' = 100 chars per line, 30,000 total.
+        let line = format!("{}\n", "x".repeat(99));
+        let diff = line.repeat(300);
+        let visible = diff_visible(&diff, MAX_DIFF_CHARS);
+        assert_eq!(visible.chars().count(), MAX_DIFF_CHARS);
+        assert_eq!(diff_hidden(&diff, MAX_DIFF_CHARS), (10_000, 100));
+    }
+
+    #[test]
+    fn diff_window_extends_a_mid_line_cap_to_the_line_end() {
+        // 300 lines of 150 chars + '\n' = 151 chars per line, 45,300 total.
+        let line = format!("{}\n", "y".repeat(150));
+        let diff = line.repeat(300);
+        let visible = diff_visible(&diff, MAX_DIFF_CHARS);
+        // The 20,000-char cap falls inside line 133; the visible text
+        // runs to that line's end: 133 * 151 - 1 (newline excluded).
+        assert_eq!(visible.chars().count(), 133 * 151 - 1);
+        assert!(!visible.ends_with('\n'));
+        assert_eq!(
+            diff_hidden(&diff, MAX_DIFF_CHARS),
+            (45_300 - (133 * 151 - 1), 300 - 133)
+        );
+    }
+
+    #[test]
+    fn diff_window_counts_unicode_characters_not_bytes() {
+        // 'é' is two bytes: a byte-based cap would cut this in half.
+        let line = format!("{}\n", "é".repeat(99));
+        let diff = line.repeat(300);
+        let visible = diff_visible(&diff, MAX_DIFF_CHARS);
+        assert_eq!(visible.chars().count(), MAX_DIFF_CHARS);
+        assert_eq!(diff_hidden(&diff, MAX_DIFF_CHARS), (10_000, 100));
     }
 }

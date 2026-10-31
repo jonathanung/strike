@@ -7,16 +7,44 @@ use std::rc::Rc;
 
 use leptos::prelude::*;
 
-use crate::shell::{Group, Command, ShellHook, Shortcut, TopRegion, TopSlot};
+use crate::shell::{Command, ConfirmSpec, Group, ShellHook, Shortcut, TopRegion, TopSlot};
+
+fn font_command(reg: &mut ShellHook, id: &'static str, label: &'static str, value: &'static str, order: i32) {
+    reg.command(
+        Command::new(
+            id,
+            Group::Theme,
+            label,
+            "Type size for this browser",
+            Rc::new(move |_| crate::shell::dispatch("settings.font", value)),
+        )
+        .keywords(&["font", "text size", "type", "zoom"])
+        .order(order),
+    );
+}
+
+fn density_command(reg: &mut ShellHook, id: &'static str, label: &'static str, value: &'static str, order: i32) {
+    reg.command(
+        Command::new(
+            id,
+            Group::Theme,
+            label,
+            "Density for this browser",
+            Rc::new(move |_| crate::shell::dispatch("settings.density", value)),
+        )
+        .keywords(&["density", "compact", "spacing", "layout"])
+        .order(order),
+    );
+}
 
 pub fn install(reg: &mut ShellHook) {
     reg.command(Command {
         id: "settings",
         group: Group::Settings,
         label: "Settings",
-        detail: "Theme, type size, shortcuts, and the files this daemon reads",
+        detail: "Appearance: theme, scheme, type size, and density",
         shortcut: "Ctrl+,",
-        keywords: &["theme", "font", "density", "preferences"],
+        keywords: &["theme", "font", "density", "preferences", "appearance"],
         argument: None,
         order: 10,
         run: Rc::new(|_| crate::shell::host::set_view("settings")),
@@ -25,6 +53,92 @@ pub fn install(reg: &mut ShellHook) {
         confirm: None,
         choices: None,
     });
+    font_command(reg, "font-sm", "Type size: Small", "sm", 30);
+    font_command(reg, "font-md", "Type size: Default", "md", 31);
+    font_command(reg, "font-lg", "Type size: Large", "lg", 32);
+    density_command(reg, "density-comfortable", "Density: Comfortable", "comfortable", 33);
+    density_command(reg, "density-compact", "Density: Compact", "compact", 34);
+    reg.command(
+        Command::new(
+            "settings.files",
+            Group::Settings,
+            "Open Settings: Data locations",
+            "Paths this daemon reads",
+            Rc::new(|_| {
+                crate::shell::host::set_view("settings")?;
+                crate::park::dispatch_or_park("settings.files", "")
+            }),
+        )
+        .keywords(&["files", "paths", "data locations", "config files", "local files"])
+        .order(20),
+    );
+    reg.command(
+        Command::new(
+            "settings.export-browser",
+            Group::Settings,
+            "Export browser settings…",
+            "Download strike-browser.json without the token",
+            Rc::new(|_| crate::shell::dispatch("settings.export-browser", "")),
+        )
+        .keywords(&["export", "download", "backup", "browser data"])
+        .order(21),
+    );
+    reg.command(
+        Command::new(
+            "settings.export-daemon",
+            Group::Settings,
+            "Export daemon settings…",
+            "Download the daemon settings dials",
+            Rc::new(|_| crate::shell::dispatch("settings.export-daemon", "")),
+        )
+        .keywords(&["export", "download", "backup", "daemon settings", "config"])
+        .order(22),
+    );
+    reg.command(
+        Command::new(
+            "settings.clear",
+            Group::Settings,
+            "Clear browser data…",
+            "Remove strike.* keys in this browser",
+            Rc::new(|_| crate::shell::dispatch("settings.clear", "")),
+        )
+        .keywords(&["clear", "reset browser", "delete local data", "sign out"])
+        .order(23)
+        .confirm(ConfirmSpec {
+            title: "Clear browser data?",
+            body: "Removes every strike.* key in this browser, including the gateway token. Daemon files stay. The HttpOnly cookie from /?token= stays until the browser drops it.",
+            confirm_label: "Clear browser data",
+        }),
+    );
+    reg.command(
+        Command::new(
+            "settings.daemon-theme",
+            Group::Theme,
+            "Use daemon theme in this browser",
+            "Copy the daemon theme id into this browser",
+            Rc::new(|_| {
+                crate::shell::host::set_view("settings")?;
+                crate::park::dispatch_or_park("settings.use-daemon-theme", "")
+            }),
+        )
+        .keywords(&["daemon theme", "sync theme", "config theme", "adopt"])
+        .order(24)
+        .visible(crate::settings::daemon_theme_mismatch),
+    );
+    reg.command(
+        Command::new(
+            "permissions.rules",
+            Group::Settings,
+            "Edit permission rules…",
+            "Allow and deny rules, and the audit list",
+            Rc::new(|_| {
+                crate::shell::host::set_view("chat")?;
+                crate::park::dispatch_or_park("permissions.rules", "")
+            }),
+        )
+        .keywords(&["rules", "permissions", "allow", "deny", "audit", "approval"])
+        .order(25),
+    );
     reg.slot(TopSlot {
         id: "settings",
         region: TopRegion::Trailing,

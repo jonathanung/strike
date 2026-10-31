@@ -12,9 +12,12 @@ mod apps;
 mod approvals;
 mod approvals_ui;
 mod chat_mode;
+mod clipboard;
 mod confirm;
 mod composer_triggers;
+mod diag;
 mod editor;
+mod load_epoch;
 mod localfiles;
 mod gateway;
 mod gateway_qr;
@@ -25,7 +28,9 @@ mod providers;
 mod schedule;
 mod model;
 mod notify;
+mod outcome;
 mod onboarding;
+mod park;
 mod steer_queue;
 mod model_menu;
 mod model_menu_view;
@@ -37,6 +42,7 @@ mod task_runner;
 mod transcript_find;
 mod usage_audit;
 mod session_delete;
+mod session_restore;
 mod shell;
 mod side_chat;
 mod status;
@@ -62,24 +68,27 @@ use composer_triggers::{
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use model::{
-    activity_panel, child_card_from_parts, child_card_from_text, child_keys_match, display_state,
-    fmt_ago, fmt_elapsed, is_running, merge_sessions, mode_label, prefer_summary,
-    protocol_dump, rfc3339_to_ms, session_label, status_kind, strip_echo_tip, task_headline,
-    ActivityRow, Bootstrap, ChangedFilesResponse, ChatLine, ChildCard, ChildrenResponse,
-    ComposerCommand, FileSearchResponse, FilesResponse, Health, ModelInfo, ModelList, Remote, RootSummary,
-    SessionItem, SessionsResponse, SkillInfo, StatusBoard, TeamSnapshot, Workspace, WorkspacesResponse,
+    activity_panel, display_state, fmt_elapsed, is_running, merge_sessions, mode_label,
+    session_label, task_headline, ActivityRow, Bootstrap, ChangedFilesResponse, ChatLine,
+    ChildrenResponse, ComposerCommand, FileSearchResponse, FilesResponse, Health, ModelInfo,
+    ModelList, RootSummary, SessionItem, SessionsResponse, SkillInfo, StatusBoard, TeamSnapshot,
+    Workspace, WorkspacesResponse,
 };
 use session_panel::{dispatch_session_key, SessionPanel};
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 
+use load_guard::{commit_load, key_matches, Commit, ErrPolicy, LoadEpoch};
+
 use crate::api::{
     get_json, get_text, idempotency_key, now_ms, patch_json, post_json, post_json_value, post_op,
     put_json,
 };
-use crate::approvals::{begin_session_mode, ModeChange};
+use crate::load_epoch::begin;
+use crate::approvals::{begin_autonomy_change, begin_session_mode, ModeChange};
 use crate::approvals_ui::{
-    apply_perm_notes, commit_session_mode, ApprovalCards, ApprovalHost, ApprovalMenu,
+    apply_perm_notes, commit_autonomy, commit_session_mode, ApprovalCards, ApprovalHost,
+    ApprovalMenu, AutonomyMenu,
 };
 use crate::transcript::Transcript;
 use crate::transcript_view::{save_download, TranscriptHandlers, TranscriptPane};
@@ -91,7 +100,6 @@ use crate::side_chat::SideChatPanel;
 
 use crate::model::{budget_elapsed, can_retry, RootsResponse};
 use crate::model_menu::{active_context, context_view, reduce_envelope, LiveModelState, ModelDefaults};
-use crate::model_menu_view::ModelMenu;
 use crate::status::{
     apply_document_chrome, elapsed_since, session_kind, StatusKind, StatusMark, StatusSlot,
     StatusTab, StatusTabs, HEARTBEAT_STALE_MS,
@@ -110,6 +118,12 @@ pub(crate) fn load(key: &str) -> String {
 pub(crate) fn save(key: &str, value: &str) {
     if let Some(s) = storage() {
         let _ = s.set_item(key, value);
+    }
+}
+
+pub(crate) fn remove_key(key: &str) {
+    if let Some(s) = storage() {
+        let _ = s.remove_item(key);
     }
 }
 
@@ -260,6 +274,187 @@ fn textarea_state(target: Option<web_sys::EventTarget>) -> Option<(String, u32)>
     let el = target?.dyn_into::<web_sys::HtmlTextAreaElement>().ok()?;
     let cursor = el.selection_start().ok().flatten().unwrap_or(0);
     Some((el.value(), cursor))
+}
+
+// --- Composer auto-grow (#1411) + prompt history (#1402) -----------------
+// One sizing function for every draft mutation: typing calls it from the
+// textarea's input handler, and an Effect tracking the draft signal calls
+// it (deferred one tick, after Leptos has written `prop:value`) for every
+// programmatic restore — per-session draft restore, queue recall, dictation,
+// suggestions, and prompt-history recall. The 44px/160px clamps are the
+// pre-existing CSS clamps, kept for parity across surfaces (#1411 Q1).
+
+pub(crate) const COMPOSER_MIN_HEIGHT_PX: i32 = 44;
+pub(crate) const COMPOSER_MAX_HEIGHT_PX: i32 = 160;
+pub(crate) const PROMPT_HISTORY_CAP: usize = 100;
+
+fn composer_height_px(scroll_height: i32) -> i32 {
+    scroll_height.clamp(COMPOSER_MIN_HEIGHT_PX, COMPOSER_MAX_HEIGHT_PX)
+}
+
+fn sync_composer_height_for(el: &web_sys::HtmlTextAreaElement) {
+    let Some(html) = el.dyn_ref::<web_sys::HtmlElement>() else {
+        return;
+    };
+    // Reset first: `scrollHeight` never shrinks below the current box, so
+    // measuring without the reset would grow but never shrink.
+    let _ = html.style().set_property("height", "auto");
+    let height = composer_height_px(el.scroll_height());
+    let _ = html
+        .style()
+        .set_property("height", &format!("{height}px"));
+}
+
+fn sync_composer_height_target(target: Option<web_sys::EventTarget>) {
+    if let Some(el) = target.and_then(|t| t.dyn_into::<web_sys::HtmlTextAreaElement>().ok()) {
+        sync_composer_height_for(&el);
+    }
+}
+
+fn sync_composer_height() {
+    let Some(el) = web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|doc| doc.query_selector("#composer-input").ok().flatten())
+        .and_then(|el| el.dyn_into::<web_sys::HtmlTextAreaElement>().ok())
+    else {
+        return;
+    };
+    sync_composer_height_for(&el);
+}
+
+/// Defer the DOM sync one tick so a programmatic `draft.set(..)` has been
+/// written into the textarea's value before `scrollHeight` is measured.
+/// Also places the caret at the end of the restored text, which is where
+/// history recall / draft restore leaves the user ready to edit or send.
+fn sync_composer_height_soon() {
+    let Some(win) = web_sys::window() else {
+        return;
+    };
+    let cb = Closure::once(move || {
+        sync_composer_height();
+    });
+    let _ = win.set_timeout_with_callback_and_timeout_and_arguments_0(
+        cb.as_ref().unchecked_ref(),
+        0,
+    );
+    cb.forget();
+}
+
+fn place_composer_caret_end_soon() {
+    let Some(win) = web_sys::window() else {
+        return;
+    };
+    let cb = Closure::once(move || {
+        if let Some(el) = web_sys::window()
+            .and_then(|w| w.document())
+            .and_then(|doc| doc.query_selector("#composer-input").ok().flatten())
+            .and_then(|el| el.dyn_into::<web_sys::HtmlTextAreaElement>().ok())
+        {
+            let end = el.value().encode_utf16().count() as u32;
+            let _ = el.set_selection_range(end, end);
+        }
+        sync_composer_height();
+    });
+    let _ = win.set_timeout_with_callback_and_timeout_and_arguments_0(
+        cb.as_ref().unchecked_ref(),
+        0,
+    );
+    cb.forget();
+}
+
+/// TUI rule (docs/keybinds.md:99): ↑/↓ navigate prompt history only when
+/// they would not move the caret within a multiline draft. Caret offsets
+/// from the DOM are UTF-16 units, matching `selection_start`.
+fn caret_can_move_up(text: &str, caret_utf16: u32) -> bool {
+    let byte = composer_triggers::utf16_to_byte(text, caret_utf16 as usize);
+    text[..byte.min(text.len())].contains('\n')
+}
+
+fn caret_can_move_down(text: &str, caret_utf16: u32) -> bool {
+    let byte = composer_triggers::utf16_to_byte(text, caret_utf16 as usize);
+    text[byte.min(text.len())..].contains('\n')
+}
+
+/// In-memory sent-prompt history (#1402 slice 1): per loaded page, no
+/// persistence and no daemon change. `cursor == None` means the user is
+/// on their own draft, not cycling. Cycling stashes that draft and hands
+/// it back when the user cycles down past the newest entry.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct PromptHistory {
+    entries: Vec<String>,
+    cursor: Option<usize>,
+    stash: String,
+    /// Last value handed out by `prev`/`next`; if the live draft no
+    /// longer matches it, the draft was edited or replaced since the
+    /// recall, so navigation restarts / abandons instead of clobbering.
+    recalled: Option<String>,
+}
+
+impl PromptHistory {
+    fn push(&mut self, raw: &str) {
+        let text = raw.trim();
+        if text.is_empty() {
+            return;
+        }
+        if self.entries.last().map(String::as_str) != Some(text) {
+            self.entries.push(text.to_string());
+            if self.entries.len() > PROMPT_HISTORY_CAP {
+                let excess = self.entries.len() - PROMPT_HISTORY_CAP;
+                self.entries.drain(..excess);
+            }
+        }
+        self.cursor = None;
+        self.stash.clear();
+        self.recalled = None;
+    }
+
+    fn prev(&mut self, current_draft: &str) -> Option<String> {
+        if self.entries.is_empty() {
+            return None;
+        }
+        let last = self.entries.len() - 1;
+        let idx = match self.cursor {
+            None => {
+                self.stash = current_draft.to_string();
+                last
+            }
+            Some(i) if self.recalled.as_deref() != Some(current_draft) => {
+                // Draft changed since the last recall (edited, or set
+                // programmatically): restart from the newest entry and
+                // stash the live draft rather than losing it.
+                self.stash = current_draft.to_string();
+                last
+            }
+            Some(0) => 0,
+            Some(i) => i - 1,
+        };
+        self.cursor = Some(idx);
+        let value = self.entries[idx].clone();
+        self.recalled = Some(value.clone());
+        Some(value)
+    }
+
+    fn next(&mut self, current_draft: &str) -> Option<String> {
+        let idx = self.cursor?;
+        if self.recalled.as_deref() != Some(current_draft) {
+            // Edited since recall: abandon cycling, keep the edit.
+            self.cursor = None;
+            self.stash.clear();
+            self.recalled = None;
+            return None;
+        }
+        if idx + 1 < self.entries.len() {
+            self.cursor = Some(idx + 1);
+            let value = self.entries[idx + 1].clone();
+            self.recalled = Some(value.clone());
+            Some(value)
+        } else {
+            self.cursor = None;
+            let value = std::mem::take(&mut self.stash);
+            self.recalled = Some(value.clone());
+            Some(value)
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -536,27 +731,16 @@ fn note_live_title(
         }
     });
 }
-/// The body text find-in-transcript (#1342) may search for one line:
-/// the rendered body, except long / JSON-ish tool bodies the transcript
-/// folds into a collapsed <details> — those stay unsearchable in this
-/// slice, matching the rendering rule in the transcript view below.
-fn transcript_search_body(line: &ChatLine) -> &str {
-    let card = line.role == "child";
-    let prose = line.role == "you" || line.role == "strike";
-    let body = &line.body;
-    let tool_dump = !card
-        && !prose
-        && (body.trim_start().starts_with('{')
-            || body.trim_start().starts_with('[')
-            || body.chars().count() > 240);
-    if tool_dump {
-        ""
-    } else {
-        body
-    }
-}
-
 /// All find-in-transcript matches over a line list, in transcript order.
+///
+/// The corpus is the whole line (#1576): the title, the full body —
+/// long and JSON-ish tool bodies included; the >240-char / `{`/`[`
+/// exclusion this projection used to apply is gone — and the collapsed
+/// `detail` the transcript folds into a <details>. Detail hits carry
+/// `Field::Detail` so the pane can expand the fold they land in and
+/// highlight them there. Nothing in the open transcript is excluded,
+/// so the find bar needs no scope note: "No matches" now means the
+/// string is not in the transcript.
 fn transcript_matches(
     list: &[ChatLine],
     query: &str,
@@ -565,10 +749,82 @@ fn transcript_matches(
         .iter()
         .map(|line| transcript_find::SearchLine {
             title: &line.title,
-            body: transcript_search_body(line),
+            body: &line.body,
+            detail: &line.detail,
         })
         .collect();
     transcript_find::matches_for_lines(&rows, query)
+}
+
+#[cfg(test)]
+mod transcript_matches_tests {
+    use super::*;
+
+    fn line(role: &str, title: &str, body: &str, detail: &str) -> ChatLine {
+        ChatLine {
+            id: 0,
+            role: role.into(),
+            title: title.into(),
+            body: body.into(),
+            badge: String::new(),
+            detail: detail.into(),
+            key: String::new(),
+            at_ms: 0.0,
+        }
+    }
+
+    #[test]
+    fn long_tool_body_is_searched() {
+        // >240 chars: the old projection returned "" for this body.
+        let body = format!("{}needle", "log line\n".repeat(40));
+        assert!(body.chars().count() > 240);
+        let list = vec![line("tool", "bash", &body, "")];
+        let hits = transcript_matches(&list, "needle");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].line, 0);
+        assert_eq!(hits[0].field, transcript_find::Field::Body);
+    }
+
+    #[test]
+    fn json_tool_body_is_searched() {
+        // Starts with `{`: the old projection returned "" for this body.
+        let list = vec![line(
+            "tool",
+            "read",
+            "{\"path\": \"/tmp/needle.json\"}",
+            "",
+        )];
+        let hits = transcript_matches(&list, "needle.json");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].field, transcript_find::Field::Body);
+    }
+
+    #[test]
+    fn folded_detail_hit_carries_its_line_identity() {
+        let list = vec![
+            line("you", "You", "run the tests", ""),
+            line("tool", "bash", "tests ran", "FAIL needle-test panicked"),
+            line("strike", "Strike", "done", ""),
+        ];
+        let hits = transcript_matches(&list, "needle-test");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].line, 1);
+        assert_eq!(hits[0].field, transcript_find::Field::Detail);
+        assert!(hits[0].in_fold());
+    }
+
+    #[test]
+    fn absent_string_is_an_honest_zero_over_the_full_corpus() {
+        let list = vec![
+            line("tool", "bash", "{\"a\": 1}", "long folded output"),
+            line("you", "You", "hello", ""),
+        ];
+        assert!(transcript_matches(&list, "not-present").is_empty());
+        assert_eq!(
+            transcript_find::count_label("not-present", 0, 0),
+            "No matches"
+        );
+    }
 }
 
 fn note_steer(
@@ -772,6 +1028,8 @@ fn App() -> impl IntoView {
     let base = RwSignal::new(load("strike.base"));
     let token = RwSignal::new(gateway::initial_token());
     let status = RwSignal::new("connecting…".to_string());
+    // Bootstrap capability `diag` (#1489): gates Download diagnostics.
+    let diag_capable = RwSignal::new(false);
     let mode = RwSignal::new("chat".to_string());
     // The shell palette preventDefaults its keys. This signal stays false;
     // AppsPane also bails when the event is already default_prevented.
@@ -789,6 +1047,11 @@ fn App() -> impl IntoView {
     let roots = RwSignal::new(Vec::<RootSummary>::new());
     let sessions = RwSignal::new(Vec::<SessionItem>::new());
     let active_root = RwSignal::new(String::new());
+    // Session restore (#1391): false until the first refresh that got a
+    // roots response has run the one-time saved-session decision, so
+    // later polls that find `active_root` empty again (e.g. the open
+    // session was deleted) use the plain fallback, not a re-restore.
+    let restore_attempted = RwSignal::new(false);
     // Flattened session order published by SessionPanel for edge-swipe
     // navigation (#1490 slice 5): (open_id, live) pairs in display order.
     let session_nav = RwSignal::new(Vec::<(String, bool)>::new());
@@ -799,7 +1062,19 @@ fn App() -> impl IntoView {
     let ux_note = RwSignal::new(String::new());
     let activity = RwSignal::new(Vec::<ActivityRow>::new());
     let team_note = RwSignal::new(String::new());
+    let children_note = RwSignal::new(String::new());
     let draft = RwSignal::new(String::new());
+    // Sent-prompt history (#1402): in-memory only, per loaded page.
+    let prompt_history = RwSignal::new(PromptHistory::default());
+    // Auto-grow (#1411): every programmatic draft change (per-session
+    // restore, queue recall, send clearing the draft, history recall,
+    // suggestions, dictation) resizes the composer once Leptos has
+    // written the new value into the textarea. Typing resizes directly
+    // from the input handler, where the DOM value is already current.
+    Effect::new(move |_| {
+        let _ = draft.get();
+        sync_composer_height_soon();
+    });
     let loading = RwSignal::new(true);
     let tick = RwSignal::new(0u32);
     let stream_note = RwSignal::new(String::new());
@@ -819,6 +1094,13 @@ fn App() -> impl IntoView {
     let seen = RwSignal::new(load_seen());
     let children = RwSignal::new(Vec::<model::ChildSession>::new());
     let perm_mode = RwSignal::new("default".to_string());
+    // Session dials (#1569 Fast, #1572 autonomy). Both signals hold only
+    // daemon-reported state: autonomy is seeded from bootstrap/status and
+    // afterwards changes solely on `autonomy.selected`; fast changes
+    // solely on `fast.selected`. Neither is set optimistically on click.
+    let autonomy = RwSignal::new("supervised".to_string());
+    let autonomy_menu = RwSignal::new(false);
+    let fast_on = RwSignal::new(false);
     let asks = RwSignal::new(Vec::<approvals::Ask>::new());
     let live_audit = RwSignal::new(Vec::<approvals::AuditLine>::new());
     let confirm = RwSignal::new(None::<approvals::PendingConfirm>);
@@ -840,6 +1122,8 @@ fn App() -> impl IntoView {
     let context_limit = RwSignal::new(0i64);
     let context_fit = RwSignal::new(String::new());
     let model_defaults = RwSignal::new(ModelDefaults::default());
+    // False until GET /v1/settings succeeds. Empty defaults are not "none saved".
+    let defaults_known = RwSignal::new(false);
     let catalog = RwSignal::new(Vec::<ModelInfo>::new());
     let catalog_note = RwSignal::new(String::new());
     let catalog_once = RwSignal::new(false);
@@ -878,6 +1162,7 @@ fn App() -> impl IntoView {
     let density_id = RwSignal::new(appearance::normalize_density(&load("strike.density")));
     let onboarded = RwSignal::new(load("strike.onboarded") == "1");
     let queue_items = RwSignal::new(Vec::<steer_queue::QueueItem>::new());
+    let queue_focus = RwSignal::new(String::new());
     let editing_id = RwSignal::new(String::new());
     let edit_draft = RwSignal::new(String::new());
     let steer_note = RwSignal::new(String::new());
@@ -937,6 +1222,11 @@ fn App() -> impl IntoView {
     let files_path = RwSignal::new(String::new());
     let files = RwSignal::new(Vec::<model::DirEntry>::new());
     let files_error = RwSignal::new(String::new());
+    // Sentinel until a listing commits, so the first paint cannot treat an
+    // empty vec as this folder or as the previous folder's rows.
+    let files_for = RwSignal::new("\u{0}".to_string());
+    let files_loading = RwSignal::new(false);
+    let files_epoch = RwSignal::new(LoadEpoch::new());
     let changes = RwSignal::new(Vec::<model::ChangedFile>::new());
     let changes_error = RwSignal::new(String::new());
     let phone_pane = RwSignal::new(mobile::PANE_CHAT.to_string());
@@ -1035,6 +1325,10 @@ fn App() -> impl IntoView {
         });
     };
 
+    // new_session parks an activation failure here so the meta refresh,
+    // which rewrites the connection status, does not erase it.
+    let activation_hold = RwSignal::new(None::<String>);
+
     let refresh_meta = move || {
         let (b, t) = (base.get_untracked(), token.get_untracked());
         spawn_local(async move {
@@ -1102,17 +1396,14 @@ fn App() -> impl IntoView {
                     }
                 }
             }
+            // Captured (not applied inline) so the open-session decision
+            // below can validate the saved session (#1391) against both
+            // the live roots and the saved sessions before picking one.
+            let mut roots_resp: Option<RootsResponse> = None;
             match get_json::<RootsResponse>(&b, &t, "/v1/roots").await {
                 Ok(r) => {
-                    if active_root.get_untracked().is_empty() {
-                        let id = if !r.active_id.is_empty() {
-                            r.active_id.clone()
-                        } else {
-                            r.roots.first().map(|x| x.id.clone()).unwrap_or_default()
-                        };
-                        active_root.set(id);
-                    }
-                    roots.set(r.roots);
+                    roots.set(r.roots.clone());
+                    roots_resp = Some(r);
                 }
                 Err(e) => {
                     if err.is_empty() {
@@ -1120,11 +1411,81 @@ fn App() -> impl IntoView {
                     }
                 }
             }
+            let mut session_ids: Vec<String> = Vec::new();
+            let mut sessions_ok = false;
             match get_json::<SessionsResponse>(&b, &t, "/v1/sessions").await {
-                Ok(r) => sessions.set(r.sessions),
+                Ok(r) => {
+                    session_ids = r.sessions.iter().map(|s| s.id.clone()).collect();
+                    sessions_ok = true;
+                    sessions.set(r.sessions);
+                }
                 Err(e) => {
                     if err.is_empty() {
                         err = format!("Saved sessions failed to load: {e}");
+                    }
+                }
+            }
+            if active_root.get_untracked().is_empty() {
+                if let Some(r) = &roots_resp {
+                    let root_ids: Vec<String> =
+                        r.roots.iter().map(|x| x.id.clone()).collect();
+                    // Only the first decision consults storage; after
+                    // that, an empty `active_root` means the open
+                    // session went away and the plain fallback applies.
+                    let saved = if restore_attempted.get_untracked() {
+                        String::new()
+                    } else {
+                        session_restore::saved_id()
+                    };
+                    let pick = session_restore::pick_initial(
+                        &saved,
+                        &root_ids,
+                        &session_ids,
+                        &r.active_id,
+                    );
+                    restore_attempted.set(true);
+                    // A stale id is only declared (and cleared) when
+                    // the saved-session list actually loaded — a failed
+                    // list fetch must not erase a dormant session's id.
+                    if pick.clear_saved && sessions_ok {
+                        session_restore::clear();
+                    }
+                    if !pick.id.is_empty() {
+                        if pick.resume {
+                            // Dormant saved session: set the view
+                            // optimistically (like `activate_root`) and
+                            // resume it; a failed resume clears both the
+                            // view and the saved id so the next poll
+                            // lands on the fallback, never an empty
+                            // screen for a session that cannot resume.
+                            let id = pick.id.clone();
+                            active_root.set(id.clone());
+                            session_restore::persist(&id);
+                            let (rb, rt) = (b.clone(), t.clone());
+                            spawn_local(async move {
+                                let path = format!("/v1/roots/{id}/resume");
+                                if let Err(e) =
+                                    post_json(&rb, &rt, &path, serde_json::json!({})).await
+                                {
+                                    status.set(format!("resume failed: {e}"));
+                                    if active_root.get_untracked() == id {
+                                        active_root.set(String::new());
+                                    }
+                                    // Only forget the id that failed —
+                                    // a newer switch may already have
+                                    // persisted a different session.
+                                    if session_restore::saved_id() == id {
+                                        session_restore::clear();
+                                    }
+                                }
+                            });
+                        } else {
+                            // View-local restore: no activate POST, so
+                            // two devices never fight over the daemon's
+                            // active id — each keeps its own place.
+                            active_root.set(pick.id.clone());
+                            session_restore::persist(&pick.id);
+                        }
                     }
                 }
             }
@@ -1143,10 +1504,16 @@ fn App() -> impl IntoView {
                             if !st.permission_mode.is_empty() {
                                 perm_mode.set(st.permission_mode);
                             }
+                            if !st.autonomy.is_empty() {
+                                autonomy.set(
+                                    crate::model::autonomy_or_default(&st.autonomy).to_string(),
+                                );
+                            }
                             session_cwd.set(st.cwd);
                             live_busy.set(st.busy);
                             live_busy_root.set(root);
                         }
+                        diag_capable.set(boot.capabilities.diag);
                         skills.set(boot.skills);
                         commands.set(boot.composer_commands);
                         if !catalog_once.get_untracked() {
@@ -1157,11 +1524,30 @@ fn App() -> impl IntoView {
                     Err(e) => model_note.set(format!("Live status unavailable: {e}")),
                 }
             }
-            if let Ok(defaults) = get_json::<ModelDefaults>(&b, &t, "/v1/settings").await {
-                model_defaults.set(defaults);
+            match get_json::<ModelDefaults>(&b, &t, "/v1/settings").await {
+                Ok(defaults) => {
+                    model_defaults.set(defaults);
+                    defaults_known.set(true);
+                    model_note.set(outcome::merge_defaults_note(
+                        &model_note.get_untracked(),
+                        None,
+                    ));
+                }
+                Err(e) => {
+                    defaults_known.set(false);
+                    model_note.set(outcome::merge_defaults_note(
+                        &model_note.get_untracked(),
+                        Some(&e),
+                    ));
+                }
             }
             load_error.set(err);
             loading.set(false);
+            if let Some(msg) = activation_hold.get_untracked() {
+                activation_hold.set(None);
+                status.set(msg.clone());
+                ux_note.set(msg);
+            }
             poll_team();
         });
     };
@@ -1227,6 +1613,7 @@ fn App() -> impl IntoView {
             transcript.set(Transcript::new());
             ux_note.set(String::new());
             children.set(Vec::new());
+            children_note.set(String::new());
             asks.set(Vec::new());
             live_audit.set(Vec::new());
             confirm.set(None);
@@ -1252,6 +1639,12 @@ fn App() -> impl IntoView {
             wipe_on_replay.set(true);
         }
         effort_level.set(String::new());
+        // A new session's dials are unknown until its bootstrap/status or
+        // its replayed confirmations land — never carry the previous
+        // session's Fast/autonomy across the switch.
+        fast_on.set(false);
+        autonomy.set("supervised".to_string());
+        autonomy_menu.set(false);
         context_used.set(0);
         context_limit.set(0);
         context_fit.set(String::new());
@@ -1263,8 +1656,12 @@ fn App() -> impl IntoView {
         let (cb, ct, child_root) = (b.clone(), token.get_untracked(), root.clone());
         spawn_local(async move {
             let path = format!("/v1/sessions/{}/children", api::js_encode(&child_root));
-            if let Ok(found) = get_json::<ChildrenResponse>(&cb, &ct, &path).await {
-                children.set(found.sessions);
+            match get_json::<ChildrenResponse>(&cb, &ct, &path).await {
+                Ok(found) => {
+                    children.set(found.sessions);
+                    children_note.set(String::new());
+                }
+                Err(e) => children_note.set(outcome::children_failure_note(&e)),
             }
         });
         poll_team();
@@ -1366,6 +1763,8 @@ fn App() -> impl IntoView {
                         provider: provider_name.get_untracked(),
                         model: model_name.get_untracked(),
                         effort: effort_level.get_untracked(),
+                        fast: fast_on.get_untracked(),
+                        autonomy: autonomy.get_untracked(),
                         context_used: context_used.get_untracked(),
                         context_limit: context_limit.get_untracked(),
                         context_fit: context_fit.get_untracked(),
@@ -1376,6 +1775,10 @@ fn App() -> impl IntoView {
                     provider_name.set(next.provider);
                     model_name.set(next.model);
                     effort_level.set(next.effort);
+                    fast_on.set(next.fast);
+                    if !next.autonomy.is_empty() {
+                        autonomy.set(next.autonomy);
+                    }
                     context_used.set(next.context_used);
                     context_limit.set(next.context_limit);
                     context_fit.set(next.context_fit);
@@ -1740,6 +2143,10 @@ fn App() -> impl IntoView {
             steer_note.set(steer_queue::STEER_WAITING.into());
             steer_mode.set(String::new());
         }
+        // Prompt history (#1402): record the trimmed prompt before the
+        // draft is cleared, deduping consecutive repeats. Attachments-only
+        // sends have no text and record nothing.
+        prompt_history.update(|h| h.push(&text));
         // Take the composer before the first await so a repeated Enter or a
         // second click cannot post the same attachments again.
         sending.set(true);
@@ -1755,7 +2162,11 @@ fn App() -> impl IntoView {
                 *d = chat_mode::merge_failed_send(d, &failed_text);
             });
             pending_files.update(|rows| {
-                *rows = chat_mode::merge_failed_files(failed.clone(), rows.clone());
+                let (merged, dropped) = chat_mode::merge_failed_files(failed.clone(), rows.clone());
+                *rows = merged;
+                if let Some(msg) = chat_mode::restore_cap_status(dropped) {
+                    status.set(msg);
+                }
             });
             sending.set(false);
         };
@@ -1911,14 +2322,18 @@ fn App() -> impl IntoView {
                             back_stack.update(|s| s.push(cur));
                             forward_stack.set(Vec::new());
                         }
-                        let _ = post_json(
+                        let activated = post_json(
                             &b,
                             &t,
                             &format!("/v1/roots/{id}/activate"),
                             serde_json::json!({}),
                         )
                         .await;
-                        active_root.set(id);
+                        if let Some(msg) = outcome::new_session_activation(activated) {
+                            activation_hold.set(Some(msg));
+                        }
+                        active_root.set(id.clone());
+                        session_restore::persist(&id);
                     }
                     refresh_meta();
                 }
@@ -1930,6 +2345,7 @@ fn App() -> impl IntoView {
     let activate_root = move |id: String| {
         let (b, t) = (base.get_untracked(), token.get_untracked());
         active_root.set(id.clone());
+        session_restore::persist(&id);
         spawn_local(async move {
             if let Err(e) = post_json(
                 &b,
@@ -1949,7 +2365,10 @@ fn App() -> impl IntoView {
         spawn_local(async move {
             let path = format!("/v1/roots/{id}/resume");
             match post_json(&b, &t, &path, serde_json::json!({})).await {
-                Ok(()) => active_root.set(id),
+                Ok(()) => {
+                    session_restore::persist(&id);
+                    active_root.set(id);
+                }
                 Err(e) => status.set(format!("resume failed: {e}")),
             }
         });
@@ -2098,6 +2517,54 @@ fn App() -> impl IntoView {
         enter_mode.set("queue".into());
         save("strike.enterMode", "queue");
     };
+    shell::bind(
+        "settings.font",
+        Rc::new(move |value| {
+            set_font(value.to_string());
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "settings.density",
+        Rc::new(move |value| {
+            set_density(value.to_string());
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "settings.export-browser",
+        Rc::new(move |_| {
+            appearance::download("strike-browser.json", &appearance::export_browser_json());
+            status.set("Downloaded browser settings. The token was left out.".into());
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "settings.export-daemon",
+        Rc::new(move |_| {
+            let (b, t) = (base.get_untracked(), token.get_untracked());
+            spawn_local(async move {
+                match get_json::<serde_json::Value>(&b, &t, "/v1/settings").await {
+                    Ok(v) => {
+                        let body = serde_json::to_string_pretty(&v).unwrap_or_else(|_| "{}".into());
+                        appearance::download("strike-daemon-settings.json", &body);
+                        status.set("Downloaded the daemon settings dials.".into());
+                    }
+                    Err(e) => status.set(format!("Could not export daemon settings: {e}")),
+                }
+            });
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "settings.clear",
+        Rc::new(move |_| {
+            appearance::clear_strike_keys();
+            on_cleared();
+            status.set("Cleared Strike keys in this browser. Daemon files were left in place.".into());
+            Ok(())
+        }),
+    );
 
     let set_memory = move |mode: String| {
         memory_menu.set(false);
@@ -2144,14 +2611,33 @@ fn App() -> impl IntoView {
         }
     };
 
+    // Autonomy (#1572), cloned from set_perm with two deliberate
+    // differences: a running turn refuses up front with the reason on
+    // the status line (the daemon rejects the op mid-turn), and applying
+    // never touches the autonomy signal — only the daemon's
+    // `autonomy.selected` confirmation does.
+    let set_autonomy = move |mode: String| {
+        autonomy_menu.set(false);
+        let root = active_root.get_untracked();
+        if !root.is_empty() && session_busy(&root) {
+            status.set(
+                "This turn is still running. Autonomy changes wait until it finishes.".into(),
+            );
+            return;
+        }
+        match begin_autonomy_change(&autonomy.get_untracked(), &mode) {
+            ModeChange::Same => {}
+            ModeChange::Apply(mode) => {
+                commit_autonomy(base, token, active_root, status, mode);
+            }
+            ModeChange::Confirm(pending) => confirm.set(Some(pending)),
+        }
+    };
+
 
     // Session delete (#1358): arm the confirm dialog for one session.
     // Shared by the row button and the palette command — one code path,
     // and arming the dialog is all either surface does.
-    let request_delete = move |id: String, label: String| {
-        delete_target.set(Some(session_delete::DeleteTarget { id, label }));
-    };
-
     // After the daemon confirms a deletion: drop the session from every
     // local list, forget its pin/seen marks and history entries, and —
     // via `remaining_active` — fall back to the empty/list state when
@@ -2189,6 +2675,10 @@ fn App() -> impl IntoView {
         let cur = active_root.get_untracked();
         if session_delete::remaining_active(&cur, &id).is_none() && !cur.is_empty() {
             active_root.set(String::new());
+            // The viewed session is gone (#1391): forget it now so a
+            // reload before the fallback lands cannot restore a ghost;
+            // the next refresh persists the fallback it picks.
+            session_restore::clear();
         }
         status.set("Session deleted.".into());
         if was_live {
@@ -2211,21 +2701,40 @@ fn App() -> impl IntoView {
     });
 
     let load_files = move || {
+        let gen = begin(files_epoch);
         let (b, t, path) = (
             base.get_untracked(),
             token.get_untracked(),
             files_path.get_untracked(),
         );
+        files.set(Vec::new());
+        files_error.set(String::new());
+        files_loading.set(true);
+        let files_epoch = files_epoch;
         spawn_local(async move {
             let q = format!("/v1/files?path={}", api::js_encode(&path));
-            match get_json::<FilesResponse>(&b, &t, &q).await {
+            let fetched = get_json::<FilesResponse>(&b, &t, &q).await;
+            if !key_matches(&path, &files_path.get_untracked()) {
+                return;
+            }
+            let mapped = match fetched {
                 Ok(r) => {
                     let mut entries = r.entries;
                     entries.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then(a.name.cmp(&b.name)));
-                    files.set(entries);
-                    files_error.set(String::new());
+                    Ok(entries)
                 }
-                Err(e) => files_error.set(e),
+                Err(e) => Err(e),
+            };
+            match files_epoch.with_untracked(|epoch| {
+                commit_load(epoch, gen, mapped, Vec::new(), ErrPolicy::Clear)
+            }) {
+                Commit::Drop => return,
+                Commit::Apply { value, error } => {
+                    files.set(value);
+                    files_error.set(error);
+                    files_for.set(path);
+                    files_loading.set(false);
+                }
             }
         });
     };
@@ -2361,15 +2870,31 @@ fn App() -> impl IntoView {
             .into_iter()
             .map(|model| shell::Choice {
                 id: format!("{}\t{}", model.provider, model.id),
-                label: if model.name.is_empty() {
-                    model.id.clone()
-                } else {
-                    model.name.clone()
+                label: {
+                    let provider = if model.provider.is_empty() {
+                        "model".to_string()
+                    } else {
+                        model.provider.clone()
+                    };
+                    let id = if model.name.is_empty() {
+                        model.id.clone()
+                    } else {
+                        model.name.clone()
+                    };
+                    format!("Switch model: {provider}/{id}")
                 },
                 detail: model.provider.clone(),
             })
             .collect();
         shell::set_model_choices(rows);
+    });
+    Effect::new(move |_| {
+        let rows = skills
+            .get()
+            .into_iter()
+            .map(|skill| (skill.name, skill.description))
+            .collect();
+        composer_triggers::set_palette_skills(rows);
     });
     let on_default_model = Callback::new(move |(provider, id): (String, String)| {
         let (b, t) = (base.get_untracked(), token.get_untracked());
@@ -2387,6 +2912,7 @@ fn App() -> impl IntoView {
                         d.provider = provider;
                         d.model = id;
                     });
+                    defaults_known.set(true);
                     model_note.set("Saved as the global default. This session stays on its current model until you pick one.".into());
                 }
                 Err(e) => model_note.set(format!("saving the default failed: {e}")),
@@ -2412,6 +2938,37 @@ fn App() -> impl IntoView {
             }
         });
     });
+    // Fast (#1569), cloned from on_effort: post the real `set.fast` op
+    // and nothing else. `fast_on` is never set here — it flips only when
+    // the daemon's `fast.selected` confirmation reduces in the SSE path
+    // above. A running turn refuses up front with the reason surfaced,
+    // matching the model menu's disabled state.
+    let on_fast = Callback::new(move |enabled: bool| {
+        let root = active_root.get_untracked();
+        if !root.is_empty() && session_busy(&root) {
+            model_note.set(
+                "This turn is still running. Fast changes wait until it finishes.".into(),
+            );
+            return;
+        }
+        model_note_after.set(now_ms() as i64);
+        model_note.set(String::new());
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            if let Err(e) = post_op(
+                &b,
+                &t,
+                &root,
+                "set.fast",
+                serde_json::json!({"enabled": enabled}),
+            )
+            .await
+            {
+                model_note.set(format!("fast change failed: {e}"));
+                model_note_after.set(0);
+            }
+        });
+    });
     let on_default_effort = Callback::new(move |level: String| {
         let (b, t) = (base.get_untracked(), token.get_untracked());
         spawn_local(async move {
@@ -2425,12 +2982,44 @@ fn App() -> impl IntoView {
             {
                 Ok(()) => {
                     model_defaults.update(|d| d.effort = level);
+                    defaults_known.set(true);
                     model_note.set("Saved the effort as the global default.".into());
                 }
                 Err(e) => model_note.set(format!("saving the effort default failed: {e}")),
             }
         });
     });
+    {
+        let pick = on_default_model.clone();
+        shell::set_default_model_picker(Rc::new(move |provider, id| {
+            pick.run((provider.to_string(), id.to_string()));
+        }));
+        let effort = on_effort.clone();
+        shell::set_effort_setter(Rc::new(move |level| {
+            effort.run(level.to_string());
+        }));
+        shell::set_effort_choices(
+            crate::model_menu::effort_levels()
+                .iter()
+                .map(|(id, label)| shell::Choice {
+                    id: (*id).to_string(),
+                    label: format!("Set reasoning effort: {label}"),
+                    detail: String::new(),
+                })
+                .collect(),
+        );
+        let save = on_default_effort.clone();
+        shell::set_effort_default_setter(Rc::new(move || {
+            let level = effort_level.get_untracked();
+            if !level.trim().is_empty() {
+                save.run(level);
+            }
+        }));
+        let fast = on_fast.clone();
+        shell::set_fast_setter(Rc::new(move |enabled| {
+            fast.run(enabled);
+        }));
+    }
 
     // #1267 navbar hosts this bell. The component owns its panel and settings.
     let on_notify = Callback::new(move |target: notify::FocusTarget| {
@@ -2485,6 +3074,7 @@ fn App() -> impl IntoView {
         view: Rc::new(move || mode.get()),
         set_enter: Rc::new(move |next: &str| set_enter(next.to_string())),
         set_perm: Rc::new(move |next: &str| set_perm(next.to_string())),
+        set_autonomy: Rc::new(move |next: &str| set_autonomy(next.to_string())),
         set_theme: Rc::new(move |next: &str| set_theme(next.to_string())),
         set_scheme: Rc::new(move |next: &str| set_scheme(next.to_string())),
         travel: Rc::new(move |back: bool| travel(back)),
@@ -2683,6 +3273,47 @@ fn App() -> impl IntoView {
             Ok(())
         }),
     );
+    shell::bind(
+        "panel-terminal",
+        Rc::new(move |_args: &str| {
+            side_tab.set("terminal".into());
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "permissions.rules",
+        Rc::new(move |_args: &str| {
+            mode.set("chat".into());
+            panel_open.set(true);
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "skill.use",
+        Rc::new(move |name| {
+            let name = name.trim().trim_start_matches('$');
+            if name.is_empty() {
+                return Err("Pick a skill.".into());
+            }
+            let mut text = draft.get_untracked();
+            if !text.is_empty() && !text.ends_with(' ') {
+                text.push(' ');
+            }
+            text.push('$');
+            text.push_str(name);
+            text.push(' ');
+            draft.set(text);
+            mode.set("chat".into());
+            Ok(())
+        }),
+    );
+    if let Some(name) = park::take("skill.use") {
+        let _ = shell::dispatch("skill.use", &name);
+    }
+    if let Some(_) = park::take("permissions.rules") {
+        mode.set("chat".into());
+        panel_open.set(true);
+    }
     // Git / Worktrees palette performers (#1270). Registered at boot by
     // src/shell/contrib/git_worktree.rs; only the page owns side_tab.
     shell::bind(
@@ -2754,27 +3385,58 @@ fn App() -> impl IntoView {
     // row button opens. No request is issued here.
     shell::bind(
         "session-delete",
-        Rc::new(move |id: &str| {
-            let id = id.to_string();
+        Rc::new(move |args: &str| {
+            let cursor = session_panel::cursor_session();
             let active = active_root.get_untracked();
+            let selected = session_panel::selected_ids();
+            let marked = web_sys::window()
+                .and_then(|w| w.document())
+                .and_then(|doc| doc.query_selector("[data-delete-target='1']").ok().flatten())
+                .and_then(|el| el.get_attribute("data-session-id"))
+                .unwrap_or_default();
+            let chosen = if !marked.is_empty() {
+                marked
+            } else if selected.len() == 1 {
+                selected[0].clone()
+            } else {
+                session_delete::resolve_session_target(args, &cursor.id, &active)?.to_string()
+            };
+            let id = chosen;
             let active_running = activity
                 .get_untracked()
                 .iter()
                 .any(|row| is_running(&row.state));
-            let label = merge_sessions(
-                &roots.get_untracked(),
-                &sessions.get_untracked(),
-                &pins.get_untracked(),
-                &seen.get_untracked(),
-                &active,
-                active_running,
-            )
-            .into_iter()
-            .find(|row| row.id == id)
-            .map(|row| session_label(&row.title, &short_id(&row.id)))
-            .unwrap_or_else(|| short_id(&id));
+            let label = if cursor.id == id && !cursor.label.is_empty() {
+                cursor.label
+            } else {
+                merge_sessions(
+                    &roots.get_untracked(),
+                    &sessions.get_untracked(),
+                    &pins.get_untracked(),
+                    &seen.get_untracked(),
+                    &active,
+                    active_running,
+                )
+                .into_iter()
+                .find(|row| row.id == id)
+                .map(|row| session_label(&row.title, &short_id(&row.id)))
+                .unwrap_or_else(|| short_id(&id))
+            };
             mode.set("chat".into());
-            request_delete(id, label);
+            let on_deleted = on_deleted;
+            let status_note = status;
+            if !session_delete::prompt_delete(
+                session_delete::DeleteTarget {
+                    id,
+                    label,
+                },
+                base.get_untracked(),
+                token.get_untracked(),
+                Rc::new(move |id| on_deleted.run(id)),
+                Rc::new(move |err| status_note.set(err)),
+            ) {
+                return Err(crate::confirm::BUSY.into());
+            }
             Ok(())
         }),
     );
@@ -2890,11 +3552,7 @@ fn App() -> impl IntoView {
     shell::bind(
         "model-menu.open",
         Rc::new(move |_args| {
-            mode_menu.set(false);
-            plus_open.set(false);
-            ac_open.set(false);
-            ac_force.set(String::new());
-            model_menu.update(|v| *v = !*v);
+            shell::show_palette();
             Ok(())
         }),
     );
@@ -2910,7 +3568,7 @@ fn App() -> impl IntoView {
                 plus_open.set(false);
                 ac_open.set(false);
                 ac_force.set(String::new());
-                model_menu.update(|v| *v = !*v);
+                shell::show_palette();
             }
         });
     if let Some(w) = web_sys::window() {
@@ -2920,7 +3578,7 @@ fn App() -> impl IntoView {
 
     // Find in transcript (#1342). Opening saves the transcript scroll so
     // closing can restore it; stepping wraps around the match list.
-    let open_find = move || {
+    let _open_find = move || {
         if !tf_open.get_untracked() {
             tf_saved_scroll.set(transcript_find::transcript_scroll());
         }
@@ -3029,10 +3687,10 @@ fn App() -> impl IntoView {
         find_view.set(crate::transcript_view::FindView { hits, current });
     });
 
-    let apply_title: Callback<(String,)> = (move |title: String| {
+    let apply_title: Callback<(String, String)> = (move |session_id: String, title: String| {
         let id = active_root.get_untracked();
-        if id.is_empty() {
-            ux_note.set("No session to rename.".into());
+        if id.is_empty() || id != session_id {
+            ux_note.set("That rename was for another session.".into());
             return;
         }
         let title = title.trim().to_string();
@@ -3040,6 +3698,13 @@ fn App() -> impl IntoView {
             ux_note.set("A title needs at least one character.".into());
             return;
         }
+        let prev_title = transcript.with_untracked(|t| t.snapshot_title());
+        let prev_session = sessions.with_untracked(|list| {
+            list.iter().find(|s| s.id == id).map(|s| s.title.clone())
+        });
+        let prev_root = roots.with_untracked(|list| {
+            list.iter().find(|r| r.id == id).map(|r| r.title.clone())
+        });
         transcript.update(|t| t.pin_title(title.clone()));
         sessions.update(|list| {
             if let Some(s) = list.iter_mut().find(|s| s.id == id) {
@@ -3056,7 +3721,24 @@ fn App() -> impl IntoView {
             let path = format!("/v1/sessions/{}", api::js_encode(&id));
             match patch_json(&b, &t, &path, serde_json::json!({"title": title})).await {
                 Ok(()) => ux_note.set(String::new()),
-                Err(e) => ux_note.set(format!("Rename failed: {e}")),
+                Err(e) => {
+                    transcript.update(|doc| doc.restore_title(prev_title));
+                    if let Some(old) = prev_session {
+                        sessions.update(|list| {
+                            if let Some(s) = list.iter_mut().find(|s| s.id == id) {
+                                s.title = old;
+                            }
+                        });
+                    }
+                    if let Some(old) = prev_root {
+                        roots.update(|list| {
+                            if let Some(r) = list.iter_mut().find(|r| r.id == id) {
+                                r.title = old;
+                            }
+                        });
+                    }
+                    ux_note.set(format!("Rename failed: {e}"));
+                }
             }
         });
     })
@@ -3074,7 +3756,7 @@ fn App() -> impl IntoView {
                 ux_note.set("No message to title from yet.".into());
                 return;
             }
-            apply_title.run((title,));
+            apply_title.run((active_root.get_untracked(), title));
         })
         .into(),
         export_timeline: (move || {
@@ -3164,7 +3846,7 @@ fn App() -> impl IntoView {
             if title.is_empty() {
                 return Err("A title needs at least one character.".into());
             }
-            rename_for_palette.run((title,));
+            rename_for_palette.run((active_root.get_untracked(), title));
             Ok(())
         }),
     );
@@ -3214,7 +3896,12 @@ fn App() -> impl IntoView {
     shell::bind(
         "session.fork",
         Rc::new(move |_| {
-            let id = active_root.get_untracked();
+            let cursor = session_panel::cursor_session();
+            let id = if cursor.id.is_empty() {
+                active_root.get_untracked()
+            } else {
+                cursor.id
+            };
             if id.is_empty() {
                 return Err("No session to fork.".into());
             }
@@ -3242,6 +3929,117 @@ fn App() -> impl IntoView {
         }),
     );
 
+    let queue_step = {
+        let queue_items = queue_items;
+        let queue_focus = queue_focus;
+        let post_queue = post_queue;
+        move |delta: i32| -> Result<(), String> {
+            let items = queue_items.get_untracked();
+            if items.is_empty() {
+                return Err("The queue is empty.".into());
+            }
+            let focus = queue_focus.get_untracked();
+            let id = if items.iter().any(|item| item.id == focus) {
+                focus
+            } else {
+                items.last().map(|item| item.id.clone()).unwrap_or_default()
+            };
+            let Some(ids) = steer_queue::moved_ids(&items, &id, delta) else {
+                return Err("That message cannot move further.".into());
+            };
+            post_queue("input.queue_reorder", serde_json::json!({"ids": ids}));
+            Ok(())
+        }
+    };
+    let queue_step = Rc::new(queue_step);
+    let queue_up = queue_step.clone();
+    let queue_down = queue_step;
+    shell::bind(
+        "queue.move-up",
+        Rc::new(move |_| queue_up(-1)),
+    );
+    shell::bind(
+        "queue.move-down",
+        Rc::new(move |_| queue_down(1)),
+    );
+    shell::bind(
+        "panel-files",
+        Rc::new(move |_| {
+            side_tab.set("files".into());
+            mode.set("chat".into());
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "workspaces.change",
+        Rc::new(move |_| {
+            picker_open.set(true);
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "approvals.rules",
+        Rc::new(move |_| {
+            panel_open.set(true);
+            mode.set("chat".into());
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "enter.toggle",
+        Rc::new(move |_| {
+            let next = if enter_mode.get_untracked() == "steer" {
+                "queue"
+            } else {
+                "steer"
+            };
+            set_enter(next.into());
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "composer.attach",
+        Rc::new(move |_| {
+            if let Some(el) = file_input.get_untracked() {
+                el.click();
+            }
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "composer.voice",
+        Rc::new(move |_| {
+            if !chat_mode::dictation_available() {
+                return Err("This browser has no speech API.".into());
+            }
+            let draft_cb = draft;
+            let status_cb = status;
+            let listen_cb = listening;
+            match chat_mode::toggle_dictation(
+                move |text| {
+                    draft_cb.update(|d| {
+                        if !d.is_empty() && !d.ends_with(' ') && !d.ends_with('\n') {
+                            d.push(' ');
+                        }
+                        d.push_str(&text);
+                    });
+                },
+                move |err| {
+                    listen_cb.set(false);
+                    if !err.is_empty() {
+                        status_cb.set(err);
+                    }
+                },
+            ) {
+                Ok(on) => listen_cb.set(on),
+                Err(err) => {
+                    listen_cb.set(false);
+                    return Err(err);
+                }
+            }
+            Ok(())
+        }),
+    );
     let ui = TriggerSignals {
         ac_force,
         ac_open,
@@ -3260,6 +4058,152 @@ fn App() -> impl IntoView {
         mode_menu,
         model_menu,
     };
+
+    {
+        let ui_mention = TriggerSignals {
+            ac_force: ui.ac_force,
+            ac_open: ui.ac_open,
+            ac_index: ui.ac_index,
+            ac_items: ui.ac_items,
+            ac_replace_all: ui.ac_replace_all,
+            trig_start: ui.trig_start,
+            trig_end: ui.trig_end,
+            skills: ui.skills,
+            commands: ui.commands,
+            search_gen: ui.search_gen,
+            base: ui.base,
+            token: ui.token,
+            draft: ui.draft,
+            plus_open: ui.plus_open,
+            mode_menu: ui.mode_menu,
+            model_menu: ui.model_menu,
+        };
+        let ui_shell = TriggerSignals {
+            ac_force: ui.ac_force,
+            ac_open: ui.ac_open,
+            ac_index: ui.ac_index,
+            ac_items: ui.ac_items,
+            ac_replace_all: ui.ac_replace_all,
+            trig_start: ui.trig_start,
+            trig_end: ui.trig_end,
+            skills: ui.skills,
+            commands: ui.commands,
+            search_gen: ui.search_gen,
+            base: ui.base,
+            token: ui.token,
+            draft: ui.draft,
+            plus_open: ui.plus_open,
+            mode_menu: ui.mode_menu,
+            model_menu: ui.model_menu,
+        };
+        let ui_skill = TriggerSignals {
+            ac_force: ui.ac_force,
+            ac_open: ui.ac_open,
+            ac_index: ui.ac_index,
+            ac_items: ui.ac_items,
+            ac_replace_all: ui.ac_replace_all,
+            trig_start: ui.trig_start,
+            trig_end: ui.trig_end,
+            skills: ui.skills,
+            commands: ui.commands,
+            search_gen: ui.search_gen,
+            base: ui.base,
+            token: ui.token,
+            draft: ui.draft,
+            plus_open: ui.plus_open,
+            mode_menu: ui.mode_menu,
+            model_menu: ui.model_menu,
+        };
+        shell::bind(
+            "composer.mention",
+            Rc::new(move |_| {
+                mention_composer_file(&ui_mention);
+                Ok(())
+            }),
+        );
+        shell::bind(
+            "composer.shell",
+            Rc::new(move |_| {
+                prefix_composer_shell(&ui_shell);
+                Ok(())
+            }),
+        );
+        shell::bind(
+            "composer.skill",
+            Rc::new(move |_| {
+                open_composer_catalog("skills", &ui_skill);
+                Ok(())
+            }),
+        );
+    }
+    shell::bind(
+        "model.effort",
+        Rc::new(move |level| {
+            let level = level.trim().to_string();
+            if level.is_empty() {
+                return Err("Pick an effort.".into());
+            }
+            on_effort.run(level);
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "model.effort-default",
+        Rc::new(move |level| {
+            let level = level.trim().to_string();
+            if level.is_empty() {
+                return Err("Pick an effort.".into());
+            }
+            on_default_effort.run(level);
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "model.default",
+        Rc::new(move |args| {
+            let Some((provider, id)) = args.split_once('\t') else {
+                return Err("Pick a model.".into());
+            };
+            on_default_model.run((provider.to_string(), id.to_string()));
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "model.pin",
+        Rc::new(move |_| {
+            let provider = provider_name.get_untracked();
+            let model = model_name.get_untracked();
+            if provider.is_empty() || model.is_empty() {
+                return Err("No model is selected.".into());
+            }
+            crate::model_menu_view::toggle_stored_pin(&provider, &model);
+            model_note.set("Updated the model pin.".into());
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "composer.context",
+        Rc::new(move |_| {
+            let ctx = active_context(
+                &catalog.get_untracked(),
+                &provider_name.get_untracked(),
+                &model_name.get_untracked(),
+            );
+            let view = context_view(
+                context_used.get_untracked(),
+                context_limit.get_untracked(),
+                ctx,
+                &context_fit.get_untracked(),
+            );
+            model_note.set(if view.summary.is_empty() {
+                "No context window reported.".into()
+            } else {
+                view.summary
+            });
+            Ok(())
+        }),
+    );
+
 
     // Bootstrap can land after the first keystroke. Recompute only when the
     // catalog contents change, and only for the trigger at the real caret.
@@ -3287,6 +4231,9 @@ fn App() -> impl IntoView {
             }
         }
     });
+
+    let git_active = Memo::new(move |_| side_tab.get() == "git");
+    let worktree_active = Memo::new(move |_| side_tab.get() == "worktrees");
 
     view! {
         <ApprovalHost
@@ -3339,6 +4286,8 @@ fn App() -> impl IntoView {
                 gateway=gateway
                 mode=mode
                 status=status
+                diag_capable=diag_capable
+                root=active_root
                 theme=theme_id
                 scheme=scheme_id
                 font=font_id
@@ -3351,24 +4300,10 @@ fn App() -> impl IntoView {
             />
         </Show>
         <Show when=move || mode.get() == "daemon" fallback=move || ()>
-            <DaemonPane
-                base=base
-                token=token
-                status=status
-                gateway=gateway
-                gateway_detail=gateway_detail
-                gateway_open=gateway_open
-                gateway_profiles=gateway_profiles
-                gateway_selected=gateway_selected
-                refresh=refresh_meta
-                open_picker=move || picker_open.set(true)
-            />
+            <DaemonPane gateway_detail=gateway_detail />
         </Show>
-        <Show when=move || mode.get() == "usage" fallback=move || ()>
-            <usage_audit::UsagePage base=base token=token status=status />
-        </Show>
-        <Show when=move || mode.get() == "audit" fallback=move || ()>
-            <usage_audit::AuditPage base=base token=token status=status />
+        <Show when=move || mode.get() == "usage" || mode.get() == "audit" fallback=move || ()>
+            <usage_audit::UsageAuditPages mode=mode base=base token=token status=status />
         </Show>
         <Show when=move || mode.get() == "goals" fallback=move || ()>
             <goals::GoalsPane base=base token=token />
@@ -3492,7 +4427,6 @@ fn App() -> impl IntoView {
                         on_open=open_session
                         on_new=new_session
                         on_refresh=refresh_meta
-                        on_delete=request_delete
                         nav_order=session_nav
                     />
                     <div class="ws-chip">
@@ -3598,7 +4532,6 @@ fn App() -> impl IntoView {
                             sessions_drawer.set(false);
                             panel_drawer.update(|v| *v = !*v);
                         }>"Panel"</button>
-                        <button type="button" class="chip" data-tf-open="true" title="Find in transcript (Ctrl+F)" on:click=move |_| open_find()>"Find"</button>
                     </div>
                     <Show when=move || !load_error.get().is_empty()>
                         <div class="notice" role="alert">
@@ -3666,6 +4599,7 @@ fn App() -> impl IntoView {
                     <Show when=move || doc_path.get().is_empty()>
                     <TranscriptPane
                         transcript=transcript
+                        session=active_root
                         loading=loading
                         load_error=load_error
                         tick=tick
@@ -3673,30 +4607,6 @@ fn App() -> impl IntoView {
                         handlers=handlers
                         find=find_view
                     />
-                    </Show>
-                    <Show when=move || layout.get() == "conversation" && {
-                        // session_busy reads roots/live_busy untracked, so
-                        // subscribe to them here: without this the Show never
-                        // re-evaluates once the turn that produced the last
-                        // line ends, and the follow-ups stay hidden.
-                        let _ = roots.get();
-                        let _ = live_busy.get();
-                        let _ = live_busy_root.get();
-                        let root = active_root.get();
-                        !root.is_empty()
-                            && !session_busy(&root)
-                            && transcript.with(|t| t.messages.last().map(|m| m.role == crate::transcript::Role::Strike).unwrap_or(false))
-                    }>
-                        <div class="follow-ups" aria-label="Suggestions">
-                            {chat_mode::FOLLOW_UPS.into_iter().map(|text| {
-                                let label = text.to_string();
-                                let send_label = label.clone();
-                                let send = send_text;
-                                view! {
-                                    <button type="button" class="chip" title="Fixed prompt, not a model suggestion" on:click=move |_| { send(send_label.clone()); }>{label}</button>
-                                }
-                            }).collect_view()}
-                        </div>
                     </Show>
                     <ApprovalCards
                         asks=asks
@@ -3732,6 +4642,16 @@ fn App() -> impl IntoView {
                             perm_mode=perm_mode
                             confirm=confirm
                             panel_open=panel_open
+                            base=base
+                            token=token
+                            root=active_root
+                            status=status
+                        />
+                        <AutonomyMenu
+                            menu_open=autonomy_menu
+                            autonomy=autonomy
+                            confirm=confirm
+                            busy=session_busy_now
                             base=base
                             token=token
                             root=active_root
@@ -3788,10 +4708,24 @@ fn App() -> impl IntoView {
                                     <span class="name">"Use a skill"</span>
                                     <span class="path">"Skills loaded for this daemon"</span>
                                 </button>
-                                <button type="button" class="palette-row" on:click=move |_| open_composer_catalog("commands", &ui)>
-                                    <span class="name">"Slash command"</span>
-                                    <span class="path">"Daemon commands from bootstrap"</span>
+                                <button type="button" class="palette-row" data-chat-attach="menu" on:click=move |_| {
+                                    plus_open.set(false);
+                                    if let Some(el) = file_input.get() {
+                                        el.click();
+                                    }
+                                }>
+                                    <span class="name">"Attach files"</span>
+                                    <span class="path">"Images and documents. Drag and paste still work."</span>
                                 </button>
+                                <Show when=move || speech_ok>
+                                    <button type="button" class="palette-row" data-chat-voice="true" on:click=move |_| {
+                                        plus_open.set(false);
+                                        let _ = crate::shell::dispatch("composer.voice", "");
+                                    }>
+                                        <span class="name">"Dictate"</span>
+                                        <span class="path">"Voice input from this browser"</span>
+                                    </button>
+                                </Show>
                             </div>
                         </Show>
                         <Show when=move || ac_open.get()>
@@ -3831,16 +4765,13 @@ fn App() -> impl IntoView {
                                         let id_for_when = id.clone();
                                         let id_for_fallback = id.clone();
                                         let id_cancel = id.clone();
-                                        let id_up = id.clone();
-                                        let id_down = id.clone();
+                                        let id_focus = id.clone();
                                         let id_send_now = id.clone();
                                         let row_busy = busy_now;
                                         let text_for_edit = item.text.clone();
-                                        let can_up = steer_queue::moved_ids(&queue_items.get(), &id, -1).is_some();
-                                        let can_down = steer_queue::moved_ids(&queue_items.get(), &id, 1).is_some();
                                         let preview = steer_queue::preview(&text_for_edit);
                                         view! {
-                                            <li>
+                                            <li on:mouseenter=move |_| queue_focus.set(id_focus.clone())>
                                                 <span class="queue-index">{(i + 1).to_string()}</span>
                                                 <Show when=move || editing_id.get() == id.clone() fallback=move || view! { <span class="queue-text">{preview.clone()}</span> }>
                                                     <input class="queue-edit" prop:value=move || edit_draft.get() on:input=move |ev| edit_draft.set(event_target_value(&ev)) on:keydown=move |ev: web_sys::KeyboardEvent| {
@@ -3880,19 +4811,9 @@ fn App() -> impl IntoView {
                                                             post_queue("input.queue_edit", serde_json::json!({"id": id, "text": text}));
                                                         }>"Save"</button>
                                                     </Show>
-                                                    <button type="button" class="secondary" disabled=move || !can_up on:click=move |_| {
-                                                        if let Some(ids) = steer_queue::moved_ids(&queue_items.get_untracked(), &id_up, -1) {
-                                                            post_queue("input.queue_reorder", serde_json::json!({"ids": ids}));
-                                                        }
-                                                    }>"Up"</button>
-                                                    <button type="button" class="secondary" disabled=move || !can_down on:click=move |_| {
-                                                        if let Some(ids) = steer_queue::moved_ids(&queue_items.get_untracked(), &id_down, 1) {
-                                                            post_queue("input.queue_reorder", serde_json::json!({"ids": ids}));
-                                                        }
-                                                    }>"Down"</button>
                                                     <button type="button" class="secondary" title="Removes this queued message" on:click=move |_| {
                                                         let id = id_cancel.clone();
-                                                        crate::confirm::ask(
+                                                        if !crate::confirm::ask(
                                                             crate::confirm::ConfirmRequest {
                                                                 title: "Remove queued message?".into(),
                                                                 body: "This drops the message from the queue. It is not sent.".into(),
@@ -3904,7 +4825,9 @@ fn App() -> impl IntoView {
                                                                     serde_json::json!({"id": id.clone()}),
                                                                 );
                                                             }),
-                                                        );
+                                                        ) {
+                                                            steer_note.set(crate::confirm::BUSY.into());
+                                                        }
                                                     }>"Cancel"</button>
                                                 </span>
                                             </li>
@@ -3951,7 +4874,7 @@ fn App() -> impl IntoView {
                                     }).collect_view()}
                                 </div>
                             </Show>
-                            <input class="file-pick" type="file" data-chat-file="true" node_ref=file_input multiple=true
+                            <input class="file-pick" type="file" data-chat-file="true" data-chat-attach="true" node_ref=file_input multiple=true
                                 accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,image/svg+xml,text/plain,application/zip,application/gzip"
                                 on:change=move |_| {
                                     if let Some(el) = file_input.get() {
@@ -3971,6 +4894,9 @@ fn App() -> impl IntoView {
                                         draft.set(text.clone());
                                         sync_composer_trigger(text, cursor, &ui);
                                     }
+                                    // Auto-grow (#1411): the DOM value is
+                                    // already current in the input handler.
+                                    sync_composer_height_target(ev.target());
                                 }
                                 on:click=move |ev: web_sys::MouseEvent| {
                                     if let Some((text, cursor)) = textarea_state(ev.target()) {
@@ -3991,6 +4917,35 @@ fn App() -> impl IntoView {
                                             ev.prevent_default();
                                             let delta = if ev.key() == "ArrowDown" { 1 } else { -1 };
                                             ac_index.set(move_index(&items, ac_index.get_untracked(), delta));
+                                        } else if !ev.ctrl_key() && !ev.meta_key() && !ev.alt_key() {
+                                            // Prompt history (#1402), after the
+                                            // autocomplete popup above has had
+                                            // first claim on ↑/↓. TUI rule
+                                            // (docs/keybinds.md:99): cycle only
+                                            // when the key would not move the
+                                            // caret within a multiline draft.
+                                            if let Some((text, cursor)) = textarea_state(ev.target()) {
+                                                let up = ev.key() == "ArrowUp";
+                                                let can_move = if up {
+                                                    caret_can_move_up(&text, cursor)
+                                                } else {
+                                                    caret_can_move_down(&text, cursor)
+                                                };
+                                                if !can_move {
+                                                    let mut hist = prompt_history.get_untracked();
+                                                    let recalled = if up {
+                                                        hist.prev(&text)
+                                                    } else {
+                                                        hist.next(&text)
+                                                    };
+                                                    if let Some(value) = recalled {
+                                                        ev.prevent_default();
+                                                        prompt_history.set(hist);
+                                                        draft.set(value);
+                                                        place_composer_caret_end_soon();
+                                                    }
+                                                }
+                                            }
                                         }
                                     } else if ev.key() == "Escape" && (ac_open.get_untracked() || plus_open.get_untracked()) {
                                         ev.prevent_default();
@@ -4075,87 +5030,38 @@ fn App() -> impl IntoView {
                                     ac_force.set(String::new());
                                     plus_open.update(|v| *v = !*v);
                                 }>"+"</button>
-                                <button type="button" class="chip" data-chat-attach="true" on:click=move |_| {
-                                    if let Some(el) = file_input.get() {
-                                        el.click();
-                                    }
-                                }>"Attach"</button>
-                                <Show when=move || speech_ok>
-                                    <button type="button" data-chat-voice="true" title="Dictate with the browser speech API. Audio may be sent to the browser vendor." class=move || if listening.get() { "chip listening" } else { "chip" } on:click=move |_| {
-                                        let draft_cb = draft;
-                                        let status_cb = status;
-                                        let listen_cb = listening;
-                                        match chat_mode::toggle_dictation(
-                                            move |text| {
-                                                draft_cb.update(|d| {
-                                                    if !d.is_empty() && !d.ends_with(' ') && !d.ends_with('\n') {
-                                                        d.push(' ');
-                                                    }
-                                                    d.push_str(&text);
-                                                });
-                                            },
-                                            move |err| {
-                                                listen_cb.set(false);
-                                                if !err.is_empty() {
-                                                    status_cb.set(err);
-                                                }
-                                            },
-                                        ) {
-                                            Ok(on) => listen_cb.set(on),
-                                            Err(err) => {
-                                                listen_cb.set(false);
-                                                status_cb.set(err);
-                                            }
-                                        }
-                                    }>{move || if listening.get() { "Stop" } else { "Voice" }}</button>
-                                </Show>
-                                <button type="button" class=move || {
+                                <span class=move || {
                                     if approvals::is_dangerous(&perm_mode.get()) {
-                                        "chip approvals-mode-chip danger"
+                                        "composer-glance approvals-mode-chip danger"
                                     } else {
-                                        "chip approvals-mode-chip"
+                                        "composer-glance approvals-mode-chip"
                                     }
-                                } aria-haspopup="menu" aria-expanded=move || mode_menu.get() on:click=move |_| {
-                                    model_menu.set(false);
-                                    memory_menu.set(false);
-                                    plus_open.set(false);
-                                    ac_open.set(false);
-                                    ac_force.set(String::new());
-                                    mode_menu.update(|v| *v = !*v);
-                                }>{move || format!("Approval · {}", mode_label(&perm_mode.get()))}</button>
-                                <ModelMenu
-                                    open=model_menu
-                                    provider=provider_name
-                                    model=model_name
-                                    effort=effort_level
-                                    context_used=context_used
-                                    context_limit=context_limit
-                                    context_fit=context_fit
-                                    catalog=catalog
-                                    catalog_note=catalog_note
-                                    model_note=model_note
-                                    defaults=model_defaults
-                                    busy=session_busy_now
-                                    on_select=on_select_model
-                                    on_default_model=on_default_model
-                                    on_effort=on_effort
-                                    on_default_effort=on_default_effort
-                                />
-                                <button type="button" class="chip" aria-label="Memory mode" on:click=move |_| {
+                                } data-approval-status="true">{move || format!("Approval · {}", mode_label(&perm_mode.get()))}</span>
+                                <button type="button" class=move || {
+                                    // Non-default autonomy is safety-relevant
+                                    // state (#1572): a session not on the
+                                    // supervised default must read that way at
+                                    // a glance, phone included.
+                                    if crate::model::autonomy_or_default(&autonomy.get()) != "supervised" {
+                                        "composer-glance approvals-mode-chip danger"
+                                    } else {
+                                        "composer-glance approvals-mode-chip"
+                                    }
+                                } data-autonomy-status="true" title="Autonomy — who clears a workflow phase exit. Opens the autonomy picker." on:click=move |_| {
                                     mode_menu.set(false);
                                     model_menu.set(false);
-                                    memory_menu.update(|v| *v = !*v);
-                                }>{move || format!("Memory · {}", memory_mode_label(&memory_mode.get()))}</button>
-                                <button type="button" class=move || if side_open.get() { "chip on side-chat-open-composer" } else { "chip side-chat-open-composer" } on:click=move |_| open_side(String::new(), String::new())>"Side chat"</button>
-                                <span class="context-meter">{move || {
-                                    let ctx = active_context(&catalog.get(), &provider_name.get(), &model_name.get());
-                                    let view = context_view(context_used.get(), context_limit.get(), ctx, &context_fit.get());
-                                    if view.limit <= 0 { String::new() } else { view.summary }
+                                    autonomy_menu.update(|v| *v = !*v);
+                                }>{move || format!("Autonomy · {}", crate::model::autonomy_label(&autonomy.get()))}</button>
+                                <Show when=move || fast_on.get()>
+                                    <span class="composer-glance" data-fast-status="true" title="Fast (priority service tier) is on for this session, as confirmed by the daemon. The current provider may not support priority tier.">"Fast · on"</span>
+                                </Show>
+                                <span class="composer-glance" data-model-status="true">{move || {
+                                    let model = model_name.get();
+                                    let name = if model.is_empty() { provider_name.get() } else { model };
+                                    if name.is_empty() { "Model · none".into() } else { format!("Model · {name}") }
                                 }}</span>
                                 </div>
                                 <div class="steer-actions">
-                                    <button type="button" title="While a turn is running, the send button steers that turn" aria-pressed=move || if enter_mode.get() == "steer" { "true" } else { "false" } class=move || if enter_mode.get() == "steer" { "chip on" } else { "chip" } on:click=move |_| set_enter("steer".into())>"Steer"</button>
-                                    <button type="button" title="While a turn is running, the send button waits until the turn finishes" aria-pressed=move || if enter_mode.get() == "queue" { "true" } else { "false" } class=move || if enter_mode.get() == "queue" { "chip on" } else { "chip" } on:click=move |_| set_enter("queue".into())>"Queue"</button>
                                     <Show when=move || session_busy_now.get()>
                                         <button type="button" id="stop-turn" class=move || if confirm_stop.get() { "secondary confirming" } else { "secondary" } title="Stops the running turn. Click again to confirm. Escape still stops immediately." on:click=move |_| {
                                             if confirm_stop.get_untracked() {
@@ -4177,14 +5083,26 @@ fn App() -> impl IntoView {
                         <Show when=move || !model_note.get().is_empty() && !model_menu.get()>
                             <p class="hint" data-model-note="true">{move || model_note.get()}</p>
                         </Show>
-                        <p class="hint" data-composer-triggers="status">{move || {
+                        <p class="hint composer-statusline" data-composer-triggers="status">{
+                            let memory_mode = memory_mode;
+                            move || {
                             let note = transcript.with(|t| t.trigger_note.clone());
                             let pending = transcript.with(|t| t.asks.len());
                             let custom = trigger_status(&note, pending);
-                            if custom.is_empty() {
-                                "Enter follows Steer or Queue while a turn runs. Ctrl+Enter does the other one. Escape stops the turn when the draft is empty. On a phone, Enter inserts a line and the button sends. ! runs a shell after approval. @file, /command, and $skill expand on send.".into()
+                            let mode = memory_mode.get();
+                            let memory = if mode == "normal" || mode.is_empty() {
+                                String::new()
                             } else {
-                                custom
+                                format!("Memory · {}", memory_mode_label(&mode))
+                            };
+                            let ctx = active_context(&catalog.get(), &provider_name.get(), &model_name.get());
+                            let meter = {
+                                let view = context_view(context_used.get(), context_limit.get(), ctx, &context_fit.get());
+                                if view.limit <= 0 { String::new() } else { view.summary }
+                            };
+                            view! {
+                                <span>{if custom.is_empty() { memory } else { custom }}</span>
+                                <span class="context-meter">{meter}</span>
                             }
                         }}</p>
                     </div>
@@ -4195,10 +5113,6 @@ fn App() -> impl IntoView {
                         <button class=move || if side_tab.get() == "files" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("files".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("files")></span>"Files"</button>
                         <button class=move || if side_tab.get() == "changes" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("changes".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("changes")></span>"Changes"</button>
                         <button class=move || if side_tab.get() == "git" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("git".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("git")></span>"Git"</button>
-                        <button class=move || if side_tab.get() == "worktrees" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("worktrees".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("worktrees")></span>"Worktrees"</button>
-                        <button class=move || if side_tab.get() == "memory" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("memory".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("memory")></span>"Memory"</button>
-                        <button class=move || if side_tab.get() == "knowledge" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("knowledge".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("knowledge")></span>"Knowledge"</button>
-                        <button class=move || if side_tab.get() == "artifacts" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("artifacts".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("artifacts")></span>"Artifacts"</button>
                         <button class=move || if side_tab.get() == "terminal" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("terminal".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("terminal")></span>"Terminal"</button>
                     </div>
                     <Show when=move || side_tab.get() == "activity">
@@ -4216,13 +5130,26 @@ fn App() -> impl IntoView {
                         <StatCard label="Tasks".into()>{move || activity.get().len().to_string()}</StatCard>
                     </div>
                     <Show when=move || !team_note.get().is_empty()>
-                        <p class="hint">{move || team_note.get()}</p>
+                        <p class="hint" data-team-note="true">{move || team_note.get()}</p>
+                    </Show>
+                    <Show when=move || !children_note.get().is_empty()>
+                        <p class="hint" data-children-note="true">{move || children_note.get()}</p>
                     </Show>
                     <Show when=move || activity.get().is_empty()>
-                        <EmptyState
-                            title="No live tasks".into()
-                            body="Delegated work for this session shows its status here.".into()
-                        />
+                        {move || {
+                            let failed = !children_note.get().is_empty();
+                            let title = if failed {
+                                "Delegation history unavailable".to_string()
+                            } else {
+                                "No live tasks".to_string()
+                            };
+                            let body = if failed {
+                                "Saved children did not load, so this panel is not a complete delegation history.".to_string()
+                            } else {
+                                "Delegated work for this session shows its status here.".to_string()
+                            };
+                            view! { <EmptyState title=title body=body /> }
+                        }}
                     </Show>
                     <ul class="plain">
                         {move || {
@@ -4332,7 +5259,10 @@ fn App() -> impl IntoView {
                     </Show>
                     <Show when=move || side_tab.get() == "files">
                         <div class="files">
-                            <p class="hint">{move || if files_path.get().is_empty() { "Working directory".into() } else { files_path.get() }}</p>
+                            <div class="files-head">
+                                <p class="hint">{move || if files_path.get().is_empty() { "Working directory".into() } else { files_path.get() }}</p>
+                                <button class="secondary" on:click=move |_| load_files()>"Refresh"</button>
+                            </div>
                             <Show when=move || !files_error.get().is_empty()>
                                 <div class="notice" role="alert">
                                     <span>{move || files_error.get()}</span>
@@ -4342,50 +5272,47 @@ fn App() -> impl IntoView {
                             <Show when=move || !files_path.get().is_empty()>
                                 <button class="secondary" on:click=move |_| files_path.set(parent_path(&files_path.get()))>"Up"</button>
                             </Show>
-                            <Show when=move || !doc_path.get().is_empty()>
-                                <p class="hint">{move || format!("Open: {}", doc_path.get())}</p>
-                            </Show>
                             <ul class="plain">
-                                {move || files.get().into_iter().map(|entry| {
+                                {move || {
+                                    let pending = files_loading.get() || files_for.get() != files_path.get();
+                                    if pending {
+                                        return view! { <li class="hint">"Loading…"</li> }.into_any();
+                                    }
+                                    files.get().into_iter().map(|entry| {
                                     let name = entry.name.clone();
                                     let path = join_path(&files_path.get(), &entry.name);
                                     let path_drag = path.clone();
                                     let path_click = path.clone();
-                                    let path_open = path.clone();
                                     let is_dir = entry.is_dir;
                                     let label = if is_dir { format!("{name}/") } else { name.clone() };
+                                    let open_attr = if is_dir { String::new() } else { path.clone() };
                                     view! {
                                         <li class="ev-fileline">
-                                            <button class="link file-row" draggable="true"
+                                            <button class="link file-row" draggable="true" data-ev-open=open_attr
                                                 on:dragstart=move |ev: web_sys::DragEvent| set_drag(&ev, &path_drag)
                                                 on:click=move |_| {
                                                     if is_dir {
                                                         files_path.set(path_click.clone());
                                                     } else {
-                                                        insert_mention(path_click.clone());
+                                                        doc_line.set(0);
+                                                        doc_diff.set(false);
+                                                        doc_path.set(path_click.clone());
                                                     }
                                                 }
                                             >{label}</button>
-                                            {(!is_dir).then(|| {
-                                                let path_attr = path_open.clone();
-                                                let path_set = path_open.clone();
-                                                view! {
-                                                    <button type="button" class="secondary ev-open" data-ev-open=path_attr on:click=move |_| {
-                                                        doc_line.set(0);
-                                                        doc_diff.set(false);
-                                                        doc_path.set(path_set.clone());
-                                                    }>"Open"</button>
-                                                }
-                                            })}
                                         </li>
                                     }
-                                }).collect_view()}
+                                }).collect_view().into_any()
+                                }}
                             </ul>
-                            <p class="hint">"Open reads the file. Click or drag inserts @path. Send attaches the file."</p>
                         </div>
                     </Show>
                     <Show when=move || side_tab.get() == "changes">
                         <div class="changes">
+                            <div class="changes-head">
+                                <p class="hint">"Changed files"</p>
+                                <button class="secondary" on:click=move |_| load_changes()>"Refresh"</button>
+                            </div>
                             <Show when=move || !changes_error.get().is_empty()>
                                 <div class="notice" role="alert">
                                     <span>{move || changes_error.get()}</span>
@@ -4400,36 +5327,34 @@ fn App() -> impl IntoView {
                                     let path = file.path.clone();
                                     let path_drag = path.clone();
                                     let path_click = path.clone();
-                                    let path_open = path.clone();
                                     let added = file.added;
                                     let deleted = file.deleted;
                                     view! {
                                         <li class="ev-fileline">
-                                            <button class="link file-row" draggable="true"
+                                            <button class="link file-row" draggable="true" data-ev-open=path.clone()
                                                 on:dragstart=move |ev: web_sys::DragEvent| set_drag(&ev, &path_drag)
-                                                on:click=move |_| insert_mention(path_click.clone())
+                                                on:click=move |_| {
+                                                    doc_line.set(0);
+                                                    doc_diff.set(true);
+                                                    doc_path.set(path_click.clone());
+                                                }
                                             >
                                                 <span class="name">{path.clone()}</span>
                                                 <span class="diff-add">{format!("+{added}")}</span>
                                                 <span class="diff-del">{format!("-{deleted}")}</span>
                                             </button>
-                                            <button type="button" class="secondary ev-open" data-ev-open=path_open.clone() on:click=move |_| {
-                                                doc_line.set(0);
-                                                doc_diff.set(true);
-                                                doc_path.set(path_open.clone());
-                                            }>"Open"</button>
                                         </li>
                                     }
                                 }).collect_view()}
                             </ul>
                         </div>
                     </Show>
-                    <Show when=move || side_tab.get() == "git">
-                        <git::GitPanel base=base token=token status_line=status />
-                    </Show>
-                    <Show when=move || side_tab.get() == "worktrees">
-                        <git::WorktreePanel base=base token=token status_line=status active_root=active_root />
-                    </Show>
+                    <div hidden=move || !git_active.get()>
+                        <git::GitPanel base=base token=token status_line=status active=git_active />
+                    </div>
+                    <div hidden=move || !worktree_active.get()>
+                        <git::WorktreePanel base=base token=token status_line=status active_root=active_root active=worktree_active />
+                    </div>
                     <Show when=move || {
                         let tab = side_tab.get();
                         tab == "memory" || tab == "knowledge" || tab == "artifacts"
@@ -4481,59 +5406,112 @@ fn App() -> impl IntoView {
 }
 
 #[component]
-fn DaemonPane(
-    base: RwSignal<String>,
-    token: RwSignal<String>,
-    status: RwSignal<String>,
-    gateway: RwSignal<String>,
-    gateway_detail: RwSignal<String>,
-    gateway_open: RwSignal<bool>,
-    gateway_profiles: RwSignal<Vec<gateway::Profile>>,
-    gateway_selected: RwSignal<String>,
-    refresh: impl Fn() + Copy + Send + Sync + 'static,
-    open_picker: impl Fn() + Copy + 'static,
-) -> impl IntoView {
-    let _ = status;
-    let connect = move |_: web_sys::MouseEvent| {
-        save("strike.base", &base.get());
-        gateway::persist_token("this", &token.get());
-        gateway::forget_persisted_host_token();
-        refresh();
-    };
-
+fn DaemonPane(gateway_detail: RwSignal<String>) -> impl IntoView {
     view! {
         <main class="daemon">
             <section class="card">
                 <h2 class="panel-title"><span class="icon-slot" aria-hidden="true" inner_html=icon("status")></span>"Daemon"</h2>
-                <label>"Base URL (blank = this daemon)"</label>
-                <input placeholder="http://100.64.0.5:8787"
-                    prop:value=move || base.get()
-                    on:input=move |ev| base.set(event_target_value(&ev)) />
-                <label>"Token"</label>
-                <input type="password" autocomplete="off"
-                    prop:value=move || token.get()
-                    on:input=move |ev| token.set(event_target_value(&ev)) />
-                <button class="primary" on:click=connect>"Connect"</button>
-                <p class="hint">"Same-origin live transcript uses the daemon cookie. strike connect keeps a short-lived grant in a local proxy so the URL has no token."</p>
-            </section>
-            <gateway::GatewaySwitcher
-                inline=true
-                primary=false
-                base=base
-                token=token
-                gateway=gateway
-                detail=gateway_detail
-                open=gateway_open
-                profiles=gateway_profiles
-                selected=gateway_selected
-                refresh=refresh
-            />
-            <section class="card">
-                <h2 class="panel-title">"Workspaces"</h2>
-                <p class="hint">"A workspace is a directory. Session lists are not folders."</p>
-                <button class="primary ws-open" on:click=move |_| open_picker()>"Change workspace"</button>
+                <p class="hint gw-detail">{move || {
+                    let detail = gateway_detail.get();
+                    if detail.is_empty() {
+                        "Gateway actions are in the command palette.".into()
+                    } else {
+                        detail
+                    }
+                }}</p>
             </section>
         </main>
+    }
+}
+
+#[cfg(test)]
+mod composer_grow_history_tests {
+    use super::*;
+
+    #[test]
+    fn height_clamps_to_existing_bounds() {
+        assert_eq!(composer_height_px(0), COMPOSER_MIN_HEIGHT_PX);
+        assert_eq!(composer_height_px(43), COMPOSER_MIN_HEIGHT_PX);
+        assert_eq!(composer_height_px(44), 44);
+        assert_eq!(composer_height_px(100), 100);
+        assert_eq!(composer_height_px(160), 160);
+        assert_eq!(composer_height_px(900), COMPOSER_MAX_HEIGHT_PX);
+    }
+
+    #[test]
+    fn caret_rules_follow_multiline_motion() {
+        // Single line: neither arrow can move the caret within the draft.
+        assert!(!caret_can_move_up("hello", 5));
+        assert!(!caret_can_move_down("hello", 0));
+        // Caret on the second line: Up moves, Down does not.
+        assert!(caret_can_move_up("a\nb", 3));
+        assert!(!caret_can_move_down("a\nb", 3));
+        // Caret on the first line of two: Down moves, Up does not.
+        assert!(!caret_can_move_up("a\nb", 1));
+        assert!(caret_can_move_down("a\nb", 1));
+        // Caret in the middle line of three: both move.
+        assert!(caret_can_move_up("a\nb\nc", 3));
+        assert!(caret_can_move_down("a\nb\nc", 3));
+    }
+
+    #[test]
+    fn history_cycles_and_restores_the_stash() {
+        let mut h = PromptHistory::default();
+        assert_eq!(h.prev("wip"), None);
+        h.push("first prompt");
+        h.push("second prompt");
+        assert_eq!(h.prev("wip draft").as_deref(), Some("second prompt"));
+        assert_eq!(h.prev("second prompt").as_deref(), Some("first prompt"));
+        // Oldest entry sticks instead of wrapping.
+        assert_eq!(h.prev("first prompt").as_deref(), Some("first prompt"));
+        assert_eq!(h.next("first prompt").as_deref(), Some("second prompt"));
+        // Down past the newest entry restores the stashed draft.
+        assert_eq!(h.next("second prompt").as_deref(), Some("wip draft"));
+        // And cycling is over: a further Down has nothing to do.
+        assert_eq!(h.next("wip draft"), None);
+    }
+
+    #[test]
+    fn history_dedupes_consecutive_and_caps() {
+        let mut h = PromptHistory::default();
+        h.push("  same  ");
+        h.push("same");
+        h.push("");
+        h.push("   ");
+        assert_eq!(h.entries, vec!["same".to_string()]);
+        h.push("other");
+        h.push("same");
+        assert_eq!(h.entries.len(), 3, "non-consecutive repeats are kept");
+        for i in 0..(PROMPT_HISTORY_CAP + 5) {
+            h.push(&format!("prompt {i}"));
+        }
+        assert_eq!(h.entries.len(), PROMPT_HISTORY_CAP);
+        assert_eq!(h.entries.first().map(String::as_str), Some("prompt 5"));
+    }
+
+    #[test]
+    fn history_edit_since_recall_is_not_clobbered() {
+        let mut h = PromptHistory::default();
+        h.push("one");
+        h.push("two");
+        assert_eq!(h.prev("").as_deref(), Some("two"));
+        // User edited the recalled prompt, then presses Down: the edit
+        // stays and cycling is abandoned.
+        assert_eq!(h.next("two, edited"), None);
+        // Pressing Up with the edited draft stashes the edit and recalls
+        // the newest entry again.
+        assert_eq!(h.prev("two, edited").as_deref(), Some("two"));
+        assert_eq!(h.next("two").as_deref(), Some("two, edited"));
+    }
+
+    #[test]
+    fn push_resets_navigation() {
+        let mut h = PromptHistory::default();
+        h.push("one");
+        assert_eq!(h.prev("wip").as_deref(), Some("one"));
+        h.push("two");
+        assert_eq!(h.cursor, None);
+        assert_eq!(h.prev("new wip").as_deref(), Some("two"));
     }
 }
 

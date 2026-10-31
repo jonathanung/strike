@@ -93,6 +93,15 @@ func (a *alwaysFailTool) Execute(_ context.Context, _ json.RawMessage, _ *tool.C
 	return tool.Result{}, &tool.CodedError{Code: code, Message: "nope", Retryable: false}
 }
 
+// drainWait is the anti-hang budget passed to drainTurn. drainTurn waits on
+// completion state (the turn's TurnCompleted event); the deadline only guards
+// against a genuine hang and is not a timeliness assertion — the tests assert
+// stop reasons and execution counts, never elapsed time. A flat 5s lost under
+// full-suite -race load on a 2-CPU VM (#1655; TestMutativeToolDoesNotAutoRetryTransient
+// and TestToolLoopDetectorStopsTurn, 0/20 isolated), the same family as #1604,
+// so the budget matches the 30s convention from #1650's orderingWait.
+const drainWait = 30 * time.Second
+
 func drainTurn(t *testing.T, eng *engine.Engine, timeout time.Duration) (protocol.TurnCompleted, []protocol.Event) {
 	t.Helper()
 	var completed protocol.TurnCompleted
@@ -149,7 +158,7 @@ func TestToolRetriesTransientSafeRetry(t *testing.T) {
 	go eng.Run(ctx)
 	eng.Ops() <- protocol.UserInput{Text: "retry please"}
 
-	completed, events := drainTurn(t, eng, 5*time.Second)
+	completed, events := drainTurn(t, eng, drainWait)
 	if completed.StopReason != "end_turn" {
 		t.Fatalf("stopReason = %q", completed.StopReason)
 	}
@@ -206,7 +215,7 @@ func TestMutativeToolDoesNotAutoRetryTransient(t *testing.T) {
 	go eng.Run(ctx)
 	eng.Ops() <- protocol.UserInput{Text: "patch"}
 
-	completed, events := drainTurn(t, eng, 5*time.Second)
+	completed, events := drainTurn(t, eng, drainWait)
 	if completed.StopReason != "end_turn" {
 		t.Fatalf("stopReason = %q", completed.StopReason)
 	}
@@ -272,7 +281,7 @@ func TestToolLoopDetectorStopsTurn(t *testing.T) {
 	go eng.Run(ctx)
 	eng.Ops() <- protocol.UserInput{Text: "loop"}
 
-	completed, events := drainTurn(t, eng, 5*time.Second)
+	completed, events := drainTurn(t, eng, drainWait)
 	if completed.StopReason != "loop_detected" {
 		t.Fatalf("stopReason = %q, want loop_detected", completed.StopReason)
 	}
@@ -322,7 +331,7 @@ func TestPreconditionRecoverHintOnConditional(t *testing.T) {
 	go eng.Run(ctx)
 	eng.Ops() <- protocol.UserInput{Text: "edit"}
 
-	_, events := drainTurn(t, eng, 5*time.Second)
+	_, events := drainTurn(t, eng, drainWait)
 	if runs.Load() != 1 {
 		t.Fatalf("executions = %d, want 1 (recover, not retry)", runs.Load())
 	}

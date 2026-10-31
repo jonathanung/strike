@@ -73,7 +73,7 @@ replaces a command, including a builtin.
 | `keywords` | Extra fuzzy terms, weighted with the shortcut above the detail. |
 | `order` | Order inside a group when the query is empty. |
 | `argument` | `Some` asks for a free-text argument before `run`. `required` rejects an empty string with “This command needs an argument.” |
-| `choices` | Second step. A closure returns rows (`id`, `label`, `detail`). The palette lists them, the field filters them, and `run` receives the chosen id. Use this for “Switch model…”, “Switch workspace…”, and “Open session…”. |
+| `choices` | Second step. A closure returns rows (`id`, `label`, `detail`). The palette lists them, the field filters them, and `run` receives the chosen id. A non-empty query also promotes up to four matching choices per command (twelve total) into the first list, so typing a model or provider name runs that choice. An empty query does not list choices. Use this for “Switch model…”, “Switch workspace…”, and “Open session…”. |
 | `visible` | `None` lists the command. `Some` hides it when the predicate is false, including from Recent. |
 | `enabled` | `None` can run. `Some` keeps the row and refuses to run when the predicate is false. |
 | `confirm` | `Some(ConfirmSpec { title, body, confirm_label })` opens the shared dialog in `webui/src/confirm.rs` before `run`. Use it for destructive work. The button that performs the same work should call `confirm::ask` too, and `run` should not ask a second time. |

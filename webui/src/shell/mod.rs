@@ -16,13 +16,15 @@ use std::cell::Cell;
 pub use chrome::Chrome;
 #[allow(unused_imports)]
 pub use host::{
-    bind, dispatch, set_host, set_model_choices, set_model_picker, set_view, unbind, HostBridge,
+    bind, dispatch, set_default_model_picker, set_effort_choices, set_effort_default_setter,
+    set_effort_setter, set_fast_setter, set_host, set_model_choices, set_model_picker,
+    set_show_palette, set_view, show_palette, unbind, HostBridge,
 };
 pub use icon::icon;
 #[allow(unused_imports)]
 pub use registry::{
-    Argument, Choice, Command, ConfirmSpec, Group, PaletteUsage, ShellHook, Shortcut, TopRegion,
-    TopSlot,
+    replace_prefixed, Argument, Choice, Command, CommandRun, ConfirmSpec, Group, PaletteUsage,
+    ShellHook, Shortcut, TopRegion, TopSlot,
 };
 
 mod contrib {

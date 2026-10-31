@@ -39,6 +39,45 @@ type ProviderStatus struct {
 	WireAPI   string    `json:"wireAPI,omitempty"`   // custom only: "openai" | "anthropic"
 	BaseURL   string    `json:"baseURL,omitempty"`   // custom only: endpoint origin (no secrets)
 	ExpiresAt time.Time `json:"expiresAt,omitempty"` // OAuth token expiry; zero = unknown/N/A
+	// KeyState is the verification state of an API-key credential:
+	// "" (no API key involved), KeyStored (a key is present but has never
+	// been accepted by the provider), KeyVerified (last probe succeeded),
+	// or KeyRejected (last probe was refused by the provider). A stored key
+	// alone must never be presented as "connected" (#1531).
+	KeyState string `json:"keyState,omitempty"`
+}
+
+// API-key verification states reported in ProviderStatus.KeyState.
+const (
+	KeyStored   = "stored"   // key present, never verified against the provider
+	KeyVerified = "verified" // last probe: provider accepted the key
+	KeyRejected = "rejected" // last probe: provider refused the key
+)
+
+// Key-probe outcomes returned by KeyProber.ProbeAPIKey.
+const (
+	ProbeValid       = "valid"       // provider accepted the stored key
+	ProbeInvalid     = "invalid"     // provider refused the stored key (401/403)
+	ProbeUnreachable = "unreachable" // provider could not be reached / did not answer usefully
+	ProbeNoKey       = "no-key"      // no API key is stored for the provider
+	ProbeUnsupported = "unsupported" // provider has no API key to probe (OAuth-only, builtin, …)
+)
+
+// KeyProbeResult is the outcome of one credential probe. Detail is safe to
+// show to the user: it never contains the key or a response body.
+type KeyProbeResult struct {
+	Status string `json:"status"` // one of the Probe* constants
+	Detail string `json:"detail"`
+}
+
+// KeyProber is an optional Auth extension: hosts that can reach provider
+// endpoints implement it so frontends can offer a real "test this key"
+// action instead of inferring health from a catalog listing (#1531).
+type KeyProber interface {
+	// ProbeAPIKey presents the provider's stored API key to the provider
+	// itself (a minimal authenticated request) and reports whether the key
+	// was accepted, refused, or could not be checked.
+	ProbeAPIKey(ctx context.Context, provider string) KeyProbeResult
 }
 
 // CustomProvider is a user-declared LLM endpoint. API keys are never included;

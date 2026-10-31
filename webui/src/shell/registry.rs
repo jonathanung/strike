@@ -240,6 +240,9 @@ pub struct PaletteHit {
     pub shortcut: String,
     pub needs_argument: bool,
     pub enabled: bool,
+    /// Choice id when this row is a promoted second-step choice. Empty for
+    /// a normal command. Enter runs the command with this argument.
+    pub args: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -349,32 +352,94 @@ impl Registry {
             groups.extend(group_contiguous(&matched));
             return groups;
         }
-        matched.sort_by(|a, b| {
-            let sa = command_score(query, a.label, a.detail, a.shortcut, a.keywords).unwrap_or(0);
-            let sb = command_score(query, b.label, b.detail, b.shortcut, b.keywords).unwrap_or(0);
-            sb.cmp(&sa)
-                .then(a.order.cmp(&b.order))
-                .then(a.label.cmp(b.label))
-        });
-        let mut order = Vec::new();
-        for cmd in &matched {
-            let section = cmd.group.title();
-            if !order.iter().any(|name| *name == section) {
-                order.push(section);
+        let mut ranked: Vec<Ranked> = matched
+            .into_iter()
+            .map(|cmd| Ranked {
+                score: command_score(query, cmd.label, cmd.detail, cmd.shortcut, cmd.keywords)
+                    .unwrap_or(0),
+                order: cmd.order,
+                label: cmd.label.to_string(),
+                section: cmd.group.title(),
+                hit: hit(cmd),
+            })
+            .collect();
+        // A typed query also surfaces matching choices (Switch model: echo/…,
+        // Remove stored key: openai) so a known name runs without a second
+        // step. An empty query does not list them.
+        let mut choice_total = 0;
+        for cmd in self.visible() {
+            if choice_total >= 12 {
+                break;
+            }
+            let Some(load) = cmd.choices.as_ref() else {
+                continue;
+            };
+            let mut took = 0;
+            for choice in filter_choices(query, &load()) {
+                if took >= 4 || choice_total >= 12 {
+                    break;
+                }
+                let score = super::rank::best_score(
+                    query,
+                    &[
+                        (choice.label.as_str(), 3),
+                        (choice.id.as_str(), 2),
+                        (choice.detail.as_str(), 1),
+                    ],
+                )
+                .unwrap_or(0);
+                ranked.push(Ranked {
+                    score,
+                    order: cmd.order,
+                    label: choice.label.clone(),
+                    section: cmd.group.title(),
+                    hit: PaletteHit {
+                        id: cmd.id.to_string(),
+                        label: choice.label,
+                        detail: choice.detail,
+                        shortcut: String::new(),
+                        needs_argument: false,
+                        enabled: cmd.is_enabled(),
+                        args: choice.id,
+                    },
+                });
+                took += 1;
+                choice_total += 1;
             }
         }
-        order
-            .into_iter()
-            .map(|section| PaletteGroup {
-                section: section.to_string(),
-                hits: matched
-                    .iter()
-                    .filter(|cmd| cmd.group.title() == section)
-                    .map(|cmd| hit(cmd))
-                    .collect(),
-            })
-            .collect()
+        ranked.sort_by(|a, b| {
+            b.score
+                .cmp(&a.score)
+                .then(a.order.cmp(&b.order))
+                .then(a.label.cmp(&b.label))
+        });
+        let mut groups: Vec<PaletteGroup> = Vec::new();
+        for row in ranked {
+            if let Some(last) = groups.last_mut() {
+                if last.section == row.section {
+                    last.hits.push(row.hit);
+                    continue;
+                }
+            }
+            if let Some(existing) = groups.iter_mut().find(|group| group.section == row.section) {
+                existing.hits.push(row.hit);
+                continue;
+            }
+            groups.push(PaletteGroup {
+                section: row.section.to_string(),
+                hits: vec![row.hit],
+            });
+        }
+        groups
     }
+}
+
+struct Ranked {
+    score: i32,
+    order: i32,
+    label: String,
+    section: &'static str,
+    hit: PaletteHit,
 }
 
 fn hit(cmd: &Command) -> PaletteHit {
@@ -385,6 +450,7 @@ fn hit(cmd: &Command) -> PaletteHit {
         shortcut: cmd.shortcut.to_string(),
         needs_argument: cmd.needs_prompt(),
         enabled: cmd.is_enabled(),
+        args: String::new(),
     }
 }
 
@@ -482,6 +548,18 @@ thread_local! {
 
 pub fn palette(raw: &str, usage: &PaletteUsage) -> Vec<PaletteGroup> {
     REG.with(|reg| reg.borrow().query(raw, usage))
+}
+
+/// Drop every command whose id starts with `prefix`, then insert `cmds`.
+/// Gateway names are not known at boot, so the switcher refreshes its rows.
+pub fn replace_prefixed(prefix: &str, cmds: Vec<Command>) {
+    REG.with(|reg| {
+        let mut reg = reg.borrow_mut();
+        reg.commands.retain(|cmd| !cmd.id.starts_with(prefix));
+        for cmd in cmds {
+            reg.upsert_command(cmd);
+        }
+    });
 }
 
 pub fn command(id: &str) -> Option<Command> {
@@ -714,6 +792,80 @@ mod tests {
         assert_eq!(hit.len(), 1);
         assert_eq!(hit[0].id, "a");
         assert!(filter_choices("zzzz", &choices).is_empty());
+    }
+
+    #[test]
+    fn typed_query_promotes_a_matching_choice() {
+        let mut hook = ShellHook::new();
+        hook.command(
+            cmd("switch-model", Group::Model, "Switch model…", 1)
+                .keywords(&["model", "switch"])
+                .argument(Argument {
+                    placeholder: "Filter models",
+                    required: true,
+                })
+                .choices(|| {
+                    vec![Choice {
+                        id: "echo\thaiku".into(),
+                        label: "Switch model: echo/haiku".into(),
+                        detail: "echo".into(),
+                    }]
+                }),
+        );
+        let groups = hook.query("haiku", &PaletteUsage::default());
+        let hit = groups
+            .iter()
+            .flat_map(|group| group.hits.iter())
+            .find(|hit| hit.args == "echo\thaiku")
+            .expect("choice row");
+        assert_eq!(hit.id, "switch-model");
+        assert!(!hit.needs_argument);
+        let empty = hook.query("", &PaletteUsage::default());
+        assert!(empty
+            .iter()
+            .flat_map(|group| group.hits.iter())
+            .all(|hit| hit.args.is_empty()));
+    }
+
+    #[test]
+    fn palette_only_views_keep_one_command_and_drop_the_menu_slot() {
+        let mut hook = ShellHook::new();
+        crate::shell::builtin::install(&mut hook);
+        crate::shell::contrib::install(&mut hook);
+        for id in [
+            "schedule",
+            "triggers",
+            "apps",
+            "tasks",
+            "goals",
+            "usage",
+            "audit",
+            "panel-terminal",
+            "providers",
+            "settings",
+        ] {
+            let n = hook
+                .registry
+                .commands
+                .iter()
+                .filter(|cmd| cmd.id == id)
+                .count();
+            assert_eq!(n, 1, "{id}");
+        }
+        for id in [
+            "schedule",
+            "triggers",
+            "apps",
+            "task-runner",
+            "goals",
+            "usage-audit",
+        ] {
+            assert!(
+                hook.registry.slots.iter().all(|slot| slot.id != id),
+                "{id} still has a TopSlot"
+            );
+        }
+        assert!(hook.registry.slots.iter().any(|slot| slot.id == "settings"));
     }
 
     #[test]

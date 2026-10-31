@@ -166,6 +166,28 @@
   clip: rect(0, 0, 0, 0);
   border: 0;
 }
+.composer-glance {
+  display: inline-flex;
+  align-items: center;
+  /* #1711: glance chips are flex items in the horizontally scrolling
+     .composer-chips row. Without flex:none + nowrap the Autonomy chip
+     shrank on phone, wrapped "Autonomy · supervised" onto two lines,
+     and the fixed 44px phone height clipped both lines (measured
+     clientHeight 42 < scrollHeight 49). Keep every glance label on
+     one line; the row scrolls horizontally instead. */
+  flex: 0 0 auto;
+  white-space: nowrap;
+  min-height: 32px;
+  padding: 0 8px;
+  font-weight: 650;
+}
+.composer-statusline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+}
+.composer-statusline .context-meter { margin-left: auto; }
 .composer-bar .chip.listening {
   color: var(--signal);
   border-color: var(--signal);

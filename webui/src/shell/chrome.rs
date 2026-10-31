@@ -84,6 +84,7 @@ pub fn Chrome() -> impl IntoView {
         error.set(String::new());
     };
 
+    host::set_show_palette(Rc::new(open_palette));
     host::set_open_help(Rc::new(move || {
         palette_open.set(false);
         arg_id.set(String::new());
@@ -91,16 +92,21 @@ pub fn Chrome() -> impl IntoView {
         help_open.set(true);
     }));
 
-    let flat_ids = move || -> Vec<String> {
+    let flat_ids = move || -> Vec<(String, String)> {
         if !arg_id.get_untracked().is_empty() {
             return choice_rows(&arg_id.get_untracked(), &arg_text.get_untracked())
                 .into_iter()
-                .map(|choice| choice.id)
+                .map(|choice| (choice.id, String::new()))
                 .collect();
         }
         registry::palette(&query.get_untracked(), &load_usage())
             .into_iter()
-            .flat_map(|group| group.hits.into_iter().map(|hit| hit.id))
+            .flat_map(|group| {
+                group
+                    .hits
+                    .into_iter()
+                    .map(|hit| (hit.id, hit.args))
+            })
             .collect()
     };
     let run_ready = move |id: String, args: String| {
@@ -122,14 +128,17 @@ pub fn Chrome() -> impl IntoView {
             let perform = cmd.run.clone();
             let remembered = id.clone();
             let payload = args.clone();
-            crate::confirm::ask(
+            if !crate::confirm::ask(
                 spec.into(),
                 Rc::new(move || {
                     if perform(&payload).is_ok() {
                         remember_command(&remembered);
                     }
                 }),
-            );
+            ) {
+                error.set(crate::confirm::BUSY.into());
+                return;
+            }
             close_palette();
             return;
         }
@@ -422,8 +431,12 @@ pub fn Chrome() -> impl IntoView {
                                     return;
                                 }
                                 let ids = flat_ids();
-                                if let Some(id) = ids.get(cursor.get_untracked()) {
-                                    activate(id.clone());
+                                if let Some((id, args)) = ids.get(cursor.get_untracked()) {
+                                    if args.is_empty() {
+                                        activate(id.clone());
+                                    } else {
+                                        run_ready(id.clone(), args.clone());
+                                    }
                                 }
                             }
                         }
@@ -498,7 +511,9 @@ pub fn Chrome() -> impl IntoView {
                                     let class = if on { "palette-row on" } else { "palette-row" };
                                     let enabled = hit.enabled;
                                     let activate_id = id.clone();
+                                    let args = hit.args.clone();
                                     let run = activate;
+                                    let run_now = run_ready;
                                     blocks.push(view! {
                                         <button
                                             type="button"
@@ -509,7 +524,13 @@ pub fn Chrome() -> impl IntoView {
                                             aria-disabled=(!enabled).to_string()
                                             disabled=!enabled
                                             data-command-id=id
-                                            on:click=move |_| run(activate_id.clone())
+                                            on:click=move |_| {
+                                                if args.is_empty() {
+                                                    run(activate_id.clone());
+                                                } else {
+                                                    run_now(activate_id.clone(), args.clone());
+                                                }
+                                            }
                                         >
                                             <span class="palette-copy">
                                                 <span class="name">{label}</span>

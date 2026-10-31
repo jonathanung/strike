@@ -13,7 +13,12 @@ use super::registry::{Choice, CommandRun};
 
 thread_local! {
     static MODEL_CHOICES: RefCell<Vec<Choice>> = RefCell::new(Vec::new());
+    static EFFORT_CHOICES: RefCell<Vec<Choice>> = RefCell::new(Vec::new());
     static PICK_MODEL: RefCell<Option<Rc<dyn Fn(&str, &str)>>> = RefCell::new(None);
+    static SET_EFFORT: RefCell<Option<Rc<dyn Fn(&str)>>> = RefCell::new(None);
+    static SET_FAST: RefCell<Option<Rc<dyn Fn(bool)>>> = RefCell::new(None);
+    static SAVE_EFFORT: RefCell<Option<Rc<dyn Fn()>>> = RefCell::new(None);
+    static SET_DEFAULT_MODEL: RefCell<Option<Rc<dyn Fn(&str, &str)>>> = RefCell::new(None);
 }
 
 pub fn set_model_choices(rows: Vec<Choice>) {
@@ -41,6 +46,77 @@ pub fn pick_model(encoded: &str) -> Result<(), String> {
     Ok(())
 }
 
+pub fn set_effort_choices(rows: Vec<Choice>) {
+    EFFORT_CHOICES.with(|choices| *choices.borrow_mut() = rows);
+}
+
+pub fn effort_choices() -> Vec<Choice> {
+    EFFORT_CHOICES.with(|choices| choices.borrow().clone())
+}
+
+pub fn set_effort_setter(set: Rc<dyn Fn(&str)>) {
+    SET_EFFORT.with(|slot| *slot.borrow_mut() = Some(set));
+}
+
+pub fn set_effort(level: &str) -> Result<(), String> {
+    let level = level.trim();
+    if level.is_empty() {
+        return Err("Pick an effort.".into());
+    }
+    let set = SET_EFFORT
+        .with(|slot| slot.borrow().clone())
+        .ok_or_else(|| "Effort control is not ready.".to_string())?;
+    set(level);
+    Ok(())
+}
+
+pub fn set_fast_setter(set: Rc<dyn Fn(bool)>) {
+    SET_FAST.with(|slot| *slot.borrow_mut() = Some(set));
+}
+
+/// The palette's Fast choices are the strings "on" / "off".
+pub fn set_fast(value: &str) -> Result<(), String> {
+    let enabled = match value.trim() {
+        "on" | "true" => true,
+        "off" | "false" => false,
+        _ => return Err("Pick on or off.".into()),
+    };
+    let set = SET_FAST
+        .with(|slot| slot.borrow().clone())
+        .ok_or_else(|| "Fast control is not ready.".to_string())?;
+    set(enabled);
+    Ok(())
+}
+
+pub fn set_effort_default_setter(save: Rc<dyn Fn()>) {
+    SAVE_EFFORT.with(|slot| *slot.borrow_mut() = Some(save));
+}
+
+pub fn save_effort_default() -> Result<(), String> {
+    let save = SAVE_EFFORT
+        .with(|slot| slot.borrow().clone())
+        .ok_or_else(|| "Effort control is not ready.".to_string())?;
+    save();
+    Ok(())
+}
+
+pub fn set_default_model_picker(pick: Rc<dyn Fn(&str, &str)>) {
+    SET_DEFAULT_MODEL.with(|slot| *slot.borrow_mut() = Some(pick));
+}
+
+/// `encoded` is `provider` + tab + model id, same as [`pick_model`].
+pub fn set_default_model(encoded: &str) -> Result<(), String> {
+    let (provider, id) = encoded.split_once('\t').unwrap_or(("", encoded));
+    if id.is_empty() {
+        return Err("Pick a model.".into());
+    }
+    let pick = SET_DEFAULT_MODEL
+        .with(|slot| slot.borrow().clone())
+        .ok_or_else(|| "Model picker is not ready.".to_string())?;
+    pick(provider, id);
+    Ok(())
+}
+
 pub struct HostBridge {
     pub new_session: Rc<dyn Fn()>,
     pub stop_all: Rc<dyn Fn()>,
@@ -48,6 +124,7 @@ pub struct HostBridge {
     pub view: Rc<dyn Fn() -> String>,
     pub set_enter: Rc<dyn Fn(&str)>,
     pub set_perm: Rc<dyn Fn(&str)>,
+    pub set_autonomy: Rc<dyn Fn(&str)>,
     pub set_theme: Rc<dyn Fn(&str)>,
     pub set_scheme: Rc<dyn Fn(&str)>,
     pub travel: Rc<dyn Fn(bool)>,
@@ -127,6 +204,12 @@ pub fn set_enter(mode: &str) -> Result<(), String> {
 
 pub fn set_perm(mode: &str) -> Result<(), String> {
     let run = host_rc!(set_perm);
+    (*run)(mode);
+    Ok(())
+}
+
+pub fn set_autonomy(mode: &str) -> Result<(), String> {
+    let run = host_rc!(set_autonomy);
     (*run)(mode);
     Ok(())
 }
@@ -275,6 +358,23 @@ thread_local! {
 
 pub fn set_open_help(open: Rc<dyn Fn()>) {
     OPEN_HELP.with(|slot| *slot.borrow_mut() = Some(open));
+}
+
+thread_local! {
+    static OPEN_PALETTE: RefCell<Option<Rc<dyn Fn()>>> = const { RefCell::new(None) };
+}
+
+pub fn set_show_palette(open: Rc<dyn Fn()>) {
+    OPEN_PALETTE.with(|slot| *slot.borrow_mut() = Some(open));
+}
+
+/// Open the command palette. Chrome installs the performer at mount.
+pub fn show_palette() {
+    OPEN_PALETTE.with(|slot| {
+        if let Some(open) = slot.borrow().clone() {
+            open();
+        }
+    });
 }
 
 pub fn open_help() {

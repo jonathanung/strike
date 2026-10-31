@@ -98,6 +98,7 @@ jobs:
             . "$HOME/.cargo/env"
           fi
           cargo test --manifest-path webui/protocol-schema/Cargo.toml --locked
+          cargo test --manifest-path webui/load-guard/Cargo.toml --locked
 
       # E3.2 prompt regression: verbose report of tool/turn/token deltas.
       # Non-blocking for now (test itself soft-fails metric drift unless
@@ -210,6 +211,11 @@ jobs:
 
       - name: Generate TUI flatten
         run: go generate ./internal/frontend/tui/app
+
+      # #1710: fail if the committed bundle this job serves has diverged
+      # from webui/*.css sources (make build does not regenerate it).
+      - name: Check committed webui bundle matches sources
+        run: node scripts/check-webui-bundle.mjs
 
       - name: Build strike
         run: go build -o strike ./cmd/strike

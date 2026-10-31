@@ -186,6 +186,10 @@ func daemonGrant(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "strike:", redactSecrets(err.Error(), hostToken))
 		return 1
 	}
+	if status == http.StatusUnauthorized {
+		fmt.Fprintf(stderr, "strike: the daemon at %s rejected the token in %s.\n%s\n", base, daemonTokenPath(), daemonTokenMismatchHint(base, daemonTokenPath()))
+		return 1
+	}
 	if status != http.StatusCreated {
 		fmt.Fprintf(stderr, "strike: grant failed: %s\n", redactSecrets(string(body), hostToken))
 		return 1
@@ -226,6 +230,10 @@ func daemonRevoke(args []string, stdout, stderr io.Writer) int {
 	status, body, err := daemonAuthedJSON(http.MethodDelete, base+"/v1/gateway/grants", hostToken, nil)
 	if err != nil {
 		fmt.Fprintln(stderr, "strike:", redactSecrets(err.Error(), hostToken))
+		return 1
+	}
+	if status == http.StatusUnauthorized {
+		fmt.Fprintf(stderr, "strike: the daemon at %s rejected the token in %s.\n%s\n", base, daemonTokenPath(), daemonTokenMismatchHint(base, daemonTokenPath()))
 		return 1
 	}
 	if status != http.StatusOK {

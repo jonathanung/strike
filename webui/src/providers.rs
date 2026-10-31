@@ -2,17 +2,51 @@
 //! Keys are posted to the daemon and never written to localStorage,
 //! never copied into a status string, and never logged.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::api::{self, delete_json, get_text, patch_json, post_json_value};
+use crate::api::{self, delete_json, get_text, post_json_value};
+use wasm_bindgen::JsCast;
 
 /// Wire dialects `config.ValidateWireAPI` accepts. Not a provider catalog.
 const WIRE_APIS: [&str; 3] = ["openai", "responses", "anthropic"];
+
+const KEY_PROVIDERS: &[&str] = &[
+    "anthropic",
+    "openai",
+    "xai",
+    "google",
+    "kimi",
+    "deepseek",
+];
+
+thread_local! {
+    static KEY_NAMES: RefCell<Vec<String>> = RefCell::new(
+        KEY_PROVIDERS.iter().map(|name| (*name).to_string()).collect(),
+    );
+}
+
+pub fn key_provider_names() -> Vec<String> {
+    KEY_NAMES.with(|names| names.borrow().clone())
+}
+
+fn publish_key_names(rows: &[ProviderStatus]) {
+    let mut names: Vec<String> = rows
+        .iter()
+        .filter(|row| row.api_key && !row.custom)
+        .map(|row| row.name.clone())
+        .collect();
+    if names.is_empty() {
+        names = KEY_PROVIDERS.iter().map(|name| (*name).to_string()).collect();
+    }
+    KEY_NAMES.with(|slot| *slot.borrow_mut() = names);
+}
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 pub struct ProviderStatus {
@@ -31,6 +65,10 @@ pub struct ProviderStatus {
     pub wire_api: String,
     #[serde(default, rename = "baseURL")]
     pub base_url: String,
+    /// API-key verification state from the daemon (#1531): "", "stored"
+    /// (present, never verified), "verified", or "rejected".
+    #[serde(default, rename = "keyState")]
+    pub key_state: String,
     #[serde(default)]
     pub methods: Vec<String>,
 }
@@ -58,14 +96,6 @@ struct CustomList {
     providers: Vec<CustomProvider>,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
-struct SettingsSnap {
-    #[serde(default)]
-    provider: String,
-    #[serde(default)]
-    model: String,
-}
-
 #[derive(Clone, Debug, Deserialize)]
 struct ModelRow {
     id: String,
@@ -77,11 +107,37 @@ struct ModelList {
     models: Vec<ModelRow>,
 }
 
-pub fn connection_label(authed: bool) -> &'static str {
-    if authed {
-        "Connected"
-    } else {
-        "Not connected"
+/// The badge text for a provider card. A stored API key is not a
+/// connection (#1531): it reads "Key stored — not tested" until the
+/// daemon's probe has actually presented it to the provider, and
+/// "Key rejected" when the provider refused it. "Connected" is reserved
+/// for credentials that need no key (OAuth, device, builtin) or a key the
+/// provider has accepted.
+pub fn connection_label(authed: bool, key_state: &str) -> &'static str {
+    if !authed {
+        return "Not connected";
+    }
+    match key_state {
+        "verified" => "Connected",
+        "rejected" => "Key rejected",
+        "stored" => "Key stored — not tested",
+        _ => "Connected",
+    }
+}
+
+/// The note shown after a key probe (`POST /v1/auth/probe`). The daemon's
+/// detail strings are written for display and never contain the key.
+pub fn probe_note(status: &str, detail: &str) -> String {
+    match status {
+        "valid" => "Key verified — the provider accepted the stored key.".to_string(),
+        "invalid" => format!(
+            "Key rejected — {detail}. Paste a corrected key and save it."
+        ),
+        "unreachable" => format!("Could not verify the key — {detail}."),
+        "no-key" => "No key stored yet — paste a key and Save key first.".to_string(),
+        "unsupported" => format!("Nothing to test — {detail}."),
+        _ if detail.is_empty() => "Test finished without a verdict.".to_string(),
+        _ => detail.to_string(),
     }
 }
 
@@ -134,6 +190,33 @@ fn note_from(raw: &str, key: &str) -> String {
     scrub_secret(&error_message(raw), key)
 }
 
+fn focus_provider(name: &str) {
+    let Some(doc) = web_sys::window().and_then(|window| window.document()) else {
+        return;
+    };
+    let selector = if name == "custom" {
+        "[data-add-host]".to_string()
+    } else {
+        format!("[data-provider=\"{name}\"]")
+    };
+    let Ok(Some(el)) = doc.query_selector(&selector) else {
+        return;
+    };
+    if let Some(html) = el.dyn_ref::<web_sys::HtmlElement>() {
+        html.scroll_into_view();
+    }
+    let field = if name == "custom" {
+        "[data-new-name]"
+    } else {
+        "[data-provider-key]"
+    };
+    if let Ok(Some(input)) = el.query_selector(field) {
+        if let Some(html) = input.dyn_ref::<web_sys::HtmlElement>() {
+            let _ = html.focus();
+        }
+    }
+}
+
 fn request_reload(bump: RwSignal<u32>) {
     bump.update(|n| *n = n.wrapping_add(1));
 }
@@ -150,8 +233,6 @@ fn ProviderCard(
     customs: RwSignal<Vec<CustomProvider>>,
     drafts: RwSignal<HashMap<String, String>>,
     notes: RwSignal<HashMap<String, String>>,
-    models: RwSignal<HashMap<String, Vec<String>>>,
-    picked: RwSignal<HashMap<String, String>>,
     base_drafts: RwSignal<HashMap<String, String>>,
     base: RwSignal<String>,
     token: RwSignal<String>,
@@ -166,8 +247,13 @@ fn ProviderCard(
     let builtin = row.builtin;
     let base_url = row.base_url.clone();
     let wire = row.wire_api.clone();
-    let badge = if authed { "chip ok" } else { "chip" };
-    let state = connection_label(authed);
+    let key_state = row.key_state.clone();
+    let state = connection_label(authed, &key_state);
+    let badge = match state {
+        "Connected" => "chip ok",
+        "Key rejected" => "chip bad",
+        _ => "chip",
+    };
 
     let save_key = {
         let name = name.clone();
@@ -198,7 +284,7 @@ fn ProviderCard(
                         map_insert(
                             &notes,
                             name,
-                            "Key stored on the daemon. It is not shown again.".into(),
+                            "Key stored on the daemon. It is not shown again. It has not been tested yet — Test key checks it against the provider.".into(),
                         );
                         request_reload(bump);
                     }
@@ -216,21 +302,41 @@ fn ProviderCard(
             .cloned()
             .unwrap_or_default();
         spawn_local(async move {
+            if api_key {
+                // Real credential probe (#1531): the daemon presents the
+                // stored key to the provider itself. A catalog listing is
+                // not a test — it never touches the key.
+                let probed = post_json_value(
+                    &b,
+                    &t,
+                    "/v1/auth/probe",
+                    serde_json::json!({ "provider": name }),
+                )
+                .await;
+                match probed {
+                    Ok(value) => {
+                        let status = value
+                            .get("status")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default();
+                        let detail = value
+                            .get("detail")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default();
+                        let note = probe_note(status, detail);
+                        map_insert(&notes, name, note_from(&note, &key));
+                        // Refresh so the badge picks up the new keyState.
+                        request_reload(bump);
+                    }
+                    Err(err) => map_insert(&notes, name, note_from(&err, &key)),
+                }
+                return;
+            }
             let path = format!("/v1/models?provider={}", api::js_encode(&name));
             match get_text(&b, &t, &path).await {
                 Ok(body) => match serde_json::from_str::<ModelList>(&body) {
                     Ok(list) => {
-                        let ids: Vec<String> = list.models.into_iter().map(|row| row.id).collect();
-                        let n = ids.len();
-                        if let Some(first) = ids.first() {
-                            let id = first.clone();
-                            picked.update(|map| {
-                                map.entry(name.clone()).or_insert(id);
-                            });
-                        }
-                        models.update(|map| {
-                            map.insert(name.clone(), ids);
-                        });
+                        let n = list.models.len();
                         map_insert(&notes, name, format!("Listed {n} models."));
                     }
                     Err(err) => map_insert(&notes, name, note_from(&err.to_string(), &key)),
@@ -299,35 +405,6 @@ fn ProviderCard(
         }
     };
 
-    let set_default = move |name: String| {
-        let model = picked
-            .get_untracked()
-            .get(&name)
-            .cloned()
-            .unwrap_or_default();
-        if model.trim().is_empty() {
-            map_insert(&notes, name, "Pick a model first.".into());
-            return;
-        }
-        let (b, t) = (base.get_untracked(), token.get_untracked());
-        spawn_local(async move {
-            match patch_json(
-                &b,
-                &t,
-                "/v1/settings",
-                serde_json::json!({ "provider": name, "model": model }),
-            )
-            .await
-            {
-                Ok(()) => {
-                    map_insert(&notes, name, "Default model saved.".into());
-                    request_reload(bump);
-                }
-                Err(err) => map_insert(&notes, name, note_from(&err, "")),
-            }
-        });
-    };
-
     let name_test_key = name.clone();
     let name_test_plain = name.clone();
     let name_remove_key = name.clone();
@@ -343,17 +420,12 @@ fn ProviderCard(
     let base_input = name.clone();
     let seeded = base_url.clone();
     let note_name = name.clone();
-    let model_name = name.clone();
-    let select_name = name.clone();
-    let pick_name = name.clone();
-
     view! {
         <li class="providers-card" data-provider=name_attr>
             <div class="providers-card-head">
                 <h2>{heading}</h2>
                 <span class=badge data-provider-state=state>{state}</span>
             </div>
-            <p class="hint">{detail}</p>
             {env.map(|text| view! { <p class="providers-env" data-env-note="true">{text}</p> })}
             {(!wire.is_empty()).then(|| view! { <p class="hint">"Wire: " {wire}</p> })}
             {(!base_url.is_empty() && !custom).then(|| {
@@ -403,10 +475,13 @@ fn ProviderCard(
                 </label>
                 <div class="providers-actions">
                     <button type="button" class="primary" data-save-key="true" on:click=save_key>"Save key"</button>
-                    <button type="button" class="secondary" data-test-provider="true" on:click=move |_| test_provider(name_test_key.clone())>"Test"</button>
-                    <button type="button" class="secondary" data-remove-key="true" on:click=move |_| remove_stored(name_remove_key.clone())>
-                        {if custom { "Remove provider" } else { "Remove stored key" }}
-                    </button>
+                    <button type="button" class="secondary" data-test-provider="true" on:click=move |_| test_provider(name_test_key.clone())>"Test key"</button>
+                    {custom.then(|| {
+                        let name_remove_key = name_remove_key.clone();
+                        view! {
+                            <button type="button" class="secondary" data-remove-key="true" on:click=move |_| remove_stored(name_remove_key.clone())>"Remove provider"</button>
+                        }
+                    })}
                 </div>
                 </div>
             })}
@@ -418,35 +493,6 @@ fn ProviderCard(
                     })}
                 </div>
             })}
-            {move || {
-                let ids = models.with(|map| map.get(&model_name).cloned().unwrap_or_default());
-                if ids.is_empty() {
-                    return view! { <span></span> }.into_any();
-                }
-                let label = select_name.clone();
-                let pick = pick_name.clone();
-                let default_name = model_name.clone();
-                view! {
-                    <div class="providers-block">
-                    <label>
-                        "Default model"
-                        <select
-                            aria-label=format!("Default model for {label}")
-                            data-default-select="true"
-                            on:change=move |ev| {
-                                map_insert(&picked, pick.clone(), event_target_value(&ev));
-                            }
-                        >
-                            {ids.into_iter().map(|id| {
-                                let attr = id.clone();
-                                view! { <option value=attr>{id}</option> }
-                            }).collect_view()}
-                        </select>
-                    </label>
-                    <button type="button" class="primary" data-set-default="true" on:click=move |_| set_default(default_name.clone())>"Set as default"</button>
-                    </div>
-                }.into_any()
-            }}
             {move || {
                 let text = notes.with(|map| map.get(&note_name).cloned().unwrap_or_default());
                 (!text.is_empty()).then(|| view! {
@@ -463,14 +509,8 @@ pub fn ProvidersPage(base: RwSignal<String>, token: RwSignal<String>) -> impl In
     let customs = RwSignal::new(Vec::<CustomProvider>::new());
     let load_error = RwSignal::new(String::new());
     let loading = RwSignal::new(true);
-    let defaults = RwSignal::new(SettingsSnap {
-        provider: String::new(),
-        model: String::new(),
-    });
     let drafts = RwSignal::new(HashMap::<String, String>::new());
     let notes = RwSignal::new(HashMap::<String, String>::new());
-    let models = RwSignal::new(HashMap::<String, Vec<String>>::new());
-    let picked = RwSignal::new(HashMap::<String, String>::new());
     let base_drafts = RwSignal::new(HashMap::<String, String>::new());
 
     let new_name = RwSignal::new(String::new());
@@ -489,10 +529,10 @@ pub fn ProvidersPage(base: RwSignal<String>, token: RwSignal<String>) -> impl In
         spawn_local(async move {
             let listed = get_text(&b, &t, "/v1/providers").await;
             let custom = get_text(&b, &t, "/v1/custom-providers").await;
-            let settings = get_text(&b, &t, "/v1/settings").await;
             match listed {
                 Ok(body) => match serde_json::from_str::<ProviderList>(&body) {
                     Ok(list) => {
+                        publish_key_names(&list.providers);
                         rows.set(list.providers);
                         load_error.set(String::new());
                     }
@@ -503,11 +543,6 @@ pub fn ProvidersPage(base: RwSignal<String>, token: RwSignal<String>) -> impl In
             if let Ok(body) = custom {
                 if let Ok(list) = serde_json::from_str::<CustomList>(&body) {
                     customs.set(list.providers);
-                }
-            }
-            if let Ok(body) = settings {
-                if let Ok(snap) = serde_json::from_str::<SettingsSnap>(&body) {
-                    defaults.set(snap);
                 }
             }
             loading.set(false);
@@ -555,27 +590,72 @@ pub fn ProvidersPage(base: RwSignal<String>, token: RwSignal<String>) -> impl In
             new_name.set(String::new());
             new_url.set(String::new());
             new_model.set(String::new());
-            new_note.set("Host saved. The key, if you pasted one, stays on the daemon.".into());
+            new_note.set("Host saved. The key, if you pasted one, stays on the daemon and has not been tested yet.".into());
             request_reload(bump);
         });
     };
+
+    let remove_named = move |name: String| {
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            let path = format!("/v1/auth/{}", api::js_encode(&name));
+            match delete_json(&b, &t, &path, None).await {
+                Ok(()) => {
+                    map_insert(&notes, name, "Stored credential removed.".into());
+                    request_reload(bump);
+                }
+                Err(err) => map_insert(&notes, name, note_from(&err, "")),
+            }
+        });
+    };
+    crate::shell::bind(
+        "providers.focus",
+        Rc::new(move |name| {
+            if loading.get_untracked() {
+                crate::park::put("providers.focus", name);
+            } else {
+                focus_provider(name);
+            }
+            Ok(())
+        }),
+    );
+    crate::shell::bind(
+        "providers.refresh",
+        Rc::new(move |_| {
+            request_reload(bump);
+            Ok(())
+        }),
+    );
+    crate::shell::bind(
+        "providers.remove-key",
+        Rc::new(move |name| {
+            if name.trim().is_empty() {
+                return Err("Pick a provider.".into());
+            }
+            remove_named(name.to_string());
+            Ok(())
+        }),
+    );
+    Effect::new(move |_| {
+        if loading.get() {
+            return;
+        }
+        if let Some(name) = crate::park::take("providers.focus") {
+            focus_provider(&name);
+        }
+        if crate::park::take("providers.refresh").is_some() {
+            request_reload(bump);
+        }
+        if let Some(name) = crate::park::take("providers.remove-key") {
+            remove_named(name);
+        }
+    });
 
     view! {
         <main class="providers-page" data-providers-root="true">
             <header class="providers-head">
                 <h1 class="panel-title">"Providers"</h1>
                 <p class="hint">"Keys stay on the daemon. This page does not put them in browser storage."</p>
-                <p data-default-model="true">
-                    {move || {
-                        let snap = defaults.get();
-                        if snap.provider.is_empty() && snap.model.is_empty() {
-                            "Default model: none yet.".to_string()
-                        } else {
-                            format!("Default model: {} / {}", snap.provider, snap.model)
-                        }
-                    }}
-                </p>
-                <button type="button" class="secondary" on:click=move |_| request_reload(bump)>"Refresh"</button>
             </header>
             <Show when=move || loading.get()>
                 <p class="hint">"Loading providers from the daemon."</p>
@@ -591,8 +671,6 @@ pub fn ProvidersPage(base: RwSignal<String>, token: RwSignal<String>) -> impl In
                             customs=customs
                             drafts=drafts
                             notes=notes
-                            models=models
-                            picked=picked
                             base_drafts=base_drafts
                             base=base
                             token=token
@@ -707,9 +785,34 @@ mod tests {
     }
 
     #[test]
-    fn connection_label_is_the_two_states() {
-        assert_eq!(connection_label(true), "Connected");
-        assert_eq!(connection_label(false), "Not connected");
+    fn connection_label_never_calls_a_stored_key_connected() {
+        assert_eq!(connection_label(false, ""), "Not connected");
+        assert_eq!(connection_label(false, "stored"), "Not connected");
+        // #1531: a pasted key is stored, not connected, until probed.
+        assert_eq!(connection_label(true, "stored"), "Key stored — not tested");
+        assert_eq!(connection_label(true, "rejected"), "Key rejected");
+        assert_eq!(connection_label(true, "verified"), "Connected");
+        // Keyless auth (OAuth, device, builtin) is connected as before.
+        assert_eq!(connection_label(true, ""), "Connected");
+    }
+
+    #[test]
+    fn probe_note_reports_each_verdict_plainly() {
+        assert_eq!(
+            probe_note("valid", "the provider accepted the stored key"),
+            "Key verified — the provider accepted the stored key."
+        );
+        let rejected = probe_note("invalid", "the provider refused the stored key (HTTP 401)");
+        assert!(rejected.starts_with("Key rejected"));
+        assert!(rejected.contains("HTTP 401"));
+        let unreachable = probe_note("unreachable", "could not reach the provider");
+        assert!(unreachable.starts_with("Could not verify the key"));
+        assert_eq!(
+            probe_note("no-key", "no API key is stored for this provider"),
+            "No key stored yet — paste a key and Save key first."
+        );
+        let oauth = probe_note("unsupported", "signed in with OAuth — there is no API key to test");
+        assert!(oauth.starts_with("Nothing to test"));
     }
 
     #[test]

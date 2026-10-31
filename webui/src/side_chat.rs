@@ -70,14 +70,20 @@ pub fn side_chat_ask_body(text: &str, focus_id: &str, focus_name: &str) -> Optio
 
 /// Label when the answer's model is not the live root's model. Empty when
 /// they match, so an echo boot does not stamp every turn.
-fn answered_by_other(provider: &str, model: &str, live_provider: &str, live_model: &str) -> Option<String> {
+fn answered_by_other(
+    provider: &str,
+    model: &str,
+    live_provider: &str,
+    live_model: &str,
+) -> Option<String> {
     let provider = provider.trim();
     let model = model.trim();
     if provider.is_empty() && model.is_empty() {
         return None;
     }
     let same_provider = provider.eq_ignore_ascii_case(live_provider.trim()) || provider.is_empty();
-    let same_model = model.eq_ignore_ascii_case(live_model.trim()) || (model.is_empty() && live_model.trim().is_empty());
+    let same_model = model.eq_ignore_ascii_case(live_model.trim())
+        || (model.is_empty() && live_model.trim().is_empty());
     if same_provider && same_model {
         return None;
     }
@@ -87,6 +93,123 @@ fn answered_by_other(provider: &str, model: &str, live_provider: &str, live_mode
         _ => model.to_string(),
     };
     Some(format!("Answered by {label}"))
+}
+
+const SIDE_NOT_READONLY: &str = "Side chat list was not marked read-only.";
+
+/// Which failure the banner's Retry button is looking at.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SideErrorKind {
+    None,
+    Load,
+    Ask,
+}
+
+/// Per-session side-chat memory. Reset when the root changes so a question
+/// asked in one session cannot be replayed into another.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SideChatMemory {
+    pub draft: String,
+    pub error: String,
+    pub kind: SideErrorKind,
+    pub last_ask: String,
+    pub last_ask_root: String,
+    pub pending: bool,
+    pub loaded_for: String,
+    pub error_root: String,
+}
+
+impl Default for SideChatMemory {
+    fn default() -> Self {
+        Self {
+            draft: String::new(),
+            error: String::new(),
+            kind: SideErrorKind::None,
+            last_ask: String::new(),
+            last_ask_root: String::new(),
+            pending: false,
+            loaded_for: String::new(),
+            error_root: String::new(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SideLoadPlan {
+    /// Already loaded for this root. Leave the draft and the banner.
+    Stay,
+    /// Root changed. Drop the previous session's draft, error, and question.
+    Switch,
+    /// Same root, load failed. Fetch again without wiping the draft.
+    Reload,
+}
+
+pub fn plan_side_load(mem: &SideChatMemory, session: &str) -> SideLoadPlan {
+    if !session.is_empty() && mem.loaded_for == session {
+        return SideLoadPlan::Stay;
+    }
+    if !session.is_empty()
+        && mem.loaded_for.is_empty()
+        && mem.kind == SideErrorKind::Load
+        && mem.error_root == session
+    {
+        return SideLoadPlan::Reload;
+    }
+    SideLoadPlan::Switch
+}
+
+pub fn apply_side_plan(mem: &mut SideChatMemory, session: &str, plan: SideLoadPlan) {
+    match plan {
+        SideLoadPlan::Stay => {}
+        SideLoadPlan::Reload => {
+            mem.loaded_for = session.to_string();
+            mem.error.clear();
+            mem.kind = SideErrorKind::None;
+        }
+        SideLoadPlan::Switch => {
+            mem.draft.clear();
+            mem.error.clear();
+            mem.kind = SideErrorKind::None;
+            mem.last_ask.clear();
+            mem.last_ask_root.clear();
+            mem.pending = false;
+            mem.error_root.clear();
+            if session.is_empty() {
+                mem.loaded_for.clear();
+            } else {
+                mem.loaded_for = session.to_string();
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SideRetry {
+    Ignore,
+    Replay,
+    Reload,
+}
+
+pub fn side_retry(mem: &SideChatMemory, root: &str) -> SideRetry {
+    if mem.pending || root.is_empty() {
+        return SideRetry::Ignore;
+    }
+    match mem.kind {
+        SideErrorKind::Load if mem.error_root == root => SideRetry::Reload,
+        SideErrorKind::Ask if mem.last_ask_root == root && !mem.last_ask.trim().is_empty() => {
+            SideRetry::Replay
+        }
+        _ => SideRetry::Ignore,
+    }
+}
+
+/// A failed or rejected load must not stay latched, or Retry and the next
+/// open of the same root cannot fetch again.
+pub fn mark_side_load_failed(mem: &mut SideChatMemory, root: &str, message: &str) {
+    mem.loaded_for.clear();
+    mem.error = message.to_string();
+    mem.kind = SideErrorKind::Load;
+    mem.error_root = root.to_string();
 }
 
 fn clip_line(s: &str) -> String {
@@ -116,10 +239,36 @@ pub fn SideChatPanel(
     let pending = RwSignal::new(false);
     let loaded_for = RwSignal::new(String::new());
     let last_ask = RwSignal::new(String::new());
+    let last_ask_root = RwSignal::new(String::new());
+    let error_kind = RwSignal::new(SideErrorKind::None);
+    let error_root = RwSignal::new(String::new());
+    let reload_gen = RwSignal::new(0u32);
+
+    let read_memory = move || SideChatMemory {
+        draft: draft.get_untracked(),
+        error: error.get_untracked(),
+        kind: error_kind.get_untracked(),
+        last_ask: last_ask.get_untracked(),
+        last_ask_root: last_ask_root.get_untracked(),
+        pending: pending.get_untracked(),
+        loaded_for: loaded_for.get_untracked(),
+        error_root: error_root.get_untracked(),
+    };
+    let write_memory = move |mem: SideChatMemory| {
+        draft.set(mem.draft);
+        error.set(mem.error);
+        error_kind.set(mem.kind);
+        last_ask.set(mem.last_ask);
+        last_ask_root.set(mem.last_ask_root);
+        pending.set(mem.pending);
+        loaded_for.set(mem.loaded_for);
+        error_root.set(mem.error_root);
+    };
 
     Effect::new(move |_| {
         let is_open = open.get();
         let session = root.get();
+        let _reload = reload_gen.get();
         if !is_open {
             return;
         }
@@ -141,16 +290,17 @@ pub fn SideChatPanel(
             );
             focus_input.forget();
         }
-        if session.is_empty() {
-            turns.set(Vec::new());
-            loaded_for.set(String::new());
+        let mut mem = read_memory();
+        let plan = plan_side_load(&mem, &session);
+        if plan == SideLoadPlan::Stay {
             return;
         }
-        if loaded_for.get_untracked() == session {
-            return;
-        }
+        apply_side_plan(&mut mem, &session, plan);
+        write_memory(mem);
         turns.set(Vec::new());
-        loaded_for.set(session.clone());
+        if session.is_empty() {
+            return;
+        }
         let expected = session.clone();
         let (b, t) = (base.get(), token.get());
         spawn_local(async move {
@@ -163,16 +313,20 @@ pub fn SideChatPanel(
                     if list.read_only {
                         turns.set(list.turns);
                         error.set(String::new());
+                        error_kind.set(SideErrorKind::None);
                     } else {
-                        error.set("Side chat list was not marked read-only.".into());
+                        let mut mem = read_memory();
+                        mark_side_load_failed(&mut mem, &expected, SIDE_NOT_READONLY);
+                        write_memory(mem);
                     }
                 }
                 Err(e) => {
                     if root.get_untracked() != expected {
                         return;
                     }
-                    loaded_for.set(String::new());
-                    error.set(e);
+                    let mut mem = read_memory();
+                    mark_side_load_failed(&mut mem, &expected, &e);
+                    write_memory(mem);
                 }
             }
         });
@@ -195,9 +349,11 @@ pub fn SideChatPanel(
             return;
         }
         last_ask.set(body["text"].as_str().unwrap_or_default().to_string());
+        last_ask_root.set(session.clone());
         draft.set(String::new());
         pending.set(true);
         error.set(String::new());
+        error_kind.set(SideErrorKind::None);
         let expected = session.clone();
         let (b, t) = (base.get_untracked(), token.get_untracked());
         spawn_local(async move {
@@ -221,24 +377,35 @@ pub fn SideChatPanel(
                             });
                         });
                     }
-                    Ok(_) => error.set("Side chat answer was not marked read-only.".into()),
-                    Err(e) => error.set(e.to_string()),
+                    Ok(_) => {
+                        error.set("Side chat answer was not marked read-only.".into());
+                        error_kind.set(SideErrorKind::Ask);
+                        error_root.set(expected.clone());
+                    }
+                    Err(e) => {
+                        error.set(e.to_string());
+                        error_kind.set(SideErrorKind::Ask);
+                        error_root.set(expected.clone());
+                    }
                 },
-                Err(e) => error.set(e),
+                Err(e) => {
+                    error.set(e);
+                    error_kind.set(SideErrorKind::Ask);
+                    error_root.set(expected.clone());
+                }
             }
         });
     };
 
-    let retry = move || {
-        if pending.get_untracked() {
-            return;
+    let retry = move || match side_retry(&read_memory(), &root.get_untracked()) {
+        SideRetry::Ignore => {}
+        SideRetry::Replay => {
+            draft.set(last_ask.get_untracked());
+            ask();
         }
-        let last = last_ask.get_untracked();
-        if last.trim().is_empty() {
-            return;
+        SideRetry::Reload => {
+            reload_gen.update(|n| *n = n.wrapping_add(1));
         }
-        draft.set(last);
-        ask();
     };
 
     view! {
@@ -359,5 +526,66 @@ mod tests {
             answered_by_other("anthropic", "claude-opus", "echo", "echo").as_deref(),
             Some("Answered by anthropic · claude-opus")
         );
+    }
+
+    fn errored(root: &str) -> SideChatMemory {
+        SideChatMemory {
+            draft: "draft for A".into(),
+            error: "boom".into(),
+            kind: SideErrorKind::Ask,
+            last_ask: "why this file?".into(),
+            last_ask_root: root.into(),
+            pending: true,
+            loaded_for: root.into(),
+            error_root: root.into(),
+        }
+    }
+
+    #[test]
+    fn switching_roots_drops_the_previous_question() {
+        let mut mem = errored("session-a");
+        assert_eq!(plan_side_load(&mem, "session-b"), SideLoadPlan::Switch);
+        apply_side_plan(&mut mem, "session-b", SideLoadPlan::Switch);
+        assert!(mem.draft.is_empty());
+        assert!(mem.error.is_empty());
+        assert!(mem.last_ask.is_empty());
+        assert!(!mem.pending);
+        assert_eq!(mem.loaded_for, "session-b");
+        assert_eq!(mem.kind, SideErrorKind::None);
+        // A's question must not replay into B even if the clear was skipped.
+        let mut stale = errored("session-a");
+        stale.pending = false;
+        assert_eq!(side_retry(&stale, "session-b"), SideRetry::Ignore);
+        assert_eq!(side_retry(&stale, "session-a"), SideRetry::Replay);
+    }
+
+    #[test]
+    fn load_error_retry_reloads_without_wiping_the_draft() {
+        let mut mem = SideChatMemory {
+            draft: "keep me".into(),
+            error: "HTTP 500".into(),
+            kind: SideErrorKind::Load,
+            loaded_for: String::new(),
+            error_root: "session-b".into(),
+            ..SideChatMemory::default()
+        };
+        assert_eq!(side_retry(&mem, "session-b"), SideRetry::Reload);
+        assert_eq!(plan_side_load(&mem, "session-b"), SideLoadPlan::Reload);
+        apply_side_plan(&mut mem, "session-b", SideLoadPlan::Reload);
+        assert_eq!(mem.draft, "keep me");
+        assert!(mem.error.is_empty());
+        assert_eq!(mem.loaded_for, "session-b");
+        // A rejected read-only list is a load failure and unlatches.
+        mem.loaded_for = "session-b".into();
+        mark_side_load_failed(&mut mem, "session-b", SIDE_NOT_READONLY);
+        assert!(mem.loaded_for.is_empty());
+        assert_eq!(mem.kind, SideErrorKind::Load);
+        assert_eq!(plan_side_load(&mem, "session-b"), SideLoadPlan::Reload);
+        assert_eq!(side_retry(&mem, "session-b"), SideRetry::Reload);
+        // Same root, already loaded: do not reset.
+        mem.loaded_for = "session-b".into();
+        mem.kind = SideErrorKind::None;
+        mem.draft = "typed".into();
+        assert_eq!(plan_side_load(&mem, "session-b"), SideLoadPlan::Stay);
     }
 }

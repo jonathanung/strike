@@ -2,6 +2,8 @@
 //! over a same-origin websocket, replays scrollback, and sends keystrokes.
 //! Leaving the tab closes the socket and leaves the process running.
 
+use std::rc::Rc;
+
 use gloo_net::http::Request;
 use leptos::html::Pre;
 use leptos::prelude::*;
@@ -13,8 +15,9 @@ use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{Element, MessageEvent, ResizeObserver, WebSocket};
 
 use crate::api::{api, auth_header, get_json, post_json_value};
+use crate::outcome;
 use crate::same_origin;
-use crate::term::{key_bytes, Screen};
+use crate::term::{key_bytes, Screen, ScrollFollow};
 use crate::EmptyState;
 
 #[derive(Clone, Deserialize, Default)]
@@ -49,6 +52,8 @@ struct Live {
     ws: WebSocket,
     // Closures stay alive for as long as the socket does.
     _on_message: Closure<dyn FnMut(MessageEvent)>,
+    _on_open: Closure<dyn FnMut(JsValue)>,
+    _on_error: Closure<dyn FnMut(JsValue)>,
     _on_close: Closure<dyn FnMut(JsValue)>,
 }
 
@@ -81,6 +86,10 @@ struct TermCtl {
     size: RwSignal<(i32, i32)>,
     timer_id: RwSignal<i32>,
     screen_ref: NodeRef<Pre>,
+    /// #1520: pinned (scrolled-away) state. Deliberately NOT reset by
+    /// attach/hello replay, so re-attaching keeps the reading position.
+    follow: StoredValue<ScrollFollow, LocalStorage>,
+    scrolled_away: RwSignal<bool>,
     screen: StoredValue<Screen, LocalStorage>,
     live: StoredValue<Option<Live>, LocalStorage>,
     fit: StoredValue<Option<Fit>, LocalStorage>,
@@ -93,6 +102,32 @@ impl TermCtl {
         self.html.set(rendered);
         if let Some(el) = self.screen_ref.get_untracked() {
             let el: &Element = &el;
+            // #1520: only autoscroll when the user is at the bottom.
+            // While pinned, restore the saved reading position — the
+            // inner_html update itself may have reset scrollTop.
+            let target = self
+                .follow
+                .with_value(|follow| follow.paint_target(el.scroll_height()));
+            el.set_scroll_top(target);
+        }
+    }
+
+    /// Scroll event on the screen: update the pinned state from the
+    /// user's actual position (proximity to the bottom resumes follow).
+    fn on_scroll(self, el: &Element) {
+        self.follow.update_value(|follow| {
+            follow.on_scroll(el.scroll_top(), el.scroll_height(), el.client_height());
+        });
+        let away = self.follow.with_value(|follow| !follow.following());
+        self.scrolled_away.set(away);
+    }
+
+    /// Jump-to-bottom control: resume following and land on the tail.
+    fn jump_to_bottom(self) {
+        self.follow.update_value(|follow| follow.jump_to_bottom());
+        self.scrolled_away.set(false);
+        if let Some(el) = self.screen_ref.get_untracked() {
+            let el: &Element = &el;
             el.set_scroll_top(el.scroll_height());
         }
     }
@@ -101,6 +136,8 @@ impl TermCtl {
         self.live.update_value(|live| {
             if let Some(cur) = live.take() {
                 cur.ws.set_onmessage(None);
+                cur.ws.set_onopen(None);
+                cur.ws.set_onerror(None);
                 cur.ws.set_onclose(None);
                 let _ = cur.ws.close();
             }
@@ -249,7 +286,14 @@ impl TermCtl {
         let t = self.token.get_untracked();
         self.active.set(id.clone());
         spawn_local(async move {
-            let ticket = mint_ticket(&b, &t, &id).await.unwrap_or_default();
+            let ticket = match outcome::require_ticket(mint_ticket(&b, &t, &id).await) {
+                Ok(ticket) => ticket,
+                Err(note) => {
+                    self.stop();
+                    self.note.set(note);
+                    return;
+                }
+            };
             self.stop();
             let sock = match open_socket(&url, &ticket) {
                 Ok(sock) => sock,
@@ -265,32 +309,36 @@ impl TermCtl {
                 }
             }) as Box<dyn FnMut(MessageEvent)>);
             let ctl = self;
+            let on_open = Closure::wrap(Box::new(move |_| {
+                ctl.connected.set(true);
+                let (cols, rows) = ctl.size.get_untracked();
+                if cols >= 2 && rows >= 2 {
+                    ctl.send_resize(cols, rows, true);
+                }
+            }) as Box<dyn FnMut(JsValue)>);
+            let ctl = self;
+            let on_error = Closure::wrap(Box::new(move |_| {
+                let failed = outcome::socket_failed();
+                ctl.connected.set(failed.connected);
+                ctl.note.set(failed.note);
+            }) as Box<dyn FnMut(JsValue)>);
+            let ctl = self;
             let on_close = Closure::wrap(Box::new(move |_| {
                 ctl.connected.set(false);
             }) as Box<dyn FnMut(JsValue)>);
             sock.set_onmessage(Some(on_message.as_ref().unchecked_ref()));
+            sock.set_onopen(Some(on_open.as_ref().unchecked_ref()));
+            sock.set_onerror(Some(on_error.as_ref().unchecked_ref()));
             sock.set_onclose(Some(on_close.as_ref().unchecked_ref()));
             self.live.update_value(|live| {
                 *live = Some(Live {
                     ws: sock,
                     _on_message: on_message,
+                    _on_open: on_open,
+                    _on_error: on_error,
                     _on_close: on_close,
                 });
             });
-            let open = self.live.with_value(|live| {
-                live.as_ref()
-                    .map(|cur| cur.ws.ready_state() == WebSocket::OPEN)
-                    .unwrap_or(false)
-            });
-            if open {
-                self.connected.set(true);
-                let (cols, rows) = self.size.get_untracked();
-                if cols >= 2 && rows >= 2 {
-                    self.send_resize(cols, rows, true);
-                }
-            } else {
-                self.connected.set(true);
-            }
         });
     }
 
@@ -445,16 +493,34 @@ impl TermCtl {
         let b = self.base.get_untracked();
         let t = self.token.get_untracked();
         spawn_local(async move {
-            if let Err(err) = delete_term(&b, &t, &id).await {
-                self.note.set(explain(err));
-                return;
+            match delete_term(&b, &t, &id).await {
+                Ok(()) => {
+                    self.sessions.update(|list| {
+                        let ids: Vec<String> = list.iter().map(|item| item.id.clone()).collect();
+                        let kept = retain_session_ids(&ids, &id);
+                        list.retain(|item| kept.iter().any(|keep| keep == &item.id));
+                    });
+                    let effects = close_ok_effects(close_landing(&id, &self.active.get_untracked()));
+                    if effects.stop_live {
+                        self.stop();
+                    }
+                    if effects.clear_active {
+                        self.active.set(String::new());
+                        self.alive.set(false);
+                        self.exit_reason.set(String::new());
+                    }
+                    if let Some(note) = effects.notice {
+                        self.note.set(note);
+                    }
+                }
+                Err(err) => {
+                    if let Some(note) =
+                        close_err_notice(close_landing(&id, &self.active.get_untracked()), &explain(err))
+                    {
+                        self.note.set(note);
+                    }
+                }
             }
-            self.stop();
-            self.active.set(String::new());
-            self.alive.set(false);
-            self.exit_reason.set(String::new());
-            self.sessions.update(|list| list.retain(|item| item.id != id));
-            self.note.set("Shell closed.".into());
         });
     }
 }
@@ -491,6 +557,8 @@ pub fn TerminalPanel(
         size: RwSignal::new((0, 0)),
         timer_id: RwSignal::new(0),
         screen_ref: NodeRef::<Pre>::new(),
+        follow: StoredValue::new_local(ScrollFollow::new()),
+        scrolled_away: RwSignal::new(false),
         screen,
         live: StoredValue::new_local(None),
         fit: StoredValue::new_local(None),
@@ -579,8 +647,19 @@ pub fn TerminalPanel(
     let agent_busy = ctl.agent_busy;
     let policy = ctl.policy;
     let kill_on_end = ctl.kill_on_end;
+    crate::shell::bind(
+        "terminal.kill-on-end",
+        Rc::new(move |_| {
+            kill_on_end.set(!kill_on_end.get_untracked());
+            Ok(())
+        }),
+    );
+    if crate::park::take("terminal.kill-on-end").is_some() {
+        kill_on_end.set(!kill_on_end.get_untracked());
+    }
     let workspace_id = ctl.workspace_id;
     let screen_ref = ctl.screen_ref;
+    let scrolled_away = ctl.scrolled_away;
 
     view! {
         <div class="term">
@@ -606,18 +685,6 @@ pub fn TerminalPanel(
                 <button class="chip" on:click=move |_| ctl.open_new()>"New"</button>
                 <button class="chip" disabled=move || active.get().is_empty() on:click=move |_| ctl.close_active()>"Close"</button>
             </div>
-            <label class="term-check">
-                <input
-                    type="checkbox"
-                    prop:checked=move || kill_on_end.get()
-                    on:change=move |ev| {
-                        let Some(target) = ev.target() else { return };
-                        let Ok(input) = target.dyn_into::<web_sys::HtmlInputElement>() else { return };
-                        kill_on_end.set(input.checked());
-                    }
-                />
-                "Close new shells when the session ends"
-            </label>
             <Show when=move || shared.get() && agent_busy.get()>
                 <p class="term-banner" role="status">"You and the agent share this directory. This shell is yours — the agent does not type here."</p>
             </Show>
@@ -654,6 +721,11 @@ pub fn TerminalPanel(
                     tabindex=0
                     node_ref=screen_ref
                     inner_html=move || html.get()
+                    on:scroll=move |ev: web_sys::Event| {
+                        if let Some(el) = ev.target().and_then(|t| t.dyn_into::<Element>().ok()) {
+                            ctl.on_scroll(&el);
+                        }
+                    }
                     on:keydown=move |ev: web_sys::KeyboardEvent| {
                         if let Some(data) = key_bytes(&ev.key(), ev.ctrl_key(), ev.alt_key(), ev.meta_key()) {
                             ev.prevent_default();
@@ -669,6 +741,11 @@ pub fn TerminalPanel(
                         }
                     }
                 ></pre>
+            </Show>
+            <Show when=move || scrolled_away.get()>
+                <button class="term-jump" on:click=move |_| ctl.jump_to_bottom()>
+                    "Jump to bottom"
+                </button>
             </Show>
             <p class="hint">{move || {
                 let dir = cwd.get();
@@ -759,4 +836,75 @@ async fn delete_term(base: &str, token: &str, id: &str) -> Result<(), String> {
         return Err(format!("HTTP {} {text}", resp.status()));
     }
     Ok(())
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CloseLanding {
+    Active,
+    Superseded,
+}
+
+struct CloseEffects {
+    stop_live: bool,
+    clear_active: bool,
+    notice: Option<String>,
+}
+
+fn close_landing(closed_id: &str, active_now: &str) -> CloseLanding {
+    if !closed_id.is_empty() && closed_id == active_now {
+        CloseLanding::Active
+    } else {
+        CloseLanding::Superseded
+    }
+}
+
+fn close_ok_effects(landing: CloseLanding) -> CloseEffects {
+    match landing {
+        CloseLanding::Active => CloseEffects {
+            stop_live: true,
+            clear_active: true,
+            notice: Some("Shell closed.".into()),
+        },
+        CloseLanding::Superseded => CloseEffects {
+            stop_live: false,
+            clear_active: false,
+            notice: None,
+        },
+    }
+}
+
+fn close_err_notice(landing: CloseLanding, message: &str) -> Option<String> {
+    match landing {
+        CloseLanding::Active => Some(message.to_string()),
+        CloseLanding::Superseded => None,
+    }
+}
+
+fn retain_session_ids(ids: &[String], closed_id: &str) -> Vec<String> {
+    ids.iter().filter(|id| id.as_str() != closed_id).cloned().collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn close_of_a_does_not_stop_shell_b() {
+        assert_eq!(close_landing("shell-a", "shell-b"), CloseLanding::Superseded);
+        let moved = close_ok_effects(CloseLanding::Superseded);
+        assert!(!moved.stop_live);
+        assert!(!moved.clear_active);
+        assert!(moved.notice.is_none());
+        assert!(close_err_notice(CloseLanding::Superseded, "HTTP 500").is_none());
+        let chips = retain_session_ids(&["shell-a".into(), "shell-b".into()], "shell-a");
+        assert_eq!(chips, vec!["shell-b".to_string()]);
+        let stayed = close_ok_effects(close_landing("shell-a", "shell-a"));
+        assert!(stayed.stop_live);
+        assert!(stayed.clear_active);
+        assert_eq!(stayed.notice.as_deref(), Some("Shell closed."));
+        assert_eq!(
+            close_err_notice(CloseLanding::Active, "HTTP 500").as_deref(),
+            Some("HTTP 500")
+        );
+    }
 }
