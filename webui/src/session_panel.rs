@@ -124,7 +124,7 @@ fn load_prefs() -> ViewPrefs {
         serde_json::from_str(&load("strike.sessionList.view")).unwrap_or_default();
     if !matches!(
         prefs.filter.as_str(),
-        "all" | "unread" | "progress" | "pinned" | "archived"
+        "all" | "unread" | "needs-you" | "progress" | "pinned" | "archived"
     ) {
         prefs.filter = filter_all();
     }
@@ -758,6 +758,13 @@ pub(crate) fn SessionPanel(
         }),
     );
     crate::shell::bind(
+        "session.filter.needs-you",
+        Rc::new(move |_| {
+            filter.set("needs-you".into());
+            Ok(())
+        }),
+    );
+    crate::shell::bind(
         "session.filter.progress",
         Rc::new(move |_| {
             filter.set("progress".into());
@@ -928,6 +935,7 @@ pub(crate) fn SessionPanel(
     on_cleanup(|| {
         for id in [
             "session.conductor",
+            "session.filter.needs-you",
             "session.filter.progress",
             "session.filter.pinned",
             "session.filter.archived",
@@ -969,9 +977,11 @@ pub(crate) fn SessionPanel(
             <div class="ss-chips" role="tablist" aria-label="Session filter">
                 {chip("all", "All")}
                 {chip("unread", "Unread")}
+                {chip("needs-you", "Needs you")}
             </div>
-            <Show when=move || !matches!(filter.get().as_str(), "all" | "unread")>
+            <Show when=move || !matches!(filter.get().as_str(), "all" | "unread" | "needs-you")>
                 <p class="hint">{move || match filter.get().as_str() {
+                    "needs-you" => "Showing sessions that need you".into(),
                     "progress" => "Showing in progress".into(),
                     "pinned" => "Showing pinned".into(),
                     "archived" => "Showing archived".into(),
@@ -1113,6 +1123,9 @@ fn build_layout(
                 ),
                 folder_id: org.map(|org| org.folder_id.clone()).unwrap_or_default(),
                 team_state: String::new(),
+                status: row.status.clone(),
+                permission_pending: row.permission_pending,
+                question_pending: row.question_pending,
                 workspace: workspaces
                     .iter()
                     .find(|w| w.id == row.workspace_id)
