@@ -18,6 +18,7 @@ use crate::load_epoch::begin;
 
 use crate::api::{get_json, post_json_value};
 use crate::model::{ChangedFilesResponse, ChildSession, ChildrenResponse};
+use crate::outcome;
 
 thread_local! {
     static BRANCHES: RefCell<Vec<(String, bool)>> = RefCell::new(Vec::new());
@@ -150,6 +151,17 @@ struct GitRow {
     inline_diff: String,
 }
 
+/// Paths of every row whose staged flag equals `staged`, in panel order.
+/// Stage all is `paths_where(rows, false)` — Unstaged and Untracked rows
+/// both carry `staged: false`, so new agent-created files are included,
+/// matching `git add` semantics (#1426 Q3). Unstage all is the staged set.
+fn paths_where(rows: &[GitRow], staged: bool) -> Vec<String> {
+    rows.iter()
+        .filter(|row| row.staged == staged)
+        .map(|row| row.path.clone())
+        .collect()
+}
+
 fn focus_id(id: &str) {
     let Some(el) = web_sys::window()
         .and_then(|w| w.document())
@@ -235,6 +247,10 @@ pub fn GitPanel(
     let diff_text = RwSignal::new(String::new());
     let diff_note = RwSignal::new(String::new());
     let diff_req = RwSignal::new(0u32);
+    // #1428: the diff render is capped at 400 lines by default (wasm DOM
+    // cost); diff_expanded lifts the cap for the currently open diff only.
+    // It resets whenever a diff is (re)loaded — see the diff effect below.
+    let diff_expanded = RwSignal::new(false);
     let show_log = RwSignal::new(false);
     let message = RwSignal::new(String::new());
     let switch_to = RwSignal::new(String::new());
@@ -262,9 +278,12 @@ pub fn GitPanel(
                     ahead.set(st.ahead);
                     behind.set(st.behind);
                     detached.set(st.detached);
-                    let changes = get_json::<ChangedFilesResponse>(&b, &t, "/v1/changed-files")
-                        .await
-                        .unwrap_or(ChangedFilesResponse { files: vec![] });
+                    let changes = outcome::take_ok(
+                        &mut err,
+                        "Changed files",
+                        get_json::<ChangedFilesResponse>(&b, &t, "/v1/changed-files").await,
+                    )
+                    .unwrap_or(ChangedFilesResponse { files: vec![] });
                     if !live() {
                         return;
                     }
@@ -341,45 +360,30 @@ pub fn GitPanel(
             if !live() {
                 return;
             }
-            match get_json::<GitBranches>(&b, &t, "/v1/git/branches").await {
-                Ok(body) => {
-                    if !live() {
-                        return;
-                    }
-                    if switch_to.get_untracked().is_empty() {
-                        if let Some(cur) = body.branches.iter().find(|b| b.current) {
-                            switch_to.set(cur.name.clone());
-                        }
-                    }
-                    branches.set(body.branches);
-                }
-                Err(e) => {
-                    if !live() {
-                        return;
-                    }
-                    if err.is_empty() {
-                        err = e;
+            if !live() {
+                return;
+            }
+            if let Some(body) = outcome::take_ok(
+                &mut err,
+                "Branches",
+                get_json::<GitBranches>(&b, &t, "/v1/git/branches").await,
+            ) {
+                if switch_to.get_untracked().is_empty() {
+                    if let Some(cur) = body.branches.iter().find(|b| b.current) {
+                        switch_to.set(cur.name.clone());
                     }
                 }
+                branches.set(body.branches);
             }
             if !live() {
                 return;
             }
-            match get_json::<GitLog>(&b, &t, "/v1/git/log?limit=30").await {
-                Ok(body) => {
-                    if !live() {
-                        return;
-                    }
-                    commits.set(body.commits);
-                }
-                Err(e) => {
-                    if !live() {
-                        return;
-                    }
-                    if err.is_empty() {
-                        err = e;
-                    }
-                }
+            if let Some(body) = outcome::take_ok(
+                &mut err,
+                "Log",
+                get_json::<GitLog>(&b, &t, "/v1/git/log?limit=30").await,
+            ) {
+                commits.set(body.commits);
             }
             if live() {
                 error.set(err);
@@ -408,6 +412,8 @@ pub fn GitPanel(
         if !open_diff.get_untracked() {
             return;
         }
+        // Per-diff expansion (#1428): every (re)load starts capped again.
+        diff_expanded.set(false);
         let rows = rows.get_untracked();
         let Some(row) = rows.get(cursor.get_untracked()).cloned() else {
             diff_text.set(String::new());
@@ -454,6 +460,7 @@ pub fn GitPanel(
         let next = (cursor.get_untracked() as i32 + delta).clamp(0, n - 1) as usize;
         cursor.set(next);
         open_diff.set(false);
+        diff_expanded.set(false);
         diff_text.set(String::new());
     };
 
@@ -485,6 +492,7 @@ pub fn GitPanel(
             "Escape" => {
                 ev.prevent_default();
                 open_diff.set(false);
+                diff_expanded.set(false);
                 diff_text.set(String::new());
             }
             "l" if !ev.meta_key() && !ev.ctrl_key() && !ev.alt_key() => {
@@ -579,6 +587,33 @@ pub fn GitPanel(
             "/v1/git/unstage".into(),
             serde_json::json!({"paths": [path]}),
             "Unstaged.".into(),
+        );
+    };
+    // Batch variants (#1426): one POST with the whole path list — the
+    // daemon routes already accept `Paths []string` — never N per-file
+    // calls looping `stage_selected` / `unstage_selected`.
+    let stage_all = move |_| {
+        let paths = paths_where(&rows.get(), false);
+        if paths.is_empty() {
+            error.set("No unstaged or untracked files.".into());
+            return;
+        }
+        mutate(
+            "/v1/git/stage".into(),
+            serde_json::json!({"paths": paths}),
+            "Staged all.".into(),
+        );
+    };
+    let unstage_all = move |_| {
+        let paths = paths_where(&rows.get(), true);
+        if paths.is_empty() {
+            error.set("No staged files.".into());
+            return;
+        }
+        mutate(
+            "/v1/git/unstage".into(),
+            serde_json::json!({"paths": paths}),
+            "Unstaged all.".into(),
         );
     };
     let discard_selected = move || {
@@ -819,19 +854,33 @@ pub fn GitPanel(
                 views.into_iter().collect_view()
             }}
             <Show when=move || open_diff.get() && !diff_text.get().is_empty()>
-                <pre class="git-diff" aria-label="Diff">{move || {
-                    let text = diff_text.get();
-                    let more = text.lines().nth(400).is_some();
-                    let mut lines: Vec<_> = text.lines().take(400).map(|line| {
-                        let kind = diff_kind(line);
-                        let text = line.to_string();
-                        view! { <div class=kind>{text}</div> }.into_any()
-                    }).collect();
-                    if more {
-                        lines.push(view! { <div class="ctx">"… first 400 lines"</div> }.into_any());
-                    }
-                    lines.into_iter().collect_view()
-                }}</pre>
+                <div class="git-diff-wrap">
+                    <pre class="git-diff" aria-label="Diff">{move || {
+                        let text = diff_text.get();
+                        // #1428: render-only cap. The full text is already
+                        // client-side; expansion renders every line with the
+                        // same line-kind classes as the capped render.
+                        let limit = if diff_expanded.get() { usize::MAX } else { 400 };
+                        text.lines().take(limit).map(|line| {
+                            let kind = diff_kind(line);
+                            let text = line.to_string();
+                            view! { <div class=kind>{text}</div> }.into_any()
+                        }).collect_view()
+                    }}</pre>
+                    {move || {
+                        let total = diff_text.get().lines().count();
+                        (total > 400 && !diff_expanded.get()).then(|| view! {
+                            <button
+                                type="button"
+                                class="secondary git-diff-expand"
+                                data-git-diff-expand="true"
+                                on:click=move |_| diff_expanded.set(true)
+                            >
+                                {format!("Show all {total} lines")}
+                            </button>
+                        })
+                    }}
+                </div>
             </Show>
             <Show when=move || !diff_note.get().is_empty()>
                 <p class="hint">{move || diff_note.get()}</p>
@@ -841,6 +890,8 @@ pub fn GitPanel(
                 <button type="button" class="primary" on:click=commit_staged>"Commit staged"</button>
                 <button type="button" class="secondary" on:click=stage_selected>"Stage"</button>
                 <button type="button" class="secondary" on:click=unstage_selected>"Unstage"</button>
+                <button type="button" class="secondary" data-git-stage-all=true disabled=move || paths_where(&rows.get(), false).is_empty() on:click=stage_all>"Stage all"</button>
+                <button type="button" class="secondary" data-git-unstage-all=true disabled=move || paths_where(&rows.get(), true).is_empty() on:click=unstage_all>"Unstage all"</button>
             </div>
         </div>
     }
@@ -875,46 +926,44 @@ pub fn WorktreePanel(
         let load_epoch = load_epoch;
         spawn_local(async move {
             let live = move || load_epoch.with_untracked(|epoch| epoch.accept(gen));
-            match get_json::<WorktreesBody>(&b, &t, "/v1/git/worktrees").await {
-                Ok(parsed) => {
-                    if !live() {
-                        return;
-                    }
-                    body.set(Some(parsed));
-                    error.set(String::new());
-                }
-                Err(e) => {
-                    if !live() {
-                        return;
-                    }
-                    error.set(e);
-                }
-            }
+            let mut err = String::new();
+            let worktrees = outcome::take_ok(
+                &mut err,
+                "Worktrees",
+                get_json::<WorktreesBody>(&b, &t, "/v1/git/worktrees").await,
+            );
             if !live() {
                 return;
+            }
+            if let Some(parsed) = worktrees {
+                body.set(Some(parsed));
             }
             if root.is_empty() {
                 kids.set(vec![]);
                 kids_note.set(String::new());
+                error.set(err);
                 return;
             }
             let path = format!("/v1/sessions/{}/children", crate::api::js_encode(&root));
-            match get_json::<ChildrenResponse>(&b, &t, &path).await {
-                Ok(parsed) => {
-                    if !live() {
-                        return;
-                    }
+            let children = outcome::take_ok(
+                &mut err,
+                "Children",
+                get_json::<ChildrenResponse>(&b, &t, &path).await,
+            );
+            if !live() {
+                return;
+            }
+            match children {
+                Some(parsed) => {
                     kids.set(parsed.sessions);
                     kids_note.set(String::new());
                 }
-                Err(_) => {
-                    if !live() {
-                        return;
-                    }
+                None => {
                     kids.set(vec![]);
                     kids_note.set("Could not load child sessions.".into());
                 }
             }
+            error.set(err);
         });
     };
 
@@ -1072,5 +1121,46 @@ pub fn WorktreePanel(
                 <p class="hint">"No worktrees."</p>
             </Show>
         </div>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn row(section: &str, path: &str, staged: bool) -> GitRow {
+        GitRow {
+            section: section.into(),
+            path: path.into(),
+            status: String::new(),
+            added: 0,
+            deleted: 0,
+            staged,
+            inline_diff: String::new(),
+        }
+    }
+
+    #[test]
+    fn paths_where_splits_mixed_rows_in_panel_order() {
+        let rows = vec![
+            row("Staged", "a.rs", true),
+            row("Unstaged", "b.rs", false),
+            row("Staged", "c.rs", true),
+            row("Untracked", "new.rs", false),
+        ];
+        assert_eq!(paths_where(&rows, true), vec!["a.rs", "c.rs"]);
+        // Stage all includes Untracked rows (#1426 Q3).
+        assert_eq!(paths_where(&rows, false), vec!["b.rs", "new.rs"]);
+    }
+
+    #[test]
+    fn paths_where_empty_sets_disable_the_batch_buttons() {
+        let none: Vec<GitRow> = Vec::new();
+        assert!(paths_where(&none, true).is_empty());
+        assert!(paths_where(&none, false).is_empty());
+        let only_staged = vec![row("Staged", "a.rs", true)];
+        assert!(paths_where(&only_staged, false).is_empty());
+        let only_unstaged = vec![row("Unstaged", "b.rs", false)];
+        assert!(paths_where(&only_unstaged, true).is_empty());
     }
 }

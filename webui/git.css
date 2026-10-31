@@ -100,3 +100,13 @@
   .side:has(.git-panel), .side:has(.worktree-panel) { max-height: 70vh; }
 }
 /* feature:git-worktree end */
+
+/* feature:git-diff-expand begin */
+.git-diff-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-height: 0;
+}
+.git-diff-expand { align-self: flex-start; }
+/* feature:git-diff-expand end */

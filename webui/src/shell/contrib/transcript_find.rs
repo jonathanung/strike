@@ -15,7 +15,7 @@ pub fn install(reg: &mut ShellHook) {
         id: "transcript-find.open",
         group: Group::Session,
         label: "Find in transcript",
-        detail: "Search the open session's messages and tool titles, with match count and next/previous",
+        detail: "Search the open session's messages, tool titles and folded tool output, with match count and next/previous",
         shortcut: "Ctrl+F",
         keywords: &["find", "search", "transcript"],
         argument: None,

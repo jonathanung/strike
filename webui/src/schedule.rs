@@ -15,6 +15,7 @@ use load_guard::{commit_load, Commit, ErrPolicy, LoadEpoch};
 use crate::load_epoch::begin;
 
 use crate::api::{self, get_json, patch_json, post_json_value};
+use crate::outcome;
 use crate::shell::Choice;
 
 thread_local! {
@@ -152,6 +153,19 @@ struct WorkflowList {
     workflows: Vec<Named>,
 }
 
+/// Name for a duplicated schedule (#1462): append ` (copy)` once so the
+/// unsaved copy is distinguishable in the list once saved.
+pub fn duplicate_schedule_name(name: &str) -> String {
+    let name = name.trim();
+    if name.is_empty() {
+        return "(copy)".into();
+    }
+    if name.ends_with("(copy)") {
+        return name.to_string();
+    }
+    format!("{name} (copy)")
+}
+
 fn browser_tz() -> String {
     js_sys::eval("Intl.DateTimeFormat().resolvedOptions().timeZone")
         .ok()
@@ -215,6 +229,7 @@ pub fn SchedulePage(
     let workflows = RwSignal::new(Vec::<Named>::new());
     let error = RwSignal::new(String::new());
     let notice = RwSignal::new(String::new());
+    let retry_open = RwSignal::new(String::new());
     let editing = RwSignal::new(String::new());
     let confirm_delete = RwSignal::new(String::new());
     let name = RwSignal::new(String::new());
@@ -484,6 +499,30 @@ pub fn SchedulePage(
         load_history(editing.get_untracked());
     };
 
+    // Duplicate (#1462): keep every loaded field, but turn the form into a
+    // new unsaved schedule. Clearing `editing` makes Save take the existing
+    // POST create path; history is dropped and the copy starts disabled so
+    // a copied cron never fires before review. Nothing is written until
+    // the operator presses Create.
+    let duplicate = move || {
+        if editing.get_untracked().is_empty() {
+            return;
+        }
+        name.set(duplicate_schedule_name(&name.get_untracked()));
+        editing.set(String::new());
+        confirm_delete.set(String::new());
+        enabled.set(false);
+        let _ = begin(history_epoch);
+        runs.set(Vec::new());
+        history_error.set(String::new());
+        history_loading.set(false);
+        error.set(String::new());
+        notice.set(
+            "Duplicated as a new schedule (copy). It starts paused/disabled — review the fields, then Create to save it. Nothing is saved yet."
+                .into(),
+        );
+    };
+
     let save = move || {
         let body = json!({
             "name": name.get_untracked(),
@@ -574,11 +613,26 @@ pub fn SchedulePage(
             return;
         }
         let (b, t) = (base.get_untracked(), token.get_untracked());
-        active_root.set(id.clone());
-        mode.set("chat".into());
-        status.set(format!("Opened {id}"));
+        error.set(String::new());
+        retry_open.set(String::new());
         spawn_local(async move {
-            let _ = post_json_value(&b, &t, &format!("/v1/roots/{id}/activate"), json!({})).await;
+            let result = post_json_value(&b, &t, &format!("/v1/roots/{id}/activate"), json!({}))
+                .await
+                .map(|_| ());
+            let decision = outcome::schedule_open(&id, result);
+            if decision.opened {
+                active_root.set(id.clone());
+                // This path bypasses `activate_root` in main.rs, so it
+                // must persist the viewed session itself (#1391).
+                crate::session_restore::persist(&id);
+                mode.set("chat".into());
+                status.set(decision.status);
+                error.set(String::new());
+                retry_open.set(String::new());
+            } else {
+                error.set(decision.error);
+                retry_open.set(id);
+            }
         });
     };
 
@@ -591,6 +645,9 @@ pub fn SchedulePage(
             <p class="hint">"A clock in the daemon. Unattended runs use the workspace permission mode, or plan when the workspace has none. Plan denies writes."</p>
             <Show when=move || !error.get().is_empty()>
                 <p class="sched-error" role="alert">{move || error.get()}</p>
+            </Show>
+            <Show when=move || !retry_open.get().is_empty()>
+                <button type="button" class="secondary" data-sched-retry="true" on:click=move |_| open_session(retry_open.get())>"Retry"</button>
             </Show>
             <Show when=move || !notice.get().is_empty()>
                 <p class="sched-note" role="status">{move || notice.get()}</p>
@@ -721,6 +778,7 @@ pub fn SchedulePage(
                     </label>
                     <div class="sched-actions">
                         <button type="submit" class="primary">{move || if editing.get().is_empty() { "Create" } else { "Save" }}</button>
+                        <button type="button" class="secondary" id="schedule-duplicate" disabled=move || editing.get().is_empty() on:click=move |_| duplicate()>"Duplicate"</button>
                         <button type="button" class="secondary" on:click=move |_| remove()>
                             {move || if confirm_delete.get() == editing.get() && !editing.get().is_empty() { "Confirm delete" } else { "Delete" }}
                         </button>
@@ -784,5 +842,18 @@ pub fn SchedulePage(
                 </form>
             </div>
         </div>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn duplicate_name_appends_copy_once() {
+        assert_eq!(duplicate_schedule_name("Morning"), "Morning (copy)");
+        assert_eq!(duplicate_schedule_name("Morning (copy)"), "Morning (copy)");
+        assert_eq!(duplicate_schedule_name(""), "(copy)");
+        assert_eq!(duplicate_schedule_name("  Standup  "), "Standup (copy)");
     }
 }

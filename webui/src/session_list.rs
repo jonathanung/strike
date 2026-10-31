@@ -7,6 +7,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::model::{fmt_ago, session_label};
+use crate::status::{session_kind, StatusKind};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SourceSession {
@@ -22,6 +23,14 @@ pub struct SourceSession {
     pub unread: bool,
     pub folder_id: String,
     pub team_state: String,
+    /// Canonical status id from `SessionRow.status` (#1451). Empty when
+    /// the daemon did not send one; [`session_kind`] then falls back to
+    /// the pending flags below.
+    pub status: String,
+    /// Waiting on an approval (#1451).
+    pub permission_pending: bool,
+    /// Waiting on an answer to an agent question (#1451).
+    pub question_pending: bool,
     /// Display name of the workspace this session is bound to (#1260).
     /// Empty when unbound. Folders above are organisation, not this.
     pub workspace: String,
@@ -158,14 +167,42 @@ pub fn unread_flag(server: Option<bool>, id: &str, active: &str, mtime: i64, see
     mtime > seen_at && mtime > 0
 }
 
+/// True when the canonical classifier ([`session_kind`]) says this row
+/// is waiting on the user — an approval, a question, or a stall (#1451).
+/// This is the single waiting test for the "Needs you" chip and the row
+/// label; do not fork a second classifier.
+pub fn is_waiting(row: &SourceSession) -> bool {
+    session_kind(
+        &row.status,
+        row.busy,
+        row.permission_pending,
+        row.question_pending,
+    ) == StatusKind::Waiting
+}
+
 /// Local stand-in for the shared status component. Kinds match the gutter
-/// classes the list already paints.
+/// classes the list already paints. Waiting is checked first, through
+/// [`session_kind`], so a session blocked on the user is never labelled
+/// "In progress" just because the busy fold includes waiting (#1451).
 pub fn status_shim(
     busy: bool,
     unread: bool,
     live: bool,
     team_state: &str,
+    status: &str,
+    permission_pending: bool,
+    question_pending: bool,
 ) -> (&'static str, &'static str) {
+    if session_kind(status, busy, permission_pending, question_pending) == StatusKind::Waiting {
+        let label = if permission_pending {
+            "Needs approval"
+        } else if question_pending {
+            "Question"
+        } else {
+            StatusKind::Waiting.label()
+        };
+        return (StatusKind::Waiting.id(), label);
+    }
     match team_state {
         "running" | "stalled" => ("running", "In progress"),
         "blocked" => ("blocked", "Blocked"),
@@ -352,9 +389,16 @@ pub fn assemble(args: AssembleArgs) -> Layout {
 fn chip_ok(row: &SourceSession, filter: &str) -> bool {
     match filter {
         "unread" => !row.archived && row.unread,
+        // "Needs you" (#1451): non-archived rows the canonical classifier
+        // calls waiting. Additive — "In progress" below still includes
+        // waiting rows, because a waiting session is still in progress.
+        "needs-you" => !row.archived && is_waiting(row),
         "progress" => {
             !row.archived
-                && (row.busy || row.team_state == "running" || row.team_state == "stalled")
+                && (row.busy
+                    || is_waiting(row)
+                    || row.team_state == "running"
+                    || row.team_state == "stalled")
         }
         "pinned" => row.pinned,
         "archived" => row.archived,
@@ -453,7 +497,15 @@ fn push_session(
     } else {
         None
     };
-    let (kind, label) = status_shim(row.busy, row.unread, row.live, &row.team_state);
+    let (kind, label) = status_shim(
+        row.busy,
+        row.unread,
+        row.live,
+        &row.team_state,
+        &row.status,
+        row.permission_pending,
+        row.question_pending,
+    );
     let subtitle = if !row.snippet.is_empty() {
         row.snippet.clone()
     } else if row.archived {
@@ -507,7 +559,7 @@ fn push_children(
         let (sk, sl) = if child.state.is_empty() {
             ("delegated", "Delegated")
         } else {
-            let (k, l) = status_shim(false, false, false, &child.state);
+            let (k, l) = status_shim(false, false, false, &child.state, "", false, false);
             if k == "saved" {
                 ("delegated", "Delegated")
             } else {
@@ -566,6 +618,9 @@ mod tests {
             unread: false,
             folder_id: String::new(),
             team_state: String::new(),
+            status: String::new(),
+            permission_pending: false,
+            question_pending: false,
             workspace: String::new(),
         }
     }
@@ -619,11 +674,102 @@ mod tests {
 
     #[test]
     fn status_shim_maps_team_state() {
-        assert_eq!(status_shim(false, false, true, "").0, "idle");
-        assert_eq!(status_shim(true, false, true, "").0, "running");
-        assert_eq!(status_shim(false, true, false, "").1, "Unread");
-        assert_eq!(status_shim(false, false, false, "blocked").0, "blocked");
-        assert_eq!(status_shim(true, false, true, "failed").0, "failed");
+        assert_eq!(
+            status_shim(false, false, true, "", "", false, false).0,
+            "idle"
+        );
+        assert_eq!(
+            status_shim(true, false, true, "", "", false, false).0,
+            "running"
+        );
+        assert_eq!(
+            status_shim(false, true, false, "", "", false, false).1,
+            "Unread"
+        );
+        assert_eq!(
+            status_shim(false, false, false, "blocked", "", false, false).0,
+            "blocked"
+        );
+        assert_eq!(
+            status_shim(true, false, true, "failed", "", false, false).0,
+            "failed"
+        );
+    }
+
+    #[test]
+    fn needs_you_chip_and_shim_for_waiting_rows() {
+        let now = 1_700_000_000i64;
+        // Waiting on an approval: busy is folded true for waiting, yet the
+        // row must match Needs you and must not be labelled In progress.
+        let mut approval = session("approval", now - 60);
+        approval.busy = true;
+        approval.status = "waiting".into();
+        approval.permission_pending = true;
+        assert!(chip_ok(&approval, "needs-you"));
+        // Additive: waiting rows still count as in progress.
+        assert!(chip_ok(&approval, "progress"));
+        assert_eq!(
+            status_shim(true, false, true, "", "waiting", true, false),
+            ("waiting", "Needs approval")
+        );
+
+        // Waiting on a question, classified from the pending flag alone
+        // (older daemon that sent no canonical status).
+        let mut question = session("question", now - 50);
+        question.question_pending = true;
+        assert!(chip_ok(&question, "needs-you"));
+        assert_eq!(
+            status_shim(false, false, true, "", "", false, true),
+            ("waiting", "Question")
+        );
+
+        // Waiting with no specific ask falls back to the canonical label.
+        let mut plain = session("plain", now - 40);
+        plain.status = "waiting".into();
+        assert!(chip_ok(&plain, "needs-you"));
+        assert_eq!(
+            status_shim(false, false, true, "", "waiting", false, false),
+            ("waiting", "Waiting")
+        );
+
+        // A running row is not Needs you, and an archived waiting row is
+        // excluded from Needs you (it only shows under Archived).
+        let mut running = session("running", now - 30);
+        running.busy = true;
+        running.status = "running".into();
+        assert!(!chip_ok(&running, "needs-you"));
+        let mut archived = approval.clone();
+        archived.id = "archived".into();
+        archived.archived = true;
+        assert!(!chip_ok(&archived, "needs-you"));
+        assert!(chip_ok(&archived, "archived"));
+
+        // End to end through assemble: the Needs you filter keeps only
+        // the waiting rows, rendered with the waiting gutter kind and a
+        // waiting label — never "In progress".
+        let sessions = vec![approval, question, running, archived];
+        let folders = Vec::new();
+        let collapsed = HashSet::new();
+        let content = HashSet::new();
+        let mut a = args(&sessions, &[], &folders, &collapsed, &content);
+        a.filter = "needs-you";
+        let layout = assemble(a);
+        let rows: Vec<_> = layout
+            .items
+            .iter()
+            .filter(|i| i.kind == LayoutKind::Session)
+            .collect();
+        assert_eq!(rows.len(), 2);
+        for row in &rows {
+            assert_eq!(row.status_kind, "waiting");
+            assert!(!row.subtitle.contains("In progress"), "{}", row.subtitle);
+        }
+        let labels: Vec<_> = rows.iter().map(|i| i.subtitle.as_str()).collect();
+        assert!(
+            labels.iter().any(|s| s.contains("Needs approval")),
+            "{labels:?}"
+        );
+        assert!(labels.iter().any(|s| s.contains("Question")), "{labels:?}");
     }
 
     #[test]
