@@ -29,6 +29,16 @@ const chromePort = 9222 + (process.pid % 200);
 await mkdir(join(home, ".strike"), { recursive: true });
 await writeFile(join(home, ".strike", "config"), '{"sandboxAllowDegrade":true}\n');
 
+// Git diff expand seed (#1428): an untracked file in the daemon's repo whose
+// --no-index diff runs past the Git panel's 400-line render cap. The git
+// section below opens it, asserts the capped render + "Show all N lines"
+// footer, expands it, and asserts the tail is reachable. Removed in finally.
+const gitDiffSeedPath = join(process.cwd(), "smoke-git-diff-1428.txt");
+await writeFile(
+  gitDiffSeedPath,
+  Array.from({ length: 500 }, (_, i) => `smoke-diff-line-${i + 1}`).join("\n") + "\n",
+);
+
 // Render/boot waits get a deadline sized for shared CI runners; shorter
 // interactive steps get a smaller one. Both are overridable for local runs.
 // WAIT_MS is also the budget for anti-hang arrival waits whose predicate
@@ -1879,6 +1889,73 @@ try {
       { timeout: STEP_MS, interval: 250 },
     );
   }
+  // Git diff expand (#1428): the seeded untracked file's diff is ~505 lines.
+  // The panel must render only the first 400 with a "Show all N lines"
+  // button (data-git-diff-expand); clicking it renders the tail in place;
+  // re-opening the same diff starts capped again (per-diff reset).
+  const diffProbe = async () => {
+    const raw = await evaluate(`(() => {
+      const pre = document.querySelector(".git-diff");
+      const btn = document.querySelector("[data-git-diff-expand]");
+      return JSON.stringify({
+        lines: pre ? pre.children.length : -1,
+        btn: btn ? (btn.textContent || "").trim() : "",
+        hasTail: pre ? pre.textContent.includes("smoke-diff-line-500") : false,
+        has401: pre ? pre.textContent.includes("smoke-diff-line-396") : false,
+      });
+    })()`);
+    return JSON.parse(raw || "{}");
+  };
+  const clickSeedRow = async () => {
+    // Rows load async after the Git tab opens; poll for the seed row like
+    // every other wait in this script instead of a single-shot query
+    // (a one-shot query raced the status load on CI: "seed row missing").
+    await waitFor(
+      "git diff expand seed row (smoke-git-diff-1428.txt)",
+      async () => {
+        const v = await evaluate(`(() => {
+          const b = [...document.querySelectorAll(".git-file")].find((x) => (x.textContent || "").includes("smoke-git-diff-1428.txt"));
+          if (!b) return "missing";
+          b.click();
+          return "clicked";
+        })()`);
+        return { ok: v === "clicked", v };
+      },
+      { timeout: WAIT_MS, interval: 250 },
+    );
+  };
+  await clickSeedRow();
+  await waitFor(
+    "git diff capped at 400 lines with a Show all N lines button",
+    async () => {
+      const p = await diffProbe();
+      return { ok: p.lines === 400 && p.btn.startsWith("Show all ") && p.btn.endsWith(" lines") && !p.has401, ...p };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  const expandClicked = await evaluate(
+    `(() => { const b = document.querySelector("[data-git-diff-expand]"); if (!b) return "missing"; b.click(); return "clicked"; })()`,
+  );
+  if (expandClicked !== "clicked") {
+    throw new Error(`git diff expand: button ${expandClicked}`);
+  }
+  await waitFor(
+    "expanded git diff renders lines past 400 through the tail",
+    async () => {
+      const p = await diffProbe();
+      return { ok: p.lines > 400 && p.hasTail && p.btn === "", ...p };
+    },
+    { timeout: STEP_MS, interval: 250 },
+  );
+  await clickSeedRow();
+  await waitFor(
+    "re-opened git diff starts capped again (per-diff reset)",
+    async () => {
+      const p = await diffProbe();
+      return { ok: p.lines === 400 && p.btn.startsWith("Show all "), ...p };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
   if (stageAllSeeded) {
     const batchButtons = async () => {
       const raw = await evaluate(`(() => {
@@ -3363,6 +3440,7 @@ try {
   // a file released a beat after exit — rm retries ENOTEMPTY/EBUSY
   // instead of failing the run.
   await Promise.all([stopChild(chrome), stopChild(strike)]);
+  await rm(gitDiffSeedPath, { force: true });
   await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   await rm(chromeData, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 }

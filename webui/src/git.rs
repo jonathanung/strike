@@ -247,6 +247,10 @@ pub fn GitPanel(
     let diff_text = RwSignal::new(String::new());
     let diff_note = RwSignal::new(String::new());
     let diff_req = RwSignal::new(0u32);
+    // #1428: the diff render is capped at 400 lines by default (wasm DOM
+    // cost); diff_expanded lifts the cap for the currently open diff only.
+    // It resets whenever a diff is (re)loaded — see the diff effect below.
+    let diff_expanded = RwSignal::new(false);
     let show_log = RwSignal::new(false);
     let message = RwSignal::new(String::new());
     let switch_to = RwSignal::new(String::new());
@@ -408,6 +412,8 @@ pub fn GitPanel(
         if !open_diff.get_untracked() {
             return;
         }
+        // Per-diff expansion (#1428): every (re)load starts capped again.
+        diff_expanded.set(false);
         let rows = rows.get_untracked();
         let Some(row) = rows.get(cursor.get_untracked()).cloned() else {
             diff_text.set(String::new());
@@ -454,6 +460,7 @@ pub fn GitPanel(
         let next = (cursor.get_untracked() as i32 + delta).clamp(0, n - 1) as usize;
         cursor.set(next);
         open_diff.set(false);
+        diff_expanded.set(false);
         diff_text.set(String::new());
     };
 
@@ -485,6 +492,7 @@ pub fn GitPanel(
             "Escape" => {
                 ev.prevent_default();
                 open_diff.set(false);
+                diff_expanded.set(false);
                 diff_text.set(String::new());
             }
             "l" if !ev.meta_key() && !ev.ctrl_key() && !ev.alt_key() => {
@@ -846,19 +854,33 @@ pub fn GitPanel(
                 views.into_iter().collect_view()
             }}
             <Show when=move || open_diff.get() && !diff_text.get().is_empty()>
-                <pre class="git-diff" aria-label="Diff">{move || {
-                    let text = diff_text.get();
-                    let more = text.lines().nth(400).is_some();
-                    let mut lines: Vec<_> = text.lines().take(400).map(|line| {
-                        let kind = diff_kind(line);
-                        let text = line.to_string();
-                        view! { <div class=kind>{text}</div> }.into_any()
-                    }).collect();
-                    if more {
-                        lines.push(view! { <div class="ctx">"… first 400 lines"</div> }.into_any());
-                    }
-                    lines.into_iter().collect_view()
-                }}</pre>
+                <div class="git-diff-wrap">
+                    <pre class="git-diff" aria-label="Diff">{move || {
+                        let text = diff_text.get();
+                        // #1428: render-only cap. The full text is already
+                        // client-side; expansion renders every line with the
+                        // same line-kind classes as the capped render.
+                        let limit = if diff_expanded.get() { usize::MAX } else { 400 };
+                        text.lines().take(limit).map(|line| {
+                            let kind = diff_kind(line);
+                            let text = line.to_string();
+                            view! { <div class=kind>{text}</div> }.into_any()
+                        }).collect_view()
+                    }}</pre>
+                    {move || {
+                        let total = diff_text.get().lines().count();
+                        (total > 400 && !diff_expanded.get()).then(|| view! {
+                            <button
+                                type="button"
+                                class="secondary git-diff-expand"
+                                data-git-diff-expand="true"
+                                on:click=move |_| diff_expanded.set(true)
+                            >
+                                {format!("Show all {total} lines")}
+                            </button>
+                        })
+                    }}
+                </div>
             </Show>
             <Show when=move || !diff_note.get().is_empty()>
                 <p class="hint">{move || diff_note.get()}</p>
