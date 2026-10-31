@@ -1008,7 +1008,8 @@ mod tests {
     #[test]
     fn still_empty_folder_ids_rechecks_against_a_fresh_snapshot() {
         let wanted: Vec<String> = vec!["f1".into(), "f2".into(), "f3".into()];
-        let folders: Vec<String> = vec!["f1".into(), "f2".into(), "f3".into(), "f4".into()];
+        // f3 is absent here: someone else already deleted it.
+        let folders: Vec<String> = vec!["f1".into(), "f2".into(), "f4".into()];
         // Since the render, f2 gained a session and f3 was deleted by
         // someone else; only f1 may still be removed. f4 is empty in
         // the fresh snapshot but was not in the confirmed set, so it
