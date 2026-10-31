@@ -2,6 +2,8 @@
 //! `user.input` or `permission.reply`. The panel mirrors the session events
 //! the app already subscribes to; it has no approval control.
 
+use std::collections::HashSet;
+
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use serde::Deserialize;
@@ -212,13 +214,75 @@ pub fn mark_side_load_failed(mem: &mut SideChatMemory, root: &str, message: &str
     mem.error_root = root.to_string();
 }
 
+/// How many mirror events render by default (#1439). The full list is
+/// already in the panel's signal; this is only a render window.
+pub const MIRROR_WINDOW: usize = 8;
+
+/// Character cap for a collapsed mirror event body (#1439).
+pub const MIRROR_CLIP_CHARS: usize = 180;
+
 fn clip_line(s: &str) -> String {
     let count = s.chars().count();
-    if count <= 180 {
+    if count <= MIRROR_CLIP_CHARS {
         return s.to_string();
     }
-    let clipped: String = s.chars().take(180).collect();
+    let clipped: String = s.chars().take(MIRROR_CLIP_CHARS).collect();
     format!("{clipped}…")
+}
+
+/// True when `clip_line` would shorten `s` — i.e. the event needs an
+/// expand affordance. Exactly at the cap is not clipped.
+pub fn is_clipped(s: &str) -> bool {
+    s.chars().count() > MIRROR_CLIP_CHARS
+}
+
+/// Index of the first rendered mirror event. Collapsed (the default)
+/// renders only the last `MIRROR_WINDOW`; `show_all` renders from 0.
+pub fn mirror_start(total: usize, show_all: bool) -> usize {
+    if show_all {
+        0
+    } else {
+        total.saturating_sub(MIRROR_WINDOW)
+    }
+}
+
+/// Label for the mirror header toggle, or `None` when there is nothing
+/// hidden (total fits the default window, so no control is offered).
+/// The total is named in both states so the collapsed truncation is
+/// never silent: collapsed reads `Show all (N)`, expanded reads
+/// `Show less (N total)`.
+pub fn mirror_toggle_label(total: usize, show_all: bool) -> Option<String> {
+    if total <= MIRROR_WINDOW {
+        return None;
+    }
+    if show_all {
+        Some(format!("Show less ({total} total)"))
+    } else {
+        Some(format!("Show all ({total})"))
+    }
+}
+
+/// Body to render for one mirror event: the full body when expanded,
+/// the clipped rendering otherwise. `clip_line` is the collapsed
+/// rendering only (#1439).
+pub fn mirror_body(body: &str, expanded: bool) -> String {
+    if expanded {
+        body.to_string()
+    } else {
+        clip_line(body)
+    }
+}
+
+/// Toggle one event's expanded state in the set (keyed by the event's
+/// absolute index in the full list). Returns the new state.
+pub fn toggle_mirror_expanded(set: &mut HashSet<usize>, index: usize) -> bool {
+    if set.contains(&index) {
+        set.remove(&index);
+        false
+    } else {
+        set.insert(index);
+        true
+    }
 }
 
 #[component]
@@ -243,6 +307,13 @@ pub fn SideChatPanel(
     let error_kind = RwSignal::new(SideErrorKind::None);
     let error_root = RwSignal::new(String::new());
     let reload_gen = RwSignal::new(0u32);
+    // Mirror window (#1439): defaults stay last-8 / clipped. `mirror_show_all`
+    // widens the window to the full list; `mirror_expanded` holds the
+    // absolute indices of events expanded to their full body. Both reset
+    // when the root switches, so one session's indices never expand
+    // another session's events.
+    let mirror_show_all = RwSignal::new(false);
+    let mirror_expanded = RwSignal::new(HashSet::<usize>::new());
 
     let read_memory = move || SideChatMemory {
         draft: draft.get_untracked(),
@@ -297,6 +368,10 @@ pub fn SideChatPanel(
         }
         apply_side_plan(&mut mem, &session, plan);
         write_memory(mem);
+        if plan == SideLoadPlan::Switch {
+            mirror_show_all.set(false);
+            mirror_expanded.set(HashSet::new());
+        }
         turns.set(Vec::new());
         if session.is_empty() {
             return;
@@ -427,22 +502,70 @@ pub fn SideChatPanel(
                 </Show>
                 <div class="side-chat-scroll">
                     <div class="side-chat-mirror" aria-label="Session events">
-                        <p class="hint">"This session"</p>
+                        <div class="side-chat-mirror-head">
+                            <p class="hint">"This session"</p>
+                            {move || {
+                                let total = lines.get().len();
+                                let show_all = mirror_show_all.get();
+                                mirror_toggle_label(total, show_all).map(|label| {
+                                    view! {
+                                        <button
+                                            type="button"
+                                            class="secondary side-chat-mirror-more"
+                                            data-mirror-more="true"
+                                            aria-expanded=move || mirror_show_all.get().to_string()
+                                            on:click=move |_| mirror_show_all.update(|v| *v = !*v)
+                                        >
+                                            {label}
+                                        </button>
+                                    }
+                                })
+                            }}
+                        </div>
                         {move || {
                             let all = lines.get();
-                            let start = all.len().saturating_sub(8);
+                            let total = all.len();
+                            let show_all = mirror_show_all.get();
+                            let start = mirror_start(total, show_all);
+                            let expanded = mirror_expanded.get();
                             let shown: Vec<_> = all[start..].to_vec();
                             if shown.is_empty() {
                                 view! { <p class="hint">"No session events yet."</p> }.into_any()
                             } else {
-                                shown.into_iter().map(|line| {
+                                shown.into_iter().enumerate().map(|(offset, line)| {
+                                    let index = start + offset;
                                     let title = line.title.clone();
-                                    let body = clip_line(&line.body);
-                                    view! {
-                                        <p class="side-chat-event">
-                                            <span class="who">{title}</span>
-                                            <span>{body}</span>
-                                        </p>
+                                    let is_expanded = expanded.contains(&index);
+                                    let clipped = is_clipped(&line.body);
+                                    let body = mirror_body(&line.body, is_expanded);
+                                    if clipped {
+                                        view! {
+                                            <p class="side-chat-event">
+                                                <span class="who">{title}</span>
+                                                <button
+                                                    type="button"
+                                                    class="side-chat-event-toggle"
+                                                    data-mirror-expand="true"
+                                                    data-mirror-expanded=is_expanded.to_string()
+                                                    aria-expanded=is_expanded.to_string()
+                                                    title=if is_expanded { "Collapse this event" } else { "Expand this event" }
+                                                    on:click=move |_| {
+                                                        mirror_expanded.update(|set| {
+                                                            toggle_mirror_expanded(set, index);
+                                                        });
+                                                    }
+                                                >
+                                                    {body}
+                                                </button>
+                                            </p>
+                                        }.into_any()
+                                    } else {
+                                        view! {
+                                            <p class="side-chat-event">
+                                                <span class="who">{title}</span>
+                                                <span>{body}</span>
+                                            </p>
+                                        }.into_any()
                                     }
                                 }).collect_view().into_any()
                             }
@@ -526,6 +649,74 @@ mod tests {
             answered_by_other("anthropic", "claude-opus", "echo", "echo").as_deref(),
             Some("Answered by anthropic · claude-opus")
         );
+    }
+
+    #[test]
+    fn mirror_window_defaults_to_last_eight() {
+        assert_eq!(mirror_start(0, false), 0);
+        assert_eq!(mirror_start(8, false), 0);
+        assert_eq!(mirror_start(9, false), 1);
+        assert_eq!(mirror_start(20, false), 12);
+        // Show-all renders from the start, whatever the total.
+        assert_eq!(mirror_start(20, true), 0);
+        assert_eq!(mirror_start(3, true), 0);
+    }
+
+    #[test]
+    fn mirror_toggle_names_the_total_and_hides_when_nothing_is_hidden() {
+        assert_eq!(mirror_toggle_label(0, false), None);
+        assert_eq!(mirror_toggle_label(8, false), None);
+        assert_eq!(mirror_toggle_label(8, true), None);
+        assert_eq!(
+            mirror_toggle_label(9, false).as_deref(),
+            Some("Show all (9)")
+        );
+        assert_eq!(
+            mirror_toggle_label(12, false).as_deref(),
+            Some("Show all (12)")
+        );
+        // Expanded state still names the total.
+        assert_eq!(
+            mirror_toggle_label(12, true).as_deref(),
+            Some("Show less (12 total)")
+        );
+    }
+
+    #[test]
+    fn mirror_body_clips_only_when_collapsed() {
+        let long = "x".repeat(200);
+        assert!(!is_clipped(&"x".repeat(180)));
+        assert!(is_clipped(&"x".repeat(181)));
+        assert!(is_clipped(&long));
+        // Collapsed: clipped to the cap plus the ellipsis.
+        let collapsed = mirror_body(&long, false);
+        assert_eq!(collapsed.chars().count(), 181);
+        assert!(collapsed.ends_with('…'));
+        assert_ne!(collapsed, long);
+        // Expanded: the full body, in either window mode — the toggle
+        // set is independent of show_all.
+        assert_eq!(mirror_body(&long, true), long);
+        // Short bodies render unchanged both ways.
+        assert_eq!(mirror_body("hello", false), "hello");
+        assert_eq!(mirror_body("hello", true), "hello");
+        // Unicode is counted in chars, not bytes.
+        let wide = "é".repeat(181);
+        assert!(is_clipped(&wide));
+        assert_eq!(mirror_body(&wide, true), wide);
+    }
+
+    #[test]
+    fn mirror_expand_toggles_per_event() {
+        let mut set = HashSet::new();
+        assert!(toggle_mirror_expanded(&mut set, 3));
+        assert!(set.contains(&3));
+        // Expanding one event does not expand another.
+        assert!(!set.contains(&4));
+        assert!(toggle_mirror_expanded(&mut set, 4));
+        // A second click on the same event collapses it again.
+        assert!(!toggle_mirror_expanded(&mut set, 3));
+        assert!(!set.contains(&3));
+        assert!(set.contains(&4));
     }
 
     fn errored(root: &str) -> SideChatMemory {
