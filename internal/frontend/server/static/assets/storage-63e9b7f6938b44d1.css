@@ -75,6 +75,10 @@
   font-size: var(--text-sm);
 }
 .storage-detail { display: flex; flex-direction: column; gap: var(--space-2); }
+/* feature:memory-export begin */
+.storage-export { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.storage-export .hint { margin: 0; flex: 1 1 220px; }
+/* feature:memory-export end */
 @media (max-width: 720px) {
   .storage-row { flex-wrap: wrap; }
   .storage-form { flex-direction: column; align-items: stretch; }
