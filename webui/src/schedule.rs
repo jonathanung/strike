@@ -584,7 +584,10 @@ pub fn SchedulePage(
                 .map(|_| ());
             let decision = outcome::schedule_open(&id, result);
             if decision.opened {
-                active_root.set(id);
+                active_root.set(id.clone());
+                // This path bypasses `activate_root` in main.rs, so it
+                // must persist the viewed session itself (#1391).
+                crate::session_restore::persist(&id);
                 mode.set("chat".into());
                 status.set(decision.status);
                 error.set(String::new());
