@@ -256,6 +256,30 @@ pub fn rule_remove_confirm(
     })
 }
 
+/// The four Add-form fields, copied verbatim from an existing rule
+/// (#1433). Duplicate/edit is prefill-only: this draft seeds the form and
+/// the existing submit path — validation and the dangerous-add confirm
+/// included — stays the single way a rule is created. Nothing here
+/// submits, and the source rule is untouched until the user removes it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RuleDraft {
+    pub scope: String,
+    pub permission: String,
+    pub pattern: String,
+    pub action: String,
+}
+
+/// Prefill for the Duplicate affordance: every field copied as-is,
+/// including a project scope (changing scope is the user's edit, Q3).
+pub fn rule_prefill(rule: &RuleRecord) -> RuleDraft {
+    RuleDraft {
+        scope: rule.scope.clone(),
+        permission: rule.permission.clone(),
+        pattern: rule.pattern.clone(),
+        action: rule.action.clone(),
+    }
+}
+
 /// Body for POST /v1/permissions/rules/remove. Identity travels with the
 /// index so a shifted list cannot delete a different rule.
 pub fn rule_remove_body(rule: &RuleRecord, confirm: bool) -> serde_json::Value {
@@ -1051,6 +1075,42 @@ mod tests {
             hint_line(&decision_choices(&ask_with("bash", &["ls"]))),
             "1 allow once, 2 allow session, 3 allow project, 4 or Escape denies."
         );
+    }
+
+    #[test]
+    fn rule_prefill_copies_all_four_fields_verbatim() {
+        // Distinct values per field so a swapped copy fails loudly.
+        let rule = RuleRecord {
+            scope: "project".into(),
+            index: 3,
+            permission: "edit".into(),
+            pattern: "src/**/*.go".into(),
+            action: "ask".into(),
+        };
+        let draft = rule_prefill(&rule);
+        assert_eq!(draft.scope, "project");
+        assert_eq!(draft.permission, "edit");
+        assert_eq!(draft.pattern, "src/**/*.go");
+        assert_eq!(draft.action, "ask");
+        // A prefilled draft is an ordinary draft: it passes the same
+        // validation a hand-typed rule goes through, with no shortcut.
+        assert!(validate_rule_draft(&draft.permission, &draft.pattern, &draft.action).is_ok());
+        // Prefill never mutates the source record.
+        assert_eq!(rule.index, 3);
+        assert_eq!(rule.pattern, "src/**/*.go");
+
+        let global = RuleRecord {
+            scope: "global".into(),
+            index: 0,
+            permission: "bash".into(),
+            pattern: "rm *".into(),
+            action: "deny".into(),
+        };
+        let draft = rule_prefill(&global);
+        assert_eq!(draft.scope, "global");
+        assert_eq!(draft.permission, "bash");
+        assert_eq!(draft.pattern, "rm *");
+        assert_eq!(draft.action, "deny");
     }
 
     #[test]
