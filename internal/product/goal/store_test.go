@@ -89,6 +89,117 @@ func TestStoreCommitIterationAndIntents(t *testing.T) {
 	}
 }
 
+// A commit carrying a stale Active snapshot must not resurrect a goal
+// a concurrent control already paused (#1417): the stored pause —
+// status and its frozen wall clock — wins, the iteration still records.
+func TestStoreCommitIterationPreservesConcurrentPause(t *testing.T) {
+	t.Parallel()
+	s, err := Open(t.TempDir(), "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	spec, _ := ParseCheckSpec("cmd: true")
+	g, err := s.Create("g", []Criterion{{Check: spec}}, DefaultConstraints())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetStatus(g.ID, StatusActive, ""); err != nil {
+		t.Fatal(err)
+	}
+	stale, ok, err := s.Get(g.ID)
+	if err != nil || !ok || stale.Status != StatusActive {
+		t.Fatalf("snapshot=%+v ok=%v err=%v", stale, ok, err)
+	}
+	paused, err := s.SetStatus(g.ID, StatusPaused, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CommitIteration(stale, IterationRecord{N: 1, StateHash: "h1"}); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := s.Get(g.ID)
+	if err != nil || !ok {
+		t.Fatalf("get: ok=%v err=%v", ok, err)
+	}
+	if got.Status != StatusPaused {
+		t.Fatalf("status=%s, want paused (commit overwrote the pause)", got.Status)
+	}
+	if !got.ActiveStartedAt.IsZero() || got.ActiveElapsed != paused.ActiveElapsed {
+		t.Fatalf("pause wall-clock freeze lost: %+v", got)
+	}
+	if got.LastIteration != 1 {
+		t.Fatalf("lastIteration=%d, want the committed iteration recorded", got.LastIteration)
+	}
+}
+
+// A commit whose snapshot deliberately carries a terminal status (the
+// loop's guard transition, stored goal still Active) must still apply.
+func TestStoreCommitIterationAppliesGuardTransition(t *testing.T) {
+	t.Parallel()
+	s, err := Open(t.TempDir(), "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	spec, _ := ParseCheckSpec("cmd: true")
+	g, err := s.Create("g", []Criterion{{Check: spec}}, DefaultConstraints())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetStatus(g.ID, StatusActive, ""); err != nil {
+		t.Fatal(err)
+	}
+	snap, ok, err := s.Get(g.ID)
+	if err != nil || !ok {
+		t.Fatalf("get: ok=%v err=%v", ok, err)
+	}
+	snap.Status = StatusDone
+	if err := s.CommitIteration(snap, IterationRecord{N: 1, StateHash: "h1"}); err != nil {
+		t.Fatal(err)
+	}
+	got, _, err := s.Get(g.ID)
+	if err != nil || got.Status != StatusDone || got.LastIteration != 1 {
+		t.Fatalf("got=%+v err=%v", got, err)
+	}
+}
+
+func TestStoreMarkFailedIfActive(t *testing.T) {
+	t.Parallel()
+	s, err := Open(t.TempDir(), "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	spec, _ := ParseCheckSpec("cmd: true")
+	g, err := s.Create("g", []Criterion{{Check: spec}}, DefaultConstraints())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetStatus(g.ID, StatusActive, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetStatus(g.ID, StatusPaused, ""); err != nil {
+		t.Fatal(err)
+	}
+	// Paused: the failure must not apply — a pause-caused cancellation
+	// is not a failure (#1417).
+	got, applied, err := s.MarkFailedIfActive(g.ID, "context canceled")
+	if err != nil || applied || got.Status != StatusPaused || got.FailReason != "" {
+		t.Fatalf("paused: got=%+v applied=%v err=%v", got, applied, err)
+	}
+	if _, err := s.SetStatus(g.ID, StatusActive, ""); err != nil {
+		t.Fatal(err)
+	}
+	got, applied, err = s.MarkFailedIfActive(g.ID, "boom")
+	if err != nil || !applied || got.Status != StatusFailed || got.FailReason != "boom" {
+		t.Fatalf("active: got=%+v applied=%v err=%v", got, applied, err)
+	}
+	if _, _, err := s.MarkFailedIfActive("missing", "boom"); err == nil {
+		t.Fatal("missing goal should error")
+	}
+}
+
 func TestStoreCommitIterationReopen(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
