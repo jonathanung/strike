@@ -4,6 +4,10 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use serde::Deserialize;
 
+use load_guard::{commit_load, Commit, ErrPolicy, LoadEpoch};
+
+use crate::load_epoch::begin;
+
 use crate::api::{delete_json, get_json, now_ms, put_json};
 use crate::model::{fmt_ago, rfc3339_to_ms};
 
@@ -113,39 +117,76 @@ pub fn StoragePanel(
     let path_in = RwSignal::new(String::new());
     let note_in = RwSignal::new(String::new());
     let selected = RwSignal::new(String::new());
+    let pin_loading = RwSignal::new(false);
+    let artifact_loading = RwSignal::new(false);
+    let artifact_label = RwSignal::new(String::new());
+    let list_loading = RwSignal::new(false);
+    let list_epoch = RwSignal::new(LoadEpoch::new());
+    let pin_epoch = RwSignal::new(LoadEpoch::new());
+    let artifact_epoch = RwSignal::new(LoadEpoch::new());
+    let list_key = RwSignal::new(String::new());
 
     let reload = move || {
-        let tab = tab.get_untracked();
-        let (b, t, root, scope) = (
+        let tab_now = tab.get_untracked();
+        let (b, t, root_now, scope_now) = (
             base.get_untracked(),
             token.get_untracked(),
             root.get_untracked(),
             scope.get_untracked(),
         );
+        let key = format!("{tab_now}|{scope_now}|{root_now}");
+        let gen = begin(list_epoch);
+        list_loading.set(true);
+        if list_key.get_untracked() != key {
+            entries.set(Vec::new());
+            pins.set(Vec::new());
+            artifacts.set(Vec::new());
+            markdown.set(String::new());
+            audit.set(String::new());
+            error.set(String::new());
+            preview.set(String::new());
+            detail.set(None);
+            selected.set(String::new());
+            artifact_label.set(String::new());
+            pin_loading.set(false);
+            artifact_loading.set(false);
+            let _ = begin(pin_epoch);
+            let _ = begin(artifact_epoch);
+            list_key.set(key.clone());
+        }
+        let list_epoch = list_epoch;
         spawn_local(async move {
-            let result = if tab == "memory" {
-                load_memory(&b, &t, &scope).await
-            } else if tab == "knowledge" {
-                load_knowledge(&b, &t, &scope).await
-            } else if tab == "artifacts" {
-                load_artifacts(&b, &t, &root).await
+            let result = if tab_now == "memory" {
+                load_memory(&b, &t, &scope_now).await
+            } else if tab_now == "knowledge" {
+                load_knowledge(&b, &t, &scope_now).await
+            } else if tab_now == "artifacts" {
+                load_artifacts(&b, &t, &root_now).await
             } else {
                 return;
             };
+            if !list_epoch.with_untracked(|epoch| epoch.accept(gen)) {
+                return;
+            }
+            list_loading.set(false);
             match result {
                 Ok(loaded) => {
                     error.set(String::new());
                     markdown.set(loaded.markdown);
                     audit.set(loaded.audit);
-                    if tab == "memory" {
+                    if tab_now == "memory" {
                         entries.set(loaded.entries);
-                    } else if tab == "knowledge" {
+                    } else if tab_now == "knowledge" {
                         pins.set(loaded.pins);
                     } else {
                         artifacts.set(loaded.artifacts);
                     }
+                    list_key.set(key);
                 }
-                Err(e) => error.set(e),
+                Err(e) => {
+                    error.set(e);
+                    list_key.set(key);
+                }
             }
         });
     };
@@ -176,7 +217,11 @@ pub fn StoragePanel(
             "author": "operator",
             "scope": scope.get_untracked(),
         });
-        let (b, t, scope) = (base.get_untracked(), token.get_untracked(), scope.get_untracked());
+        let (b, t, scope) = (
+            base.get_untracked(),
+            token.get_untracked(),
+            scope.get_untracked(),
+        );
         let path = format!("/v1/memory/{}?scope={}", crate::api::js_encode(&key), scope);
         spawn_local(async move {
             match put_json(&b, &t, &path, body).await {
@@ -191,7 +236,11 @@ pub fn StoragePanel(
     };
 
     let delete_memory = move |key: String| {
-        let (b, t, scope) = (base.get_untracked(), token.get_untracked(), scope.get_untracked());
+        let (b, t, scope) = (
+            base.get_untracked(),
+            token.get_untracked(),
+            scope.get_untracked(),
+        );
         let path = format!("/v1/memory/{}?scope={}", crate::api::js_encode(&key), scope);
         spawn_local(async move {
             match delete_json(&b, &t, &path, None).await {
@@ -244,30 +293,63 @@ pub fn StoragePanel(
     };
 
     let open_pin = move |path: String| {
+        let gen = begin(pin_epoch);
         selected.set(path.clone());
+        preview.set(String::new());
+        pin_loading.set(true);
+        error.set(String::new());
         let (b, t) = (base.get_untracked(), token.get_untracked());
+        let pin_epoch = pin_epoch;
         spawn_local(async move {
             let q = format!("/v1/file?path={}", crate::api::js_encode(&path));
-            match get_json::<FileBody>(&b, &t, &q).await {
+            let fetched = get_json::<FileBody>(&b, &t, &q).await;
+            let mapped = match fetched {
                 Ok(file) => {
                     if file.skip {
-                        preview.set(if file.notice.is_empty() {
+                        Ok(if file.notice.is_empty() {
                             "This path could not be read.".into()
                         } else {
                             file.notice
-                        });
+                        })
                     } else {
-                        preview.set(file.content);
+                        Ok(file.content)
                     }
-                    error.set(String::new());
                 }
-                Err(e) => error.set(e),
+                Err(e) => Err(e),
+            };
+            match pin_epoch.with_untracked(|epoch| {
+                commit_load(epoch, gen, mapped, String::new(), ErrPolicy::Clear)
+            }) {
+                Commit::Drop => return,
+                Commit::Apply {
+                    value,
+                    error: pane_error,
+                } => {
+                    preview.set(value);
+                    error.set(pane_error);
+                    pin_loading.set(false);
+                }
             }
         });
     };
 
     let open_artifact = move |id: String, version: i64| {
-        let (b, t, root) = (base.get_untracked(), token.get_untracked(), root.get_untracked());
+        let gen = begin(artifact_epoch);
+        let label = if version > 0 {
+            format!("{id} · v{version}")
+        } else {
+            id.clone()
+        };
+        artifact_label.set(label);
+        detail.set(None);
+        artifact_loading.set(true);
+        error.set(String::new());
+        let (b, t, root) = (
+            base.get_untracked(),
+            token.get_untracked(),
+            root.get_untracked(),
+        );
+        let artifact_epoch = artifact_epoch;
         spawn_local(async move {
             let mut q = format!(
                 "/v1/artifacts/{}?actorSession={}&actorRoot={}",
@@ -278,12 +360,23 @@ pub fn StoragePanel(
             if version > 0 {
                 q.push_str(&format!("&version={version}"));
             }
-            match get_json::<ArtifactDetail>(&b, &t, &q).await {
-                Ok(art) => {
-                    detail.set(Some(art));
-                    error.set(String::new());
+            let fetched = get_json::<ArtifactDetail>(&b, &t, &q).await;
+            let mapped = match fetched {
+                Ok(art) => Ok(Some(art)),
+                Err(e) => Err(e),
+            };
+            match artifact_epoch
+                .with_untracked(|epoch| commit_load(epoch, gen, mapped, None, ErrPolicy::Clear))
+            {
+                Commit::Drop => return,
+                Commit::Apply {
+                    value,
+                    error: pane_error,
+                } => {
+                    detail.set(value);
+                    error.set(pane_error);
+                    artifact_loading.set(false);
                 }
-                Err(e) => error.set(e),
             }
         });
     };
@@ -293,9 +386,14 @@ pub fn StoragePanel(
             tabindex="0"
             on:keydown=move |ev: web_sys::KeyboardEvent| {
                 if ev.key() == "Escape" {
+                    let _ = begin(pin_epoch);
+                    let _ = begin(artifact_epoch);
                     selected.set(String::new());
                     detail.set(None);
                     preview.set(String::new());
+                    artifact_label.set(String::new());
+                    pin_loading.set(false);
+                    artifact_loading.set(false);
                     key_in.set(String::new());
                     value_in.set(String::new());
                 }
@@ -335,7 +433,7 @@ pub fn StoragePanel(
                 <Show when=move || !audit.get().is_empty()>
                     <p class="hint storage-path">"Audit " {move || audit.get()}</p>
                 </Show>
-                <Show when=move || entries.get().is_empty() && error.get().is_empty()>
+                <Show when=move || entries.get().is_empty() && error.get().is_empty() && !list_loading.get()>
                     <div class="empty-state">
                         <strong>"Nothing stored in this scope"</strong>
                         <p>"Save a key here. Tagged entries survive restarts and are read when a session starts."</p>
@@ -402,7 +500,7 @@ pub fn StoragePanel(
                 <Show when=move || !markdown.get().is_empty()>
                     <p class="hint storage-path">"Plain file " {move || markdown.get()}</p>
                 </Show>
-                <Show when=move || pins.get().is_empty() && error.get().is_empty()>
+                <Show when=move || pins.get().is_empty() && error.get().is_empty() && !list_loading.get()>
                     <div class="empty-state">
                         <strong>"No pinned paths"</strong>
                         <p>"Pin a doc or path the agent should know about across sessions."</p>
@@ -426,13 +524,19 @@ pub fn StoragePanel(
                         }
                     }).collect_view()}
                 </ul>
+                <Show when=move || !selected.get().is_empty()>
+                    <p class="hint storage-path">{move || selected.get()}</p>
+                </Show>
+                <Show when=move || pin_loading.get()>
+                    <p class="hint">"Loading preview…"</p>
+                </Show>
                 <Show when=move || !preview.get().is_empty()>
                     <pre class="storage-preview">{move || preview.get()}</pre>
                 </Show>
             </Show>
             <Show when=move || tab.get() == "artifacts">
                 <p class="hint">"Version is the CAS token. Older bodies stay on the same artifact, up to the last 20. Content is scrubbed before it is stored."</p>
-                <Show when=move || artifacts.get().is_empty() && error.get().is_empty()>
+                <Show when=move || artifacts.get().is_empty() && error.get().is_empty() && !list_loading.get()>
                     <div class="empty-state">
                         <strong>"No artifacts for this session"</strong>
                         <p>"When an agent writes a findings, patch, or test report, it shows up here."</p>
@@ -455,14 +559,22 @@ pub fn StoragePanel(
                         }
                     }).collect_view()}
                 </ul>
+                <Show when=move || artifact_loading.get()>
+                    <p class="hint">{move || format!("Loading {}…", artifact_label.get())}</p>
+                </Show>
+                <Show when=move || !artifact_loading.get() && detail.get().is_none() && !artifact_label.get().is_empty() && !error.get().is_empty()>
+                    <p class="hint storage-path">{move || artifact_label.get()}</p>
+                </Show>
                 {move || detail.get().map(|art| {
                     let versions = if art.versions.is_empty() { vec![art.version] } else { art.versions.clone() };
                     let id = art.id.clone();
                     let body = art.content.clone();
                     let heading = if art.title.is_empty() { art.kind.clone() } else { art.title.clone() };
+                    let ident = format!("{} · v{}", art.id, art.version);
                     view! {
                         <div class="storage-detail">
                             <strong>{heading}</strong>
+                            <p class="hint storage-path">{ident}</p>
                             <div class="chips">
                                 {versions.into_iter().map(|v| {
                                     let id_v = id.clone();

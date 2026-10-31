@@ -29,8 +29,24 @@ const chromePort = 9222 + (process.pid % 200);
 await mkdir(join(home, ".strike"), { recursive: true });
 await writeFile(join(home, ".strike", "config"), '{"sandboxAllowDegrade":true}\n');
 
+// Git diff expand seed (#1428): an untracked file in the daemon's repo whose
+// --no-index diff runs past the Git panel's 400-line render cap. The git
+// section below opens it, asserts the capped render + "Show all N lines"
+// footer, expands it, and asserts the tail is reachable. Removed in finally.
+const gitDiffSeedPath = join(process.cwd(), "smoke-git-diff-1428.txt");
+await writeFile(
+  gitDiffSeedPath,
+  Array.from({ length: 500 }, (_, i) => `smoke-diff-line-${i + 1}`).join("\n") + "\n",
+);
+
 // Render/boot waits get a deadline sized for shared CI runners; shorter
 // interactive steps get a smaller one. Both are overridable for local runs.
+// WAIT_MS is also the budget for anti-hang arrival waits whose predicate
+// depends on a daemon round trip (op POST, engine state change, live
+// event, re-render) rather than a local DOM reaction: those assert that
+// the state arrives, never how fast, so a STEP_MS budget only measures
+// host load. See the "turn stopped" wait below (#1713) and #1650, which
+// adopted this same 30s convention for the engine's anti-hang waits.
 const WAIT_MS = Number(process.env.STRIKE_SMOKE_WAIT_MS || 30000);
 const STEP_MS = Number(process.env.STRIKE_SMOKE_STEP_MS || 15000);
 
@@ -55,6 +71,22 @@ async function waitHealth(url) {
     await delay(100);
   }
   throw new Error(`daemon did not answer ${url}`);
+}
+
+// SIGTERM a spawned child and wait for it to actually exit, escalating
+// to SIGKILL after a grace period (same pattern as the daemon restart
+// below). Cleanup must not rm a child's files while it is still running:
+// Chrome keeps writing its profile for well over a fixed sleep, and the
+// rm then races it and fails ENOTEMPTY (#1477).
+async function stopChild(child) {
+  if (!child || child.exitCode != null || child.signalCode) return;
+  const exited = new Promise((resolve) => child.once("exit", resolve));
+  child.kill("SIGTERM");
+  await Promise.race([exited, delay(5000)]);
+  if (child.exitCode == null && !child.signalCode) {
+    child.kill("SIGKILL");
+    await Promise.race([exited, delay(2000)]);
+  }
 }
 
 async function status(path, headers) {
@@ -990,6 +1022,42 @@ try {
   if (selected.result?.result?.value !== "yes") {
     throw new Error("keyboard x did not select the cursor session");
   }
+  // Needs you chip (#1451): the chip renders beside All/Unread, activates,
+  // and filters the seeded (non-waiting) sessions out; All restores them.
+  // Waiting-row rendering itself is covered by session_list unit tests —
+  // the echo/smoke seeds never pend an approval or a question.
+  const needsYou = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const chips = [...document.querySelectorAll(".ss-chips .chip")].map((c) => c.textContent.trim());
+      const chip = [...document.querySelectorAll(".ss-chips .chip")].find((c) => c.textContent.trim() === "Needs you");
+      if (chip) chip.click();
+      return JSON.stringify({ chips, clicked: !!chip });
+    })()`,
+    returnByValue: true,
+  });
+  const needsYouInfo = JSON.parse(needsYou.result?.result?.value || "{}");
+  if (!needsYouInfo.clicked || needsYouInfo.chips?.join(",") !== "All,Unread,Needs you") {
+    throw new Error(`Needs you chip missing or out of order: ${JSON.stringify(needsYouInfo)}`);
+  }
+  await waitFor(
+    "Needs you filter empties the non-waiting list",
+    textProbe((t) => t.includes("No sessions match")),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  const needsYouActive = await evalValue(
+    `document.querySelector(".ss-chips .chip.on")?.textContent.trim() || ""`,
+  );
+  if (needsYouActive !== "Needs you") {
+    throw new Error(`Needs you chip did not stay active (on=${needsYouActive})`);
+  }
+  await send("Runtime.evaluate", {
+    expression: `[...document.querySelectorAll(".ss-chips .chip")].find((c) => c.textContent.trim() === "All")?.click()`,
+  });
+  await waitFor(
+    "All filter restores sessions after Needs you",
+    textProbe((t) => t.includes("Palette polish") && t.includes("Alpha session")),
+    { timeout: WAIT_MS, interval: 250 },
+  );
   // feature:navbar — palette fuzzy match, argument error, shortcut overlay.
   const navbar = async (expression) => {
     try {
@@ -1100,6 +1168,18 @@ try {
   await waitUntil(
     `document.body.innerText.includes("Appearance") && document.body.innerText.includes("Type size") && document.body.innerText.includes("Density") && !!document.querySelector('input[data-choice="lg"]')`,
     "settings page",
+  );
+  // #1489: Download diagnostics lives in Settings, enabled on a live
+  // (echo) host, and a click produces the success confirmation. The
+  // server-chosen filename is covered by the UAT download capture.
+  await waitUntil(
+    `!!document.querySelector('[data-action="download-diagnostics"]') && !document.querySelector('[data-action="download-diagnostics"]').disabled`,
+    "diag download control enabled on a live host",
+  );
+  await evaluate(`document.querySelector('[data-action="download-diagnostics"]').click()`);
+  await waitUntil(
+    `document.body.innerText.includes("diagnostic bundle downloaded")`,
+    "diag download success confirmation",
   );
   await evaluate(`document.querySelector('input[data-choice="lg"]').click()`);
   await evaluate(`document.querySelector('input[data-choice="compact"]').click()`);
@@ -1426,6 +1506,50 @@ try {
     textProbe((body) => body.includes("smoke pass") && body.includes("Done")),
     { timeout: WAIT_MS, interval: 250 },
   );
+  // Duplicate a goal (#1415): the detail Duplicate opens the create form
+  // prefilled from the spec; nothing is created until submit, and the
+  // submitted copy is a fresh goal.
+  const goalsBeforeDup = await (
+    await fetch(`http://127.0.0.1:${port}/v1/goals`, { headers: { Authorization: `Bearer ${token}` } })
+  ).json();
+  await evaluate(`document.getElementById("goals-duplicate").click()`);
+  await waitFor(
+    "duplicate goal form prefilled with the original spec",
+    async () => {
+      const raw = await evaluate(`JSON.stringify({
+        desc: document.getElementById("goals-desc")?.value,
+        verify: document.getElementById("goals-verify")?.value,
+        turns: document.getElementById("goals-turns")?.value,
+      })`);
+      const p = JSON.parse(raw || "{}");
+      return { ok: p.desc === "smoke pass" && p.verify === "cmd: true" && p.turns === "8", ...p };
+    },
+    { timeout: STEP_MS, interval: 250 },
+  );
+  const goalsAfterDupOpen = await (
+    await fetch(`http://127.0.0.1:${port}/v1/goals`, { headers: { Authorization: `Bearer ${token}` } })
+  ).json();
+  if (goalsAfterDupOpen.goals.length !== goalsBeforeDup.goals.length) {
+    throw new Error("duplicate goal was created before submit");
+  }
+  await evaluate(`(() => {
+    const el = document.getElementById("goals-desc");
+    el.value = "smoke pass copy";
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    document.getElementById("goals-run").click();
+    return "sent";
+  })()`);
+  await waitFor(
+    "duplicated goal run to reach Done",
+    textProbe((body) => body.includes("smoke pass copy") && body.includes("Done")),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  const goalsAfterDupSubmit = await (
+    await fetch(`http://127.0.0.1:${port}/v1/goals`, { headers: { Authorization: `Bearer ${token}` } })
+  ).json();
+  if (goalsAfterDupSubmit.goals.length !== goalsBeforeDup.goals.length + 1) {
+    throw new Error(`duplicate goal submit count=${goalsAfterDupSubmit.goals.length} want=${goalsBeforeDup.goals.length + 1}`);
+  }
   await evaluate(`document.querySelector(".goals-list .secondary").click()`);
   await waitFor(
     "goal form to reappear after picking the listed goal",
@@ -1730,6 +1854,45 @@ try {
       { timeout: WAIT_MS, interval: 250 },
     );
   };
+  // Stage all / Unstage all (#1426): seed several untracked files BEFORE
+  // the panel first loads, but only when the repo is completely clean —
+  // Stage all would otherwise stage a developer's unrelated work when
+  // this script runs in a dirty checkout. In CI the checkout is clean,
+  // so the full batch flow below runs.
+  const stageAllFiles = [
+    "smoke-stage-all-1.txt",
+    "smoke-stage-all-2.txt",
+    "smoke-stage-all-3.txt",
+  ];
+  const gitStatusPaths = async () => {
+    const res = await fetch(`http://127.0.0.1:${port}/v1/git/status`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) throw new Error(`git status HTTP ${res.status}`);
+    const body = await res.json();
+    const paths = (list) => (list || []).map((f) => f.path);
+    return {
+      staged: paths(body.staged),
+      unstaged: paths(body.unstaged),
+      untracked: paths(body.untracked),
+    };
+  };
+  let stageAllSeeded = false;
+  try {
+    const before = await gitStatusPaths();
+    if (
+      before.staged.length === 0 &&
+      before.unstaged.length === 0 &&
+      before.untracked.length === 0
+    ) {
+      for (const name of stageAllFiles) {
+        await writeFile(join(process.cwd(), name), `stage-all smoke ${name}\n`);
+      }
+      stageAllSeeded = true;
+    }
+  } catch {
+    stageAllSeeded = false;
+  }
   await clickSideTab("Git", "Staged");
   // Branch switcher regression (#1314): the rendered <select> value must
   // equal the daemon's current branch once the options exist. The defect
@@ -1761,6 +1924,159 @@ try {
       },
       { timeout: STEP_MS, interval: 250 },
     );
+  }
+  // Git diff expand (#1428): the seeded untracked file's diff is ~505 lines.
+  // The panel must render only the first 400 with a "Show all N lines"
+  // button (data-git-diff-expand); clicking it renders the tail in place;
+  // re-opening the same diff starts capped again (per-diff reset).
+  const diffProbe = async () => {
+    const raw = await evaluate(`(() => {
+      const pre = document.querySelector(".git-diff");
+      const btn = document.querySelector("[data-git-diff-expand]");
+      return JSON.stringify({
+        lines: pre ? pre.children.length : -1,
+        btn: btn ? (btn.textContent || "").trim() : "",
+        hasTail: pre ? pre.textContent.includes("smoke-diff-line-500") : false,
+        has401: pre ? pre.textContent.includes("smoke-diff-line-396") : false,
+      });
+    })()`);
+    return JSON.parse(raw || "{}");
+  };
+  const clickSeedRow = async () => {
+    // Rows load async after the Git tab opens; poll for the seed row like
+    // every other wait in this script instead of a single-shot query
+    // (a one-shot query raced the status load on CI: "seed row missing").
+    await waitFor(
+      "git diff expand seed row (smoke-git-diff-1428.txt)",
+      async () => {
+        const v = await evaluate(`(() => {
+          const b = [...document.querySelectorAll(".git-file")].find((x) => (x.textContent || "").includes("smoke-git-diff-1428.txt"));
+          if (!b) return "missing";
+          b.click();
+          return "clicked";
+        })()`);
+        return { ok: v === "clicked", v };
+      },
+      { timeout: WAIT_MS, interval: 250 },
+    );
+  };
+  await clickSeedRow();
+  await waitFor(
+    "git diff capped at 400 lines with a Show all N lines button",
+    async () => {
+      const p = await diffProbe();
+      return { ok: p.lines === 400 && p.btn.startsWith("Show all ") && p.btn.endsWith(" lines") && !p.has401, ...p };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  const expandClicked = await evaluate(
+    `(() => { const b = document.querySelector("[data-git-diff-expand]"); if (!b) return "missing"; b.click(); return "clicked"; })()`,
+  );
+  if (expandClicked !== "clicked") {
+    throw new Error(`git diff expand: button ${expandClicked}`);
+  }
+  await waitFor(
+    "expanded git diff renders lines past 400 through the tail",
+    async () => {
+      const p = await diffProbe();
+      return { ok: p.lines > 400 && p.hasTail && p.btn === "", ...p };
+    },
+    { timeout: STEP_MS, interval: 250 },
+  );
+  await clickSeedRow();
+  await waitFor(
+    "re-opened git diff starts capped again (per-diff reset)",
+    async () => {
+      const p = await diffProbe();
+      return { ok: p.lines === 400 && p.btn.startsWith("Show all "), ...p };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  if (stageAllSeeded) {
+    const batchButtons = async () => {
+      const raw = await evaluate(`(() => {
+        const s = document.querySelector("[data-git-stage-all]");
+        const u = document.querySelector("[data-git-unstage-all]");
+        return JSON.stringify({
+          stage: s ? s.disabled : null,
+          unstage: u ? u.disabled : null,
+        });
+      })()`);
+      return JSON.parse(raw || "{}");
+    };
+    const clickBatch = async (selector) => {
+      const v = await evaluate(`(() => {
+        const b = document.querySelector(${JSON.stringify(selector)});
+        if (!b) return "missing";
+        if (b.disabled) return "disabled";
+        b.click();
+        return "clicked";
+      })()`);
+      if (v !== "clicked") throw new Error(`stage-all smoke: ${selector} -> ${v}`);
+    };
+    try {
+      await waitFor(
+        "Stage all enabled and Unstage all disabled with only untracked files",
+        async () => {
+          const b = await batchButtons();
+          return { ok: b.stage === false && b.unstage === true, ...b };
+        },
+        { timeout: STEP_MS, interval: 250 },
+      );
+      await clickBatch("[data-git-stage-all]");
+      await waitFor(
+        "Stage all moves every seeded file to Staged in one batch",
+        async () => {
+          const s = await gitStatusPaths();
+          return {
+            ok: stageAllFiles.every((f) => s.staged.includes(f)),
+            ...s,
+          };
+        },
+        { timeout: STEP_MS, interval: 250 },
+      );
+      await waitFor(
+        "panel flips the batch buttons after Stage all",
+        async () => {
+          const b = await batchButtons();
+          return { ok: b.stage === true && b.unstage === false, ...b };
+        },
+        { timeout: STEP_MS, interval: 250 },
+      );
+      await clickBatch("[data-git-unstage-all]");
+      await waitFor(
+        "Unstage all moves every seeded file back to Untracked",
+        async () => {
+          const s = await gitStatusPaths();
+          return {
+            ok:
+              stageAllFiles.every((f) => s.untracked.includes(f)) &&
+              !stageAllFiles.some((f) => s.staged.includes(f)),
+            ...s,
+          };
+        },
+        { timeout: STEP_MS, interval: 250 },
+      );
+    } finally {
+      // Restore the clean repo even when an assertion above fails:
+      // unstage any seeded file still staged, then delete the seeds.
+      try {
+        const s = await gitStatusPaths();
+        const stillStaged = stageAllFiles.filter((f) => s.staged.includes(f));
+        if (stillStaged.length > 0) {
+          await fetch(`http://127.0.0.1:${port}/v1/git/unstage`, {
+            method: "POST",
+            headers: auth,
+            body: JSON.stringify({ paths: stillStaged }),
+          });
+        }
+      } catch {
+        // best-effort cleanup only; the assertion failure already reports
+      }
+      for (const name of stageAllFiles) {
+        await rm(join(process.cwd(), name), { force: true });
+      }
+    }
   }
   await waitUntil(`(() => {
     if ((document.body.innerText || "").includes("session.childIsolation")) return true;
@@ -2044,6 +2360,114 @@ try {
     }),
     { timeout: WAIT_MS, interval: 250 },
   );
+  // Session restore (#1391): the viewed session is persisted like theme
+  // and layout, so a reload returns to it; a saved id whose session was
+  // deleted falls back to another session instead of an empty screen.
+  const mkRoot = async (label) => {
+    const res = await fetch(`http://127.0.0.1:${port}/v1/roots`, {
+      method: "POST",
+      headers: auth,
+      body: "{}",
+    });
+    if (!res.ok) {
+      throw new Error(`session-restore seed ${label} failed ${res.status} ${await res.text()}`);
+    }
+    const id = (await res.json()).id;
+    if (!id) throw new Error(`session-restore seed ${label} returned no id`);
+    return id;
+  };
+  const restoreFallback = await mkRoot("fallback");
+  const restoreTarget = await mkRoot("target");
+  const selectedID = async () =>
+    evaluate(
+      `(() => { const el = document.querySelector('[data-session-id][aria-selected="true"]'); return el ? el.getAttribute("data-session-id") : ""; })()`,
+    );
+  const savedActive = async () => evaluate(`localStorage.getItem("strike.activeSession") || ""`);
+  const reloadCockpit = async (label) => {
+    await send("Page.navigate", {
+      url: "http://127.0.0.1:" + port + "/?token=" + token,
+    });
+    await waitFor(label, textProbe((t) => t.includes("Menu")), {
+      timeout: WAIT_MS,
+      interval: 250,
+    });
+  };
+  await reloadCockpit("cockpit re-boot for session restore");
+  await waitFor(
+    "session-restore target row",
+    async () => ({
+      ok:
+        (await evaluate(
+          `!!document.querySelector(${JSON.stringify(rowSel(restoreTarget))})`,
+        )) === true,
+    }),
+    { timeout: STEP_MS, interval: 250 },
+  );
+  // Open session B (the target) through its row, like a user switch.
+  await evaluate(
+    `(() => { const row = document.querySelector(${JSON.stringify(rowSel(restoreTarget))}); const btn = row && row.querySelector(".ss-main"); if (btn) btn.click(); return !!btn; })()`,
+  );
+  await waitFor(
+    "session B open and persisted",
+    async () => ({
+      ok:
+        (await selectedID()) === restoreTarget &&
+        (await savedActive()) === restoreTarget,
+    }),
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await reloadCockpit("cockpit reload after opening session B");
+  await waitFor(
+    "session B still viewed after reload",
+    async () => ({
+      ok:
+        (await selectedID()) === restoreTarget &&
+        (await savedActive()) === restoreTarget,
+    }),
+    { timeout: STEP_MS, interval: 200 },
+  );
+  // Stale-id path: delete B on the daemon (session log + live root,
+  // the same composition the page's delete flow performs), reload, and
+  // require the fallback session — never an empty screen.
+  const delSession = await fetch(
+    `http://127.0.0.1:${port}/v1/sessions/${encodeURIComponent(restoreTarget)}?force=true`,
+    { method: "DELETE", headers: { Authorization: `Bearer ${token}` } },
+  );
+  if (!delSession.ok) {
+    throw new Error(`session-restore delete failed ${delSession.status} ${await delSession.text()}`);
+  }
+  const delRoot = await fetch(
+    `http://127.0.0.1:${port}/v1/roots/${encodeURIComponent(restoreTarget)}`,
+    { method: "DELETE", headers: { Authorization: `Bearer ${token}` } },
+  );
+  // Since #1399 the session DELETE above also deregisters the live
+  // root, so this follow-up close answering 404 "is not active" is the
+  // documented success case (see handleSessionDelete in api.go) — the
+  // root being gone either way is exactly the state this step needs.
+  // Any other failure is still fatal.
+  if (!delRoot.ok && delRoot.status !== 404) {
+    throw new Error(`session-restore root close failed ${delRoot.status} ${await delRoot.text()}`);
+  }
+  await reloadCockpit("cockpit reload after deleting session B");
+  await waitFor(
+    "fallback session viewed after stale-id reload (no empty state)",
+    async () => {
+      const selected = await selectedID();
+      return {
+        ok:
+          selected !== "" &&
+          selected !== restoreTarget &&
+          (await savedActive()) === selected &&
+          (await rootIDs()).includes(selected),
+        selected,
+      };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  if (!(await rootIDs()).includes(restoreFallback)) {
+    throw new Error("session-restore fallback seed root vanished");
+  }
+
   // Task runner (#1277): a plain echo section fails schema:handoff and
   // blocks the next section. Restart the daemon so the run is read back
   // from disk, then check the Tasks board (via the strict
@@ -2170,13 +2594,32 @@ try {
   // the label from the fixture above — exactly one "took 4:12", on the
   // long turn's final line; the short turn and the untimed-line turn
   // render nothing.
-  const elapsedClicked = await evaluate(`(() => {
-    const row = document.querySelector('[data-session-id="elapsed-session"]');
-    const btn = row && row.querySelector(".ss-main");
-    if (!btn) return "missing";
-    btn.click();
-    return "clicked";
-  })()`);
+  // The seeded session row renders from the session-list fetch; right
+  // after the daemon restart above that fetch can still be in flight (or
+  // refused mid-restart), so the row is not always in the DOM yet. Poll
+  // for it with the file's condition-based waitFor — clicking as soon as
+  // the row appears — instead of a single shot that flakes as "missing"
+  // (#1477). A row that never appears still fails with the same error.
+  let elapsedClicked = "missing";
+  try {
+    await waitFor(
+      "turn-elapsed resume row",
+      async () => {
+        elapsedClicked = await evaluate(`(() => {
+          const row = document.querySelector('[data-session-id="elapsed-session"]');
+          const btn = row && row.querySelector(".ss-main");
+          if (!btn) return "missing";
+          btn.click();
+          return "clicked";
+        })()`);
+        return { ok: elapsedClicked === "clicked", clicked: elapsedClicked };
+      },
+      { timeout: STEP_MS, interval: 250 },
+    );
+  } catch {
+    // waitFor's timeout carries diagnostics; the outer catch appends a
+    // fresh dump to the original "missing" failure thrown below.
+  }
   if (elapsedClicked !== "clicked") {
     throw new Error(`turn-elapsed resume click -> ${elapsedClicked}`);
   }
@@ -2235,6 +2678,86 @@ try {
     textProbe((body) => body.includes("Nothing is scheduled") && !body.includes("unauthorized")),
     { timeout: WAIT_MS, interval: 250 },
   );
+
+  // Duplicate a schedule (#1462): seed one via the API, duplicate it in the
+  // form, assert nothing is saved until Create, then assert the saved copy
+  // exists next to the original and starts disabled.
+  const seedRes = await fetch(`http://127.0.0.1:${port}/v1/schedules`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: "Smoke schedule",
+      kind: "cron",
+      cron: "0 9 * * 1-5",
+      timezone: "UTC",
+      source: "prompt",
+      prompt: "review CI",
+      enabled: true,
+    }),
+  });
+  if (!seedRes.ok) {
+    throw new Error(`seed schedule for duplicate check: HTTP ${seedRes.status}`);
+  }
+  await send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
+  await waitFor(
+    "app after reload for schedule duplicate check",
+    textProbe((body) => body.includes("Menu")),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await runPalette("Schedule");
+  await waitFor(
+    "schedule page with the seeded schedule",
+    textProbe((body) => body.includes("Smoke schedule")),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await evaluate(`(() => {
+    const row = [...document.querySelectorAll(".sched-row")].find((r) => r.textContent.includes("Smoke schedule"));
+    if (row) row.click();
+    return row ? "clicked" : "missing";
+  })()`);
+  await waitFor(
+    "schedule duplicate action enabled after selecting a schedule",
+    async () => ({
+      ok: (await evaluate(`(() => { const b = document.getElementById("schedule-duplicate"); return !!b && !b.disabled; })()`)) === true,
+    }),
+    { timeout: STEP_MS, interval: 250 },
+  );
+  await evaluate(`document.getElementById("schedule-duplicate").click()`);
+  await waitFor(
+    "duplicated schedule form (copy name, disabled notice, Create)",
+    async () => {
+      const raw = await evaluate(`JSON.stringify({
+        name: document.getElementById("schedule-name")?.value,
+        text: document.body ? document.body.innerText : "",
+      })`);
+      const p = JSON.parse(raw || "{}");
+      return {
+        ok: p.name === "Smoke schedule (copy)" && (p.text || "").includes("starts paused/disabled"),
+        name: p.name,
+      };
+    },
+    { timeout: STEP_MS, interval: 250 },
+  );
+  const schedBeforeSave = await (
+    await fetch(`http://127.0.0.1:${port}/v1/schedules`, { headers: { Authorization: `Bearer ${token}` } })
+  ).json();
+  if (schedBeforeSave.schedules.length !== 1) {
+    throw new Error(`duplicate schedule was saved before Create count=${schedBeforeSave.schedules.length}`);
+  }
+  await evaluate(`document.querySelector(".sched-form .primary").click()`);
+  await waitFor(
+    "saved schedule copy in the list next to the original",
+    textProbe((body) => body.includes("Smoke schedule (copy)")),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  const schedAfterSave = await (
+    await fetch(`http://127.0.0.1:${port}/v1/schedules`, { headers: { Authorization: `Bearer ${token}` } })
+  ).json();
+  const schedCopy = schedAfterSave.schedules.find((s) => s.name === "Smoke schedule (copy)");
+  const schedOrig = schedAfterSave.schedules.find((s) => s.name === "Smoke schedule");
+  if (!schedCopy || schedCopy.enabled !== false || !schedOrig || schedOrig.enabled !== true) {
+    throw new Error(`schedule duplicate saved state copy=${JSON.stringify(schedCopy)} orig=${JSON.stringify(schedOrig)}`);
+  }
 
   if (strikeLog.includes(token)) {
     throw new Error("daemon log contains the smoke token");
@@ -2754,7 +3277,19 @@ try {
     })()`);
     return JSON.parse(raw || "{}");
   };
-  await waitFor("turn stopped", idleProbe, { timeout: STEP_MS, interval: 200 });
+  // "turn stopped" is an anti-hang arrival wait, not a timeliness check:
+  // Escape posts an `interrupt` op, the daemon/engine must cancel the
+  // running `sleep 30` tool, emit the terminal event, and the cockpit
+  // must receive it and re-render before #stop-turn disappears — a full
+  // daemon round trip. The predicate is unchanged (idle = no #stop-turn
+  // and no queue list); only its budget class was wrong. With STEP_MS
+  // (15s) it flaked 1/20 under load (#1713: probe still busy:true at
+  // expiry while the whole smoke ran 54-87s vs 26-31s unloaded, load
+  // ~9.9), so it uses WAIT_MS like the other daemon-backed arrival
+  // waits. A genuine stop hang still fails, just at 30s. The "still
+  // idle" re-check below keeps STEP_MS: its predicate is already true
+  // when it starts, so it is a stability check, not an arrival wait.
+  await waitFor("turn stopped", idleProbe, { timeout: WAIT_MS, interval: 200 });
   await delay(700);
   await waitFor("still idle", idleProbe, { timeout: STEP_MS, interval: 200 });
 
@@ -2773,6 +3308,154 @@ try {
     { timeout: STEP_MS, interval: 200 },
   );
 
+  // Phone Settings (#1551): the blanket phone rule
+  // `body[data-phone="1"] .segmented { display:none }` was written for the
+  // header bar, but the Settings ChoiceRows reuse .segmented, so Scheme /
+  // Type size / Density measured 0x0 on phone. The hide is now scoped to
+  // `.page-header` in mobile.css. The desktop settings block above cannot
+  // catch that — it clicks the inputs through JS, which fires even on
+  // display:none controls. Switch to a phone viewport, measure the real
+  // geometry at 390x844 and again at 360x800, tap one option from each
+  // row at its on-screen centre, and check the header bar itself keeps
+  // no visible segmented switch (the hide's original purpose).
+  await send("Emulation.setDeviceMetricsOverride", {
+    width: 390,
+    height: 844,
+    deviceScaleFactor: 2,
+    mobile: true,
+  });
+  await waitFor(
+    "phone layout engages for the settings check",
+    async () => ({
+      ok: (await evaluate(`document.body.getAttribute("data-phone")`)) === "1",
+    }),
+    { timeout: STEP_MS, interval: 150 },
+  );
+  await evaluate(`document.querySelector('[data-action="open-settings"]')?.click()`);
+  await waitFor(
+    "phone settings choice rows are visible",
+    async () => {
+      const raw = await evaluate(`(() => {
+        const rows = [...document.querySelectorAll(".settings-page .choice-row .segmented")].map((seg) => {
+          const r = seg.getBoundingClientRect();
+          return { display: getComputedStyle(seg).display, w: r.width, h: r.height };
+        });
+        return JSON.stringify({
+          ok: rows.length === 3 && rows.every((r) => r.display !== "none" && r.w >= 200 && r.h >= 40),
+          rows,
+        });
+      })()`);
+      return JSON.parse(raw || "{}");
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await waitFor(
+    "phone header bar keeps no visible segmented switch",
+    async () => {
+      const raw = await evaluate(`(() => {
+        const segs = [...document.querySelectorAll(".page-header .segmented")].map((seg) => {
+          const r = seg.getBoundingClientRect();
+          return { display: getComputedStyle(seg).display, w: r.width, h: r.height };
+        });
+        return JSON.stringify({
+          ok: segs.every((s) => s.display === "none" || s.w === 0 || s.h === 0),
+          segs,
+        });
+      })()`);
+      return JSON.parse(raw || "{}");
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  const tapSettingsChoice = async (choice) => {
+    const point = JSON.parse(
+      (await evaluate(`(() => {
+        const input = document.querySelector('.settings-page input[data-choice="${choice}"]');
+        const span = input ? input.closest("label").querySelector("span") : null;
+        if (!span) return "{}";
+        span.scrollIntoView({ block: "center" });
+        const r = span.getBoundingClientRect();
+        const cx = r.x + r.width / 2;
+        const cy = r.y + r.height / 2;
+        const hit = document.elementFromPoint(cx, cy);
+        return JSON.stringify({ cx, cy, hitOk: !!hit && (hit === span || span.contains(hit)) });
+      })()`)) || "{}",
+    );
+    if (!point.hitOk) {
+      throw new Error(`phone settings ${choice} choice is covered: ${JSON.stringify(point)}`);
+    }
+    await send("Input.dispatchMouseEvent", {
+      type: "mousePressed",
+      x: point.cx,
+      y: point.cy,
+      button: "left",
+      clickCount: 1,
+    });
+    await send("Input.dispatchMouseEvent", {
+      type: "mouseReleased",
+      x: point.cx,
+      y: point.cy,
+      button: "left",
+      clickCount: 1,
+    });
+  };
+  await tapSettingsChoice("light");
+  await waitFor(
+    "phone tap changes the scheme",
+    async () => ({
+      ok: (await evaluate(`document.documentElement.getAttribute("data-scheme")`)) === "light",
+    }),
+    { timeout: STEP_MS, interval: 150 },
+  );
+  // Narrow phone (360x800, the second #1551 evidence width): the same
+  // three rows keep real geometry, and Type size / Density taps — not
+  // just Scheme — take effect.
+  await send("Emulation.setDeviceMetricsOverride", {
+    width: 360,
+    height: 800,
+    deviceScaleFactor: 2,
+    mobile: true,
+  });
+  await waitFor(
+    "phone settings choice rows are visible at 360",
+    async () => {
+      const raw = await evaluate(`(() => {
+        const rows = [...document.querySelectorAll(".settings-page .choice-row .segmented")].map((seg) => {
+          const r = seg.getBoundingClientRect();
+          return { display: getComputedStyle(seg).display, w: r.width, h: r.height };
+        });
+        return JSON.stringify({
+          ok: rows.length === 3 && rows.every((r) => r.display !== "none" && r.w >= 200 && r.h >= 40),
+          rows,
+        });
+      })()`);
+      return JSON.parse(raw || "{}");
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await tapSettingsChoice("lg");
+  await waitFor(
+    "phone tap changes the type size",
+    async () => ({
+      ok: (await evaluate(`document.documentElement.getAttribute("data-font")`)) === "lg",
+    }),
+    { timeout: STEP_MS, interval: 150 },
+  );
+  await tapSettingsChoice("compact");
+  await waitFor(
+    "phone tap changes the density",
+    async () => ({
+      ok: (await evaluate(`document.documentElement.getAttribute("data-density")`)) === "compact",
+    }),
+    { timeout: STEP_MS, interval: 150 },
+  );
+  await send("Emulation.setDeviceMetricsOverride", {
+    width: 1440,
+    height: 900,
+    deviceScaleFactor: 1,
+    mobile: false,
+  });
+  await evaluate(`document.querySelector('[data-view="chat"]')?.click()`);
+
   console.log("webui-smoke ok");
 } catch (err) {
   console.error(String(err));
@@ -2786,9 +3469,14 @@ try {
   if (strikeLog) console.error(strikeLog.slice(-2000));
   process.exitCode = 1;
 } finally {
-  if (chrome) chrome.kill("SIGTERM");
-  strike.kill("SIGTERM");
-  await delay(200);
-  await rm(home, { recursive: true, force: true });
-  await rm(chromeData, { recursive: true, force: true });
+  // Wait for both children to actually exit before removing their files
+  // (Chrome profile, daemon HOME): the old fixed 200ms sleep raced a
+  // still-shutting-down Chrome and crashed with ENOTEMPTY after every
+  // assertion had passed (#1477). maxRetries is the belt-and-braces for
+  // a file released a beat after exit — rm retries ENOTEMPTY/EBUSY
+  // instead of failing the run.
+  await Promise.all([stopChild(chrome), stopChild(strike)]);
+  await rm(gitDiffSeedPath, { force: true });
+  await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+  await rm(chromeData, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 }

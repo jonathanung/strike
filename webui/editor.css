@@ -176,3 +176,19 @@
 .ev-md .md-table .md-center { text-align: center; }
 .ev-md .md-table .md-right { text-align: right; }
 /* feature:markdown-tables end */
+/* feature:editor-render-window begin */
+.ev-codeview > button.secondary { margin: 0 0 8px 8px; }
+/* feature:editor-render-window end */
+/* feature:agent-diff-expand begin */
+.ev-diff > button.secondary { margin: 0 0 8px 8px; }
+/* feature:agent-diff-expand end */
+/* feature:editor-unsaved-guard begin */
+.ev-unsaved-guard {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 8px;
+}
+.ev-dirty { color: var(--warning); font-size: var(--type-sm); }
+/* feature:editor-unsaved-guard end */
