@@ -2608,6 +2608,15 @@ button.linkish:disabled { color: var(--muted); cursor: default; text-decoration:
   .approvals-form button { flex: 1 1 140px; }
 }
 /* feature:approvals end */
+/* feature:rule-duplicate begin */
+/* #1433: Duplicate + Remove sit together at the row's end instead of
+   spreading across the space-between rule row. */
+.approvals-rule-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex: 0 0 auto;
+}
+/* feature:rule-duplicate end */
 /* feature:terminal begin */
 .side-tabs { flex-wrap: wrap; }
 .term {
