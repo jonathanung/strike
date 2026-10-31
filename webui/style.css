@@ -2493,6 +2493,12 @@ button.linkish:disabled { color: var(--muted); cursor: default; text-decoration:
 }
 .approvals-diff .add { color: var(--diff-add); }
 .approvals-diff .del { color: var(--diff-del); }
+/* feature:approval-diff-expand begin */
+.approvals-diff-expanded {
+  max-height: 320px;
+  overflow: auto;
+}
+/* feature:approval-diff-expand end */
 .approvals-count { color: var(--warning); margin: var(--space-2) 0 0; }
 .approvals-fact {
   margin: var(--space-2) 0 0;

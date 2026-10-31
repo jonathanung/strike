@@ -950,9 +950,14 @@ fn ApprovalCard(
     let command = ask.preview.command.clone();
     let removed = ask.preview.removed.clone();
     let added = ask.preview.added.clone();
+    let full_removed = ask.preview.full_removed.clone();
+    let full_added = ask.preview.full_added.clone();
     let truncated = ask.preview.truncated;
     let show_command = !command.is_empty();
     let show_diff = !removed.is_empty() || !added.is_empty();
+    // Per-card diff expansion (#1430): collapsed by default, independent
+    // per card.
+    let diff_expanded = RwSignal::new(false);
     // Decision facts (#1507): the daemon-stamped working directory and one
     // consequence line per scope, computed from the ask payload only.
     let work_dir_line = if ask.work_dir.is_empty() {
@@ -978,14 +983,29 @@ fn ApprovalCard(
             <Show when=move || show_command>
                 <pre class="approvals-command">{command.clone()}</pre>
             </Show>
-            <Show when=move || show_diff>
+            <Show when=move || show_diff && !diff_expanded.get()>
                 <pre class="approvals-diff">
                     {removed.iter().map(|line| view! { <span class="del">{"- "}{line.clone()}{"\n"}</span> }).collect_view()}
                     {added.iter().map(|line| view! { <span class="add">{"+ "}{line.clone()}{"\n"}</span> }).collect_view()}
                 </pre>
             </Show>
+            <Show when=move || show_diff && diff_expanded.get()>
+                <pre class="approvals-diff approvals-diff-expanded">
+                    {full_removed.iter().map(|line| view! { <span class="del">{"- "}{line.clone()}{"\n"}</span> }).collect_view()}
+                    {full_added.iter().map(|line| view! { <span class="add">{"+ "}{line.clone()}{"\n"}</span> }).collect_view()}
+                </pre>
+            </Show>
             <Show when=move || truncated>
                 <p class="hint">"Diff preview is shortened."</p>
+                <button
+                    type="button"
+                    class="secondary"
+                    data-approval-diff-expand=""
+                    aria-expanded=move || if diff_expanded.get() { "true" } else { "false" }
+                    on:click=move |_| diff_expanded.update(|v| *v = !*v)
+                >
+                    {move || if diff_expanded.get() { "Show less" } else { "Show full diff" }}
+                </button>
             </Show>
             <Show when=move || show_work_dir>
                 <p class="approvals-fact">{work_dir_line.clone()}</p>
