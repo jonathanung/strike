@@ -201,6 +201,7 @@ pub fn TaskRunner(
     let selected = RwSignal::new(String::new());
     let row = RwSignal::new(String::new());
     let note = RwSignal::new(String::new());
+    let poll_error = RwSignal::new(String::new());
     let show_new = RwSignal::new(false);
     let draft_title = RwSignal::new(String::new());
     let draft_section = RwSignal::new(String::new());
@@ -502,7 +503,7 @@ pub fn TaskRunner(
         ev.prevent_default();
     };
 
-    arm_poll(base, token, plans, selected, run, run_epoch);
+    arm_poll(base, token, plans, selected, run, run_epoch, poll_error);
 
     view! {
         <div class="task-shell">
@@ -612,6 +613,9 @@ pub fn TaskRunner(
             </aside>
         </div>
         <p class="task-note" aria-live="polite">{move || note.get()}</p>
+        <Show when=move || !poll_error.get().is_empty()>
+            <p class="task-note" role="alert" data-poll-error="true">{move || poll_error.get()}</p>
+        </Show>
         </div>
     }
 }
@@ -738,6 +742,14 @@ fn checkpoint_view(
     }.into_any()
 }
 
+/// Error line for a failed live-poll tick (#1587). The poll gets its own
+/// error signal so a success can clear the poll's error without clobbering
+/// notes set by user actions, and an action's note is never erased by a
+/// poll tick.
+fn poll_error_line(err: &str) -> String {
+    format!("Live update failed: {err} — Refresh to retry.")
+}
+
 /// Polls the open run while a section is running so the checkpoint shows up
 /// without a manual refresh. The closure stays alive until this view unmounts.
 fn arm_poll(
@@ -747,6 +759,7 @@ fn arm_poll(
     selected: RwSignal<String>,
     run: RwSignal<Option<TaskRun>>,
     run_epoch: RwSignal<LoadEpoch>,
+    poll_error: RwSignal<String>,
 ) {
     let cb = wasm_bindgen::closure::Closure::wrap(Box::new(move || {
         let running = run
@@ -764,19 +777,29 @@ fn arm_poll(
         let plan_id = plan.id.clone();
         let (b, t) = (base.get_untracked(), token.get_untracked());
         spawn_local(async move {
-            if let Ok(body) = get_json::<RunBody>(
+            match get_json::<RunBody>(
                 &b,
                 &t,
                 &format!("/v1/plans/{}/run", crate::api::js_encode(&plan.id)),
             )
             .await
             {
-                if !run_epoch.with_untracked(|epoch| epoch.accept(gen))
-                    || selected.get_untracked() != plan_id
-                {
-                    return;
+                Ok(body) => {
+                    if !run_epoch.with_untracked(|epoch| epoch.accept(gen))
+                        || selected.get_untracked() != plan_id
+                    {
+                        return;
+                    }
+                    run.set(Some(body.run));
+                    poll_error.set(String::new());
                 }
-                run.set(Some(body.run));
+                Err(err) => {
+                    if run_epoch.with_untracked(|epoch| epoch.accept(gen))
+                        && selected.get_untracked() == plan_id
+                    {
+                        poll_error.set(poll_error_line(&err));
+                    }
+                }
             }
         });
     }) as Box<dyn FnMut()>);
@@ -798,4 +821,16 @@ fn arm_poll(
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn poll_error_line_names_the_failure_and_the_retry() {
+        let line = poll_error_line("HTTP 500");
+        assert!(line.starts_with("Live update failed: HTTP 500"));
+        assert!(line.contains("Refresh to retry"));
+    }
 }

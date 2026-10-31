@@ -16,6 +16,7 @@ mod clipboard;
 mod confirm;
 mod composer_triggers;
 mod diag;
+mod draft_size;
 mod editor;
 mod load_epoch;
 mod localfiles;
@@ -43,6 +44,7 @@ mod task_runner;
 mod transcript_find;
 mod usage_audit;
 mod session_delete;
+mod session_restore;
 mod shell;
 mod side_chat;
 mod status;
@@ -118,6 +120,12 @@ pub(crate) fn load(key: &str) -> String {
 pub(crate) fn save(key: &str, value: &str) {
     if let Some(s) = storage() {
         let _ = s.set_item(key, value);
+    }
+}
+
+pub(crate) fn remove_key(key: &str) {
+    if let Some(s) = storage() {
+        let _ = s.remove_item(key);
     }
 }
 
@@ -871,6 +879,27 @@ fn memory_mode_label(mode: &str) -> &'static str {
     }
 }
 
+/// Chip text for the memory mode (#1585). The chip is a privacy control:
+/// it may only name a mode the daemon has confirmed. Before a successful
+/// load (or after a failed one with nothing confirmed) it asserts
+/// "Unknown" instead of the invented default "Normal".
+fn memory_chip_text(known: bool, mode: &str) -> String {
+    if known {
+        format!("Memory · {}", memory_mode_label(mode))
+    } else {
+        "Memory · Unknown".to_string()
+    }
+}
+
+/// The mode to show after a rejected change (#1585): the last confirmed
+/// mode, or unknown when nothing was ever confirmed.
+fn revert_memory_mode(previous: Option<String>) -> (bool, String) {
+    match previous {
+        Some(mode) => (true, mode),
+        None => (false, String::new()),
+    }
+}
+
 pub(crate) fn load_string_list(key: &str) -> Vec<String> {
     serde_json::from_str(&load(key)).unwrap_or_default()
 }
@@ -1041,6 +1070,11 @@ fn App() -> impl IntoView {
     let roots = RwSignal::new(Vec::<RootSummary>::new());
     let sessions = RwSignal::new(Vec::<SessionItem>::new());
     let active_root = RwSignal::new(String::new());
+    // Session restore (#1391): false until the first refresh that got a
+    // roots response has run the one-time saved-session decision, so
+    // later polls that find `active_root` empty again (e.g. the open
+    // session was deleted) use the plain fallback, not a re-restore.
+    let restore_attempted = RwSignal::new(false);
     // Flattened session order published by SessionPanel for edge-swipe
     // navigation (#1490 slice 5): (open_id, live) pairs in display order.
     let session_nav = RwSignal::new(Vec::<(String, bool)>::new());
@@ -1158,6 +1192,9 @@ fn App() -> impl IntoView {
     let steer_mode = RwSignal::new(String::new());
     let queue_note = RwSignal::new(String::new());
     let hold_bypass = RwSignal::new(false);
+    // Draft-size second-press arm (#1542): the exact draft text whose
+    // first Send press was held at projected-critical. Empty = unarmed.
+    let draft_armed = RwSignal::new(String::new());
     // Cancel and Stop drop work. The first click arms the button; the
     // second click is the confirm. Escape still stops immediately.
     let confirm_cancel = RwSignal::new(String::new());
@@ -1166,6 +1203,9 @@ fn App() -> impl IntoView {
     let live_busy_root = RwSignal::new(String::new());
     let side_tab = RwSignal::new("activity".to_string());
     let memory_mode = RwSignal::new("normal".to_string());
+    // False until the daemon confirms a mode (#1585): the chip must not
+    // assert the invented "normal" default before a successful load.
+    let memory_mode_known = RwSignal::new(false);
     let memory_menu = RwSignal::new(false);
     let storage_rev = RwSignal::new(0u32);
     // Find in transcript (#1342): bar visibility, query, current match,
@@ -1385,17 +1425,14 @@ fn App() -> impl IntoView {
                     }
                 }
             }
+            // Captured (not applied inline) so the open-session decision
+            // below can validate the saved session (#1391) against both
+            // the live roots and the saved sessions before picking one.
+            let mut roots_resp: Option<RootsResponse> = None;
             match get_json::<RootsResponse>(&b, &t, "/v1/roots").await {
                 Ok(r) => {
-                    if active_root.get_untracked().is_empty() {
-                        let id = if !r.active_id.is_empty() {
-                            r.active_id.clone()
-                        } else {
-                            r.roots.first().map(|x| x.id.clone()).unwrap_or_default()
-                        };
-                        active_root.set(id);
-                    }
-                    roots.set(r.roots);
+                    roots.set(r.roots.clone());
+                    roots_resp = Some(r);
                 }
                 Err(e) => {
                     if err.is_empty() {
@@ -1403,11 +1440,81 @@ fn App() -> impl IntoView {
                     }
                 }
             }
+            let mut session_ids: Vec<String> = Vec::new();
+            let mut sessions_ok = false;
             match get_json::<SessionsResponse>(&b, &t, "/v1/sessions").await {
-                Ok(r) => sessions.set(r.sessions),
+                Ok(r) => {
+                    session_ids = r.sessions.iter().map(|s| s.id.clone()).collect();
+                    sessions_ok = true;
+                    sessions.set(r.sessions);
+                }
                 Err(e) => {
                     if err.is_empty() {
                         err = format!("Saved sessions failed to load: {e}");
+                    }
+                }
+            }
+            if active_root.get_untracked().is_empty() {
+                if let Some(r) = &roots_resp {
+                    let root_ids: Vec<String> =
+                        r.roots.iter().map(|x| x.id.clone()).collect();
+                    // Only the first decision consults storage; after
+                    // that, an empty `active_root` means the open
+                    // session went away and the plain fallback applies.
+                    let saved = if restore_attempted.get_untracked() {
+                        String::new()
+                    } else {
+                        session_restore::saved_id()
+                    };
+                    let pick = session_restore::pick_initial(
+                        &saved,
+                        &root_ids,
+                        &session_ids,
+                        &r.active_id,
+                    );
+                    restore_attempted.set(true);
+                    // A stale id is only declared (and cleared) when
+                    // the saved-session list actually loaded — a failed
+                    // list fetch must not erase a dormant session's id.
+                    if pick.clear_saved && sessions_ok {
+                        session_restore::clear();
+                    }
+                    if !pick.id.is_empty() {
+                        if pick.resume {
+                            // Dormant saved session: set the view
+                            // optimistically (like `activate_root`) and
+                            // resume it; a failed resume clears both the
+                            // view and the saved id so the next poll
+                            // lands on the fallback, never an empty
+                            // screen for a session that cannot resume.
+                            let id = pick.id.clone();
+                            active_root.set(id.clone());
+                            session_restore::persist(&id);
+                            let (rb, rt) = (b.clone(), t.clone());
+                            spawn_local(async move {
+                                let path = format!("/v1/roots/{id}/resume");
+                                if let Err(e) =
+                                    post_json(&rb, &rt, &path, serde_json::json!({})).await
+                                {
+                                    status.set(format!("resume failed: {e}"));
+                                    if active_root.get_untracked() == id {
+                                        active_root.set(String::new());
+                                    }
+                                    // Only forget the id that failed —
+                                    // a newer switch may already have
+                                    // persisted a different session.
+                                    if session_restore::saved_id() == id {
+                                        session_restore::clear();
+                                    }
+                                }
+                            });
+                        } else {
+                            // View-local restore: no activate POST, so
+                            // two devices never fight over the daemon's
+                            // active id — each keeps its own place.
+                            active_root.set(pick.id.clone());
+                            session_restore::persist(&pick.id);
+                        }
                     }
                 }
             }
@@ -1551,6 +1658,7 @@ fn App() -> impl IntoView {
             steer_mode.set(String::new());
             queue_note.set(String::new());
             hold_bypass.set(false);
+            draft_armed.set(String::new());
             confirm_cancel.set(String::new());
             confirm_stop.set(false);
         } else if mobile::resume_after(cursor_fx.get(), false).is_some() {
@@ -2056,6 +2164,35 @@ fn App() -> impl IntoView {
             status.set("no live session yet".into());
             return;
         }
+        // Draft-size gate (#1542): when the draft itself projects the
+        // session to critical, the first press arms the warning —
+        // nothing is dispatched and the draft is kept. A second press
+        // on the same draft sends anyway. Below critical this never
+        // blocks, and an active session hold defers (no double gate).
+        {
+            let ctx = active_context(
+                &catalog.get_untracked(),
+                &provider_name.get_untracked(),
+                &model_name.get_untracked(),
+            );
+            let base_view = context_view(
+                context_used.get_untracked(),
+                context_limit.get_untracked(),
+                ctx,
+                &context_fit.get_untracked(),
+            );
+            let dview = draft_size::draft_size_view(
+                base_view.used,
+                base_view.limit,
+                base_view.held,
+                &text,
+            );
+            if draft_size::send_held(&dview, &draft_armed.get_untracked(), &text) {
+                draft_armed.set(text.clone());
+                return;
+            }
+            draft_armed.set(String::new());
+        }
         let op = steer_queue::send_op(session_busy(&root), &enter_mode.get_untracked(), which);
         queue_note.set(String::new());
         if op == "steer" {
@@ -2251,7 +2388,8 @@ fn App() -> impl IntoView {
                         if let Some(msg) = outcome::new_session_activation(activated) {
                             activation_hold.set(Some(msg));
                         }
-                        active_root.set(id);
+                        active_root.set(id.clone());
+                        session_restore::persist(&id);
                     }
                     refresh_meta();
                 }
@@ -2263,6 +2401,7 @@ fn App() -> impl IntoView {
     let activate_root = move |id: String| {
         let (b, t) = (base.get_untracked(), token.get_untracked());
         active_root.set(id.clone());
+        session_restore::persist(&id);
         spawn_local(async move {
             if let Err(e) = post_json(
                 &b,
@@ -2282,7 +2421,10 @@ fn App() -> impl IntoView {
         spawn_local(async move {
             let path = format!("/v1/roots/{id}/resume");
             match post_json(&b, &t, &path, serde_json::json!({})).await {
-                Ok(()) => active_root.set(id),
+                Ok(()) => {
+                    session_restore::persist(&id);
+                    active_root.set(id);
+                }
                 Err(e) => status.set(format!("resume failed: {e}")),
             }
         });
@@ -2482,26 +2624,56 @@ fn App() -> impl IntoView {
 
     let set_memory = move |mode: String| {
         memory_menu.set(false);
-        memory_mode.set(mode.clone());
+        // Snapshot the confirmed mode before any optimistic update so a
+        // rejected change can revert the chip (#1585). The optimistic set
+        // happens only after the live-session check passes.
+        let previous = if memory_mode_known.get_untracked() {
+            Some(memory_mode.get_untracked())
+        } else {
+            None
+        };
         let root = active_root.get_untracked();
         if root.is_empty() {
             status.set("no live session yet".into());
             return;
         }
+        memory_mode.set(mode.clone());
         let (b, t) = (base.get_untracked(), token.get_untracked());
         spawn_local(async move {
             let path = format!("/v1/memory/mode?root={}", api::js_encode(&root));
             match put_json(&b, &t, &path, serde_json::json!({"mode": mode})).await {
                 Ok(text) => {
-                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
-                        if let Some(saved) = v.get("mode").and_then(|m| m.as_str()) {
-                            if !saved.is_empty() {
-                                memory_mode.set(saved.to_string());
+                    let saved = serde_json::from_str::<serde_json::Value>(&text)
+                        .ok()
+                        .and_then(|v| {
+                            v.get("mode")
+                                .and_then(|m| m.as_str())
+                                .map(str::to_string)
+                        })
+                        .filter(|saved| !saved.is_empty());
+                    match saved {
+                        Some(saved) => {
+                            memory_mode.set(saved);
+                            memory_mode_known.set(true);
+                        }
+                        None => {
+                            let (known, mode) = revert_memory_mode(previous);
+                            memory_mode_known.set(known);
+                            if known {
+                                memory_mode.set(mode);
                             }
+                            status.set("memory mode was not confirmed by the daemon".into());
                         }
                     }
                 }
-                Err(e) => status.set(format!("memory mode failed: {e}")),
+                Err(e) => {
+                    let (known, mode) = revert_memory_mode(previous);
+                    memory_mode_known.set(known);
+                    if known {
+                        memory_mode.set(mode);
+                    }
+                    status.set(format!("memory mode failed: {e}"));
+                }
             }
         });
     };
@@ -2589,6 +2761,10 @@ fn App() -> impl IntoView {
         let cur = active_root.get_untracked();
         if session_delete::remaining_active(&cur, &id).is_none() && !cur.is_empty() {
             active_root.set(String::new());
+            // The viewed session is gone (#1391): forget it now so a
+            // reload before the fallback lands cannot restore a ghost;
+            // the next refresh persists the fallback it picks.
+            session_restore::clear();
         }
         status.set("Session deleted.".into());
         if was_live {
@@ -2739,10 +2915,25 @@ fn App() -> impl IntoView {
         let (b, t) = (base.get(), token.get());
         spawn_local(async move {
             let path = format!("/v1/memory/mode?root={}", api::js_encode(&root));
-            if let Ok(v) = get_json::<serde_json::Value>(&b, &t, &path).await {
-                if let Some(mode) = v.get("mode").and_then(|m| m.as_str()) {
-                    if !mode.is_empty() {
-                        memory_mode.set(mode.to_string());
+            // A failed or empty load must not leave the chip asserting the
+            // invented default (#1585): mark the mode unknown and say so.
+            let loaded = match get_json::<serde_json::Value>(&b, &t, &path).await {
+                Ok(v) => v
+                    .get("mode")
+                    .and_then(|m| m.as_str())
+                    .filter(|mode| !mode.is_empty())
+                    .map(str::to_string),
+                Err(_) => None,
+            };
+            match loaded {
+                Some(mode) => {
+                    memory_mode.set(mode);
+                    memory_mode_known.set(true);
+                }
+                None => {
+                    memory_mode_known.set(false);
+                    if !root.is_empty() {
+                        status.set("memory mode could not be loaded".into());
                     }
                 }
             }
@@ -4583,6 +4774,33 @@ fn App() -> impl IntoView {
                                 }>"Send anyway"</button>
                             </div>
                         </Show>
+                        <Show when=move || {
+                            let ctx = active_context(&catalog.get(), &provider_name.get(), &model_name.get());
+                            let base_view = context_view(context_used.get(), context_limit.get(), ctx, &context_fit.get());
+                            draft_size::draft_size_view(base_view.used, base_view.limit, base_view.held, &draft.get()).level != draft_size::DraftSizeLevel::None
+                        }>
+                            <p class=move || {
+                                let ctx = active_context(&catalog.get(), &provider_name.get(), &model_name.get());
+                                let base_view = context_view(context_used.get(), context_limit.get(), ctx, &context_fit.get());
+                                let view = draft_size::draft_size_view(base_view.used, base_view.limit, base_view.held, &draft.get());
+                                if view.level == draft_size::DraftSizeLevel::Critical { "hint draft-size-warn critical" } else { "hint draft-size-warn" }
+                            } role="status" data-draft-size=move || {
+                                let ctx = active_context(&catalog.get(), &provider_name.get(), &model_name.get());
+                                let base_view = context_view(context_used.get(), context_limit.get(), ctx, &context_fit.get());
+                                let view = draft_size::draft_size_view(base_view.used, base_view.limit, base_view.held, &draft.get());
+                                match view.level { draft_size::DraftSizeLevel::Critical => "critical", draft_size::DraftSizeLevel::Warn => "warn", draft_size::DraftSizeLevel::None => "none" }
+                            }>{move || {
+                                let ctx = active_context(&catalog.get(), &provider_name.get(), &model_name.get());
+                                let base_view = context_view(context_used.get(), context_limit.get(), ctx, &context_fit.get());
+                                let text = draft.get();
+                                let view = draft_size::draft_size_view(base_view.used, base_view.limit, base_view.held, &text);
+                                if view.level == draft_size::DraftSizeLevel::Critical && draft_armed.get() == text.trim() && !text.trim().is_empty() {
+                                    draft_size::armed_message(&view)
+                                } else {
+                                    view.message
+                                }
+                            }}</p>
+                        </Show>
                         <Show when=move || memory_menu.get()>
                             <div class="menu" role="menu" aria-label="Memory mode">
                                 {["normal", "incognito", "temporary"].into_iter().map(|id| {
@@ -4593,7 +4811,7 @@ fn App() -> impl IntoView {
                                         _ => "Reads and writes memory.",
                                     };
                                     let set = set_memory;
-                                    let on = memory_mode.get() == id;
+                                    let on = memory_mode_known.get() && memory_mode.get() == id;
                                     let klass = if on { "palette-row on" } else { "palette-row" };
                                     let id = id.to_string();
                                     view! {
@@ -4996,15 +5214,17 @@ fn App() -> impl IntoView {
                         </Show>
                         <p class="hint composer-statusline" data-composer-triggers="status">{
                             let memory_mode = memory_mode;
+                            let memory_mode_known = memory_mode_known;
                             move || {
                             let note = transcript.with(|t| t.trigger_note.clone());
                             let pending = transcript.with(|t| t.asks.len());
                             let custom = trigger_status(&note, pending);
                             let mode = memory_mode.get();
-                            let memory = if mode == "normal" || mode.is_empty() {
+                            let known = memory_mode_known.get();
+                            let memory = if known && (mode == "normal" || mode.is_empty()) {
                                 String::new()
                             } else {
-                                format!("Memory · {}", memory_mode_label(&mode))
+                                memory_chip_text(known, &mode)
                             };
                             let ctx = active_context(&catalog.get(), &provider_name.get(), &model_name.get());
                             let meter = {
@@ -5174,6 +5394,7 @@ fn App() -> impl IntoView {
                                 <p class="hint">{move || if files_path.get().is_empty() { "Working directory".into() } else { files_path.get() }}</p>
                                 <button class="secondary" on:click=move |_| load_files()>"Refresh"</button>
                             </div>
+                            <p class="hint">"Click a file to open it. @ mentions it in chat; drag also inserts @path."</p>
                             <Show when=move || !files_error.get().is_empty()>
                                 <div class="notice" role="alert">
                                     <span>{move || files_error.get()}</span>
@@ -5194,6 +5415,9 @@ fn App() -> impl IntoView {
                                     let path = join_path(&files_path.get(), &entry.name);
                                     let path_drag = path.clone();
                                     let path_click = path.clone();
+                                    let mention_attr = path.clone();
+                                    let mention_click = path.clone();
+                                    let mention_label = format!("Mention {path} in chat");
                                     let is_dir = entry.is_dir;
                                     let label = if is_dir { format!("{name}/") } else { name.clone() };
                                     let open_attr = if is_dir { String::new() } else { path.clone() };
@@ -5211,6 +5435,12 @@ fn App() -> impl IntoView {
                                                     }
                                                 }
                                             >{label}</button>
+                                            {(!is_dir).then(move || view! {
+                                                <button type="button" class="secondary ev-mention" data-ev-mention=mention_attr.clone()
+                                                    aria-label=mention_label.clone() title="Mention in chat"
+                                                    on:click=move |_| insert_mention(mention_click.clone())
+                                                >"@"</button>
+                                            })}
                                         </li>
                                     }
                                 }).collect_view().into_any()
@@ -5224,6 +5454,7 @@ fn App() -> impl IntoView {
                                 <p class="hint">"Changed files"</p>
                                 <button class="secondary" on:click=move |_| load_changes()>"Refresh"</button>
                             </div>
+                            <p class="hint">"Click a change to open its diff. @ mentions it in chat; drag also inserts @path."</p>
                             <Show when=move || !changes_error.get().is_empty()>
                                 <div class="notice" role="alert">
                                     <span>{move || changes_error.get()}</span>
@@ -5238,6 +5469,9 @@ fn App() -> impl IntoView {
                                     let path = file.path.clone();
                                     let path_drag = path.clone();
                                     let path_click = path.clone();
+                                    let mention_attr = path.clone();
+                                    let mention_click = path.clone();
+                                    let mention_label = format!("Mention {path} in chat");
                                     let added = file.added;
                                     let deleted = file.deleted;
                                     view! {
@@ -5254,6 +5488,10 @@ fn App() -> impl IntoView {
                                                 <span class="diff-add">{format!("+{added}")}</span>
                                                 <span class="diff-del">{format!("-{deleted}")}</span>
                                             </button>
+                                            <button type="button" class="secondary ev-mention" data-ev-mention=mention_attr.clone()
+                                                aria-label=mention_label.clone() title="Mention in chat"
+                                                on:click=move |_| insert_mention(mention_click.clone())
+                                            >"@"</button>
                                         </li>
                                     }
                                 }).collect_view()}
@@ -5437,5 +5675,28 @@ fn main() {
         if let Some(el) = doc.query_selector(".boot-shell").ok().flatten() {
             el.remove();
         }
+    }
+}
+
+#[cfg(test)]
+mod memory_mode_tests {
+    use super::*;
+
+    #[test]
+    fn chip_asserts_only_confirmed_modes() {
+        assert_eq!(memory_chip_text(true, "incognito"), "Memory · Incognito");
+        assert_eq!(memory_chip_text(true, "temporary"), "Memory · Temporary");
+        assert_eq!(memory_chip_text(true, "normal"), "Memory · Normal");
+        assert_eq!(memory_chip_text(false, "normal"), "Memory · Unknown");
+        assert_eq!(memory_chip_text(false, "incognito"), "Memory · Unknown");
+    }
+
+    #[test]
+    fn revert_restores_the_confirmed_mode_or_unknown() {
+        assert_eq!(
+            revert_memory_mode(Some("incognito".to_string())),
+            (true, "incognito".to_string())
+        );
+        assert_eq!(revert_memory_mode(None), (false, String::new()));
     }
 }

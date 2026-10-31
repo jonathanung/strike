@@ -151,6 +151,17 @@ struct GitRow {
     inline_diff: String,
 }
 
+/// Paths of every row whose staged flag equals `staged`, in panel order.
+/// Stage all is `paths_where(rows, false)` — Unstaged and Untracked rows
+/// both carry `staged: false`, so new agent-created files are included,
+/// matching `git add` semantics (#1426 Q3). Unstage all is the staged set.
+fn paths_where(rows: &[GitRow], staged: bool) -> Vec<String> {
+    rows.iter()
+        .filter(|row| row.staged == staged)
+        .map(|row| row.path.clone())
+        .collect()
+}
+
 fn focus_id(id: &str) {
     let Some(el) = web_sys::window()
         .and_then(|w| w.document())
@@ -216,6 +227,38 @@ fn owner_label(wt: &WorktreeInfo, kids: &[ChildSession], root: &str) -> String {
     }
 }
 
+/// Plain-language error for the panel: transport errors arrive as
+/// `HTTP 400 {"error":"git commit: exit status 1"}`; surface only the
+/// daemon's `error` field. Follows the `http_message` idiom in editor.rs.
+/// Strings without a JSON error field pass through unchanged.
+fn http_message(err: &str) -> String {
+    if let Some(idx) = err.find('{') {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&err[idx..]) {
+            if let Some(msg) = v.get("error").and_then(|e| e.as_str()) {
+                if !msg.is_empty() {
+                    return msg.to_string();
+                }
+            }
+        }
+    }
+    err.to_string()
+}
+
+/// Why a commit attempt must not run, or `None` if it may proceed.
+/// Every `Some` outcome leaves the composed message exactly as typed:
+/// the caller returns before any request or clearing (#1519).
+/// `targeted` commits name their own paths, so the staged-count guard
+/// only applies to the plain "Commit staged" path.
+fn commit_block(text: &str, targeted: bool, staged_count: usize) -> Option<&'static str> {
+    if text.is_empty() {
+        return Some("Commit message is required.");
+    }
+    if !targeted && staged_count == 0 {
+        return Some("Nothing is staged. Stage a file first, then commit.");
+    }
+    None
+}
+
 #[component]
 pub fn GitPanel(
     base: RwSignal<String>,
@@ -236,6 +279,10 @@ pub fn GitPanel(
     let diff_text = RwSignal::new(String::new());
     let diff_note = RwSignal::new(String::new());
     let diff_req = RwSignal::new(0u32);
+    // #1428: the diff render is capped at 400 lines by default (wasm DOM
+    // cost); diff_expanded lifts the cap for the currently open diff only.
+    // It resets whenever a diff is (re)loaded — see the diff effect below.
+    let diff_expanded = RwSignal::new(false);
     let show_log = RwSignal::new(false);
     let message = RwSignal::new(String::new());
     let switch_to = RwSignal::new(String::new());
@@ -397,6 +444,8 @@ pub fn GitPanel(
         if !open_diff.get_untracked() {
             return;
         }
+        // Per-diff expansion (#1428): every (re)load starts capped again.
+        diff_expanded.set(false);
         let rows = rows.get_untracked();
         let Some(row) = rows.get(cursor.get_untracked()).cloned() else {
             diff_text.set(String::new());
@@ -443,6 +492,7 @@ pub fn GitPanel(
         let next = (cursor.get_untracked() as i32 + delta).clamp(0, n - 1) as usize;
         cursor.set(next);
         open_diff.set(false);
+        diff_expanded.set(false);
         diff_text.set(String::new());
     };
 
@@ -474,6 +524,7 @@ pub fn GitPanel(
             "Escape" => {
                 ev.prevent_default();
                 open_diff.set(false);
+                diff_expanded.set(false);
                 diff_text.set(String::new());
             }
             "l" if !ev.meta_key() && !ev.ctrl_key() && !ev.alt_key() => {
@@ -484,18 +535,26 @@ pub fn GitPanel(
         }
     };
 
-    let mutate = move |path: String, body: serde_json::Value, ok: String| {
-        let (b, t) = (base.get_untracked(), token.get_untracked());
-        spawn_local(async move {
-            match post_json_value(&b, &t, &path, body).await {
-                Ok(_) => {
-                    error.set(String::new());
-                    status_line.set(ok);
-                    load();
+    // `on_ok` runs only after the POST succeeds (#1519): callers use it
+    // to clear text the user composed, so a failed request can never
+    // destroy it. Failures surface the daemon's message via http_message.
+    let mutate_with =
+        move |path: String, body: serde_json::Value, ok: String, on_ok: Rc<dyn Fn()>| {
+            let (b, t) = (base.get_untracked(), token.get_untracked());
+            spawn_local(async move {
+                match post_json_value(&b, &t, &path, body).await {
+                    Ok(_) => {
+                        on_ok();
+                        error.set(String::new());
+                        status_line.set(ok);
+                        load();
+                    }
+                    Err(e) => error.set(http_message(&e)),
                 }
-                Err(e) => error.set(e),
-            }
-        });
+            });
+        };
+    let mutate = move |path: String, body: serde_json::Value, ok: String| {
+        mutate_with(path, body, ok, Rc::new(|| {}));
     };
 
     let do_switch = move |branch: String| {
@@ -515,6 +574,10 @@ pub fn GitPanel(
             error.set("Branch name is required.".into());
             return;
         }
+        // No panel field holds the name (it arrives by value from the
+        // palette since #1669), so there is no panel text to clear
+        // before the POST resolves; failures surface the daemon's
+        // plain-language error via mutate (#1519).
         mutate(
             "/v1/git/checkout".into(),
             serde_json::json!({"branch": branch, "create": true}),
@@ -522,18 +585,27 @@ pub fn GitPanel(
         );
     };
     let do_commit = move |paths: Vec<String>| {
-        let text = message.get().trim().to_string();
-        if text.is_empty() {
-            error.set("Commit message is required.".into());
+        let text = message.get_untracked().trim().to_string();
+        let staged_count = rows.get_untracked().iter().filter(|row| row.staged).count();
+        if let Some(block) = commit_block(&text, !paths.is_empty(), staged_count) {
+            // Blocked attempts preserve the message exactly as typed.
+            error.set(block.into());
             return;
         }
-        message.set(String::new());
         let body = if paths.is_empty() {
             serde_json::json!({"message": text})
         } else {
             serde_json::json!({"message": text, "paths": paths})
         };
-        mutate("/v1/git/commit".into(), body, "Committed.".into());
+        // Clear only on success: on_ok fires after the POST resolves Ok,
+        // so a failure (nothing staged server-side, hook, lock) leaves
+        // the composed message in the box (#1519).
+        mutate_with(
+            "/v1/git/commit".into(),
+            body,
+            "Committed.".into(),
+            Rc::new(move || message.set(String::new())),
+        );
     };
     let commit_staged = move |_| do_commit(vec![]);
     let commit_selected = move || {
@@ -568,6 +640,33 @@ pub fn GitPanel(
             "/v1/git/unstage".into(),
             serde_json::json!({"paths": [path]}),
             "Unstaged.".into(),
+        );
+    };
+    // Batch variants (#1426): one POST with the whole path list — the
+    // daemon routes already accept `Paths []string` — never N per-file
+    // calls looping `stage_selected` / `unstage_selected`.
+    let stage_all = move |_| {
+        let paths = paths_where(&rows.get(), false);
+        if paths.is_empty() {
+            error.set("No unstaged or untracked files.".into());
+            return;
+        }
+        mutate(
+            "/v1/git/stage".into(),
+            serde_json::json!({"paths": paths}),
+            "Staged all.".into(),
+        );
+    };
+    let unstage_all = move |_| {
+        let paths = paths_where(&rows.get(), true);
+        if paths.is_empty() {
+            error.set("No staged files.".into());
+            return;
+        }
+        mutate(
+            "/v1/git/unstage".into(),
+            serde_json::json!({"paths": paths}),
+            "Unstaged all.".into(),
         );
     };
     let discard_selected = move || {
@@ -808,19 +907,33 @@ pub fn GitPanel(
                 views.into_iter().collect_view()
             }}
             <Show when=move || open_diff.get() && !diff_text.get().is_empty()>
-                <pre class="git-diff" aria-label="Diff">{move || {
-                    let text = diff_text.get();
-                    let more = text.lines().nth(400).is_some();
-                    let mut lines: Vec<_> = text.lines().take(400).map(|line| {
-                        let kind = diff_kind(line);
-                        let text = line.to_string();
-                        view! { <div class=kind>{text}</div> }.into_any()
-                    }).collect();
-                    if more {
-                        lines.push(view! { <div class="ctx">"… first 400 lines"</div> }.into_any());
-                    }
-                    lines.into_iter().collect_view()
-                }}</pre>
+                <div class="git-diff-wrap">
+                    <pre class="git-diff" aria-label="Diff">{move || {
+                        let text = diff_text.get();
+                        // #1428: render-only cap. The full text is already
+                        // client-side; expansion renders every line with the
+                        // same line-kind classes as the capped render.
+                        let limit = if diff_expanded.get() { usize::MAX } else { 400 };
+                        text.lines().take(limit).map(|line| {
+                            let kind = diff_kind(line);
+                            let text = line.to_string();
+                            view! { <div class=kind>{text}</div> }.into_any()
+                        }).collect_view()
+                    }}</pre>
+                    {move || {
+                        let total = diff_text.get().lines().count();
+                        (total > 400 && !diff_expanded.get()).then(|| view! {
+                            <button
+                                type="button"
+                                class="secondary git-diff-expand"
+                                data-git-diff-expand="true"
+                                on:click=move |_| diff_expanded.set(true)
+                            >
+                                {format!("Show all {total} lines")}
+                            </button>
+                        })
+                    }}
+                </div>
             </Show>
             <Show when=move || !diff_note.get().is_empty()>
                 <p class="hint">{move || diff_note.get()}</p>
@@ -830,6 +943,8 @@ pub fn GitPanel(
                 <button type="button" class="primary" on:click=commit_staged>"Commit staged"</button>
                 <button type="button" class="secondary" on:click=stage_selected>"Stage"</button>
                 <button type="button" class="secondary" on:click=unstage_selected>"Unstage"</button>
+                <button type="button" class="secondary" data-git-stage-all=true disabled=move || paths_where(&rows.get(), false).is_empty() on:click=stage_all>"Stage all"</button>
+                <button type="button" class="secondary" data-git-unstage-all=true disabled=move || paths_where(&rows.get(), true).is_empty() on:click=unstage_all>"Unstage all"</button>
             </div>
         </div>
     }
@@ -1059,5 +1174,91 @@ pub fn WorktreePanel(
                 <p class="hint">"No worktrees."</p>
             </Show>
         </div>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn row(section: &str, path: &str, staged: bool) -> GitRow {
+        GitRow {
+            section: section.into(),
+            path: path.into(),
+            status: String::new(),
+            added: 0,
+            deleted: 0,
+            staged,
+            inline_diff: String::new(),
+        }
+    }
+
+    #[test]
+    fn paths_where_splits_mixed_rows_in_panel_order() {
+        let rows = vec![
+            row("Staged", "a.rs", true),
+            row("Unstaged", "b.rs", false),
+            row("Staged", "c.rs", true),
+            row("Untracked", "new.rs", false),
+        ];
+        assert_eq!(paths_where(&rows, true), vec!["a.rs", "c.rs"]);
+        // Stage all includes Untracked rows (#1426 Q3).
+        assert_eq!(paths_where(&rows, false), vec!["b.rs", "new.rs"]);
+    }
+
+    #[test]
+    fn paths_where_empty_sets_disable_the_batch_buttons() {
+        let none: Vec<GitRow> = Vec::new();
+        assert!(paths_where(&none, true).is_empty());
+        assert!(paths_where(&none, false).is_empty());
+        let only_staged = vec![row("Staged", "a.rs", true)];
+        assert!(paths_where(&only_staged, false).is_empty());
+        let only_unstaged = vec![row("Unstaged", "b.rs", false)];
+        assert!(paths_where(&only_unstaged, true).is_empty());
+    }
+
+    #[test]
+    fn http_message_extracts_the_daemon_error_field() {
+        // The exact transport string from #1519.
+        let err = r#"HTTP 400 {"error":"git commit: exit status 1"}"#;
+        assert_eq!(http_message(err), "git commit: exit status 1");
+        // No raw HTTP status or JSON braces survive.
+        let shown = http_message(err);
+        assert!(!shown.contains("HTTP"));
+        assert!(!shown.contains('{'));
+    }
+
+    #[test]
+    fn http_message_passes_plain_errors_through() {
+        assert_eq!(
+            http_message("unauthorized: check the daemon token"),
+            "unauthorized: check the daemon token"
+        );
+        assert_eq!(http_message("HTTP 500"), "HTTP 500");
+        // An empty error field is not a plain-language message.
+        assert_eq!(
+            http_message(r#"HTTP 400 {"error":""}"#),
+            r#"HTTP 400 {"error":""}"#
+        );
+    }
+
+    #[test]
+    fn commit_block_preserves_the_message_on_every_block() {
+        // Empty message: blocked, and there is nothing to lose.
+        assert_eq!(
+            commit_block("", false, 3),
+            Some("Commit message is required.")
+        );
+        // #1519's common failure, caught client-side: nothing staged.
+        assert_eq!(
+            commit_block("do not lose me: fix the thing", false, 0),
+            Some("Nothing is staged. Stage a file first, then commit.")
+        );
+        // A targeted (per-file) commit names its paths, so zero staged
+        // files in the panel do not block it.
+        assert_eq!(commit_block("fix the thing", true, 0), None);
+        // The happy path runs; clearing happens only in the success
+        // callback, never on a block or a failed POST.
+        assert_eq!(commit_block("fix the thing", false, 1), None);
     }
 }

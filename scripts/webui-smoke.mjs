@@ -29,6 +29,16 @@ const chromePort = 9222 + (process.pid % 200);
 await mkdir(join(home, ".strike"), { recursive: true });
 await writeFile(join(home, ".strike", "config"), '{"sandboxAllowDegrade":true}\n');
 
+// Git diff expand seed (#1428): an untracked file in the daemon's repo whose
+// --no-index diff runs past the Git panel's 400-line render cap. The git
+// section below opens it, asserts the capped render + "Show all N lines"
+// footer, expands it, and asserts the tail is reachable. Removed in finally.
+const gitDiffSeedPath = join(process.cwd(), "smoke-git-diff-1428.txt");
+await writeFile(
+  gitDiffSeedPath,
+  Array.from({ length: 500 }, (_, i) => `smoke-diff-line-${i + 1}`).join("\n") + "\n",
+);
+
 // Render/boot waits get a deadline sized for shared CI runners; shorter
 // interactive steps get a smaller one. Both are overridable for local runs.
 // WAIT_MS is also the budget for anti-hang arrival waits whose predicate
@@ -1012,6 +1022,42 @@ try {
   if (selected.result?.result?.value !== "yes") {
     throw new Error("keyboard x did not select the cursor session");
   }
+  // Needs you chip (#1451): the chip renders beside All/Unread, activates,
+  // and filters the seeded (non-waiting) sessions out; All restores them.
+  // Waiting-row rendering itself is covered by session_list unit tests —
+  // the echo/smoke seeds never pend an approval or a question.
+  const needsYou = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const chips = [...document.querySelectorAll(".ss-chips .chip")].map((c) => c.textContent.trim());
+      const chip = [...document.querySelectorAll(".ss-chips .chip")].find((c) => c.textContent.trim() === "Needs you");
+      if (chip) chip.click();
+      return JSON.stringify({ chips, clicked: !!chip });
+    })()`,
+    returnByValue: true,
+  });
+  const needsYouInfo = JSON.parse(needsYou.result?.result?.value || "{}");
+  if (!needsYouInfo.clicked || needsYouInfo.chips?.join(",") !== "All,Unread,Needs you") {
+    throw new Error(`Needs you chip missing or out of order: ${JSON.stringify(needsYouInfo)}`);
+  }
+  await waitFor(
+    "Needs you filter empties the non-waiting list",
+    textProbe((t) => t.includes("No sessions match")),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  const needsYouActive = await evalValue(
+    `document.querySelector(".ss-chips .chip.on")?.textContent.trim() || ""`,
+  );
+  if (needsYouActive !== "Needs you") {
+    throw new Error(`Needs you chip did not stay active (on=${needsYouActive})`);
+  }
+  await send("Runtime.evaluate", {
+    expression: `[...document.querySelectorAll(".ss-chips .chip")].find((c) => c.textContent.trim() === "All")?.click()`,
+  });
+  await waitFor(
+    "All filter restores sessions after Needs you",
+    textProbe((t) => t.includes("Palette polish") && t.includes("Alpha session")),
+    { timeout: WAIT_MS, interval: 250 },
+  );
   // feature:navbar — palette fuzzy match, argument error, shortcut overlay.
   const navbar = async (expression) => {
     try {
@@ -1407,15 +1453,22 @@ try {
   }
   // A memory row's key cell must stay readable at panel width: the full
   // RFC3339 timestamp once sat as a flex sibling and crushed the link
-  // block to ~35px (PR #1305 review).
-  const memKeyWidthPx = await evaluate(`(() => {
-    const row = [...document.querySelectorAll(".storage-row")].find((r) => r.textContent.includes("smoke-pref"));
-    const link = row ? row.querySelector(".link") : null;
-    return link ? link.getBoundingClientRect().width : 0;
-  })()`);
-  if (!(memKeyWidthPx > 100)) {
-    throw new Error(`memory row key cell too narrow width=${memKeyWidthPx}`);
-  }
+  // block to ~35px (PR #1305 review). The text probe above can pass
+  // before layout settles, leaving the link rect at width 0 for a
+  // frame, so poll the width like every other wait in this file
+  // instead of measuring once.
+  await waitFor(
+    "memory row key cell readable width (>100px)",
+    async () => {
+      const w = await evaluate(`(() => {
+        const row = [...document.querySelectorAll(".storage-row")].find((r) => r.textContent.includes("smoke-pref"));
+        const link = row ? row.querySelector(".link") : null;
+        return link ? link.getBoundingClientRect().width : 0;
+      })()`);
+      return { ok: w > 100, memKeyWidthPx: w };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
 
   // Goals + Autopilot (#1300, #1593). The view is palette-only. A bundle
   // that predates Goals has no palette command and fails here.
@@ -1808,6 +1861,45 @@ try {
       { timeout: WAIT_MS, interval: 250 },
     );
   };
+  // Stage all / Unstage all (#1426): seed several untracked files BEFORE
+  // the panel first loads, but only when the repo is completely clean —
+  // Stage all would otherwise stage a developer's unrelated work when
+  // this script runs in a dirty checkout. In CI the checkout is clean,
+  // so the full batch flow below runs.
+  const stageAllFiles = [
+    "smoke-stage-all-1.txt",
+    "smoke-stage-all-2.txt",
+    "smoke-stage-all-3.txt",
+  ];
+  const gitStatusPaths = async () => {
+    const res = await fetch(`http://127.0.0.1:${port}/v1/git/status`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) throw new Error(`git status HTTP ${res.status}`);
+    const body = await res.json();
+    const paths = (list) => (list || []).map((f) => f.path);
+    return {
+      staged: paths(body.staged),
+      unstaged: paths(body.unstaged),
+      untracked: paths(body.untracked),
+    };
+  };
+  let stageAllSeeded = false;
+  try {
+    const before = await gitStatusPaths();
+    if (
+      before.staged.length === 0 &&
+      before.unstaged.length === 0 &&
+      before.untracked.length === 0
+    ) {
+      for (const name of stageAllFiles) {
+        await writeFile(join(process.cwd(), name), `stage-all smoke ${name}\n`);
+      }
+      stageAllSeeded = true;
+    }
+  } catch {
+    stageAllSeeded = false;
+  }
   await clickSideTab("Git", "Staged");
   // Branch switcher regression (#1314): the rendered <select> value must
   // equal the daemon's current branch once the options exist. The defect
@@ -1839,6 +1931,159 @@ try {
       },
       { timeout: STEP_MS, interval: 250 },
     );
+  }
+  // Git diff expand (#1428): the seeded untracked file's diff is ~505 lines.
+  // The panel must render only the first 400 with a "Show all N lines"
+  // button (data-git-diff-expand); clicking it renders the tail in place;
+  // re-opening the same diff starts capped again (per-diff reset).
+  const diffProbe = async () => {
+    const raw = await evaluate(`(() => {
+      const pre = document.querySelector(".git-diff");
+      const btn = document.querySelector("[data-git-diff-expand]");
+      return JSON.stringify({
+        lines: pre ? pre.children.length : -1,
+        btn: btn ? (btn.textContent || "").trim() : "",
+        hasTail: pre ? pre.textContent.includes("smoke-diff-line-500") : false,
+        has401: pre ? pre.textContent.includes("smoke-diff-line-396") : false,
+      });
+    })()`);
+    return JSON.parse(raw || "{}");
+  };
+  const clickSeedRow = async () => {
+    // Rows load async after the Git tab opens; poll for the seed row like
+    // every other wait in this script instead of a single-shot query
+    // (a one-shot query raced the status load on CI: "seed row missing").
+    await waitFor(
+      "git diff expand seed row (smoke-git-diff-1428.txt)",
+      async () => {
+        const v = await evaluate(`(() => {
+          const b = [...document.querySelectorAll(".git-file")].find((x) => (x.textContent || "").includes("smoke-git-diff-1428.txt"));
+          if (!b) return "missing";
+          b.click();
+          return "clicked";
+        })()`);
+        return { ok: v === "clicked", v };
+      },
+      { timeout: WAIT_MS, interval: 250 },
+    );
+  };
+  await clickSeedRow();
+  await waitFor(
+    "git diff capped at 400 lines with a Show all N lines button",
+    async () => {
+      const p = await diffProbe();
+      return { ok: p.lines === 400 && p.btn.startsWith("Show all ") && p.btn.endsWith(" lines") && !p.has401, ...p };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  const expandClicked = await evaluate(
+    `(() => { const b = document.querySelector("[data-git-diff-expand]"); if (!b) return "missing"; b.click(); return "clicked"; })()`,
+  );
+  if (expandClicked !== "clicked") {
+    throw new Error(`git diff expand: button ${expandClicked}`);
+  }
+  await waitFor(
+    "expanded git diff renders lines past 400 through the tail",
+    async () => {
+      const p = await diffProbe();
+      return { ok: p.lines > 400 && p.hasTail && p.btn === "", ...p };
+    },
+    { timeout: STEP_MS, interval: 250 },
+  );
+  await clickSeedRow();
+  await waitFor(
+    "re-opened git diff starts capped again (per-diff reset)",
+    async () => {
+      const p = await diffProbe();
+      return { ok: p.lines === 400 && p.btn.startsWith("Show all "), ...p };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  if (stageAllSeeded) {
+    const batchButtons = async () => {
+      const raw = await evaluate(`(() => {
+        const s = document.querySelector("[data-git-stage-all]");
+        const u = document.querySelector("[data-git-unstage-all]");
+        return JSON.stringify({
+          stage: s ? s.disabled : null,
+          unstage: u ? u.disabled : null,
+        });
+      })()`);
+      return JSON.parse(raw || "{}");
+    };
+    const clickBatch = async (selector) => {
+      const v = await evaluate(`(() => {
+        const b = document.querySelector(${JSON.stringify(selector)});
+        if (!b) return "missing";
+        if (b.disabled) return "disabled";
+        b.click();
+        return "clicked";
+      })()`);
+      if (v !== "clicked") throw new Error(`stage-all smoke: ${selector} -> ${v}`);
+    };
+    try {
+      await waitFor(
+        "Stage all enabled and Unstage all disabled with only untracked files",
+        async () => {
+          const b = await batchButtons();
+          return { ok: b.stage === false && b.unstage === true, ...b };
+        },
+        { timeout: STEP_MS, interval: 250 },
+      );
+      await clickBatch("[data-git-stage-all]");
+      await waitFor(
+        "Stage all moves every seeded file to Staged in one batch",
+        async () => {
+          const s = await gitStatusPaths();
+          return {
+            ok: stageAllFiles.every((f) => s.staged.includes(f)),
+            ...s,
+          };
+        },
+        { timeout: STEP_MS, interval: 250 },
+      );
+      await waitFor(
+        "panel flips the batch buttons after Stage all",
+        async () => {
+          const b = await batchButtons();
+          return { ok: b.stage === true && b.unstage === false, ...b };
+        },
+        { timeout: STEP_MS, interval: 250 },
+      );
+      await clickBatch("[data-git-unstage-all]");
+      await waitFor(
+        "Unstage all moves every seeded file back to Untracked",
+        async () => {
+          const s = await gitStatusPaths();
+          return {
+            ok:
+              stageAllFiles.every((f) => s.untracked.includes(f)) &&
+              !stageAllFiles.some((f) => s.staged.includes(f)),
+            ...s,
+          };
+        },
+        { timeout: STEP_MS, interval: 250 },
+      );
+    } finally {
+      // Restore the clean repo even when an assertion above fails:
+      // unstage any seeded file still staged, then delete the seeds.
+      try {
+        const s = await gitStatusPaths();
+        const stillStaged = stageAllFiles.filter((f) => s.staged.includes(f));
+        if (stillStaged.length > 0) {
+          await fetch(`http://127.0.0.1:${port}/v1/git/unstage`, {
+            method: "POST",
+            headers: auth,
+            body: JSON.stringify({ paths: stillStaged }),
+          });
+        }
+      } catch {
+        // best-effort cleanup only; the assertion failure already reports
+      }
+      for (const name of stageAllFiles) {
+        await rm(join(process.cwd(), name), { force: true });
+      }
+    }
   }
   await waitUntil(`(() => {
     if ((document.body.innerText || "").includes("session.childIsolation")) return true;
@@ -2122,6 +2367,114 @@ try {
     }),
     { timeout: WAIT_MS, interval: 250 },
   );
+  // Session restore (#1391): the viewed session is persisted like theme
+  // and layout, so a reload returns to it; a saved id whose session was
+  // deleted falls back to another session instead of an empty screen.
+  const mkRoot = async (label) => {
+    const res = await fetch(`http://127.0.0.1:${port}/v1/roots`, {
+      method: "POST",
+      headers: auth,
+      body: "{}",
+    });
+    if (!res.ok) {
+      throw new Error(`session-restore seed ${label} failed ${res.status} ${await res.text()}`);
+    }
+    const id = (await res.json()).id;
+    if (!id) throw new Error(`session-restore seed ${label} returned no id`);
+    return id;
+  };
+  const restoreFallback = await mkRoot("fallback");
+  const restoreTarget = await mkRoot("target");
+  const selectedID = async () =>
+    evaluate(
+      `(() => { const el = document.querySelector('[data-session-id][aria-selected="true"]'); return el ? el.getAttribute("data-session-id") : ""; })()`,
+    );
+  const savedActive = async () => evaluate(`localStorage.getItem("strike.activeSession") || ""`);
+  const reloadCockpit = async (label) => {
+    await send("Page.navigate", {
+      url: "http://127.0.0.1:" + port + "/?token=" + token,
+    });
+    await waitFor(label, textProbe((t) => t.includes("Menu")), {
+      timeout: WAIT_MS,
+      interval: 250,
+    });
+  };
+  await reloadCockpit("cockpit re-boot for session restore");
+  await waitFor(
+    "session-restore target row",
+    async () => ({
+      ok:
+        (await evaluate(
+          `!!document.querySelector(${JSON.stringify(rowSel(restoreTarget))})`,
+        )) === true,
+    }),
+    { timeout: STEP_MS, interval: 250 },
+  );
+  // Open session B (the target) through its row, like a user switch.
+  await evaluate(
+    `(() => { const row = document.querySelector(${JSON.stringify(rowSel(restoreTarget))}); const btn = row && row.querySelector(".ss-main"); if (btn) btn.click(); return !!btn; })()`,
+  );
+  await waitFor(
+    "session B open and persisted",
+    async () => ({
+      ok:
+        (await selectedID()) === restoreTarget &&
+        (await savedActive()) === restoreTarget,
+    }),
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await reloadCockpit("cockpit reload after opening session B");
+  await waitFor(
+    "session B still viewed after reload",
+    async () => ({
+      ok:
+        (await selectedID()) === restoreTarget &&
+        (await savedActive()) === restoreTarget,
+    }),
+    { timeout: STEP_MS, interval: 200 },
+  );
+  // Stale-id path: delete B on the daemon (session log + live root,
+  // the same composition the page's delete flow performs), reload, and
+  // require the fallback session — never an empty screen.
+  const delSession = await fetch(
+    `http://127.0.0.1:${port}/v1/sessions/${encodeURIComponent(restoreTarget)}?force=true`,
+    { method: "DELETE", headers: { Authorization: `Bearer ${token}` } },
+  );
+  if (!delSession.ok) {
+    throw new Error(`session-restore delete failed ${delSession.status} ${await delSession.text()}`);
+  }
+  const delRoot = await fetch(
+    `http://127.0.0.1:${port}/v1/roots/${encodeURIComponent(restoreTarget)}`,
+    { method: "DELETE", headers: { Authorization: `Bearer ${token}` } },
+  );
+  // Since #1399 the session DELETE above also deregisters the live
+  // root, so this follow-up close answering 404 "is not active" is the
+  // documented success case (see handleSessionDelete in api.go) — the
+  // root being gone either way is exactly the state this step needs.
+  // Any other failure is still fatal.
+  if (!delRoot.ok && delRoot.status !== 404) {
+    throw new Error(`session-restore root close failed ${delRoot.status} ${await delRoot.text()}`);
+  }
+  await reloadCockpit("cockpit reload after deleting session B");
+  await waitFor(
+    "fallback session viewed after stale-id reload (no empty state)",
+    async () => {
+      const selected = await selectedID();
+      return {
+        ok:
+          selected !== "" &&
+          selected !== restoreTarget &&
+          (await savedActive()) === selected &&
+          (await rootIDs()).includes(selected),
+        selected,
+      };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  if (!(await rootIDs()).includes(restoreFallback)) {
+    throw new Error("session-restore fallback seed root vanished");
+  }
+
   // Task runner (#1277): a plain echo section fails schema:handoff and
   // blocks the next section. Restart the daemon so the run is read back
   // from disk, then check the Tasks board (via the strict
@@ -3130,6 +3483,7 @@ try {
   // a file released a beat after exit — rm retries ENOTEMPTY/EBUSY
   // instead of failing the run.
   await Promise.all([stopChild(chrome), stopChild(strike)]);
+  await rm(gitDiffSeedPath, { force: true });
   await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   await rm(chromeData, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 }
