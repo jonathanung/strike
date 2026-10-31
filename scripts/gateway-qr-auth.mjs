@@ -66,6 +66,10 @@ strike.stdout.on("data", keep);
 strike.stderr.on("data", keep);
 
 const failures = [];
+// Booted = the shell rendered (Sessions rail) or the first-run onboarding
+// overlay is up. The old "Run a command" composer text is covered by the
+// onboarding overlay on a fresh HOME, so it never appears at boot.
+const BOOTED = `document.body && (document.body.innerText.includes("Sessions") || document.querySelector('[data-action="onboarding-dismiss"]'))`;
 let chrome;
 let page;
 try {
@@ -86,11 +90,7 @@ try {
     mobile: false,
   });
   await page.send("Page.navigate", { url: baseURL });
-  const firstBoot = await waitFor(
-    page,
-    `document.body && document.body.innerText.includes("Run a command")`,
-    20000,
-  );
+  const firstBoot = await waitFor(page, BOOTED, 20000);
   if (!firstBoot) failures.push("cockpit did not boot");
   if (withAuth) {
     await page.evaluate(`(() => {
@@ -102,11 +102,18 @@ try {
     await page.send("Page.reload", { ignoreCache: true });
     const booted = await waitFor(
       page,
-      `document.body && document.body.innerText.includes("Run a command") && window.__strikeBoot !== 1`,
+      `(${BOOTED}) && window.__strikeBoot !== 1`,
       20000,
     );
     if (!booted) failures.push("cockpit did not reload with the saved token");
   }
+  // Dismiss the first-run onboarding card if it is up: it overlays the
+  // shell, and the screenshots below must show the pairing dialog itself.
+  await page.evaluate(
+    `document.querySelector('[data-action="onboarding-dismiss"]')?.click()`,
+  );
+  await waitFor(page, `!document.querySelector('[data-action="onboarding-dismiss"]')`, 5000);
+  await delay(200);
   await page.send("Input.dispatchKeyEvent", {
     type: "keyDown",
     key: "k",
