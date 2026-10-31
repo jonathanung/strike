@@ -229,6 +229,16 @@ pub struct FileSearchResponse {
     pub paths: Vec<String>,
 }
 
+/// Bootstrap capability flags the cockpit reads. Unknown flags stay
+/// ignored; a missing object parses as every capability off.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct BootstrapCapabilities {
+    /// True when a live engine can build a diagnostic bundle (#1489):
+    /// the daemon sets it from the same live gate as `GET /v1/diag`.
+    #[serde(default)]
+    pub diag: bool,
+}
+
 #[derive(Clone, Debug, Deserialize)]
 pub struct Bootstrap {
     #[serde(default)]
@@ -237,6 +247,53 @@ pub struct Bootstrap {
     pub skills: Vec<SkillInfo>,
     #[serde(default, rename = "composerCommands")]
     pub composer_commands: Vec<ComposerCommand>,
+    #[serde(default)]
+    pub capabilities: BootstrapCapabilities,
+}
+
+/// The filename a `/v1/diag` download is saved under: the server's
+/// `Content-Disposition` filename when it sends one (#1489 — the daemon
+/// chooses `strike-diag-<session>-<timestamp>.json`), never a name the
+/// client invents while a server name exists. Falls back to a generic
+/// Strike name only when the header is absent or unparseable.
+pub fn diag_filename(content_disposition: Option<&str>) -> String {
+    if let Some(header) = content_disposition {
+        for part in header.split(';') {
+            let part = part.trim();
+            let Some(rest) = part
+                .strip_prefix("filename=")
+                .or_else(|| part.strip_prefix("Filename="))
+            else {
+                continue;
+            };
+            let name = rest.trim().trim_matches('"').trim();
+            // A header value must never become a path on the client.
+            let name = name.rsplit(['/', '\\']).next().unwrap_or("").trim();
+            if !name.is_empty() {
+                return name.to_string();
+            }
+        }
+    }
+    "strike-diag.json".to_string()
+}
+
+/// The daemon's own error wording from a `/v1/diag` error body
+/// (`{"error": "…"}`), verbatim when present — the 503 capability message
+/// is the daemon's sentence, not the cockpit's paraphrase (#1489).
+pub fn diag_error_message(status: u16, body: &str) -> String {
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(body) {
+        if let Some(msg) = v.get("error").and_then(|e| e.as_str()) {
+            if !msg.trim().is_empty() {
+                return msg.to_string();
+            }
+        }
+    }
+    let body = body.trim();
+    if body.is_empty() {
+        format!("HTTP {status}")
+    } else {
+        format!("HTTP {status} {body}")
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -326,6 +383,11 @@ pub struct SessionRow {
     pub workspace_id: String,
     /// Canonical status id. Empty only before classification.
     pub status: String,
+    /// Live root is waiting on an approval (#1451). Carried from
+    /// [`RootSummary`] so the session list can label the waiting kind.
+    pub permission_pending: bool,
+    /// Live root is waiting on an answer to an agent question (#1451).
+    pub question_pending: bool,
     /// Unix milliseconds when `status` began.
     pub status_since: i64,
     /// Unix milliseconds of the last user-visible activity. 0 when unknown.
@@ -574,6 +636,8 @@ fn blank_row(id: &str, title: &str, mtime: i64, pinned: bool) -> SessionRow {
         unread: false,
         workspace_id: String::new(),
         status: String::new(),
+        permission_pending: false,
+        question_pending: false,
         status_since: 0,
         last_activity_at: 0,
     }
@@ -626,6 +690,8 @@ pub fn merge_sessions(
         if !r.status.is_empty() {
             entry.status = r.status.clone();
         }
+        entry.permission_pending = r.permission_pending;
+        entry.question_pending = r.question_pending;
         if r.status_since > 0 {
             entry.status_since = r.status_since;
         }
@@ -674,6 +740,14 @@ pub fn filter_sessions(
         .filter(|row| {
             let mode_ok = match filter {
                 "unread" => row.unread,
+                "needs-you" => {
+                    crate::status::session_kind(
+                        &row.status,
+                        row.busy,
+                        row.permission_pending,
+                        row.question_pending,
+                    ) == crate::status::StatusKind::Waiting
+                }
                 "progress" => row.busy,
                 "pinned" => row.pinned,
                 _ => true,
@@ -1171,6 +1245,8 @@ mod tests {
             unread: false,
             workspace_id: String::new(),
             status: String::new(),
+            permission_pending: false,
+            question_pending: false,
             status_since: 0,
             last_activity_at: 0,
         }
@@ -1234,6 +1310,8 @@ mod tests {
         assert!(rows[0].unread);
         assert!(rows[0].busy);
         assert_eq!(rows[0].status, "waiting");
+        assert!(rows[0].permission_pending);
+        assert!(!rows[0].question_pending);
         assert_eq!(rows[0].last_activity_at, 9_000);
 
         let acked = vec![RootSummary {
@@ -1451,6 +1529,53 @@ mod tests {
             summary_for_merge("wrote the migration", "completed"),
             "wrote the migration"
         );
+    }
+
+    #[test]
+    fn bootstrap_reads_the_diag_capability() {
+        let boot: Bootstrap = serde_json::from_str(
+            r#"{"capabilities":{"diag":true},"skills":[],"composerCommands":[]}"#,
+        )
+        .unwrap();
+        assert!(boot.capabilities.diag);
+        // Older daemons without a capabilities object read as off, so the
+        // Download diagnostics control stays disabled rather than lying.
+        let boot: Bootstrap = serde_json::from_str(r#"{"skills":[]}"#).unwrap();
+        assert!(!boot.capabilities.diag);
+    }
+
+    #[test]
+    fn diag_filename_honours_the_server_name() {
+        assert_eq!(
+            diag_filename(Some(
+                "attachment; filename=\"strike-diag-abcd1234-20261030-120000.json\""
+            )),
+            "strike-diag-abcd1234-20261030-120000.json"
+        );
+        assert_eq!(
+            diag_filename(Some("attachment; filename=strike-diag-x.json")),
+            "strike-diag-x.json"
+        );
+        // A hostile header cannot smuggle a path into the download name.
+        assert_eq!(
+            diag_filename(Some("attachment; filename=\"../../evil.json\"")),
+            "evil.json"
+        );
+        assert_eq!(diag_filename(None), "strike-diag.json");
+        assert_eq!(diag_filename(Some("attachment")), "strike-diag.json");
+    }
+
+    #[test]
+    fn diag_error_keeps_the_daemons_words() {
+        assert_eq!(
+            diag_error_message(
+                503,
+                r#"{"error":"diag capability unavailable on this host"}"#
+            ),
+            "diag capability unavailable on this host"
+        );
+        assert_eq!(diag_error_message(504, ""), "HTTP 504");
+        assert_eq!(diag_error_message(500, "boom"), "HTTP 500 boom");
     }
 
     #[test]

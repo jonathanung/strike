@@ -263,3 +263,14 @@ button.notify-mute {
 }
 
 /* feature:notifications end */
+/* feature:notify-dismiss begin */
+
+button.notify-dismiss {
+  margin: var(--space-2) var(--space-2) 0 0;
+  height: var(--control);
+  flex-shrink: 0;
+}
+
+.notify-head-actions { flex-wrap: wrap; justify-content: flex-end; }
+
+/* feature:notify-dismiss end */

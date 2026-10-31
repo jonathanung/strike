@@ -25,6 +25,7 @@ async function waitFor(send, expression, label) {
 
 export async function editorBrowserCheck({ send, port, token, repoDir }) {
   const sample = join(repoDir, "editor-smoke.txt");
+  const long = join(repoDir, "editor-long.txt");
   await writeFile(sample, "alpha beta\n");
   try {
     const trav = await fetch(
@@ -157,6 +158,102 @@ export async function editorBrowserCheck({ send, port, token, repoDir }) {
       throw new Error(`conflict wrote the file: ${JSON.stringify(body).slice(0, 200)}`);
     }
 
+    // Long file (#1431): the render window starts at 2,000 lines,
+    // "Show more" raises it a chunk at a time, "Show all" reaches the
+    // tail, and a find hit past the cap auto-raises the window.
+    const longLines = Array.from({ length: 5000 }, (_, i) => `line ${i + 1}`);
+    longLines[4499] = "zebra-tail unique marker";
+    longLines[4999] = "tail line 5000";
+    await writeFile(long, `${longLines.join("\n")}\n`);
+    const openLongFile = async () => {
+      await evalValue(
+        send,
+        `(() => { const b = [...document.querySelectorAll("button")].find(el => el.textContent.trim() === "Back to chat"); if (b) b.click(); return "ok"; })()`,
+      );
+      await waitFor(
+        send,
+        `(() => document.querySelector("textarea") ? "ok" : "no composer")()`,
+        "composer before long file",
+      );
+      const tab = await evalValue(
+        send,
+        `(() => { const b = [...document.querySelectorAll("button")].find(el => el.textContent.trim() === "Files"); if (!b) return "no files tab"; b.click(); return "ok"; })()`,
+      );
+      if (tab !== "ok") {
+        throw new Error(`files tab click (long): ${tab}`);
+      }
+      await waitFor(
+        send,
+        `(() => document.querySelector('[data-ev-open="editor-long.txt"]') ? "ok" : "no long file row")()`,
+        "open button for editor-long.txt",
+      );
+      await evalValue(
+        send,
+        `(() => { document.querySelector('[data-ev-open="editor-long.txt"]').click(); return "ok"; })()`,
+      );
+    };
+    await openLongFile();
+    await waitFor(
+      send,
+      `(() => {
+        if (!document.querySelector("#ev-line-2000")) return "no line 2000";
+        return document.querySelector("#ev-line-2001") ? "line 2001 rendered too early" : "ok";
+      })()`,
+      "long file first window",
+    );
+    const more = await evalValue(
+      send,
+      `(() => { const b = document.querySelector("[data-ev-show-more]"); if (!b) return "no show more"; b.click(); return "ok"; })()`,
+    );
+    if (more !== "ok") {
+      throw new Error(`show more click: ${more}`);
+    }
+    await waitFor(
+      send,
+      `(() => {
+        if (!document.querySelector("#ev-line-4000")) return "no line 4000";
+        return document.querySelector("#ev-line-4001") ? "line 4001 rendered too early" : "ok";
+      })()`,
+      "long file second window",
+    );
+    const all = await evalValue(
+      send,
+      `(() => { const b = document.querySelector("[data-ev-show-all]"); if (!b) return "no show all"; b.click(); return "ok"; })()`,
+    );
+    if (all !== "ok") {
+      throw new Error(`show all click: ${all}`);
+    }
+    await waitFor(
+      send,
+      `(() => document.querySelector("#ev-line-5000") ? "ok" : "no line 5000")()`,
+      "long file tail after show all",
+    );
+    // Reopen and find the marker at line 4,500: the window must raise
+    // itself so the hit row exists (previously a silent no-op).
+    await openLongFile();
+    await evalValue(
+      send,
+      `(() => {
+        const input = document.getElementById("ev-search");
+        input.value = "zebra-tail";
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        return "ok";
+      })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        const n = document.querySelector(".ev-count");
+        return n && n.textContent.trim() === "1/1" ? "ok" : (n ? n.textContent : "no count");
+      })()`,
+      "long file search count",
+    );
+    await waitFor(
+      send,
+      `(() => document.querySelector("#ev-line-4500") ? "ok" : "hit row beyond the window")()`,
+      "long file hit row auto-raised",
+    );
+
     await evalValue(
       send,
       `(() => { const b = [...document.querySelectorAll("button")].find(el => el.textContent.trim() === "Back to chat"); if (b) b.click(); return "ok"; })()`,
@@ -200,5 +297,6 @@ export async function editorBrowserCheck({ send, port, token, repoDir }) {
     console.log("webui-editor-check ok");
   } finally {
     await rm(sample, { force: true });
+    await rm(long, { force: true });
   }
 }

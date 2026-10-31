@@ -760,14 +760,29 @@ fn message_view(
         .filter(|h| h.field == crate::transcript_find::Field::Title)
         .map(|h| (h.start, h.end))
         .collect();
+    let detail_ranges: Vec<(usize, usize)> = find_hits
+        .iter()
+        .filter(|h| h.field == crate::transcript_find::Field::Detail)
+        .map(|h| (h.start, h.end))
+        .collect();
     let cur_body = find_current
         .filter(|h| h.field == crate::transcript_find::Field::Body)
         .map(|h| (h.start, h.end));
     let cur_title = find_current
         .filter(|h| h.field == crate::transcript_find::Field::Title)
         .map(|h| (h.start, h.end));
+    let cur_detail = find_current
+        .filter(|h| h.field == crate::transcript_find::Field::Detail)
+        .map(|h| (h.start, h.end));
     let find_body = !body_ranges.is_empty();
     let find_title = !title_ranges.is_empty();
+    let find_detail = !detail_ranges.is_empty();
+    // #1576: the fold opens when the current match sits inside it, so
+    // stepping onto a folded hit lands somewhere visible. Only the
+    // current match's fold is forced open; other folds keep the user's
+    // own open/closed state (the `open` attribute is only rendered in
+    // the forced branch below, never rendered as closed).
+    let fold_open = cur_detail.is_some();
     let _ = (prose, retry_text, keep);
     let class = move || {
         let on = cursor.get() == Some(id);
@@ -840,12 +855,29 @@ fn message_view(
             }}
             {if !detail.is_empty() {
                 let summary = if diff.is_some() { "Diff" } else { "Output" };
-                view! {
-                    <details class="sx-fold">
-                        <summary>{summary}</summary>
-                        <pre>{detail}</pre>
-                    </details>
-                }.into_any()
+                // Detail hits highlight through MarkedText, exactly
+                // like body hits (#1576); without hits the fold is the
+                // plain <pre> it has always been.
+                let detail_inner = if find_detail {
+                    view! { <crate::transcript_find::MarkedText text=detail.clone() kind="pre" ranges=detail_ranges current=cur_detail /> }.into_any()
+                } else {
+                    view! { <pre>{detail.clone()}</pre> }.into_any()
+                };
+                if fold_open {
+                    view! {
+                        <details class="sx-fold" open=true data-tf-fold-current="true">
+                            <summary>{summary}</summary>
+                            {detail_inner}
+                        </details>
+                    }.into_any()
+                } else {
+                    view! {
+                        <details class="sx-fold">
+                            <summary>{summary}</summary>
+                            {detail_inner}
+                        </details>
+                    }.into_any()
+                }
             } else {
                 view! { <span></span> }.into_any()
             }}
