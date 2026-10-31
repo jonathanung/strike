@@ -296,6 +296,13 @@ func (f *fakeOnboarding) ShouldAutoOpen() bool {
 	return f.autoOpen
 }
 
+func (f *fakeOnboarding) Acknowledged() bool {
+	if f == nil {
+		return false
+	}
+	return f.acks > 0
+}
+
 func (f *fakeOnboarding) Acknowledge() error {
 	if f == nil {
 		return nil

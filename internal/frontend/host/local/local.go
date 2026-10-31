@@ -598,6 +598,17 @@ func (o *onboardingAdapter) ShouldAutoOpen() bool {
 	return true
 }
 
+// Acknowledged is the serve-safe read for #1552: it reports the record on
+// disk without running ShouldAutoOpen's established-install migration, so
+// a web page load never writes onboarding.json as a side effect.
+func (o *onboardingAdapter) Acknowledged() bool {
+	if o == nil {
+		return false
+	}
+	st, err := config.LoadOnboarding()
+	return err == nil && st.Acknowledged
+}
+
 func (o *onboardingAdapter) Acknowledge() error {
 	if o == nil {
 		return nil
