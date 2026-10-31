@@ -1276,7 +1276,12 @@ fn App() -> impl IntoView {
                                     if active_root.get_untracked() == id {
                                         active_root.set(String::new());
                                     }
-                                    session_restore::clear();
+                                    // Only forget the id that failed —
+                                    // a newer switch may already have
+                                    // persisted a different session.
+                                    if session_restore::saved_id() == id {
+                                        session_restore::clear();
+                                    }
                                 }
                             });
                         } else {
