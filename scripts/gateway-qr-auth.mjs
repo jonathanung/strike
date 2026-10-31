@@ -146,19 +146,19 @@ try {
     })()`);
   }
   if (!typed) failures.push("palette query did not accept phone");
-  await page.evaluate(`document.querySelector(".palette input")?.focus()`);
-  await page.send("Input.dispatchKeyEvent", {
-    type: "keyDown",
-    key: "Enter",
-    code: "Enter",
-    windowsVirtualKeyCode: 13,
-  });
-  await page.send("Input.dispatchKeyEvent", {
-    type: "keyUp",
-    key: "Enter",
-    code: "Enter",
-    windowsVirtualKeyCode: 13,
-  });
+  // Click the "Open on phone" row directly. Pressing Enter would run the
+  // palette's selected row, and "phone" also matches git branches named
+  // muse/phone-* in this repo — once the branch results load, the selected
+  // row is a branch switch, not the gateway command.
+  const PICK = `(() => {
+    const row = [...document.querySelectorAll(".palette button.palette-row")]
+      .find((b) => b.querySelector(".name")?.textContent.trim() === "Open on phone");
+    if (!row) return false;
+    row.click();
+    return true;
+  })()`;
+  const picked = await waitFor(page, PICK, 6000);
+  if (!picked) failures.push("palette had no 'Open on phone' command row");
   const opened = await waitFor(
     page,
     blocked
