@@ -604,8 +604,15 @@ button.link { text-align: left; width: 100%; }
    44px/160px bounds above. The manual resize handle is removed — it would
    fight the auto height on every keystroke — and past the 160px cap the
    textarea scrolls internally instead. No transition: instant sizing
-   avoids input lag and reduced-motion concerns. */
+   avoids input lag and reduced-motion concerns. flex:none is load-bearing:
+   the base rule's `flex: 1` gives the textarea a 0% flex basis inside the
+   column-flex composer form, and a flex item's main size then ignores its
+   height property entirely — the JS-set height computed but never
+   rendered (verified in UAT: style height 160px, rendered height 56px).
+   With flex:none the inline height drives the box; width still comes from
+   the form's default align-items:stretch. */
 .composer textarea {
+  flex: none;
   resize: none;
   overflow-y: auto;
 }
