@@ -1787,6 +1787,18 @@ pub fn DocumentPane(
         let cmd = ev.meta_key() || ev.ctrl_key();
         if key == "Escape" {
             ev.stop_propagation();
+            // While the unsaved guard (#1394) is open, Escape is
+            // Stay — never the edit-cancel below, which would drop
+            // the draft the prompt exists to protect.
+            if pending_nav.get_untracked().is_some() {
+                pending_nav.set(None);
+                let loaded = loaded_path.get_untracked();
+                if path.get_untracked() != loaded {
+                    reverting.set(true);
+                    path.set(loaded);
+                }
+                return;
+            }
             if !query.get_untracked().is_empty() {
                 query.set(String::new());
                 return;

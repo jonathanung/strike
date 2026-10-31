@@ -186,6 +186,34 @@ export async function editorBrowserCheck({ send, port, token, repoDir }) {
       })()`,
       "Stay keeps the draft",
     );
+    // Keyboard path: Escape while the prompt is open is Stay, not
+    // the editor's edit-cancel — the draft must survive it.
+    await evalValue(
+      send,
+      `(() => { document.querySelector('[data-ev-open="editor-other.txt"]').click(); return "ok"; })()`,
+    );
+    await waitFor(
+      send,
+      `(() => document.querySelector("[data-ev-unsaved-guard]") ? "ok" : "no guard for Escape case")()`,
+      "dirty guard for Escape case",
+    );
+    await evalValue(
+      send,
+      `(() => {
+        const pane = document.querySelector(".ev-doc");
+        pane.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+        return "ok";
+      })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        if (document.querySelector("[data-ev-unsaved-guard]")) return "guard still open after Escape";
+        const ta = document.querySelector(".ev-editor");
+        return ta && ta.value === "alpha edited\\n" ? "ok" : "draft lost after Escape";
+      })()`,
+      "Escape is Stay while the guard is open",
+    );
     await evalValue(
       send,
       `(() => { document.querySelector('[data-ev-open="editor-other.txt"]').click(); return "ok"; })()`,
