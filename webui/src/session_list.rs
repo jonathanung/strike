@@ -69,6 +69,7 @@ pub struct LayoutItem {
     pub status_kind: String,
     pub pinned: bool,
     pub archived: bool,
+    pub unread: bool,
     pub selectable: bool,
     pub slot: Option<u8>,
     pub depth: u8,
@@ -154,6 +155,14 @@ fn clip_chars(s: &str, max: usize) -> String {
     let mut out: String = s.chars().take(max - 1).collect();
     out.push('…');
     out
+}
+
+/// Whether a row offers "Mark unread" (#1557): only a session that is
+/// currently read and is not the open one — opening re-marks seen by
+/// design, so offering it on the open session would be undone at once,
+/// and an already-unread row has nothing to do.
+pub fn can_mark_unread(unread: bool, is_active: bool) -> bool {
+    !unread && !is_active
 }
 
 /// Server unread wins. `None` keeps the seen-map shim (#1263 swap point).
@@ -472,6 +481,7 @@ fn folder_item(id: &str, name: &str, count: usize, collapsed: bool) -> LayoutIte
         status_kind: String::new(),
         pinned: false,
         archived: false,
+        unread: false,
         selectable: false,
         slot: None,
         depth: 0,
@@ -526,6 +536,7 @@ fn push_session(
         status_kind: kind.to_string(),
         pinned: row.pinned,
         archived: row.archived,
+        unread: row.unread,
         selectable: true,
         slot: alt,
         depth: 0,
@@ -577,6 +588,7 @@ fn push_children(
             status_kind: sk.to_string(),
             pinned: false,
             archived: false,
+            unread: false,
             selectable: true,
             slot: None,
             depth,
@@ -660,6 +672,29 @@ mod tests {
         );
         assert_eq!(human_title("Fix login", "", id), "Fix login");
         assert_eq!(human_title("Reviews", "", id), "Reviews");
+    }
+
+    #[test]
+    fn mark_unread_only_for_read_inactive_sessions() {
+        assert!(can_mark_unread(false, false));
+        assert!(!can_mark_unread(true, false), "already unread");
+        assert!(!can_mark_unread(false, true), "open session re-marks seen");
+        assert!(!can_mark_unread(true, true));
+        // The layout carries the source row's unread flag for the panel.
+        // Fresh mtime: an old one would be folded into hidden-older
+        // (args() pins now_s and show_older=false) and never appear.
+        let mut row = session("x", 1_700_000_000 - 100);
+        row.unread = true;
+        let folders = Vec::new();
+        let collapsed = HashSet::new();
+        let content = HashSet::new();
+        let layout = assemble(args(&[row], &[], &folders, &collapsed, &content));
+        let item = layout
+            .items
+            .iter()
+            .find(|i| i.kind == LayoutKind::Session)
+            .unwrap();
+        assert!(item.unread);
     }
 
     #[test]

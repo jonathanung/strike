@@ -1868,6 +1868,14 @@ select.mode, .daemon select {
 .session-row { grid-template-columns: auto minmax(0, 1fr) auto; }
 .session-row .session-main { grid-template-columns: minmax(0, 1fr); }
 /* feature:status end */
+/* feature:session-status-chip-action begin */
+.status-chip-action { cursor: pointer; }
+.approvals-card.ask-flash { outline: 2px solid var(--warning); outline-offset: 2px; }
+.approvals-card:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 2px; }
+@media (hover: none), (max-width: 720px) {
+  .status-chip-action { min-height: 44px; display: inline-flex; align-items: center; }
+}
+/* feature:session-status-chip-action end */
 /* feature:message-timestamps begin (#1349) */
 .bubble header .stamp {
   margin-left: auto;
