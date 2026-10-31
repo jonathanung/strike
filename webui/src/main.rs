@@ -1189,6 +1189,40 @@ fn App() -> impl IntoView {
     let font_id = RwSignal::new(appearance::normalize_font(&load("strike.font")));
     let density_id = RwSignal::new(appearance::normalize_density(&load("strike.density")));
     let onboarded = RwSignal::new(load("strike.onboarded") == "1");
+    // Daemon-side onboarding acknowledgement (#1552): localStorage is only
+    // a per-browser fast path. Until GET /v1/onboarding has answered for
+    // the current base, the first-run card stays hidden, so a browser
+    // against an already-onboarded daemon never flashes it. A failed
+    // check (old or attach-only daemon) counts as checked and falls back
+    // to the localStorage behaviour.
+    let onboarding_daemon_checked = RwSignal::new(load("strike.onboarded") == "1");
+    Effect::new(move |_| {
+        let b = base.get();
+        if onboarded.get_untracked() {
+            onboarding_daemon_checked.set(true);
+            return;
+        }
+        let t = token.get_untracked();
+        spawn_local(async move {
+            let ack = match get_json::<serde_json::Value>(&b, &t, "/v1/onboarding").await {
+                Ok(v) => v
+                    .get("acknowledged")
+                    .and_then(|x| x.as_bool())
+                    .unwrap_or(false),
+                Err(_) => false,
+            };
+            // Stale-response guard: the gateway changed while the check
+            // was in flight; the effect re-runs for the new base.
+            if base.get_untracked() != b {
+                return;
+            }
+            if ack {
+                save("strike.onboarded", "1");
+                onboarded.set(true);
+            }
+            onboarding_daemon_checked.set(true);
+        });
+    });
     let queue_items = RwSignal::new(Vec::<steer_queue::QueueItem>::new());
     let queue_focus = RwSignal::new(String::new());
     let editing_id = RwSignal::new(String::new());
@@ -2655,6 +2689,21 @@ fn App() -> impl IntoView {
     let finish_onboarding = move || {
         save("strike.onboarded", "1");
         onboarded.set(true);
+        // Record the acknowledgement on the daemon too (#1552), for both
+        // Continue and "Not now" (both reach this via on_done), so other
+        // browsers and devices against this daemon skip the card. The
+        // local ack above stands either way; a failed daemon write is
+        // surfaced, not swallowed, so the repeat is not a surprise.
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            if let Err(e) =
+                post_json(&b, &t, "/v1/onboarding/acknowledge", serde_json::json!({})).await
+            {
+                status.set(format!(
+                    "Onboarding is saved in this browser only. The daemon record was not written: {e}"
+                ));
+            }
+        });
     };
     let on_cleared = move || {
         set_theme("strike".into());
@@ -2662,6 +2711,7 @@ fn App() -> impl IntoView {
         set_font("md".into());
         set_density("comfortable".into());
         onboarded.set(false);
+        onboarding_daemon_checked.set(false);
         set_layout("cockpit".into());
         base.set(String::new());
         token.set(String::new());
@@ -4471,7 +4521,7 @@ fn App() -> impl IntoView {
         <Show when=move || mode.get() == "providers" fallback=move || ()>
             <providers::ProvidersPage base=base token=token />
         </Show>
-        <Show when=move || !onboarded.get()>
+        <Show when=move || !onboarded.get() && onboarding_daemon_checked.get()>
             <onboarding::OnboardingCard
                 base=base
                 token=token
