@@ -1460,6 +1460,50 @@ try {
     textProbe((body) => body.includes("smoke pass") && body.includes("Done")),
     { timeout: WAIT_MS, interval: 250 },
   );
+  // Duplicate a goal (#1415): the detail Duplicate opens the create form
+  // prefilled from the spec; nothing is created until submit, and the
+  // submitted copy is a fresh goal.
+  const goalsBeforeDup = await (
+    await fetch(`http://127.0.0.1:${port}/v1/goals`, { headers: { Authorization: `Bearer ${token}` } })
+  ).json();
+  await evaluate(`document.getElementById("goals-duplicate").click()`);
+  await waitFor(
+    "duplicate goal form prefilled with the original spec",
+    async () => {
+      const raw = await evaluate(`JSON.stringify({
+        desc: document.getElementById("goals-desc")?.value,
+        verify: document.getElementById("goals-verify")?.value,
+        turns: document.getElementById("goals-turns")?.value,
+      })`);
+      const p = JSON.parse(raw || "{}");
+      return { ok: p.desc === "smoke pass" && p.verify === "cmd: true" && p.turns === "8", ...p };
+    },
+    { timeout: STEP_MS, interval: 250 },
+  );
+  const goalsAfterDupOpen = await (
+    await fetch(`http://127.0.0.1:${port}/v1/goals`, { headers: { Authorization: `Bearer ${token}` } })
+  ).json();
+  if (goalsAfterDupOpen.goals.length !== goalsBeforeDup.goals.length) {
+    throw new Error("duplicate goal was created before submit");
+  }
+  await evaluate(`(() => {
+    const el = document.getElementById("goals-desc");
+    el.value = "smoke pass copy";
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    document.getElementById("goals-run").click();
+    return "sent";
+  })()`);
+  await waitFor(
+    "duplicated goal run to reach Done",
+    textProbe((body) => body.includes("smoke pass copy") && body.includes("Done")),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  const goalsAfterDupSubmit = await (
+    await fetch(`http://127.0.0.1:${port}/v1/goals`, { headers: { Authorization: `Bearer ${token}` } })
+  ).json();
+  if (goalsAfterDupSubmit.goals.length !== goalsBeforeDup.goals.length + 1) {
+    throw new Error(`duplicate goal submit count=${goalsAfterDupSubmit.goals.length} want=${goalsBeforeDup.goals.length + 1}`);
+  }
   await evaluate(`document.querySelector(".goals-list .secondary").click()`);
   await waitFor(
     "goal form to reappear after picking the listed goal",
@@ -1764,6 +1808,45 @@ try {
       { timeout: WAIT_MS, interval: 250 },
     );
   };
+  // Stage all / Unstage all (#1426): seed several untracked files BEFORE
+  // the panel first loads, but only when the repo is completely clean —
+  // Stage all would otherwise stage a developer's unrelated work when
+  // this script runs in a dirty checkout. In CI the checkout is clean,
+  // so the full batch flow below runs.
+  const stageAllFiles = [
+    "smoke-stage-all-1.txt",
+    "smoke-stage-all-2.txt",
+    "smoke-stage-all-3.txt",
+  ];
+  const gitStatusPaths = async () => {
+    const res = await fetch(`http://127.0.0.1:${port}/v1/git/status`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) throw new Error(`git status HTTP ${res.status}`);
+    const body = await res.json();
+    const paths = (list) => (list || []).map((f) => f.path);
+    return {
+      staged: paths(body.staged),
+      unstaged: paths(body.unstaged),
+      untracked: paths(body.untracked),
+    };
+  };
+  let stageAllSeeded = false;
+  try {
+    const before = await gitStatusPaths();
+    if (
+      before.staged.length === 0 &&
+      before.unstaged.length === 0 &&
+      before.untracked.length === 0
+    ) {
+      for (const name of stageAllFiles) {
+        await writeFile(join(process.cwd(), name), `stage-all smoke ${name}\n`);
+      }
+      stageAllSeeded = true;
+    }
+  } catch {
+    stageAllSeeded = false;
+  }
   await clickSideTab("Git", "Staged");
   // Branch switcher regression (#1314): the rendered <select> value must
   // equal the daemon's current branch once the options exist. The defect
@@ -1795,6 +1878,92 @@ try {
       },
       { timeout: STEP_MS, interval: 250 },
     );
+  }
+  if (stageAllSeeded) {
+    const batchButtons = async () => {
+      const raw = await evaluate(`(() => {
+        const s = document.querySelector("[data-git-stage-all]");
+        const u = document.querySelector("[data-git-unstage-all]");
+        return JSON.stringify({
+          stage: s ? s.disabled : null,
+          unstage: u ? u.disabled : null,
+        });
+      })()`);
+      return JSON.parse(raw || "{}");
+    };
+    const clickBatch = async (selector) => {
+      const v = await evaluate(`(() => {
+        const b = document.querySelector(${JSON.stringify(selector)});
+        if (!b) return "missing";
+        if (b.disabled) return "disabled";
+        b.click();
+        return "clicked";
+      })()`);
+      if (v !== "clicked") throw new Error(`stage-all smoke: ${selector} -> ${v}`);
+    };
+    try {
+      await waitFor(
+        "Stage all enabled and Unstage all disabled with only untracked files",
+        async () => {
+          const b = await batchButtons();
+          return { ok: b.stage === false && b.unstage === true, ...b };
+        },
+        { timeout: STEP_MS, interval: 250 },
+      );
+      await clickBatch("[data-git-stage-all]");
+      await waitFor(
+        "Stage all moves every seeded file to Staged in one batch",
+        async () => {
+          const s = await gitStatusPaths();
+          return {
+            ok: stageAllFiles.every((f) => s.staged.includes(f)),
+            ...s,
+          };
+        },
+        { timeout: STEP_MS, interval: 250 },
+      );
+      await waitFor(
+        "panel flips the batch buttons after Stage all",
+        async () => {
+          const b = await batchButtons();
+          return { ok: b.stage === true && b.unstage === false, ...b };
+        },
+        { timeout: STEP_MS, interval: 250 },
+      );
+      await clickBatch("[data-git-unstage-all]");
+      await waitFor(
+        "Unstage all moves every seeded file back to Untracked",
+        async () => {
+          const s = await gitStatusPaths();
+          return {
+            ok:
+              stageAllFiles.every((f) => s.untracked.includes(f)) &&
+              !stageAllFiles.some((f) => s.staged.includes(f)),
+            ...s,
+          };
+        },
+        { timeout: STEP_MS, interval: 250 },
+      );
+    } finally {
+      // Restore the clean repo even when an assertion above fails:
+      // unstage any seeded file still staged, then delete the seeds.
+      try {
+        const s = await gitStatusPaths();
+        const stillStaged = stageAllFiles.filter((f) => s.staged.includes(f));
+        if (stillStaged.length > 0) {
+          await fetch(`http://127.0.0.1:${port}/v1/git/unstage`, {
+            method: "POST",
+            headers: auth,
+            body: JSON.stringify({ paths: stillStaged }),
+          });
+        }
+      } catch {
+        // best-effort cleanup only; the assertion failure already reports
+      }
+      for (const name of stageAllFiles) {
+        await rm(join(process.cwd(), name), { force: true });
+      }
+    }
   }
   await waitUntil(`(() => {
     if ((document.body.innerText || "").includes("session.childIsolation")) return true;
@@ -2288,6 +2457,86 @@ try {
     textProbe((body) => body.includes("Nothing is scheduled") && !body.includes("unauthorized")),
     { timeout: WAIT_MS, interval: 250 },
   );
+
+  // Duplicate a schedule (#1462): seed one via the API, duplicate it in the
+  // form, assert nothing is saved until Create, then assert the saved copy
+  // exists next to the original and starts disabled.
+  const seedRes = await fetch(`http://127.0.0.1:${port}/v1/schedules`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: "Smoke schedule",
+      kind: "cron",
+      cron: "0 9 * * 1-5",
+      timezone: "UTC",
+      source: "prompt",
+      prompt: "review CI",
+      enabled: true,
+    }),
+  });
+  if (!seedRes.ok) {
+    throw new Error(`seed schedule for duplicate check: HTTP ${seedRes.status}`);
+  }
+  await send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
+  await waitFor(
+    "app after reload for schedule duplicate check",
+    textProbe((body) => body.includes("Menu")),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await runPalette("Schedule");
+  await waitFor(
+    "schedule page with the seeded schedule",
+    textProbe((body) => body.includes("Smoke schedule")),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await evaluate(`(() => {
+    const row = [...document.querySelectorAll(".sched-row")].find((r) => r.textContent.includes("Smoke schedule"));
+    if (row) row.click();
+    return row ? "clicked" : "missing";
+  })()`);
+  await waitFor(
+    "schedule duplicate action enabled after selecting a schedule",
+    async () => ({
+      ok: (await evaluate(`(() => { const b = document.getElementById("schedule-duplicate"); return !!b && !b.disabled; })()`)) === true,
+    }),
+    { timeout: STEP_MS, interval: 250 },
+  );
+  await evaluate(`document.getElementById("schedule-duplicate").click()`);
+  await waitFor(
+    "duplicated schedule form (copy name, disabled notice, Create)",
+    async () => {
+      const raw = await evaluate(`JSON.stringify({
+        name: document.getElementById("schedule-name")?.value,
+        text: document.body ? document.body.innerText : "",
+      })`);
+      const p = JSON.parse(raw || "{}");
+      return {
+        ok: p.name === "Smoke schedule (copy)" && (p.text || "").includes("starts paused/disabled"),
+        name: p.name,
+      };
+    },
+    { timeout: STEP_MS, interval: 250 },
+  );
+  const schedBeforeSave = await (
+    await fetch(`http://127.0.0.1:${port}/v1/schedules`, { headers: { Authorization: `Bearer ${token}` } })
+  ).json();
+  if (schedBeforeSave.schedules.length !== 1) {
+    throw new Error(`duplicate schedule was saved before Create count=${schedBeforeSave.schedules.length}`);
+  }
+  await evaluate(`document.querySelector(".sched-form .primary").click()`);
+  await waitFor(
+    "saved schedule copy in the list next to the original",
+    textProbe((body) => body.includes("Smoke schedule (copy)")),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  const schedAfterSave = await (
+    await fetch(`http://127.0.0.1:${port}/v1/schedules`, { headers: { Authorization: `Bearer ${token}` } })
+  ).json();
+  const schedCopy = schedAfterSave.schedules.find((s) => s.name === "Smoke schedule (copy)");
+  const schedOrig = schedAfterSave.schedules.find((s) => s.name === "Smoke schedule");
+  if (!schedCopy || schedCopy.enabled !== false || !schedOrig || schedOrig.enabled !== true) {
+    throw new Error(`schedule duplicate saved state copy=${JSON.stringify(schedCopy)} orig=${JSON.stringify(schedOrig)}`);
+  }
 
   if (strikeLog.includes(token)) {
     throw new Error("daemon log contains the smoke token");
