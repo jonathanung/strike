@@ -15,6 +15,7 @@ mod chat_mode;
 mod clipboard;
 mod confirm;
 mod composer_triggers;
+mod diag;
 mod editor;
 mod load_epoch;
 mod localfiles;
@@ -1020,6 +1021,8 @@ fn App() -> impl IntoView {
     let base = RwSignal::new(load("strike.base"));
     let token = RwSignal::new(gateway::initial_token());
     let status = RwSignal::new("connecting…".to_string());
+    // Bootstrap capability `diag` (#1489): gates Download diagnostics.
+    let diag_capable = RwSignal::new(false);
     let mode = RwSignal::new("chat".to_string());
     // The shell palette preventDefaults its keys. This signal stays false;
     // AppsPane also bails when the event is already default_prevented.
@@ -1431,6 +1434,7 @@ fn App() -> impl IntoView {
                             live_busy.set(st.busy);
                             live_busy_root.set(root);
                         }
+                        diag_capable.set(boot.capabilities.diag);
                         skills.set(boot.skills);
                         commands.set(boot.composer_commands);
                         if !catalog_once.get_untracked() {
@@ -4194,6 +4198,8 @@ fn App() -> impl IntoView {
                 gateway=gateway
                 mode=mode
                 status=status
+                diag_capable=diag_capable
+                root=active_root
                 theme=theme_id
                 scheme=scheme_id
                 font=font_id
