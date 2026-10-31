@@ -269,6 +269,187 @@ fn textarea_state(target: Option<web_sys::EventTarget>) -> Option<(String, u32)>
     Some((el.value(), cursor))
 }
 
+// --- Composer auto-grow (#1411) + prompt history (#1402) -----------------
+// One sizing function for every draft mutation: typing calls it from the
+// textarea's input handler, and an Effect tracking the draft signal calls
+// it (deferred one tick, after Leptos has written `prop:value`) for every
+// programmatic restore — per-session draft restore, queue recall, dictation,
+// suggestions, and prompt-history recall. The 44px/160px clamps are the
+// pre-existing CSS clamps, kept for parity across surfaces (#1411 Q1).
+
+pub(crate) const COMPOSER_MIN_HEIGHT_PX: i32 = 44;
+pub(crate) const COMPOSER_MAX_HEIGHT_PX: i32 = 160;
+pub(crate) const PROMPT_HISTORY_CAP: usize = 100;
+
+fn composer_height_px(scroll_height: i32) -> i32 {
+    scroll_height.clamp(COMPOSER_MIN_HEIGHT_PX, COMPOSER_MAX_HEIGHT_PX)
+}
+
+fn sync_composer_height_for(el: &web_sys::HtmlTextAreaElement) {
+    let Some(html) = el.dyn_ref::<web_sys::HtmlElement>() else {
+        return;
+    };
+    // Reset first: `scrollHeight` never shrinks below the current box, so
+    // measuring without the reset would grow but never shrink.
+    let _ = html.style().set_property("height", "auto");
+    let height = composer_height_px(el.scroll_height());
+    let _ = html
+        .style()
+        .set_property("height", &format!("{height}px"));
+}
+
+fn sync_composer_height_target(target: Option<web_sys::EventTarget>) {
+    if let Some(el) = target.and_then(|t| t.dyn_into::<web_sys::HtmlTextAreaElement>().ok()) {
+        sync_composer_height_for(&el);
+    }
+}
+
+fn sync_composer_height() {
+    let Some(el) = web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|doc| doc.query_selector("#composer-input").ok().flatten())
+        .and_then(|el| el.dyn_into::<web_sys::HtmlTextAreaElement>().ok())
+    else {
+        return;
+    };
+    sync_composer_height_for(&el);
+}
+
+/// Defer the DOM sync one tick so a programmatic `draft.set(..)` has been
+/// written into the textarea's value before `scrollHeight` is measured.
+/// Also places the caret at the end of the restored text, which is where
+/// history recall / draft restore leaves the user ready to edit or send.
+fn sync_composer_height_soon() {
+    let Some(win) = web_sys::window() else {
+        return;
+    };
+    let cb = Closure::once(move || {
+        sync_composer_height();
+    });
+    let _ = win.set_timeout_with_callback_and_timeout_and_arguments_0(
+        cb.as_ref().unchecked_ref(),
+        0,
+    );
+    cb.forget();
+}
+
+fn place_composer_caret_end_soon() {
+    let Some(win) = web_sys::window() else {
+        return;
+    };
+    let cb = Closure::once(move || {
+        if let Some(el) = web_sys::window()
+            .and_then(|w| w.document())
+            .and_then(|doc| doc.query_selector("#composer-input").ok().flatten())
+            .and_then(|el| el.dyn_into::<web_sys::HtmlTextAreaElement>().ok())
+        {
+            let end = el.value().encode_utf16().count() as u32;
+            let _ = el.set_selection_range(end, end);
+        }
+        sync_composer_height();
+    });
+    let _ = win.set_timeout_with_callback_and_timeout_and_arguments_0(
+        cb.as_ref().unchecked_ref(),
+        0,
+    );
+    cb.forget();
+}
+
+/// TUI rule (docs/keybinds.md:99): ↑/↓ navigate prompt history only when
+/// they would not move the caret within a multiline draft. Caret offsets
+/// from the DOM are UTF-16 units, matching `selection_start`.
+fn caret_can_move_up(text: &str, caret_utf16: u32) -> bool {
+    let byte = composer_triggers::utf16_to_byte(text, caret_utf16 as usize);
+    text[..byte.min(text.len())].contains('\n')
+}
+
+fn caret_can_move_down(text: &str, caret_utf16: u32) -> bool {
+    let byte = composer_triggers::utf16_to_byte(text, caret_utf16 as usize);
+    text[byte.min(text.len())..].contains('\n')
+}
+
+/// In-memory sent-prompt history (#1402 slice 1): per loaded page, no
+/// persistence and no daemon change. `cursor == None` means the user is
+/// on their own draft, not cycling. Cycling stashes that draft and hands
+/// it back when the user cycles down past the newest entry.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct PromptHistory {
+    entries: Vec<String>,
+    cursor: Option<usize>,
+    stash: String,
+    /// Last value handed out by `prev`/`next`; if the live draft no
+    /// longer matches it, the draft was edited or replaced since the
+    /// recall, so navigation restarts / abandons instead of clobbering.
+    recalled: Option<String>,
+}
+
+impl PromptHistory {
+    fn push(&mut self, raw: &str) {
+        let text = raw.trim();
+        if text.is_empty() {
+            return;
+        }
+        if self.entries.last().map(String::as_str) != Some(text) {
+            self.entries.push(text.to_string());
+            if self.entries.len() > PROMPT_HISTORY_CAP {
+                let excess = self.entries.len() - PROMPT_HISTORY_CAP;
+                self.entries.drain(..excess);
+            }
+        }
+        self.cursor = None;
+        self.stash.clear();
+        self.recalled = None;
+    }
+
+    fn prev(&mut self, current_draft: &str) -> Option<String> {
+        if self.entries.is_empty() {
+            return None;
+        }
+        let last = self.entries.len() - 1;
+        let idx = match self.cursor {
+            None => {
+                self.stash = current_draft.to_string();
+                last
+            }
+            Some(i) if self.recalled.as_deref() != Some(current_draft) => {
+                // Draft changed since the last recall (edited, or set
+                // programmatically): restart from the newest entry and
+                // stash the live draft rather than losing it.
+                self.stash = current_draft.to_string();
+                last
+            }
+            Some(0) => 0,
+            Some(i) => i - 1,
+        };
+        self.cursor = Some(idx);
+        let value = self.entries[idx].clone();
+        self.recalled = Some(value.clone());
+        Some(value)
+    }
+
+    fn next(&mut self, current_draft: &str) -> Option<String> {
+        let idx = self.cursor?;
+        if self.recalled.as_deref() != Some(current_draft) {
+            // Edited since recall: abandon cycling, keep the edit.
+            self.cursor = None;
+            self.stash.clear();
+            self.recalled = None;
+            return None;
+        }
+        if idx + 1 < self.entries.len() {
+            self.cursor = Some(idx + 1);
+            let value = self.entries[idx + 1].clone();
+            self.recalled = Some(value.clone());
+            Some(value)
+        } else {
+            self.cursor = None;
+            let value = std::mem::take(&mut self.stash);
+            self.recalled = Some(value.clone());
+            Some(value)
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 struct TriggerSignals {
     ac_force: RwSignal<String>,
@@ -543,27 +724,16 @@ fn note_live_title(
         }
     });
 }
-/// The body text find-in-transcript (#1342) may search for one line:
-/// the rendered body, except long / JSON-ish tool bodies the transcript
-/// folds into a collapsed <details> — those stay unsearchable in this
-/// slice, matching the rendering rule in the transcript view below.
-fn transcript_search_body(line: &ChatLine) -> &str {
-    let card = line.role == "child";
-    let prose = line.role == "you" || line.role == "strike";
-    let body = &line.body;
-    let tool_dump = !card
-        && !prose
-        && (body.trim_start().starts_with('{')
-            || body.trim_start().starts_with('[')
-            || body.chars().count() > 240);
-    if tool_dump {
-        ""
-    } else {
-        body
-    }
-}
-
 /// All find-in-transcript matches over a line list, in transcript order.
+///
+/// The corpus is the whole line (#1576): the title, the full body —
+/// long and JSON-ish tool bodies included; the >240-char / `{`/`[`
+/// exclusion this projection used to apply is gone — and the collapsed
+/// `detail` the transcript folds into a <details>. Detail hits carry
+/// `Field::Detail` so the pane can expand the fold they land in and
+/// highlight them there. Nothing in the open transcript is excluded,
+/// so the find bar needs no scope note: "No matches" now means the
+/// string is not in the transcript.
 fn transcript_matches(
     list: &[ChatLine],
     query: &str,
@@ -572,10 +742,82 @@ fn transcript_matches(
         .iter()
         .map(|line| transcript_find::SearchLine {
             title: &line.title,
-            body: transcript_search_body(line),
+            body: &line.body,
+            detail: &line.detail,
         })
         .collect();
     transcript_find::matches_for_lines(&rows, query)
+}
+
+#[cfg(test)]
+mod transcript_matches_tests {
+    use super::*;
+
+    fn line(role: &str, title: &str, body: &str, detail: &str) -> ChatLine {
+        ChatLine {
+            id: 0,
+            role: role.into(),
+            title: title.into(),
+            body: body.into(),
+            badge: String::new(),
+            detail: detail.into(),
+            key: String::new(),
+            at_ms: 0.0,
+        }
+    }
+
+    #[test]
+    fn long_tool_body_is_searched() {
+        // >240 chars: the old projection returned "" for this body.
+        let body = format!("{}needle", "log line\n".repeat(40));
+        assert!(body.chars().count() > 240);
+        let list = vec![line("tool", "bash", &body, "")];
+        let hits = transcript_matches(&list, "needle");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].line, 0);
+        assert_eq!(hits[0].field, transcript_find::Field::Body);
+    }
+
+    #[test]
+    fn json_tool_body_is_searched() {
+        // Starts with `{`: the old projection returned "" for this body.
+        let list = vec![line(
+            "tool",
+            "read",
+            "{\"path\": \"/tmp/needle.json\"}",
+            "",
+        )];
+        let hits = transcript_matches(&list, "needle.json");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].field, transcript_find::Field::Body);
+    }
+
+    #[test]
+    fn folded_detail_hit_carries_its_line_identity() {
+        let list = vec![
+            line("you", "You", "run the tests", ""),
+            line("tool", "bash", "tests ran", "FAIL needle-test panicked"),
+            line("strike", "Strike", "done", ""),
+        ];
+        let hits = transcript_matches(&list, "needle-test");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].line, 1);
+        assert_eq!(hits[0].field, transcript_find::Field::Detail);
+        assert!(hits[0].in_fold());
+    }
+
+    #[test]
+    fn absent_string_is_an_honest_zero_over_the_full_corpus() {
+        let list = vec![
+            line("tool", "bash", "{\"a\": 1}", "long folded output"),
+            line("you", "You", "hello", ""),
+        ];
+        assert!(transcript_matches(&list, "not-present").is_empty());
+        assert_eq!(
+            transcript_find::count_label("not-present", 0, 0),
+            "No matches"
+        );
+    }
 }
 
 fn note_steer(
@@ -810,6 +1052,17 @@ fn App() -> impl IntoView {
     let team_note = RwSignal::new(String::new());
     let children_note = RwSignal::new(String::new());
     let draft = RwSignal::new(String::new());
+    // Sent-prompt history (#1402): in-memory only, per loaded page.
+    let prompt_history = RwSignal::new(PromptHistory::default());
+    // Auto-grow (#1411): every programmatic draft change (per-session
+    // restore, queue recall, send clearing the draft, history recall,
+    // suggestions, dictation) resizes the composer once Leptos has
+    // written the new value into the textarea. Typing resizes directly
+    // from the input handler, where the DOM value is already current.
+    Effect::new(move |_| {
+        let _ = draft.get();
+        sync_composer_height_soon();
+    });
     let loading = RwSignal::new(true);
     let tick = RwSignal::new(0u32);
     let stream_note = RwSignal::new(String::new());
@@ -1811,6 +2064,10 @@ fn App() -> impl IntoView {
             steer_note.set(steer_queue::STEER_WAITING.into());
             steer_mode.set(String::new());
         }
+        // Prompt history (#1402): record the trimmed prompt before the
+        // draft is cleared, deduping consecutive repeats. Attachments-only
+        // sends have no text and record nothing.
+        prompt_history.update(|h| h.push(&text));
         // Take the composer before the first await so a repeated Enter or a
         // second click cannot post the same attachments again.
         sending.set(true);
@@ -4549,6 +4806,9 @@ fn App() -> impl IntoView {
                                         draft.set(text.clone());
                                         sync_composer_trigger(text, cursor, &ui);
                                     }
+                                    // Auto-grow (#1411): the DOM value is
+                                    // already current in the input handler.
+                                    sync_composer_height_target(ev.target());
                                 }
                                 on:click=move |ev: web_sys::MouseEvent| {
                                     if let Some((text, cursor)) = textarea_state(ev.target()) {
@@ -4569,6 +4829,35 @@ fn App() -> impl IntoView {
                                             ev.prevent_default();
                                             let delta = if ev.key() == "ArrowDown" { 1 } else { -1 };
                                             ac_index.set(move_index(&items, ac_index.get_untracked(), delta));
+                                        } else if !ev.ctrl_key() && !ev.meta_key() && !ev.alt_key() {
+                                            // Prompt history (#1402), after the
+                                            // autocomplete popup above has had
+                                            // first claim on ↑/↓. TUI rule
+                                            // (docs/keybinds.md:99): cycle only
+                                            // when the key would not move the
+                                            // caret within a multiline draft.
+                                            if let Some((text, cursor)) = textarea_state(ev.target()) {
+                                                let up = ev.key() == "ArrowUp";
+                                                let can_move = if up {
+                                                    caret_can_move_up(&text, cursor)
+                                                } else {
+                                                    caret_can_move_down(&text, cursor)
+                                                };
+                                                if !can_move {
+                                                    let mut hist = prompt_history.get_untracked();
+                                                    let recalled = if up {
+                                                        hist.prev(&text)
+                                                    } else {
+                                                        hist.next(&text)
+                                                    };
+                                                    if let Some(value) = recalled {
+                                                        ev.prevent_default();
+                                                        prompt_history.set(hist);
+                                                        draft.set(value);
+                                                        place_composer_caret_end_soon();
+                                                    }
+                                                }
+                                            }
                                         }
                                     } else if ev.key() == "Escape" && (ac_open.get_untracked() || plus_open.get_untracked()) {
                                         ev.prevent_default();
@@ -5044,6 +5333,97 @@ fn DaemonPane(gateway_detail: RwSignal<String>) -> impl IntoView {
                 }}</p>
             </section>
         </main>
+    }
+}
+
+#[cfg(test)]
+mod composer_grow_history_tests {
+    use super::*;
+
+    #[test]
+    fn height_clamps_to_existing_bounds() {
+        assert_eq!(composer_height_px(0), COMPOSER_MIN_HEIGHT_PX);
+        assert_eq!(composer_height_px(43), COMPOSER_MIN_HEIGHT_PX);
+        assert_eq!(composer_height_px(44), 44);
+        assert_eq!(composer_height_px(100), 100);
+        assert_eq!(composer_height_px(160), 160);
+        assert_eq!(composer_height_px(900), COMPOSER_MAX_HEIGHT_PX);
+    }
+
+    #[test]
+    fn caret_rules_follow_multiline_motion() {
+        // Single line: neither arrow can move the caret within the draft.
+        assert!(!caret_can_move_up("hello", 5));
+        assert!(!caret_can_move_down("hello", 0));
+        // Caret on the second line: Up moves, Down does not.
+        assert!(caret_can_move_up("a\nb", 3));
+        assert!(!caret_can_move_down("a\nb", 3));
+        // Caret on the first line of two: Down moves, Up does not.
+        assert!(!caret_can_move_up("a\nb", 1));
+        assert!(caret_can_move_down("a\nb", 1));
+        // Caret in the middle line of three: both move.
+        assert!(caret_can_move_up("a\nb\nc", 3));
+        assert!(caret_can_move_down("a\nb\nc", 3));
+    }
+
+    #[test]
+    fn history_cycles_and_restores_the_stash() {
+        let mut h = PromptHistory::default();
+        assert_eq!(h.prev("wip"), None);
+        h.push("first prompt");
+        h.push("second prompt");
+        assert_eq!(h.prev("wip draft").as_deref(), Some("second prompt"));
+        assert_eq!(h.prev("second prompt").as_deref(), Some("first prompt"));
+        // Oldest entry sticks instead of wrapping.
+        assert_eq!(h.prev("first prompt").as_deref(), Some("first prompt"));
+        assert_eq!(h.next("first prompt").as_deref(), Some("second prompt"));
+        // Down past the newest entry restores the stashed draft.
+        assert_eq!(h.next("second prompt").as_deref(), Some("wip draft"));
+        // And cycling is over: a further Down has nothing to do.
+        assert_eq!(h.next("wip draft"), None);
+    }
+
+    #[test]
+    fn history_dedupes_consecutive_and_caps() {
+        let mut h = PromptHistory::default();
+        h.push("  same  ");
+        h.push("same");
+        h.push("");
+        h.push("   ");
+        assert_eq!(h.entries, vec!["same".to_string()]);
+        h.push("other");
+        h.push("same");
+        assert_eq!(h.entries.len(), 3, "non-consecutive repeats are kept");
+        for i in 0..(PROMPT_HISTORY_CAP + 5) {
+            h.push(&format!("prompt {i}"));
+        }
+        assert_eq!(h.entries.len(), PROMPT_HISTORY_CAP);
+        assert_eq!(h.entries.first().map(String::as_str), Some("prompt 5"));
+    }
+
+    #[test]
+    fn history_edit_since_recall_is_not_clobbered() {
+        let mut h = PromptHistory::default();
+        h.push("one");
+        h.push("two");
+        assert_eq!(h.prev("").as_deref(), Some("two"));
+        // User edited the recalled prompt, then presses Down: the edit
+        // stays and cycling is abandoned.
+        assert_eq!(h.next("two, edited"), None);
+        // Pressing Up with the edited draft stashes the edit and recalls
+        // the newest entry again.
+        assert_eq!(h.prev("two, edited").as_deref(), Some("two"));
+        assert_eq!(h.next("two").as_deref(), Some("two, edited"));
+    }
+
+    #[test]
+    fn push_resets_navigation() {
+        let mut h = PromptHistory::default();
+        h.push("one");
+        assert_eq!(h.prev("wip").as_deref(), Some("one"));
+        h.push("two");
+        assert_eq!(h.cursor, None);
+        assert_eq!(h.prev("new wip").as_deref(), Some("two"));
     }
 }
 

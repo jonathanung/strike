@@ -222,6 +222,61 @@ func TestPauseDuringBackgroundStart(t *testing.T) {
 	}
 }
 
+// finishRun must leave a paused goal paused when the loop returns the
+// pause's own cancellation, and must still fail a goal that is active
+// when its run errors for another reason (#1417).
+func TestFinishRunKeepsPausedGoalPaused(t *testing.T) {
+	dir := t.TempDir()
+	store, err := goal.Open(dir, "finishrun")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	gapi := NewGoals(store, dir)
+	adapter, ok := gapi.(*goalsAdapter)
+	if !ok {
+		t.Fatalf("NewGoals = %T, want *goalsAdapter", gapi)
+	}
+	g, err := gapi.Set("hold", []string{"cmd: exec sleep 30"}, host.GoalSetOptions{
+		MaxIterations: 5, MaxNoProgressIters: 5, MaxVerifyFailures: 5, MaxWallClockS: 120,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gapi.Resume(g.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gapi.Pause(g.ID); err != nil {
+		t.Fatal(err)
+	}
+	got, err := adapter.finishRun(g.ID, goal.Goal{}, context.Canceled)
+	if err != nil {
+		t.Fatalf("finishRun(paused, canceled) err=%v, want nil", err)
+	}
+	if got.Status != "paused" {
+		t.Fatalf("status=%s, want paused", got.Status)
+	}
+	cur, ok, err := gapi.Get(g.ID)
+	if err != nil || !ok || cur.Status != "paused" || cur.FailReason != "" {
+		t.Fatalf("stored=%+v ok=%v err=%v", cur, ok, err)
+	}
+
+	g2, err := gapi.Set("boom", []string{"cmd: false"}, host.GoalSetOptions{MaxIterations: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gapi.Resume(g2.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := adapter.finishRun(g2.ID, goal.Goal{}, context.DeadlineExceeded); err == nil {
+		t.Fatal("finishRun(active, err) should return the run error")
+	}
+	cur, ok, err = gapi.Get(g2.ID)
+	if err != nil || !ok || cur.Status != "failed" || cur.FailReason == "" {
+		t.Fatalf("stored=%+v ok=%v err=%v", cur, ok, err)
+	}
+}
+
 func TestCanceledRunMarksActiveGoalFailed(t *testing.T) {
 	dir := t.TempDir()
 	store, err := goal.Open(dir, "failrun")

@@ -599,6 +599,24 @@ button.link { text-align: left; width: 100%; }
   border-radius: var(--radius-sm);
   padding: 8px 10px;
 }
+/* feature:composer-autogrow begin */
+/* #1411: JS sets the textarea height from scrollHeight, clamped to the
+   44px/160px bounds above. The manual resize handle is removed — it would
+   fight the auto height on every keystroke — and past the 160px cap the
+   textarea scrolls internally instead. No transition: instant sizing
+   avoids input lag and reduced-motion concerns. flex:none is load-bearing:
+   the base rule's `flex: 1` gives the textarea a 0% flex basis inside the
+   column-flex composer form, and a flex item's main size then ignores its
+   height property entirely — the JS-set height computed but never
+   rendered (verified in UAT: style height 160px, rendered height 56px).
+   With flex:none the inline height drives the box; width still comes from
+   the form's default align-items:stretch. */
+.composer textarea {
+  flex: none;
+  resize: none;
+  overflow-y: auto;
+}
+/* feature:composer-autogrow end */
 .composer form { display: flex; flex-direction: column; gap: var(--space-2); }
 .composer-bar {
   display: flex;
@@ -2638,6 +2656,26 @@ button.linkish:disabled { color: var(--muted); cursor: default; text-decoration:
   font-size: 12px;
 }
 .term-check input { width: auto; height: auto; margin: 0; }
+/* #1520: shown only while the user is scrolled away from the tail.
+   Blocky retro tokens: square corners, 2px border, hard offset shadow,
+   yellow accent block. */
+.term-jump {
+  align-self: flex-end;
+  background: var(--sharp);
+  color: #1a1528;
+  border: 2px solid var(--ink);
+  border-radius: 0;
+  box-shadow: 3px 3px 0 var(--ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.term-jump:active {
+  box-shadow: 0 0 0 var(--ink);
+  transform: translate(3px, 3px);
+}
 /* feature:terminal end */
 
 /* feature:phone-reading begin */
