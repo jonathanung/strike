@@ -151,6 +151,17 @@ struct GitRow {
     inline_diff: String,
 }
 
+/// Paths of every row whose staged flag equals `staged`, in panel order.
+/// Stage all is `paths_where(rows, false)` — Unstaged and Untracked rows
+/// both carry `staged: false`, so new agent-created files are included,
+/// matching `git add` semantics (#1426 Q3). Unstage all is the staged set.
+fn paths_where(rows: &[GitRow], staged: bool) -> Vec<String> {
+    rows.iter()
+        .filter(|row| row.staged == staged)
+        .map(|row| row.path.clone())
+        .collect()
+}
+
 fn focus_id(id: &str) {
     let Some(el) = web_sys::window()
         .and_then(|w| w.document())
@@ -578,6 +589,33 @@ pub fn GitPanel(
             "Unstaged.".into(),
         );
     };
+    // Batch variants (#1426): one POST with the whole path list — the
+    // daemon routes already accept `Paths []string` — never N per-file
+    // calls looping `stage_selected` / `unstage_selected`.
+    let stage_all = move |_| {
+        let paths = paths_where(&rows.get(), false);
+        if paths.is_empty() {
+            error.set("No unstaged or untracked files.".into());
+            return;
+        }
+        mutate(
+            "/v1/git/stage".into(),
+            serde_json::json!({"paths": paths}),
+            "Staged all.".into(),
+        );
+    };
+    let unstage_all = move |_| {
+        let paths = paths_where(&rows.get(), true);
+        if paths.is_empty() {
+            error.set("No staged files.".into());
+            return;
+        }
+        mutate(
+            "/v1/git/unstage".into(),
+            serde_json::json!({"paths": paths}),
+            "Unstaged all.".into(),
+        );
+    };
     let discard_selected = move || {
         let rows = rows.get();
         let Some(row) = rows.get(cursor.get()) else {
@@ -852,6 +890,8 @@ pub fn GitPanel(
                 <button type="button" class="primary" on:click=commit_staged>"Commit staged"</button>
                 <button type="button" class="secondary" on:click=stage_selected>"Stage"</button>
                 <button type="button" class="secondary" on:click=unstage_selected>"Unstage"</button>
+                <button type="button" class="secondary" data-git-stage-all=true disabled=move || paths_where(&rows.get(), false).is_empty() on:click=stage_all>"Stage all"</button>
+                <button type="button" class="secondary" data-git-unstage-all=true disabled=move || paths_where(&rows.get(), true).is_empty() on:click=unstage_all>"Unstage all"</button>
             </div>
         </div>
     }
@@ -1081,5 +1121,46 @@ pub fn WorktreePanel(
                 <p class="hint">"No worktrees."</p>
             </Show>
         </div>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn row(section: &str, path: &str, staged: bool) -> GitRow {
+        GitRow {
+            section: section.into(),
+            path: path.into(),
+            status: String::new(),
+            added: 0,
+            deleted: 0,
+            staged,
+            inline_diff: String::new(),
+        }
+    }
+
+    #[test]
+    fn paths_where_splits_mixed_rows_in_panel_order() {
+        let rows = vec![
+            row("Staged", "a.rs", true),
+            row("Unstaged", "b.rs", false),
+            row("Staged", "c.rs", true),
+            row("Untracked", "new.rs", false),
+        ];
+        assert_eq!(paths_where(&rows, true), vec!["a.rs", "c.rs"]);
+        // Stage all includes Untracked rows (#1426 Q3).
+        assert_eq!(paths_where(&rows, false), vec!["b.rs", "new.rs"]);
+    }
+
+    #[test]
+    fn paths_where_empty_sets_disable_the_batch_buttons() {
+        let none: Vec<GitRow> = Vec::new();
+        assert!(paths_where(&none, true).is_empty());
+        assert!(paths_where(&none, false).is_empty());
+        let only_staged = vec![row("Staged", "a.rs", true)];
+        assert!(paths_where(&only_staged, false).is_empty());
+        let only_unstaged = vec![row("Unstaged", "b.rs", false)];
+        assert!(paths_where(&only_unstaged, true).is_empty());
     }
 }
