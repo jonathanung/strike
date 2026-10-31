@@ -1417,15 +1417,22 @@ try {
   }
   // A memory row's key cell must stay readable at panel width: the full
   // RFC3339 timestamp once sat as a flex sibling and crushed the link
-  // block to ~35px (PR #1305 review).
-  const memKeyWidthPx = await evaluate(`(() => {
-    const row = [...document.querySelectorAll(".storage-row")].find((r) => r.textContent.includes("smoke-pref"));
-    const link = row ? row.querySelector(".link") : null;
-    return link ? link.getBoundingClientRect().width : 0;
-  })()`);
-  if (!(memKeyWidthPx > 100)) {
-    throw new Error(`memory row key cell too narrow width=${memKeyWidthPx}`);
-  }
+  // block to ~35px (PR #1305 review). The text probe above can pass
+  // before layout settles, leaving the link rect at width 0 for a
+  // frame, so poll the width like every other wait in this file
+  // instead of measuring once.
+  await waitFor(
+    "memory row key cell readable width (>100px)",
+    async () => {
+      const w = await evaluate(`(() => {
+        const row = [...document.querySelectorAll(".storage-row")].find((r) => r.textContent.includes("smoke-pref"));
+        const link = row ? row.querySelector(".link") : null;
+        return link ? link.getBoundingClientRect().width : 0;
+      })()`);
+      return { ok: w > 100, memKeyWidthPx: w };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
 
   // Goals + Autopilot (#1300, #1593). The view is palette-only. A bundle
   // that predates Goals has no palette command and fails here.
