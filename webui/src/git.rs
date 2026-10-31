@@ -227,6 +227,38 @@ fn owner_label(wt: &WorktreeInfo, kids: &[ChildSession], root: &str) -> String {
     }
 }
 
+/// Plain-language error for the panel: transport errors arrive as
+/// `HTTP 400 {"error":"git commit: exit status 1"}`; surface only the
+/// daemon's `error` field. Follows the `http_message` idiom in editor.rs.
+/// Strings without a JSON error field pass through unchanged.
+fn http_message(err: &str) -> String {
+    if let Some(idx) = err.find('{') {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&err[idx..]) {
+            if let Some(msg) = v.get("error").and_then(|e| e.as_str()) {
+                if !msg.is_empty() {
+                    return msg.to_string();
+                }
+            }
+        }
+    }
+    err.to_string()
+}
+
+/// Why a commit attempt must not run, or `None` if it may proceed.
+/// Every `Some` outcome leaves the composed message exactly as typed:
+/// the caller returns before any request or clearing (#1519).
+/// `targeted` commits name their own paths, so the staged-count guard
+/// only applies to the plain "Commit staged" path.
+fn commit_block(text: &str, targeted: bool, staged_count: usize) -> Option<&'static str> {
+    if text.is_empty() {
+        return Some("Commit message is required.");
+    }
+    if !targeted && staged_count == 0 {
+        return Some("Nothing is staged. Stage a file first, then commit.");
+    }
+    None
+}
+
 #[component]
 pub fn GitPanel(
     base: RwSignal<String>,
@@ -503,18 +535,26 @@ pub fn GitPanel(
         }
     };
 
-    let mutate = move |path: String, body: serde_json::Value, ok: String| {
-        let (b, t) = (base.get_untracked(), token.get_untracked());
-        spawn_local(async move {
-            match post_json_value(&b, &t, &path, body).await {
-                Ok(_) => {
-                    error.set(String::new());
-                    status_line.set(ok);
-                    load();
+    // `on_ok` runs only after the POST succeeds (#1519): callers use it
+    // to clear text the user composed, so a failed request can never
+    // destroy it. Failures surface the daemon's message via http_message.
+    let mutate_with =
+        move |path: String, body: serde_json::Value, ok: String, on_ok: Rc<dyn Fn()>| {
+            let (b, t) = (base.get_untracked(), token.get_untracked());
+            spawn_local(async move {
+                match post_json_value(&b, &t, &path, body).await {
+                    Ok(_) => {
+                        on_ok();
+                        error.set(String::new());
+                        status_line.set(ok);
+                        load();
+                    }
+                    Err(e) => error.set(http_message(&e)),
                 }
-                Err(e) => error.set(e),
-            }
-        });
+            });
+        };
+    let mutate = move |path: String, body: serde_json::Value, ok: String| {
+        mutate_with(path, body, ok, Rc::new(|| {}));
     };
 
     let do_switch = move |branch: String| {
@@ -534,6 +574,10 @@ pub fn GitPanel(
             error.set("Branch name is required.".into());
             return;
         }
+        // No panel field holds the name (it arrives by value from the
+        // palette since #1669), so there is no panel text to clear
+        // before the POST resolves; failures surface the daemon's
+        // plain-language error via mutate (#1519).
         mutate(
             "/v1/git/checkout".into(),
             serde_json::json!({"branch": branch, "create": true}),
@@ -541,18 +585,27 @@ pub fn GitPanel(
         );
     };
     let do_commit = move |paths: Vec<String>| {
-        let text = message.get().trim().to_string();
-        if text.is_empty() {
-            error.set("Commit message is required.".into());
+        let text = message.get_untracked().trim().to_string();
+        let staged_count = rows.get_untracked().iter().filter(|row| row.staged).count();
+        if let Some(block) = commit_block(&text, !paths.is_empty(), staged_count) {
+            // Blocked attempts preserve the message exactly as typed.
+            error.set(block.into());
             return;
         }
-        message.set(String::new());
         let body = if paths.is_empty() {
             serde_json::json!({"message": text})
         } else {
             serde_json::json!({"message": text, "paths": paths})
         };
-        mutate("/v1/git/commit".into(), body, "Committed.".into());
+        // Clear only on success: on_ok fires after the POST resolves Ok,
+        // so a failure (nothing staged server-side, hook, lock) leaves
+        // the composed message in the box (#1519).
+        mutate_with(
+            "/v1/git/commit".into(),
+            body,
+            "Committed.".into(),
+            Rc::new(move || message.set(String::new())),
+        );
     };
     let commit_staged = move |_| do_commit(vec![]);
     let commit_selected = move || {
@@ -1162,5 +1215,50 @@ mod tests {
         assert!(paths_where(&only_staged, false).is_empty());
         let only_unstaged = vec![row("Unstaged", "b.rs", false)];
         assert!(paths_where(&only_unstaged, true).is_empty());
+    }
+
+    #[test]
+    fn http_message_extracts_the_daemon_error_field() {
+        // The exact transport string from #1519.
+        let err = r#"HTTP 400 {"error":"git commit: exit status 1"}"#;
+        assert_eq!(http_message(err), "git commit: exit status 1");
+        // No raw HTTP status or JSON braces survive.
+        let shown = http_message(err);
+        assert!(!shown.contains("HTTP"));
+        assert!(!shown.contains('{'));
+    }
+
+    #[test]
+    fn http_message_passes_plain_errors_through() {
+        assert_eq!(
+            http_message("unauthorized: check the daemon token"),
+            "unauthorized: check the daemon token"
+        );
+        assert_eq!(http_message("HTTP 500"), "HTTP 500");
+        // An empty error field is not a plain-language message.
+        assert_eq!(
+            http_message(r#"HTTP 400 {"error":""}"#),
+            r#"HTTP 400 {"error":""}"#
+        );
+    }
+
+    #[test]
+    fn commit_block_preserves_the_message_on_every_block() {
+        // Empty message: blocked, and there is nothing to lose.
+        assert_eq!(
+            commit_block("", false, 3),
+            Some("Commit message is required.")
+        );
+        // #1519's common failure, caught client-side: nothing staged.
+        assert_eq!(
+            commit_block("do not lose me: fix the thing", false, 0),
+            Some("Nothing is staged. Stage a file first, then commit.")
+        );
+        // A targeted (per-file) commit names its paths, so zero staged
+        // files in the panel do not block it.
+        assert_eq!(commit_block("fix the thing", true, 0), None);
+        // The happy path runs; clearing happens only in the success
+        // callback, never on a block or a failed POST.
+        assert_eq!(commit_block("fix the thing", false, 1), None);
     }
 }
