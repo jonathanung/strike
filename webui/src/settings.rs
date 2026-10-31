@@ -44,6 +44,8 @@ pub fn SettingsPage(
     on_font: impl Fn(String) + Copy + Send + Sync + 'static,
     on_density: impl Fn(String) + Copy + Send + Sync + 'static,
     on_cleared: impl Fn() + Copy + Send + Sync + 'static,
+    diag_capable: RwSignal<bool>,
+    root: RwSignal<String>,
 ) -> impl IntoView {
     let _ = (gateway, mode, on_cleared);
     let dials = RwSignal::new(Value::Null);
@@ -161,6 +163,16 @@ pub fn SettingsPage(
                     options=vec![("comfortable", "Comfortable"), ("compact", "Compact")]
                     current=density
                     on_pick=on_density
+                />
+            </section>
+            <section class="card settings-section">
+                <h2 class="panel-title">"Diagnostics"</h2>
+                <crate::diag::DiagDownload
+                    base=base
+                    token=token
+                    root=root
+                    status=status
+                    diag_capable=diag_capable
                 />
             </section>
             <Show when=move || show_files.get()>
