@@ -42,6 +42,7 @@ mod task_runner;
 mod transcript_find;
 mod usage_audit;
 mod session_delete;
+mod session_restore;
 mod shell;
 mod side_chat;
 mod status;
@@ -117,6 +118,12 @@ pub(crate) fn load(key: &str) -> String {
 pub(crate) fn save(key: &str, value: &str) {
     if let Some(s) = storage() {
         let _ = s.set_item(key, value);
+    }
+}
+
+pub(crate) fn remove_key(key: &str) {
+    if let Some(s) = storage() {
+        let _ = s.remove_item(key);
     }
 }
 
@@ -1040,6 +1047,11 @@ fn App() -> impl IntoView {
     let roots = RwSignal::new(Vec::<RootSummary>::new());
     let sessions = RwSignal::new(Vec::<SessionItem>::new());
     let active_root = RwSignal::new(String::new());
+    // Session restore (#1391): false until the first refresh that got a
+    // roots response has run the one-time saved-session decision, so
+    // later polls that find `active_root` empty again (e.g. the open
+    // session was deleted) use the plain fallback, not a re-restore.
+    let restore_attempted = RwSignal::new(false);
     // Flattened session order published by SessionPanel for edge-swipe
     // navigation (#1490 slice 5): (open_id, live) pairs in display order.
     let session_nav = RwSignal::new(Vec::<(String, bool)>::new());
@@ -1384,17 +1396,14 @@ fn App() -> impl IntoView {
                     }
                 }
             }
+            // Captured (not applied inline) so the open-session decision
+            // below can validate the saved session (#1391) against both
+            // the live roots and the saved sessions before picking one.
+            let mut roots_resp: Option<RootsResponse> = None;
             match get_json::<RootsResponse>(&b, &t, "/v1/roots").await {
                 Ok(r) => {
-                    if active_root.get_untracked().is_empty() {
-                        let id = if !r.active_id.is_empty() {
-                            r.active_id.clone()
-                        } else {
-                            r.roots.first().map(|x| x.id.clone()).unwrap_or_default()
-                        };
-                        active_root.set(id);
-                    }
-                    roots.set(r.roots);
+                    roots.set(r.roots.clone());
+                    roots_resp = Some(r);
                 }
                 Err(e) => {
                     if err.is_empty() {
@@ -1402,11 +1411,81 @@ fn App() -> impl IntoView {
                     }
                 }
             }
+            let mut session_ids: Vec<String> = Vec::new();
+            let mut sessions_ok = false;
             match get_json::<SessionsResponse>(&b, &t, "/v1/sessions").await {
-                Ok(r) => sessions.set(r.sessions),
+                Ok(r) => {
+                    session_ids = r.sessions.iter().map(|s| s.id.clone()).collect();
+                    sessions_ok = true;
+                    sessions.set(r.sessions);
+                }
                 Err(e) => {
                     if err.is_empty() {
                         err = format!("Saved sessions failed to load: {e}");
+                    }
+                }
+            }
+            if active_root.get_untracked().is_empty() {
+                if let Some(r) = &roots_resp {
+                    let root_ids: Vec<String> =
+                        r.roots.iter().map(|x| x.id.clone()).collect();
+                    // Only the first decision consults storage; after
+                    // that, an empty `active_root` means the open
+                    // session went away and the plain fallback applies.
+                    let saved = if restore_attempted.get_untracked() {
+                        String::new()
+                    } else {
+                        session_restore::saved_id()
+                    };
+                    let pick = session_restore::pick_initial(
+                        &saved,
+                        &root_ids,
+                        &session_ids,
+                        &r.active_id,
+                    );
+                    restore_attempted.set(true);
+                    // A stale id is only declared (and cleared) when
+                    // the saved-session list actually loaded — a failed
+                    // list fetch must not erase a dormant session's id.
+                    if pick.clear_saved && sessions_ok {
+                        session_restore::clear();
+                    }
+                    if !pick.id.is_empty() {
+                        if pick.resume {
+                            // Dormant saved session: set the view
+                            // optimistically (like `activate_root`) and
+                            // resume it; a failed resume clears both the
+                            // view and the saved id so the next poll
+                            // lands on the fallback, never an empty
+                            // screen for a session that cannot resume.
+                            let id = pick.id.clone();
+                            active_root.set(id.clone());
+                            session_restore::persist(&id);
+                            let (rb, rt) = (b.clone(), t.clone());
+                            spawn_local(async move {
+                                let path = format!("/v1/roots/{id}/resume");
+                                if let Err(e) =
+                                    post_json(&rb, &rt, &path, serde_json::json!({})).await
+                                {
+                                    status.set(format!("resume failed: {e}"));
+                                    if active_root.get_untracked() == id {
+                                        active_root.set(String::new());
+                                    }
+                                    // Only forget the id that failed —
+                                    // a newer switch may already have
+                                    // persisted a different session.
+                                    if session_restore::saved_id() == id {
+                                        session_restore::clear();
+                                    }
+                                }
+                            });
+                        } else {
+                            // View-local restore: no activate POST, so
+                            // two devices never fight over the daemon's
+                            // active id — each keeps its own place.
+                            active_root.set(pick.id.clone());
+                            session_restore::persist(&pick.id);
+                        }
                     }
                 }
             }
@@ -2253,7 +2332,8 @@ fn App() -> impl IntoView {
                         if let Some(msg) = outcome::new_session_activation(activated) {
                             activation_hold.set(Some(msg));
                         }
-                        active_root.set(id);
+                        active_root.set(id.clone());
+                        session_restore::persist(&id);
                     }
                     refresh_meta();
                 }
@@ -2265,6 +2345,7 @@ fn App() -> impl IntoView {
     let activate_root = move |id: String| {
         let (b, t) = (base.get_untracked(), token.get_untracked());
         active_root.set(id.clone());
+        session_restore::persist(&id);
         spawn_local(async move {
             if let Err(e) = post_json(
                 &b,
@@ -2284,7 +2365,10 @@ fn App() -> impl IntoView {
         spawn_local(async move {
             let path = format!("/v1/roots/{id}/resume");
             match post_json(&b, &t, &path, serde_json::json!({})).await {
-                Ok(()) => active_root.set(id),
+                Ok(()) => {
+                    session_restore::persist(&id);
+                    active_root.set(id);
+                }
                 Err(e) => status.set(format!("resume failed: {e}")),
             }
         });
@@ -2591,6 +2675,10 @@ fn App() -> impl IntoView {
         let cur = active_root.get_untracked();
         if session_delete::remaining_active(&cur, &id).is_none() && !cur.is_empty() {
             active_root.set(String::new());
+            // The viewed session is gone (#1391): forget it now so a
+            // reload before the fallback lands cannot restore a ghost;
+            // the next refresh persists the fallback it picks.
+            session_restore::clear();
         }
         status.set("Session deleted.".into());
         if was_live {
