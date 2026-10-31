@@ -2247,6 +2247,114 @@ try {
     }),
     { timeout: WAIT_MS, interval: 250 },
   );
+  // Session restore (#1391): the viewed session is persisted like theme
+  // and layout, so a reload returns to it; a saved id whose session was
+  // deleted falls back to another session instead of an empty screen.
+  const mkRoot = async (label) => {
+    const res = await fetch(`http://127.0.0.1:${port}/v1/roots`, {
+      method: "POST",
+      headers: auth,
+      body: "{}",
+    });
+    if (!res.ok) {
+      throw new Error(`session-restore seed ${label} failed ${res.status} ${await res.text()}`);
+    }
+    const id = (await res.json()).id;
+    if (!id) throw new Error(`session-restore seed ${label} returned no id`);
+    return id;
+  };
+  const restoreFallback = await mkRoot("fallback");
+  const restoreTarget = await mkRoot("target");
+  const selectedID = async () =>
+    evaluate(
+      `(() => { const el = document.querySelector('[data-session-id][aria-selected="true"]'); return el ? el.getAttribute("data-session-id") : ""; })()`,
+    );
+  const savedActive = async () => evaluate(`localStorage.getItem("strike.activeSession") || ""`);
+  const reloadCockpit = async (label) => {
+    await send("Page.navigate", {
+      url: "http://127.0.0.1:" + port + "/?token=" + token,
+    });
+    await waitFor(label, textProbe((t) => t.includes("Menu")), {
+      timeout: WAIT_MS,
+      interval: 250,
+    });
+  };
+  await reloadCockpit("cockpit re-boot for session restore");
+  await waitFor(
+    "session-restore target row",
+    async () => ({
+      ok:
+        (await evaluate(
+          `!!document.querySelector(${JSON.stringify(rowSel(restoreTarget))})`,
+        )) === true,
+    }),
+    { timeout: STEP_MS, interval: 250 },
+  );
+  // Open session B (the target) through its row, like a user switch.
+  await evaluate(
+    `(() => { const row = document.querySelector(${JSON.stringify(rowSel(restoreTarget))}); const btn = row && row.querySelector(".ss-main"); if (btn) btn.click(); return !!btn; })()`,
+  );
+  await waitFor(
+    "session B open and persisted",
+    async () => ({
+      ok:
+        (await selectedID()) === restoreTarget &&
+        (await savedActive()) === restoreTarget,
+    }),
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await reloadCockpit("cockpit reload after opening session B");
+  await waitFor(
+    "session B still viewed after reload",
+    async () => ({
+      ok:
+        (await selectedID()) === restoreTarget &&
+        (await savedActive()) === restoreTarget,
+    }),
+    { timeout: STEP_MS, interval: 200 },
+  );
+  // Stale-id path: delete B on the daemon (session log + live root,
+  // the same composition the page's delete flow performs), reload, and
+  // require the fallback session — never an empty screen.
+  const delSession = await fetch(
+    `http://127.0.0.1:${port}/v1/sessions/${encodeURIComponent(restoreTarget)}?force=true`,
+    { method: "DELETE", headers: { Authorization: `Bearer ${token}` } },
+  );
+  if (!delSession.ok) {
+    throw new Error(`session-restore delete failed ${delSession.status} ${await delSession.text()}`);
+  }
+  const delRoot = await fetch(
+    `http://127.0.0.1:${port}/v1/roots/${encodeURIComponent(restoreTarget)}`,
+    { method: "DELETE", headers: { Authorization: `Bearer ${token}` } },
+  );
+  // Since #1399 the session DELETE above also deregisters the live
+  // root, so this follow-up close answering 404 "is not active" is the
+  // documented success case (see handleSessionDelete in api.go) — the
+  // root being gone either way is exactly the state this step needs.
+  // Any other failure is still fatal.
+  if (!delRoot.ok && delRoot.status !== 404) {
+    throw new Error(`session-restore root close failed ${delRoot.status} ${await delRoot.text()}`);
+  }
+  await reloadCockpit("cockpit reload after deleting session B");
+  await waitFor(
+    "fallback session viewed after stale-id reload (no empty state)",
+    async () => {
+      const selected = await selectedID();
+      return {
+        ok:
+          selected !== "" &&
+          selected !== restoreTarget &&
+          (await savedActive()) === selected &&
+          (await rootIDs()).includes(selected),
+        selected,
+      };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  if (!(await rootIDs()).includes(restoreFallback)) {
+    throw new Error("session-restore fallback seed root vanished");
+  }
+
   // Task runner (#1277): a plain echo section fails schema:handoff and
   // blocks the next section. Restart the daemon so the run is read back
   // from disk, then check the Tasks board (via the strict
