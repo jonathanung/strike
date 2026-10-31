@@ -31,6 +31,12 @@ await writeFile(join(home, ".strike", "config"), '{"sandboxAllowDegrade":true}\n
 
 // Render/boot waits get a deadline sized for shared CI runners; shorter
 // interactive steps get a smaller one. Both are overridable for local runs.
+// WAIT_MS is also the budget for anti-hang arrival waits whose predicate
+// depends on a daemon round trip (op POST, engine state change, live
+// event, re-render) rather than a local DOM reaction: those assert that
+// the state arrives, never how fast, so a STEP_MS budget only measures
+// host load. See the "turn stopped" wait below (#1713) and #1650, which
+// adopted this same 30s convention for the engine's anti-hang waits.
 const WAIT_MS = Number(process.env.STRIKE_SMOKE_WAIT_MS || 30000);
 const STEP_MS = Number(process.env.STRIKE_SMOKE_STEP_MS || 15000);
 
@@ -1116,6 +1122,18 @@ try {
   await waitUntil(
     `document.body.innerText.includes("Appearance") && document.body.innerText.includes("Type size") && document.body.innerText.includes("Density") && !!document.querySelector('input[data-choice="lg"]')`,
     "settings page",
+  );
+  // #1489: Download diagnostics lives in Settings, enabled on a live
+  // (echo) host, and a click produces the success confirmation. The
+  // server-chosen filename is covered by the UAT download capture.
+  await waitUntil(
+    `!!document.querySelector('[data-action="download-diagnostics"]') && !document.querySelector('[data-action="download-diagnostics"]').disabled`,
+    "diag download control enabled on a live host",
+  );
+  await evaluate(`document.querySelector('[data-action="download-diagnostics"]').click()`);
+  await waitUntil(
+    `document.body.innerText.includes("diagnostic bundle downloaded")`,
+    "diag download success confirmation",
   );
   await evaluate(`document.querySelector('input[data-choice="lg"]').click()`);
   await evaluate(`document.querySelector('input[data-choice="compact"]').click()`);
@@ -2789,7 +2807,19 @@ try {
     })()`);
     return JSON.parse(raw || "{}");
   };
-  await waitFor("turn stopped", idleProbe, { timeout: STEP_MS, interval: 200 });
+  // "turn stopped" is an anti-hang arrival wait, not a timeliness check:
+  // Escape posts an `interrupt` op, the daemon/engine must cancel the
+  // running `sleep 30` tool, emit the terminal event, and the cockpit
+  // must receive it and re-render before #stop-turn disappears — a full
+  // daemon round trip. The predicate is unchanged (idle = no #stop-turn
+  // and no queue list); only its budget class was wrong. With STEP_MS
+  // (15s) it flaked 1/20 under load (#1713: probe still busy:true at
+  // expiry while the whole smoke ran 54-87s vs 26-31s unloaded, load
+  // ~9.9), so it uses WAIT_MS like the other daemon-backed arrival
+  // waits. A genuine stop hang still fails, just at 30s. The "still
+  // idle" re-check below keeps STEP_MS: its predicate is already true
+  // when it starts, so it is a stability check, not an arrival wait.
+  await waitFor("turn stopped", idleProbe, { timeout: WAIT_MS, interval: 200 });
   await delay(700);
   await waitFor("still idle", idleProbe, { timeout: STEP_MS, interval: 200 });
 
