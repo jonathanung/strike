@@ -1,4 +1,4 @@
-.PHONY: build run run-echo serve webui-build webui-check webui-uat webui-uat-smoke webui-sidechat-uat web-check desktop-test test vet cover cover-check clean setup restore tui-gen prompt-reg chaos harness-eval swebench-eval telemetry-check protocol-schema protocol-schema-check container-smoke
+.PHONY: build run run-echo serve webui-build webui-bundle-check webui-check webui-uat webui-uat-smoke webui-sidechat-uat web-check desktop-test test vet cover cover-check clean setup restore tui-gen prompt-reg chaos harness-eval swebench-eval telemetry-check protocol-schema protocol-schema-check container-smoke
 
 # Multi-module workspace (go.work): ., ./pkg/protocol, ./pkg/redact,
 # ./harness.
@@ -59,6 +59,12 @@ webui-build:
 	for f in webui/dist/*.wasm webui/dist/*.js webui/dist/*.css webui/dist/*.svg webui/dist/*.png; do \
 		[ -e "$$f" ] && cp "$$f" internal/frontend/server/static/assets/ || true; \
 	done
+
+# Guard (#1710): the committed embed bundle must match webui/*.css sources,
+# and the served mobile CSS must keep the .segmented hide header-scoped.
+# `make build` does not regenerate the bundle; only webui-build does.
+webui-bundle-check:
+	node scripts/check-webui-bundle.mjs
 
 webui-check:
 	@if ! command -v cargo >/dev/null; then echo "webui-check: cargo not found (run inside nix develop)"; exit 1; fi

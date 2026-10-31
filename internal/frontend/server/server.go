@@ -599,6 +599,15 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/terminals/{id}/ticket", s.handleTerminalTicket)
 	s.mux.HandleFunc("GET /v1/terminals/{id}/stream", s.handleTerminalStream)
 	s.mux.HandleFunc("DELETE /v1/terminals/{id}", s.handleTerminalDelete)
+	// Unknown API routes (#1452): these method-less patterns are less
+	// specific than every registered /v1 route, so they only answer paths
+	// no handler claimed (the handler itself synthesises a JSON 405 for a
+	// known path called with a wrong method). They sit inside
+	// withMiddleware, so unauthenticated
+	// probes of unknown /v1 paths on an auth gateway get 401 like any
+	// other /v1 route instead of leaking the route table via 404-vs-401.
+	s.mux.HandleFunc("/v1", s.handleAPINotFound)
+	s.mux.HandleFunc("/v1/", s.handleAPINotFound)
 	s.mux.HandleFunc("GET /{$}", s.handleAttach)
 	s.mux.HandleFunc("GET /attach", s.handleAttach)
 	s.mux.HandleFunc("GET /assets/{path...}", s.handleAsset)
@@ -925,6 +934,46 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		Commit:  version.Commit,
 		Now:     time.Now().UnixMilli(),
 	})
+}
+
+// handleAPINotFound answers unmatched /v1 paths with the daemon's standard
+// JSON error envelope (opErrorResponse) instead of the mux's plain-text
+// 404, so API clients can tell "route missing on this gateway" apart from
+// a proxy/tailnet failure page. The message echoes the caller's own method
+// and path — never anything server-side — so version-skew bugs are
+// self-diagnosing in client logs (#1452 Q1).
+//
+// A path registered under a different method is not "route not found":
+// registering this method-less fallback would otherwise swallow the mux's
+// own 405 for known paths into a misleading 404. Probing the mux with the
+// other methods recovers the distinction (and the Allow list) with the
+// stock ServeMux — no route-table restructuring (#1452 Q2).
+func (s *Server) handleAPINotFound(w http.ResponseWriter, r *http.Request) {
+	if allow := s.otherMethodsForPath(r); len(allow) > 0 {
+		w.Header().Set("Allow", strings.Join(allow, ", "))
+		writeJSON(w, http.StatusMethodNotAllowed, opErrorResponse{Error: "method not allowed: " + r.Method + " " + r.URL.Path})
+		return
+	}
+	writeJSON(w, http.StatusNotFound, opErrorResponse{Error: "route not found: " + r.Method + " " + r.URL.Path})
+}
+
+// otherMethodsForPath returns the methods under which r's path is a
+// registered route, excluding r's own method. It asks the mux itself, so
+// it cannot drift from the route table: a probe whose matched pattern is
+// one of the /v1 fallbacks means the path is unknown under that method too.
+func (s *Server) otherMethodsForPath(r *http.Request) []string {
+	var out []string
+	for _, m := range []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete} {
+		if m == r.Method {
+			continue
+		}
+		probe := r.Clone(r.Context())
+		probe.Method = m
+		if _, pattern := s.mux.Handler(probe); pattern != "/v1" && pattern != "/v1/" && pattern != "" {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 func (s *Server) handleAttach(w http.ResponseWriter, r *http.Request) {

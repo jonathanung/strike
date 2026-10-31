@@ -212,6 +212,11 @@ jobs:
       - name: Generate TUI flatten
         run: go generate ./internal/frontend/tui/app
 
+      # #1710: fail if the committed bundle this job serves has diverged
+      # from webui/*.css sources (make build does not regenerate it).
+      - name: Check committed webui bundle matches sources
+        run: node scripts/check-webui-bundle.mjs
+
       - name: Build strike
         run: go build -o strike ./cmd/strike
 

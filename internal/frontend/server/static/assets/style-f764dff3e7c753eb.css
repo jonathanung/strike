@@ -2638,6 +2638,26 @@ button.linkish:disabled { color: var(--muted); cursor: default; text-decoration:
   font-size: 12px;
 }
 .term-check input { width: auto; height: auto; margin: 0; }
+/* #1520: shown only while the user is scrolled away from the tail.
+   Blocky retro tokens: square corners, 2px border, hard offset shadow,
+   yellow accent block. */
+.term-jump {
+  align-self: flex-end;
+  background: var(--sharp);
+  color: #1a1528;
+  border: 2px solid var(--ink);
+  border-radius: 0;
+  box-shadow: 3px 3px 0 var(--ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.term-jump:active {
+  box-shadow: 0 0 0 var(--ink);
+  transform: translate(3px, 3px);
+}
 /* feature:terminal end */
 
 /* feature:phone-reading begin */
@@ -2837,3 +2857,13 @@ button.linkish:disabled { color: var(--muted); cursor: default; text-decoration:
   .settings-page { padding-bottom: calc(28px + env(safe-area-inset-bottom, 0px)); }
 }
 /* feature:onboarding-settings end */
+/* feature:files-refresh begin */
+.files-head, .changes-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+.files-head .hint, .changes-head .hint { margin: 0; }
+/* feature:files-refresh end */
