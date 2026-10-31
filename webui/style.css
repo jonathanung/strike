@@ -1082,6 +1082,27 @@ button.link { text-align: left; width: 100%; }
   margin: var(--space-2) 0;
 }
 .triggers .secret-once p { margin: 0 0 var(--space-2); }
+/* feature:triggers-copy begin */
+/* Copy buttons (#1486): inline beside the hook hint; on phone widths the
+   new buttons are real 44px tap targets. */
+.triggers-hook-row { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
+.triggers-hook-row .hint { margin: 0; }
+@media (max-width: 800px) {
+  .triggers button.triggers-copy-secret,
+  .triggers button.triggers-copy-hook { min-height: 44px; }
+}
+/* feature:triggers-copy end */
+/* feature:trigger-session-link begin */
+/* Delivery-log session links (#1492): linkish on desktop, a real touch
+   target on phone widths. */
+@media (max-width: 800px) {
+  .triggers-log button.session-link {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+  }
+}
+/* feature:trigger-session-link end */
 .triggers-log .row { justify-content: space-between; }
 .triggers-list button.row, .triggers-list button.card {
   width: 100%;
