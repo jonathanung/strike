@@ -169,12 +169,44 @@ try {
   check(!(await page.evaluate(`!!document.querySelector(".side-chat")`)), "side chat was open before the user opened it");
   await shoot("before-closed");
 
-  const seeded = await fetch(`${baseURL}/v1/ops`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ type: "user.input", data: { text: "read the makefile" } }),
-  });
-  check(seeded.ok, `seed user.input HTTP ${seeded.status}`);
+  // Mirror seeds (#1439): six echo turns produce well over 8 mirror
+  // events. The first carries a marker that only "Show all" can reveal;
+  // the last is over 180 chars with a tail marker that only expanding
+  // the clipped event can reveal.
+  const LONG_TAIL = "MIRROR-TAIL-MARKER";
+  const longSeed = `mirror long event ${"filler word ".repeat(24)}${LONG_TAIL}`;
+  check(longSeed.length > 180, "long mirror seed is not over 180 chars");
+  const seedTexts = [
+    "mirror-oldest-marker read the makefile",
+    "mirror seed two",
+    "mirror seed three",
+    "mirror seed four",
+    "mirror seed five",
+    longSeed,
+  ];
+  for (const text of seedTexts) {
+    const seeded = await fetch(`${baseURL}/v1/ops`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "user.input", data: { text } }),
+    });
+    check(seeded.ok, `seed user.input HTTP ${seeded.status}`);
+    await waitUntil(
+      `document.querySelector(".transcript") && document.querySelector(".transcript").innerText.includes(${JSON.stringify(text.slice(0, 40))})`,
+      20000,
+      "mirror seed in transcript",
+    );
+    await waitUntil(
+      `(async () => {
+        const res = await fetch("/v1/bootstrap");
+        if (!res.ok) return false;
+        const body = await res.json();
+        return Boolean(body.status && body.status.busy === false);
+      })()`,
+      20000,
+      "session idle after mirror seed",
+    );
+  }
   await waitUntil(
     `document.querySelector(".transcript") && document.querySelector(".transcript").innerText.includes("You said:")`,
     20000,
@@ -194,6 +226,70 @@ try {
   );
   check(Boolean(opened), "composer Side chat did not open a read-only panel");
   log("panel open");
+
+  // Mirror show-all + expand (#1439). Default: last 8 only, the header
+  // names the total, the oldest seed and the long seed's tail are both
+  // absent. Expand works in the collapsed window; Show all reveals the
+  // oldest event and the expansion survives the window toggle.
+  const mirrorText = () =>
+    page.evaluate(
+      `document.querySelector(".side-chat-mirror") ? document.querySelector(".side-chat-mirror").innerText : ""`,
+    );
+  const mirrorDefault = await waitUntil(
+    `(() => {
+      const btn = document.querySelector("[data-mirror-more]");
+      return Boolean(btn && /^Show all \\(\\d+\\)$/.test(btn.textContent.trim()));
+    })()`,
+    8000,
+    "mirror Show all (N) control",
+  );
+  check(Boolean(mirrorDefault), "mirror did not offer Show all (N) for >8 events");
+  const defaultText = await mirrorText();
+  check(!defaultText.includes("mirror-oldest-marker"), "mirror default window leaked the oldest event");
+  check(!defaultText.includes(LONG_TAIL), "mirror default rendered the clipped tail");
+  check(
+    Boolean(await page.evaluate(`!!document.querySelector("[data-mirror-expand]")`)),
+    "clipped mirror event has no expand control",
+  );
+  await shoot("mirror-default");
+  const expandedClick = await page.evaluate(`(() => {
+    const btn = document.querySelector("[data-mirror-expand]");
+    if (!btn) return false;
+    btn.click();
+    return true;
+  })()`);
+  check(expandedClick, "mirror expand click failed");
+  const expandedText = await waitUntil(
+    `document.querySelector(".side-chat-mirror") && document.querySelector(".side-chat-mirror").innerText.includes(${JSON.stringify(LONG_TAIL)})`,
+    4000,
+    "expanded mirror event shows the full body",
+  );
+  check(Boolean(expandedText), "expanding a clipped mirror event did not show its full body");
+  await shoot("mirror-expanded");
+  const showAllClick = await page.evaluate(`(() => {
+    const btn = document.querySelector("[data-mirror-more]");
+    if (!btn) return false;
+    btn.click();
+    return true;
+  })()`);
+  check(showAllClick, "mirror Show all click failed");
+  const allText = await waitUntil(
+    `document.querySelector(".side-chat-mirror") && document.querySelector(".side-chat-mirror").innerText.includes("mirror-oldest-marker")`,
+    4000,
+    "show-all mirror reveals the oldest event",
+  );
+  check(Boolean(allText), "Show all did not reveal the oldest mirror event");
+  const shownAllText = await mirrorText();
+  check(shownAllText.includes(LONG_TAIL), "expansion was lost when the mirror window widened");
+  const lessLabel = await page.evaluate(
+    `document.querySelector("[data-mirror-more]") ? document.querySelector("[data-mirror-more]").textContent.trim() : ""`,
+  );
+  check(/^Show less \(\d+ total\)$/.test(lessLabel), `mirror toggle label after Show all: ${lessLabel}`);
+  log("mirror show-all + expand");
+  await shoot("mirror-all");
+  // Restore the default window for the rest of the pass.
+  await page.evaluate(`document.querySelector("[data-mirror-more]")?.click()`);
+
   await shoot("after-open");
 
   const asked = await page.evaluate(`(() => {

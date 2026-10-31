@@ -1988,6 +1988,30 @@ select.mode, .daemon select {
   }
 }
 /* feature:side-chat end */
+/* feature:sidechat-mirror begin */
+.side-chat-mirror-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.side-chat-mirror-head .hint { margin: 0; }
+.side-chat-mirror-more { flex: 0 0 auto; }
+.side-chat-event-toggle {
+  display: inline;
+  height: auto;
+  padding: 0;
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.side-chat-event-toggle:hover { text-decoration: underline; }
+/* feature:sidechat-mirror end */
 /* feature:markdown-tables begin */
 .bubble .ev-md { padding: 0; }
 .bubble .md-table-wrap { max-width: 100%; }
