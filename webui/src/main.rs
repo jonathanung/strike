@@ -542,27 +542,16 @@ fn note_live_title(
         }
     });
 }
-/// The body text find-in-transcript (#1342) may search for one line:
-/// the rendered body, except long / JSON-ish tool bodies the transcript
-/// folds into a collapsed <details> — those stay unsearchable in this
-/// slice, matching the rendering rule in the transcript view below.
-fn transcript_search_body(line: &ChatLine) -> &str {
-    let card = line.role == "child";
-    let prose = line.role == "you" || line.role == "strike";
-    let body = &line.body;
-    let tool_dump = !card
-        && !prose
-        && (body.trim_start().starts_with('{')
-            || body.trim_start().starts_with('[')
-            || body.chars().count() > 240);
-    if tool_dump {
-        ""
-    } else {
-        body
-    }
-}
-
 /// All find-in-transcript matches over a line list, in transcript order.
+///
+/// The corpus is the whole line (#1576): the title, the full body —
+/// long and JSON-ish tool bodies included; the >240-char / `{`/`[`
+/// exclusion this projection used to apply is gone — and the collapsed
+/// `detail` the transcript folds into a <details>. Detail hits carry
+/// `Field::Detail` so the pane can expand the fold they land in and
+/// highlight them there. Nothing in the open transcript is excluded,
+/// so the find bar needs no scope note: "No matches" now means the
+/// string is not in the transcript.
 fn transcript_matches(
     list: &[ChatLine],
     query: &str,
@@ -571,10 +560,82 @@ fn transcript_matches(
         .iter()
         .map(|line| transcript_find::SearchLine {
             title: &line.title,
-            body: transcript_search_body(line),
+            body: &line.body,
+            detail: &line.detail,
         })
         .collect();
     transcript_find::matches_for_lines(&rows, query)
+}
+
+#[cfg(test)]
+mod transcript_matches_tests {
+    use super::*;
+
+    fn line(role: &str, title: &str, body: &str, detail: &str) -> ChatLine {
+        ChatLine {
+            id: 0,
+            role: role.into(),
+            title: title.into(),
+            body: body.into(),
+            badge: String::new(),
+            detail: detail.into(),
+            key: String::new(),
+            at_ms: 0.0,
+        }
+    }
+
+    #[test]
+    fn long_tool_body_is_searched() {
+        // >240 chars: the old projection returned "" for this body.
+        let body = format!("{}needle", "log line\n".repeat(40));
+        assert!(body.chars().count() > 240);
+        let list = vec![line("tool", "bash", &body, "")];
+        let hits = transcript_matches(&list, "needle");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].line, 0);
+        assert_eq!(hits[0].field, transcript_find::Field::Body);
+    }
+
+    #[test]
+    fn json_tool_body_is_searched() {
+        // Starts with `{`: the old projection returned "" for this body.
+        let list = vec![line(
+            "tool",
+            "read",
+            "{\"path\": \"/tmp/needle.json\"}",
+            "",
+        )];
+        let hits = transcript_matches(&list, "needle.json");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].field, transcript_find::Field::Body);
+    }
+
+    #[test]
+    fn folded_detail_hit_carries_its_line_identity() {
+        let list = vec![
+            line("you", "You", "run the tests", ""),
+            line("tool", "bash", "tests ran", "FAIL needle-test panicked"),
+            line("strike", "Strike", "done", ""),
+        ];
+        let hits = transcript_matches(&list, "needle-test");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].line, 1);
+        assert_eq!(hits[0].field, transcript_find::Field::Detail);
+        assert!(hits[0].in_fold());
+    }
+
+    #[test]
+    fn absent_string_is_an_honest_zero_over_the_full_corpus() {
+        let list = vec![
+            line("tool", "bash", "{\"a\": 1}", "long folded output"),
+            line("you", "You", "hello", ""),
+        ];
+        assert!(transcript_matches(&list, "not-present").is_empty());
+        assert_eq!(
+            transcript_find::count_label("not-present", 0, 0),
+            "No matches"
+        );
+    }
 }
 
 fn note_steer(
