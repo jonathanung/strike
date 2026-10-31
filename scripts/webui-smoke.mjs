@@ -1808,6 +1808,45 @@ try {
       { timeout: WAIT_MS, interval: 250 },
     );
   };
+  // Stage all / Unstage all (#1426): seed several untracked files BEFORE
+  // the panel first loads, but only when the repo is completely clean —
+  // Stage all would otherwise stage a developer's unrelated work when
+  // this script runs in a dirty checkout. In CI the checkout is clean,
+  // so the full batch flow below runs.
+  const stageAllFiles = [
+    "smoke-stage-all-1.txt",
+    "smoke-stage-all-2.txt",
+    "smoke-stage-all-3.txt",
+  ];
+  const gitStatusPaths = async () => {
+    const res = await fetch(`http://127.0.0.1:${port}/v1/git/status`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) throw new Error(`git status HTTP ${res.status}`);
+    const body = await res.json();
+    const paths = (list) => (list || []).map((f) => f.path);
+    return {
+      staged: paths(body.staged),
+      unstaged: paths(body.unstaged),
+      untracked: paths(body.untracked),
+    };
+  };
+  let stageAllSeeded = false;
+  try {
+    const before = await gitStatusPaths();
+    if (
+      before.staged.length === 0 &&
+      before.unstaged.length === 0 &&
+      before.untracked.length === 0
+    ) {
+      for (const name of stageAllFiles) {
+        await writeFile(join(process.cwd(), name), `stage-all smoke ${name}\n`);
+      }
+      stageAllSeeded = true;
+    }
+  } catch {
+    stageAllSeeded = false;
+  }
   await clickSideTab("Git", "Staged");
   // Branch switcher regression (#1314): the rendered <select> value must
   // equal the daemon's current branch once the options exist. The defect
@@ -1839,6 +1878,92 @@ try {
       },
       { timeout: STEP_MS, interval: 250 },
     );
+  }
+  if (stageAllSeeded) {
+    const batchButtons = async () => {
+      const raw = await evaluate(`(() => {
+        const s = document.querySelector("[data-git-stage-all]");
+        const u = document.querySelector("[data-git-unstage-all]");
+        return JSON.stringify({
+          stage: s ? s.disabled : null,
+          unstage: u ? u.disabled : null,
+        });
+      })()`);
+      return JSON.parse(raw || "{}");
+    };
+    const clickBatch = async (selector) => {
+      const v = await evaluate(`(() => {
+        const b = document.querySelector(${JSON.stringify(selector)});
+        if (!b) return "missing";
+        if (b.disabled) return "disabled";
+        b.click();
+        return "clicked";
+      })()`);
+      if (v !== "clicked") throw new Error(`stage-all smoke: ${selector} -> ${v}`);
+    };
+    try {
+      await waitFor(
+        "Stage all enabled and Unstage all disabled with only untracked files",
+        async () => {
+          const b = await batchButtons();
+          return { ok: b.stage === false && b.unstage === true, ...b };
+        },
+        { timeout: STEP_MS, interval: 250 },
+      );
+      await clickBatch("[data-git-stage-all]");
+      await waitFor(
+        "Stage all moves every seeded file to Staged in one batch",
+        async () => {
+          const s = await gitStatusPaths();
+          return {
+            ok: stageAllFiles.every((f) => s.staged.includes(f)),
+            ...s,
+          };
+        },
+        { timeout: STEP_MS, interval: 250 },
+      );
+      await waitFor(
+        "panel flips the batch buttons after Stage all",
+        async () => {
+          const b = await batchButtons();
+          return { ok: b.stage === true && b.unstage === false, ...b };
+        },
+        { timeout: STEP_MS, interval: 250 },
+      );
+      await clickBatch("[data-git-unstage-all]");
+      await waitFor(
+        "Unstage all moves every seeded file back to Untracked",
+        async () => {
+          const s = await gitStatusPaths();
+          return {
+            ok:
+              stageAllFiles.every((f) => s.untracked.includes(f)) &&
+              !stageAllFiles.some((f) => s.staged.includes(f)),
+            ...s,
+          };
+        },
+        { timeout: STEP_MS, interval: 250 },
+      );
+    } finally {
+      // Restore the clean repo even when an assertion above fails:
+      // unstage any seeded file still staged, then delete the seeds.
+      try {
+        const s = await gitStatusPaths();
+        const stillStaged = stageAllFiles.filter((f) => s.staged.includes(f));
+        if (stillStaged.length > 0) {
+          await fetch(`http://127.0.0.1:${port}/v1/git/unstage`, {
+            method: "POST",
+            headers: auth,
+            body: JSON.stringify({ paths: stillStaged }),
+          });
+        }
+      } catch {
+        // best-effort cleanup only; the assertion failure already reports
+      }
+      for (const name of stageAllFiles) {
+        await rm(join(process.cwd(), name), { force: true });
+      }
+    }
   }
   await waitUntil(`(() => {
     if ((document.body.innerText || "").includes("session.childIsolation")) return true;
