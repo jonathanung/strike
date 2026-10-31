@@ -8,62 +8,63 @@
 
 mod api;
 mod appearance;
+mod apps;
 mod approvals;
 mod approvals_ui;
-mod apps;
 mod chat_mode;
 mod clipboard;
-mod composer_triggers;
 mod confirm;
+mod composer_triggers;
 mod diag;
 mod editor;
+mod load_epoch;
+mod localfiles;
 mod gateway;
 mod gateway_qr;
 mod git;
 mod goals;
-mod load_epoch;
-mod localfiles;
 mod mobile;
-mod model;
-mod model_menu;
-mod model_menu_view;
-mod notify;
-mod onboarding;
-mod outcome;
-mod park;
 mod providers;
 mod schedule;
-mod session_delete;
-mod session_list;
-mod session_panel;
-mod settings;
-mod shell;
-mod side_chat;
-mod status;
+mod model;
+mod notify;
+mod outcome;
+mod onboarding;
+mod park;
 mod steer_queue;
+mod model_menu;
+mod model_menu_view;
+mod session_list;
+mod settings;
+mod session_panel;
 mod storage;
 mod tab_title;
 mod task_runner;
+mod transcript_find;
+mod usage_audit;
+mod session_delete;
+mod shell;
+mod side_chat;
+mod status;
 mod term;
 mod terminal;
 mod transcript;
-mod transcript_find;
 mod transcript_view;
 mod triggers;
 mod turn_elapsed;
-mod usage_audit;
 mod workspaces;
 use crate::shell::icon;
+
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use composer_triggers::{
-    file_suggestions, move_index, shell_hint, skill_suggestions, slash_suggestions, splice_draft,
-    trigger_at, trigger_status, Kind, Suggestion,
-};
 use leptos::callback::Callback;
+use composer_triggers::{
+    file_suggestions, move_index, shell_hint, skill_suggestions,
+    slash_suggestions, splice_draft, trigger_at, trigger_status, Kind, Suggestion,
+};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use model::{
@@ -83,24 +84,22 @@ use crate::api::{
     get_json, get_text, idempotency_key, now_ms, patch_json, post_json, post_json_value, post_op,
     put_json,
 };
+use crate::load_epoch::begin;
 use crate::approvals::{begin_autonomy_change, begin_session_mode, ModeChange};
 use crate::approvals_ui::{
     apply_perm_notes, commit_autonomy, commit_session_mode, ApprovalCards, ApprovalHost,
     ApprovalMenu, AutonomyMenu,
 };
-use crate::editor::DocumentPane;
-use crate::load_epoch::begin;
-use crate::mobile::PhoneNav;
-use crate::side_chat::SideChatPanel;
-use crate::storage::StoragePanel;
 use crate::transcript::Transcript;
 use crate::transcript_view::{save_download, TranscriptHandlers, TranscriptPane};
 use crate::workspaces::WorkspacePicker;
+use crate::storage::StoragePanel;
+use crate::editor::DocumentPane;
+use crate::mobile::PhoneNav;
+use crate::side_chat::SideChatPanel;
 
 use crate::model::{budget_elapsed, can_retry, RootsResponse};
-use crate::model_menu::{
-    active_context, context_view, reduce_envelope, LiveModelState, ModelDefaults,
-};
+use crate::model_menu::{active_context, context_view, reduce_envelope, LiveModelState, ModelDefaults};
 use crate::status::{
     apply_document_favicon, elapsed_since, session_kind, StatusKind, StatusMark, StatusSlot,
     StatusTab, StatusTabs, HEARTBEAT_STALE_MS,
@@ -295,7 +294,9 @@ fn sync_composer_height_for(el: &web_sys::HtmlTextAreaElement) {
     // measuring without the reset would grow but never shrink.
     let _ = html.style().set_property("height", "auto");
     let height = composer_height_px(el.scroll_height());
-    let _ = html.style().set_property("height", &format!("{height}px"));
+    let _ = html
+        .style()
+        .set_property("height", &format!("{height}px"));
 }
 
 fn sync_composer_height_target(target: Option<web_sys::EventTarget>) {
@@ -326,8 +327,10 @@ fn sync_composer_height_soon() {
     let cb = Closure::once(move || {
         sync_composer_height();
     });
-    let _ =
-        win.set_timeout_with_callback_and_timeout_and_arguments_0(cb.as_ref().unchecked_ref(), 0);
+    let _ = win.set_timeout_with_callback_and_timeout_and_arguments_0(
+        cb.as_ref().unchecked_ref(),
+        0,
+    );
     cb.forget();
 }
 
@@ -346,8 +349,10 @@ fn place_composer_caret_end_soon() {
         }
         sync_composer_height();
     });
-    let _ =
-        win.set_timeout_with_callback_and_timeout_and_arguments_0(cb.as_ref().unchecked_ref(), 0);
+    let _ = win.set_timeout_with_callback_and_timeout_and_arguments_0(
+        cb.as_ref().unchecked_ref(),
+        0,
+    );
     cb.forget();
 }
 
@@ -730,7 +735,10 @@ fn note_live_title(
 /// highlight them there. Nothing in the open transcript is excluded,
 /// so the find bar needs no scope note: "No matches" now means the
 /// string is not in the transcript.
-fn transcript_matches(list: &[ChatLine], query: &str) -> Vec<transcript_find::TMatch> {
+fn transcript_matches(
+    list: &[ChatLine],
+    query: &str,
+) -> Vec<transcript_find::TMatch> {
     let rows: Vec<transcript_find::SearchLine<'_>> = list
         .iter()
         .map(|line| transcript_find::SearchLine {
@@ -774,7 +782,12 @@ mod transcript_matches_tests {
     #[test]
     fn json_tool_body_is_searched() {
         // Starts with `{`: the old projection returned "" for this body.
-        let list = vec![line("tool", "read", "{\"path\": \"/tmp/needle.json\"}", "")];
+        let list = vec![line(
+            "tool",
+            "read",
+            "{\"path\": \"/tmp/needle.json\"}",
+            "",
+        )];
         let hits = transcript_matches(&list, "needle.json");
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].field, transcript_find::Field::Body);
@@ -808,7 +821,11 @@ mod transcript_matches_tests {
     }
 }
 
-fn note_steer(transcript: RwSignal<Transcript>, raw: &str, notes: &impl Fn(steer_queue::LiveNote)) {
+fn note_steer(
+    transcript: RwSignal<Transcript>,
+    raw: &str,
+    notes: &impl Fn(steer_queue::LiveNote),
+) {
     let Ok(v) = serde_json::from_str::<serde_json::Value>(raw) else {
         return;
     };
@@ -820,8 +837,7 @@ fn note_steer(transcript: RwSignal<Transcript>, raw: &str, notes: &impl Fn(steer
                 let text = text.clone();
                 transcript.update(|t| {
                     if let Some(msg) = t.messages.iter_mut().rev().find(|m| {
-                        m.role == crate::transcript::Role::You
-                            && (m.body == text || m.retry_text == text)
+                        m.role == crate::transcript::Role::You && (m.body == text || m.retry_text == text)
                     }) {
                         msg.badge = "steered".into();
                     }
@@ -967,10 +983,7 @@ fn apply_status_payload(
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
-    let unread = sess
-        .get("unread")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
+    let unread = sess.get("unread").and_then(|v| v.as_bool()).unwrap_or(false);
     let since = sess.get("since").and_then(|v| v.as_i64()).unwrap_or(0);
     let last = sess
         .get("lastActivityAt")
@@ -1650,13 +1663,10 @@ fn App() -> impl IntoView {
                                 steer_mode.set(String::new());
                             }
                         }
-                        steer_queue::LiveNote::Usage { .. } | steer_queue::LiveNote::Fit { .. } => {
-                        }
+                        steer_queue::LiveNote::Usage { .. } | steer_queue::LiveNote::Fit { .. } => {}
                         steer_queue::LiveNote::EngineError { message, .. } => {
                             queue_note.set(message.clone());
-                            if message.contains("no active turn")
-                                || message.contains("already waiting")
-                            {
+                            if message.contains("no active turn") || message.contains("already waiting") {
                                 steer_note.set(String::new());
                                 steer_mode.set(String::new());
                             }
@@ -1695,8 +1705,7 @@ fn App() -> impl IntoView {
                     context_limit.set(next.context_limit);
                     context_fit.set(next.context_fit);
                     model_note.set(next.note);
-                    model_note_after.set(next.note_after);
-                }
+                    model_note_after.set(next.note_after);                }
             });
         es.set_onmessage(Some(on_msg.as_ref().unchecked_ref()));
         on_msg.forget();
@@ -1936,8 +1945,8 @@ fn App() -> impl IntoView {
         let saved = sessions.get();
         let active = active_root.get();
         let blocking = tab_title::blocking_count(&root_rows);
-        let unread =
-            tab_title::unread_session_count(&root_rows, &saved, &active) + notify_unread.get();
+        let unread = tab_title::unread_session_count(&root_rows, &saved, &active)
+            + notify_unread.get();
         // Favicon behaviour is unchanged (status module owns it); only
         // the title text follows the #1405 waiting/unread precedence.
         apply_document_favicon(kind);
@@ -2034,10 +2043,7 @@ fn App() -> impl IntoView {
         }
         let text = draft.get_untracked().trim().to_string();
         let files = pending_files.get_untracked();
-        if files
-            .iter()
-            .any(|f| f.error.is_empty() && f.data_b64.is_empty() && f.uploaded_ref.is_empty())
-        {
+        if files.iter().any(|f| f.error.is_empty() && f.data_b64.is_empty() && f.uploaded_ref.is_empty()) {
             status.set("Still reading an attachment.".into());
             return;
         }
@@ -2091,16 +2097,7 @@ fn App() -> impl IntoView {
                     continue;
                 }
                 if file.uploaded_ref.is_empty() {
-                    match chat_mode::upload_attachment(
-                        &b,
-                        &t,
-                        &root,
-                        &file.name,
-                        &file.mime,
-                        &file.data_b64,
-                    )
-                    .await
-                    {
+                    match chat_mode::upload_attachment(&b, &t, &root, &file.name, &file.mime, &file.data_b64).await {
                         Ok(up) => {
                             file.uploaded_ref = up.reference.clone();
                             file.uploaded_kind = up.kind;
@@ -2478,9 +2475,7 @@ fn App() -> impl IntoView {
         Rc::new(move |_| {
             appearance::clear_strike_keys();
             on_cleared();
-            status.set(
-                "Cleared Strike keys in this browser. Daemon files were left in place.".into(),
-            );
+            status.set("Cleared Strike keys in this browser. Daemon files were left in place.".into());
             Ok(())
         }),
     );
@@ -2516,6 +2511,7 @@ fn App() -> impl IntoView {
         side_focus_name.set(name);
         side_open.set(true);
         mode.set("chat".into());
+
     };
 
     let set_perm = move |mode: String| {
@@ -2538,8 +2534,9 @@ fn App() -> impl IntoView {
         autonomy_menu.set(false);
         let root = active_root.get_untracked();
         if !root.is_empty() && session_busy(&root) {
-            status
-                .set("This turn is still running. Autonomy changes wait until it finishes.".into());
+            status.set(
+                "This turn is still running. Autonomy changes wait until it finishes.".into(),
+            );
             return;
         }
         match begin_autonomy_change(&autonomy.get_untracked(), &mode) {
@@ -2550,6 +2547,7 @@ fn App() -> impl IntoView {
             ModeChange::Confirm(pending) => confirm.set(Some(pending)),
         }
     };
+
 
     // Session delete (#1358): arm the confirm dialog for one session.
     // Shared by the row button and the palette command — one code path,
@@ -2596,7 +2594,10 @@ fn App() -> impl IntoView {
         if was_live {
             let (b, t) = (base.get_untracked(), token.get_untracked());
             spawn_local(async move {
-                let path = format!("/v1/roots/{}", session_delete::encode_segment(&id));
+                let path = format!(
+                    "/v1/roots/{}",
+                    session_delete::encode_segment(&id)
+                );
                 if let Err(e) = crate::api::delete_json(&b, &t, &path, None).await {
                     status.set(format!(
                         "Session deleted, but closing its live root failed: {e}"
@@ -2730,8 +2731,7 @@ fn App() -> impl IntoView {
     Effect::new(move |_| {
         if model_menu.get() {
             mode_menu.set(false);
-            load_model_catalog();
-        }
+            load_model_catalog();        }
     });
 
     Effect::new(move |_| {
@@ -2752,11 +2752,7 @@ fn App() -> impl IntoView {
     let on_select_model = Callback::new(move |(provider, id): (String, String)| {
         model_note_after.set(now_ms() as i64);
         model_note.set(String::new());
-        let (b, t, root) = (
-            base.get_untracked(),
-            token.get_untracked(),
-            active_root.get_untracked(),
-        );
+        let (b, t, root) = (base.get_untracked(), token.get_untracked(), active_root.get_untracked());
         spawn_local(async move {
             if let Err(e) = post_op(
                 &b,
@@ -2836,11 +2832,7 @@ fn App() -> impl IntoView {
     let on_effort = Callback::new(move |level: String| {
         model_note_after.set(now_ms() as i64);
         model_note.set(String::new());
-        let (b, t, root) = (
-            base.get_untracked(),
-            token.get_untracked(),
-            active_root.get_untracked(),
-        );
+        let (b, t, root) = (base.get_untracked(), token.get_untracked(), active_root.get_untracked());
         spawn_local(async move {
             if let Err(e) = post_op(
                 &b,
@@ -2864,8 +2856,9 @@ fn App() -> impl IntoView {
     let on_fast = Callback::new(move |enabled: bool| {
         let root = active_root.get_untracked();
         if !root.is_empty() && session_busy(&root) {
-            model_note
-                .set("This turn is still running. Fast changes wait until it finishes.".into());
+            model_note.set(
+                "This turn is still running. Fast changes wait until it finishes.".into(),
+            );
             return;
         }
         model_note_after.set(now_ms() as i64);
@@ -2889,7 +2882,14 @@ fn App() -> impl IntoView {
     let on_default_effort = Callback::new(move |level: String| {
         let (b, t) = (base.get_untracked(), token.get_untracked());
         spawn_local(async move {
-            match patch_json(&b, &t, "/v1/settings", serde_json::json!({"effort": level})).await {
+            match patch_json(
+                &b,
+                &t,
+                "/v1/settings",
+                serde_json::json!({"effort": level}),
+            )
+            .await
+            {
                 Ok(()) => {
                     model_defaults.update(|d| d.effort = level);
                     defaults_known.set(true);
@@ -3265,8 +3265,7 @@ fn App() -> impl IntoView {
             }
         });
     if let Some(w) = web_sys::window() {
-        let _ = w
-            .add_event_listener_with_callback("keydown", on_worktrees_key.as_ref().unchecked_ref());
+        let _ = w.add_event_listener_with_callback("keydown", on_worktrees_key.as_ref().unchecked_ref());
     }
     on_worktrees_key.forget();
     shell::bind(
@@ -3303,11 +3302,7 @@ fn App() -> impl IntoView {
             let selected = session_panel::selected_ids();
             let marked = web_sys::window()
                 .and_then(|w| w.document())
-                .and_then(|doc| {
-                    doc.query_selector("[data-delete-target='1']")
-                        .ok()
-                        .flatten()
-                })
+                .and_then(|doc| doc.query_selector("[data-delete-target='1']").ok().flatten())
                 .and_then(|el| el.get_attribute("data-session-id"))
                 .unwrap_or_default();
             let chosen = if !marked.is_empty() {
@@ -3342,7 +3337,10 @@ fn App() -> impl IntoView {
             let on_deleted = on_deleted;
             let status_note = status;
             if !session_delete::prompt_delete(
-                session_delete::DeleteTarget { id, label },
+                session_delete::DeleteTarget {
+                    id,
+                    label,
+                },
                 base.get_untracked(),
                 token.get_untracked(),
                 Rc::new(move |id| on_deleted.run(id)),
@@ -3381,8 +3379,7 @@ fn App() -> impl IntoView {
             }
         });
     if let Some(w) = web_sys::window() {
-        let _ =
-            w.add_event_listener_with_callback("keydown", on_goals_key.as_ref().unchecked_ref());
+        let _ = w.add_event_listener_with_callback("keydown", on_goals_key.as_ref().unchecked_ref());
     }
     on_goals_key.forget();
 
@@ -3418,8 +3415,7 @@ fn App() -> impl IntoView {
             }
         });
     if let Some(w) = web_sys::window() {
-        let _ =
-            w.add_event_listener_with_callback("keydown", on_schedule_key.as_ref().unchecked_ref());
+        let _ = w.add_event_listener_with_callback("keydown", on_schedule_key.as_ref().unchecked_ref());
     }
     on_schedule_key.forget();
 
@@ -3442,10 +3438,7 @@ fn App() -> impl IntoView {
                         .map(|t| {
                             t.dyn_ref::<web_sys::Element>()
                                 .map(|el| {
-                                    matches!(
-                                        el.tag_name().as_str(),
-                                        "INPUT" | "TEXTAREA" | "SELECT"
-                                    )
+                                    matches!(el.tag_name().as_str(), "INPUT" | "TEXTAREA" | "SELECT")
                                 })
                                 .unwrap_or(false)
                         })
@@ -3458,10 +3451,7 @@ fn App() -> impl IntoView {
             }
         });
     if let Some(w) = web_sys::window() {
-        let _ = w.add_event_listener_with_callback(
-            "keydown",
-            on_usage_audit_key.as_ref().unchecked_ref(),
-        );
+        let _ = w.add_event_listener_with_callback("keydown", on_usage_audit_key.as_ref().unchecked_ref());
     }
     on_usage_audit_key.forget();
     // Alt+M opens the model menu. The shell owns the other chords; this
@@ -3493,8 +3483,7 @@ fn App() -> impl IntoView {
             }
         });
     if let Some(w) = web_sys::window() {
-        let _ =
-            w.add_event_listener_with_callback("keydown", on_model_key.as_ref().unchecked_ref());
+        let _ = w.add_event_listener_with_callback("keydown", on_model_key.as_ref().unchecked_ref());
     }
     on_model_key.forget();
 
@@ -3621,10 +3610,12 @@ fn App() -> impl IntoView {
             return;
         }
         let prev_title = transcript.with_untracked(|t| t.snapshot_title());
-        let prev_session = sessions
-            .with_untracked(|list| list.iter().find(|s| s.id == id).map(|s| s.title.clone()));
-        let prev_root =
-            roots.with_untracked(|list| list.iter().find(|r| r.id == id).map(|r| r.title.clone()));
+        let prev_session = sessions.with_untracked(|list| {
+            list.iter().find(|s| s.id == id).map(|s| s.title.clone())
+        });
+        let prev_root = roots.with_untracked(|list| {
+            list.iter().find(|r| r.id == id).map(|r| r.title.clone())
+        });
         transcript.update(|t| t.pin_title(title.clone()));
         sessions.update(|list| {
             if let Some(s) = list.iter_mut().find(|s| s.id == id) {
@@ -3874,8 +3865,14 @@ fn App() -> impl IntoView {
     let queue_step = Rc::new(queue_step);
     let queue_up = queue_step.clone();
     let queue_down = queue_step;
-    shell::bind("queue.move-up", Rc::new(move |_| queue_up(-1)));
-    shell::bind("queue.move-down", Rc::new(move |_| queue_down(1)));
+    shell::bind(
+        "queue.move-up",
+        Rc::new(move |_| queue_up(-1)),
+    );
+    shell::bind(
+        "queue.move-down",
+        Rc::new(move |_| queue_down(1)),
+    );
     shell::bind(
         "panel-files",
         Rc::new(move |_| {
@@ -4118,6 +4115,7 @@ fn App() -> impl IntoView {
         }),
     );
 
+
     // Bootstrap can land after the first keystroke. Recompute only when the
     // catalog contents change, and only for the trigger at the real caret.
     // refresh_meta writes the same lists every poll; a content match is a no-op.
@@ -4149,1173 +4147,1173 @@ fn App() -> impl IntoView {
     let worktree_active = Memo::new(move |_| side_tab.get() == "worktrees");
 
     view! {
-            <ApprovalHost
+        <ApprovalHost
+            base=base
+            token=token
+            root=active_root
+            perm_mode=perm_mode
+            menu_open=mode_menu
+            panel_open=panel_open
+            confirm=confirm
+            asks=asks
+            live_audit=live_audit
+            workspaces=workspaces
+            active_workspace=active_workspace
+            status=status
+            auto_seconds=auto_seconds
+            auto_exclude=auto_exclude
+            rules=rules_doc
+            stored_audit=stored_audit
+            panel_error=panel_error
+            reply_n=reply_n
+            reply_id=reply_id
+            reply_decision=reply_decision
+        />
+        <shell::Chrome />
+        {gateway_qr::phone_view()}
+        <session_delete::SessionDeleteDialog
+            target=delete_target
+            base=base
+            token=token
+            on_deleted=on_deleted
+        />
+        <Show when=move || mode.get() == "providers" fallback=move || ()>
+            <providers::ProvidersPage base=base token=token />
+        </Show>
+        <Show when=move || !onboarded.get()>
+            <onboarding::OnboardingCard
                 base=base
                 token=token
-                root=active_root
-                perm_mode=perm_mode
-                menu_open=mode_menu
-                panel_open=panel_open
-                confirm=confirm
-                asks=asks
-                live_audit=live_audit
-                workspaces=workspaces
-                active_workspace=active_workspace
                 status=status
-                auto_seconds=auto_seconds
-                auto_exclude=auto_exclude
-                rules=rules_doc
-                stored_audit=stored_audit
-                panel_error=panel_error
-                reply_n=reply_n
-                reply_id=reply_id
-                reply_decision=reply_decision
+                theme=theme_id
+                on_theme=set_theme
+                on_done=finish_onboarding
             />
-            <shell::Chrome />
-            {gateway_qr::phone_view()}
-            <session_delete::SessionDeleteDialog
-                target=delete_target
+        </Show>
+        <Show when=move || mode.get() == "settings">
+            <settings::SettingsPage
                 base=base
                 token=token
-                on_deleted=on_deleted
+                gateway=gateway
+                mode=mode
+                status=status
+                diag_capable=diag_capable
+                root=active_root
+                theme=theme_id
+                scheme=scheme_id
+                font=font_id
+                density=density_id
+                on_theme=set_theme
+                on_scheme=set_scheme
+                on_font=set_font
+                on_density=set_density
+                on_cleared=on_cleared
             />
-            <Show when=move || mode.get() == "providers" fallback=move || ()>
-                <providers::ProvidersPage base=base token=token />
-            </Show>
-            <Show when=move || !onboarded.get()>
-                <onboarding::OnboardingCard
-                    base=base
-                    token=token
-                    status=status
-                    theme=theme_id
-                    on_theme=set_theme
-                    on_done=finish_onboarding
-                />
-            </Show>
-            <Show when=move || mode.get() == "settings">
-                <settings::SettingsPage
-                    base=base
-                    token=token
-                    gateway=gateway
-                    mode=mode
-                    status=status
-                    diag_capable=diag_capable
-                    root=active_root
-                    theme=theme_id
-                    scheme=scheme_id
-                    font=font_id
-                    density=density_id
-                    on_theme=set_theme
-                    on_scheme=set_scheme
-                    on_font=set_font
-                    on_density=set_density
-                    on_cleared=on_cleared
-                />
-            </Show>
-            <Show when=move || mode.get() == "daemon" fallback=move || ()>
-                <DaemonPane gateway_detail=gateway_detail />
-            </Show>
-            <Show when=move || mode.get() == "usage" || mode.get() == "audit" fallback=move || ()>
-                <usage_audit::UsageAuditPages mode=mode base=base token=token status=status />
-            </Show>
-            <Show when=move || mode.get() == "goals" fallback=move || ()>
-                <goals::GoalsPane base=base token=token />
-            </Show>
-            <Show when=move || mode.get() == "tasks" fallback=move || ()>
-                <task_runner::TaskRunner
-                    base=base
-                    token=token
-                    active_root=active_root
-                    status=status
-                />
-            </Show>
-            <Show when=move || mode.get() == "schedule" fallback=move || ()>
-                <schedule::SchedulePage
-                    base=base
-                    token=token
-                    mode=mode
-                    active_root=active_root
-                    status=status
-                />
-            </Show>
-            <Show when=move || mode.get() == "triggers" fallback=move || ()>
-                <triggers::TriggersPage base=base token=token status=status />
-            </Show>
-            <Show when=move || mode.get() == "apps" fallback=move || ()>
-                <apps::AppsPane
-                    base=base
-                    token=token
-                    status=status
-                    palette_open=apps_palette_open
-                    open_session=move |id: String| {
-                        mode.set("chat".into());
-                        activate_root(id);
-                    }
-                />
-            </Show>
-            <Show when=move || mode.get() == "chat">
-                <div
-                    class=move || {
-                        let mut class = chat_mode::shell_class(
-                            focus.get(),
-                            &layout.get(),
-                            sessions_drawer.get(),
-                            panel_drawer.get(),
-                        );
-                        class.push_str(" phone-pane-");
-                        class.push_str(&phone_pane.get());
-                        class
-                    }
-                    on:touchstart=move |ev: web_sys::TouchEvent| {
-                        // Edge-swipe session navigation (#1490 slice 5): only
-                        // gestures that begin within 24px of the left/right
-                        // screen edge are candidates, and never ones that
-                        // begin on a horizontal scroller or a text field —
-                        // code blocks own their drags. The handlers live on
-                        // the shell so a swipe that starts on the outermost
-                        // pixels (outside the chat section's inset) counts.
-                        if sessions_drawer.get_untracked() || panel_drawer.get_untracked() {
-                            swipe_start.set(None);
-                            return;
-                        }
-                        if touch_in_scroller(ev.target()) {
-                            swipe_start.set(None);
-                            return;
-                        }
-                        if let Some(t) = ev.changed_touches().item(0) {
-                            swipe_start.set(Some((t.client_x(), t.client_y())));
-                        }
-                    }
-                    on:touchend=move |ev: web_sys::TouchEvent| {
-                        let Some((x0, y0)) = swipe_start.get_untracked() else {
-                            return;
-                        };
+        </Show>
+        <Show when=move || mode.get() == "daemon" fallback=move || ()>
+            <DaemonPane gateway_detail=gateway_detail />
+        </Show>
+        <Show when=move || mode.get() == "usage" || mode.get() == "audit" fallback=move || ()>
+            <usage_audit::UsageAuditPages mode=mode base=base token=token status=status />
+        </Show>
+        <Show when=move || mode.get() == "goals" fallback=move || ()>
+            <goals::GoalsPane base=base token=token />
+        </Show>
+        <Show when=move || mode.get() == "tasks" fallback=move || ()>
+            <task_runner::TaskRunner
+                base=base
+                token=token
+                active_root=active_root
+                status=status
+            />
+        </Show>
+        <Show when=move || mode.get() == "schedule" fallback=move || ()>
+            <schedule::SchedulePage
+                base=base
+                token=token
+                mode=mode
+                active_root=active_root
+                status=status
+            />
+        </Show>
+        <Show when=move || mode.get() == "triggers" fallback=move || ()>
+            <triggers::TriggersPage base=base token=token status=status />
+        </Show>
+        <Show when=move || mode.get() == "apps" fallback=move || ()>
+            <apps::AppsPane
+                base=base
+                token=token
+                status=status
+                palette_open=apps_palette_open
+                open_session=move |id: String| {
+                    mode.set("chat".into());
+                    activate_root(id);
+                }
+            />
+        </Show>
+        <Show when=move || mode.get() == "chat">
+            <div
+                class=move || {
+                    let mut class = chat_mode::shell_class(
+                        focus.get(),
+                        &layout.get(),
+                        sessions_drawer.get(),
+                        panel_drawer.get(),
+                    );
+                    class.push_str(" phone-pane-");
+                    class.push_str(&phone_pane.get());
+                    class
+                }
+                on:touchstart=move |ev: web_sys::TouchEvent| {
+                    // Edge-swipe session navigation (#1490 slice 5): only
+                    // gestures that begin within 24px of the left/right
+                    // screen edge are candidates, and never ones that
+                    // begin on a horizontal scroller or a text field —
+                    // code blocks own their drags. The handlers live on
+                    // the shell so a swipe that starts on the outermost
+                    // pixels (outside the chat section's inset) counts.
+                    if sessions_drawer.get_untracked() || panel_drawer.get_untracked() {
                         swipe_start.set(None);
-                        if sessions_drawer.get_untracked() || panel_drawer.get_untracked() {
-                            return;
-                        }
-                        let Some(t) = ev.changed_touches().item(0) else {
-                            return;
-                        };
-                        let dx = t.client_x() - x0;
-                        let dy = t.client_y() - y0;
-                        if dx.abs() < 48 || dx.abs() < dy.abs() * 2 {
-                            return;
-                        }
-                        let iw = web_sys::window()
-                            .and_then(|w| w.inner_width().ok())
-                            .and_then(|v| v.as_f64())
-                            .unwrap_or(0.0) as i32;
-                        let delta = if x0 <= 24 && dx > 0 {
-                            -1
-                        } else if iw > 0 && x0 >= iw - 24 && dx < 0 {
-                            1
-                        } else {
-                            return;
-                        };
-                        if let Some((id, live)) = session_list::neighbour(
-                            &session_nav.get_untracked(),
-                            &active_root.get_untracked(),
-                            delta,
-                        ) {
-                            ev.prevent_default();
-                            open_session(id, live);
-                        }
+                        return;
                     }
-                >
-                    <button type="button" class="chat-scrim" aria-label="Close panel" on:click=move |_| {
-                        sessions_drawer.set(false);
-                        panel_drawer.set(false);
-                    }></button>
-                    <aside class="rail">
-    <SessionPanel
-                            base=base
-                            token=token
-                            sessions=sessions
-                            roots=roots
-                            activity=activity
-                            active_root=active_root
-                            seen=seen
-                            workspaces=workspaces
-                            on_open=open_session
-                            on_new=new_session
-                            on_refresh=refresh_meta
-                            nav_order=session_nav
-                        />
-                        <div class="ws-chip">
-                            <div class="section-head">
-                                <h2 class="panel-title">"Workspace"</h2>
-                                <button class="secondary ws-open" on:click=move |_| picker_open.set(true)>"Change workspace"</button>
-                            </div>
-                            <p class="name">{move || {
-                                let id = active_workspace.get();
-                                workspaces.get().into_iter().find(|w| w.id == id).map(|w| w.name).unwrap_or_else(|| "No workspace".into())
-                            }}</p>
-                            <p class="path">{move || {
-                                let id = active_workspace.get();
-                                if let Some(w) = workspaces.get().into_iter().find(|w| w.id == id) {
-                                    w.path
-                                } else {
-                                    let cwd = session_cwd.get();
-                                    if cwd.is_empty() { "New sessions use the daemon directory.".into() } else { cwd }
-                                }
-                            }}</p>
-                            {move || {
-                                let id = active_workspace.get();
-                                let ws_path = workspaces.get().into_iter().find(|w| w.id == id).map(|w| w.path).unwrap_or_default();
-                                let note = crate::workspaces::chip_note(&ws_path, &session_cwd.get());
-                                if note.is_empty() {
-                                    view! { <span></span> }.into_any()
-                                } else {
-                                    view! { <p class="hint">{note}</p> }.into_any()
-                                }
-                            }}
-                            <p class="hint">"This line is the directory. Sessions above are chats, not folders."</p>
+                    if touch_in_scroller(ev.target()) {
+                        swipe_start.set(None);
+                        return;
+                    }
+                    if let Some(t) = ev.changed_touches().item(0) {
+                        swipe_start.set(Some((t.client_x(), t.client_y())));
+                    }
+                }
+                on:touchend=move |ev: web_sys::TouchEvent| {
+                    let Some((x0, y0)) = swipe_start.get_untracked() else {
+                        return;
+                    };
+                    swipe_start.set(None);
+                    if sessions_drawer.get_untracked() || panel_drawer.get_untracked() {
+                        return;
+                    }
+                    let Some(t) = ev.changed_touches().item(0) else {
+                        return;
+                    };
+                    let dx = t.client_x() - x0;
+                    let dy = t.client_y() - y0;
+                    if dx.abs() < 48 || dx.abs() < dy.abs() * 2 {
+                        return;
+                    }
+                    let iw = web_sys::window()
+                        .and_then(|w| w.inner_width().ok())
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(0.0) as i32;
+                    let delta = if x0 <= 24 && dx > 0 {
+                        -1
+                    } else if iw > 0 && x0 >= iw - 24 && dx < 0 {
+                        1
+                    } else {
+                        return;
+                    };
+                    if let Some((id, live)) = session_list::neighbour(
+                        &session_nav.get_untracked(),
+                        &active_root.get_untracked(),
+                        delta,
+                    ) {
+                        ev.prevent_default();
+                        open_session(id, live);
+                    }
+                }
+            >
+                <button type="button" class="chat-scrim" aria-label="Close panel" on:click=move |_| {
+                    sessions_drawer.set(false);
+                    panel_drawer.set(false);
+                }></button>
+                <aside class="rail">
+<SessionPanel
+                        base=base
+                        token=token
+                        sessions=sessions
+                        roots=roots
+                        activity=activity
+                        active_root=active_root
+                        seen=seen
+                        workspaces=workspaces
+                        on_open=open_session
+                        on_new=new_session
+                        on_refresh=refresh_meta
+                        nav_order=session_nav
+                    />
+                    <div class="ws-chip">
+                        <div class="section-head">
+                            <h2 class="panel-title">"Workspace"</h2>
+                            <button class="secondary ws-open" on:click=move |_| picker_open.set(true)>"Change workspace"</button>
                         </div>
-                        <details class="fold">
-                        <summary>"Workspaces"</summary>
-                        <p class="hint">"Opening one records it. It does not move the live engine."</p>
-                        <Show when=move || workspaces.get().is_empty()>
-                            <EmptyState title="No workspaces".into() body="Add a directory from Daemon.".into() />
-                        </Show>
-                        <ul class="plain">
-                            {move || workspaces.get().into_iter().map(|w| {
-                                let id = w.id.clone();
-                                let on = move || active_workspace.get() == id;
-                                let activate_id = w.id.clone();
-                                view! {
-                                    <li class=move || if on() { "row card on" } else { "row card" }>
-                                        <button class="link" on:click=move |_| {
-                                            let (b, t, id) = (base.get(), token.get(), activate_id.clone());
-                                            spawn_local(async move {
-                                                let path = format!("/v1/workspaces/{id}/activate");
-                                                match post_json(&b, &t, &path, serde_json::json!({})).await {
-                                                    Ok(()) => active_workspace.set(id),
-                                                    Err(e) => status.set(format!("activate failed: {e}")),
-                                                }
-                                            });
-                                        }>
-                                            <span class="name">{w.name}</span>
-                                            <span class="path">{w.path}</span>
-                                        </button>
-                                    </li>
-                                }
-                            }).collect_view()}
-                        </ul>
-                        </details>
-                    </aside>
-                    <section class="chat">
+                        <p class="name">{move || {
+                            let id = active_workspace.get();
+                            workspaces.get().into_iter().find(|w| w.id == id).map(|w| w.name).unwrap_or_else(|| "No workspace".into())
+                        }}</p>
+                        <p class="path">{move || {
+                            let id = active_workspace.get();
+                            if let Some(w) = workspaces.get().into_iter().find(|w| w.id == id) {
+                                w.path
+                            } else {
+                                let cwd = session_cwd.get();
+                                if cwd.is_empty() { "New sessions use the daemon directory.".into() } else { cwd }
+                            }
+                        }}</p>
                         {move || {
-                            let _ = tick.get();
-                            let active = active_root.get();
-                            let now = now_ms() as i64;
-                            let open = open_session;
-                            let tabs: Vec<StatusTab> = roots.get().into_iter().map(|row| {
-                                let kind = session_kind(&row.status, row.busy, row.permission_pending, row.question_pending);
-                                let fallback = short_id(&row.id);
-                                StatusTab {
-                                    id: row.id.clone(),
-                                    label: session_label(&row.title, &fallback),
-                                    unread: row.unread.unwrap_or(false) && row.id != active,
-                                    elapsed_s: elapsed_since(kind, row.status_since, now),
-                                    active: row.id == active,
-                                    kind,
-                                }
-                            }).collect();
-                            view! {
-                                <StatusTabs tabs=tabs on_select=move |id: String| open(id, true) />
+                            let id = active_workspace.get();
+                            let ws_path = workspaces.get().into_iter().find(|w| w.id == id).map(|w| w.path).unwrap_or_default();
+                            let note = crate::workspaces::chip_note(&ws_path, &session_cwd.get());
+                            if note.is_empty() {
+                                view! { <span></span> }.into_any()
+                            } else {
+                                view! { <p class="hint">{note}</p> }.into_any()
                             }
                         }}
-                        <div class="chat-mode-bar">
-                            <button type="button" class="chip" data-chat-sessions="true" on:click=move |_| {
-                                panel_drawer.set(false);
-                                sessions_drawer.update(|v| *v = !*v);
-                            }>"Sessions"</button>
-                            <span class="chat-mode-title">{move || {
-                                let id = active_root.get();
-                                if id.is_empty() {
-                                    return "No session".to_string();
-                                }
-                                sessions.get().into_iter().find(|s| s.id == id).map(|s| {
-                                    let fallback = short_id(&s.id);
-                                    session_label(&s.title, &fallback)
-                                }).unwrap_or_else(|| short_id(&id))
-                            }}</span>
-                            <button type="button" class="chip" data-chat-panel="true" on:click=move |_| {
-                                sessions_drawer.set(false);
-                                panel_drawer.update(|v| *v = !*v);
-                            }>"Panel"</button>
+                        <p class="hint">"This line is the directory. Sessions above are chats, not folders."</p>
+                    </div>
+                    <details class="fold">
+                    <summary>"Workspaces"</summary>
+                    <p class="hint">"Opening one records it. It does not move the live engine."</p>
+                    <Show when=move || workspaces.get().is_empty()>
+                        <EmptyState title="No workspaces".into() body="Add a directory from Daemon.".into() />
+                    </Show>
+                    <ul class="plain">
+                        {move || workspaces.get().into_iter().map(|w| {
+                            let id = w.id.clone();
+                            let on = move || active_workspace.get() == id;
+                            let activate_id = w.id.clone();
+                            view! {
+                                <li class=move || if on() { "row card on" } else { "row card" }>
+                                    <button class="link" on:click=move |_| {
+                                        let (b, t, id) = (base.get(), token.get(), activate_id.clone());
+                                        spawn_local(async move {
+                                            let path = format!("/v1/workspaces/{id}/activate");
+                                            match post_json(&b, &t, &path, serde_json::json!({})).await {
+                                                Ok(()) => active_workspace.set(id),
+                                                Err(e) => status.set(format!("activate failed: {e}")),
+                                            }
+                                        });
+                                    }>
+                                        <span class="name">{w.name}</span>
+                                        <span class="path">{w.path}</span>
+                                    </button>
+                                </li>
+                            }
+                        }).collect_view()}
+                    </ul>
+                    </details>
+                </aside>
+                <section class="chat">
+                    {move || {
+                        let _ = tick.get();
+                        let active = active_root.get();
+                        let now = now_ms() as i64;
+                        let open = open_session;
+                        let tabs: Vec<StatusTab> = roots.get().into_iter().map(|row| {
+                            let kind = session_kind(&row.status, row.busy, row.permission_pending, row.question_pending);
+                            let fallback = short_id(&row.id);
+                            StatusTab {
+                                id: row.id.clone(),
+                                label: session_label(&row.title, &fallback),
+                                unread: row.unread.unwrap_or(false) && row.id != active,
+                                elapsed_s: elapsed_since(kind, row.status_since, now),
+                                active: row.id == active,
+                                kind,
+                            }
+                        }).collect();
+                        view! {
+                            <StatusTabs tabs=tabs on_select=move |id: String| open(id, true) />
+                        }
+                    }}
+                    <div class="chat-mode-bar">
+                        <button type="button" class="chip" data-chat-sessions="true" on:click=move |_| {
+                            panel_drawer.set(false);
+                            sessions_drawer.update(|v| *v = !*v);
+                        }>"Sessions"</button>
+                        <span class="chat-mode-title">{move || {
+                            let id = active_root.get();
+                            if id.is_empty() {
+                                return "No session".to_string();
+                            }
+                            sessions.get().into_iter().find(|s| s.id == id).map(|s| {
+                                let fallback = short_id(&s.id);
+                                session_label(&s.title, &fallback)
+                            }).unwrap_or_else(|| short_id(&id))
+                        }}</span>
+                        <button type="button" class="chip" data-chat-panel="true" on:click=move |_| {
+                            sessions_drawer.set(false);
+                            panel_drawer.update(|v| *v = !*v);
+                        }>"Panel"</button>
+                    </div>
+                    <Show when=move || !load_error.get().is_empty()>
+                        <div class="notice" role="alert">
+                            <span>{move || load_error.get()}</span>
+                            <button class="secondary" on:click=move |_| refresh_meta()>"Retry"</button>
                         </div>
-                        <Show when=move || !load_error.get().is_empty()>
-                            <div class="notice" role="alert">
-                                <span>{move || load_error.get()}</span>
-                                <button class="secondary" on:click=move |_| refresh_meta()>"Retry"</button>
-                            </div>
-                        </Show>
-                        <Show when=move || !stream_note.get().is_empty()>
-                            <p class="hint banner">{move || stream_note.get()}</p>
-                        </Show>
-                        <Show when=move || !doc_path.get().is_empty()>
-                            <DocumentPane
-                                base=base
-                                token=token
-                                path=doc_path
-                                jump_line=doc_line
-                                want_diff=doc_diff
-                                editing=doc_editing
-                            />
-                        </Show>
-                        <Show when=move || tf_open.get() && doc_path.get().is_empty()>
-                            <div
-                                class="tf-bar"
-                                data-tf-bar="true"
-                                role="search"
-                                aria-label="Find in transcript"
-                                on:keydown=move |ev: web_sys::KeyboardEvent| {
-                                    if ev.key() == "Escape" {
-                                        ev.prevent_default();
-                                        ev.stop_propagation();
-                                        close_find();
-                                    }
-                                }
-                            >
-                                <input
-                                    id="tf-search"
-                                    class="tf-search"
-                                    type="search"
-                                    placeholder="Find in transcript"
-                                    aria-label="Find in transcript"
-                                    prop:value=move || tf_query.get()
-                                    on:input=move |ev| {
-                                        tf_query.set(event_target_value(&ev));
-                                        tf_idx.set(0);
-                                    }
-                                    on:keydown=move |ev: web_sys::KeyboardEvent| {
-                                        if ev.key() == "Enter" {
-                                            ev.prevent_default();
-                                            ev.stop_propagation();
-                                            tf_step(if ev.shift_key() { -1 } else { 1 });
-                                        }
-                                    }
-                                />
-                                <span class="tf-count" data-tf-count="">{move || {
-                                    let q = tf_query.get();
-                                    let list = lines.get();
-                                    let hits = transcript_matches(&list, &q);
-                                    transcript_find::count_label(&q, hits.len(), tf_idx.get())
-                                }}</span>
-                                <button type="button" class="secondary" data-tf-prev="true" on:click=move |_| tf_step(-1)>"Prev"</button>
-                                <button type="button" class="secondary" data-tf-next="true" on:click=move |_| tf_step(1)>"Next"</button>
-                                <button type="button" class="secondary" data-tf-close="true" on:click=move |_| close_find()>"Close"</button>
-                            </div>
-                        </Show>
-                        <Show when=move || doc_path.get().is_empty()>
-                        <TranscriptPane
-                            transcript=transcript
-                            session=active_root
-                            loading=loading
-                            load_error=load_error
-                            tick=tick
-                            note=ux_note
-                            handlers=handlers
-                            find=find_view
+                    </Show>
+                    <Show when=move || !stream_note.get().is_empty()>
+                        <p class="hint banner">{move || stream_note.get()}</p>
+                    </Show>
+                    <Show when=move || !doc_path.get().is_empty()>
+                        <DocumentPane
+                            base=base
+                            token=token
+                            path=doc_path
+                            jump_line=doc_line
+                            want_diff=doc_diff
+                            editing=doc_editing
                         />
-                        </Show>
-                        <ApprovalCards
-                            asks=asks
-                            perm_mode=perm_mode
-                            auto_seconds=auto_seconds
-                            auto_exclude=auto_exclude
-                            reply_n=reply_n
-                            reply_id=reply_id
-                            reply_decision=reply_decision
-                        />
-                        <div class="composer" data-feature="composer-triggers"
-                            on:dragover=move |ev: web_sys::DragEvent| ev.prevent_default()
-                            on:drop=move |ev: web_sys::DragEvent| {
-                                ev.prevent_default();
-                                if let Some(dt) = ev.data_transfer() {
-                                    if let Some(files) = dt.files() {
-                                        if files.length() > 0 {
-                                            chat_mode::enqueue_file_list(files, pending_files, status);
-                                            return;
-                                        }
-                                    }
-                                    if let Ok(text) = dt.get_data("text/plain") {
-                                        let text = text.trim().to_string();
-                                        if text.starts_with('@') {
-                                            insert_mention(text.trim_start_matches('@').to_string());
-                                        }
-                                    }
+                    </Show>
+                    <Show when=move || tf_open.get() && doc_path.get().is_empty()>
+                        <div
+                            class="tf-bar"
+                            data-tf-bar="true"
+                            role="search"
+                            aria-label="Find in transcript"
+                            on:keydown=move |ev: web_sys::KeyboardEvent| {
+                                if ev.key() == "Escape" {
+                                    ev.prevent_default();
+                                    ev.stop_propagation();
+                                    close_find();
                                 }
                             }
                         >
-                            <ApprovalMenu
-                                menu_open=mode_menu
-                                perm_mode=perm_mode
-                                confirm=confirm
-                                panel_open=panel_open
-                                base=base
-                                token=token
-                                root=active_root
-                                status=status
+                            <input
+                                id="tf-search"
+                                class="tf-search"
+                                type="search"
+                                placeholder="Find in transcript"
+                                aria-label="Find in transcript"
+                                prop:value=move || tf_query.get()
+                                on:input=move |ev| {
+                                    tf_query.set(event_target_value(&ev));
+                                    tf_idx.set(0);
+                                }
+                                on:keydown=move |ev: web_sys::KeyboardEvent| {
+                                    if ev.key() == "Enter" {
+                                        ev.prevent_default();
+                                        ev.stop_propagation();
+                                        tf_step(if ev.shift_key() { -1 } else { 1 });
+                                    }
+                                }
                             />
-                            <AutonomyMenu
-                                menu_open=autonomy_menu
-                                autonomy=autonomy
-                                confirm=confirm
-                                busy=session_busy_now
-                                base=base
-                                token=token
-                                root=active_root
-                                status=status
-                            />
-                            <Show when=move || {
-                                let ctx = active_context(&catalog.get(), &provider_name.get(), &model_name.get());
-                                context_view(context_used.get(), context_limit.get(), ctx, &context_fit.get()).held
-                            }>
-                                <div class="steer-hold" role="status" data-context-hold="true">
-                                    <p class="model-hold">{move || {
-                                        let ctx = active_context(&catalog.get(), &provider_name.get(), &model_name.get());
-                                        context_view(context_used.get(), context_limit.get(), ctx, &context_fit.get()).hold_message
-                                    }}</p>
-                                    <button type="button" class="secondary" on:click=move |_| {
-                                        hold_bypass.set(true);
-                                        send(steer_queue::SendWhich::Primary);
-                                    }>"Send anyway"</button>
-                                </div>
-                            </Show>
-                            <Show when=move || memory_menu.get()>
-                                <div class="menu" role="menu" aria-label="Memory mode">
-                                    {["normal", "incognito", "temporary"].into_iter().map(|id| {
-                                        let label = memory_mode_label(id).to_string();
-                                        let detail = match id {
-                                            "incognito" => "Reads memory. The agent learns nothing.",
-                                            "temporary" => "This session does not load memory.",
-                                            _ => "Reads and writes memory.",
-                                        };
-                                        let set = set_memory;
-                                        let on = memory_mode.get() == id;
-                                        let klass = if on { "palette-row on" } else { "palette-row" };
-                                        let id = id.to_string();
+                            <span class="tf-count" data-tf-count="">{move || {
+                                let q = tf_query.get();
+                                let list = lines.get();
+                                let hits = transcript_matches(&list, &q);
+                                transcript_find::count_label(&q, hits.len(), tf_idx.get())
+                            }}</span>
+                            <button type="button" class="secondary" data-tf-prev="true" on:click=move |_| tf_step(-1)>"Prev"</button>
+                            <button type="button" class="secondary" data-tf-next="true" on:click=move |_| tf_step(1)>"Next"</button>
+                            <button type="button" class="secondary" data-tf-close="true" on:click=move |_| close_find()>"Close"</button>
+                        </div>
+                    </Show>
+                    <Show when=move || doc_path.get().is_empty()>
+                    <TranscriptPane
+                        transcript=transcript
+                        session=active_root
+                        loading=loading
+                        load_error=load_error
+                        tick=tick
+                        note=ux_note
+                        handlers=handlers
+                        find=find_view
+                    />
+                    </Show>
+                    <ApprovalCards
+                        asks=asks
+                        perm_mode=perm_mode
+                        auto_seconds=auto_seconds
+                        auto_exclude=auto_exclude
+                        reply_n=reply_n
+                        reply_id=reply_id
+                        reply_decision=reply_decision
+                    />
+                    <div class="composer" data-feature="composer-triggers"
+                        on:dragover=move |ev: web_sys::DragEvent| ev.prevent_default()
+                        on:drop=move |ev: web_sys::DragEvent| {
+                            ev.prevent_default();
+                            if let Some(dt) = ev.data_transfer() {
+                                if let Some(files) = dt.files() {
+                                    if files.length() > 0 {
+                                        chat_mode::enqueue_file_list(files, pending_files, status);
+                                        return;
+                                    }
+                                }
+                                if let Ok(text) = dt.get_data("text/plain") {
+                                    let text = text.trim().to_string();
+                                    if text.starts_with('@') {
+                                        insert_mention(text.trim_start_matches('@').to_string());
+                                    }
+                                }
+                            }
+                        }
+                    >
+                        <ApprovalMenu
+                            menu_open=mode_menu
+                            perm_mode=perm_mode
+                            confirm=confirm
+                            panel_open=panel_open
+                            base=base
+                            token=token
+                            root=active_root
+                            status=status
+                        />
+                        <AutonomyMenu
+                            menu_open=autonomy_menu
+                            autonomy=autonomy
+                            confirm=confirm
+                            busy=session_busy_now
+                            base=base
+                            token=token
+                            root=active_root
+                            status=status
+                        />
+                        <Show when=move || {
+                            let ctx = active_context(&catalog.get(), &provider_name.get(), &model_name.get());
+                            context_view(context_used.get(), context_limit.get(), ctx, &context_fit.get()).held
+                        }>
+                            <div class="steer-hold" role="status" data-context-hold="true">
+                                <p class="model-hold">{move || {
+                                    let ctx = active_context(&catalog.get(), &provider_name.get(), &model_name.get());
+                                    context_view(context_used.get(), context_limit.get(), ctx, &context_fit.get()).hold_message
+                                }}</p>
+                                <button type="button" class="secondary" on:click=move |_| {
+                                    hold_bypass.set(true);
+                                    send(steer_queue::SendWhich::Primary);
+                                }>"Send anyway"</button>
+                            </div>
+                        </Show>
+                        <Show when=move || memory_menu.get()>
+                            <div class="menu" role="menu" aria-label="Memory mode">
+                                {["normal", "incognito", "temporary"].into_iter().map(|id| {
+                                    let label = memory_mode_label(id).to_string();
+                                    let detail = match id {
+                                        "incognito" => "Reads memory. The agent learns nothing.",
+                                        "temporary" => "This session does not load memory.",
+                                        _ => "Reads and writes memory.",
+                                    };
+                                    let set = set_memory;
+                                    let on = memory_mode.get() == id;
+                                    let klass = if on { "palette-row on" } else { "palette-row" };
+                                    let id = id.to_string();
+                                    view! {
+                                        <button type="button" class=klass on:click=move |_| set(id.clone())>
+                                            <span class="name">{label}</span>
+                                            <span class="path">{detail}</span>
+                                        </button>
+                                    }
+                                }).collect_view()}
+                            </div>
+                        </Show>
+                        <Show when=move || plus_open.get()>
+                            <div class="menu composer-plus" data-composer-triggers="plus">
+                                <button type="button" class="palette-row" on:click=move |_| mention_composer_file(&ui)>
+                                    <span class="name">"Mention a file"</span>
+                                    <span class="path">"Insert @ and search the working tree"</span>
+                                </button>
+                                <button type="button" class="palette-row" on:click=move |_| prefix_composer_shell(&ui)>
+                                    <span class="name">"Run a shell command"</span>
+                                    <span class="path">"Prefix ! and ask before it runs"</span>
+                                </button>
+                                <button type="button" class="palette-row" on:click=move |_| open_composer_catalog("skills", &ui)>
+                                    <span class="name">"Use a skill"</span>
+                                    <span class="path">"Skills loaded for this daemon"</span>
+                                </button>
+                                <button type="button" class="palette-row" data-chat-attach="menu" on:click=move |_| {
+                                    plus_open.set(false);
+                                    if let Some(el) = file_input.get() {
+                                        el.click();
+                                    }
+                                }>
+                                    <span class="name">"Attach files"</span>
+                                    <span class="path">"Images and documents. Drag and paste still work."</span>
+                                </button>
+                                <Show when=move || speech_ok>
+                                    <button type="button" class="palette-row" data-chat-voice="true" on:click=move |_| {
+                                        plus_open.set(false);
+                                        let _ = crate::shell::dispatch("composer.voice", "");
+                                    }>
+                                        <span class="name">"Dictate"</span>
+                                        <span class="path">"Voice input from this browser"</span>
+                                    </button>
+                                </Show>
+                            </div>
+                        </Show>
+                        <Show when=move || ac_open.get()>
+                            <div class="menu composer-suggest" role="listbox" data-composer-triggers="suggestions">
+                                {move || {
+                                    let selected_at = ac_index.get();
+                                    ac_items.get().into_iter().enumerate().map(move |(i, item)| {
+                                        let picked = item.clone();
+                                        let label = item.label.clone();
+                                        let detail = item.detail.clone();
+                                        let selectable = item.selectable;
+                                        let selected = i == selected_at;
+                                        let klass = if selected && selectable { "palette-row on" } else { "palette-row" };
                                         view! {
-                                            <button type="button" class=klass on:click=move |_| set(id.clone())>
+                                            <button type="button" role="option" class=klass disabled=move || !selectable aria-selected=selected.to_string() on:click=move |_| accept_suggestion(picked.clone(), &ui)>
                                                 <span class="name">{label}</span>
                                                 <span class="path">{detail}</span>
                                             </button>
                                         }
-                                    }).collect_view()}
-                                </div>
+                                    }).collect_view()
+                                }}
+                            </div>
+                        </Show>
+                        <div class="steer-queue" id="steer-queue">
+                            <Show when=move || !steer_note.get().is_empty()>
+                                <p class="steer-note" role="status">{move || steer_note.get()}</p>
                             </Show>
-                            <Show when=move || plus_open.get()>
-                                <div class="menu composer-plus" data-composer-triggers="plus">
-                                    <button type="button" class="palette-row" on:click=move |_| mention_composer_file(&ui)>
-                                        <span class="name">"Mention a file"</span>
-                                        <span class="path">"Insert @ and search the working tree"</span>
-                                    </button>
-                                    <button type="button" class="palette-row" on:click=move |_| prefix_composer_shell(&ui)>
-                                        <span class="name">"Run a shell command"</span>
-                                        <span class="path">"Prefix ! and ask before it runs"</span>
-                                    </button>
-                                    <button type="button" class="palette-row" on:click=move |_| open_composer_catalog("skills", &ui)>
-                                        <span class="name">"Use a skill"</span>
-                                        <span class="path">"Skills loaded for this daemon"</span>
-                                    </button>
-                                    <button type="button" class="palette-row" data-chat-attach="menu" on:click=move |_| {
-                                        plus_open.set(false);
-                                        if let Some(el) = file_input.get() {
-                                            el.click();
-                                        }
-                                    }>
-                                        <span class="name">"Attach files"</span>
-                                        <span class="path">"Images and documents. Drag and paste still work."</span>
-                                    </button>
-                                    <Show when=move || speech_ok>
-                                        <button type="button" class="palette-row" data-chat-voice="true" on:click=move |_| {
-                                            plus_open.set(false);
-                                            let _ = crate::shell::dispatch("composer.voice", "");
-                                        }>
-                                            <span class="name">"Dictate"</span>
-                                            <span class="path">"Voice input from this browser"</span>
-                                        </button>
-                                    </Show>
-                                </div>
+                            <Show when=move || !queue_note.get().is_empty()>
+                                <p class="steer-error" role="alert">{move || queue_note.get()}</p>
                             </Show>
-                            <Show when=move || ac_open.get()>
-                                <div class="menu composer-suggest" role="listbox" data-composer-triggers="suggestions">
+                            <Show when=move || !queue_items.get().is_empty()>
+                                <ol class="queue-list" aria-label="Queued messages">
                                     {move || {
-                                        let selected_at = ac_index.get();
-                                        ac_items.get().into_iter().enumerate().map(move |(i, item)| {
-                                            let picked = item.clone();
-                                            let label = item.label.clone();
-                                            let detail = item.detail.clone();
-                                            let selectable = item.selectable;
-                                            let selected = i == selected_at;
-                                            let klass = if selected && selectable { "palette-row on" } else { "palette-row" };
-                                            view! {
-                                                <button type="button" role="option" class=klass disabled=move || !selectable aria-selected=selected.to_string() on:click=move |_| accept_suggestion(picked.clone(), &ui)>
-                                                    <span class="name">{label}</span>
-                                                    <span class="path">{detail}</span>
-                                                </button>
-                                            }
+                                        let busy_now = session_busy_now.get();
+                                        queue_items.get().into_iter().enumerate().map(|(i, item)| {
+                                        let id = item.id.clone();
+                                        let id_for_when = id.clone();
+                                        let id_for_fallback = id.clone();
+                                        let id_cancel = id.clone();
+                                        let id_focus = id.clone();
+                                        let id_send_now = id.clone();
+                                        let row_busy = busy_now;
+                                        let text_for_edit = item.text.clone();
+                                        let preview = steer_queue::preview(&text_for_edit);
+                                        view! {
+                                            <li on:mouseenter=move |_| queue_focus.set(id_focus.clone())>
+                                                <span class="queue-index">{(i + 1).to_string()}</span>
+                                                <Show when=move || editing_id.get() == id.clone() fallback=move || view! { <span class="queue-text">{preview.clone()}</span> }>
+                                                    <input class="queue-edit" prop:value=move || edit_draft.get() on:input=move |ev| edit_draft.set(event_target_value(&ev)) on:keydown=move |ev: web_sys::KeyboardEvent| {
+                                                        if ev.key() == "Enter" {
+                                                            ev.prevent_default();
+                                                            let id = editing_id.get_untracked();
+                                                            let text = edit_draft.get_untracked();
+                                                            editing_id.set(String::new());
+                                                            post_queue("input.queue_edit", serde_json::json!({"id": id, "text": text}));
+                                                        } else if ev.key() == "Escape" {
+                                                            ev.prevent_default();
+                                                            ev.stop_propagation();
+                                                            editing_id.set(String::new());
+                                                        }
+                                                    } />
+                                                </Show>
+                                                <span class="queue-actions">
+                                                    <Show when=move || row_busy>
+                                                        {let id_click = id_send_now.clone();
+                                                        view! {
+                                                            <button type="button" class="secondary" title="Send this message into the running turn now. The messages it jumps stay queued, in order." on:click=move |_| {
+                                                                steer_note.set(steer_queue::STEER_WAITING.into());
+                                                                steer_mode.set(String::new());
+                                                                post_queue("input.queue_send_now", serde_json::json!({"id": id_click.clone()}));
+                                                            }>"Send now"</button>
+                                                        }}
+                                                    </Show>
+                                                    <Show when=move || editing_id.get() == id_for_when.clone() fallback=move || {
+                                                        let id_edit = id_for_fallback.clone();
+                                                        let text = text_for_edit.clone();
+                                                        view! { <button type="button" class="secondary" on:click=move |_| { editing_id.set(id_edit.clone()); edit_draft.set(text.clone()); }>"Edit"</button> }
+                                                    }>
+                                                        <button type="button" class="secondary" on:click=move |_| {
+                                                            let id = editing_id.get_untracked();
+                                                            let text = edit_draft.get_untracked();
+                                                            editing_id.set(String::new());
+                                                            post_queue("input.queue_edit", serde_json::json!({"id": id, "text": text}));
+                                                        }>"Save"</button>
+                                                    </Show>
+                                                    <button type="button" class="secondary" title="Removes this queued message" on:click=move |_| {
+                                                        let id = id_cancel.clone();
+                                                        if !crate::confirm::ask(
+                                                            crate::confirm::ConfirmRequest {
+                                                                title: "Remove queued message?".into(),
+                                                                body: "This drops the message from the queue. It is not sent.".into(),
+                                                                confirm_label: "Remove".into(),
+                                                            },
+                                                            Rc::new(move || {
+                                                                post_queue(
+                                                                    "input.queue_cancel",
+                                                                    serde_json::json!({"id": id.clone()}),
+                                                                );
+                                                            }),
+                                                        ) {
+                                                            steer_note.set(crate::confirm::BUSY.into());
+                                                        }
+                                                    }>"Cancel"</button>
+                                                </span>
+                                            </li>
+                                        }
                                         }).collect_view()
                                     }}
-                                </div>
+                                </ol>
                             </Show>
-                            <div class="steer-queue" id="steer-queue">
-                                <Show when=move || !steer_note.get().is_empty()>
-                                    <p class="steer-note" role="status">{move || steer_note.get()}</p>
-                                </Show>
-                                <Show when=move || !queue_note.get().is_empty()>
-                                    <p class="steer-error" role="alert">{move || queue_note.get()}</p>
-                                </Show>
-                                <Show when=move || !queue_items.get().is_empty()>
-                                    <ol class="queue-list" aria-label="Queued messages">
-                                        {move || {
-                                            let busy_now = session_busy_now.get();
-                                            queue_items.get().into_iter().enumerate().map(|(i, item)| {
-                                            let id = item.id.clone();
-                                            let id_for_when = id.clone();
-                                            let id_for_fallback = id.clone();
-                                            let id_cancel = id.clone();
-                                            let id_focus = id.clone();
-                                            let id_send_now = id.clone();
-                                            let row_busy = busy_now;
-                                            let text_for_edit = item.text.clone();
-                                            let preview = steer_queue::preview(&text_for_edit);
-                                            view! {
-                                                <li on:mouseenter=move |_| queue_focus.set(id_focus.clone())>
-                                                    <span class="queue-index">{(i + 1).to_string()}</span>
-                                                    <Show when=move || editing_id.get() == id.clone() fallback=move || view! { <span class="queue-text">{preview.clone()}</span> }>
-                                                        <input class="queue-edit" prop:value=move || edit_draft.get() on:input=move |ev| edit_draft.set(event_target_value(&ev)) on:keydown=move |ev: web_sys::KeyboardEvent| {
-                                                            if ev.key() == "Enter" {
-                                                                ev.prevent_default();
-                                                                let id = editing_id.get_untracked();
-                                                                let text = edit_draft.get_untracked();
-                                                                editing_id.set(String::new());
-                                                                post_queue("input.queue_edit", serde_json::json!({"id": id, "text": text}));
-                                                            } else if ev.key() == "Escape" {
-                                                                ev.prevent_default();
-                                                                ev.stop_propagation();
-                                                                editing_id.set(String::new());
-                                                            }
-                                                        } />
-                                                    </Show>
-                                                    <span class="queue-actions">
-                                                        <Show when=move || row_busy>
-                                                            {let id_click = id_send_now.clone();
-                                                            view! {
-                                                                <button type="button" class="secondary" title="Send this message into the running turn now. The messages it jumps stay queued, in order." on:click=move |_| {
-                                                                    steer_note.set(steer_queue::STEER_WAITING.into());
-                                                                    steer_mode.set(String::new());
-                                                                    post_queue("input.queue_send_now", serde_json::json!({"id": id_click.clone()}));
-                                                                }>"Send now"</button>
-                                                            }}
-                                                        </Show>
-                                                        <Show when=move || editing_id.get() == id_for_when.clone() fallback=move || {
-                                                            let id_edit = id_for_fallback.clone();
-                                                            let text = text_for_edit.clone();
-                                                            view! { <button type="button" class="secondary" on:click=move |_| { editing_id.set(id_edit.clone()); edit_draft.set(text.clone()); }>"Edit"</button> }
-                                                        }>
-                                                            <button type="button" class="secondary" on:click=move |_| {
-                                                                let id = editing_id.get_untracked();
-                                                                let text = edit_draft.get_untracked();
-                                                                editing_id.set(String::new());
-                                                                post_queue("input.queue_edit", serde_json::json!({"id": id, "text": text}));
-                                                            }>"Save"</button>
-                                                        </Show>
-                                                        <button type="button" class="secondary" title="Removes this queued message" on:click=move |_| {
-                                                            let id = id_cancel.clone();
-                                                            if !crate::confirm::ask(
-                                                                crate::confirm::ConfirmRequest {
-                                                                    title: "Remove queued message?".into(),
-                                                                    body: "This drops the message from the queue. It is not sent.".into(),
-                                                                    confirm_label: "Remove".into(),
-                                                                },
-                                                                Rc::new(move || {
-                                                                    post_queue(
-                                                                        "input.queue_cancel",
-                                                                        serde_json::json!({"id": id.clone()}),
-                                                                    );
-                                                                }),
-                                                            ) {
-                                                                steer_note.set(crate::confirm::BUSY.into());
-                                                            }
-                                                        }>"Cancel"</button>
-                                                    </span>
-                                                </li>
-                                            }
-                                            }).collect_view()
-                                        }}
-                                    </ol>
-                                </Show>
-                                <Show when=move || !queue_items.get().is_empty() && !session_busy_now.get()>
-                                    <p class="queue-note">"No turn is running — queued messages send on their own, in order."</p>
-                                </Show>
-                            </div>
-                            <form on:submit=move |ev| { ev.prevent_default(); send(steer_queue::SendWhich::Primary); }>
-                                <Show when=move || !pending_files.get().is_empty()>
-                                    <div class="attach-row">
-                                        {move || pending_files.get().into_iter().map(|file| {
-                                            let id = file.id;
-                                            let name = file.name.clone();
-                                            let preview = file.preview.clone();
-                                            let error = file.error.clone();
-                                            let show_img = !preview.is_empty();
-                                            let show_err = !error.is_empty();
-                                            view! {
-                                                <span class="attach-chip">
-                                                    <Show when=move || show_img>
-                                                        <img src=preview.clone() alt="" />
-                                                    </Show>
-                                                    <span>
-                                                        <span class="name">{name}</span>
-                                                        <Show when=move || show_err>
-                                                            <span class="path">{error.clone()}</span>
-                                                        </Show>
-                                                    </span>
-                                                    <button type="button" aria-label="Remove attachment" on:click=move |_| {
-                                                        pending_files.update(|rows| {
-                                                            if let Some(i) = rows.iter().position(|row| row.id == id) {
-                                                                chat_mode::revoke_preview(&rows[i].preview);
-                                                                rows.remove(i);
-                                                            }
-                                                        });
-                                                    }>"Remove"</button>
-                                                </span>
-                                            }
-                                        }).collect_view()}
-                                    </div>
-                                </Show>
-                                <input class="file-pick" type="file" data-chat-file="true" data-chat-attach="true" node_ref=file_input multiple=true
-                                    accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,image/svg+xml,text/plain,application/zip,application/gzip"
-                                    on:change=move |_| {
-                                        if let Some(el) = file_input.get() {
-                                            if let Some(files) = el.files() {
-                                                chat_mode::enqueue_file_list(files, pending_files, status);
-                                            }
-                                            el.set_value("");
-                                        }
-                                    }
-                                />
-                                <textarea
-                                    id="composer-input"
-                                    placeholder="Message this session"
-                                    prop:value=move || draft.get()
-                                    on:input=move |ev| {
-                                        if let Some((text, cursor)) = textarea_state(ev.target()) {
-                                            draft.set(text.clone());
-                                            sync_composer_trigger(text, cursor, &ui);
-                                        }
-                                        // Auto-grow (#1411): the DOM value is
-                                        // already current in the input handler.
-                                        sync_composer_height_target(ev.target());
-                                    }
-                                    on:click=move |ev: web_sys::MouseEvent| {
-                                        if let Some((text, cursor)) = textarea_state(ev.target()) {
-                                            sync_composer_trigger(text, cursor, &ui);
-                                        }
-                                    }
-                                    on:keyup=move |ev: web_sys::KeyboardEvent| {
-                                        if matches!(ev.key().as_str(), "ArrowLeft" | "ArrowRight" | "Home" | "End") {
-                                            if let Some((text, cursor)) = textarea_state(ev.target()) {
-                                                sync_composer_trigger(text, cursor, &ui);
-                                            }
-                                        }
-                                    }
-                                    on:keydown=move |ev: web_sys::KeyboardEvent| {
-                                        if ev.key() == "ArrowDown" || ev.key() == "ArrowUp" {
-                                            let items = ac_items.get_untracked();
-                                            if ac_open.get_untracked() && items.iter().any(|item| item.selectable) {
-                                                ev.prevent_default();
-                                                let delta = if ev.key() == "ArrowDown" { 1 } else { -1 };
-                                                ac_index.set(move_index(&items, ac_index.get_untracked(), delta));
-                                            } else if !ev.ctrl_key() && !ev.meta_key() && !ev.alt_key() {
-                                                // Prompt history (#1402), after the
-                                                // autocomplete popup above has had
-                                                // first claim on ↑/↓. TUI rule
-                                                // (docs/keybinds.md:99): cycle only
-                                                // when the key would not move the
-                                                // caret within a multiline draft.
-                                                if let Some((text, cursor)) = textarea_state(ev.target()) {
-                                                    let up = ev.key() == "ArrowUp";
-                                                    let can_move = if up {
-                                                        caret_can_move_up(&text, cursor)
-                                                    } else {
-                                                        caret_can_move_down(&text, cursor)
-                                                    };
-                                                    if !can_move {
-                                                        let mut hist = prompt_history.get_untracked();
-                                                        let recalled = if up {
-                                                            hist.prev(&text)
-                                                        } else {
-                                                            hist.next(&text)
-                                                        };
-                                                        if let Some(value) = recalled {
-                                                            ev.prevent_default();
-                                                            prompt_history.set(hist);
-                                                            draft.set(value);
-                                                            place_composer_caret_end_soon();
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        } else if ev.key() == "Escape" && (ac_open.get_untracked() || plus_open.get_untracked()) {
-                                            ev.prevent_default();
-                                            ev.stop_propagation();
-                                            ac_open.set(false);
-                                            plus_open.set(false);
-                                            ac_force.set(String::new());
-                                        } else if ev.key() == "Tab" {
-                                            if ac_open.get_untracked() {
-                                                let items = ac_items.get_untracked();
-                                                let idx = ac_index.get_untracked();
-                                                if let Some(item) = items.get(idx) {
-                                                    if item.selectable {
-                                                        ev.prevent_default();
-                                                        accept_suggestion(item.clone(), &ui);
-                                                    }
-                                                }
-                                            }
-                                        } else if ev.key() == "Enter" && !ev.shift_key() {
-                                            if ac_open.get_untracked() {
-                                                ev.prevent_default();
-                                                let items = ac_items.get_untracked();
-                                                let idx = ac_index.get_untracked();
-                                                if let Some(item) = items.get(idx) {
-                                                    if item.selectable {
-                                                        accept_suggestion(item.clone(), &ui);
-                                                    }
-                                                }
-                                                return;
-                                            }
-                                            // Phone keyboards use Enter for a newline. Send is the button.
-                                            if !mobile::is_phone() {
-                                                ev.prevent_default();
-                                                if ev.alt_key() && !ev.ctrl_key() && !ev.meta_key() {
-                                                    hold_bypass.set(true);
-                                                    send(steer_queue::SendWhich::Primary);
-                                                } else if ev.ctrl_key() || ev.meta_key() {
-                                                    send(steer_queue::SendWhich::Alternate);
-                                                } else {
-                                                    send(steer_queue::SendWhich::Primary);
-                                                }
-                                            }
-                                        } else if ev.key() == "Escape"
-                                            && draft.get_untracked().trim().is_empty()
-                                            && editing_id.get_untracked().is_empty()
-                                        {
-                                            let root = active_root.get_untracked();
-                                            if session_busy(&root)
-                                                && !mode_menu.get_untracked()
-                                                && !model_menu.get_untracked()
-                                                && !memory_menu.get_untracked()
-                                            {
-                                                ev.prevent_default();
-                                                ev.stop_propagation();
-                                                stop_turn();
-                                            }
-                                        } else if ev.key() == "Backspace" && draft.get_untracked().is_empty() {
-                                            if let Some(item) = queue_items.get_untracked().last().cloned() {
-                                                ev.prevent_default();
-                                                draft.set(item.text);
-                                                post_queue("input.queue_cancel", serde_json::json!({"id": item.id}));
-                                            }
-                                        }
-                                    }
-                                    on:paste=move |ev: web_sys::ClipboardEvent| {
-                                        if let Some(data) = ev.clipboard_data() {
-                                            if let Some(files) = data.files() {
-                                                if files.length() > 0 {
-                                                    ev.prevent_default();
-                                                    chat_mode::enqueue_file_list(files, pending_files, status);
-                                                }
-                                            }
-                                        }
-                                    }
-                                ></textarea>
-                                <div class="composer-bar">
-                                    <div class="composer-chips">
-                                    <button type="button" class="chip plus" aria-label="Composer actions" data-composer-triggers="plus-button" on:click=move |_| {
-                                        mode_menu.set(false);
-                                        model_menu.set(false);
-                                        ac_open.set(false);
-                                        ac_force.set(String::new());
-                                        plus_open.update(|v| *v = !*v);
-                                    }>"+"</button>
-                                    <span class=move || {
-                                        if approvals::is_dangerous(&perm_mode.get()) {
-                                            "composer-glance approvals-mode-chip danger"
-                                        } else {
-                                            "composer-glance approvals-mode-chip"
-                                        }
-                                    } data-approval-status="true">{move || format!("Approval · {}", mode_label(&perm_mode.get()))}</span>
-                                    <button type="button" class=move || {
-                                        // Non-default autonomy is safety-relevant
-                                        // state (#1572): a session not on the
-                                        // supervised default must read that way at
-                                        // a glance, phone included.
-                                        if crate::model::autonomy_or_default(&autonomy.get()) != "supervised" {
-                                            "composer-glance approvals-mode-chip danger"
-                                        } else {
-                                            "composer-glance approvals-mode-chip"
-                                        }
-                                    } data-autonomy-status="true" title="Autonomy — who clears a workflow phase exit. Opens the autonomy picker." on:click=move |_| {
-                                        mode_menu.set(false);
-                                        model_menu.set(false);
-                                        autonomy_menu.update(|v| *v = !*v);
-                                    }>{move || format!("Autonomy · {}", crate::model::autonomy_label(&autonomy.get()))}</button>
-                                    <Show when=move || fast_on.get()>
-                                        <span class="composer-glance" data-fast-status="true" title="Fast (priority service tier) is on for this session, as confirmed by the daemon. The current provider may not support priority tier.">"Fast · on"</span>
-                                    </Show>
-                                    <span class="composer-glance" data-model-status="true">{move || {
-                                        let model = model_name.get();
-                                        let name = if model.is_empty() { provider_name.get() } else { model };
-                                        if name.is_empty() { "Model · none".into() } else { format!("Model · {name}") }
-                                    }}</span>
-                                    </div>
-                                    <div class="steer-actions">
-                                        <Show when=move || session_busy_now.get()>
-                                            <button type="button" id="stop-turn" class=move || if confirm_stop.get() { "secondary confirming" } else { "secondary" } title="Stops the running turn. Click again to confirm. Escape still stops immediately." on:click=move |_| {
-                                                if confirm_stop.get_untracked() {
-                                                    confirm_stop.set(false);
-                                                    stop_turn();
-                                                } else {
-                                                    confirm_cancel.set(String::new());
-                                                    confirm_stop.set(true);
-                                                }
-                                            }>{move || if confirm_stop.get() { "Confirm" } else { "Stop" }}</button>
-                                        </Show>
-                                        <button id="send-primary" class="primary send" type="submit" disabled=move || {
-                                            let ctx = active_context(&catalog.get(), &provider_name.get(), &model_name.get());
-                                            context_view(context_used.get(), context_limit.get(), ctx, &context_fit.get()).held
-                                        }>{move || steer_queue::primary_label(session_busy_now.get(), &enter_mode.get())}</button>
-                                    </div>
-                                </div>
-                            </form>
-                            <Show when=move || !model_note.get().is_empty() && !model_menu.get()>
-                                <p class="hint" data-model-note="true">{move || model_note.get()}</p>
+                            <Show when=move || !queue_items.get().is_empty() && !session_busy_now.get()>
+                                <p class="queue-note">"No turn is running — queued messages send on their own, in order."</p>
                             </Show>
-                            <p class="hint composer-statusline" data-composer-triggers="status">{
-                                let memory_mode = memory_mode;
-                                move || {
-                                let note = transcript.with(|t| t.trigger_note.clone());
-                                let pending = transcript.with(|t| t.asks.len());
-                                let custom = trigger_status(&note, pending);
-                                let mode = memory_mode.get();
-                                let memory = if mode == "normal" || mode.is_empty() {
-                                    String::new()
-                                } else {
-                                    format!("Memory · {}", memory_mode_label(&mode))
-                                };
-                                let ctx = active_context(&catalog.get(), &provider_name.get(), &model_name.get());
-                                let meter = {
-                                    let view = context_view(context_used.get(), context_limit.get(), ctx, &context_fit.get());
-                                    if view.limit <= 0 { String::new() } else { view.summary }
-                                };
-                                view! {
-                                    <span>{if custom.is_empty() { memory } else { custom }}</span>
-                                    <span class="context-meter">{meter}</span>
-                                }
-                            }}</p>
                         </div>
-                    </section>
-                    <aside class="side">
-                        <div class="side-tabs" role="tablist" aria-label="Side panel">
-                            <button class=move || if side_tab.get() == "activity" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("activity".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("activity")></span>"Activity"</button>
-                            <button class=move || if side_tab.get() == "files" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("files".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("files")></span>"Files"</button>
-                            <button class=move || if side_tab.get() == "changes" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("changes".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("changes")></span>"Changes"</button>
-                            <button class=move || if side_tab.get() == "git" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("git".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("git")></span>"Git"</button>
-                            <button class=move || if side_tab.get() == "terminal" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("terminal".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("terminal")></span>"Terminal"</button>
-                        </div>
-                        <Show when=move || side_tab.get() == "activity">
-                        <div class="activity">
-                        <header class="activity-head">
-                            <span class="hint">"Live tasks"</span>
-                            <span class="row-actions">
-                                <button type="button" class="secondary side-chat-open-activity" on:click=move |_| open_side(String::new(), String::new())>"Side chat"</button>
-                                <button class="secondary" disabled=move || running_count() == 0 on:click=move |_| stop_all()>"Stop all"</button>
-                            </span>
-                        </header>
-                            <div class="stats">
-                            <StatCard label="Running".into()>{move || running_count().to_string()}</StatCard>
-                            <StatCard label="Blocked".into()>{move || blocked_count().to_string()}</StatCard>
-                            <StatCard label="Tasks".into()>{move || activity.get().len().to_string()}</StatCard>
-                        </div>
-                        <Show when=move || !team_note.get().is_empty()>
-                            <p class="hint" data-team-note="true">{move || team_note.get()}</p>
-                        </Show>
-                        <Show when=move || !children_note.get().is_empty()>
-                            <p class="hint" data-children-note="true">{move || children_note.get()}</p>
-                        </Show>
-                        <Show when=move || activity.get().is_empty()>
-                            {move || {
-                                let failed = !children_note.get().is_empty();
-                                let title = if failed {
-                                    "Delegation history unavailable".to_string()
-                                } else {
-                                    "No live tasks".to_string()
-                                };
-                                let body = if failed {
-                                    "Saved children did not load, so this panel is not a complete delegation history.".to_string()
-                                } else {
-                                    "Delegated work for this session shows its status here.".to_string()
-                                };
-                                view! { <EmptyState title=title body=body /> }
-                            }}
-                        </Show>
-                        <ul class="plain">
-                            {move || {
-                                let _ = tick.get();
-                                activity.get().into_iter().map(|row| {
-                                    let state = row.state.clone();
-                                    let started_ms = row.started_ms;
-                                    let server_elapsed = row.elapsed_s;
-                                    let elapsed = if started_ms <= 0.0 && server_elapsed <= 0 {
-                                        String::new()
-                                    } else {
-                                        let local = if started_ms <= 0.0 {
-                                            server_elapsed
-                                        } else {
-                                            ((now_ms() - started_ms) / 1000.0) as i64
-                                        };
-                                        fmt_elapsed(local.max(server_elapsed))
-                                    };
-                                    let show_elapsed = !elapsed.is_empty();
-                                    let sid = row.session_id.clone();
-                                    let sid_stop = sid.clone();
-                                    let task_retry = row.task.clone();
-                                    let headline = task_headline(&row.task);
-                                    let show_task = !headline.is_empty();
-                                    let output = row.output.clone();
-                                    let expanded = row.expanded;
-                                    let running = is_running(&state);
-                                    let retry = can_retry(&state);
-                                    let name = row.name.clone();
-                                    let name_chat = name.clone();
-                                    let sid_chat = sid.clone();
-                                    let who = name.clone();
-                                    let agent = row.agent.clone();
-                                    let agent_label = agent.clone();
-                                    let primary = if show_task { headline } else { name.clone() };
-                                    let kind = StatusKind::parse_known(&state);
-                                    let status_label = if state == "stalled" {
-                                        "Stalled".to_string()
-                                    } else if let Some(kind) = kind {
-                                        kind.label().to_string()
-                                    } else {
-                                        state.clone()
-                                    };
-                                    let mark_kind = kind.unwrap_or(StatusKind::Idle);
-                                    view! {
-                                        <li class="card activity-row">
-                                            <button class="link activity-main" on:click=move |_| {
-                                                let sid = sid.clone();
-                                                activity.update(|rows| {
-                                                    if let Some(r) = rows.iter_mut().find(|r| r.session_id == sid) {
-                                                        r.expanded = !r.expanded;
-                                                    }
-                                                });
-                                            }>
-                                                <span class="task-line">
-                                                    <StatusMark kind=mark_kind place=StatusSlot::Dot />
-                                                    <span class="name">{primary}</span>
-                                                    <StatusMark kind=mark_kind place=StatusSlot::Badge label=status_label />
-                                                </span>
-                                                <span class="task-meta">
-                                                    <Show when=move || show_task>
-                                                        <span class="path">{who.clone()}</span>
-                                                    </Show>
-                                                    <Show when=move || !agent.is_empty()>
-                                                        <span class="path">{agent_label.clone()}</span>
-                                                    </Show>
-                                                    <Show when=move || show_elapsed>
-                                                        <span class="elapsed">{elapsed.clone()}</span>
-                                                    </Show>
-                                                </span>
-                                            </button>
-                                            <div class="row-actions">
-                                                <button type="button" class="secondary" on:click={
-                                                    let sid_chat = sid_chat.clone();
-                                                    let name_chat = name_chat.clone();
-                                                    move |ev: web_sys::MouseEvent| {
-                                                        ev.stop_propagation();
-                                                        open_side(sid_chat.clone(), name_chat.clone());
-                                                    }
-                                                }>"Side chat"</button>
-                                                <button class="secondary" disabled=move || !running on:click={
-                                                    let sid_stop = sid_stop.clone();
-                                                    move |ev: web_sys::MouseEvent| {
-                                                        ev.stop_propagation();
-                                                        stop_child(sid_stop.clone());
-                                                    }
-                                                }>"Stop"</button>
-                                                <Show when=move || retry>
-                                                    <button class="secondary" on:click={
-                                                        let task_retry = task_retry.clone();
-                                                        move |ev: web_sys::MouseEvent| {
-                                                            ev.stop_propagation();
-                                                            retry_child(task_retry.clone());
-                                                        }
-                                                    }>"Retry"</button>
+                        <form on:submit=move |ev| { ev.prevent_default(); send(steer_queue::SendWhich::Primary); }>
+                            <Show when=move || !pending_files.get().is_empty()>
+                                <div class="attach-row">
+                                    {move || pending_files.get().into_iter().map(|file| {
+                                        let id = file.id;
+                                        let name = file.name.clone();
+                                        let preview = file.preview.clone();
+                                        let error = file.error.clone();
+                                        let show_img = !preview.is_empty();
+                                        let show_err = !error.is_empty();
+                                        view! {
+                                            <span class="attach-chip">
+                                                <Show when=move || show_img>
+                                                    <img src=preview.clone() alt="" />
                                                 </Show>
-                                            </div>
-                                            <Show when=move || expanded>
-                                                <pre class="output">{if output.is_empty() { "No output yet.".to_string() } else { output.clone() }}</pre>
-                                            </Show>
-                                        </li>
-                                    }
-                                }).collect_view()
-                            }}
-                        </ul>
-                        </div>
-                        </Show>
-                        <Show when=move || side_tab.get() == "files">
-                            <div class="files">
-                                <div class="files-head">
-                                    <p class="hint">{move || if files_path.get().is_empty() { "Working directory".into() } else { files_path.get() }}</p>
-                                    <button class="secondary" on:click=move |_| load_files()>"Refresh"</button>
-                                </div>
-                                <Show when=move || !files_error.get().is_empty()>
-                                    <div class="notice" role="alert">
-                                        <span>{move || files_error.get()}</span>
-                                        <button class="secondary" on:click=move |_| load_files()>"Retry"</button>
-                                    </div>
-                                </Show>
-                                <Show when=move || !files_path.get().is_empty()>
-                                    <button class="secondary" on:click=move |_| files_path.set(parent_path(&files_path.get()))>"Up"</button>
-                                </Show>
-                                <ul class="plain">
-                                    {move || {
-                                        let pending = files_loading.get() || files_for.get() != files_path.get();
-                                        if pending {
-                                            return view! { <li class="hint">"Loading…"</li> }.into_any();
-                                        }
-                                        files.get().into_iter().map(|entry| {
-                                        let name = entry.name.clone();
-                                        let path = join_path(&files_path.get(), &entry.name);
-                                        let path_drag = path.clone();
-                                        let path_click = path.clone();
-                                        let is_dir = entry.is_dir;
-                                        let label = if is_dir { format!("{name}/") } else { name.clone() };
-                                        let open_attr = if is_dir { String::new() } else { path.clone() };
-                                        view! {
-                                            <li class="ev-fileline">
-                                                <button class="link file-row" draggable="true" data-ev-open=open_attr
-                                                    on:dragstart=move |ev: web_sys::DragEvent| set_drag(&ev, &path_drag)
-                                                    on:click=move |_| {
-                                                        if is_dir {
-                                                            files_path.set(path_click.clone());
-                                                        } else {
-                                                            doc_line.set(0);
-                                                            doc_diff.set(false);
-                                                            doc_path.set(path_click.clone());
+                                                <span>
+                                                    <span class="name">{name}</span>
+                                                    <Show when=move || show_err>
+                                                        <span class="path">{error.clone()}</span>
+                                                    </Show>
+                                                </span>
+                                                <button type="button" aria-label="Remove attachment" on:click=move |_| {
+                                                    pending_files.update(|rows| {
+                                                        if let Some(i) = rows.iter().position(|row| row.id == id) {
+                                                            chat_mode::revoke_preview(&rows[i].preview);
+                                                            rows.remove(i);
                                                         }
-                                                    }
-                                                >{label}</button>
-                                            </li>
-                                        }
-                                    }).collect_view().into_any()
-                                    }}
-                                </ul>
-                            </div>
-                        </Show>
-                        <Show when=move || side_tab.get() == "changes">
-                            <div class="changes">
-                                <div class="changes-head">
-                                    <p class="hint">"Changed files"</p>
-                                    <button class="secondary" on:click=move |_| load_changes()>"Refresh"</button>
-                                </div>
-                                <Show when=move || !changes_error.get().is_empty()>
-                                    <div class="notice" role="alert">
-                                        <span>{move || changes_error.get()}</span>
-                                        <button class="secondary" on:click=move |_| load_changes()>"Retry"</button>
-                                    </div>
-                                </Show>
-                                <Show when=move || changes.get().is_empty() && changes_error.get().is_empty()>
-                                    <EmptyState title="No changes".into() body="Git diffs for the daemon working directory show up here.".into() />
-                                </Show>
-                                <ul class="plain">
-                                    {move || changes.get().into_iter().map(|file| {
-                                        let path = file.path.clone();
-                                        let path_drag = path.clone();
-                                        let path_click = path.clone();
-                                        let added = file.added;
-                                        let deleted = file.deleted;
-                                        view! {
-                                            <li class="ev-fileline">
-                                                <button class="link file-row" draggable="true" data-ev-open=path.clone()
-                                                    on:dragstart=move |ev: web_sys::DragEvent| set_drag(&ev, &path_drag)
-                                                    on:click=move |_| {
-                                                        doc_line.set(0);
-                                                        doc_diff.set(true);
-                                                        doc_path.set(path_click.clone());
-                                                    }
-                                                >
-                                                    <span class="name">{path.clone()}</span>
-                                                    <span class="diff-add">{format!("+{added}")}</span>
-                                                    <span class="diff-del">{format!("-{deleted}")}</span>
-                                                </button>
-                                            </li>
+                                                    });
+                                                }>"Remove"</button>
+                                            </span>
                                         }
                                     }).collect_view()}
-                                </ul>
+                                </div>
+                            </Show>
+                            <input class="file-pick" type="file" data-chat-file="true" data-chat-attach="true" node_ref=file_input multiple=true
+                                accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,image/svg+xml,text/plain,application/zip,application/gzip"
+                                on:change=move |_| {
+                                    if let Some(el) = file_input.get() {
+                                        if let Some(files) = el.files() {
+                                            chat_mode::enqueue_file_list(files, pending_files, status);
+                                        }
+                                        el.set_value("");
+                                    }
+                                }
+                            />
+                            <textarea
+                                id="composer-input"
+                                placeholder="Message this session"
+                                prop:value=move || draft.get()
+                                on:input=move |ev| {
+                                    if let Some((text, cursor)) = textarea_state(ev.target()) {
+                                        draft.set(text.clone());
+                                        sync_composer_trigger(text, cursor, &ui);
+                                    }
+                                    // Auto-grow (#1411): the DOM value is
+                                    // already current in the input handler.
+                                    sync_composer_height_target(ev.target());
+                                }
+                                on:click=move |ev: web_sys::MouseEvent| {
+                                    if let Some((text, cursor)) = textarea_state(ev.target()) {
+                                        sync_composer_trigger(text, cursor, &ui);
+                                    }
+                                }
+                                on:keyup=move |ev: web_sys::KeyboardEvent| {
+                                    if matches!(ev.key().as_str(), "ArrowLeft" | "ArrowRight" | "Home" | "End") {
+                                        if let Some((text, cursor)) = textarea_state(ev.target()) {
+                                            sync_composer_trigger(text, cursor, &ui);
+                                        }
+                                    }
+                                }
+                                on:keydown=move |ev: web_sys::KeyboardEvent| {
+                                    if ev.key() == "ArrowDown" || ev.key() == "ArrowUp" {
+                                        let items = ac_items.get_untracked();
+                                        if ac_open.get_untracked() && items.iter().any(|item| item.selectable) {
+                                            ev.prevent_default();
+                                            let delta = if ev.key() == "ArrowDown" { 1 } else { -1 };
+                                            ac_index.set(move_index(&items, ac_index.get_untracked(), delta));
+                                        } else if !ev.ctrl_key() && !ev.meta_key() && !ev.alt_key() {
+                                            // Prompt history (#1402), after the
+                                            // autocomplete popup above has had
+                                            // first claim on ↑/↓. TUI rule
+                                            // (docs/keybinds.md:99): cycle only
+                                            // when the key would not move the
+                                            // caret within a multiline draft.
+                                            if let Some((text, cursor)) = textarea_state(ev.target()) {
+                                                let up = ev.key() == "ArrowUp";
+                                                let can_move = if up {
+                                                    caret_can_move_up(&text, cursor)
+                                                } else {
+                                                    caret_can_move_down(&text, cursor)
+                                                };
+                                                if !can_move {
+                                                    let mut hist = prompt_history.get_untracked();
+                                                    let recalled = if up {
+                                                        hist.prev(&text)
+                                                    } else {
+                                                        hist.next(&text)
+                                                    };
+                                                    if let Some(value) = recalled {
+                                                        ev.prevent_default();
+                                                        prompt_history.set(hist);
+                                                        draft.set(value);
+                                                        place_composer_caret_end_soon();
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    } else if ev.key() == "Escape" && (ac_open.get_untracked() || plus_open.get_untracked()) {
+                                        ev.prevent_default();
+                                        ev.stop_propagation();
+                                        ac_open.set(false);
+                                        plus_open.set(false);
+                                        ac_force.set(String::new());
+                                    } else if ev.key() == "Tab" {
+                                        if ac_open.get_untracked() {
+                                            let items = ac_items.get_untracked();
+                                            let idx = ac_index.get_untracked();
+                                            if let Some(item) = items.get(idx) {
+                                                if item.selectable {
+                                                    ev.prevent_default();
+                                                    accept_suggestion(item.clone(), &ui);
+                                                }
+                                            }
+                                        }
+                                    } else if ev.key() == "Enter" && !ev.shift_key() {
+                                        if ac_open.get_untracked() {
+                                            ev.prevent_default();
+                                            let items = ac_items.get_untracked();
+                                            let idx = ac_index.get_untracked();
+                                            if let Some(item) = items.get(idx) {
+                                                if item.selectable {
+                                                    accept_suggestion(item.clone(), &ui);
+                                                }
+                                            }
+                                            return;
+                                        }
+                                        // Phone keyboards use Enter for a newline. Send is the button.
+                                        if !mobile::is_phone() {
+                                            ev.prevent_default();
+                                            if ev.alt_key() && !ev.ctrl_key() && !ev.meta_key() {
+                                                hold_bypass.set(true);
+                                                send(steer_queue::SendWhich::Primary);
+                                            } else if ev.ctrl_key() || ev.meta_key() {
+                                                send(steer_queue::SendWhich::Alternate);
+                                            } else {
+                                                send(steer_queue::SendWhich::Primary);
+                                            }
+                                        }
+                                    } else if ev.key() == "Escape"
+                                        && draft.get_untracked().trim().is_empty()
+                                        && editing_id.get_untracked().is_empty()
+                                    {
+                                        let root = active_root.get_untracked();
+                                        if session_busy(&root)
+                                            && !mode_menu.get_untracked()
+                                            && !model_menu.get_untracked()
+                                            && !memory_menu.get_untracked()
+                                        {
+                                            ev.prevent_default();
+                                            ev.stop_propagation();
+                                            stop_turn();
+                                        }
+                                    } else if ev.key() == "Backspace" && draft.get_untracked().is_empty() {
+                                        if let Some(item) = queue_items.get_untracked().last().cloned() {
+                                            ev.prevent_default();
+                                            draft.set(item.text);
+                                            post_queue("input.queue_cancel", serde_json::json!({"id": item.id}));
+                                        }
+                                    }
+                                }
+                                on:paste=move |ev: web_sys::ClipboardEvent| {
+                                    if let Some(data) = ev.clipboard_data() {
+                                        if let Some(files) = data.files() {
+                                            if files.length() > 0 {
+                                                ev.prevent_default();
+                                                chat_mode::enqueue_file_list(files, pending_files, status);
+                                            }
+                                        }
+                                    }
+                                }
+                            ></textarea>
+                            <div class="composer-bar">
+                                <div class="composer-chips">
+                                <button type="button" class="chip plus" aria-label="Composer actions" data-composer-triggers="plus-button" on:click=move |_| {
+                                    mode_menu.set(false);
+                                    model_menu.set(false);
+                                    ac_open.set(false);
+                                    ac_force.set(String::new());
+                                    plus_open.update(|v| *v = !*v);
+                                }>"+"</button>
+                                <span class=move || {
+                                    if approvals::is_dangerous(&perm_mode.get()) {
+                                        "composer-glance approvals-mode-chip danger"
+                                    } else {
+                                        "composer-glance approvals-mode-chip"
+                                    }
+                                } data-approval-status="true">{move || format!("Approval · {}", mode_label(&perm_mode.get()))}</span>
+                                <button type="button" class=move || {
+                                    // Non-default autonomy is safety-relevant
+                                    // state (#1572): a session not on the
+                                    // supervised default must read that way at
+                                    // a glance, phone included.
+                                    if crate::model::autonomy_or_default(&autonomy.get()) != "supervised" {
+                                        "composer-glance approvals-mode-chip danger"
+                                    } else {
+                                        "composer-glance approvals-mode-chip"
+                                    }
+                                } data-autonomy-status="true" title="Autonomy — who clears a workflow phase exit. Opens the autonomy picker." on:click=move |_| {
+                                    mode_menu.set(false);
+                                    model_menu.set(false);
+                                    autonomy_menu.update(|v| *v = !*v);
+                                }>{move || format!("Autonomy · {}", crate::model::autonomy_label(&autonomy.get()))}</button>
+                                <Show when=move || fast_on.get()>
+                                    <span class="composer-glance" data-fast-status="true" title="Fast (priority service tier) is on for this session, as confirmed by the daemon. The current provider may not support priority tier.">"Fast · on"</span>
+                                </Show>
+                                <span class="composer-glance" data-model-status="true">{move || {
+                                    let model = model_name.get();
+                                    let name = if model.is_empty() { provider_name.get() } else { model };
+                                    if name.is_empty() { "Model · none".into() } else { format!("Model · {name}") }
+                                }}</span>
+                                </div>
+                                <div class="steer-actions">
+                                    <Show when=move || session_busy_now.get()>
+                                        <button type="button" id="stop-turn" class=move || if confirm_stop.get() { "secondary confirming" } else { "secondary" } title="Stops the running turn. Click again to confirm. Escape still stops immediately." on:click=move |_| {
+                                            if confirm_stop.get_untracked() {
+                                                confirm_stop.set(false);
+                                                stop_turn();
+                                            } else {
+                                                confirm_cancel.set(String::new());
+                                                confirm_stop.set(true);
+                                            }
+                                        }>{move || if confirm_stop.get() { "Confirm" } else { "Stop" }}</button>
+                                    </Show>
+                                    <button id="send-primary" class="primary send" type="submit" disabled=move || {
+                                        let ctx = active_context(&catalog.get(), &provider_name.get(), &model_name.get());
+                                        context_view(context_used.get(), context_limit.get(), ctx, &context_fit.get()).held
+                                    }>{move || steer_queue::primary_label(session_busy_now.get(), &enter_mode.get())}</button>
+                                </div>
                             </div>
+                        </form>
+                        <Show when=move || !model_note.get().is_empty() && !model_menu.get()>
+                            <p class="hint" data-model-note="true">{move || model_note.get()}</p>
                         </Show>
-                        <div hidden=move || !git_active.get()>
-                            <git::GitPanel base=base token=token status_line=status active=git_active />
+                        <p class="hint composer-statusline" data-composer-triggers="status">{
+                            let memory_mode = memory_mode;
+                            move || {
+                            let note = transcript.with(|t| t.trigger_note.clone());
+                            let pending = transcript.with(|t| t.asks.len());
+                            let custom = trigger_status(&note, pending);
+                            let mode = memory_mode.get();
+                            let memory = if mode == "normal" || mode.is_empty() {
+                                String::new()
+                            } else {
+                                format!("Memory · {}", memory_mode_label(&mode))
+                            };
+                            let ctx = active_context(&catalog.get(), &provider_name.get(), &model_name.get());
+                            let meter = {
+                                let view = context_view(context_used.get(), context_limit.get(), ctx, &context_fit.get());
+                                if view.limit <= 0 { String::new() } else { view.summary }
+                            };
+                            view! {
+                                <span>{if custom.is_empty() { memory } else { custom }}</span>
+                                <span class="context-meter">{meter}</span>
+                            }
+                        }}</p>
+                    </div>
+                </section>
+                <aside class="side">
+                    <div class="side-tabs" role="tablist" aria-label="Side panel">
+                        <button class=move || if side_tab.get() == "activity" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("activity".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("activity")></span>"Activity"</button>
+                        <button class=move || if side_tab.get() == "files" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("files".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("files")></span>"Files"</button>
+                        <button class=move || if side_tab.get() == "changes" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("changes".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("changes")></span>"Changes"</button>
+                        <button class=move || if side_tab.get() == "git" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("git".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("git")></span>"Git"</button>
+                        <button class=move || if side_tab.get() == "terminal" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("terminal".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("terminal")></span>"Terminal"</button>
+                    </div>
+                    <Show when=move || side_tab.get() == "activity">
+                    <div class="activity">
+                    <header class="activity-head">
+                        <span class="hint">"Live tasks"</span>
+                        <span class="row-actions">
+                            <button type="button" class="secondary side-chat-open-activity" on:click=move |_| open_side(String::new(), String::new())>"Side chat"</button>
+                            <button class="secondary" disabled=move || running_count() == 0 on:click=move |_| stop_all()>"Stop all"</button>
+                        </span>
+                    </header>
+                        <div class="stats">
+                        <StatCard label="Running".into()>{move || running_count().to_string()}</StatCard>
+                        <StatCard label="Blocked".into()>{move || blocked_count().to_string()}</StatCard>
+                        <StatCard label="Tasks".into()>{move || activity.get().len().to_string()}</StatCard>
+                    </div>
+                    <Show when=move || !team_note.get().is_empty()>
+                        <p class="hint" data-team-note="true">{move || team_note.get()}</p>
+                    </Show>
+                    <Show when=move || !children_note.get().is_empty()>
+                        <p class="hint" data-children-note="true">{move || children_note.get()}</p>
+                    </Show>
+                    <Show when=move || activity.get().is_empty()>
+                        {move || {
+                            let failed = !children_note.get().is_empty();
+                            let title = if failed {
+                                "Delegation history unavailable".to_string()
+                            } else {
+                                "No live tasks".to_string()
+                            };
+                            let body = if failed {
+                                "Saved children did not load, so this panel is not a complete delegation history.".to_string()
+                            } else {
+                                "Delegated work for this session shows its status here.".to_string()
+                            };
+                            view! { <EmptyState title=title body=body /> }
+                        }}
+                    </Show>
+                    <ul class="plain">
+                        {move || {
+                            let _ = tick.get();
+                            activity.get().into_iter().map(|row| {
+                                let state = row.state.clone();
+                                let started_ms = row.started_ms;
+                                let server_elapsed = row.elapsed_s;
+                                let elapsed = if started_ms <= 0.0 && server_elapsed <= 0 {
+                                    String::new()
+                                } else {
+                                    let local = if started_ms <= 0.0 {
+                                        server_elapsed
+                                    } else {
+                                        ((now_ms() - started_ms) / 1000.0) as i64
+                                    };
+                                    fmt_elapsed(local.max(server_elapsed))
+                                };
+                                let show_elapsed = !elapsed.is_empty();
+                                let sid = row.session_id.clone();
+                                let sid_stop = sid.clone();
+                                let task_retry = row.task.clone();
+                                let headline = task_headline(&row.task);
+                                let show_task = !headline.is_empty();
+                                let output = row.output.clone();
+                                let expanded = row.expanded;
+                                let running = is_running(&state);
+                                let retry = can_retry(&state);
+                                let name = row.name.clone();
+                                let name_chat = name.clone();
+                                let sid_chat = sid.clone();
+                                let who = name.clone();
+                                let agent = row.agent.clone();
+                                let agent_label = agent.clone();
+                                let primary = if show_task { headline } else { name.clone() };
+                                let kind = StatusKind::parse_known(&state);
+                                let status_label = if state == "stalled" {
+                                    "Stalled".to_string()
+                                } else if let Some(kind) = kind {
+                                    kind.label().to_string()
+                                } else {
+                                    state.clone()
+                                };
+                                let mark_kind = kind.unwrap_or(StatusKind::Idle);
+                                view! {
+                                    <li class="card activity-row">
+                                        <button class="link activity-main" on:click=move |_| {
+                                            let sid = sid.clone();
+                                            activity.update(|rows| {
+                                                if let Some(r) = rows.iter_mut().find(|r| r.session_id == sid) {
+                                                    r.expanded = !r.expanded;
+                                                }
+                                            });
+                                        }>
+                                            <span class="task-line">
+                                                <StatusMark kind=mark_kind place=StatusSlot::Dot />
+                                                <span class="name">{primary}</span>
+                                                <StatusMark kind=mark_kind place=StatusSlot::Badge label=status_label />
+                                            </span>
+                                            <span class="task-meta">
+                                                <Show when=move || show_task>
+                                                    <span class="path">{who.clone()}</span>
+                                                </Show>
+                                                <Show when=move || !agent.is_empty()>
+                                                    <span class="path">{agent_label.clone()}</span>
+                                                </Show>
+                                                <Show when=move || show_elapsed>
+                                                    <span class="elapsed">{elapsed.clone()}</span>
+                                                </Show>
+                                            </span>
+                                        </button>
+                                        <div class="row-actions">
+                                            <button type="button" class="secondary" on:click={
+                                                let sid_chat = sid_chat.clone();
+                                                let name_chat = name_chat.clone();
+                                                move |ev: web_sys::MouseEvent| {
+                                                    ev.stop_propagation();
+                                                    open_side(sid_chat.clone(), name_chat.clone());
+                                                }
+                                            }>"Side chat"</button>
+                                            <button class="secondary" disabled=move || !running on:click={
+                                                let sid_stop = sid_stop.clone();
+                                                move |ev: web_sys::MouseEvent| {
+                                                    ev.stop_propagation();
+                                                    stop_child(sid_stop.clone());
+                                                }
+                                            }>"Stop"</button>
+                                            <Show when=move || retry>
+                                                <button class="secondary" on:click={
+                                                    let task_retry = task_retry.clone();
+                                                    move |ev: web_sys::MouseEvent| {
+                                                        ev.stop_propagation();
+                                                        retry_child(task_retry.clone());
+                                                    }
+                                                }>"Retry"</button>
+                                            </Show>
+                                        </div>
+                                        <Show when=move || expanded>
+                                            <pre class="output">{if output.is_empty() { "No output yet.".to_string() } else { output.clone() }}</pre>
+                                        </Show>
+                                    </li>
+                                }
+                            }).collect_view()
+                        }}
+                    </ul>
+                    </div>
+                    </Show>
+                    <Show when=move || side_tab.get() == "files">
+                        <div class="files">
+                            <div class="files-head">
+                                <p class="hint">{move || if files_path.get().is_empty() { "Working directory".into() } else { files_path.get() }}</p>
+                                <button class="secondary" on:click=move |_| load_files()>"Refresh"</button>
+                            </div>
+                            <Show when=move || !files_error.get().is_empty()>
+                                <div class="notice" role="alert">
+                                    <span>{move || files_error.get()}</span>
+                                    <button class="secondary" on:click=move |_| load_files()>"Retry"</button>
+                                </div>
+                            </Show>
+                            <Show when=move || !files_path.get().is_empty()>
+                                <button class="secondary" on:click=move |_| files_path.set(parent_path(&files_path.get()))>"Up"</button>
+                            </Show>
+                            <ul class="plain">
+                                {move || {
+                                    let pending = files_loading.get() || files_for.get() != files_path.get();
+                                    if pending {
+                                        return view! { <li class="hint">"Loading…"</li> }.into_any();
+                                    }
+                                    files.get().into_iter().map(|entry| {
+                                    let name = entry.name.clone();
+                                    let path = join_path(&files_path.get(), &entry.name);
+                                    let path_drag = path.clone();
+                                    let path_click = path.clone();
+                                    let is_dir = entry.is_dir;
+                                    let label = if is_dir { format!("{name}/") } else { name.clone() };
+                                    let open_attr = if is_dir { String::new() } else { path.clone() };
+                                    view! {
+                                        <li class="ev-fileline">
+                                            <button class="link file-row" draggable="true" data-ev-open=open_attr
+                                                on:dragstart=move |ev: web_sys::DragEvent| set_drag(&ev, &path_drag)
+                                                on:click=move |_| {
+                                                    if is_dir {
+                                                        files_path.set(path_click.clone());
+                                                    } else {
+                                                        doc_line.set(0);
+                                                        doc_diff.set(false);
+                                                        doc_path.set(path_click.clone());
+                                                    }
+                                                }
+                                            >{label}</button>
+                                        </li>
+                                    }
+                                }).collect_view().into_any()
+                                }}
+                            </ul>
                         </div>
-                        <div hidden=move || !worktree_active.get()>
-                            <git::WorktreePanel base=base token=token status_line=status active_root=active_root active=worktree_active />
+                    </Show>
+                    <Show when=move || side_tab.get() == "changes">
+                        <div class="changes">
+                            <div class="changes-head">
+                                <p class="hint">"Changed files"</p>
+                                <button class="secondary" on:click=move |_| load_changes()>"Refresh"</button>
+                            </div>
+                            <Show when=move || !changes_error.get().is_empty()>
+                                <div class="notice" role="alert">
+                                    <span>{move || changes_error.get()}</span>
+                                    <button class="secondary" on:click=move |_| load_changes()>"Retry"</button>
+                                </div>
+                            </Show>
+                            <Show when=move || changes.get().is_empty() && changes_error.get().is_empty()>
+                                <EmptyState title="No changes".into() body="Git diffs for the daemon working directory show up here.".into() />
+                            </Show>
+                            <ul class="plain">
+                                {move || changes.get().into_iter().map(|file| {
+                                    let path = file.path.clone();
+                                    let path_drag = path.clone();
+                                    let path_click = path.clone();
+                                    let added = file.added;
+                                    let deleted = file.deleted;
+                                    view! {
+                                        <li class="ev-fileline">
+                                            <button class="link file-row" draggable="true" data-ev-open=path.clone()
+                                                on:dragstart=move |ev: web_sys::DragEvent| set_drag(&ev, &path_drag)
+                                                on:click=move |_| {
+                                                    doc_line.set(0);
+                                                    doc_diff.set(true);
+                                                    doc_path.set(path_click.clone());
+                                                }
+                                            >
+                                                <span class="name">{path.clone()}</span>
+                                                <span class="diff-add">{format!("+{added}")}</span>
+                                                <span class="diff-del">{format!("-{deleted}")}</span>
+                                            </button>
+                                        </li>
+                                    }
+                                }).collect_view()}
+                            </ul>
                         </div>
-                        <Show when=move || {
-                            let tab = side_tab.get();
-                            tab == "memory" || tab == "knowledge" || tab == "artifacts"
-                        }>
-                            <StoragePanel
-                                tab=side_tab
-                                base=base
-                                token=token
-                                root=active_root
-                                memory_mode=memory_mode
-                                status=status
-                                storage_rev=storage_rev
-                            />
-                        </Show>
-                        <Show when=move || side_tab.get() == "terminal">
-                            <terminal::TerminalPanel
-                                base=base
-                                token=token
-                                workspace_id=active_workspace
-                                session_id=active_root
-                            />
-                        </Show>
-                    </aside>
-                </div>
-                <SideChatPanel
-                    open=side_open
-                    base=base
-                    token=token
-                    root=active_root
-                    lines=lines
-                    focus_id=side_focus_id
-                    focus_name=side_focus_name
-                    live_provider=provider_name
-                    live_model=model_name
-                />
-            </Show>
-            <WorkspacePicker
-                open=picker_open
+                    </Show>
+                    <div hidden=move || !git_active.get()>
+                        <git::GitPanel base=base token=token status_line=status active=git_active />
+                    </div>
+                    <div hidden=move || !worktree_active.get()>
+                        <git::WorktreePanel base=base token=token status_line=status active_root=active_root active=worktree_active />
+                    </div>
+                    <Show when=move || {
+                        let tab = side_tab.get();
+                        tab == "memory" || tab == "knowledge" || tab == "artifacts"
+                    }>
+                        <StoragePanel
+                            tab=side_tab
+                            base=base
+                            token=token
+                            root=active_root
+                            memory_mode=memory_mode
+                            status=status
+                            storage_rev=storage_rev
+                        />
+                    </Show>
+                    <Show when=move || side_tab.get() == "terminal">
+                        <terminal::TerminalPanel
+                            base=base
+                            token=token
+                            workspace_id=active_workspace
+                            session_id=active_root
+                        />
+                    </Show>
+                </aside>
+            </div>
+            <SideChatPanel
+                open=side_open
                 base=base
                 token=token
-                status=status
-                workspaces=workspaces
-                active_workspace=active_workspace
-                recents=workspace_recents
-                refresh=refresh_meta
+                root=active_root
+                lines=lines
+                focus_id=side_focus_id
+                focus_name=side_focus_name
+                live_provider=provider_name
+                live_model=model_name
             />
-            <PhoneNav pane=phone_pane side_tab=side_tab mode=mode />
-        }
+        </Show>
+        <WorkspacePicker
+            open=picker_open
+            base=base
+            token=token
+            status=status
+            workspaces=workspaces
+            active_workspace=active_workspace
+            recents=workspace_recents
+            refresh=refresh_meta
+        />
+        <PhoneNav pane=phone_pane side_tab=side_tab mode=mode />
+    }
 }
 
 #[component]

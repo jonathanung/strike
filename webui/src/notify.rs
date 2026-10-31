@@ -619,8 +619,16 @@ fn show_os(kind: &str, href: &str, tag: &str) {
             &JsValue::from_str("type"),
             &JsValue::from_str("notify"),
         );
-        let _ = js_sys::Reflect::set(&obj, &JsValue::from_str("kind"), &JsValue::from_str(kind));
-        let _ = js_sys::Reflect::set(&obj, &JsValue::from_str("title"), &JsValue::from_str(title));
+        let _ = js_sys::Reflect::set(
+            &obj,
+            &JsValue::from_str("kind"),
+            &JsValue::from_str(kind),
+        );
+        let _ = js_sys::Reflect::set(
+            &obj,
+            &JsValue::from_str("title"),
+            &JsValue::from_str(title),
+        );
         let _ = js_sys::Reflect::set(&obj, &JsValue::from_str("body"), &JsValue::from_str(body));
         let _ = js_sys::Reflect::set(&obj, &JsValue::from_str("href"), &JsValue::from_str(&href));
         let _ = js_sys::Reflect::set(&obj, &JsValue::from_str("tag"), &JsValue::from_str(&tag));
@@ -1720,7 +1728,11 @@ mod tests {
 
     #[test]
     fn visible_notes_hides_dismissed_and_keeps_order() {
-        let notes = vec![plain_note("a", 3), plain_note("b", 2), plain_note("c", 1)];
+        let notes = vec![
+            plain_note("a", 3),
+            plain_note("b", 2),
+            plain_note("c", 1),
+        ];
         let visible = visible_notes(&notes, &["b".to_string()]);
         let ids: Vec<&str> = visible.iter().map(|n| n.id.as_str()).collect();
         assert_eq!(ids, vec!["a", "c"]);

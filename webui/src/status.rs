@@ -107,11 +107,7 @@ impl StatusKind {
             "idle" | "ready" | "saved" => StatusKind::Idle,
             "running" | "thinking" | "working" | "in_progress" | "in-progress" | "busy"
             | "starting" | "active" => StatusKind::Running,
-            "waiting"
-            | "waiting-for-approval"
-            | "approval"
-            | "permission"
-            | "question"
+            "waiting" | "waiting-for-approval" | "approval" | "permission" | "question"
             | "stalled" => StatusKind::Waiting,
             "blocked" => StatusKind::Blocked,
             "failed" | "error" => StatusKind::Failed,
@@ -383,11 +379,7 @@ fn css_var(window: &web_sys::Window, doc: &web_sys::Document, name: &str) -> Str
 }
 
 fn set_favicon(doc: &web_sys::Document, href: &str) {
-    let link = match doc
-        .query_selector("link[data-status-icon='1']")
-        .ok()
-        .flatten()
-    {
+    let link = match doc.query_selector("link[data-status-icon='1']").ok().flatten() {
         Some(el) => el,
         None => {
             let Ok(el) = doc.create_element("link") else {
@@ -449,8 +441,7 @@ pub fn StatusMark(
     #[prop(optional)] unread: bool,
     /// Where to draw. Defaults to [`StatusSlot::Badge`]. Named `place` because
     /// Leptos treats `slot` as a component slot, which cannot nest in HTML.
-    #[prop(optional)]
-    place: StatusSlot,
+    #[prop(optional)] place: StatusSlot,
     #[prop(optional)] elapsed_s: i64,
     #[prop(optional)] last_activity_s: i64,
     #[prop(optional)] now_s: i64,
@@ -511,8 +502,7 @@ pub fn StatusMark(
 pub fn StatusTabs(
     tabs: Vec<StatusTab>,
     /// `move |id: String| { ... }`. Leptos stores it as `Callback<(String,)>`.
-    #[prop(into)]
-    on_select: Callback<(String,)>,
+    #[prop(into)] on_select: Callback<(String,)>,
 ) -> impl IntoView {
     if tabs.is_empty() {
         return ().into_any();
@@ -577,10 +567,7 @@ mod tests {
             assert_eq!(StatusKind::parse(alias).id(), want.as_str().unwrap());
         }
         assert!(StatusKind::parse_known("tool").is_none());
-        assert_eq!(
-            doc["heartbeatStaleMs"].as_i64().unwrap(),
-            HEARTBEAT_STALE_MS as i64
-        );
+        assert_eq!(doc["heartbeatStaleMs"].as_i64().unwrap(), HEARTBEAT_STALE_MS as i64);
         assert_eq!(
             doc["heartbeatIntervalMs"].as_i64().unwrap(),
             HEARTBEAT_INTERVAL_MS as i64
@@ -611,7 +598,10 @@ mod tests {
         assert_eq!(chrome_title(StatusKind::Idle, 0), "Strike");
         assert_eq!(chrome_title(StatusKind::Running, 0), "Strike · Running");
         assert_eq!(chrome_title(StatusKind::Idle, 2), "(2) Strike");
-        assert_eq!(chrome_title(StatusKind::Waiting, 1), "(1) Strike · Waiting");
+        assert_eq!(
+            chrome_title(StatusKind::Waiting, 1),
+            "(1) Strike · Waiting"
+        );
         assert_eq!(fmt_elapsed(65), "1:05");
         assert_eq!(fmt_elapsed(3661), "1:01:01");
         assert_eq!(fmt_ago(100, 160), "1m");
