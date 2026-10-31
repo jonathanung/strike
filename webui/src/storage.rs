@@ -1,5 +1,7 @@
 //! Memory, knowledge, and artifact panels. feature:storage
 
+use std::rc::Rc;
+
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use serde::Deserialize;
@@ -484,7 +486,15 @@ pub fn StoragePanel(
                                     <span class="path">{format!("{author} · {tags}")}</span>
                                     <span class="path">{when}</span>
                                 </button>
-                                <button type="button" class="secondary" on:click=move |_| delete_memory(del.clone())>"Delete"</button>
+                                <button type="button" class="secondary" data-action="delete-memory" on:click=move |_| {
+                                    let del2 = del.clone();
+                                    if !crate::confirm::ask(
+                                        memory_delete_confirm(&del, &scope.get_untracked()),
+                                        Rc::new(move || delete_memory(del2.clone())),
+                                    ) {
+                                        error.set(crate::confirm::BUSY.into());
+                                    }
+                                }>"Delete"</button>
                             </li>
                         }
                     }).collect_view()}
@@ -592,6 +602,22 @@ pub fn StoragePanel(
     }
 }
 
+/// Confirm copy for Memory Delete (#1554). Deleting a memory entry is
+/// permanent with no undo or trash, so the shared confirm dialog
+/// (`crate::confirm`) gates it and names the entry and its scope.
+/// Knowledge Unpin stays single-click in this slice: a pin is a
+/// re-creatable path reference, not stored content.
+pub fn memory_delete_confirm(key: &str, scope: &str) -> crate::confirm::ConfirmRequest {
+    let scope_label = if scope == "global" { "global" } else { "project" };
+    crate::confirm::ConfirmRequest {
+        title: format!("Delete memory \u{201c}{key}\u{201d}?"),
+        body: format!(
+            "This permanently removes the {scope_label} memory entry \u{201c}{key}\u{201d}. It cannot be undone; re-creating it means retyping its value and tags."
+        ),
+        confirm_label: "Delete memory".into(),
+    }
+}
+
 struct Loaded {
     entries: Vec<MemoryEntry>,
     pins: Vec<KnowledgePin>,
@@ -646,5 +672,23 @@ impl Default for Loaded {
             markdown: String::new(),
             audit: String::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn memory_delete_confirm_names_key_scope_and_permanence() {
+        let req = memory_delete_confirm("smoke-pref", "project");
+        assert_eq!(req.confirm_label, "Delete memory");
+        assert!(req.title.contains("smoke-pref"));
+        assert!(req.body.contains("project"));
+        assert!(req.body.contains("cannot be undone"));
+        let global = memory_delete_confirm("k", "global");
+        assert!(global.body.contains("global"));
+        // Unknown scopes fall back to the panel's default (project).
+        assert!(memory_delete_confirm("k", "").body.contains("project"));
     }
 }

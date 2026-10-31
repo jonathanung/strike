@@ -2,6 +2,7 @@
 //! the allowlist may run without an ask, and deny rules still block.
 //! It is not a session permission mode (that dial stays on the composer).
 
+use std::rc::Rc;
 use std::sync::Arc;
 
 use leptos::prelude::*;
@@ -110,6 +111,19 @@ pub fn goal_status_label(status: &str) -> &'static str {
         "aborted" => "Aborted",
         "blocked" => "Needs you",
         _ => "Unknown",
+    }
+}
+
+/// Confirm copy for Abort (#1559). Abort is terminal — an aborted goal
+/// can never be resumed or re-run — so the shared confirm dialog
+/// (`crate::confirm`) gates it, while Pause/Continue stay single-click.
+pub fn abort_confirm(title: &str) -> crate::confirm::ConfirmRequest {
+    crate::confirm::ConfirmRequest {
+        title: "Abort this goal?".into(),
+        body: format!(
+            "This stops the loop for \u{201c}{title}\u{201d} now. The goal cannot be resumed or run again; re-create the goal from scratch to run the same spec again."
+        ),
+        confirm_label: "Abort goal".into(),
     }
 }
 
@@ -686,6 +700,7 @@ pub fn GoalsPane(base: RwSignal<String>, token: RwSignal<String>) -> impl IntoVi
                     let pause_id = gid.clone();
                     let abort_id = gid.clone();
                     let title = g.description.clone();
+                    let abort_title = title.clone();
                     let status = goal_status_label(&g.status).to_string();
                     let reason = g.fail_reason.clone();
                     let human = needs_human(&g.status, &g.escalation);
@@ -813,11 +828,22 @@ pub fn GoalsPane(base: RwSignal<String>, token: RwSignal<String>) -> impl IntoVi
                                 }}
                                 {let ctrl = ctrl.clone();
                                 let abort_id = abort_id.clone();
+                                let abort_title = abort_title.clone();
                                 move || {
                                     let ctrl = ctrl.clone();
                                     let abort_id = abort_id.clone();
+                                    let abort_title = abort_title.clone();
                                     if can_abort {
-                                        view! { <button type="button" class="secondary" on:click=move |_| ctrl(abort_id.clone(), "abort".into())>"Abort"</button> }.into_any()
+                                        view! { <button type="button" class="secondary" data-action="abort-goal" on:click=move |_| {
+                                            let ctrl = ctrl.clone();
+                                            let abort_id = abort_id.clone();
+                                            if !crate::confirm::ask(
+                                                abort_confirm(&abort_title),
+                                                Rc::new(move || ctrl(abort_id.clone(), "abort".into())),
+                                            ) {
+                                                note.set(crate::confirm::BUSY.into());
+                                            }
+                                        }>"Abort"</button> }.into_any()
                                     } else {
                                         view! { <span></span> }.into_any()
                                     }
@@ -965,6 +991,15 @@ mod tests {
         assert_eq!(fields.verification, "");
         assert_eq!(fields.extra, "");
         assert!(!fields.autopilot);
+    }
+
+    #[test]
+    fn abort_confirm_states_the_terminal_consequence() {
+        let req = abort_confirm("tests pass");
+        assert_eq!(req.confirm_label, "Abort goal");
+        assert!(req.body.contains("tests pass"));
+        assert!(req.body.contains("cannot be resumed or run again"));
+        assert!(req.body.contains("re-create the goal"));
     }
 
     #[test]
