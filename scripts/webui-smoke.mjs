@@ -1225,7 +1225,13 @@ try {
     const pop = document.querySelector(".gw-pop");
     if (!pop) return false;
     const note = pop.querySelector(".gw-form-note");
-    return !!note && (note.textContent || "").includes("Could not reach") && (pop.innerText || "").includes("Connected");
+    // The panel detail line is the working gateway's live describe
+    // (host · loopback · auth on · host token · grants); the literal
+    // word "Connected" lives in the header pill, not inside .gw-pop.
+    const txt = pop.innerText || "";
+    return !!note && (note.textContent || "").includes("Could not reach")
+      && txt.includes("loopback") && !txt.includes("Unreachable")
+      && document.body.innerText.includes("Connected");
   })()`, "guarded switch keeps the working gateway connected with a form error");
   await evaluate(`document.querySelector(".gw-back")?.click()`);
   await evaluate(`document.querySelector('[data-view="chat"]')?.click()`);
