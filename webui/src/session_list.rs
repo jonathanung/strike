@@ -279,6 +279,46 @@ pub fn alt_digit(key: &str) -> Option<usize> {
     }
 }
 
+/// Folders no session is filed under (#1566): the batch-cleanup set.
+/// `filed_folder_ids` is one entry per session (its folder id, empty
+/// when unfiled), taken from the unfiltered snapshot — never from the
+/// rendered layout, whose per-folder count drops sessions the current
+/// filter, search, or older-folding hides, and would call a folder
+/// "empty" while it still holds archived or folded sessions. A folder
+/// listed here therefore renders count 0 in the unfiltered view, and a
+/// folder holding anything at all is never listed. Order follows
+/// `folder_ids`; blank ids (the synthetic Ungrouped row) never qualify.
+pub fn empty_folder_ids(folder_ids: &[String], filed_folder_ids: &[String]) -> Vec<String> {
+    let used: HashSet<&str> = filed_folder_ids
+        .iter()
+        .map(String::as_str)
+        .filter(|id| !id.is_empty())
+        .collect();
+    folder_ids
+        .iter()
+        .filter(|id| !id.is_empty() && !used.contains(id.as_str()))
+        .cloned()
+        .collect()
+}
+
+/// The candidates from `wanted` that a fresh snapshot still shows as
+/// empty (#1566): a folder that gained a session since the panel last
+/// rendered is dropped here, not removed from under its sessions.
+pub fn still_empty_folder_ids(
+    wanted: &[String],
+    folder_ids: &[String],
+    filed_folder_ids: &[String],
+) -> Vec<String> {
+    let empty: HashSet<String> = empty_folder_ids(folder_ids, filed_folder_ids)
+        .into_iter()
+        .collect();
+    wanted
+        .iter()
+        .filter(|id| empty.contains(*id))
+        .cloned()
+        .collect()
+}
+
 pub fn toggle_id(selected: &[String], id: &str) -> Vec<String> {
     if selected.iter().any(|s| s == id) {
         selected
@@ -945,6 +985,41 @@ mod tests {
         );
         let order = vec!["a".into(), "b".into(), "c".into()];
         assert_eq!(select_range(&order, "c", "a"), order);
+    }
+
+    #[test]
+    fn empty_folder_ids_counts_only_unfiled_folders() {
+        let folders: Vec<String> = vec!["f1".into(), "f2".into(), "f3".into(), "".into()];
+        // f1 holds two sessions, f2 one; the blank filed ids are
+        // unfiled sessions and must not make any folder non-empty.
+        let filed: Vec<String> = vec!["f1".into(), "f1".into(), "f2".into(), "".into(), "".into()];
+        assert_eq!(empty_folder_ids(&folders, &filed), vec!["f3".to_string()]);
+        // No sessions at all: every real folder is empty.
+        assert_eq!(
+            empty_folder_ids(&folders, &[]),
+            vec!["f1".to_string(), "f2".to_string(), "f3".to_string()]
+        );
+        // Every folder filed: nothing to clean up.
+        let all: Vec<String> = vec!["f1".into(), "f2".into(), "f3".into()];
+        assert!(empty_folder_ids(&folders, &all).is_empty());
+        assert!(empty_folder_ids(&[], &filed).is_empty());
+    }
+
+    #[test]
+    fn still_empty_folder_ids_rechecks_against_a_fresh_snapshot() {
+        let wanted: Vec<String> = vec!["f1".into(), "f2".into(), "f3".into()];
+        // f3 is absent here: someone else already deleted it.
+        let folders: Vec<String> = vec!["f1".into(), "f2".into(), "f4".into()];
+        // Since the render, f2 gained a session and f3 was deleted by
+        // someone else; only f1 may still be removed. f4 is empty in
+        // the fresh snapshot but was not in the confirmed set, so it
+        // is not swept up either.
+        let filed: Vec<String> = vec!["f2".into()];
+        assert_eq!(
+            still_empty_folder_ids(&wanted, &folders, &filed),
+            vec!["f1".to_string()]
+        );
+        assert!(still_empty_folder_ids(&[], &folders, &filed).is_empty());
     }
 
     #[test]

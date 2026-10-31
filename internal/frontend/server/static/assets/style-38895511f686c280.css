@@ -1484,6 +1484,8 @@ select.mode, .daemon select {
 .ss-bulk button,
 .ss-older button { height: 24px; padding: 0 8px; font-size: var(--type-sm); }
 .ss-bulk-count { font-size: var(--type-sm); color: var(--muted); margin-right: 4px; }
+.ss-folder-cleanup { margin: 0 0 8px; }
+.ss-folder-cleanup button { height: 24px; padding: 0 8px; font-size: var(--type-sm); }
 .ss-list { display: flex; flex-direction: column; gap: 2px; }
 .ss-older { margin: 6px 0; }
 .ss-folder-row {
