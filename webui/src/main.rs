@@ -39,6 +39,7 @@ mod session_list;
 mod settings;
 mod session_panel;
 mod storage;
+mod tab_title;
 mod task_runner;
 mod transcript_find;
 mod usage_audit;
@@ -102,7 +103,7 @@ use crate::side_chat::SideChatPanel;
 use crate::model::{budget_elapsed, can_retry, RootsResponse};
 use crate::model_menu::{active_context, context_view, reduce_envelope, LiveModelState, ModelDefaults};
 use crate::status::{
-    apply_document_chrome, elapsed_since, session_kind, StatusKind, StatusMark, StatusSlot,
+    apply_document_favicon, elapsed_since, session_kind, StatusKind, StatusMark, StatusSlot,
     StatusTab, StatusTabs, HEARTBEAT_STALE_MS,
 };
 
@@ -2042,25 +2043,22 @@ fn App() -> impl IntoView {
         *status_tail_fx.borrow_mut() = Some(es);
     });
 
+    // #1405 tab title: the notification bell publishes its unread count
+    // into this signal (see notify::set_unread_host below); the chrome
+    // effect combines it with unread sessions.
+    let notify_unread = RwSignal::new(0usize);
     Effect::new(move |_| {
         let kind = gateway_kind.get();
         let root_rows = roots.get();
         let saved = sessions.get();
         let active = active_root.get();
-        let mut n = 0usize;
-        let mut live_ids = std::collections::HashSet::new();
-        for row in &root_rows {
-            live_ids.insert(row.id.clone());
-            if row.unread == Some(true) && row.id != active {
-                n += 1;
-            }
-        }
-        for row in &saved {
-            if row.unread == Some(true) && !live_ids.contains(&row.id) {
-                n += 1;
-            }
-        }
-        apply_document_chrome(kind, n);
+        let blocking = tab_title::blocking_count(&root_rows);
+        let unread = tab_title::unread_session_count(&root_rows, &saved, &active)
+            + notify_unread.get();
+        // Favicon behaviour is unchanged (status module owns it); only
+        // the title text follows the #1405 waiting/unread precedence.
+        apply_document_favicon(kind);
+        tab_title::apply_title(blocking, unread);
     });
 
     let session_busy = move |root: &str| -> bool {
@@ -3168,6 +3166,7 @@ fn App() -> impl IntoView {
         gateway,
         on_focus: on_notify,
     });
+    notify::set_unread_host(notify_unread);
 
     shell::boot();
     shell::set_host(shell::HostBridge {
