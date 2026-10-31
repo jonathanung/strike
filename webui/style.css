@@ -586,8 +586,9 @@ button.link { text-align: left; width: 100%; }
   margin: 0 0 2px;
   padding: 8px 10px;
   background: var(--surface);
-  border: 1px solid var(--rule);
-  border-radius: 12px;
+  border: var(--border-width) solid var(--rule);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
 }
 .composer textarea {
   flex: 1;
@@ -628,6 +629,10 @@ button.link { text-align: left; width: 100%; }
 .composer-bar .chip { flex: 0 0 auto; max-width: 180px; }
 .composer-bar .send { margin-left: auto; height: var(--control); border-radius: 999px; padding: 0 var(--space-3); flex: 0 0 auto; }
 .composer .hint { margin: 0; font-size: var(--type-sm); }
+/* feature:composer-draft-size begin */
+.draft-size-warn { margin: 0; font-size: var(--type-sm); color: var(--warning); }
+.draft-size-warn.critical { color: var(--danger); }
+/* feature:composer-draft-size end */
 .activity-head { display: flex; justify-content: space-between; align-items: center; }
 .activity-head h2 { margin: 8px 0; }
 .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-2); margin-bottom: var(--space-2); }
@@ -2856,6 +2861,11 @@ button.linkish:disabled { color: var(--muted); cursor: default; text-decoration:
 .file-meta { display: flex; gap: 8px; align-items: baseline; margin-top: 2px; }
 .exist { color: var(--muted); font-size: var(--type-sm); }
 .exist.on { color: var(--success); }
+/* feature:localfiles-copy-path begin */
+.file-item { display: flex; gap: 8px; align-items: flex-start; }
+.file-item .file-main { flex: 1; min-width: 0; }
+.file-copy { flex: 0 0 auto; min-height: 44px; min-width: 44px; padding: 4px 10px; }
+/* feature:localfiles-copy-path end */
 .shortcut-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .shortcut-list li { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
 .shortcut-list span { color: var(--muted); }

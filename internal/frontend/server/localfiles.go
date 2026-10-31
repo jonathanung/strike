@@ -94,7 +94,7 @@ func (s *Server) handleLocalFiles(w http.ResponseWriter, r *http.Request) {
 		WorkDir:    workDir,
 		GlobalRoot: config.GlobalRoot(),
 		ProjectKey: projectKey,
-		Note:       "No telemetry is sent. Each path is one this process reads or creates. Optional files that are missing are skipped. File contents are not included. ~/.strike/onboarding.json is the TUI first-run record and is not read by strike serve.",
+		Note:       "No telemetry is sent. Each path is one this process reads or creates. Optional files that are missing are skipped. File contents are not included. ~/.strike/onboarding.json is the shared first-run record: strike serve reads it for the web card and writes it when the card is completed or dismissed; it is not listed below.",
 		Files:      dedupeLocalFiles(files),
 	})
 }

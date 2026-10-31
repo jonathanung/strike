@@ -12,6 +12,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::api::{self, delete_json, get_text, post_json_value};
+use load_guard::{apply_provider_load, prepare_provider_load, LoadEpoch, ProviderView};
 use wasm_bindgen::JsCast;
 
 /// Wire dialects `config.ValidateWireAPI` accepts. Not a provider catalog.
@@ -216,6 +217,16 @@ pub fn custom_removal_note(
     }
 }
 
+fn clock_label() -> String {
+    let now = js_sys::Date::new_0();
+    format!(
+        "{:02}:{:02}:{:02}",
+        now.get_hours(),
+        now.get_minutes(),
+        now.get_seconds()
+    )
+}
+
 fn focus_provider(name: &str) {
     let Some(doc) = web_sys::window().and_then(|window| window.document()) else {
         return;
@@ -247,6 +258,17 @@ fn request_reload(bump: RwSignal<u32>) {
     bump.update(|n| *n = n.wrapping_add(1));
 }
 
+/// Note shown when a base-URL edit misses the loaded custom list (#1578).
+/// A miss after a failed custom-providers load must blame the load, not
+/// the host.
+fn edit_host_miss_note(custom_load_failed: bool) -> &'static str {
+    if custom_load_failed {
+        "Custom providers could not be loaded, so this host cannot be checked right now."
+    } else {
+        "This host is not an editable custom provider."
+    }
+}
+
 fn map_insert(map: &RwSignal<HashMap<String, String>>, key: String, value: String) {
     map.update(|found| {
         found.insert(key, value);
@@ -257,6 +279,7 @@ fn map_insert(map: &RwSignal<HashMap<String, String>>, key: String, value: Strin
 fn ProviderCard(
     row: ProviderStatus,
     customs: RwSignal<Vec<CustomProvider>>,
+    custom_error: RwSignal<String>,
     drafts: RwSignal<HashMap<String, String>>,
     notes: RwSignal<HashMap<String, String>>,
     base_drafts: RwSignal<HashMap<String, String>>,
@@ -442,7 +465,7 @@ fn ProviderCard(
                 map_insert(
                     &notes,
                     name.clone(),
-                    "This host is not an editable custom provider.".into(),
+                    edit_host_miss_note(!custom_error.get_untracked().is_empty()).into(),
                 );
                 return;
             };
@@ -568,6 +591,7 @@ fn ProviderCard(
 pub fn ProvidersPage(base: RwSignal<String>, token: RwSignal<String>) -> impl IntoView {
     let rows = RwSignal::new(Vec::<ProviderStatus>::new());
     let customs = RwSignal::new(Vec::<CustomProvider>::new());
+    let custom_error = RwSignal::new(String::new());
     let load_error = RwSignal::new(String::new());
     let loading = RwSignal::new(true);
     let drafts = RwSignal::new(HashMap::<String, String>::new());
@@ -582,31 +606,88 @@ pub fn ProvidersPage(base: RwSignal<String>, token: RwSignal<String>) -> impl In
     let new_note = RwSignal::new(String::new());
 
     let bump = RwSignal::new(0u32);
+    let load_epoch = RwSignal::new(LoadEpoch::new());
+    let loaded_base = RwSignal::new(String::new());
+    let loaded_at = RwSignal::new(String::new());
+    let stale_note = RwSignal::new(String::new());
     Effect::new(move |_| {
         let _ = base.get();
         let _ = bump.get();
         let (b, t) = (base.get_untracked(), token.get_untracked());
-        loading.set(true);
+        let mut view = ProviderView {
+            rows: rows.get_untracked(),
+            customs: customs.get_untracked(),
+            load_error: load_error.get_untracked(),
+            stale_note: stale_note.get_untracked(),
+            loading: loading.get_untracked(),
+            loaded_base: loaded_base.get_untracked(),
+            loaded_at: loaded_at.get_untracked(),
+        };
+        let mut epoch = load_epoch.get_untracked();
+        let ticket = prepare_provider_load(&mut epoch, &mut view, &b);
+        load_epoch.set(epoch);
+        rows.set(view.rows.clone());
+        customs.set(view.customs.clone());
+        load_error.set(view.load_error.clone());
+        stale_note.set(view.stale_note.clone());
+        loading.set(view.loading);
+        loaded_base.set(view.loaded_base.clone());
+        loaded_at.set(view.loaded_at.clone());
         spawn_local(async move {
             let listed = get_text(&b, &t, "/v1/providers").await;
+            if !load_epoch.get_untracked().accept(ticket) {
+                return;
+            }
             let custom = get_text(&b, &t, "/v1/custom-providers").await;
-            match listed {
+            if !load_epoch.get_untracked().accept(ticket) {
+                return;
+            }
+            let rows_result = match listed {
                 Ok(body) => match serde_json::from_str::<ProviderList>(&body) {
-                    Ok(list) => {
-                        publish_key_names(&list.providers);
-                        rows.set(list.providers);
-                        load_error.set(String::new());
-                    }
-                    Err(err) => load_error.set(format!("Could not read providers: {err}")),
+                    Ok(list) => Ok(list.providers),
+                    Err(err) => Err(format!("Could not read providers: {err}")),
                 },
-                Err(err) => load_error.set(note_from(&err, "")),
-            }
-            if let Ok(body) = custom {
-                if let Ok(list) = serde_json::from_str::<CustomList>(&body) {
-                    customs.set(list.providers);
+                Err(err) => Err(note_from(&err, "")),
+            };
+            let published = match &rows_result {
+                Ok(rows) => Some(rows.clone()),
+                Err(_) => None,
+            };
+            let customs_result = match custom {
+                Ok(body) => match serde_json::from_str::<CustomList>(&body) {
+                    Ok(list) => Ok(list.providers),
+                    Err(_) => Err("Could not read custom providers.".into()),
+                },
+                Err(err) => Err(err),
+            };
+            // Main's #1670 surfacing, applied only inside the guarded commit
+            // below: a superseded load must not paint this notice either.
+            let custom_notice = match &customs_result {
+                Ok(_) => String::new(),
+                Err(err) => format!(
+                    "Custom providers could not be loaded — the list below may be incomplete. ({err})"
+                ),
+            };
+            if apply_provider_load(
+                &load_epoch.get_untracked(),
+                ticket,
+                &mut view,
+                rows_result,
+                customs_result,
+                &clock_label(),
+            ) {
+                if let Some(rows) = published {
+                    publish_key_names(&rows);
                 }
+                custom_error.set(custom_notice);
+                rows.set(view.rows);
+                customs.set(view.customs);
+                load_error.set(view.load_error);
+                stale_note.set(view.stale_note);
+                loading.set(view.loading);
+                loaded_base.set(view.loaded_base);
+                loaded_at.set(view.loaded_at);
             }
-            loading.set(false);
         });
     });
 
@@ -724,12 +805,19 @@ pub fn ProvidersPage(base: RwSignal<String>, token: RwSignal<String>) -> impl In
             <Show when=move || !load_error.get().is_empty()>
                 <p class="notice" role="alert">{move || load_error.get()}</p>
             </Show>
+            <Show when=move || !stale_note.get().is_empty()>
+                <p class="hint" data-providers-stale="true">{move || stale_note.get()}</p>
+            </Show>
+            <Show when=move || !custom_error.get().is_empty()>
+                <p class="notice" role="alert" data-custom-load-error="true">{move || custom_error.get()}</p>
+            </Show>
             <ul class="providers-list plain">
                 {move || rows.get().into_iter().map(|row| {
                     view! {
                         <ProviderCard
                             row=row
                             customs=customs
+                            custom_error=custom_error
                             drafts=drafts
                             notes=notes
                             base_drafts=base_drafts
@@ -899,6 +987,15 @@ mod tests {
         assert_eq!(
             custom_removal_note(&Ok(()), None),
             "Stored credential removed."
+        );
+    }
+
+    #[test]
+    fn edit_host_miss_blames_the_load_not_the_host() {
+        assert!(edit_host_miss_note(true).contains("could not be loaded"));
+        assert_eq!(
+            edit_host_miss_note(false),
+            "This host is not an editable custom provider."
         );
     }
 

@@ -283,6 +283,10 @@ pub fn GitPanel(
     // cost); diff_expanded lifts the cap for the currently open diff only.
     // It resets whenever a diff is (re)loaded — see the diff effect below.
     let diff_expanded = RwSignal::new(false);
+    // #1580: whether the daemon truncated the currently open diff, fed
+    // from the /v1/git/diff response; copy feedback must call a truncated
+    // copy partial rather than complete.
+    let diff_truncated = RwSignal::new(false);
     let show_log = RwSignal::new(false);
     let message = RwSignal::new(String::new());
     let switch_to = RwSignal::new(String::new());
@@ -449,11 +453,13 @@ pub fn GitPanel(
         let rows = rows.get_untracked();
         let Some(row) = rows.get(cursor.get_untracked()).cloned() else {
             diff_text.set(String::new());
+            diff_truncated.set(false);
             return;
         };
         if !row.inline_diff.is_empty() {
             diff_text.set(row.inline_diff);
             diff_note.set(String::new());
+            diff_truncated.set(false);
             return;
         }
         let (b, t) = (base.get_untracked(), token.get_untracked());
@@ -465,6 +471,7 @@ pub fn GitPanel(
         spawn_local(async move {
             match get_json::<GitDiff>(&b, &t, &path).await {
                 Ok(body) => {
+                    diff_truncated.set(body.truncated);
                     diff_note.set(if body.truncated {
                         "Diff truncated.".into()
                     } else {
@@ -478,11 +485,28 @@ pub fn GitPanel(
                 }
                 Err(e) => {
                     diff_text.set(String::new());
+                    diff_truncated.set(false);
                     diff_note.set(e);
                 }
             }
         });
     });
+
+    // Copy diff (#1580): writes the exact diff_text via the shared
+    // clipboard helper, which awaits the write — feedback in diff_note is
+    // only "copied" once the browser accepted it, and a truncated diff is
+    // called partial in the feedback itself.
+    let copy_diff = move |_| {
+        let text = diff_text.get_untracked();
+        if !crate::clipboard::diff_copyable(&text) {
+            return;
+        }
+        let truncated = diff_truncated.get_untracked();
+        spawn_local(async move {
+            let ok = crate::clipboard::copy_text(&text).await.is_ok();
+            diff_note.set(crate::clipboard::diff_copy_feedback(truncated, ok));
+        });
+    };
 
     let move_cursor = move |delta: i32| {
         let n = rows.get_untracked().len() as i32;
@@ -494,6 +518,7 @@ pub fn GitPanel(
         open_diff.set(false);
         diff_expanded.set(false);
         diff_text.set(String::new());
+        diff_truncated.set(false);
     };
 
     let open_selected = move || {
@@ -526,6 +551,7 @@ pub fn GitPanel(
                 open_diff.set(false);
                 diff_expanded.set(false);
                 diff_text.set(String::new());
+                diff_truncated.set(false);
             }
             "l" if !ev.meta_key() && !ev.ctrl_key() && !ev.alt_key() => {
                 ev.prevent_default();
@@ -908,6 +934,9 @@ pub fn GitPanel(
             }}
             <Show when=move || open_diff.get() && !diff_text.get().is_empty()>
                 <div class="git-diff-wrap">
+                    <div class="git-diff-bar">
+                        <button type="button" class="secondary git-copy-diff" disabled=move || !crate::clipboard::diff_copyable(&diff_text.get()) on:click=copy_diff>"Copy diff"</button>
+                    </div>
                     <pre class="git-diff" aria-label="Diff">{move || {
                         let text = diff_text.get();
                         // #1428: render-only cap. The full text is already

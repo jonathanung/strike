@@ -5,7 +5,8 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::api::{js_encode, patch_json, post_json, post_json_value};
-use crate::model::{mode_label, permission_modes, BrowseResponse, Workspace};
+use load_guard::{apply_browse, BrowseOutcome, BrowseView, LoadEpoch};
+use crate::model::{mode_label, permission_modes, BrowseEntry, BrowseResponse, Workspace};
 
 fn event_tag(ev: &web_sys::KeyboardEvent) -> String {
     ev.target()
@@ -118,11 +119,13 @@ fn fetch_browse(
     base: String,
     token: String,
     path: String,
+    epoch: RwSignal<LoadEpoch>,
     browse_path: RwSignal<String>,
     browse_parent: RwSignal<String>,
-    browse_entries: RwSignal<Vec<crate::model::BrowseEntry>>,
+    browse_entries: RwSignal<Vec<BrowseEntry>>,
     browse_error: RwSignal<String>,
 ) {
+    let ticket = crate::load_epoch::begin(epoch);
     spawn_local(async move {
         let url = if path.is_empty() {
             "/v1/workspaces/browse".to_string()
@@ -133,15 +136,14 @@ fn fetch_browse(
             .header("Authorization", &crate::api::auth_header(&token))
             .send()
             .await;
-        match resp {
+        let outcome = match resp {
             Ok(r) if r.ok() => match r.json::<BrowseResponse>().await {
-                Ok(body) => {
-                    browse_path.set(body.path);
-                    browse_parent.set(body.parent);
-                    browse_entries.set(body.entries);
-                    browse_error.set(String::new());
-                }
-                Err(e) => browse_error.set(e.to_string()),
+                Ok(body) => BrowseOutcome::Ready {
+                    path: body.path,
+                    parent: body.parent,
+                    entries: body.entries,
+                },
+                Err(e) => BrowseOutcome::Failed(e.to_string()),
             },
             Ok(r) => {
                 let status = r.status();
@@ -151,9 +153,21 @@ fn fetch_browse(
                     .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(str::to_string))
                     .filter(|s| !s.is_empty())
                     .unwrap_or_else(|| format!("HTTP {status}"));
-                browse_error.set(msg);
+                BrowseOutcome::Failed(msg)
             }
-            Err(e) => browse_error.set(e.to_string()),
+            Err(e) => BrowseOutcome::Failed(e.to_string()),
+        };
+        let mut view = BrowseView {
+            path: browse_path.get_untracked(),
+            parent: browse_parent.get_untracked(),
+            entries: browse_entries.get_untracked(),
+            error: browse_error.get_untracked(),
+        };
+        if apply_browse(&epoch.get_untracked(), ticket, &mut view, outcome) {
+            browse_path.set(view.path);
+            browse_parent.set(view.parent);
+            browse_entries.set(view.entries);
+            browse_error.set(view.error);
         }
     });
 }
@@ -184,6 +198,7 @@ pub fn WorkspacePicker(
     let policy_roots = RwSignal::new(String::new());
     let policy_for = RwSignal::new(String::new());
     let note = RwSignal::new(String::new());
+    let browse_epoch = RwSignal::new(LoadEpoch::new());
 
     Effect::new(move |_| {
         if !open.get() {
@@ -193,6 +208,7 @@ pub fn WorkspacePicker(
             base.get(),
             token.get(),
             String::new(),
+            browse_epoch,
             browse_path,
             browse_parent,
             browse_entries,
@@ -220,6 +236,7 @@ pub fn WorkspacePicker(
             base.get(),
             token.get(),
             path,
+            browse_epoch,
             browse_path,
             browse_parent,
             browse_entries,
@@ -331,6 +348,7 @@ pub fn WorkspacePicker(
                         b,
                         t,
                         parent,
+                        browse_epoch,
                         browse_path,
                         browse_parent,
                         browse_entries,

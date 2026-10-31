@@ -1,5 +1,9 @@
-//! First-run card. Browser acknowledgement lives in localStorage
-//! (`strike.onboarded`). strike serve does not write ~/.strike/onboarding.json.
+//! First-run card. Acknowledgement is daemon-scoped (#1552): completing
+//! or dismissing the card writes ~/.strike/onboarding.json through
+//! POST /v1/onboarding/acknowledge, and the app checks GET /v1/onboarding
+//! before showing this card, so a new browser against an onboarded daemon
+//! skips it. localStorage (`strike.onboarded`) is the per-browser fast
+//! path and the fallback when the daemon record cannot be written.
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -160,7 +164,7 @@ pub fn OnboardingCard(
                         <button type="button" class="secondary" data-action="onboarding-dismiss" on:click=dismiss>"Not now"</button>
                         <button type="button" class="primary" data-action="onboarding-continue" disabled=move || !theme_ready.get() || (loading.get() && files_error.get().is_empty()) on:click=continue_on>"Continue"</button>
                     </div>
-                    <p class="hint">"Not now keeps the theme this browser already had and does not write daemon config. Continue writes a bundled theme id only when you pick one, or when daemon config has no theme id. A theme id this card does not offer is left as it is. Light or dark, type size, and density stay in this browser."</p>
+                    <p class="hint">"Not now keeps the theme this browser already had and does not write daemon config. Continue writes a bundled theme id only when you pick one, or when daemon config has no theme id. A theme id this card does not offer is left as it is. Light or dark, type size, and density stay in this browser. Either button records onboarding as acknowledged on this daemon (~/.strike/onboarding.json), so other browsers and devices connected to this daemon do not see this card again."</p>
                 </div>
             </div>
         </div>
