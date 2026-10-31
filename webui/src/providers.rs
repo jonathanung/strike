@@ -190,6 +190,32 @@ fn note_from(raw: &str, key: &str) -> String {
     scrub_secret(&error_message(raw), key)
 }
 
+/// What the note says after a custom provider's "Remove provider" (#1544).
+/// `credential` is the `DELETE /v1/auth/{name}` result; `definition` is the
+/// `DELETE /v1/custom-providers/{name}` result, or `None` when it was never
+/// attempted — the flow deletes the credential first and stops on failure,
+/// so a failed removal changes nothing and leaves no orphan credential
+/// behind for a provider that is already gone. Errors arrive scrubbed by
+/// `note_from`. The copy never claims more than actually happened.
+pub fn custom_removal_note(
+    credential: &Result<(), String>,
+    definition: Option<&Result<(), String>>,
+) -> String {
+    match (credential, definition) {
+        (Ok(()), Some(Ok(()))) => "Provider removed.".into(),
+        (Ok(()), Some(Err(err))) => format!(
+            "Stored credential removed, but the provider definition could not be deleted: {err}"
+        ),
+        (Ok(()), None) => "Stored credential removed.".into(),
+        (Err(err), Some(Ok(()))) => format!(
+            "Provider definition deleted, but its stored credential could not be removed: {err}"
+        ),
+        (Err(err), _) => {
+            format!("Could not remove the stored credential: {err} The provider was not removed.")
+        }
+    }
+}
+
 fn focus_provider(name: &str) {
     let Some(doc) = web_sys::window().and_then(|window| window.document()) else {
         return;
@@ -346,18 +372,53 @@ fn ProviderCard(
         });
     };
 
-    let remove_stored = move |name: String| {
+    // "Remove provider" is rendered only for custom providers, and for them
+    // it must remove the provider (#1544): after the shared confirm, delete
+    // the stored credential, then the provider definition itself, so the
+    // provider is still gone after a reload. A credential failure stops
+    // before the definition delete; a definition failure is reported as the
+    // partial removal it is. Built-in providers never render this button —
+    // their credential-only path is the palette's "Remove stored key".
+    let remove_provider = move |name: String| {
         let (b, t) = (base.get_untracked(), token.get_untracked());
-        spawn_local(async move {
-            let path = format!("/v1/auth/{}", api::js_encode(&name));
-            match delete_json(&b, &t, &path, None).await {
-                Ok(()) => {
-                    map_insert(&notes, name, "Stored credential removed.".into());
-                    request_reload(bump);
-                }
-                Err(err) => map_insert(&notes, name, note_from(&err, "")),
-            }
+        let run_name = name.clone();
+        let run = Rc::new(move || {
+            let (b, t) = (b.clone(), t.clone());
+            let name = run_name.clone();
+            spawn_local(async move {
+                let cred_path = format!("/v1/auth/{}", api::js_encode(&name));
+                let credential = delete_json(&b, &t, &cred_path, None)
+                    .await
+                    .map_err(|err| note_from(&err, ""));
+                let definition = if credential.is_ok() {
+                    let def_path = format!("/v1/custom-providers/{}", api::js_encode(&name));
+                    Some(
+                        delete_json(&b, &t, &def_path, None)
+                            .await
+                            .map_err(|err| note_from(&err, "")),
+                    )
+                } else {
+                    None
+                };
+                map_insert(
+                    &notes,
+                    name,
+                    custom_removal_note(&credential, definition.as_ref()),
+                );
+                request_reload(bump);
+            });
         });
+        let opened = crate::confirm::ask(
+            crate::confirm::ConfirmRequest {
+                title: format!("Remove provider {name}?"),
+                body: "This deletes the provider definition and its stored credential from the daemon. The provider stays gone after a reload.".into(),
+                confirm_label: "Remove provider".into(),
+            },
+            run,
+        );
+        if !opened {
+            map_insert(&notes, name, crate::confirm::BUSY.into());
+        }
     };
 
     let save_base = {
@@ -479,7 +540,7 @@ fn ProviderCard(
                     {custom.then(|| {
                         let name_remove_key = name_remove_key.clone();
                         view! {
-                            <button type="button" class="secondary" data-remove-key="true" on:click=move |_| remove_stored(name_remove_key.clone())>"Remove provider"</button>
+                            <button type="button" class="secondary" data-remove-key="true" on:click=move |_| remove_provider(name_remove_key.clone())>"Remove provider"</button>
                         }
                     })}
                 </div>
@@ -489,7 +550,7 @@ fn ProviderCard(
                 <div class="providers-actions">
                     <button type="button" class="secondary" data-test-provider="true" on:click=move |_| test_provider(name_test_plain.clone())>"Test"</button>
                     {(custom && !builtin).then(|| view! {
-                        <button type="button" class="secondary" data-remove-key="true" on:click=move |_| remove_stored(name_remove_plain.clone())>"Remove provider"</button>
+                        <button type="button" class="secondary" data-remove-key="true" on:click=move |_| remove_provider(name_remove_plain.clone())>"Remove provider"</button>
                     })}
                 </div>
             })}
@@ -813,6 +874,32 @@ mod tests {
         );
         let oauth = probe_note("unsupported", "signed in with OAuth — there is no API key to test");
         assert!(oauth.starts_with("Nothing to test"));
+    }
+
+    #[test]
+    fn custom_removal_note_claims_only_what_happened() {
+        // Full removal: honest success matching the button's label.
+        assert_eq!(
+            custom_removal_note(&Ok(()), Some(&Ok(()))),
+            "Provider removed."
+        );
+        // The issue's partial case, verbatim shape: credential gone,
+        // definition still there, and the note says exactly that.
+        assert_eq!(
+            custom_removal_note(&Ok(()), Some(&Err("no such provider".into()))),
+            "Stored credential removed, but the provider definition could not be deleted: no such provider"
+        );
+        // Credential failure stops the flow: definition never attempted,
+        // and the note must not claim a removal.
+        assert_eq!(
+            custom_removal_note(&Err("HTTP 400".into()), None),
+            "Could not remove the stored credential: HTTP 400 The provider was not removed."
+        );
+        // Credential-only path (no definition step) keeps the old copy.
+        assert_eq!(
+            custom_removal_note(&Ok(()), None),
+            "Stored credential removed."
+        );
     }
 
     #[test]
