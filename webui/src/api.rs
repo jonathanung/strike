@@ -232,9 +232,26 @@ pub async fn post_op(
 }
 
 pub fn js_encode(s: &str) -> String {
-    js_sys::encode_uri_component(s)
-        .as_string()
-        .unwrap_or_else(|| s.to_string())
+    #[cfg(target_arch = "wasm32")]
+    {
+        js_sys::encode_uri_component(s)
+            .as_string()
+            .unwrap_or_else(|| s.to_string())
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        // Host fallback (unit tests): js_sys panics off-wasm, so percent-
+        // encode exactly like encodeURIComponent (unreserved set below).
+        let mut out = String::with_capacity(s.len());
+        for b in s.bytes() {
+            match b {
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'!'
+                | b'~' | b'*' | b'\'' | b'(' | b')' => out.push(b as char),
+                _ => out.push_str(&format!("%{b:02X}")),
+            }
+        }
+        out
+    }
 }
 
 pub fn now_ms() -> f64 {
