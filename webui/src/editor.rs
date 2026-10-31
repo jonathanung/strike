@@ -17,6 +17,57 @@ const MAX_RENDER_LINES: usize = 2000;
 const MAX_HITS: usize = 2000;
 const MAX_DIFF_CHARS: usize = 20_000;
 
+/// localStorage key for the word-wrap preference (#1412). One global
+/// reading-style choice, like theme: `"on"` / `"off"`.
+pub const WRAP_STORAGE_KEY: &str = "strike.editorWrap";
+
+/// Wrap preference from a stored value: default ON (today's behaviour);
+/// only an explicit `"off"` disables wrapping.
+pub fn wrap_enabled_from_storage(raw: Option<&str>) -> bool {
+    !matches!(raw, Some("off"))
+}
+
+/// Stored / `data-ev-wrap` value for a wrap state.
+pub fn wrap_storage_value(wrap: bool) -> &'static str {
+    if wrap {
+        "on"
+    } else {
+        "off"
+    }
+}
+
+/// Whether the always-visible Reload control must be blocked (#1407):
+/// only while editing with unsaved changes, where a reload — whose load
+/// effect resets `editing` — would silently clobber the draft. Editing
+/// with no changes, and not editing at all, are safe to reload.
+pub fn reload_blocked(editing: bool, draft: &str, content: &str) -> bool {
+    editing && draft != content
+}
+
+/// Explanatory title for the Reload control, blocked or not.
+pub fn reload_title(blocked: bool) -> &'static str {
+    if blocked {
+        "Reload is disabled while you have unsaved edits — save or cancel them first"
+    } else {
+        "Reload this file from disk"
+    }
+}
+
+fn wrap_storage() -> Option<web_sys::Storage> {
+    web_sys::window()?.local_storage().ok().flatten()
+}
+
+fn load_wrap_pref() -> bool {
+    let raw = wrap_storage().and_then(|s| s.get_item(WRAP_STORAGE_KEY).ok().flatten());
+    wrap_enabled_from_storage(raw.as_deref())
+}
+
+fn save_wrap_pref(wrap: bool) {
+    if let Some(s) = wrap_storage() {
+        let _ = s.set_item(WRAP_STORAGE_KEY, wrap_storage_value(wrap));
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Hit {
     pub line: u32,
@@ -1038,6 +1089,7 @@ fn SourceView(
     hits: Vec<Hit>,
     current: usize,
     target_line: u32,
+    wrap: bool,
 ) -> impl IntoView {
     // The whole file is already loaded; only the rendered window is
     // capped (#1431). The window lives in a signal so "Show more" can
@@ -1060,8 +1112,9 @@ fn SourceView(
             .unwrap_or(target_line)
     };
     let limit = RwSignal::new(initial_render_limit(total, target));
+    let code_class = if wrap { "ev-codeview" } else { "ev-codeview ev-nowrap" };
     view! {
-        <div class="ev-codeview">
+        <div class=code_class>
             {move || {
                 let rows_lines = lines.clone();
                 let rows_hits = hits.clone();
@@ -1188,10 +1241,11 @@ fn marked_pieces(line: &str, hits: &[&Hit], current: Option<&Hit>) -> Vec<(Strin
 }
 
 #[component]
-fn DiffView(text: String) -> impl IntoView {
+fn DiffView(text: String, wrap: bool) -> impl IntoView {
+    let diff_class = if wrap { "ev-diff" } else { "ev-diff ev-nowrap" };
     if text.is_empty() {
         return view! {
-            <div class="ev-diff">
+            <div class=diff_class>
                 <p class="hint">"No agent diff for this file. The Changes tab lists git diffs for the working directory."</p>
             </div>
         }
@@ -1204,7 +1258,7 @@ fn DiffView(text: String) -> impl IntoView {
     let full_footer = full.clone();
     let shown = RwSignal::new(MAX_DIFF_CHARS);
     view! {
-        <div class="ev-diff">
+        <div class=diff_class>
             {move || {
                 let visible = diff_visible(&full, shown.get());
                 let lines: Vec<String> = visible.split('\n').map(|s| s.to_string()).collect();
@@ -1381,6 +1435,10 @@ pub fn DocumentPane(
     let reload_tick = RwSignal::new(0u32);
     let load_gen = RwSignal::new(0u32);
     let diff_gen = RwSignal::new(0u32);
+    // Word-wrap preference (#1412): global, persisted, default on.
+    // Edit mode's textarea is explicitly out of scope — it wraps per
+    // its own attribute and does not follow this preference in slice 1.
+    let wrap_on = RwSignal::new(load_wrap_pref());
 
     Effect::new(move |_| {
         let text = if editing.get() { draft.get() } else { content.get() };
@@ -1676,6 +1734,7 @@ pub fn DocumentPane(
             data-ev-root="open"
             data-ev-path=move || loaded_path.get()
             data-ev-sha=move || sha.get()
+            data-ev-wrap=move || wrap_storage_value(wrap_on.get())
             on:keydown=on_key
         >
             <div class="ev-bar">
@@ -1717,6 +1776,18 @@ pub fn DocumentPane(
                 }}</span>
                 <button type="button" class="secondary" on:click=move |_| step(-1)>"Prev"</button>
                 <button type="button" class="secondary" on:click=move |_| step(1)>"Next"</button>
+                <button
+                    type="button"
+                    class="secondary"
+                    data-ev-reload-bar=true
+                    disabled=move || reload_blocked(editing.get(), &draft.get(), &content.get())
+                    title=move || reload_title(reload_blocked(editing.get(), &draft.get(), &content.get()))
+                    on:click=move |_| {
+                        if !reload_blocked(editing.get_untracked(), &draft.get_untracked(), &content.get_untracked()) {
+                            reload_tick.update(|n| *n += 1);
+                        }
+                    }
+                >"Reload"</button>
                 <button type="button" class="secondary" on:click=move |_| path.set(String::new())>"Back to chat"</button>
             </div>
             <Show when=move || !status.get().is_empty()>
@@ -1751,6 +1822,7 @@ pub fn DocumentPane(
                             hits=hits.get()
                             current=hit_idx.get()
                             target_line=jump_line.get()
+                            wrap=wrap_on.get()
                         />
                     }}
                 </Show>
@@ -1767,10 +1839,22 @@ pub fn DocumentPane(
                     <Show when=move || !diff_note.get().is_empty()>
                         <p class="hint">{move || diff_note.get()}</p>
                     </Show>
-                    {move || view! { <DiffView text=agent_diff.get() /> }}
+                    {move || view! { <DiffView text=agent_diff.get() wrap=wrap_on.get() /> }}
                 </Show>
             </div>
             <div class="ev-tools">
+                <button
+                    type="button"
+                    class=move || if wrap_on.get() { "chip on" } else { "chip" }
+                    data-ev-wrap-toggle=true
+                    aria-pressed=move || if wrap_on.get() { "true" } else { "false" }
+                    title="Toggle word wrap for the code and diff views"
+                    on:click=move |_| {
+                        let next = !wrap_on.get_untracked();
+                        wrap_on.set(next);
+                        save_wrap_pref(next);
+                    }
+                >"Wrap"</button>
                 <button
                     type="button"
                     class="secondary"
@@ -1800,6 +1884,34 @@ pub fn DocumentPane(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wrap_pref_defaults_on_and_only_explicit_off_disables() {
+        assert!(wrap_enabled_from_storage(None));
+        assert!(wrap_enabled_from_storage(Some("")));
+        assert!(wrap_enabled_from_storage(Some("on")));
+        assert!(wrap_enabled_from_storage(Some("garbage")));
+        assert!(!wrap_enabled_from_storage(Some("off")));
+        assert_eq!(wrap_storage_value(true), "on");
+        assert_eq!(wrap_storage_value(false), "off");
+        // Round-trip through the storage representation.
+        assert!(wrap_enabled_from_storage(Some(wrap_storage_value(true))));
+        assert!(!wrap_enabled_from_storage(Some(wrap_storage_value(false))));
+        assert_eq!(WRAP_STORAGE_KEY, "strike.editorWrap");
+    }
+
+    #[test]
+    fn reload_blocked_only_while_editing_with_unsaved_changes() {
+        // Not editing: safe even though the texts differ (stale view).
+        assert!(!reload_blocked(false, "draft", "on disk"));
+        // Editing but untouched draft: reload loses nothing.
+        assert!(!reload_blocked(true, "same", "same"));
+        // Editing with unsaved changes: the load effect would reset
+        // editing and clobber the draft, so Reload must be disabled.
+        assert!(reload_blocked(true, "edited", "on disk"));
+        assert!(reload_title(true).contains("unsaved edits"));
+        assert!(reload_title(false).contains("from disk"));
+    }
 
     #[test]
     fn linkify_paths_and_skips_urls() {

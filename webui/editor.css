@@ -175,3 +175,26 @@
 /* feature:agent-diff-expand begin */
 .ev-diff > button.secondary { margin: 0 0 8px 8px; }
 /* feature:agent-diff-expand end */
+/* feature:document-reload begin */
+/* Reload uses the existing .secondary button style in .ev-bar; no
+   extra rules are needed for #1407. */
+/* feature:document-reload end */
+/* feature:viewer-wrap-toggle begin */
+/* Wrap off (#1412): one row per line, columns line up, and the
+   containers' existing overflow:auto provides horizontal scroll.
+   The class lands on .ev-codeview/.ev-diff; the pane-root
+   [data-ev-wrap="off"] selector is the same state for descendants. */
+.ev-codeview.ev-nowrap .ev-line,
+.ev-doc[data-ev-wrap="off"] .ev-codeview .ev-line {
+  white-space: pre;
+  word-break: normal;
+  width: max-content;
+  min-width: 100%;
+}
+.ev-diff.ev-nowrap pre,
+.ev-doc[data-ev-wrap="off"] .ev-diff pre {
+  white-space: pre;
+  width: max-content;
+  min-width: 100%;
+}
+/* feature:viewer-wrap-toggle end */
