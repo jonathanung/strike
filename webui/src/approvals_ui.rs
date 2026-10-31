@@ -14,7 +14,8 @@ use crate::api::{get_json, patch_json, post_json, post_op};
 use crate::approvals::{
     autonomy_confirm, begin_autonomy_change, begin_session_mode, countdown_seconds,
     decision_choices, global_confirm, hint_line, is_dangerous, notes_from_envelope,
-    rule_add_confirm, rule_remove_confirm, session_confirm, validate_rule_draft, workspace_confirm,
+    rule_add_confirm, rule_prefill, rule_remove_confirm, session_confirm, validate_rule_draft,
+    workspace_confirm,
     Ask, AuditDocument, AuditLine, ConfirmKind, ModeChange, PendingConfirm, PermNote, RuleRecord,
     RulesDocument, SettingsBits,
 };
@@ -241,6 +242,7 @@ pub fn ApprovalHost(
     let perm_name = RwSignal::new("bash".to_string());
     let pattern = RwSignal::new(String::new());
     let action = RwSignal::new("deny".to_string());
+    let pattern_input = NodeRef::<leptos::html::Input>::new();
     let global_choice = RwSignal::new("default".to_string());
     let workspace_choice = RwSignal::new("default".to_string());
     Effect::new(move |_| {
@@ -383,20 +385,36 @@ pub fn ApprovalHost(
                             {move || rules.get().rules.into_iter().map(|rule| {
                                 let shown = format!("{} · {} · {} · {}", rule.scope, rule.permission, rule.pattern, rule.action);
                                 let remove = rule.clone();
+                                let dup = rule.clone();
                                 view! {
                                     <li class="approvals-rule">
                                         <span>{shown}</span>
-                                        <button type="button" class="secondary" on:click=move |_| remove_rule(remove.clone(), confirm, base, token, status, panel_error, rules)>"Remove"</button>
+                                        <span class="approvals-rule-actions">
+                                            <button type="button" class="secondary" data-rule-duplicate="true" title="Copy this rule into the form below" on:click=move |_| {
+                                                // Prefill only (#1433): seed the four
+                                                // form signals verbatim and focus the
+                                                // pattern field. Nothing is submitted;
+                                                // the existing Add path (validation +
+                                                // dangerous-add confirm) creates the rule.
+                                                let draft = rule_prefill(&dup);
+                                                scope.set(draft.scope);
+                                                perm_name.set(draft.permission);
+                                                pattern.set(draft.pattern);
+                                                action.set(draft.action);
+                                                focus_pattern(pattern_input);
+                                            }>"Duplicate"</button>
+                                            <button type="button" class="secondary" on:click=move |_| remove_rule(remove.clone(), confirm, base, token, status, panel_error, rules)>"Remove"</button>
+                                        </span>
                                     </li>
                                 }
                             }).collect_view()}
                         </ul>
                         <div class="approvals-form">
-                            <select aria-label="Rule scope" on:change=move |ev| scope.set(event_target_value(&ev))>
+                            <select aria-label="Rule scope" prop:value=move || scope.get() on:change=move |ev| scope.set(event_target_value(&ev))>
                                 <option value="global">"Global"</option>
                                 <option value="project">"Project"</option>
                             </select>
-                            <select aria-label="Permission name" on:change=move |ev| perm_name.set(event_target_value(&ev))>
+                            <select aria-label="Permission name" prop:value=move || perm_name.get() on:change=move |ev| perm_name.set(event_target_value(&ev))>
                                 {move || {
                                     let mut names = rules.get().known;
                                     if names.is_empty() {
@@ -411,11 +429,12 @@ pub fn ApprovalHost(
                             <input
                                 aria-label="Pattern"
                                 placeholder="pattern, such as rm * or *.go"
+                                node_ref=pattern_input
                                 prop:value=move || pattern.get()
                                 on:input=move |ev| pattern.set(event_target_value(&ev))
                             />
-                            <select aria-label="Rule action" on:change=move |ev| action.set(event_target_value(&ev))>
-                                <option value="deny" selected>"Deny"</option>
+                            <select aria-label="Rule action" prop:value=move || action.get() on:change=move |ev| action.set(event_target_value(&ev))>
+                                <option value="deny">"Deny"</option>
                                 <option value="ask">"Ask"</option>
                                 <option value="allow">"Allow"</option>
                             </select>
@@ -448,6 +467,24 @@ pub fn ApprovalHost(
             </div>
         </Show>
     }
+}
+
+/// Move focus to the pattern field after a Duplicate prefill (#1433, Q2:
+/// the pattern is the field most often changed). Deferred a tick so the
+/// click's own focus change does not win.
+fn focus_pattern(pattern_input: NodeRef<leptos::html::Input>) {
+    let closure = Closure::once(move || {
+        if let Some(el) = pattern_input.get() {
+            let _ = el.focus();
+        }
+    });
+    if let Some(window) = web_sys::window() {
+        let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
+            closure.as_ref().unchecked_ref(),
+            0,
+        );
+    }
+    closure.forget();
 }
 
 fn reload_panel(
