@@ -198,7 +198,7 @@ pub fn install(reg: &mut ShellHook) {
             "Back",
             "Return to the previous session",
             "Alt+Left",
-            &[],
+            &["history", "previous", "session", "return"],
             40,
             None,
             run(|_| {
@@ -217,7 +217,7 @@ pub fn install(reg: &mut ShellHook) {
             "Forward",
             "Return to the session you left with Back",
             "Alt+Right",
-            &[],
+            &["history", "next", "session", "return"],
             50,
             None,
             run(|_| {
@@ -235,7 +235,7 @@ pub fn install(reg: &mut ShellHook) {
         "Toggle focus mode",
         "Hide the session list and the side panel",
         "Alt+\\",
-        &["zen"],
+        &["focus", "zen", "hide", "panels"],
         60,
         None,
         run(|_| host::toggle_focus()),
@@ -268,7 +268,7 @@ pub fn install(reg: &mut ShellHook) {
         "Keyboard shortcuts",
         "Show the shortcut overlay",
         "?",
-        &["help", "keys"],
+        &["help", "keys", "shortcuts", "hotkeys"],
         80,
         None,
         run(|_| {
@@ -293,7 +293,7 @@ pub fn install(reg: &mut ShellHook) {
         "Daemon",
         "This gateway, its token, and workspaces",
         "",
-        &["settings"],
+        &["gateway", "token", "workspaces", "settings"],
         20,
         None,
         run(|_| host::set_view("daemon")),
@@ -496,15 +496,10 @@ pub fn install(reg: &mut ShellHook) {
         collapse_below_px: 720,
         render: Rc::new(gateway_chip),
     });
-    reg.slot(TopSlot {
-        id: "view",
-        region: TopRegion::Trailing,
-        order: 90,
-        title: "View",
-        overflow_label: "View",
-        collapse_below_px: 0,
-        render: Rc::new(view_switcher),
-    });
+    // No `view` slot (#1590 A4/D19/D20): the Chat/Daemon switcher is not
+    // rendered as a slot any more — the header centre zone, the palette
+    // (`chat` / `daemon` commands) and the phone bottom nav own view
+    // switching.
 }
 
 fn autonomy_command_id(id: &str) -> &'static str {
@@ -621,30 +616,6 @@ fn gateway_chip() -> AnyView {
         <span class=move || gateway_class(&host::gateway()) title="This daemon">
             {move || gateway_label(&host::gateway())}
         </span>
-    }
-    .into_any()
-}
-
-fn view_switcher() -> AnyView {
-    view! {
-        <div class="segmented" role="tablist" aria-label="View">
-            <button
-                class=move || if host::view() == "chat" { "seg on" } else { "seg" }
-                on:click=move |_| {
-                    let _ = host::set_view("chat");
-                }
-            >
-                "Chat"
-            </button>
-            <button
-                class=move || if host::view() == "daemon" { "seg on" } else { "seg" }
-                on:click=move |_| {
-                    let _ = host::set_view("daemon");
-                }
-            >
-                "Daemon"
-            </button>
-        </div>
     }
     .into_any()
 }

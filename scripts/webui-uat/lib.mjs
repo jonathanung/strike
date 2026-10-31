@@ -1,7 +1,7 @@
 // Pure helpers for the web UI UAT harness. No browser, no daemon.
 
 export const SHELL_LABELS = [
-  "Menu",
+  "Run a command",
   "Strike",
   "Sessions",
   "Activity",
