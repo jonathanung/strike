@@ -8,8 +8,37 @@ use load_guard::{commit_load, Commit, ErrPolicy, LoadEpoch};
 
 use crate::load_epoch::begin;
 
-use crate::api::{delete_json, get_json, now_ms, put_json};
+use crate::api::{delete_json, get_json, get_text, now_ms, put_json};
 use crate::model::{fmt_ago, rfc3339_to_ms};
+
+/// Daemon route for the whole-store memory export (#1534). The daemon
+/// already serves this as a file download; the panel only fetches it.
+pub const MEMORY_EXPORT_PATH: &str = "/v1/memory/export";
+/// Filename the daemon sends in Content-Disposition for the export;
+/// the download must use exactly this name.
+pub const MEMORY_EXPORT_FILENAME: &str = "strike-memory.json";
+/// Honest one-line label for the export (#1534, scope note from #1541):
+/// the file is plain unencrypted JSON, and the daemon route ignores
+/// the panel's Project/Global scope — it always exports the Project
+/// store, even while the Global tab is showing.
+pub const MEMORY_EXPORT_HINT: &str = "Export downloads plain, unencrypted JSON of everything the agent remembers in the Project store \u{2014} it always exports Project, even on the Global tab.";
+
+/// What the export action should do with a finished fetch. Split out
+/// as a pure decision so tests can prove the two honest states
+/// without a browser: success downloads the daemon's bytes untouched,
+/// failure downloads nothing and surfaces the daemon's message.
+#[derive(Debug, PartialEq, Eq)]
+enum MemoryExportDecision {
+    Download(String),
+    ShowError(String),
+}
+
+fn memory_export_decision(result: Result<String, String>) -> MemoryExportDecision {
+    match result {
+        Ok(text) => MemoryExportDecision::Download(text),
+        Err(e) => MemoryExportDecision::ShowError(e),
+    }
+}
 
 #[derive(Clone, Deserialize, Default)]
 struct MemoryEntry {
@@ -125,6 +154,8 @@ pub fn StoragePanel(
     let pin_epoch = RwSignal::new(LoadEpoch::new());
     let artifact_epoch = RwSignal::new(LoadEpoch::new());
     let list_key = RwSignal::new(String::new());
+    let exporting = RwSignal::new(false);
+    let exported = RwSignal::new(String::new());
 
     let reload = move || {
         let tab_now = tab.get_untracked();
@@ -250,6 +281,41 @@ pub fn StoragePanel(
                 }
                 Err(e) => error.set(e),
             }
+        });
+    };
+
+    let export_memory = move || {
+        if exporting.get_untracked() {
+            return;
+        }
+        exporting.set(true);
+        exported.set(String::new());
+        error.set(String::new());
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            // get_text preserves the daemon's error body, so a failure
+            // (including memory-not-configured) surfaces its message.
+            // The downloaded bytes are the daemon response untouched —
+            // never assembled client-side from the entry list.
+            let result = get_text(&b, &t, MEMORY_EXPORT_PATH).await;
+            match memory_export_decision(result) {
+                MemoryExportDecision::Download(text) => {
+                    crate::transcript_view::save_download(
+                        MEMORY_EXPORT_FILENAME,
+                        "application/json",
+                        &text,
+                    );
+                    let msg =
+                        format!("Downloaded {MEMORY_EXPORT_FILENAME} (Project memory export).");
+                    exported.set(msg.clone());
+                    status.set(msg);
+                }
+                MemoryExportDecision::ShowError(e) => {
+                    // No file is saved on failure.
+                    error.set(e);
+                }
+            }
+            exporting.set(false);
         });
     };
 
@@ -420,6 +486,17 @@ pub fn StoragePanel(
                 </p>
             </Show>
             <Show when=move || tab.get() == "memory">
+                <div class="storage-export">
+                    <button type="button" class="secondary" data-action="memory-export"
+                        disabled=move || exporting.get()
+                        on:click=move |_| export_memory()>
+                        {move || if exporting.get() { "Exporting\u{2026}" } else { "Export memory" }}
+                    </button>
+                    <p class="hint">{MEMORY_EXPORT_HINT}</p>
+                </div>
+                <Show when=move || !exported.get().is_empty()>
+                    <p class="hint" role="status">{move || exported.get()}</p>
+                </Show>
                 <form class="storage-form" on:submit=move |ev| { ev.prevent_default(); save_memory(); }>
                     <label>"Key" <input prop:value=move || key_in.get() on:input=move |ev| key_in.set(event_target_value(&ev)) /></label>
                     <label class="grow">"Value" <textarea prop:value=move || value_in.get() on:input=move |ev| value_in.set(event_target_value(&ev))></textarea></label>
@@ -646,5 +723,60 @@ impl Default for Loaded {
             markdown: String::new(),
             audit: String::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn export_targets_the_daemon_route_and_filename() {
+        // The daemon serves GET /v1/memory/export and sends
+        // Content-Disposition: attachment; filename="strike-memory.json"
+        // (internal/frontend/server/api.go handleMemoryExport).
+        assert_eq!(MEMORY_EXPORT_PATH, "/v1/memory/export");
+        assert_eq!(MEMORY_EXPORT_FILENAME, "strike-memory.json");
+    }
+
+    #[test]
+    fn export_success_downloads_the_daemon_bytes_untouched() {
+        // Stubbed daemon response: the decision must carry the exact
+        // bytes through to the download, never a client-assembled copy.
+        let stubbed = r#"{"entries":[{"key":"pref","value":"likes plain files"}]}"#;
+        assert_eq!(
+            memory_export_decision(Ok(stubbed.to_string())),
+            MemoryExportDecision::Download(stubbed.to_string())
+        );
+    }
+
+    #[test]
+    fn export_empty_store_still_downloads_what_the_daemon_returns() {
+        // An empty store is not a UI error and no empty file is
+        // fabricated client-side: whatever the daemon returns downloads.
+        assert_eq!(
+            memory_export_decision(Ok("{}".to_string())),
+            MemoryExportDecision::Download("{}".to_string())
+        );
+    }
+
+    #[test]
+    fn export_error_saves_no_file_and_surfaces_the_daemon_message() {
+        let decision =
+            memory_export_decision(Err("HTTP 400 memory is not configured".to_string()));
+        assert_eq!(
+            decision,
+            MemoryExportDecision::ShowError("HTTP 400 memory is not configured".to_string())
+        );
+        assert!(!matches!(decision, MemoryExportDecision::Download(_)));
+    }
+
+    #[test]
+    fn export_hint_is_honest_about_encryption_and_scope() {
+        assert!(MEMORY_EXPORT_HINT.contains("unencrypted"));
+        assert!(MEMORY_EXPORT_HINT.contains("Project"));
+        assert!(MEMORY_EXPORT_HINT.contains("Global"));
+        // It must never claim the Global store is what gets exported.
+        assert!(!MEMORY_EXPORT_HINT.contains("exports Global"));
     }
 }
