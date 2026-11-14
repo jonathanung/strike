@@ -25,8 +25,9 @@ use load_guard::{
 };
 use crate::model::{is_running, merge_sessions, ActivityRow, RootSummary, SessionItem, Workspace};
 use crate::session_list::{
-    alt_digit, assemble, human_title, select_range, stamp_times, step_index, title_is_raw_id,
-    toggle_id, unread_flag, AssembleArgs, ChildIn, FolderIn, Layout, LayoutKind, SourceSession,
+    alt_digit, assemble, empty_folder_ids, human_title, select_range, stamp_times, step_index,
+    still_empty_folder_ids, title_is_raw_id, toggle_id, unread_flag, AssembleArgs, ChildIn,
+    FolderIn, Layout, LayoutKind, SourceSession,
 };
 use crate::shell::icon;
 use crate::{load, load_string_list, save};
@@ -64,6 +65,18 @@ thread_local! {
     static CURSOR: RefCell<CursorSession> = RefCell::new(CursorSession::default());
     static FOLDERS: RefCell<Vec<(String, String)>> = RefCell::new(Vec::new());
     static SELECTED: RefCell<Vec<String>> = RefCell::new(Vec::new());
+    static CLEANUP_ASK: RefCell<Option<Rc<dyn Fn()>>> = RefCell::new(None);
+}
+
+/// Run the mounted panel's empty-folder cleanup ask (#1566). The
+/// callback lives in a thread-local because the panel's view closures
+/// must be `Send` and an `Rc` callback is not; the FOLDERS/SELECTED
+/// slots above are the same pattern.
+fn ask_empty_folder_cleanup() {
+    let ask = CLEANUP_ASK.with(|slot| slot.borrow().clone());
+    if let Some(ask) = ask {
+        ask();
+    }
 }
 
 pub(crate) fn cursor_session() -> CursorSession {
@@ -291,6 +304,7 @@ pub(crate) fn SessionPanel(
     let anchor = RwSignal::new(String::new());
     let action_note = RwSignal::new(String::new());
     let migrated = RwSignal::new(false);
+    let cleanup_busy = RwSignal::new(false);
     let search_epoch = RwSignal::new(LoadEpoch::new());
     let reload_epoch = RwSignal::new(LoadEpoch::new());
 
@@ -592,6 +606,97 @@ pub(crate) fn SessionPanel(
             reload();
         });
     };
+
+    // Bulk cleanup of empty folders (#1566). The candidate set is
+    // recomputed against a fresh snapshot inside the run: a folder
+    // that gained a session since the confirm was armed is skipped,
+    // never removed from under its sessions. Deletes reuse the
+    // existing per-folder DELETE in a loop; the panel reloads once
+    // at the end, and a partial failure says how many folders could
+    // not be removed instead of reporting a clean sweep.
+    let cleanup_empty: Rc<dyn Fn(Vec<String>)> = Rc::new(move |candidates: Vec<String>| {
+        if candidates.is_empty() || cleanup_busy.get_untracked() {
+            return;
+        }
+        cleanup_busy.set(true);
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        let n = start_op();
+        let finish = finish_op;
+        let reload = reload;
+        let note = action_note;
+        spawn_local(async move {
+            // No fresh snapshot, no deletes: without the re-check a
+            // folder that gained a session could be removed.
+            let fresh = match get_json::<Snapshot>(&b, &t, "/v1/session-list").await {
+                Ok(fresh) => fresh,
+                Err(e) => {
+                    cleanup_busy.set(false);
+                    finish(n, format!("Could not re-check folders; nothing removed. {e}"));
+                    return;
+                }
+            };
+            let folder_ids: Vec<String> = fresh.folders.iter().map(|f| f.id.clone()).collect();
+            let filed: Vec<String> =
+                fresh.sessions.values().map(|o| o.folder_id.clone()).collect();
+            let targets = still_empty_folder_ids(&candidates, &folder_ids, &filed);
+            let skipped = candidates.len() - targets.len();
+            let total = targets.len();
+            let mut failed = 0usize;
+            for id in &targets {
+                let path = format!("/v1/session-list/folders/{}", js_encode(id));
+                if delete_json(&b, &t, &path, None).await.is_err() {
+                    failed += 1;
+                }
+            }
+            cleanup_busy.set(false);
+            if failed > 0 {
+                finish(n, format!("Could not remove {failed} of {total} empty folders."));
+            } else {
+                finish(n, String::new());
+                if total > 0 && skipped > 0 {
+                    note.set(format!(
+                        "Removed {total} empty folders. {skipped} skipped — no longer empty."
+                    ));
+                } else if total > 0 {
+                    note.set(format!("Removed {total} empty folders."));
+                } else if skipped > 0 {
+                    note.set("Nothing removed — every folder gained a session.".into());
+                }
+            }
+            reload();
+        });
+    });
+
+    // Panel-level discovery + one shared confirm for the cleanup
+    // (#1566). The count comes from the snapshot's folder assignments,
+    // so it never disagrees with what the batch will actually remove.
+    let ask_cleanup: Rc<dyn Fn()> = Rc::new(move || {
+        let snap = snapshot.get_untracked();
+        let folder_ids: Vec<String> = snap.folders.iter().map(|f| f.id.clone()).collect();
+        let filed: Vec<String> = snap
+            .sessions
+            .values()
+            .map(|o| o.folder_id.clone())
+            .collect();
+        let candidates = empty_folder_ids(&folder_ids, &filed);
+        let count = candidates.len();
+        if count == 0 {
+            return;
+        }
+        let run = cleanup_empty.clone();
+        if !crate::confirm::ask(
+            crate::confirm::ConfirmRequest {
+                title: format!("Remove {count} empty folders?"),
+                body: "Sessions are not affected — these folders contain none.".into(),
+                confirm_label: "Remove empty folders".into(),
+            },
+            Rc::new(move || run(candidates.clone())),
+        ) {
+            list_error.set(crate::confirm::BUSY.into());
+        }
+    });
+    CLEANUP_ASK.with(|slot| *slot.borrow_mut() = Some(ask_cleanup));
+    on_cleanup(|| CLEANUP_ASK.with(|slot| *slot.borrow_mut() = None));
 
     let open_at = move |index: usize| {
         let layout = layout.get_untracked();
@@ -1028,6 +1133,37 @@ pub(crate) fn SessionPanel(
                     <button type="button" class="secondary" on:click=move |_| selected.set(Vec::new())>"Clear"</button>
                 </div>
             </Show>
+            {move || {
+                // Empty-folder cleanup (#1566): shown only while the
+                // snapshot says at least one folder holds no session.
+                let snap = snapshot.get();
+                let folder_ids: Vec<String> = snap.folders.iter().map(|f| f.id.clone()).collect();
+                let filed: Vec<String> = snap
+                    .sessions
+                    .values()
+                    .map(|o| o.folder_id.clone())
+                    .collect();
+                let empty = empty_folder_ids(&folder_ids, &filed);
+                if empty.is_empty() {
+                    ().into_any()
+                } else {
+                    let label = format!("Clean up empty folders ({})", empty.len());
+                    view! {
+                        <div class="ss-folder-cleanup">
+                            <button
+                                type="button"
+                                class="secondary"
+                                data-action="cleanup-empty-folders"
+                                disabled=move || cleanup_busy.get()
+                                on:click=move |_| ask_empty_folder_cleanup()
+                            >
+                                {label}
+                            </button>
+                        </div>
+                    }
+                    .into_any()
+                }
+            }}
             {move || render_rows(
                 layout.get(),
                 cursor.get(),
