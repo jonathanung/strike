@@ -291,10 +291,18 @@ async fn put_json(base: &str, token: &str, path: &str, body: Value) -> Result<Va
 // the same structs the page renders, one file per breakdown.
 
 fn csv_escape(field: &str) -> String {
+    // Neutralise spreadsheet formulas: a title like `=HYPERLINK(...)`
+    // must open as text, not run. No numeric cell here is negative, so
+    // the leading-'-' guard never touches a number.
+    let field = if field.starts_with(['=', '+', '-', '@', '\t', '\r']) {
+        format!("'{field}")
+    } else {
+        field.to_string()
+    };
     if field.contains([',', '"', '\n', '\r']) {
         format!("\"{}\"", field.replace('"', "\"\""))
     } else {
-        field.to_string()
+        field
     }
 }
 
@@ -1183,6 +1191,17 @@ mod tests {
         assert!(sessions.contains("pricey,Pricey"), "sessions: {sessions}");
         let models = models_csv(&rep);
         assert!(models.contains("anthropic,opus,2026-10-25,2026-10-26,1,2,1009"), "models: {models}");
+    }
+
+    #[test]
+    fn csv_neutralises_formula_cells() {
+        assert_eq!(csv_escape("=1+1"), "'=1+1");
+        assert_eq!(csv_escape("@SUM(A1)"), "'@SUM(A1)");
+        assert_eq!(csv_escape("+x"), "'+x");
+        assert_eq!(csv_escape("-x"), "'-x");
+        assert_eq!(csv_escape("=HYPERLINK(\"u\",\"x\")"), "\"'=HYPERLINK(\"\"u\"\",\"\"x\"\")\"");
+        assert_eq!(csv_escape("plain"), "plain");
+        assert_eq!(csv_escape("1.5"), "1.5");
     }
 
     #[test]
