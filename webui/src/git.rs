@@ -187,6 +187,13 @@ pub(crate) fn shortcut_blocked(ev: &web_sys::KeyboardEvent) -> bool {
     )
 }
 
+fn enter_on_button(ev: &web_sys::KeyboardEvent) -> bool {
+    ev.target()
+        .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
+        .map(|el| el.tag_name().eq_ignore_ascii_case("button"))
+        .unwrap_or(false)
+}
+
 fn diff_kind(line: &str) -> &'static str {
     if line.starts_with('+') && !line.starts_with("+++") {
         "add"
@@ -225,15 +232,31 @@ struct GitShow {
     parents: Vec<String>,
     #[serde(default)]
     files: Vec<GitShowFile>,
+    #[serde(default, rename = "filesTotal")]
+    files_total: usize,
     #[serde(default)]
     patch: String,
     #[serde(default)]
     truncated: bool,
 }
 
-/// Render window for a commit patch: the same 400 lines as the working
-/// tree diff (#1484 Q2, #1428).
-const PATCH_RENDER_LINES: usize = 400;
+/// Render window shared by the working-tree diff (#1428) and a commit
+/// patch (#1484 Q2): wasm DOM cost, not data, limits the default view.
+const DIFF_RENDER_LINES: usize = 400;
+
+/// Diff/patch lines with add/del/ctx classes, capped at
+/// DIFF_RENDER_LINES unless expanded. One renderer for both surfaces.
+fn diff_lines_view(text: &str, expanded: bool) -> Vec<AnyView> {
+    let limit = if expanded { usize::MAX } else { DIFF_RENDER_LINES };
+    text.lines()
+        .take(limit)
+        .map(|line| {
+            let kind = diff_kind(line);
+            let text = line.to_string();
+            view! { <div class=kind>{text}</div> }.into_any()
+        })
+        .collect()
+}
 
 /// Clicking a log row opens that commit; clicking the open one closes it
 /// (#1484). Returns the hash to load, or `None` to close the detail.
@@ -247,13 +270,16 @@ fn commit_click_target(open: &str, clicked: &str) -> Option<String> {
 
 /// Honest notes under a commit detail: merges are diffed against the
 /// first parent, and a daemon-truncated patch says so (#1484).
-fn commit_detail_notes(parents: usize, truncated: bool) -> Vec<&'static str> {
+fn commit_detail_notes(parents: usize, truncated: bool, shown: usize, total: usize) -> Vec<String> {
     let mut notes = Vec::new();
     if parents > 1 {
-        notes.push("Merge commit — changes shown against the first parent.");
+        notes.push("Merge commit — changes shown against the first parent.".to_string());
+    }
+    if total > shown {
+        notes.push(format!("Showing {shown} of {total} changed files."));
     }
     if truncated {
-        notes.push("Patch truncated by the daemon — showing the first 200 KB.");
+        notes.push("Patch truncated by the daemon — showing the first 200 KB.".to_string());
     }
     notes
 }
@@ -651,6 +677,12 @@ pub fn GitPanel(
                 move_cursor(-1);
             }
             "Enter" => {
+                // A focused button (log row, file row, action) keeps its
+                // native click; Enter-to-open is for the panel itself
+                // (#1484: Enter on a commit row must open that commit).
+                if enter_on_button(&ev) {
+                    return;
+                }
                 ev.prevent_default();
                 open_selected();
             }
@@ -1014,13 +1046,13 @@ pub fn GitPanel(
                     <p class="hint" role="alert">{move || show_note.get()}</p>
                 </Show>
                 {move || shown.get().map(|c| {
-                    let notes = commit_detail_notes(c.parents.len(), c.truncated);
+                    let notes = commit_detail_notes(c.parents.len(), c.truncated, c.files.len(), c.files_total);
                     let meta = format!("{} · {}", c.author, c.date);
                     let body = c.body.clone();
                     let files = c.files.clone();
                     let no_files = files.is_empty();
-                    let lines: Vec<String> = c.patch.lines().map(str::to_string).collect();
-                    let total = lines.len();
+                    let patch = c.patch.clone();
+                    let total = patch.lines().count();
                     view! {
                         <section class="git-commit-detail" data-git-commit-detail=c.hash.clone() aria-label="Commit detail">
                             <h3 class="git-section">{c.subject.clone()}</h3>
@@ -1040,15 +1072,8 @@ pub fn GitPanel(
                                 }).collect_view()}
                             </ul>
                             {no_files.then(|| view! { <p class="hint">"No file changes."</p> })}
-                            <pre class="git-diff" aria-label="Commit patch">{move || {
-                                let limit = if show_expanded.get() { usize::MAX } else { PATCH_RENDER_LINES };
-                                lines.iter().take(limit).map(|line| {
-                                    let kind = diff_kind(line);
-                                    let text = line.clone();
-                                    view! { <div class=kind>{text}</div> }.into_any()
-                                }).collect_view()
-                            }}</pre>
-                            {move || (total > PATCH_RENDER_LINES && !show_expanded.get()).then(|| view! {
+                            <pre class="git-diff" aria-label="Commit patch">{move || diff_lines_view(&patch, show_expanded.get())}</pre>
+                            {move || (total > DIFF_RENDER_LINES && !show_expanded.get()).then(|| view! {
                                 <button type="button" class="secondary git-diff-expand" on:click=move |_| show_expanded.set(true)>
                                     {format!("Show all {total} lines")}
                                 </button>
@@ -1102,21 +1127,13 @@ pub fn GitPanel(
                     <div class="git-diff-bar">
                         <button type="button" class="secondary git-copy-diff" disabled=move || !crate::clipboard::diff_copyable(&diff_text.get()) on:click=copy_diff>"Copy diff"</button>
                     </div>
-                    <pre class="git-diff" aria-label="Diff">{move || {
-                        let text = diff_text.get();
-                        // #1428: render-only cap. The full text is already
-                        // client-side; expansion renders every line with the
-                        // same line-kind classes as the capped render.
-                        let limit = if diff_expanded.get() { usize::MAX } else { 400 };
-                        text.lines().take(limit).map(|line| {
-                            let kind = diff_kind(line);
-                            let text = line.to_string();
-                            view! { <div class=kind>{text}</div> }.into_any()
-                        }).collect_view()
-                    }}</pre>
+                    // #1428: render-only cap. The full text is already
+                    // client-side; expansion renders every line with the
+                    // same line-kind classes as the capped render.
+                    <pre class="git-diff" aria-label="Diff">{move || diff_lines_view(&diff_text.get(), diff_expanded.get())}</pre>
                     {move || {
                         let total = diff_text.get().lines().count();
-                        (total > 400 && !diff_expanded.get()).then(|| view! {
+                        (total > DIFF_RENDER_LINES && !diff_expanded.get()).then(|| view! {
                             <button
                                 type="button"
                                 class="secondary git-diff-expand"
@@ -1385,14 +1402,15 @@ mod tests {
 
     #[test]
     fn commit_detail_notes_are_honest_about_merges_and_truncation() {
-        assert!(commit_detail_notes(1, false).is_empty());
-        assert!(commit_detail_notes(0, false).is_empty());
-        let merge = commit_detail_notes(2, false);
+        assert!(commit_detail_notes(1, false, 3, 3).is_empty());
+        assert!(commit_detail_notes(0, false, 0, 0).is_empty());
+        let merge = commit_detail_notes(2, false, 1, 1);
         assert_eq!(merge.len(), 1);
         assert!(merge[0].contains("first parent"));
-        let both = commit_detail_notes(2, true);
-        assert_eq!(both.len(), 2);
-        assert!(both[1].contains("truncated"));
+        let all = commit_detail_notes(2, true, 500, 1640);
+        assert_eq!(all.len(), 3);
+        assert_eq!(all[1], "Showing 500 of 1640 changed files.");
+        assert!(all[2].contains("truncated"));
     }
 
     #[test]

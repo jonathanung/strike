@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -497,7 +498,7 @@ func TestGitShowRoute(t *testing.T) {
 	for _, f := range got.Files {
 		paths[f.Path] = f
 	}
-	if len(got.Files) != 2 || paths["alpha.txt"].Added != 1 || paths["src/beta.go"].Added != 1 {
+	if len(got.Files) != 2 || got.FilesTotal != 2 || paths["alpha.txt"].Added != 1 || paths["src/beta.go"].Added != 1 {
 		t.Fatalf("files = %+v", got.Files)
 	}
 	if !strings.Contains(got.Patch, "+two") || !strings.Contains(got.Patch, "src/beta.go") || got.Truncated {
@@ -530,12 +531,25 @@ func TestGitShowRoute(t *testing.T) {
 		t.Fatalf("big commit = %d truncated=%v len=%d %s", code, got.Truncated, len(got.Patch), raw[:min(len(raw), 200)])
 	}
 
-	for _, bad := range []string{"", "--output=/tmp/pwned", "-p", "HEAD~1", "main..side", "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"} {
+	pwned := filepath.Join(t.TempDir(), "pwned")
+	for _, bad := range []string{"", "--output=" + pwned, "-p", "HEAD~1", "main..side", "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"} {
 		if code, _, raw := show(bad); code != http.StatusBadRequest {
 			t.Errorf("ref %q = %d %s, want 400", bad, code, raw)
 		}
 	}
-	if _, err := os.Stat("/tmp/pwned"); err == nil {
+	if _, err := os.Stat(pwned); err == nil {
 		t.Fatal("option-looking ref was executed")
+	}
+
+	// A commit touching more paths than gitShowFilesMax lists the cap
+	// and reports the real total.
+	for i := 0; i < gitShowFilesMax+5; i++ {
+		write(fmt.Sprintf("many/f%03d.txt", i), "x\n")
+	}
+	git("add", ".")
+	git("commit", "-m", "many files")
+	code, got, raw = show(git("rev-parse", "HEAD"))
+	if code != http.StatusOK || len(got.Files) != gitShowFilesMax || got.FilesTotal != gitShowFilesMax+5 {
+		t.Fatalf("many files = %d files=%d total=%d %s", code, len(got.Files), got.FilesTotal, raw[:min(len(raw), 200)])
 	}
 }

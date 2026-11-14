@@ -2004,6 +2004,20 @@ try {
       },
       { timeout: STEP_MS, interval: 250 },
     );
+    // Enter on a focused commit row must keep the button's native
+    // activation: the panel's Enter-opens-diff shortcut may not swallow
+    // it (a synthetic keydown cannot click, so assert it stays
+    // un-prevented).
+    const enterPrevented = await evaluate(`(() => {
+      const b = document.querySelector("[data-git-commit]");
+      b.focus();
+      const ev = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+      b.dispatchEvent(ev);
+      return ev.defaultPrevented;
+    })()`);
+    if (enterPrevented !== false) {
+      throw new Error(`Enter on a commit row was swallowed by the panel shortcut (defaultPrevented=${enterPrevented})`);
+    }
     await evaluate(toggleLog);
   }
   // Branch switcher regression (#1314): the rendered <select> value must

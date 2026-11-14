@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -34,6 +35,10 @@ const (
 	gitDiffCap      = 200_000
 	gitLogDefault   = 30
 	gitLogMax       = 100
+	// gitShowFilesMax caps the changed-file list of an inspected commit
+	// (#1484): a vendor import or shallow boundary commit can touch
+	// thousands of paths.
+	gitShowFilesMax = 500
 
 	confirmDiscard        = "discard"
 	confirmResetHard      = "reset-hard"
@@ -84,15 +89,18 @@ type gitShowFileJSON struct {
 // gitShowJSON is the read-only commit detail behind GET /v1/git/show.
 // Merge commits are diffed against their first parent.
 type gitShowJSON struct {
-	Hash      string            `json:"hash"`
-	Subject   string            `json:"subject"`
-	Body      string            `json:"body"`
-	Author    string            `json:"author"`
-	Date      string            `json:"date"`
-	Parents   []string          `json:"parents"`
-	Files     []gitShowFileJSON `json:"files"`
-	Patch     string            `json:"patch"`
-	Truncated bool              `json:"truncated"`
+	Hash    string            `json:"hash"`
+	Subject string            `json:"subject"`
+	Body    string            `json:"body"`
+	Author  string            `json:"author"`
+	Date    string            `json:"date"`
+	Parents []string          `json:"parents"`
+	Files   []gitShowFileJSON `json:"files"`
+	// FilesTotal counts every changed path; Files holds at most
+	// gitShowFilesMax of them.
+	FilesTotal int    `json:"filesTotal"`
+	Patch      string `json:"patch"`
+	Truncated  bool   `json:"truncated"`
 }
 
 type gitWorktreeJSON struct {
@@ -950,15 +958,16 @@ func gitShow(ctx context.Context, cwd, ref string) (gitShowJSON, error) {
 		return gitShowJSON{}, errors.New(gitErr("show", err, stderr))
 	}
 	body.Files = parseShowNumstatZ(numstat)
-	patch, stderr, err := gitRun(ctx, cwd, append(diffArgs, "--patch", hash)...)
+	body.FilesTotal = len(body.Files)
+	if len(body.Files) > gitShowFilesMax {
+		body.Files = body.Files[:gitShowFilesMax]
+	}
+	patch, truncated, stderr, err := gitRunCapped(ctx, cwd, gitDiffCap, append(diffArgs, "--patch", hash)...)
 	if err != nil {
 		return gitShowJSON{}, errors.New(gitErr("show", err, stderr))
 	}
-	if len(patch) > gitDiffCap {
-		patch = patch[:gitDiffCap]
-		body.Truncated = true
-	}
 	body.Patch = string(patch)
+	body.Truncated = truncated
 	return body, nil
 }
 
@@ -1219,6 +1228,37 @@ func gitRun(ctx context.Context, cwd string, args ...string) ([]byte, string, er
 	cmd.Stderr = &stderr
 	err := cmd.Run()
 	return stdout.Bytes(), strings.TrimSpace(stderr.String()), err
+}
+
+// gitRunCapped is gitRun for potentially huge output: it reads at most
+// limit bytes of stdout and kills git once more arrives, so a commit
+// adding a giant generated file is never buffered whole while gitMu is
+// held (#1484). truncated reports that output was cut.
+func gitRunCapped(ctx context.Context, cwd string, limit int, args ...string) ([]byte, bool, string, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", cwd}, args...)...)
+	cmd.Env = gitEnv()
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, false, "", err
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, false, "", err
+	}
+	out, readErr := io.ReadAll(io.LimitReader(stdout, int64(limit)+1))
+	if len(out) > limit {
+		cancel()
+		_ = cmd.Wait()
+		return out[:limit], true, "", nil
+	}
+	waitErr := cmd.Wait()
+	if readErr != nil {
+		return nil, false, strings.TrimSpace(stderr.String()), readErr
+	}
+	return out, false, strings.TrimSpace(stderr.String()), waitErr
 }
 
 func gitEnv() []string {
