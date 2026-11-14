@@ -269,3 +269,55 @@ func TestArtifactWriteRequiresSession(t *testing.T) {
 		t.Fatalf("want session identity err, got %v", err)
 	}
 }
+
+func TestArtifactWriteRejectsDaemonOnlySessionReport(t *testing.T) {
+	dir := t.TempDir()
+	store, err := artifact.Open(dir, "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	tc := artifactTC(dir, "s", "r")
+	w := NewArtifactWrite(store)
+	res, err := w.Execute(context.Background(), json.RawMessage(`{
+		"action":"create","type":"session_report","content":"fake facts"
+	}`), tc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Output, "daemon-generated") {
+		t.Fatalf("create should be denied, got %s", res.Output)
+	}
+	if list, _ := store.List("s", "r", artifact.ListFilter{}); len(list) != 0 {
+		t.Fatalf("agent created a session_report: %#v", list)
+	}
+
+	// A daemon-created report stays uneditable through the tool.
+	rep, err := store.Create(artifact.CreateInput{
+		Type: artifact.TypeSessionReport, Content: "facts", Scope: artifact.ScopeSession,
+		SessionID: "s", Access: artifact.AccessTeam, OwnerSession: "s", OwnerRoot: "r",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err = w.Execute(context.Background(), json.RawMessage(`{
+		"action":"update","id":"`+rep.ID+`","expected_version":1,"content":"rewritten"
+	}`), tc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Output, "daemon-generated") {
+		t.Fatalf("update should be denied, got %s", res.Output)
+	}
+	got, ok, err := store.Get(rep.ID, "s", "r")
+	if err != nil || !ok || got.Content != "facts" || got.Version != 1 {
+		t.Fatalf("report mutated: %+v ok=%v err=%v", got, ok, err)
+	}
+
+	// The read tool still sees it.
+	rd := NewArtifactRead(store)
+	res, err = rd.Execute(context.Background(), json.RawMessage(`{"id":"`+rep.ID+`"}`), tc)
+	if err != nil || !strings.Contains(res.Output, "session_report") {
+		t.Fatalf("read: %v %s", err, res.Output)
+	}
+}

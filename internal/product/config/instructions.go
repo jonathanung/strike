@@ -56,6 +56,21 @@ func readFirstInstruction(paths []string) string {
 // returns blocks in root-first, deepest-last order. When start is not inside
 // stop, nothing is collected (the walk never escapes projectRoot).
 func collectProjectInstructions(start, stop string) []string {
+	paths := projectInstructionPaths(start, stop)
+	out := make([]string, 0, len(paths))
+	for _, path := range paths {
+		if block := readInstruction(path); block != "" {
+			out = append(out, block)
+		}
+	}
+	return out
+}
+
+// projectInstructionPaths returns the non-empty AGENTS.md / CLAUDE.md files
+// collectProjectInstructions would load, root-first. It is the enumeration
+// used by workspace trust (#1352): callers can list steering files without
+// placing their content in a prompt.
+func projectInstructionPaths(start, stop string) []string {
 	start = filepath.Clean(start)
 	stop = filepath.Clean(stop)
 	if stop == "" || !isWithin(start, stop) {
@@ -65,8 +80,8 @@ func collectProjectInstructions(start, stop string) []string {
 	var deepestFirst []string
 	dir := start
 	for {
-		if block := readDirInstruction(dir); block != "" {
-			deepestFirst = append(deepestFirst, block)
+		if path := dirInstructionPath(dir); path != "" {
+			deepestFirst = append(deepestFirst, path)
 		}
 		if dir == stop {
 			break
@@ -87,10 +102,13 @@ func collectProjectInstructions(start, stop string) []string {
 	return deepestFirst
 }
 
-func readDirInstruction(dir string) string {
+// dirInstructionPath returns the first instruction file in dir with
+// non-empty content, or "".
+func dirInstructionPath(dir string) string {
 	for _, name := range instructionNames {
-		if block := readInstruction(filepath.Join(dir, name)); block != "" {
-			return block
+		path := filepath.Join(dir, name)
+		if readInstruction(path) != "" {
+			return path
 		}
 	}
 	return ""

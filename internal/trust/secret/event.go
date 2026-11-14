@@ -280,9 +280,35 @@ func redactVerification(r protocol.VerificationReport) protocol.VerificationRepo
 		checks[i].Error = redact.String(checks[i].Error)
 		checks[i].Name = redact.String(checks[i].Name)
 		checks[i].Value = redact.String(checks[i].Value)
+		checks[i].Triage = redactVerificationTriage(checks[i].Triage)
 	}
 	r.Checks = checks
 	return r
+}
+
+func redactVerificationTriage(t *protocol.VerificationTriage) *protocol.VerificationTriage {
+	if t == nil {
+		return nil
+	}
+	out := *t
+	out.FocusedCommand = redact.String(out.FocusedCommand)
+	out.OriginalOutput = redact.ScrubToolOutput(out.OriginalOutput)
+	out.Failures = make([]protocol.VerificationFailure, len(t.Failures))
+	for i, f := range t.Failures {
+		f.Package = redact.String(f.Package)
+		f.Dir = redact.String(f.Dir)
+		f.Source = redact.String(f.Source)
+		f.Tests = append([]string(nil), f.Tests...)
+		out.Failures[i] = f
+	}
+	out.Attempts = make([]protocol.VerificationAttempt, len(t.Attempts))
+	for i, a := range t.Attempts {
+		a.Command = redact.String(a.Command)
+		a.Output = redact.ScrubToolOutput(a.Output)
+		a.Error = redact.String(a.Error)
+		out.Attempts[i] = a
+	}
+	return &out
 }
 
 func redactResidueItems(in []protocol.ResidueItem) []protocol.ResidueItem {

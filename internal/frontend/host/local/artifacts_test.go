@@ -158,3 +158,26 @@ func TestArtifactsConcurrentReads(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestArtifactsCreateSessionReport(t *testing.T) {
+	store, err := artifact.Open(t.TempDir(), "proj-r")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	w, ok := NewArtifacts(store).(host.SessionReportWriter)
+	if !ok {
+		t.Fatal("local artifacts must implement host.SessionReportWriter")
+	}
+	art, err := w.CreateSessionReport("sess-1", "root-1", "Session report", "# Session report\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if art.Type != artifact.TypeSessionReport || art.Scope != artifact.ScopeSession ||
+		art.SessionID != "sess-1" || art.OwnerRoot != "root-1" || art.Access != artifact.AccessTeam || art.Version != 1 {
+		t.Fatalf("artifact = %+v", art)
+	}
+	if _, ok, err := NewArtifacts(store).Get(art.ID, "other", "root-1"); err != nil || !ok {
+		t.Fatalf("team under root-1 should read the report: ok=%v err=%v", ok, err)
+	}
+}
