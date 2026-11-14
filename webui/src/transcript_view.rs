@@ -7,6 +7,7 @@ use std::rc::Rc;
 
 use leptos::callback::{Callable, Callback};
 use leptos::prelude::*;
+use leptos::task::spawn_local;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
@@ -280,7 +281,10 @@ pub fn TranscriptPane(
             "c" => {
                 ev.prevent_default();
                 if let Some(text) = current_copy(&transcript, cursor.get_untracked()) {
-                    let _ = write_clipboard(&text);
+                    spawn_local(async move {
+                        let ok = crate::clipboard::copy_text(&text).await.is_ok();
+                        note.set(crate::clipboard::transcript_copy_feedback(ok).to_string());
+                    });
                 }
             }
             "t" => {
@@ -654,12 +658,6 @@ fn scroll_message(id: u32) {
     }
 }
 
-fn write_clipboard(text: &str) -> Result<(), String> {
-    let win = web_sys::window().ok_or_else(|| "no window".to_string())?;
-    let _ = win.navigator().clipboard().write_text(text);
-    Ok(())
-}
-
 pub fn dispatch_open_file(path: &str, line: u32) {
     let Some(win) = web_sys::window() else {
         return;
@@ -762,20 +760,39 @@ fn message_view(
         .filter(|h| h.field == crate::transcript_find::Field::Title)
         .map(|h| (h.start, h.end))
         .collect();
+    let detail_ranges: Vec<(usize, usize)> = find_hits
+        .iter()
+        .filter(|h| h.field == crate::transcript_find::Field::Detail)
+        .map(|h| (h.start, h.end))
+        .collect();
     let cur_body = find_current
         .filter(|h| h.field == crate::transcript_find::Field::Body)
         .map(|h| (h.start, h.end));
     let cur_title = find_current
         .filter(|h| h.field == crate::transcript_find::Field::Title)
         .map(|h| (h.start, h.end));
+    let cur_detail = find_current
+        .filter(|h| h.field == crate::transcript_find::Field::Detail)
+        .map(|h| (h.start, h.end));
     let find_body = !body_ranges.is_empty();
     let find_title = !title_ranges.is_empty();
+    let find_detail = !detail_ranges.is_empty();
+    // #1576: the fold opens when the current match sits inside it, so
+    // stepping onto a folded hit lands somewhere visible. Only the
+    // current match's fold is forced open; other folds keep the user's
+    // own open/closed state (the `open` attribute is only rendered in
+    // the forced branch below, never rendered as closed).
+    let fold_open = cur_detail.is_some();
     let _ = (prose, retry_text, keep);
     let class = move || {
         let on = cursor.get() == Some(id);
         format!("sx-msg sx-{role}{}", if on { " sx-on" } else { "" })
     };
     let copy_btn = copy_text.clone();
+    // Per-button copy feedback (#1582): the label only reads "Copied"
+    // once the awaited clipboard write resolves; a rejection reads
+    // "Copy failed" instead of silence. Reverts after 2s.
+    let copy_state = RwSignal::new(None::<bool>);
     view! {
         <article id=format!("tf-line-{idx}") data-msg=id class=class data-role=role>
             <header>
@@ -802,7 +819,14 @@ fn message_view(
                     </span>
                 })}
                 <span class="sx-actions">
-                    <button type="button" class="sx-quiet" on:click=move |_| { let _ = write_clipboard(&copy_btn); }>"Copy"</button>
+                    <button type="button" class="sx-quiet" on:click=move |_| {
+                        let text = copy_btn.clone();
+                        spawn_local(async move {
+                            let ok = crate::clipboard::copy_text(&text).await.is_ok();
+                            copy_state.set(Some(ok));
+                            crate::clipboard::after_ms(2_000, move || copy_state.set(None));
+                        });
+                    }>{move || crate::clipboard::transcript_copy_label(copy_state.get())}</button>
                 </span>
             </header>
             {if find_body {
@@ -829,12 +853,29 @@ fn message_view(
             }}
             {if !detail.is_empty() {
                 let summary = if diff.is_some() { "Diff" } else { "Output" };
-                view! {
-                    <details class="sx-fold">
-                        <summary>{summary}</summary>
-                        <pre>{detail}</pre>
-                    </details>
-                }.into_any()
+                // Detail hits highlight through MarkedText, exactly
+                // like body hits (#1576); without hits the fold is the
+                // plain <pre> it has always been.
+                let detail_inner = if find_detail {
+                    view! { <crate::transcript_find::MarkedText text=detail.clone() kind="pre" ranges=detail_ranges current=cur_detail /> }.into_any()
+                } else {
+                    view! { <pre>{detail.clone()}</pre> }.into_any()
+                };
+                if fold_open {
+                    view! {
+                        <details class="sx-fold" open=true data-tf-fold-current="true">
+                            <summary>{summary}</summary>
+                            {detail_inner}
+                        </details>
+                    }.into_any()
+                } else {
+                    view! {
+                        <details class="sx-fold">
+                            <summary>{summary}</summary>
+                            {detail_inner}
+                        </details>
+                    }.into_any()
+                }
             } else {
                 view! { <span></span> }.into_any()
             }}
@@ -876,11 +917,21 @@ fn blocks_view(blocks: Vec<Block>, open_file: Callback<(String, u32)>) -> impl I
                 }
                 Block::Code { lang, text } => {
                     let copy = text.clone();
+                    // Same honest per-button feedback as the message
+                    // Copy button (#1582).
+                    let copy_state = RwSignal::new(None::<bool>);
                     view! {
                         <div class="sx-fence">
                             <div class="sx-fence-bar">
                                 <span class="sx-lang">{lang}</span>
-                                <button type="button" class="sx-quiet" on:click=move |_| { let _ = write_clipboard(&copy); }>"Copy"</button>
+                                <button type="button" class="sx-quiet" on:click=move |_| {
+                                    let text = copy.clone();
+                                    spawn_local(async move {
+                                        let ok = crate::clipboard::copy_text(&text).await.is_ok();
+                                        copy_state.set(Some(ok));
+                                        crate::clipboard::after_ms(2_000, move || copy_state.set(None));
+                                    });
+                                }>{move || crate::clipboard::transcript_copy_label(copy_state.get())}</button>
                             </div>
                             <pre class="sx-code">{text}</pre>
                         </div>

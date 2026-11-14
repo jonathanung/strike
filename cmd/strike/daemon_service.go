@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -176,8 +178,70 @@ func installDaemon(host daemonHost, opts daemonInstallOpts, cmd daemonCommander,
 	for _, a := range ran {
 		fmt.Fprintf(stdout, "  %s\n", formatArgv(a))
 	}
+	if code := verifyStartedDaemon(opts.addr, tokenPath, stdout, stderr); code != 0 {
+		return code
+	}
 	fmt.Fprintf(stdout, "Then open http://%s/ in a browser.\n", opts.addr)
+	fmt.Fprintln(stdout, "Sign the browser in with the one-time link from `strike gateway url`, or paste the token from `strike daemon token` in the Gateways panel.")
 	return 0
+}
+
+// daemonProbeBudget bounds how long install --start waits for the started
+// daemon to answer with the installed token. Tests shrink both values.
+var (
+	daemonProbeBudget   = 3 * time.Second
+	daemonProbeInterval = 200 * time.Millisecond
+)
+
+// verifyStartedDaemon checks that the daemon now answering at addr accepts
+// the token in tokenPath — the file the installed unit passes to serve via
+// --token-file (#1679). A daemon that answers but rejects the token means
+// something else holds the address with another credential: that is a hard
+// failure with remediation text. A daemon that does not answer yet is only
+// a warning; the service manager may still be starting it.
+func verifyStartedDaemon(addr, tokenPath string, stdout, stderr io.Writer) int {
+	tok, err := readDaemonToken(tokenPath)
+	if err != nil {
+		fmt.Fprintln(stderr, "strike:", err)
+		return 1
+	}
+	base := "http://" + dialableAddr(addr)
+	deadline := time.Now().Add(daemonProbeBudget)
+	for {
+		status, _, perr := daemonAuthedJSON(http.MethodGet, base+"/v1/gateway", tok, nil)
+		if perr == nil && status == http.StatusOK {
+			fmt.Fprintf(stdout, "Verified: the daemon at %s accepts the token in %s.\n", base, tokenPath)
+			return 0
+		}
+		if time.Now().After(deadline) {
+			if perr == nil {
+				fmt.Fprintf(stderr, "strike: the daemon answering at %s does not accept the token in %s (HTTP %d).\n%s\n", base, tokenPath, status, daemonTokenMismatchHint(addr, tokenPath))
+				return 1
+			}
+			fmt.Fprintf(stderr, "strike: could not verify the daemon at %s yet (%v). It may still be starting; check `strike daemon status`.\n", base, perr)
+			return 0
+		}
+		time.Sleep(daemonProbeInterval)
+	}
+}
+
+// dialableAddr turns a bind address into one a local client can dial:
+// an unspecified host means this machine.
+func dialableAddr(addr string) string {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return addr
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+	return net.JoinHostPort(host, port)
+}
+
+// daemonTokenMismatchHint is the remediation printed when a daemon rejects
+// the token from the daemon token file (#1679).
+func daemonTokenMismatchHint(where, tokenPath string) string {
+	return fmt.Sprintf("A different strike serve is probably already using %s with another token (for example a foreground `strike serve` started by hand), so the installed daemon could not take over the address.\nFix: stop that process, then run `strike daemon install --start` again.\nIf the running daemon IS the installed one, its token source disagrees with %s: run `strike daemon logout` to rotate the file token (a daemon started with --token-file picks the new value up on the next request and revokes paired browsers), then sign the browser in again with `strike gateway url`.", where, tokenPath)
 }
 
 func writeInstallHeader(stdout io.Writer, def, tokenPath string) {

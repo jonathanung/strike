@@ -118,15 +118,17 @@ async function providerFlow(page, check, waitUntil, grab) {
     "key stored",
   );
   check(Boolean(stored), "saving the openai key did not confirm");
-  const connected = await waitUntil(
+  // #1531: a stored key is not a connection. The badge must say the key is
+  // stored-but-untested; "Connected" here was the honesty bug.
+  const storedState = await waitUntil(
     `(() => {
       const state = document.querySelector('[data-provider="openai"] [data-provider-state]');
-      return Boolean(state && state.textContent.trim() === "Connected");
+      return Boolean(state && state.textContent.trim() === "Key stored — not tested");
     })()`,
     8000,
-    "openai connected after save",
+    "openai stored-not-tested after save",
   );
-  check(Boolean(connected), "openai did not show Connected after the key was stored");
+  check(Boolean(storedState), "openai did not show 'Key stored — not tested' after the key was stored");
   const leaked = await page.evaluate(`(() => {
     const body = document.body ? document.body.innerText : "";
     let store = "";
@@ -138,16 +140,27 @@ async function providerFlow(page, check, waitUntil, grab) {
   await page.evaluate(
     `document.querySelector('[data-provider="openai"] [data-test-provider]')?.click()`,
   );
+  // #1531: Test key runs a real probe against the vendor. The fake key can
+  // only be rejected (vendor reachable) or unverifiable (offline UAT box);
+  // it must never report a catalog listing or a verified/Connected state.
   const tested = await waitUntil(
     `(() => {
       const note = document.querySelector('[data-provider="openai"] [data-provider-note]');
       const text = note ? note.innerText : "";
-      return text.includes("Listed") && !text.includes(${JSON.stringify(FAKE_KEY)});
+      const honest = text.includes("Key rejected") || text.includes("Could not verify the key");
+      return honest && !text.includes("Listed") && !text.includes(${JSON.stringify(FAKE_KEY)});
     })()`,
-    15000,
-    "provider test",
+    20000,
+    "provider key probe",
   );
-  check(Boolean(tested), "Test did not report a result");
+  check(Boolean(tested), "Test key did not report an honest probe verdict for the fake key");
+  const stillNotConnected = await page.evaluate(
+    `(() => {
+      const state = document.querySelector('[data-provider="openai"] [data-provider-state]');
+      return Boolean(state) && state.textContent.trim() !== "Connected";
+    })()`,
+  );
+  check(Boolean(stillNotConnected), "openai showed Connected after the fake key failed probing");
   for (const [width, height] of [
     [390, 844],
     [768, 1024],

@@ -118,11 +118,14 @@ pub fn ModelMenu(
     catalog_note: RwSignal<String>,
     model_note: RwSignal<String>,
     defaults: RwSignal<ModelDefaults>,
+    defaults_known: RwSignal<bool>,
     busy: Memo<bool>,
     on_select: Callback<(String, String)>,
     on_default_model: Callback<(String, String)>,
     on_effort: Callback<String>,
     on_default_effort: Callback<String>,
+    fast: RwSignal<bool>,
+    on_fast: Callback<bool>,
 ) -> impl IntoView {
     let filter = RwSignal::new(String::new());
     let cursor = RwSignal::new(0usize);
@@ -246,7 +249,7 @@ pub fn ModelMenu(
                     }}
                     <p class="hint" data-model-scope="true">{move || {
                         let d = defaults.get();
-                        scope_label(&provider.get(), &model.get(), &d.provider, &d.model).to_string()
+                        scope_label(&provider.get(), &model.get(), &d.provider, &d.model, defaults_known.get()).to_string()
                     }}</p>
                     <Show when=move || busy.get()>
                         <p class="hint">"This turn is still running. Session model and effort changes wait until it finishes."</p>
@@ -328,6 +331,41 @@ pub fn ModelMenu(
                                     </div>
                                 </div>
                             }.into_any()
+                        }
+                    }}
+                    {move || {
+                        // Fast (#1569): shown for every provider with honest
+                        // copy — the daemon does not advertise per-provider
+                        // priority-tier support, and unsupported providers
+                        // ignore the flag silently. The button only posts
+                        // `set.fast` via on_fast; `fast` flips solely when
+                        // the daemon's fast.selected confirmation lands.
+                        let on = fast.get();
+                        let klass = if on { "chip on" } else { "chip" };
+                        view! {
+                            <div class="model-effort" data-fast="shown">
+                                <div class="model-effort-head">
+                                    <span class="hint">"Fast"</span>
+                                    <button
+                                        type="button"
+                                        class=klass
+                                        data-fast-toggle="true"
+                                        data-fast-on=on.to_string()
+                                        disabled=move || busy.get()
+                                        on:click=move |_| {
+                                            if busy.get_untracked() {
+                                                model_note.set("This turn is still running. Session model and effort changes wait until it finishes.".into());
+                                                return;
+                                            }
+                                            on_fast.run(!fast.get_untracked());
+                                        }
+                                    >{if on { "Fast on" } else { "Fast off" }}</button>
+                                </div>
+                                <p class="hint">"Priority service tier for later turns. The current provider may not support priority tier — unsupported providers ignore Fast silently, so on is the session's preference, not a speed guarantee."</p>
+                                <Show when=move || busy.get()>
+                                    <p class="hint" data-fast-busy="true">"This turn is still running. Fast changes wait until it finishes."</p>
+                                </Show>
+                            </div>
                         }
                     }}
                     <label class="model-filter-label">
@@ -506,7 +544,13 @@ pub fn ModelMenu(
                 class=move || {
                     let scope = {
                         let d = defaults.get();
-                        scope_label(&provider.get(), &model.get(), &d.provider, &d.model)
+                        scope_label(
+                            &provider.get(),
+                            &model.get(),
+                            &d.provider,
+                            &d.model,
+                            defaults_known.get(),
+                        )
                     };
                     let live = view_now();
                     let mut class = String::from("chip");
@@ -523,7 +567,13 @@ pub fn ModelMenu(
                 data-model-chip="true"
                 title=move || {
                     let d = defaults.get();
-                    let scope = scope_label(&provider.get(), &model.get(), &d.provider, &d.model);
+                    let scope = scope_label(
+                        &provider.get(),
+                        &model.get(),
+                        &d.provider,
+                        &d.model,
+                        defaults_known.get(),
+                    );
                     let live = view_now();
                     format!("Model. {scope}. {}. Alt+M opens the model menu.", live.summary)
                 }

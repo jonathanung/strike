@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jonathanung/strike/harness/permission"
+	"github.com/jonathanung/strike/internal/frontend/host"
 	"github.com/jonathanung/strike/internal/product/config"
 	"github.com/jonathanung/strike/internal/protocol"
 	"github.com/jonathanung/strike/internal/trust/audit"
@@ -32,6 +33,35 @@ type permissionRuleBody struct {
 	Confirm    bool   `json:"confirm"`
 }
 
+// permissionRuleRemoveBody keeps permission/pattern/action as pointers so an
+// older client that omits them stays positional. Any present field opts into
+// the identity check.
+type permissionRuleRemoveBody struct {
+	Scope      string  `json:"scope"`
+	Permission *string `json:"permission"`
+	Pattern    *string `json:"pattern"`
+	Action     *string `json:"action"`
+	Index      int     `json:"index"`
+	Confirm    bool    `json:"confirm"`
+}
+
+func (b permissionRuleRemoveBody) identity() *config.RuleIdentity {
+	if b.Permission == nil && b.Pattern == nil && b.Action == nil {
+		return nil
+	}
+	perm, pat, act := "", "", ""
+	if b.Permission != nil {
+		perm = *b.Permission
+	}
+	if b.Pattern != nil {
+		pat = *b.Pattern
+	}
+	if b.Action != nil {
+		act = *b.Action
+	}
+	return &config.RuleIdentity{Permission: perm, Pattern: pat, Action: act}
+}
+
 func (s *Server) handlePermissionRules(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
@@ -51,26 +81,47 @@ func (s *Server) handlePermissionRuleRemove(w http.ResponseWriter, r *http.Reque
 	if !s.allowPermissionWrite(w) {
 		return
 	}
-	var body permissionRuleBody
+	var body permissionRuleRemoveBody
 	if err := decodeBody(w, r, &body); err != nil {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
 		return
 	}
 	if strings.TrimSpace(body.Scope) == sessionFolderScope {
-		if s.opts.Services == nil || s.opts.Services.Permissions == nil ||
-			!s.opts.Services.Permissions.RevokeSessionFolderGrant(body.Index) {
+		if s.opts.Services == nil || s.opts.Services.Permissions == nil {
+			writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "session folder grant index out of range"})
+			return
+		}
+		perms := s.opts.Services.Permissions
+		if id := body.identity(); id != nil {
+			grants := perms.SessionFolderGrants()
+			if body.Index < 0 || body.Index >= len(grants) || !folderGrantMatches(grants[body.Index], id) {
+				writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: config.ErrRuleListChanged.Error()})
+				return
+			}
+		}
+		if !perms.RevokeSessionFolderGrant(body.Index) {
 			writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "session folder grant index out of range"})
 			return
 		}
 		s.writePermissionRules(w, r)
 		return
 	}
-	err := config.DeletePermissionRule(s.currentCWD(r), strings.TrimSpace(body.Scope), body.Index, body.Confirm)
+	err := config.DeletePermissionRule(s.currentCWD(r), strings.TrimSpace(body.Scope), body.Index, body.Confirm, body.identity())
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
 		return
 	}
 	s.writePermissionRules(w, r)
+}
+
+func folderGrantMatches(g host.PermissionFolderGrant, id *config.RuleIdentity) bool {
+	if id == nil {
+		return true
+	}
+	action := strings.ToLower(strings.TrimSpace(id.Action))
+	return g.Permission == strings.TrimSpace(id.Permission) &&
+		g.Pattern == id.Pattern &&
+		action == string(permission.Allow)
 }
 
 func (s *Server) appendPermissionRule(w http.ResponseWriter, r *http.Request) {

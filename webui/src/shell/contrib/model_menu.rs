@@ -80,6 +80,35 @@ pub fn install(reg: &mut ShellHook) {
     );
     reg.command(
         Command::new(
+            "model.fast",
+            Group::Model,
+            "Set Fast (priority tier)…",
+            "Toggle the Fast priority service tier for this session. The current provider may not support priority tier.",
+            Rc::new(|args| crate::shell::host::set_fast(args)),
+        )
+        .keywords(&["fast", "priority", "tier", "speed"])
+        .order(23)
+        .argument(Argument {
+            placeholder: "On or off",
+            required: true,
+        })
+        .choices(|| {
+            vec![
+                Choice {
+                    id: "on".into(),
+                    label: "Fast on".into(),
+                    detail: "Priority tier for later turns, if the provider supports it".into(),
+                },
+                Choice {
+                    id: "off".into(),
+                    label: "Fast off".into(),
+                    detail: "Standard service tier".into(),
+                },
+            ]
+        }),
+    );
+    reg.command(
+        Command::new(
             "model.effort-default",
             Group::Model,
             "Save effort as default",
