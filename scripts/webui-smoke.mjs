@@ -1402,6 +1402,14 @@ try {
     );
   };
   await openView("Usage", ["Input tokens", "Daily budget (USD)"]);
+  // Usage projection (#1388): the smoke daemon has no multi-day priced
+  // history, so no estimate may render — only the absent note, if any.
+  const projectionLevel = await evaluate(
+    `(document.querySelector("[data-usage-projection]") || {}).dataset?.usageProjection || ""`,
+  );
+  if (projectionLevel !== "" && projectionLevel !== "absent") {
+    throw new Error(`usage projection rendered without priced history: ${projectionLevel}`);
+  }
   await openView("Audit", ["Verify chain", "Append-only hash chain"]);
   const auditProbe = await waitFor(
     "audit chain state (Chain intact / No audit entries / Not configured)",

@@ -38,6 +38,71 @@ struct UsageReport {
     daily_usd: f64,
     #[serde(rename = "pricingNote", default)]
     pricing_note: String,
+    #[serde(default)]
+    projection: Option<Projection>,
+    #[serde(rename = "projectionNote", default)]
+    projection_note: String,
+}
+
+/// Daemon-computed spend-pace estimate (#1388). Mirrors
+/// `usageaudit.Projection`; absent when prices are incomplete or priced
+/// history is too short, and the page then renders no number.
+#[derive(Clone, Deserialize, Default)]
+struct Projection {
+    #[serde(default)]
+    basis: String,
+    #[serde(rename = "avgDailyUsd", default)]
+    avg_daily_usd: f64,
+    #[serde(rename = "monthEndUsd", default)]
+    month_end_usd: f64,
+    #[serde(default)]
+    today: Option<TodayProjection>,
+}
+
+#[derive(Clone, Deserialize, Default)]
+struct TodayProjection {
+    #[serde(rename = "projectedUsd", default)]
+    projected_usd: f64,
+    #[serde(rename = "runOutAt", default)]
+    run_out_at: String,
+    #[serde(default)]
+    exhausted: bool,
+    #[serde(rename = "withinBudget", default)]
+    within_budget: bool,
+    #[serde(default)]
+    level: String,
+}
+
+/// One labelled estimate line, plus its severity class:
+/// (text, alert class, level for the smoke hook).
+fn projection_line(p: &Projection) -> (String, &'static str, String) {
+    let mut text = format!(
+        "Estimate ({}): {} a day, about {} by month end.",
+        p.basis,
+        money(true, false, p.avg_daily_usd, ""),
+        money(true, false, p.month_end_usd, ""),
+    );
+    let mut class = "ua-alert";
+    let mut level = "info".to_string();
+    if let Some(t) = &p.today {
+        level = t.level.clone();
+        if t.exhausted {
+            class = "ua-alert bad";
+            text.push_str(" Today's daily budget is already spent.");
+        } else if t.within_budget {
+            text.push_str(&format!(
+                " At today's pace ({} for the day) you stay within the daily budget.",
+                money(true, false, t.projected_usd, "")
+            ));
+        } else {
+            // runOutAt is RFC 3339 UTC; show its HH:MM.
+            let at = t.run_out_at.get(11..16).unwrap_or("later today");
+            text.push_str(&format!(
+                " At today's pace the daily budget runs out around {at} UTC."
+            ));
+        }
+    }
+    (text, class, level)
 }
 
 #[derive(Clone, Deserialize, Default)]
@@ -411,6 +476,19 @@ pub fn UsagePage(
                         view! { <p class=class role="status">{text}</p> }
                     }).collect_view()
                 }}
+                {move || {
+                    let r = report.get();
+                    match r.projection {
+                        Some(p) => {
+                            let (text, class, level) = projection_line(&p);
+                            Some(view! { <p class=class role="status" data-usage-projection=level>{text}</p> }.into_any())
+                        }
+                        None if !r.projection_note.is_empty() && !r.sessions.is_empty() => Some(view! {
+                            <p class="hint" data-usage-projection="absent">{r.projection_note.clone()}</p>
+                        }.into_any()),
+                        None => None,
+                    }
+                }}
                 <Show when=move || !report.get().pricing_note.is_empty()>
                     <p class="ua-alert">{move || report.get().pricing_note}</p>
                 </Show>
@@ -682,5 +760,52 @@ pub fn AuditPage(
                 </div>
             </div>
         </main>
+    }
+}
+
+#[cfg(test)]
+mod projection_tests {
+    use super::*;
+
+    #[test]
+    fn projection_line_labels_basis_and_run_out() {
+        let p = Projection {
+            basis: "7-day average".into(),
+            avg_daily_usd: 2.0,
+            month_end_usd: 47.0,
+            today: Some(TodayProjection {
+                projected_usd: 24.0,
+                run_out_at: "2026-11-14T10:00:00Z".into(),
+                level: "warning".into(),
+                ..Default::default()
+            }),
+        };
+        let (text, class, level) = projection_line(&p);
+        assert!(text.starts_with("Estimate (7-day average): $2.00 a day, about $47.00 by month end."), "{text}");
+        assert!(text.contains("runs out around 10:00 UTC"), "{text}");
+        assert_eq!((class, level.as_str()), ("ua-alert", "warning"));
+    }
+
+    #[test]
+    fn projection_line_within_budget_and_exhausted() {
+        let mut p = Projection {
+            basis: "3-day average".into(),
+            today: Some(TodayProjection { within_budget: true, projected_usd: 1.0, level: "info".into(), ..Default::default() }),
+            ..Default::default()
+        };
+        let (text, class, _) = projection_line(&p);
+        assert!(text.contains("stay within the daily budget"), "{text}");
+        assert_eq!(class, "ua-alert");
+        p.today = Some(TodayProjection { exhausted: true, level: "warning".into(), ..Default::default() });
+        let (text, class, _) = projection_line(&p);
+        assert!(text.contains("already spent"), "{text}");
+        assert_eq!(class, "ua-alert bad");
+    }
+
+    #[test]
+    fn report_without_projection_decodes_to_none() {
+        let r: UsageReport = serde_json::from_str(r#"{"projectionNote":"no projection yet"}"#).unwrap();
+        assert!(r.projection.is_none());
+        assert_eq!(r.projection_note, "no projection yet");
     }
 }

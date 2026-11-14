@@ -132,6 +132,10 @@ type Report struct {
 	Unpriced     int            `json:"unpricedSessions"`
 	SkippedLines int            `json:"skippedLines,omitempty"`
 	Alerts       []Alert        `json:"alerts,omitempty"`
+	// Projection is filled by the server from Project (#1388); nil with
+	// ProjectionNote set when no honest estimate exists.
+	Projection     *Projection `json:"projection,omitempty"`
+	ProjectionNote string      `json:"projectionNote,omitempty"`
 }
 
 type acc struct {
