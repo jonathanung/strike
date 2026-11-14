@@ -510,9 +510,12 @@ pub fn TranscriptPane(
                                 .collect();
                             let msg_current = fv.current.filter(|h| h.line == idx);
                             let msg_elapsed = snap.elapsed_for(msg.id).map(str::to_owned);
+                            let msg_usage = snap
+                                .usage_for(msg.id)
+                                .and_then(|u| u.label().map(|label| (label, u.detail())));
                             view! {
                                 {sep.map(|label| view! { <div class="day-sep" role="separator">{label}</div> })}
-                                {message_view(msg, idx, cursor, open_file, retry, fork, msg_hits, msg_current, msg_elapsed)}
+                                {message_view(msg, idx, cursor, open_file, retry, fork, msg_hits, msg_current, msg_elapsed, msg_usage)}
                             }
                         })
                         .collect_view()
@@ -725,6 +728,7 @@ fn message_view(
     find_hits: Vec<crate::transcript_find::TMatch>,
     find_current: Option<crate::transcript_find::TMatch>,
     turn_elapsed: Option<String>,
+    turn_usage: Option<(String, String)>,
 ) -> impl IntoView {
     let id = msg.id;
     let role = msg.role.class();
@@ -820,6 +824,7 @@ fn message_view(
                 </Show>
                 {has_stamp.then(|| view! { <span class="stamp" title=stamp_full.clone()>{stamp.clone()}</span> })}
                 {turn_elapsed.clone().map(|label| view! { <span class="turn-elapsed" title="Turn elapsed time">{label}</span> })}
+                {turn_usage.clone().map(|(label, detail)| view! { <span class="turn-usage" title=detail>{label}</span> })}
                 {diff.clone().map(|d| view! {
                     <span class="sx-diff" aria-label=format!("+{} -{}", d.added, d.deleted)>
                         <span class="sx-add">{format!("+{}", d.added)}</span>
