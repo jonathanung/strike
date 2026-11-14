@@ -287,6 +287,17 @@ fn later(ms: i32, f: impl FnOnce() + 'static) {
     cb.forget();
 }
 
+/// Empty-state line for the iteration log (#1586). "No iterations yet."
+/// is a fact the pane may only assert after a successful log load that
+/// returned zero rows; a failed load renders as a failure, not absence.
+fn log_empty_label(log_known: bool) -> &'static str {
+    if log_known {
+        "No iterations yet."
+    } else {
+        "Iteration log could not be loaded."
+    }
+}
+
 fn pull_list(
     base: RwSignal<String>,
     token: RwSignal<String>,
@@ -313,6 +324,7 @@ fn follow(
     token: RwSignal<String>,
     goals: RwSignal<Vec<GoalView>>,
     iterations: RwSignal<Vec<IterView>>,
+    log_known: RwSignal<bool>,
     note: RwSignal<String>,
     selected: RwSignal<String>,
     watch_gen: RwSignal<u32>,
@@ -320,7 +332,7 @@ fn follow(
 ) {
     let gen = watch_gen.get_untracked().wrapping_add(1);
     watch_gen.set(gen);
-    poll_goal(base, token, goals, iterations, note, selected, watch_gen, gen, id, 0, 1800);
+    poll_goal(base, token, goals, iterations, log_known, note, selected, watch_gen, gen, id, 0, 1800);
 }
 
 fn poll_goal(
@@ -328,6 +340,7 @@ fn poll_goal(
     token: RwSignal<String>,
     goals: RwSignal<Vec<GoalView>>,
     iterations: RwSignal<Vec<IterView>>,
+    log_known: RwSignal<bool>,
     note: RwSignal<String>,
     selected: RwSignal<String>,
     watch_gen: RwSignal<u32>,
@@ -351,7 +364,7 @@ fn poll_goal(
                 Err(e) => {
                     if watch_gen.get_untracked() == gen {
                         note.set(e);
-                        poll_goal(base, token, goals, iterations, note, selected, watch_gen, gen, id_for_fetch, 1000, left - 1);
+                        poll_goal(base, token, goals, iterations, log_known, note, selected, watch_gen, gen, id_for_fetch, 1000, left - 1);
                     }
                     return;
                 }
@@ -366,18 +379,33 @@ fn poll_goal(
                 .map(|g| g.status.clone())
                 .unwrap_or_default();
             goals.set(list.goals);
-            note.set(String::new());
             if !id_for_fetch.is_empty() && selected.get_untracked() == id_for_fetch {
                 let path = format!("/v1/goals/{}/log", crate::api::js_encode(&id_for_fetch));
-                if let Ok(log) = get_json::<GoalLog>(&b, &t, &path).await {
-                    if watch_gen.get_untracked() == gen && selected.get_untracked() == id_for_fetch {
-                        iterations.set(log.iterations);
+                // The note is cleared only once the log load has also
+                // succeeded (#1586): clearing it first erased the evidence
+                // of a failed log fetch, and the empty iterations then
+                // rendered as "No iterations yet.".
+                match get_json::<GoalLog>(&b, &t, &path).await {
+                    Ok(log) => {
+                        if watch_gen.get_untracked() == gen && selected.get_untracked() == id_for_fetch {
+                            iterations.set(log.iterations);
+                            log_known.set(true);
+                            note.set(String::new());
+                        }
+                    }
+                    Err(e) => {
+                        if watch_gen.get_untracked() == gen && selected.get_untracked() == id_for_fetch {
+                            log_known.set(false);
+                            note.set(format!("Iteration log could not be loaded: {e}"));
+                        }
                     }
                 }
+            } else {
+                note.set(String::new());
             }
             let live = matches!(status.as_str(), "pending" | "active");
             if live && selected.get_untracked() == id_for_fetch {
-                poll_goal(base, token, goals, iterations, note, selected, watch_gen, gen, id_for_fetch, 1000, left - 1);
+                poll_goal(base, token, goals, iterations, log_known, note, selected, watch_gen, gen, id_for_fetch, 1000, left - 1);
             }
         });
     });
@@ -402,6 +430,7 @@ fn draft_body(draft: &GoalDraft) -> Value {
 pub fn GoalsPane(base: RwSignal<String>, token: RwSignal<String>) -> impl IntoView {
     let goals = RwSignal::new(Vec::<GoalView>::new());
     let iterations = RwSignal::new(Vec::<IterView>::new());
+    let log_known = RwSignal::new(false);
     let selected = RwSignal::new(String::new());
     let creating = RwSignal::new(true);
     let note = RwSignal::new(String::new());
@@ -433,7 +462,8 @@ pub fn GoalsPane(base: RwSignal<String>, token: RwSignal<String>) -> impl IntoVi
         creating.set(false);
         selected.set(id.clone());
         iterations.set(Vec::new());
-        follow(base, token, goals, iterations, note, selected, watch_gen, id);
+        log_known.set(false);
+        follow(base, token, goals, iterations, log_known, note, selected, watch_gen, id);
     });
 
     let start_run: Arc<dyn Fn(String) + Send + Sync> = Arc::new(move |id: String| {
@@ -443,7 +473,7 @@ pub fn GoalsPane(base: RwSignal<String>, token: RwSignal<String>) -> impl IntoVi
             if let Err(e) = post_json(&b, &t, &path, json!({})).await {
                 note.set(e);
             }
-            follow(base, token, goals, iterations, note, selected, watch_gen, id);
+            follow(base, token, goals, iterations, log_known, note, selected, watch_gen, id);
         });
     });
 
@@ -458,7 +488,7 @@ pub fn GoalsPane(base: RwSignal<String>, token: RwSignal<String>) -> impl IntoVi
             if let Err(e) = post_json(&b, &t, &path, json!({})).await {
                 note.set(e);
             }
-            follow(base, token, goals, iterations, note, selected, watch_gen, id);
+            follow(base, token, goals, iterations, log_known, note, selected, watch_gen, id);
         });
     });
 
@@ -512,7 +542,7 @@ pub fn GoalsPane(base: RwSignal<String>, token: RwSignal<String>) -> impl IntoVi
                 busy.set(false);
                 selected.set(id.clone());
                 creating.set(false);
-                follow(base, token, goals, iterations, note, selected, watch_gen, id);
+                follow(base, token, goals, iterations, log_known, note, selected, watch_gen, id);
                 return;
             }
             busy.set(false);
@@ -522,7 +552,7 @@ pub fn GoalsPane(base: RwSignal<String>, token: RwSignal<String>) -> impl IntoVi
             verification.set(String::new());
             extra.set(String::new());
             duplicate_note.set(String::new());
-            follow(base, token, goals, iterations, note, selected, watch_gen, id);
+            follow(base, token, goals, iterations, log_known, note, selected, watch_gen, id);
         });
     });
 
@@ -684,6 +714,7 @@ pub fn GoalsPane(base: RwSignal<String>, token: RwSignal<String>) -> impl IntoVi
                     );
                     let criteria = g.criteria.clone();
                     let log_rows = iterations.get();
+                    let log_is_known = log_known.get();
                     let start = start.clone();
                     let ctrl = ctrl.clone();
                     view! {
@@ -721,7 +752,7 @@ pub fn GoalsPane(base: RwSignal<String>, token: RwSignal<String>) -> impl IntoVi
                             <h3 class="panel-title">"Log"</h3>
                             <ol class="goals-log" id="goals-log">
                                 {if log_rows.is_empty() {
-                                    view! { <li class="hint">"No iterations yet."</li> }.into_any()
+                                    view! { <li class="hint">{log_empty_label(log_is_known)}</li> }.into_any()
                                 } else {
                                     view! {
                                         <span>
@@ -822,6 +853,12 @@ mod tests {
             "",
         )
         .unwrap()
+    }
+
+    #[test]
+    fn log_empty_label_requires_a_successful_load() {
+        assert_eq!(log_empty_label(true), "No iterations yet.");
+        assert_eq!(log_empty_label(false), "Iteration log could not be loaded.");
     }
 
     #[test]
