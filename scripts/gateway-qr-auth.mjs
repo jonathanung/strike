@@ -1,5 +1,11 @@
 #!/usr/bin/env node
-// Local happy-path for an authenticated gateway. Not part of CI.
+// Local UAT for the phone pairing dialog. Not part of CI.
+// GATEWAY_QR_MODE picks the gateway shape:
+//   auth      (default) loopback + --auth: the dialog must show the
+//             loopback-blocked panel, no QR and no pairing URL (#1522).
+//   noauth    loopback, no --auth: same blocked panel via the public path.
+//   reachable loopback + --auth + --advertise-url: the dialog must show
+//             the QR and the fragment pairing URL, as before #1522.
 // The daemon token stays in a 0600 file. The page reads it from sessionStorage
 // (strike.gateway.tokens) for this tab. It is not put on argv, in a URL, or
 // in the screenshot DOM dump. Artifacts are gitignored.
@@ -21,7 +27,16 @@ import {
 } from "./webui-uat/browser.mjs";
 import { encodeVideo, writeBytes } from "./webui-uat/media.mjs";
 
-const outDir = resolve(process.env.GATEWAY_QR_OUT || "webui-uat-artifacts/gateway-qr-auth");
+const mode = process.env.GATEWAY_QR_MODE || "auth";
+if (!["auth", "noauth", "reachable"].includes(mode)) {
+  console.error(`unknown GATEWAY_QR_MODE ${mode}`);
+  process.exit(2);
+}
+const blocked = mode !== "reachable";
+const withAuth = mode !== "noauth";
+const outDir = resolve(
+  process.env.GATEWAY_QR_OUT || `webui-uat-artifacts/gateway-qr-${mode}`,
+);
 const bin = process.env.STRIKE_BIN || "./strike";
 const home = await mkdtemp(join(tmpdir(), "strike-gateway-qr-"));
 const port = await freePort();
@@ -30,22 +45,18 @@ const token = `uat-${Math.random().toString(36).slice(2)}-${Date.now().toString(
 const tokenPath = join(home, ".strike", "daemon.token");
 await mkdir(join(home, ".strike"), { recursive: true });
 await writeFile(join(home, ".strike", "config.json"), '{"sandboxAllowDegrade":true}\n');
-await writeFile(tokenPath, `${token}\n`, { mode: 0o600 });
+if (withAuth) {
+  await writeFile(tokenPath, `${token}\n`, { mode: 0o600 });
+}
 
-const strike = spawn(
-  bin,
-  [
-    "serve",
-    "--addr",
-    `127.0.0.1:${port}`,
-    "--provider",
-    "echo",
-    "--auth",
-    "--token-file",
-    tokenPath,
-  ],
-  { cwd: process.cwd(), env: { ...process.env, HOME: home }, stdio: ["ignore", "pipe", "pipe"] },
-);
+const serveArgs = ["serve", "--addr", `127.0.0.1:${port}`, "--provider", "echo"];
+if (withAuth) serveArgs.push("--auth", "--token-file", tokenPath);
+if (mode === "reachable") serveArgs.push("--advertise-url", `http://192.0.2.10:${port}`);
+const strike = spawn(bin, serveArgs, {
+  cwd: process.cwd(),
+  env: { ...process.env, HOME: home },
+  stdio: ["ignore", "pipe", "pipe"],
+});
 let log = "";
 const keep = (buf) => {
   log += buf.toString();
@@ -55,6 +66,10 @@ strike.stdout.on("data", keep);
 strike.stderr.on("data", keep);
 
 const failures = [];
+// Booted = the shell rendered (Sessions rail) or the first-run onboarding
+// overlay is up. The old "Run a command" composer text is covered by the
+// onboarding overlay on a fresh HOME, so it never appears at boot.
+const BOOTED = `document.body && (document.body.innerText.includes("Sessions") || document.querySelector('[data-action="onboarding-dismiss"]'))`;
 let chrome;
 let page;
 try {
@@ -75,25 +90,30 @@ try {
     mobile: false,
   });
   await page.send("Page.navigate", { url: baseURL });
-  const firstBoot = await waitFor(
-    page,
-    `document.body && document.body.innerText.includes("Run a command")`,
-    20000,
-  );
+  const firstBoot = await waitFor(page, BOOTED, 20000);
   if (!firstBoot) failures.push("cockpit did not boot");
-  await page.evaluate(`(() => {
-    const raw = JSON.stringify({ this: ${JSON.stringify(token)} });
-    sessionStorage.setItem("strike.gateway.tokens", raw);
-    localStorage.removeItem("strike.token");
-    window.__strikeBoot = 1;
-  })()`);
-  await page.send("Page.reload", { ignoreCache: true });
-  const booted = await waitFor(
-    page,
-    `document.body && document.body.innerText.includes("Run a command") && window.__strikeBoot !== 1`,
-    20000,
+  if (withAuth) {
+    await page.evaluate(`(() => {
+      const raw = JSON.stringify({ this: ${JSON.stringify(token)} });
+      sessionStorage.setItem("strike.gateway.tokens", raw);
+      localStorage.removeItem("strike.token");
+      window.__strikeBoot = 1;
+    })()`);
+    await page.send("Page.reload", { ignoreCache: true });
+    const booted = await waitFor(
+      page,
+      `(${BOOTED}) && window.__strikeBoot !== 1`,
+      20000,
+    );
+    if (!booted) failures.push("cockpit did not reload with the saved token");
+  }
+  // Dismiss the first-run onboarding card if it is up: it overlays the
+  // shell, and the screenshots below must show the pairing dialog itself.
+  await page.evaluate(
+    `document.querySelector('[data-action="onboarding-dismiss"]')?.click()`,
   );
-  if (!booted) failures.push("cockpit did not reload with the saved token");
+  await waitFor(page, `!document.querySelector('[data-action="onboarding-dismiss"]')`, 5000);
+  await delay(200);
   await page.send("Input.dispatchKeyEvent", {
     type: "keyDown",
     key: "k",
@@ -126,22 +146,24 @@ try {
     })()`);
   }
   if (!typed) failures.push("palette query did not accept phone");
-  await page.evaluate(`document.querySelector(".palette input")?.focus()`);
-  await page.send("Input.dispatchKeyEvent", {
-    type: "keyDown",
-    key: "Enter",
-    code: "Enter",
-    windowsVirtualKeyCode: 13,
-  });
-  await page.send("Input.dispatchKeyEvent", {
-    type: "keyUp",
-    key: "Enter",
-    code: "Enter",
-    windowsVirtualKeyCode: 13,
-  });
+  // Click the "Open on phone" row directly. Pressing Enter would run the
+  // palette's selected row, and "phone" also matches git branches named
+  // muse/phone-* in this repo — once the branch results load, the selected
+  // row is a branch switch, not the gateway command.
+  const PICK = `(() => {
+    const row = [...document.querySelectorAll(".palette button.palette-row")]
+      .find((b) => b.querySelector(".name")?.textContent.trim() === "Open on phone");
+    if (!row) return false;
+    row.click();
+    return true;
+  })()`;
+  const picked = await waitFor(page, PICK, 6000);
+  if (!picked) failures.push("palette had no 'Open on phone' command row");
   const opened = await waitFor(
     page,
-    `document.querySelector(".gq-dialog") && (document.querySelector("#gq-url")?.value || "").includes("#pair=")`,
+    blocked
+      ? `document.querySelector(".gq-dialog") && document.querySelector(".gq-blocked")`
+      : `document.querySelector(".gq-dialog") && (document.querySelector("#gq-url")?.value || "").includes("#pair=")`,
     8000,
   );
   if (!opened) {
@@ -151,12 +173,17 @@ try {
         dialog: Boolean(document.querySelector(".gq-dialog")),
         palette: Boolean(document.querySelector(".palette")),
         optIn: body.includes("A phone cannot open"),
+        blockedPanel: body.includes("No QR to scan"),
         noCode: body.includes("No pairing code"),
         needToken: body.includes("not signed in"),
         minted: body.includes("works once"),
       };
     })()`);
-    failures.push(`authenticated dialog did not mint a fragment URL ${JSON.stringify(snap)}`);
+    failures.push(
+      blocked
+        ? `loopback dialog did not show the blocked panel ${JSON.stringify(snap)}`
+        : `authenticated dialog did not mint a fragment URL ${JSON.stringify(snap)}`,
+    );
   }
   const leak = await page.evaluate(`(() => {
     const value = document.querySelector("#gq-url")?.value || "";
@@ -170,10 +197,20 @@ try {
       query: value.includes("?token=") || shown.includes("?token=") || body.includes("?token="),
       secret: blob.includes(secret),
       pair: value.includes("#pair="),
+      pairInBody: body.includes("#pair="),
+      restartCmd: body.includes("strike daemon install --addr"),
       svg: Boolean(document.querySelector(".gq-qr svg")),
     };
   })()`);
-  if (!leak?.pair || !leak?.svg) failures.push("pairing QR or fragment URL missing");
+  if (blocked) {
+    if (leak?.svg) failures.push("loopback dialog rendered a scannable QR (#1522)");
+    if (leak?.pair || leak?.pairInBody) {
+      failures.push("loopback dialog exposed a pairing URL or code (#1522)");
+    }
+    if (!leak?.restartCmd) failures.push("loopback dialog offered no restart command (#1522)");
+  } else if (!leak?.pair || !leak?.svg) {
+    failures.push("pairing QR or fragment URL missing");
+  }
   if (leak?.query) failures.push("pairing URL used a token query");
   if (leak?.secret) failures.push("daemon token appeared in the DOM");
   const shotDir = join(outDir, "screenshots");
@@ -195,7 +232,7 @@ try {
     });
     await delay(150);
     const png = await page.send("Page.captureScreenshot", { format: "png" });
-    await writeBytes(join(shotDir, `shell-phone-paired-${tag}.png`), Buffer.from(png.data, "base64"));
+    await writeBytes(join(shotDir, `shell-phone-${mode}-${tag}.png`), Buffer.from(png.data, "base64"));
     const jpeg = await page.send("Page.captureScreenshot", { format: "jpeg", quality: 55 });
     frame += 1;
     await writeBytes(
@@ -203,8 +240,8 @@ try {
       Buffer.from(jpeg.data, "base64"),
     );
   }
-  await encodeVideo(frameDir, join(outDir, "paired.mp4"), 1);
-  const report = { failures, outDir };
+  await encodeVideo(frameDir, join(outDir, `${mode}.mp4`), 1);
+  const report = { mode, failures, outDir };
   await writeFile(join(outDir, "report.json"), JSON.stringify(report, null, 2));
   console.log(JSON.stringify(report));
   if (failures.length) process.exitCode = 1;
