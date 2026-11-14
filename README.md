@@ -102,6 +102,7 @@ curl -s http://127.0.0.1:8787/health
 |---|---|
 | [Changelog](CHANGELOG.md) | release history and upgrade notes |
 | [Install & build](docs/install.md) | curl install, releases, upgrade, make targets |
+| [Release verification](docs/release.md) | cosign signatures, SLSA provenance (`gh attestation verify`) |
 | [Usage](docs/usage.md) | slash commands, `@file`, resume/fork, panes |
 | [Loop](docs/loop.md) | `/loop` recurring session jobs (vs `/goal`) |
 | [Nix dev env](docs/nix.md) | Nix philosophy, best practices, reference projects |

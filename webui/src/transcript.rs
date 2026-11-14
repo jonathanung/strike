@@ -19,6 +19,13 @@ pub const MINIMAP_MIN: usize = 8;
 const ECHO_TIP: &str = "Tip: start a message with `run <command>` to exercise the bash tool and the permission prompt.";
 const ECHO_MARK: &str = "Tip: start a message with";
 
+/// Terminal badge for a tool or child row whose end never arrived (#1506).
+/// States the fact — no result was recorded — without claiming the call
+/// failed or was cancelled, neither of which the cockpit can know.
+pub const NO_RESULT_BADGE: &str = "no result";
+const NO_RESULT_TOOL_DETAIL: &str = "Turn ended before this call returned.";
+const NO_RESULT_CHILD_DETAIL: &str = "Turn ended before this delegation returned.";
+
 const EXTS: &[&str] = &[
     "rs", "go", "md", "css", "js", "mjs", "ts", "tsx", "json", "toml", "yml", "yaml", "py", "rb",
     "sh", "html", "svg", "txt", "nix",
@@ -86,9 +93,16 @@ pub struct Message {
     pub keep_events: i32,
     pub retry_text: String,
     pub copy_text: String,
+    /// Provider whose credential was rejected, on a `provider_auth` notice
+    /// (#1546). Drives the Open Providers action; empty everywhere else.
+    pub reconnect: String,
     /// Envelope time of the event that created this message, epoch ms.
     /// 0 means unknown (old log line without a parseable `time`).
     pub at_ms: f64,
+    /// `turnId` correlation of the event that created this message, when
+    /// the envelope carried one. Empty for legacy log lines. Used by the
+    /// orphan sweep (#1506) to scope a `turn.completed` to its own turn.
+    pub turn_id: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -287,6 +301,15 @@ pub struct Transcript {
     /// turns under a minute, still in progress, or containing an untimed
     /// line have no entry and render nothing.
     pub turn_elapsed: HashMap<u32, String>,
+    /// Per-turn token footers (#1558), keyed like `turn_elapsed` by the
+    /// turn's final message id. Only turns with a known input or output
+    /// count get an entry.
+    pub turn_usage: HashMap<u32, crate::turn_usage::TurnUsage>,
+    /// Usage streams of the turn in progress, folded at `turn.completed`.
+    usage_acc: crate::turn_usage::TurnUsage,
+    /// `sessionId` of the turn in progress (from `turn.started`), so a
+    /// child session's streams are not counted on the parent's turn.
+    turn_session: String,
 }
 
 impl Default for Transcript {
@@ -310,6 +333,9 @@ impl Transcript {
             event_count: 0,
             turn_start: None,
             turn_elapsed: HashMap::new(),
+            turn_usage: HashMap::new(),
+            usage_acc: crate::turn_usage::TurnUsage::default(),
+            turn_session: String::new(),
         }
     }
 
@@ -317,6 +343,12 @@ impl Transcript {
     /// final line of a completed turn that exceeded a minute (#1364).
     pub fn elapsed_for(&self, id: u32) -> Option<&str> {
         self.turn_elapsed.get(&id).map(String::as_str)
+    }
+
+    /// The per-turn usage footer stamped on this message, if it is the
+    /// final line of a completed turn with known token counts (#1558).
+    pub fn usage_for(&self, id: u32) -> Option<&crate::turn_usage::TurnUsage> {
+        self.turn_usage.get(&id)
     }
 
     pub fn set_listed_title(&mut self, listed: &str) {
@@ -474,13 +506,26 @@ impl Transcript {
                     keep_events: -1,
                     retry_text: text,
                     copy_text: shown,
+                    reconnect: String::new(),
                     at_ms,
+                    turn_id: field_str(&data, "turnId"),
                 });
                 self.turn_start = Some(id);
                 self.absorb();
             }
             "session.titled" => self.note_titled(&field_str(&data, "title")),
-            "turn.started" => self.assistant_open = false,
+            "turn.started" => {
+                self.assistant_open = false;
+                // A new turn starting means every earlier turn has ended:
+                // any row from an earlier turn still marked running is an
+                // orphan (its turn died without a turn.completed reaching
+                // this consumer, e.g. a replayed log). Rows carrying the
+                // new turn's own id are untouched.
+                self.sweep_orphaned_before_turn(&field_str(&data, "turnId"));
+                self.usage_acc = crate::turn_usage::TurnUsage::default();
+                self.turn_session = field_str(&data, "sessionId");
+            }
+            "usage.reported" => self.usage_acc.absorb(&data, &self.turn_session),
             "reasoning.delta" => {}
             "text.delta" => {
                 let chunk = field_str(&data, "text");
@@ -515,13 +560,17 @@ impl Transcript {
                     keep_events: -1,
                     retry_text: retry,
                     copy_text: body,
+                    reconnect: String::new(),
                     at_ms,
+                    turn_id: String::new(),
                 });
             }
             "turn.completed" => {
                 self.assistant_open = false;
+                self.sweep_orphaned_at_turn_end(&field_str(&data, "turnId"));
                 self.absorb();
-                self.stamp_turn(at_ms);
+                let usage = std::mem::take(&mut self.usage_acc);
+                self.stamp_turn(at_ms, usage);
             }
             "tool.begin" => {
                 self.assistant_open = false;
@@ -552,7 +601,9 @@ impl Transcript {
                     keep_events: -1,
                     retry_text: String::new(),
                     copy_text: copy,
+                    reconnect: String::new(),
                     at_ms,
+                    turn_id: field_str(&data, "turnId"),
                 });
             }
             "tool.end" => {
@@ -607,7 +658,9 @@ impl Transcript {
                         keep_events: -1,
                         retry_text: String::new(),
                         copy_text: face.copy,
+                        reconnect: String::new(),
                         at_ms,
+                        turn_id: field_str(&data, "turnId"),
                     });
                 }
             }
@@ -645,6 +698,33 @@ impl Transcript {
                 if code == "composer_notice" {
                     self.trigger_note = message.clone();
                 }
+                if code == PROVIDER_AUTH_CODE {
+                    // #1546: the daemon classified a rejected credential.
+                    // Headline says what happened; the vendor text is
+                    // secondary detail; Retry re-sends the failed prompt
+                    // only when the user presses it.
+                    let provider = field_str(&data, "provider");
+                    let retry = self.current_retry();
+                    self.push(Message {
+                        id: 0,
+                        role: Role::Notice,
+                        title: "Authentication failed".into(),
+                        body: provider_auth_headline(&provider),
+                        badge: code,
+                        detail: message.clone(),
+                        key: String::new(),
+                        call_id: String::new(),
+                        diff: None,
+                        chips: Vec::new(),
+                        keep_events: -1,
+                        retry_text: retry,
+                        copy_text: message,
+                        reconnect: provider,
+                        at_ms,
+                        turn_id: String::new(),
+                    });
+                    return;
+                }
                 self.push(Message {
                     id: 0,
                     role: Role::Notice,
@@ -659,7 +739,9 @@ impl Transcript {
                     keep_events: -1,
                     retry_text: String::new(),
                     copy_text: String::new(),
+                    reconnect: String::new(),
                     at_ms,
+                    turn_id: String::new(),
                 });
             }
             "permission.asked" => {
@@ -695,7 +777,9 @@ impl Transcript {
                     keep_events: -1,
                     retry_text: String::new(),
                     copy_text: permission,
+                    reconnect: String::new(),
                     at_ms,
+                    turn_id: String::new(),
                 });
             }
             "permission.resolved" => {
@@ -772,7 +856,102 @@ impl Transcript {
         None
     }
 
-    fn stamp_turn(&mut self, completed_ms: f64) {
+    /// Index of the first message of the turn `turn.completed` is closing:
+    /// the live turn's start when one is tracked, else the whole
+    /// transcript (a completion for a turn this consumer never saw open,
+    /// e.g. a replay that begins mid-turn).
+    fn turn_range_start(&self) -> usize {
+        match self.turn_start {
+            Some(id) => self
+                .messages
+                .iter()
+                .position(|m| m.id == id)
+                .unwrap_or(0),
+            None => 0,
+        }
+    }
+
+    /// Give one still-running tool/child row its honest terminal state.
+    fn settle_row(msg: &mut Message) {
+        let note = if msg.role == Role::Child {
+            NO_RESULT_CHILD_DETAIL
+        } else {
+            NO_RESULT_TOOL_DETAIL
+        };
+        msg.badge = NO_RESULT_BADGE.into();
+        if msg.detail.is_empty() {
+            msg.detail = note.into();
+        } else if !msg.detail.contains(note) {
+            msg.detail = format!("{}\n{note}", msg.detail);
+        }
+    }
+
+    /// Sweep on `turn.completed`: rows in the completing turn still
+    /// marked `running` never got their `tool.end` / `child.end`, so
+    /// they settle as `no result`. Rows that received an end keep their
+    /// `done`/`failed` badge. A row tagged with the completing turnId
+    /// settles wherever it sits — a mid-turn `user.message` (steer,
+    /// child notice, mailbox) moves `turn_start` past it. Untagged
+    /// (legacy) rows settle only inside the tracked turn range. A row
+    /// carrying a *different* turnId belongs to another turn and is
+    /// left alone.
+    fn sweep_orphaned_at_turn_end(&mut self, completed_turn_id: &str) {
+        let start = self.turn_range_start();
+        for (idx, msg) in self.messages.iter_mut().enumerate() {
+            if msg.badge != "running" || !matches!(msg.role, Role::Tool | Role::Child) {
+                continue;
+            }
+            let ours = if completed_turn_id.is_empty() || msg.turn_id.is_empty() {
+                idx >= start
+            } else {
+                msg.turn_id == completed_turn_id
+            };
+            if ours {
+                Self::settle_row(msg);
+            }
+        }
+    }
+
+    /// Sweep when a new turn starts: rows from earlier turns still
+    /// marked `running` are orphans of turns that ended without this
+    /// consumer seeing their completion (dead engine, restarted
+    /// gateway, replayed log). A row carrying the new turn's own id
+    /// (replayed out of order) is left running.
+    fn sweep_orphaned_before_turn(&mut self, new_turn_id: &str) {
+        for msg in self.messages.iter_mut() {
+            if msg.badge != "running" || !matches!(msg.role, Role::Tool | Role::Child) {
+                continue;
+            }
+            if !new_turn_id.is_empty() && msg.turn_id == new_turn_id {
+                continue;
+            }
+            Self::settle_row(msg);
+        }
+    }
+
+    /// Any tool/child row still marked `running`? Lets callers skip a
+    /// signal write when there is nothing to settle.
+    pub fn has_running_tools(&self) -> bool {
+        self.messages
+            .iter()
+            .any(|m| m.badge == "running" && matches!(m.role, Role::Tool | Role::Child))
+    }
+
+    /// Settle every still-running tool/child row. Load/replay entry
+    /// point (#1506): call after a stored transcript has been fully
+    /// applied for a session that is NOT in a live turn, so a log that
+    /// ends mid-tool does not render a forever-running row in an idle
+    /// session. Never call this for a live turn — use the turn-boundary
+    /// sweeps, which key off turn state, not age or timers.
+    pub fn settle_orphaned_tools(&mut self) {
+        for msg in self.messages.iter_mut() {
+            if msg.badge == "running" && matches!(msg.role, Role::Tool | Role::Child) {
+                Self::settle_row(msg);
+            }
+        }
+    }
+
+    fn stamp_turn(&mut self, completed_ms: f64, usage: crate::turn_usage::TurnUsage) {
         let Some(id) = self.turn_start else {
             return;
         };
@@ -802,6 +981,11 @@ impl Transcript {
                 crate::turn_elapsed::turn_elapsed_label(first_ms, completed_ms, all_timed)
             {
                 self.turn_elapsed.insert(last_id, label);
+            }
+            // Turn usage (#1558): same final line, only when a stream
+            // reported a known input or output count.
+            if usage.label().is_some() {
+                self.turn_usage.insert(last_id, usage);
             }
         }
         self.turn_start = None;
@@ -902,7 +1086,9 @@ impl Transcript {
             keep_events: -1,
             retry_text: String::new(),
             copy_text: summary,
+            reconnect: String::new(),
             at_ms,
+            turn_id: String::new(),
         });
     }
 }
@@ -1823,9 +2009,94 @@ fn clip(text: &str, max: usize) -> String {
     short
 }
 
+/// `engine.error` code for a provider rejecting the saved credential
+/// mid-session (#1546). Classified daemon-side; never inferred here from
+/// message text.
+pub const PROVIDER_AUTH_CODE: &str = "provider_auth";
+
+/// Display name for a provider id in the auth-failure headline.
+fn provider_display(provider: &str) -> String {
+    match provider.trim() {
+        "anthropic" => "Anthropic".into(),
+        "openai" => "OpenAI".into(),
+        "google" => "Google".into(),
+        "xai" => "xAI".into(),
+        "deepseek" => "DeepSeek".into(),
+        "kimi" => "Kimi".into(),
+        other => other.to_string(),
+    }
+}
+
+/// Headline for a `provider_auth` notice: what happened, in the user's
+/// terms, without the vendor's raw error text.
+pub fn provider_auth_headline(provider: &str) -> String {
+    let name = provider_display(provider);
+    if name.is_empty() {
+        "Provider authentication failed — the saved credential was rejected.".into()
+    } else {
+        format!("{name} authentication failed — the saved credential was rejected.")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn provider_auth_error_renders_actionable_notice() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": "fix the bug"})));
+        t.apply_envelope(&env(
+            "engine.error",
+            serde_json::json!({
+                "message": "openai: invalid_request_error: Incorrect API key provided",
+                "code": "provider_auth",
+                "provider": "openai"
+            }),
+        ));
+        let m = t.messages.last().unwrap();
+        assert_eq!(m.role, Role::Notice);
+        assert_eq!(m.badge, PROVIDER_AUTH_CODE);
+        assert_eq!(m.reconnect, "openai");
+        assert_eq!(
+            m.body,
+            "OpenAI authentication failed — the saved credential was rejected."
+        );
+        assert!(m.detail.contains("Incorrect API key"));
+        assert_eq!(m.retry_text, "fix the bug");
+    }
+
+    #[test]
+    fn generic_engine_error_mentioning_401_stays_plain() {
+        // No client-side string matching: only the daemon's code makes
+        // a notice actionable.
+        let mut t = Transcript::new();
+        t.apply_envelope(&env(
+            "engine.error",
+            serde_json::json!({"message": "openai: unexpected status 401: unauthorized"}),
+        ));
+        let m = t.messages.last().unwrap();
+        assert_eq!(m.title, "Notice");
+        assert!(m.reconnect.is_empty());
+        assert!(m.retry_text.is_empty());
+        assert!(m.body.contains("401"));
+    }
+
+    #[test]
+    fn provider_auth_headline_names_known_and_unknown_providers() {
+        assert_eq!(
+            provider_auth_headline("anthropic"),
+            "Anthropic authentication failed — the saved credential was rejected."
+        );
+        assert_eq!(
+            provider_auth_headline("my-gateway"),
+            "my-gateway authentication failed — the saved credential was rejected."
+        );
+        assert_eq!(
+            provider_auth_headline(""),
+            "Provider authentication failed — the saved credential was rejected."
+        );
+    }
 
     fn env(typ: &str, data: Value) -> String {
         serde_json::json!({"type": typ, "data": data}).to_string()
@@ -1925,6 +2196,281 @@ mod tests {
         let diff = msg.diff.clone().expect("diff");
         assert!(diff.deleted >= 1 && diff.added >= 1);
         assert!(msg.chips.iter().any(|c| c.path == "webui/src/main.rs"));
+    }
+
+    #[test]
+    fn orphan_tool_swept_at_turn_end() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env(
+            "user.message",
+            serde_json::json!({"text": "hi", "turnId": "t1"}),
+        ));
+        t.apply_envelope(&env(
+            "tool.begin",
+            serde_json::json!({"callId": "a", "name": "bash", "turnId": "t1", "args": {"command": "sleep 9"}}),
+        ));
+        t.apply_envelope(&env(
+            "tool.begin",
+            serde_json::json!({"callId": "b", "name": "read", "turnId": "t1", "args": {"filePath": "a.go"}}),
+        ));
+        t.apply_envelope(&env(
+            "tool.end",
+            serde_json::json!({"callId": "b", "name": "read", "output": "contents"}),
+        ));
+        t.apply_envelope(&env(
+            "turn.completed",
+            serde_json::json!({"turnId": "t1"}),
+        ));
+        let orphan = t
+            .messages
+            .iter()
+            .find(|m| m.call_id == "a")
+            .expect("orphan row");
+        assert_eq!(orphan.badge, NO_RESULT_BADGE);
+        assert_eq!(orphan.badge, "no result");
+        assert!(
+            orphan.detail.contains("Turn ended before this call returned."),
+            "{}",
+            orphan.detail
+        );
+        let done = t
+            .messages
+            .iter()
+            .find(|m| m.call_id == "b")
+            .expect("done row");
+        assert_eq!(done.badge, "done");
+    }
+
+    #[test]
+    fn orphan_tool_failed_row_untouched_at_turn_end() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env(
+            "user.message",
+            serde_json::json!({"text": "hi", "turnId": "t1"}),
+        ));
+        t.apply_envelope(&env(
+            "tool.begin",
+            serde_json::json!({"callId": "a", "name": "bash", "turnId": "t1", "args": {"command": "false"}}),
+        ));
+        t.apply_envelope(&env(
+            "tool.end",
+            serde_json::json!({"callId": "a", "name": "bash", "output": "boom", "isError": true}),
+        ));
+        t.apply_envelope(&env(
+            "turn.completed",
+            serde_json::json!({"turnId": "t1"}),
+        ));
+        let row = t
+            .messages
+            .iter()
+            .find(|m| m.call_id == "a")
+            .expect("failed row");
+        assert_eq!(row.badge, "failed");
+        assert!(!row.detail.contains("Turn ended before this call returned."));
+    }
+
+    #[test]
+    fn orphan_swept_only_for_the_completing_turn() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env(
+            "user.message",
+            serde_json::json!({"text": "hi", "turnId": "t1"}),
+        ));
+        // A running row correlated to a different (live) turn must not be
+        // swept by t1's completion.
+        t.apply_envelope(&env(
+            "tool.begin",
+            serde_json::json!({"callId": "a", "name": "bash", "turnId": "t2", "args": {"command": "sleep 9"}}),
+        ));
+        t.apply_envelope(&env(
+            "turn.completed",
+            serde_json::json!({"turnId": "t1"}),
+        ));
+        let row = t
+            .messages
+            .iter()
+            .find(|m| m.call_id == "a")
+            .expect("other-turn row");
+        assert_eq!(row.badge, "running");
+        // Its own turn completing does sweep it.
+        t.apply_envelope(&env(
+            "turn.completed",
+            serde_json::json!({"turnId": "t2"}),
+        ));
+        let row = t
+            .messages
+            .iter()
+            .find(|m| m.call_id == "a")
+            .expect("other-turn row");
+        assert_eq!(row.badge, "no result");
+    }
+
+    #[test]
+    fn replay_ending_mid_tool_settles_on_load() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env(
+            "user.message",
+            serde_json::json!({"text": "hi", "turnId": "t1"}),
+        ));
+        t.apply_envelope(&env(
+            "tool.begin",
+            serde_json::json!({"callId": "a", "name": "bash", "turnId": "t1", "args": {"command": "sleep 9"}}),
+        ));
+        t.apply_envelope(&env(
+            "tool.begin",
+            serde_json::json!({"callId": "b", "name": "read", "turnId": "t1", "args": {"filePath": "a.go"}}),
+        ));
+        t.apply_envelope(&env(
+            "tool.end",
+            serde_json::json!({"callId": "b", "name": "read", "output": "contents"}),
+        ));
+        // The stored log ends here: no tool.end for `a`, no turn.completed.
+        let row = t
+            .messages
+            .iter()
+            .find(|m| m.call_id == "a")
+            .expect("orphan row");
+        assert_eq!(row.badge, "running");
+        assert!(t.has_running_tools());
+        t.settle_orphaned_tools();
+        assert!(!t.has_running_tools());
+        let row = t
+            .messages
+            .iter()
+            .find(|m| m.call_id == "a")
+            .expect("orphan row");
+        assert_eq!(row.badge, "no result");
+        assert!(row.detail.contains("Turn ended before this call returned."));
+        let done = t
+            .messages
+            .iter()
+            .find(|m| m.call_id == "b")
+            .expect("done row");
+        assert_eq!(done.badge, "done");
+        // A late tool.end (stale idle raced a live call) heals the row.
+        let mut healed = t.clone();
+        healed.apply_envelope(&env(
+            "tool.end",
+            serde_json::json!({"callId": "a", "name": "bash", "output": "ok"}),
+        ));
+        let row = healed.messages.iter().find(|m| m.call_id == "a").unwrap();
+        assert_eq!(row.badge, "done");
+        assert!(!row.detail.contains("Turn ended before"));
+        // Settling is idempotent: the note is not appended twice.
+        t.settle_orphaned_tools();
+        let row = t
+            .messages
+            .iter()
+            .find(|m| m.call_id == "a")
+            .expect("orphan row");
+        assert_eq!(
+            row.detail
+                .matches("Turn ended before this call returned.")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn replay_orphan_swept_when_next_turn_starts_and_live_row_survives() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env(
+            "user.message",
+            serde_json::json!({"text": "first", "turnId": "t1"}),
+        ));
+        t.apply_envelope(&env(
+            "tool.begin",
+            serde_json::json!({"callId": "a", "name": "bash", "turnId": "t1", "args": {"command": "sleep 9"}}),
+        ));
+        // No turn.completed for t1 in the log; the next turn starting is
+        // the evidence t1 ended, so its orphan settles here.
+        t.apply_envelope(&env(
+            "turn.started",
+            serde_json::json!({"turnId": "t2"}),
+        ));
+        let orphan = t
+            .messages
+            .iter()
+            .find(|m| m.call_id == "a")
+            .expect("orphan row");
+        assert_eq!(orphan.badge, "no result");
+        // A tool in the live turn keeps running until its own turn ends.
+        t.apply_envelope(&env(
+            "tool.begin",
+            serde_json::json!({"callId": "b", "name": "bash", "turnId": "t2", "args": {"command": "sleep 9"}}),
+        ));
+        let live = t
+            .messages
+            .iter()
+            .find(|m| m.call_id == "b")
+            .expect("live row");
+        assert_eq!(live.badge, "running");
+        t.apply_envelope(&env(
+            "turn.completed",
+            serde_json::json!({"turnId": "t2"}),
+        ));
+        let live = t
+            .messages
+            .iter()
+            .find(|m| m.call_id == "b")
+            .expect("live row");
+        assert_eq!(live.badge, "no result");
+    }
+
+    #[test]
+    fn orphan_swept_at_turn_end_after_mid_turn_user_message() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": "go", "turnId": "t1"})));
+        t.apply_envelope(&env(
+            "tool.begin",
+            serde_json::json!({"callId": "a", "name": "bash", "turnId": "t1", "args": {"command": "sleep 9"}}),
+        ));
+        // Steer / child notice / mailbox inject a user.message mid-turn.
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": "also this"})));
+        t.apply_envelope(&env("turn.completed", serde_json::json!({"turnId": "t1"})));
+        let row = t.messages.iter().find(|m| m.call_id == "a").expect("row");
+        assert_eq!(row.badge, "no result");
+    }
+
+    #[test]
+    fn orphan_child_row_swept_at_turn_end() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env(
+            "user.message",
+            serde_json::json!({"text": "hi", "turnId": "t1"}),
+        ));
+        t.apply_envelope(&env(
+            "child.completed",
+            serde_json::json!({
+                "name": "scribe",
+                "sessionId": "abcd1234",
+                "status": "running",
+                "summary": "working on the subtask"
+            }),
+        ));
+        let child = t
+            .messages
+            .iter()
+            .find(|m| m.role == Role::Child)
+            .expect("child row");
+        assert_eq!(child.badge, "running");
+        t.apply_envelope(&env(
+            "turn.completed",
+            serde_json::json!({"turnId": "t1"}),
+        ));
+        let child = t
+            .messages
+            .iter()
+            .find(|m| m.role == Role::Child)
+            .expect("child row");
+        assert_eq!(child.badge, "no result");
+        assert!(
+            child
+                .detail
+                .contains("Turn ended before this delegation returned."),
+            "{}",
+            child.detail
+        );
     }
 
     #[test]
@@ -2438,6 +2984,49 @@ mod tests {
         assert_eq!(t.turn_elapsed.len(), 1);
         let last = t.messages.last().unwrap();
         assert_eq!(t.elapsed_for(last.id), Some("took 2:30"));
+    }
+
+    #[test]
+    fn turn_usage_sums_own_streams_onto_the_final_line() {
+        let known = |n: i64| serde_json::json!({"n": n, "known": true});
+        let mut t = Transcript::new();
+        // Turn 1: a tool loop (two streams) plus a child's stream.
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": "fix it"})));
+        t.apply_envelope(&env("turn.started", serde_json::json!({"sessionId": "root", "turnId": "t1"})));
+        t.apply_envelope(&env(
+            "usage.reported",
+            serde_json::json!({"sessionId": "root", "input": known(1000), "output": known(50)}),
+        ));
+        t.apply_envelope(&env(
+            "usage.reported",
+            serde_json::json!({"sessionId": "kid", "input": known(9999), "output": known(9999)}),
+        ));
+        t.apply_envelope(&env(
+            "usage.reported",
+            serde_json::json!({"sessionId": "root", "input": known(1500), "output": known(150)}),
+        ));
+        t.apply_envelope(&env("text.delta", serde_json::json!({"text": "done"})));
+        assert!(t.turn_usage.is_empty(), "nothing until the turn completes");
+        t.apply_envelope(&env("turn.completed", serde_json::json!({"turnId": "t1"})));
+        let last = t.messages.last().unwrap().id;
+        let u = t.usage_for(last).expect("footer on final line");
+        assert_eq!(u.label().as_deref(), Some("2.5k in · 200 out"));
+        assert_eq!(u.streams, 2);
+        assert_eq!(t.turn_usage.len(), 1);
+        // Turn 2: usage not reported — no footer, and turn 1's sums do
+        // not leak into it.
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": "again"})));
+        t.apply_envelope(&env("turn.started", serde_json::json!({"sessionId": "root", "turnId": "t2"})));
+        t.apply_envelope(&env(
+            "usage.reported",
+            serde_json::json!({"sessionId": "root", "input": {"known": false}, "output": {"known": false}}),
+        ));
+        t.apply_envelope(&env("text.delta", serde_json::json!({"text": "ok"})));
+        t.apply_envelope(&env("turn.completed", serde_json::json!({"turnId": "t2"})));
+        let last2 = t.messages.last().unwrap().id;
+        assert_ne!(last, last2);
+        assert!(t.usage_for(last2).is_none());
+        assert_eq!(t.turn_usage.len(), 1);
     }
 
     #[test]
