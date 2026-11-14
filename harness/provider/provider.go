@@ -72,12 +72,25 @@ type ToolSchema struct {
 	InputSchema json.RawMessage // JSON Schema
 }
 
+// SystemBlock is one ordered segment of Request.System. Dynamic marks churn
+// (date, auto-loaded memory, ledger slice) that changes between turns, so
+// adapters with prompt-cache breakpoints can keep it out of the cached prefix.
+type SystemBlock struct {
+	Text    string
+	Dynamic bool
+}
+
 type Request struct {
-	Model     string
-	System    string
-	Messages  []Message
-	Tools     []ToolSchema
-	MaxTokens int
+	Model string
+	// System is the full system prompt. Adapters without multi-block system
+	// support read only this field.
+	System string
+	// SystemBlocks optionally partitions System into stable-then-dynamic
+	// segments (texts joined with "\n" equal System). Empty means one block.
+	SystemBlocks []SystemBlock
+	Messages     []Message
+	Tools        []ToolSchema
+	MaxTokens    int
 	// Effort is the reasoning dial for this request. EffortDefault leaves the
 	// provider's own default in place.
 	Effort Effort

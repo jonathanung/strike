@@ -383,6 +383,11 @@ pub struct SessionRow {
     pub workspace_id: String,
     /// Canonical status id. Empty only before classification.
     pub status: String,
+    /// Live root is waiting on an approval (#1451). Carried from
+    /// [`RootSummary`] so the session list can label the waiting kind.
+    pub permission_pending: bool,
+    /// Live root is waiting on an answer to an agent question (#1451).
+    pub question_pending: bool,
     /// Unix milliseconds when `status` began.
     pub status_since: i64,
     /// Unix milliseconds of the last user-visible activity. 0 when unknown.
@@ -631,6 +636,8 @@ fn blank_row(id: &str, title: &str, mtime: i64, pinned: bool) -> SessionRow {
         unread: false,
         workspace_id: String::new(),
         status: String::new(),
+        permission_pending: false,
+        question_pending: false,
         status_since: 0,
         last_activity_at: 0,
     }
@@ -683,6 +690,8 @@ pub fn merge_sessions(
         if !r.status.is_empty() {
             entry.status = r.status.clone();
         }
+        entry.permission_pending = r.permission_pending;
+        entry.question_pending = r.question_pending;
         if r.status_since > 0 {
             entry.status_since = r.status_since;
         }
@@ -731,6 +740,14 @@ pub fn filter_sessions(
         .filter(|row| {
             let mode_ok = match filter {
                 "unread" => row.unread,
+                "needs-you" => {
+                    crate::status::session_kind(
+                        &row.status,
+                        row.busy,
+                        row.permission_pending,
+                        row.question_pending,
+                    ) == crate::status::StatusKind::Waiting
+                }
                 "progress" => row.busy,
                 "pinned" => row.pinned,
                 _ => true,
@@ -1228,6 +1245,8 @@ mod tests {
             unread: false,
             workspace_id: String::new(),
             status: String::new(),
+            permission_pending: false,
+            question_pending: false,
             status_since: 0,
             last_activity_at: 0,
         }
@@ -1291,6 +1310,8 @@ mod tests {
         assert!(rows[0].unread);
         assert!(rows[0].busy);
         assert_eq!(rows[0].status, "waiting");
+        assert!(rows[0].permission_pending);
+        assert!(!rows[0].question_pending);
         assert_eq!(rows[0].last_activity_at, 9_000);
 
         let acked = vec![RootSummary {

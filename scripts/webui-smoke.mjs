@@ -1022,6 +1022,42 @@ try {
   if (selected.result?.result?.value !== "yes") {
     throw new Error("keyboard x did not select the cursor session");
   }
+  // Needs you chip (#1451): the chip renders beside All/Unread, activates,
+  // and filters the seeded (non-waiting) sessions out; All restores them.
+  // Waiting-row rendering itself is covered by session_list unit tests —
+  // the echo/smoke seeds never pend an approval or a question.
+  const needsYou = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const chips = [...document.querySelectorAll(".ss-chips .chip")].map((c) => c.textContent.trim());
+      const chip = [...document.querySelectorAll(".ss-chips .chip")].find((c) => c.textContent.trim() === "Needs you");
+      if (chip) chip.click();
+      return JSON.stringify({ chips, clicked: !!chip });
+    })()`,
+    returnByValue: true,
+  });
+  const needsYouInfo = JSON.parse(needsYou.result?.result?.value || "{}");
+  if (!needsYouInfo.clicked || needsYouInfo.chips?.join(",") !== "All,Unread,Needs you") {
+    throw new Error(`Needs you chip missing or out of order: ${JSON.stringify(needsYouInfo)}`);
+  }
+  await waitFor(
+    "Needs you filter empties the non-waiting list",
+    textProbe((t) => t.includes("No sessions match")),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  const needsYouActive = await evalValue(
+    `document.querySelector(".ss-chips .chip.on")?.textContent.trim() || ""`,
+  );
+  if (needsYouActive !== "Needs you") {
+    throw new Error(`Needs you chip did not stay active (on=${needsYouActive})`);
+  }
+  await send("Runtime.evaluate", {
+    expression: `[...document.querySelectorAll(".ss-chips .chip")].find((c) => c.textContent.trim() === "All")?.click()`,
+  });
+  await waitFor(
+    "All filter restores sessions after Needs you",
+    textProbe((t) => t.includes("Palette polish") && t.includes("Alpha session")),
+    { timeout: WAIT_MS, interval: 250 },
+  );
   // feature:navbar — palette fuzzy match, argument error, shortcut overlay.
   const navbar = async (expression) => {
     try {
@@ -1439,14 +1475,48 @@ try {
   }
   // A memory row's key cell must stay readable at panel width: the full
   // RFC3339 timestamp once sat as a flex sibling and crushed the link
-  // block to ~35px (PR #1305 review).
-  const memKeyWidthPx = await evaluate(`(() => {
-    const row = [...document.querySelectorAll(".storage-row")].find((r) => r.textContent.includes("smoke-pref"));
-    const link = row ? row.querySelector(".link") : null;
-    return link ? link.getBoundingClientRect().width : 0;
+  // block to ~35px (PR #1305 review). The text probe above can pass
+  // before layout settles, leaving the link rect at width 0 for a
+  // frame, so poll the width like every other wait in this file
+  // instead of measuring once.
+  await waitFor(
+    "memory row key cell readable width (>100px)",
+    async () => {
+      const w = await evaluate(`(() => {
+        const row = [...document.querySelectorAll(".storage-row")].find((r) => r.textContent.includes("smoke-pref"));
+        const link = row ? row.querySelector(".link") : null;
+        return link ? link.getBoundingClientRect().width : 0;
+      })()`);
+      return { ok: w > 100, memKeyWidthPx: w };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  // Memory export (#1534): the panel must offer the Export action with
+  // its honest label, and the daemon route must return the seeded
+  // entry as a strike-memory.json download.
+  if (!memoryText.includes("Export memory") || !memoryText.includes("unencrypted")) {
+    throw new Error(`memory panel missing export action/label text=${memoryText.slice(0, 1500)}`);
+  }
+  const exportBtnFound = await evaluate(`(() => {
+    const btn = document.querySelector('[data-action="memory-export"]');
+    return !!btn && btn.textContent.includes("Export memory");
   })()`);
-  if (!(memKeyWidthPx > 100)) {
-    throw new Error(`memory row key cell too narrow width=${memKeyWidthPx}`);
+  if (!exportBtnFound) {
+    throw new Error("memory panel export button not found in DOM");
+  }
+  const exportRes = await fetch(`http://127.0.0.1:${port}/v1/memory/export`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const exportBody = await exportRes.text();
+  const exportDisposition = exportRes.headers.get("content-disposition") || "";
+  if (
+    !exportRes.ok ||
+    !exportDisposition.includes("strike-memory.json") ||
+    !exportBody.includes("smoke-pref")
+  ) {
+    throw new Error(
+      `memory export route failed status=${exportRes.status} disposition=${exportDisposition} body=${exportBody.slice(0, 500)}`,
+    );
   }
 
   // Goals + Autopilot (#1300, #1593). The view is palette-only. A bundle

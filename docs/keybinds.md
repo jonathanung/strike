@@ -38,10 +38,20 @@ Registry: `keybindSlashPrimary` / `keybindNoSlashReason` in
 | `ctrl+up` / `ctrl+down` | scroll transcript | `/scroll-up`, `/scroll-down` |
 | `ctrl+t` | jump to latest output | `/jump-bottom` |
 | `alt+y` | copy last assistant response (OSC52) | `/copy` |
+| mouse drag | select transcript/prompt text; release copies it (OSC52) and shows a top-right `Sent to clipboard` badge for ~1.5s | - |
 | `ctrl+h` / `ctrl+l` | focus left (primary transcript) / right (secondary pane column) — **orientation-independent**; on the lean home screen, `ctrl+l` also opens the multi-pane workspace (launch left, panels right) | `/focus-left`, `/focus-right` |
 | `ctrl+p` / `ctrl+o` | cycle right-pane focus next / previous within the active stack group, then to the next group | `/window-next`, `/window-prev` |
 | `ctrl+shift+o` / `ctrl+shift+p` | cycle right-pane **stack groups** next / previous (lands on the group's first pane) | `/group-next`, `/group-prev` |
 | `ctrl+;` | toggle split orientation | `/layout`, `/split` |
+
+Mouse selection contract: strike enables mouse reporting, so a plain drag is
+an app-owned selection limited to the transcript and prompt. Releasing it sends
+the text with OSC52 and shows the `Sent to clipboard` badge. The badge says
+"sent", not "copied", because OSC52 is not acknowledged; terminals or tmux/SSH
+hops that block OSC52 drop the text without an error. For terminal-native
+selection, hold `shift` (most Linux/Windows terminals) or `option` (macOS
+iTerm2/Terminal) while dragging. That bypasses mouse reporting, so strike never
+sees it and shows no badge; use your terminal's copy key and feedback.
 
 Focus and cycle chords do **not** swap when the split is stacked top/bottom:
 left/right mean primary transcript vs secondary pane column in either layout.
