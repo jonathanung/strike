@@ -414,6 +414,49 @@ func TestLoopCancelledContextDoesNotActivate(t *testing.T) {
 	}
 }
 
+// An iteration cut short by cancellation (a pause kills the running
+// check, and the critic records that as a failed criterion, not an
+// error) must not commit: no iteration record, LastIteration stays 0,
+// and Run reports the cancellation (#1417).
+func TestLoopCancelledIterationDoesNotCommit(t *testing.T) {
+	t.Parallel()
+	s, err := Open(t.TempDir(), "canceliter")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	spec, _ := ParseCheckSpec("cmd: true")
+	g, err := s.Create("cancel mid-check", []Criterion{{Check: spec}}, DefaultConstraints())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	loop := &Loop{
+		Store:   s,
+		Planner: EvaluateOnlyPlanner{},
+		Critic: &DefaultCritic{
+			CmdRunner: func(context.Context, string, string) (int, string, error) {
+				cancel() // the check is killed, as a pause would kill it
+				return -1, "", nil
+			},
+		},
+	}
+	if _, err := loop.Run(ctx, g.ID); err == nil {
+		t.Fatal("expected the cancellation to be reported")
+	}
+	cur, ok, err := s.Get(g.ID)
+	if err != nil || !ok {
+		t.Fatalf("get: ok=%v err=%v", ok, err)
+	}
+	if cur.LastIteration != 0 {
+		t.Fatalf("lastIteration=%d, want no committed iterations", cur.LastIteration)
+	}
+	iters, err := s.ListIterations(g.ID)
+	if err != nil || len(iters) != 0 {
+		t.Fatalf("iters=%+v err=%v, want none", iters, err)
+	}
+}
+
 func TestLoopRaceRun(t *testing.T) {
 	s, err := Open(t.TempDir(), "race-loop")
 	if err != nil {
