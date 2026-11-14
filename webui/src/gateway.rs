@@ -255,8 +255,6 @@ pub fn save_profiles(list: &[Profile]) {
     }
 }
 
-/// Ok(true) means a hostname that is not a literal private address.
-/// The bearer would leave the machine, so the switcher warns.
 /// A validated name/URL/SSH form, shared by add and edit (#1466) so an
 /// edited URL gets exactly the `classify_base` check a fresh add gets.
 #[derive(Clone, Debug, PartialEq)]
@@ -297,6 +295,14 @@ fn apply_profile_edit(list: &mut [Profile], id: &str, form: ProfileForm) -> bool
     true
 }
 
+/// Whether saving an edit should re-point the tab at the profile's new URL.
+/// Only the selected profile whose URL moved re-points, and never to a
+/// warned (non-literal) hostname: that would send the bearer there on
+/// Save, while a fresh add only sends it once the user selects it.
+fn edit_repoints(is_selected: bool, url_changed: bool, warn: bool) -> bool {
+    is_selected && url_changed && !warn
+}
+
 fn saved_note(warn: bool) -> String {
     if warn {
         "Saved. This hostname is not a literal private address. The bearer is sent there only when you select it.".into()
@@ -305,6 +311,8 @@ fn saved_note(warn: bool) -> String {
     }
 }
 
+/// Ok(true) means a hostname that is not a literal private address.
+/// The bearer would leave the machine, so the switcher warns.
 pub fn classify_base(raw: &str) -> Result<bool, String> {
     let raw = raw.trim();
     if raw.is_empty() {
@@ -973,20 +981,23 @@ pub fn GatewaySwitcher(
             Ok(())
         }),
     );
-    crate::shell::bind(
-        "gateway.add",
-        Rc::new(move |_| {
-            open.set(true);
-            Ok(())
-        }),
-    );
-
     let clear_form = move || {
         editing.set(None);
         name.set(String::new());
         url.set(String::new());
         ssh.set(String::new());
     };
+
+    crate::shell::bind(
+        "gateway.add",
+        Rc::new(move |_| {
+            // Adding always starts in add mode: a closed-but-unfinished
+            // edit must not turn this into an overwrite of that profile.
+            clear_form();
+            open.set(true);
+            Ok(())
+        }),
+    );
 
     let save_profile = move |_| {
         let form = match validate_profile_form(&name.get(), &url.get(), &ssh.get()) {
@@ -1008,11 +1019,20 @@ pub fn GatewaySwitcher(
             }
             save_profiles(&profiles.get());
             clear_form();
-            form_note.set(saved_note(warn));
             // The edited profile stays selected (identity is the ID). If
-            // its URL moved, re-point the tab through the normal pick path.
-            if selected.get_untracked() == id && base.get_untracked() != new_base {
+            // its URL moved, re-point the tab through the normal pick path
+            // unless the new host is a warned hostname.
+            let is_selected = selected.get_untracked() == id;
+            let url_changed = base.get_untracked() != new_base;
+            if edit_repoints(is_selected, url_changed, warn) {
+                form_note.set(saved_note(warn));
                 choose(id, new_base);
+            } else if is_selected && url_changed {
+                form_note.set(
+                    "Saved. This hostname is not a literal private address, so the tab stays on the old URL and the bearer is not sent there yet. Select the gateway again to use the new URL.".into(),
+                );
+            } else {
+                form_note.set(saved_note(warn));
             }
             return;
         }
@@ -1283,6 +1303,23 @@ mod tests {
             validate_profile_form("box", "http://8.8.8.8:8787", ""),
             Err(classify_base("http://8.8.8.8:8787").unwrap_err())
         );
+    }
+
+    #[test]
+    fn edit_repoints_only_selected_moved_private_targets() {
+        // (selected, url_changed, warn) -> re-point now?
+        let cases = [
+            (true, true, false, true),
+            (true, true, true, false),
+            (true, false, false, false),
+            (true, false, true, false),
+            (false, true, false, false),
+            (false, true, true, false),
+            (false, false, false, false),
+        ];
+        for (sel, moved, warn, want) in cases {
+            assert_eq!(edit_repoints(sel, moved, warn), want, "{sel} {moved} {warn}");
+        }
     }
 
     #[test]
