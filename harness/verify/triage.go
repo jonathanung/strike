@@ -79,6 +79,25 @@ type TriageReport struct {
 type Triage struct {
 	mu    sync.Mutex
 	gates map[string]TriageReport
+	// keyMu serializes runs of the same gate key so concurrent child
+	// verifications cannot lose attempt-history updates.
+	keyMu map[string]*sync.Mutex
+}
+
+// lockKey holds the per-key run lock; call the returned func to release.
+func (t *Triage) lockKey(key string) func() {
+	t.mu.Lock()
+	if t.keyMu == nil {
+		t.keyMu = make(map[string]*sync.Mutex)
+	}
+	m := t.keyMu[key]
+	if m == nil {
+		m = &sync.Mutex{}
+		t.keyMu[key] = m
+	}
+	t.mu.Unlock()
+	m.Lock()
+	return m.Unlock
 }
 
 func (t *Triage) load(key string) (TriageReport, bool) {
@@ -306,6 +325,7 @@ func triageKey(workDir, command string) string {
 // reproduced once with the focused command while budget remains.
 func (r *Runner) runTriagedCmd(ctx context.Context, cr *CheckResult, command string) {
 	key := triageKey(r.WorkDir, command)
+	defer r.Triage.lockKey(key)()
 	rep, had := r.Triage.load(key)
 	if had && rep.FocusedCommand != "" && len(rep.Attempts) < MaxFocusedAttempts {
 		att := r.focusedAttempt(ctx, rep.FocusedCommand)

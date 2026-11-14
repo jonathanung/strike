@@ -305,3 +305,28 @@ func TestTriageCmdErrorKeepsHistory(t *testing.T) {
 		t.Fatalf("%+v triage=%+v", c, c.Triage)
 	}
 }
+
+func TestTriageConcurrentSameGateKeepsHistory(t *testing.T) {
+	t.Parallel()
+	dir := goWorkspace(t)
+	fail := func(_ context.Context, _, command string) (int, string, error) {
+		return 1, "--- FAIL: TestBroken (0.00s)\nFAIL\texample.com/mod/pkg/a\t0.01s\n", nil
+	}
+	tri := &Triage{}
+	done := make(chan struct{})
+	for i := 0; i < 4; i++ {
+		go func() {
+			defer func() { done <- struct{}{} }()
+			r := &Runner{WorkDir: dir, CmdRunner: fail, Triage: tri}
+			r.Run(context.Background(), []Gate{{Kind: KindCmd, Value: "make test"}}, Input{Claimed: true})
+		}()
+	}
+	for i := 0; i < 4; i++ {
+		<-done
+	}
+	// Serialized per key: every run's attempt counts, capped at the budget.
+	st, _ := tri.load(triageKey(dir, "make test"))
+	if len(st.Attempts) != MaxFocusedAttempts || !st.Exhausted {
+		t.Fatalf("attempts=%d exhausted=%v", len(st.Attempts), st.Exhausted)
+	}
+}
