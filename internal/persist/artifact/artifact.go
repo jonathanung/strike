@@ -1,5 +1,6 @@
 // Package artifact stores shared typed, versioned multi-agent work products
-// (findings, patches, test reports, contracts, lightweight plans) with
+// (findings, patches, test reports, contracts, lightweight plans, daemon-generated
+// session reports) with
 // compare-and-swap updates.
 //
 // Non-overlap vs sibling stores:
@@ -30,6 +31,10 @@ const (
 	TypeFindings   = "findings"
 	TypePatch      = "patch"
 	TypeTestReport = "test_report"
+	// TypeSessionReport is a daemon-generated per-session report (#1444).
+	// Its facts come from the session record; agent tools must not write it
+	// (see DaemonOnlyType).
+	TypeSessionReport = "session_report"
 )
 
 // Durability scopes.
@@ -166,11 +171,17 @@ func MetaFrom(a Artifact) Meta {
 // ValidType reports whether t is a registered artifact type.
 func ValidType(t string) bool {
 	switch t {
-	case TypePlan, TypeContract, TypeFindings, TypePatch, TypeTestReport:
+	case TypePlan, TypeContract, TypeFindings, TypePatch, TypeTestReport, TypeSessionReport:
 		return true
 	default:
 		return registeredTypes[t]
 	}
+}
+
+// DaemonOnlyType reports whether t may only be written by the daemon (never
+// by agent tools), so generated facts stay uneditable by the model.
+func DaemonOnlyType(t string) bool {
+	return t == TypeSessionReport
 }
 
 // registeredTypes holds extension types (tests / future plugins).

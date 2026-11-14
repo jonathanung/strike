@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # webui-bundle.yml dispatches CI after pushing a rebuilt bundle
+  # (GITHUB_TOKEN pushes do not trigger pull_request).
+  workflow_dispatch:
 
 permissions:
   contents: read

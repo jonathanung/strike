@@ -675,6 +675,32 @@ func (settingsAdapter) Defaults() host.UserDefaults {
 		PruneMinimumTokens:           cfg.PruneMinimumTokens,
 		PruneKeepUserTurns:           cfg.PruneKeepUserTurns,
 		PruneProtectTools:            append([]string(nil), cfg.PruneProtectTools...),
+		Guardrails:                   guardrailsFromConfig(cfg.Session),
+	}
+}
+
+func guardrailsFromConfig(s config.SessionConfig) host.Guardrails {
+	return host.Guardrails{
+		TurnTimeoutS:      config.EffectiveTurnTimeoutS(s.TurnTimeoutS),
+		MaxSessionCostUSD: s.MaxSessionCostUSD,
+		MaxTurnTokens:     s.MaxTurnTokens,
+		AgentBudget: host.AgentBudget{
+			MaxWallClockS:     s.AgentBudget.MaxWallClockS,
+			MaxTokens:         s.AgentBudget.MaxTokens,
+			MaxCostUSD:        s.AgentBudget.MaxCostUSD,
+			MaxToolCalls:      s.AgentBudget.MaxToolCalls,
+			MaxDangerousTools: s.AgentBudget.MaxDangerousTools,
+			StallAfterS:       s.AgentBudget.StallAfterS,
+			LoopDetectN:       s.AgentBudget.LoopDetectN,
+		},
+		DelegationPolicy: host.DelegationPolicy{
+			Mode:            config.EffectiveDelegationMode(s.DelegationPolicy.Mode),
+			TinyPromptRunes: s.DelegationPolicy.TinyPromptRunes,
+			MaxPathsLocal:   s.DelegationPolicy.MaxPathsLocal,
+			MaxLiveChildren: s.DelegationPolicy.MaxLiveChildren,
+		},
+		ChildHandoffRequired: config.EffectiveChildHandoffRequired(s.ChildHandoffRequired),
+		ChildIsolation:       config.EffectiveChildIsolation(s.ChildIsolation),
 	}
 }
 
@@ -700,6 +726,10 @@ func (settingsAdapter) SaveConfigDials(sandboxMode, notify, leanCode, deferTools
 
 func (settingsAdapter) SaveKeepAwake(mode string) error {
 	return config.SetGlobalKeepAwake(mode)
+}
+
+func (settingsAdapter) SaveGuardrailDials(d host.GuardrailDials) error {
+	return config.SetGlobalGuardrailDials(config.GuardrailDials(d))
 }
 
 func (settingsAdapter) SaveAutoApproveDials(seconds string, exclude *[]string, maxChildDepth string) error {
