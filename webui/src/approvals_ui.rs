@@ -22,6 +22,7 @@ use crate::approvals::{
 use crate::permissions_explain::PermissionsExplain;
 use crate::model::{autonomies, autonomy_label, mode_label, permission_modes, Workspace};
 use crate::outcome::{self, AUTO_SECONDS_UNKNOWN};
+use crate::sandbox_explain::SandboxSection;
 
 /// Initial audit fetch size (#1438): the panel starts at the daemon's
 /// default page and only fetches more when the user asks.
@@ -367,6 +368,7 @@ pub fn ApprovalHost(
                         <h3>"This session"</h3>
                         <p class="hint">{move || format!("Live mode: {}", mode_label(&perm_mode.get()))}</p>
                     </section>
+                    <SandboxSection base=base token=token/>
                     <section>
                         <h3>"Global default"</h3>
                         <p class="hint">{move || {
