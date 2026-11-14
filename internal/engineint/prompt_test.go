@@ -486,8 +486,9 @@ func TestSystemPromptComposesEnvironmentAndInstructions(t *testing.T) {
 	leanIdx := strings.Index(sys, "Lean code (implementer)")
 	envIdx := strings.Index(sys, "<env>")
 	instIdx := strings.Index(sys, "Instructions from:")
-	if !(baseIdx >= 0 && personaIdx > baseIdx && leanIdx > personaIdx && envIdx > leanIdx && instIdx > envIdx) {
-		t.Fatalf("layer order wrong: shared=%d persona=%d lean=%d env=%d inst=%d", baseIdx, personaIdx, leanIdx, envIdx, instIdx)
+	// Environment (date) is dynamic and trails stable instructions (#1200).
+	if !(baseIdx >= 0 && personaIdx > baseIdx && leanIdx > personaIdx && instIdx > leanIdx && envIdx > instIdx) {
+		t.Fatalf("layer order wrong: shared=%d persona=%d lean=%d inst=%d env=%d", baseIdx, personaIdx, leanIdx, instIdx, envIdx)
 	}
 }
 
@@ -653,6 +654,96 @@ func TestSystemPromptLedgerAutoload(t *testing.T) {
 	_ = memIdx
 }
 
+// TestSystemBlocksKeepStableBytesAcrossDynamicChurn pins #1200 end to end:
+// a tagged memory_write and a ledger append between turns change only the
+// dynamic system block; the stable block bytes the provider caches are equal.
+func TestSystemBlocksKeepStableBytesAcrossDynamicChurn(t *testing.T) {
+	dir := t.TempDir()
+	mem := openTestMemory(t)
+	led, err := ledger.Open(dir, "proj")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = led.Close() })
+	step := streamStep{events: []provider.StreamEvent{
+		{Type: provider.EventTextDelta, Text: "ok"},
+		{Type: provider.EventDone, StopReason: "end_turn"},
+	}}
+	prov := newScriptedProvider(step, step)
+	eng := engine.New(engine.Options{
+		BuildDiagnostic: enginebind.Diagnostic(),
+		SessionID:       "s-system-blocks",
+		WorkDir:         dir,
+		Memory:          enginebind.Memory(mem),
+		Ledger:          enginebind.Ledger(led),
+		Instructions:    []string{"Instructions from: /tmp/AGENTS.md\nSTABLE_INSTRUCTION"},
+		Agents:          []engine.Agent{{Name: "build"}},
+		Registry:        tool.NewRegistry(),
+		Select: func(string) (provider.Provider, string, error) {
+			return prov, "model-a", nil
+		},
+		InitialProvider: "scripted",
+		InitialModel:    "model-a",
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "first"}
+	req1 := waitStreamRequest(t, eng, prov)
+	waitTurnCompleted(t, eng)
+
+	if err := mem.Put("live.pref", "MEMORY_CHURN", []string{"preference"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := led.Append(ledger.AppendInput{
+		Kind:          ledger.KindAssumption,
+		Statement:     "LEDGER_CHURN",
+		AuthorSession: "s1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	eng.Ops() <- protocol.UserInput{Text: "second"}
+	req2 := waitStreamRequest(t, eng, prov)
+	waitTurnCompleted(t, eng)
+
+	for i, req := range []provider.Request{req1, req2} {
+		if len(req.SystemBlocks) != 2 {
+			t.Fatalf("req%d: SystemBlocks = %d, want stable+dynamic", i+1, len(req.SystemBlocks))
+		}
+		stable, dynamic := req.SystemBlocks[0], req.SystemBlocks[1]
+		if stable.Dynamic || !dynamic.Dynamic {
+			t.Fatalf("req%d: dynamic flags = %v/%v, want false/true", i+1, stable.Dynamic, dynamic.Dynamic)
+		}
+		if got := stable.Text + "\n" + dynamic.Text; got != req.System {
+			t.Fatalf("req%d: blocks do not join to System:\n%q\nvs\n%q", i+1, got, req.System)
+		}
+		if !strings.Contains(stable.Text, "STABLE_INSTRUCTION") {
+			t.Errorf("req%d: instructions missing from stable block", i+1)
+		}
+		for _, dyn := range []string{"<env>", "Today's date:"} {
+			if strings.Contains(stable.Text, dyn) {
+				t.Errorf("req%d: stable block carries dynamic %q", i+1, dyn)
+			}
+			if !strings.Contains(dynamic.Text, dyn) {
+				t.Errorf("req%d: dynamic block missing %q", i+1, dyn)
+			}
+		}
+	}
+	if req1.SystemBlocks[0].Text != req2.SystemBlocks[0].Text {
+		t.Fatalf("stable block changed after memory/ledger write:\n%q\nvs\n%q", req1.SystemBlocks[0].Text, req2.SystemBlocks[0].Text)
+	}
+	for _, want := range []string{"MEMORY_CHURN", "LEDGER_CHURN"} {
+		if strings.Contains(req1.SystemBlocks[1].Text, want) {
+			t.Errorf("turn 1 dynamic block already has %q", want)
+		}
+		if !strings.Contains(req2.SystemBlocks[1].Text, want) {
+			t.Errorf("turn 2 dynamic block missing %q", want)
+		}
+	}
+}
+
 func TestAgentSwitchReplacesPersonaLayer(t *testing.T) {
 	prov := newScriptedProvider(
 		streamStep{
@@ -776,8 +867,9 @@ func TestInspectEffectivePromptMatchesStream(t *testing.T) {
 	wantOrder := []string{
 		protocol.PromptLayerShared,
 		protocol.PromptLayerPersona,
-		protocol.PromptLayerEnvironment,
 		protocol.PromptLayerInstruction,
+		// Environment trails stable layers (dynamic tail, #1200).
+		protocol.PromptLayerEnvironment,
 	}
 	if len(kinds) < len(wantOrder) {
 		t.Fatalf("kinds = %v, want prefix %v", kinds, wantOrder)
