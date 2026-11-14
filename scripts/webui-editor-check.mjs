@@ -449,8 +449,27 @@ export async function editorBrowserCheck({ send, port, token, repoDir }) {
     );
     // Copy path (#1410): the chip must surface its outcome in the
     // status line — "Path copied." only when the write resolved, the
-    // generic failure line otherwise, never silence. The find for
-    // "beta" is still active, so the copied text takes path:line form.
+    // generic failure line otherwise, never silence. Every load clears
+    // the find, so set one here ("alpha" hits line 1 of the draft):
+    // the copied text then takes path:line form.
+    await evalValue(
+      send,
+      `(() => {
+        const input = document.getElementById("ev-search");
+        if (!input) return "no search";
+        input.value = "alpha";
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        return "ok";
+      })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        const n = document.querySelector(".ev-count");
+        return n && n.textContent.trim() === "1/1" ? "ok" : (n ? n.textContent : "no count");
+      })()`,
+      "copy path find count",
+    );
     try {
       await send("Browser.grantPermissions", {
         permissions: ["clipboardReadWrite", "clipboardSanitizedWrite"],
