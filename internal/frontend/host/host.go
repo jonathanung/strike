@@ -945,6 +945,16 @@ type Artifacts interface {
 	GetVersion(id string, version int, actorSession, actorRoot string) (Artifact, bool, error)
 }
 
+// SessionReportWriter is the daemon-only write path for session_report
+// artifacts (#1444). Artifacts implementations may also satisfy it; frontends
+// type-assert and degrade when absent. Agent tools never reach this path, so
+// the generated facts stay uneditable by the model.
+type SessionReportWriter interface {
+	// CreateSessionReport stores content as a new team-access, session-scoped
+	// session_report artifact owned by sessionID under ownerRoot.
+	CreateSessionReport(sessionID, ownerRoot, title, content string) (Artifact, error)
+}
+
 // LedgerEntry is one durable decision/assumption/constraint record.
 type LedgerEntry struct {
 	ID                 string
