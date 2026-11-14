@@ -618,17 +618,21 @@ pub(crate) fn SessionPanel(
         let reload = reload;
         let note = action_note;
         spawn_local(async move {
-            let mut targets = candidates.clone();
-            let mut skipped = 0usize;
-            if let Ok(fresh) = get_json::<Snapshot>(&b, &t, "/v1/session-list").await {
-                let folder_ids: Vec<String> =
-                    fresh.folders.iter().map(|f| f.id.clone()).collect();
-                let filed: Vec<String> =
-                    fresh.sessions.values().map(|o| o.folder_id.clone()).collect();
-                let still = still_empty_folder_ids(&candidates, &folder_ids, &filed);
-                skipped = candidates.len() - still.len();
-                targets = still;
-            }
+            // No fresh snapshot, no deletes: without the re-check a
+            // folder that gained a session could be removed.
+            let fresh = match get_json::<Snapshot>(&b, &t, "/v1/session-list").await {
+                Ok(fresh) => fresh,
+                Err(e) => {
+                    cleanup_busy.set(false);
+                    finish(n, format!("Could not re-check folders; nothing removed. {e}"));
+                    return;
+                }
+            };
+            let folder_ids: Vec<String> = fresh.folders.iter().map(|f| f.id.clone()).collect();
+            let filed: Vec<String> =
+                fresh.sessions.values().map(|o| o.folder_id.clone()).collect();
+            let targets = still_empty_folder_ids(&candidates, &folder_ids, &filed);
+            let skipped = candidates.len() - targets.len();
             let total = targets.len();
             let mut failed = 0usize;
             for id in &targets {
