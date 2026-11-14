@@ -387,7 +387,7 @@ func run(opts cliOptions, stdout, stderr io.Writer) (runErr error) {
 			ThemeID:                      themeID,
 			SessionID:                    a.sessionID,
 			WorkDir:                      a.workDir,
-			StartupAlert:                 a.worktreeNotice,
+			StartupAlert:                 a.startupNotice(),
 			VimMode:                      vimMode,
 			NanoMode:                     nanoMode,
 			MdReadMode:                   mdReadMode,
@@ -461,8 +461,8 @@ func runExecContext(ctx context.Context, opts cliOptions, prompt string, format 
 	if err != nil {
 		return err
 	}
-	if a.worktreeNotice != "" {
-		fmt.Fprintln(stderr, a.worktreeNotice)
+	if a.startupNotice() != "" {
+		fmt.Fprintln(stderr, a.startupNotice())
 	}
 	defer func() {
 		if a.mcpClose != nil {

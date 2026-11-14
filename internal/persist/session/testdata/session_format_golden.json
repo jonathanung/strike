@@ -1288,6 +1288,92 @@
                   "name": "durationMs",
                   "type": "number",
                   "omitEmpty": true
+                },
+                {
+                  "name": "triage",
+                  "type": "object",
+                  "omitEmpty": true,
+                  "fields": [
+                    {
+                      "name": "failures",
+                      "type": "array",
+                      "omitEmpty": true,
+                      "elem": "object",
+                      "fields": [
+                        {
+                          "name": "package",
+                          "type": "string"
+                        },
+                        {
+                          "name": "dir",
+                          "type": "string",
+                          "omitEmpty": true
+                        },
+                        {
+                          "name": "tests",
+                          "type": "array",
+                          "omitEmpty": true,
+                          "elem": "string"
+                        },
+                        {
+                          "name": "source",
+                          "type": "string",
+                          "omitEmpty": true
+                        }
+                      ]
+                    },
+                    {
+                      "name": "focusedCommand",
+                      "type": "string",
+                      "omitEmpty": true
+                    },
+                    {
+                      "name": "originalOutput",
+                      "type": "string",
+                      "omitEmpty": true
+                    },
+                    {
+                      "name": "attempts",
+                      "type": "array",
+                      "omitEmpty": true,
+                      "elem": "object",
+                      "fields": [
+                        {
+                          "name": "command",
+                          "type": "string"
+                        },
+                        {
+                          "name": "passed",
+                          "type": "bool"
+                        },
+                        {
+                          "name": "exitCode",
+                          "type": "number",
+                          "omitEmpty": true
+                        },
+                        {
+                          "name": "output",
+                          "type": "string",
+                          "omitEmpty": true
+                        },
+                        {
+                          "name": "error",
+                          "type": "string",
+                          "omitEmpty": true
+                        }
+                      ]
+                    },
+                    {
+                      "name": "fullGateSkipped",
+                      "type": "bool",
+                      "omitEmpty": true
+                    },
+                    {
+                      "name": "exhausted",
+                      "type": "bool",
+                      "omitEmpty": true
+                    }
+                  ]
                 }
               ]
             },
@@ -1484,6 +1570,92 @@
                   "name": "durationMs",
                   "type": "number",
                   "omitEmpty": true
+                },
+                {
+                  "name": "triage",
+                  "type": "object",
+                  "omitEmpty": true,
+                  "fields": [
+                    {
+                      "name": "failures",
+                      "type": "array",
+                      "omitEmpty": true,
+                      "elem": "object",
+                      "fields": [
+                        {
+                          "name": "package",
+                          "type": "string"
+                        },
+                        {
+                          "name": "dir",
+                          "type": "string",
+                          "omitEmpty": true
+                        },
+                        {
+                          "name": "tests",
+                          "type": "array",
+                          "omitEmpty": true,
+                          "elem": "string"
+                        },
+                        {
+                          "name": "source",
+                          "type": "string",
+                          "omitEmpty": true
+                        }
+                      ]
+                    },
+                    {
+                      "name": "focusedCommand",
+                      "type": "string",
+                      "omitEmpty": true
+                    },
+                    {
+                      "name": "originalOutput",
+                      "type": "string",
+                      "omitEmpty": true
+                    },
+                    {
+                      "name": "attempts",
+                      "type": "array",
+                      "omitEmpty": true,
+                      "elem": "object",
+                      "fields": [
+                        {
+                          "name": "command",
+                          "type": "string"
+                        },
+                        {
+                          "name": "passed",
+                          "type": "bool"
+                        },
+                        {
+                          "name": "exitCode",
+                          "type": "number",
+                          "omitEmpty": true
+                        },
+                        {
+                          "name": "output",
+                          "type": "string",
+                          "omitEmpty": true
+                        },
+                        {
+                          "name": "error",
+                          "type": "string",
+                          "omitEmpty": true
+                        }
+                      ]
+                    },
+                    {
+                      "name": "fullGateSkipped",
+                      "type": "bool",
+                      "omitEmpty": true
+                    },
+                    {
+                      "name": "exhausted",
+                      "type": "bool",
+                      "omitEmpty": true
+                    }
+                  ]
                 }
               ]
             },
@@ -2842,6 +3014,92 @@
                   "name": "durationMs",
                   "type": "number",
                   "omitEmpty": true
+                },
+                {
+                  "name": "triage",
+                  "type": "object",
+                  "omitEmpty": true,
+                  "fields": [
+                    {
+                      "name": "failures",
+                      "type": "array",
+                      "omitEmpty": true,
+                      "elem": "object",
+                      "fields": [
+                        {
+                          "name": "package",
+                          "type": "string"
+                        },
+                        {
+                          "name": "dir",
+                          "type": "string",
+                          "omitEmpty": true
+                        },
+                        {
+                          "name": "tests",
+                          "type": "array",
+                          "omitEmpty": true,
+                          "elem": "string"
+                        },
+                        {
+                          "name": "source",
+                          "type": "string",
+                          "omitEmpty": true
+                        }
+                      ]
+                    },
+                    {
+                      "name": "focusedCommand",
+                      "type": "string",
+                      "omitEmpty": true
+                    },
+                    {
+                      "name": "originalOutput",
+                      "type": "string",
+                      "omitEmpty": true
+                    },
+                    {
+                      "name": "attempts",
+                      "type": "array",
+                      "omitEmpty": true,
+                      "elem": "object",
+                      "fields": [
+                        {
+                          "name": "command",
+                          "type": "string"
+                        },
+                        {
+                          "name": "passed",
+                          "type": "bool"
+                        },
+                        {
+                          "name": "exitCode",
+                          "type": "number",
+                          "omitEmpty": true
+                        },
+                        {
+                          "name": "output",
+                          "type": "string",
+                          "omitEmpty": true
+                        },
+                        {
+                          "name": "error",
+                          "type": "string",
+                          "omitEmpty": true
+                        }
+                      ]
+                    },
+                    {
+                      "name": "fullGateSkipped",
+                      "type": "bool",
+                      "omitEmpty": true
+                    },
+                    {
+                      "name": "exhausted",
+                      "type": "bool",
+                      "omitEmpty": true
+                    }
+                  ]
                 }
               ]
             },
