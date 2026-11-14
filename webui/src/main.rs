@@ -31,8 +31,10 @@ mod schedule;
 mod model;
 mod notify;
 mod outcome;
+mod project_init;
 mod onboarding;
 mod park;
+mod permissions_explain;
 mod steer_queue;
 mod model_menu;
 mod model_menu_view;
@@ -1057,6 +1059,8 @@ fn App() -> impl IntoView {
     let status = RwSignal::new("connecting…".to_string());
     // Bootstrap capability `diag` (#1489): gates Download diagnostics.
     let diag_capable = RwSignal::new(false);
+    // Bootstrap capability `projectInit` (#1581): gates Create AGENTS.md.
+    let project_init_capable = RwSignal::new(false);
     let mode = RwSignal::new("chat".to_string());
     // The shell palette preventDefaults its keys. This signal stays false;
     // AppsPane also bails when the event is already default_prevented.
@@ -1150,6 +1154,13 @@ fn App() -> impl IntoView {
     let context_used = RwSignal::new(0i64);
     let context_limit = RwSignal::new(0i64);
     let context_fit = RwSignal::new(String::new());
+    // Compact now (#1567): true from sending the `compact` op until the
+    // daemon's own `compaction.completed` event lands — the meter only
+    // ever moves from daemon events, never optimistically.
+    let compacting = RwSignal::new(false);
+    // Daemon refusal text carried from the engine.error arm to the end
+    // of the same envelope handler (#1567).
+    let compact_refused = RwSignal::new(String::new());
     let model_defaults = RwSignal::new(ModelDefaults::default());
     // False until GET /v1/settings succeeds. Empty defaults are not "none saved".
     let defaults_known = RwSignal::new(false);
@@ -1653,6 +1664,7 @@ fn App() -> impl IntoView {
                                     live_busy_root.set(root);
                                 }
                                 diag_capable.set(boot.capabilities.diag);
+                                project_init_capable.set(boot.capabilities.project_init);
                                 skills.set(boot.skills);
                                 commands.set(boot.composer_commands);
                                 if !catalog_once.get_untracked() {
@@ -1813,6 +1825,7 @@ fn App() -> impl IntoView {
         context_used.set(0);
         context_limit.set(0);
         context_fit.set(String::new());
+        compacting.set(false);
         if root.is_empty() {
             stream_note.set(String::new());
             return;
@@ -1909,6 +1922,12 @@ fn App() -> impl IntoView {
                         steer_queue::LiveNote::Usage { .. } | steer_queue::LiveNote::Fit { .. } => {}
                         steer_queue::LiveNote::EngineError { message, .. } => {
                             queue_note.set(message.clone());
+                            if compacting.get_untracked()
+                                && crate::model_menu::is_compact_refusal(&message)
+                            {
+                                compacting.set(false);
+                                compact_refused.set(message.clone());
+                            }
                             if message.contains("no active turn") || message.contains("already waiting") {
                                 steer_note.set(String::new());
                                 steer_mode.set(String::new());
@@ -1948,7 +1967,18 @@ fn App() -> impl IntoView {
                     context_limit.set(next.context_limit);
                     context_fit.set(next.context_fit);
                     model_note.set(next.note);
-                    model_note_after.set(next.note_after);                }
+                    model_note_after.set(next.note_after);
+                    if data.contains("\"compaction.completed\"") {
+                        compacting.set(false);
+                    }
+                    // Set after reduce_envelope so its note does not
+                    // overwrite the daemon's refusal (#1567).
+                    let refused = compact_refused.get_untracked();
+                    if !refused.is_empty() {
+                        compact_refused.set(String::new());
+                        model_note.set(format!("compact refused: {refused}"));
+                    }
+                }
             });
         es.set_onmessage(Some(on_msg.as_ref().unchecked_ref()));
         on_msg.forget();
@@ -3221,6 +3251,35 @@ fn App() -> impl IntoView {
             }
         });
     });
+    // Compact now (#1567): send the daemon-certified `compact` op on
+    // the same path as effort. No optimistic meter change — the UI
+    // waits for `compaction.completed`; a refusal surfaces as-is.
+    let on_compact = Callback::new(move |_: ()| {
+        let root = active_root.get_untracked();
+        if root.is_empty() {
+            return;
+        }
+        let busy = roots
+            .get_untracked()
+            .iter()
+            .any(|row| row.id == root && row.busy)
+            || (live_busy.get_untracked() && live_busy_root.get_untracked() == root);
+        if let Some(reason) =
+            crate::model_menu::compact_disabled(busy, compacting.get_untracked())
+        {
+            model_note.set(reason.into());
+            return;
+        }
+        compacting.set(true);
+        model_note.set(String::new());
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            if let Err(e) = post_op(&b, &t, &root, "compact", serde_json::json!({})).await {
+                compacting.set(false);
+                model_note.set(format!("compact failed: {e}"));
+            }
+        });
+    });
     let on_default_effort = Callback::new(move |level: String| {
         let (b, t) = (base.get_untracked(), token.get_untracked());
         spawn_local(async move {
@@ -3473,6 +3532,22 @@ fn App() -> impl IntoView {
         roots,
         active_root,
         refresh: Rc::new(move || refresh_meta()),
+        // Waiting chip (#1543): jump to the pending ask card, or say
+        // plainly in the status line when it already resolved — the
+        // flags and the ask list are re-read at click time, not from
+        // the render that painted the chip.
+        go_to_ask: Rc::new(move || {
+            mode.set("chat".into());
+            let root = active_root.get_untracked();
+            let flagged = roots.get_untracked().iter().any(|row| {
+                row.id == root && (row.permission_pending || row.question_pending)
+            });
+            if asks.get_untracked().is_empty() && !flagged {
+                status.set("That ask is already resolved — nothing is waiting.".into());
+                return;
+            }
+            crate::status::scroll_to_pending_ask_soon();
+        }),
     });
     // Gateway switcher page wiring (#1265). The slot is registered at
     // boot by src/shell/contrib/gateway.rs and renders through this
@@ -4401,6 +4476,13 @@ fn App() -> impl IntoView {
         }),
     );
     shell::bind(
+        "model.compact",
+        Rc::new(move |_| {
+            on_compact.run(());
+            Ok(())
+        }),
+    );
+    shell::bind(
         "model.effort-default",
         Rc::new(move |level| {
             let level = level.trim().to_string();
@@ -4540,6 +4622,7 @@ fn App() -> impl IntoView {
                 mode=mode
                 status=status
                 diag_capable=diag_capable
+                project_init_capable=project_init_capable
                 root=active_root
                 theme=theme_id
                 scheme=scheme_id
@@ -4553,10 +4636,20 @@ fn App() -> impl IntoView {
             />
         </Show>
         <Show when=move || mode.get() == "daemon" fallback=move || ()>
-            <DaemonPane gateway_detail=gateway_detail />
+            <DaemonPane gateway_detail=gateway_detail status=status />
         </Show>
         <Show when=move || mode.get() == "usage" || mode.get() == "audit" fallback=move || ()>
-            <usage_audit::UsageAuditPages mode=mode base=base token=token status=status />
+            <usage_audit::UsageAuditPages
+                mode=mode
+                base=base
+                token=token
+                status=status
+                open_session=move |id: String| {
+                    mode.set("chat".into());
+                    let live = roots.get_untracked().iter().any(|r| r.id == id);
+                    open_session(id, live);
+                }
+            />
         </Show>
         <Show when=move || mode.get() == "goals" fallback=move || ()>
             <goals::GoalsPane base=base token=token />
@@ -5706,11 +5799,16 @@ fn App() -> impl IntoView {
 }
 
 #[component]
-fn DaemonPane(gateway_detail: RwSignal<String>) -> impl IntoView {
+fn DaemonPane(gateway_detail: RwSignal<String>, status: RwSignal<String>) -> impl IntoView {
     view! {
         <main class="daemon">
             <section class="card">
                 <h2 class="panel-title"><span class="icon-slot" aria-hidden="true" inner_html=icon("status")></span>"Daemon"</h2>
+                // Connection state and version ("Connected · v…" /
+                // "Unreachable"): this is their on-screen home now that the
+                // header prints neither (#1590 A6/A7); the brand mark only
+                // carries the same text as a tooltip.
+                <p class="hint" data-daemon-link="true">{move || status.get()}</p>
                 <p class="hint gw-detail">{move || {
                     let detail = gateway_detail.get();
                     if detail.is_empty() {
