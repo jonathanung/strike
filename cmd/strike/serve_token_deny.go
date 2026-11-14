@@ -20,7 +20,12 @@ import (
 //   - bash <path>: matched through action-fact path keys (cat <path>, …)
 //   - bash **<path>* and **<path>*/**: raw command text with the path
 //     anywhere in it, when the command does not parse authoritatively
-func tokenFileDenyRules(tokenFile string) permission.Ruleset {
+//
+// When the file sits under cwd (serve's directory, the default workspace),
+// the cwd-relative spelling is denied too: the read tool asks with a path
+// relative to the session WorkDir. Only exact and single-command forms are
+// added for it, since a relative glob would match same-named files elsewhere.
+func tokenFileDenyRules(tokenFile, cwd string) permission.Ruleset {
 	tokenFile = strings.TrimSpace(tokenFile)
 	if tokenFile == "" {
 		return nil
@@ -50,6 +55,26 @@ func tokenFileDenyRules(tokenFile string) permission.Ruleset {
 		}
 	}
 	var out permission.Ruleset
+	if cwd = strings.TrimSpace(cwd); cwd != "" {
+		relSeen := map[string]bool{}
+		for _, p := range spellings {
+			if strings.HasPrefix(p, "~") {
+				continue
+			}
+			rel, err := filepath.Rel(cwd, p)
+			if err != nil || rel == "." || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) || relSeen[rel] {
+				continue
+			}
+			relSeen[rel] = true
+			q := escapeGlob(filepath.ToSlash(rel))
+			out = append(out,
+				permission.Rule{Permission: "read", Pattern: q, Action: permission.Deny},
+				permission.Rule{Permission: "bash", Pattern: q, Action: permission.Deny},
+				permission.Rule{Permission: "bash", Pattern: "* " + q, Action: permission.Deny},
+				permission.Rule{Permission: "bash", Pattern: "* ./" + q, Action: permission.Deny},
+			)
+		}
+	}
 	for _, p := range spellings {
 		q := escapeGlob(p)
 		out = append(out,
@@ -93,4 +118,13 @@ func sessionManagedRules(configured, extra permission.Ruleset) permission.Rulese
 		return nil
 	}
 	return out
+}
+
+// serveCwd is the daemon directory (default workspace path); empty on error.
+func serveCwd() string {
+	dir, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	return dir
 }

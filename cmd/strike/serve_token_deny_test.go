@@ -9,7 +9,7 @@ import (
 )
 
 func TestTokenFileDenyRulesEmpty(t *testing.T) {
-	if rs := tokenFileDenyRules("  "); rs != nil {
+	if rs := tokenFileDenyRules("  ", "/"); rs != nil {
 		t.Fatalf("empty token file produced rules %+v", rs)
 	}
 }
@@ -24,7 +24,7 @@ func TestTokenFileDenyRulesDenyReadAndBash(t *testing.T) {
 	if err := os.WriteFile(tok, []byte("secret"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	rules := tokenFileDenyRules(tok)
+	rules := tokenFileDenyRules(tok, "")
 	if err := permission.ValidateRuleset(rules); err != nil {
 		t.Fatalf("invalid rules: %v", err)
 	}
@@ -87,5 +87,34 @@ func TestSessionManagedRulesKeepsConfiguredFirst(t *testing.T) {
 	}
 	if sessionManagedRules(nil, nil) != nil {
 		t.Fatal("empty ceiling should be nil")
+	}
+}
+
+// A token file inside serve's directory is also denied by its relative
+// spelling, which is what the read tool asks with inside the WorkDir.
+func TestTokenFileDenyRulesRelativeToCwd(t *testing.T) {
+	cwd := t.TempDir()
+	tok := filepath.Join(cwd, ".strike", "token")
+	rules := tokenFileDenyRules(tok, cwd)
+	if err := permission.ValidateRuleset(rules); err != nil {
+		t.Fatalf("invalid rules: %v", err)
+	}
+	base := []permission.Ruleset{permission.Defaults(), {{Permission: "bash", Pattern: "*", Action: permission.Allow}}}
+	eval := func(perm, pattern string) permission.Action {
+		return permission.Evaluate(perm, pattern, append(append([]permission.Ruleset(nil), base...), rules)...)
+	}
+	for _, c := range []struct{ perm, pattern string }{
+		{"read", ".strike/token"},
+		{"bash", "cat .strike/token"},
+		{"bash", "cat ./.strike/token"},
+		{"read", tok},
+	} {
+		if got := eval(c.perm, c.pattern); got != permission.Deny {
+			t.Errorf("%s %q = %s, want deny", c.perm, c.pattern, got)
+		}
+	}
+	// A same-named file in another directory stays readable.
+	if got := eval("read", "other/.strike/token"); got == permission.Deny {
+		t.Error("relative deny matched a same-named file elsewhere")
 	}
 }
