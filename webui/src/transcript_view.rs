@@ -95,7 +95,7 @@ pub fn TranscriptPane(
         cursor_session.set(String::new());
         rename_for.set(String::new());
         folds.map.set(HashMap::new());
-        folds.dismissed.set_untracked(None);
+        folds.dismissed.update_untracked(|d| *d = None);
     });
     let scroller = NodeRef::<leptos::html::Div>::new();
     let scroller_fx = scroller;
@@ -1064,7 +1064,7 @@ fn message_view(
                                 );
                             });
                             if changed {
-                                folds.dismissed.set_untracked(dismissed);
+                                folds.dismissed.update_untracked(|d| *d = dismissed);
                                 folds.map.notify();
                             }
                         }
